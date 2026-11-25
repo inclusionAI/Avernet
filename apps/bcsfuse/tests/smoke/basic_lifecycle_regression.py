@@ -52,7 +52,7 @@ def test_basic_lifecycle_regression():
     """
 
     # Import here to avoid import side effects
-    from src.bootstrap.opensource_app import create_opensource_app
+    from app.bootstrap.opensource_app import create_opensource_app
 
     print("\n" + "=" * 80)
     print("S9 Basic Lifecycle Regression Test")

@@ -88,7 +88,15 @@ NON_SECRET_VALUE_RE = re.compile(
 
 # These values name entries in the existing secret resolver, not credentials.
 SECRET_REFERENCE_RE = re.compile(r"^other_manual_agentclaw_[a-z0-9_]+$")
-PYTHON_ATTRIBUTE_RE = re.compile(r"^\(*[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\)*$")
+# The adapter maps this public protocol label to senderId=agentswarm and
+# msgType=tcApp2a; it is not a certified token. Keep this exact, not prefix-wide.
+PUBLIC_PROTOCOL_LABELS = frozenset({"OPEN_API:app:agentswarm"})
+PYTHON_FIELD_NAME_RE = re.compile(
+    r"(?ix)^(?:[a-z0-9]+[._-])*"
+    r"(?:api[._-]?key|access[._-]?key|secret(?:[._-]?key)?|"
+    r"private[._-]?key|client[._-]?secret|auth[._-]?token|"
+    r"password|passwd|credential|token)$"
+)
 
 
 def _entropy(value: str) -> float:
@@ -106,7 +114,7 @@ def _looks_like_plaintext_value(value: str) -> bool:
     # such as `"KEY=" + value` as a literal credential.
     if any(char.isspace() for char in value):
         return False
-    if (len(value) < 12 or PLACEHOLDER_RE.fullmatch(value)
+    if (value in PUBLIC_PROTOCOL_LABELS or len(value) < 12 or PLACEHOLDER_RE.fullmatch(value)
             or NON_SECRET_VALUE_RE.fullmatch(value) or SECRET_REFERENCE_RE.fullmatch(value)):
         return False
     # A high-entropy value is a strong signal. Password/secret assignments are
@@ -159,6 +167,21 @@ def _redact_content(content: str) -> str:
             if value_start >= 0 and value_end >= 0:
                 spans.append((value_start, value_end))
 
+    try:
+        statement = ast.parse(content.strip().rstrip(","))
+    except (SyntaxError, ValueError):
+        pass
+    else:
+        if any(
+            isinstance(item, ast.JoinedStr) and any(
+                isinstance(part, ast.Constant) and isinstance(part.value, str)
+                and _looks_like_plaintext_value(part.value)
+                for part in ast.walk(item)
+            )
+            for item in ast.walk(statement)
+        ):
+            spans.append((0, len(content)))
+
     if not spans:
         return content
 
@@ -175,7 +198,7 @@ def _redact_content(content: str) -> str:
     return redacted
 
 
-def _added_lines(diff: str) -> list[tuple[str, int, str]]:
+def _added_lines(diff: str, *, include_context: bool = False) -> list[tuple[str, int, str]]:
     path = ""
     new_line = 0
     added: list[tuple[str, int, str]] = []
@@ -196,11 +219,72 @@ def _added_lines(diff: str) -> list[tuple[str, int, str]]:
             added.append((path, new_line, raw_line[1:]))
             new_line += 1
         elif raw_line.startswith(" "):
+            if include_context:
+                added.append((path, new_line, raw_line[1:]))
             new_line += 1
     return added
 
 
-def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
+def _python_assignment_expression(
+    added: list[tuple[str, int, str]], index: int, assignment: re.Match[str],
+) -> str:
+    """Reconstruct an expression from consecutive new-side diff lines."""
+    path, line, content = added[index]
+    previous = content[:assignment.start()].rstrip()
+    if previous.endswith(("(", ",")) and "(" in previous:
+        expression = assignment.group("bare") or ""
+    else:
+        expression = content[assignment.start("bare"):]
+    for next_index in range(index + 1, len(added) + 1):
+        try:
+            ast.parse(expression.strip().rstrip(","), mode="eval")
+        except (SyntaxError, ValueError):
+            # Only incomplete lexical constructs can continue on another line.
+            # Invalid fragments (e.g. a mapping's closing brace) must not pull
+            # unrelated later statements into this assignment's value.
+            try:
+                list(tokenize.generate_tokens(io.StringIO(expression).readline))
+            except tokenize.TokenError:
+                pass
+            except IndentationError:
+                break
+            else:
+                break
+            if next_index == len(added):
+                break
+            next_path, next_line, continuation = added[next_index]
+            if next_path != path or next_line != line + 1:
+                break
+            expression += "\n" + continuation
+            line = next_line
+        else:
+            break
+    return expression.strip().rstrip(",")
+
+
+def _python_has_plaintext_literal(expression: str) -> bool:
+    # Even a short callee such as str(...) can wrap a long credential. Keep
+    # checking tokens in unresolved fragments instead of trusting the callee.
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(expression).readline):
+            if token.type != tokenize.STRING:
+                continue
+            try:
+                value = ast.literal_eval(token.string)
+            except (SyntaxError, ValueError):
+                continue
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", errors="replace")
+            if isinstance(value, str) and _looks_like_plaintext_value(value):
+                return True
+    except (tokenize.TokenError, IndentationError):
+        pass
+    return False
+
+
+def _python_reference_is_safe(
+    content: str, assignment: re.Match[str], expression: str,
+) -> bool:
     """Recognize expressions, not secrets, without evaluating Python source.
 
     Calls are exempt only when their argument values contain no suspicious
@@ -222,11 +306,10 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
                 )
     if assignment.group("quoted") is not None:
         return False
-    expression = content[assignment.start("bare"):].strip().rstrip(",")
     try:
         node = ast.parse(expression, mode="eval").body
     except (SyntaxError, ValueError):
-        return False
+        node = None
 
     def safe(value: ast.AST) -> bool:
         if isinstance(value, ast.Name):
@@ -234,15 +317,44 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
         if isinstance(value, ast.Attribute):
             return safe(value.value)
         if isinstance(value, ast.Subscript):
-            return safe(value.value) and safe(value.slice)
+            # Unknown numeric indexes are deliberately conservative; named
+            # indexes and credential-field-name strings are references.
+            if isinstance(value.slice, ast.Constant) and not isinstance(value.slice.value, str):
+                return False
+            field_name = (
+                isinstance(value.slice, ast.Constant)
+                and isinstance(value.slice.value, str)
+                and PYTHON_FIELD_NAME_RE.fullmatch(value.slice.value)
+            )
+            return safe(value.value) and (bool(field_name) or safe(value.slice))
+        if isinstance(value, ast.BinOp):
+            return safe(value.left) and safe(value.right)
         if isinstance(value, ast.BoolOp):
             return all(safe(item) for item in value.values)
+        if isinstance(value, ast.IfExp):
+            return safe(value.test) and safe(value.body) and safe(value.orelse)
         if isinstance(value, ast.JoinedStr):
             return all(safe(item) for item in value.values)
         if isinstance(value, ast.FormattedValue):
-            return safe(value.value)
+            return safe(value.value) and (
+                value.format_spec is None or safe(value.format_spec)
+            )
         if isinstance(value, ast.Call):
-            return (safe(value.func) and all(safe(arg) for arg in value.args)
+            args = value.args
+            # Only a mapping lookup's first argument names a field. Defaults,
+            # constructor arguments, and mapping values still carry values.
+            if (isinstance(value.func, ast.Attribute) and value.func.attr == "get"
+                    and args and isinstance(args[0], ast.Constant)
+                    and isinstance(args[0].value, str)
+                    and PYTHON_FIELD_NAME_RE.fullmatch(args[0].value)):
+                args = args[1:]
+            elif (isinstance(value.func, ast.Name) and value.func.id == "getattr"
+                    and len(args) in (2, 3) and isinstance(args[1], ast.Constant)
+                    and isinstance(args[1].value, str)
+                    and PYTHON_FIELD_NAME_RE.fullmatch(args[1].value)):
+                # Attribute labels are references, but defaults still carry values.
+                args = [args[0], *args[2:]]
+            return (safe(value.func) and all(safe(arg) for arg in args)
                     and all(safe(arg.value) for arg in value.keywords))
         if isinstance(value, ast.Dict):
             return all(safe(item) for item in value.values)
@@ -257,15 +369,121 @@ def _python_reference_is_safe(content: str, assignment: re.Match[str]) -> bool:
             )
         return False
 
+    if node is None:
+        # A credential-named field may be inside a formatted Cookie string.
+        # Parse the containing statement and require every string component,
+        # including literal prefixes/suffixes, to pass the existing checks.
+        try:
+            statement = ast.parse(stripped)
+        except (SyntaxError, ValueError):
+            return False
+        if len(statement.body) != 1 or not isinstance(
+            statement.body[0], (ast.Assign, ast.AnnAssign, ast.Expr)
+        ):
+            return False
+        enclosing_value = statement.body[0].value
+        if enclosing_value is None or not safe(enclosing_value):
+            return False
+        offset = len(content) - len(content.lstrip())
+        column = len(content[offset:assignment.start()].encode("utf-8"))
+        for item in ast.walk(enclosing_value):
+            if not isinstance(item, ast.Dict):
+                continue
+            for key, value in zip(item.keys, item.values):
+                if (isinstance(key, ast.Constant) and isinstance(key.value, str)
+                        and PYTHON_FIELD_NAME_RE.fullmatch(key.value)
+                        and key.lineno == key.end_lineno == 1
+                        and key.col_offset <= column <= key.end_col_offset
+                        and safe(value)):
+                    return True
+        return any(
+            isinstance(item, ast.JoinedStr)
+            and item.lineno == item.end_lineno == 1
+            and item.col_offset <= column < item.end_col_offset
+            and safe(item)
+            for item in ast.walk(statement)
+        )
     return isinstance(
         node,
-        (ast.Name, ast.Attribute, ast.Call, ast.Subscript, ast.BoolOp, ast.JoinedStr),
+        (ast.Name, ast.Attribute, ast.Call, ast.Subscript, ast.BoolOp, ast.JoinedStr, ast.Tuple),
     ) and safe(node)
+
+
+# Deliberately a small lexical recognizer, not a Rust parser. Unknown syntax
+# retains the conservative assignment rule. Literals are checked before any
+# expression exemption, including literals nested in constructors/macros.
+RUST_STRING_RE = re.compile(r'(?:b?r(?P<hashes>\#*)"(?P<raw>.*?)"(?P=hashes)|b?"(?P<escaped>(?:\\.|[^"\\])*)")')
+RUST_TYPE_FIELD_RE = re.compile(
+    r"(?:^|[({,])\s*(?:pub(?:\(crate\))?\s+)?\w+\s*:\s*"
+    r"(?:[A-Za-z_]\w*::)*(?:[A-Z]\w*|&str)"
+    r"(?:<(?:[A-Za-z_]\w*::)*(?:[A-Z]\w*|&str)>)?\s*(?=[,)}]|$)"
+)
+
+
+def _rust_assignment(content: str, assignment: re.Match[str]) -> tuple[bool, bool]:
+    """Return (recognized nonliteral expression, suspicious nested literal)."""
+    if assignment.group("quoted") is not None:
+        return False, False
+    expression = content[assignment.start("bare"):].strip()
+    suspicious = False
+
+    def replace_literal(match: re.Match[str]) -> str:
+        nonlocal suspicious
+        value = match.group("raw")
+        if value is None:
+            escaped = match.group("escaped")
+            try:
+                # Decode the shared Python/Rust escape subset. Unsupported Rust
+                # escapes fail closed rather than silently exempting a literal.
+                value = ast.literal_eval('"' + escaped + '"')
+            except (SyntaxError, ValueError):
+                suspicious = True
+                return "LITERAL"
+        # Mapping keys are field names, not credential values. A Rust :: path
+        # following a literal is not a mapping key.
+        following = expression[match.end():].lstrip()
+        mapping_key = following.startswith(":") and not following.startswith("::")
+        # A bracket alone can start an array literal. Only exempt simple
+        # identifier/chained-index receivers; other receivers stay conservative.
+        receiver = re.search(r"(?P<name>[A-Za-z_]\w*|\])\s*\[\s*$", expression[:match.start()])
+        index_key = bool(
+            receiver and following.startswith("]")
+            and receiver.group("name") not in {
+                "return", "break", "yield", "else", "in", "loop", "move",
+                "const", "unsafe", "async",
+            }
+        )
+        if not (mapping_key or index_key):
+            suspicious |= _looks_like_plaintext_value(value)
+        return "LITERAL"
+
+    skeleton = RUST_STRING_RE.sub(replace_literal, expression)
+    if suspicious:
+        return False, True
+    # Braced initializer fields carry values, even when a value looks like a
+    # type name. Only a struct declaration can introduce inline type fields.
+    before_field = content[:assignment.start()]
+    declaration = "{" not in before_field or re.fullmatch(
+        r"\s*(?:pub(?:\(crate\))?\s+)?struct\s+\w+\s*\{[^{}]*\}\s*;?\s*", content
+    )
+    if declaration and any(
+        match.start() <= assignment.start() < match.end()
+        for match in RUST_TYPE_FIELD_RE.finditer(content)
+    ):
+        return True, False
+    # Require a path/member access or call: an arbitrary bare high-entropy
+    # identifier must never be mistaken for a runtime expression.
+    runtime = re.match(r"^&?[A-Za-z_]\w*(?:::|\.|\(|!\(|\[)", skeleton)
+    supported = re.fullmatch(r"[A-Za-z0-9_\s.:,;(){}\[\]<>!?&|=+*\-]+", skeleton)
+    return bool(runtime and supported), False
 
 
 def _findings(diff: str) -> list[Finding]:
     findings: list[Finding] = []
-    for path, line, content in _added_lines(diff):
+    added = _added_lines(diff)
+    source = _added_lines(diff, include_context=True)
+    source_indexes = {(path, line): index for index, (path, line, _) in enumerate(source)}
+    for path, line, content in added:
         for rule, pattern in (("private key", PRIVATE_KEY_RE), *KNOWN_SECRET_RES):
             if pattern.search(content):
                 findings.append(Finding(path, line, rule, _redact_content(content)))
@@ -279,11 +497,33 @@ def _findings(diff: str) -> list[Finding]:
                 detected = False
                 for assignment in assignment_pattern.finditer(content):
                     value = assignment.group("quoted") or assignment.group("bare") or ""
-                    if path.endswith(".py") and (
-                        _python_reference_is_safe(content, assignment)
-                        or (assignment.group("quoted") is None
-                            and PYTHON_ATTRIBUTE_RE.fullmatch(value))
-                    ):
+                    if path.endswith(".py"):
+                        expression = (
+                            _python_assignment_expression(source, source_indexes[path, line], assignment)
+                            if assignment.group("quoted") is None else value
+                        )
+                        if _python_reference_is_safe(content, assignment, expression):
+                            continue
+                        # Keyword-reference parsing may stop at a lexical bare
+                        # token. Never lose same-line argument literals beyond it.
+                        source_expression = content[assignment.start("bare"):]
+                        if (_python_has_plaintext_literal(expression)
+                                or (assignment.group("bare") is not None
+                                    and _python_has_plaintext_literal(source_expression))):
+                            findings.append(Finding(path, line, rule, _redact_content(content)))
+                            detected = True
+                            break
+                    rust_safe, rust_literal = (
+                        _rust_assignment(content, assignment)
+                        if path.endswith(".rs") else (False, False)
+                    )
+                    if rust_literal:
+                        # Do not print Rust literals here: Python tokenization
+                        # cannot reliably mask raw/escaped Rust strings.
+                        findings.append(Finding(path, line, rule, "<Rust credential literal redacted>"))
+                        detected = True
+                        break
+                    if rust_safe:
                         continue
                     if _looks_like_plaintext_value(value):
                         findings.append(Finding(path, line, rule, _redact_content(content)))
@@ -303,7 +543,7 @@ def _git_diff(base: str, head: str) -> str:
             "diff",
             "--no-ext-diff",
             "--no-color",
-            "--unified=0",
+            "--unified=3",
             "--diff-filter=ACMRTUXB",
             base,
             head,

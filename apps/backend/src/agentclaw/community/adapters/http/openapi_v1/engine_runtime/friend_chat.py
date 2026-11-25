@@ -18,12 +18,17 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
 )
+from agentclaw.community.core.expert_chat.errors import (
+    BotNotFoundError, BotNotActiveError, BotNotPublishedError,
+    ChatPermissionError, ConnectionError,
+)
 
 FRIEND_USER_ID_DESCRIPTION = (
     "The Human friend whose caller-owned chat resources are addressed. Omit "
     "this parameter to preserve the existing owner/collaborator Engine Runtime "
     "behavior. When supplied, BCN friendship is authoritative; the caller must "
-    "be this Human or the Bot owner."
+    "be this Human or the Bot owner. Service Bot conversations address online "
+    "(legacy draft selectors also mean online); personal Bots address draft."
 )
 
 FriendUserIdQuery = Annotated[
@@ -48,8 +53,9 @@ async def authorize_friend_chat(
     owner_id: str,
     friend_user_id: str,
     friendships: HumanBotFriendshipServiceProtocol,
-    expert: ExpertChatServiceProtocol | None = None,
-) -> None:
+    expert: ExpertChatServiceProtocol,
+    stage: str = "draft",
+) -> str:
     """Authorize an explicit friend view and prepare ExpertChat's projection."""
     if caller_id not in {friend_user_id, owner_id}:
         raise EngineResourceNotFoundError("friend chat bot not found")
@@ -67,8 +73,14 @@ async def authorize_friend_chat(
         ) from error
     if not allowed:
         raise EngineResourceNotFoundError("friend chat bot not found")
-    if expert is not None:
+    try:
+        resolved_stage = await asyncio.to_thread(expert.resolve_chat_stage, bot_id, owner_id, stage)
         await asyncio.to_thread(expert.add_chat_bot, friend_user_id, bot_id, owner_id)
+        return resolved_stage
+    except (BotNotFoundError, ChatPermissionError) as error:
+        raise EngineResourceNotFoundError("friend chat bot not found") from error
+    except (BotNotActiveError, BotNotPublishedError, ConnectionError) as error:
+        raise EngineDeviceNotReadyError("friend bot runtime is not ready") from error
 
 
 __all__ = ["FriendUserIdQuery", "authorize_friend_chat"]

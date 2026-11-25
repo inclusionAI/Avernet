@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from injector import Binder, Module, inject, provider, singleton
+from agentclaw.community.core.caller_identity.expiry_correction import CallerExpiryCorrectionService
+from agentclaw.community.core.caller_identity.protocols import CallerExpiryCorrectionServiceProtocol
+
+from agentclaw.community.core.caller_identity.scheduled_refresh import (
+    NoopScheduledCallerRefresh, ScheduledCallerRefreshProtocol,
+)
 
 from agentclaw.community.api.caller_identity_service import (
     CallerIdentityServiceProtocol,
@@ -27,10 +33,19 @@ from agentclaw.community.core.caller_identity.protocols import (
     CallerRuntimeUpdaterProtocol,
     CallerTokenProviderProtocol,
 )
+from agentclaw.community.core.caller_identity.protocols import (
+    BcsCallerConfigSyncProtocol,
+)
+from agentclaw.community.core.caller_identity.contracts import CallerBcsSyncError
+from agentclaw.community.core.bot_management.services.bcn_service import BcnService
+from agentclaw.community.core.bot_management.services.bcn_service import BcnServiceError
+from agentclaw.community.log import get_logger
 from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
 from agentclaw.community.core.caller_identity.session_validator import CallerSessionValidator
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.caller_identity.service import CallerIdentityService
+from agentclaw.community.core.caller_identity.expiry_runtime_updater import ExpiryAwareCallerRuntimeUpdater
+from agentclaw.community.core.repository.protocols.chat import ExpertChatInstanceRepository
 from agentclaw.community.core.caller_identity.iam_token_service import (
     CallerIamTokenService,
 )
@@ -41,6 +56,64 @@ from agentclaw.community.core.repository.implementations.identity.caller_identit
 from agentclaw.community.core.token_exchange import NoopTokenPluginPipeline, TokenExchangeOrchestrator, TokenPluginPipeline
 from agentclaw.community.plugin_api.auth import AuthPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
+
+
+class BcnBackedCallerConfigSync:
+    """Adapt BcnService transport outcomes onto the caller sync port.
+
+    transport 的 BcnServiceError 在端口层折叠为域错误 CallerBcsSyncError,
+    交由调用方(更新操作)整体失败传播;skipped 是 env 门降级,静默成功。
+    """
+
+    def __init__(self, bcn_service: BcnService) -> None:
+        self._bcn_service = bcn_service
+
+    def sync_caller_config(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        enabled: bool,
+        source_revision: int,
+    ) -> None:
+        logger = get_logger()
+        try:
+            result = self._bcn_service.sync_bot_caller_config(
+                teamclaw_bot_uuid=bot_id,
+                owner_workno=owner_id,
+                enabled=enabled,
+                source_revision=source_revision,
+            )
+        except BcnServiceError as exc:
+            logger.warning(
+                "caller_config_bcs_sync_failed bot_id=%s owner_id=%s "
+                "enabled=%s source_revision=%s error=%s",
+                bot_id,
+                owner_id,
+                enabled,
+                source_revision,
+                exc,
+            )
+            raise CallerBcsSyncError from exc
+        if result.get("skipped"):
+            logger.info(
+                "caller_config_bcs_sync_skipped bot_id=%s owner_id=%s "
+                "enabled=%s source_revision=%s",
+                bot_id,
+                owner_id,
+                enabled,
+                source_revision,
+            )
+        else:
+            logger.info(
+                "caller_config_bcs_sync_succeeded bot_id=%s owner_id=%s "
+                "enabled=%s source_revision=%s sync_status=%s",
+                bot_id,
+                owner_id,
+                enabled,
+                source_revision,
+                result.get("sync_status"),
+            )
 
 
 class CallerIdentityModule(Module):
@@ -60,12 +133,38 @@ class CallerIdentityModule(Module):
 
     @singleton
     @provider
+    def caller_expiry_correction(
+        self, bots: BotRepository, bindings: DeviceBindingRepository,
+        instances: ExpertChatInstanceRepository,
+    ) -> CallerExpiryCorrectionServiceProtocol:
+        return CallerExpiryCorrectionService(bots=bots, bindings=bindings, instances=instances)
+
+    @singleton
+    @provider
+    def scheduled_caller_refresh(self) -> ScheduledCallerRefreshProtocol:
+        """Community-safe no-op; enterprise composition supplies ASC support."""
+        return NoopScheduledCallerRefresh()
+
+    @singleton
+    @provider
     @inject
     def caller_session_validator(
         self, binding_repository: DeviceBindingRepository,
         runtime_bindings: RuntimeBindingResolutionService,
     ) -> CallerSessionValidator:
-        return CallerSessionValidator(binding_repository=binding_repository, runtime_bindings=runtime_bindings)
+        return CallerSessionValidator(
+            binding_repository=binding_repository, runtime_bindings=runtime_bindings,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def bcs_caller_config_sync(
+        self,
+        bcn_service: BcnService,
+    ) -> BcsCallerConfigSyncProtocol:
+        """Bind the BcnService-backed adapter to the caller sync port."""
+        return BcnBackedCallerConfigSync(bcn_service)
 
     @singleton
     @provider
@@ -81,6 +180,7 @@ class CallerIdentityModule(Module):
         passport_plugin: PassportPlugin,
         collaborator_service: CoreCollaboratorServiceProtocol,
         session_validator: CallerSessionValidator,
+        bcs_caller_sync: BcsCallerConfigSyncProtocol,
     ) -> CallerIdentityService:
         """Construct the draft configuration and Agent Principal sync service."""
         return CallerIdentityService(
@@ -93,6 +193,7 @@ class CallerIdentityModule(Module):
             passport_plugin=passport_plugin,
             collaborator_service=collaborator_service,
             session_validator=session_validator,
+            bcs_caller_sync=bcs_caller_sync,
         )
 
     @singleton
@@ -130,19 +231,20 @@ class CallerIdentityModule(Module):
     def caller_runtime_updater(
         self,
         baas_service: BaasService,
+        instances: ExpertChatInstanceRepository,
+        bindings: DeviceBindingRepository,
+        bots: BotRepository,
     ) -> CallerRuntimeUpdater:
-        """Use the existing BaaS singleton for the Caller outbound PUT."""
-        return baas_service
+        return ExpiryAwareCallerRuntimeUpdater(instances=instances, delegate=baas_service, bindings=bindings, bots=bots)
 
     @singleton
     @provider
     @inject
     def caller_runtime_updater_protocol(
         self,
-        baas_service: BaasService,
+        updater: CallerRuntimeUpdater,
     ) -> CallerRuntimeUpdaterProtocol:
-        """Bind BaasService to core layer protocol."""
-        return baas_service
+        return updater
 
     @singleton
     @provider
@@ -182,10 +284,12 @@ class CallerIdentityModule(Module):
         caller_service: CallerIamTokenService,
         token_pipeline: TokenPluginPipeline,
         bot_repository: BotRepository,
+        auth_plugin: AuthPlugin,
     ) -> CallerIamTokenServiceProtocol:
-        """Expose Caller through a Caller-first independent plugin wrapper."""
+        """Expose Caller alongside the independent token plugin pipeline."""
         return TokenExchangeOrchestrator(
             caller_service=caller_service,
             token_pipeline=token_pipeline,
             bot_repository=bot_repository,
+            auth_plugin=auth_plugin,
         )

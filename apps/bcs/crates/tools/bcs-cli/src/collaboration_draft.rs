@@ -1,7 +1,6 @@
 //! File-to-BCS authoring workflow. The normal chat reply remains the sender.
 use crate::BcsClient;
 use anyhow::{Result, anyhow, bail};
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use clap::Subcommand;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -126,26 +125,25 @@ pub struct Reference {
     pub schema_version: u8,
     pub draft_id: String,
     pub revision: u64,
-    pub read_token: String,
 }
 
-pub fn reference_message(value: Value, id: &str, revision: u64) -> Result<(Reference, String)> {
+pub fn reference_message(mut value: Value, id: &str, revision: u64) -> Result<(Reference, String)> {
+    // The HTTP adapter retains this inert field for deployed CLI readers.
+    // New cards omit it, including when talking to an older server.
+    if let Some(fields) = value.as_object_mut() {
+        fields.remove("readToken");
+    }
     let r: Reference =
         serde_json::from_value(value).map_err(|_| anyhow!("invalid draft reference response"))?;
-    let decoded = URL_SAFE_NO_PAD
-        .decode(&r.read_token)
-        .map_err(|_| anyhow!("invalid draft read capability"))?;
     if r.schema_version != 2
         || r.draft_id != id
         || r.revision != revision
         || parse_id(&r.draft_id).is_err()
         || !(1..=MAX_REVISION).contains(&revision)
-        || decoded.len() != 32
-        || URL_SAFE_NO_PAD.encode(decoded) != r.read_token
     {
         bail!("invalid draft reference response");
     }
-    // Validated fields contain only ASCII UUID/base64url, field names and integers.
+    // Validated fields contain only ASCII UUID, field names and integers.
     let message = format!(
         "<AixUI type=\"card\" component=\"bcsPanel.CollaborationDefinitionCard\" params='{}' />",
         serde_json::to_string(&r)?

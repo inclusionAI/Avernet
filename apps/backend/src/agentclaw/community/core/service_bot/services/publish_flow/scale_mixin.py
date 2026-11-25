@@ -52,9 +52,10 @@ class ScaleMixin:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
 
         owner_id = self._get_owner_id(publish_record)
-        bot = self._bot_service.get_bot(
+        bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id,
             user_id=owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             raise PublishFlowServiceError(f"Bot does not exist: {publish_record.source_bot_id}")
@@ -167,9 +168,10 @@ class ScaleMixin:
     def _resolve_scale_target_count(self, publish_record: BotPublishRecord) -> int:
         """Resolve the target device count for scaling a service Bot."""
         owner_id = self._get_owner_id(publish_record)
-        bot = self._bot_service.get_bot(
+        bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id,
             user_id=owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             raise PublishFlowServiceError(f"Bot does not exist: {publish_record.source_bot_id}")

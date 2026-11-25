@@ -1,0 +1,661 @@
+//! Extracted verbatim from `server.rs`: router building, lifecycle init, scanners, and run loops.
+use super::*;
+
+/// Both mounted OAuth entries (plan Task 11): the LEGACY `/auth/*`
+/// route state and the V1 `/openapi/v1/auth/*` application service.
+/// They share the same strict session identity port, provider chain,
+/// and pending-login store, and differ ONLY in the flow namespace and
+/// callback base the application service pins at construction.
+struct SecureOAuthEntries {
+    legacy_state: Arc<bcs_http::oauth::OAuthRouteState>,
+    v1_service: Arc<dyn bcs_service_api::application::v1::AuthService>,
+    v1_public_base_url: String,
+}
+
+impl BcsServer {
+    /// The finite EXACT trusted-origin subset of `cors.allowed_origins`
+    /// for the legacy entry's cookie CSRF gate (plan §8.3 compatibility
+    /// tightening): wildcards (`*`), the literal `null`, and empty
+    /// entries are EXCLUDED. When nothing remains, cookie-authenticated
+    /// unsafe writes are rejected (fail closed). Origins are never
+    /// inferred from Host or Referer.
+    fn exact_cors_origins(config: &crate::config::BcsConfig) -> Vec<String> {
+        let mut trusted: Vec<String> = config
+            .cors
+            .allowed_origins
+            .iter()
+            .map(|origin| origin.trim())
+            .filter(|origin| {
+                !origin.is_empty()
+                    && *origin != "null"
+                    && *origin != "*"
+                    && !origin.contains('*')
+            })
+            .map(str::to_string)
+            .collect();
+        trusted.dedup();
+        trusted
+    }
+
+    fn build_secure_oauth_entries(&self) -> Option<SecureOAuthEntries> {
+        let auth_chain = Arc::clone(&self.state.auth_chain);
+        // `auth_config.oauth` is the resolved form: present only when a
+        // non-empty jwt_secret was configured (I6 gate lives in resolve).
+        if let (Some(resolved), Some(raw)) = (
+            self.state.auth_config.oauth.as_ref(),
+            self.config.auth.oauth.as_ref(),
+        ) {
+            if !resolved.jwt_secret.is_empty() {
+                let base = resolved.base_url.trim();
+                if base.starts_with("http://") || base.starts_with("https://") {
+                    let mut providers: Vec<(String, Arc<dyn bcs_auth_api::OAuthProvider>)> =
+                        Vec::new();
+
+                    // Build every configured provider instance via the
+                    // composition-root factory. A misconfigured provider
+                    // (unknown kind / empty client_id) is an operator error:
+                    // fail fast at startup rather than silently dropping it and
+                    // surfacing a runtime 404.
+                    for (name, cfg) in &raw.providers {
+                        match crate::auth_wiring::build_oauth_provider(name, cfg) {
+                            Ok(provider) => {
+                                providers.push((name.clone(), provider));
+                            }
+                            Err(e) => {
+                                panic!("Invalid OAuth provider configuration: {e}");
+                            }
+                        }
+                    }
+
+                    if !providers.is_empty() {
+                        // Deterministic chain order (the legacy entry has
+                        // always sorted by name; the application service
+                        // preserves this injection order).
+                        providers.sort_by(|a, b| a.0.cmp(&b.0));
+
+                        if let (Some(user_port), Some(identities)) = (
+                            self.state.user_identity_port.clone(),
+                            self.state.auth_session_identity.clone(),
+                        ) {
+                            // Shared, in-process, atomically-consumed pending
+                            // login store (plan §8.4; multiple instances must
+                            // hold one logical store instead — documented).
+                            let pending = std::sync::Arc::new(
+                                bcs_auth_oauth::MemoryPendingOAuthLoginStore::new(),
+                            );
+                            let provider_bridge = std::sync::Arc::new(
+                                crate::api_auth_ports::ConfiguredOAuthProviderBridge::new(
+                                    providers.clone(),
+                                ),
+                            );
+
+                            // Both entries share ONE strict identity port
+                            // (state lives there), differ only in the flow
+                            // namespace / callback base, which the routes pin.
+                            let legacy_bridge =
+                                crate::api_auth_ports::StrictSessionPortBridge::new(
+                                    std::sync::Arc::new(bcs_auth_oauth::OAuthSessionEngine::new(
+                                        bcs_jwt::OAuthSessionJwt::new(&resolved.jwt_secret),
+                                        identities.clone(),
+                                        resolved.env.clone(),
+                                        resolved.idle_timeout_secs(),
+                                    )),
+                                    identities.clone(),
+                                    resolved.env.clone(),
+                                );
+                            let v1_bridge = crate::api_auth_ports::StrictSessionPortBridge::new(
+                                std::sync::Arc::new(bcs_auth_oauth::OAuthSessionEngine::new(
+                                    bcs_jwt::OAuthSessionJwt::new(&resolved.jwt_secret),
+                                    identities.clone(),
+                                    resolved.env.clone(),
+                                    resolved.idle_timeout_secs(),
+                                )),
+                                identities,
+                                resolved.env.clone(),
+                            );
+                            let pending =
+                                std::sync::Arc::new(crate::api_auth_ports::PendingLoginStoreBridge::new(pending));
+
+                            let success_redirect =
+                                resolved.success_redirect_location().to_string();
+                            let legacy_service = std::sync::Arc::new(
+                                bcs_app_auth::AuthApplicationService::new(
+                                    provider_bridge.clone(),
+                                    std::sync::Arc::new(legacy_bridge),
+                                    pending.clone(),
+                                    success_redirect.clone(),
+                                    "legacy".to_string(),
+                                ),
+                            );
+                            let v1_service =
+                                std::sync::Arc::new(bcs_app_auth::AuthApplicationService::new(
+                                    provider_bridge,
+                                    std::sync::Arc::new(v1_bridge),
+                                    pending.clone(),
+                                    success_redirect,
+                                    "v1".to_string(),
+                                ));
+
+                            let trusted_origins = Self::exact_cors_origins(&self.config);
+                            if trusted_origins.len() != self.config.cors.allowed_origins.len() {
+                                warn!(
+                                    exact = trusted_origins.len(),
+                                    configured = self.config.cors.allowed_origins.len(),
+                                    "legacy cookie CSRF trust derived from cors.allowed_origins: \
+                                     wildcard/null entries excluded"
+                                );
+                            }
+                            let legacy_state =
+                                std::sync::Arc::new(bcs_http::oauth::OAuthRouteState::new(
+                                    legacy_service,
+                                    user_port,
+                                    resolved.clone(),
+                                    Some(auth_chain),
+                                    trusted_origins,
+                                ));
+
+                            info!(
+                                providers = ?providers.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>(),
+                                cookie_secure = resolved.cookie_secure,
+                                env = %resolved.env,
+                                "Mounting OAuth routes (legacy entry, secured shared services)"
+                            );
+                            return Some(SecureOAuthEntries {
+                                legacy_state,
+                                v1_service,
+                                v1_public_base_url: format!(
+                                    "{}/openapi/v1/auth",
+                                    resolved.base_url.trim_end_matches('/')
+                                ),
+                            });
+                        }
+                    } else {
+                        warn!(
+                            "[auth.oauth] present but no OAuth providers configured; \
+                             mounting identity-only /auth/user"
+                        );
+                    }
+                } else {
+                    warn!(
+                        base_url = %resolved.base_url,
+                        "[auth.oauth] base_url must be an http(s) URL"
+                    );
+                }
+            } else {
+                warn!("[auth.oauth] jwt_secret is empty");
+            }
+        }
+
+        None
+    }
+
+    /// Build the `/auth/*` router.
+    ///
+    /// Two mounting paths:
+    /// 1. **Full OAuth** — when `[auth.oauth]` is configured with a non-empty
+    ///    `jwt_secret`, an `http(s)` `base_url`, and at least one provider:
+    ///    mounts the complete OAuth protocol routes with the auth chain
+    ///    injected as the `/auth/user` fallback, driven by the injected
+    ///    LEGACY-flow secure `AuthService`.
+    /// 2. **Identity-only** — when no usable OAuth config exists but an auth
+    ///    chain (e.g. the `local` mock plugin) is present: mounts just
+    ///    `GET /auth/user`, resolved solely via the chain. This lets deployments
+    ///    use `/auth/user` without configuring any OAuth provider.
+    ///
+    /// `jwt_secret` comes from the resolved `auth_config` (see
+    /// `auth_wiring::resolve_auth_config`).
+    fn build_auth_router(
+        &self,
+        oauth_state: Option<Arc<bcs_http::oauth::OAuthRouteState>>,
+    ) -> Option<Router> {
+        if let Some(route_state) = oauth_state {
+            info!("Mounting OAuth /auth/* routes");
+            return Some(bcs_http::oauth::routes(route_state));
+        }
+
+        // Identity-only (chain-backed, no OAuth).
+        if let Some(user_port) = self.state.user_identity_port.clone() {
+            let route_state = Arc::new(bcs_http::oauth::OAuthRouteState::new_chain_only(
+                user_port,
+                Arc::clone(&self.state.auth_chain),
+            ));
+            info!("Mounting identity-only /auth/user (no OAuth providers configured)");
+            return Some(bcs_http::oauth::identity_routes(route_state));
+        }
+
+        None
+    }
+
+    /// Build the Axum router.
+    pub(super) async fn build_router(&self) -> crate::Result<Router> {
+        let api_router = bcs_http::router::build_router(
+            crate::http_adapter::build_http_app_state(Arc::clone(&self.state)).await,
+        );
+        let group_session_connections = build_group_session_connection_service(
+            self.state.openapi_v1.session_service.clone(),
+            &self.config.group_session_ws,
+            self.state.group_session_secret_access.clone(),
+            self.state.session_authorization_core.clone(),
+            Some(self.state.services.bot_authority_hook.clone()),
+        )
+        .await?;
+        let group_session_websocket_router = bcs_ws::web::group_session_websocket_router(
+            group_session_connections.clone(),
+            web_ws_dispatch_state(&self.state, Some(group_session_connections.clone())),
+            ws_lifecycle_hook(&self.state),
+            Arc::clone(&self.state.auth_chain),
+        );
+        let secure_oauth = self.build_secure_oauth_entries();
+        let oauth_state = secure_oauth.as_ref().map(|entries| entries.legacy_state.clone());
+        // The V1 login family's mount: an EXPLICIT [api.auth] decides it
+        // outright (OAuth-less chains keep auth_service unset, so the login
+        // family answers auth_not_configured while /user still projects the
+        // verified Human — spec §4.3/§8.2); the [auth.oauth]-derived mount
+        // exists only for the compat selection. The legacy /auth/* router
+        // state mounts either way: the native Human chain keeps its own
+        // primitives.
+        let (oauth_v1_service, oauth_v1_base_url) = if self.state.config.api.auth.is_some() {
+            match &self.state.explicit_api_auth {
+                Some(explicit) => (
+                    Some(Arc::clone(&explicit.auth_service)),
+                    Some(explicit.public_base_url.clone()),
+                ),
+                None => (None, None),
+            }
+        } else {
+            (
+                secure_oauth.as_ref().map(|entries| entries.v1_service.clone()),
+                secure_oauth
+                    .as_ref()
+                    .map(|entries| entries.v1_public_base_url.clone()),
+            )
+        };
+        let bot_self = Arc::new(bcs_app_bot::BotSelfServiceImpl::new(
+            crate::agent_identity::build_agent_identity_port()?,
+            self.state.services.registry.clone(),
+        ));
+        let mut openapi_v1 = self.state.openapi_v1.clone().with_bot_self_service(bot_self);
+        if let Some(management) = self.state.services.a2a_bot_management.clone() {
+            openapi_v1 = openapi_v1.with_a2a_service(Arc::new(bcs_app_a2a_bot::v1::A2aApiService::new(
+                management,
+            )));
+        }
+        openapi_v1.group_context = Some(self.state.services.group_context.clone());
+        openapi_v1.collaboration_drafts = self.state.services.collaboration_drafts.clone();
+        openapi_v1.worker_task_service = Some(Arc::new(
+            bcs_message_flow::TaskHandleApplicationService::new(self.state.services.message_flow.clone()),
+        ));
+        let mut browser_v1 = openapi_v1.clone();
+        browser_v1.principal_verifier = Arc::new(crate::browser_principal::BrowserPrincipalVerifier(
+            self.state.auth_chain.clone(),
+        ));
+        if let (Some(auth_service), Some(public_base_url)) =
+            (oauth_v1_service, oauth_v1_base_url)
+        {
+            openapi_v1 = openapi_v1.with_auth_service(auth_service, public_base_url);
+            if self.state.config.api.auth.is_none() {
+                openapi_v1.auth_user_verifier = Some(Arc::new(
+                    crate::compat_auth_principal::CompatAuthPrincipalVerifier(self.state.auth_chain.clone()),
+                ));
+                // The compat V1 facade uses the same exact CORS trust as
+                // legacy OAuth. Explicit chains retain their own origins.
+                let origins = Self::exact_cors_origins(&self.config);
+                if !origins.is_empty() {
+                    let origins = bcs_api_http::TrustedBrowserOrigins::new(origins)
+                        .map_err(crate::BcsError::InvalidConfig)?;
+                    openapi_v1 = openapi_v1.with_trusted_browser_origins(origins);
+                }
+            }
+        }
+
+        let mut router = Router::new()
+            // WebSocket endpoint for frontend clients (via gateway)
+            .route(bcs_ws::web::FRONTEND_WS_ENDPOINT, get(ws_upgrade_handler))
+            // WebSocket for bot connections
+            .route(bcs_ws::bot::BOT_WS_ENDPOINT, get(bot_ws_handler));
+
+        if let Some(metrics) = &self.state.metrics {
+            router = router.route(&metrics.endpoint_path, get(metrics_handler));
+        }
+
+        let mut router = router
+            .with_state(Arc::clone(&self.state))
+            .merge(api_router)
+            .merge(bcs_api_http::router(openapi_v1))
+            .merge(bcs_api_http::v1::human::router(browser_v1))
+            .merge(bcs_api_http::group_session_connection_router(
+                group_session_connections,
+                // ONE final stateful verifier Arc with the main V1 ApiState;
+                // the per-actual-source CSRF origins travel with it.
+                self.state.gateway_principal_verifier.clone(),
+                self.state.openapi_v1.trusted_browser_origins.clone(),
+            ))
+            .merge(group_session_websocket_router);
+
+        if let Some(oauth_router) = self.build_auth_router(oauth_state) {
+            router = router.merge(oauth_router);
+        }
+
+        let allowed_origins = Arc::new(
+            self.config
+                .cors
+                .allowed_origins
+                .iter()
+                .cloned()
+                .collect::<std::collections::HashSet<_>>(),
+        );
+
+        let mut untraced_routes = vec![
+            "/health".to_string(),
+            "/me/repair-info".to_string(),
+            "/admin/secret/{name}".to_string(),
+            "/groups/{id}/settings".to_string(),
+            "/manifest".to_string(),
+            "/assets/{bundle_name}/{file_name}".to_string(),
+            "/api/v1/collaboration/manifest".to_string(),
+            "/api/v1/collaboration/assets/{bundle_name}/{file_name}".to_string(),
+            bcs_ws::web::FRONTEND_WS_ENDPOINT.to_string(),
+            bcs_ws::bot::BOT_WS_ENDPOINT.to_string(),
+            bcs_ws::web::GROUP_SESSION_WS_ENDPOINT.to_string(),
+        ];
+        if let Some(metrics) = &self.state.metrics {
+            untraced_routes.push(metrics.endpoint_path.clone());
+        }
+        let trace_filter = bcs_network_tracing::HttpServerFilter::new(untraced_routes);
+
+        Ok(router
+            .layer(middleware::from_fn(debug_middleware))
+            .layer(CatchPanicLayer::custom(
+                |_: Box<dyn std::any::Any + Send>| {
+                    let body = serde_json::json!({
+                        "error": "Internal server error",
+                        "status": 500
+                    });
+                    axum::response::Response::builder()
+                        .status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(body.to_string()))
+                        .unwrap()
+                },
+            ))
+            // Keep metrics outside panic handling so handler panics are
+            // recorded as the generated 500 response, not as cancellations.
+            .layer(middleware::from_fn_with_state(
+                Arc::clone(&self.state),
+                http_metrics_middleware,
+            ))
+            .layer(middleware::from_fn(bcs_http::gateway_trace::observe_request))
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(bcs_http::gateway_trace::BcnMakeSpan)
+                    .on_response(bcs_http::gateway_trace::BcnOnResponse),
+            )
+            .layer(
+                CorsLayer::new()
+                    .allow_origin(AllowOrigin::predicate(move |origin, _| {
+                        origin
+                            .to_str()
+                            .is_ok_and(|origin| allowed_origins.contains(origin))
+                    }))
+                    .allow_methods(AllowMethods::mirror_request())
+                    .allow_headers(AllowHeaders::mirror_request())
+                    .allow_credentials(true),
+            )
+            .layer(middleware::from_fn_with_state(trace_filter, bcs_network_tracing::http_server)))
+    }
+
+    async fn initialize_lifecycle(&self) -> Result<()> {
+        self.state
+            .lifecycle
+            .lock()
+            .await
+            .initialize_all()
+            .await
+            .map_err(|error| {
+                crate::BcsError::InvalidConfig(format!(
+                    "service lifecycle initialize failed: {error}"
+                ))
+            })
+    }
+
+    fn spawn_state_machine_timeout_scanner(&self) -> tokio::task::JoinHandle<()> {
+        crate::state_machine_timeout_scanner::spawn(
+            self.state.leader_election.clone(),
+            self.state.services.collaboration_runtime.clone(),
+            crate::state_machine_timeout_scanner::DEFAULT_SCAN_INTERVAL,
+            crate::state_machine_timeout_scanner::DEFAULT_BATCH_SIZE,
+            crate::state_machine_timeout_scanner::DEFAULT_TIMEOUT_GRACE_MS,
+        )
+    }
+
+    fn spawn_state_machine_progression_scanner(&self) -> crate::state_machine_progression_scanner::ProgressionRecoveryTask {
+        tracing::info!(loop_execution_enabled = self.config.collaboration.loop_execution_enabled,
+            nested_loop_execution_enabled = self.config.collaboration.nested_loop_execution_enabled,
+            "State Machine progression recovery started");
+        crate::state_machine_progression_scanner::spawn(
+            self.state.leader_election.clone(),
+            self.state.services.collaboration_runtime.clone(),
+        )
+    }
+
+    /// Run the server with graceful shutdown support.
+    pub async fn run(self) -> Result<()> {
+        self.run_with_listener(None).await
+    }
+
+    pub(crate) async fn run_with_listener(self, listener: Option<tokio::net::TcpListener>) -> Result<()> {
+        // Also stop durable workers if address parsing, lifecycle setup or bind
+        // fails before the normal graceful-shutdown path is installed.
+        let _delivery_shutdown_guard = crate::message_delivery_wiring::StartupGuard(
+            Some(self.state.services.message_flow.clone()),
+        );
+        let addr: SocketAddr = format!("{}:{}", self.config.bind, self.config.port)
+            .parse()
+            .map_err(|e| crate::BcsError::InvalidConfig(format!("Invalid address: {}", e)))?;
+
+        self.initialize_lifecycle().await?;
+        let _a2a_card_refresh = self.state.services.a2a_bot_management.clone()
+            .map(super::a2a_wiring::start_card_refresh);
+        let ws_leadership = crate::ws_leadership::start(self.state.clone()).await;
+        let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
+        let state_machine_progression_handle = Arc::new(Mutex::new(self.spawn_state_machine_progression_scanner()));
+
+        // Spawn async chat-run TTL cleanup loop.
+        {
+            let a2a_chat = self.state.services.a2a_chat.clone();
+            let bot_run_context = self.state.services.bot_run_context.clone();
+            let provider_bot_events = self.state.services.provider_bot_events.clone();
+            let retention_ms = self.config.async_chat_run_retention_ms;
+            tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(std::time::Duration::from_secs(10));
+                ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    ticker.tick().await;
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    match a2a_chat.cleanup_expired(now_ms, retention_ms).await {
+                        Ok((expired, dropped)) => {
+                            if !expired.is_empty() || !dropped.is_empty() {
+                                info!(
+                                    expired = expired.len(),
+                                    dropped = dropped.len(),
+                                    "chat_run: cleanup_expired"
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            warn!(error = %err, "chat_run: cleanup_expired failed");
+                        }
+                    }
+                    let removed_contexts =
+                        bot_run_context.cleanup_expired(now_ms, retention_ms).await;
+                    if removed_contexts > 0 {
+                        info!(
+                            removed = removed_contexts,
+                            "bot_run_context: cleanup_expired"
+                        );
+                    }
+                    let removed_provider_events = provider_bot_events.cleanup_expired(now_ms).await;
+                    if removed_provider_events > 0 {
+                        info!(
+                            removed = removed_provider_events,
+                            "provider_event: cleanup_expired"
+                        );
+                    }
+                }
+            });
+        }
+
+        let app = self.build_router().await?;
+
+        info!(
+            bind = %self.config.bind,
+            port = self.config.port,
+            bots_base_dir = %self.config.bots_base_dir.display(),
+            "Bot Coordination Service starting"
+        );
+
+        let listener = match listener {
+            Some(listener) => listener,
+            None => tokio::net::TcpListener::bind(addr)
+                .await
+                .map_err(crate::BcsError::IoError)?,
+        };
+        // The external-process test fixture consumes this record from its own
+        // child's stdout; a successful health check alone cannot identify it.
+        info!("BCS_LISTENING {}", serde_json::json!({
+            "address": listener.local_addr().map_err(crate::BcsError::IoError)?.to_string(),
+        }));
+
+        let shutdown_lifecycle = self.state.lifecycle.clone();
+        let final_lifecycle = self.state.lifecycle.clone();
+        let shutdown_metrics = self.state.metrics.clone();
+        let final_metrics = self.state.metrics.clone();
+        let shutdown_message_flow = self.state.services.message_flow.clone();
+        let final_message_flow = self.state.services.message_flow.clone();
+        // Axum spawns the signal future; it must not keep recovery alive if
+        // the server future itself is cancelled before receiving a signal.
+        let shutdown_progression = Arc::downgrade(&state_machine_progression_handle);
+        let shutdown_ws = ws_leadership.stop_handle();
+
+        let serve_result = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+            .with_graceful_shutdown(async move {
+                use tokio::signal::unix::{signal, SignalKind};
+
+                // Wait for shutdown signal (Ctrl+C or SIGTERM from kill)
+                let mut sigterm = signal(SignalKind::terminate()).ok();
+                let mut sigint = signal(SignalKind::interrupt()).ok();
+
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = async { if let Some(ref mut s) = sigterm { s.recv().await } else { std::future::pending().await } } => {}
+                    _ = async { if let Some(ref mut s) = sigint { s.recv().await } else { std::future::pending().await } } => {}
+                }
+
+                info!("Shutdown signal received, gracefully shutting down...");
+                shutdown_ws.cancel();
+
+                if let Some(progression) = shutdown_progression.upgrade() {
+                    progression.lock().await.shutdown().await;
+                }
+
+                if let Err(error) = shutdown_message_flow.shutdown_managed_delivery().await {
+                    warn!(%error, "message delivery shutdown failed");
+                }
+
+                if let Err(error) = shutdown_lifecycle.lock().await.shutdown_all().await {
+                    warn!(error = %error, "service lifecycle shutdown failed");
+                }
+                if let Some(metrics) = shutdown_metrics {
+                    metrics.shutdown().await;
+                }
+            })
+            .await
+            .map_err(|e| crate::BcsError::InvalidConfig(e.to_string()));
+
+        state_machine_progression_handle.lock().await.shutdown().await;
+        if let Err(error) = final_message_flow.shutdown_managed_delivery().await {
+            warn!(%error, "message delivery final shutdown failed");
+        }
+        if let Err(error) = final_lifecycle.lock().await.shutdown_all().await {
+            warn!(error = %error, "service lifecycle shutdown failed");
+        }
+        if let Some(metrics) = final_metrics {
+            metrics.shutdown().await;
+        }
+
+        info!("Bot Coordination Service stopped");
+        serve_result
+    }
+
+    /// Run the server on a random port and return the bound address.
+    /// This is useful for integration tests.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub async fn run_on_random_port(
+        self,
+    ) -> Result<(std::net::SocketAddr, tokio::task::JoinHandle<Result<()>>)> {
+        let addr: SocketAddr = format!("{}:0", self.config.bind)
+            .parse()
+            .map_err(|e| crate::BcsError::InvalidConfig(format!("Invalid address: {}", e)))?;
+
+        self.initialize_lifecycle().await?;
+        let ws_leadership = crate::ws_leadership::start(self.state.clone()).await;
+        let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
+        let state_machine_progression_handle = self.spawn_state_machine_progression_scanner();
+
+        let app = self.build_router().await?;
+
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .map_err(crate::BcsError::IoError)?;
+
+        let bound_addr = listener.local_addr().map_err(crate::BcsError::IoError)?;
+        let lifecycle = self.state.lifecycle.clone();
+        let metrics = self.state.metrics.clone();
+
+        let handle = tokio::spawn(async move {
+            // Keep supervision alive for the server lifetime, including random-port tests.
+            let _ws_leadership = ws_leadership;
+            let mut state_machine_progression_handle = state_machine_progression_handle;
+            let result = axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .map_err(|e| crate::BcsError::InvalidConfig(e.to_string()));
+            state_machine_progression_handle.shutdown().await;
+            if let Err(error) = lifecycle.lock().await.shutdown_all().await {
+                warn!(error = %error, "service lifecycle shutdown failed");
+            }
+            if let Some(metrics) = metrics {
+                metrics.shutdown().await;
+            }
+            result
+        });
+
+        Ok((bound_addr, handle))
+    }
+
+    /// Run the server on a random port and return the shared state for integration tests.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub async fn run_on_random_port_with_state(
+        self,
+    ) -> Result<(
+        std::net::SocketAddr,
+        tokio::task::JoinHandle<Result<()>>,
+        Arc<BcsServerState>,
+    )> {
+        let state = self.state.clone();
+        let (addr, handle) = self.run_on_random_port().await?;
+        Ok((addr, handle, state))
+    }
+}
+
+#[cfg(test)]
+#[path = "network_tracing_tests.rs"]
+mod network_tracing_tests;

@@ -2,7 +2,7 @@
 
 Business logic for quality task management.
 """
-import uuid
+import uuid as uuid_mod
 
 from injector import inject
 
@@ -90,6 +90,7 @@ class QualityTaskService(QualityTaskServiceProtocol):
         owner_id: str | None = None,
         ext: dict | None = None,
         operator_id: str | None = None,
+        uuid: str | None = None,
     ) -> QualityTaskRecord:
         """Create a new quality task.
 
@@ -104,7 +105,7 @@ class QualityTaskService(QualityTaskServiceProtocol):
         Returns:
             Created QualityTaskRecord
         """
-        task_uuid = uuid.uuid4().hex
+        task_uuid = uuid if uuid is not None else uuid_mod.uuid4().hex
         logger.info("[create_task] uuid=%s, task_type=%s, biz_type=%s, bot_id=%s, owner_id=%s", task_uuid, task_type, biz_type, bot_id, owner_id)
         return self._repository.create(
             uuid=task_uuid,

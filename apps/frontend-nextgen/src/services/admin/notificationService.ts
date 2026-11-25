@@ -65,6 +65,9 @@ export const notificationService = {
         itemType: wo.itemType,
         notificationId: wo.notificationId,
         isRead: wo.isRead,
+        bizType: wo.bizType,
+        eventType: wo.eventType,
+        bbsTarget: wo.bbsTarget,
       }));
       return { data: recent };
     } catch (e) {
@@ -103,7 +106,8 @@ export const notificationService = {
     try {
       const resp = await getNotificationDetail(notification_id, { user_id });
       if (!resp.data) return { data: undefined };
-      return { data: mapWorkOrderDto(resp.data).item };
+      // 通知可携带原审批事件；接收人通知身份由端点确定，不能按原事件误判为审批。
+      return { data: mapWorkOrderDto({ ...resp.data, item_type: 'NOTICE' }).item };
     } catch (e) {
       return { error: toServiceError(e) };
     }

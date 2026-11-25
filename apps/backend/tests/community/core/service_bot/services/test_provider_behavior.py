@@ -144,7 +144,7 @@ async def test_teclaw_stage_build_files_merges_refs():
     )
 
     await teclaw.stage_build_files(
-        artifact=artifact, bot={"entity_type": "staff", "entity_id": "u"},
+        artifact=artifact, bot={"entity_type": "staff", "entity_id": "staff_u", "owner_id": "new-owner"},
         bot_id="b", owner_id="u", publish_id=5,
     )
 
@@ -159,7 +159,9 @@ async def test_teclaw_stage_build_files_merges_refs():
     assert kwargs["publish_id"] == 5
     assert kwargs["stage"] == "verify"
     assert kwargs["device_fs"] is dispatcher.dispatch.return_value
-    resolver.resolve_for_bot.assert_called_once_with("b", "u")
+    resolver.resolve_for_bot.assert_called_once_with("b", "new-owner")
+    assert kwargs["entity_id"] == "staff_u"
+    assert kwargs["entity_type"] == "staff"
 
 
 @pytest.mark.asyncio
@@ -234,3 +236,15 @@ def test_teclaw_draft_restore_rejects_non_teclaw_artifact():
     )
 
     assert reason == "上一版本的 config_artifact 不是 teclaw 构造物"
+
+
+@pytest.mark.parametrize("status", ["FAILED", "STOPPED"])
+def test_default_provider_reuses_recoverable_candidates(status):
+    assert DefaultProviderBehavior().should_upgrade_not_live_bot(status) is True
+
+
+@pytest.mark.parametrize("status,expected", [("FAILED", True), ("STOPPED", False)])
+def test_teclaw_recovery_policy_is_status_specific(status, expected):
+    behavior = _teclaw_behavior()
+    assert behavior.upgrade_recovers_not_live_bot is False
+    assert behavior.should_upgrade_not_live_bot(status) is expected

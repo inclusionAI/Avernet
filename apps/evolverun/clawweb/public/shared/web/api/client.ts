@@ -126,6 +126,35 @@ import type { EvolveTaskType } from '../types'
 
 const BASE = '/api'
 
+export type WorkflowCloneCandidate = {
+  workflowId: string
+  title: string
+  packId: string | null
+  updatedAt: number
+}
+
+export type WorkflowClonePreview = {
+  sourceWorkflowId: string
+  sourcePackId: string
+  sourceTitle: string
+  baseCommit: string
+  scriptCount: number
+}
+
+export type WorkflowCloneInput = {
+  sourceWorkflowId: string
+  targetWorkflowId: string
+  targetTitle: string
+  facade?: { command?: string; remark?: string }
+}
+
+export type WorkflowCloneResult = WorkflowClonePreview & {
+  targetWorkflowId: string
+  targetPackId: string
+  branch: string
+  commit: string
+}
+
 export type ApprovalCardSummary = {
   id: number
   flowId: string
@@ -382,6 +411,8 @@ export type WorkflowAutoAnalysisSetting = {
 
 
 export type EvolveTask = {
+  canManage?: boolean
+  canApplySkill?: boolean
   task_id: string
   task_type: EvolveTaskType | 'session_analysis' | 'session_export' | 'stage_test'
   task_name: string | null
@@ -635,6 +666,7 @@ export type SessionAnalysisTask = {
   stepCreatedAt?: number | string | null; stepStartedAt?: number | string | null;
   stepCompletedAt?: number | string | null;
   result: Record<string, unknown> | null; reportMarkdown?: string | null;
+  sessionPreviewUnavailableReason?: string | null;
   sessionPreview?: { events: Record<string, unknown>[]; eventCount: number; parseErrorCount: number; truncated: boolean } | null;
   artifacts?: string[]; error: string | null; gmtCreate: number | string; gmtModified: number | string;
 }
@@ -1261,7 +1293,7 @@ export const api = {
     }> {
       return fetchJson(`${BASE}/evolve/task-definitions`)
     },
-    listTasks(params: { page?: number; pageSize?: number; scope?: 'mine' | 'all'; ownerUserId?: string; category?: string; status?: string; query?: string } = {}): Promise<{ tasks: EvolveTask[]; page: number; pageSize: number; total: number; totalPages: number; scope: 'mine' | 'all'; canViewAll: boolean }> {
+    listTasks(params: { page?: number; pageSize?: number; scope?: 'mine' | 'all'; ownerUserId?: string; category?: string; status?: string; query?: string } = {}): Promise<{ tasks: EvolveTask[]; page: number; pageSize: number; total: number; totalPages: number; scope: 'mine' | 'all'; canViewAll: boolean; spaceExpansion?: 'disabled-in-dev' }> {
       const sp = new URLSearchParams()
       if (params.page) sp.set('page', String(params.page))
       if (params.pageSize) sp.set('pageSize', String(params.pageSize))
@@ -1784,6 +1816,25 @@ export const api = {
   },
 
   workflows: {
+    listCloneCandidates(): Promise<WorkflowCloneCandidate[]> {
+      return fetchJson<{ data: WorkflowCloneCandidate[] }>(`${BASE}/workflows/clone-candidates`)
+        .then((response) => response.data)
+    },
+
+    clonePreview(sourceWorkflowId: string): Promise<WorkflowClonePreview> {
+      return fetchJson(`${BASE}/workflows/clone/preview`, {
+        method: 'POST',
+        body: JSON.stringify({ sourceWorkflowId }),
+      })
+    },
+
+    clone(input: WorkflowCloneInput): Promise<WorkflowCloneResult> {
+      return fetchJson(`${BASE}/workflows/clone`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      })
+    },
+
     list(botOwnerId?: string, botId?: string): Promise<Array<{ workflowId: string; title: string; packId: string | null; updatedAt: number }>> {
       const params = new URLSearchParams()
       if (botOwnerId) params.set('botOwnerId', botOwnerId)

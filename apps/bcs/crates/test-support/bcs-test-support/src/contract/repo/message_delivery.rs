@@ -35,7 +35,8 @@ fn command(id: &str, targets: &[(&str, DeliveryType)]) -> AdmitMessageDeliveries
                 kind: *kind,
                 max_queued: 1,
                 semantic_projection_json: serde_json::json!({"version":1}),
-            })
+             run_id: None,
+})
             .collect(),
     }
 }
@@ -104,6 +105,12 @@ pub async fn message_delivery_repo_port_contract_tests<
     assert!(repo.lookup(DeliveryLookup::BotPendingContexts("A".into())).await?.is_empty(),
         "bound contexts stay with their existing carrier while Sends drain");
     assert_eq!(repo.lookup(DeliveryLookup::Message(first.message.message_id.clone())).await?.len(), 2);
+    let exact=&first.deliveries[0];
+    let run=exact.run_id.clone().expect("Send has canonical Run");
+    let canonical=repo.lookup(DeliveryLookup::CanonicalRun {bot:exact.target_bot_id.clone(),session:exact.session_id.clone(),run:run.clone()}).await?;
+    assert_eq!(canonical.len(),1);assert_eq!(canonical[0].delivery_id,exact.delivery_id);assert_eq!(canonical[0].run_id,exact.run_id);
+    assert!(repo.lookup(DeliveryLookup::CanonicalRun {bot:exact.target_bot_id.clone(),session:"other".into(),run:run.clone()}).await?.is_empty());
+    assert!(repo.lookup(DeliveryLookup::CanonicalRun {bot:"other".into(),session:exact.session_id.clone(),run}).await?.is_empty());
     let stats = repo.queue_statistics().await?;
     assert_eq!(stats.iter().filter(|s| s.status == "queued").map(|s| s.count).sum::<u64>(), 2);
     assert_eq!(stats.iter().filter(|s| s.status == "bound").map(|s| s.count).sum::<u64>(), 1);
@@ -394,22 +401,28 @@ async fn run_reply_contract<T: MessageDeliveryRepoPort + MessageRepoPort>(repo: 
     let segments = repo.run_chat_segments(&summary.message.session_id, "reply-bot", "shared-run").await?;
     assert_eq!(segments.iter().map(|m| m.content.as_str().unwrap()).collect::<Vec<_>>(), vec!["before", "after"]);
     assert!(repo.run_chat_segments("other-session", "reply-bot", "shared-run").await?.is_empty());
-    let mut rejected = command("header-rejection", &[("header-send", DeliveryType::Send), ("header-context", DeliveryType::Inject), ("accepted", DeliveryType::Send)]);
-    rejected.targets[0].rejection = Some(DeliveryAdmissionRejection::ProviderHeadersUnsupported);
-    rejected.targets[1].rejection = Some(DeliveryAdmissionRejection::ProviderHeadersUnsupported);
-    rejected.targets[2].semantic_projection_json = serde_json::json!({"version":1,"provider_route_headers":[["x-routing-zone","blue"]]});
-    let admitted = repo.admit(rejected.clone()).await?;
-    for row in &admitted.deliveries[..2] {
-        assert_eq!(row.state.status, Status::Failed);
-        assert!(!row.state.may_have_been_sent);
-        assert_eq!(row.last_error_code.as_deref(), Some("delivery_provider_headers_unsupported"));
-        assert_eq!(row.terminal_at_ms, Some(100));
-        assert!(repo.lookup(DeliveryLookup::BotPending(row.target_bot_id.clone())).await?.is_empty());
+    for (id, rejection) in [
+        ("header-rejection", DeliveryAdmissionRejection::ProviderHeadersUnsupported),
+        ("target-rejection", DeliveryAdmissionRejection::TargetUnavailable),
+    ] {
+        let accepted_bot = format!("accepted-{id}");
+        let mut rejected = command(id, &[("rejected-send", DeliveryType::Send), ("rejected-context", DeliveryType::Inject), (&accepted_bot, DeliveryType::Send)]);
+        rejected.targets[0].rejection = Some(rejection);
+        rejected.targets[1].rejection = Some(rejection);
+        rejected.targets[2].semantic_projection_json = serde_json::json!({"version":1,"provider_route_headers":[["x-routing-zone","blue"]]});
+        let admitted = repo.admit(rejected.clone()).await?;
+        for row in &admitted.deliveries[..2] {
+            assert_eq!(row.state.status, Status::Failed);
+            assert!(!row.state.may_have_been_sent);
+            assert_eq!(row.last_error_code.as_deref(), Some(rejection.code()));
+            assert_eq!(row.terminal_at_ms, Some(100));
+            assert!(repo.lookup(DeliveryLookup::BotPending(row.target_bot_id.clone())).await?.is_empty());
+        }
+        let accepted = &admitted.deliveries[2];
+        assert_eq!(accepted.state.status, Status::Queued);
+        assert_eq!(repo.get_delivery(&accepted.delivery_id).await?.unwrap().semantic_projection_json, rejected.targets[2].semantic_projection_json);
+        assert!(repo.admit(rejected).await?.duplicate);
     }
-    let accepted = &admitted.deliveries[2];
-    assert_eq!(accepted.state.status, Status::Queued);
-    assert_eq!(repo.get_delivery(&accepted.delivery_id).await?.unwrap().semantic_projection_json, rejected.targets[2].semantic_projection_json);
-    assert!(repo.admit(rejected).await?.duplicate);
     state_machine_result_admission(repo).await?;
     Ok(())
 }

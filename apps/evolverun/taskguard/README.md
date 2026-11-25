@@ -14,6 +14,10 @@ taskguard is a YAML-defined Directed Acyclic Graph (DAG) workflow orchestration 
 - **Workflow packs** — distribute business workflows via `workflow.pack.yaml` manifests, with facade slash commands
 - **Multi-platform adaptation** — PlatformAdapter abstraction layer, supporting OpenClaw / Claude Code / Hermes / TeClaw
 
+## Guides
+
+- [Subworkflow fanout v1](docs/subworkflow-fanout.md) — configuration, explicit release locks, result contracts, tests, and platform integration requirements.
+
 ## Architecture
 
 ```

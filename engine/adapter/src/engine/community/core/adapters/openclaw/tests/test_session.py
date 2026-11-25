@@ -17,9 +17,11 @@ import pytest
 
 from engine.community.core.adapters.openclaw.session import (
     OpenClawSessionAdapter,
+    _clean_title,
     _parse_datetime,
     _raw_message_time,
     _session_label_suffix,
+    _to_session,
 )
 from engine.community.core.engine.context import AuthContext
 from engine.community.core.session.models import (
@@ -119,6 +121,8 @@ class _FakeSessionPort:
         self._session_create_result = session_create_result or {
             "key": "session:abc:user:default",
             "label": "Test_0601120000",
+            "canonical_session_id": "agent:main:session:abc:user:default",
+            "resolved_model": "provider/default-model",
         }
         self._session_delete_result = session_delete_result
         self._session_clear_raises = session_clear_raises
@@ -409,7 +413,11 @@ async def test_list_tolerates_non_list_raw_messages():
 @pytest.mark.asyncio
 async def test_create_builds_session_dto_and_calls_port():
     port = _FakeSessionPort(
-        session_create_result={"key": "session:fixed:user:u1", "label": "My_0601120000"}
+        session_create_result={
+            "key": "session:fixed:user:u1", "label": "My_0601120000",
+            "canonical_session_id": "agent:custom:session:fixed:user:u1",
+            "resolved_model": "provider/actual-model",
+        }
     )
     adapter = OpenClawSessionAdapter(port)
     request = SessionCreateRequest(title="My", user_id="u1", model="ant/llm")
@@ -422,6 +430,15 @@ async def test_create_builds_session_dto_and_calls_port():
     assert session.key == "session:fixed:user:u1"
     assert session.model == "ant/llm"
     assert session.user_id == "u1"
+    assert session.id == "session:fixed:user:u1"
+    assert session.title == "My_0601120000"
+    assert session.message_count == 0
+    assert session.ext_info == {"openclaw_creation": {
+        "session_id": "agent:custom:session:fixed:user:u1",
+        "model": "provider/actual-model",
+    }}
+    assert port.sessions_list_calls == []
+    assert port.chat_history_calls == []
 
     call = port.session_create_calls[0]
     assert call["key"] == "session:fixed:user:u1"
@@ -752,3 +769,96 @@ async def test_get_history_content_list_joined():
     adapter = OpenClawSessionAdapter(port)
     result = await adapter.get_history(SessionHistoryRequest(session_id="cx"))
     assert result.messages[0].content == "part1\npart2"
+
+
+# ── outbound title read-boundary strip (fix-session-title-auto-rename D1) ──────
+
+
+UUID = "9a4cadce-44a7-41de-8826-749b3b0b79f7"
+
+
+def test_to_session_strips_create_form_uuid_suffix():
+    # create 写引擎 label 的真实形态：`新对话_<裸uuid>` → 出站 title 剥净。
+    raw = _make_raw_session(
+        key=f"session:{UUID}:user:u1",
+        label=f"新对话_{UUID}",
+    )
+    assert _to_session(raw).title == "新对话"
+
+
+def test_to_session_strips_update_form_full_id_suffix():
+    full_id = f"agent:main:session:{UUID}:user:u1"
+    raw = _make_raw_session(key=full_id, label=f"标题A_{full_id}")
+    assert _to_session(raw).title == "标题A"
+
+
+def test_to_session_keeps_dsh_label_key_fallback_verbatim():
+    # DSH 场景 label 回退为 session key：全等不中任何 endsWith 判据，原样保留。
+    key = f"session:{UUID}:user:u1"
+    assert _to_session(_make_raw_session(key=key, label=key)).title == key
+
+
+def test_to_session_keeps_human_underscore_titles():
+    raw = _make_raw_session(label="技能回放-ODPS_APPROVAL-100008")
+    assert _to_session(raw).title == "技能回放-ODPS_APPROVAL-100008"
+
+
+def test_clean_title_stripped_empty_falls_back_to_key():
+    # 剥除后为空 → None，调用方沿 displayName/key 兜底语义不变。
+    assert _clean_title(f"_{UUID}", f"session:{UUID}:user:u1") is None
+    raw = _make_raw_session(key=f"session:{UUID}:user:u1", label=f"_{UUID}")
+    assert _to_session(raw).title == f"session:{UUID}:user:u1"
+
+
+def test_clean_title_short_uuid_never_strips():
+    # 短自定义 uuid（测试/异常形状）不参与判据：宁漏剥不误剥。
+    assert _clean_title("My_0601120000", "session:fixed:user:u1") == "My_0601120000"
+    assert _clean_title("app_ab", "session:ab:user:x") == "app_ab"
+
+
+def test_clean_title_strips_nonstandard_agent_profile_keys_via_identity():
+    # acceptance 场景（expert_chat test_caller_cron_sessions）的 key 形如
+    # ``agent:main:<profile>:acceptance_session_<hex>``：无 session/user 段，
+    # ``_session_label_suffix`` 对其回退整串 → update label 后缀 == 整 key；
+    # 出站按 identity（endsWith 完整 id）分支剥净，uuid 分支不参与。
+    key = "agent:main:ordinary:acceptance_session_d3043d2350bd"
+    assert _clean_title(f"Caller renamed_{key}", key) == "Caller renamed"
+
+
+@pytest.mark.asyncio
+async def test_create_returns_clean_title():
+    # create 出站剥除：引擎 label 带后缀（关联令牌）可以保留在引擎里，
+    # 但 create 响应 DTO 的 title 必须干净。
+    port = _FakeSessionPort(
+        session_create_result={
+            "key": f"session:{UUID}:user:u1",
+            "label": f"新会话_{UUID}",
+            "canonical_session_id": f"agent:main:session:{UUID}:user:u1",
+            "resolved_model": "provider/m1",
+        }
+    )
+    adapter = OpenClawSessionAdapter(port)
+    request = SessionCreateRequest(title="新会话", user_id="u1", model="ant/llm")
+    request.uuid = UUID
+
+    session = await adapter.create(request, auth=_auth("tok"))
+    assert session.title == "新会话"
+    # 引擎写入路径不受影响：label 仍带关联令牌后缀。
+    assert port.session_create_calls[0]["label"] == f"新会话_{UUID}"
+
+
+@pytest.mark.asyncio
+async def test_update_returns_clean_title():
+    full_id = f"agent:main:session:{UUID}:user:u1"
+    port = _FakeSessionPort(
+        session_patch_then_get_result=_make_raw_session(
+            key=full_id, label=f"标题A_{full_id}"
+        )
+    )
+    adapter = OpenClawSessionAdapter(port)
+    request = SessionUpdateRequest(session_id=full_id, title="标题A")
+
+    session = await adapter.update(request, auth=_auth("tok"))
+    assert session.title == "标题A"
+    # 引擎写入仍带后缀（update 形态后缀=整串 session id，不变量）。
+    assert port.session_patch_then_get_calls[0]["label"] == f"标题A_{full_id}"

@@ -12,8 +12,14 @@ import { resolveWorkflowOutputs } from "../workflow-outputs.js";
 import { resolveWorkflow, resolveWorkflowByIdAndPackId, resolveWorkflowByIdFromPacks } from "../packs/resolver.js";
 import type { ResolvedWorkflow } from "../packs/types.js";
 import type { IWorkflowSpecRepository } from "../db/repositories/types.js";
+import type { FanoutRuntime } from "./subworkflow-fanout-types.js";
+import { executeSubworkflowFanout } from "./subworkflow-fanout.js";
+import { resolvePinnedWorkflowDependency } from "../workflow-dependencies.js";
 
 export type SubworkflowDeps = {
+  /** Required for fanout; never fall back to the legacy in-memory child path. */
+  fanoutRuntime?: FanoutRuntime;
+  abortSignal?: AbortSignal;
   resolvedWorkflows?: ResolvedWorkflow[];
   /**
    * Optional DB/API repository for resolving child workflows registered in ClawWeb.
@@ -90,6 +96,17 @@ export async function executeSubworkflow(
   }
 
   const config = node.executor as SubworkflowExecutor;
+  if (config.fanout) {
+    if (!deps.fanoutRuntime) return { status: "failed", error: "fanout requires a durable runtime host" };
+    if (config.version !== "pinned") return { status: "failed", error: "fanout requires version: pinned" };
+    let dependency;
+    try {
+      dependency = resolvePinnedWorkflowDependency(flowState.subworkflowDependencies, config.workflowId);
+    } catch (error) {
+      return { status: "failed", error: `DEPENDENCY_LOCK_INVALID: ${error instanceof Error ? error.message : String(error)}` };
+    }
+    return executeSubworkflowFanout(node, templateCtx, flowState, flowId, dependency.spec, deps.fanoutRuntime, { signal: deps.abortSignal });
+  }
   const onFailure = config.onFailure ?? "fail";
   const currentPackId = flowState.workflowPin?.packId;
 
@@ -97,7 +114,14 @@ export async function executeSubworkflow(
 
   let childWorkflow: WorkflowSpec | undefined;
   try {
-    if (config.packId) {
+    const lockedExecution = flowState.workflowSnapshot !== undefined
+      && flowState.subworkflowDependencies !== undefined;
+    if (config.version === "pinned" || lockedExecution) {
+      // A child launched from an immutable workflow snapshot must consume its
+      // retained dependency closure even when an older node omitted the
+      // explicit version: mutable saved/latest resolution would break replay.
+      childWorkflow = resolvePinnedWorkflowDependency(flowState.subworkflowDependencies, config.workflowId).spec;
+    } else if (config.packId) {
       // Preserve explicit pack pinning semantics: a subworkflow that asks for a
       // specific pack should resolve from that pack, not from an unrelated DB row
       // with the same workflow id.
@@ -244,6 +268,14 @@ export function buildChildFlowState(
       phase: node.phase,
       executor: node.executor.type,
     };
+  }
+
+  if (parentFlowState.runInitiator) initialState.runInitiator = structuredClone(parentFlowState.runInitiator);
+  if (childWorkflow.subworkflowDependencies) {
+    // A child with a retained dependency closure is itself a frozen snapshot;
+    // nested legacy subworkflow nodes must resolve from that closure too.
+    initialState.subworkflowDependencies = structuredClone(childWorkflow.subworkflowDependencies);
+    initialState.workflowSnapshot = structuredClone(childWorkflow);
   }
 
   if (parentFlowState.commandSurface) {

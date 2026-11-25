@@ -92,6 +92,10 @@ pub struct Actor {
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Bot display avatar URL, or null when unavailable. Human actors always
+    /// resolve null (bot-avatar plan design §5.1).
+    #[serde(default)]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,11 +104,31 @@ pub struct Participant {
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Bot display avatar URL, or null when the participant has none. Human
+    /// participants resolve null and retained members of soft-deleted Bots
+    /// keep their stored face (design §5.2/§5.3).
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub role: ParticipantRole,
     pub mode: ParticipantMode,
     pub message_view_scope: MessageViewScope,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+}
+
+/// Lightweight participant row for the V1 list summaries (bot-avatar plan
+/// design §5.2): identity plus the two nullable display fields. `name` is the
+/// Group-membership snapshot verbatim (may be null) and is never backfilled
+/// from the registry; the detail-only control fields (role, mode,
+/// message_view_scope, tags) are intentionally absent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParticipantSummary {
+    pub actor_id: String,
+    pub actor_kind: ActorKind,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,9 +157,21 @@ pub struct NormalGroupSummary {
     #[serde(default)]
     pub driver_bot_name: Option<String>,
     pub strategy: GroupStrategy,
+    /// Lightweight summaries of every stored member in stored order, with the
+    /// membership name snapshot and the current Bot avatar (design §5.2).
+    #[serde(default)]
+    pub participants: Vec<ParticipantSummary>,
     pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub created_at: u64,
     pub updated_at: u64,
+    /// D1 activity key for this group, epoch ms: the max of the persisted
+    /// message `created_at` and the `created_at` of every currently persisted
+    /// session of the group; a group with neither reports its own `created_at`.
+    /// Absent on the wire means `None` (older payloads stay readable) and the
+    /// caller falls back to `created_at`. Endpoints that do not populate it —
+    /// the public discovery catalog (D4) — omit it entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -153,9 +189,21 @@ pub struct DirectMessageGroupSummary {
     pub participant_count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peer_actor: Option<Actor>,
+    /// Lightweight summaries of every stored member in stored order, with the
+    /// membership name snapshot and the current Bot avatar (design §5.2).
+    #[serde(default)]
+    pub participants: Vec<ParticipantSummary>,
     pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub created_at: u64,
     pub updated_at: u64,
+    /// D1 activity key for this group, epoch ms: the max of the persisted
+    /// message `created_at` and the `created_at` of every currently persisted
+    /// session of the group; a group with neither reports its own `created_at`.
+    /// Absent on the wire means `None` (older payloads stay readable) and the
+    /// caller falls back to `created_at`. Endpoints that do not populate it —
+    /// the public discovery catalog (D4) — omit it entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -215,6 +263,8 @@ pub enum GroupDetail {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CollaborationGroupDetail {
+    #[serde(default)]
+    pub catalog_labels: crate::types::catalog_labels::CatalogLabels,
     pub group_id: String,
     pub version: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -242,6 +292,8 @@ pub struct CollaborationGroupDetail {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DirectMessageGroupDetail {
+    #[serde(default)]
+    pub catalog_labels: crate::types::catalog_labels::CatalogLabels,
     pub group_id: String,
     pub version: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -276,6 +328,24 @@ impl<T> Page<T> {
     }
 }
 
+/// Ordering for the V1 group list (design D1/D3).
+///
+/// `CreatedAt` is the historical `created_at DESC, group_id ASC` order and the
+/// default. `LastActivity` orders by the D1 activity key
+/// (`last_activity_at DESC, group_id ASC`), falling back to the group's
+/// `created_at` when it has no activity rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupListSort {
+    CreatedAt,
+    LastActivity,
+}
+
+impl Default for GroupListSort {
+    fn default() -> Self {
+        Self::CreatedAt
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ListGroups {
     pub caller: AuthenticatedCaller,
@@ -287,6 +357,7 @@ pub struct ListGroups {
     pub membership: MembershipFilter,
     pub kind: GroupKindFilter,
     pub strategy: Option<GroupStrategy>,
+    pub sort: GroupListSort,
 }
 
 #[derive(Debug, Clone)]
@@ -307,6 +378,7 @@ pub struct CreateParticipant {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateCollaborationGroup {
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
     /// External Human-mention notification policy selected at creation.
     pub human_mention_notify_mode: HumanMentionNotifyMode,
     pub name: Option<String>,
@@ -323,6 +395,7 @@ pub struct CreateCollaborationGroup {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateDirectMessageGroup {
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
     pub name: Option<String>,
     pub context: Option<String>,
     pub target_actor_id: String,
@@ -454,6 +527,7 @@ pub struct GetGroup {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GroupPatch {
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
     pub name: Option<String>,
     pub context: Option<String>,
     /// Outer `None` leaves the field unchanged; `Some(None)` restores the default.
@@ -467,7 +541,8 @@ pub struct GroupPatch {
 
 impl GroupPatch {
     pub fn is_empty(&self) -> bool {
-        self.name.is_none()
+        self.catalog_labels.is_none()
+            && self.name.is_none()
             && self.context.is_none()
             && self.opening_message.is_none()
             && self.visibility.is_none()
@@ -606,5 +681,85 @@ mod membership_none_tests {
     fn none_round_trips_through_wire() {
         let parsed: Membership = serde_json::from_value(json!("none")).expect("deserialize");
         assert_eq!(parsed, Membership::None);
+    }
+}
+
+/// `last_activity_at` wire contract for the group list summaries (design D1/D4):
+/// absent → `None` (backward compatible with pre-field payloads), present →
+/// round-trips as epoch ms, and `None` is omitted instead of serialized null.
+#[cfg(test)]
+mod group_list_activity_serde_tests {
+    use super::{DirectMessageGroupSummary, NormalGroupSummary};
+    use serde_json::{json, Value};
+
+    fn normal_group_json() -> Value {
+        json!({
+            "group_id": "g-1",
+            "version": 1,
+            "status": "active",
+            "visibility": "private",
+            "membership": "direct",
+            "originator_actor_id": "human-1",
+            "participant_count": 2,
+            "driver_bot_uuid": "bot-1",
+            "strategy": "chat",
+            "human_mention_notify_mode": "all",
+            "created_at": 1_700_000_000_000_u64,
+            "updated_at": 1_700_000_000_000_u64
+        })
+    }
+
+    fn direct_message_group_json() -> Value {
+        json!({
+            "group_id": "g-dm",
+            "version": 1,
+            "status": "active",
+            "visibility": "private",
+            "membership": "direct",
+            "originator_actor_id": "human-1",
+            "participant_count": 2,
+            "human_mention_notify_mode": "all",
+            "created_at": 1_700_000_000_000_u64,
+            "updated_at": 1_700_000_000_000_u64
+        })
+    }
+
+    #[test]
+    fn normal_group_summary_without_last_activity_at_defaults_to_none() {
+        let summary: NormalGroupSummary =
+            serde_json::from_value(normal_group_json()).expect("deserialize");
+        assert_eq!(summary.last_activity_at, None);
+        let serialized = serde_json::to_value(&summary).expect("serialize");
+        assert_eq!(serialized.get("last_activity_at"), None);
+    }
+
+    #[test]
+    fn normal_group_summary_last_activity_at_round_trips() {
+        let mut value = normal_group_json();
+        value["last_activity_at"] = json!(123_u64);
+        let summary: NormalGroupSummary = serde_json::from_value(value).expect("deserialize");
+        assert_eq!(summary.last_activity_at, Some(123_u64));
+        let serialized = serde_json::to_value(&summary).expect("serialize");
+        assert_eq!(serialized["last_activity_at"], json!(123_u64));
+    }
+
+    #[test]
+    fn direct_message_group_summary_without_last_activity_at_defaults_to_none() {
+        let summary: DirectMessageGroupSummary =
+            serde_json::from_value(direct_message_group_json()).expect("deserialize");
+        assert_eq!(summary.last_activity_at, None);
+        let serialized = serde_json::to_value(&summary).expect("serialize");
+        assert_eq!(serialized.get("last_activity_at"), None);
+    }
+
+    #[test]
+    fn direct_message_group_summary_last_activity_at_round_trips() {
+        let mut value = direct_message_group_json();
+        value["last_activity_at"] = json!(456_u64);
+        let summary: DirectMessageGroupSummary =
+            serde_json::from_value(value).expect("deserialize");
+        assert_eq!(summary.last_activity_at, Some(456_u64));
+        let serialized = serde_json::to_value(&summary).expect("serialize");
+        assert_eq!(serialized["last_activity_at"], json!(456_u64));
     }
 }

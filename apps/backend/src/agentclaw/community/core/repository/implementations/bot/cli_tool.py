@@ -21,7 +21,7 @@ from injector import inject
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import func
 
-from agentclaw.community.core.bot_config_manifest.cli_tools import (
+from agentclaw.community.core.apply_engine.cli_tools import (
     BotCliToolModel,
     BotCliToolRecord,
 )

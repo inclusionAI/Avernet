@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "../message_log_tests/task_tests.rs"]
+mod key_log_tests;
+
 pub(super) struct TaskCompleteScope {
     pub(super) group_id: String,
     pub(super) session_id: Option<String>,
@@ -69,14 +73,10 @@ pub(super) async fn complete_session_target(
 
 pub(super) async fn complete_service_session_if_needed(
     flow: &BcsMessageFlow,
-    group: &Group,
     group_id: &str,
     status: &str,
     payload: &Value,
 ) -> ServiceResult<Option<Session>> {
-    if group.service_spec.is_none() {
-        return Ok(None);
-    }
     let Some(session_management) = flow.session_management.as_ref() else {
         return Ok(None);
     };
@@ -260,6 +260,12 @@ pub(super) async fn publish_task_message_to_workbench(
             exclude_conn_id: None,
             visibility_domain: MessageVisibilityDomain::ManagerWorker,
             audience: Some(audience),
+            // Task progress notices are independent finite events
+            // (spec §7.3 boundary): authorized per event against
+            // current facts.
+            operation_id: None,
+            terminal: false,
+            run_id: None,
         })
         .await;
 
@@ -343,6 +349,7 @@ pub(super) fn build_task_dispatch_frame(
     target_bot_name: &str,
     message: &str,
     task_id: &str,
+    assignment_intent_id: Option<&str>,
     manager_session_id: &str,
     tags: &[String],
     now_ms: u64,
@@ -379,13 +386,16 @@ pub(super) fn build_task_dispatch_frame(
         from_bot_id: None,
         from_bot_owner: None,
     };
+    let text = if group.group_strategy == GroupStrategy::ManagerWorker {
+        crate::task_presentation::dispatch(driver_name, assignment_intent_id, task_id, message)
+    } else { format!("[from:{}] {}", driver_name, message) };
     let mut params = serde_json::json!({
         "session_key": manager_session_id,
         "bcs_group_id": manager_session_id,
         "bcs_session_id": manager_session_id,
         "message": {
             "role": "user",
-            "content": [{"type": "text", "text": format!("[from:{}] {}", driver_name, message)}],
+            "content": [{"type": "text", "text": text}],
             "timestamp": now_ms / 1000,
         },
         "channel": {
@@ -540,6 +550,7 @@ pub(super) fn log_task_dispatch_created(
     let content = MessageLogContent::from_text(message);
     info!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::TaskDispatchCreated.as_str(),
         status = MessageLogStatus::Routed.as_str(),
@@ -573,6 +584,7 @@ pub(super) fn log_task_complete(
     };
     info!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::TaskComplete.as_str(),
         status = status.as_str(),
@@ -606,6 +618,7 @@ pub(super) fn log_manager_worker_deliver_result(
     if delivered {
         info!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::BotDeliverResult.as_str(),
             status = status.as_str(),
@@ -626,6 +639,7 @@ pub(super) fn log_manager_worker_deliver_result(
     } else {
         warn!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::BotDeliverResult.as_str(),
             status = status.as_str(),

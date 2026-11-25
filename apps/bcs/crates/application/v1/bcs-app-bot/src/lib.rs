@@ -1,27 +1,37 @@
 //! Versioned Bot control-plane application facade for the BCN V1 API.
 
+pub mod authority;
+pub mod authority_policy;
 mod bot_self;
+mod candidate_friends;
+mod candidate_search;
+mod mine;
+pub use authority::BotAuthorityServiceImpl;
 pub use bot_self::BotSelfServiceImpl;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bcs_service_api::application::v1::bot_authority::ERROR_BOT_LIST_CHANGED;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedUserIdentity, Bot, BotCandidate, BotCandidatePurpose,
-    BotCandidateSearchItem, BotCandidateSearchMode, BotCandidateSearchResult, BotDescriptor,
-    BotKind, BotProvider, BotReachability, BotService, BotSkill, BotStatus, BotVisibility, GetBot,
-    HumanBot, InternalBotAttributesService, ListBotCandidates, ListMyBots, Page,
-    PatchBotInternalAttributes, PhysicalBot, QueryBots, SearchBotCandidates, UpdateBot,
-    require_authenticated_user,
+    BotCandidateSearchResult, BotDescriptor, BotKind, BotProvider, BotReachability, BotService,
+    BotSkill, BotStatus, BotVisibility, GetBot, HumanBot, InternalBotAttributesService,
+    ListBotCandidates, ListMyBots, Page, PatchBotInternalAttributes, PhysicalBot, QueryBots,
+    SearchBotCandidates, UpdateBot, require_authenticated_user,
 };
 use bcs_service_api::application::ConnectService;
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
+use bcs_service_api::types::bot_authority::{
+    AuthorityActor, AuthorityMutation, BotAccessRelation, human_actor_id,
+};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateSearchCoreService,
-    BotCandidateSearchMode as CoreCandidateSearchMode, BotCandidateSearchQuery,
     BotCandidateVisibility, BotControlPlaneCoreService, BotControlPlaneDescriptorPatch,
-    BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneView,
-    BotRegistryCoreService, FriendCoreService, ServiceError,
+    BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneView,
+    BotRegistryCoreService, ControllableCandidateQuery, ControlledBotCandidate,
+    FriendCoreService, RuntimeActivitySnapshot, ServiceError,
 };
 
 #[derive(Debug, Clone)]
@@ -32,10 +42,40 @@ pub struct BotServiceConfig {
 pub struct BotServiceImpl {
     control_plane: Arc<dyn BotControlPlaneCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
+    /// Legacy friend store retained by the constructor contract; the v1
+    /// candidate lists read approved Connect/edge relationships only.
+    /// Remove together with the constructor parameter when the remaining v1
+    /// friend-connections flows move off the legacy store (edge-cutover plan,
+    /// candidate-search task).
+    #[allow(dead_code)]
     friends: Arc<dyn FriendCoreService>,
     connect_service: Arc<dyn ConnectService>,
     candidate_search: Arc<dyn BotCandidateSearchCoreService>,
+    /// The narrow authority hook (bot-authority plan Task 6.3):
+    /// every Human→Bot control judgment in this facade consults
+    /// it live; a missing wiring fails closed.
+    bot_authority: Option<Arc<dyn BotAuthorityPort>>,
+    /// Migration-window compat (spec §10.2a): mine also surfaces
+    /// live physical Bots whose stored `created_by` byte-matches
+    /// the caller while their ownership is still uninitialized.
+    /// Strict posture pins it off (default).
+    legacy_created_by_fallback: bool,
     config: BotServiceConfig,
+}
+
+/// Map one authority read to application errors: a strict deny
+/// (`Forbidden`) is 403 at the entry's own conventions; every
+/// other read failure propagates as an internal error (spec §3.2:
+/// 存储错误返回错误 — never a deny-as-false).
+pub(crate) fn map_authority_error(error: ServiceError) -> ApplicationError {
+    match error {
+        ServiceError::Forbidden(message) => {
+            ApplicationError::forbidden(message)
+        }
+        other => ApplicationError::internal(format!(
+            "bot authority lookup failed: {other}"
+        )),
+    }
 }
 
 pub struct InternalBotAttributesServiceImpl {
@@ -152,8 +192,42 @@ impl BotServiceImpl {
             friends,
             connect_service,
             candidate_search,
+            bot_authority: None,
+            legacy_created_by_fallback: false,
             config,
         }
+    }
+
+    /// Wire the §10.2a compat posture the composition root
+    /// resolved for this process: ON only inside the declared
+    /// migration window, OFF (default) everywhere else.
+    pub fn with_legacy_created_by_fallback(
+        mut self,
+        enabled: bool,
+    ) -> Self {
+        self.legacy_created_by_fallback = enabled;
+        self
+    }
+
+    /// Wire the authority hook (bot-authority plan Task 6.3).
+    pub fn with_bot_authority_hook(
+        mut self,
+        bot_authority: Arc<dyn BotAuthorityPort>,
+    ) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// The wired authority hook; failing to wire one is a
+    /// composition error and must fail closed (never deny-as-Ok).
+    fn authority(&self) -> Result<&dyn BotAuthorityPort, ApplicationError> {
+        self.bot_authority
+            .as_deref()
+            .ok_or_else(|| {
+                ApplicationError::internal(
+                    "bot authority hook is not wired",
+                )
+            })
     }
 
     fn human_staff_no(
@@ -236,18 +310,47 @@ impl BotServiceImpl {
         &self,
         records: Vec<BotControlPlaneView>,
     ) -> Result<Vec<Bot>, ApplicationError> {
-        let physical_ids = records
-            .iter()
-            .filter(|bot| bot.record.kind == ActorKind::Bot)
-            .map(|bot| bot.record.bot_id.clone())
-            .collect::<Vec<_>>();
+        let physical_ids = Self::physical_bot_ids(&records);
         let runtime_active = self
             .registry
             .list_runtime_active_bot_ids(&physical_ids)
             .await
             .into_iter()
             .collect::<HashSet<_>>();
+        self.project_records_with_activity(records, &runtime_active, &physical_ids)
+            .await
+    }
 
+    fn physical_bot_ids(records: &[BotControlPlaneView]) -> Vec<String> {
+        records
+            .iter()
+            .filter(|bot| bot.record.kind == ActorKind::Bot)
+            .map(|bot| bot.record.bot_id.clone())
+            .collect()
+    }
+
+    /// Project records onto the public Bot shapes using an
+    /// ALREADY-OBSERVED runtime-activity sampling. The mine
+    /// page shares the one `try_runtime_activity_for`
+    /// observation with its reachability total (spec §8.0:
+    /// 页内 total/items 使用同一采样) instead of
+    /// re-observing per page.
+    async fn project_records_with_activity(
+        &self,
+        records: Vec<BotControlPlaneView>,
+        runtime_active: &HashSet<String>,
+        physical_ids: &[String],
+    ) -> Result<Vec<Bot>, ApplicationError> {
+        // Read only physical Bots in this authorized result page. Core owns
+        // deduplication and bounded store batches; failures must not become nulls.
+        let avatars = if physical_ids.is_empty() {
+            HashMap::new()
+        } else {
+            self.registry
+                .avatar_urls(physical_ids)
+                .await
+                .map_err(map_service_error)?
+        };
         records
             .into_iter()
             .map(|bot| {
@@ -259,6 +362,7 @@ impl BotServiceImpl {
                         bot_id: record.bot_id,
                         kind: BotKind::Human,
                         name: record.name,
+                        avatar_url: None,
                         visibility,
                         status,
                         env: record.env,
@@ -268,6 +372,12 @@ impl BotServiceImpl {
                         friend_check_in_strategy: record.friend_check_in_strategy,
                         created_at: record.created_at,
                         updated_at: record.updated_at,
+                        // The mine page stamps its
+                        // sampled relation afterwards;
+                        // other projections stay
+                        // relation-less (spec §8 mine
+                        // row only).
+                        access_relation: None,
                     }));
                 }
 
@@ -283,6 +393,7 @@ impl BotServiceImpl {
                     name: provider.name,
                 });
                 Ok(Bot::Physical(PhysicalBot {
+                    avatar_url: avatars.get(&record.bot_id).cloned().flatten(),
                     bot_id: record.bot_id,
                     kind: BotKind::Bot,
                     name: record.name,
@@ -314,6 +425,11 @@ impl BotServiceImpl {
                     friend_check_in_strategy: record.friend_check_in_strategy,
                     created_at: record.created_at,
                     updated_at: record.updated_at,
+                    // The mine page stamps its sampled
+                    // relation afterwards; other
+                    // projections stay relation-less
+                    // (spec §8 mine row only).
+                    access_relation: None,
                 }))
             })
             .collect()
@@ -327,6 +443,32 @@ impl BotServiceImpl {
             .ok_or_else(|| ApplicationError::internal("Bot projection returned no record"))
     }
 
+    /// The candidate query of §8.0, built once per
+    /// attempt (the sampling and its backfill
+    /// re-derivation share the same persistent shape).
+    fn controllable_query(
+        &self,
+        staff_no: &str,
+        command: &ListMyBots,
+    ) -> ControllableCandidateQuery {
+        ControllableCandidateQuery {
+            user_id: staff_no.to_string(),
+            env: self.config.env.clone(),
+            kind: command.kind.map(|kind| match kind {
+                BotKind::Bot => ActorKind::Bot,
+                BotKind::Human => ActorKind::Human,
+            }),
+            name: normalize_optional_name(command.name.clone()),
+            status: command.status.map(domain_status),
+            include_legacy_creator: self.legacy_created_by_fallback,
+        }
+    }
+
+    /// Bot-authority plan Task 6.3 (row 1 of the mounted-entry
+    /// table): a Human uses a Bot as its candidate perspective
+    /// through the CURRENT control judgment — a live
+    /// `can_manage` edge — never the historical `created_by`.
+    /// The Human self entry keeps the `human_{staff_no}` rule.
     async fn authorize_candidate_perspective(
         &self,
         staff_no: &str,
@@ -334,7 +476,17 @@ impl BotServiceImpl {
     ) -> Result<BotControlPlaneRecord, ApplicationError> {
         let acting = self.load_record(bot_id).await?;
         match acting.kind {
-            ActorKind::Bot if acting.created_by.as_deref() == Some(staff_no) => Ok(acting),
+            ActorKind::Bot => match self
+                .authority()?
+                .can_manage(staff_no, bot_id)
+                .await
+            {
+                Ok(true) => Ok(acting),
+                Ok(false) => Err(ApplicationError::forbidden(format!(
+                    "Current Human cannot use Bot '{bot_id}' as the candidate perspective"
+                ))),
+                Err(error) => Err(map_authority_error(error)),
+            },
             ActorKind::Human if acting.bot_id == format!("human_{staff_no}") => Ok(acting),
             _ => Err(ApplicationError::forbidden(format!(
                 "Current Human cannot use Bot '{bot_id}' as the candidate perspective"
@@ -357,6 +509,7 @@ impl BotServiceImpl {
                     BotCandidatePurpose::Discovery => BotCandidateVisibility::Discovery,
                     BotCandidatePurpose::Collaboration => BotCandidateVisibility::Collaboration,
                 },
+                viewer_kind: acting.kind,
                 friend_ids,
                 name: normalize_optional_name(command.name),
                 offset: command.offset,
@@ -368,17 +521,34 @@ impl BotServiceImpl {
             .iter()
             .map(|record| record.is_friend)
             .collect::<Vec<_>>();
+        let bot_ids = records
+            .iter()
+            .map(|record| record.bot.record.bot_id.clone())
+            .collect::<Vec<_>>();
+        // Candidate-page owner projection: ONE batched authority read
+        // per page (never per row), aligned positionally with the
+        // page items; the field is display metadata, never an
+        // authorization result.
+        let ownerships = self
+            .authority()?
+            .ownerships_for(&bot_ids)
+            .await
+            .map_err(map_authority_error)?;
         let bots = self
             .project_records(records.into_iter().map(|record| record.bot).collect())
             .await?;
         let mut items = Vec::with_capacity(bots.len());
-        for (bot, is_friend) in bots.into_iter().zip(is_friend) {
+        for ((bot, is_friend), ownership) in bots.into_iter().zip(is_friend).zip(ownerships) {
             let Bot::Physical(bot) = bot else {
                 return Err(ApplicationError::internal(
                     "Candidate store returned a Human record",
                 ));
             };
-            items.push(BotCandidate { bot, is_friend });
+            items.push(BotCandidate {
+                bot,
+                is_friend,
+                owner_user_id: ownership.map(|view| view.owner_user_id),
+            });
         }
         Ok(Page {
             items,
@@ -402,12 +572,7 @@ impl BotService for BotServiceImpl {
             .authorize_candidate_perspective(&staff_no, &command.bot_id)
             .await?;
 
-        let friend_ids = self
-            .friends
-            .list_friends(&command.bot_id)
-            .await
-            .into_iter()
-            .collect();
+        let friend_ids = self.approved_bot_friend_ids(&command.bot_id).await?;
         self.list_candidates_with_friend_ids(command, acting, friend_ids)
             .await
     }
@@ -416,103 +581,14 @@ impl BotService for BotServiceImpl {
         &self,
         command: ListBotCandidates,
     ) -> Result<Page<BotCandidate>, ApplicationError> {
-        let staff_no = Self::human_staff_no(&command.caller)?;
-        Self::validate_bot_id(&command.bot_id)?;
-        Self::validate_pagination(command.offset, command.limit)?;
-        let acting = self
-            .authorize_candidate_perspective(&staff_no, &command.bot_id)
-            .await?;
-
-        let friend_ids = self
-            .connect_service
-            .list_friends(&command.bot_id)
-            .await
-            .map_err(map_service_error)?
-            .into_iter()
-            .filter(|entry| entry.kind == ActorKind::Bot)
-            .map(|entry| entry.actor_id)
-            .collect();
-        self.list_candidates_with_friend_ids(command, acting, friend_ids)
-            .await
+        self.list_candidates(command).await
     }
 
     async fn search_candidates(
         &self,
         command: SearchBotCandidates,
     ) -> Result<BotCandidateSearchResult, ApplicationError> {
-        const CANDIDATE_SEARCH_LIMIT: usize = 20;
-
-        let staff_no = Self::human_staff_no(&command.caller)?;
-        Self::validate_bot_id(&command.bot_id)?;
-        let acting = self
-            .authorize_candidate_perspective(&staff_no, &command.bot_id)
-            .await?;
-        let search = self
-            .candidate_search
-            .search_candidates(BotCandidateSearchQuery {
-                query: command
-                    .query
-                    .as_deref()
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string(),
-                acting_actor_id: command.bot_id,
-                visibility: match command.purpose {
-                    BotCandidatePurpose::Discovery => BotCandidateVisibility::Discovery,
-                    BotCandidatePurpose::Collaboration => BotCandidateVisibility::Collaboration,
-                },
-                limit: CANDIDATE_SEARCH_LIMIT,
-            })
-            .await;
-        let search_mode = search.mode;
-        let searched_ids = search
-            .hits
-            .iter()
-            .map(|hit| hit.bot.bot_uuid.clone())
-            .collect::<Vec<_>>();
-        let projected = self
-            .project_records(
-                self.control_plane
-                    .get_by_ids(&searched_ids, &acting.env)
-                    .await
-                    .map_err(map_service_error)?,
-            )
-            .await?;
-        let mut projected_by_id = projected
-            .into_iter()
-            .map(|bot| (bot.bot_id().to_string(), bot))
-            .collect::<HashMap<_, _>>();
-        let mut items = Vec::with_capacity(search.hits.len());
-        for hit in search.hits {
-            let Some(bot) = projected_by_id.remove(&hit.bot.bot_uuid) else {
-                continue;
-            };
-            let Bot::Physical(bot) = bot else {
-                return Err(ApplicationError::internal(
-                    "Actor search returned a Human record",
-                ));
-            };
-            let (score, short_profile) = if search_mode == CoreCandidateSearchMode::Semantic {
-                (hit.score, hit.short_profile)
-            } else {
-                (None, None)
-            };
-            items.push(BotCandidateSearchItem {
-                bot,
-                is_friend: hit.is_friend,
-                tags: hit.tags,
-                score,
-                short_profile,
-            });
-        }
-        Ok(BotCandidateSearchResult {
-            items,
-            search_mode: match search_mode {
-                CoreCandidateSearchMode::EmptyQuery => BotCandidateSearchMode::EmptyQuery,
-                CoreCandidateSearchMode::Semantic => BotCandidateSearchMode::Semantic,
-                CoreCandidateSearchMode::NameFallback => BotCandidateSearchMode::NameFallback,
-            },
-        })
+        self.search_candidates_impl(command).await
     }
 
     async fn query(&self, command: QueryBots) -> Result<Vec<Bot>, ApplicationError> {
@@ -563,11 +639,35 @@ impl BotService for BotServiceImpl {
             ));
         }
         let record = self.load_record(&command.bot_id).await?;
-        if record.created_by.as_deref() != Some(staff_no.as_str()) {
-            return Err(ApplicationError::forbidden(format!(
-                "Current Human does not own Bot '{}'",
-                command.bot_id
-            )));
+        // Bot-authority plan Task 6.3 (row 2 of the mounted-entry
+        // table): the descriptor patch is a §8 BUSINESS operation
+        // ("Bot 配置 … 使用当前角色"), so the CURRENT ROLE gate
+        // admits owner OR manager (`require_manage`, spec §1 goal
+        // 1: manager 获得相同的 Bot 业务操作权限) — never the
+        // historical `created_by` (spec §3.3: 旧创建者在失去
+        // manager 后不再有特权). Only the ownership-transfer
+        // commands stay owner-exclusive.
+        //
+        // Human-kind rows carry NO authority edges (spec §3.2.4
+        // 管理边不把 Human 当 Bot): the gate narrows to ACTOR
+        // SELF — the calling Human may patch only its OWN
+        // `human_{staff_no}` row (the legacy created_by fact was
+        // exactly that self row) — every other Human row is 403.
+        match record.kind {
+            ActorKind::Bot => {
+                self.authority()?
+                    .require_manage(&staff_no, &command.bot_id)
+                    .await
+                    .map_err(map_authority_error)?;
+            }
+            ActorKind::Human
+                if record.bot_id == format!("human_{staff_no}") => {}
+            ActorKind::Human => {
+                return Err(ApplicationError::forbidden(format!(
+                    "Current Human does not own Bot '{}'",
+                    command.bot_id
+                )));
+            }
         }
         if record.kind == ActorKind::Human
             && (command.patch.descriptor.is_some()
@@ -610,6 +710,8 @@ impl BotService for BotServiceImpl {
                             Ok(bcs_service_api::Skill {
                                 name,
                                 description: skill.description,
+                                // The patch input has no tags concept; pass-through here would be wrong.
+                                tags: Vec::new(),
                             })
                         })
                         .collect::<Result<Vec<_>, _>>()
@@ -652,46 +754,12 @@ impl BotService for BotServiceImpl {
     }
 
     async fn list_mine(&self, command: ListMyBots) -> Result<Page<Bot>, ApplicationError> {
-        let human = require_authenticated_user(&command.caller)?;
-        Self::validate_pagination(command.offset, command.limit)?;
-        let staff_no = human.id.clone();
-        let display_name = Self::human_display_name(human);
-        self.registry
-            .ensure_human_actor(&staff_no, &display_name)
-            .await
-            .map_err(map_service_error)?;
-        let records = self
-            .control_plane
-            .list_by_creator(BotControlPlaneOwnedQuery {
-                created_by: staff_no,
-                env: self.config.env.clone(),
-                kind: command.kind.map(|kind| match kind {
-                    BotKind::Bot => ActorKind::Bot,
-                    BotKind::Human => ActorKind::Human,
-                }),
-                name: normalize_optional_name(command.name),
-                status: command.status.map(domain_status),
-            })
-            .await
-            .map_err(map_service_error)?;
-        let mut bots = self.project_records(records).await?;
-        if let Some(reachability) = command.reachability {
-            bots.retain(|bot| {
-                matches!(bot, Bot::Physical(physical) if physical.reachability == reachability)
-            });
-        }
-        let total = bots.len() as u64;
-        let offset = usize::try_from(command.offset).unwrap_or(usize::MAX);
-        let limit = usize::try_from(command.limit).unwrap_or(usize::MAX);
-        let items = bots.into_iter().skip(offset).take(limit).collect();
-        Ok(Page {
-            items,
-            total,
-            offset: command.offset,
-            limit: command.limit,
-        })
+        self.list_mine_impl(command).await
     }
 }
+
+
+
 
 fn normalize_optional_name(name: Option<String>) -> Option<String> {
     name.map(|name| name.trim().to_string())
@@ -735,3 +803,4 @@ fn domain_status(value: BotStatus) -> ActorStatus {
 fn map_service_error(error: ServiceError) -> ApplicationError {
     ApplicationError::internal(error.to_string())
 }
+

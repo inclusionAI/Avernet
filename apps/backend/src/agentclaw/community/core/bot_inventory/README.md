@@ -46,6 +46,12 @@ still run before restart; unrelated programming errors are not reclassified.
 
 ## Inventory status contract
 
+`GET /openapi/v1/bots/all` orders Bots by creation time, newest first,
+regardless of name or deployment mode. Within each service Bot, visible
+publications are ordered by their own creation time, newest first. Pagination
+applies to this combined card list. Editing a Bot or adding a publication
+does not move it ahead of a more recently created Bot.
+
 `GET /openapi/v1/bots/all` exposes the stored Bot status for every card kind
 (`PENDING`, `PROVISIONING`, `ACTIVE`, etc.), matching `GET /openapi/v1/bots`.
 Service cards additionally expose a bounded `publish` object with `id`,
@@ -59,4 +65,21 @@ from checking it for `draft/deploying/prestable/running/offline`. Use
 for normalized card presentation. Keep using `actions` for available operations.
 The legacy `/api/bots/search`, `/bots`, and `/lifecycle` contracts are unchanged.
 Existing publication identifiers, diagnostic state, edit locks, and action policy
-remain intact. Projection reuses the existing batched publication read.
+remain intact. Projection reuses the batched publication read without fetching
+offloaded configuration artifacts: inventory cards use publication metadata
+only. The page's template configuration is loaded separately.
+
+`actions` distinguishes the public/basic-information `view` face from the
+configuration surface. `view_config` is emitted for an explicit service-Bot
+collaborator whose permission level is at least `MEMBER`; it is not emitted for
+a user whose `MEMBER` level is synthesized only from Space membership. The
+action grants read-only navigation and does not grant `edit` or any write
+operation. Owners continue to be identified by `owner_entity_id`, and existing
+clients that ignore the additive action remain compatible.
+
+For personal cloud Bots, stored `RECYCLED` maps to `display_state: dormant`
+even when `ext.dormant` is absent. The Owner receives `activate` in `actions`;
+collaborators do not. `RECYCLING` and `REACTIVATING` without a legacy dormant
+flag remain `pending`, with no activation action while the transition runs.
+The raw `status`, local/service card mappings, and activation endpoint are
+unchanged. Clients still need to render and invoke the advertised action.

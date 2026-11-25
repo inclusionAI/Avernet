@@ -130,11 +130,20 @@ class RecordingBindingStore:
     """SliceStore double for the two calls the pool makes: the
     write-ahead intent (pre-setup) and the settle (post-setup)."""
 
-    def __init__(self, fail_intent_with: Exception | None = None) -> None:
+    def __init__(self, fail_intent_with: Exception | None = None,
+                 highest_ordinal: int = 0) -> None:
         self.intent_calls: list[dict] = []
         self.binding_calls: list[dict] = []
         self.result_calls: list[dict] = []
+        self.ordinal_reads: list[dict] = []
         self.fail_intent_with = fail_intent_with
+        self.highest_ordinal = highest_ordinal
+
+    async def next_attempt_ordinal(self, run, agent_id):
+        self.ordinal_reads.append({
+            "run_id": run.run_id, "agent_id": agent_id,
+        })
+        return self.highest_ordinal + 1
 
     async def journal_attempt_intent(self, run, agent_id, claim_epoch,
                                       attempt, executor_kind, executor_id,
@@ -464,3 +473,114 @@ class TestFencedJournalUnwinds:
         assert store.binding_calls == []
         assert breaker.state is BreakerState.CLOSED
         assert breaker.consecutive_failures == 0
+
+class OrdinalFailingSubagent(ExecutorSubagent):
+    """Fails setup on its first in-slice attempt, succeeds on the next."""
+
+    def __init__(self, spec, executor_id, fail_first: bool) -> None:
+        super().__init__(spec, executor_id)
+        self._fail_first = fail_first
+
+    async def setup(self) -> None:
+        if self._fail_first:
+            self._fail_first = False
+            raise ValueError("transient setup boom")
+
+
+class TestLifetimeAttemptOrdinals:
+    """The ordinal feeds the persona id, so it cannot restart per slice:
+    a re-derived id collides on uk_bot_id_entity_id_env, because the earlier
+    attempt's Bot row survives as a soft-deleted row."""
+
+    def test_ordinals_continue_after_the_ledgers_highest(self):
+        async def main():
+            store = RecordingBindingStore(highest_ordinal=2)
+            factory = JournalingFactory()
+            rt = SubagentRuntime(factory=factory, binding_store=store,
+                                 max_attempts=2)
+            await rt.start()
+            try:
+                run = _mk_run()
+                await rt.spawn(run, _mk_envelope(name="clerk"))
+                await rt.wait_for_completions()
+            finally:
+                await rt.stop()
+
+            # injest ordinals 3 then 4 — never a restart at 1
+            assert factory.created_attempts == [3, 4]
+            assert [c["attempt"] for c in store.intent_calls] == [3, 4]
+            assert store.ordinal_reads[0]["agent_id"] is not None
+
+    def test_ordinal_reads_once_per_item(self):
+        async def main():
+            store = RecordingBindingStore(highest_ordinal=1)
+            factory = JournalingFactory()
+            rt = SubagentRuntime(factory=factory, binding_store=store,
+                                 max_attempts=3)
+            await rt.start()
+            try:
+                await rt.spawn(_mk_run(), _mk_envelope(name="clerk"))
+                await rt.wait_for_completions()
+            finally:
+                await rt.stop()
+            assert len(store.ordinal_reads) == 1
+            assert factory.created_attempts == [2]
+
+    def test_target_attempt_budget_still_counts_this_slice(self):
+        # The budget is per slice even though the ordinal continues: an agent
+        # that succeeds on its 2nd in-slice attempt reports attempts=2.
+        async def main():
+            store = RecordingBindingStore(highest_ordinal=5)
+            factory = _OrdinalFactory(fail_first=True)
+            rt = SubagentRuntime(factory=factory, binding_store=store,
+                                 max_attempts=3)
+            await rt.start()
+            try:
+                await rt.spawn(_mk_run(), _mk_envelope(name="scout"))
+                results = await rt.wait_for_completions()
+            finally:
+                await rt.stop()
+            assert results[0]["attempts"] == 2
+            assert factory.created_attempts == [6, 7]
+
+    def test_a_new_slice_does_not_reuse_the_previous_ordinals(self):
+        # The reported incident: slice 1 used ordinals 1 and 2; the respawn
+        # must start at 3, so its derived persona ids differ from both.
+        async def main():
+            store = RecordingBindingStore(highest_ordinal=2)
+            factory = JournalingFactory()
+            rt = SubagentRuntime(factory=factory, binding_store=store)
+            await rt.start()
+            try:
+                await rt.spawn(_mk_run(), _mk_envelope(name="clerk"))
+                await rt.wait_for_completions()
+            finally:
+                await rt.stop()
+            assert factory.created_attempts == [3]
+
+    def test_missing_store_falls_back_to_one(self):
+        async def main():
+            factory = JournalingFactory()
+            rt = SubagentRuntime(factory=factory)
+            await rt.start()
+            try:
+                await rt.spawn(_mk_run(), _mk_envelope(name="clerk"))
+                await rt.wait_for_completions()
+            finally:
+                await rt.stop()
+            assert factory.created_attempts == [1]
+
+
+class _OrdinalFactory(JournalingFactory):
+    """Factory whose subagents fail setup on the first in-slice attempt."""
+
+    def __init__(self, fail_first: bool = False) -> None:
+        super().__init__()
+        self._fail_first = fail_first
+
+    def create(self, spec, run, agent_id=None, attempt: int = 1):
+        self.created_attempts.append(attempt)
+        return OrdinalFailingSubagent(
+            spec, f"agent_swarm_{uuid.uuid4().hex[:16]}",
+            fail_first=self._fail_first,
+        )

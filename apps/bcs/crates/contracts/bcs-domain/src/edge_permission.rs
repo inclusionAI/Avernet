@@ -11,6 +11,14 @@ use serde_json::{Map, Value};
 use crate::actor::ActorKind;
 
 /// Kind of authorization carried by an edge.
+///
+/// `Owner` and `Manager` are the bot-authority metadata edges
+/// (2026-10-10 Bot authority design §4.1): Human → physical Bot
+/// management edges with unified shape `grant_ref_id = 0`,
+/// `rules = NULL`, `originator_policy = same_as_from`, and only the
+/// `approved` status ever counts for authority reads. They are
+/// metadata only — they never take part in runtime permission
+/// decisions (no friendship, no profile/rules routing grant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GrantKind {
@@ -18,6 +26,12 @@ pub enum GrantKind {
     PermissionProfile,
     /// Edge carries inline `rules`.
     Rules,
+    /// Owner management edge (Human → Bot). Exactly one approved
+    /// edge per `(env, to_id)`; unified `grant_ref_id = 0`.
+    Owner,
+    /// Manager management edge (Human → Bot). Unified
+    /// `grant_ref_id = 0`; owner takes precedence over manager.
+    Manager,
 }
 
 /// Lifecycle status of an edge grant.
@@ -220,6 +234,10 @@ pub struct PermissionRequest {
     pub decided_by: Option<String>,
     #[serde(default)]
     pub decided_at: Option<u64>,
+    /// DB-managed row creation time (`gmt_create`, epoch ms, UTC).
+    pub created_at: u64,
+    /// DB-managed last-write time (`gmt_modified`, epoch ms, UTC).
+    pub updated_at: u64,
 }
 
 /// Provenance of an active grant at runtime.
@@ -376,7 +394,7 @@ mod tests {
             request_kind: RequestKind::Connect, requested_ref_id: None,
             requested_rules: None, message: None, status: RequestStatus::Pending,
             decision_reason: None, created_by: "human_88001".into(), decided_by: None,
-            decided_at: None,
+            decided_at: None, created_at: 0, updated_at: 0,
         };
         let s = serde_json::to_string(&r).unwrap();
         let back: PermissionRequest = serde_json::from_str(&s).unwrap();

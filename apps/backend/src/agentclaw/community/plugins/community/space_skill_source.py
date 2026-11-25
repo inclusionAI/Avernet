@@ -9,7 +9,7 @@ import signal
 import socket
 import subprocess
 import time
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 
@@ -95,15 +95,12 @@ class CommunitySpaceSkillSource(SpaceSkillSourcePlugin):
             )
             selected = select_skill_source_subdir(manifests, requested_subdir=subdir)
             root = checkout / selected if selected else checkout
-            excluded = self._nested_skill_roots(
-                manifests=manifests, selected_subdir=selected
-            )
             return GitSkillSnapshot(
                 repo_url=url,
                 resolved_branch=resolved_branch,
                 commit_sha=commit_sha,
                 source_subdir=selected,
-                files=self._read_tree(root, excluded_roots=excluded),
+                files=self._read_tree(root),
             )
 
     def fetch_exact_package(self, *, url: str, expected_sha256: str) -> bytes:
@@ -136,24 +133,6 @@ class CommunitySpaceSkillSource(SpaceSkillSourcePlugin):
         if hashlib.sha256(package).hexdigest().lower() != expected_sha256.lower():
             raise ExactSkillPackageFetchError("exact Skill package checksum mismatch")
         return package
-
-    @staticmethod
-    def _nested_skill_roots(
-        *, manifests: tuple[str, ...], selected_subdir: str
-    ) -> tuple[PurePosixPath, ...]:
-        selected = (
-            PurePosixPath(selected_subdir) if selected_subdir else PurePosixPath(".")
-        )
-        roots: set[PurePosixPath] = set()
-        for manifest in manifests:
-            parent = PurePosixPath(manifest).parent
-            try:
-                relative = parent.relative_to(selected)
-            except ValueError:
-                continue
-            if relative != PurePosixPath("."):
-                roots.add(relative)
-        return tuple(sorted(roots, key=lambda item: item.as_posix().encode("utf-8")))
 
     def _validated_url(self, value: str) -> tuple[str, str]:
         normalized = value.strip() if isinstance(value, str) else ""
@@ -279,18 +258,12 @@ class CommunitySpaceSkillSource(SpaceSkillSourcePlugin):
         process.communicate()
 
     @staticmethod
-    def _read_tree(
-        root: Path, *, excluded_roots: tuple[PurePosixPath, ...]
-    ) -> tuple[tuple[str, bytes], ...]:
+    def _read_tree(root: Path) -> tuple[tuple[str, bytes], ...]:
         entries: list[tuple[str, bytes]] = []
         total = 0
         for path in sorted(root.rglob("*"), key=lambda item: item.as_posix().encode()):
             relative = path.relative_to(root)
-            relative_posix = PurePosixPath(relative.as_posix())
-            if ".git" in relative.parts or any(
-                relative_posix == excluded or excluded in relative_posix.parents
-                for excluded in excluded_roots
-            ):
+            if ".git" in relative.parts:
                 continue
             if path.is_dir():
                 continue

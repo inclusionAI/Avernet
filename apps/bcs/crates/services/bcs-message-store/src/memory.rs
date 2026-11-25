@@ -116,6 +116,32 @@ impl MemoryMessageRepo {
         self.event_store = Some(event_store);
         self
     }
+
+    /// Single env-scoped pass over the stored log returning `MAX(created_at)`
+    /// per requested id (design D2 Q1/Q3 shape). The repo owns exactly one env
+    /// (`with_environment`), so its own messages are the env filter. Ids with
+    /// no message stay absent from the map.
+    async fn last_activity(
+        &self,
+        ids: &[String],
+        key: for<'a> fn(&'a PersistedMessage) -> &'a str,
+    ) -> Result<HashMap<String, u64>, MessageRepoError> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let wanted: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let sessions = self.sessions.read().await;
+        let mut activity = HashMap::new();
+        for message in sessions.values().flat_map(|entry| &entry.messages) {
+            let id = key(message);
+            if !wanted.contains(id) {
+                continue;
+            }
+            let entry = activity.entry(id.to_string()).or_insert(message.created_at);
+            *entry = (*entry).max(message.created_at);
+        }
+        Ok(activity)
+    }
 }
 
 #[async_trait]
@@ -165,6 +191,27 @@ impl MessageRepoPort for MemoryMessageRepo {
         let sessions = self.sessions.read().await;
         let ids: std::collections::BTreeSet<_> = ids.iter().collect();
         Ok(sessions.get(session_id).map(|s| s.messages.iter().filter(|m| ids.contains(&m.message_id)).cloned().collect()).unwrap_or_default())
+    }
+    async fn last_activity_by_group_ids(&self, group_ids: &[String]) -> Result<HashMap<String, u64>, MessageRepoError> {
+        self.last_activity(group_ids, |message| message.group_id.as_str()).await
+    }
+    async fn last_activity_by_session_ids(&self, session_ids: &[String]) -> Result<HashMap<String, u64>, MessageRepoError> {
+        self.last_activity(session_ids, |message| message.session_id.as_str()).await
+    }
+    /// Single pass over the stored log returning `MAX(created_at)` per session
+    /// for one group (the in-memory D5-revised aggregate). Ids with no message
+    /// in this group stay absent from the map.
+    async fn last_activity_in_group(&self, group_id: &str) -> Result<HashMap<String, u64>, MessageRepoError> {
+        let sessions = self.sessions.read().await;
+        let mut activity = HashMap::new();
+        for message in sessions.values().flat_map(|entry| &entry.messages) {
+            if message.group_id != group_id {
+                continue;
+            }
+            let entry = activity.entry(message.session_id.clone()).or_insert(message.created_at);
+            *entry = (*entry).max(message.created_at);
+        }
+        Ok(activity)
     }
     fn delivery_repository(self: Arc<Self>) -> Option<Arc<dyn bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort>> {
         Some(self)
@@ -281,7 +328,9 @@ impl MessageRepoPort for MemoryMessageRepo {
         };
 
         let limit = query.limit as usize;
-        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter().filter(|m| m.message_type != "run_reply").collect();
+        let hidden = super::cancelled_history::hidden_ids(&entry.deliveries);
+        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter()
+            .filter(|m| m.message_type != "run_reply" && !hidden.contains(m.message_id.as_str())).collect();
 
         if !query.human_view.as_ref().is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant) {
             filtered.retain(|m| m.message_type != bcs_domain::STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE);
@@ -403,7 +452,9 @@ impl MessageRepoPort for MemoryMessageRepo {
         };
 
         let limit = limit as usize;
-        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter().filter(|m| m.message_type != "run_reply").collect();
+        let hidden = super::cancelled_history::hidden_ids(&entry.deliveries);
+        let mut filtered: Vec<&PersistedMessage> = entry.messages.iter()
+            .filter(|m| m.message_type != "run_reply" && !hidden.contains(m.message_id.as_str())).collect();
 
         if !human_view.as_ref().is_some_and(|view| view.scope == bcs_domain::MessageViewScope::Participant) {
             filtered.retain(|m| m.message_type != bcs_domain::STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE);
@@ -573,12 +624,46 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
     }
     async fn lookup(&self, scope: bcs_service_api::port::repo::message_delivery::DeliveryLookup) -> Result<Vec<bcs_domain::message_delivery::PersistedMessageDelivery>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
         use bcs_service_api::port::repo::message_delivery::DeliveryLookup as Q;
+        if let Q::TaskPrefixes { ref prefixes, retained_after_ms, ref legacy_intents } = scope {
+            if prefixes.is_empty() || prefixes.len() > 20 { return Err(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Invalid("invalid task batch".into())); }
+            let rows = self.list_deliveries(None).await?;
+            let mut found = std::collections::BTreeMap::new();
+            for prefix in prefixes {
+                for row in crate::task_lookup::memory(&rows, prefix, retained_after_ms, legacy_intents)? { found.insert(row.delivery_id.clone(), row); }
+            }
+            return Ok(found.into_values().collect());
+        }
+        if let Q::TaskPrefix { ref prefix, retained_after_ms, ref legacy_intents } = scope {
+            return crate::task_lookup::memory(&self.list_deliveries(None).await?, prefix, retained_after_ms, legacy_intents);
+        }
         if matches!(&scope, Q::Ids(ids) if ids.len() > 8) { return Err(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Invalid("delivery recovery batch too large".into())); }
+        if let Q::CanonicalRun {bot, session, run} = &scope {
+            let sessions = self.sessions.read().await;
+            return Ok(sessions.get(session).into_iter().flat_map(|entry|&entry.deliveries)
+                .filter(|row|row.target_bot_id == *bot && row.run_id.as_ref() == Some(run)).take(2).cloned().collect());
+        }
+        if let Q::SessionUnfinished { session, after, limit } = &scope {
+            use bcs_domain::message_delivery::MessageDeliveryStatus as S;
+            let mut rows: Vec<_> = self.list_deliveries(None).await?.into_iter()
+                .filter(|d| d.session_id == *session && d.state.kind == bcs_domain::DeliveryType::Send
+                    && matches!(d.state.status, S::Queued | S::Dispatching | S::Running | S::Unknown)
+                    && after.as_ref().is_none_or(|(m, id)| (&d.source_message_id, &d.delivery_id) > (m, id)))
+                .collect();
+            rows.sort_by(|a, b| (&a.source_message_id, &a.delivery_id).cmp(&(&b.source_message_id, &b.delivery_id)));
+            rows.truncate((*limit).min(500));
+            return Ok(rows);
+        }
+        if let Q::Id(id) = &scope {
+            return Ok(self.sessions.read().await.values().flat_map(|entry|&entry.deliveries)
+                .find(|row|row.delivery_id == *id).cloned().into_iter().collect());
+        }
         let rows = self.list_deliveries(None).await?;
         Ok(rows.into_iter().filter(|d| match &scope {
             Q::Ids(ids) => ids.contains(&d.delivery_id),
+            Q::TaskPrefix { .. } | Q::TaskPrefixes { .. } => unreachable!(),
             Q::Id(id) => d.delivery_id == *id,
             Q::Request(id) => d.request_id.as_ref() == Some(id),
+            Q::CanonicalRun {bot,session,run} => d.target_bot_id == *bot && d.session_id == *session && d.run_id.as_ref() == Some(run),
             Q::Run { bot, alias } => d.target_bot_id == *bot && (d.run_id.as_ref() == Some(alias) || d.request_id.as_ref() == Some(alias) || d.transport_context_json.as_ref().and_then(|v| v.get("downstream_run_id")).and_then(|v| v.as_str()) == Some(alias.as_str())),
             Q::Bound(id) => d.bound_to_delivery_id.as_ref() == Some(id) && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Bound,
             Q::Lane { bot, session } | Q::LanePending { bot, session } => d.target_bot_id == *bot && d.session_id == *session && d.state.kind == bcs_domain::DeliveryType::Send && super::delivery::unfinished(d),
@@ -587,6 +672,7 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
             Q::LanePendingContexts { bot, session } => d.target_bot_id == *bot && d.session_id == *session && d.state.kind == bcs_domain::DeliveryType::Inject && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::PendingContext,
             Q::LanePendingContextCarrier { bot, session, now_ms } => d.target_bot_id == *bot && d.session_id == *session && d.state.kind == bcs_domain::DeliveryType::Inject && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::PendingContext && d.expire_at_ms.is_none_or(|at| at > *now_ms),
             Q::Message(id) => d.source_message_id == *id,
+            Q::SessionUnfinished { .. } => unreachable!(),
             Q::Successor { bot, session, after_seq, exclude, now_ms } => d.target_bot_id == *bot && d.session_id == *session && d.source_session_seq > *after_seq && d.delivery_id != *exclude && d.state.kind == bcs_domain::DeliveryType::Send && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Queued && !d.state.may_have_been_sent && d.expire_at_ms.is_none_or(|t| t > *now_ms),
         }).take(match scope { Q::BotPending(_) | Q::LanePending { .. } | Q::LanePendingContextCarrier { .. } | Q::Successor { .. } => 1, Q::BotPendingContexts(_) | Q::LanePendingContexts { .. } => 100, _ => usize::MAX }).collect())
     }

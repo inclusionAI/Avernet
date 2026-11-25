@@ -21,7 +21,7 @@ const input = {
   userId: 'caller-1',
 };
 
-test('只为在线的本人或团队 Bot 单聊建立版本目标并保留权限依据', () => {
+test('只为在线的本人或团队空间 Bot 单聊建立版本目标并保留权限依据', () => {
   expect(buildChatEngineVersionTarget(input)).toEqual({
     permissionSource: 'backend',
     key: 'chat:caller-1:managed:bot-1:owner-1:session-1',
@@ -63,7 +63,7 @@ test('保留 Service 计算权限所需的后端动作与阶段字段', () => {
     ...input,
     bot: { ...bot, botType: 'service', runtimeStage: 'online' },
   });
-  expect(onlineService?.permissionSource).toBe('backend');
+  expect(onlineService).toBeNull();
 
   const draftService = buildChatEngineVersionTarget({
     ...input,
@@ -86,4 +86,23 @@ test('团队引擎请求使用真实 Bot owner，保留实体 ID 作为聊天身
   expect(buildChatEngineVersionTarget({ ...input, section: 'team', bot: teamBot })).toMatchObject({ ownerId: 'bot-owner', botId: 'bot-1', userId: 'caller-1' });
   expect(teamBot.ownerId).toBe('record-entity');
   expect(buildChatEngineVersionTarget({ ...input, section: 'team', bot: { ...teamBot, engineOwnerId: undefined } })).toBeNull();
+});
+
+test('团队服务 Bot 的在线对话不触发仅支持 draft 的引擎版本检查', () => {
+  expect(
+    buildChatEngineVersionTarget({
+      ...input,
+      section: 'team',
+      bot: {
+        ...bot,
+        botType: 'service',
+        isTeamBot: true,
+        engineOwnerId: 'owner',
+        runtimeStage: 'online',
+      },
+    }),
+  ).toBeNull();
+  expect(
+    buildChatEngineVersionTarget({ ...input, bot: { ...bot, botType: 'service', runtimeStage: 'draft' } }),
+  ).not.toBeNull();
 });

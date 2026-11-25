@@ -70,7 +70,7 @@ export function NodeEditorPanel({ spec, selectedNodeId, onChange, onClose }: Nod
   return (
     <Card className="flex w-[320px] shrink-0 flex-col overflow-hidden border-l shadow-sm">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+      <div className="flex items-center justify-between border-b border-divider px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <Badge tone="primary" className="shrink-0">
             {getExecutorType(node)}
@@ -83,7 +83,7 @@ export function NodeEditorPanel({ spec, selectedNodeId, onChange, onClose }: Nod
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-border bg-muted/30">
+      <div className="flex border-b border-divider bg-muted/30">
         {tabs.map((tab) => (
           <Button
             key={tab.id}
@@ -117,7 +117,7 @@ export function NodeEditorPanel({ spec, selectedNodeId, onChange, onClose }: Nod
       </div>
 
       {/* Footer */}
-      <div className="border-t border-border px-3 py-2">
+      <div className="border-t border-divider px-3 py-2">
         <Button
           variant="outline"
           size="sm"

@@ -3479,3 +3479,45 @@ class TestResolveBindingDefaultTag:
         call_kw = mock_bot_service_plugin.get_binding.call_args.kwargs
         assert call_kw["stage"] == "eval"
         assert call_kw["default_tag"] == "default"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lifecycle_stage", ["draft", "online"])
+async def test_runtime_status_resolves_stage_without_starting_run(
+    mock_selector,
+    mock_run_repo,
+    mock_bot_service_plugin,
+    context,
+    lifecycle_stage,
+):
+    from types import SimpleNamespace
+
+    from secbaas.community.api.bot_runtime import SessionRuntimeStatus
+
+    runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+    expected = SessionRuntimeStatus(
+        session_id="s-1", found=False, reason="NO_ACTIVE_RUN"
+    )
+    service = MagicMock()
+    service.get_session_runtime_status = AsyncMock(return_value=expected)
+    binding = MagicMock()
+    metadata = {"bot_options": {"lifecycle_stage": lifecycle_stage}}
+    with patch.object(runner, "_resolve_bot_route", new_callable=AsyncMock) as resolve:
+        resolve.return_value = SimpleNamespace(
+            bot_service=service, binding_info=binding
+        )
+        result = await runner.get_session_runtime_status(
+            bot_id=BOT_ID,
+            session_id="s-1",
+            context=context,
+            metadata=metadata,
+        )
+    assert result == expected
+    resolve.assert_awaited_once_with(BOT_ID, metadata)
+    service.get_session_runtime_status.assert_awaited_once_with(
+        session_id="s-1",
+        binding_info=binding,
+        context=context,
+    )
+    service.create_session.assert_not_called()
+    mock_run_repo.insert_run.assert_not_called()

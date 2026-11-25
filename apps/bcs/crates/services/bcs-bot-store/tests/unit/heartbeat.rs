@@ -4,7 +4,7 @@ use bcs_db_local::LocalSqliteDbPlugin;
 async fn database() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
     db.execute(DbStatement::new(
-        "CREATE TABLE bcs_bots (
+        "CREATE TABLE bcs_bots (agent_card TEXT,
                 connection_mode TEXT DEFAULT 'plugin',
             bot_uuid TEXT NOT NULL, name TEXT, bot_info TEXT, session_token TEXT,
             created_by TEXT, visibility TEXT, status TEXT NOT NULL DEFAULT 'online',

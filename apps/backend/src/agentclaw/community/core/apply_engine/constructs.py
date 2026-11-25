@@ -1,0 +1,120 @@
+"""The construct vocabulary: the seven things a desired state can declare, by name.
+
+A **construct** is one independently converged area of a bot: its MCP
+servers, its resource files, its skills, its engine configuration, its
+identity files, its CLI tools, its startup script. Each has one materialiser,
+one declaration in ``DesiredState``, one capability verdict per engine and
+one section of the apply report, all keyed by the construct's name.
+
+Two kinds, each its own enum, so that a construct's kind is its type and an
+ill-formed ``(kind, name)`` pair cannot be written:
+
+* a :class:`Category` — a collection of named entries (six of them);
+* a :class:`Section` — a single value with no entries of its own (``script``).
+
+The spellings are the wire's: a desired-state compiler (the Manifest's, the
+genome's) maps its own grammar onto these names, the capability verdicts are
+reported under them, and the apply report keys its results by them.
+"""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+__all__ = [
+    "ApplyConstruct",
+    "Construct",
+    "CURRENT_CATEGORIES",
+    "ConstructKind",
+    "Category",
+    "Section",
+    "kind_of",
+    "parse_category",
+]
+
+
+class ConstructKind(StrEnum):
+    """What sort of thing a construct is. Derived, never chosen at a call site."""
+
+    CATEGORY = "category"
+    SECTION = "section"
+
+
+class Category(StrEnum):
+    """The six entry-bearing constructs. A closed set: a compiler maps onto these or refuses.
+
+    The order is the one the schema documents list them in, not the apply
+    order (that is ``order.APPLY_ORDER``).
+    """
+
+    #: Historical report/input spelling; excluded from current execution.
+    #: Direct Skills, ordinary SkillSets/Default and Direct MCP converge together.
+    CAPABILITIES = "capabilities"
+    MCP = "mcp"
+    #: Files and directories under the bot's resources root (``data/``), each by workspace-relative path.
+    RESOURCES = "resources"
+    #: Skills installed for the bot, each by name; today a local package, later a Center or repository skill.
+    SKILLS = "skills"
+    #: The engine's own configuration mapping (validated, not yet materialised: #2858).
+    ENGINE_CONFIG = "engine_config"
+    #: A mapping of per-kind configuration the bot carries — the destination a
+    #: copy converges render-screen rows (and later task-nav rows, …) onto. Each
+    #: key is one sync kind, its value that kind's entry list; one
+    #: ``BotConfigMaterialiser`` dispatches by kind to a registered handler. A
+    #: mapping-valued Category like ``ENGINE_CONFIG``, not a list Category like
+    #: ``RESOURCES``. Materialised in ``PRE_CONTAINER`` (a plain DB-row write).
+    BOT_CONFIG = "bot_config"
+    #: Identity (persona) files such as ``SOUL.md`` or ``CLAUDE.md``, each by type.
+    IDENTITY = "identity"
+    #: Command-line tools placed in the bot's ``~/.local/bin``, each by name.
+    CLI_TOOLS = "cli_tools"
+
+
+class Section(StrEnum):
+    """The single-valued constructs: no entries, one value per bot."""
+
+    #: The startup script's body, run when the bot's container starts.
+    SCRIPT = "script"
+    #: A bot-to-bot workspace file sync. Single-valued because a copy moves one
+    #: source bot's workspace: the entry written under ``manifest.resources`` as
+    #: ``protocol: bot`` is reclassified here by the compiler, which is why this
+    #: section has no own key in the document grammar (a caller writes it as a
+    #: resources entry, not as ``manifest.bot_file_sync``). Converges through a
+    #: per-engine sync strategy, never through the content store.
+    BOT_FILE_SYNC = "bot_file_sync"
+
+
+#: Either of the two. A value's own type says which kind it is.
+Construct = Category | Section
+#: The apply engine's name for the same union, kept for the report types.
+ApplyConstruct = Construct
+
+_KIND_BY_TYPE: dict[type, ConstructKind] = {
+    Category: ConstructKind.CATEGORY,
+    Section: ConstructKind.SECTION,
+}
+
+
+def kind_of(construct: Construct) -> ConstructKind:
+    """The kind a construct belongs to, read off its type."""
+    return _KIND_BY_TYPE[type(construct)]
+
+
+def parse_category(value: object) -> Category | None:
+    """A ``manifest`` key as a category, or ``None`` when it is not one.
+
+    The Manifest parser needs this because a submitted document may name
+    anything; everything inside the engine works in enums from there on.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        return Category(value)
+    except ValueError:
+        return None
+
+
+# Historical SKILLS/MCP remain decodable; only this tuple is executable.
+CURRENT_CATEGORIES: tuple[Category, ...] = tuple(
+    category for category in Category if category not in (Category.SKILLS, Category.MCP)
+)

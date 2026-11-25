@@ -1,69 +1,122 @@
 import { Button } from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/Textarea';
+import type { CommunityTopic, CreateCommunityReplyDraft } from '@/domain/community/types';
+import { MessageSquare } from 'lucide-react';
 import { useState } from 'react';
 
-interface ReplyComposerProps {
-  replyTargetFloor: number | null;
-  replyTargetPostId: string | null;
-  publishing: boolean;
-  onCancelReply: () => void;
-  onSubmitReply: (body: string) => Promise<boolean>;
+export interface ReplyComposerTarget {
+  postId: string;
+  authorName: string;
 }
 
-export function ReplyComposer({
-  replyTargetFloor,
-  replyTargetPostId,
-  publishing,
-  onCancelReply,
-  onSubmitReply,
-}: ReplyComposerProps) {
-  const [draft, setDraft] = useState('');
-  const [submitError, setSubmitError] = useState<string | null>(null);
+export type ReplyComposerPayload = CreateCommunityReplyDraft;
 
-  const submitReply = async () => {
-    const body = draft.trim();
-    if (!body) {
-      setSubmitError('请输入回复内容');
-      return;
-    }
-    const submitted = await onSubmitReply(body);
-    if (submitted) {
-      setDraft('');
-      setSubmitError(null);
+interface ReplyComposerProps {
+  topic: CommunityTopic;
+  placeholder?: string;
+  submitLabel?: string;
+  replyTo?: ReplyComposerTarget;
+  saving?: boolean;
+  disabled?: boolean;
+  onSubmit: (payload: ReplyComposerPayload) => Promise<boolean>;
+  onCancel?: () => void;
+}
+
+function togglePollSelection(
+  current: number[],
+  index: number,
+  selectionType: 'single' | 'multi',
+): number[] {
+  if (selectionType === 'single') return current[0] === index ? [] : [index];
+  if (current.includes(index)) return current.filter((item) => item !== index);
+  return [...current, index];
+}
+
+/**
+ * 主题回复编辑器：`single`/`multi` 投票同时支持选择选项；
+ * 楼中楼回复通过 `replyToPostId` 指向被回复楼层。
+ */
+export function ReplyComposer({
+  topic,
+  placeholder = '写下回复...',
+  submitLabel = '回复',
+  replyTo,
+  saving = false,
+  disabled = false,
+  onSubmit,
+  onCancel,
+}: ReplyComposerProps) {
+  const [body, setBody] = useState('');
+  const [pollSelection, setPollSelection] = useState<number[]>([]);
+  const poll = topic.topicType === 'poll' ? topic.topicConfig?.poll : undefined;
+
+  const submit = async () => {
+    if (!body.trim()) return;
+    const payload: ReplyComposerPayload = {
+      body: body.trim(),
+      ...(poll ? { pollSelection } : {}),
+      ...(replyTo ? { replyToPostId: replyTo.postId } : {}),
+    };
+    const succeeded = await onSubmit(payload);
+    if (succeeded) {
+      setBody('');
+      setPollSelection([]);
     }
   };
 
   return (
-    <section className="py-4" aria-label="回复编辑区">
-      <div className="mb-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span>{replyTargetPostId ? `正在回复第 ${replyTargetFloor ?? '目标'} 楼` : '直接回复主题'}</span>
-        {replyTargetPostId ? (
-          <Button variant="ghost" size="sm" className="h-7 px-2.5" onClick={onCancelReply}>
-            取消引用
+    <section aria-label={replyTo ? `回复 ${replyTo.authorName}` : '回复主题'} className="rounded-xl border border-border bg-card px-4 py-3">
+      {replyTo ? (
+        <p className="m-0 text-xs text-muted-foreground">
+          回复
+          <span className="ml-1 font-medium text-primary">@{replyTo.authorName}</span>
+        </p>
+      ) : null}
+      {poll ? (
+        <div aria-label="选择投票选项" className="mb-2 flex flex-wrap gap-2">
+          {poll.options.map((option, index) => {
+            const selected = pollSelection.includes(index);
+            return (
+              <Button
+                key={`${option}-${index}`}
+                type="button"
+                size="sm"
+                variant={selected ? 'secondary' : 'outline'}
+                aria-pressed={selected}
+                onClick={() => setPollSelection((previous) => togglePollSelection(previous, index, poll.selection))}
+              >
+                {option}
+              </Button>
+            );
+          })}
+        </div>
+      ) : null}
+      <Textarea
+        value={body}
+        onChange={(event) => setBody(event.target.value)}
+        placeholder={placeholder}
+        aria-label={replyTo ? `回复 ${replyTo.authorName}` : '回复正文'}
+        disabled={disabled || saving}
+        variant="default"
+        className="min-h-20 text-xs"
+      />
+      <footer className="mt-2 flex items-center justify-end gap-2">
+        {onCancel ? (
+          <Button variant="ghost" size="sm" onClick={onCancel}>
+            取消
           </Button>
         ) : null}
-      </div>
-      <Textarea
-        className="min-h-[96px] rounded-lg border-border bg-card px-3 py-3 text-sm leading-relaxed"
-        value={draft}
-        onChange={(event) => {
-          setDraft(event.target.value);
-          setSubmitError(null);
-        }}
-        placeholder={replyTargetPostId ? '回复这个楼层...' : '回复这个主题...'}
-        maxLength={20000}
-        variant={submitError ? 'error' : 'default'}
-        aria-label="回复正文"
-        aria-invalid={!!submitError}
-      />
-      {submitError ? <p className="m-0 mt-2 text-xs text-destructive">{submitError}</p> : null}
-      <Button
-        className="mt-3 bg-foreground px-4 text-xs text-background hover:opacity-90"
-        loading={publishing}
-        onClick={() => void submitReply()}
-      >
-        {replyTargetPostId ? '发送楼层回复' : '发送回复'}
-      </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          leftIcon={<MessageSquare className="size-3.5" aria-hidden />}
+          loading={saving}
+          disabled={disabled || !body.trim() || (Boolean(poll) && pollSelection.length === 0)}
+          onClick={() => void submit()}
+        >
+          {submitLabel}
+        </Button>
+      </footer>
     </section>
   );
 }

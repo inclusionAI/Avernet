@@ -42,8 +42,8 @@ from agentclaw.community.adapters.http.openapi_v1.bots.create_with_manifest impo
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.local import router as local_router
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.api.bot_quota_service import BotQuotaServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
@@ -280,7 +280,7 @@ def make_client(bot_grants):
                 binder.bind(AuthRelationshipPlugin, to=MagicMock())
                 binder.bind(SkillSetServiceFactoryProtocol, to=MagicMock())
                 binder.bind(ManifestCreationSeam, to=MagicMock())
-                binder.bind(BotConfigManifestApplyServiceProtocol, to=MagicMock())
+                binder.bind(ApplyRunServiceProtocol, to=MagicMock())
                 binder.bind(BotQuotaServiceProtocol, to=_Quota())
                 binder.bind(BusinessSpaceContextProtocol, to=NoopBusinessSpaceContext())
                 binder.bind(LocalBotWorkflowServiceProtocol, to=local)

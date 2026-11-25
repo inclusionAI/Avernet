@@ -27,6 +27,7 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasServiceError,
     BotWsConnectionInfoResponse,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import BaasNoActiveDevicesError
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     ImagePolicyState,
 )
@@ -147,8 +148,8 @@ def _make_service(
 def _wire_publish(publish_repo, record=None):
     """Wire publish_repo to return a success publish record."""
     publish_record = record or MockPublishRecord()
-    publish_repo.get_by_publish_bot_id = MagicMock(
-        return_value=publish_record
+    publish_repo.list_by_source_bot = MagicMock(
+        return_value=[publish_record]
     )
     publish_repo.get_by_id = MagicMock(return_value=publish_record)
 
@@ -276,13 +277,13 @@ class TestResolveBuildArtifact:
     def test_no_success_publish_raises_not_published(self):
         """Lines 267, 271: No success publish record raises BotNotPublishedError."""
         svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
-        publish_repo.get_by_publish_bot_id = MagicMock(return_value=None)
+        publish_repo.list_by_source_bot = MagicMock(return_value=[])
 
         with pytest.raises(BotNotPublishedError) as exc_info:
             svc._resolve_build_artifact(BOT_ID, OWNER_ID)
 
         assert "no success publish order" in str(exc_info.value).lower()
-        publish_repo.get_by_publish_bot_id.assert_called_once()
+        publish_repo.list_by_source_bot.assert_called_once()
 
     def test_success_returns_record_and_migration_path(self):
         """Successful resolution returns (record, migration_path)."""
@@ -292,7 +293,7 @@ class TestResolveBuildArtifact:
             version=2,
             ext={"migration_path": "/nas/custom/path"}
         )
-        publish_repo.get_by_publish_bot_id = MagicMock(return_value=record)
+        publish_repo.list_by_source_bot = MagicMock(return_value=[record])
 
         result_record, migration_path = svc._resolve_build_artifact(BOT_ID, OWNER_ID)
 
@@ -305,7 +306,7 @@ class TestResolveBuildArtifact:
         record = MockPublishRecord(id=789, version=1, ext=None)
         # Override __post_init__ effect
         record.ext = None
-        publish_repo.get_by_publish_bot_id = MagicMock(return_value=record)
+        publish_repo.list_by_source_bot = MagicMock(return_value=[record])
 
         result_record, migration_path = svc._resolve_build_artifact(BOT_ID, OWNER_ID)
 
@@ -318,7 +319,7 @@ class TestResolveBuildArtifact:
         record = MockPublishRecord(id=999, version=None, ext={"migration_path": "/nas/path"})
         # Ensure version is None
         record.version = None
-        publish_repo.get_by_publish_bot_id = MagicMock(return_value=record)
+        publish_repo.list_by_source_bot = MagicMock(return_value=[record])
 
         result_record, migration_path = svc._resolve_build_artifact(BOT_ID, OWNER_ID)
 
@@ -641,6 +642,28 @@ class TestUpgradeContainer:
 class TestBuildConnection:
     """Tests for _build_connection method."""
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("offline", [True, False])
+    async def test_caller_ws_failure_log_level_and_contract(self, offline):
+        svc, instance_repo, baas, publish_repo, *_ = _make_service()
+        _wire_publish(publish_repo, MockPublishRecord(version=1))
+        instance_repo.get_instance.return_value = {
+            "id": 1, "status": "success", "ext": {"bot_uuid": BOT_UUID, "version": 2},
+        }
+        original = BaasNoActiveDevicesError(status_code=404) if offline else BaasServiceError("provider failed")
+        baas.get_ws_info_by_bot_uuid.side_effect = original
+
+        with patch("agentclaw.community.core.expert_chat.services.expert_chat_instance_service.logger") as log:
+            with pytest.raises(ConnectionError) as caught:
+                await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        assert caught.value.__cause__ is original
+        assert caught.value.error_code == "5001"
+        assert caught.value.original_error == str(original)
+        assert caught.value.caller_device_unavailable is offline
+        assert instance_repo.update_instance.call_args.kwargs["status"] == "failed"
+        assert (log.warning.call_count, log.error.call_count) == ((2, 0) if offline else (0, 2))
+
     def test_baas_service_error_wrapped_as_connection_error(self):
         """BaasServiceError wrapped as ConnectionError."""
         svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
@@ -689,7 +712,7 @@ class TestGetCallerConnection:
         instance_repo.upsert_instance = MagicMock(
             return_value={"id": 1, "status": "init", "ext": None}
         )
-        publish_repo.get_by_publish_bot_id = MagicMock(return_value=None)
+        publish_repo.list_by_source_bot = MagicMock(return_value=[])
 
         with pytest.raises(BotNotPublishedError):
             await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
@@ -710,7 +733,7 @@ class TestGetCallerConnection:
         ws_info = _make_ws_info()
         baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
 
-        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID, iam_token="test-token")
 
         assert result["need_poll"] is False
         assert result["connection"]["bot_uuid"] == BOT_UUID
@@ -718,6 +741,8 @@ class TestGetCallerConnection:
         # No create or upgrade called
         bot_build_service.release_async.assert_not_called()
         bot_build_service.upgrade_async.assert_not_called()
+
+        caller_identity.exchange_caller_identity.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_success_instance_with_old_version_upgrades(self):
@@ -1387,7 +1412,7 @@ class TestGetCallerConnectionEdgeCases:
             },
         )
         record.version = None
-        publish_repo.get_by_publish_bot_id = MagicMock(return_value=record)
+        publish_repo.list_by_source_bot = MagicMock(return_value=[record])
         publish_repo.get_by_id = MagicMock(return_value=record)
         ws_info = _make_ws_info()
         baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
@@ -1638,6 +1663,7 @@ class TestCallerIdentityExchange:
         assert call_kwargs["stage"] == "online"
         assert call_kwargs["entity_id"] == OWNER_ID
         assert call_kwargs["is_test_exchange"] is False
+        assert call_kwargs["force_runtime_refresh"] is True
 
     @pytest.mark.asyncio
     async def test_exchange_not_called_when_no_iam_token(self):
@@ -1699,7 +1725,7 @@ class TestCallerIdentityExchange:
         caller_identity.exchange_caller_identity.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_exchange_failure_does_not_interrupt_container_startup(self):
+    async def test_exchange_failure_does_not_interrupt_container_startup(self, caplog):
         """When exchange_caller_identity fails, container startup continues normally."""
         svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
 
@@ -1720,8 +1746,9 @@ class TestCallerIdentityExchange:
         instance_repo.update_instance = MagicMock(return_value=True)
 
         # Make exchange_caller_identity raise an exception
-        caller_identity.exchange_caller_identity = MagicMock(side_effect=RuntimeError("exchange failed"))
+        caller_identity.exchange_caller_identity = MagicMock(side_effect=RuntimeError("outbound-private-secret"))
 
+        caplog.set_level("INFO")
         # Call with iam_token
         result = await svc.get_caller_connection(
             USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
@@ -1732,6 +1759,11 @@ class TestCallerIdentityExchange:
         assert result["connection"]["bot_uuid"] == BOT_UUID
         # Verify exchange_caller_identity was called
         caller_identity.exchange_caller_identity.assert_called_once()
+
+        assert "force_runtime_refresh=True" in caplog.text
+        assert "error_type=RuntimeError" in caplog.text
+        assert "outbound-private-secret" not in caplog.text
+        assert "test-iam-token" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_exchange_with_binding_id_passed(self):
@@ -1851,7 +1883,7 @@ class TestCallerIdentityExchange:
         instance_repo.update_instance = MagicMock(return_value=True)
 
         # Make exchange_caller_identity raise an exception
-        caller_identity.exchange_caller_identity = MagicMock(side_effect=RuntimeError("exchange failed"))
+        caller_identity.exchange_caller_identity = MagicMock(side_effect=RuntimeError("outbound-private-secret"))
 
         with patch("agentclaw.community.core.expert_chat.services.expert_chat_instance_service.logger") as mock_logger:
             result = await svc.get_caller_connection(

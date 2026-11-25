@@ -69,7 +69,7 @@ class SwarmRunHandler:
         self._guards = guards
         self._slice_lost = asyncio.Event()
         self._claim_epoch = 0
-        self._worker_id = uuid.uuid4().hex[:8]
+        self._worker_id = uuid.uuid4().hex[:12]
         self._active_run_id: RunId | None = None
         self._active_tenant: TenantId | None = None
         self._finalized = False
@@ -296,7 +296,7 @@ class SwarmRunHandler:
             self._run_repo.update_status,
             run_id, tenant, RunStatus.RUNNING, claim_epoch=claim_epoch,
         )
-        deadline = self._deadline()
+        deadline = self._deadline(run)
 
         try:
             await self._runtime.start()
@@ -412,8 +412,13 @@ class SwarmRunHandler:
         )
         return "reschedule"
 
-    def _deadline(self) -> float:
-        return time.monotonic() + self._config.orchestration.slice_max_seconds
+    def _deadline(self, run) -> float:
+        opts = getattr(run, "run_options", None)
+        budget = (opts.resolved_slice_max(
+                      self._config.orchestration.slice_max_seconds)
+                  if opts is not None
+                  else float(self._config.orchestration.slice_max_seconds))
+        return time.monotonic() + budget
 
     async def _release_claim(self, run_id: RunId, tenant: TenantId, claim_epoch: int,
                              note: str) -> None:
@@ -505,7 +510,7 @@ class SwarmRunHandler:
                 tenant=run.tenant,
                 parent_agent_id=None,
                 depth=0,
-                name=envelope.name,
+                name=f"{envelope.name}_{str(agent_id).replace('-', '')[:12]}",
                 role=envelope.objective,
                 kind=kind,
                 task_spec=envelope,
@@ -523,9 +528,32 @@ class SwarmRunHandler:
 
     @staticmethod
     def _resolve_kind(run: Run, name: str) -> AgentKind:
+        # Exact match first; then prefix match so composite spawn names
+        # (e.g. "coder_rust" from catalog entry "coder") inherit the
+        # catalog kind, including config-manifest and engine binding.
+        def _coerce_kind(spec: Any) -> AgentKind:
+            kind = getattr(spec, "kind", None)
+            if isinstance(kind, AgentKind):
+                return kind
+            try:
+                return AgentKind(kind)
+            except (ValueError, TypeError, KeyError):
+                return AgentKind.LLM
         for spec in run.agent_catalog:
             if spec.name == name:
-                return spec.kind if isinstance(spec.kind, AgentKind) else AgentKind.LLM
+                return _coerce_kind(spec)
+        for spec in run.agent_catalog:
+            if name.startswith(spec.name):
+                return _coerce_kind(spec)
+        # Unresolved name: the pool's execution fallback
+        # (_unanimous_catalog_surface) inherits kind/engine/identity from
+        # a unanimous catalog, so the durable row must predict the same
+        # kind — an LLM-labeled row that actually executes as a bot parks
+        # at a consent gate the detail surfaces only for kind=bot, hiding
+        # the authorization URL from the human supervisor.
+        kinds = {_coerce_kind(spec) for spec in run.agent_catalog}
+        if len(kinds) == 1:
+            return kinds.pop()
         return AgentKind.LLM
 
     async def _await_refs(self, run_id: RunId, tenant: TenantId, refs: tuple[str, ...],

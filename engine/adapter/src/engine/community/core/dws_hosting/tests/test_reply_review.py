@@ -130,14 +130,13 @@ async def test_review_failure_is_manual_without_replaying_original(
     assert len(engine.calls) == len(engine.reviews) == 1
 
 
-@pytest.mark.parametrize("action", ["ignore", "escalate"])
-async def test_non_reply_never_invokes_reviewer(tmp_path, action):
+async def test_ignore_never_invokes_reviewer(tmp_path):
     state, ledger, turn, _ = build_execution(tmp_path)
-    engine = Reviewer(text=decision_json(action), failure=AssertionError())
+    engine = Reviewer(text=decision_json("ignore"), failure=AssertionError())
     record = await HostingExecutor(state, ledger, engine).execute(
         "binding", turn.turn_id
     )
-    assert record.decision.action == action
+    assert record.decision.action == "ignore"
     assert engine.reviews == []
 
 
@@ -281,7 +280,7 @@ async def test_compact_input_preserves_all_dialogue_rules_and_facts(tmp_path):
     request = request.model_copy(update={"message": json.dumps(original)})
     engine = Engine()
     proposal = candidate("Keep this exact text.")
-    assert await review_reply(engine, request, proposal, history) is proposal
+    assert (await review_reply(engine, request, proposal, history)).decision is proposal
     data = json.loads(engine.reviews[0].message.split("\nINPUT_JSON:\n")[1])
     assert len(data["dialogue"]) == 41
     assert sum(m.get("current_batch", False) for m in data["dialogue"]) == 1

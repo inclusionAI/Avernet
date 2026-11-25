@@ -5,7 +5,7 @@
   "record": {
     "genome_schema": 1,
     "revision": {
-      "id": "sha256:506f3639d55abacab5978f8bfaf9acb9a38375c4204889cc2ae184a6ad11dfe7",
+      "id": "sha256:bda18da8ce6421dd0074c3b17c5abe36188ea3ab67eecc8905424eb152167a17",
       "seq": 41,
       "bot": {
         "owner_id": "user_owner_5",
@@ -50,8 +50,7 @@
         },
         {
           "name": "refund-policy",
-          "origin": "center",
-          "center_version": "v7"
+          "origin": "center"
         }
       ],
       "memory": null,

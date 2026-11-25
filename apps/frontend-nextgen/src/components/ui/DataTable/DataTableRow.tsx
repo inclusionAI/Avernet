@@ -12,7 +12,7 @@ interface DataTableRowProps<Row> {
 export function DataTableRow<Row>({ row, rowIndex, columns, rowHeight, onClick }: DataTableRowProps<Row>) {
   const interactive = Boolean(onClick);
   const rowClassName = [
-    'group border-b border-border/60 transition-colors duration-150',
+    'group border-b border-divider/60 transition-colors duration-150',
     rowHeight,
     interactive ? 'cursor-pointer hover:bg-muted/40' : 'hover:bg-muted/40',
   ].join(' ');
@@ -35,7 +35,7 @@ export function DataTableRow<Row>({ row, rowIndex, columns, rowHeight, onClick }
       }
     >
       {columns.map((column) => (
-        <DataTableCell key={column.id} width={column.width} align={column.align} className={column.className}>
+        <DataTableCell key={column.id} width={column.width} align={column.align} className={column.className} sticky={column.sticky}>
           {column.cell(row, rowIndex)}
         </DataTableCell>
       ))}

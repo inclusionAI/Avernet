@@ -45,6 +45,50 @@ describe('ConversationOriginFilter', () => {
     expect(screen.queryByText('已收藏')).not.toBeInTheDocument();
   });
 
+  it('keeps the coding Bot scope group available for others', () => {
+    const handlers = callbacks();
+    render(
+      <ConversationOriginFilter
+        botId="coding:2088"
+        origin="others"
+        scope="archived"
+        supportsArchives
+        supportsCollab
+        onOriginChange={handlers.onOriginChange}
+        onScopeChange={handlers.onScopeChange}
+      />,
+    );
+
+    expect(screen.getByText('会话')).toBeInTheDocument();
+    expect(screen.getByText('已归档')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '已归档' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('sizes the coding Bot filter popover to its three-tab content', () => {
+    const handlers = callbacks();
+    render(
+      <ConversationOriginFilter
+        botId="coding:2088"
+        origin="mine"
+        scope="all"
+        supportsArchives
+        supportsCollab
+        onOriginChange={handlers.onOriginChange}
+        onScopeChange={handlers.onScopeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '发起人与会话筛选' }));
+    expect(screen.getByRole('button', { name: '协作' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '已归档' })).toBeInTheDocument();
+
+    const grouping = screen.getByText('发起人').closest('[data-radix-popper-content-wrapper]');
+    const content = grouping?.firstElementChild;
+    expect(content).toHaveClass('w-[max-content]');
+    expect(content).toHaveClass('min-w-[171px]');
+    expect(content).not.toHaveClass('w-[171px]');
+  });
+
   it('marks the active origin and scope options', () => {
     const { onOriginChange, onScopeChange } = callbacks();
     render(
@@ -118,18 +162,15 @@ it('hides every scope option and its indicator when favorites are unsupported', 
   expect(screen.getByRole('button', { name: '发起人筛选' })).not.toHaveClass('bg-primary/10');
 });
 
-it('团队他人来源显示开发中且原生禁用，鼠标/键盘不触发选择；我的来源仍可选', () => {
+it('默认允许选择他人来源并切回我的来源', () => {
   const handlers = callbacks();
-  render(<ConversationOriginFilter botId="team:entity" origin="mine" scope="all" othersDisabled {...handlers} />);
+  render(<ConversationOriginFilter botId="team:entity" origin="mine" scope="all" {...handlers} />);
   const others = screen.getByRole('button', { name: '他人发起' });
-  expect(others).toBeDisabled();
-  expect(others).toHaveClass('text-muted-foreground');
+  expect(others).toBeEnabled();
   fireEvent.click(others);
-  fireEvent.keyDown(others, { key: 'Enter' });
-  fireEvent.keyDown(others, { key: ' ' });
-  expect(handlers.onOriginChange).not.toHaveBeenCalled();
+  expect(handlers.onOriginChange).toHaveBeenCalledWith('others');
   fireEvent.click(screen.getByRole('button', { name: '我发起' }));
-  expect(handlers.onOriginChange).toHaveBeenCalledWith('mine');
+  expect(handlers.onOriginChange).toHaveBeenLastCalledWith('mine');
 });
 
 describe('好友 Bot 会话范围筛选(supportsOrigin=false)', () => {
@@ -201,4 +242,18 @@ describe('好友 Bot 会话范围筛选(supportsOrigin=false)', () => {
     );
     expect(trigger).not.toHaveClass('text-primary');
   });
+});
+
+it('只禁用指定的他人发起选项，点击和键盘导航都不能选中它', () => {
+  const handlers = callbacks();
+  render(<ConversationOriginFilter botId="team:entity" origin="mine" scope="all"
+    othersDisabledReason="功能修复中，暂不可用" {...handlers} />);
+  const others = screen.getByRole('button', { name: '他人发起' });
+  const mine = screen.getByRole('button', { name: '我发起' });
+  expect(others).toBeDisabled();
+  expect(mine).toBeEnabled();
+  fireEvent.click(others);
+  expect(handlers.onOriginChange).not.toHaveBeenCalled();
+  fireEvent.keyDown(mine, { key: 'ArrowRight' });
+  expect(handlers.onOriginChange).not.toHaveBeenCalledWith('others');
 });

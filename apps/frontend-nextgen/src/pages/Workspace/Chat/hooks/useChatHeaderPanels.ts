@@ -1,34 +1,43 @@
+import { createBotTaskHistoryReader } from '@/services/tasks/panel/taskPanelHistoryAdapter';
+import type { ChatBotView } from '@/services/workspace/botSessionService';
 /**
- * useChatHeaderPanels —— 对话页头部五图标域的开合编排（chat-header-panels）。
+ * useChatHeaderPanels —— 对话页头部六图标域的开合编排（chat-header-panels）。
  *
- * 五图标（dmore 实测语义）：
+ * 六图标（dmore 实测语义）：
  * - 收藏会话：动作开关，复用 useConversationFavorites.toggleFavorite；
- * - 会话管理 / 历史消息：右缘面板互斥开合（新面板打开关闭旧面板）；
+ * - 会话管理 / 历史消息 / 任务护航 DEMO：右缘面板互斥开合（新面板打开关闭旧面板）；
  * - 资源管理：收敛既有会话文件副屏（openFileDrawer / closeFileDrawer，同一容器）；
  * - 副屏：closePanel 关闭；打开走 reopenSidePaneTabsFromMessages 按消息标记幂等重建
  *   （sidePaneOpen 经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 保持为真实开合态——含
  *   消息渲染器挂载即 openTab 的「默认展开」；toggle 仅乐观翻转，真实态事件随后纠偏；
  *   会话切换复位——useBotChat 同边界 closePanelForce；无 <AixUI type="panel"> 内容时
- *   图标禁用，防 autoCloseWhenEmpty 弹回）。
- * 历史搜索状态收口本 Hook（useMemo 前端过滤，Service 双源）。
+ *   图标禁用，防 autoCloseWhenEmpty 弹回）；右缘域面板开合互斥（让位收起/全收回开/
+ *   真实态收面板，修复侧边栏被悬浮副屏掩盖）统一委托 sidePanePanelMutex。
+ * 历史搜索状态下沉同目录 sessionHistorySearchModel.ts（useMemo 前端过滤，Service 双源）。
  */
 import type { ConversationBotSection } from '@/domain/conversation';
+import {
+  markTaskNavigationRouteHydrated,
+  shouldPreserveTaskPanelForSession,
+} from '@/services/tasks/taskConversationNavigation';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
-import type {
-  SessionMessageSearchQuery,
-  SessionMessageSearchResult,
-} from '@/services/workspace/conversationSearchService';
-import { searchConversationMessages } from '@/services/workspace/conversationSearchService';
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useSessionTaskPanelBootstrap } from '@/hooks/useSessionTaskPanelBootstrap';
+import { useSessionTaskPanelTab } from '@/hooks/useSessionTaskPanelTab';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSidePanePanelMutex } from './sidePanePanelMutex';
+import { useSessionHistorySearchModel } from './sessionHistorySearchModel';
+import type { UseSessionHistorySearchModel } from './sessionHistorySearchModel';
 import { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from './sidePaneContent';
 
 // 副屏内容判定与幂等重建已下沉至同目录 sidePaneContent.ts（工程红线：Hook 单文件 ≤250 行）；
 // 保留再导出兼容既有导入面（useGroupChatHeaderPanels / 测试用例）。
 export { reopenSidePaneTabsFromMessages, sessionHasSidePaneContent } from './sidePaneContent';
+// 历史搜索模型同边界下沉 sessionHistorySearchModel.ts；类型再导出保持既有导入面。
+export type { UseSessionHistorySearchModel } from './sessionHistorySearchModel';
 
 /** 头部右侧承载的右缘面板类型（资源面板走既有文件副屏，不在此枚举内）。 */
-export type ChatHeaderPanelKind = 'detail' | 'history';
+export type ChatHeaderPanelKind = 'detail' | 'history' | 'escort';
 
 export interface ChatHeaderFavoritesModel {
   favorite: boolean;
@@ -38,6 +47,9 @@ export interface ChatHeaderFavoritesModel {
 
 export interface UseChatHeaderPanelsOptions {
   session: BotChatSessionView | null;
+  bot?: ChatBotView | null;
+  /** 当前登录用户任务列表查询口径。 */
+  userId: string | null;
   messages: ChatMessage[];
   /** 副屏 handle（与 ChatPanel panelRef 同源）。 */
   panelRef: React.RefObject<PanelHandle | null>;
@@ -51,6 +63,10 @@ export interface UseChatHeaderPanelsOptions {
   openFileDrawer: () => void;
   closeFileDrawer: () => void;
   fileDrawerOpen: boolean;
+  /** 是否启用任务副屏及其进入会话自动恢复逻辑。 */
+  sidePaneEnabled?: boolean;
+  /** 普通单聊先完成历史读取，再恢复任务副屏，避免首屏并发全量任务查询。 */
+  historyReady?: boolean;
 }
 
 export interface UseChatHeaderPanelsResult {
@@ -58,6 +74,8 @@ export interface UseChatHeaderPanelsResult {
   openPanel: ChatHeaderPanelKind | null;
   togglePanel: (kind: ChatHeaderPanelKind) => void;
   closePanel: () => void;
+  /** 右缘域面板（资源抽屉含）即将展开前的副屏让位：收起副屏并记录回开标记，面板全收后自动回开。 */
+  dismissSidePaneForPanels: () => void;
   /** 关闭右缘面板与文件副屏（切换会话等场景复位）。 */
   resetAll: () => void;
   favorites: ChatHeaderFavoritesModel;
@@ -74,68 +92,58 @@ export interface UseChatHeaderPanelsResult {
   locateMessage: (messageId: string) => void;
 }
 
-export interface UseSessionHistorySearchModel {
-  query: SessionMessageSearchQuery;
-  setKeyword: (keyword: string) => void;
-  setSender: (sender: SessionMessageSearchQuery['sender']) => void;
-  setTodayOnly: (todayOnly: boolean) => void;
-  /** 本地降级态指示：面板据此明示「仅已载入消息」。 */
-  source: 'local';
-  results: SessionMessageSearchResult[];
-}
-
-/** 历史消息面板的搜索/筛选/结果模型（本地源即时过滤）。 */
-function useSessionHistorySearchModel(messages: ChatMessage[], sessionEpoch: number): UseSessionHistorySearchModel {
-  const [keyword, setKeyword] = useState('');
-  const [sender, setSender] = useState<SessionMessageSearchQuery['sender']>(null);
-  const [todayOnly, setTodayOnly] = useState(false);
-
-  // 会话切换复位筛选（sessionEpoch 变化即重置）。
-  const lastEpochRef = useRef(sessionEpoch);
-  if (lastEpochRef.current !== sessionEpoch) {
-    lastEpochRef.current = sessionEpoch;
-    setKeyword('');
-    setSender(null);
-    setTodayOnly(false);
-  }
-
-  const outcome = useMemo(
-    () => searchConversationMessages(messages, { keyword, sender, todayOnly }),
-    [messages, keyword, sender, todayOnly],
-  );
-  return {
-    query: { keyword, sender, todayOnly },
-    setKeyword,
-    setSender,
-    setTodayOnly,
-    source: outcome.source,
-    results: outcome.items,
-  };
-}
-
 const HIGHLIGHT_TIMEOUT_MS = 3000;
 
 export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseChatHeaderPanelsResult {
   const { session, messages, panelRef } = options;
+  const sessionId = session?.sessionId ?? null;
+
+  const sidePaneEnabled = options.sidePaneEnabled !== false;
+  const taskHistory = useMemo(() => options.bot && options.userId ? createBotTaskHistoryReader(options.bot, options.userId) : null, [options.bot, options.userId]);
+  const taskRecovery = useSessionTaskPanelBootstrap({
+    history: taskHistory,
+    kind: options.section === 'friend' ? 'friend' : 'bot',
+    enabled: options.historyReady !== false,
+    sessionId: sidePaneEnabled ? sessionId : null,
+    userId: sidePaneEnabled ? options.userId : null,
+    panelRef,
+  });
+
+  const taskTab = useSessionTaskPanelTab(sessionId);
 
   const [openPanel, setOpenPanel] = useState<ChatHeaderPanelKind | null>(null);
   // 副屏开合态：默认 false，经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 的真实态事件同步
   // （含渲染器「挂载即 openTab」的默认展开），toggle 仅乐观翻转、随后由真实态事件纠偏。
   const [sidePaneOpen, setSidePaneOpen] = useState(false);
-  const onSidePaneIsOpenChange = useCallback((open: boolean) => setSidePaneOpen(open), []);
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeHeaderPanels = useCallback(() => {
+    setOpenPanel(null);
+    options.closeFileDrawer();
+  }, [options.closeFileDrawer]);
+  // 右缘域面板 × 副屏互斥：副屏为 AppShell 悬浮层，展开后整条盖住右缘面板让位区——委托互斥 Hook。
+  const sidePaneMutex = useSidePanePanelMutex({
+    panelRef,
+    sidePaneOpen,
+    panelsOpen: openPanel !== null || options.fileDrawerOpen,
+    closePanels: closeHeaderPanels,
+    onMirrorChange: setSidePaneOpen,
+  });
 
   // 互斥开合：再次点击同一面板关闭；资源文件副屏与本组右缘面板同属头部域，一并互斥。
   const togglePanel = useCallback(
     (kind: ChatHeaderPanelKind) => {
       setOpenPanel((current) => {
         const next = current === kind ? null : kind;
-        if (next !== null) options.closeFileDrawer();
+        if (next !== null) {
+          options.closeFileDrawer();
+          sidePaneMutex.dismissSidePaneForPanels();
+          if (next === 'escort') setSidePaneOpen(false);
+        }
         return next;
       });
     },
-    [options],
+    [options, sidePaneMutex],
   );
   const closePanel = useCallback(() => setOpenPanel(null), []);
   const resetAll = useCallback(() => {
@@ -144,24 +152,34 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
   }, [options]);
 
   // 会话切换即复位开合态（面板内容按当前会话呈现）。
-  const sessionId = session?.sessionId ?? null;
-  const lastSessionIdRef = useRef<string | null>(sessionId);
+  const sessionKey = JSON.stringify([options.botId, sessionId]);
+  const lastSessionKeyRef = useRef(sessionKey);
   const [sessionEpoch, setSessionEpoch] = useState(0);
-  if (lastSessionIdRef.current !== sessionId) {
-    lastSessionIdRef.current = sessionId;
+  if (lastSessionKeyRef.current !== sessionKey) {
+    lastSessionKeyRef.current = sessionKey;
     setOpenPanel(null);
     setHighlightMessageId(null);
     // 副屏同步复位（兜底）：useBotChat 在同边界 closePanelForce 强关面板并清空 tabs，
     // closePanelForce 经 onIsOpenChange(false) 已同步真实态；此复位防面板随舞台切换卸载
     // 而无事件发出的脱钩场景（与群侧孪生 useGroupChatHeaderPanels 一致）。
-    setSidePaneOpen(false);
+    if (!shouldPreserveTaskPanelForSession(sessionId, '/workspace/chat')) setSidePaneOpen(false);
+    // 让位回开标记同边界作废：副屏已 closePanelForce 清 tabs，回开会被 autoCloseWhenEmpty 空弹。
+    sidePaneMutex.clearSidePaneExclusion();
     setSessionEpoch((epoch) => epoch + 1);
   }
+  useEffect(() => {
+    markTaskNavigationRouteHydrated(sessionId, '/workspace/chat');
+  }, [sessionId]);
 
-  // 副屏判空：无内容时禁用 Monitor（openPanel 只会被 autoCloseWhenEmpty 弹回）。
-  const sidePaneDisabled = useMemo(() => !sessionHasSidePaneContent(messages), [messages]);
+  // 副屏判空：无内容也不可重建 Task tab 时才禁用 Monitor；已打开的 TaskPanel 必须保持可切。
+  const sidePaneDisabled = useMemo(
+    () => !sidePaneEnabled || (!sidePaneOpen && !sessionHasSidePaneContent(messages) && !taskTab && !['incomplete', 'error'].includes(taskRecovery.status)),
+    [messages, sidePaneEnabled, sidePaneOpen, taskTab, taskRecovery.status],
+  );
 
   const toggleSidePane = useCallback(() => {
+    if (!sidePaneEnabled) return;
+    if (['incomplete', 'error'].includes(taskRecovery.status)) { void taskRecovery.continueRecovery(); return; }
     setSidePaneOpen((current) => {
       const next = !current;
       const panel = panelRef.current;
@@ -172,9 +190,9 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
       }
       // 打开：按消息标记幂等重建 tabs，不再裸 openPanel——空 tabs 会被 autoCloseWhenEmpty
       // 立即弹回（「打开一瞬又关闭」）；重建成功即面板已展开，镜像同步为 true。
-      return reopenSidePaneTabsFromMessages(messages, panel);
+      return reopenSidePaneTabsFromMessages(messages, panel, taskTab);
     });
-  }, [panelRef, messages]);
+  }, [panelRef, messages, sidePaneEnabled, taskTab, taskRecovery.status, taskRecovery.continueRecovery]);
 
   const favorites = useMemo<ChatHeaderFavoritesModel>(() => {
     const favorite = session?.favorite === true;
@@ -182,7 +200,7 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
       session && options.botId ? options.favoritePending(options.botId, options.section, session.sessionId) : false;
     return {
       favorite,
-      disabled: !session || !options.botId || pending,
+      disabled: !session || session.favorite === undefined || !options.botId || pending,
       onToggle: () => {
         if (!session || !options.botId) return;
         void options.toggleFavorite(options.botId, options.section, session.sessionId);
@@ -203,12 +221,13 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
     openPanel,
     togglePanel,
     closePanel,
+    dismissSidePaneForPanels: sidePaneMutex.dismissSidePaneForPanels,
     resetAll,
     favorites,
     sidePaneOpen,
     sidePaneDisabled,
     toggleSidePane,
-    onSidePaneIsOpenChange,
+    onSidePaneIsOpenChange: sidePaneMutex.onSidePaneIsOpenChange,
     historySearch,
     highlightMessageId,
     locateMessage,

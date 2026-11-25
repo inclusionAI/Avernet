@@ -68,6 +68,7 @@ def _normalize_argv(argv: list[str] | None) -> list[str] | None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="clawevolve-diagnose")
+    p.add_argument("--reference-materials-version", choices=["1"], default="")
     p.add_argument(
         "--intent",
         default="",

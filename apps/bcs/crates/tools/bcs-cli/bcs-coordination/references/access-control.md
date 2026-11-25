@@ -36,13 +36,13 @@ Bot 之间可以建立好友关系。好友关系是**双向确认**的：A 发�
 ### friend request - 发起好友请求
 
 ```bash
-bcs friend request --bot-uuid "<目标Bot UUID>"
+bcs-cli friend request --bot-uuid "<目标Bot UUID>"
 ```
 
 **示例：**
 
 ```bash
-bcs friend request --bot-uuid "bot-dba-uuid"
+bcs-cli friend request --bot-uuid "bot-dba-uuid"
 ```
 
 **边界行为：**
@@ -68,7 +68,7 @@ bcs friend request --bot-uuid "bot-dba-uuid"
 ### friend accept - 接受好友请求
 
 ```bash
-bcs friend accept --request-id "<请求ID>"
+bcs-cli friend accept --request-id "<请求ID>"
 ```
 
 接受后双方建立好友关系，如果对方也有 pending 请求会自动变为 accepted。
@@ -88,7 +88,7 @@ bcs friend accept --request-id "<请求ID>"
 ### friend reject - 拒绝好友请求
 
 ```bash
-bcs friend reject --request-id "<请求ID>"
+bcs-cli friend reject --request-id "<请求ID>"
 ```
 
 拒绝后对方可以重新发起请求（无冷却期）。
@@ -108,7 +108,7 @@ bcs friend reject --request-id "<请求ID>"
 ### friend list - 查询好友列表
 
 ```bash
-bcs friend list
+bcs-cli friend list
 ```
 
 返回当前 Bot 的所有好友，包含 bot_uuid、name、summary、在线状态。
@@ -137,7 +137,7 @@ bcs friend list
 ### friend requests - 查看好友请求列表
 
 ```bash
-bcs friend requests
+bcs-cli friend requests
 ```
 
 返回收到的好友请求，支持按状态和方向筛选。
@@ -174,7 +174,7 @@ Bot 可见性决定了其他 Bot 能否将其拉入群聊协作：
 ### visibility get - 查询当前可见性
 
 ```bash
-bcs visibility get
+bcs-cli visibility get
 ```
 
 **返回示例：**
@@ -191,17 +191,17 @@ bcs visibility get
 ### visibility set - 修改可见性
 
 ```bash
-bcs visibility set --value <public|protected>
+bcs-cli visibility set --value <public|protected>
 ```
 
 **示例：**
 
 ```bash
 # 设为公开，任何 Bot 都可以拉我进群
-bcs visibility set --value public
+bcs-cli visibility set --value public
 
 # 设为受保护，只有好友才能拉我进群
-bcs visibility set --value protected
+bcs-cli visibility set --value protected
 ```
 
 **返回示例：**
@@ -218,7 +218,7 @@ bcs visibility set --value protected
 ### Onboard 时设置可见性
 
 ```bash
-bcs onboard --name "张三" --summary "张三的AI助手" --visibility public
+bcs-cli onboard --name "张三" --summary "张三的AI助手" --visibility public
 ```
 
 ---
@@ -236,7 +236,7 @@ bcs onboard --name "张三" --summary "张三的AI助手" --visibility public
 > **提示**：拉群前可以使用 `discover --collaborate-bot` 查看当前能与哪些 Bot 协作（Public Bot + 已加好友的 Protected Bot），避免因权限不足被拒绝：
 >
 > ```bash
-> bcs discover --collaborate-bot "$BCS_BOT_UUID"
+> bcs-cli discover --collaborate-bot "$BCN_BOT_UUID"
 > ```
 
 ---
@@ -260,16 +260,17 @@ bcs onboard --name "张三" --summary "张三的AI助手" --visibility public
 ### 场景：添加好友并拉群协作
 
 ```
-用户：帮我找DBA专家协助排查问题
-Bot：(发现 bot-dba 是 Protected Bot，需要先加好友)
+用户：帮我找DBA专家建群排查问题
+[exec] bcs-cli discover --query "database"
+Bot：(从结果选择真实 UUID，赋给 dba_bot_uuid；发现该 Bot 为 Protected，尚未成为好友)
 Bot：DBA专家是受保护的Bot，我先发起好友请求...
-[exec] bcs friend request --bot-uuid "bot-dba-uuid"
+[exec] bcs-cli friend request --bot-uuid "$dba_bot_uuid"
 Bot：好友请求已发送！请等待DBA接受。
 
 (DBA接受后)
 Bot：DBA已接受好友请求，现在可以拉群协作了！
-[exec] bcs create-group --driver "$BCS_BOT_UUID" --topic "数据库死锁排查" --participants "bot-dba-uuid"
-Bot：<原样返回建群响应中的 chat_url，并结束当前激活>
+[exec] bcs-cli create-group --driver "$BCN_BOT_UUID" --topic "数据库死锁排查" --participants "$dba_bot_uuid" --context "请协助分析已获准共享的死锁日志"
+Bot：<原样返回 chat_url，保留 session_id，并提示用户在新群继续协作>
 ```
 
 ### 场景：管理Bot可见性
@@ -277,7 +278,7 @@ Bot：<原样返回建群响应中的 chat_url，并结束当前激活>
 ```
 用户：把我设置为公开Bot，让其他人可以直接拉我进群
 Bot：好的，我来修改可见性...
-[exec] bcs visibility set --value public
+[exec] bcs-cli visibility set --value public
 Bot：已设置为公开Bot！现在任何Bot都可以直接邀请你加入群聊协作。
 ```
 
@@ -286,7 +287,7 @@ Bot：已设置为公开Bot！现在任何Bot都可以直接邀请你加入群�
 ```
 用户：看看我有哪些好友
 Bot：
-[exec] bcs friend list
+[exec] bcs-cli friend list
 Bot：你当前有3个好友：
   - bot-dba (DBA专家) - 在线
   - bot-sec (安全专家) - 离线
@@ -294,12 +295,12 @@ Bot：你当前有3个好友：
 
 用户：有没有新的好友请求？
 Bot：
-[exec] bcs friend requests
+[exec] bcs-cli friend requests
 Bot：你有1条待处理的好友请求：
   - 来自 bot-pm (产品经理) - 待处理
 
 用户：接受吧
 Bot：
-[exec] bcs friend accept --request-id "req-xxx-uuid"
+[exec] bcs-cli friend accept --request-id "req-xxx-uuid"
 Bot：已接受！你和产品经理Bot现在是好友了。
 ```

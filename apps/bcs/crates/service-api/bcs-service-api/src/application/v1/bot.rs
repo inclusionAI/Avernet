@@ -70,6 +70,9 @@ pub struct PhysicalBot {
     pub bot_id: String,
     pub kind: BotKind,
     pub name: String,
+    /// Current display avatar; absent avatars serialize as null.
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub visibility: BotVisibility,
     pub status: BotStatus,
     pub env: String,
@@ -89,6 +92,15 @@ pub struct PhysicalBot {
     pub friend_check_in_strategy: FriendCheckInStrategy,
     pub created_at: u64,
     pub updated_at: u64,
+    /// Mine-page sampled authority relation (spec §8
+    /// mine row: 逐项 `access_relation=owner|manager`) of
+    /// the calling Human on THIS row at the sampling
+    /// moment: `owner` | `manager`. Present only on the
+    /// mine projection; every other projection omits the
+    /// field, and the sampled value is not an
+    /// authorization result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_relation: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,6 +108,9 @@ pub struct HumanBot {
     pub bot_id: String,
     pub kind: BotKind,
     pub name: String,
+    /// Human avatars are not stored in BCS and always project as null.
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub visibility: BotVisibility,
     pub status: BotStatus,
     pub env: String,
@@ -107,6 +122,13 @@ pub struct HumanBot {
     pub friend_check_in_strategy: FriendCheckInStrategy,
     pub created_at: u64,
     pub updated_at: u64,
+    /// Mine-page relation of the calling Human's OWN
+    /// self row (spec §8 mine row: "Human 自身条目保持
+    /// self 语义"): always `self` when present — a
+    /// Human→Human owner edge never exists. Present
+    /// only on the mine projection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_relation: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,12 +152,37 @@ impl Bot {
             Self::Human(_) => BotKind::Human,
         }
     }
+
+    /// Stamps the mine-page relation (spec §8) onto
+    /// either variant; the field stays absent on every
+    /// other projection.
+    pub fn with_mine_access_relation(
+        mut self,
+        access_relation: Option<String>,
+    ) -> Self {
+        match &mut self {
+            Self::Physical(physical) => {
+                physical.access_relation = access_relation;
+            }
+            Self::Human(human) => {
+                human.access_relation = access_relation;
+            }
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BotCandidate {
     pub bot: PhysicalBot,
     pub is_friend: bool,
+    /// Owner user id from the Bot's approved owner authority edge
+    /// (edge-grant `from_id` of `grant_kind='owner'`), read on the
+    /// same page. Absent when the row cannot project an owner
+    /// (e.g. an uninitialized legacy Bot under the strict posture).
+    /// Display metadata, never an authorization result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -15,6 +15,7 @@ struct ProviderTransportEntry {
 
 #[derive(Debug, Default)]
 pub struct MemoryBotRunContextStore {
+    lifecycle: crate::run_deadline::RunLifecycleLocks,
     runs: RwLock<HashMap<String, BotRunContext>>,
     processing: RwLock<HashSet<String>>,
     provider_transports: RwLock<HashMap<String, ProviderTransportEntry>>,
@@ -44,12 +45,33 @@ impl BotRunContextPort for MemoryBotRunContextStore {
             .insert(context.run_id.clone(), context);
     }
 
+    async fn reschedule_deadline(&self, scope: &BotRunScope, run_id: &str, expected: u64, deadline: u64) -> ServiceResult<bool> {
+        let _guard = self.lifecycle.acquire(run_id).await;
+        if deadline <= now_ms() || expected <= now_ms() { return Ok(false); }
+        let mut runs = self.runs.write().await;
+        let Some(run) = runs.get_mut(run_id) else { return Ok(false); };
+        if run.run_id != run_id || run.terminal || run.deadline_ms != expected
+            || run.bot_id != scope.bot_id || run.group_id != scope.group_id
+            || run.bcs_session_id.as_deref().unwrap_or(&run.group_id) != scope.session_id
+            || self.processing.read().await.contains(run_id) { return Ok(false); }
+        let mut active = self.active_runs.write().await;
+        let Some(index) = active.get_mut(run_id) else { return Ok(false); };
+        if index.canonical_run_id != run_id || index.scope != *scope
+            || !matches!(index.transport_owner,bcs_service_api::BotRunTransportOwner::A2a {..}) { return Ok(false); }
+        let mut transports = self.provider_transports.write().await;
+        let Some(transport) = transports.get_mut(run_id) else { return Ok(false); };
+        if !matches!(transport.state,ProviderRunTransport::A2a {..}) { return Ok(false); }
+        run.deadline_ms = deadline; index.deadline_ms = deadline; transport.deadline_ms = deadline;
+        Ok(true)
+    }
+
     async fn get_context(&self, run_id: &str) -> Option<BotRunContext> {
         let canonical = self.active_aliases.read().await.get(run_id).cloned();
         self.runs.read().await.get(canonical.as_deref().unwrap_or(run_id)).cloned()
     }
 
     async fn try_begin_terminal(&self, run_id: &str) -> bool {
+        let _lifecycle = self.lifecycle.acquire(run_id).await;
         let runs = self.runs.read().await;
         let Some(context) = runs.get(run_id) else {
             return false;
@@ -68,6 +90,7 @@ impl BotRunContextPort for MemoryBotRunContextStore {
     }
 
     async fn mark_terminal(&self, run_id: &str) -> bool {
+        let _lifecycle = self.lifecycle.acquire(run_id).await;
         let mut runs = self.runs.write().await;
         let Some(context) = runs.get_mut(run_id) else {
             return false;
@@ -208,6 +231,7 @@ impl BotRunContextPort for MemoryBotRunContextStore {
         scope: &BotRunScope,
         canonical_run_id: &str,
     ) -> ServiceResult<bool> {
+        let _lifecycle = self.lifecycle.acquire(canonical_run_id).await;
         let mut active = self.active_runs.write().await;
         let matches_scope = active
             .get(canonical_run_id)
@@ -239,9 +263,10 @@ impl BotRunContextPort for MemoryBotRunContextStore {
     }
 
     async fn bind_provider_transport(&self, run_id: &str, transport: ProviderRunTransport) -> bool {
+        let _lifecycle = self.lifecycle.acquire(run_id).await;
         if !matches!(
             transport,
-            ProviderRunTransport::Sse | ProviderRunTransport::Callback
+            ProviderRunTransport::Sse | ProviderRunTransport::Callback | ProviderRunTransport::A2a { .. }
         ) {
             return false;
         }
@@ -265,6 +290,7 @@ impl BotRunContextPort for MemoryBotRunContextStore {
     }
 
     async fn mark_provider_transport_terminal(&self, run_id: &str) {
+        let _lifecycle = self.lifecycle.acquire(run_id).await;
         if let Some(entry) = self.provider_transports.write().await.get_mut(run_id) {
             entry.state = ProviderRunTransport::Terminal;
         }

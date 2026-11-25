@@ -12,6 +12,7 @@
 pub mod actor;
 pub mod attachment;
 pub mod bot_provider;
+pub mod caller_identity;
 pub mod channel;
 pub mod collaboration;
 pub mod edge_permission;
@@ -25,11 +26,14 @@ pub mod message;
 pub mod message_delivery;
 pub mod organization;
 pub mod opening_message;
-pub mod proposal;
 pub mod provider;
+pub mod provider_a2a;
 pub mod provider_identity;
 pub mod provider_registration_token;
 pub mod register;
+pub mod speaking_lease;
+pub mod shared_stream;
+pub mod history_manifest;
 pub mod registry;
 pub mod routing;
 pub mod session;
@@ -98,7 +102,6 @@ pub use opening_message::{
     MAX_OPENING_MESSAGE_COMPONENT_BYTES, OpeningMessage, OpeningMessageError,
     OpeningMessageRenderContext, OpeningMessageScope, RenderedOpeningMessage,
 };
-pub use proposal::GroupChatProposal;
 pub use provider::{
     BotDeliveryTarget, CoordinationMode, CoordinationSurface, ProviderAuthMode,
     ProviderBotBinding, ProviderBotConnectionMode, ProviderCoordinationConfig,
@@ -114,8 +117,7 @@ pub use routing::{
     RouteParticipantOverlay, RouteSelectorWire, RoutingDecision, RoutingTarget,
 };
 pub use session::{
-    CallbackChannelConfig, CallbackConfig, Session, SessionKind, SessionStatus, ServiceSpec,
-};
+    Session, SessionKind, SessionStatus, };
 pub use system_message::{
     PersistMode, SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind,
     system_message_visibility,
@@ -126,3 +128,12 @@ pub use register::{RegisterTokenPayload, RegisterTokenError, encode as register_
 pub use session_file::{FileStatus, SessionFile, new_file_id};
 pub use share::{ShareTokenError, ShareTokenPayload, share_token_decode_and_verify, share_token_encode};
 pub mod state_machine_history;
+
+pub mod caller_identity_material;
+pub mod a2a;
+pub mod a2a_auth;
+pub mod a2a_names;
+pub mod a2a_management;
+mod a2a_json;
+
+pub mod catalog_labels;

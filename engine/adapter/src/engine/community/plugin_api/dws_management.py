@@ -10,7 +10,9 @@ class ManagementProofVerifier(Protocol):
 
     async def verify(self, payload: str, signature: str) -> bool: ...
 
-    async def runtime_eligible(self, payload: str, signature: str) -> bool: ...
+    async def runtime_eligible(self, payload: str, signature: str) -> bool:
+        """Raise RolloutUnavailable for transport/response failures, not denial."""
+        ...
 
 
 class HostingManagementStore(Protocol):

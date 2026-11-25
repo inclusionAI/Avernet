@@ -15,6 +15,7 @@ ExpertChat Service — 用户与专家Bot对话业务逻辑层
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Protocol, runtime_checkable
 from urllib.parse import quote
@@ -25,7 +26,6 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_service imp
     CollaboratorService,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.caller_identity.models import McpCallType
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -48,7 +48,10 @@ from agentclaw.community.core.expert_chat.services.expert_chat_session_runtime i
 from agentclaw.community.core.expert_chat.services.expert_chat_owned_session import (
     ExpertChatOwnedSessionMixin,
 )
+from agentclaw.community.core.expert_chat.services.expert_chat_caller_sessions import ExpertChatCallerSessionsMixin
 from agentclaw.community.core.expert_chat.services.bot_lookup import ExpertChatBotLookupMixin
+from agentclaw.community.core.expert_chat.services.chat_stage import ExpertChatStageMixin
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
@@ -109,7 +112,7 @@ class BotInfoProvider(Protocol):
 # ============ Service Implementation ============
 
 
-class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin, ExpertChatServiceProtocol):
+class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin, ExpertChatStageMixin, ExpertChatServiceProtocol):
     """用户与专家Bot对话业务逻辑"""
 
     @inject
@@ -123,6 +126,7 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
         collaborator_service: CollaboratorService,
         transport: DeviceAdapterTransport,
         instance_service: ExpertChatInstanceService,
+        publish_repository: BotPublishRepositoryProtocol,
     ):
         """Initialise.
 
@@ -152,6 +156,7 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
         self._collaborator_service = collaborator_service
         self._transport = transport
         self._instance_service = instance_service
+        self._publish_repository = publish_repository
 
     # ============ Public Methods ============
 
@@ -186,7 +191,11 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
             raise BotNotActiveError(f"Bot未激活: {bot_id}")
 
         # 2. 校验 Bot 是否已绑定设备
-        binding_id = bot.get("binding_id")
+        binding_id = (
+            self._online_chat_binding(bot)
+            if bot.get("bot_type") == "service"
+            else bot.get("binding_id")
+        )
         if not binding_id:
             logger.warning(f"[ExpertChatService] Bot not bound to device: {bot_id}")
             raise BotNotPublishedError(f"Bot未绑定设备: {bot_id}")
@@ -340,6 +349,19 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
         )
         return result
 
+    async def get_caller_instance_status(
+        self, *, user_id: str, bot_id: str, owner_id: str,
+    ) -> Dict[str, bool]:
+        """Authorize the existing chat relation before observing this Caller."""
+        bot = await asyncio.to_thread(self._find_chat_bot, bot_id, owner_id)
+        if not bot:
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+        # COSEC: the authenticated subject must retain the existing chat access.
+        await asyncio.to_thread(self._check_chat_access, bot, user_id)
+        return await self._instance_service.get_caller_instance_status(
+            user_id=user_id, bot_id=bot_id, owner_id=str(bot["owner_id"]),
+        )
+
     async def get_chat_session(
         self, user_id: str, bot_id: str, owner_id: str, iam_token: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -439,11 +461,12 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
         iam_token: Optional[str] = None,
         *,
         bcn_friend_authorized: bool = False,
+        actor_user_id: str | None = None,
     ) -> Dict[str, Any]:
         """List one user's sessions for one expert Bot.
 
-        The Backend-owned index is authoritative for ownership. Adapter data is
-        only used to enrich those already-authorized keys with live metadata.
+        Independent Caller sessions are authorized by the subject's container.
+        Shared runtimes use the Backend-owned index and Adapter enrichment.
         """
         bot = self._get_authorized_chat_bot(
             user_id,
@@ -451,6 +474,10 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
             owner_id,
             bcn_friend_authorized=bcn_friend_authorized,
         )
+        if self._is_independent_caller(bot):
+            return await self._list_caller_sessions(bot, user_id, owner_id, session_key,
+                favorite_only, limit, offset, bcn_friend_authorized=bcn_friend_authorized,
+                actor_user_id=actor_user_id)
         legacy_session_key = self._repo.get_session(user_id, bot_id, owner_id)
         if legacy_session_key:
             self._repo.add_owned_session(user_id, bot_id, owner_id, legacy_session_key)
@@ -470,6 +497,7 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
             owner_id,
             iam_token,
             bcn_friend_authorized=bcn_friend_authorized,
+            actor_user_id=actor_user_id,
         )
         if favorite_only and need_poll:
             return {"total": 0, "items": [], "need_poll": True}
@@ -596,16 +624,8 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
             owner_id,
             bcn_friend_authorized=bcn_friend_authorized,
         )
-        # 以下为安全注释COSEC：会话归属必须在建立容器连接前由登录用户维度校验。
-        owned = self._repo.get_owned_session(user_id, bot_id, owner_id, session_key)
-        if not owned:
-            raise BotNotFoundError("Session不存在或不属于当前用户")
-
-        connection, need_poll = await self._prepare_chat_connection(
-            bot,
-            user_id,
-            owner_id,
-            iam_token,
+        connection, need_poll = await self._prepare_authorized_session_connection(
+            bot, user_id, owner_id, session_key, iam_token,
             bcn_friend_authorized=bcn_friend_authorized,
         )
         if not need_poll:
@@ -633,16 +653,8 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
             owner_id,
             bcn_friend_authorized=bcn_friend_authorized,
         )
-        # 以下为安全注释COSEC：禁止仅凭前端提供的 session_key 删除会话。
-        owned = self._repo.get_owned_session(user_id, bot_id, owner_id, session_key)
-        if not owned:
-            raise BotNotFoundError("Session不存在或不属于当前用户")
-
-        connection, need_poll = await self._prepare_chat_connection(
-            bot,
-            user_id,
-            owner_id,
-            None,
+        connection, need_poll = await self._prepare_authorized_session_connection(
+            bot, user_id, owner_id, session_key, None,
             bcn_friend_authorized=bcn_friend_authorized,
         )
         if need_poll or connection is None:
@@ -651,11 +663,17 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
                 error_code="5001",
             )
 
-        # Keep the ownership row until runtime deletion is confirmed. Otherwise
-        # a transient Adapter failure would make the session impossible to retry.
-        await self._delete_adapter_session(
-            bot, session_key, user_id, connection=connection
-        )
+        if self._is_independent_caller(bot):
+            await self._invoke_caller_session(bot, connection, user_id, "DELETE", f"/api/sessions/{quote(session_key, safe='')}")
+            try:
+                await self._invoke_caller_session(bot, connection, user_id, "DELETE", f"/api/session-favorites/{quote(session_key, safe='')}", params={"user_id": user_id})
+            except (ConnectionError, BotNotFoundError):
+                pass  # Favorite cleanup remains best effort after confirmed deletion.
+            if self._repo.get_session(user_id, bot_id, owner_id) == session_key:
+                self._repo.delete_session(user_id, bot_id, owner_id)
+            return True
+        # Shared-runtime ownership remains until deletion is confirmed.
+        await self._delete_adapter_session(bot, session_key, user_id, connection=connection)
         await self._remove_session_favorite(connection, session_key, user_id)
         self._repo.delete_owned_session(user_id, bot_id, owner_id, session_key)
 
@@ -748,59 +766,6 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
         if not bcn_friend_authorized:
             self._check_chat_access(bot, user_id)
         return bot
-
-    async def _prepare_chat_connection(
-        self,
-        bot: Dict[str, Any],
-        user_id: str,
-        owner_id: str,
-        iam_token: Optional[str],
-        *,
-        bcn_friend_authorized: bool = False,
-    ) -> tuple[Optional[Dict[str, Any]], bool]:
-        """Resolve caller/owner binding and return Adapter connection data."""
-        bot_id = bot["bot_id"]
-        bot_call_type = McpCallType.parse(bot.get("call_type") or None)
-        logger.info(
-            "[ExpertChatService] Bot call_type: bot=%s, call_type=%s, parsed=%s",
-            bot_id,
-            bot.get("call_type"),
-            bot_call_type,
-        )
-        if bot_call_type == McpCallType.CALLER:
-            result = await self._instance_service.get_caller_connection(
-                user_id=user_id,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                iam_token=iam_token,
-            )
-            if result.get("need_poll", False):
-                logger.info(
-                    "[ExpertChatService] Caller instance not ready: bot=%s, user=%s",
-                    bot_id,
-                    user_id,
-                )
-                return result.get("connection"), True
-            instance = result.get("instance", {})
-            ext = instance.get("ext") or {}
-            bot["binding_id"] = ext.get("binding_id")
-        elif bot.get("bot_type", "personal") == "service":
-            from agentclaw.community.core.service_bot.repository.models import (
-                PublishStatus,
-            )
-
-            bot["binding_id"] = self._baas_service.get_bind_id(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                bot_type="service",
-                publish_status=PublishStatus.SUCCESS.value,
-            )
-
-        return self._get_connection(
-            bot,
-            user_id,
-            bcn_friend_authorized=bcn_friend_authorized,
-        ), False
 
     async def _list_owned_adapter_sessions(
         self,

@@ -67,6 +67,8 @@ class InMemorySqliteDB:
         finally:
             session.close()
 
+    orm_session = transactional_orm_session
+
 
 class FileSqliteDB(InMemorySqliteDB):
     """为真实多连接竞争测试提供共享 SQLite 文件。"""

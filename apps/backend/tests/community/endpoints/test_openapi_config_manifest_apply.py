@@ -5,7 +5,7 @@ real gateway-principal verification, the ownership guard, the declared bars, and
 the repository round trip.
 
 The engine's own behaviour — convergence, all-or-nothing, overwrite — is proven
-in ``tests/community/core/bot_config_manifest/apply/``. What these cover is the
+in ``tests/community/core/apply_engine/``. What these cover is the
 *surface*: the shapes a caller sees, and the two "absent is not an error" rules.
 """
 
@@ -22,14 +22,20 @@ import jwt
 from injector import singleton
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
+from agentclaw.community.core.apply_engine.apply_task import (
     APPLY_TASK_TYPE,
 )
 from agentclaw.community.core.repository.protocols.platform import (
     TaskQueueRepositoryProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.schema.limits import MAX_DOCUMENT_BYTES
+from agentclaw.community.core.skill_center.materialization_contract import ValidatedExactSkillPackage
+from agentclaw.community.core.skill_center.skill_reference_contract import (
+    PublicSkillPreview,
+    SkillReferenceServiceProtocol,
 )
 from agentclaw.community.core.task_queue.types import DEFAULT_APP, TaskStatus
 from agentclaw.community.core.repository.protocols.bot import (
@@ -41,6 +47,12 @@ from agentclaw.community.core.repository.protocols.bot import (
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
+)
+from tests.community.core.apply_engine._fixture_data import build_skill_zip, real_validator
+from tests.community.endpoints.manifest_device_seed import (
+    seed_empty_identity,
+    seed_empty_manifest_device,
+    seed_empty_default_scope,
 )
 from tests.community.framework import (
     CaseInput,
@@ -56,9 +68,9 @@ _BOT_ID = "manifest-apply-bot"
 _KEY = "manifest-apply-framework-signing-key-at-least-32-bytes"
 _APPLY_ID = "0123456789abcdef0123456789abcdef"
 
-#: A document declaring only ``script``: it is the one construct whose
-#: materialiser needs neither a container nor a registry, so these cases test
-#: the surface rather than a device fixture.
+#: Only Script has a nonempty target. The full Manifest also replaces omitted
+#: capabilities with empty targets, so the fixture supplies a real Default
+#: scope for recording platform-policy exclusions.
 _DOCUMENT = 'schema_version: 1\nscript:\n  body: "echo hello"\n'
 
 
@@ -119,7 +131,9 @@ def _seed_bot(world) -> None:
 
 
 def _seed_bot_with_manifest(world) -> None:
+    seed_empty_manifest_device(world)
     _seed_bot(world)
+    seed_empty_default_scope(world, "openclaw")
     world.get(BotConfigManifestRepositoryProtocol).upsert(
         env=get_current_env(),
         entity_id=_OWNER,
@@ -215,7 +229,7 @@ def _await_the_background_apply(_response, world) -> None:
             "the explicit-apply route reached the service with a phase; it must "
             f"pass none, got {task.payload['phase']!r}"
         )
-    apply_service = world.get(BotConfigManifestApplyServiceProtocol)
+    apply_service = world.get(ApplyRunServiceProtocol)
     for task in enqueued:
         apply_service.run_apply_task(task.payload)
 
@@ -476,7 +490,7 @@ def apply_while_locked_is_a_409():
     """Applies are serialized per bot, and contention is retryable — not a 500.
 
     The route's own documentation promises this 409, but
-    ``ManifestApplyInProgressError`` was not registered in the envelope's error
+    ``ApplyInProgressError`` was not registered in the envelope's error
     map, so ``@envelope_errors`` re-raised it and the caller got a 500. Pinned
     through the assembled app rather than at the service, because the defect was
     entirely in the mapping: the service raised the right exception all along.
@@ -512,10 +526,10 @@ _RESOURCE_DOCUMENT = (
     "schema_version: 1\n"
     "manifest:\n"
     "  resources:\n"
-    "    - path: notes/r.md\n"
+    "    - path: data/notes/r.md\n"
     "      content: |\n"
     "        # rules\n"
-    "    - path: tools/\n"
+    "    - path: data/tools/\n"
     "      unpack: tar.gz\n"
     "      strip_components: 1\n"
     "      source:\n"
@@ -536,8 +550,10 @@ def _seed_bot_with_resource_manifest(world) -> None:
     ``test_openapi_resources.py`` installs: through the assembled app is the
     point, not through a real device or a real mirror.
     """
+    seed_empty_identity(world)
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
     _insert_bot(world)
+    seed_empty_default_scope(world, "openclaw")
     world.get(BotConfigManifestRepositoryProtocol).upsert(
         env=get_current_env(),
         entity_id=_OWNER,
@@ -557,7 +573,7 @@ def _seed_bot_with_resource_manifest(world) -> None:
     from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
         AliyunObjectStore,
     )
-    from tests.community.core.bot_config_manifest.apply._fakes import (
+    from tests.community.core.apply_engine._fakes import (
         FakeObjectStore,
     )
 
@@ -582,6 +598,16 @@ def _seed_bot_with_resource_manifest(world) -> None:
     async def exists(_self, **_kwargs):
         return False
 
+    listed: list[int] = []
+    clears: list[int] = []
+
+    async def list_entries(_self, **kwargs):
+        (listed if kwargs.get("recursive") else clears).append(1)
+        return ()
+
+    async def delete_dir(_self, **_kwargs):
+        return True
+
     # The object store is doubled BEFORE the fetch funnel is first resolved:
     # the funnel is a singleton built over whatever store the injector holds
     # at that moment, and a fake bound afterwards would never be consulted.
@@ -590,7 +616,13 @@ def _seed_bot_with_resource_manifest(world) -> None:
     bind_overrides(
         world,
         ResourceFileService,
-        {"upload_file": upload_file, "delete": delete, "exists": exists},
+        {
+            "upload_file": upload_file,
+            "delete": delete,
+            "exists": exists,
+            "list_entries": list_entries,
+            "delete_dir": delete_dir,
+        },
     )
     # The stubs only record; the materialiser under test still decides what
     # to call, so its decisions are visible on the recorders. Function
@@ -626,6 +658,7 @@ def _seed_bot_with_resource_manifest(world) -> None:
 
     _seed_bot_with_resource_manifest.uploads = uploads
     _seed_bot_with_resource_manifest.deletes = deletes
+    _seed_bot_with_resource_manifest.clears = clears
 
 
 def _resources_reached_the_write_chain(_response, world) -> None:
@@ -643,23 +676,21 @@ def _resources_reached_the_write_chain(_response, world) -> None:
     by_entry = {
         (e["category"], e["name"]): e["action"] for e in report["entries"]
     }
-    assert by_entry[("resources", "notes/r.md")] == "created"
-    assert by_entry[("resources", "tools/a.py")] == "created"
-    assert by_entry[("resources", "tools/sub/b.py")] == "created"
+    assert by_entry[("resources", "data/notes/r.md")] == "created"
+    assert by_entry[("resources", "data/tools/a.py")] == "created"
+    assert by_entry[("resources", "data/tools/sub/b.py")] == "created"
 
     uploads = _seed_bot_with_resource_manifest.uploads
-    assert sorted(u["target_dir"] for u in uploads) == ["notes", "tools", "tools/sub"]
+    assert sorted(u["target_dir"] for u in uploads) == ["data/notes", "data/tools", "data/tools/sub"]
     writes = {(u["target_dir"], u["filename"]): u["data"] for u in uploads}
     assert writes == {
-        ("notes", "r.md"): b"# rules\n",
-        ("tools", "a.py"): b"x = 1\n",
-        ("tools/sub", "b.py"): b"y = 2\n",
+        ("data/notes", "r.md"): b"# rules\n",
+        ("data/tools", "a.py"): b"x = 1\n",
+        ("data/tools/sub", "b.py"): b"y = 2\n",
     }
-    # The declared directory tree is replaced in full, delete first — the
-    # ownership rule, including files the new archive no longer ships. The
-    # tree is addressed without the declaring slash: the write chain's
-    # file-vs-tree branching keys on the path's shape.
-    assert _seed_bot_with_resource_manifest.deletes == ["tools"]
+    # Planning and replacement each read the current workspace root.
+    assert len(_seed_bot_with_resource_manifest.clears) == 2
+    assert _seed_bot_with_resource_manifest.deletes == []
 
 
 @endpoint_test(
@@ -677,3 +708,154 @@ def apply_materialises_resources():
     """W6's category, end to end: an inline file entry and an archived
     directory entry converge through the one write chain, each leaving its
     per-entry row in the report."""
+
+
+_PREVIEW_PATH = "/openapi/v1/bots/{bot_id}/config-manifest"
+_PREVIEW_QUERY = {**_QUERY, "dry_run": "true"}
+_PUBLIC_SKILL = {"name": "preview-weather", "origin": "center", "skill_code": "preview-weather"}
+
+
+class _FirstPublicSkill:
+    def __init__(self) -> None:
+        self.previewed: list[str] = []
+        self.prepared: list[PublicSkillPreview] = []
+
+    def preview_public_reference(self, *, scope, skill_code, expected_name) -> PublicSkillPreview:
+        self.previewed.append(skill_code)
+        assert scope.actor_id == _OWNER
+        assert expected_name == "preview-weather"
+        package = build_skill_zip(expected_name)
+        return PublicSkillPreview(
+            skill_code=skill_code,
+            skill_uuid="0f08b36f-cf91-4af2-85ca-04c315936f41",
+            name=expected_name,
+            sc_skill_id=1,
+            sc_version_number="1.0.0",
+            sc_version_id=2,
+            content=ValidatedExactSkillPackage(
+                skill_code=skill_code,
+                version_number="1.0.0",
+                sha256=hashlib.sha256(package).hexdigest(),
+                package=real_validator().validate_zip(package),
+                metadata_json='{"mcp_dependencies": []}',
+                download_size=len(package),
+            ),
+        )
+
+    def prepare_public_reference(self, *, scope, preview) -> None:
+        self.prepared.append(preview)
+        raise AssertionError("preview must not prepare a Public skill")
+
+
+def _seed_first_public_skill(world) -> None:
+    _seed_bot_with_a_held_lock(world)
+    references = _FirstPublicSkill()
+    world.injector.binder.bind(SkillReferenceServiceProtocol, to=references, scope=singleton)
+
+
+def _assert_preview_preserved_storage(response, world) -> None:
+    key = dict(env=get_current_env(), entity_id=_OWNER, bot_id=_BOT_ID)
+    stored = world.get(BotConfigManifestRepositoryProtocol).get(**key)
+    assert stored is not None and stored.document == _DOCUMENT
+    assert world.get(BotConfigManifestApplyRepositoryProtocol).latest(**key) is None
+
+
+def _assert_first_public_only_previewed(response, world) -> None:
+    _assert_preview_preserved_storage(response, world)
+    report = response.json()["data"]
+    assert not any(entry["category"] == "script" for entry in report["entries"])
+    references = world.get(SkillReferenceServiceProtocol)
+    assert references.previewed == ["preview-weather"]
+    assert references.prepared == []
+
+
+def _public_preview_input(*, nested: bool) -> CaseInput:
+    manifest = {"skills": [_PUBLIC_SKILL]}
+    if nested:
+        manifest = {"capabilities": manifest}
+    return CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params=_PREVIEW_QUERY,
+        headers=_HEADERS,
+        json_body={"document": json.dumps({"schema_version": 1, "manifest": manifest})},
+    )
+
+
+_PUBLIC_PREVIEW_RESULT = ExpectSuccess(
+    status=200,
+    json_contains={
+        "data": {
+            "bot_id": _BOT_ID,
+            "apply_id": "",
+            "trigger": "dry_run",
+            "entries": [
+                {"category": "capabilities", "name": "skills/preview-weather", "action": "created"}
+            ],
+        }
+    },
+)
+
+
+@endpoint_test(
+    method="PUT",
+    path=_PREVIEW_PATH,
+    scenario="previews_first_public_code_from_submitted_capabilities",
+    input=_public_preview_input(nested=True),
+    seed=_seed_first_public_skill,
+    expect=_PUBLIC_PREVIEW_RESULT,
+    extra_assertions=(_assert_first_public_only_previewed,),
+)
+def put_preview_uses_submitted_manifest():
+    """A held Apply lock does not block preview or cause it to use the stored script."""
+
+
+@endpoint_test(
+    method="PUT",
+    path=_PREVIEW_PATH,
+    scenario="previews_legacy_flat_skills",
+    input=_public_preview_input(nested=False),
+    seed=_seed_first_public_skill,
+    expect=_PUBLIC_PREVIEW_RESULT,
+    extra_assertions=(_assert_first_public_only_previewed,),
+)
+def put_preview_accepts_flat_skills():
+    """Legacy flat skills compile to the same capability plan."""
+
+
+@endpoint_test(
+    method="PUT",
+    path=_PREVIEW_PATH,
+    scenario="preview_rejects_over_limit_document",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params=_PREVIEW_QUERY,
+        headers=_HEADERS,
+        json_body={"document": " " * (MAX_DOCUMENT_BYTES + 1)},
+    ),
+    seed=_seed_bot_with_manifest,
+    expect=ExpectError(status=413),
+    extra_assertions=(_assert_preview_preserved_storage,),
+)
+def put_preview_checks_size_before_compilation():
+    """An over-limit request follows the same 413 contract as a save."""
+
+
+@endpoint_test(
+    method="PUT",
+    path=_PREVIEW_PATH,
+    scenario="preview_refuses_mixed_capabilities",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params=_PREVIEW_QUERY,
+        headers=_HEADERS,
+        json_body={"document": "schema_version: 1\nmanifest: {capabilities: {}, skills: []}\n"},
+    ),
+    seed=_seed_bot_with_manifest,
+    expect=ExpectError(
+        status=422,
+        json_contains={"data": {"violations": [{"code": "mixed_capabilities"}]}},
+    ),
+    extra_assertions=(_assert_preview_preserved_storage,),
+)
+def put_preview_checks_schema():
+    """Refused input keeps the saved document and Apply history intact."""

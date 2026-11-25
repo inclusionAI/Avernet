@@ -76,16 +76,29 @@ describe('GroupSidebar', () => {
     expect(capsule).toHaveClass('left-2', 'right-2', 'rounded-md');
   });
 
-  it('选中会话胶囊升级品牌蓝 bg-primary/10，标题点亮 text-primary（2026-10-22 对话侧同轮裁决）', () => {
+  it('选中会话胶囊中性深 bg-foreground/[6%]，标题点亮 text-foreground（2026-11-02 对话侧同轮裁决）', () => {
     const { rerender } = render(<GroupSidebar {...makeProps()} />);
     rerender(<GroupSidebar {...makeProps({ selectedSessionId: 's1' })} />);
     const sessionTrigger = screen.getByRole('button', { name: /会话一/ });
     expect(sessionTrigger).toHaveAttribute('aria-current', 'page');
     const capsule = sessionTrigger.previousElementSibling as HTMLElement;
-    // 几何契约不变（inset-x-2 全宽 rx6）；壳层会话选中语言已统一定稿为品牌蓝。
-    expect(capsule).toHaveClass('bg-primary/10');
+    // 几何契约不变（inset-x-2 全宽 rx6）；会话选中语言统一定稿为 #09090B0F/#09090B。
+    expect(capsule).toHaveClass('bg-foreground/[6%]');
     expect(capsule).not.toHaveClass('bg-selected');
-    expect(screen.getByText('会话一')).toHaveClass('text-primary');
+    expect(screen.getByText('会话一')).toHaveClass('text-foreground');
+  });
+
+  it('群挂着舞台选中会话时群名点亮 #09090B（id+会话双命中，不依赖会话列表加载）', () => {
+    // 未选中：群名保持常规灰。
+    const { rerender } = render(<GroupSidebar {...makeProps()} />);
+    expect(screen.getByText('主站群')).toHaveClass('text-content-strong');
+    expect(screen.getByText('主站群')).not.toHaveClass('text-foreground');
+    // 仅选中群、无选中会话：不算选中链路，群名不点亮。
+    rerender(<GroupSidebar {...makeProps({ selectedGroupId: 'g1' })} />);
+    expect(screen.getByText('主站群')).not.toHaveClass('text-foreground');
+    // 群+会话双命中：群名点亮，收起时由群名顶位承载选中语义（2026-11-02 稿）。
+    rerender(<GroupSidebar {...makeProps({ selectedGroupId: 'g1', selectedSessionId: 's1' })} />);
+    expect(screen.getByText('主站群')).toHaveClass('text-foreground');
   });
 
   it('选中协作群暂无会话时展示明确空态', () => {

@@ -104,6 +104,16 @@ export function extractCodefuseTokenUserId(payload: unknown): string | null {
   return null;
 }
 
+/**
+ * 纯数字工号可能在不同系统间出现前置 0 差异（如 11111 与 011111）。
+ * 这里仅在比较时去掉数字 ID 的前置 0，不修改原始登录态或 Token payload。
+ */
+function normalizeUserIdForOwnerCompare(userId: string): string {
+  const value = userId.trim();
+  if (!/^\d+$/.test(value)) return value;
+  return value.replace(/^0+/, '') || '0';
+}
+
 export function validateCodefuseTokenOwner(token: string, currentUserId?: string | null): string | null {
   const trimmedToken = token.trim();
   if (!trimmedToken) return CODEFUSE_TOKEN_ERROR_MESSAGES.missing;
@@ -123,7 +133,10 @@ export function validateCodefuseTokenOwner(token: string, currentUserId?: string
     return CODEFUSE_TOKEN_ERROR_MESSAGES.currentUserMissing;
   }
 
-  if (tokenUserId !== normalizedCurrentUserId) {
+  if (
+    normalizeUserIdForOwnerCompare(tokenUserId) !==
+    normalizeUserIdForOwnerCompare(normalizedCurrentUserId)
+  ) {
     return CODEFUSE_TOKEN_ERROR_MESSAGES.userMismatch;
   }
 

@@ -40,6 +40,21 @@ class BotWsConnectionInfoResponse(BaseModel):
     )
     expires_at: datetime = Field(..., description="Token expiration timestamp (UTC)")
     device_id: str = Field(..., description="PaaS device id of the selected device")
+    a2a_base_url: str = Field(
+        default="",
+        description=(
+            "Authoritative HTTP base URL of the device's A2A agent face "
+            "(card at /.well-known/agent-card.json, RPC at /rpc), addressed "
+            "for direct browser access. Empty when the sandbox platform "
+            "defines no such address; consumers then derive nothing and "
+            "fall back to their legacy transport."
+        ),
+    )
+    a2a_auth: str = Field(
+        default="",
+        description="A2A transport authentication: empty for direct HTTP; "
+        "proxypass uses token as X-PROXYPASS-TOKEN until expires_at.",
+    )
 
 
 class BotWsConnectionErrorResponse(BaseModel):
@@ -153,6 +168,8 @@ async def get_bot_ws_connection_info(
                 target=conn_info.target,
                 expires_at=conn_info.expires_at,
                 device_id=conn_info.device_id,
+                a2a_base_url=conn_info.a2a_base_url,
+                a2a_auth=conn_info.a2a_auth,
             )
         )
 

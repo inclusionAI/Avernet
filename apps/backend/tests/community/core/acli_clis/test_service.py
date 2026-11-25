@@ -187,7 +187,7 @@ async def test_an_outdated_engine_lists_as_outdated() -> None:
 
 
 async def test_an_engine_without_acli_is_refused() -> None:
-    world = _World(record=bot(active_engine="teclaw"))
+    world = _World(record=bot(active_engine="hermes"))
 
     with pytest.raises(AcliEngineUnsupportedError):
         await world.call("list_bot_clis")
@@ -212,6 +212,17 @@ async def test_add_grants_then_installs_and_answers_with_the_tool() -> None:
     assert [c[:3] for c in world.engine.calls if c[0] == "submit"] == [
         ("submit", "draft", "install"),
     ]
+
+
+async def test_a_teclaw_bot_installs_through_its_own_engine() -> None:
+    world = _World(record=bot(active_engine="teclaw"))
+
+    outcome = await world.run("add", cli_code="deepinsight-cli")
+
+    assert outcome.operation.status == "succeeded"
+    assert world.engine.installed["draft"] == {"deepinsight-cli"}
+    # The task payload carries the engine, so every call picks teclaw's prefix.
+    assert world.engine.engines and set(world.engine.engines) == {"teclaw"}
 
 
 async def test_add_keeps_the_identity_the_owner_chose_before() -> None:
@@ -538,7 +549,7 @@ async def test_only_the_owner_holding_the_lock_may_write_to_an_active_bot(method
     with pytest.raises(AcliBotNotRunningError):
         await _World(record=bot(status="STOPPED")).call(method, **extra)
     with pytest.raises(AcliEngineUnsupportedError):
-        await _World(record=bot(active_engine="teclaw")).call(method, **extra)
+        await _World(record=bot(active_engine="hermes")).call(method, **extra)
 
 
 async def test_a_stale_lock_epoch_is_refused() -> None:

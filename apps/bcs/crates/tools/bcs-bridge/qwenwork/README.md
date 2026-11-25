@@ -61,10 +61,11 @@ Unknown or malformed wrappers remain unchanged. Output cannot select a tool's
 identity or grant coordination permissions.
 
 Use a dedicated Provider with `coordination.mode = "native_mcp"` and exact
-`tool_name_mapping` entries for the desktop MCP server's three coordination tools:
-`bcs_assign_task`, `bcs_send_task_message`, and `bcs_task_complete`. For a server
-named `bcs-mcp`, map `mcp__bcs-mcp__bcs_assign_task` to `bcs_assign_task`, and likewise
-for the other two tools. Do not map the generic QwenWork wrapper to a coordination
+`tool_name_mapping` entries for the desktop MCP server's coordination echoes:
+`bcs_assign_task` and `bcs_task_complete`. For a server named `bcs-mcp`, map
+`mcp__bcs-mcp__bcs_assign_task` to `bcs_assign_task`, and likewise for completion.
+Status and cancel tools call the task API directly and do not produce coordination
+echoes. The retired worker-message tool is decoded only for compatibility. Do not map the generic QwenWork wrapper to a coordination
 tool. BCS retains responsibility for Provider authorization and intent validation.
 
 ## Configure
@@ -303,3 +304,22 @@ A slow endpoint
 can still delay a tool until its Hook deadline (300 seconds for opted-in questions).
 This is version-specific behavior, not a guarantee for future SDKs. Always remove
 unused global Hooks; do not rely on the bridge being unreachable as cleanup.
+
+
+## Manager–Worker task handles
+
+`bcs_send_task_message` is retired from model-visible tools. Worker final replies
+are automatically returned as task results. When blocked, end the turn and state
+what is needed; the Manager assigns a follow-up to the same Worker, including
+necessary context. Do not use old worker-message examples as invocation guidance.
+
+Managers use `bcs_assign_task` (optional positive `timeout_s`), `bcs_task_status`
+(1–20 refs, on demand only), and `bcs_cancel_task` (ref and reason). `task_ref` is
+`T-` plus eight hex digits; ambiguous refs require a longer prefix. `stored` is not
+admission or completion. `unknown`/`not_found` never proves stopped or safe to
+resend. Cancellation waits briefly for confirmation, never exposes `cancelling`,
+and does not roll back side effects. FIFO is not business idempotence.
+
+The server consumes old task.message/v2 echoes for one compatibility release;
+that compatibility path is not a newly exposed tool. Remove it only after old
+producers and queued work have drained (cached payloads live for 24 hours).

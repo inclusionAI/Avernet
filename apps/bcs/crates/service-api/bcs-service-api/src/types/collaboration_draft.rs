@@ -1,4 +1,4 @@
-//! Immutable collaboration authoring revisions and their independent read grants.
+//! Immutable collaboration authoring revisions and public fixed-version references.
 use serde::{Deserialize, Serialize};
 
 pub const MAX_DRAFT_BYTES: usize = 65_536;
@@ -31,19 +31,11 @@ pub struct DraftRevision {
     pub created_at: String,
 }
 
-// Deliberately no Debug: neither raw content nor grant material belongs in logs.
+// Deliberately no Debug: raw content does not belong in logs.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StoredDraftRevision {
     pub content: DraftRevision,
-    /// Random capability persisted with this exact revision; never a deployment key.
-    pub read_token: String,
     pub revoked: bool,
-}
-
-#[derive(Clone)]
-pub enum DraftAccess {
-    Owner(String),
-    ReadToken(String),
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -52,7 +44,6 @@ pub struct DraftReference {
     pub schema_version: u8,
     pub draft_id: String,
     pub revision: u64,
-    pub read_token: String,
 }
 
 pub struct SavedDraftRevision {

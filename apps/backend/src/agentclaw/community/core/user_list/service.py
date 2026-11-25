@@ -6,7 +6,7 @@ from injector import inject
 
 from agentclaw.community.plugin_api.staff_dept import DeptLookupError, StaffDeptPlugin
 from agentclaw.community.core.user_list.rules import (
-    ACTUAL_BOT_TYPES, department_path_candidates, validate_membership,
+    ACTUAL_BOT_TYPES, department_name_candidates, department_path_candidates, validate_membership,
 )
 
 from agentclaw.community.core.repository.protocols.identity import UserListRepositoryProtocol
@@ -82,6 +82,7 @@ class UserListService(UserListServiceProtocol):
         source = "none"
         reason = "not_configured"
         paths: tuple[str, ...] = ()
+        names: tuple[str, ...] = ()
         department = None
         stage = "user_list_query"
         try:
@@ -92,16 +93,22 @@ class UserListService(UserListServiceProtocol):
                 return False
             stage = "directory_lookup"
             department = self._staff_dept.get_dept_by_work_no(work_no=entity_id)
-            if not department.dept_path:
-                reason = "no_dept"
-                return False
-            try:
-                paths = department_path_candidates(department.dept_path)
-            except ValueError:
-                reason = "invalid_path"
+            if department.dept_name:
+                try:
+                    names = department_name_candidates(department.dept_name)
+                except ValueError:
+                    pass  # A malformed name must not discard a valid legacy ID path.
+            if department.dept_path:
+                try:
+                    paths = department_path_candidates(department.dept_path)
+                except ValueError:
+                    pass  # A malformed ID path must not discard a valid name chain.
+            candidates = tuple(dict.fromkeys((*names, *paths)))
+            if not candidates:
+                reason = "invalid_department_data" if department.dept_name or department.dept_path else "no_dept"
                 return False
             stage = "department_list_query"
-            matched = self._repository.exists_any(entity_ids=paths, subject_type="department", **scope)
+            matched = self._repository.exists_any(entity_ids=candidates, subject_type="department", **scope)
             source, reason = ("department", "matched") if matched else ("none", "not_matched")
             return matched
         except DeptLookupError:
@@ -113,8 +120,9 @@ class UserListService(UserListServiceProtocol):
         finally:
             logger.info(
                 "user_list.match_decision entity_id=%s user_list_type=%s env=%s bot_type=%s "
-                "matched_source=%s reason=%s department_paths=%s dept_no=%s dept_name=%s dept_path=%s",
-                entity_id, user_list_type, env, bot_type, source, reason, paths,
+                "matched_source=%s reason=%s department_names=%s department_paths=%s "
+                "dept_no=%s dept_name=%s dept_path=%s",
+                entity_id, user_list_type, env, bot_type, source, reason, names, paths,
                 department.dept_no if department else None,
                 department.dept_name if department else None,
                 department.dept_path if department else None,

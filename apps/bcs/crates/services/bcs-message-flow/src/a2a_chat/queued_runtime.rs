@@ -2,13 +2,17 @@
 use super::*;
 use super::queued::{DirectProjection, invalid, transition, transition_conflict};
 use bcs_domain::message_delivery::{DeliveryFlowKind, PersistedMessageDelivery};
-use bcs_service_api::{BotDeliveryTarget, BotRunTransportOwner, PreparedManagedDelivery, BotEventCommand, BotEventOutcome, ChatEventState};
+use bcs_service_api::{BotRunTransportOwner, PreparedManagedDelivery, BotEventCommand, BotEventOutcome, ChatEventState};
 use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
 
 impl A2aChat {
     pub(crate) async fn prepare_direct(&self, flow: &crate::BcsMessageFlow, row: &PersistedMessageDelivery) -> ServiceResult<PreparedManagedDelivery> {
         let p: DirectProjection = serde_json::from_value(row.semantic_projection_json.clone()).map_err(|_| invalid("invalid direct projection"))?;
-        if p.version != 1 || row.flow_kind != DeliveryFlowKind::DirectA2a || !row.group_id.is_empty() { return Err(invalid("invalid direct projection scope")); }
+        if p.version != 1
+            || row.flow_kind != DeliveryFlowKind::DirectA2a || !row.group_id.is_empty()
+        {
+            return Err(invalid("invalid direct projection scope"));
+        }
         let sessions = self.session_management.as_ref().ok_or_else(|| invalid("direct session service unavailable"))?;
         let registration = sessions.session_registration(&row.session_id).await.map_err(|_| invalid("direct session read failed"))?
             .ok_or_else(|| invalid("session_registry_missing"))?;
@@ -31,23 +35,20 @@ impl A2aChat {
         self.authorize_queued_text(run, &p.from_bot_id, &row.target_bot_id, text).await?;
         let target = self.registry.resolve_delivery_target(&row.target_bot_id).await?;
         let headers = bcs_config_api::queued_provider_headers::snapshot(&p.provider_route_headers, &flow.queue_persistable_headers).map_err(invalid)?;
-        let connection_id = if target.is_http_provider() { None } else {
+        let connection_id = if target.is_gateway() { None } else {
             Some(self.bot_delivery.connection_identity(&target).await.ok_or_else(|| invalid("direct connection unavailable"))?)
         };
-        let owner = match &target {
-            BotDeliveryTarget::WebSocket { .. } => BotRunTransportOwner::WebSocket,
-            BotDeliveryTarget::HttpProvider { provider_id, provider_bot_ref, .. } => BotRunTransportOwner::HttpProvider { provider_id: provider_id.clone(), provider_bot_ref: provider_bot_ref.clone() },
-        };
+        let owner = BotRunTransportOwner::from_target(&target);
         let headers = if target.is_http_provider() { headers } else { Vec::new() };
         let mut frame = build_chat_send_frame(run, &row.session_id, &row.target_bot_id, &p.from_bot_id, &p.sender_name, &p.from_actor_id, text, &p.target_tags, p.caller_wait_mode.as_deref())?;
         if let BcsFrame::Request(request) = &mut frame {
             if let Some(params) = &mut request.params { params["idempotency_key"] = serde_json::json!(row.idempotency_key); }
         }
-        let transport = crate::queued_group::QueuedTransportContext { version: 1, owner, connection_id,
+        let transport = crate::queued_group::QueuedTransportContext { caller_expires_at_ms: None, version: 1, owner, connection_id,
             downstream_run_id: None, cancel_reason: None, task_timeout: false, downstream_session_key: row.session_id.clone(),
             provider_route_headers: headers.clone(), relay_route_headers: None };
         Ok(PreparedManagedDelivery {
-            command: BotDeliveryCommand { target, run_id: run.into(), frame, delivery_kind: BotDeliveryKind::Send,
+            command: BotDeliveryCommand { a2a_test_user: None, target, run_id: run.into(), frame, delivery_kind: BotDeliveryKind::Send,
                 provider_transport: if p.client.as_deref().is_some_and(|c| c.starts_with("bcs-cli")) { ProviderTransportPreference::Callback } else { ProviderTransportPreference::SseFirst },
                 provider_bypass_headers: headers },
             transport_context_json: serde_json::to_value(transport)?,

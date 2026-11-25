@@ -3,15 +3,16 @@
 use super::*;
 use bcs_service_api::bot_provider::{BotConnectionMode, BotProviderRecord};
 use bcs_service_api::port::repo::{BotRepoPort, bot_provider::BotProviderRepoPort};
+use crate::memory::MemoryBotRepo;
 
 pub struct MemoryBotProviderStore {
-    bots: Arc<dyn BotRepoPort>,
+    bots: Arc<MemoryBotRepo>,
     bindings: Arc<MemoryProviderStore>,
     records: RwLock<BTreeMap<String, BotProviderRecord>>,
 }
 
 impl MemoryBotProviderStore {
-    pub fn new(bots: Arc<dyn BotRepoPort>, bindings: Arc<MemoryProviderStore>) -> Self {
+    pub fn new(bots: Arc<MemoryBotRepo>, bindings: Arc<MemoryProviderStore>) -> Self {
         Self { bots, bindings, records: RwLock::new(BTreeMap::new()) }
     }
 }
@@ -26,6 +27,17 @@ fn binding_now_ms() -> ServiceResult<u64> {
 
 #[async_trait]
 impl BotProviderRepoPort for MemoryBotProviderStore {
+    async fn validate_provider_bot_name(&self, provider_id:&str, name:&str, exclude_bot:Option<&str>) -> ServiceResult<()> {
+        let records=self.records.read().await;
+        for existing in records.values().filter(|r| !r.is_deleted && r.provider_id==provider_id && Some(r.bot_uuid.as_str())!=exclude_bot) {
+            if let Some(bot)=self.bots.try_get(&existing.bot_uuid).await? {
+                if bot.capabilities.name.as_deref().unwrap_or(&existing.bot_uuid)==name {
+                    return Err(ServiceError::Conflict("Bot name is already in use in this Provider".into()));
+                }
+            }
+        }
+        Ok(())
+    }
     async fn validate_provider_affiliation(&self, provider_id: &str, bot_uuid: &str) -> ServiceResult<()> {
         self.bindings.check_affiliation_scope(provider_id, bot_uuid).await
     }
@@ -89,6 +101,9 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
             refs.insert(key, record.bot_uuid.clone());
         }
         self.bots.persist_provider_affiliation(&record).await?;
+        self.bots
+            .mark_provider_managed(&record.bot_uuid)
+            .await;
         records.insert(record.bot_uuid.clone(), record);
         Ok(())
     }
@@ -97,12 +112,101 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
         Ok(self.records.read().await.get(bot_uuid).cloned())
     }
 
+    async fn create_provider_bot_with_ownership(
+        &self, record: BotProviderRecord, capabilities: BotCapabilities, owner: &str, token: &str,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<()> {
+        self.create_owned_registration(record, capabilities, owner, token, initialization, false).await
+    }
+
+    async fn create_provider_admin_bot_with_ownership(
+        &self, record: BotProviderRecord, capabilities: BotCapabilities, owner: &str, token: &str,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<()> {
+        self.create_owned_registration(record, capabilities, owner, token, initialization, true).await
+    }
+
+    async fn restore_provider_bot_with_ownership(
+        &self, record: BotProviderRecord, capabilities: BotCapabilities, owner: &str, token: &str,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<()> {
+        bot_storage::validate_record(&record)?;
+        if owner.trim().is_empty() || token.is_empty() || owner.trim() != initialization.owner_user_id {
+            return Err(ServiceError::InvalidOperation { message: "Bot owner and runtime credential are required".into(), request_id: None });
+        }
+        let now = binding_now_ms()?;
+        let mut records = self.records.write().await;
+        let previous = records.get(&record.bot_uuid).cloned();
+        if previous.as_ref().is_some_and(|previous| {
+            !previous.is_deleted || previous.provider_id != record.provider_id
+                || previous.provider_bot_ref != record.provider_bot_ref
+        }) {
+            return Err(conflict());
+        }
+        let name = capabilities.name.as_deref().unwrap_or(&record.bot_uuid);
+        for existing in records.values().filter(|r| {
+            !r.is_deleted && r.provider_id == record.provider_id && r.bot_uuid != record.bot_uuid
+        }) {
+            if let Some(bot) = self.bots.try_get(&existing.bot_uuid).await? {
+                if bot.capabilities.name.as_deref().unwrap_or(&existing.bot_uuid) == name {
+                    return Err(ServiceError::Conflict("Bot name is already in use in this Provider".into()));
+                }
+            }
+        }
+        let mut bindings = self.bindings.bindings_by_bot.write().await;
+        let mut refs = self.bindings.binding_ref_index.write().await;
+        let key = (record.provider_id.clone(), record.provider_bot_ref.clone());
+        if refs.get(&key).is_some_and(|id| id != &record.bot_uuid)
+            || bindings.get(&record.bot_uuid).is_some_and(|binding| {
+                binding.provider_id != record.provider_id || binding.provider_bot_ref != record.provider_bot_ref
+            })
+        {
+            return Err(conflict());
+        }
+        if previous.is_none() && !bindings.get(&record.bot_uuid).is_some_and(|binding| {
+            binding.disabled && binding.provider_id == record.provider_id
+                && binding.provider_bot_ref == record.provider_bot_ref
+        }) {
+            return Err(conflict());
+        }
+        self.bots.restore_provider_registration(
+            record.bot_uuid.clone(), capabilities, owner, token, &initialization, &record.provider_id,
+        ).await?;
+        records.insert(record.bot_uuid.clone(), record.clone());
+        match record.connection_mode {
+            BotConnectionMode::Gateway => {
+                let created_at = bindings.get(&record.bot_uuid).map(|binding| binding.created_at).unwrap_or(now);
+                bindings.insert(record.bot_uuid.clone(), ProviderBotBinding {
+                    bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(),
+                    provider_bot_ref: record.provider_bot_ref.clone(), webhook_url: record.webhook_url,
+                    disabled: false, created_at, updated_at: now,
+                });
+                refs.insert(key, record.bot_uuid);
+            }
+            BotConnectionMode::Plugin => {
+                bindings.remove(&record.bot_uuid);
+                if refs.get(&key).is_some_and(|id| id == &record.bot_uuid) {
+                    refs.remove(&key);
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn create_provider_bot(&self, record: BotProviderRecord, capabilities: BotCapabilities, owner: &str, token: &str) -> ServiceResult<()> {
         bot_storage::validate_record(&record)?;
         if owner.trim().is_empty() || token.is_empty() {
             return Err(ServiceError::InvalidOperation { message: "Bot owner and runtime credential are required".into(), request_id: None });
         }
         let mut records = self.records.write().await;
+        let name=capabilities.name.as_deref().unwrap_or(&record.bot_uuid);
+        for existing in records.values().filter(|r| !r.is_deleted && r.provider_id==record.provider_id) {
+            if let Some(bot)=self.bots.try_get(&existing.bot_uuid).await? {
+                if bot.capabilities.name.as_deref().unwrap_or(&existing.bot_uuid)==name {
+                    return Err(ServiceError::Conflict("Bot name is already in use in this Provider".into()));
+                }
+            }
+        }
         let mut bindings = self.bindings.bindings_by_bot.write().await;
         let mut refs = self.bindings.binding_ref_index.write().await;
         let key = (record.provider_id.clone(), record.provider_bot_ref.clone());
@@ -115,6 +219,9 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
         if !self.bots.create_registration_if_absent(record.bot_uuid.clone(), capabilities, owner, token).await? {
             return Err(conflict());
         }
+        self.bots
+            .mark_provider_managed(&record.bot_uuid)
+            .await;
         if record.connection_mode == BotConnectionMode::Gateway {
             bindings.insert(record.bot_uuid.clone(), ProviderBotBinding {
                 bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(), provider_bot_ref: record.provider_bot_ref.clone(),
@@ -153,4 +260,195 @@ impl BotProviderRepoPort for MemoryBotProviderStore {
         if let Some(binding) = binding { binding.disabled = true; binding.updated_at = updated_at; }
         Ok(true)
     }
+
+    /// Atomic Provider retirement (memory mirror, Task 4,
+    /// spec §7.1): the branch is derived and re-verified
+    /// from the SAME records the read paths use, then ONE
+    /// staged pass of the shared Bot State revokes the
+    /// authority edges, closes the valid pending
+    /// transfers (fixed system marker) and writes the
+    /// `retire` audit together with the Bot tombstone.
+    /// The metadata record / binding disable publish
+    /// only after that staged pass committed (they are
+    /// infallible memory writes), so a failure anywhere
+    /// leaves the projection byte-identical. A repeat on
+    /// an already-tombstoned Bot is idempotent and returns
+    /// `changed = false`.
+    async fn retire_with_authority(
+        &self,
+        retire: bcs_service_api::core::provider::ProviderRetire,
+    ) -> ServiceResult<bcs_service_api::core::provider::ProviderRetirement> {
+        use bcs_service_api::core::provider::ProviderRetireBranch;
+        crate::ownership::validate_mutation(&retire.mutation)?;
+        // The branch derivation mirrors the SQL store:
+        // same 归属规则, same mismatches.
+        let source = {
+            let records = self.records.read().await;
+            if let Some(existing) = records.get(&retire.bot_id) {
+                if existing.provider_id != retire.provider_id {
+                    return Err(ServiceError::Forbidden("provider_id_mismatch".into()));
+                }
+                if existing.provider_bot_ref != retire.provider_bot_ref {
+                    return Err(ServiceError::Conflict("Bot Provider membership cannot be replaced".into()));
+                }
+                RetireSource::Metadata
+            } else if let Some(binding) = self.bindings.bindings_by_bot.read().await.get(&retire.bot_id) {
+                if binding.provider_id != retire.provider_id
+                    || binding.provider_bot_ref != retire.provider_bot_ref
+                {
+                    return Err(ServiceError::Forbidden("provider_id_mismatch".into()));
+                }
+                RetireSource::BindingFallback
+            } else if crate::retirement::is_owner_suffixed_bot_id(&retire.bot_id)
+                && retire.expected_branch == ProviderRetireBranch::LegacyUnbound
+            {
+                RetireSource::LegacyUnbound
+            } else {
+                return Err(retirement_branch_mismatch(retire.expected_branch));
+            }
+        };
+        if source.branch() != retire.expected_branch {
+            return Err(retirement_branch_mismatch(retire.expected_branch));
+        }
+
+        let changed = self
+            .bots
+            .retire_core_state_provider(&retire.bot_id, &retire.mutation)
+            .await?;
+        // Infallible post-swap publication of the
+        // Provider projection (nothing left can fail).
+        {
+            let mut records = self.records.write().await;
+            if let Some(existing) = records.get_mut(&retire.bot_id) {
+                existing.is_deleted = true;
+            }
+            let mut bindings = self.bindings.bindings_by_bot.write().await;
+            if let Some(binding) = bindings.get_mut(&retire.bot_id) {
+                binding.disabled = true;
+            }
+        }
+        Ok(bcs_service_api::core::provider::ProviderRetirement {
+            bot_id: retire.bot_id,
+            provider_id: retire.provider_id,
+            provider_bot_ref: retire.provider_bot_ref,
+            changed,
+            branch: source.branch(),
+        })
+    }
 }
+
+/// Source of the memory retirement: which durable
+/// record routed the command (mirrors the SQL
+/// store's derivation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetireSource {
+    Metadata,
+    BindingFallback,
+    LegacyUnbound,
+}
+
+impl RetireSource {
+    fn branch(self) -> bcs_service_api::core::provider::ProviderRetireBranch {
+        match self {
+            RetireSource::Metadata => bcs_service_api::core::provider::ProviderRetireBranch::Metadata,
+            RetireSource::BindingFallback => bcs_service_api::core::provider::ProviderRetireBranch::BindingFallback,
+            RetireSource::LegacyUnbound => bcs_service_api::core::provider::ProviderRetireBranch::LegacyUnbound,
+        }
+    }
+}
+
+fn retirement_branch_mismatch(
+    expected: bcs_service_api::core::provider::ProviderRetireBranch,
+) -> ServiceError {
+    ServiceError::Conflict(format!(
+        "retirement branch does not match the stored identity \
+         state (expected {expected:?})"
+    ))
+}
+
+impl MemoryBotProviderStore {
+    async fn create_owned_registration(
+        &self, record: BotProviderRecord, capabilities: BotCapabilities, owner: &str, token: &str,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+        provider_admin: bool,
+    ) -> ServiceResult<()> {
+        bot_storage::validate_record(&record)?;
+        if owner.trim().is_empty() || token.is_empty() {
+            return Err(ServiceError::InvalidOperation { message: "Bot owner and runtime credential are required".into(), request_id: None });
+        }
+        if owner.trim() != initialization.owner_user_id {
+            return Err(crate::ownership::initialization_invalid_public(
+                "registration owner must be the verified registration owner",
+            ));
+        }
+        // The projection guards span validation AND the Bot
+        // composite AND the install, so a concurrent
+        // same-ref/same-Bot registration cannot pass the
+        // validation window: the winner commits, the loser
+        // sees it and conflicts (old create_provider_bot
+        // discipline).
+        let now = binding_now_ms()?;
+        let mut records = self.records.write().await;
+        let name=capabilities.name.as_deref().unwrap_or(&record.bot_uuid);
+        for existing in records.values().filter(|r| !r.is_deleted && r.provider_id==record.provider_id) {
+            if let Some(bot)=self.bots.try_get(&existing.bot_uuid).await? {
+                if bot.capabilities.name.as_deref().unwrap_or(&existing.bot_uuid)==name {
+                    return Err(ServiceError::Conflict("Bot name is already in use in this Provider".into()));
+                }
+            }
+        }
+        if records.contains_key(&record.bot_uuid) {
+            return Err(conflict());
+        }
+        if records.values().any(|existing| {
+            existing.provider_id == record.provider_id
+                && existing.provider_bot_ref == record.provider_bot_ref
+        }) {
+            return Err(conflict());
+        }
+        // Same order as insert_binding and attach: bindings before ref index.
+        let mut bindings = self.bindings.bindings_by_bot.write().await;
+        let mut refs = self.bindings.binding_ref_index.write().await;
+        let key = (record.provider_id.clone(), record.provider_bot_ref.clone());
+        if refs.get(&key).is_some_and(|id| *id != record.bot_uuid) {
+            return Err(conflict());
+        }
+        // Retain the credential-free affiliation marker across memory restarts,
+        // just as ordinary create_provider_bot does; a failed admission may leave
+        // a marker, but never a usable identity, credential or authority row.
+        if provider_admin { self.bots.persist_provider_affiliation(&record).await?; }
+        if !self
+            .bots
+            .create_registration_with_authority(
+                record.bot_uuid.clone(),
+                capabilities,
+                owner,
+                token,
+                &initialization,
+                provider_admin.then_some(record.provider_id.as_str()),
+            )
+            .await?
+        {
+            return Err(conflict());
+        }
+        self.bots
+            .mark_provider_managed(&record.bot_uuid)
+            .await;
+        records.insert(record.bot_uuid.clone(), record.clone());
+        if record.connection_mode == BotConnectionMode::Gateway {
+            bindings.insert(record.bot_uuid.clone(), ProviderBotBinding {
+                bot_uuid: record.bot_uuid.clone(), provider_id: record.provider_id.clone(),
+                provider_bot_ref: record.provider_bot_ref.clone(),
+                webhook_url: record.webhook_url.clone(), disabled: false,
+                created_at: now, updated_at: now,
+            });
+            refs.insert((record.provider_id.clone(), record.provider_bot_ref.clone()), record.bot_uuid.clone());
+        }
+        Ok(())
+    }
+
+}
+
+#[cfg(test)]
+#[path = "memory_provider_registration_tests.rs"]
+mod registration_tests;

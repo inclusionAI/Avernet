@@ -43,6 +43,7 @@ Areas covered:
 - SandboxInfo class
 """
 
+import time
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
@@ -1657,3 +1658,53 @@ class TestPushFileToUrl:
         )
 
         mock_sandbox.exec_command.assert_called_once()
+
+
+class TestResolveWsConnInfoEventLoop:
+    """a2a 地址发现不得阻塞事件循环（review P2：k8s 实查 NodePort 曾在
+    本 async 方法协程线程上同步执行——A2A 可选字段的慢/挂必须无法拖住
+    WS 签发，也不能阻塞同循环的其他请求）。"""
+
+    def test_plugin_call_runs_off_event_loop(self, arca_credentials) -> None:
+        import asyncio
+
+        block_seconds = 0.25
+        plugin = MagicMock()
+
+        def _slow_resolve(**kwargs):
+            time.sleep(block_seconds)
+            return MagicMock(
+                ws_url="ws://x",
+                token="t",
+                target="x",
+                expires_at=None,
+                a2a_base_url="http://a2a",
+            )
+
+        plugin.resolve_ws_conn_info = MagicMock(side_effect=_slow_resolve)
+        svc = ArcaPaasService(credentials=arca_credentials, arca_sandbox_plugin=plugin)
+
+        ticks: list[float] = []
+
+        async def _heartbeat() -> None:
+            while True:
+                ticks.append(time.monotonic())
+                await asyncio.sleep(0.0125)
+
+        async def _scenario() -> None:
+            hb = asyncio.create_task(_heartbeat())
+            start = time.monotonic()
+            await svc.resolve_ws_conn_info(
+                paas_device_id="sb-1", port=20003, path="/ws"
+            )
+            elapsed = time.monotonic() - start
+            hb.cancel()
+            return elapsed
+
+        asyncio.run(_scenario())
+        # 阻塞期内心跳必须推进：to_thread 生效 → ~每 12.5ms 一 tick；
+        # 若同步跑在协程线程，整个阻塞期 tick 数 ~1
+        assert len(ticks) >= 6, (
+            f"event loop stalled during blocking plugin call: "
+            f"{len(ticks)} ticks in {block_seconds}s"
+        )

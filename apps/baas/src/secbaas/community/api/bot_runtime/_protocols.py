@@ -27,6 +27,7 @@ from ._models import (
     MessageInfo,
     SessionInfo,
 )
+from ._session_runtime_status import SessionRuntimeStatus
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -352,6 +353,17 @@ class BotRunner(Protocol):
         Returns:
             消息信息列表
         """
+        ...
+
+    async def get_session_runtime_status(
+        self,
+        *,
+        bot_id: str,
+        session_id: str,
+        context: BotChatContext,
+        metadata: dict[str, Any],
+    ) -> SessionRuntimeStatus:
+        """Read current runtime activity through the selected Bot service."""
         ...
 
     async def get_session_info(

@@ -18,7 +18,7 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
-    ManifestDesiredStateCommittedError,
+    ApplyDesiredStateCommittedError,
     McpPermissionDeniedError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneConflictError,
@@ -43,6 +43,9 @@ class _Repository:
         self.manifest_skill_claim_calls: list[dict] = []
         self.manifest_skill_remove_calls: list[dict] = []
         self.restore_calls: list[dict] = []
+
+    def commit_capability_mutation(self, *, mutation, **_kwargs):
+        return mutation()
 
     #: Dependencies the Skill under test declares, mirrored onto the mutation
     #: result the way the real repository fills it under the row lock.
@@ -81,7 +84,7 @@ class _Repository:
         self.uninstall_skill_calls.append(kwargs)
         return self._skill_mutation()
 
-    def claim_manifest_mcp(self, **kwargs) -> DesiredStateMutation:
+    def claim_apply_mcp(self, **kwargs) -> DesiredStateMutation:
         self.manifest_mcp_claim_calls.append(kwargs)
         return replace(
             self._mutation(),
@@ -89,7 +92,7 @@ class _Repository:
             source_transitions=self.manifest_transitions,
         )
 
-    def remove_manifest_mcp(self, **kwargs) -> DesiredStateMutation:
+    def remove_apply_mcp(self, **kwargs) -> DesiredStateMutation:
         self.manifest_mcp_remove_calls.append(kwargs)
         return replace(
             self._mutation(),
@@ -97,13 +100,13 @@ class _Repository:
             source_transitions=self.manifest_transitions,
         )
 
-    def claim_manifest_skill(self, **kwargs) -> DesiredStateMutation:
+    def claim_apply_skill(self, **kwargs) -> DesiredStateMutation:
         self.manifest_skill_claim_calls.append(kwargs)
         return replace(
             self._skill_mutation(), source_transitions=self.manifest_transitions
         )
 
-    def remove_manifest_skill(self, **kwargs) -> DesiredStateMutation:
+    def remove_apply_skill(self, **kwargs) -> DesiredStateMutation:
         self.manifest_skill_remove_calls.append(kwargs)
         return replace(
             self._skill_mutation(), source_transitions=self.manifest_transitions
@@ -370,7 +373,7 @@ async def test_mcp_direct_deactivation_needs_no_marketplace_permission():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method_name", ["activate_mcp", "deactivate_mcp"])
-async def test_platform_default_mcp_refuses_direct_control(method_name: str):
+async def test_direct_mcp_commands_pass_complete_policy_to_transactional_guard(method_name: str):
     repository = _Repository()
     mcp_center = _McpCenter(allowed=True)
     policy = _PlatformDefaultMcpPolicy("mcp.policy")
@@ -380,20 +383,13 @@ async def test_platform_default_mcp_refuses_direct_control(method_name: str):
         platform_default_mcp_policy=policy,
     )
 
-    with pytest.raises(
-        SkillSetControlPlaneConflictError,
-        match="RESOURCE_MANAGED_BY_PLATFORM_POLICY",
-    ):
-        await getattr(service, method_name)(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            actor_id="true-owner",
-            server_code="mcp.policy",
-        )
+    await getattr(service, method_name)(
+        bot_id="bot-1", owner_id="true-owner", actor_id="true-owner", server_code="mcp.policy",
+    )
     assert policy.bots[0]["bot_id"] == "bot-1"
-    assert repository.install_mcp_calls == []
-    assert repository.uninstall_mcp_calls == []
-    assert mcp_center.calls == []
+    calls = repository.install_mcp_calls if method_name == "activate_mcp" else repository.uninstall_mcp_calls
+    assert calls[0]["platform_default_codes"] == frozenset({"mcp.policy"})
+
 
 
 @pytest.mark.asyncio
@@ -791,7 +787,7 @@ async def test_manifest_claim_logs_safe_source_transition(monkeypatch):
         _PlatformDefaultMcpPolicy(), MagicMock(),
     )
 
-    result = await service.claim_manifest_mcp(
+    result = await service.claim_apply_mcp(
         server_code="github",
         config={"headers": {"Authorization": "must-not-be-logged"}},
         bot_id="bot-1",
@@ -823,8 +819,8 @@ async def test_manifest_command_marks_a_post_commit_audit_failure():
         _PlatformDefaultMcpPolicy(), MagicMock(),
     )
 
-    with pytest.raises(ManifestDesiredStateCommittedError):
-        await service.claim_manifest_mcp(
+    with pytest.raises(ApplyDesiredStateCommittedError):
+        await service.claim_apply_mcp(
             server_code="github",
             config=None,
             bot_id="bot-1",

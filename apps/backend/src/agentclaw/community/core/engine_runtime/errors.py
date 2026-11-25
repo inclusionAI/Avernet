@@ -83,6 +83,14 @@ class EngineHistoryDepthExceededError(EngineRuntimeError):
     """
 
 
+class EngineSessionCursorError(EngineRuntimeError):
+    """A source cursor is malformed or belongs to a different query scope."""
+
+
+class EngineSessionScanDepthError(EngineRuntimeError):
+    """Continuing would exceed the bounded session candidate scan depth."""
+
+
 class EngineResourceNotFoundError(EngineRuntimeError):
     """The engine answered 404 — the addressed resource does not exist.
 
@@ -113,6 +121,8 @@ __all__ = [
     "EngineCapabilityUnsupportedError",
     "EngineDeviceNotReadyError",
     "EngineHistoryDepthExceededError",
+    "EngineSessionCursorError",
+    "EngineSessionScanDepthError",
     "EngineResourceNotFoundError",
     "EngineStageNotLiveError",
     "EngineStageReadOnlyError",

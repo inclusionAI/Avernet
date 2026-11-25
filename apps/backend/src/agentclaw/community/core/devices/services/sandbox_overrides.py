@@ -139,10 +139,12 @@ class SandboxOverrides:
                 )
 
     def merged_envs(self, base_envs: dict[str, str]) -> dict[str, str]:
-        """Merge: {**base_envs, **self.envs}. User values override platform defaults."""
+        """Apply user overrides, preserving the platform-owned Bot display name."""
         if not self.envs:
             return dict(base_envs)
-        return {**base_envs, **self.envs}
+        # COSEC: template values cannot impersonate platform creator metadata.
+        overrides = {key: value for key, value in self.envs.items() if key != "TEAMCLAW_BOT_NAME"}
+        return {**base_envs, **overrides}
 
     def to_create_kwargs(self) -> dict:
         """Return non-None fields as kwargs dict for **-unpacking into create_sync_sandbox.

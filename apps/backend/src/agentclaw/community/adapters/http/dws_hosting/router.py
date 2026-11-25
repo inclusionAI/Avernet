@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
 from agentclaw.community.core.system_config.dws_rollout import is_allowed, is_stop
+from agentclaw.community.plugin_api.dws_identity import DwsRolloutIdentity
 from agentclaw.community.di import Injected
 from agentclaw.community.utils.env_utils import get_current_env
 from starlette.concurrency import run_in_threadpool
@@ -42,6 +43,7 @@ async def verify_command(
     body: SignedCommand,
     config: Annotated[DwsManagementConfig, Depends(get_dws_management_config)],
     rollout: SystemConfigServiceProtocol = Injected(SystemConfigServiceProtocol),
+    identity: DwsRolloutIdentity = Injected(DwsRolloutIdentity),
 ):
     if not config.key:
         raise HTTPException(503, "management_verifier_unavailable")
@@ -63,7 +65,7 @@ async def verify_command(
     ):
         raise HTTPException(403, "invalid_management_proof")
     allowed = is_stop(value.operation, value.data) or await run_in_threadpool(
-        is_allowed, rollout, value.actor_id, get_current_env()
+        is_allowed, rollout, value.actor_id, get_current_env(), identity
     )
     return {"verified": allowed}
 
@@ -73,6 +75,7 @@ async def runtime_eligibility(
     body: SignedCommand,
     config: Annotated[DwsManagementConfig, Depends(get_dws_management_config)],
     rollout: SystemConfigServiceProtocol = Injected(SystemConfigServiceProtocol),
+    identity: DwsRolloutIdentity = Injected(DwsRolloutIdentity),
 ):
     # COSEC: a previously signed enable command is a read-only credential for
     # this one owner/Bot's rollout status, never a replayable management command.
@@ -95,6 +98,6 @@ async def runtime_eligibility(
         raise HTTPException(403, "invalid_runtime_proof")
     return {
         "allowed": await run_in_threadpool(
-            is_allowed, rollout, value.actor_id, get_current_env()
+            is_allowed, rollout, value.actor_id, get_current_env(), identity
         )
     }

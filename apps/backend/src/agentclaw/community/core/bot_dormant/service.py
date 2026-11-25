@@ -879,6 +879,9 @@ class DormantBotService:
                     alive.result,
                     c.bot_id,
                 )
+            error_msg = None
+            if alive.error_type:
+                error_msg = f"check_alive exhausted: {alive.error_type}"
             self._write_audit(
                 session,
                 run_id=run_id,
@@ -887,6 +890,7 @@ class DormantBotService:
                 check_result="unknown",
                 action_taken="skipped",
                 dry_run=dry_run,
+                error_msg=error_msg,
             )
             summary.skipped += 1
             return

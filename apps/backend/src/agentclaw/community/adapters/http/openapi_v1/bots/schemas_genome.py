@@ -4,14 +4,15 @@
 (``core/bot_genome/spec_models.py``, ``patch_models.py``): one set of
 classes for the wire and the registry, mirroring
 ``api-contracts/genome/v1/*.schema.json`` with the contract's own patterns.
-The compiled document a promotion carries stays a JSON object: its shape is
-the Manifest's, which that module owns.
+A promotion carries no document: the revision compiles into the apply
+engine's desired state at delivery time, and the row records the delivery's
+answer only.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
@@ -237,6 +238,12 @@ class GenomeRefPayload(BaseModel):
     moved_at: UtcDatetime = Field(description="When it last moved, UTC with a `Z` suffix.")
     moved_by: ProvenancePayload = Field(description="Who moved it.")
     reason: str | None = Field(default=None, description="Why, as the mover said.")
+    labels: list[str] = Field(
+        default_factory=list,
+        description="What its last move says about it. Today only `partial`: on `active`, the promotion that moved it "
+        "delivered only part of the revision (its apply ended `PARTIAL`); on `previous`, the label it had as `active`, "
+        "carried along when the next promotion moved it there. Empty otherwise.",
+    )
 
 
 class GenomeRefsPayload(BaseModel):
@@ -268,7 +275,7 @@ class ContentStored(BaseModel):
 
 
 class PromoteRequest(BaseModel):
-    """Move `active` to a revision and hand it to delivery."""
+    """Deliver a revision to the bot; `active` moves to it once the delivery ends."""
 
     revision: str = Field(description=_REV_DESCRIPTION + " `previous` goes one step back.")
     expected_revision: str | None = Field(
@@ -278,45 +285,33 @@ class PromoteRequest(BaseModel):
 
 
 class PromotionPayload(BaseModel):
-    """One promotion as recorded."""
+    """One promotion as recorded: the delivery it started and, once that ended, the refs it moved."""
 
     id: str = Field(description="The promotion's id.")
     ref: str = Field(
-        description="The ref it moved. Always `active` today: promotion moves `active` (and `previous` behind it); "
+        description="The ref it moves once its delivery ends. Always `active` today (and `previous` behind it); "
         "canary refs are RSI-16."
     )
-    revision: str = Field(description="The revision it moved the ref to.")
+    revision: str = Field(description="The revision it delivers.")
     from_revision: str | None = Field(description="Where the ref pointed before; null for a bot's first promotion.")
-    document_digest: str = Field(
-        description="`sha256:<hex64>` of the compiled document's canonical JSON (the revision rendered in the Manifest "
-        "v1 field layout, contract §7); the apply report repeats it, which is how the registry later tells "
-        "which revision a bot runs."
-    )
     going_back: bool = Field(
         description="True when the target had been promoted before and is not the current `active`."
     )
     actor: ProvenancePayload = Field(description="Who promoted.")
     reason: str = Field(description="Why, as the actor said.")
-    status: Literal["applying", "applied", "apply_failed"] = Field(
-        description="`applying` while delivery starts, then `applied` or `apply_failed`."
+    status: Literal["pending", "applying", "applied", "applied_partial", "apply_failed"] = Field(
+        description="`pending` while its delivery starts, `applying` while the apply runs (the refs have not moved), "
+        "then `applied` (the refs moved), `applied_partial` (the refs moved; part of the revision was not delivered "
+        "and `active` is labelled `partial`) or `apply_failed` (nothing moved)."
     )
-    apply_kind: Literal["pending", "direct"] = Field(
-        description="Which delivery seam took the promotion: `pending` (RSI-03: no delivery exists yet, every "
-        "promotion is refused before the refs move) or `direct` (RSI-04: direct delivery into the apply "
-        "engine)."
-    )
-    apply_reference: str | None = Field(
-        description="The seam's handle for the delivery it started, an apply id such as "
-        "`0123456789abcdef0123456789abcdef`; it is what `applied_revision` joins the bot's last apply on. "
-        "Null when delivery did not start."
+    apply_id: str | None = Field(
+        description="The apply run delivering it (read its report under the bot's applies); null until it started."
     )
     apply_detail: str = Field(
-        description="One sentence from the seam on how the start went, e.g. `started`; a failure names the error type "
-        "only, never its text."
+        description="One line on how the delivery went, e.g. `apply 3f…: applied` or `apply 3f…: 1 entry not "
+        "delivered: skills/refund-policy (failed)`; a failure names the error type only, never its text."
     )
-    created_at: UtcDatetime = Field(description="When the refs moved, UTC with a `Z` suffix.")
-    document: dict[str, Any] | None = Field(
-        default=None,
-        description="The compiled document the promotion recorded (the revision in the Manifest v1 field layout, "
-        "contract §7); present on a single promotion read, null in listings.",
+    created_at: UtcDatetime = Field(description="When the promotion was asked for, UTC with a `Z` suffix.")
+    settled_at: UtcDatetime | None = Field(
+        description="When its delivery ended and it took its final status, UTC with a `Z` suffix; null while in flight."
     )

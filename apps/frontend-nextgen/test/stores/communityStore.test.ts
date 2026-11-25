@@ -12,6 +12,8 @@ const topic = {
   createdAt: '2026-10-06T09:00:00Z',
   isMine: true,
   canClose: true,
+  canEdit: true,
+  canDelete: true,
 };
 
 describe('community store', () => {
@@ -27,12 +29,15 @@ describe('community store', () => {
     expect(useCommunityStore.getState().selectedTopic).toMatchObject({ status: 'closed', canClose: false });
   });
 
-  test('changing scope and query resets pagination', () => {
+  test('changing scope, type and query resets pagination', () => {
     useCommunityStore.setState({ offset: 20 });
     useCommunityStore.getState().setQuery('bot');
     expect(useCommunityStore.getState()).toMatchObject({ query: 'bot', offset: 0 });
     useCommunityStore.setState({ offset: 20 });
     useCommunityStore.getState().setScope('mine');
     expect(useCommunityStore.getState()).toMatchObject({ scope: 'mine', offset: 0 });
+    useCommunityStore.setState({ offset: 20 });
+    useCommunityStore.getState().setTopicType('share');
+    expect(useCommunityStore.getState()).toMatchObject({ topicType: 'share', offset: 0 });
   });
 });

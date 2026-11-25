@@ -62,6 +62,8 @@ pub struct BotQueryByIdsCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotQueryEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_card: Option<Value>,
     pub bot_uuid: String,
     pub capabilities: BotCapabilities,
     pub visibility: String,
@@ -78,6 +80,14 @@ pub struct BotQueryEntry {
     pub friend_check_in_strategy: String,
     #[serde(default)]
     pub is_friend: Option<bool>,
+    /// Mine-page sampled authority relation (bot-authority
+    /// spec §8 mine row) of the calling Human on THIS row:
+    /// `owner` | `manager` for physical Bots, `self` for
+    /// the caller's own Human self row. Present only on the
+    /// legacy mine page; every other list omits the field,
+    /// and the sampled value is not an authorization result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_relation: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,6 +178,8 @@ pub struct OrganizationMemberSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotDiscoveryEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_card: Option<Value>,
     pub bot_uuid: String,
     pub capabilities: BotCapabilities,
     pub visibility: String,
@@ -202,6 +214,8 @@ pub struct BotDetailCommand {
 /// Bot detail shape returned by bot detail endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BotDetailResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_card: Option<Value>,
     pub bot_uuid: String,
     pub capabilities: BotCapabilities,
     pub status: ActorStatus,

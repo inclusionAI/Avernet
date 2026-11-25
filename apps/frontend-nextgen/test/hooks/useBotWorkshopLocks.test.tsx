@@ -28,6 +28,25 @@ test('获取成功刷新后进入草稿编辑', async () => {
     '/bot-workshop/detail?type=edit&id=b1&runtime_stage=draft&owner_id=owner-1',
   );
 });
+test('草稿服务 Coding Bot 获取锁后进入 Coding Chat 而不是通用编辑页', async () => {
+  (botEditLockService.claim as jest.Mock).mockResolvedValue(undefined);
+  const load = jest.fn().mockResolvedValue(undefined);
+  const codingBot = mapBotDto({
+    bot_id: 'coding-bot',
+    owner_entity_id: 'owner-1',
+    bot_type: 'service',
+    display_state: 'service_draft',
+    engine: 'claude_code',
+    template_type: 'generalCC',
+  }).item;
+  const { result } = renderHook(() => useBotWorkshopLocks(load));
+
+  await act(async () => result.current.claimLock(codingBot));
+
+  expect(load).toHaveBeenCalledWith({ silent: true });
+  expect(history.push).toHaveBeenCalledWith('/coding/coding-chat?botId=coding-bot&ownerId=owner-1');
+});
+
 test('抢锁失败同步最新状态但不跳转', async () => {
   (botEditLockService.claim as jest.Mock).mockRejectedValue(new Error('被抢先持锁'));
   const load = jest.fn().mockResolvedValue(undefined);
@@ -43,6 +62,28 @@ test('释放后同步状态并留在列表', async () => {
   const load = jest.fn().mockResolvedValue(undefined);
   const { result } = renderHook(() => useBotWorkshopLocks(load));
   await act(async () => result.current.releaseLock(bot));
+  expect(load).toHaveBeenCalledWith({ silent: true });
+  expect(history.push).not.toHaveBeenCalled();
+});
+
+test.each(['running', 'prestable', 'failed'] as const)('%s 态获取锁后仅刷新，不跳转编辑页', async (lifecycle) => {
+  (botEditLockService.claim as jest.Mock).mockResolvedValue(undefined);
+  const load = jest.fn().mockResolvedValue(undefined);
+  const target = { ...bot, lifecycle };
+  const { result } = renderHook(() => useBotWorkshopLocks(load));
+  await act(async () => result.current.claimLock(target));
+  expect(botEditLockService.claim).toHaveBeenCalledWith(target);
+  expect(load).toHaveBeenCalledWith({ silent: true });
+  expect(history.push).not.toHaveBeenCalled();
+});
+
+test('运行态释放锁后刷新列表，不跳转编辑页', async () => {
+  (botEditLockService.release as jest.Mock).mockResolvedValue(undefined);
+  const load = jest.fn().mockResolvedValue(undefined);
+  const target = { ...bot, lifecycle: 'running' as const, lock: { status: 'mine' as const } };
+  const { result } = renderHook(() => useBotWorkshopLocks(load));
+  await act(async () => result.current.releaseLock(target));
+  expect(botEditLockService.release).toHaveBeenCalledWith(target);
   expect(load).toHaveBeenCalledWith({ silent: true });
   expect(history.push).not.toHaveBeenCalled();
 });

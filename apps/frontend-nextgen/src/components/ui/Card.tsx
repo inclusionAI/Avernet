@@ -25,5 +25,5 @@ export const CardContent = ({ className, ...props }: React.HTMLAttributes<HTMLDi
   <div className={cn('p-5', className)} {...props} />
 );
 export const CardFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn('flex items-center justify-end gap-2 border-t border-border p-4', className)} {...props} />
+  <div className={cn('flex items-center justify-end gap-2 border-t border-divider p-4', className)} {...props} />
 );

@@ -3,7 +3,7 @@ import { MarkdownReport } from '@/pages/EvolutionFactory/OutputPrimitives';
 import '@testing-library/jest-dom';
 import { render, screen } from '@testing-library/react';
 
-jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
+jest.mock('@umijs/max', () => ({ history: { push: jest.fn() }, useParams: () => ({}) }));
 
 test('报告保留 Markdown 标题、表格、列表、代码与安全链接', () => {
   const { container } = render(<MarkdownReport content={[

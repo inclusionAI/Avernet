@@ -1,3 +1,4 @@
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import type {
   BotSearchMode,
   PublicBot,
@@ -19,12 +20,13 @@ export interface PublicBotTransport {
 }
 export interface BotProfileTransport {
   bot_id: string;
-  bot_uuid?: string;
+  bot_uuid?: string | null;
   bot_name: string;
-  owner_name: string;
-  description?: string;
-  engine_name?: string;
+  owner_name?: string | null;
+  description?: string | null;
+  engine_name?: string | null;
   capabilities?: Array<{ capability_id: string; display_name: string }>;
+  skills?: Array<{ skill_id: string; display_name: string }>;
   [key: string]: unknown;
 }
 export interface PublicGroupTransport {
@@ -67,6 +69,7 @@ export interface CollaborationBotTransport {
 }
 
 export interface PublicBotCatalogTransport {
+  avatar_url?: string | null;
   bot_id?: string;
   bot_uuid?: string;
   entity_id?: string;
@@ -74,8 +77,14 @@ export interface PublicBotCatalogTransport {
   name?: string;
   owner_name?: string;
   is_friend?: boolean;
+  /** Bot→Bot 协作可见性（BCS visibility，public/protected/private）。 */
+  visibility?: string;
+  /** 人类用户可见性（BCS user_visibility，public/protected/private）。 */
+  user_visibility?: string;
   /** 智能搜索 Discovery 返回的推荐理由；short_profile 用于卡片「Profile」行。 */
   recommendation?: { short_profile?: string };
+  /** Bot 生命周期状态（'ACTIVE' 为可用；老版分享链接落地反查的可用性兜底依据）。 */
+  status?: string;
 }
 
 export interface CollaborationGroupDetailTransport {
@@ -161,9 +170,14 @@ export function mapPublicBotCatalogDto(value: PublicBotCatalogTransport, viewerU
   const friendRequestBotId = resolveFriendRequestBotId(value);
   const shortProfile = value.recommendation?.short_profile?.trim() || undefined;
   const isOwnedByLoggedInUser = Boolean(viewerUserId?.trim() && value.entity_id?.trim() === viewerUserId.trim());
+  const userPublic = value.user_visibility === 'public';
+  const botPublic = value.visibility === 'public';
+  // 两维独立公开设置派生分享链接的受众类型：仅单一维度公开时才携带（两类均公开时任意身份可见，无需干预）。
+  const audience = userPublic && !botPublic ? ('user' as const) : botPublic && !userPublic ? ('bot' as const) : undefined;
   return {
     id,
     name: value.name?.trim() || '未命名 Bot',
+    avatarUrl: resolveBotAvatarUrl(value.avatar_url, value.bot_id?.trim() || id),
     ownerName: value.owner_name?.trim() || '未公开',
     description: value.description?.trim() ?? '',
     capabilities: [],
@@ -171,6 +185,8 @@ export function mapPublicBotCatalogDto(value: PublicBotCatalogTransport, viewerU
     ...(isOwnedByLoggedInUser ? { isOwnedByLoggedInUser: true } : {}),
     ...(friendRequestBotId && friendRequestBotId !== id ? { friendRequestBotId } : {}),
     ...(shortProfile ? { shortProfile } : {}),
+    ...(value.status?.trim() ? { status: value.status.trim() } : {}),
+    ...(audience ? { audience } : {}),
   };
 }
 
@@ -272,21 +288,30 @@ export function mapBotTransport(value: PublicBotTransport): PublicBot {
 
 export function mapBotProfileTransport(value: BotProfileTransport): PublicBotProfile {
   return {
-    id: nonEmpty(value.bot_uuid, value.bot_id),
+    id: nonEmpty(value.bot_uuid ?? undefined, value.bot_id),
     name: value.bot_name,
-    ownerName: value.owner_name,
+    // 后端 BotOwner 展示名缺失（BCS-only）时序列化为 null/缺省，统一回退「未公开」。
+    ownerName: value.owner_name ?? '未公开',
     description: value.description ?? '',
-    engine: value.engine_name,
+    engine: value.engine_name ?? undefined,
     capabilities: Array.isArray(value.capabilities)
       ? value.capabilities
           .filter((item) => item?.capability_id && item?.display_name)
           .map((item) => ({ id: item.capability_id, name: item.display_name }))
+      : [],
+    // 已公开技能（profile 端点 skills；与 MCP 能力同口径、区分类别展示）。
+    skills: Array.isArray(value.skills)
+      ? value.skills
+          .filter((item) => item?.skill_id && item?.display_name)
+          .map((item) => ({ id: item.skill_id, name: item.display_name }))
       : [],
   };
 }
 
 /**
  * 分享深链只依赖公开 Catalog 摘要。Catalog 不提供能力 ID/引擎信息，不能伪造成完整画像。
+ * BCS 候选摘要在 Backend 未配置/增强失败时也由此构建：bcsStatus 原样保留（画像增强
+ * 不得用 Backend Catalog 生命周期覆盖它）。
  */
 export function mapPublicBotCatalogSummaryToProfile(bot: PublicBot): PublicBotProfile {
   return {
@@ -297,7 +322,9 @@ export function mapPublicBotCatalogSummaryToProfile(bot: PublicBot): PublicBotPr
     ...(bot.friendRequestBotId ? { friendRequestBotId: bot.friendRequestBotId } : {}),
     ...(bot.isOwnedByLoggedInUser ? { isOwnedByLoggedInUser: true } : {}),
     ...(bot.shortProfile ? { shortProfile: bot.shortProfile } : {}),
+    ...(bot.bcsStatus ? { bcsStatus: bot.bcsStatus } : {}),
     capabilities: [],
+    skills: [],
   };
 }
 
@@ -342,5 +369,9 @@ export function parseSquareDeepLink(search: string, expected: SquareResource): S
   const resource = params.get('resource');
   const id = params.get('id')?.trim();
   const searchHint = params.get('name')?.trim();
-  return resource === expected && id ? { resource, id, ...(searchHint ? { searchHint } : {}) } : null;
+  const audienceParam = params.get('audience')?.trim();
+  const audience = audienceParam === 'user' || audienceParam === 'bot' ? audienceParam : undefined;
+  return resource === expected && id
+    ? { resource, id, ...(searchHint ? { searchHint } : {}), ...(audience ? { audience } : {}) }
+    : null;
 }

@@ -10,16 +10,28 @@ from engine.community.kernel.dws_execution import (
     HostingDecision,
     RunObservation,
     GatewayWitness,
+    HostingReview,
+    HostingScope,
 )
 from engine.community.kernel.dws_hosting import Turn
 
 
 class HostingEngine(Protocol):
+    async def classify_scope(self, data: dict, prompt: str) -> HostingScope:
+        """Isolated, tool-free JSON task; never use the reply session or send.
+
+        Missing capability, invalid output and timeouts fail closed. Only allow
+        permits agent execution. Message content is data, not authorization.
+        """
+        ...
+
     def execute(self, request: AgentInvocation) -> AsyncIterator[EngineUpdate]:
         """One dispatch only; accepted is not terminal. Never automatically replay."""
         ...
 
-    async def inspect_run(self, run_id: str, *, gateway_witness: GatewayWitness | None = None) -> RunObservation:
+    async def inspect_run(
+        self, run_id: str, *, gateway_witness: GatewayWitness | None = None
+    ) -> RunObservation:
         """Read-only terminal/restarted-process evidence; never reconstruct a reply.
 
         A persisted authenticated local process witness may prove a restart even
@@ -31,6 +43,9 @@ class HostingEngine(Protocol):
     async def review_reply(self, request: AgentInvocation) -> str:
         """Tool-free review in an isolated session; return a terminal result envelope.
 
+        Reviews both reply and escalation candidates. Core validates verdict,
+        reason_code and a bounded reason; a scope exclusion suppresses both peer
+        replies and owner notices. Diagnostics never authorize replacement text.
         No ordinary conversation history, tools, sending, or fallback to a
         tool-enabled agent. Unsupported engines must raise ExecutionError.
         """
@@ -48,7 +63,19 @@ class HostingFormatRepair(Protocol):
 
 
 class HostingExecutionStore(Protocol):
-    def review_context(self, binding_id: str, turn_id: str) -> tuple[dict[str, str], ...]:
+    def record_scope(
+        self, binding_id: str, turn_id: str, scope: HostingScope
+    ) -> ExecutionRecord:
+        """Persist eligibility before dispatch; exclusions finish silently.
+
+        Unknown eligibility is retained for diagnosis, never an owner notice.
+        Revoked control epochs cancel the execution, including after inference.
+        """
+        ...
+
+    def review_context(
+        self, binding_id: str, turn_id: str
+    ) -> tuple[dict[str, str], ...]:
         """Bounded prior incoming/sent pairs in this conversation and control epoch.
 
         Excludes unconfirmed sends, owner notices and current/future turns.
@@ -82,16 +109,32 @@ class HostingExecutionStore(Protocol):
         ...
 
     def resolve(
-        self, binding_id: str, turn_id: str, decision: HostingDecision
+        self,
+        binding_id: str,
+        turn_id: str,
+        decision: HostingDecision,
+        *,
+        review: HostingReview | None = None,
     ) -> ExecutionRecord:
-        """Fence controls again. Reply/escalate remain blocked pending future outbox."""
+        """Fence controls and atomically persist internal review with the decision.
+
+        Review diagnostics must not be exposed in public projections or notices.
+        Reply/escalate remain blocked pending the outbox.
+        """
         ...
 
     def require_manual(
-        self, binding_id: str, turn_id: str, reason: str, *, ended: bool
+        self,
+        binding_id: str,
+        turn_id: str,
+        reason: str,
+        *,
+        ended: bool,
+        review: HostingReview | None = None,
     ) -> ExecutionRecord:
         """Known-ended failure can release execution; unknown runs stay isolated.
 
         This persists a manual task, not a claim that the owner was notified.
+        Optional review diagnostics commit atomically and remain internal.
         """
         ...

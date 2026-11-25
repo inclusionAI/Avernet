@@ -1,6 +1,7 @@
 """Opt-in supervised hosting. No registration in the interactive chat lifecycle."""
 
 import asyncio
+import logging
 from collections.abc import Callable
 
 from engine.community.core.dws_hosting.connection import DwsIntake
@@ -13,6 +14,7 @@ from engine.community.kernel.dws_runtime import (
     Resolution,
     RuntimePolicy,
     RuntimeStatus,
+    RolloutUnavailable,
 )
 from engine.community.plugin_api.dws_connection import HostingRecoveryStore
 from engine.community.plugin_api.dws_delivery import HostingOutbox
@@ -51,11 +53,27 @@ class HostingRuntime:
         )
         self.clock_ms, self.policy = clock_ms, policy
         self.rollout = rollout
+        self._rollout_unavailable = False
 
     async def require_rollout(self):
-        if self.rollout is None or await self.rollout.allowed():
+        try:
+            allowed = self.rollout is None or await self.rollout.allowed()
+        except RolloutUnavailable:
+            if not self._rollout_unavailable:
+                logging.getLogger(__name__).warning(
+                    "DWS rollout check unavailable; work paused, consent unchanged"
+                )
+            self._rollout_unavailable = True
+            return False
+        if allowed:
+            if self._rollout_unavailable:
+                logging.getLogger(__name__).info("DWS rollout check recovered")
+            self._rollout_unavailable = False
             return True
         # Disable durably before cancelling work; regrant must not auto-enable.
+        logging.getLogger(__name__).warning(
+            "DWS rollout eligibility denied; disabling hosting"
+        )
         await durable_call(
             self.state.set_enabled,
             self.binding.binding_id,
@@ -65,7 +83,8 @@ class HostingRuntime:
         return False
 
     async def _rollout_watch(self):
-        while await self.require_rollout():
+        while (await self.status(self.binding.owner_id)).enabled:
+            await self.require_rollout()
             await asyncio.sleep(30)
 
     def _owner(self, actor_id):
@@ -170,7 +189,8 @@ class HostingRuntime:
             if not status.enabled:
                 return
             if not await self.require_rollout():
-                return
+                await asyncio.sleep(self.policy.tick_seconds)
+                continue
             if status.intake_ready:
                 if deliver:
                     await self.delivery.run_once(self.binding.binding_id)
@@ -191,9 +211,13 @@ class HostingRuntime:
             status = await durable_call(self.operations.status, self.binding)
             if not status.enabled:
                 return
-            if not await self.require_rollout():
-                return
             await durable_call(self.recovery.block_intake, self.binding.binding_id)
+            while not await self.require_rollout():
+                if not (await self.status(self.binding.owner_id)).enabled:
+                    return
+                await asyncio.sleep(max(1, self.policy.tick_seconds))
+            if not (await self.status(self.binding.owner_id)).enabled:
+                return
             tasks = []
             try:
                 await durable_call(

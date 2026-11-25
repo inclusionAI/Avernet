@@ -27,7 +27,7 @@ class TestMySQLWorkerProfileBindingStoreContract:
     def test_module_imports_without_connecting(self):
         """Test that the module can be imported without database connection."""
         import importlib
-        import src.infra.public.stores.mysql_worker_profile_binding_store as store_module
+        import app.infra.public.stores.mysql_worker_profile_binding_store as store_module
 
         # Reload to ensure no connection happens on import
         importlib.reload(store_module)
@@ -37,13 +37,13 @@ class TestMySQLWorkerProfileBindingStoreContract:
 
     def test_store_constructs_without_connecting(self):
         """Test that the store can be constructed without database connection."""
-        from src.infra.public.stores.mysql_worker_profile_binding_store import (
+        from app.infra.public.stores.mysql_worker_profile_binding_store import (
             MySQLWorkerProfileBindingStore,
         )
 
         # Connection settings belong to the pool; constructing a store is lazy.
         with patch(
-            "src.infra.public.database.mysql_connection_pool.MySQLConnectionPoolProvider"
+            "app.infra.public.database.mysql_connection_pool.MySQLConnectionPoolProvider"
         ) as pool_factory:
             MySQLWorkerProfileBindingStore()
             pool_factory.return_value.get_connection.assert_not_called()
@@ -57,7 +57,7 @@ class TestMySQLWorkerProfileBindingStoreContract:
 
     def test_required_methods_exist(self):
         """Test that all required methods exist."""
-        from src.infra.public.stores.mysql_worker_profile_binding_store import (
+        from app.infra.public.stores.mysql_worker_profile_binding_store import (
             MySQLWorkerProfileBindingStore,
         )
 
@@ -105,7 +105,7 @@ class TestMySQLWorkerProfileBindingStoreContract:
             [
                 sys.executable,
                 "-c",
-                "from src.infra.public.stores.mysql_worker_profile_binding_store import MySQLWorkerProfileBindingStore; print('OK')",
+                "from app.infra.public.stores.mysql_worker_profile_binding_store import MySQLWorkerProfileBindingStore; print('OK')",
             ],
             cwd=str(open_core_root),
             env=env,
@@ -125,11 +125,11 @@ class TestMySQLWorkerProfileBindingStoreContract:
             "mist",
             "mist_client",
             "layotto",
-            "src.infra.config.zdas_settings",
-            "src.infra.adapters.zdas_",
-            "src.infra.vectorstores.qdrant_zdas_vector_store",
-            "src.infra.vectorstores.faiss_zdas_vector_store",
-            "src.infra.vectorstore_backends.zdas_vector_persistence_backend",
+            "app.infra.config.zdas_settings",
+            "app.infra.adapters.zdas_",
+            "app.infra.vectorstores.qdrant_zdas_vector_store",
+            "app.infra.vectorstores.faiss_zdas_vector_store",
+            "app.infra.vectorstore_backends.zdas_vector_persistence_backend",
         ]
         for keyword in forbidden:
             assert keyword not in result.stdout.lower()
@@ -137,10 +137,10 @@ class TestMySQLWorkerProfileBindingStoreContract:
 
     def test_no_fallback_to_inmemory_or_sqlite(self):
         """Test that the store does not fallback to InMemory or SQLite."""
-        from src.infra.public.stores.mysql_worker_profile_binding_store import (
+        from app.infra.public.stores.mysql_worker_profile_binding_store import (
             MySQLWorkerProfileBindingStore,
         )
-        from src.domain.models.worker_source_info import WorkerSourceType
+        from app.domain.models.worker_source_info import WorkerSourceType
 
         store = MySQLWorkerProfileBindingStore()
 
@@ -160,10 +160,10 @@ class TestMySQLWorkerProfileBindingStoreContract:
 
     def test_fail_fast_without_mysql_config(self):
         """Test that methods fail fast with clear MySQL error when DB is not configured."""
-        from src.infra.public.stores.mysql_worker_profile_binding_store import (
+        from app.infra.public.stores.mysql_worker_profile_binding_store import (
             MySQLWorkerProfileBindingStore,
         )
-        from src.domain.models.worker_source_info import WorkerSourceType
+        from app.domain.models.worker_source_info import WorkerSourceType
 
         pool = MagicMock()
         failure = RuntimeError("Failed to initialize MySQL connection pool")
@@ -206,7 +206,7 @@ class TestMySQLWorkerProfileBindingStoreIntegration:
     @pytest.fixture
     def mysql_store(self):
         """Create MySQL store with configuration from environment."""
-        from src.infra.public.stores.mysql_worker_profile_binding_store import (
+        from app.infra.public.stores.mysql_worker_profile_binding_store import (
             MySQLWorkerProfileBindingStore,
         )
 
@@ -235,7 +235,7 @@ class TestMySQLWorkerProfileBindingStoreIntegration:
 
     def test_bind_profile_creates_binding(self, mysql_store):
         """Test that bind_profile creates a binding."""
-        from src.domain.models.worker_source_info import WorkerSourceType
+        from app.domain.models.worker_source_info import WorkerSourceType
 
         worker_id = "test-worker-1"
         profile_key = "test-profile-1"
@@ -251,7 +251,7 @@ class TestMySQLWorkerProfileBindingStoreIntegration:
 
     def test_list_bindings_by_worker_returns_binding(self, mysql_store):
         """Test that list_bindings_by_worker returns bindings."""
-        from src.domain.models.worker_source_info import WorkerSourceType
+        from app.domain.models.worker_source_info import WorkerSourceType
 
         worker_id = "test-worker-2"
         profile_key = "test-profile-2"
@@ -265,7 +265,7 @@ class TestMySQLWorkerProfileBindingStoreIntegration:
 
     def test_get_binding_by_profile_key_returns_binding(self, mysql_store):
         """Test that get_binding_by_profile_key returns binding."""
-        from src.domain.models.worker_source_info import WorkerSourceType
+        from app.domain.models.worker_source_info import WorkerSourceType
 
         worker_id = "test-worker-3"
         profile_key = "test-profile-3"
@@ -280,7 +280,7 @@ class TestMySQLWorkerProfileBindingStoreIntegration:
 
     def test_set_active_profile_activates_selected_and_deactivates_previous(self, mysql_store):
         """Test that set_active_profile atomically activates selected and deactivates previous."""
-        from src.domain.models.worker_source_info import WorkerSourceType
+        from app.domain.models.worker_source_info import WorkerSourceType
 
         worker_id = "test-worker-4"
         profile_key_1 = "test-profile-4a"
@@ -316,7 +316,7 @@ class TestMySQLWorkerProfileBindingStoreIntegration:
 
     def test_get_active_binding_returns_active_binding(self, mysql_store):
         """Test that get_active_binding returns the active binding."""
-        from src.domain.models.worker_source_info import WorkerSourceType
+        from app.domain.models.worker_source_info import WorkerSourceType
 
         worker_id = "test-worker-5"
         profile_key = "test-profile-5"
@@ -332,7 +332,7 @@ class TestMySQLWorkerProfileBindingStoreIntegration:
 
     def test_unbind_profile_removes_binding(self, mysql_store):
         """Test that unbind_profile deactivates binding."""
-        from src.domain.models.worker_source_info import WorkerSourceType
+        from app.domain.models.worker_source_info import WorkerSourceType
 
         worker_id = "test-worker-6"
         profile_key = "test-profile-6"
@@ -355,7 +355,7 @@ class TestMySQLWorkerProfileBindingStoreIntegration:
 
     def test_duplicate_binding_does_not_create_duplicate_rows(self, mysql_store):
         """Test that binding the same profile twice does not create duplicate rows."""
-        from src.domain.models.worker_source_info import WorkerSourceType
+        from app.domain.models.worker_source_info import WorkerSourceType
 
         worker_id = "test-worker-7"
         profile_key = "test-profile-7"

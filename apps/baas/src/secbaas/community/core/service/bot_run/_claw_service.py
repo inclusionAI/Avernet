@@ -11,7 +11,7 @@ Design: 每个 API 方法按 binding_info 从连接池获取已握手的 client�
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -27,6 +27,7 @@ from secbaas.community.api.bot_runtime import (
     MessageInfo,
     SessionInfo,
     SessionNotFoundError,
+    SessionRuntimeStatus,
 )
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.logger import get_logger
@@ -238,7 +239,9 @@ class ClawBotService(BotService):
         url = self._build_ws_url(sandbox_id, engine_type)
         headers = self._get_headers(sandbox_id)
 
-        client = await self._client_pool.get(sandbox_id, url, headers)
+        client = await self._client_pool.get(
+            sandbox_id, url, headers, token_minter=self._token_minter_for(sandbox_id)
+        )
 
         try:
             auth_token = context.build_auth_token() if context else None
@@ -304,7 +307,9 @@ class ClawBotService(BotService):
         url = self._build_ws_url(sandbox_id, engine_type)
         headers = self._get_headers(sandbox_id)
 
-        client = await self._client_pool.get(sandbox_id, url, headers)
+        client = await self._client_pool.get(
+            sandbox_id, url, headers, token_minter=self._token_minter_for(sandbox_id)
+        )
 
         auth_token = context.build_auth_token() if context else None
         app_id = context.app_id if context else None
@@ -367,7 +372,9 @@ class ClawBotService(BotService):
         url = self._build_ws_url(sandbox_id, engine_type or "openclaw")
         headers = self._get_headers(sandbox_id)
 
-        client = await self._client_pool.get(sandbox_id, url, headers)
+        client = await self._client_pool.get(
+            sandbox_id, url, headers, token_minter=self._token_minter_for(sandbox_id)
+        )
 
         try:
             auth_token = context.build_auth_token() if context else None
@@ -429,6 +436,31 @@ class ClawBotService(BotService):
             raise
         except Exception as e:
             raise BotServiceError(f"Failed to get messages: {e}") from e
+
+    async def get_session_runtime_status(
+        self,
+        *,
+        session_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+    ) -> SessionRuntimeStatus:
+        """Observe an existing run without creating a session or sending a message."""
+        if binding_info.engine_type != "openclaw":
+            return SessionRuntimeStatus(
+                session_id=session_id,
+                found=False,
+                reason="UNSUPPORTED_ENGINE",
+            )
+        try:
+            if binding_info.sandbox_id is None:
+                raise BotServiceError(
+                    "ClawBotService requires sandbox_id in binding_info."
+                )
+            client = self._create_session_client(binding_info.sandbox_id)
+            async with client:
+                return await client.get_session_runtime_status(session_id)
+        except Exception as exc:
+            raise BotServiceError("Runtime observation request failed") from exc
 
     async def get_session(
         self,
@@ -550,7 +582,11 @@ class ClawBotService(BotService):
 
         try:
             client = await self._client_pool.get(
-                sandbox_id, url, headers, session_key=session_id
+                sandbox_id,
+                url,
+                headers,
+                session_key=session_id,
+                token_minter=self._token_minter_for(sandbox_id),
             )
 
             # 注意：chat.abort 的 run_id 是引擎侧 run 标识，与 baas_bot_run.run_id
@@ -749,6 +785,20 @@ class ClawBotService(BotService):
             str: The target path for HTTP requests.
         """
         return f"ARCA_{sandbox_id}:{self._config.adapter_port}"
+
+    def _token_minter_for(self, sandbox_id: str) -> Callable[[], Awaitable[str]]:
+        """后台交互答复派发的按需续签闭包（评审 P2）。
+
+        绑定本服务真实的签发入口（与 _get_headers 同一条
+        generate_proxy_token 管线），不做任何池 key 形态解析；直连/
+        无代理凭证场景返回空串，由客户端的空值守卫保持既有值。
+        """
+
+        async def _remint() -> str:
+            target = self._get_path_target(sandbox_id)
+            return self._secret_store.generate_proxy_token(target=target)
+
+        return _remint
 
     def _get_headers(self, sandbox_id: str) -> dict[str, Any]:
         """Get headers for HTTP requests.

@@ -12,14 +12,19 @@ cycle), so everything both sides need lives here.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Callable, Dict, Optional
+from functools import wraps
+from typing import Any, Callable, Dict, Iterator, Optional
 
 from agentclaw.community.core.bot_management.errors import BotTemplateInvalidError
 from agentclaw.community.core.workspace.runtime_identity import ENGINE_FORM_KEY
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+
+from .restart_contract import PublishedRestartServices, RestartAdmission
 
 # Public template input must not set platform-owned identity or lifecycle data.
 # ``engine_form`` is the server-managed form marker written only by creation
@@ -215,6 +220,10 @@ class EngineProvisioningStrategy(ABC):
     def extract_runtime_token(self, ctx: BotProvisioningContext) -> str | None:
         """Return the token value that should be forwarded to container init."""
 
+    def requires_caller_chat_instance(self, ctx: BotProvisioningContext) -> bool:
+        """Whether Caller chat allocates an independent runtime before sessions."""
+        return True
+
     @abstractmethod
     def uses_adapter_chat_session_lifecycle(self, ctx: BotProvisioningContext) -> bool:
         """Whether ExpertChat should manage chat sessions through Adapter APIs.
@@ -237,6 +246,49 @@ class EngineProvisioningStrategy(ABC):
         Versioned service-bot formats are documented in
         ``apps/backend/specs/2026-08-10-expert-chat-service-bot-session-keys/spec.md``.
         """
+
+    def prepare_recycle(self, ctx: BotProvisioningContext, **kwargs):
+        """Default engines have no backup policy, probe, helper or configuration read."""
+        return None
+
+    def assert_lifecycle_mutable(self, ctx: BotProvisioningContext, bot: dict) -> None:
+        """Personal Bots honor the same in-flight recycle operation across engines."""
+        if ctx.bot_type != "personal":
+            return
+        from .restart_contract import assert_not_recycling
+        assert_not_recycling(bot)
+
+    def execute_resource_release(self, ctx, bot, release, *, lifecycle):
+        if ctx.bot_type != "personal":
+            return release()
+        from agentclaw.community.core.bot_management.engines.restart_contract import assert_not_recycling
+        from agentclaw.community.utils.env_utils import get_current_env
+        from agentclaw.community.core.bot_management.services.bot_service import (
+            BotInvalidLifecycleStateError,
+        )
+
+        assert_not_recycling(bot)
+        entity = bot.get("entity_id")
+        if not entity:
+            return release()
+        key = (get_current_env(), entity, ctx.bot_id, ctx.owner_id)
+        if held_resource_lock.get() == key:
+            return release()
+        lock = lifecycle._try_acquire_restart_lock(*key)
+        if lock is None:
+            raise BotInvalidLifecycleStateError(
+                bot_id=ctx.bot_id, current_status="BUSY"
+            )
+        reset_handle = held_resource_lock.set(key)
+        try:
+            assert_not_recycling(
+                lifecycle._repository.get_by_id_and_owner(ctx.bot_id, ctx.owner_id)
+                or bot
+            )
+            return release()
+        finally:
+            held_resource_lock.reset(reset_handle)
+            lifecycle._restart_lock_repo.release(*key[:3], lock.lock_token)
 
     def prepare_restart(
         self, ctx: BotProvisioningContext, **kwargs
@@ -261,6 +313,47 @@ class EngineProvisioningStrategy(ABC):
         through to the original synchronous lifecycle callback.
         """
         return restart(**kwargs)
+
+    @contextmanager
+    def published_restart_scope(
+        self, ctx: BotProvisioningContext, *, services: PublishedRestartServices,
+        publish_id: int, stage: str, binding_id: int, source_status: str,
+        operation_id: str | None = None,
+    ) -> Iterator[dict]:
+        """Keep shared orchestration in place; engines own entry/exit policy.
+
+        Yield an empty result to proceed, or a populated result to return before
+        executing the workflow. If a policy consumes a workflow exception, it
+        must populate that same result after any required persistence succeeds.
+        The default performs no I/O and never suppresses exceptions.
+        """
+        yield {}
+
+    def project_status_ext(
+        self, *, ext: dict, response_ext: dict, published: bool = False,
+        progress=None, public: bool = False,
+    ) -> dict:
+        """Project safe engine-owned fields into a response extension envelope.
+
+        The caller supplies existing response fields; implementations preserve
+        them and own their namespace. The default adds no fields or I/O.
+        """
+        return dict(response_ext)
+
+    def published_restart_result(self, *, record):
+        """Optionally answer progress before a provider workflow can be queried."""
+        return None
+
+    def observe_published_restart(self, *, record, progress, mutate_ext):
+        """Persist engine-owned operation progress; default has no I/O."""
+
+    def accept_published_restart(self, ctx, *, services, publish_id, stage) -> RestartAdmission:
+        """Admit an engine-owned operation; the default changes nothing."""
+        return RestartAdmission()
+
+    async def acquire_restart_workflow(self, ctx, op, issue, *, runner):
+        """Keep the runner's exact operation identity and crash/adoption contract."""
+        return await runner.acquire_workflow(op, issue)
 
     @abstractmethod
     def apply_restart_extra_configs(
@@ -346,3 +439,29 @@ class EngineProvisioningStrategy(ABC):
         service layer translates it uniformly (coding engines override).
         """
         raise hosted_workspace_not_eligible_error(ctx)
+
+
+held_resource_lock: ContextVar[tuple | None] = ContextVar(
+    "held_resource_lock", default=None
+)
+
+
+def serialize_resource_release(method):
+    @wraps(method)
+    def guarded(self, bot_id, user_id, *args, **kwargs):
+        from agentclaw.community.core.bot_management.engines.registry import (
+            resolve_restart_strategy,
+        )
+
+        bot = self._repository.get_by_id_and_owner(bot_id, user_id)
+        if not bot:
+            return method(self, bot_id, user_id, *args, **kwargs)
+        ctx, strategy = resolve_restart_strategy(bot)
+        return strategy.execute_resource_release(
+            ctx,
+            bot,
+            lambda: method(self, bot_id, user_id, *args, **kwargs),
+            lifecycle=self,
+        )
+
+    return guarded

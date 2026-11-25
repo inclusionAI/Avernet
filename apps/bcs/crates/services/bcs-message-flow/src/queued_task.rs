@@ -24,6 +24,8 @@ pub(crate) struct TaskIntent {
     pub assignment_intent_id: Option<String>,
     #[serde(default)]
     pub summary: String,
+    #[serde(default)]
+    pub timeout_s: Option<u64>,
 }
 
 pub(crate) fn error(message: &str) -> ServiceError { ServiceError::InternalError(message.into()) }
@@ -111,16 +113,27 @@ pub(crate) async fn command(flow: &BcsMessageFlow, group: &Group, session: &str,
     let event = crate::queued_admission::prepare_message_event(flow, &message_id, &message)?;
     Ok(AdmitMessageDeliveries { display_message:None, message_id, message, flow_kind:DeliveryFlowKind::Task,
         targets:vec![DeliveryAdmissionTarget { rejection:None, target_bot_id:target.clone(), kind:DeliveryType::Send,
-            max_queued:policy.as_ref().map_or(100, |p| p.policy.bot(target).max_queued), semantic_projection_json:projection }],
+            max_queued:policy.as_ref().map_or(100, |p| p.policy.bot(target).max_queued), semantic_projection_json:projection, run_id: None,
+}],
         now_ms:now, expire_at_ms:policy.as_ref().and_then(|p| p.policy.queue_ttl_ms).map(|ttl| now.saturating_add(ttl as i64)), event })
 }
 
 pub(crate) async fn admit(flow: &BcsMessageFlow, command: AdmitMessageDeliveries) -> ServiceResult<PersistedMessageDelivery> {
     let service = flow.managed_deliveries.as_ref().ok_or_else(|| error("task queue unavailable"))?;
     let admitted = service.admit(command).await.map_err(|e| error(&format!("task queue admission failed: {e}")))?;
+    finish_admission(flow, admitted).await
+}
+
+pub(crate) async fn finish_admission(flow: &BcsMessageFlow,
+    admitted: bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult,
+) -> ServiceResult<PersistedMessageDelivery> {
     let row = admitted.deliveries.into_iter().next().ok_or_else(|| error("task queue target missing"))?;
     restore(flow, &row).await?;
     if !matches!(row.state.status, Status::Queued) {
+        if matches!(row.state.status, Status::Failed | Status::RejectedCapacity) && !row.state.may_have_been_sent
+            && intent(&row)?.is_some_and(|task| task.leg == TaskLeg::Dispatch) {
+            return Err(crate::task_rejection::reject_admitted(flow, &row).await);
+        }
         return Err(ServiceError::InvalidOperation { message:format!("task queue admission rejected: {:?}", row.state.status), request_id:Some(row.delivery_id) });
     }
     Ok(row)
@@ -143,6 +156,7 @@ pub(crate) async fn restore(flow: &BcsMessageFlow, row: &PersistedMessageDeliver
     let mut entry = new_task_entry(task.task_id.clone(), row.group_id.clone(), Some(row.session_id.clone()),
         task.manager, task.worker, Some(task.worker_name), row.created_at_ms as u64, task.response_mode);
     entry.status = status;
+    entry.timeout_s = task.timeout_s;
     entry.assignment_intent_id = task.assignment_intent_id;
     entry.summary = task.summary;
     entry.managed = true;

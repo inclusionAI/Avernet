@@ -39,6 +39,7 @@ class DisplayState(StrEnum):
 
 class BotAction(StrEnum):
     VIEW = "view"
+    VIEW_CONFIG = "view_config"
     CHAT = "chat"
     EDIT = "edit"
     DELETE = "delete"
@@ -112,6 +113,7 @@ class BotInventoryItem:
     status: str
     owner_entity_id: str
     space: BusinessSpaceRef | None
+    expert_name: str | None = None
     avatar_url: str | None = None
     machine_id: str | None = None
     mount_path: str | None = None
@@ -128,6 +130,8 @@ class BotInventoryItem:
     # lives in template_type + the public projection of template_config).
     template_type: str | None = None
     template_config: Mapping[str, Any] | None = None
+    # Repository ISO creation time for ordering, not part of the HTTP response.
+    bot_created_at: str = ""
 
 
 @dataclass(frozen=True)

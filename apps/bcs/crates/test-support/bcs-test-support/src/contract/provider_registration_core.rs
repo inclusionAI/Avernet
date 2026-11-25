@@ -44,6 +44,8 @@ pub async fn provider_registration_core_service_contract_tests(
     downlink.mode = ProviderRegistrationMode::Gateway;
     assert!(core.register(downlink.clone()).await.is_err());
     downlink.webhook_url = Some("https://bot.example.com/hook".into());
+    assert!(matches!(core.register(downlink.clone()).await,Err(ServiceError::Conflict(_))));
+    downlink.bot_name = "Contract gateway".into();
     let registered = core.register(downlink.clone()).await.unwrap();
     assert_eq!(registered.record.webhook_url, downlink.webhook_url);
     assert_eq!(registered.effective_webhook_url, downlink.webhook_url);

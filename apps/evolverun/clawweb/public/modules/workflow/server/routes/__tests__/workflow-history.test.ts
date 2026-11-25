@@ -10,9 +10,12 @@
  * the history routes touch. This isolates route-handler logic (ordering, status codes,
  * response shape) from the MySQL-only storage layer.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import http from "node:http";
+import { createHash } from "node:crypto";
 import express from "express";
+import Database from "better-sqlite3";
+import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import type { WorkflowDeployHistoryRepository } from "../../repositories/workflow-deploy-history-repository.js";
 import type { WorkflowDeployHistoryRow } from "../../repositories/workflow-deploy-history-repository.js";
 import type { WorkflowVersionSourceService } from "../../contracts/workflow-version-source.js";
@@ -126,12 +129,12 @@ let app: express.Express;
 let server: http.Server;
 let baseUrl: string;
 
-function startApp(repo: WorkflowDeployHistoryRepository | null, source: WorkflowVersionSourceService | null = null) {
+function startApp(repo: WorkflowDeployHistoryRepository | null, source: WorkflowVersionSourceService | null = null, permissions: BotWorkflowPermissionRepository | null = null) {
   return new Promise<void>((resolve) => {
     server = http.createServer((app = express()));
     app.use(express.json());
-    // Only wfdhRepo is exercised by the history routes; pass null for the rest.
-    app.use("/api/workflows", createWorkflowsRouter(null, null, null, null, repo, null, source));
+    // Inject optional permissions when exercising the workflow access boundary.
+    app.use("/api/workflows", createWorkflowsRouter(null, null, permissions, null, repo, null, source));
     server.listen(0, () => {
       const addr = server.address();
       baseUrl = `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
@@ -161,6 +164,140 @@ describe("workflow version history (read-only)", () => {
     expect(body.active.source).toEqual(source);
   });
 
+  it("takes the active pack identity from the active DB lookup, not history or provenance", async () => {
+    const repo = makeFakeRepo([
+      row({ deploy_number: 3, version: 2, pack_id: "stale-history-pack", is_active: 1 }),
+      row({ deploy_number: 4, version: 3, pack_id: "newer-pack" }),
+    ]);
+    const findActive = vi.spyOn(repo, "findActiveByWorkflowId");
+    const original = await findActive("tech-research");
+    if (!original) throw new Error("expected active fixture");
+    findActive.mockResolvedValue({ ...original, pack_id: "db-active-pack" });
+    await startApp(repo);
+
+    const response = await fetch(`${baseUrl}/api/workflows/tech-research/history`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(findActive).toHaveBeenLastCalledWith("tech-research");
+    expect(body.active).toMatchObject({ deployNumber: 3, version: 2, isActive: true, packId: "db-active-pack" });
+    expect(body.history.map((item: { deployNumber: number }) => item.deployNumber)).toEqual([4, 3]);
+    expect(body.active.activeToken).toBe(createHash("sha256").update(JSON.stringify([
+      "active-workflow-baseline-v1", "tech-research", "db-active-pack", "3", "2",
+      original.tag_name, original.action, original.spec_json,
+    ])).digest("hex"));
+    for (const item of body.history) {
+      expect(item).not.toHaveProperty("packId");
+      expect(item).not.toHaveProperty("activeToken");
+    }
+    findActive.mockResolvedValue({ ...original, pack_id: "db-active-pack", spec_json: `${original.spec_json} ` });
+    const changed = await (await fetch(`${baseUrl}/api/workflows/tech-research/history`)).json();
+    expect(changed.active.deployNumber).toBe(body.active.deployNumber);
+    expect(changed.active.activeToken).not.toBe(body.active.activeToken);
+    expect(body.active).not.toHaveProperty("specJson");
+    expect(body.active).not.toHaveProperty("spec_json");
+  });
+
+  it.each([
+    { label: "negative version", version: -1, deployNumber: 3 },
+    { label: "unsafe version", version: Number.MAX_SAFE_INTEGER + 1, deployNumber: 3 },
+    { label: "negative deploy number", version: 2, deployNumber: -1 },
+    { label: "unsafe deploy number", version: 2, deployNumber: Number.MAX_SAFE_INTEGER + 1 },
+  ])("preserves history without an active token for $label", async ({ version, deployNumber }) => {
+    const repo = makeFakeRepo([
+      row({ deploy_number: deployNumber, version, is_active: 1, pack_id: "legacy-pack" }),
+    ]);
+    await startApp(repo);
+    const response = await fetch(`${baseUrl}/api/workflows/tech-research/history`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.workflowId).toBe("tech-research");
+    expect(body.history).toHaveLength(1);
+    expect(body.history[0]).toMatchObject({ deployNumber, version, isActive: true });
+    expect(body.active).toMatchObject({ deployNumber, version, isActive: true, packId: "legacy-pack" });
+    expect(body.active).not.toHaveProperty("activeToken");
+    expect(body.history[0]).not.toHaveProperty("activeToken");
+  });
+
+  it.each([
+    { field: "pack_id", value: "pack\uFFFD" },
+    { field: "tag_name", value: "tag\uFFFD" },
+    { field: "action", value: "deploy\uFFFD" },
+    { field: "spec_json", value: '{"title":"\uFFFD"}' },
+  ])("preserves history when active $field contains U+FFFD", async ({ field, value }) => {
+    const repo = makeFakeRepo([row({ is_active: 1, [field]: value })]);
+    await startApp(repo);
+    const response = await fetch(`${baseUrl}/api/workflows/tech-research/history`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.active).toMatchObject({ deployNumber: 1, version: 1, isActive: true });
+    expect(body.history).toHaveLength(1);
+    expect(body.active).not.toHaveProperty("activeToken");
+  });
+
+  it("keeps history readable for distinct invalid SQLite text bytes", async () => {
+    const db = new Database(":memory:");
+    try {
+      const repo = makeFakeRepo([row({ is_active: 1 })]);
+      const active = await repo.findActiveByWorkflowId("tech-research");
+      if (!active) throw new Error("expected active fixture");
+      const first = db.prepare("SELECT CAST(X'80' AS TEXT) AS value").get() as { value: string };
+      const second = db.prepare("SELECT CAST(X'81' AS TEXT) AS value").get() as { value: string };
+      expect(first.value).toBe("\uFFFD");
+      expect(second.value).toBe(first.value);
+      vi.spyOn(repo, "findActiveByWorkflowId")
+        .mockResolvedValueOnce({ ...active, spec_json: first.value })
+        .mockResolvedValueOnce({ ...active, spec_json: second.value });
+      await startApp(repo);
+      for (const _value of [first.value, second.value]) {
+        const response = await fetch(`${baseUrl}/api/workflows/tech-research/history`);
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        expect(body.history).toHaveLength(1);
+        expect(body.active).toMatchObject({ deployNumber: 1, version: 1, isActive: true });
+        expect(body.active).not.toHaveProperty("activeToken");
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each(["listHistory", "findActiveByWorkflowId"] as const)("still propagates %s database failures", async method => {
+    const repo = makeFakeRepo([row({ is_active: 1 })]);
+    vi.spyOn(repo, method).mockRejectedValue(new Error("DB lookup failed"));
+    await startApp(repo);
+    const response = await fetch(`${baseUrl}/api/workflows/tech-research/history`);
+    expect(response.status).toBe(500);
+  });
+
+  it("exposes active pack identity only after workflow view authorization", async () => {
+    const repo = makeFakeRepo([row({ is_active: 1, pack_id: "authorized-db-pack" })]);
+    const activeLookup = vi.spyOn(repo, "findActiveByWorkflowId");
+    const listHistory = vi.spyOn(repo, "listHistory");
+    const permissions = {
+      getViewByIdsForOwner: vi.fn(async (actor: string) => ({
+        viewableIds: new Set(actor === "viewer" ? ["tech-research"] : []),
+        restrictedIds: new Set(["tech-research"]),
+      })),
+    } as unknown as BotWorkflowPermissionRepository;
+    await startApp(repo, null, permissions);
+
+    const anonymous = await fetch(`${baseUrl}/api/workflows/tech-research/history`);
+    expect(anonymous.status).toBe(401);
+    expect(await anonymous.json()).not.toHaveProperty("active");
+    const denied = await fetch(`${baseUrl}/api/workflows/tech-research/history`, { headers: { "X-User-Id": "other" } });
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).not.toHaveProperty("active");
+    expect(activeLookup).not.toHaveBeenCalled();
+    expect(listHistory).not.toHaveBeenCalled();
+
+    const allowed = await fetch(`${baseUrl}/api/workflows/tech-research/history`, { headers: { "X-User-Id": "viewer" } });
+    expect(allowed.status).toBe(200);
+    const body = await allowed.json();
+    expect(body.active.packId).toBe("authorized-db-pack");
+    expect(body.active.activeToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(activeLookup).toHaveBeenCalledOnce();
+  });
+
   describe("GET /api/workflows/:wf/history", () => {
     beforeEach(async () => {
       await startApp(makeFakeRepo([
@@ -179,6 +316,8 @@ describe("workflow version history (read-only)", () => {
       expect(body.history[0].version).toBe(3);
       expect(body.history[0].action).toBe("edit");
       expect(body.history[1].deployNumber).toBe(3);
+      expect(body.active).toBeNull();
+      expect(body.history.every((item: object) => !("packId" in item) && !("activeToken" in item))).toBe(true);
       // spec_json never leaked in the list payload
       expect(body.history[0].specJson).toBeUndefined();
       expect(body.history[0].spec_json).toBeUndefined();
@@ -202,7 +341,7 @@ describe("workflow version history (read-only)", () => {
     it("returns an active release outside the bounded history page", async () => {
       await stopApp();
       await startApp(makeFakeRepo([
-        row({ deploy_number: 1, version: 1, is_active: 1 }),
+        row({ deploy_number: 1, version: 1, is_active: 1, pack_id: "older-active-pack" }),
         ...Array.from({ length: 50 }, (_, index) => row({ deploy_number: index + 2, version: index + 2 })),
       ]));
       const res = await fetch(`${baseUrl}/api/workflows/tech-research/history?limit=50&releaseOnly=true`);
@@ -210,7 +349,7 @@ describe("workflow version history (read-only)", () => {
       const body = await res.json();
       expect(body.history).toHaveLength(50);
       expect(body.history.some((item: { deployNumber: number }) => item.deployNumber === 1)).toBe(false);
-      expect(body.active).toMatchObject({ deployNumber: 1, version: 1, isActive: true });
+      expect(body.active).toMatchObject({ deployNumber: 1, version: 1, isActive: true, packId: "older-active-pack" });
     });
   });
 

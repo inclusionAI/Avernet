@@ -2,13 +2,13 @@ import { getCapabilities } from '@/capabilities';
 import type { GroupPanelKind } from '@/pages/Workspace/components/GroupHeader';
 import { filterVisibleGroupMessages } from '@/pages/Workspace/hooks/groupChatHistoryUtils';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { GroupChatAbortUnsupportedDialog } from './components/GroupChatAbortUnsupportedDialog';
 import { GroupChatPane } from './components/GroupChatPane';
-import { GroupHistorySidebar } from './components/GroupChatPane/GroupHistorySidebar';
-import { SessionFilesSidebar } from './components/GroupChatPane/SessionFilesSidebar';
 import { GroupMembersPanelSlot } from './components/GroupMembersPanelSlot';
+import { GroupSessionSidebars } from './components/GroupSessionSidebars';
 import { GroupWorkspaceSidebar } from './components/GroupWorkspaceSidebar';
+import { GroupWorkspaceConversation } from './components/GroupWorkspaceConversation';
 import { CreateGroupModal } from './components/Modals/CreateGroupModal';
 import { ScopedWorkspaceUnavailable } from './components/ScopedWorkspaceUnavailable';
 import { WorkspaceManagePanels } from './components/WorkspaceManagePanels';
@@ -17,6 +17,7 @@ import { useGroupChat } from './hooks/useGroupChat';
 import { useGroupCreateDialog } from './hooks/useGroupCreateDialog';
 import { useGroupManagement } from './hooks/useGroupManagement';
 import { useGroupChatHeaderPanels } from './hooks/useGroupChatHeaderPanels';
+import { useGroupSessionLocation } from './hooks/useGroupSessionLocation';
 import { useGroupSessions } from './hooks/useGroupSessions';
 import { useGroupWorkspace } from './hooks/useGroupWorkspace';
 import { useGroupSidebarProps } from './hooks/useGroupSidebarProps';
@@ -25,6 +26,7 @@ import { useSessionManagement } from './hooks/useSessionManagement';
 export function GroupWorkspaceArea({
   scope,
   sessionOnly = false,
+  sessionLocationRequest,
   userAvatarUrl,
   userIdentityId,
   userIdentityName,
@@ -34,8 +36,9 @@ export function GroupWorkspaceArea({
 }: GroupWorkspaceAreaProps) {
   const ws = useGroupWorkspace(scope?.group);
   const expandedGroupIds = React.useMemo(
-    () => ws.groups.filter((g) => ws.expandedGroupIds[g.groupId]).map((g) => g.groupId),
-    [ws.groups, ws.expandedGroupIds],
+    // 数据加载只跟随显式展开意图，不把搜索/类型筛选的显隐当成重新展开。
+    () => Object.keys(ws.expandedGroupIds).filter((id) => !scope || id === scope.group.groupId),
+    [ws.expandedGroupIds, scope],
   );
   const sessions = useGroupSessions(
     scope && ws.selectedGroupId !== scope.group.groupId ? null : ws.selectedGroupId,
@@ -44,14 +47,34 @@ export function GroupWorkspaceArea({
   );
   const chat = useGroupChat(scope && !ws.selectedGroup ? null : sessions.selectedSession, userIdentityId);
   const [activePanel, setActivePanel] = useState<GroupPanelKind>('none');
+  // 右缘域面板（管理/历史/资源）全收出口：面板形态与 chat 同构（内联副屏），与悬浮副屏互斥——
+  // 关合/让位回开统一经 useGroupChatHeaderPanels 内的 sidePanePanelMutex 编排。
+  const closeHeaderPanels = useCallback(() => setActivePanel('none'), []);
+  const sessionLocation = useGroupSessionLocation(
+    ws.selectedGroup, sessions.selectedSession, onOpenMobileList, sessionLocationRequest, Boolean(ws.selectedGroupError),
+  );
   // 头部六图标域（收藏/历史消息/副屏）：搜索口径与消息区渲染同源（filterVisibleGroupMessages），
   // 保证历史面板每条结果都能在消息区定位到（useGroupChatDisplayStatus 同款同源约定）。
   const headerPanels = useGroupChatHeaderPanels({
     session: sessions.selectedSession,
+    taskRecoveryReady: sessions.isSessionSelectionReady,
+    userId: userIdentityId ?? null,
     messages: filterVisibleGroupMessages(chat.chat.messages ?? []),
     panelRef: chat.panelRef,
     toggleFavorite: sessions.toggleFavorite,
+    panelsOpen: activePanel !== 'none',
+    closePanels: closeHeaderPanels,
   });
+  const { dismissSidePaneForPanels } = headerPanels;
+  const openPanelKind = useCallback(
+    (panel: GroupPanelKind) => {
+      // 右缘域面板即将展开（侧栏「…」菜单/头部图标）：副屏让位收起（closePanel 保留 tabs，
+      // 面板全收后互斥 Hook 自动回开）——chat 侧 chat-header-panels 同构互斥。
+      if (panel !== 'none') dismissSidePaneForPanels();
+      setActivePanel(panel);
+    },
+    [dismissSidePaneForPanels],
+  );
   const groupAdvancedConfigEnabled = getCapabilities().getGroupAdvancedConfigEnabled().value;
   const groupManage = useGroupManagement(
     ws.selectedGroupId,
@@ -73,17 +96,26 @@ export function GroupWorkspaceArea({
     groupManage,
     sessionManage,
     createGroupDialog,
-    setActivePanel,
+    // 侧栏「…」菜单开面板与头部图标同语义：经 openPanelKind 让位副屏后再展开。
+    setActivePanel: openPanelKind,
   });
   const { selectedGroup, canManageGroup: canManage } = ws;
-  // 管理面板打开期间跟随选中群补拉详情：打开面板（齿轮/「…」菜单）或面板保持打开时切群，
-  // 都会为新选中群拉取 participants 等详情；否则列表项 participants 为空且 participantCount>0，
-  // 「群成员管理」card 会一直停留在「加载中…」。面板关闭时不拉取（保持按需拉取约定）。
+  // 管理面板打开期间按需补齐完整群详情：打开/切群都刷新；同群被新列表对象替换
+  // （participantDetailsLoaded=false）也会重拉，详情回填（true，含显式空详情）后停止。
+  // 面板关闭时不拉取，保留头像补拉的请求预算（AC-02）。
   const { selectedGroupId, reloadSelectedGroup } = ws;
+  const lastManagedGroupRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    if (activePanel !== 'manage' || !selectedGroupId) return;
-    void reloadSelectedGroup(selectedGroupId);
-  }, [activePanel, selectedGroupId, reloadSelectedGroup]);
+    if (activePanel !== 'manage' || !selectedGroupId) {
+      lastManagedGroupRef.current = null;
+      return;
+    }
+    const entering = lastManagedGroupRef.current !== selectedGroupId;
+    lastManagedGroupRef.current = selectedGroupId;
+    const detailLoaded = selectedGroup?.participantDetailsLoaded ??
+      ((selectedGroup?.participants.length ?? 0) > 0);
+    if (entering || !detailLoaded) void reloadSelectedGroup(selectedGroupId);
+  }, [activePanel, selectedGroupId, selectedGroup, reloadSelectedGroup]);
 
   const handleDissolve = () => {
     if (!ws.selectedGroupId) return;
@@ -125,7 +157,7 @@ export function GroupWorkspaceArea({
           error: { code: 'GROUP_MISSING', friendlyMessage: '未选择协作群', canRetry: false },
         });
   const handleShareSession = (expiresInSeconds?: number) => sessionManage.createShare(undefined, expiresInSeconds);
-  const handleTogglePanel = (panel: GroupPanelKind) => setActivePanel(panel);
+  const handleTogglePanel = (panel: GroupPanelKind) => openPanelKind(panel);
   if (scope && (!selectedGroup || (sessionOnly && !sessions.selectedSession))) {
     return (
       <ScopedWorkspaceUnavailable
@@ -138,9 +170,13 @@ export function GroupWorkspaceArea({
   return (
     <>
       {!sessionOnly && (
-        <GroupWorkspaceSidebar sidebar={groupSidebarProps} open={mobileListOpen} onClose={onCloseMobileList} />
+        <GroupWorkspaceSidebar
+          sidebar={{ ...groupSidebarProps, location: sessionLocation.location, onDismissLocation: sessionLocation.dismissLocation }}
+          open={mobileListOpen}
+          onClose={onCloseMobileList}
+        />
       )}
-      <div className="relative isolate flex min-h-0 min-w-0 flex-1" data-workspace-conversation="true">
+      <GroupWorkspaceConversation workspace={ws}>
         <GroupChatPane
           identityLocked={Boolean(scope)}
           group={selectedGroup}
@@ -156,6 +192,7 @@ export function GroupWorkspaceArea({
           connectionStatus={chat.connectionStatus}
           questions={chat.questions}
           execApprovals={chat.execApprovals}
+          speakingLease={chat.speakingLease}
           groupBootstrapProcessing={chat.groupBootstrapProcessing}
           send={chat.send}
           submitPanelMessage={chat.submitPanelMessage}
@@ -170,6 +207,7 @@ export function GroupWorkspaceArea({
           cancelDelivery={chat.cancelDelivery}
           reconnect={chat.reconnect}
           onOpenSessionList={sessionOnly ? undefined : onOpenMobileList}
+          onLocateSession={sessionOnly ? undefined : sessionLocation.locate}
           reloadHistory={chat.reloadHistory}
           hasMoreHistory={chat.hasMoreHistory}
           isLoadingMoreHistory={chat.isLoadingMoreHistory}
@@ -201,7 +239,7 @@ export function GroupWorkspaceArea({
             group={selectedGroup}
             session={sessions.selectedSession}
             canManage={canManage}
-            onClose={() => setActivePanel('none')}
+            onClose={closeHeaderPanels}
           />
         ) : null}
         <WorkspaceManagePanels
@@ -214,13 +252,13 @@ export function GroupWorkspaceArea({
           activeIdentity={ws.activeIdentity}
           authenticatedUserId={userIdentityId}
           authenticatedUserName={userIdentityName}
-          onClose={() => setActivePanel('none')}
+          onClose={closeHeaderPanels}
           onUpdateGroup={groupManage.updateGroup}
           onDissolveGroup={handleDissolve}
           onLeaveGroup={handleLeaveGroup}
           onAddGroupMember={groupManage.addMember}
           onRemoveGroupMember={groupManage.removeMember}
-          onShareGroup={groupManage.createShare}
+          onShareGroup={handleShareGroup}
           onSaveDingTalk={groupManage.saveDingTalk}
           onToggleDingTalkActive={groupManage.toggleDingTalkActive}
           onDeleteDingTalk={groupManage.deleteDingTalk}
@@ -231,25 +269,22 @@ export function GroupWorkspaceArea({
           onLeaveSession={handleLeaveSession}
           onAddSessionMember={sessionManage.addMember}
           onRemoveSessionMember={sessionManage.removeMember}
-          onShareSession={sessionManage.createShare}
+          onShareSession={handleShareSession}
         />
-        {activePanel === 'resources' && sessions.selectedSession && (
-          /* 会话局部覆盖层：资源管理与单聊侧共用容器。 */
-          <SessionFilesSidebar
-            sessionId={sessions.selectedSession.sessionId}
-            participants={sessions.selectedSession.participants}
-            authenticatedUser={userIdentityId ? { userId: userIdentityId, name: userIdentityName } : null}
-            onClose={() => setActivePanel('none')}
-          />
-        )}
-        {activePanel === 'history' && sessions.selectedSession && (
-          <GroupHistorySidebar
+        {(sessions.selectedSession || selectedGroup) && (
+          <GroupSessionSidebars
+            activePanel={activePanel}
+            session={sessions.selectedSession}
+            group={selectedGroup}
+            activeIdentity={ws.activeIdentity}
+            userIdentityId={userIdentityId}
+            userIdentityName={userIdentityName}
             search={headerPanels.historySearch}
             onLocate={headerPanels.locateMessage}
-            onClose={() => setActivePanel('none')}
+            onClose={closeHeaderPanels}
           />
         )}
-      </div>
+      </GroupWorkspaceConversation>
       <CreateGroupModal
         open={createGroupDialog.open}
         activeIdentity={ws.activeIdentity}

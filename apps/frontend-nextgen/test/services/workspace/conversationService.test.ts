@@ -1,6 +1,7 @@
+import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { conversationService } from '@/services/workspace/conversationService';
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/bots/botController');
 jest.mock('@/services/backendApi/bots/privateBotSessionController');
@@ -43,16 +44,21 @@ const sessionItem = {
   gmt_modified: '2026-09-16T10:00:00Z',
 };
 
-const sessionsEnvelope = (items: unknown[], total = items.length) => ({
+const sessionsEnvelope = (items: unknown[], total = items.length, source: 'mine' | 'others' = 'mine') => ({
   code: 20000,
   message: 'OK',
-  data: { items, total },
+  data: { items, total, source, has_more: false, next_cursor: null, scan_limited: false },
   request_id: 'sessions',
 });
 
 beforeEach(() => {
   jest.clearAllMocks();
+  extendCapabilities(defaultCapabilities);
   mocked.listFavoriteSessions.mockResolvedValue(sessionsEnvelope([]));
+});
+
+afterEach(() => {
+  extendCapabilities(defaultCapabilities);
 });
 
 describe('conversationService.listDirectory', () => {
@@ -143,6 +149,47 @@ describe('conversationService.listDirectory', () => {
     ]);
   });
 
+  it.each([
+    ['service', false, false],
+    ['service', true, true],
+    ['service', null, true],
+    ['service', undefined, true],
+    ['personal', false, true],
+    [undefined, false, true],
+  ] as const)(
+    'maps friend bot_type=%p online_available=%p to chatable=%p',
+    async (botType, onlineAvailable, chatable) => {
+      botMocked.listBots.mockResolvedValue({ code: 200000, data: { items: [], total: 0 } });
+      relationsMocked.mockResolvedValue({
+        code: 20000,
+        data: { items: [{ actor: { type: 'bot', id: 'friend:327325' } }], total: 1 },
+      });
+      botMocked.listBotMetadata.mockResolvedValue({
+        code: 200000,
+        data: {
+          items: [
+            {
+              bot_id: 'friend',
+              owner_id: '327325',
+              bot_name: '好友 Bot',
+              bot_type: botType,
+              online_available: onlineAvailable,
+              status: 'ACTIVE',
+            },
+          ],
+          total: 1,
+        },
+      });
+
+      const result = await conversationService.listDirectory('human_900003');
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { friendBots: [{ botId: 'friend:327325', botType, onlineAvailable, chatable, isFriendBot: true }] },
+      });
+    },
+  );
+
   it('keeps the directory usable with empty friend Bots when friend relations fail', async () => {
     botMocked.listBots.mockResolvedValue({
       code: 200000,
@@ -195,9 +242,9 @@ describe('conversationService.listManagedSessions', () => {
 
     expect(mocked.listBotSessions).toHaveBeenCalledWith(
       'bot-a',
-      expect.objectContaining({ user_id: '900003', owner_id: '2088', page: 2, page_size: 20 }),
+      expect.objectContaining({ user_id: '900003', owner_id: '2088', page: 1, page_size: 20, source: 'mine' }),
     );
-    expect(mocked.listFavoriteSessions).toHaveBeenCalled();
+    expect(mocked.listFavoriteSessions).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.items[0]).toMatchObject({
@@ -220,6 +267,128 @@ describe('conversationService.listManagedSessions', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.items[0]).toMatchObject({ sessionId: 'session-1', favorite: true });
+  });
+
+  describe('Coding Bot session ownership', () => {
+    const codingBot: ChatBotView = {
+      ...managedBot,
+      engine: 'claude_code',
+      isAgentCodingBot: true,
+    };
+    const sessionDto = (sessionId: string) => ({
+      ...sessionItem,
+      session_id: sessionId,
+      title: `历史会话_${sessionId}`,
+    });
+
+    it('delegates mine filtering to backend without rescanning raw pages in the browser', async () => {
+      const mineSession = sessionDto('user:100:session:mine:agent:bot-a');
+      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([mineSession]));
+
+      const result = await conversationService.listManagedSessions(codingBot, '100', 'all', 1, 10);
+
+      expect(mocked.listBotSessions).toHaveBeenNthCalledWith(
+        1,
+        'bot-a',
+        expect.objectContaining({ page: 1, page_size: 10, source: 'mine', user_id: '100' }),
+      );
+      expect(mocked.listBotSessions).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({
+        ok: true,
+        data: { items: [{ sessionId: 'user:100:session:mine:agent:bot-a' }], total: 1 },
+      });
+    });
+
+    it('returns only sessions created by other users for origin=others', async () => {
+      mocked.listBotSessions.mockResolvedValue(
+        sessionsEnvelope([
+          sessionDto('user:200:session:other:agent:bot-a'),
+        ], 1, 'others'),
+      );
+
+      const result = await conversationService.listManagedSessions(
+        codingBot,
+        '100',
+        'all',
+        1,
+        10,
+        '',
+        undefined,
+        'others',
+      );
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { items: [{ sessionId: 'user:200:session:other:agent:bot-a' }], total: 1 },
+      });
+    });
+
+    it('treats numeric user ids with leading zeroes as the same creator', async () => {
+      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([sessionDto('user:000100:session:mine:agent:bot-a')]));
+
+      const result = await conversationService.listManagedSessions(codingBot, '100', 'all');
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { items: [{ sessionId: 'user:000100:session:mine:agent:bot-a' }] },
+      });
+    });
+
+    it('filters internal sessions injected through the Coding Bot visibility policy', async () => {
+      extendCapabilities({
+        getCodingBotConversationHost: () => ({
+          status: 'available',
+          value: {
+            Stage: () => null,
+            isSessionHidden: (session: { title?: unknown }) => session.title === 'cron: MemoryOS任务',
+          },
+        }),
+      });
+      const normal = sessionDto('user:100:session:normal:agent:bot-a');
+      const hidden = {
+        ...sessionDto('user:100:session:hidden:agent:bot-a'),
+        title: 'cron: MemoryOS任务_user:100:session:hidden:agent:bot-a',
+      };
+      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([hidden, normal], 2));
+
+      const result = await conversationService.listManagedSessions(codingBot, '100', 'all', 1, 10);
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { items: [{ sessionId: 'user:100:session:normal:agent:bot-a' }] },
+      });
+    });
+
+    it('keeps ordinary Bot sessions unaffected by the Coding Bot visibility policy', async () => {
+      extendCapabilities({
+        getCodingBotConversationHost: () => ({
+          status: 'available',
+          value: {
+            Stage: () => null,
+            isSessionHidden: () => true,
+          },
+        }),
+      });
+      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([sessionItem]));
+
+      const result = await conversationService.listManagedSessions(managedBot, 'human_900003', 'all');
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { items: [{ sessionId: 'session-1', title: '历史会话' }] },
+      });
+    });
+
+    it('keeps unrecognized legacy session ids in mine for backward compatibility', async () => {
+      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([sessionDto('legacy-session-id')]));
+
+      const result = await conversationService.listManagedSessions(codingBot, '100', 'all');
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { items: [{ sessionId: 'legacy-session-id' }] },
+      });
+    });
   });
 });
 
@@ -269,6 +438,6 @@ it('normalizes a stale TEClaw favorite scope to ordinary sessions', async () => 
     10,
   );
   expect(result.ok).toBe(true);
-  expect(mocked.listBotSessions).toHaveBeenCalledWith('bot-a', expect.objectContaining({ page: 2, page_size: 10 }));
+  expect(mocked.listBotSessions).toHaveBeenCalledWith('bot-a', expect.objectContaining({ page: 1, page_size: 10, source: 'mine' }));
   expect(mocked.listFavoriteSessions).not.toHaveBeenCalled();
 });

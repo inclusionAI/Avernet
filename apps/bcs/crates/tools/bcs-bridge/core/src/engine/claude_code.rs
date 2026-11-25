@@ -28,7 +28,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use bcs_protocol::stream::{InteractionKind, InteractionPhase, StreamEvent};
 #[cfg(test)]
-use bcs_protocol::stream::{AgentData, ToolData, ToolPhase};
+use bcs_protocol::stream::{ToolData, ToolPhase};
 use serde_json::{json, Value};
 
 use crate::engine::cli::CliSession;

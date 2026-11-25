@@ -209,6 +209,7 @@ def _build_env(db, script: list[str]) -> tuple:
 
 def _req(idempotency_key: str | None = None) -> SubmitRunRequest:
     return SubmitRunRequest(
+        identity_bot_id=IDENTITY_SOURCE,
         tenant=TENANT,
         goal="e2e: map the incident to owning services",
         agents=(
@@ -274,7 +275,7 @@ class TestSingleProcessEndToEnd:
         assert run.ended_at is not None
 
         agents = repos["agent"].list_by_run(dm.RunId(run_id), TENANT)
-        assert sorted(a.name for a in agents) == ["a1", "a2"]
+        assert sorted(a.name.split("_", 1)[0] for a in agents) == ["a1", "a2"]
         assert all(a.status is dm.AgentStatus.COMPLETED for a in agents)
         assert all(a.attempts == 1 for a in agents)
 
@@ -284,10 +285,12 @@ class TestSingleProcessEndToEnd:
             assert (result.payload is not None) != (result.artifact_key is not None)
         payloads = {repos["agent"].get(dm.RunId(run_id), s.source_agent_id, TENANT).name: s.payload
                     for s in results}
-        assert payloads == {
-            "a1": {"answer": "done-a1"},
-            "a2": {"answer": "done-a2"},
-        }
+        stems = {k.split("_", 1)[0] for k in payloads}
+        assert stems == {"a1", "a2"}
+        for k, payload in payloads.items():
+            expected = {"a1": {"answer": "done-a1"},
+                       "a2": {"answer": "done-a2"}}[k.split("_", 1)[0]]
+            assert payload == expected
 
         rounds = repos["round"].list_by_run(dm.RunId(run_id), TENANT)
         assert len(rounds) == 1
@@ -336,3 +339,8 @@ class TestSingleProcessEndToEnd:
         assert _count_rows(db, om.AcAgentSwarmAgentModel, TENANT) == 2
         assert _count_rows(db, om.AcAgentSwarmAgentResultModel, TENANT) == 2
         assert _count_rows(db, om.AcAgentSwarmMessageModel, TENANT) == 4
+#: The Bot every submit in this suite names as its identity source. The
+#: service refuses a submit without one, so the value is fixed here rather
+#: than repeated at each call site; the seam resolves it (or is unbound, in
+#: which case the service takes the id as given).
+IDENTITY_SOURCE = "identity-source-bot"

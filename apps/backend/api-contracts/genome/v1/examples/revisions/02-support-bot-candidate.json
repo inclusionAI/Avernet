@@ -1,13 +1,13 @@
 {
   "genome_schema": 1,
   "revision": {
-    "id": "sha256:5deca3495156b975acac9f4138966c19ce2d535943ce2ad625c238880373183b",
+    "id": "sha256:74fef9e67c35b6f56f49307f1d84b670a43508a37952583f5d118baa3ba78e5f",
     "seq": 42,
     "bot": {
       "owner_id": "user_owner_5",
       "bot_id": "bot_123"
     },
-    "parent": "sha256:9e21ea360e6d4bdb63a151d280a7f1802402a8294b5033c92239731bd1e8d1fe",
+    "parent": "sha256:03dd8ae31e03dd12f9eca965000af1a4af950d867da49da4faa93f4d43153894",
     "created_by": {
       "kind": "strategy_run",
       "actor": "clawevolve/bot-evolution@2.0.0",
@@ -16,7 +16,7 @@
     },
     "created_at": "2026-10-08T03:12:00Z",
     "status": "candidate",
-    "patch_digest": "sha256:9087460edf7d08ce72f9f8f929d5cc41efba368ec74387f2db2c8c1308ab4290",
+    "patch_digest": "sha256:8cdb43e91a5e8f64f5564f4c2034f0c2e0afb55fcdb014fe3f6d433c67160771",
     "evidence": [
       "episode:ep_91",
       "feedback:fb_311"
@@ -53,8 +53,7 @@
       },
       {
         "name": "refund-policy",
-        "origin": "center",
-        "center_version": "v7"
+        "origin": "center"
       }
     ],
     "memory": null,

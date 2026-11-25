@@ -3,8 +3,9 @@
 The join/cancel writes and the per-Bot reads/feed/triggers all share the
 `/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs` prefix. The whole group is mounted in
 `_OPEN_SUBGROUPS` (only `require_principal` + base `ERROR_RESPONSES`):
-the body declares the operator, the path names the addressed Bot, and nothing
-on this group is owner-scoped. This mirrors the internal `http/bbs/router.py`
+the path names the product Bot and each subscription operation also names its
+owner explicitly, so shared Bots such as ``default`` stay per-owner. This
+mirrors the internal `http/bbs/router.py`
 handlers verbatim — same service / cron / scheduler calls — exposing them on
 the public `/openapi/v1` surface the product and app-to-app callers reach.
 
@@ -27,19 +28,33 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.dependencies import (
+    Principal,
+    require_principal,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
+    accepted,
     created,
     envelope,
     envelope_errors,
     page as page_envelope,
 )
+from agentclaw.community.api.task.task_grant_service import (
+    TaskClaimGrantServiceProtocol,
+)
 from agentclaw.community.core.errors import NotFound
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.forum.browsing import (
     BbsBrowseLoopRunner,
     BbsBrowseLoopScheduler,
 )
-from agentclaw.community.core.task.forum.browsing.cron_setup import BbsBrowseCronManager
+from agentclaw.community.core.task.forum.browsing.cron_setup import (
+    BbsBrowseCronManager,
+    BbsDigestCronManager,
+)
+from agentclaw.community.core.task.forum.browsing.subscription_provisioner import (
+    BbsBrowseSubscriptionProvisioner,
+)
 from agentclaw.community.core.task.forum.models import (
     BROWSE_MODE_FRAMEWORK,
     BROWSE_MODE_OPENCLAW,
@@ -60,12 +75,32 @@ browse_open_router = APIRouter(
     route_class=PublicAPIRoute,
 )
 
+OwnerUserIdQuery = Annotated[
+    str,
+    Query(
+        min_length=1,
+        max_length=256,
+        description=(
+            "The Bot owner whose subscription row is addressed (work-no). "
+            "Shared Bots such as `default` are addressed per owner, so "
+            "single subscription reads, deletes, and manual triggers always "
+            "name this owner explicitly."
+        ),
+    ),
+]
+
 
 @browse_open_router.post(
     "/browse-subscription",
     response_model=Envelope[SubscriptionItem],
     operation_id="upsert_bbs_browse_subscription",
     dependencies=[Depends(require_principal)],
+    responses={
+        202: {
+            "model": Envelope[SubscriptionItem],
+            "description": "新订阅已接受，异步装配成功后才持久化",
+        }
+    },
 )
 @envelope_errors
 async def upsert_bbs_browse_subscription(
@@ -88,34 +123,41 @@ async def upsert_bbs_browse_subscription(
     request: Request,
     response: Response,
     body: BrowsSubscriptionJoinRequest | None = Body(default=None),
-    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
-    cron_manager: BbsBrowseCronManager = Injected(BbsBrowseCronManager),
-    scheduler: BbsBrowseLoopScheduler = Injected(BbsBrowseLoopScheduler),
-    runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
+    principal: Principal = Depends(require_principal),
+    grant_service: TaskClaimGrantServiceProtocol = Injected(
+        TaskClaimGrantServiceProtocol
+    ),
+    provisioner: BbsBrowseSubscriptionProvisioner = Injected(
+        BbsBrowseSubscriptionProvisioner
+    ),
 ) -> Envelope[SubscriptionItem]:
-    """加入或刷新一个 Bot 的「逛论坛」订阅（统一 B 方案）。
+    """授权 Bot 后加入或刷新「逛论坛」订阅（统一 B 方案）。
 
-    mode 后端恒定 OpenClaw cron，不暴露触发模式选择；订阅发起人取自必填的
-    owner_user_id query（不取自登录态，由调用方作为必填参数显式声明）。请求体
-    只携带可选备注。若该 Bot 此前在旧框架轮询下注册过，一并卸下旧触发，保证
-    任意时刻仅一份触发。创建返回 201，更新已存在订阅返回 200。
+    Bot 授权必须在请求内同步完成，因为它依赖当前浏览器的登录 Cookie；授权成功后才启动异步
+    装配。新订阅先返回 202，后台装配 `bbs-browse-loop`、清理历史 `bbs-digest-loop`，成功后才
+    写入订阅记录。已存在的 OpenClaw 订阅同步保存备注并后台修复 Browse cron。
     """
+    await grant_service.grant(
+        bcs_bot_id=compose_bot_identity(bot_id, owner_user_id),
+        cookie=request.headers.get("cookie", ""),
+        referer=request.headers.get("referer", ""),
+        operator=principal.user_id,
+    )
     note = body.note if body is not None else None
-    old = service.get_subscription(bot_id=bot_id)
-    result = service.upsert_subscription(
+    result = provisioner.join_or_refresh(
         bot_id=bot_id,
         owner_user_id=owner_user_id,
-        mode=BROWSE_MODE_OPENCLAW,
         note=note,
     )
-    sub = result.subscription
-    await cron_manager.ensure_cron(bot_id=bot_id, owner_user_id=owner_user_id)
-    await runner.push_install_bbs_skills(bot_id=bot_id)
-    if old is not None and old.mode == BROWSE_MODE_FRAMEWORK:
-        scheduler.unregister_bot(bot_id=bot_id)
-    payload = SubscriptionItem.from_record(sub)
-    response.status_code = 201 if result.created else 200
-    return created(payload, request) if result.created else envelope(payload, request)
+    payload = SubscriptionItem.from_record(result.subscription)
+    if result.persisted:
+        response.status_code = 201 if result.created else 200
+        return (
+            created(payload, request) if result.created else envelope(payload, request)
+        )
+
+    response.status_code = 202
+    return accepted(payload, request)
 
 
 @browse_open_router.delete(
@@ -127,21 +169,36 @@ async def upsert_bbs_browse_subscription(
 @envelope_errors
 async def delete_bbs_browse_subscription(
     bot_id: BotIdPath,
+    owner_user_id: OwnerUserIdQuery,
     request: Request,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
     cron_manager: BbsBrowseCronManager = Injected(BbsBrowseCronManager),
+    digest_cron_manager: BbsDigestCronManager = Injected(BbsDigestCronManager),
     scheduler: BbsBrowseLoopScheduler = Injected(BbsBrowseLoopScheduler),
+    provisioner: BbsBrowseSubscriptionProvisioner = Injected(
+        BbsBrowseSubscriptionProvisioner
+    ),
 ) -> Envelope[SubscriptionDeleted]:
     """退出逛论坛订阅（不存在也返回 deleted=false，幂等）；同时卸下定时触发。"""
-    sub = service.get_subscription(bot_id=bot_id)
+    await provisioner.cancel_pending(bot_id=bot_id, owner_user_id=owner_user_id)
+    sub = service.get_subscription(
+        bot_id=bot_id,
+        owner_user_id=owner_user_id,
+    )
     if sub is not None:
         if sub.mode == BROWSE_MODE_OPENCLAW:
             await cron_manager.remove_cron(
                 bot_id=bot_id, owner_user_id=sub.owner_user_id
             )
+            await digest_cron_manager.remove_cron(
+                bot_id=bot_id, owner_user_id=sub.owner_user_id
+            )
         else:
             scheduler.unregister_bot(bot_id=bot_id)
-    deleted = service.delete_subscription(bot_id=bot_id)
+    deleted = service.delete_subscription(
+        bot_id=bot_id,
+        owner_user_id=owner_user_id,
+    )
     return envelope(SubscriptionDeleted(deleted=deleted), request)
 
 
@@ -151,9 +208,9 @@ async def delete_bbs_browse_subscription(
 # Browse without a separate internal ticket. These mirror the internal
 # `/api/v1/collaboration/tasks/bots/{bot_id}/bbs/*` handlers verbatim (same service/runner calls),
 # differing only in the authorisation seam: the public routes require a
-# verified OpenAPI principal and admit OPEN / NoCheck — they name no owner on
-# the wire, so there is no addressed-owner grant to check and no logged-in-user
-# coupling. The declared `bot_id` path segment is the only key.
+# verified OpenAPI principal and admit OPEN / NoCheck. The `bot_id` path names
+# the product Bot and the required `owner_user_id` query names its owner;
+# there is still no addressed-owner grant and no logged-in-user coupling.
 # ---------------------------------------------------------------------------
 
 
@@ -166,17 +223,20 @@ async def delete_bbs_browse_subscription(
 @envelope_errors
 async def get_bbs_browse_subscription(
     bot_id: BotIdPath,
+    owner_user_id: OwnerUserIdQuery,
     request: Request,
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[SubscriptionItem]:
     """读取该 Bot 当前的逛论坛订阅状态，不存在则 404。
 
     Read state lives beside the join/cancel writes so the UI can render a Bot
-    on/off switch. It is a backend read keyed by the addressed `bot_id`: the
-    owner is not assumed from the principal, so admission is OPEN and the
-    authorisation row is NoCheck.
+    on/off switch. It is a backend read keyed by the addressed `bot_id` plus
+    `owner_user_id`, which keeps shared Bots such as `default` independent.
     """
-    sub = service.get_subscription(bot_id=bot_id)
+    sub = service.get_subscription(
+        bot_id=bot_id,
+        owner_user_id=owner_user_id,
+    )
     if sub is None:
         raise NotFound("subscription not found")
     return envelope(SubscriptionItem.from_record(sub), request)
@@ -201,7 +261,7 @@ async def list_bbs_browse_feed(
     topic_type: str | None = Query(
         default=None,
         max_length=16,
-        description="Optional Topic type filter: DISCUSSION, POLL, or NOTICE.",
+        description="Optional Topic type filter: DISCUSSION, SHARE, POLL, HELP, or NOTICE.",
     ),
     service: ForumServiceProtocol = Injected(ForumServiceProtocol),
 ) -> Envelope[Page[BrowseFeedTopicItem]]:
@@ -226,6 +286,30 @@ async def list_bbs_browse_feed(
 
 
 @browse_open_router.post(
+    "/skills/install",
+    response_model=Envelope[dict[str, Any]],
+    operation_id="trigger_bbs_skills_install",
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def trigger_bbs_skills_install(
+    bot_id: BotIdPath,
+    owner_user_id: OwnerUserIdQuery,
+    request: Request,
+    runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
+) -> Envelope[dict[str, Any]]:
+    """向已订阅的 Bot 重发一次 BBS skill 安装/自检消息。
+
+    Path and the required owner query name the addressed owner's product Bot;
+    the runner constructs the BaaS identity, so the caller need not know it.
+    """
+    result = await runner.trigger_install_bbs_skills(
+        bot_id=bot_id, owner_user_id=owner_user_id
+    )
+    return envelope(dict(result), request)
+
+
+@browse_open_router.post(
     "/browse-loop/trigger-framework",
     response_model=Envelope[dict[str, Any]],
     operation_id="trigger_bbs_browse_framework",
@@ -234,6 +318,7 @@ async def list_bbs_browse_feed(
 @envelope_errors
 async def trigger_bbs_browse_framework(
     bot_id: BotIdPath,
+    owner_user_id: OwnerUserIdQuery,
     request: Request,
     runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
@@ -244,7 +329,9 @@ async def trigger_bbs_browse_framework(
     is wired.
     """
     result = await runner.push_browse_once(
-        bot_id=bot_id, expected_mode=BROWSE_MODE_FRAMEWORK
+        bot_id=bot_id,
+        owner_user_id=owner_user_id,
+        expected_mode=BROWSE_MODE_FRAMEWORK,
     )
     return envelope(dict(result), request)
 
@@ -258,6 +345,7 @@ async def trigger_bbs_browse_framework(
 @envelope_errors
 async def trigger_bbs_browse_self(
     bot_id: BotIdPath,
+    owner_user_id: OwnerUserIdQuery,
     request: Request,
     runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
@@ -268,7 +356,9 @@ async def trigger_bbs_browse_self(
     complete one Browse Run on its own.
     """
     result = await runner.push_browse_once(
-        bot_id=bot_id, expected_mode=BROWSE_MODE_OPENCLAW
+        bot_id=bot_id,
+        owner_user_id=owner_user_id,
+        expected_mode=BROWSE_MODE_OPENCLAW,
     )
     return envelope(dict(result), request)
 
@@ -282,11 +372,16 @@ async def trigger_bbs_browse_self(
 @envelope_errors
 async def trigger_bbs_browse_cron_register(
     bot_id: BotIdPath,
+    owner_user_id: OwnerUserIdQuery,
     request: Request,
     runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
     """通知订阅的 Bot 注册其本地 */30 cron（B 模式装配步骤）。"""
-    result = await runner.push_cron_event(bot_id=bot_id, action="register")
+    result = await runner.push_cron_event(
+        bot_id=bot_id,
+        owner_user_id=owner_user_id,
+        action="register",
+    )
     return envelope(dict(result), request)
 
 
@@ -299,9 +394,14 @@ async def trigger_bbs_browse_cron_register(
 @envelope_errors
 async def trigger_bbs_browse_cron_remove(
     bot_id: BotIdPath,
+    owner_user_id: OwnerUserIdQuery,
     request: Request,
     runner: BbsBrowseLoopRunner = Injected(BbsBrowseLoopRunner),  # noqa: B008
 ) -> Envelope[dict[str, Any]]:
     """通知订阅的 Bot 移除其本地 bbs-browse cron（退出/降级）。"""
-    result = await runner.push_cron_event(bot_id=bot_id, action="remove")
+    result = await runner.push_cron_event(
+        bot_id=bot_id,
+        owner_user_id=owner_user_id,
+        action="remove",
+    )
     return envelope(dict(result), request)

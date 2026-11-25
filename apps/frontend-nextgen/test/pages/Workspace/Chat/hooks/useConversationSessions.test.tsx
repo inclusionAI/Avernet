@@ -1,6 +1,9 @@
 /** @jest-environment jsdom */
+import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import type { ConversationBotView } from '@/domain/conversation';
 import { useConversationSessions } from '@/pages/Workspace/Chat/hooks/useConversationSessions';
+import { useConversationSelection } from '@/pages/Workspace/Chat/hooks/useConversationSelection';
+import { useConversationSessionPlaceholder } from '@/pages/Workspace/Chat/hooks/useConversationSessionPlaceholder';
 import { botSessionService } from '@/services/workspace/botSessionService';
 import { conversationService } from '@/services/workspace/conversationService';
 import { useConversationStore } from '@/stores/conversationStore';
@@ -68,6 +71,21 @@ const okPage = (sessionIds: string[], total = sessionIds.length) => ({
   data: { items: sessionIds.map(sessionOf), total },
 });
 
+it('loads sessions for a legacy bot-only URL and finishes with a session-selection prompt', async () => {
+  listManagedSessions.mockResolvedValue(okPage(['existing-session']));
+  const { result } = renderHook(() => {
+    const options = { userId: '327325', managedBots: [managedBot], friendBots: [] };
+    const sessions = useConversationSessions(options);
+    const selection = useConversationSelection({ ...options, hydrated: true });
+    const placeholder = useConversationSessionPlaceholder({ ...options, sessions });
+    return { selection, placeholder };
+  });
+  act(() => result.current.selection.onRouteSelection({ botId: managedBot.bot.realBotId }));
+  await waitFor(() => expect(result.current.placeholder?.status).toBe('unselected'));
+  expect(listManagedSessions).toHaveBeenCalledWith(managedBot.bot, '327325', 'all', 1, 10, '');
+  expect(result.current.selection.selection.botId).toBe(managedBot.bot.botId);
+});
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -120,6 +138,152 @@ describe('useConversationSessions', () => {
     expect(result.current.openBotIds['bot-a:2088']).toBe(true);
   });
 
+  it('does not fall back to the generic create API when the Coding host is unavailable', async () => {
+    const codingBot: ConversationBotView = {
+      bot: {
+        ...managedBot.bot,
+        botId: 'coding-bot:2088',
+        realBotId: 'coding-bot',
+        engine: 'claude_code',
+        isAgentCodingBot: true,
+      },
+      section: 'managed',
+    };
+    listManagedSessions.mockResolvedValue(okPage(['s-coding']));
+    const { result } = renderSessions({ managedBots: [codingBot], friendBots: [] });
+
+    act(() => result.current.toggleBot(codingBot.bot.botId, 'managed'));
+    await waitFor(() => expect(listManagedSessions).toHaveBeenCalledWith(codingBot.bot, '327325', 'all', 1, 10, ''));
+
+    await act(async () => result.current.createSession(codingBot.bot.botId));
+    expect(createSession).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith('当前部署未提供 Coding Bot 会话创建能力。');
+  });
+
+  it('creates Coding Bot sessions through the embedded action bridge', async () => {
+    const codingBot: ConversationBotView = {
+      bot: {
+        ...managedBot.bot,
+        botId: 'coding-bot:2088',
+        realBotId: 'coding-bot',
+        engine: 'claude_code',
+        isAgentCodingBot: true,
+      },
+      section: 'managed',
+    };
+    const createCodingSession = jest.fn().mockResolvedValue({
+      ok: true,
+      session: {
+        sessionId: 's-from-aix',
+        title: '新对话',
+        messageCount: 0,
+        gmtModified: '2026-10-27T10:00:00.000Z',
+        gmtCreate: '2026-10-27T10:00:00.000Z',
+      },
+    });
+    extendCapabilities({
+      getCodingBotConversationHost: () => ({
+        status: 'available',
+        value: { Stage: () => null, createSession: createCodingSession },
+      }),
+    });
+    listManagedSessions.mockResolvedValue(okPage(['s-coding']));
+    const { result } = renderSessions({ managedBots: [codingBot], friendBots: [] });
+    act(() => result.current.toggleBot(codingBot.bot.botId, 'managed'));
+    await waitFor(() => expect(listManagedSessions).toHaveBeenCalledTimes(1));
+
+    await act(async () => result.current.createSession(codingBot.bot.botId));
+
+    expect(createCodingSession).toHaveBeenCalledWith({
+      botId: 'coding-bot',
+      userId: '327325',
+      ownerId: '2088',
+      title: '新对话',
+    });
+    expect(createSession).not.toHaveBeenCalled();
+    const list = useConversationStore.getState().sessionsByBotId[codingBot.bot.botId].sessions;
+    expect(list.items[0]).toMatchObject({ sessionId: 's-from-aix', title: '新对话', botId: codingBot.bot.botId });
+    expect(useConversationStore.getState().selectedSessionId).toBe('s-from-aix');
+    extendCapabilities(defaultCapabilities);
+  });
+
+  it('switches to a managed Coding Bot runtime before creating a cross-Bot session', async () => {
+    const codingBotA: ConversationBotView = {
+      bot: {
+        ...managedBot.bot,
+        botId: 'coding-a:2088',
+        realBotId: 'coding-a',
+        engine: 'claude_code',
+        isAgentCodingBot: true,
+      },
+      section: 'managed',
+    };
+    const codingBotB: ConversationBotView = {
+      bot: {
+        ...managedBot.bot,
+        botId: 'coding-b:2088',
+        realBotId: 'coding-b',
+        engine: 'claude_code',
+        isAgentCodingBot: true,
+      },
+      section: 'managed',
+    };
+    const createdSession = {
+      sessionId: 's-cross-bot',
+      title: '新对话',
+      messageCount: 0,
+      gmtModified: '2026-11-04T10:00:00.000Z',
+      gmtCreate: '2026-11-04T10:00:00.000Z',
+    };
+    type CreateResult = { ok: true; session: typeof createdSession };
+    let resolveCreate!: (result: CreateResult) => void;
+    const createPromise = new Promise<CreateResult>((resolve) => {
+      resolveCreate = resolve;
+    });
+    const createCodingSession = jest.fn(() => createPromise);
+    extendCapabilities({
+      getCodingBotConversationHost: () => ({
+        status: 'available',
+        value: { Stage: () => null, createSession: createCodingSession },
+      }),
+    });
+    const { result } = renderSessions({ managedBots: [codingBotA, codingBotB], friendBots: [] });
+
+    act(() => {
+      useConversationStore.getState().selectConversation({
+        botId: codingBotA.bot.botId,
+        section: 'managed',
+        origin: 'mine',
+        scope: 'all',
+        friendUserId: null,
+        sessionId: 's-a-current',
+      });
+    });
+
+    let createSessionPromise!: Promise<void>;
+    act(() => {
+      createSessionPromise = result.current.createSession(codingBotB.bot.botId);
+    });
+
+    expect(createCodingSession).toHaveBeenCalledTimes(1);
+    expect(useConversationStore.getState().selectedBotId).toBe(codingBotB.bot.botId);
+    expect(useConversationStore.getState().selectedSection).toBe('managed');
+    expect(useConversationStore.getState().selectedOrigin).toBe('mine');
+    expect(useConversationStore.getState().selectedSessionId).toBeNull();
+    expect(useConversationStore.getState().expandedBotIds[codingBotB.bot.botId]).toBe(true);
+    expect(result.current.isCreatingSession(codingBotB.bot.botId)).toBe(true);
+
+    await act(async () => {
+      resolveCreate({ ok: true, session: createdSession });
+      await createSessionPromise;
+    });
+
+    expect(useConversationStore.getState().selectedBotId).toBe(codingBotB.bot.botId);
+    expect(useConversationStore.getState().selectedSessionId).toBe('s-cross-bot');
+    expect(result.current.isCreatingSession(codingBotB.bot.botId)).toBe(false);
+    extendCapabilities(defaultCapabilities);
+  });
+
   it('keeps the loaded list when a Bot collapses and re-expands', async () => {
     listManagedSessions.mockResolvedValue(okPage(['s1']));
     const { result } = renderSessions();
@@ -164,7 +328,7 @@ describe('useConversationSessions', () => {
     expect(useConversationStore.getState().sessionsByBotId['bot-a:2088'].sessions.items[0]?.sessionId).toBe('fav-1');
   });
 
-  it('does not load managed sessions while the origin is others', async () => {
+  it('loads the backend others window for managed sessions', async () => {
     listManagedSessions.mockResolvedValue(okPage(['s1']));
     act(() => useConversationStore.getState().setManagedBotOrigin('bot-a:2088', 'others'));
     const { result } = renderSessions();
@@ -174,7 +338,7 @@ describe('useConversationSessions', () => {
       await Promise.resolve();
     });
 
-    expect(listManagedSessions).not.toHaveBeenCalled();
+    expect(listManagedSessions).toHaveBeenCalledWith(managedBot.bot, '327325', 'all', 1, 10, '', undefined, 'others');
   });
 
   it('loads friend Bot sessions through the friend path', async () => {
@@ -233,7 +397,7 @@ describe('useConversationSessions', () => {
     await act(async () => result.current.createSession('bot-a:2088'));
     expect(useConversationStore.getState().expandedBotIds).toEqual({ 'bot-a:2088': true });
 
-    expect(createSession).toHaveBeenCalledWith(managedBot.bot, '327325');
+    expect(createSession).toHaveBeenCalledWith(managedBot.bot, '327325', undefined, { friendlyErrors: true });
     const view = useConversationStore.getState().sessionsByBotId['bot-a:2088'];
     expect(view.sessions.items[0]?.sessionId).toBe('s-new');
     expect(useConversationStore.getState().selectedSessionId).toBe('s-new');
@@ -431,7 +595,7 @@ it('resumes a deferred scope load when the pending session action finishes', asy
   );
 });
 
-it('expands managed and friend Bots exclusively, selects their first session and reuses cached sessions', async () => {
+it('expands managed and friend Bots exclusively, reuses cached sessions and never touches the selection', async () => {
   listManagedSessions.mockResolvedValue(okPage(['s1']));
   listFriendBotSessions.mockResolvedValue(okPage(['fs1']));
   const { result } = renderSessions();
@@ -444,9 +608,11 @@ it('expands managed and friend Bots exclusively, selects their first session and
     expect(useConversationStore.getState().friendBotSessionsByBotId[friendBot.bot.botId]?.items).toHaveLength(1),
   );
   expect(result.current.openBotIds).toEqual({ [friendBot.bot.botId]: true });
+  // 展开/切台解耦：展开好友 Bot 只浏览列表，主舞台的会话选中保持不变。
   expect(useConversationStore.getState()).toMatchObject({
-    selectedBotId: friendBot.bot.botId,
-    selectedSessionId: 'fs1',
+    selectedBotId: managedBot.bot.botId,
+    selectedSection: 'managed',
+    selectedSessionId: 's1',
   });
   act(() => result.current.toggleBot(managedBot.bot.botId, 'managed'));
   expect(result.current.openBotIds).toEqual({ [managedBot.bot.botId]: true });
@@ -470,16 +636,19 @@ it('a late response only caches the collapsed Bot without re-expanding it', asyn
   expect(useConversationStore.getState().sessionsByBotId[managedBot.bot.botId].sessions.items).toHaveLength(1);
 });
 
-describe('团队 Bot 复用管理会话', () => {
+describe('我协作的 Bot 复用管理会话', () => {
   const teamBot: ConversationBotView = { ...managedBot, section: 'team' };
-  it('展开走管理列表、自动首选、切换 mine 选中保留 team；创建/动作使用 team 缓存', async () => {
+  it('展开走管理列表；切换 mine 选中保留 team；创建/动作使用 team 缓存', async () => {
     listManagedSessions.mockResolvedValue(okPage(['first']));
     const { result } = renderSessions({ managedBots: [teamBot] });
     act(() => result.current.toggleBot(teamBot.bot.botId, 'team'));
-    await waitFor(() => expect(useConversationStore.getState().selectedSessionId).toBe('first'));
+    // 展开/切台解耦：列表加载完只供浏览，选中不落、不切舞台。
+    await waitFor(() =>
+      expect(useConversationStore.getState().sessionsByBotId[teamBot.bot.botId]?.sessions.items).toHaveLength(1),
+    );
+    expect(useConversationStore.getState().selectedBotId).toBeNull();
     expect(listManagedSessions).toHaveBeenCalledWith(teamBot.bot, '327325', 'all', 1, 10, '');
     expect(listFriendBotSessions).not.toHaveBeenCalled();
-    expect(useConversationStore.getState().selectedSection).toBe('team');
     act(() => result.current.selectMineSession(teamBot.bot.botId, 'first'));
     expect(useConversationStore.getState().selectedSection).toBe('team');
     createSession.mockResolvedValue({ ok: true, data: sessionOf('new') });
@@ -496,10 +665,12 @@ describe('团队 Bot 复用管理会话', () => {
     await act(async () => {
       await result.current.createSession(teamBot.bot.botId);
     });
-    expect(listManagedSessions).not.toHaveBeenCalled();
+    expect(listManagedSessions).toHaveBeenCalledWith(teamBot.bot, '327325', 'all', 1, 10, '', undefined, 'others');
     expect(listFriendBotSessions).not.toHaveBeenCalled();
     expect(createSession).not.toHaveBeenCalled();
-    expect(useConversationStore.getState().selectedOrigin).toBe('others');
+    // 展开不写选中；来源记忆保持用户选择的 others。
+    expect(useConversationStore.getState().selectedBotId).toBeNull();
+    expect(useConversationStore.getState().originByManagedBotId[teamBot.bot.botId]).toBe('others');
   });
 });
 
@@ -516,4 +687,51 @@ it('团队缺 entity 的不可聊天 Bot 即使被深链展开也不查询/创�
   });
   expect(listManagedSessions).not.toHaveBeenCalled();
   expect(createSession).not.toHaveBeenCalled();
+});
+
+describe('Coding Bot session origin', () => {
+  it.each(['managed', 'team'] as const)(
+    '%s Coding Bot loads others through the flat Coding list and preserves the creator identity',
+    async (section) => {
+      const codingBot: ConversationBotView = {
+        bot: {
+          ...managedBot.bot,
+          botId: `${section}-coding:2088`,
+          realBotId: `${section}-coding`,
+          engine: 'claude_code',
+          isAgentCodingBot: true,
+        },
+        section,
+      };
+      const otherSessionId = `user:400001:session:shared:agent:${section}-coding`;
+      listManagedSessions.mockResolvedValue(okPage([otherSessionId]));
+      act(() => {
+        useConversationStore.setState({
+          originByManagedBotId: { [codingBot.bot.botId]: 'others' },
+          effectiveScopeByManagedBotId: { [codingBot.bot.botId]: 'all' },
+        });
+      });
+      const { result } = renderSessions({ managedBots: [codingBot], friendBots: [] });
+
+      act(() => result.current.toggleBot(codingBot.bot.botId, section));
+      await waitFor(() =>
+        expect(listManagedSessions).toHaveBeenCalledWith(
+          codingBot.bot,
+          '327325',
+          'all',
+          1,
+          10,
+          '',
+          undefined,
+          'others',
+        ),
+      );
+
+      act(() => result.current.selectMineSession(codingBot.bot.botId, otherSessionId));
+      const store = useConversationStore.getState();
+      expect(store.selectedOrigin).toBe('others');
+      expect(store.selectedFriendUserId).toBe('400001');
+      expect(store.selectedSessionId).toBe(otherSessionId);
+    },
+  );
 });

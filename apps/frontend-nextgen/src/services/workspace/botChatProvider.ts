@@ -1,8 +1,19 @@
+import { createBotA2aFetch, type A2aProxyConnection } from './botA2aFetch';
+import {
+  isSendBannedForSession,
+  revertA2AChoice,
+  takeCachedA2AProvider,
+  SEND_BAN_UI_TEXT,
+  type A2aBootstrapConfig,
+} from '@/adapters/a2a/bootstrap';
+import type { CancelOutcome } from '@avernet/a2a-chat-client';
 import { getBotConnection } from '@/services/backendApi/bots/privateBotSessionController';
 import { getBotIamToken } from '@/services/backendApi/privateChat/iamTokenController';
+import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { OpenClawProvider, type ConnectionStatusEvent, type OpenClawProviderConfig } from '@tc-chat/adapters';
 import type { ChatMessage, ChatProvider, PromptFileRef, ResourceReference } from '@tc-chat/core';
 import { installCompleteFallback } from './botChatCompleteFallback';
+import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
 import {
   BOT_MESSAGE_PAGE_SIZE,
   botSessionService,
@@ -18,15 +29,56 @@ export interface BotChatRequest {
   resourceReferences?: ResourceReference[];
   promptFileRefs?: PromptFileRef[];
 }
+/**
+ * 好友 Coding Bot 的 AICoding 兼容连接路径。
+ *
+ * connection 是实际运行时的权威结果。好友分组的 AICoding socket 临时复用
+ * Claude Code 兼容入口，同时保留原网关前缀、routing target 与连接 token。
+ */
+const FRIEND_AICODING_CHAT_PATH = '/api/aicoding/ws';
+const FRIEND_CLAUDE_CODE_CHAT_PATH = '/api/claude_code/ws';
+
+export function isAicodingConnectionEngine(engine: string | null | undefined): boolean {
+  const normalized = engine?.trim().toLowerCase().replace(/[\s_-]/g, '') || '';
+  return normalized === 'aicoding' || normalized === 'applicationcoding';
+}
+
+export function resolveFriendCodingBotChatSocketUrl(
+  bot: ChatBotView,
+  connectionEngine: string | undefined,
+  url: string,
+): string {
+  if (!bot.isFriendBot) return url;
+  if (!isAicodingConnectionEngine(connectionEngine)) return url;
+
+  let socket: URL;
+  try {
+    socket = new URL(url);
+  } catch {
+    return url;
+  }
+  if (!socket.pathname.endsWith(FRIEND_AICODING_CHAT_PATH)) return url;
+  socket.pathname = `${socket.pathname.slice(0, -FRIEND_AICODING_CHAT_PATH.length)}${FRIEND_CLAUDE_CODE_CHAT_PATH}`;
+  return socket.toString();
+}
+
 export interface BotChatState {
   phase: 'idle' | 'preparing' | 'loading-history' | 'ready' | 'error';
   error: string | null;
+}
+
+/** /connection 返回的会话运行时；好友 Bot 展示能力以该结果为最终依据。 */
+export interface BotConnectionRuntime {
+  resolved: boolean;
+  engine: string | null;
 }
 
 interface BotChatProviderOptions {
   bot: ChatBotView;
   userId: string;
   sessionId: string;
+  /** 多实例服务 Bot 的实例范围;缺省按后端默认实例解析。 */
+  range?: ConversationSessionRequestRange;
   /** 注入 SDK Provider 构造(测试 stub);缺省真实 SDK。 */
   createSdkProvider?: (config: OpenClawProviderConfig) => OpenClawProvider;
   /** 注入 IAM token 拉取(测试 stub);缺省走 /openapi/v1/bots/{bot_id}/iam-token。 */
@@ -58,20 +110,51 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   public onMessage?: (message: ChatMessage) => void;
   public onComplete?: (messages: ChatMessage[]) => void;
   public onError?: (error: Error) => void;
+  /** R2-3 第四轮——未终结旧任务的隔离播报面（parking 重接，见
+   * parkOrDisposeRetiredA2a）：旧任务的完成/失败不再冒充当前发送的
+   * 完成/失败；UI 接线归 M3（同 manualRecover 的 B13 预留口径）。 */
+  public onRetiredTaskMessage?: (message: unknown) => void;
+  public onRetiredTaskComplete?: (messages: Array<unknown>) => void;
+  public onRetiredTaskError?: (error: Error) => void;
 
   private readonly options: BotChatProviderOptions;
   private inner: OpenClawProvider | null = null;
+  /**
+   * 回滚换轨后**保留的未终结 A2A 旧任务处理器**（review R2-3 第二补丁，
+   * spec §3.1：旧任务生命周期独立于新发送 provider——恢复锚/播报/迟到
+   * 核销全在；至终态或用户明确放弃时释放，见 releaseSettledA2aHandler）
+   */
+  private retiredA2aHandler: OpenClawProvider | null = null;
   private initializePromise: Promise<OpenClawProvider> | null = null;
   private connectionPromise: Promise<void> | null = null;
   /** disconnect() 递增；异步 connect 在每个 await 后校验，过期连接静默清理。 */
   private connectionEpoch = 0;
   private readonly getIamTokenFn: typeof getBotIamToken;
+  /** Caller 判据探测(单飞缓存):首次换签后结果定格,null=尚未发起。 */
+  private callerRuntimeTargetPromise: Promise<'service' | 'caller_instance' | undefined> | null = null;
   private iamToken = '';
   private directDesktop = false;
   private desktopReconnectTimer?: ReturnType<typeof setTimeout>;
   private manuallyDisconnected = false;
   private connectionListeners = new Set<(event: ConnectionStatusEvent) => void>();
   private stateListeners = new Set<(state: BotChatState) => void>();
+  private connectionRuntimeListeners = new Set<(runtime: BotConnectionRuntime) => void>();
+  private connectionRuntimeState: BotConnectionRuntime = { resolved: false, engine: null };
+  /** A2A M2 bootstrap seam：最近一次连接信息里的 ws url——§3.1 发送禁令门按它派生 A2A endpointBase */
+  private wsUrl: string | null = null;
+  /** B17 服务端签发面：连接响应 sockets kind='a2a' 的 base（无则 null——旧后端
+   * 不出该 socket，ws 推导行为逐字节保持）；A2A bootstrap 与发送禁令的门键均
+   * 以它为权威来源（见 bootstrap.ts resolveA2aUrls/isSendBannedForSession）。 */
+  private a2aBaseUrl: string | null = null;
+  /** 用户灰度负结果（服务端 a2a_withheld）——bootstrap 拦截推导/探测/构造 */
+  private a2aWithheld = false;
+  private a2aFetchImpl: typeof fetch | undefined;
+  /** R6 禁令作用域：bot+owner+stage 键前缀——registry 是 app 级单例而
+   * sessionKey 跨 bot 不唯一（不同 OpenClaw 实例的同名会话），scope 把
+   * 挂禁/查询/核销限定在本 bot/runtime 域内，杜绝跨 bot 串联误封。 */
+  private readonly sendBanScopeId: string;
+  /** B12 取消四态的宿主订阅面（A2AProvider.onCancelOutcome → useBotChat toast 消费） */
+  private readonly cancelOutcomeListeners = new Set<(outcome: CancelOutcome) => void>();
   private unsubscribeInnerConnection?: () => void;
   private state: BotChatState = { phase: 'idle', error: null };
   private teardownFallback?: () => void;
@@ -83,6 +166,40 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   constructor(options: BotChatProviderOptions) {
     this.options = options;
     this.getIamTokenFn = options.getIamToken ?? getBotIamToken;
+    // 成分均无空格（bot id/工号/stage 枚举）——空格即稳定的域边界（policy 约定）。
+    this.sendBanScopeId = [
+      options.bot.realBotId, options.bot.ownerId,
+      resolveChatRuntimeStage(options.bot),
+    ].join(' ');
+    // Caller 判据探测随构造即发,与连接握手(getBotConnection)并行,保证首次换签
+    // 前已有结论、不串行加时延;desktop 直连不走云端换签,不探测。
+    if (options.bot.botType !== 'desktop') void this.resolveCallerRuntimeTarget();
+  }
+
+  /** Caller 模式判据运行时化(2026-11-19 需求变更,与文件链 useBotSessionFilesFeature
+   *  同款判据/取值):新版目录接口族不下发 call_type,静态 options.bot.callType 恒
+   *  undefined(判据死参数事故的根因);改探测 GET /openapi/v1/bots/{id}/caller-context
+   *  (stage=draft,聚合 bot_call_type 存量存于 Bot 行,与运行 stage 无关)。
+   *  取值:我管理的/我协作的 → service(服务实例池,实例仍由 stage/device_uuid 定位);
+   *  好友 Bot → caller_instance(当前用户独立 Caller 实例)。
+   *  三轮勘误(2026-11-19):好友探测照旧发起——gateway 契约本接口仅授权 Bot 的
+   *  owner/collaborator,好友视角探测预期失败,但无论成败 caller_runtime_target
+   *  电文均可能无法落地,不再据此裁剪请求面;探测失败/非 caller 一律静默降级不带
+   *  且零提示(请求层 suppressErrorNotification 不投 httpClient 默认错误 toast,
+   *  契约安全:f_user_id 路由自明)。
+   *  单飞缓存:结果跨多次换签定格,失效面(改调用身份)随 provider 重建刷新。 */
+  private resolveCallerRuntimeTarget(): Promise<'service' | 'caller_instance' | undefined> {
+    if (this.options.bot.botType === 'desktop') return Promise.resolve(undefined);
+    this.callerRuntimeTargetPromise ??= botEditorService
+      .getCallerContext(this.options.bot.realBotId, this.options.bot.ownerId, {
+        suppressErrorNotification: true,
+      })
+      .then((ctx) =>
+        ctx.botCallType === 'caller'
+          ? (this.options.bot.isFriendBot ? ('caller_instance' as const) : ('service' as const))
+          : undefined)
+      .catch(() => undefined);
+    return this.callerRuntimeTargetPromise;
   }
 
   get isConnected(): boolean {
@@ -90,6 +207,9 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   }
   get supportState(): BotChatState {
     return this.state;
+  }
+  get connectionRuntime(): BotConnectionRuntime {
+    return this.connectionRuntimeState;
   }
   get hasMoreHistory(): boolean {
     return this.loadedHistoryRawCount < this.historyTotal;
@@ -111,20 +231,120 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       this.connectionListeners.delete(listener);
     };
   }
+  subscribeToConnectionRuntime(listener: (runtime: BotConnectionRuntime) => void): () => void {
+    this.connectionRuntimeListeners.add(listener);
+    listener(this.connectionRuntimeState);
+    return () => {
+      this.connectionRuntimeListeners.delete(listener);
+    };
+  }
 
-  private async getChatUrl(): Promise<string> {
+  // ─── A2A M2 bootstrap seam：§3.1 发送禁令门（纯谓词）+ B12 取消四态订阅面 ───
+
+  /**
+   * §3.1 context 级发送禁令门（spec 原文文案单源在 bootstrap.SEND_BAN_UI_TEXT，
+   * toast 消费面归 useBotChat.send）。禁令生命周期独立于 provider 实例
+   * （registry 是 (endpointBase, sessionKey) 键的 app 级单例）；未初始化
+   * （尚无 ws url）/ 非 A2A 面（选择探测落 v3）恒 false——v3 发送不受影响。
+   */
+  isSendBanned(): boolean {
+    // 查询口径 = 本 bot/runtime 域内 context 级（scope 隔离跨 bot 同名
+    // sessionKey），与当前连接的推导键无关——回滚移除 A2A 地址后旧面禁令
+    // 仍可查（R5-F2），跨 bot 互不串联（R6-F1）。
+    return this.wsUrl !== null
+      && isSendBannedForSession(this.options.sessionId, {
+        scopeId: this.sendBanScopeId,
+        wsUrl: this.wsUrl,
+        a2aBaseUrl: this.a2aBaseUrl ?? undefined,
+      });
+  }
+
+  /** B12 取消终局播报订阅：A2AProvider.onCancelOutcome 经本类转发（含 provider 已 teardown 的迟到核销） */
+  subscribeToCancelOutcome(listener: (outcome: CancelOutcome) => void): () => void {
+    this.cancelOutcomeListeners.add(listener);
+    return () => {
+      this.cancelOutcomeListeners.delete(listener);
+    };
+  }
+
+  private emitCancelOutcome(outcome: CancelOutcome): void {
+    for (const listener of [...this.cancelOutcomeListeners]) {
+      try {
+        listener(outcome);
+      } catch {
+        /* 单订阅异常不中断其余（镜像订阅面通用容错） */
+      }
+    }
+  }
+
+  private async fetchIamToken(): Promise<string> {
+    const params = withFriendBotRequestParams(this.options.bot, this.options.userId, {
+      user_id: resolveUserId(this.options.userId),
+    });
+    // IAM 与文件链同规则(2026-11-19 勘误):判据与取值同 resolveCallerRuntimeTarget 单点收口。
+    const callerRuntimeTarget = await this.resolveCallerRuntimeTarget();
+    return this.getIamTokenFn(
+      this.options.bot.realBotId,
+      params.user_id,
+      this.options.bot.ownerId,
+      params.stage,
+      {
+        sessionKey: this.options.sessionId,
+        ...(this.options.bot.isFriendBot
+          ? { friendUserId: params.user_id, ownerId: this.options.bot.ownerId }
+          : {}),
+        // 多实例服务 Bot:IAM 换签带选中实例 device_uuid(与 getChatUrl 的实例选址同源
+        // options.range,避免 Token 与实际实例不一致)。range 产出已由 useBotSessionRange /
+        // supportsConversationInstanceScope 收口(服务 Bot+非好友+非 teclaw+已选实例)。
+        // 2026-11-19 口径勘误:不再门控 stage=online——选定实例即定位目标,任意运行态
+        // (含草稿/验证)多实例 Token 都须与建连同实例(openspec add-servicebot-iam-device-uuid)。
+        ...(this.options.range?.deviceUuid
+          ? { deviceUuid: this.options.range.deviceUuid }
+          : {}),
+        ...(callerRuntimeTarget
+          ? { callerRuntimeTarget }
+          : {}),
+      },
+    );
+  }
+
+  private async getChatUrl(): Promise<A2aProxyConnection & { url: string }> {
     const resp = await getBotConnection(
       this.options.bot.realBotId,
       withFriendBotRequestParams(this.options.bot, this.options.userId, {
         user_id: resolveUserId(this.options.userId),
         owner_id: this.options.bot.ownerId,
         ...(this.options.bot.isFriendBot ? { session_id: this.options.sessionId } : {}),
+        ...(this.options.range ? { device_uuid: this.options.range.deviceUuid } : {}),
       }),
     );
+    const connectionEngine = resp.data?.engine?.trim().toLowerCase() || null;
+    this.setConnectionRuntime({
+      resolved: connectionEngine !== null,
+      engine: connectionEngine,
+    });
     const socket = resp.data?.sockets?.find((s) => s.kind === 'chat');
     if (!socket?.url) throw new Error('Bot 连接信息为空,请稍后重试');
+    const socketUrl = resolveFriendCodingBotChatSocketUrl(
+      this.options.bot,
+      resp.data?.engine,
+      socket.url,
+    );
     this.directDesktop = resp.data?.transport_mode === 'direct';
-    return socket.url;
+    // B17：服务端签发的 A2A base 原样收下（签发方承诺浏览器可达）；
+    // 缺席 = null = 既有 ws 推导兜底，不做任何本地代填。
+    const a2aSocket = resp.data?.sockets?.find((s) => s.kind === 'a2a');
+    const a2aBase = a2aSocket?.url;
+    // 用户灰度负结果（服务端治理后明确拒绝）：与"没有地址"是两个语义——
+    // 明确拒绝禁止推导/探测/缓存命中构造，见 A2aBootstrapConfig.a2aWithheld。
+    const a2aWithheld = resp.data?.a2a_withheld === true;
+    return {
+      url: socketUrl,
+      a2aBaseUrl: a2aBase ? String(a2aBase) : null,
+      a2aWithheld,
+      a2aHeaders: a2aSocket?.headers,
+      expiresAt: resp.data?.expires_at ?? '',
+    };
   }
 
   private ensureInitialized(): Promise<OpenClawProvider> {
@@ -139,20 +359,47 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
 
   private async initialize(): Promise<OpenClawProvider> {
     this.setState({ phase: 'preparing', error: null });
-    const url = await this.getChatUrl();
+    this.setConnectionRuntime({ resolved: false, engine: null });
+    const connection = await this.getChatUrl();
+    const { url, a2aBaseUrl, a2aWithheld } = connection;
+    this.wsUrl = url;
+    this.a2aBaseUrl = a2aBaseUrl;
+    this.a2aWithheld = a2aWithheld;
+    this.a2aFetchImpl = createBotA2aFetch(connection, () => this.getChatUrl());
     // 连接凭证(URL query token,管 WS 握手)与请求身份凭证(x-iam-token,管 chat.send 帧)是两套:
     // URL 已内含握手凭证;此处须单独拉取 IAM token 并注入 SDK,否则发送会被服务端拒(身份不明)。
     this.iamToken = this.directDesktop
       ? ''
-      : await this.getIamTokenFn(
-          this.options.bot.realBotId,
-          resolveUserId(this.options.userId),
-          this.options.bot.ownerId,
-          resolveChatRuntimeStage(this.options.bot),
-        );
-    const factory = this.options.createSdkProvider ?? ((cfg) => new OpenClawProvider(cfg));
+      : await this.fetchIamToken();
+    // A2A M2 bootstrap seam：SDK 工厂两条候选——缓存命中同步换入 A2AProvider（两段式
+    // 传输选择：探测未决时 takeCachedA2AProvider 内部 fire-and-forget 后台预热、
+    // 本轮落回 v3；选择/锁定/禁令编排权威在 @/adapters/a2a/bootstrap.ts 单一编排点）。
+    // v3 构造行 `new OpenClawProvider(cfg)` 保持逐字不变（零改动红线，钉板
+    // test/services/workspace/botChatProvider.a2a.seam.test.ts）。
+    const factory = this.options.createSdkProvider ?? ((cfg) => {
+      const a2aProvider = takeCachedA2AProvider(
+        cfg as A2aBootstrapConfig, this.a2aFetchImpl ? { fetchImpl: this.a2aFetchImpl } : undefined,
+      );
+      if (a2aProvider) {
+        // B12 取消四态播报转发（宿主 toast 消费面在 useBotChat；文案单源 CANCEL_UI_TEXT）。
+        // IAM 凭证刷新沿用本类既有通道：request() 的 updateProviderIamToken 直写
+        // config.xIAMToken，A2AProvider.resolveIamToken 每次请求重读——无需额外接线。
+        a2aProvider.onCancelOutcome = (outcome) => this.emitCancelOutcome(outcome);
+        return a2aProvider as unknown as OpenClawProvider;
+      }
+      return new OpenClawProvider(cfg);
+    });
     const inner = factory({
       url,
+      // B17：服务端签发的 A2A base 随 cfg 透传——A2A bootstrap 在场即权威，
+      // v3 OpenClawProvider 对多出的成员幂等忽略（ws 面不改一字）。
+      ...(this.a2aBaseUrl ? { a2aBaseUrl: this.a2aBaseUrl } : {}),
+      // 用户灰度明确拒绝同链透传：bootstrap 拦截推导/探测/缓存构造。
+      ...(this.a2aWithheld ? { a2aWithheld: true } : {}),
+      // R6 禁令作用域进 provider 配置:挂禁/核销与宿主查询同键
+      //（条件展开同 a2aBaseUrl 模式:v3 OpenClawProviderConfig 无此成员,
+      // spread 形态不触发 excess-property 检查,v3 对多出成员幂等忽略）
+      ...(this.sendBanScopeId ? { sendBanScopeId: this.sendBanScopeId } : {}),
       sessionKey: this.options.sessionId,
       xIAMToken: this.iamToken,
       immediateConnect: true,
@@ -167,12 +414,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       // 不返回 xProxypassToken——避免 SDK 给内含 token 的 url 再次追加 x-proxypass-token。
       credentialProvider: async () => {
         if (this.directDesktop) return {};
-        const refreshed = await this.getIamTokenFn(
-          this.options.bot.realBotId,
-          resolveUserId(this.options.userId),
-          this.options.bot.ownerId,
-          resolveChatRuntimeStage(this.options.bot),
-        );
+        const refreshed = await this.fetchIamToken();
         this.iamToken = refreshed;
         return { xIAMToken: refreshed };
       },
@@ -222,6 +464,23 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
         if (inner) this.disconnectInner(inner);
         return;
       }
+      // A2A connect 失败回退（review P3）：缓存命中换入的 A2A 在连接阶段（未
+      // 出站任何请求）失败——回退选择 probe-v3 + 丢弃缓存 inner，下次 connect
+      // 经工厂重建落回 v3；不允许"v3 本可用却持续失败"。已出站请求的失败不进
+      // 此分支（归 provider 恢复/取消面，不重发）。
+      if (inner !== null && (inner as { isA2aProvider?: boolean }).isA2aProvider === true) {
+        this.disconnectInner(inner);
+        // this.inner 与已 resolve 的 initializePromise 都要清：ensureInitialized
+        // 对旧 resolved 装载同样直返——不清则下次 connect 仍拿回死亡的 A2A inner
+        if (this.inner === inner) {
+          this.inner = null;
+          this.initializePromise = null;
+        }
+        revertA2AChoice({
+          url: this.wsUrl ?? '',
+          ...(this.a2aBaseUrl ? { a2aBaseUrl: this.a2aBaseUrl } : {}),
+        } as A2aBootstrapConfig);
+      }
       const normalized = error instanceof Error ? error : new Error(String(error));
       this.setState({ phase: 'error', error: normalized.message });
       this.emitConnection({ status: 'error', retryCount: 0, error: normalized });
@@ -242,6 +501,12 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     // CONNECTING 状态直接 close 会让 SDK reject 1006。进行中的 connect 自己在 epoch
     // 失效后完成清理；已稳定/空闲的连接仍立即断开。
     if (!this.connectionPromise) this.inner?.disconnect();
+    // 会话关闭 = 用户明确放弃（spec §3.1 销毁条件）：保留中的未终结旧任务
+    // 处理器随会话一并释放
+    if (this.retiredA2aHandler) {
+      this.retiredA2aHandler.disconnect();
+      this.retiredA2aHandler = null;
+    }
     this.emitConnection({ status: 'disconnected', retryCount: 0 });
   }
 
@@ -256,19 +521,27 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   }
 
   async request(params: BotChatRequest, messageId?: string): Promise<void> {
+    await this.rollbackTransportForNewRun();          // 发送边界重估（review R2-3）
     const inner = await this.ensureInitialized();
     // 发送前刷新 IAM token,确保 WS 请求帧携带最新身份凭证(与 supportProvider / open-claw 一致)。
     const freshIamToken = this.directDesktop
       ? ''
-      : await this.getIamTokenFn(
-          this.options.bot.realBotId,
-          resolveUserId(this.options.userId),
-          this.options.bot.ownerId,
-          resolveChatRuntimeStage(this.options.bot),
-        );
+      : await this.fetchIamToken();
     this.iamToken = freshIamToken;
     updateProviderIamToken(inner, freshIamToken);
     if (!inner.isConnected) await this.connect();
+    // A2A M2 bootstrap seam：§3.1 发送禁令强制核验（review P2-2）。
+    // useBotChat.send 的检查只是输入框入口的提前提示——副屏/卡片等入口经
+    // chat.onRequest 直汇到本方法，绕过它；且初始化/刷 IAM/connect 等异步
+    // 步骤窗口内可能挂上新禁令（取消隔离不能靠入队时的旧读数）。禁令
+    // 判断必须在统一执行入口兜底、放在出站前最后同步点：挂禁即拒绝＋
+    // onError 上行，绝不发出 SendStreamingMessage。回滚到 v3 不豁免——
+    // 谓词键由 wsUrl/a2aBaseUrl 派生（传输无关），同 context 旧禁令仍在。
+    if (this.isSendBanned()) {
+      const error = new Error(SEND_BAN_UI_TEXT);
+      this.onError?.(error);
+      throw error;
+    }
     await inner.request(
       {
         query: params.content,
@@ -283,6 +556,120 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   abort(): void {
     this.inner?.abort();
   }
+
+  /**
+   * A2A 传输回滚（review R2-3，spec §7 回滚语义）：开关关 / locked-v3 只在
+   * 构造期生效是不够的——会话已有 A2A inner 时，后续发送会一直复用它，新
+   * 任务继续以 A2A 创建。发送边界重估"当下选择"：
+   *   · inner 非 A2A（v3/未建）→ 直接放行；
+   *   · inner 是 A2A 且当下 takeCachedA2AProvider 仍取得到（选择成立）→ 放行；
+   *   · inner 是 A2A 但当下取不到（开关关/锁定/未决）→ **只替换"新发送
+   *     provider"位**（this.inner），重走 initialize 工厂按当下选择重建（此处
+   *     即落 v3）；被替换的旧实例按 spec §3.1 销毁时点分流处置——见
+   *     parkOrDisposeRetiredA2a。
+   * 不自动重发原任务；在途旧 run 由 isRequesting 互斥保证不与换轨并发
+   *（能走到发送边界的会话内 发送位必然空闲——但引擎侧任务未必终结，故旧
+   * 处理器不得随换轨销毁，review R2-3 第二补丁）。
+   */
+  private async rollbackTransportForNewRun(): Promise<void> {
+    this.releaseSettledA2aHandler();                 // 先核销已终结的旧任务处理器
+    const current = this.inner as { isA2aProvider?: boolean } | null;
+    if (!current?.isA2aProvider || !this.wsUrl) return;
+    const probeCfg = {
+      url: this.wsUrl,
+      ...(this.a2aBaseUrl ? { a2aBaseUrl: this.a2aBaseUrl } : {}),
+      ...(this.a2aWithheld ? { a2aWithheld: true } : {}),
+      // R6 禁令作用域进 provider 配置:挂禁/核销与宿主查询同键
+      //（条件展开同 a2aBaseUrl 模式:v3 OpenClawProviderConfig 无此成员,
+      // spread 形态不触发 excess-property 检查,v3 对多出成员幂等忽略）
+      ...(this.sendBanScopeId ? { sendBanScopeId: this.sendBanScopeId } : {}),
+      sessionKey: this.options.sessionId,
+    } as A2aBootstrapConfig;
+    if (takeCachedA2AProvider(
+      probeCfg, this.a2aFetchImpl ? { fetchImpl: this.a2aFetchImpl } : undefined,
+    )) return;    // 当下选择仍 A2A——复用
+    const retired = this.inner as OpenClawProvider;
+    this.parkOrDisposeRetiredA2a(retired);
+    this.inner = null;
+    this.initializePromise = null;
+    await this.initialize();                        // 工厂重走：当下选择 → v3
+  }
+
+  /**
+   * 回滚退役实例的 spec §3.1 分流：**未终结任务**（hasUnterminatedRecovery：
+   * 恢复锚在、终局未落、无在途请求——预算耗尽/协议错等退出后的典型形态）→
+   * 旧任务处理器**保留**为 retiredA2aHandler——订阅/播报/恢复锚全数不动
+   * （manualRecover 仍可开只读轮、迟到 CancelTask 核销仍写 context 级
+   * registry、终稿仍走 parser→onComplete 进会话 UI）。**已终结/无任务** →
+   * 原 R2-3 语义：disconnectInner 仅断连静默退役（不播 onComplete）。
+   * 前端发送位空闲 ≠ 引擎任务已终结——不得以前者证明可销毁后者。
+   */
+  private parkOrDisposeRetiredA2a(retired: OpenClawProvider): void {
+    if ((retired as { hasUnterminatedRecovery?: boolean }).hasUnterminatedRecovery) {
+      // 回调隔离（review R2-3 第四轮 #2）：旧任务后续事件重接到专用
+      // retired_*面——不得冒充当前会话新发送的完成/失败（宿主 onMessage/
+      // onComplete/onError 保持专属于当下发送位）。旧任务的迟到恢复终局、
+      // 播报从 onRetiredTask* 走；取消核销仍走 onCancelOutcome（文案自带
+      // 归属，不歧义）。连接状态订阅一并剪除——旧任务恢复期不再发会话级
+      // 状态（错误面经 onRetiredTaskError 上浮，宿主选择是否展示）。
+      const isolated = retired as unknown as {
+        onMessage?: (m: unknown) => void;
+        onComplete?: (msgs: Array<unknown>) => void;
+        onError?: (e: Error) => void;
+      };
+      isolated.onMessage = (m) => this.onRetiredTaskMessage?.(m);
+      isolated.onComplete = (msgs) => this.onRetiredTaskComplete?.(msgs);
+      isolated.onError = (e) => this.onRetiredTaskError?.(e);
+      this.unsubscribeInnerConnection?.();
+      this.unsubscribeInnerConnection = undefined;
+      this.retiredA2aHandler = retired;             // 处理器全保留（锚/恢复/核销）
+      return;
+    }
+    this.disconnectInner(retired);
+  }
+
+  /**
+   * 未终结旧任务的生产驱动面——恢复入口（review R2-3 第四轮 #1）：经宿主
+   * 可达（parked 处理器的 manualRecover 只读轮；真实终局事件回流的唯一
+   * 生产通道）。终局落定后由下一发送边界惰性释放（releaseSettledA2aHandler）。
+   * UI 按钮接线归 M3；本面先立可达性（§3.1"独立生命周期"的主干道）。
+   */
+  async recoverRetiredA2aTask(): Promise<{ outcome: string; state?: string } | null> {
+    const parked = this.retiredA2aHandler;
+    if (!parked) return null;
+    return (parked as unknown as {
+      manualRecover(): Promise<{ outcome: string; state?: string } | null>;
+    }).manualRecover();
+  }
+
+  /**
+   * 未终结旧任务的生产驱动面——取消入口（§3.1"用户明确放弃"经宿主显式
+   * 触发）：wire CancelTask 控制面（四态核销 + context 级 send-ban 照 §3.1
+   * 迟到规则落地——registry 与实例无关，引用释放不影响核销），随后立即
+   * 释放处理器（用户已明确放弃，恢复入口随之作废）。
+   */
+  cancelRetiredA2aTask(): void {
+    const parked = this.retiredA2aHandler;
+    if (!parked) return;
+    (parked as unknown as { cancelUnterminatedTask?(): void }).cancelUnterminatedTask?.();
+    this.retiredA2aHandler = null;
+    this.disconnectInner(parked);
+  }
+
+  /**
+   * 旧任务处理器的 §3.1 销毁条件核销（在新发送边界惰性执行）：终局已落
+   * （runSettled——迟到终态/GetTask 收账后 hasUnterminatedRecovery 翻 false）
+   * → 断连释放。GetTask 查无任务（not_found_or_expired）走同一位翻false。
+   * "用户明确放弃恢复"（§3.1 第三条件）的 UI 入口未建设——会话级 disconnect
+   * 即整体释放（见 disconnect()），独立放弃按钮留 M3。
+   */
+  private releaseSettledA2aHandler(): void {
+    const parked = this.retiredA2aHandler;
+    if (!parked) return;
+    if ((parked as { hasUnterminatedRecovery?: boolean }).hasUnterminatedRecovery) return;
+    this.retiredA2aHandler = null;
+    this.disconnectInner(parked);                   // 已终结：只剩断连释悬挂
+  }
   stop(): void {
     this.abort();
   }
@@ -296,6 +683,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
         this.options.sessionId,
         1,
         BOT_MESSAGE_PAGE_SIZE,
+        this.options.range,
       );
       this.historyPage = 1;
       this.loadedHistoryRawCount = page.rawCount;
@@ -323,6 +711,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
         this.options.sessionId,
         nextPage,
         BOT_MESSAGE_PAGE_SIZE,
+        this.options.range,
       );
       this.historyPage = nextPage;
       this.loadedHistoryRawCount += page.rawCount;
@@ -359,6 +748,14 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private setState(patch: Partial<BotChatState>): void {
     this.state = { ...this.state, ...patch };
     this.stateListeners.forEach((l) => l(this.state));
+  }
+  private setConnectionRuntime(runtime: BotConnectionRuntime): void {
+    if (
+      this.connectionRuntimeState.resolved === runtime.resolved
+      && this.connectionRuntimeState.engine === runtime.engine
+    ) return;
+    this.connectionRuntimeState = runtime;
+    this.connectionRuntimeListeners.forEach((listener) => listener(runtime));
   }
   private emitConnection(event: ConnectionStatusEvent): void {
     this.connectionListeners.forEach((l) => l(event));

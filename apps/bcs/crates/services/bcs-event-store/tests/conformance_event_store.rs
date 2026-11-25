@@ -10,9 +10,7 @@ use bcs_event_store::{DbEventStore, MemoryEventStore};
 use bcs_service_api::port::repo::EventRepoPort;
 use bcs_test_support::contract::repo::event_repo_port_contract_tests;
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 
 #[tokio::test]
 async fn memory_event_store_passes_contract() {

@@ -164,5 +164,5 @@ def test_migrate_v1_without_losing_identity(tmp_path):
     state = SqliteHostingStateStore(directory)
     state.bind(identity())
     with sqlite3.connect(path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 7
         assert db.execute("SELECT count(*) FROM bindings").fetchone()[0] == 1

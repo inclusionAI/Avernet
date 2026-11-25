@@ -6,7 +6,7 @@ import pytest
 
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
     BcsClientError, BcsClientRequestError, BcsCreateGroupRequest, BcsHttpAdapter,
-    BcsServerError,
+    BcsServerError, BcsTimeoutError,
 )
 
 
@@ -201,8 +201,9 @@ def test_owned_client_isolated_when_event_loop_changes(monkeypatch):
     class _FakeClient:
         instances = []
 
-        def __init__(self, *, base_url):
+        def __init__(self, *, base_url, timeout):
             self.base_url = base_url
+            self.timeout = timeout
             self.closed = False
             self.__class__.instances.append(self)
 
@@ -220,6 +221,18 @@ def test_owned_client_isolated_when_event_loop_changes(monkeypatch):
 
     assert len(_FakeClient.instances) == 2
     assert _FakeClient.instances[1].closed is True
+    assert _FakeClient.instances[0].timeout == module._DEFAULT_HTTP_TIMEOUT_SECONDS
+    assert _FakeClient.instances[1].timeout == module._DEFAULT_HTTP_TIMEOUT_SECONDS
+
+
+def test_request_timeout_is_mapped_to_bcs_timeout_error():
+    req = BcsCreateGroupRequest(driver_bot="drv", participants=[{"bot_uuid": "drv"}])
+
+    def h(request):
+        raise httpx.ReadTimeout("read timed out", request=request)
+
+    with pytest.raises(BcsTimeoutError):
+        _run(_adapter(h).create_group(req))
 
 
 # ===== BCS A2A 单 bot 异步消息:POST /bots/{bot}:{owner}/chat-async =====
@@ -336,3 +349,35 @@ def test_get_chat_run_long_polls_with_bot_identity():
         caller_bearer="drv-session-token",
     ))
     assert result["state"] == "completed"
+
+
+def test_query_deliveries_reuses_participant_identity_and_existing_route():
+    def handler(request):
+        assert request.method == "POST"
+        assert request.url.path == "/openapi/v1/collaboration/sessions/s1/message-deliveries/query"
+        assert request.headers["Authorization"] == "Bearer participant"
+        assert request.headers["X-ECB-Token"] == "drv"
+        assert json.loads(request.content) == {"message_ids": ["source"]}
+        return httpx.Response(200, json=[{"message_id": "source", "status": "failed"}])
+    rows = _run(_adapter(handler).query_message_deliveries("s1", message_ids=["source"], caller_bearer="participant"))
+    assert rows[0]["status"] == "failed"
+
+
+@pytest.mark.parametrize("status", [401, 403, 503])
+def test_delivery_query_denial_or_outage_is_not_a_failed_delivery(status):
+    with pytest.raises(BcsClientError):
+        _run(_adapter(lambda request: httpx.Response(status)).query_message_deliveries("s1", message_ids=["source"]))
+
+
+@pytest.mark.parametrize("body", [{}, {"code": 0}, [None]])
+def test_delivery_query_rejects_malformed_success(body):
+    with pytest.raises(BcsClientError):
+        _run(_adapter(lambda request: httpx.Response(200, json=body)).query_message_deliveries("s1", message_ids=["source"]))
+
+
+def test_history_includes_pending_admissions_when_requested():
+    def handler(request):
+        assert request.url.params["include_pending"] == "true"
+        assert request.headers["Authorization"] == "Bearer participant"
+        return httpx.Response(200, json=[])
+    assert _run(_adapter(handler).get_session_messages("s1", include_pending=True, caller_bearer="participant")) == []

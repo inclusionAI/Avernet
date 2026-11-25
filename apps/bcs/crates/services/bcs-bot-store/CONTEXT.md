@@ -56,6 +56,15 @@ gateway binding projection, webhook updates and soft deletion use DB transaction
 upstream never writes a binding. Errors propagate; runtime credentials are not
 cached in a second journal. Memory metadata is process-local.
 
+`restore_provider_bot_with_ownership` is the only Provider tombstone reactivation
+write. It preserves the Bot UUID but replaces capabilities, credential, Provider
+identity and owner/manager authority, deletes old ownership transfers, and recreates
+the default profile and initialization audit. Gateway mode replaces the old binding;
+Plugin mode leaves no Gateway binding. Legacy binding-only tombstones are backfilled
+with Provider metadata by the same checked update. SQL commits these changes in one
+transaction; strict create operations still reject tombstones. Organization and
+channel memberships are not restored.
+
 ProviderBindingProjection selects legacy binding reads or strict Bot-mode reads,
 independently of gateway dual writes. Affiliation alone is not a delivery binding.
 SQLite 030 / MySQL 029 add nullable migration-state columns and a unique index.
@@ -89,11 +98,395 @@ credential can trigger one extra bounded existence query (Bot and binding keys,
 including tombstones). Any persisted identity blocks this fallback, so stale
 memory tokens cannot bypass revocation, deletion or Provider state. Unknown
 tokens incur no extra query; no writes or new cache are introduced.
-
 ## Provider collaboration scope
-
 Bot Provider authorization uses a bounded fresh environment-scoped LEFT JOIN (maximum 256 actors per read); no policy cache or group policy table is introduced. Provider metadata writes atomically reject relaxation of same_owner, including stale ordinary PATCH config.
-
 Provider tightening to same_owner atomically rejects related public groups through current environment-scoped membership. Memory implementations receive a Group membership projection and weak Bot-metadata reference; their policy gate serializes Group writes against policy updates. Failed tightening leaves all Provider metadata unchanged.
-
 Affiliation into a same_owner Provider rejects current public membership before writing Bot metadata or gateway projection. SQL attachment locks Provider then Bot and checks membership inside the transaction; public Group writes also lock unbound Bot rows. Memory attachment uses the existing policy gate. A fresh preflight port supports registration before capability merging; the write always rechecks.
+## Bot authority
+
+Bot authority state (bot-authority spec, plan Tasks 3–4) joins the SAME
+atomic shared state for Memory (`MemoryBotState`) and the SQL chain: the
+owner/manager edge projection, `bcs_bots.ownership_version`, the
+`bot_ownership_transfers` current-round row (one pending per
+`(env, bot_id, target_owner_actor_id)`) and the `bot_authority_changes`
+permission-scope audit. Registration commits the owner identity, the owner
+edge, `ownership_version` and the default runtime profile in one command
+(`register_with_ownership` → `CommittedBotRegistration`); owner transfer
+acceptance moves owner/manager edges and bumps the version inside one
+transaction, restoring the ex-owner as a plain manager. Manager sync is a
+set replacement in one transaction (input ≤1,000 deduped known Humans,
+stock cap 10,000, bounded retry for deterministic local rollbacks only);
+the owner is never a sync operand. Provider retirement (three branches),
+cleanup-pending retry and retire audits share the same atomic command
+boundary; a failed post-commit cleanup returns
+`retirement_cleanup_pending` and stays retriable without new audit rows.
+The authority read-side same-record pin (profile port, memory mode) holds
+for both dialects.
+
+Ordinary Bot retirement rejects Human targets in the repository, not just the
+application hook. SQL checks actor_kind again under the existing Bot row lock;
+Memory checks it under the shared authority write lock. This API does not delete
+Humans, so registration/transfer cannot race it into orphaning an owner. No new
+Human lifecycle API, query, migration or owner scan is introduced. Authority
+role/fallback reads accept only physical Bot targets (scalar and batch).
+
+
+## Bot profile existing-only writes and avatar reads
+
+Memory avatar reads exclude live Human actor kinds before opening any local
+record, including records created by ordinary profile/token APIs. When no live
+registry row exists (restart or deletion), the reserved `human_` namespace is
+excluded just as in the existing Agent Bot disk scan; legacy local files have
+no actor-kind column. A retained ordinary Bot record still supplies its avatar.
+
+Memory/file record rewrites share the existing repository write mutex, acquired
+before authority/bot/token guards and held from snapshot read through durable
+replacement and memory publication. Profile/avatar, capabilities, control-plane,
+token, creator and visibility writes therefore cannot replay stale file snapshots
+over each other. Creation and retirement use the same guard. This serializes local
+record writes within one repository instance; it is not cross-process coordination.
+Each rewrite prepares and syncs a private temporary file on a blocking worker,
+then atomically replaces `bot.json` in the guarded caller. Readers see complete
+records, and failed or cancelled preparation cannot truncate or later overwrite
+the live file. No extra DB queries, schema changes or avatar caches are introduced.
+`tests/memory_profile_concurrency.rs` exercises competing writes and concurrent
+readers against real files.
+
+`BotRepoPort::update_profile_existing` / `update_avatar_existing` /
+`read_avatar_batch` (bot-avatar plan) store the Bot display profile on the
+existing record only: one guarded `UPDATE bcs_bots ... WHERE bot_uuid = ?
+AND env = ? AND COALESCE(is_deleted,0)=0` (plus the dedicated `avatar_url`
+column from SQLite/MySQL 040) — no INSERT and no upsert, so a missing or
+tombstoned identity is `ProfileWrite::Missing` with nothing written. The
+lifetime of one write is one short DB transaction that first confirms
+(and on MySQL locks with `SELECT ... FOR UPDATE`) the live row: MySQL
+reports zero changed rows for a value that already matches the request,
+so classification comes from the confirmed row, never from affected rows.
+Profile fields reuse the same JSON-key derivation (`bot_info_json_set`)
+through a profile-only projection (`project_profile_columns`); the
+`agent_code` column and the `$.agent_code`/`$.agent_token` bot_info keys
+never appear in the statement, because the runtime AgentPass identity is
+registry-owned — a profile write that wrote an identity-less capabilities
+snapshot would wipe an online Bot's credentials and silently skip its
+outbound security interceptor chain. Cache publication is field-wise for
+the same reason: profile fields publish wholesale after the durable write
+like the legacy save path, while the live entry's current
+`agent_code`/`agent_token` are preserved (Memory: the record file keeps
+them with live-entry precedence, file fallback). `AvatarChange::Keep` never
+appears in the SET clause, and token/owner/audit fields are never part of
+the statement. The committed profile write refreshes the process-local
+binding-channel reverse index through the same `sync_binding_channel_index`
+helper as the ordinary save path (a `Missing` target or failed write leaves
+it untouched); avatar-only writes never touch the index. The batched read is one parameterized `IN` query over ≤256
+deduplicated ids (more is `InvalidOperation`, empty input reads nothing),
+keeps environment isolation, retains terminal Bot rows for tombstone
+display and excludes Human actors. The Memory store keeps the same
+semantics on its persisted record file: the avatar is a sibling field of
+the record (`StoredBotProfile` flattening the legacy snapshot, compatible
+with old files that lack the field), ordinary record rewrites (capability
+save, token save, control-plane attributes) preserve it, the fallible file
+write happens before any registry publication, and the per-id read source
+is the same record (tombstoned records still display). Ordinary capability
+saves also re-read the record through the same profile path: an
+unreadable/malformed record file — or one carrying another identity —
+fails the save closed instead of overwriting it. Conformance:
+`tests/conformance_bot_profile.rs` (Memory + real SQLite over the full
+migration chain, plus failure/isolation/restart/race cases), the shared
+`tests/support/bot_profile_contract.rs` (also mounted by the bcs-admin
+full MySQL chain gate).
+
+## Caller configuration storage seam
+
+`PersistentBotRepo` implements the P1.1 caller-configuration read/sync on the
+existing `bcs_bots.bot_info` JSON column — no schema migration. Reads treat a
+missing `$.caller` as "never configured" and surface `caller:null`, non-object
+roots and malformed snapshots as a closed sanitized storage error, never as a
+disable. Sync resolves the §10.7.2 revision matrix in storage order
+(Apply/Unchanged/Stale/Conflict), writes with a binary CAS over the original
+`bot_info` text (CAST on MySQL, binary TEXT compare on SQLite), preserves all
+sibling fields, and after a lost CAS re-reads exactly once — a still-writable
+decision becomes Conflict, never a blind overwrite. `MemoryBotRepo` keeps the
+port's explicit fail-closed defaults. Conformance:
+`tests/conformance_caller_configuration.rs` (real SQLite + contended fake).
+
+## Provider caller capabilities read
+
+`DbProviderStore` implements the P1.4 authoritative caller-capability read on
+`bcs_providers.config.$.caller_capabilities` as a direct, cache-bypassing
+SQLite/MySQL query: missing provider is `ProviderNotFound`, a disabled
+provider is a closed "unavailable" error (never "undeclared"), a missing or
+empty config is a legacy never-declared row, and `caller_capabilities:null`,
+non-object roots and malformed declarations are closed sanitized errors that
+never echo raw config. Conformance:
+`tests/provider_caller_capabilities_contract.rs` (real SQLite).
+
+The caller-configuration seam is also provider-scoped: the read JOINs the
+canonical `bcs_provider_bot_bindings` (non-deleted bot, enabled binding,
+exact provider) and the conditional write re-asserts the same ownership
+inside its WHERE clause, so Bots of other providers, unbound Bots and
+disabled bindings are out of scope without ever being reported
+"unconfigured".
+
+## A2A Card storage
+
+`DbA2aBotStore` implements `A2aBotRepoPort` using only raw `agent_card`,
+nullable `agent_card_url` and `agent_card_revision` on `bcs_bots` after MySQL 038 /
+SQLite 039. One explicit read returns one Card. A short transaction updates the Card and
+the synchronized `bot_info` capability fields (`name`, `summary`, `domains`,
+`skills`, `scopes`) and reads its committed snapshot. An unchanged URL refresh can
+reapply that projection through a revision-fenced update without incrementing
+`agent_card_revision`, so a stale generic projection cannot survive the first refresh.
+The write also updates the generic Bot audit time. Writes fence environment, Provider/ref,
+active Gateway mode and revision; failures propagate. Routes and credential
+references are derived, never duplicated in this store.
+Refresh reads at most 16 URL-backed snapshots in one bot_uuid keyset query, not
+one ID query plus per-Card lookups. Availability projects interfaces and security declarations for at
+most 256 IDs. No persistent refresh/error state or additional cache exists.
+See docs/specs/a2a/minimal-card-registration-v1.md for access costs and limits.
+
+Full Card queries select only Bot identity and Card payload in batches of 256.
+Discovery matches the synchronized BCS name/ID as well as Card
+names/descriptions and skill IDs/names/descriptions/tags
+in SQL before selecting matching payloads. A nonmatching A2A identity remains
+distinguishable from a legacy Bot, preventing stale capability fallback. Search
+count and pagination share the same predicate. Name matches do not enable
+legacy skill/summary matching; explicit skill selectors still require Card skills.
+The name predicate uses the existing SQL queries and pagination/batch bounds.
+Offline Gateway discovery also matches the name in the Provider binding selector;
+organization candidate counts/pages use the same name rule. A live registry
+entry is not required to discover an enabled Gateway Bot. SQL flavor is explicitly injected;
+SQLite uses JSON extraction and MySQL uses JSON_SEARCH with a literal escape
+character and bound values. See the
+[MySQL JSON search contract](https://dev.mysql.com/doc/refman/8.0/en/json-search-functions.html).
+Provider database implementations and tests are separated into provider_db.rs
+and provider_tests.rs; the existing Provider behavior remains covered by its suite.
+
+
+A2A strict registration extends the existing ownership composite with a checked
+Card UPDATE inside the same transaction, after the new Bot/binding and before
+ownership/profile/audit steps. Identity, credential scope and initial revision
+are checked before writing. It adds the Card update inside the existing transaction,
+with no network access. Failure of Card or a later ownership step rolls back every lifecycle row.
+
+
+Provider-admin A2A admission uses the separate
+`create_provider_admin_a2a_bot_with_ownership` operation. Its ownership builder
+requires a Provider actor exactly matching the Bot's Provider; the old Human
+registration operations still reject Provider actors. Both paths reuse the
+same SQL transaction/guard statements, differing only in verified audit identity.
+No credential reaches audit rows; no post-commit owner/profile/Card write is
+introduced. A rollback includes Bot, binding, Card, Human/owner and default profile.
+
+The mandatory bcs-admin full MySQL migration-chain gate also runs the shared A2A
+Card/Run/Task/context store cases from tests/support/a2a_mysql_cases.rs, using the
+same already-migrated disposable schema. The isolated a2a_mysql test reuses those
+cases. Failure injection uses temporary CHECK constraints, without requiring
+privileged trigger creation. JSON search, CAS, rollback of Task/context association,
+shared Task references and all audit fields are exercised on native MySQL.
+
+
+Provider Bot registration performs a fresh name preflight across active Bots in
+(env, provider_id), including non-A2A Bots. It adds one SELECT returning at most
+one identifier before writes; a name collision returns Conflict without side effects.
+Memory registration checks the corresponding instance-local records. No name cache,
+extra table, generated column, length change or migration 040 is required.
+The preflight does not prevent cross-process concurrent inserts or legacy renames;
+a database unique index is deferred until duplicate production rows are corrected.
+Without a name index, the read may scan the Provider's rows (LIMIT bounds results,
+not rows examined). A2A Card writes also preflight names; Card/name changes remain
+atomic and explicit replacement returns its own committed revision. Name lookup
+returns at most two rows and rejects ambiguous legacy names, including non-A2A
+collisions. Rename and soft deletion release names; there is no historical reservation.
+Lifecycle capability writes preserve Card.name atomically even when an earlier
+registry read supplied stale capabilities. Direct control-plane name patches
+reject a different A2A name and retain the Card-owned value during concurrent
+updates. The name-patch precheck reads one indexed name row; the UPDATE preserves
+the synchronized name without parsing Card JSON. Full Card projection remains
+authoritative for query responses.
+
+### A2A Provider name reservation
+
+`pin_a2a_slug` atomically reserves the previously resolved Provider slug before
+name-based A2A access. SQL stores the internal reservation in Provider config;
+ordinary metadata writes preserve it even when based on a stale config, and
+slug changes then fail. Concurrent rename-before-pin fails the pin instead of
+silently addressing another identity. Legacy unpinned Providers retain their
+existing rename behavior. Memory uses the same Provider write lock for both.
+
+Name access adds one conditional indexed UPDATE and one indexed SELECT (one
+Provider row); only the first pin changes data. It invalidates the Provider cache,
+propagates errors, and never runs per output event. No network request is made
+while holding a DB transaction. Store conformance covers Memory and SQLite.
+
+## A2A source identity writes
+
+Source identity uses the original Card JSON, with no new columns or migrations.
+MySQL source registration/update transactions lock the existing environment-scoped
+Provider row before reading source conflicts and writing a Bot. SQLite uses its
+transactional writer serialization. Source queries return one scalar EXISTS value,
+filter by env/Provider/active Bot and compare IDs and URIs byte-exactly. They may
+scan that Provider's active Cards; there is no source index in this phase. This is
+registration/configuration work, never per-token or per-message work.
+
+Card writes add one current-Card read for immutable-ID validation, one conflict
+preflight when a source is present, then a transaction with a Provider lock (or
+constant query), a conflict query, conditional Card/name write and snapshot read.
+The revision fence protects the immutable-ID check even for legacy unconditional
+replacement; local replacement retries at most three times. Registration adds
+source preflight and two transaction reads to the existing ownership composite.
+All failures roll back or propagate; network fetches happen before transactions.
+A source conflict is distinct from the deferred name-index preflight guarantee.
+
+A successful Card write invalidates same-process registry metadata through the
+shared live registry wired at bootstrap. It does not evict connections, tokens or
+heartbeat state. Invalidated Bots use durable metadata for single and batched
+registry reads for the remaining process lifetime; delayed lifecycle writes cannot
+repopulate stale names. Single reads add one indexed row lookup; batches retain
+100-ID chunks rather than per-Bot queries. Card writes add no DB queries for
+invalidation. Failed/CAS-rejected writes do not invalidate. This is local coherence,
+not a cross-instance invalidation protocol. Profile/lifecycle SQL preserves the
+Card-owned name even when a caller carries an older capabilities snapshot.
+
+
+## Provider initial manager snapshot
+
+`initialize_provider_authority` is Provider-only, distinct from governance backfill
+and ongoing manager edits/sync. Version-0 initialization commits owner/version,
+initial manager Human actors, manager edges and the Provider `initialize` audit
+snapshot together. An initialized Bot never reapplies the snapshot. Ordinary fresh multi-user
+registration now uses `create_provider_admin_bot_with_ownership`: Bot, optional
+Gateway binding, Human actors, initial authority, profile and audit share the
+existing ownership transaction/staged publication. No version-0 Bot is visible
+to the mine sweep on failure or before authority commits. Single-owner legacy
+registration retains its previous boundary; A2A retains its full composite. Human-token registration
+must supply an empty initial-manager list. No runtime permission-policy change.
+MySQL migration 043 aligns the actor registry and active identity-reference
+keys/predicates to NO PAD utf8mb4_0900_bin (corrected 043 plus additive 044), so distinct principals do not alias grants, runtime
+profiles, group/session membership, routing or actor-scoped content. The complete
+32-column/23-table inventory and maintenance requirements are in the review-followup spec. SQLite and Memory already compare these IDs byte-exactly. No lowercasing,
+identity remapping or historical migration rewrite is allowed. Apply with writers
+stopped before multi-user admission; retain the collation on application rollback.
+The native MySQL manager test drives the full migration chain, retained-row upgrade,
+case/accent-distinct and existing-Human cases, ordinary partial initialization and
+A2A whole-registration failure rollback/retry.
+
+The input is bounded to 101 entries (100 initial managers). SQL adds five steps
+inside the existing transaction for a nonempty set: one batched Human insert,
+one live-Human count guard, one batched edge upsert, one exact-identity edge count
+guard and one guard consumption. At most 100 Human/edge rows are written per
+batch; the largest statement binds 500 values. No per-person network lookup or
+DB call is introduced. The two counts return one scalar each; predicate scans
+remain subject to existing indexes/collation. Existing deterministic rollback
+retries stay bounded to three; no new retry worker/cache exists. Memory validates
+and stages actors/edges before publishing under the existing record/authority
+lock order. Tests: `provider_initial_managers` (Memory application and SQLite),
+Provider A2A conformance, and `ownership_managers` bounded-statement unit test.
+
+Ordinary registration checks actual governance completion for both connection
+modes. A SQL governance read performs three queries when `created_by` is present:
+one Bot row, one Human existence count and the approved-owner edge read (normally
+0–1 rows). Gateway replays already paid this cost; new registrations and Plugin
+replays now also pay it to avoid reinitializing committed authority. No manager
+list is read. The underlying owner-edge integrity read remains unchanged.
+
+### Review concurrency and migration repairs (2026-11-09)
+
+Memory candidate listing takes authority before bots, matching initialization;
+a controlled pending-future regression checks it never pins bots while waiting
+for authority. Multi-user registration stages manager Humans before the durable
+file and publishes them with authority under the same guards. Its credential-free
+Provider marker uses the existing fail-closed restart mechanism. Memory authority
+remains process-local, as before; this is not a new persistence guarantee.
+
+NO PAD 043 preserves trailing-space-distinct legacy keys. Exact original 043
+history is retained and upgraded by 044, never checksum-rewritten. MySQL tests
+cover real retained rows, the fresh chain and the original-history upgrade;
+compatible engines without utf8mb4_0900_bin are unsupported, not silently folded.
+
+## Atomic effective Bot visibility
+
+`patch_control_plane` normalizes explicit privacy writes (visibility or
+check-in strategy) from their effective target state. Private stays private;
+public/protected (including the existing NULL/empty legacy default) become
+public iff strategy is Open and the active top-level agent view scope is
+missing/null/an empty array. Otherwise they become protected. Malformed scope
+values cannot authorize public. A friend_ext-only write normalizes only when
+the live and target active scopes change between the empty and non-empty
+categories. Approval metadata updates, missing/null/empty-array shape changes,
+and replacements between two non-empty scopes leave visibility unchanged, so
+they do not lazily migrate a retained noncanonical public row. This supports
+both editing directions and downgrade restrictions without applying pending
+approval scope. Explicit public/protected express visible intent rather than
+bypassing the normalization rule.
+
+Supplied fields replace stored values; omitted fields use the live row. Legacy
+all-visible requests (explicit `visibility=public` with both `friend_ext` and
+strategy omitted) derive Open and clear only the active top-level agent scope
+in the same write before deriving visibility. Explicit visibility=public
+together with Open and no friend_ext also clears that scope. Explicit
+Approval/DeptFree preserves the scope and produces protected. SQL JSON_SET operates on the live object; Memory edits it
+under the record-write guard. Approval, user-scope, exemption and unknown
+sibling fields are preserved, including concurrent changes. Explicit
+`friend_ext` instead has its existing whole-object replacement semantics and
+wins over this compatibility rule. Strategy-only, private and explicit
+non-Open public requests do not implicitly clear scope. Pending approval
+sub-blocks are not active scope. Name/status/user-visibility-only patches do
+not normalize Bot visibility, and there is no bulk backfill. Existing public
+Group membership is not rewritten by a Bot patch; public participant admission
+guards still apply separately.
+
+SQL evaluates the policy within the one UPDATE for both dialects, without a
+read/derive/write gap. The visibility assignment is emitted before friend_ext:
+MySQL evaluates SET left-to-right, and the friend_ext-only scope-category
+comparison must read the pre-update live object. Memory computes the same
+comparison after merging the patch under the existing record-write mutex and
+publishes only after durable replacement. No schema change, retry loop or new
+cache.
+
+The normal SQL cost remains a precheck, one UPDATE and read-back (three bounded
+single-row DB round trips). The authoritative privacy read-back also handles
+MySQL unchanged-row results without a redundant existence read. Per-Bot
+publication mutexes serialize control-plane, legacy visibility,
+capability/profile and runtime registration DB writes and their cache
+publication; unrelated Bots do not share a publication lock. A2A Card writes
+retain their separate permanent metadata invalidation described above. Each
+guard marks its Bot in-flight before the DB await and holds the publication
+lock through the final cache update. The global registry bots lock is acquired
+only after the control-plane DB read for that update, so a blocked read-back
+does not stall unrelated registry reads or let an older read-back overwrite a
+newer legacy write. While a write is in flight, single, batch and legacy
+discovery reads for that Bot use persistence instead of its previous public
+cache. Permanent and in-flight markers live behind one synchronous state lock,
+so cache reads cannot observe a transition where neither marker is present.
+Successful publication clears the in-flight marker; any error or future
+cancellation first installs the permanent bypass below and then clears it.
+Cancellation uses a synchronous Drop guard, covering both the DB UPDATE await
+and the read-back/publication await without leaving a reusable stale cache or
+an in-flight-only leak. The cache receives actual normalized visibility;
+save_to_storage also publishes the DB's private default for an empty value,
+never the raw requested public/protected value. If this post-commit read fails or the row disappears,
+the existing metadata-bypass set invalidates the old cache entry before
+returning. Subsequent single/batch reads use persistence or propagate its
+error, never stale public permissions. Like Card invalidation, this bypass
+lasts for the process lifetime for affected Bots; healthy writes add no
+queries. Legacy active/discovery/skill/domain/scope lists also refresh
+invalidated candidates through the existing 100-ID batch loader; healthy
+candidates add no DB reads, and failed refreshes omit affected Bots rather
+than exposing stale public entries. The existing active-list tombstone query
+is unchanged. There are no new scans or external delivery.
+
+Tests: `open_check_in_visibility` (shared effective-state matrix on Memory and
+the full SQLite chain, controlled concurrent visibility/strategy/scope writes,
+failed-write publication), `privacy_readback_failure` (committed restrictions,
+read-back failure/deletion and cache bypass), application `open_check_in_concurrency`, and the
+same `support/open_check_in_contract.rs` in bcs-admin's native MySQL chain gate.
+
+## Configured catalog labels
+
+The [BCS label contract](../../../docs/catalog-labels.md) owns dictionary,
+omission, atomic persistence, refresh fencing and complete-publication semantics.
+Service API 7.0.0 adds typed metadata and explicit preserve/replace commands;
+external Rust consumers rebuild together. Labels are not raw Card or authorization
+state. Bootstrap loads the independent policy file once; no environment overlay
+or request can extend it. See the change validation record for actual test and
+release evidence; local code is not a published or deployed revision.

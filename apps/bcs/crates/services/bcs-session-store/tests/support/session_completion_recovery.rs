@@ -1,4 +1,5 @@
 use super::*;
+use bcs_service_api::port::repo::CompleteSessionWithEvent;
 use bcs_service_api::SessionStatus;
 use serde_json::json;
 
@@ -32,7 +33,6 @@ async fn contract(repo: &dyn SessionRepoPort) {
     let last = repo.list_running_service_after(Some(&sessions[2].id), 2).await.unwrap();
     assert_eq!(last.iter().map(|s| &s.id).collect::<Vec<_>>(), [&sessions[3].id, &sessions[4].id]);
     assert!(repo.list_running_service_after(Some(&sessions[4].id), 2).await.unwrap().is_empty());
-    repo.update_callback_status(&target.id, "not_applicable").await.unwrap();
     let next = repo.reactivate(&target.id, None).await.unwrap();
     assert!(repo.complete_running_service_activation(&target.id, target.activation_count, None, Some("old failure".into())).await.unwrap().is_none());
     let unchanged = repo.try_get(&target.id).await.unwrap().unwrap();
@@ -55,6 +55,39 @@ async fn sqlite_session_completion_recovery_conforms_and_uses_index() {
     let details = rows.iter().map(|row| bcs_db_api::db_get_column::<String>(row, "detail").unwrap()).collect::<Vec<_>>().join("\n");
     assert!(details.contains("idx_session_running_recovery"), "{details}");
     assert!(!details.contains("TEMP B-TREE"), "{details}");
+}
+
+#[tokio::test]
+async fn retired_callback_columns_allow_creation_completion_and_reactivation() {
+    let db = sqlite_db().await;
+    let repo = MySqlSessionStore::sqlite(db.clone(), "dev".into());
+    let session = repo.create("retained-schema", NewSessionParams {
+        session_kind: SessionKind::ServiceInvocation, ..Default::default()
+    }).await.unwrap();
+    let legacy_sql = "SELECT callback_status, callback_lease_owner, callback_lease_token, callback_lease_until_ms FROM bcs_group_sessions WHERE env = 'dev' AND session_id = ?";
+    let legacy_row = db.query(DbStatement::with_params(legacy_sql, vec![DbValue::from(session.id.clone())])).await.unwrap();
+    assert_eq!(bcs_db_api::db_get_column_opt::<String>(&legacy_row[0], "callback_status").unwrap(), None);
+    // Simulate a record written by an old binary with an outstanding callback.
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_group_sessions SET callback_status = 'pending', callback_lease_owner = 'old-worker', callback_lease_token = 42, callback_lease_until_ms = 1234 WHERE env = 'dev' AND session_id = ?",
+        vec![DbValue::from(session.id.clone())],
+    )).await.unwrap();
+    let legacy_row = db.query(DbStatement::with_params(legacy_sql, vec![DbValue::from(session.id.clone())])).await.unwrap();
+    let completed = repo.complete_running_service_activation(
+        &session.id, session.activation_count, Some(json!({"answer": 42})), None,
+    ).await.unwrap().unwrap();
+    assert_eq!(completed.status, SessionStatus::Completed);
+    assert_eq!(completed.output, Some(json!({"answer": 42})));
+    assert!(completed.completed_at.is_some());
+    assert_eq!(repo.try_get(&session.id).await.unwrap().unwrap().output, completed.output);
+    assert_eq!(db.query(DbStatement::with_params(legacy_sql, vec![DbValue::from(session.id.clone())])).await.unwrap(), legacy_row);
+
+    let reactivated = repo.reactivate(&session.id, None).await.unwrap();
+    assert_eq!(reactivated.status, SessionStatus::Running);
+    assert_eq!(reactivated.activation_count, session.activation_count + 1);
+    assert!(reactivated.output.is_none());
+    assert!(reactivated.completed_at.is_none());
+    assert_eq!(db.query(DbStatement::with_params(legacy_sql, vec![DbValue::from(session.id)])).await.unwrap(), legacy_row);
 }
 
 #[tokio::test]
@@ -118,4 +151,122 @@ async fn completion_cas_handles_activation_races_and_returns_its_own_snapshot() 
             _ => unreachable!(),
         }
     }
+}
+
+struct EventfulCompletionRaceDb {
+    inner: Arc<dyn DbPlugin>,
+    finish_before_transaction: AtomicBool,
+    fail_transaction: AtomicBool,
+}
+
+#[async_trait]
+impl DbPlugin for EventfulCompletionRaceDb {
+    async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        self.inner.query(statement).await
+    }
+
+    async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
+        self.inner.execute(statement).await
+    }
+
+    async fn transaction(
+        &self,
+        steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        if self.fail_transaction.swap(false, Ordering::SeqCst) {
+            return Err(DbError::Backend(
+                "forced eventful completion transaction failure".into(),
+            ));
+        }
+        if self.finish_before_transaction.swap(false, Ordering::SeqCst) {
+            self.inner
+                .execute(DbStatement::with_params(
+                    "UPDATE bcs_group_sessions SET status = 'completed' WHERE env = ?",
+                    vec![DbValue::from("dev")],
+                ))
+                .await?;
+        }
+        self.inner.transaction(steps).await
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        self.inner.health_check().await
+    }
+}
+
+fn completion_event(session: &bcs_service_api::Session) -> AppendEventRecord {
+    AppendEventRecord {
+        event: NewEvent {
+            event_id: format!("completed-{}", session.id),
+            event_type: "session.completed".into(),
+            schema_version: EVENT_SCHEMA_VERSION_V1.into(),
+            producer: "session-completion-recovery-test".into(),
+            producer_key: session.id.clone(),
+            occurred_at: "2026-11-12T00:00:00.000Z".into(),
+            subject: EventSubject {
+                subject_type: "session".into(),
+                id: session.id.clone(),
+            },
+            scope: EventScope {
+                group_id: Some(session.group_id.clone()),
+                session_id: Some(session.id.clone()),
+                ..EventScope::default()
+            },
+            stream_key: format!("session:{}", session.id),
+            actor: None,
+            correlation_id: None,
+            causation_event_id: None,
+            trace_id: None,
+            data: BTreeMap::new(),
+        },
+        recorded_at: "2026-11-12T00:00:00.001Z".into(),
+        retention_until_ms: 2_000_000_000_000,
+        env: "dev".into(),
+    }
+}
+
+#[tokio::test]
+async fn eventful_completion_returns_none_when_another_writer_finishes_first() {
+    let db = Arc::new(EventfulCompletionRaceDb {
+        inner: sqlite_db().await,
+        finish_before_transaction: AtomicBool::new(false),
+        fail_transaction: AtomicBool::new(false),
+    });
+    let repo = MySqlSessionStore::sqlite(db.clone(), "dev".into());
+    let session = repo.create("eventful-race", NewSessionParams::default()).await.unwrap();
+    db.finish_before_transaction.store(true, Ordering::SeqCst);
+
+    let result = repo.complete_if_running_with_event(CompleteSessionWithEvent {
+        session_id: session.id.clone(),
+        expected_activation_count: session.activation_count,
+        output: Some(json!("late result")),
+        error: None,
+        event: completion_event(&session),
+    }).await.unwrap();
+
+    assert!(result.is_none());
+    assert_eq!(repo.get(&session.id).await.unwrap().status, SessionStatus::Completed);
+}
+
+#[tokio::test]
+async fn eventful_completion_does_not_hide_other_transaction_failures() {
+    let db = Arc::new(EventfulCompletionRaceDb {
+        inner: sqlite_db().await,
+        finish_before_transaction: AtomicBool::new(false),
+        fail_transaction: AtomicBool::new(false),
+    });
+    let repo = MySqlSessionStore::sqlite(db.clone(), "dev".into());
+    let session = repo.create("eventful-failure", NewSessionParams::default()).await.unwrap();
+    db.fail_transaction.store(true, Ordering::SeqCst);
+
+    let error = repo.complete_if_running_with_event(CompleteSessionWithEvent {
+        session_id: session.id.clone(),
+        expected_activation_count: session.activation_count,
+        output: None,
+        error: None,
+        event: completion_event(&session),
+    }).await.unwrap_err();
+
+    assert!(error.to_string().contains("forced eventful completion transaction failure"));
+    assert_eq!(repo.get(&session.id).await.unwrap().status, SessionStatus::Running);
 }

@@ -5,15 +5,44 @@ use super::*;
 impl GroupServiceImpl {
     pub(crate) async fn project_detail_with_state_machine(
         &self,
-        mut group: DomainGroup,
+        group: DomainGroup,
         state_machine_override: Option<StateMachineConfiguration>,
     ) -> Result<GroupDetail, ApplicationError> {
+        let snapshot = self.detail_snapshot(group).await?;
+        self.project_detail_with_labels(snapshot.group, state_machine_override, snapshot.catalog_labels).await
+    }
+
+    pub(crate) async fn detail_snapshot(
+        &self, group: DomainGroup,
+    ) -> Result<bcs_service_api::types::GroupMutationSnapshot, ApplicationError> {
+        if group.group_kind == GroupKind::Normal
+            && matches!(group.group_strategy, GroupStrategy::ManagerWorker | GroupStrategy::StateMachine)
+        {
+            return self.groups.read_detail_snapshot(&group.id).await.map_err(map_service_error)?
+                .ok_or_else(|| ApplicationError::not_found("group_not_found", "Group was removed during detail read"));
+        }
+        Ok(bcs_service_api::types::GroupMutationSnapshot { group, catalog_labels: Default::default() })
+    }
+
+    pub(crate) async fn project_detail_with_labels(
+        &self,
+        mut group: DomainGroup,
+        state_machine_override: Option<StateMachineConfiguration>,
+        catalog_labels: bcs_service_api::types::catalog_labels::CatalogLabels,
+    ) -> Result<GroupDetail, ApplicationError> {
         bcs_service_api::backfill_bot_names(self.registry.as_ref(), &mut group).await;
-        let participants = group
+        let mut participants = group
             .participants
             .iter()
             .map(project_participant)
             .collect::<Vec<_>>();
+        // Detail keeps every control field and gains the avatar column from
+        // one batched display-profile read for this Group (design §5.3);
+        // read failures surface as service errors.
+        let avatars = self
+            .avatar_map_for_ids(avatar::detail_bot_ids(&participants))
+            .await?;
+        avatar::apply_participant_avatars(&mut participants, &avatars);
         let common = DetailCommon {
             group_id: group.id.clone(),
             version: group.version,
@@ -36,6 +65,7 @@ impl GroupServiceImpl {
                 )));
             }
             return Ok(GroupDetail::DirectMessage(DirectMessageGroupDetail {
+                catalog_labels,
                 group_id: common.group_id,
                 version: common.version,
                 name: common.name,
@@ -77,6 +107,7 @@ impl GroupServiceImpl {
         let (driver_bot_owner, driver_bot_owner_name) =
             self.resolve_driver_bot_owner(&group.driver_bot).await;
         Ok(GroupDetail::Collaboration(CollaborationGroupDetail {
+            catalog_labels,
             group_id: common.group_id,
             version: common.version,
             name: common.name,
@@ -98,9 +129,24 @@ impl GroupServiceImpl {
 
     // Best-effort display metadata, matching the legacy detail response. These
     // lookups do not authorize the caller or change the Group's persisted owner.
+    // Owner display (row 9) prefers the CURRENT ownership view from the
+    // authority Core (a transfer moves the owner without touching
+    // `created_by`); an unwired Core or an uninitialized (version-0)
+    // Bot falls back to the historical `created_by` display.
     async fn resolve_driver_bot_owner(&self, driver_bot_id: &str) -> (Option<String>, Option<String>) {
         if driver_bot_id.is_empty() {
             return (None, None);
+        }
+        if let Some(core) = self.bot_authority_core.as_deref() {
+            if let Ok(view) = core.ownership(driver_bot_id).await {
+                let human_id = view.owner_actor_id;
+                let owner_name = self
+                    .registry
+                    .get(&human_id)
+                    .await
+                    .and_then(|human| human.capabilities.name);
+                return (Some(human_id), owner_name);
+            }
         }
         let Some(driver) = self.registry.get(driver_bot_id).await else {
             return (None, None);
@@ -162,12 +208,29 @@ impl GroupServiceImpl {
         mut group: DomainGroup,
         target_bot_uuid: &str,
         membership: Membership,
+        last_activity_at: Option<u64>,
     ) -> Result<GroupSummary, ApplicationError> {
+        // Design §5.2/§5.3: the lightweight rows' names are the stored
+        // membership snapshots (null allowed), so they must be extracted
+        // BEFORE the driver/peer name backfill mutates the member copies.
+        // The avatar column stays null here; the page orchestration fills it
+        // from one batched display-profile read.
+        let participants = avatar::participant_summaries(&group);
         bcs_service_api::backfill_bot_names(self.registry.as_ref(), &mut group).await;
         let status = project_status(group.status);
         let visibility = project_visibility(&group.visibility)?;
         let originator_actor_id = group.originator().to_string();
         if group.group_kind == GroupKind::Dm {
+            // Mirror the detail projection's invariant (they share the
+            // exactly-2 DM membership contract): corrupted store rows must
+            // fail the read loudly instead of serializing a
+            // contract-violating summary page (bot-avatar plan Task 8).
+            if group.participants.len() != 2 {
+                return Err(ApplicationError::internal(format!(
+                    "DM Group '{}' does not contain exactly two participants",
+                    group.id
+                )));
+            }
             let peer_actor = group
                 .participants
                 .iter()
@@ -181,6 +244,7 @@ impl GroupServiceImpl {
                             actor_id: participant.bot_uuid.clone(),
                             actor_kind: participant.actor_kind,
                             name: participant.bot_name.clone(),
+                            avatar_url: None,
                         })
                 })
                 .flatten();
@@ -195,9 +259,11 @@ impl GroupServiceImpl {
                 originator_actor_id,
                 participant_count: group.participants.len(),
                 peer_actor,
+                participants,
                 human_mention_notify_mode: group.human_mention_notify_mode,
                 created_at: group.created_at,
                 updated_at: group.updated_at,
+                last_activity_at,
             }));
         }
 
@@ -221,9 +287,11 @@ impl GroupServiceImpl {
             driver_bot_uuid: group.driver_bot,
             driver_bot_name,
             strategy: project_strategy(group.group_strategy),
+            participants,
             human_mention_notify_mode: group.human_mention_notify_mode,
             created_at: group.created_at,
             updated_at: group.updated_at,
+            last_activity_at,
         }))
     }
 }

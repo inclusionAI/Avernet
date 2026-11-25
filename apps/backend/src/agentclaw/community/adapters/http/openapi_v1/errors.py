@@ -140,6 +140,16 @@ class ApplicationCodingUnavailableError(Exception):
     """
 
 
+class IdentitySourceInvalidError(Exception):
+    """The declared identity Bot cannot supply identity to this Bot (→ 422).
+
+    The request is well-formed but names a source that does not exist, is not
+    visible to the caller, belongs to another entity, holds no issued passport,
+    or does not cover this Bot's declared scope. Distinct from a malformed
+    template (422 on the template contract) and from a deployment limitation.
+    """
+
+
 class StartupScriptUnsupportedError(Exception):
     """A bot whose container cannot run a startup script was sent one.
 
@@ -164,6 +174,14 @@ class BotAccessRefusedError(Exception):
     who may not reach a bot must not be able to tell it from one that is not
     there, or the surface becomes an enumeration oracle over other people's
     bots.
+    """
+
+
+class BotAccessCheckForbiddenError(Exception):
+    """The caller is not an allowlisted application (→ 403, Bot-independent).
+
+    Raised by the transitional Bot access check before any Bot is read, so the
+    refusal carries nothing about the Bot or user that was asked about.
     """
 
 

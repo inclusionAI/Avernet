@@ -94,7 +94,9 @@ def _seed_successful_publish(
                     "source_bot_pk, source_bot_id, publish_bot_id, name, owner_id, "
                     "permission_owner, status, version, last_pub_id, env, gmt_create, gmt_modified, ext"
                     ") VALUES ("
-                    "1, :source_bot_id, :publish_bot_id, :name, :owner_id, "
+                    "(SELECT id FROM ac_bots WHERE bot_id = :source_bot_id "
+                    "AND owner_id = :owner_id AND env = :env AND is_delete = 0), "
+                    ":source_bot_id, :publish_bot_id, :name, :owner_id, "
                     "'owner', :status, :version, 0, :env, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, :ext"
                     ") RETURNING id"
                 ),

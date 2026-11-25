@@ -26,28 +26,32 @@ MANIFEST = (
 )
 
 
-def test_supported_profiles_resolve_exactly_to_two_default_clis() -> None:
+def test_supported_profiles_resolve_default_clis() -> None:
     """Default CLIs are granted per the manifest's match + exclude policy.
 
-    For ``claude_code`` the generalCC profile is an exact match; every other
-    non-empty template_type except ``normalCC`` is caught by the exclude-based
-    fallback profile. Empty/None template_type and ``normalCC`` are rejected.
+    For ``claude_code`` the generalCC profile is an exact match and retains the
+    two original defaults; every other non-empty template_type except
+    ``normalCC`` is caught by the exclude-based fallback profile, now including
+    ``AntCR``. Empty/None template_type and ``normalCC`` are rejected.
     """
     resolver = CliCapabilityManifestResolver(MANIFEST)
-    expected = ["dataphin", "deepinsight-cli"]
+    expected_generalcc = ["dataphin", "deepinsight-cli"]
+    expected_custom = ["dataphin", "deepinsight-cli", "AntCR"]
 
     # openclaw is a catch-all (no template_type constraint).
-    assert [item["cli_code"] for item in resolver.required_cli_items("openclaw", None)] == expected
+    assert [
+        item["cli_code"] for item in resolver.required_cli_items("openclaw", None)
+    ] == expected_generalcc
 
-    # claude_code + generalCC — exact-match profile.
+    # claude_code + generalCC — exact-match profile without AntCR.
     assert [
         item["cli_code"] for item in resolver.required_cli_items("claude_code", "generalCC")
-    ] == expected
+    ] == expected_generalcc
 
-    # claude_code + any non-empty, non-normalCC template — exclude-based profile.
+    # claude_code + any other non-empty, non-normalCC template — custom profile.
     assert [
         item["cli_code"] for item in resolver.required_cli_items("claude_code", "mcptestpq")
-    ] == expected
+    ] == expected_custom
     assert resolver.is_supported_profile("claude_code", "mcptestpq") is True
 
     # claude_code + normalCC — explicitly excluded.

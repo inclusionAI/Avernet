@@ -11,15 +11,16 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+bcs-tracing-api.workspace = true
+bcs-network-tracing.workspace = true
 bcs-domain      = { workspace = true }
 bcs-group       = { workspace = true }
 bcs-channel-api = { workspace = true }
-bcs-callback    = { workspace = true }
 bcs-config-api  = { workspace = true }
+bcs-config = { workspace = true }
 bcs-route-security = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-auth-api    = { workspace = true }
-bcs-jwt         = { workspace = true }
 bcs-services-container = { workspace = true }
 bcs-protocol    = { workspace = true }
 bcs-storage-api = { workspace = true }
@@ -33,6 +34,7 @@ futures         = { workspace = true }
 base64          = { workspace = true }
 serde           = { workspace = true }
 serde_json      = { workspace = true }
+serde_path_to_error = { workspace = true }
 serde_yaml      = { workspace = true }
 thiserror       = { workspace = true }
 strum           = { workspace = true }
@@ -53,10 +55,14 @@ reqwest         = { workspace = true }
 bcs-test-support = { workspace = true }
 
 [dev-dependencies]
+bcs-network-tracing = { workspace = true, features = ["blocking", "reqwest13"] }
+bcs-provider-http = { workspace = true }
 bcs-collaboration-draft = { workspace = true }
 bcs-app-collaboration-draft = { workspace = true }
-bcs-db-local = { workspace = true }
+bcs-message-flow = { workspace = true }
+async-trait = { workspace = true }
 bcs-db-api = { workspace = true }
+bcs-db-local = { workspace = true }
 bcs-collaboration-runtime = { workspace = true }
 bcs-collaboration-store = { workspace = true }
 bcs-message-store = { workspace = true }
@@ -80,4 +86,5 @@ bcs-user-directory-api = { workspace = true }
 tempfile = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 tracing-subscriber = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }

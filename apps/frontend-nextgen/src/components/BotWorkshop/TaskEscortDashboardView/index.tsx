@@ -27,7 +27,7 @@ const TaskEscortDashboardView: React.FC<DashboardViewProps> = ({
   return (
     <div className="flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2">
+      <div className="flex items-center justify-between border-b border-divider px-3 py-2">
         <div>
           <div className="text-sm font-semibold">工作流</div>
           <div className="mt-0.5 text-xs text-[var(--color-muted)]">

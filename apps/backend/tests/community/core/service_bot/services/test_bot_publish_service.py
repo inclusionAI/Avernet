@@ -79,6 +79,7 @@ def _make_service(
     task_queue_service=None,
     bot_process_registry=None,
     common_config_service=None,
+    passport_plugin=None,
 ) -> BotPublishService:
     """Build a ``BotPublishService`` with MagicMock fallbacks for unused deps.
 
@@ -183,6 +184,7 @@ def _make_service(
         task_queue_service=task_queue_service or MagicMock(),
         bot_process_registry=process_registry,
         common_config_service=common_config,
+        passport_plugin=passport_plugin or MagicMock(),
     )
 
 
@@ -1148,6 +1150,7 @@ class TestUpgradeBotToService:
         mock_bot_repo = Mock()
         mock_bot_service = Mock()
         mock_bcn_service = Mock()
+        mock_passport = Mock()
         mock_bcn_service.switch_bot.return_value = {
             "bot_id": "bot_001:user_001",
             "provider_id": "prv_test",
@@ -1188,6 +1191,7 @@ class TestUpgradeBotToService:
             bot_repo=mock_bot_repo,
             bot_service=mock_bot_service,
             bcn_service=mock_bcn_service,
+            passport_plugin=mock_passport,
         )
 
         # Act - 使用 mock threading.Thread 立即执行目标函数
@@ -1219,6 +1223,9 @@ class TestUpgradeBotToService:
             owner_workno="user_001",
             name="Test Bot",
             summary="Test description",
+        )
+        mock_passport.update_passport.assert_called_once_with(
+            bot_id="bot_001", user_id="user_001", bot_type="service"
         )
         # 验证 restart_bot 被异步调用
         mock_bot_service.restart_bot.assert_called_once_with(
@@ -1639,6 +1646,47 @@ class TestUpgradeBotToService:
         # restart_bot 未被调用
         mock_bot_service.restart_bot.assert_not_called()
 
+    def test_upgrade_bot_to_service_database_failure_attempts_compensation(
+        self, caplog
+    ):
+        """A failed local update keeps its error even if remote compensation fails."""
+        mock_bot_repo = Mock()
+        mock_bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100,
+            "bot_id": "bot_001",
+            "bot_name": "Test Bot",
+            "bot_type": "personal",
+            "active_engine": "openclaw",
+            "owner_id": "user_001",
+            "entity_id": "user_001",
+            "env": "dev",
+        }
+        mock_bot_repo.update_by_owner.return_value = None
+        mock_bcn_service = Mock()
+        mock_bcn_service.switch_bot.return_value = {}
+        mock_passport = Mock()
+        mock_passport.update_passport.side_effect = [
+            None,
+            RuntimeError("compensation unavailable"),
+        ]
+        service = _make_service(
+            bot_publish_repo=Mock(),
+            bot_repo=mock_bot_repo,
+            bcn_service=mock_bcn_service,
+            passport_plugin=mock_passport,
+        )
+
+        with caplog.at_level("ERROR"), pytest.raises(
+            BotNotFoundError, match="Failed to update bot"
+        ):
+            service.upgrade_bot_to_service("bot_001", "user_001")
+
+        assert mock_passport.update_passport.call_args_list == [
+            call(bot_id="bot_001", user_id="user_001", bot_type="service"),
+            call(bot_id="bot_001", user_id="user_001", bot_type="personal"),
+        ]
+        assert "Failed to restore Passport metadata" in caplog.text
+
 
 class TestUpdateBotType:
     """update_bot_type 方法测试。"""
@@ -1647,6 +1695,16 @@ class TestUpdateBotType:
         """更新 bot_type 为 service。"""
         mock_repo = Mock()
         mock_bot_repo = Mock()
+        mock_passport = Mock()
+
+        mock_bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100,
+            "bot_id": "bot_001",
+            "bot_type": "personal",
+            "owner_id": "user_001",
+            "entity_id": "user_001",
+            "env": "dev",
+        }
 
         updated_bot = {
             "id": 100,
@@ -1660,6 +1718,7 @@ class TestUpdateBotType:
         service = _make_service(
             bot_publish_repo=mock_repo,
             bot_repo=mock_bot_repo,
+            passport_plugin=mock_passport,
         )
 
         result = service.update_bot_type(
@@ -1672,11 +1731,24 @@ class TestUpdateBotType:
         mock_bot_repo.update_by_owner.assert_called_once_with(
             "bot_001", "user_001", {"bot_type": "service"}
         )
+        mock_passport.update_passport.assert_called_once_with(
+            bot_id="bot_001", user_id="user_001", bot_type="service"
+        )
 
     def test_update_bot_type_to_personal(self):
         """更新 bot_type 为 personal。"""
         mock_repo = Mock()
         mock_bot_repo = Mock()
+        mock_passport = Mock()
+
+        mock_bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100,
+            "bot_id": "bot_001",
+            "bot_type": "service",
+            "owner_id": "user_001",
+            "entity_id": "user_001",
+            "env": "dev",
+        }
 
         updated_bot = {
             "id": 100,
@@ -1690,6 +1762,7 @@ class TestUpdateBotType:
         service = _make_service(
             bot_publish_repo=mock_repo,
             bot_repo=mock_bot_repo,
+            passport_plugin=mock_passport,
         )
 
         result = service.update_bot_type(
@@ -1702,6 +1775,60 @@ class TestUpdateBotType:
         mock_bot_repo.update_by_owner.assert_called_once_with(
             "bot_001", "user_001", {"bot_type": "personal"}
         )
+        mock_passport.update_passport.assert_called_once_with(
+            bot_id="bot_001", user_id="user_001", bot_type="personal"
+        )
+
+    def test_update_bot_type_stops_before_database_when_passport_sync_fails(self):
+        mock_bot_repo = Mock()
+        mock_bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100,
+            "bot_id": "bot_001",
+            "bot_type": "personal",
+            "owner_id": "user_001",
+            "entity_id": "user_001",
+            "env": "dev",
+        }
+        mock_passport = Mock()
+        mock_passport.update_passport.side_effect = RuntimeError("tcauth unavailable")
+        service = _make_service(
+            bot_publish_repo=Mock(),
+            bot_repo=mock_bot_repo,
+            passport_plugin=mock_passport,
+        )
+
+        with pytest.raises(
+            BotPublishServiceError, match="Failed to synchronize Passport bot_type"
+        ):
+            service.update_bot_type("bot_001", "user_001", "service")
+
+        mock_bot_repo.update_by_owner.assert_not_called()
+
+    def test_update_bot_type_database_failure_restores_previous_remote_type(self):
+        mock_bot_repo = Mock()
+        mock_bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100,
+            "bot_id": "bot_001",
+            "bot_type": "personal",
+            "owner_id": "user_001",
+            "entity_id": "user_001",
+            "env": "dev",
+        }
+        mock_bot_repo.update_by_owner.return_value = None
+        mock_passport = Mock()
+        service = _make_service(
+            bot_publish_repo=Mock(),
+            bot_repo=mock_bot_repo,
+            passport_plugin=mock_passport,
+        )
+
+        with pytest.raises(BotNotFoundError, match="Bot not found"):
+            service.update_bot_type("bot_001", "user_001", "service")
+
+        assert mock_passport.update_passport.call_args_list == [
+            call(bot_id="bot_001", user_id="user_001", bot_type="service"),
+            call(bot_id="bot_001", user_id="user_001", bot_type="personal"),
+        ]
 
     def test_update_bot_type_invalid_type(self):
         """无效的 bot_type 应该报错。"""
@@ -1779,6 +1906,9 @@ class TestDeleteServiceBot:
         """正常删除：草稿状态且无成功发布单，删除成功。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         draft_record = _create_mock_record(
@@ -1823,6 +1953,9 @@ class TestDeleteServiceBot:
         """发布单不存在时抛出 PublishNotFoundError。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         mock_repo.get_by_id.return_value = None
@@ -1844,6 +1977,9 @@ class TestDeleteServiceBot:
         """不满足删除条件时抛出 BotPublishServiceError。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         # 成功状态的发布单，不满足删除条件
@@ -1870,6 +2006,9 @@ class TestDeleteServiceBot:
         """destroy_publish_history 失败时，抛出异常阻断删除流程。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         draft_record = _create_mock_record(
@@ -1898,6 +2037,9 @@ class TestDeleteServiceBot:
         """存在其他成功发布单时，不能删除。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         draft_record = _create_mock_record(
@@ -1929,6 +2071,9 @@ class TestDeleteServiceBot:
         """有 last_pub_id 时，销毁当前发布单和上一个发布单的发布历史。"""
         mock_repo = Mock()
         mock_bot_service = Mock()
+        mock_bot_service.get_bot_by_address.return_value = {
+            "bot_id": "bot_001", "entity_id": "user_001", "owner_id": "user_001",
+        }
         mock_publish_flow_service = Mock()
 
         # 草稿记录有 last_pub_id=100
@@ -3514,7 +3659,7 @@ class TestDraftRestore:
         )
         repo.get_by_id.side_effect = [draft, source]
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "teclaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "teclaw"}
         service = _make_service(repo, bot_service=bot_service)
 
         can_restore, reason, restore_source = service.can_restore_draft(2)
@@ -3536,7 +3681,7 @@ class TestDraftRestore:
         )
         repo.get_by_id.side_effect = [draft, source]
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "TeClaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "TeClaw"}
         service = _make_service(repo, bot_service=bot_service)
 
         can_restore, reason, _ = service.can_restore_draft(2)
@@ -3557,7 +3702,7 @@ class TestDraftRestore:
         )
         repo.get_by_id.side_effect = [draft, source]
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "teclaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "teclaw"}
         service = _make_service(repo, bot_service=bot_service)
 
         can_restore, reason, restore_source = service.can_restore_draft(2)
@@ -3579,7 +3724,7 @@ class TestDraftRestore:
         )
         repo.get_by_id.side_effect = [draft, source]
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "teclaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "teclaw"}
         service = _make_service(repo, bot_service=bot_service)
 
         can_restore, reason, restore_source = service.can_restore_draft(2)
@@ -3789,7 +3934,7 @@ class TestDraftRestore:
             }
         )
         bot_service = MagicMock()
-        bot_service.get_bot.return_value = {"active_engine": "openclaw"}
+        bot_service.get_bot_by_address.return_value = {"active_engine": "openclaw"}
         service = _make_service(
             repo,
             bot_service=bot_service,
@@ -3824,7 +3969,7 @@ class TestDraftRestore:
         operation_repo = self._stateful_operation_repo()
         task_queue = Mock()
         bot_service = Mock()
-        bot_service.get_bot.return_value = {"binding_id": 802}
+        bot_service.get_bot_by_address.return_value = {"binding_id": 802}
         binding_repo = Mock()
         binding_repo.get_by_id.return_value = SimpleNamespace(
             id=802, device_id="BOT-current-draft"
@@ -3879,7 +4024,7 @@ class TestDraftRestore:
         task_queue = Mock()
         task_queue.enqueue.side_effect = RuntimeError("queue unavailable")
         bot_service = Mock()
-        bot_service.get_bot.return_value = {"binding_id": 802}
+        bot_service.get_bot_by_address.return_value = {"binding_id": 802}
         binding_repo = Mock()
         binding_repo.get_by_id.return_value = SimpleNamespace(
             id=802, device_id="BOT-current-draft"

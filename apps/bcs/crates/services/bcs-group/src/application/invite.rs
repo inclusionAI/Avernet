@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_service_api::types::{EventActor, EventActorType, MessageViewScope};
 use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
+use bcs_service_api::types::{EventActor, EventActorType, MessageViewScope};
 use bcs_service_api::{
     ActorKind, BotRegistryCoreService, CreateInviteTokenCommand, GroupCoreService, GroupKind,
     GroupStatus, InviteService, InviteTargetType, InviteTokenError, InviteTokenPayload,
     InviteTokenResult, InviteUseCaseError, JoinByInviteCommand, JoinByInviteResult, Participant,
-    ParticipantMode, ParticipantRole, SessionManagementService, SystemMessageEvent,
+    ParticipantMode, ParticipantRole, ServiceError, SessionManagementService, SystemMessageEvent,
     SystemMessageService,
     invite_token_decode_no_expiry, invite_token_encode,
 };
@@ -22,9 +23,54 @@ pub struct InviteServiceImpl {
     pub base_url: Option<String>,
     pub group_link_url: Option<String>,
     pub session_link_url: Option<String>,
+    /// The live Human→Bot control hook (bot-authority
+    /// plan Task 6.5): the invite-issuance control legs
+    /// resolve the CURRENT `can_manage` edge; the
+    /// historical `list_bots_by_creator` claim is gone.
+    /// A missing wiring fails closed.
+    pub bot_authority: Option<Arc<dyn BotAuthorityPort>>,
 }
 
 impl InviteServiceImpl {
+    pub fn with_bot_authority_hook(
+        mut self,
+        hook: Arc<dyn BotAuthorityPort>,
+    ) -> Self {
+        self.bot_authority = Some(hook);
+        self
+    }
+
+    /// The CURRENT Human→Bot control judgment for the
+    /// invite-issuance legs. The historical
+    /// `created_by` claim no longer authorizes NEW
+    /// invite issuance; a failing read is an internal
+    /// error — never a deny-as-false.
+    async fn human_controls_bot(
+        &self,
+        staff_no: &str,
+        bot_id: &str,
+    ) -> Result<bool, InviteUseCaseError> {
+        let hook = self
+            .bot_authority
+            .as_deref()
+            .ok_or_else(|| {
+                InviteUseCaseError::Service(ServiceError::InternalError(
+                    "bot authority hook is not wired".to_string(),
+                ))
+            })?;
+        match hook.can_manage(staff_no, bot_id).await {
+            Ok(result) => Ok(result),
+            Err(ServiceError::Forbidden(message)) => Err(
+                InviteUseCaseError::Forbidden(message),
+            ),
+            Err(other) => Err(
+                InviteUseCaseError::Service(ServiceError::InternalError(
+                    format!("bot authority lookup failed: {other}"),
+                )),
+            ),
+        }
+    }
+
     fn resolve_base_url(&self) -> String {
         self.base_url
             .clone()
@@ -55,14 +101,20 @@ impl InviteServiceImpl {
                 return Ok(());
             }
         }
-        // Owner of driver/originator bot can generate invites.
+        // CURRENT controller of the driver/originator
+        // Bot can generate invites (owner or manager,
+        // live edge; spec §3.2 — a creator whose edge
+        // was revoked no longer mints NEW invitations;
+        // previously-issued URLs keep working through
+        // the join paths).
         if let Some(staff_no) = caller_staff_no {
-            let owned = self.registry.list_bots_by_creator(staff_no).await;
-            let owned_ids: Vec<&str> = owned.iter().map(|b| b.bot_uuid.as_str()).collect();
-            if owned_ids.contains(&group.driver_bot.as_str()) {
+            if self
+                .human_controls_bot(staff_no, group.driver_bot.as_str())
+                .await?
+            {
                 return Ok(());
             }
-            if owned_ids.contains(&originator) {
+            if self.human_controls_bot(staff_no, originator).await? {
                 return Ok(());
             }
         }
@@ -91,11 +143,17 @@ impl InviteServiceImpl {
             if is_member(&format!("human_{}", staff_no)) {
                 return Ok(());
             }
-            let owned = self.registry.list_bots_by_creator(staff_no).await;
-            if owned.iter().any(|bot| {
-                bot.actor_kind == ActorKind::Bot && is_member(bot.bot_uuid.as_str())
-            }) {
-                return Ok(());
+            // The Human qualifies through any participant
+            // Bot it CURRENTLY controls (live `can_manage`
+            // per participant, never a creator-list
+            // whitelist).
+            for participant in session.participants.iter().filter(|p| p.is_bot()) {
+                if self
+                    .human_controls_bot(staff_no, &participant.bot_uuid)
+                    .await?
+                {
+                    return Ok(());
+                }
             }
         }
         Err(InviteUseCaseError::Forbidden(

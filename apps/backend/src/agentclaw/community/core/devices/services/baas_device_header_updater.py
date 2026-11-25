@@ -63,6 +63,14 @@ class BaasDeviceHeaderUpdater:
         bolt_id = device.device_props.get("bolt_id", "")
         owner_id = device.device_props.get("entity_id", "")
         device_uuid = device.device_props.get("device_uuid", "")
+        engine_type = device.device_props.get("engine_type", "")
+        if not engine_type and self._bot_query is not None:
+            # ``owner_id`` here is the immutable entity id recorded on the
+            # device. Resolve by the resource address so an owner handoff does
+            # not prevent a later outbound-rule refresh.
+            bot = self._bot_query.get_by_id_and_entity(bolt_id, owner_id)
+            if isinstance(bot, dict):
+                engine_type = str(bot.get("active_engine") or "")
 
         logger.info(
             f"[BaasDeviceHeaderUpdater.update] Start: "
@@ -109,6 +117,7 @@ class BaasDeviceHeaderUpdater:
                     owner_id=owner_id,
                     agent_pass_token=agent_pass_token,
                     agent_code=agent_code,
+                    engine_type=engine_type,
                     extra_properties=extra_properties,
                 )
         except Exception as e:
@@ -173,6 +182,7 @@ class BaasDeviceHeaderUpdater:
         self._baas_service.update_device_outbound_rule(
             paas_device_id,
             outbound_rule,
+            **({"mode": "replace"} if device.device_provider == TECLAW_DEVICE_PROVIDER else {}),
         )
         logger.info(
             f"[BaasDeviceHeaderUpdater.update] Single device updated: "
@@ -218,6 +228,7 @@ class BaasDeviceHeaderUpdater:
             self._baas_service.update_device_outbound_rule(
                 paas_device_id,
                 outbound_rule,
+                **({"mode": "replace"} if device.device_provider == TECLAW_DEVICE_PROVIDER else {}),
             )
             updated_devices.append(
                 {

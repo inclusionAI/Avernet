@@ -2,10 +2,12 @@
 //!
 //! Route-facing; called by `routes/friends.rs`. Orchestrates `PermissionRequestRepo`,
 //! `EdgeGrantRepo`, `PermissionProfileRepo` (wired in a later installment).
-use async_trait::async_trait;
-use bcs_domain::edge_permission::{FriendListEntry, PermissionRequest, RequestStatus};
+use std::collections::HashSet;
 
-use crate::core::error::ServiceResult;
+use async_trait::async_trait;
+use bcs_domain::edge_permission::{FriendListEntry, PermissionRequest, RequestKind, RequestStatus};
+
+use crate::core::error::{ServiceError, ServiceResult};
 use crate::principal::RequestAuthHeaders;
 pub use crate::port::repo::edge_grant::FriendListQuery;
 
@@ -57,6 +59,8 @@ pub struct RequestsPage {
 #[async_trait]
 pub trait ConnectService: Send + Sync {
     /// Human→Bot: 1 request (+1 edge on approve). Bot↔Bot: 2 requests (+2 edges).
+    /// The second Bot↔Bot row is a generated reverse mirror, not an independent
+    /// peer request; it cannot be decided directly.
     async fn create_connect(
         &self,
         caller: &str,
@@ -113,7 +117,18 @@ pub trait ConnectService: Send + Sync {
         query: FriendListQuery,
     ) -> ServiceResult<FriendEntriesPage>;
 
+    /// Return the requested Bot IDs with active friendship from this Human in
+    /// the service environment. Never consult legacy relation mirrors.
+    async fn find_human_friend_bots(
+        &self,
+        _human_id: &str,
+        _bot_ids: &[String],
+    ) -> ServiceResult<HashSet<String>> {
+        Err(ServiceError::InternalError("Human friend lookup is unavailable".into()))
+    }
+
     /// Owner inbox / sent list (`GET /friends/requests`). Paginated.
+    /// Generated reverse Connect mirrors are excluded before totals and pagination.
     async fn list_requests(
         &self,
         actor: &str,
@@ -123,4 +138,34 @@ pub trait ConnectService: Send + Sync {
         page_size: u32,
     ) -> ServiceResult<RequestsPage>;
 
+    /// The caller's own pending Connect request toward `to`, if one exists —
+    /// the legacy duplicate-pending (409) guard read.
+    ///
+    /// The default scans ONE bounded page so compatibility fakes keep
+    /// compiling; production implementations MUST override with a bounded
+    /// existence query (`LIMIT 1` at the store) instead of materializing
+    /// the caller's whole request history.
+    async fn find_pending_self_connect(
+        &self,
+        caller: &str,
+        to: &str,
+    ) -> ServiceResult<Option<PermissionRequest>> {
+        let page = self
+            .list_requests(
+                caller,
+                RequestDirection::Sent,
+                Some(RequestStatus::Pending),
+                1,
+                100,
+            )
+            .await?;
+        Ok(page
+            .items
+            .into_iter()
+            .find(|request| {
+                request.request_kind == RequestKind::Connect
+                    && request.to_id == to
+                    && request.created_by == caller
+            }))
+    }
 }

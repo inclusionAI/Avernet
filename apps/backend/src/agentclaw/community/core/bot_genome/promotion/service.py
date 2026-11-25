@@ -1,21 +1,23 @@
-"""``GenomePromotionService``: the 08-promotion.md §7.1 steps over the registry, the refs and the seam.
+"""``GenomePromotionService``: the 08-promotion.md §7.1 steps over the registry, the seam and the settler.
 
 Order: resolve the target → refuse a candidate the gate has not accepted →
-compile → drift (automated actors only) → ``applier.preflight`` → one
-transaction holding the ``active``/``previous`` compare-and-swap, the
-revision's ``promoted`` status and the promotion row with the compiled
-document → ``applier.start`` → the row's delivery answer. Everything before
-that transaction leaves no trace, and the transaction leaves all or nothing.
+compile → drift (automated actors only, observed by reading the bot) →
+``applier.preflight`` — none of which writes anything — → file the promotion
+``pending`` → ``applier.start`` (the apply run takes the bot's lock here,
+synchronously) → ``applying`` with the apply id. The refs do not move here:
+they move when the apply ends, in the transaction that settles the promotion
+(``promotion/settle.py``), so ``active`` never names a revision the bot does
+not hold.
 """
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from agentclaw.community.core.bot_genome.canonical import canonicalize, loads_strict
 from agentclaw.community.core.bot_genome.errors import (
+    ApplyBusy,
     Drifted,
     NotPromotable,
     PromotionUnsupported,
@@ -27,6 +29,7 @@ from agentclaw.community.core.bot_genome.models import (
     BotRef,
     Promotion,
     PromotionPage,
+    PromotionStatus,
     Provenance,
     ProvenanceKind,
     RevisionStatus,
@@ -39,7 +42,6 @@ from agentclaw.community.core.bot_genome.repository.models import GenomePromotio
 from agentclaw.community.core.repository.protocols.bot.genome import (
     GenomePromotionRepositoryProtocol,
     GenomeRefRepositoryProtocol,
-    GenomeRevisionRepositoryProtocol,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -51,6 +53,10 @@ logger = get_logger()
 #: Statuses a promotion accepts: an owner's draft, a gate-accepted candidate, or a revision promoted before.
 PROMOTABLE = frozenset({RevisionStatus.DRAFT, RevisionStatus.ACCEPTED, RevisionStatus.PROMOTED})
 
+#: A ``pending`` row older than this with no apply belongs to a request that died between filing it and starting its
+#: apply; the bot's next promotion settles it. Starting an apply takes milliseconds, so this is generous.
+STALE_PENDING_SECONDS = 5 * 60
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -61,14 +67,12 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
         self,
         *,
         registry: GenomeRegistryProtocol,
-        revisions: GenomeRevisionRepositoryProtocol,
         refs: GenomeRefRepositoryProtocol,
         promotions: GenomePromotionRepositoryProtocol,
         applier: RevisionApplier,
         env: Callable[[], str] = get_current_env,
     ) -> None:
         self._registry = registry
-        self._revisions = revisions
         self._refs = refs
         self._promotions = promotions
         self._applier = applier
@@ -96,98 +100,105 @@ class GenomePromotionService(GenomePromotionServiceProtocol):
                 f"revision {target.revision.id} is {status.value}; "
                 "only a draft, an accepted candidate or a promoted revision can be promoted"
             )
-        compiled = self._registry.compile(bot, target.revision.id)
-        active = self._refs.get(**self._axes(bot), name="active")
-        if active is not None and actor.kind is not ProvenanceKind.USER:
-            applied = self._registry.applied_revision(bot)
-            if applied != active.revision_id:
-                raise Drifted(active=active.revision_id, applied=applied)
-        self._applier.preflight(bot, compiled)
+        state = self._registry.compile(bot, target.revision.id)
+        if actor.kind is not ProvenanceKind.USER:
+            # An automated actor may not promote over a bot that has moved by hand; an owner may.
+            drift = await self._registry.drift(bot)
+            if drift is not None:
+                raise Drifted(active=drift.active, observed=drift.observed)
+        self._applier.preflight(bot, state)
+        current = self._refs.get(**self._axes(bot), name="active")
+        if (current.revision_id if current is not None else None) != expected_revision:
+            raise RefConflict("active", expected=expected_revision, current=current.revision_id if current else None)
 
         now = _now()
-        row = self._promotions.start(
+        row = self._promotions.insert(
             GenomePromotionRow(
                 **self._axes(bot),
                 promotion_id=uuid.uuid4().hex,
                 ref="active",
                 revision_id=target.revision.id,
                 from_revision_id=expected_revision,
-                document_digest=compiled.document_digest,
-                document_json=canonicalize(compiled.document).decode("utf-8"),
                 going_back=status is RevisionStatus.PROMOTED and expected_revision != target.revision.id,
                 actor_kind=actor.kind.value,
                 actor_id=actor.audit,
                 actor_run_id=actor.run_id,
                 reason=reason,
-                status="applying",
-                apply_kind=self._applier.kind,
+                status=PromotionStatus.PENDING.value,
                 created_at=now,
-            ),
-            expected_active=expected_revision,
-            expected_statuses=tuple(s.value for s in PROMOTABLE),
-            moved_at=now,
+            )
         )
-        if row is None:
-            # Either the ref moved under us or the revision's status did (verification can reject
-            # an accepted candidate while we compile); the re-read says which.
-            now_status = self._registry.get_revision(bot, target.revision.id).revision.status
-            if now_status not in PROMOTABLE:
-                raise NotPromotable(f"revision {target.revision.id} became {now_status.value} while promoting")
-            current = self._refs.get(**self._axes(bot), name="active")
-            raise RefConflict("active", expected=expected_revision, current=current.revision_id if current else None)
+        # An automated actor's apply runs with the bot owner as its principal; the record names the actor.
+        principal = actor.checked_as if actor.kind is ProvenanceKind.USER else bot.owner_id
         try:
-            result = await self._applier.start(bot, compiled, actor=actor, reason=reason)
-        # The refs moved already: a delivery failure is the promotion's record, not the caller's crash.
-        except Exception as exc:  # noqa: BLE001
+            apply_id = self._applier.start(
+                bot, promotion_id=row.promotion_id, principal_id=principal, audit_actor=actor.audit
+            )
+        except ApplyBusy:
+            self._finish(bot, row.promotion_id, "another apply was running on this bot; nothing moved")
+            raise
+        except RefConflict:
+            # Another promotion settled between the check above and this apply taking the bot's lock.
+            self._finish(bot, row.promotion_id, "active moved before its apply started; nothing moved")
+            raise
+        except Exception as exc:  # noqa: BLE001 - recorded on the row; the refs never moved
             logger.warning(
                 "[genome.promotion] delivery did not start promotion=%s bot=%s: %s", row.promotion_id, bot.bot_id, exc
             )
             # The type only: delivery errors can quote headers or paths, and the row is never deleted.
-            detail = (
-                f"delivery did not start ({type(exc).__name__}); see the server log for promotion {row.promotion_id}"
+            return _promotion(
+                self._finish(
+                    bot,
+                    row.promotion_id,
+                    f"delivery did not start ({type(exc).__name__}); see the server log for promotion "
+                    f"{row.promotion_id}",
+                )
+                or row
             )
-            finished = self._promotions.finish(
-                **self._axes(bot),
-                promotion_id=row.promotion_id,
-                status="apply_failed",
-                apply_reference=None,
-                apply_detail=detail,
-            )
-        else:
-            finished = self._promotions.finish(
-                **self._axes(bot),
-                promotion_id=row.promotion_id,
-                status="applied",
-                apply_reference=result.reference,
-                apply_detail=result.detail[:1024],
-            )
-        return _promotion(finished or row, with_document=True)
+        # This apply holds the bot's lock now, so no earlier promotion's apply is queued or running: an apply
+        # whose request died after starting it held the lock until it ended, and its end settled that row.
+        # An older `pending` row is one whose apply never started.
+        self._promotions.fail_stale_pending(
+            **self._axes(bot),
+            older_than=now - timedelta(seconds=STALE_PENDING_SECONDS),
+            apply_detail="the request that filed it ended before its apply started",
+            settled_at=now,
+        )
+        applying = self._promotions.mark_applying(**self._axes(bot), promotion_id=row.promotion_id, apply_id=apply_id)
+        # ``None`` only when the apply already ended and settled the row (a worker can be that quick): read it.
+        return _promotion(applying or self._promotions.get(**self._axes(bot), promotion_id=row.promotion_id) or row)
+
+    def _finish(self, bot: BotRef, promotion_id: str, detail: str) -> GenomePromotionRow | None:
+        return self._promotions.finish(
+            **self._axes(bot),
+            promotion_id=promotion_id,
+            status=PromotionStatus.APPLY_FAILED.value,
+            apply_detail=detail,
+        )
 
     def get_promotion(self, bot: BotRef, promotion_id: str) -> Promotion:
         row = self._promotions.get(**self._axes(bot), promotion_id=promotion_id)
         if row is None:
             raise RevisionNotFound(promotion_id)
-        return _promotion(row, with_document=True)
+        return _promotion(row)
 
     def list_promotions(self, bot: BotRef, *, page: int = 1, page_size: int = 20) -> PromotionPage:
         total, rows = self._promotions.list(**self._axes(bot), page=page, page_size=page_size)
-        return PromotionPage(total=total, items=tuple(_promotion(row, with_document=False) for row in rows))
+        return PromotionPage(total=total, items=tuple(_promotion(row) for row in rows))
 
 
-def _promotion(row: GenomePromotionRow, *, with_document: bool) -> Promotion:
+def _promotion(row: GenomePromotionRow) -> Promotion:
     return Promotion(
         id=row.promotion_id,
         ref=row.ref,
         revision=row.revision_id,
         from_revision=row.from_revision_id,
-        document_digest=row.document_digest,
         going_back=bool(row.going_back),
         actor=Provenance(ProvenanceKind(row.actor_kind), row.actor_id, run_id=row.actor_run_id),
         reason=row.reason,
-        status=row.status,
-        apply_kind=row.apply_kind,
-        apply_reference=row.apply_reference,
+        status=PromotionStatus(row.status),
+        apply_id=row.apply_id,
         apply_detail=row.apply_detail,
         created_at=row.created_at,
-        document=loads_strict(row.document_json) if with_document else None,
+        settled_at=row.settled_at,
     )

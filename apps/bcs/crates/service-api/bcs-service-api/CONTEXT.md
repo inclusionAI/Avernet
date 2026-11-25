@@ -1,5 +1,346 @@
 # bcs-service-api Context
 
+## Distributed output reads
+
+`port::dist_output` owns the pure `DistOutputAdapterPort`, Worker-side
+`DistTaskOutputReaderPort` and transient formatted event envelopes. These use
+neutral model/JSON types and import no A2A DTOs. TaskFeed persistence continues
+to use neutral display snapshots and artifact operations. The Gateway core and
+application expose the facade's formatted results to delivery adapters, which
+retain their protocol envelopes. Centralized harnesses cover both output ports;
+the A2A adapter and Worker facade call those harnesses from conformance tests.
+
+## Managed admission target failures
+
+`DeliveryAdmissionRejection::TargetUnavailable` records a recipient's failed
+delivery-target resolution as an unsent terminal Failed row alongside valid
+siblings. The existing `DeliveryStatusView.admission_error` exposes the fixed
+`delivery_target_unavailable` code, never arbitrary resolver text. Group message
+and reply preparation share this behavior; stores retain atomic admission and
+idempotency, including when every recipient fails. Persistence errors remain
+request errors. The Rust enum gains one variant (exhaustive consumers must
+handle it); workspace path consumers rebuild together. Existing stored rows
+remain readable, and no schema, Plugin API or endpoint change is needed. See
+the [admission contract](src/port/repo/message_delivery.rs) and
+[message-flow boundary](../../services/bcs-message-flow/CONTEXT.md#queued-group-target-failure-isolation).
+
+## Version 7.1.0: Connector core contract
+
+Add `core::dist_connector::DistConnectorCoreService`, the pure rules of one
+downstream call: what a holder does first in each dispatch phase, stable request
+and key-event identities, how an unknown send is resolved from declared
+capabilities, and how a remote event becomes a session input. It is additive:
+no existing trait, type, endpoint or stored record changes; the Worker relies on
+the reporting rules in the module documentation. The
+[change record](../../../specs/2026-11-17-connector-runtime/spec.md) holds the
+plan and validation.
+
+## Distributed Gateway/Worker integration amendment
+
+TaskAdmissionCoreService consumes a stable caller command; Gateway no longer
+supplies initial TaskSnapshot or output policy/version. Worker admission uses
+InboxProducerPort::lookup to retrieve scoped canonical content, checks caller
+intent, and confirms/repairs that original through admit, including first-request
+races. Lookup is not success proof. Accepted/Duplicate remain provider details;
+CoreAdmission exposes one successful receipt. This supersedes the original
+Accepted-only assumption documented below for this opt-in Worker composition.
+
+DistOutputAdapterPort formats neutral snapshots and stable artifact operations.
+DistTaskOutputReaderPort exposes converted views/events. WorkerOutputReader resolves
+content and invokes an injected formatter; Gateway forwards output with its A2A
+envelope. No A2A types enter the Worker or storage model. Byte quotas for units,
+cumulative output and complete snapshots are removed; physical frames remain.
+
+Propagation: Gateway app/core, Worker admission/output, Inbox/TaskFeed, harnesses
+and explicit Singlebox test assembly rebuild together. These unpublished metadata
+shapes require a fresh distributed namespace; automatic prototype migration is not
+provided. Existing non-distributed A2A registration and endpoints are unchanged.
+
+## Version 7.0.0: One admission success and Gateway waiting
+
+Breaking for the unpublished distributed declarations only; no existing
+runtime, wire endpoint or stored record changes.
+
+- The original Gateway-only design collapsed provider admission outcomes. The
+  integrated Worker provider retains `Accepted` and `Duplicate`; both map to the
+  same `CoreAdmission` receipt, with no difference in HTTP success behavior.
+- `GatewayError::NotCancelable` reports a cancel of a finished task.
+- `DistGatewayService::wait_task` (`WaitTask`, `WaitUntil`) waits until a task
+  needs input or is finished and the stored view covers that event, and
+  returns the current view at its timeout. Blocking send and cancel use it.
+
+- A session or task is reached only through the group it was created for.
+  `get_task` takes the addressed group, and `SubscribeTask`, `WaitTask`,
+  `CancelTask` and `ListTasks` carry it; another group is answered as
+  NotFound. `DistGatewayCoreService::session_group` reads the frozen group.
+
+Consumers implementing `DistGatewayService`, `TaskAdmissionCoreService` or the
+formatted output ports rebuild together with the explicit Worker composition.
+
+## Version 6.1.0: Distributed coordination contracts
+
+The phase-one refinement adds the pure
+[`OutputProjectionCoreService`](src/core/dist_projection.rs), stable artifact
+operations and frozen internal physical output profiles. Candidate projection
+counts diagnostic usage only for newly committed output; read-side folding applies
+the same transform and structural checks without charging again. No output-body
+byte quota applies in this phase. The implementation is
+[bcs-dist-projection](../../services/bcs-dist-projection/README.md).
+Checkpoint Runner state is optional and bound to one task; finalization retains
+the frozen archive record and terminal publication progress independently of it.
+These unpublished v1 declarations require a fresh phase-one namespace and rebuild
+of workspace consumers; no legacy records are migrated or HTTP endpoints changed.
+
+Add opt-in Gateway, Worker and Connector service/port declarations plus
+`bcs-dist-model` shared data. No existing trait method, wire endpoint, runtime
+registration or stored record changes. All workspace path consumers rebuild;
+the additive Service API version is 6.1.0.
+
+The [distributed contract](src/port/repo/distributed/README.md) owns admission,
+atomic checkpoint/effect replay, scheduling, consistent task recovery and
+dispatch ownership semantics. State and queue adapters remain replaceable.
+The [change record](../../../specs/2026-11-15-distributed-contracts/spec.md) links
+ordered implementation tasks and actual validation. The public
+[Inbox provider](../../services/bcs-dist-store/src/inbox/README.md) implements
+scoped canonical admission, consumption and independent repair/discovery.
+`AdmitRequest.scope` binds trusted scope; `FeedBatch.failures` requires Worker
+watch recovery. `AdmissionControlPort` exposes gate/cut obligations, while
+terminal/archive confirmation and authorized resume remain runtime duties.
+Complete runtime assembly and provider acceptance remain separate.
+
+`SessionStorePort::get_spec` owns frozen-session specification reads, even before
+the first checkpoint. Inbox producer/consumer ports and the stateful shard feed
+remain separate. Initial spec/task creation remains inside reliable admission;
+the read-method move adds no trait, storage layout or required database call.
+
+Distributed ownership uses `ShardOwner` for the shard-assigned identity and
+`SessionOwnership` for the processing identity obtained by sealing a specific session.
+Shard claims compare `expected_epoch`; business commits compare
+`expected_commit_seq` together with the sealed owner. Owner/checkpoint records,
+commit receipts and recovery responses expose no independent revision. Recovery
+metadata has an idempotent control-write path that preserves business state and
+outbox; dispatch recheck revisions and inbox scheduling tokens remain separate.
+`ShardClaim`, `MembershipLease` and `SessionOwnership` contain identities, not authority
+strings; providers still validate current claims and exact unexpired registrations.
+Old incarnations cannot renew or drain a replacement, and a lost lease cannot
+be revived by renew. Session commits validate sid-to-shard membership and the
+exact sealed node/incarnation/epoch atomically with the sequence check/write;
+caller-supplied identities alone grant no rights. Commit proofs remain.
+These refine the unpublished 6.1.0 distributed declarations only; no existing
+runtime or deployed persistence format changes.
+
+## Version 5.1.0: Group Card snapshots
+
+`GroupCoreService` and `GroupRepoPort` add `read_card_snapshot`, returning
+`GroupCardSnapshot` with current Group publication metadata and an optional
+stored template from one consistent read. Defaults fail explicitly, preserving
+source compatibility for existing implementations without silently treating
+unsupported reads as deletion. SQL and Memory implement the contract; GroupCore
+forwards it, and Fuse V2 consumes it instead of building Cards from `Group`.
+All workspace consumers rebuild together; no HTTP or Plugin API changes apply.
+
+The store projects template names from label/ID and both Card/skill descriptions
+from context (empty when unset), preserving interfaces and opaque extensions.
+Legacy stored display fields are refreshed only in the read result until a
+normal upsert/name/context write persists them. Missing templates remain missing,
+and query/decode failures propagate. Shared Memory/SQLite conformance and catalog
+integration cover the boundary. No schema migration or startup backfill is added.
+See [Group template ownership](../../../docs/bcsfuse-catalog.md#group-template-ownership).
+
+## Version 4.0.0: Provider initial authority
+
+`OwnershipInitialization` adds required `initial_manager_user_ids`; existing Rust
+constructors must supply it (empty for Human-token registrations). Provider Core
+and the Bot Provider repo add separate fail-closed atomic multi-user admission
+methods. Fresh ordinary identity/binding/authority commits together; initialized
+replays preserve changes, and existing uninitialized multi-user targets conflict.
+Empty snapshots preserve the legacy path. Workspace consumers rebuild together;
+HTTP fields and Plugin APIs are unchanged. Shared registration/rollback tests
+cover Memory and SQLite, with native MySQL migration-chain conformance.
+
+## Version 5.0.0: Candidate viewer perspective and bound friend set
+
+`BotCandidateReadQuery` adds required `viewer_kind: ActorKind`, and
+`BotSearchCandidateQuery` adds `viewer_kind: Option<ActorKind>` plus
+`name_only: bool`. Existing external struct literals must supply the new
+fields, so this is a major Rust Service API version change even though no JSON
+wire field changes. All workspace consumers use path dependencies and rebuild
+together; there is no Plugin API or database migration change.
+
+A Human viewer filters candidates on the target's `user_visibility`, while a
+Bot viewer filters on the Bot-facing `visibility`. Collaboration adds the
+approved friend set to that same dimension. The store applies the filter
+before COUNT and before `offset`/`limit`, so `total` is the post-filter
+pre-pagination value. The V1 candidate list and V1 candidate search now pass
+the authorized perspective `acting.kind`, so a Human viewer filters on
+`user_visibility` and a Bot viewer on `visibility`, with the approved
+Connect/edge friend set. The legacy control-plane search keeps `viewer_kind:
+None` and `name_only: false` (Bot-oriented filtering and the broader
+name/summary/Bot-ID search), while the store's `Some(..)` viewer and
+`name_only: true` (name-only matching for the V1 name fallback) are consumed by
+the authorized Core search entry wired at the composition root.
+
+Candidate stores bind the sorted, de-duplicated friend IDs as one JSON array
+expanded with SQLite `json_each` or MySQL `JSON_TABLE`; page and COUNT share
+the same CTE, conditions and bindings. This removes the per-friend
+`UNION ALL` statement chain (which failed at 501 friends on SQLite) without
+claiming constant set-construction or scan cost.
+
+Measured SQLite shape evidence over 0, 100, 500, 501 and 1,000 friends:
+1,000 friend IDs serialize to about 30,001 bytes of JSON; the candidate page
+SQL is about 811–826 bytes and its COUNT about 357–372 bytes depending on the
+viewer/purpose branch; the page statement binds 6 parameters (one friend JSON
+array plus the fixed filters and page bounds), and COUNT binds the same shared
+4 conditions. Each candidate query remains
+exactly two statements (page + COUNT) and contains no per-friend `UNION ALL`
+chain; the friend-set binding count does not grow with the set size.
+
+The control-plane Core contract also exposes `search_candidate_records`, a
+Provider-hydration-free search path for authorization. The production
+`BotControlPlaneCore` delegates it directly to the repository's candidate
+record query; authorized candidate search must use it for visibility/edge
+filtering and hydrate Provider metadata only for the final displayed IDs.
+The existing `search_candidates` path remains the hydrated projection for
+callers that need Provider information.
+
+The same 5.0.0 change adds the authorized shared-search contract.
+`BotCandidateSearchCoreService::search_authorized_candidates` takes
+`AuthorizedCandidateSearchQuery` (query text, acting actor, env, `ActorKind`
+viewer, purpose visibility, approved `friend_ids`, display limit) and returns
+`ServiceResult<BotCandidateSearchCoreResult>`. Its default explicitly fails, so
+test doubles and legacy implementations keep compiling while an unwired
+composition never returns an unauthorized success. `WorkerRecommendCommand`
+gains the required `WorkerRecommendationScope` (`LegacyDefault` /
+`AllVisibilities`), making the provider recall range an explicit choice at every
+construction site. Recall scope is not authorization: the production Core
+re-checks the bounded provider recall against the control plane before
+hydration. This contract adds no JSON wire field of its own, no Plugin API
+change, and no database migration; the same 5.0.0 delivery also adds the
+BCSFuse request `filters` field in `bcs-fuse-client` to carry that recall
+scope.
+
+## Version 6.0.0: Candidate current-owner display projection
+
+`BotCandidate` adds `owner_user_id: Option<String>`. Existing Rust struct literals
+must supply the new field, and `BotAuthorityRepoPort`, `BotAuthorityCoreService`,
+and `BotAuthorityPort` add required `ownerships_for` methods without defaults.
+External constructors and trait implementors must therefore migrate together;
+this is a major Rust Service API version change. Workspace consumers use path
+dependencies and rebuild together.
+
+The HTTP JSON field is optional and omitted when no owner projects, so existing
+clients can ignore it. Owner display metadata comes from the current authority
+owner edge rather than the historical `created_by` column. There is no Plugin
+API, route, configuration, database schema, or migration change.
+
+## Version 3.0.0: Bot response avatars
+
+`PhysicalBot` and `HumanBot` add `avatar_url: Option<String>`. Existing Rust
+struct literals must supply this field, requiring a major Service API version
+change. Workspace consumers rebuild together; external constructors should use
+`None` for an unset avatar and for Humans. JSON responses always include the
+nullable key, while serde still accepts older payloads without it. All V1 Bot
+projections share this shape, including mine, get, query, update and candidates.
+The application reuses `BotRegistryCoreService::avatar_urls`; no Plugin API,
+storage schema, HTTP route version, or configuration changes are needed.
+
+## Version 2.0.0: avatar source compatibility
+
+The avatar extension adds fields to public Rust structs, including
+`AdminBotOnboardCommand`, `RegisterProviderBotCommand`, `Actor`, `Participant`,
+`SessionParticipant` and Group/Session summaries. Existing external struct
+literals must supply the new fields, so this is a major Rust API version change
+even though the JSON fields are additive and serde accepts their omission.
+Consumers should use `AvatarChange::Keep` for omitted write intent, `None` for
+unknown display avatars, and construct the new participant summary vectors.
+All workspace consumers use path dependencies and rebuild together. HTTP clients
+retain the existing v1 routes, and no additional database migration is required.
+
+`A2aBotManagementService::register_provider_bot` orchestrates Provider-admin
+Card-aware creation using the existing Provider command/response. Its
+`A2aProviderRegistrationCoreService` dependency owns reauthorization and the
+atomic Bot/ownership/Card transaction through the existing repository port.
+SDK/HTTP types do not enter Core. The management credential authenticates the
+real Provider audit actor; owners are delegated Bot ownership, not a claimed
+Human caller. A2A duplicate creation conflicts and never returns old credentials.
+
+`RunBudgetService` is the application boundary for execution/wait budgets.
+Initialization delegates pure policy; update_deadline orchestrates policy,
+managed delivery and guarded Run-context deadline persistence. Its protocol-free
+RunBudgetTarget/RunBudgetUpdate carry canonical scope and expected deadline.
+The caller persists its protocol correlation before publishing a wait or sending
+a continuation. A failure is not a rollback or terminal; callers fail closed.
+The budget Core contract is consumed by application implementations and
+composition/tests, not outbound wire adapters through a facade re-export.
+
+`ManagedMessageDeliveryService::mark_run_transport_unknown` accepts only an
+already-issued canonical Send and its exact Bot/Group/Session scope. It retains
+the occupied slot and existing cancellation intent, is idempotent for uncertain
+or terminal work, rejects aliases/unsent work, and propagates persistence errors.
+Only a later trusted terminal or explicit operator resolution may release it.
+The shared managed-deadline harness covers Memory and SQLite implementations.
+
+`BotRegistryCoreService::resolve_abort_target` is cancellation-only. BotCore
+retains current Bot/Provider affiliation, enabled downlink/binding and credential
+checks. Failed refresh preserves the last successful snapshot for both new sends
+and cancellation, subject to current deployment policy. The adapter still proves exact frozen
+Task/context from the trusted Run; this method grants neither new send authority
+nor a wider cancel scope. Default implementations delegate ordinary resolution
+for backward compatibility. Queued and active-scope abort paths use the new
+method. No HTTP/WS or persistence-plugin API changes are introduced.
+
+Run budgeting adds the transport-independent `RunBudgetCoreService` policy and
+typed executing/waiting state. ManagedMessageDeliveryService's canonical
+`reschedule_run_deadline` and BotRunContextPort's expected-deadline
+`reschedule_deadline` are separate contracts: neither revives expired/terminal
+work, changes attempt/owner, or creates output producers. Unsupported defaults
+fail closed. The orchestrator must treat partial cross-store failure as failed
+budget publication and cancel before exposing input cards. Shared Core,
+application and port conformance harnesses cover Memory/SQLite/Redis-backed
+implementations. No HTTP/WS or storage-plugin contract/schema change is added.
+
+A2A delivery targets carry typed extension declarations including `required`
+and full `params`, rather than URI strings alone. Core projects declarations;
+the outbound adapter owns draft/profile negotiation. This source-level contract
+change requires rebuilding consumers; frozen Run records retain selected URIs.
+
+Operation-boundary delivery admission (bot-authority spec §8.2 — 已准入输出不追溯):
+`DeliveryAdmissionService::resolve_recipient_views` resolves each candidate
+connection's delivery view ONCE per accepted operation per scope (one shared
+snapshot batch, never per frame). `OutputAdmissionPort` installs the result as
+read-only in-process permits at business-accept time; producers stamp trusted
+metadata (`FrontendDeliveryCommand.operation_id` / `run_id` / `terminal`) and
+the adapter checks frames against frozen permits at the enqueue boundary.
+Mid-operation revocation never interrupts admitted output; new operations,
+subscriptions and reconnects re-admit against current facts. Frames with no
+operation tag are independent resource events authorized per publish against
+current facts; their read failures skip fail-closed and never cancel streams.
+Terminal frames are typed: after accept the producer registers the operation's
+COMPLETE Send-run set (`register_operation_runs`) BEFORE the durable commit —
+a terminal closes only its own stream, and the operation turns Draining when
+EVERY registered stream is terminal (Run terminal ≠ operation complete);
+producer visibility facts are frozen from the admission-time Group/Session
+snapshot before the first callback, and managed deliveries pre-assign their
+canonical run ids (`DeliveryAdmissionTarget.run_id`) so bindings, facts and
+the full managed ∪ direct stream set exist before the commit — a queue
+worker never runs an unbound admitted row, and a caller cancelled AT the
+commit boundary changes nothing. Accepted operations are reclaimed only by
+explicit end-states, never by age: stream terminals, recipient loss, or
+`release_operation_runs`. Releases are exact: commit-side failure, duplicates
+and admission-time rejections release only their fresh identities, a
+`delivered=false` explicit rejection releases only that run, a transport Err
+(uncertain) releases nothing, and an aborted send releases only runs that
+never started — already-delivered siblings keep their binding until their
+own terminal. A terminal that cannot enqueue within the bounded backpressure
+budget retires the saturated connection (observable transport failure),
+leaving no silent final-less stream.
+
+Bot-view delivery admission consumes the existing batched `BotAuthorityPort::roles_for`
+contract (one result per input in order), including fail-closed length/error checks.
+SQL implementations read actual identity pairs in bounded chunks, never scalar
+`can_manage` per viewer. Accepted Run aliases enter MessageFlow under their
+canonical output identity after authenticated Bot/scope validation; no transport
+or database details enter that contract.
 
 MessageFlowService::publish_state_machine_result accepts the original one-shot
 result command. Success acknowledges durable Group admission for managed targets
@@ -208,7 +549,7 @@ dispatcher-to-Send boundary without native inject.
   repository contracts provide an activation CAS; Memory/SQL implementations
   and the runtime-cleanup decorator must preserve it. Normal State Machine
   completion, failure, and cancellation use the same CAS, propagate write errors,
-  and dispatch callbacks only from the returned activation snapshot. Missing
+  and return the completed activation snapshot. Missing
   activation metadata is never inferred from the current Session. Completed/Failed
   Run recovery prepares the immutable terminal IM intent before completing the
   Session, then shares the foreground delivery path. Chat publication uses its
@@ -453,13 +794,23 @@ connection modes and the Provider auth mode. `RegisterProviderBot.token_auth_mod
 is an internal optional claim copied only from a verified Token, not an HTTP
 parameter. The core checks a present value against current Provider configuration
 before mutations; None preserves historical v2 compatibility. Consumers and test
-fakes must rebuild against 0.4.0 for these Rust source-contract changes; no database change is needed.
+fakes must rebuild against 1.0.0 for these Rust source-contract changes; no database change is needed.
 
 ProviderBotCoreService also owns authorized deletion by Bot Provider/ref metadata
 for both modes. ProviderManagement invokes this core operation before its legacy
 binding fallback and then performs channel cleanup; it never accesses the metadata
 repository directly. A missing metadata identity returns None, but storage and
 authorization errors propagate and must not trigger the fallback.
+
+`BotRepoPort` adds the existing-only Bot profile contracts (bot-avatar
+plan, Task 3): `update_profile_existing`/`update_avatar_existing`
+(`ExistingProfileUpdate` over `AvatarChange` Keep/Clear/Set, classified as
+`ProfileWrite::Updated|Missing`) and the bounded `read_avatar_batch`
+(≤256 deduplicated ids, `BotAvatarMap`) for display-face reads. The
+compatibility defaults fail closed ("not configured"); the Memory and
+persistent bot stores implement them over the record's dedicated avatar
+field, with `AvatarChange::Keep` never reaching a storage SET clause and
+tombstoned identities refusing every write.
 
 BotRegistryCoreService/BotRepoPort add fail-closed `create_registration_if_absent`
 for this flow. It is atomic, preserves existing active/deleted identities and
@@ -504,3 +855,204 @@ summary; HTTP version negotiation remains the adapter's responsibility.
 SessionManagementService.authorize_collaboration is the policy contract used before HTTP self-enrollment and runtime Human input. Bootstrap injects the live registry into SessionManagementServiceImpl; the runtime-cleanup wrapper delegates the contract. Legacy implementations without Provider support retain their existing default behavior.
 
 BotProviderRepoPort.validate_provider_affiliation is a fresh preflight for registration before capability merging. Concrete memory/SQL attachment implementations must also recheck public membership at the write boundary; the default unsupported error is not an authorization fallback.
+
+BotRunContextPort remains the trusted pre-delivery registration boundary. The
+bootstrap composition may decorate it with process-local output lineage without
+changing Memory/Redis storage semantics or adding per-frame remote reads.
+Independent producers and MessageFlow must share that registration instance;
+missing/retired nonmanaged Runs have no authorization to produce message effects.
+The existing BotRunContextPort conformance harness covers the decorated Memory
+and cache implementations, in addition to producer-to-consumer integration tests.
+
+`BotRunContextPort::put_alias_context` is the compatibility projection of an
+already validated accepted alias, not a new producer. Its default delegates the
+storage write for existing implementations; lifecycle decorators must not mint
+independent output lineage, including when a delayed ACK overlaps canonical
+terminal cleanup. WS uses this method for direct A2A alias scope projection.
+
+## Service Session policy retirement
+
+Service Sessions retain creation, authorization, completion, completion events,
+activation fencing and reactivation. The Group `service_spec` policy, Service
+Session timeout scanner, external completion callbacks and callback recovery are
+retired. Reactivation requires a Completed Service Session; it has no callback
+status prerequisite. State Machine Node deadlines, progression/IM recovery,
+Provider callbacks and Event subscriptions retain their existing contracts.
+Legacy Group creation accepts and discards `service_spec` for Backend compatibility, and the legacy settings
+endpoint returns 410. Service invocation needs no Group policy marker. Existing
+Group policy and Session callback columns, indexes and values remain unchanged;
+runtime stores no longer read or write those fields. This retirement adds no
+schema migration. Stop old binaries to prevent legacy scanners and callbacks
+from continuing to run. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
+
+This retirement is a breaking Rust Service API change: bcs-service-api is version
+1.0.0. Group/Session consumers and implementations must rebuild together; Plugin
+API versions and State Machine contracts are unchanged.
+
+## Runtime-only caller identity envelopes
+
+`application::caller_identity` freezes the P0 caller identity envelopes:
+the strict `AuthenticatedHumanCallerIngress` (same-authentication Human caller
+material with a trusted, monotonically shrinkable validity window),
+`CallerSubjectRef` (opaque subject handle reachable only through explicit
+`expose_ref`) and the closed three-value `CallerExecutionPurpose`. These
+types never derive serde; Debug redacts the staff principal and the subject
+reference. Ingress supports Clone for trusted WS snapshots without renewing
+validity. WebSendCommand and GroupChatCommand clones remove caller_ingress;
+identity-preserving forwarding explicitly moves it. Handoff claim-once remains
+per scope, independent of Rust Clone. Persistable caller control-plane contracts live in
+`bcs_domain::caller_identity` instead. The access-level `application ::
+principal::CallerContext` is intentionally separate; it stays the request
+principal enum and never carries execution identity.
+
+
+Human acting for an owned Bot is authenticated as the Human but uses the Bot as the
+effective sender. It stays ordinary Bot speech for caller-disabled targets, never
+carries the Human ingress, and fails closed when a caller-enabled target is present.
+
+Caller observe commands carry a redacted destination subject and optional paired
+Gateway reference/epoch. Provider wire maps the subject to caller_context.subject
+for both send and ordinary observe-only inject; inject has no execution credential
+or identity-expiry claim. Provider container_routing defaults to ensure; explicit
+caller_subject opts into lazy Human×Bot routing and session isolation. Preparation
+reads the existing ProviderCore capability source once per target preparation,
+never per observer. Failed reads or ensure calls cannot enable a fallback. The
+subject/observe directory remains bounded, expiring and memory-only; no identity
+storage or new lifecycle is introduced.
+
+## Caller identity boundary
+
+Shared caller runtime envelopes are domain-owned and reexported here for compatibility. The issuance trait now lives exclusively in `bcs-caller-identity-api`; Service API does not depend on Plugin API.
+
+## A2A Bot configuration
+
+The frozen A2A context scope may carry a credential-free deployment route
+fingerprint. Changed remote routing identities partition contexts and must not
+retarget an existing Task. Absent fingerprints are omitted on HTTP scopes so
+existing serialized context keys remain compatible. This adds no SDK dependency
+or database migration; consumers persist the same correlation JSON atomically.
+
+`A2aBotManagementService` authorizes Provider-admin configuration and explicit
+refresh. `A2aCardPort` returns a validated, credential-free declaration; SDK and
+HTTP types do not enter this contract. `A2aBotCoreService` checks the active
+Gateway affiliation and delegates CAS to `A2aBotRepoPort`. Complete Card JSON,
+nullable source URL and revision are one atomic Bot-row write; the same Card projection
+also synchronizes generic Bot fields, and an unchanged URL refresh can reapply it without
+incrementing revision. Inline and URL
+sources share validation. Routes and fixed-kind Provider credentials derive from
+trusted current configuration; refresh failure does not overwrite the snapshot.
+No tool execution proves compatibility; in-flight tasks keep frozen interfaces.
+
+A2A association contract: explicit-column run bindings can share one remote Task
+within a trusted scope. Repository CAS returns the committed projection and
+fences both run and shared Task revisions. Pending input is Task-owned; budgets
+and local states remain run-owned. Run-scoped cancellation rejects a shared Task
+with another active binding. See docs/specs/a2a/task-bindings-v1.md.
+
+## Strict atomic auth session repository
+
+`AuthSessionRepoPort` is the strict, environment-scoped login-session
+persistence contract for the V1 API auth plugin chain. `AuthSessionScope`
+includes `env`, and scope values come from trusted configuration plus an
+already-verified identity, never from unverified JWT claims. Session versions
+CAS on a revision that advances by `checked_add(1)` within SQL signed BIGINT
+bounds. Install and rotate are compare-and-swap writes returning
+`Applied`/`Conflict`; a conflict is a lost race, never a persistence error,
+and callers restart the login batch or fail authentication instead of writing
+unconditionally. Revoking bumps the revision and clears the token hash, so a
+revoked or rotated-out hash no longer resolves; repeating a revoke reports
+`NotCurrent`. Reads separate absence (`None` for a missing session), the
+current revision, and persistence failure through the closed two-category
+`AuthSessionStoreError` whose display text never carries SQL, endpoint, or
+credential material. The port is independent of `UserIdentityRepoPort`: an
+implementation may implement both, but the strict trait has no default
+methods delegating to the legacy Option-returning lookups, and a session
+write never auto-creates a missing identity row. Snapshot display fields are
+joined from the identity row. Concrete implementations prove conformance
+against the shared `bcs-test-support` harness
+(`auth_session_repo_port_contract_tests`), which takes any
+`AuthSessionRepoPort` trait object and a scope.
+
+## V1 auth application ports and AuthService
+
+`port::oauth` is the ONLY surface the auth application layer consumes for
+login, transport-neutral by construction: `OAuthProviderPort` (chain-ordered
+provider names, authorize-URL build with the exact per-provider callback,
+one-time code exchange whose third-party errors are lowered to stable
+`ApplicationError` categories, never raw provider text), `OAuthSessionPort`
+(atomic install for a completed browser-bound login, rotation, and
+idempotent session-instance revoke), and `PendingOAuthLoginPort` (the
+issue/consume mirror of plugin-api's `PendingOAuthLoginStore`, with the
+byte-identical `{callback_base}/{provider}` join on both sides). `application::v1::AuthService`
+orchestrates them for the OpenAPI V1 facade (`login_urls`, `complete_login`,
+`current_user`, `refresh_session`, `logout`): its `AuthFlowReply` carries
+transport-neutral cookie instructions — one `SetLoginChallenge` on URL
+discovery, session-install plus challenge-clear on callback success — plus
+the failure classes the API chain pins (lost login race → 409, lost rotation
+race → 401, dependency outage → 503 `auth_dependency_unavailable`, and
+logout never reports success after a failed revoke). No delivery type crosses
+into this contract; the HTTP adapter encodes `BrowserCookieChange` into
+separate `Set-Cookie` headers and the rest of BCS keeps consuming
+`AuthenticatedCaller` unchanged. Wire contract:
+`api-contracts/v1/authentication/contract.md`.
+
+## Invite-code issuance caller
+
+`InitInviteCodes` requires the verified `AuthenticatedCaller`; application
+implementations must authorize issuance before repository access. The bootstrap
+allowlist uses exact user IDs and defaults to denying all callers. Gateway or
+OAuth authentication, a binding and non-user identities do not implicitly grant
+issuance. HTTP request bodies remain count-only; Rust callers must provide the
+caller when rebuilding. No persistence schema changes are required.
+
+### A2A Provider name reservation
+
+`pin_a2a_slug` atomically reserves the previously resolved Provider slug before
+name-based A2A access. SQL stores the internal reservation in Provider config;
+ordinary metadata writes preserve it even when based on a stale config, and
+slug changes then fail. Concurrent rename-before-pin fails the pin instead of
+silently addressing another identity. Legacy unpinned Providers retain their
+existing rename behavior. Memory uses the same Provider write lock for both.
+
+Name access adds one conditional indexed UPDATE and one indexed SELECT (one
+Provider row); only the first pin changes data. It invalidates the Provider cache,
+propagates errors, and never runs per output event. No network request is made
+while holding a DB transaction. Store conformance covers Memory and SQLite.
+
+## Native task Service API compatibility
+
+`MessageFlowService::handle_native_task_dispatch(request_id, command)` is the
+inbound entry for authenticated native task requests without a wire parent key.
+The production Caller-aware implementation correlates accepted starts and checks
+BCS-owned parent identity; request IDs and model arguments never grant authority.
+The additive entry is versioned as bcs-service-api 3.1.0 on top of the 3.0.0 API.
+Workspace consumers rebuild together; existing implementations retain source
+compatibility with the 3.0.0 API.
+The additive default strips delegation and retains ordinary task dispatch only,
+not Caller inheritance. There is no identity Plugin API or task wire change.
+Bounded replay and composition semantics are specified in
+`apps/bcs/docs/native-task-caller.md` and exercised through the real task and
+protected-delivery application seams.
+
+Public Agent registration accepts BCN visibility (protected by default, or public). The typed policy is passed into atomic ownership/Card admission; Card updates preserve it unless explicitly supplied; refreshes never modify it. Card and visibility updates share one CAS-fenced transaction. Legacy registration retains protected visibility.
+
+## Configured catalog labels
+
+The [BCS label contract](../../../docs/catalog-labels.md) owns dictionary,
+omission, atomic persistence, refresh fencing and complete-publication semantics.
+Service API 7.0.0 adds typed metadata and explicit preserve/replace commands;
+external Rust consumers rebuild together. Labels are not raw Card or authorization
+state. Bootstrap loads the independent policy file once; no environment overlay
+or request can extend it. See the change validation record for actual test and
+release evidence; local code is not a published or deployed revision.
+
+
+## Atomic normal-Group creation
+
+`GroupCoreService` and `GroupRepoPort` expose `create_with_catalog_labels` for
+create-only admission. Existing identities conflict atomically; a default
+implementation fails explicitly rather than doing an unsafe exists/upsert pair.
+Memory and SQL implement the contract, and legacy normal-Group creation uses it
+instead of upsert. Custom downstream Core/repo implementations must implement
+or delegate this method before using legacy creation. Trusted internal upserts
+and DM pair reuse retain their separate behavior. See the [label contract](../../../docs/catalog-labels.md).

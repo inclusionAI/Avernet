@@ -1,4 +1,5 @@
 import { backendRequest } from '../httpClient';
+import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '../types';
 import { userScopedParams } from './botController';
 import type { ChannelDto } from './botEditorChannelDtos';
@@ -182,27 +183,29 @@ export const botEditorController = {
     botId: string,
     options: { source?: 'LOCAL'; owner_id?: string; user_id?: string; page?: number; page_size?: number } = {},
   ) => request<BackendApiPage<SkillDto>>(path(botId, 'skills'), 'GET', { page: 1, page_size: 100, ...options }),
-  setSkillActive: (botId: string, skillId: string, active: boolean) =>
-    request(path(botId, `skills/${skillId}/${active ? 'activate' : 'deactivate'}`), 'POST'),
-  deleteSkill: (botId: string, skillId: string) => request(path(botId, `skills/${skillId}`), 'DELETE'),
-  uploadSkill: (botId: string, packageBody: ArrayBuffer) =>
+  setSkillActive: (botId: string, skillId: string, active: boolean, ownerId?: string) =>
+    request(path(botId, `skills/${skillId}/${active ? 'activate' : 'deactivate'}`), 'POST', { owner_id: ownerId }),
+  deleteSkill: (botId: string, skillId: string, ownerId?: string) =>
+    request(path(botId, `skills/${skillId}`), 'DELETE', { owner_id: ownerId }),
+  uploadSkill: (botId: string, packageBody: ArrayBuffer, ownerId?: string) =>
     backendRequest<BackendApiEnvelope<BackendUnknownRecord>>(path(botId, 'skills'), {
       method: 'POST',
-      params: userScopedParams(),
+      params: userScopedParams({ owner_id: ownerId }),
       rawBody: packageBody,
       headers: { 'Content-Type': 'application/zip' },
     }),
-  uploadSkillFolder: (botId: string, files: File[]) => {
+  uploadSkillFolder: (botId: string, files: File[], ownerId?: string) => {
     const body = new FormData();
     const paths = files.map((file) => (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name);
     files.forEach((file) => body.append('files', file, file.name));
     body.append('file_paths', JSON.stringify(paths));
     return backendRequest<BackendApiEnvelope<{ skill: SkillDto; operation: string }>>(
       path(botId, 'skills/upload-folder'),
-      { method: 'POST', params: userScopedParams(), rawBody: body },
+      { method: 'POST', params: userScopedParams({ owner_id: ownerId }), rawBody: body },
     );
   },
-  listBotMcps: (botId: string) => request<BotMcpDto[]>(path(botId, 'mcps')),
+  listBotMcps: (botId: string, ownerId?: string) =>
+    request<BotMcpDto[]>(path(botId, 'mcps'), 'GET', { owner_id: ownerId }),
   listMcpServers: () =>
     request<BackendApiPage<McpServerDto>>('/openapi/v1/bots/mcp/servers', 'GET', { page: 1, page_size: 100 }),
   searchMarketMcpServers: (params: { keyword?: string; tenants?: string[] } = {}) =>
@@ -251,62 +254,62 @@ export const botEditorController = {
         page_size: pageSize,
       },
     ),
-  createSkillCenterReferences: (botId: string, setId: string, skillCodes: string[]) =>
+  createSkillCenterReferences: (botId: string, setId: string, skillCodes: string[], ownerId?: string) =>
     backendRequest<BackendApiEnvelope<{ request_id: string; reference_ids: string[] }>>(
       path(botId, `skill-sets/${setId}/skill-center-references`),
       {
         method: 'POST',
-        params: userScopedParams(),
+        params: { ...userScopedParams(), owner_id: ownerId },
         data: { skill_codes: skillCodes },
         headers: { 'Idempotency-Key': globalThis.crypto?.randomUUID?.() ?? `${botId}-${setId}-${Date.now()}` },
       },
     ),
-  listSkillCenterReferences: (botId: string, setId: string, requestId: string) =>
+  listSkillCenterReferences: (botId: string, setId: string, requestId: string, ownerId?: string) =>
     request<BackendApiPage<SkillCenterReferenceDto>>(
       path(botId, `skill-sets/${setId}/skill-center-references`),
       'GET',
-      { request_id: requestId, page: 1, page_size: 20 },
+      { request_id: requestId, page: 1, page_size: 20, owner_id: ownerId },
     ),
-  setMcpActive: (botId: string, serverCode: string, active: boolean) =>
+  setMcpActive: (botId: string, serverCode: string, active: boolean, ownerId?: string) =>
     request<BotMcpDto>(
       path(botId, `mcps/${encodeURIComponent(serverCode)}/${active ? 'activate' : 'deactivate'}`),
       'POST',
+      { owner_id: ownerId },
     ),
   listSkillSets: (botId: string) => request<SkillSetDto[]>(path(botId, 'skill-sets')),
   listSkillSetResources: (botId: string, ownerId?: string) =>
     request<SkillSetResourceDto[]>(path(botId, 'skill-sets/resources'), 'GET', { owner_id: ownerId }),
-  createSkillSet: (botId: string, body: { name: string; description?: string }) =>
+  createSkillSet: (botId: string, body: { name: string; description?: string }, ownerId?: string) =>
     backendRequest<BackendApiEnvelope<SkillSetDto>>(path(botId, 'skill-sets'), {
       method: 'POST',
-      params: userScopedParams(),
+      params: { ...userScopedParams(), owner_id: ownerId },
       data: body,
       headers: { 'Idempotency-Key': `${botId}-${Date.now()}-${Math.random().toString(36).slice(2)}` },
     }),
-  updateSkillSet: (botId: string, setId: string, body: { name?: string; description?: string }) =>
-    request<SkillSetDto>(path(botId, `skill-sets/${setId}`), 'PUT', {}, body),
-  deleteSkillSet: (botId: string, setId: string) => request(path(botId, `skill-sets/${setId}`), 'DELETE'),
-  setSkillSetActive: (botId: string, setId: string, active: boolean) =>
-    request<SkillSetDto>(path(botId, `skill-sets/${setId}/${active ? 'activate' : 'deactivate'}`), 'POST'),
+  updateSkillSet: (botId: string, setId: string, body: { name?: string; description?: string }, ownerId?: string) =>
+    request<SkillSetDto>(path(botId, `skill-sets/${setId}`), 'PUT', { owner_id: ownerId }, body),
+  deleteSkillSet: (botId: string, setId: string, ownerId?: string) => request(path(botId, `skill-sets/${setId}`), 'DELETE', { owner_id: ownerId }),
+  setSkillSetActive: (botId: string, setId: string, active: boolean, ownerId?: string) =>
+    request<SkillSetDto>(path(botId, `skill-sets/${setId}/${active ? 'activate' : 'deactivate'}`), 'POST', { owner_id: ownerId }),
   listSkillSetSkills: (botId: string, setId: string, ownerId?: string) =>
     request<Array<{ skill_id: string; name: string; description?: string }>>(
       path(botId, `skill-sets/${setId}/skills`),
       'GET',
       { owner_id: ownerId },
     ),
-  setSkillSetSkill: (botId: string, setId: string, skillId: string, active: boolean) =>
-    request(path(botId, `skill-sets/${setId}/skills/${skillId}`), active ? 'PUT' : 'DELETE'),
+  setSkillSetSkill: (botId: string, setId: string, skillId: string, active: boolean, ownerId?: string) =>
+    request(path(botId, `skill-sets/${setId}/skills/${skillId}`), active ? 'PUT' : 'DELETE', { owner_id: ownerId }),
   listSkillSetMcps: (botId: string, setId: string) =>
     request<Array<{ server_code: string; name: string; description?: string }>>(
       path(botId, `skill-sets/${setId}/mcps`),
     ),
-  setSkillSetMcp: (botId: string, setId: string, serverCode: string, active: boolean) =>
-    request(path(botId, `skill-sets/${setId}/mcps/${encodeURIComponent(serverCode)}`), active ? 'PUT' : 'DELETE'),
-  listResources: (botId: string, directory = '', ownerId?: string) =>
-    request<BackendApiPage<ResourceDto>>(path(botId, 'resources'), 'GET', {
-      path: directory,
-      page: 1,
-      page_size: 100,
-      owner_id: ownerId,
+  setSkillSetMcp: (botId: string, setId: string, serverCode: string, active: boolean, ownerId?: string) =>
+    request(path(botId, `skill-sets/${setId}/mcps/${encodeURIComponent(serverCode)}`), active ? 'PUT' : 'DELETE', { owner_id: ownerId }),
+  listResources: (botId: string, directory = '', ownerId?: string, suppressErrorNotification = false) =>
+    backendRequest<BackendApiEnvelope<BackendApiPage<ResourceDto>>>(path(botId, 'resources'), {
+      method: 'GET',
+      params: userScopedParams({ path: directory, page: 1, page_size: 100, owner_id: ownerId }),
+      suppressErrorNotification,
     }),
   createDirectory: (botId: string, resourcePath: string, ownerId?: string) =>
     request<ResourceDto>(path(botId, 'resources/mkdir'), 'POST', { path: resourcePath, owner_id: ownerId }),
@@ -362,13 +365,15 @@ export const botEditorController = {
       page_size: 20,
       owner_id: ownerId,
     }),
-  listIdentityFiles: (botId: string, ownerId?: string) =>
+  listIdentityFiles: (botId: string, ownerId?: string, stage?: BotRuntimeStage) =>
     request<{ bot_id: string; files: IdentityFileInfoDto[] }>(path(botId, 'identity'), 'GET', {
       owner_id: ownerId,
+      stage,
     }),
-  getIdentityFile: (botId: string, type: string) => request<IdentityFileDto>(path(botId, `identity/${type}`)),
-  updateIdentityFile: (botId: string, type: string, content: string) =>
-    request(path(botId, `identity/${type}`), 'PUT', {}, { content }),
+  getIdentityFile: (botId: string, type: string, ownerId?: string, stage?: BotRuntimeStage) =>
+    request<IdentityFileDto>(path(botId, `identity/${type}`), 'GET', { owner_id: ownerId, stage }),
+  updateIdentityFile: (botId: string, type: string, content: string, ownerId?: string) =>
+    request(path(botId, `identity/${type}`), 'PUT', { owner_id: ownerId, stage: 'draft' }, { content }),
   listChannels: (botId: string, ownerId?: string) =>
     request<ChannelDto[] | BackendApiPage<ChannelDto>>(path(botId, 'channels'), 'GET', {
       page: 1,
@@ -376,19 +381,32 @@ export const botEditorController = {
       stage: 'draft',
       owner_id: ownerId,
     }),
-  createChannel: (botId: string, body: BackendUnknownRecord) =>
-    request<ChannelDto>(path(botId, 'channels'), 'POST', {}, body),
-  updateChannel: (botId: string, channelId: number, body: BackendUnknownRecord) =>
-    request<ChannelDto>(path(botId, `channels/${channelId}`), 'PATCH', {}, body),
-  setChannelStatus: (botId: string, channelId: number, status: 'active' | 'inactive') =>
-    request<ChannelDto>(path(botId, `channels/${channelId}/status`), 'PUT', {}, { status }),
-  deleteChannel: (botId: string, channelId: number) => request(path(botId, `channels/${channelId}`), 'DELETE'),
-  getCallerContext: (botId: string, ownerId?: string) =>
-    request<{
+  createChannel: (botId: string, body: BackendUnknownRecord, ownerId?: string) =>
+    request<ChannelDto>(path(botId, 'channels'), 'POST', { owner_id: ownerId }, body),
+  updateChannel: (botId: string, channelId: number, body: BackendUnknownRecord, ownerId?: string) =>
+    request<ChannelDto>(path(botId, `channels/${channelId}`), 'PATCH', { owner_id: ownerId }, body),
+  setChannelStatus: (botId: string, channelId: number, status: 'active' | 'inactive', ownerId?: string) =>
+    request<ChannelDto>(path(botId, `channels/${channelId}/status`), 'PUT', { owner_id: ownerId }, { status }),
+  deleteChannel: (botId: string, channelId: number, ownerId?: string) =>
+    request(path(botId, `channels/${channelId}`), 'DELETE', { owner_id: ownerId }),
+  getCallerContext: (botId: string, ownerId?: string, options?: { suppressErrorNotification?: boolean }) =>
+    backendRequest<BackendApiEnvelope<{
       editable: boolean;
+      /**
+       * 聚合 Caller 判定:任一 MCP/CLI 以 caller 身份执行即为 'caller'。
+       * 会话文件面据此注入 caller_runtime_target(openspec add-session-files-caller-runtime-target D6);
+       * 可选以兼容旧网关/mock。后端 CallerContext 必回。
+       */
+      bot_call_type?: 'caller' | 'owner';
       mcp_call_types: Record<string, 'caller' | 'owner'>;
       cli_call_types: Record<string, 'caller' | 'owner'>;
-    }>(path(botId, 'caller-context'), 'GET', { stage: 'draft', owner_id: ownerId }),
+    }>>(path(botId, 'caller-context'), {
+      method: 'GET',
+      params: userScopedParams({ stage: 'draft', owner_id: ownerId }),
+      // 2026-11-19 二轮勘误:本接口授权 owner/collaborator-only,「空间成员但非协作」等形态按契约
+      // 正常 404(非故障),运行时判定语义的探测请求失败一律零提示(不投 httpClient 默认错误 toast)。
+      suppressErrorNotification: options?.suppressErrorNotification,
+    }),
   updateMcpCallType: (botId: string, serverCode: string, callType: 'caller' | 'owner', ownerId?: string) =>
     request<{ server_code: string; call_type: 'caller' | 'owner'; bot_call_type: 'caller' | 'owner' }>(
       path(botId, `mcps/${encodeURIComponent(serverCode)}/call-type`),
@@ -423,18 +441,18 @@ export const botEditorController = {
     request<RenderScreenDto>(path(botId, `render-screens/${id}`), 'PATCH', { owner_id: ownerId }, body),
   deleteRenderScreen: (botId: string, id: number, ownerId?: string) =>
     request(path(botId, `render-screens/${id}`), 'DELETE', { owner_id: ownerId }),
-  getLifecycle: (botId: string) =>
-    request<{ bot_id: string; items: ServicePublicationDto[] }>(path(botId, 'lifecycle')),
-  upgradeLifecycle: (botId: string, publicationId: number) =>
-    request<ServicePublicationDto>(path(botId, `lifecycle/${publicationId}/upgrade`), 'POST'),
-  advanceLifecycle: (botId: string, stage: 'prestable' | 'online') =>
-    request(path(botId, 'lifecycle/advance'), 'POST', {}, { stage }),
-  restartLifecycle: (botId: string, stage: 'prestable' | 'online') =>
-    request(path(botId, 'lifecycle/restart'), 'POST', {}, { stage }),
-  cancelStaging: (botId: string) => request(path(botId, 'lifecycle/cancel-staging'), 'POST'),
-  offlineLifecycle: (botId: string) => request(path(botId, 'lifecycle/offline'), 'POST'),
-  retryLifecycle: (botId: string) => request(path(botId, 'lifecycle/retry'), 'POST'),
-  deleteLifecycleDraft: (botId: string) => request(path(botId, 'lifecycle'), 'DELETE'),
+  getLifecycle: (botId: string, ownerId?: string) =>
+    request<{ bot_id: string; items: ServicePublicationDto[] }>(path(botId, 'lifecycle'), 'GET', { owner_id: ownerId }),
+  upgradeLifecycle: (botId: string, publicationId: number, ownerId?: string) =>
+    request<ServicePublicationDto>(path(botId, `lifecycle/${publicationId}/upgrade`), 'POST', { owner_id: ownerId }),
+  advanceLifecycle: (botId: string, stage: 'prestable' | 'online', ownerId?: string) =>
+    request(path(botId, 'lifecycle/advance'), 'POST', { owner_id: ownerId }, { stage }),
+  restartLifecycle: (botId: string, stage: 'prestable' | 'online', ownerId?: string) =>
+    request(path(botId, 'lifecycle/restart'), 'POST', { owner_id: ownerId }, { stage }),
+  cancelStaging: (botId: string, ownerId?: string) => request(path(botId, 'lifecycle/cancel-staging'), 'POST', { owner_id: ownerId }),
+  offlineLifecycle: (botId: string, ownerId?: string) => request(path(botId, 'lifecycle/offline'), 'POST', { owner_id: ownerId }),
+  retryLifecycle: (botId: string, ownerId?: string) => request(path(botId, 'lifecycle/retry'), 'POST', { owner_id: ownerId }),
+  deleteLifecycleDraft: (botId: string, ownerId?: string) => request(path(botId, 'lifecycle'), 'DELETE', { owner_id: ownerId }),
   getEditLock: (botId: string, ownerId?: string) =>
     request<EditLockDto>(path(botId, 'edit-lock'), 'GET', { owner_id: ownerId }),
   /** 成功响应也可能 acquired=false；抢占必须另经用户确认。 */

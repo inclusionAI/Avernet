@@ -11,9 +11,9 @@ import { useState } from 'react';
 interface CapabilityMembersProps {
   kind: 'skill' | 'mcp' | 'cli';
   items: Array<BotEditorSkill | BotEditorMcp | BotEditorCli>;
-  /** 调试面板同屏时避免横向挤压，卡片改为纵向单列。 */
-  compact?: boolean;
   editable: boolean;
+  /** 调试对话同屏时为 true：成员卡片退回单列；调试区收起后恢复多列断点 */
+  compact?: boolean;
   identities?: Record<string, 'caller' | 'owner'>;
   identityEditable?: boolean;
   identityDisabledReason?: string;
@@ -39,8 +39,8 @@ function sourceBadge(item: BotEditorSkill | BotEditorMcp | BotEditorCli) {
 export function CapabilityMembers({
   kind,
   items,
-  compact = false,
   editable,
+  compact,
   identities = {},
   onIdentity,
   identityEditable = false,
@@ -54,7 +54,7 @@ export function CapabilityMembers({
   return (
     <div>
       <div className="mb-2 flex h-5 items-center justify-between">
-        <span className="text-sm font-medium text-foreground">
+        <span className="text-[13px] font-medium text-foreground">
           {kind === 'skill' ? 'Skills' : kind === 'mcp' ? 'MCPs' : 'CLIs'}
         </span>
         {kind !== 'cli' && onAdd ? (
@@ -71,6 +71,8 @@ export function CapabilityMembers({
         ) : null}
       </div>
       {items.length ? (
+        // 稿面(artboard-047):成员卡片为 40px 行、1px #EEEEEE(=--divider) 发丝描边、r8、无阴影。
+        // 调试对话同屏(compact)时通栏单列;调试区收起后恢复 md 2 列 / xl 3 列(对齐 RoutinePanel)。
         <div className={cn('grid grid-cols-1 gap-2', !compact && 'md:grid-cols-2 xl:grid-cols-3')}>
           {items.map((item) => {
           const id = 'serverCode' in item ? item.serverCode : 'code' in item ? item.code : item.id;
@@ -78,7 +80,7 @@ export function CapabilityMembers({
           return (
             <div
               key={id}
-              className="group flex h-10 min-w-0 items-center gap-2 rounded-lg border border-border bg-card px-3 shadow-sm transition-colors hover:bg-muted/40"
+              className="group flex h-10 min-w-0 items-center gap-2 rounded-lg border border-divider bg-card px-4 transition-colors hover:bg-muted/40"
             >
               {kind === 'skill' ? (
                 <FileText className="size-4 shrink-0 text-success" />

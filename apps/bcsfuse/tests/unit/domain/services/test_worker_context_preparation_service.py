@@ -15,11 +15,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from src.domain.models.context_fragment import ContextFragment, ContextKind
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.domain.models.skill_profile import SkillProfile
-from src.domain.models.worker_profile import WorkerProfile, ProfileType
-from src.domain.models.worker_context_digest import WorkerContextDigest
+from app.domain.models.context_fragment import ContextFragment, ContextKind
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.skill_profile import SkillProfile
+from app.domain.models.worker_profile import WorkerProfile, ProfileType
+from app.domain.models.worker_context_digest import WorkerContextDigest
 
 
 def create_test_profile_with_content(
@@ -99,7 +99,7 @@ class TestWorkerContextPreparationService:
 
     def test_prepare_context_basic(self, sample_profile):
         """测试基本 context 准备"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -119,7 +119,7 @@ class TestWorkerContextPreparationService:
 
     def test_prepare_context_scores_fragments(self, sample_profile):
         """测试片段评分"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -139,7 +139,7 @@ class TestWorkerContextPreparationService:
 
     def test_prepare_context_scores_skills(self, sample_profile):
         """测试技能评分"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -158,7 +158,7 @@ class TestWorkerContextPreparationService:
 
     def test_prepare_context_selects_relevant_fragments(self, sample_profile):
         """测试选择相关片段"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -179,7 +179,7 @@ class TestWorkerContextPreparationService:
 
     def test_prepare_context_selects_relevant_skills(self, sample_profile):
         """测试选择相关技能"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -200,7 +200,7 @@ class TestWorkerContextPreparationService:
 
     def test_prepare_context_generates_summary(self, sample_profile):
         """测试生成摘要"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -218,7 +218,7 @@ class TestWorkerContextPreparationService:
 
     def test_prepare_context_max_fragments_limit(self):
         """测试片段数量限制"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -246,7 +246,7 @@ class TestWorkerContextPreparationService:
 
     def test_prepare_context_max_skills_limit(self):
         """测试技能数量限制"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -271,7 +271,7 @@ class TestWorkerContextPreparationService:
 
     def test_prepare_context_mode_aware(self, sample_profile):
         """测试 mode-aware 处理"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -289,7 +289,7 @@ class TestWorkerContextPreparationService:
 
     def test_prepare_context_includes_reasons(self, sample_profile):
         """测试包含选择理由"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -310,7 +310,7 @@ class TestContextPreparationScoring:
 
     def test_high_relevance_fragments_scored_higher(self):
         """测试高相关性片段获得更高分数"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -342,7 +342,7 @@ class TestContextPreparationScoring:
 
     def test_skill_name_exact_match_higher_score(self):
         """测试技能名称精确匹配获得更高分数"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -375,7 +375,7 @@ class TestContextPreparationEdgeCases:
 
     def test_prepare_empty_profile(self):
         """测试空 profile"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -401,7 +401,7 @@ class TestContextPreparationEdgeCases:
 
     def test_prepare_no_matching_content(self):
         """测试无匹配内容"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -425,7 +425,7 @@ class TestContextPreparationEdgeCases:
 
     def test_prepare_vague_question(self):
         """测试模糊问题"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -464,7 +464,7 @@ class TestContextDigestProperties:
 
     def test_fragment_selection_ratio(self):
         """测试片段选择比例"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 
@@ -493,7 +493,7 @@ class TestContextDigestProperties:
 
     def test_has_relevant_content(self):
         """测试 has_relevant_content 属性"""
-        from src.domain.services.worker_context_preparation_service import (
+        from app.domain.services.worker_context_preparation_service import (
             WorkerContextPreparationService,
         )
 

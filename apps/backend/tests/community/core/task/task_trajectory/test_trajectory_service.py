@@ -789,13 +789,21 @@ class _FakeGraph:
 
 class _FakeBcs:
     """Serves ``get_session_messages``; scriptable per-session payloads/failures.
-    Records each call as ``(session_id, limit, caller_bearer)``."""
+    Records each call as ``(session_id, limit, caller_bearer)``. ``get_group``
+    can serve the authoritative driver for cooperation-group nodes."""
 
     def __init__(self, *, messages_by_session: dict | None = None,
-                 raise_exc: Exception | None = None) -> None:
+                 raise_exc: Exception | None = None,
+                 groups_by_id: dict[str, dict] | None = None) -> None:
         self._messages = messages_by_session or {}
         self._raise = raise_exc
+        self._groups = groups_by_id or {}
         self.calls: list[tuple[str, int, "str | None"]] = []
+        self.group_calls: list[str] = []
+
+    async def get_group(self, group_id: str) -> dict:
+        self.group_calls.append(group_id)
+        return self._groups[group_id]
 
     async def get_session_messages(self, session_id: str, *, limit: int = 50,
                                    since_msg_id: str | None = None,
@@ -1933,18 +1941,71 @@ async def test_fetch_engine_channel_ok_and_bcs_skips_non_dict_msgs():
     assert out2 == [{"role": "a", "content": "ok"}], "非 dict 消息跳过"
 
 
-def test_holder_bearer_token_defensive_paths():
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_holder_bearer_token_defensive_paths():
     """持棒 token 解析:无持有者 → None;provider 异常 → None。"""
     svc = _support_svc(tokens=_FakeTokenProvider(tokens={"bot-x:7": "tok"}))
     node = _FakeNode(node_id="n1", status=Status.RUNNING,
                      extend_props={"session_id": "s"}, assignee=None)
-    assert svc._holder_bearer_token(node) is None
+    assert await svc._holder_bearer_token(node) is None
 
     svc._bcs_bot_tokens = _FakeTokenProvider(raise_exc=RuntimeError("provider down"))
     node2 = _FakeNode(node_id="n2", status=Status.RUNNING,
                       extend_props={"session_id": "s", "driver_bot_id": "bot-x"},
                       assignee="bot-x")
-    assert svc._holder_bearer_token(node2) is None
+    assert await svc._holder_bearer_token(node2) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_fetch_bcs_group_messages_uses_resolved_driver_bearer():
+    """协作群会话明细实拉应携带群 driver 的 Bearer,而不是 HMAC-only。"""
+    group_id = "bcs_grp_group_fetch"
+    session_id = f"{group_id}:session-fetch"
+    bcs = _FakeBcs(
+        messages_by_session={session_id: [{"role": "assistant", "content": "ok"}]},
+        groups_by_id={group_id: {"driver_bot_id": "bot-driver"}},
+    )
+    tokens = _FakeTokenProvider(tokens={"bot-driver": "tok-driver"})
+    svc = _support_svc(bcs=bcs, tokens=tokens)
+    node = _FakeNode(
+        node_id="n-group-fetch", status=Status.RUNNING,
+        extend_props={"group_id": group_id, "session_id": session_id},
+        assignee=group_id,
+    )
+
+    out = await svc._fetch_node_session_msgs("t1", node, limit=50)
+
+    assert out == [{"role": "assistant", "content": "ok"}]
+    assert bcs.group_calls == [group_id]
+    assert bcs.calls == [(session_id, 50, "tok-driver")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_holder_bearer_token_resolves_group_driver():
+    """协作群 ``assignee=group_id`` 时不能拿 group_id 查 token;应读群详情里的
+    driver bot,再用其 session_token 访问参与者级 BCS 历史接口。"""
+    group_id = "bcs_grp_741d35a7268b40a88b6e12c653edec92"
+    session_id = f"{group_id}:c0af281c"
+    bcs = _FakeBcs(groups_by_id={
+        group_id: {"driver_bot_id": "bot-driver"},
+    })
+    tokens = _FakeTokenProvider(tokens={"bot-driver": "tok-driver"})
+    svc = _support_svc(
+        bcs=bcs,
+        tokens=tokens,
+    )
+    node = _FakeNode(
+        node_id="n-group", status=Status.RUNNING,
+        extend_props={"group_id": group_id, "session_id": session_id},
+        assignee=group_id,
+    )
+
+    assert await svc._holder_bearer_token(node) == "tok-driver"
+    assert bcs.group_calls == [group_id]
+    assert tokens.requested == ["bot-driver"]
 
 
 def test_safe_list_records_failure_returns_none():

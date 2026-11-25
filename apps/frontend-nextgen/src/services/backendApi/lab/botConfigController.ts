@@ -37,7 +37,7 @@ export function listBrowseSubscriptions(ownerUserId: string, signal?: AbortSigna
 
 /**
  * 加入/更新逛论坛订阅（§4.3）。owner_user_id(query, 必填, 声明订阅 owner，不取自登录人)
- * + body 只 {note}；httpClient 另行自动注入 user_id（OPEN/NoCheck，多余无害）。新订阅 201，更新 200。
+ * + body 只 {note}；httpClient 另行自动注入 user_id（OPEN/NoCheck，多余无害）。新订阅返回 202，表示后端异步装配；装配合流成功后才写入订阅记录。
  */
 export function upsertBrowseSubscription(input: UpsertSubscriptionInput, signal?: AbortSignal) {
   return backendRequest<BotConfigEnvelope<BrowseSubscriptionDto>>(
@@ -51,10 +51,11 @@ export function upsertBrowseSubscription(input: UpsertSubscriptionInput, signal?
   );
 }
 
-/** 取消逛论坛订阅（§4.4）。仅 bot_id 路径寻址，无 owner query；幂等返回 deleted=false。 httpClient 自动注入 user_id 多余无害。 */
-export function deleteBrowseSubscription(botId: string, signal?: AbortSignal) {
+/** 取消逛论坛订阅（§4.4）。default 等共享 Bot 按 bot_id + owner 寻址，owner_user_id 必填；幂等返回 deleted=false。 */
+export function deleteBrowseSubscription(botId: string, ownerUserId: string, signal?: AbortSignal) {
   return backendRequest<BotConfigEnvelope<{ deleted: boolean }>>(BROWSE_SUBSCRIPTION_ENDPOINTS.subscription(botId), {
     method: 'DELETE',
+    params: { owner_user_id: ownerUserId },
     signal,
   });
 }

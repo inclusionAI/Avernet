@@ -39,6 +39,7 @@ internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.plugin_api.database
   - agentclaw.community.plugin_api.agentswarm  # swarm SPI protocols + seam vocabulary (BotId/IdempotencyKey/BotCreateSpec)
+  - agentclaw.community.plugin_api.passport  # the passport SPI the identity-source rule resolves through
   - agentclaw.community.log
   - agentclaw.community.kernel
   - agentclaw.community.utils
@@ -153,7 +154,7 @@ All tables carry `id`, `env`, `tenant`, `is_deleted`, `gmt_create`,
 | `node_executions.agent` + `DAGNode.id` | `agent.name` + lineage (`agent_id`, `parent_agent_id`, `depth`) | Mapped |
 | instance id (`{name}-{uuid}`) | `agent.agent_id` (fresh uuid per spawn) | Mapped |
 | `DAGNode.wave` | `agent.spawn_round` | Mapped |
-| Avernet `_bot_id` + lifecycle states | `agent.bot_id` + `agent.bot_state` (POC never persisted bot state) | Mapped |
+| Avernet `_bot_id` + lifecycle states | `agent.bot_id` + `agent.bot_state` (POC never persisted bot state) | Mapped — `bot_state` now includes `AWAITING_AUTHORIZATION`, the human passport-authorization park: a consent-required create reports the gate instead of generic `PROVISIONING`, and rides an `authorization` descriptor on the run surfaces (see Bot-create human gate below) |
 | `AgentContext.upstream` | structural: lineage via `parent_agent_id` + `result_shard`s | Mapped |
 
 ### Messages, shards, rounds, guards
@@ -336,6 +337,122 @@ unresolvable tenant (principal without a tenant) → 400; missing LLM
 config → 400; unknown run → 404. SSE `run_events` advance row
 cursors (`after_agent_id`, `after_round_id`, `after_event`) — each event
 emits once per stream.
+
+#### Persona identity: one derivation, one identity per attempt
+
+A bot-kind agent provisions a platform Bot under
+`agent_swarm_` + `sha1(f"{run_id}:{agent_id}:{attempt}")[:16]`, with no
+separator inserted before the digest (host `bot_id_for` /
+`spawn_idempotency_key`). Creation, adoption, status reads and teardown all
+call that one function, so a persona id is reproducible from the triple.
+
+`attempt` is the agent's **lifetime** ordinal — the `slice_retry_index` of
+its `ac_agent_swarm_agent_attempt` row — not the pool's in-slice counter. The
+counter restarts at 1 on every claim, and a re-derived id would collide on the
+platform's `uk_bot_id_entity_id_env` (deletion there is a soft update, so the
+failed row keeps the tuple). The pool therefore starts each slice after the
+ledger's highest ordinal, and a retry always derives a new id.
+
+A derived id that already exists is never inserted again:
+
+- still `PENDING`/`PROVISIONING` → adopted, no second submission;
+- terminal or soft-deleted → `NonRetryableProvisioningError` whose message is
+  `persona identity collision: bot_id=… already exists (…)`. It is
+  non-retryable on purpose: every retry would hit the same row, so the pool
+  fails the agent immediately instead of spending its attempt budget on
+  identical duplicates. A duplicate that still reaches the platform (a
+  concurrent create) is reclassified to the same error.
+
+Operators: a `persona identity collision` failure means the ordinal and the
+identity disagreed, not that the platform is unhealthy. Grep the reason;
+the agent row and the attempt ledger name the ordinals involved.
+
+### Bot-create human gate (`AWAITING_AUTHORIZATION`)
+
+Bot lifecycle states (`ac_agent_swarm_agent.bot_state`) are
+`PROVISIONING`, `AWAITING_AUTHORIZATION`, `READY`,
+`AUTHORIZATION_REJECTED`, `AUTHORIZATION_EXPIRED`, `CREATE_FAILED`,
+`APPLY_FAILED`. While a bot's passport application is **pending human
+approval** (the in-window consent window, enforced by the durable creation
+job), the swarm reports `AWAITING_AUTHORIZATION` instead of generic
+`PROVISIONING`; the park is per-bot — a mixed run keeps each agent's gate
+state independent, and auto-issued creations (passport issued inline, no
+consent page) never enter the gate (the decision keys off the application
+status being pending, never off the presence of consent URLs).
+
+A creation apply whose report is `RUNNING` remains `PROVISIONING`, even
+when the container is already active. Only a succeeded creation apply can
+make an active bot `READY`; an unfinished apply is not `APPLY_FAILED`.
+A terminal pre-container report still means `PROVISIONING` while its creation
+job is live: the on-container phase may not have started yet. Record-first
+creation can use that report once its job has finished provisioning.
+
+**Run detail** — an agent with a passport application actually PENDING
+inside its window carries an additive `authorization` descriptor. Presence
+keys off the authorization source — the passport facade's live
+application status joined with the durable creation-job payload (no copy
+of the facts lives in swarm tables) — never off the agent row's cached
+`bot_state` write: parallel cohort agents go PENDING at apply time while
+the provisioning pool parks their rows sequentially, so a later agent
+carries the gate even before its `bot_state` says
+`AWAITING_AUTHORIZATION`, and its window is never hidden behind the
+pool's lag:
+
+```json
+{
+  "agent_id": "agent-42",
+  "name": "scout",
+  "status": "RUNNING",
+  "bot_id": "agent_swarm_9f31c0e2a7b4d6f1",
+  "bot_state": "AWAITING_AUTHORIZATION",
+  "authorization": {
+    "state": "AWAITING_AUTHORIZATION",
+    "iframe_url": "https://tcauthmng.example/consent?app=passport",
+    "redirect_url": "https://tcauthmng.example/done",
+    "deadline": "2026-11-20T10:10:00",
+    "application_id": "sim-passport-3d2f0a1b2c04"
+  }
+}
+```
+
+`application_id` names the facade's application so a consumer can
+address the decision surface from the run read alone — no direct listing
+against the passport facade. Non-pending agents — auto-issued, approved,
+rejected, expired, terminal — serialize `authorization: null`, and every
+pre-existing field is unchanged. Approvals happen only on the consent
+page; the swarm only surfaces the URL, never approves on a human's
+behalf.
+
+```bash
+# detail view of a mixed run: one agent parked at the gate, one ready
+curl -sS 'http://127.0.0.1:8000/openapi/v1/agentswarm/runs/<run_id>/detail?tenant=acme' \
+  | jq '.agents[] | {name, bot_state, authorization}'
+```
+
+**SSE gate deltas** — `GET /runs/{run_id}/events` rides the existing
+`agent` event kind (no new event names) for gate crossings: entering the
+park (`bot_state` becomes `AWAITING_AUTHORIZATION`, descriptor attached)
+and leaving it (issued → `PROVISIONING`/`READY` resume, human-rejected →
+`AUTHORIZATION_REJECTED`, window elapsed → `AUTHORIZATION_EXPIRED` —
+descriptor absent from the payload). Deltas are per-stream state, keyed
+off the `RunEvents` authorization snapshot, not row cursors: unchanged
+status polls emit nothing, the auto-issue fast path (`PROVISIONING →
+READY`) emits nothing, and each crossing emits exactly once per stream
+(a stream attaching mid-park surfaces the pending gate once):
+
+```
+event: agent
+data: {"event": "agent", "run_id": "<run_id>", "data": {
+  "agent_id": "agent-42", "name": "scout", "status": "RUNNING",
+  "kind": "bot", "spawn_round": 0,
+  "bot_id": "agent_swarm_9f31c0e2a7b4d6f1",
+  "bot_state": "AWAITING_AUTHORIZATION",
+  "authorization": {"state": "AWAITING_AUTHORIZATION",
+                    "iframe_url": "https://tcauthmng.example/consent?app=passport",
+                    "redirect_url": "https://tcauthmng.example/done",
+                    "deadline": "2026-11-20T10:10:00",
+                    "application_id": "sim-passport-3d2f0a1b2c04"}}}
+```
 
 CLI (`build_parser`/`main(argv, client)`; no `__main__` guard — invoke
 `main` directly):

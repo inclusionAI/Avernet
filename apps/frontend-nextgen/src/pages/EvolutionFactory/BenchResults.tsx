@@ -27,7 +27,7 @@ export function BenchResults({ output, stepId }: { output: JsonObject; stepId?: 
               <summary className="cursor-pointer text-xs text-primary">
                 查看 Case 明细 · {array(benchCases.items).length}
               </summary>
-              <div className="mt-3 divide-y divide-border">
+              <div className="mt-3 divide-y divide-divider">
                 {array(benchCases.items).map((item, i) => {
                   const template = object(item.template);
                   return (

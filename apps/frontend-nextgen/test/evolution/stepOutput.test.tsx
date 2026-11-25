@@ -5,7 +5,7 @@ import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { history } from '@umijs/max';
 
-jest.mock('@umijs/max', () => ({ history: { push: require('@jest/globals').jest.fn() } }));
+jest.mock('@umijs/max', () => ({ history: { push: require('@jest/globals').jest.fn() }, useParams: () => ({}) }));
 it('presents baseline provenance and real scores with encoded Bench links', () => {
   const result = {
     producerStepId: 'plan',

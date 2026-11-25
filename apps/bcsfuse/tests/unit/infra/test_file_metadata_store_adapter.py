@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from src.domain.models.metadata_record import MetadataRecord
-from src.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
+from app.domain.models.metadata_record import MetadataRecord
+from app.infra.metadatastores.file_metadata_store_adapter import FileMetadataStoreAdapter
 
 
 class TestFileMetadataStoreAdapter:
@@ -547,6 +547,6 @@ class TestFileMetadataStoreAdapter:
 
     def test_satisfies_protocol(self, store):
         """Test that FileMetadataStoreAdapter satisfies MetadataStoreAdapter protocol."""
-        from src.domain.services.metadata_store_adapter import MetadataStoreAdapter
+        from app.domain.services.metadata_store_adapter import MetadataStoreAdapter
 
         assert isinstance(store, MetadataStoreAdapter)

@@ -37,6 +37,7 @@ from .schemas import EnabledUpdate, SettingsUpdate, TakeoverUpdate
 from .admission import PATH
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
 from agentclaw.community.core.system_config.dws_rollout import is_allowed, is_stop
+from agentclaw.community.plugin_api.dws_identity import DwsRolloutIdentity
 from agentclaw.community.utils.env_utils import get_current_env
 from starlette.concurrency import run_in_threadpool
 
@@ -49,9 +50,10 @@ router = APIRouter(
 
 
 class OwnerEndpoint:
-    def __init__(self, bot_id, actor, relay, config, rollout=None):
+    def __init__(self, bot_id, actor, relay, config, rollout=None, identity=DwsRolloutIdentity()):
         self.bot_id, self.actor, self.relay, self.config = bot_id, actor, relay, config
         self.rollout = rollout
+        self.identity = identity
 
     async def call(self, operation, data, request):
         facts = await self.relay.resolve_bot_off_loop(
@@ -64,7 +66,7 @@ class OwnerEndpoint:
                 409, "DWS hosting requires a personal OpenClaw Bot", request
             )
         allowed = await run_in_threadpool(
-            is_allowed, self.rollout, self.actor, get_current_env()
+            is_allowed, self.rollout, self.actor, get_current_env(), self.identity
         )
         if operation == "eligibility":
             return envelope({"available": allowed}, request)
@@ -117,9 +119,10 @@ async def endpoint(
     config: Annotated[DwsManagementConfig, Depends(get_dws_management_config)],
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     rollout: SystemConfigServiceProtocol = Injected(SystemConfigServiceProtocol),
+    identity: DwsRolloutIdentity = Injected(DwsRolloutIdentity),
 ):
     actor = caller_owner_id(principal)
-    return OwnerEndpoint(bot_id, actor, relay, config, rollout)
+    return OwnerEndpoint(bot_id, actor, relay, config, rollout, identity)
 
 
 Endpoint = Annotated[OwnerEndpoint, Depends(endpoint)]

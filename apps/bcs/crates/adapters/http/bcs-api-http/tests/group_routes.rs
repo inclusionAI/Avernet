@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
-use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
+use bcs_api_http::{ApiState, CredentialKind, PrincipalVerificationError, PrincipalVerifier, VerifiedRequestIdentity, router};
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptInvitation, BotRegistration, CreateBotFriendRequest,
     CreateGroupInvitation, CreateSessionInvitation, DeleteBotFriendship, FriendRequest,
@@ -19,6 +19,7 @@ use bcs_service_api::application::v1::{
     DeleteResult, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupService, GroupStatus,
     GroupStrategy, GroupSummary, GroupVisibility, InlineGroupEventSubscriptionRequest,
     ListGroups, ListPublicGroups, MembershipFilter,
+    GroupListSort,
     DirectMessageGroupSummary, Membership, NormalGroupSummary, Page, Participant,
     UpdateGroup, UpdateGroupParticipant,
 };
@@ -44,13 +45,13 @@ impl PrincipalVerifier for HeaderVerifier {
     async fn verify(
         &self,
         headers: &HeaderMap,
-    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
+    ) -> Result<VerifiedRequestIdentity, PrincipalVerificationError> {
         if headers
             .get("x-test-auth")
             .and_then(|value| value.to_str().ok())
             == Some("yes")
         {
-            Ok(self.caller.clone())
+            Ok(VerifiedRequestIdentity::pin(self.caller.clone(), "test-double", CredentialKind::GatewayPrincipalHeader))
         } else {
             Err(PrincipalVerificationError::Missing)
         }
@@ -193,6 +194,7 @@ impl GroupService for FakeGroupService {
             actor_id: command.actor_id,
             actor_kind: ActorKind::Bot,
             name: None,
+            avatar_url: None,
             role: ParticipantRole::Consultant,
             tags: Vec::new(),
             mode: ParticipantMode::Auto,
@@ -212,6 +214,7 @@ impl GroupService for FakeGroupService {
             actor_id: command.actor_id,
             actor_kind: ActorKind::Bot,
             name: None,
+            avatar_url: None,
             role: ParticipantRole::Consultant,
             tags: Vec::new(),
             mode: command.mode.unwrap_or(ParticipantMode::Auto),
@@ -321,6 +324,13 @@ struct NoopInvitationService;
 
 #[async_trait]
 impl InvitationService for NoopInvitationService {
+    async fn preview_invitation(
+        &self,
+        _query: bcs_service_api::application::v1::PreviewInvitation,
+    ) -> Result<bcs_service_api::application::v1::InvitationPreview, ApplicationError> {
+        Err(ApplicationError::internal("invitation preview not configured"))
+    }
+
     async fn create_group_invitation(
         &self,
         _command: CreateGroupInvitation,
@@ -429,7 +439,7 @@ fn caller_user_id(caller: &AuthenticatedCaller) -> &str {
 }
 
 fn group_detail() -> GroupDetail {
-    GroupDetail::Collaboration(CollaborationGroupDetail {
+    GroupDetail::Collaboration(CollaborationGroupDetail { catalog_labels:Default::default(),
         group_id: "group-1".into(),
         version: 1,
         name: Some("Planning".into()),
@@ -442,6 +452,7 @@ fn group_detail() -> GroupDetail {
             actor_id: "bot-1".into(),
             actor_kind: ActorKind::Bot,
             name: Some("Bot 1".into()),
+            avatar_url: None,
             role: ParticipantRole::Driver,
             tags: Vec::new(),
             mode: ParticipantMode::Auto,
@@ -509,9 +520,11 @@ fn populated_group_summaries() -> Vec<GroupSummary> {
             driver_bot_uuid: "bot-1".into(),
             driver_bot_name: Some("Bot 1".into()),
             strategy: GroupStrategy::Chat,
+            participants: Vec::new(),
             human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
             created_at: 1,
             updated_at: 2,
+            last_activity_at: None,
         }),
         GroupSummary::DirectMessage(DirectMessageGroupSummary {
             group_id: "group-dm".into(),
@@ -524,9 +537,11 @@ fn populated_group_summaries() -> Vec<GroupSummary> {
             originator_actor_id: "bot-1".into(),
             participant_count: 2,
             peer_actor: None,
+            participants: Vec::new(),
             human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::DriverBotOnly,
             created_at: 1,
             updated_at: 2,
+            last_activity_at: None,
         }),
     ]
 }
@@ -534,8 +549,41 @@ fn populated_group_summaries() -> Vec<GroupSummary> {
 #[path = "group_routes/existing.rs"]
 mod existing;
 
+#[path = "group_routes/activity_sort.rs"]
+mod activity_sort;
+
 #[path = "group_routes/driver_metadata.rs"]
 mod driver_metadata;
 
 #[path = "group_routes/create_notify_mode.rs"]
 mod create_notify_mode;
+
+
+#[tokio::test]
+async fn group_context_openapi_routes_require_authentication_and_group_id() {
+    let app = test_router(Arc::new(FakeGroupService::default()));
+    for operation in [
+        "shared-info",
+        "list-preset",
+        "manage/list-preset",
+        "manage/add-preset",
+        "manage/update-preset",
+        "manage/delete-preset",
+    ] {
+        let uri = format!("/openapi/v1/collaboration/groupcontext/{operation}");
+        let anonymous = Request::post(&uri).body(Body::empty()).unwrap();
+        let response = app.clone().oneshot(anonymous).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+
+        let response = app.clone()
+            .oneshot(authenticated_request("POST", &uri, json!({})))
+            .await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        let body = response_json(response).await;
+        assert_eq!(body["data"]["error_code"], "invalid_request", "{uri}");
+        assert_eq!(body["request_id"], "request-123");
+    }
+}
+
+#[path = "group_routes/group_context.rs"]
+mod group_context;

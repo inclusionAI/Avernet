@@ -130,7 +130,7 @@ def test_pool_active_factory_scopes_direct_skill_crud_to_canonical_pool(
     )
 
 
-def test_skill_factory_uses_bot_owner_for_pool_and_device_resolution(
+def test_skill_factory_uses_entity_for_pool_and_owner_for_device_resolution(
     test_injector,
 ):
     factory = test_injector.get(SkillServiceFactory)
@@ -152,7 +152,7 @@ def test_skill_factory_uses_bot_owner_for_pool_and_device_resolution(
         engine_type="hermes",
     )
 
-    assert pool_resolution_calls == [("owner-7", "bot-1", "hermes")]
+    assert pool_resolution_calls == [("project-42", "bot-1", "hermes")]
     assert service._device_owner_id == "owner-7"
 
 
@@ -346,6 +346,81 @@ def test_teclaw_legacy_locator_cleanup_reapplies_workspace_adapter(test_injector
     assert storage._device_directory == "workspace/skills-local/reviewer"
 
 
+def test_openclaw_engine_locator_cleanup_targets_current_bot_directory(test_injector):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: None
+    calls = []
+    factory._device_fs_dispatcher.for_bot = lambda *args: calls.append(args) or object()
+    factory._path_factory.get_bot_skills_local_dir = (
+        lambda entity_id, bot_id, *_args, **_kwargs: Path(
+            f"/bots/{entity_id}/{bot_id}/skills-local"
+        )
+    )
+
+    storage = factory.local_skill_package_storage_for_locator(
+        entity_id="owner-7", owner_id="owner-7", bot_id="bot-1",
+        engine_type="openclaw", entity_type="staff", is_desktop=False,
+        is_teclaw=False,
+        locator="/home/admin/.openclaw/workspace/skills/skills-local/reviewer",
+        skill_name="reviewer",
+    )
+
+    assert storage.directory == "/bots/owner-7/bot-1/skills-local/reviewer"
+    assert calls == [("bot-1", "owner-7")]
+
+
+@pytest.mark.parametrize("locator", [
+    "/home/admin/.openclaw/workspace/skills/skills-local/other",
+    "/home/admin/.openclaw/workspace/skills/skills-local/../reviewer",
+    "/home/admin/.openclaw/workspace/skills-pool/skills-local/reviewer",
+    "/home/admin/.hermes/workspace/skills/skills-local/reviewer",
+    "/bots/owner-7/another-bot/skills-local/reviewer",
+])
+def test_openclaw_cleanup_rejects_unrelated_locators_before_device_io(
+    test_injector, locator,
+):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: None
+    calls = []
+    factory._device_fs_dispatcher.for_bot = lambda *args: calls.append(args) or object()
+    factory._path_factory.get_bot_skills_local_dir = (
+        lambda *_args, **_kwargs: Path("/bots/owner-7/bot-1/skills-local")
+    )
+
+    with pytest.raises(ValueError, match="escapes skills-local"):
+        factory.local_skill_package_storage_for_locator(
+            entity_id="owner-7", owner_id="owner-7", bot_id="bot-1",
+            engine_type="openclaw", entity_type="staff", is_desktop=False,
+            is_teclaw=False, locator=locator, skill_name="reviewer",
+        )
+    assert calls == []
+
+
+@pytest.mark.parametrize("pool_enabled,is_teclaw", [(True, False), (False, True)])
+def test_openclaw_legacy_alias_does_not_bypass_pool_or_teclaw_roots(
+    test_injector, pool_enabled, is_teclaw,
+):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: (
+        ("/pool/active", "/pool/local", "/pool/repo") if pool_enabled else None
+    )
+    factory._path_factory.get_bot_skills_local_dir = (
+        lambda *_args, **_kwargs: Path("skills-local")
+    )
+    calls = []
+    factory._device_fs_dispatcher.for_bot = lambda *args: calls.append(args) or object()
+
+    with pytest.raises(ValueError, match="escapes skills-local"):
+        factory.local_skill_package_storage_for_locator(
+            entity_id="owner-7", owner_id="owner-7", bot_id="bot-1",
+            engine_type="openclaw", entity_type="staff", is_desktop=False,
+            is_teclaw=is_teclaw,
+            locator="/home/admin/.openclaw/workspace/skills/skills-local/reviewer",
+            skill_name="reviewer",
+        )
+    assert calls == []
+
+
 def test_legacy_local_skill_packages_are_isolated_for_same_name_across_bots(
     test_injector,
 ):
@@ -456,7 +531,7 @@ def test_pool_active_factory_scopes_skill_writes_to_canonical_pool(test_injector
     ).endswith("/skills-pool/skills-local/handmade")
 
 
-def test_skill_set_factory_uses_owner_for_pool_lookup_and_entity_for_paths(
+def test_skill_set_factory_uses_entity_for_pool_lookup_and_paths(
     test_injector,
 ):
     factory = test_injector.get(SkillSetServiceFactory)
@@ -480,14 +555,14 @@ def test_skill_set_factory_uses_owner_for_pool_lookup_and_entity_for_paths(
         entity_type="proj",
     )
 
-    assert pool_resolution_calls == [("owner-7", "bot-1", "hermes")] * 2
-    assert svc.user_id == "owner-7"
+    assert pool_resolution_calls == [("project-42", "bot-1", "hermes")] * 2
+    assert svc.user_id == "project-42"
     assert svc.entity_id == "project-42"
     assert str(svc.local_dir) == "/pool/local"
     assert str(svc.skill_service.local_dir) == "/pool/local"
 
 
-def test_skill_set_mapping_uses_owner_for_pool_lookup(test_injector):
+def test_skill_set_mapping_uses_entity_for_pool_lookup(test_injector):
     factory = test_injector.get(SkillSetServiceFactory)
     pool_resolution_calls = []
 
@@ -507,7 +582,7 @@ def test_skill_set_mapping_uses_owner_for_pool_lookup(test_injector):
 
     mappings = svc.get_symlink_mappings(additional_skill_paths=["local://handmade"])
 
-    assert pool_resolution_calls == [("owner-7", "bot-1", "hermes")] * 3
+    assert pool_resolution_calls == [("project-42", "bot-1", "hermes")] * 3
     assert [(mapping.source, mapping.target) for mapping in mappings] == [
         ("/pool/local/handmade", "/pool/active/handmade")
     ]
@@ -517,7 +592,7 @@ def test_desktop_pool_active_factory_uses_the_same_canonical_paths(
     test_injector,
 ):
     factory = test_injector.get(SkillSetServiceFactory)
-    factory._bot_repo.get_by_id_and_owner = lambda *_: {
+    factory._bot_repo.get_by_id_and_entity = lambda *_: {
         "bot_type": "desktop",
     }
     factory._pool_layout_paths = lambda *_: (
@@ -541,7 +616,7 @@ def test_desktop_pool_active_factory_uses_the_same_canonical_paths(
 
 def test_desktop_legacy_factory_preserves_existing_paths(test_injector):
     factory = test_injector.get(SkillSetServiceFactory)
-    factory._bot_repo.get_by_id_and_owner = lambda *_: {
+    factory._bot_repo.get_by_id_and_entity = lambda *_: {
         "bot_type": "desktop",
     }
     factory._pool_layout_paths = lambda *_: None
@@ -563,7 +638,7 @@ def test_desktop_legacy_factory_preserves_existing_paths(test_injector):
 
 def test_desktop_pool_mapping_uses_canonical_pool_sources(test_injector):
     factory = test_injector.get(SkillSetServiceFactory)
-    factory._bot_repo.get_by_id_and_owner = lambda *_: {
+    factory._bot_repo.get_by_id_and_entity = lambda *_: {
         "bot_type": "desktop",
     }
     factory._pool_layout_paths = lambda *_: (
@@ -606,7 +681,7 @@ def test_desktop_pool_mapping_uses_canonical_pool_sources(test_injector):
 
 def test_local_replacement_mapping_keeps_stable_skill_link_name(test_injector):
     factory = test_injector.get(SkillSetServiceFactory)
-    factory._bot_repo.get_by_id_and_owner = lambda *_: {"bot_type": "desktop"}
+    factory._bot_repo.get_by_id_and_entity = lambda *_: {"bot_type": "desktop"}
     factory._pool_layout_paths = lambda *_: (
         "/home/admin/.openclaw/workspace/skills",
         "/home/admin/.openclaw/workspace/skills-pool/skills-local",
@@ -645,7 +720,7 @@ def test_relative_local_replacement_mapping_keeps_stable_skill_link_name(
 ):
     monkeypatch.setenv("DEPLOY_PROFILE", "production")
     factory = test_injector.get(SkillSetServiceFactory)
-    factory._bot_repo.get_by_id_and_owner = lambda *_: {"bot_type": "teclaw"}
+    factory._bot_repo.get_by_id_and_entity = lambda *_: {"bot_type": "teclaw"}
     factory._pool_layout_paths = lambda *_: (
         "/home/admin/.openclaw/workspace/skills",
         "/home/admin/.openclaw/workspace/skills-pool/skills-local",

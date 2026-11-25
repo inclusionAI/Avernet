@@ -7,7 +7,7 @@
  * 明细 = Skills + MCP 两段 muted 容器 + 白底行卡（类型徽章 + 数量胶囊），只读无编辑。
  * 规格：openspec add-composer-capability-set-viewer specs「查看明细只读」；
  * 数据拉取由宿主（ComposerCapabilitiesMenu onOpenChange）负责，每次打开重拉。 */
-import { Badge, Button } from '@/components/ui';
+import { Badge, Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
 import type {
   CapabilitySetDetailResult,
   CapabilitySetSkillView,
@@ -39,7 +39,7 @@ function ViewerHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-2 border-b border-border/70 px-3.5 py-2.5">
+    <div className="flex items-start justify-between gap-2 border-b border-divider/70 px-3.5 py-2.5">
       <div className="min-w-0">
         <p className="m-0 flex items-center gap-1.5 text-[13px] font-semibold leading-5 text-foreground">
           <span className="min-w-0 truncate">{title}</span>
@@ -110,23 +110,26 @@ function CapabilityMembers({
       {items.length ? (
         <ul className="m-0 mt-1.5 flex list-none flex-col gap-1 p-0">
           {items.map((item) => (
-            <li
-              key={item.key}
-              title={item.description || undefined}
-              className="flex items-center gap-2 rounded-lg bg-background px-2.5 py-2"
-            >
-              {icon}
-              <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{item.name}</span>
-              <span
-                className={
-                  tone === 'skill'
-                    ? 'shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary'
-                    : 'shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground'
-                }
-              >
-                {tone === 'skill' ? 'Skill' : 'MCP'}
-              </span>
-            </li>
+            <TooltipProvider key={item.key} delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <li className="flex items-center gap-2 rounded-lg bg-background px-2.5 py-2">
+                    {icon}
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{item.name}</span>
+                    <span
+                      className={
+                        tone === 'skill'
+                          ? 'shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary'
+                          : 'shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground'
+                      }
+                    >
+                      {tone === 'skill' ? 'Skill' : 'MCP'}
+                    </span>
+                  </li>
+                </TooltipTrigger>
+                {item.description ? <TooltipContent>{item.description}</TooltipContent> : null}
+              </Tooltip>
+            </TooltipProvider>
           ))}
         </ul>
       ) : (

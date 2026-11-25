@@ -6,6 +6,9 @@ use bcs_service_api::{BotDeliveryTarget, BotRegistryCoreService, ProviderAuthMod
     ProviderCoreService, RegisterProviderBotParams, ServiceError};
 use serde_json::json;
 
+#[path="provider_webhook_parts/a2a_abort.rs"]
+mod a2a_abort;
+
 struct Fixture {
     core: ProviderCore,
     registry: Arc<BotCore>,

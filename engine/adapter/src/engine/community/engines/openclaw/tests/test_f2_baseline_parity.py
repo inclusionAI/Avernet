@@ -61,6 +61,7 @@ GOLDEN_SUPPORTED = frozenset({
     Capability.SKILLS_CLEAN_SYMLINKS,
     Capability.SKILLS_CENTER_ENSURE,
     Capability.SKILLS_LOCAL_PACKAGE_APPLY,
+    Capability.SKILLS_LOCAL_PACKAGE_PARALLEL_TARGETS,
     # Approval
     Capability.APPROVAL_GET,
     Capability.APPROVAL_SET,
@@ -94,6 +95,7 @@ GOLDEN_SUPPORTED = frozenset({
     Capability.CRON_HISTORY,
     # Model
     Capability.MODEL_LIST,
+    Capability.MODEL_DEFAULT_GET,  # additive configured-default read contract
     Capability.MODEL_SWITCH,
     # Default config
     Capability.DEFAULT_CONFIG_GET,

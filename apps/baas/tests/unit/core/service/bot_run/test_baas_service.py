@@ -13,6 +13,7 @@ Covers:
 
 import uuid
 from datetime import UTC, datetime
+from unittest.mock import ANY as _MOCK_ANY
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1949,6 +1950,7 @@ class TestSendMessageExtended:
                 conn_info.target,
                 conn_info.ws_url,
                 {"x-proxypass-token": conn_info.token},
+                token_minter=_MOCK_ANY,
             )
 
 
@@ -3315,6 +3317,51 @@ class TestCreateSessionClientEvalIdHeader:
         assert "X-Eval-Id" not in client.headers
 
 
+class TestGetSessionContextBinding:
+    """Regression coverage for get_session context argument binding."""
+
+    @pytest.mark.asyncio
+    async def test_get_session_passes_context_as_keyword(self, service):
+        session_client = AsyncMock()
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+        session_client.get_session = AsyncMock(
+            return_value=MagicMock(
+                id=SESSION_ID,
+                title="session",
+                created_at="2026-11-03T00:00:00+00:00",
+                updated_at=None,
+            )
+        )
+        context = _make_context(tenant=TENANT)
+        binding = _make_binding_info()
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                AsyncMock(return_value=_make_conn_info()),
+            ) as resolve_connection,
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+        ):
+            result = await service.get_session(
+                session_id=SESSION_ID,
+                binding_info=binding,
+                context=context,
+            )
+
+        resolve_connection.assert_awaited_once_with(
+            binding, session_id=SESSION_ID, context=context
+        )
+        session_client.get_session.assert_awaited_once_with(
+            SESSION_ID, engine=binding.engine_type
+        )
+        assert result.session_id == SESSION_ID
+        assert result.bot_id == BOT_UUID
+
+
 # ==================== TestMaterializeSession ====================
 
 
@@ -3609,3 +3656,51 @@ class TestSessionPendingDispatch:
                     session_pending=True,
                 )
         mat.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "session_id", ["agent:main:session:a:user:u", "session:a:user:u"]
+)
+async def test_runtime_status_uses_same_normalized_affinity_and_proxy(
+    service, wss_resolver, session_id
+):
+    from secbaas.community.api.bot_runtime import SessionRuntimeStatus
+
+    observation = SessionRuntimeStatus(
+        session_id=session_id,
+        found=True,
+        run_id="r",
+        state="running",
+        started_at=1,
+        last_event_seq=2,
+    )
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.get_session_runtime_status.return_value = observation
+    binding = _make_binding_info(engine_type="openclaw")
+    with patch.object(service, "_create_session_client", return_value=client) as create:
+        result = await service.get_session_runtime_status(
+            session_id=session_id,
+            binding_info=binding,
+            context=_make_context(tenant=TENANT),
+        )
+    assert result == observation
+    args = wss_resolver.dispatch_bot_ws_conn_info.await_args.kwargs
+    assert args["device_affinity"] == "session:a:user:u"
+    assert args["path"] == "/api/openclaw/ws"
+    assert create.call_args.args[0].target == TARGET
+    client.get_session_runtime_status.assert_awaited_once_with(session_id)
+    client.create_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_unsupported_engine_does_not_connect(
+    service, wss_resolver
+):
+    result = await service.get_session_runtime_status(
+        session_id="s",
+        binding_info=_make_binding_info(engine_type="claude_code"),
+    )
+    assert result.reason == "UNSUPPORTED_ENGINE"
+    wss_resolver.dispatch_bot_ws_conn_info.assert_not_called()

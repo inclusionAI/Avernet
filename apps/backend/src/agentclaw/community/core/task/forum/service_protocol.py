@@ -13,7 +13,9 @@ from agentclaw.community.core.task.forum.models import (
     BrowseSubscriptionUpsertResult,
     ForumTopicConfig,
     ForumPollSelection,
+    ForumPostLocationRecord,
     ForumPostPage,
+    ForumPostRecord,
     ForumReplyCreateResult,
     ForumTopicCreateResult,
     ForumTopicPage,
@@ -33,11 +35,15 @@ class ForumServiceProtocol(Protocol):
         page_size: int,
         topic_type: str | None = None,
         author_id: str | None = None,
+        following_owner_id: str | None = None,
     ) -> ForumTopicPage:
         """List Topics visible in the current tenant and environment.
 
         When ``author_id`` is given the result is scoped to that author
-        (the per-author 'my topics' view, server-side paginated).
+        (the per-author 'my topics' view, server-side paginated). When
+        ``following_owner_id`` is given, the service first reads that human
+        actor's active HUMAN/BOT follows, then queries only Topics authored by
+        those identities.
         """
 
     @abstractmethod
@@ -61,12 +67,42 @@ class ForumServiceProtocol(Protocol):
 
     @abstractmethod
     def list_posts(self, *, topic_id: str, page: int, page_size: int) -> ForumPostPage:
-        """Page one Topic's first-level replies in stable chronological order.
+        """Page one Topic's first-level replies in stable display order.
 
-        ``total`` and ``page_size`` count only direct Topic replies. Each
-        returned first-level reply carries all of its descendant replies in
-        ``children`` for the two-level presentation layout; children are
-        never paginated independently.
+        Helpful HELP replies appear before ordinary replies, with chronological
+        order inside each group. ``floor_no`` still reflects each first-level
+        reply's original chronological position. ``total`` and ``page_size``
+        count only direct Topic replies; descendants travel in ``children``.
+        """
+
+    @abstractmethod
+    def get_post_location(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        page_size: int,
+    ) -> ForumPostLocationRecord:
+        """Resolve one Post to its page under the public display ordering.
+
+        Missing Topics/Posts and malformed parent chains raise ``NotFound``.
+        """
+
+    @abstractmethod
+    def set_post_helpful(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        author_type: str,
+        author_id: str,
+        helpful: bool,
+    ) -> ForumPostRecord:
+        """Mark or unmark one direct HELP reply as helpful.
+
+        Only the Topic author may perform the idempotent update. Multiple
+        direct replies can be helpful, and this operation never closes the
+        Topic automatically.
         """
 
     @abstractmethod
@@ -89,7 +125,6 @@ class ForumServiceProtocol(Protocol):
         ``topic_config.poll`` is defined today, and it is required for POLL topics.
         """
 
-
     @abstractmethod
     def create_reply(
         self,
@@ -107,7 +142,39 @@ class ForumServiceProtocol(Protocol):
         """Append a reply to a Topic, or replay the first request.
 
         ``reply_to_post_id`` optionally references one existing Post in the
-        same Topic. The reply stream remains flat; no hierarchy is persisted.
+        same Topic for DISCUSSION and SHARE Topics. POLL and HELP Topics reject
+        it and require a direct Topic reply.
+        """
+
+    @abstractmethod
+    def update_topic(
+        self,
+        *,
+        topic_id: str,
+        author_type: str,
+        author_id: str,
+        title: str,
+        body: str,
+    ) -> ForumTopicRecord:
+        """Edit one OPEN Topic as its declared author.
+
+        Only the persisted author may edit, and editing requires the Topic to
+        remain OPEN. Replies are outside this operation: this release does not
+        expose reply edit or delete APIs.
+        """
+
+    @abstractmethod
+    def delete_topic(
+        self,
+        *,
+        topic_id: str,
+        author_type: str,
+        author_id: str,
+    ) -> bool:
+        """Delete one non-LOCKED Topic as its declared author.
+
+        The Topic and all of its replies are removed in one transaction.
+        Reply edit/delete remains intentionally unsupported in this release.
         """
 
     @abstractmethod
@@ -131,8 +198,10 @@ class ForumServiceProtocol(Protocol):
         """Create or replace one Bot's Browse-Loop subscription in the tenant/env."""
 
     @abstractmethod
-    def get_subscription(self, *, bot_id: str) -> BrowseSubscriptionRecord | None:
-        """Return one Bot's Browse-Loop subscription, or ``None``."""
+    def get_subscription(
+        self, *, bot_id: str, owner_user_id: str
+    ) -> BrowseSubscriptionRecord | None:
+        """Return one owner's Browse-Loop Bot subscription, or ``None``."""
 
     @abstractmethod
     def list_subscriptions(
@@ -150,8 +219,8 @@ class ForumServiceProtocol(Protocol):
         """
 
     @abstractmethod
-    def delete_subscription(self, *, bot_id: str) -> bool:
-        """Delete one Bot's subscription. ``False`` if it did not exist."""
+    def delete_subscription(self, *, bot_id: str, owner_user_id: str) -> bool:
+        """Delete one owner's Bot subscription. ``False`` if it did not exist."""
 
     @abstractmethod
     def list_browse_feed(
@@ -164,7 +233,6 @@ class ForumServiceProtocol(Protocol):
         page_size: int,
     ) -> BrowseFeedPage:
         """Actor-aware pending Topics for one Bot."""
-
 
     @abstractmethod
     def submit_browse_report(

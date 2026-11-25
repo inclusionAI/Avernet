@@ -307,10 +307,6 @@ async fn stale_service_rerun_does_not_reactivate_session_without_a_child_run() {
         .complete_if_running(&session.id, None, None)
         .await
         .expect("complete first activation");
-    session_repo
-        .update_callback_status(&session.id, "not_applicable")
-        .await
-        .expect("complete first callback");
 
     let store = MemoryCollaborationStore::new().with_session_repo(session_repo.clone());
     let definition = test_definition("Say hello.");
@@ -335,10 +331,6 @@ async fn stale_service_rerun_does_not_reactivate_session_without_a_child_run() {
         .complete_if_running(&session.id, None, None)
         .await
         .expect("complete concurrent activation");
-    session_repo
-        .update_callback_status(&session.id, "not_applicable")
-        .await
-        .expect("complete concurrent callback");
 
     let mut child = test_run("sm-run-stale-child", &session.id, 3);
     child.status = StateMachineRunStatus::Pending;

@@ -1,0 +1,152 @@
+{
+  "updated": "2026-10-29",
+  "scope": "BCS A2A HTTP+JSON/SSE and Java Harness phase 1; ask_user explicitly deferred by user",
+  "overall_status": "phase_1_implemented_and_real_model_e2e_verified_with_existing_gate_failures",
+  "runtime": {
+    "model": "Ling-3.1-flash",
+    "bcs_binary_sha256": "fb7c9b091581e28a281a60ada68a788273582b343d997aa3de6b2a9c4f2571f8",
+    "java_jar_sha256": "6cbf2870440793ffe5e3f470f680d8049713c548949a77db92987e32f85a2440"
+  },
+  "rust_affected_modules": {
+    "packages": 15,
+    "suites": 293,
+    "passed": 3573,
+    "failed": 0,
+    "ignored": 32,
+    "note": "Before final budget application refactor; later focused tests cover subsequent changes; overlapping counts are not additive"
+  },
+  "rust_latest_transport_and_interaction": {
+    "passed": 22,
+    "failed": 0
+  },
+  "rust_budget_application": {
+    "passed": 57,
+    "failed": 0
+  },
+  "rust_context_and_cache": {
+    "passed": 13,
+    "failed": 0
+  },
+  "rust_ws_adapter": {
+    "passed": 114,
+    "failed": 0
+  },
+  "workspace_test_compilation": {
+    "success": true,
+    "test_executables": 605
+  },
+  "java_reactor": {
+    "passed": 71,
+    "failed": 0,
+    "errors": 0,
+    "note": "Unchanged production Jar; experimental capability probe removed after user deferred ask_user"
+  },
+  "source_size": {
+    "avernet_changed_source_files": 193,
+    "harness_changed_source_files": 68,
+    "over_1000": []
+  },
+  "architecture_components": [
+    {
+      "script": "check-deps.sh",
+      "exit_code": 1,
+      "log": "/tmp/avernet-a2a-current-check-deps.sh.log"
+    },
+    {
+      "script": "check-import-rules.sh",
+      "exit_code": 1,
+      "log": "/tmp/avernet-a2a-current-check-import-rules.sh.log"
+    },
+    {
+      "script": "check-port-purity.sh",
+      "exit_code": 0,
+      "log": "/tmp/avernet-a2a-current-check-port-purity.sh.log"
+    },
+    {
+      "script": "check-forbidden-symbols.sh",
+      "exit_code": 0,
+      "log": "/tmp/avernet-a2a-current-check-forbidden-symbols.sh.log"
+    },
+    {
+      "script": "check-config-validation.sh",
+      "exit_code": 0,
+      "log": "/tmp/avernet-a2a-current-check-config-validation.sh.log"
+    },
+    {
+      "script": "check-store-boundaries.sh",
+      "exit_code": 0,
+      "log": "/tmp/avernet-a2a-current-check-store-boundaries.sh.log"
+    },
+    {
+      "script": "check-interceptor-chain.sh",
+      "exit_code": 0,
+      "log": "/tmp/avernet-a2a-current-check-interceptor-chain.sh.log"
+    },
+    {
+      "script": "check-trait-naming.sh",
+      "exit_code": 1,
+      "log": "/tmp/avernet-a2a-current-check-trait-naming.sh.log"
+    },
+    {
+      "script": "check-protocol-compat.sh",
+      "exit_code": 0,
+      "log": "/tmp/avernet-a2a-current-check-protocol-compat.sh.log"
+    },
+    {
+      "script": "check-pr-gate.sh",
+      "exit_code": 77,
+      "log": "/tmp/avernet-a2a-current-check-pr-gate.sh.log"
+    },
+    {
+      "script": "check-waivers.sh",
+      "exit_code": 0,
+      "log": "/tmp/avernet-a2a-current-check-waivers.sh.log"
+    },
+    {
+      "script": "check-public-api.sh",
+      "exit_code": 77,
+      "log": "/tmp/avernet-a2a-current-check-public-api.sh.log"
+    },
+    {
+      "script": "check-baseline-not-growing.sh",
+      "exit_code": 77,
+      "log": "/tmp/avernet-a2a-current-check-baseline-not-growing.sh.log"
+    }
+  ],
+  "limitations": [
+    "No gRPC/JSON-RPC/push binding",
+    "No intermediate Artifact replacement",
+    "No signed end-user delegation",
+    "No multi-instance ownership or token-exact restart recovery",
+    "ask_user excluded from phase 1 by explicit user instruction"
+  ],
+  "evidence_directory": "evidence",
+  "real_model_exec_evidence": "a2a-bcs-exec.json",
+  "real_model_exec_latest_pair": true,
+  "evidence_repository": "harness-bcs-demo",
+  "centralized_conformance_static": {
+    "exit_code": 1,
+    "existing_missing_trait_harnesses": 77,
+    "existing_noncentralized_entries": 5,
+    "existing_missing_impl_entries": 79,
+    "new_findings": 0,
+    "baseline_verification": "Each declaration and missing harness checked against HEAD; moved impls located in original provider.rs",
+    "latest_budget_and_context_entry_matcher": "passed"
+  },
+  "full_architecture_wrappers": {
+    "result": "interrupted",
+    "exit_codes": [
+      143,
+      143
+    ],
+    "note": "Redundant whole-workspace --list enumeration stopped; not counted as passed; actual affected contracts executed separately"
+  },
+  "not_claimed": [
+    "All workspace tests executed",
+    "All architecture/CI gates passed",
+    "Missing public-API tool checks",
+    "PR body validation without a PR",
+    "Baseline comparison against an unresolved configured base"
+  ],
+  "publication_note": "Historical validation of the builds recorded here; not a validation of the rebased PR head or the default in-memory Harness. See pr-validation.json for current merged-head checks. Harness SDK source is excluded from this PR."
+}

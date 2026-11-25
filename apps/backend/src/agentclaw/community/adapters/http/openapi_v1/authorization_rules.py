@@ -1,11 +1,16 @@
 """Per-route authorization inventory; vocabulary lives in models_authorization."""
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from .authorization_rules_bot_mcp import BOT_MCP_AUTHORIZATION
+from .authorization_rules_catalog import CATALOG_AUTHORIZATION
 from .authorization_rules_genome import GENOME_AUTHORIZATION
+from .authorization_rules_metadata import METADATA_AUTHORIZATION
 from .authorization_rules_retiring import RETIRING_AUTHORIZATION
+from .authorization_rules_service_eval import SERVICE_EVAL_AUTHORIZATION
 from .authorization_rules_task import (
     TASK_BBS_AUTHORIZATION,
     TASK_PUBLIC_AUTHORIZATION,
+    TASK_TODO_AUTHORIZATION,
 )
 from .models_authorization import (
     EDIT_LOCK,
@@ -19,13 +24,17 @@ from .models_authorization import (
 )
 from .rule_shape_audit import assert_member_writes_name_explicit_origin
 from .dws_hosting.admission import OPERATIONS as DWS_OPERATIONS, PATH as DWS_PATH
-
 #: Every operation on this surface, exactly once, keyed as ``ADMISSION`` is.
 #:
 #: No row is :class:`Check` yet: this change builds the seam, and moving each
 #: group onto it is its own session (``spec.md`` *Decisions* 4).
 AUTHORIZATION: dict[tuple[str, str], Authorization] = {
+    ("PATCH", "/openapi/v1/bots/{bot_id}/caller-instances/{caller_user_id}/token-expiry"): NoCheck("verified human super-admin checked by CallerExpiryCorrectionService"),
+    ("POST", "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown"): NoCheck(
+        "service environment teardown intentionally has no Bot collaborator-level requirement"
+    ),
     **{(method, DWS_PATH + suffix): OWNER_SCOPED for method, suffix in DWS_OPERATIONS},
+    **SERVICE_EVAL_AUTHORIZATION,
     ("GET", "/openapi/v1/bots/{bot_id}/classification"): NoCheck(
         "authenticated minimal classification before establishing Bot collaboration"
     ),
@@ -35,15 +44,17 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/links"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/links/{resource_id}"): OWNER_SCOPED,
     ("DELETE", "/openapi/v1/bots/{bot_id}/links/{resource_id}"): OWNER_SCOPED,
+    # One-shot BCS collaboration repair. The command is the owner's and the
+    # service reconciles only the addressed Bot; collaborators have no say in
+    # what its ownership metadata says.
+    ("POST", "/openapi/v1/bots/{bot_id}/collaboration/repair"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local/start-progress"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/metadata/digital-employees"): NoCheck(
-        "authenticated tenant catalog for digital employee registration; creator filter is supplied by the platform"
+    **METADATA_AUTHORIZATION,
+    ("GET", "/openapi/v1/bots/{bot_id}/access"): NoCheck(
+        "transitional; the handler checks the configured app_name allowlist"
     ),
-    ("GET", "/openapi/v1/bots/metadata/digital-employees/{agent_id}"): NoCheck(
-        "authenticated tenant catalog for digital employee registration; public visibility approved for this integration"
-    ),
-    ("POST", "/openapi/v1/bots/metadata/queries"): NoCheck(
-        "tenant-wide display metadata for caller-supplied known bot ids"
+    ("GET", "/openapi/v1/bots/{bot_id}/overview"): NoCheck(
+        "bot-scoped and intentionally unguarded: returns only non-user Bot data"
     ),
     # ── Bot-scoped operations ─────────────────────────────────────────────
     ("DELETE", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
@@ -55,6 +66,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("PUT", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/activate"): Check(PermissionLevel.OWNER),
     ("POST", "/openapi/v1/bots/{bot_id}/recycle"): Check(PermissionLevel.OWNER),
+    ("GET", "/openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}"): Check(PermissionLevel.OWNER),
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(
         PermissionLevel.MEMBER, explicit=True
@@ -87,7 +99,11 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/authorized-apps/{app_id}"): NoCheck(
         "the caller's own account-level delegation, not a bot; app-only callers are REFUSED (admission.py)"
     ),
-    ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): OWNER_SCOPED,
+    # Explicit friend mode additionally verifies BCN friendship, owned session,
+    # and the resolved published stage before updating only the subject's IAM.
+    ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): ServiceChecked(
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.file_access"
+    ),
     # Config manifest. Read at MEMBER, write at ADMIN — the same split the
     # channels rows above make, and for the same reason: reading how a bot is
     # configured is part of working on it, while replacing that configuration
@@ -159,6 +175,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"): Check(
         PermissionLevel.ADMIN, EDIT_LOCK
     ),
+    ("GET", "/openapi/v1/bots/{bot_id}/caller-instance/status"): ServiceChecked(PermissionLevel.MEMBER, "agentclaw.community.core.expert_chat.services.expert_chat_service"),
     ("GET", "/openapi/v1/bots/{bot_id}/caller-context"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/chats"): ServiceChecked(
         PermissionLevel.MEMBER, "…core.bot_chat.service"
@@ -236,6 +253,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/engine/restart"): Check(
         PermissionLevel.MEMBER, explicit=True
     ),
+    ("GET", "/openapi/v1/bots/{bot_id}/engine/default-model"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/engine/status"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/harness/apply"): ServiceChecked(
         PermissionLevel.ADMIN, "…openapi_v1.harness.router"
@@ -271,6 +289,14 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(
         PermissionLevel.OWNER, EDIT_LOCK
     ),
+    ("GET", "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress"): NoCheck(
+        "workflow-id-only progress query intentionally has no Bot authorization requirement"
+    ),
+    # Eval reuses a built artifact without editing the draft or its bindings.
+    ("POST", "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish"): NoCheck(
+        "service environment API intentionally has no Bot collaborator-level requirement; "
+        "resource address validation is not actor authorization"
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"): Check(
         PermissionLevel.MEMBER, EDIT_LOCK, explicit=True
@@ -304,16 +330,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/local/auth-status"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/local/open-folder"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/local/restart"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/mcps"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"): Check(
-        PermissionLevel.MEMBER, explicit=True
-    ),
-    ("POST", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"): Check(
-        PermissionLevel.MEMBER, explicit=True
-    ),
-    ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"): Check(
-        PermissionLevel.OWNER, EDIT_LOCK
-    ),
+    **BOT_MCP_AUTHORIZATION,
     ("PATCH", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"): Check(
         PermissionLevel.OWNER, EDIT_LOCK
     ),
@@ -339,6 +356,10 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/nodes"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/passport"): OWNER_SCOPED,
     ("POST", "/openapi/v1/collaboration/bots/{bot_uuid}/public"): OWNER_SCOPED,
+    ("POST", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks"): Check(PermissionLevel.ADMIN, explicit=True),
+    ("GET", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/current"): Check(PermissionLevel.ADMIN, explicit=True),
+    ("GET", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/{risk_check_id}"): Check(PermissionLevel.ADMIN, explicit=True),
+    ("POST", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/{risk_check_id}/refresh"): Check(PermissionLevel.ADMIN, explicit=True),
     ("GET", "/openapi/v1/bots/{bot_id}/render-screens"): NoCheck(
         "share and group viewers must render panels without an Editor relation"
     ),
@@ -411,30 +432,30 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/sessions"): ServiceChecked(
         PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
     ),
-    ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"): Check(
-        PermissionLevel.MEMBER
+    ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"): ServiceChecked(
+        PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
     ),
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-intents",
-    ): Check(PermissionLevel.MEMBER, explicit=True),
+    ): ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.file_access"),
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-complete",
-    ): Check(PermissionLevel.MEMBER, explicit=True),
+    ): ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.file_access"),
     (
         "DELETE",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}",
-    ): Check(PermissionLevel.MEMBER, explicit=True),
+    ): ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.file_access"),
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content",
-    ): Check(PermissionLevel.MEMBER),
+    ): ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.file_access"),
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}"
         "/materialize-status",
-    ): Check(PermissionLevel.MEMBER),
+    ): ServiceChecked(PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.file_access"),
     ("GET", "/openapi/v1/bots/{bot_id}/sessions/favorites"): ServiceChecked(
         PermissionLevel.MEMBER, "…openapi_v1.engine_runtime.sessions.router"
     ),
@@ -607,6 +628,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/with-manifest"): NoCheck(
         "a creation, not one addressed bot — as POST /openapi/v1/bots"
     ),
+    ("POST", "/openapi/v1/bots/copy"): NoCheck(
+        "a creation (copy source → new dst), not one addressed bot — as POST /openapi/v1/bots; an app-only caller is admitted on the user-level delegation and granted the dst bot it creates"
+    ),
+    ("POST", "/openapi/v1/bots/copy/{bot_id}/retry"): NoCheck(
+        "operator retry of the caller's own copy operation; the path's bot_id is the dst bot (whose copy_state FE is polling), not an addressed source — scoped by the caller's ownership of that dst, not a bot grant"
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/with-manifest/status"): NoCheck(
         "the caller's own creation: for most of one there is no bot record to check against, so what scopes it is that every row it reads — the job's idempotency key included — is keyed by the entity_id the caller's principal resolves to. For an app-only caller require_user_id returns the user_id QUERY PARAMETER, so the entity_id is request-supplied — and what authorizes it is the own-bot grant dependency the route declares (admission.py GRANT_CHECKED_OWN_BOT): the creation granted the submitting application this bot at submission, so an application naming a user who never delegated to it, or a bot_id it did not create, holds no grant and is refused before this read runs"
     ),
@@ -617,8 +644,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/routines/all"): NoCheck(
         "a collection, not one addressed bot"
     ),
-    ("GET", "/openapi/v1/bots/catalog/discover"): NoCheck("tenant-identical catalogue"),
-    ("GET", "/openapi/v1/bots/catalog/search"): NoCheck("tenant-identical catalogue"),
+    **CATALOG_AUTHORIZATION,
     ("GET", "/openapi/v1/bots/ceiling"): NoCheck(
         "the named user's account quota, not a bot"
     ),
@@ -664,8 +690,10 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/market/skill-center/tags"): NoCheck(
         "tenant-identical marketplace"
     ),
-    ("POST", "/openapi/v1/bots/market/skills"): NoCheck("tenant-identical marketplace"),
-    ("GET", "/openapi/v1/bots/market/clis"): NoCheck("tenant-identical marketplace"),
+    ("POST", "/openapi/v1/experts/{expert_id}/bots"): NoCheck("user delegation checked by creation dependency"),
+    ("GET", "/openapi/v1/experts"): NoCheck("tenant-identical expert catalogue"),
+    ("GET", "/openapi/v1/experts/categories"): NoCheck("tenant-identical expert catalogue"),
+    ("GET", "/openapi/v1/experts/{expert_id}"): NoCheck("tenant-identical expert catalogue"),
     ("GET", "/openapi/v1/bots/mcp/servers"): NoCheck(
         "tenant-identical MCP catalogue and per-caller config"
     ),
@@ -750,6 +778,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/spaces/{space_id}/members/{member_user_id}"): NoCheck(
         "Space membership, adjudicated by the Space service"
     ),
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}"): NoCheck("Space deletion, adjudicated by the Space service"),
     (
         "PUT",
         "/openapi/v1/bots/spaces/{space_id}/members/{member_user_id}/role",
@@ -945,6 +974,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "the named user's own work orders and notifications"
     ),
     **TASK_PUBLIC_AUTHORIZATION,
+    **TASK_TODO_AUTHORIZATION,
     # ── Retiring addresses in ``deprecated/``: the other half of the table,
     # a same-keyed dict unioned in unchanged — split out to keep this file
     # inside the module-size cap (Rule 9). See
@@ -953,7 +983,6 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     **TASK_BBS_AUTHORIZATION,
     **GENOME_AUTHORIZATION,
 }
-
 
 # The table asserts its own shape while it imports (Instruction #2551): a
 # MEMBER write/operations row without its explicit origin fails the boot —

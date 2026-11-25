@@ -2,6 +2,30 @@
 
 ## Provides
 
+- A2A registration and Card management at `/api/v1/collaboration/a2a/**`,
+  owned by `v1/a2a`, call the injected `application::v1::a2a::A2aService`.
+  Provider administration uses raw Provider-admin Bearer credentials, outside
+  Gateway Principal and Human invite-code middleware. The existing management
+  application enforces Provider/resource authorization. Responses use the V1
+  `code/message/data/request_id` envelope and no-store headers; creation Location
+  stays under this prefix. Framework/path/body/method errors are also enveloped.
+  AgentCard protocol/authentication errors explain the required method, JSON format,
+  size limit or Provider-admin credential. Internal failures return safe support
+  guidance with request_id, not raw exception details; shared non-A2A errors are unchanged.
+  Card payloads preserve unknown fields. Chat and run controls remain exclusively
+  on the legacy `/a2a/...` routes.
+
+- Immutable Draft GET/validate at `/api/v1/collaboration/drafts/**`, outside
+  Gateway middleware, using public fixed-revision reads without credentials. The native
+  and V1 adapters share one injected Draft service; V1 adds an envelope, not
+  management routes, identity fallback or persistence.
+- `GET /openapi/v1/collaboration/me` projects the verified Human only. The native
+  `/collaboration/user` browser slice reuses V1 me/Bot mine/candidates/Group create
+  handlers with a bootstrap-selected Human verifier, no-store responses and a
+  cross-site/custom-header write boundary. `X-BCS-Expected-User` compares a
+  prepared configuration's user with verified identity before dispatch; it is
+  never an authentication source. Ownership and eligibility stay in application.
+
 - `GET /openapi/v1/collaboration/channels/conversations/by-session` reuses the
   Session V1 application facade's Human/owned-Bot read authorization before
   querying Channel mappings. It returns a V1 envelope with all mappings and
@@ -97,6 +121,11 @@ selection, and business policy.
 
 ## Tests
 
+- `tests/a2a_routes.rs`: V1 routing, envelopes, strict parsing, request IDs,
+  Provider-admin credential forwarding, Card views and absent chat/run routes.
+- `tests/boundary_contract.rs`: new A2A namespace belongs to this crate and is
+  injected from production bootstrap, with no legacy HTTP dependency.
+
 Register endpoints accept additive Provider/mode/ref/webhook queries. GET remains
 Human-authenticated and POST remains token-only; responses with credentials use
 no-store. The application selects v1/v2 tokens and authorizes scope; this adapter
@@ -116,3 +145,44 @@ derives authentication mode from the Provider configuration and validates the
 parent/slug split. No separate request slug or expected auth mode is consumed.
 Gateway Principal checks retain the signed Bot UUID and reject a mismatching
 Actor; bootstrap additionally injects current persisted-state validation.
+
+Scoped A2A registration also accepts an optional JSON body containing inline
+agent_card or agent_card_url. Query/body duplicates and mixed sources are rejected.
+An omitted A2A display name is passed to the application for Card.name defaults;
+legacy registrations still require names. See minimal-card-registration-v1.md.
+
+
+## Authentication display data
+
+`VerifiedRequestIdentity` carries an optional avatar alongside the unchanged
+business caller and pinned authentication context. It is verified-source
+display data only, never authorization input. OAuth bootstrap copies it from
+the existing strict-session snapshot, and `/openapi/v1/auth/user` forwards it
+without another credential-chain run or database query. Sources constructed
+with `pin` keep a null avatar unless they explicitly supply one.
+
+## Compatibility current-user selection
+
+Bootstrap may inject `ApiState.auth_user_verifier` for the legacy-configured
+OAuth facade when `[api.auth]` is absent. Only `GET /openapi/v1/auth/user`
+uses it; protected V1 routes retain `principal_verifier`. The adapter selects
+one verifier before authentication, never retries another source on failure.
+Explicit chains do not install this override.
+
+## Invite-code issuance
+
+The internal init route forwards the verified caller in `InitInviteCodes` rather
+than discarding it. Application enforces the configured issuer-user allowlist;
+being under `/api/v1` or passing the Cookie Origin check is not authorization.
+The request body remains count-only, and authorization denial maps to 403 with
+no authentication-source fallback.
+
+## A2A business-failure diagnostics
+
+A2A's transport boundary retains a request-local body snapshot under its existing
+2 MiB limit. Only failures produce `bcs_business_warning` records, through the
+neutral `bcs-observability` auxiliary API. Original field values (including unknown
+Card fields) are retained after credential redaction, not reconstructed from
+normalized application commands. Invalid JSON is explicitly omitted; successful
+requests emit no payload. The existing response envelope and admission behavior
+are unchanged. See `docs/observability/request-operation-logging.md` in BCS.

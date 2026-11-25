@@ -1,0 +1,37 @@
+[package]
+name         = "bcs-dist-gateway-http"
+description  = "Inbound A2A 1.0 JSON-RPC + SSE delivery adapter of the distributed Gateway"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+a2a             = { package = "a2a-lf", version = "=0.4.2" }
+axum            = { workspace = true }
+base64          = { workspace = true }
+bcs-dist-model  = { workspace = true }
+bcs-service-api = { workspace = true }
+futures         = { workspace = true }
+serde           = { workspace = true }
+serde_json      = { workspace = true }
+tracing         = { workspace = true }
+
+[dev-dependencies]
+bcs-dist-projection = { workspace = true }
+async-trait            = { workspace = true }
+bcs-app-dist-gateway   = { workspace = true }
+bcs-dist-a2a-output    = { workspace = true }
+bcs-dist-gateway       = { workspace = true }
+bcs-dist-gateway-store = { workspace = true }
+bcs-dist-store         = { workspace = true }
+bcs-dist-worker        = { workspace = true }
+bcs-domain             = { workspace = true }
+bcs-store-api          = { workspace = true }
+bcs-test-support       = { workspace = true }
+tokio                  = { workspace = true }
+tower                  = { workspace = true, features = ["util"] }

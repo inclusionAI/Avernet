@@ -113,10 +113,9 @@ the rest.
 - **Module**: backend
 - **Goal**: Revisions table, refs with CAS, patch apply/validate, diff,
   captured and produced content in the content store, lineage queries.
-  Promotion API that moves `active` by CAS, records the compiled document
-  and its digest, and hands the revision to a `RevisionApplier` seam. The
-  applied → revision mapping and the drift check
-  ([01-genome.md](01-genome.md) §5.5).
+  Promotion API that moves `active` by CAS, records the promotion and
+  hands the revision's desired state to a `RevisionApplier` seam. The drift
+  check ([01-genome.md](01-genome.md) §5.5).
 - **Depends on**: RSI-02.
 - **Read first**: [01-genome.md](01-genome.md); `core/bot_config_manifest/`.
 - **Shipped** (`apps/backend/specs/2026-10-19-bot-genome-registry/`):
@@ -128,45 +127,71 @@ the rest.
   wiring and route tests. Promotion's only applier refuses every delivery as
   `not_appliable` naming RSI-04, before any ref moves, so the singlebox
   story stops at the refusal.
+- **Landed since** (`apps/backend/specs/2026-10-23-apply-engine-desired-state/`):
+  the apply engine is its own component (`core/apply_engine/`) taking one
+  typed desired state from two compilers, the Manifest's and the genome's
+  (`compile_spec`, `GenomeCompiler` registered under the `genome` kind); the
+  contract's `compiled.yaml` oracles are replaced by an equivalence test
+  that compiles every case both ways; drift is observed by reading the bot
+  (`GenomeRegistry.drift`), and the promotion row carries neither a
+  compiled document, nor its digest, nor an apply id; the resources root is
+  cleared and rewritten each apply (#2162) and `script: null` declares no
+  script (#2862).
 - **Left to RSI-04**: delivery itself (personal bots), service-bot publish,
   pinning the commit of a shared-repository skill (`origin: repo` records
-  the path only), and the apply report carrying `document_digest`. Until
-  then `applied_revision` joins the bot's last Manifest apply to the
-  promotion that started it by apply id.
+  the path only), and resolving Center and repo skills at delivery. All
+  but service-bot publish landed with RSI-04; commit pinning was dropped by
+  the owner (see RSI-04).
 - **Follow-up**: capture refuses a platform-managed teclaw bot (teclaw
   delivery mode `platform`, `CaptureRefused`): it has no device to read, so
   capturing it means composing its state from the platform's own rows, the
   way that delivery mode does.
 
-### RSI-04 Direct delivery of a compiled revision (Stage 2)
+### RSI-04 Direct delivery of a compiled revision (Stage 2) — done
 - **Module**: backend
-- **Goal**: Deliver a compiled revision to the bot runtime through the
-  existing apply engine with no Manifest document in between. New
-  components take the compiled revision (every category present, file
-  entries by content-store digest, Center skills by pinned version,
-  shared-repository skills by path) and feed the apply engine's
-  materialisers directly, reading bytes from the content store and
-  resolving Center and repo skills; they plug into the `RevisionApplier`
-  seam RSI-03 leaves. The Manifest grammar gains no new source kinds. The
-  apply report records the digest of the compiled document it applied
-  ([01-genome.md](01-genome.md) §8 item 5); for service bots the publish
-  record records the digest of the published document. A compiled revision
-  must also remove what the revision omits, so this item includes the two
-  totality fixes: resource removal
-  ([#2162](https://github.com/inclusionAI/Avernet/issues/2162)) and
-  `script: null` ([#2862](https://github.com/inclusionAI/Avernet/issues/2862)).
-  Still Manifest work, landing with their own items: `engine_config`
-  (open decision G-4, [#2858](https://github.com/inclusionAI/Avernet/issues/2858))
-  and the `memory` category (after RSI-05). No revision table, refs, or
+- **Shipped** (`apps/backend/specs/2026-10-28-rsi-04-direct-delivery/`):
+  a promotion files a `pending` row and starts an apply run whose state
+  reference names it (`DirectApplier`, under the apply lock; a busy bot is
+  `409 apply_in_progress`). The refs move when that apply ends: the apply
+  engine publishes every apply's end to a subscriber per state kind
+  (`core/apply_engine/completion.py`, with a task-queue give-up hook for
+  the deadline case), and the genome's `PromotionSettler` settles the
+  promotion `applied`, `applied_partial` (`active` labelled `partial`) or
+  `apply_failed`. Center skills are delivered by name and repo skills by
+  path (`SharedSkillPort`; #3103). A revision no longer records a Center
+  version (bots track the latest, ADR 0002) and no repo commit is recorded
+  (owner's decision). Delivery keeps the platform's default MCP servers,
+  which capture does not record. Personal bots and service-bot drafts are
+  delivered; a service bot's verify/online stage through the publish
+  pipeline is [#3212](https://github.com/inclusionAI/Avernet/issues/3212)
+  (open decision P-2 decided there: the stage's ref moves once the
+  pipeline completes).
+- **Goal**: Deliver a promoted revision to the bot runtime through the
+  apply engine with no Manifest document in between. The engine, its typed
+  desired state and the genome compiler already exist
+  (`core/apply_engine/`, `core/bot_genome/compile.py`; the run service
+  looks the compiler up by the apply's state reference). What remains is
+  binding: a `RevisionApplier` that starts an apply run with
+  `StateRef("genome", promotion_id)` and reports its outcome on the promotion
+  row, in place of `PendingDeliveryApplier`; the materialisers resolving a
+  `CenterSkillVersion` and a `RepoSkillPath` (today only a local package
+  is delivered); the service-bot publish path; and the singlebox story.
+  The Manifest grammar gains no new source kinds. No digest is recorded
+  anywhere: whether the bot holds `active` is observed by reading it
+  ([01-genome.md](01-genome.md) §5.5). Still Manifest work, landing with
+  their own items: `engine_config` (open decision G-4,
+  [#2858](https://github.com/inclusionAI/Avernet/issues/2858)) and the
+  `memory` category (after RSI-05). No revision table, refs, or
   `revision_id` in the Manifest; the `/config-manifest` endpoints are
   unchanged. The existing service-bot rollback feature is not changed.
-- **Depends on**: RSI-03 (the seam and the compiled document), #2162, #2862.
+- **Depends on**: RSI-03 (the seam) and the apply-engine desired-state
+  refactor (the engine, the two compilers, the totality fixes #2162 and
+  #2862).
 - **Done when**: all existing manifest tests pass unchanged; promoting a
   revision in singlebox delivers it to a personal bot with no fetch and no
-  Manifest write, the apply report carries the compiled document's digest
-  and `GenomeRegistry.applied_revision` maps it back; going back two
-  revisions by promoting an earlier one restores the bot, removed
-  resources and script included.
+  Manifest write, and `GenomeRegistry.drift` then reads the bot as holding
+  `active`; going back two revisions by promoting an earlier one restores
+  the bot, removed resources and script included.
 
 ## P2 — Evolution core
 

@@ -14,10 +14,30 @@ workspace = true
 diagnostic-logs = ["dep:bcs-observability", "dep:tracing", "dep:tracing-subscriber"]
 
 [dependencies]
+bcs-dist-model = { workspace = true }
+futures = { workspace = true }
+bcs-caller-identity-api = { workspace = true }
 bcs-domain      = { workspace = true }
+bcs-protocol    = { workspace = true }
 bcs-service-api = { workspace = true }
+bcs-config      = { workspace = true }
+bcs-db-local    = { workspace = true }
+bcs-bot         = { workspace = true }
+bcs-bot-store   = { workspace = true }
+bcs-app-a2a-bot = { workspace = true }
+bcs-app-bot     = { workspace = true }
+bcs-edge-permission = { workspace = true }
+bcs-edge-permission-store = { workspace = true }
+bcs-app-register = { workspace = true }
+bcs-route-security = { workspace = true }
+bcs-fuse-client = { workspace = true }
+bcs-fusion      = { workspace = true }
+bcs-relation    = { workspace = true }
 bcs-auth-api    = { workspace = true }
+bcs-auth-oauth  = { workspace = true }
+bcs-jwt         = { workspace = true }
 bcs-cache-api   = { workspace = true }
+bcs-store-api   = { workspace = true }
 bcs-db-api      = { workspace = true }
 bcs-llm-api     = { workspace = true }
 bcs-human-notify-api = { workspace = true }

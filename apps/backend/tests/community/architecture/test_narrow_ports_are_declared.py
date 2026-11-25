@@ -22,7 +22,7 @@ mode ``test_protocol_base_ordering.py`` was written after shipping. Only
 **What this file does not check is behaviour.** Every assertion here is
 structural: a delegate that forwards the wrong argument, drops a keyword, or
 picks the other family's ``project`` satisfies all of it. That is covered by
-``core/bot_config_manifest/apply/test_device_port_forwarding.py``, which drives
+``core/apply_engine/test_device_port_forwarding.py``, which drives
 each port's methods through a recording double, and by the store-backed
 implementations' own suites under ``managed_files/``.
 
@@ -35,23 +35,25 @@ hand that choice back to the callers it was built to keep it from.
 from __future__ import annotations
 
 import inspect
+import ast
+from pathlib import Path
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
+from agentclaw.community.core.apply_engine.activation_delegates import (
     DeviceActivation,
     PlatformActivation,
 )
-from agentclaw.community.core.bot_config_manifest.apply.identity_files import (
+from agentclaw.community.core.apply_engine.identity_files import (
     DeviceIdentity,
 )
-from agentclaw.community.core.bot_config_manifest.apply.resource_files import (
+from agentclaw.community.core.apply_engine.resource_files import (
     DeviceResource,
 )
-from agentclaw.community.core.bot_config_manifest.apply.skill_package_upload import (
+from agentclaw.community.core.apply_engine.skill_package_upload import (
     DeviceSkillPackageUpload,
 )
-from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
+from agentclaw.community.core.apply_engine.managed_files.ports import (
     PlatformIdentity,
     PlatformResource,
     PlatformSkillPackageUpload,
@@ -59,6 +61,8 @@ from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
 from agentclaw.community.core.ports.activation_port import ActivationPort
 from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
 from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
+from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
+from agentclaw.community.core.resources.service import ResourceService
 from agentclaw.community.core.ports.skill_package_upload_port import (
     SkillPackageUploadPort,
 )
@@ -76,6 +80,7 @@ _PORT_IMPLEMENTERS = [
     (IdentityFilePort, PlatformIdentity),
     (ResourceFilePort, DeviceResource),
     (ResourceFilePort, PlatformResource),
+    (ResourceRowsPort, ResourceService),
 ]
 
 #: Every outbound port. Members must be abstract for the declarations to gate.
@@ -84,7 +89,27 @@ _PORTS = [
     SkillPackageUploadPort,
     IdentityFilePort,
     ResourceFilePort,
+    ResourceRowsPort,
 ]
+
+
+def test_port_contracts_do_not_import_domain_packages() -> None:
+    """The shared contracts stay reachable without depending on either domain."""
+    root = Path(inspect.getfile(ActivationPort)).parent
+    forbidden = []
+    for path in root.glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            modules = (
+                [node.module] if isinstance(node, ast.ImportFrom)
+                else [alias.name for alias in node.names] if isinstance(node, ast.Import)
+                else []
+            )
+            for module in modules:
+                if module and module.startswith("agentclaw.") and not module.startswith(
+                    "agentclaw.community.core.ports"
+                ):
+                    forbidden.append(f"{path.name}:{node.lineno}: {module}")
+    assert forbidden == [], "Ports must import only shared port contracts: " + ", ".join(forbidden)
 
 
 @pytest.mark.parametrize(

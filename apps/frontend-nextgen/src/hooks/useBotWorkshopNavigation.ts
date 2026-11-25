@@ -1,7 +1,11 @@
 import { serializeConversationRoute } from '@/domain/conversation';
 import type { BotDomain } from '@/services/botWorkshop';
+import {
+  buildDraftOrPrestableServiceCodingBotChatHref,
+  isDraftOrPrestableServiceCodingBot,
+} from '@/services/botWorkshop/botPolicy';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
-import { buildAgentCodingChatPath, workspaceService } from '@/services/workspace';
+import { workspaceService } from '@/services/workspace';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history } from '@umijs/max';
 import { useCallback } from 'react';
@@ -17,8 +21,11 @@ export function useBotWorkshopNavigation() {
     history.push(`/bot-workshop/detail?${params.toString()}`);
   }, []);
   const openConversation = useCallback((bot: BotDomain) => {
-    if (bot.runtime.isAgentCodingBot) {
-      history.push(buildAgentCodingChatPath({ botId: bot.id, spaceId: bot.spaceId, spaceName: bot.spaceName }));
+    // Draft/verify service Coding Bots are absent from TeamClaw's online chat
+    // directory. Route to AIXCoding's standalone app, which owns the
+    // non-online service runtime.
+    if (isDraftOrPrestableServiceCodingBot(bot)) {
+      history.push(buildDraftOrPrestableServiceCodingBotChatHref(bot));
       return;
     }
     const current = useWorkspaceStore.getState();

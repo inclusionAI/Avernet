@@ -12,7 +12,7 @@ BCS WebSocket channel plugin for OpenClaw.
 - Provides BCS group routing and manager-worker task tools:
   - `bcs_route`
   - `bcs_assign_task`
-  - `bcs_send_task_message`
+  - `bcs_task_status` / `bcs_cancel_task`
   - `bcs_task_complete`
 
 This plugin package intentionally does not include internal HITL, environment detection,
@@ -207,3 +207,22 @@ Reports are written to `scripts/.dependencies/compat/openclaw/reports/`.
 - `BCS_BOT_DOMAINS`
 - `BCS_BOT_SKILLS`
 - `BCS_BOT_SCOPES`
+
+
+## Manager–Worker task handles
+
+`bcs_send_task_message` is retired from model-visible tools. Worker final replies
+are automatically returned as task results. When blocked, end the turn and state
+what is needed; the Manager assigns a follow-up to the same Worker, including
+necessary context. Do not use old worker-message examples as invocation guidance.
+
+Managers use `bcs_assign_task` (optional positive `timeout_s`), `bcs_task_status`
+(1–20 refs, on demand only), and `bcs_cancel_task` (ref and reason). `task_ref` is
+`T-` plus eight hex digits; ambiguous refs require a longer prefix. `stored` is not
+admission or completion. `unknown`/`not_found` never proves stopped or safe to
+resend. Cancellation waits briefly for confirmation, never exposes `cancelling`,
+and does not roll back side effects. FIFO is not business idempotence.
+
+The server consumes old task.message/v2 echoes for one compatibility release;
+that compatibility path is not a newly exposed tool. Remove it only after old
+producers and queued work have drained (cached payloads live for 24 hours).

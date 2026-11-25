@@ -28,6 +28,7 @@ export function createMonitoringService(
     },
     async reportDiagnosis(input, key) {
       const event = parseDiagnosis(input, key);
+      // Persist NAS metadata with the original credentials before triggering recovery.
       const inserted = await store.insertDiagnosis({ wire: event, target: await resolver.resolveReport(event, event.engine) }, now());
       await recovery?.trigger(event);
       return { accepted: true, stored: true, eventId: event.eventId, botId: event.botId, entityId: event.entityId, env: event.env, duplicate: !inserted };

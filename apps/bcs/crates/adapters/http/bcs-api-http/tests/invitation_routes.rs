@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
-use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
+use bcs_api_http::{ApiState, CredentialKind, PrincipalVerificationError, PrincipalVerifier, VerifiedRequestIdentity, router};
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptInvitation, AddGroupParticipant, AddSessionParticipant,
     ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, BotRegistration,
@@ -37,13 +37,13 @@ impl PrincipalVerifier for HeaderVerifier {
     async fn verify(
         &self,
         headers: &HeaderMap,
-    ) -> Result<AuthenticatedCaller, PrincipalVerificationError> {
+    ) -> Result<VerifiedRequestIdentity, PrincipalVerificationError> {
         if headers
             .get("x-test-auth")
             .and_then(|value| value.to_str().ok())
             == Some("yes")
         {
-            Ok(self.caller.clone())
+            Ok(VerifiedRequestIdentity::pin(self.caller.clone(), "test-double", CredentialKind::GatewayPrincipalHeader))
         } else {
             Err(PrincipalVerificationError::Missing)
         }
@@ -298,10 +298,22 @@ struct FakeInvitationService {
     created_group: Mutex<Option<CreateGroupInvitation>>,
     created_session: Mutex<Option<CreateSessionInvitation>>,
     accepted: Mutex<Option<AcceptInvitation>>,
+    previewed: Mutex<Option<bcs_service_api::application::v1::PreviewInvitation>>,
 }
 
 #[async_trait]
 impl InvitationService for FakeInvitationService {
+    async fn preview_invitation(
+        &self,
+        query: bcs_service_api::application::v1::PreviewInvitation,
+    ) -> Result<bcs_service_api::application::v1::InvitationPreview, ApplicationError> {
+        *self.previewed.lock().unwrap() = Some(query);
+        Ok(bcs_service_api::application::v1::InvitationPreview {
+            target_type: InvitationTargetType::Session, target_id: "session-1".into(),
+            group_id: "group-1".into(), already_joined: true,
+        })
+    }
+
     async fn create_group_invitation(
         &self,
         command: CreateGroupInvitation,
@@ -656,4 +668,37 @@ async fn missing_principal_returns_unauthenticated() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let body = response_json(response).await;
     assert_eq!(body["data"]["error_code"], "unauthenticated");
+}
+
+#[tokio::test]
+async fn preview_invitation_returns_private_read_only_membership_projection() {
+    let service = Arc::new(FakeInvitationService::default());
+    let response = test_router(service.clone())
+        .oneshot(authenticated_request("GET", "/openapi/v1/collaboration/invitations/token-1", json!({})))
+        .await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "private, no-store");
+    let body = response_json(response).await;
+    assert_eq!(body["code"], 20_000);
+    assert_eq!(body["request_id"], "request-123");
+    assert_eq!(body["data"], json!({
+        "target_type": "session", "target_id": "session-1", "group_id": "group-1", "already_joined": true,
+    }));
+    let previewed = service.previewed.lock().unwrap();
+    let query = previewed.as_ref().expect("preview forwarded");
+    assert_eq!(query.token, "token-1");
+    assert_eq!(caller_user_id(&query.caller), "staff-1");
+    assert!(service.accepted.lock().unwrap().is_none(), "GET must not accept invitation");
+}
+
+#[tokio::test]
+async fn preview_invitation_requires_gateway_credentials() {
+    let service = Arc::new(FakeInvitationService::default());
+    let response = test_router(service.clone()).oneshot(
+        Request::builder().uri("/openapi/v1/collaboration/invitations/token-1")
+            .body(Body::empty()).unwrap(),
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(service.previewed.lock().unwrap().is_none());
+    assert!(service.accepted.lock().unwrap().is_none());
 }

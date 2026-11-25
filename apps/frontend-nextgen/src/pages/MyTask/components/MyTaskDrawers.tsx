@@ -1,14 +1,9 @@
-import { TaskPanel } from '@/assets/TaskPanel';
-import { TaskSwitcherBar } from '@/assets/TaskPanel/v2/TaskSwitcherBar';
+import { TaskPanelHost as TaskPanel } from '@/components/Workspace/TaskPanelHost';
 import { Drawer, DrawerContent } from '@/components/ui/Drawer';
 import { Empty } from '@/components/ui/Empty';
 import type { TaskListItem } from '@/domain/tasks/models';
-import { useTaskPanelNavBinding } from '@/hooks/taskPanelNavBinding';
-import { toSwitcherItem } from '@/hooks/useTaskSwitcherTasks';
-import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import type { ScheduledRoutineRecord, ScheduledRoutineRunRecord } from '@/services/scheduledTasks';
 import { TASK_API_BASE, TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
-import { useMemo } from 'react';
 import { getBotDisplayName, getUserTaskSourceLabel, getUserTaskTypeLabel } from '../userTaskUtils';
 import { MyTaskRoutineDrawer } from './MyTaskRoutineDrawer';
 import { MyTaskRoutineHistoryDrawer } from './MyTaskRoutineHistoryDrawer';
@@ -33,6 +28,7 @@ export interface MyTaskDrawersProps {
   historyError: string | null;
   onOpenRoutineFromHistory: (botId: string, routineId: string) => void;
   botNameMap: Record<string, string>;
+  routineBotType?: string;
 }
 
 export function MyTaskDrawers({
@@ -54,23 +50,8 @@ export function MyTaskDrawers({
   historyError,
   onOpenRoutineFromHistory,
   botNameMap,
+  routineBotType,
 }: MyTaskDrawersProps) {
-  // V2 导航按 taskId 分片缝合 taskSidePanelStore(抽屉/聊天两挂载点共享导航语义)。
-  const navBinding = useTaskPanelNavBinding(selectedTaskId ?? '');
-  const nav = selectedTaskId ? navBinding : undefined;
-  // V2 多任务切换条:记录列表已在宿主侧加载,同映射复用;切换由宿主(setSelectedTaskId)承载。
-  const switcherItems = useMemo(() => (taskRecords ?? []).map(toSwitcherItem), [taskRecords]);
-  const handleSelectTask = useMemo(() => {
-    if (!onSelectTask) return undefined;
-    return (taskId: string) => {
-      useTaskSidePanelStore.getState().setActiveTask(taskId);
-      onSelectTask(taskId);
-    };
-  }, [onSelectTask]);
-  const switcher =
-    switcherItems.length && handleSelectTask ? (
-      <TaskSwitcherBar items={switcherItems} activeTaskId={selectedTaskId ?? switcherItems[0].taskId} onSelectTask={handleSelectTask} />
-    ) : null;
   const selectedTask = selectedTaskId ? taskRecords.find((record) => record.task_id === selectedTaskId) : null;
   const taskInfoFallback = selectedTask
     ? (() => {
@@ -111,8 +92,7 @@ export function MyTaskDrawers({
                 userId={ownerUserId}
                 taskId={selectedTaskId}
                 taskInfoFallback={taskInfoFallback}
-                nav={nav}
-                switcher={switcher}
+                onSelectTask={onSelectTask}
                 style={{ height: '100%', minHeight: 0 }}
               />
             ) : (
@@ -125,6 +105,7 @@ export function MyTaskDrawers({
       </Drawer>
 
       <MyTaskRoutineDrawer
+        botType={routineBotType}
         selectedRoutine={selectedRoutine}
         selectedRoutineKey={selectedRoutineKey}
         onCloseRoutine={onCloseRoutine}
@@ -135,6 +116,7 @@ export function MyTaskDrawers({
       />
 
       <MyTaskRoutineHistoryDrawer
+        botType={routineBotType}
         selectedRoutineHistoryId={selectedRoutineHistoryId}
         onCloseRoutineHistory={onCloseRoutineHistory}
         historyRuns={historyRuns}

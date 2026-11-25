@@ -486,3 +486,65 @@ def test_legacy_path_still_excludes_intranet() -> None:
         McporterComposer().compose_server(
             McpComposeInput(mcp_data=md, endpoint_env="PROD")
         )
+
+
+def test_no_center_endpoint_no_override_uses_center_transport() -> None:
+    item = McpComposeInput(mcp_data=_remote_mcp("no-endpoints"), endpoint_env="PROD")
+
+    server = McporterComposer().compose_server(item)
+
+    assert server.endpoint == "https://mcp.example.com/weather"
+    assert server.transport == "http"
+
+
+def test_no_center_endpoint_override_still_used_both_paths() -> None:
+    """
+    If the server has no Center endpoint and a bot override supplies its own URL,
+    both composition paths should no longer reject the conversion just because
+    there is no Center-spanning endpoint either.
+    """
+    item = McpComposeInput(
+        mcp_data=_remote_mcp("no-endpoints"),
+        endpoint_env="PROD",
+        url_override="https://custom.example/mcp",
+        strict_transport_protocol=False,
+    )
+
+    server = McporterComposer().compose_server(item)
+
+    assert server.endpoint == "https://custom.example/mcp"
+    assert server.transport == "sse"
+
+
+def test_no_center_endpoint_override_still_used_strict_transport_protocol() -> None:
+    item = McpComposeInput(
+        mcp_data=_remote_mcp("no-endpoints"),
+        endpoint_env="PROD",
+        transport_protocol="STREAMABLE_HTTP",
+        url_override="https://custom.example/mcp",
+        strict_transport_protocol=True,
+    )
+
+    server = McporterComposer().compose_server(item)
+
+    assert server.endpoint == "https://custom.example/mcp"
+    assert server.transport == "http"
+
+
+def test_no_center_endpoint_override_contains_explicit_transport_protocol() -> None:
+    """
+    The strict endpoint path should still be reachable if there is a Center
+    endpoint, but no explicit protocol contract for the bot override. In that
+    case the override falls back to current Center semantics.
+    """
+    item = McpComposeInput(
+        mcp_data=_remote_mcp("no-endpoints"),
+        endpoint_env="PROD",
+        url_override="https://custom.example/mcp",
+        strict_transport_protocol=False,
+    )
+
+    server = McporterComposer().compose_server(item)
+
+    assert server.endpoint == "https://custom.example/mcp"
+    assert server.transport == "sse"

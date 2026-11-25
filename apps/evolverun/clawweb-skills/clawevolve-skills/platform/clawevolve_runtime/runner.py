@@ -56,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--step-id", required=True)
     parser.add_argument("--clawweb-url", required=True)
     parser.add_argument("--model", default="")
+    parser.add_argument("--reference-materials-version", choices=["1"], default="")
     args = parser.parse_args(argv)
     args.message = ""
     try:

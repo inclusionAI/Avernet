@@ -17,7 +17,7 @@ pub struct SessionManagementServiceImpl {
 pub struct SessionManagementWithRuntimeCleanup {
     pub(super) inner: Arc<dyn SessionManagementService>,
     pub(super) collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
-
+    pub(super) message_flow: Option<Arc<dyn bcs_service_api::MessageFlowService>>,
 }
 
 impl SessionManagementWithRuntimeCleanup {
@@ -29,7 +29,14 @@ pub fn new(
         Self {
             inner,
             collaboration_runtime,
+            message_flow: None,
         }
+    }
+
+    /// Session deletion also settles the Session's unfinished delivery queue.
+    pub fn with_message_flow(mut self, message_flow: Arc<dyn bcs_service_api::MessageFlowService>) -> Self {
+        self.message_flow = Some(message_flow);
+        self
     }
 }
 
@@ -88,55 +95,10 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
             .await
     }
 
-    async fn count_running_service(&self, group_id: &str) -> Result<u64, SessionUseCaseError> {
-        self.inner.count_running_service(group_id).await
-    }
-
-    async fn list_running_service(
-        &self,
-        offset: u64,
-        limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        self.inner.list_running_service(offset, limit).await
-    }
-
     async fn list_running_service_after(
         &self, cursor: Option<&str>, limit: u64,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
         self.inner.list_running_service_after(cursor, limit).await
-    }
-
-    async fn list_recoverable_callbacks(
-        &self,
-        now_ms: u64,
-        after_session_id: Option<&str>,
-        limit: u64,
-    ) -> Result<Vec<Session>, SessionUseCaseError> {
-        self.inner
-            .list_recoverable_callbacks(now_ms, after_session_id, limit)
-            .await
-    }
-
-    async fn update_callback_status(
-        &self,
-        session_id: &str,
-        status: &str,
-    ) -> Result<(), SessionUseCaseError> {
-        self.inner.update_callback_status(session_id, status).await
-    }
-
-    async fn claim_callback(
-        &self,
-        command: ClaimSessionCallbackCommand,
-    ) -> Result<Option<ClaimSessionCallbackOutcome>, SessionUseCaseError> {
-        self.inner.claim_callback(command).await
-    }
-
-    async fn complete_callback(
-        &self,
-        command: CompleteSessionCallbackCommand,
-    ) -> Result<bool, SessionUseCaseError> {
-        self.inner.complete_callback(command).await
     }
 
     async fn complete_if_running(
@@ -237,6 +199,11 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
     }
 
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError> {
+        // Only an existing Session has a queue to settle.
+        let exists = match &self.message_flow {
+            Some(_) => self.inner.get(session_id).await?.is_some(),
+            None => false,
+        };
         self.collaboration_runtime
             .cancel_session_runs(session_id, "session_deleted")
             .await
@@ -245,6 +212,15 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
                     "Failed to cancel active state-machine runs for deleted session '{session_id}': {error}"
                 )))
             })?;
+        // Settle the queue BEFORE removing the Session: a cleanup failure
+        // must fail the delete while the Session still exists, so retrying
+        // the delete retries the cleanup.
+        if let (true, Some(flow)) = (exists, &self.message_flow) {
+            flow.cancel_session_deliveries(session_id, "session_deleted").await
+                .map_err(|error| SessionUseCaseError::Internal(ServiceError::InternalError(format!(
+                    "Failed to cancel queued deliveries for deleted session '{session_id}': {error}"
+                ))))?;
+        }
         self.inner.delete(session_id).await
     }
 
@@ -278,6 +254,12 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         self.inner.collected_at_map(session_ids, bot_uuid).await
     }
 
+    async fn max_created_at_by_group_ids(
+        &self,
+        group_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, u64>, SessionUseCaseError> {
+        self.inner.max_created_at_by_group_ids(group_ids).await
+    }
 }
 
 impl SessionManagementServiceImpl {
@@ -518,6 +500,11 @@ pub(super) async fn persist_session_opening_message(
                 exclude_conn_id: None,
                 visibility_domain,
                 audience,
+                // A session-opening message is an independent
+                // resource event: authorized per event.
+                operation_id: None,
+                terminal: false,
+                run_id: None,
             }),
         )
         .await

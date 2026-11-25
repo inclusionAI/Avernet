@@ -10,6 +10,9 @@ export interface UseGroupWorkspaceResult {
   groupsError: string | null;
   selectedGroupId: string | null;
   selectedGroup: GroupView | null;
+  isLoadingSelectedGroup: boolean;
+  selectedGroupError: string | null;
+  retrySelectedGroup: () => void;
   groupSearchText: string;
   setGroupSearchText: (v: string) => void;
   kindFilter: 'all' | GroupKind;

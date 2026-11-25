@@ -15,7 +15,9 @@ function fixture() {
   INSERT INTO flow_runs VALUES (1,'f1','wf','failed','bot:owner','identity',1,2,NULL),(2,'f2','wf','failed','bot:owner','identity',1,2,NULL),(3,'other','wf','failed','bot:other','identity',1,2,NULL),(4,'legacy','wf','failed',NULL,'identity',1,2,NULL);
   CREATE TABLE run_logs (id INTEGER PRIMARY KEY,flow_id TEXT,node_id TEXT,level TEXT,source TEXT,message TEXT,timestamp INTEGER,seq INTEGER);
   INSERT INTO run_logs VALUES (1,'f1','n','error','engine','first',100,1),(2,'f1','n','error','engine','second',100,1),(3,'f1','n','info','engine','info',100,2);`);
-  raw.exec(`ALTER TABLE flow_runs ADD COLUMN origin_session_key TEXT;
+  raw.exec(`ALTER TABLE flow_runs ADD COLUMN env VARCHAR(32) DEFAULT 'prod';
+  ALTER TABLE flow_runs ADD COLUMN tag VARCHAR(255) DEFAULT '';
+  ALTER TABLE flow_runs ADD COLUMN origin_session_key TEXT;
   ALTER TABLE flow_runs ADD COLUMN origin_session_id TEXT;
   UPDATE flow_runs SET origin_session_key='session-a', origin_session_id='session-id-a' WHERE flow_id='f2';`);
   raw.exec(`CREATE TABLE bot_workflow_permissions (id INTEGER PRIMARY KEY, workflow_id TEXT, bot_id TEXT, bot_owner_id TEXT, can_view INTEGER, can_edit INTEGER, can_execute INTEGER DEFAULT 0, env TEXT DEFAULT 'test', gmt_create INTEGER DEFAULT 0, gmt_modified INTEGER DEFAULT 0);

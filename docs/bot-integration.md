@@ -279,8 +279,10 @@ Reconnect reads the current Provider policy. Clients never select a Provider by
 supplying a Provider ID in their handshake or tool output.
 
 `native_mcp` fixes server `bcs` and exact tool names
-`mcp__bcs__bcs_assign_task`, `mcp__bcs__bcs_send_task_message`, and
-`mcp__bcs__bcs_task_complete`. `mcporter_mcp` fixes command `mcporter` and server
+`mcp__bcs__bcs_assign_task` and `mcp__bcs__bcs_task_complete`.
+The retired `mcp__bcs__bcs_send_task_message` name remains receive-only for the
+compatibility release. Status/cancel call the backend directly, without a
+coordination echo. `mcporter_mcp` fixes command `mcporter` and server
 `bcs`, and parses the unmodified coordination envelope from successful
 `exec`/`bash`/`shell`/`mcporter` tool output (case-insensitive source names).
 It does not use the native MCP name mapping. Both paths require paired tool
@@ -767,3 +769,22 @@ a rule engine or configuration table. They do not need to implement this tool.
 
 The OpenClaw integration reference implementation is
 [openclaw-channel-bcn](../src/bcs/crates/plugins/openclaw-channel-bcn/README.md).
+
+
+## Manager–Worker task handles
+
+`bcs_send_task_message` is retired from model-visible tools. Worker final replies
+are automatically returned as task results. When blocked, end the turn and state
+what is needed; the Manager assigns a follow-up to the same Worker, including
+necessary context. Do not use old worker-message examples as invocation guidance.
+
+Managers use `bcs_assign_task` (optional positive `timeout_s`), `bcs_task_status`
+(1–20 refs, on demand only), and `bcs_cancel_task` (ref and reason). `task_ref` is
+`T-` plus eight hex digits; ambiguous refs require a longer prefix. `stored` is not
+admission or completion. `unknown`/`not_found` never proves stopped or safe to
+resend. Cancellation waits briefly for confirmation, never exposes `cancelling`,
+and does not roll back side effects. FIFO is not business idempotence.
+
+The server consumes old task.message/v2 echoes for one compatibility release;
+that compatibility path is not a newly exposed tool. Remove it only after old
+producers and queued work have drained (cached payloads live for 24 hours).

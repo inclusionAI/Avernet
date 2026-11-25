@@ -1,13 +1,16 @@
 /** Composition root. Host-owned connections/identity; lazy, fail-closed, no implicit DB fallback. */
+import { AppConfigRepository } from '@avernet/clawevolve/server/repositories/app-config-repository';
 import type { Request } from 'express';
 import { getRepositories, type IDatabase } from '@avernet/clawweb-shared/server/db';
 import { MonitoringRepository } from '../../repositories/monitoring-repository.js';
+import { BotDiagnosisRecoveryConfigRepository } from '../../repositories/bot-diagnosis-recovery-config-repository.js';
 import { type MonitoringApi, type MonitoringRecoveryTrigger, MonitoringError } from './contracts.js';
 import type { DirectoryScope, LegacyReportBinding, MonitoringBotDirectory, MonitoringBrowserApi, MonitoringPrincipal } from './directory-contracts.js';
 import { createMonitoringService } from './monitoring-service.js';
 import { createMonitoringBrowserService } from './monitoring-browser-service.js';
 import { createTargetResolver } from './target-resolver.js';
 import { createMonitoringReferences } from './target-ref.js';
+import type { BotEnabledNotifier } from './bot-config-service.js';
 
 /** Trusted host integration, registered at bootstrap, not from request JSON/headers. */
 export type MonitoringIntegration = {
@@ -17,6 +20,7 @@ export type MonitoringIntegration = {
   isolatedStorageTenant: string;
   bindings?: readonly LegacyReportBinding[];
   recovery?: MonitoringRecoveryTrigger;
+  onBotEnabled?: BotEnabledNotifier;
   principal: (request: Request) => Promise<MonitoringPrincipal>;
 };
 let configuredIntegration: MonitoringIntegration | null = null;
@@ -50,7 +54,7 @@ export function createMonitoringRuntime(
       const resolver = createTargetResolver(integration.directory, integration.scope, integration.bindings);
       const references = createMonitoringReferences(now);
       assembled = { integration, service: createMonitoringService(repository, resolver, now, integration.recovery),
-        browser: createMonitoringBrowserService(repository, integration.directory, references, integration.scope, now) };
+        browser: createMonitoringBrowserService(repository, integration.directory, references, integration.scope, now, new BotDiagnosisRecoveryConfigRepository(getDb()), new AppConfigRepository(getDb()), integration.onBotEnabled) };
       return assembled;
     } catch (error) {
       if (error instanceof MonitoringError) throw error;
@@ -67,6 +71,9 @@ export function createMonitoringRuntime(
       diagnoses: async (...args) => services().service.diagnoses(...args),
     },
     browser: {
+      configure: async (...args) => services().browser.configure!(...args),
+      readConfiguration: async (...args) => services().browser.readConfiguration!(...args),
+      replaceConfiguration: async (...args) => services().browser.replaceConfiguration!(...args),
       options: async (...args) => services().browser.options(...args),
       status: async (...args) => services().browser.status(...args),
       diagnoses: async (...args) => services().browser.diagnoses(...args),

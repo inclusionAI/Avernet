@@ -43,6 +43,14 @@ impl BotRegistryCoreService for MockRegistry {
         vec![]
     }
 
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        _created_by: &str,
+        _limit: usize,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        Ok(Vec::new())
+    }
+
     async fn discover(&self, _query: &str) -> Vec<RegisteredBot> {
         vec![]
     }

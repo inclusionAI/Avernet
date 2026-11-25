@@ -83,7 +83,7 @@ def _make_service(
     bot_svc = bot_service
     if bot_svc is None:
         bot_svc = MagicMock()
-        bot_svc.get_bot.return_value = {"active_engine": "openclaw"}
+        bot_svc.get_bot_by_address.return_value = {"active_engine": "openclaw", "owner_id": "user-1", "entity_id": "user-1"}
         bot_svc.get_bot_work_path.return_value = Path("/tmp/bot")
     return ChannelService(
         repository=repo,
@@ -173,6 +173,7 @@ class TestChannelServiceBusinessMethodCallsResolver:
 
         bot_service = MagicMock()
         bot_service.get_bot_work_path.return_value = Path("/tmp/bot-x")
+        bot_service.get_bot_by_address.return_value = {"owner_id": "owner-x", "entity_id": "owner-x"}
 
         service = _make_service(
             resolver=resolver,

@@ -76,6 +76,7 @@ past shutdown, which is worse. Doing better would mean either tracking in-flight
 requests here (bookkeeping this seam does not otherwise need) or teaching this
 seam about a particular caller's retry classifier, which is backwards.
 """
+
 from __future__ import annotations
 
 import http.cookiejar
@@ -84,9 +85,9 @@ from contextlib import contextmanager
 from typing import Any, Iterator, Mapping
 
 import httpx
-
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.plugin_api.http_client import HttpClient
+from agentclaw.community.utils.runtime_list_timing import mark
 
 # Transport-policy defaults. Once the composition root is wired to config it
 # passes explicit values for all four, so these govern only a direct
@@ -119,6 +120,10 @@ class _DiscardingCookieJar(http.cookiejar.CookieJar):
 
     def set_cookie(self, cookie: http.cookiejar.Cookie) -> None:
         return None
+
+
+def _mark_response_headers(response: httpx.Response) -> None:
+    mark("http.headers")
 
 
 class HttpxClient(LifecycleBase, HttpClient):
@@ -177,6 +182,7 @@ class HttpxClient(LifecycleBase, HttpClient):
                     limits=self._limits,
                     http2=self._http2,
                     cookies=_DiscardingCookieJar(),
+                    event_hooks={"response": [_mark_response_headers]},
                 )
             return self._client
 
@@ -209,7 +215,9 @@ class HttpxClient(LifecycleBase, HttpClient):
         headers: Mapping[str, str] | None = None,
         timeout: float = 30.0,
     ) -> httpx.Response:
-        return self._request("GET", path, params=params, headers=headers, timeout=timeout)
+        return self._request(
+            "GET", path, params=params, headers=headers, timeout=timeout
+        )
 
     def post(
         self,
@@ -297,7 +305,11 @@ class HttpxClient(LifecycleBase, HttpClient):
         # ``timeout`` is per-request now that the client outlives the call. A bare
         # float expands to the same connect/read/write/pool budget httpx applied
         # when it was a constructor argument, so the per-call budget is unchanged.
-        return self._pooled_client().request(method, path, timeout=timeout, **kwargs)
+        mark("http.request")
+        try:
+            return self._pooled_client().request(method, path, timeout=timeout, **kwargs)
+        finally:
+            mark("http.request_end")
 
     @contextmanager
     def stream(
@@ -329,3 +341,62 @@ class HttpxClient(LifecycleBase, HttpClient):
             method, path, timeout=timeout, **kwargs
         ) as resp:
             yield resp
+
+
+class AsyncHttpxClient(LifecycleBase):
+    """One lazy async pool per deployment binding, with terminal shutdown.
+
+    A neutral HTTP library, not a knowledge-platform plugin. Reuses the common
+    limits and response-cookie isolation policy. Request cancellation is native.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_connections: int = DEFAULT_MAX_CONNECTIONS,
+        max_keepalive_connections: int = DEFAULT_MAX_KEEPALIVE_CONNECTIONS,
+        keepalive_expiry: float = DEFAULT_KEEPALIVE_EXPIRY,
+        http2: bool = DEFAULT_HTTP2,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
+        self._limits = httpx.Limits(
+            max_connections=max_connections,
+            max_keepalive_connections=max_keepalive_connections,
+            keepalive_expiry=keepalive_expiry,
+        )
+        self._http2, self._transport = http2, transport
+        self._client: httpx.AsyncClient | None = None
+        self._closed = False
+
+    def _pooled_client(self) -> httpx.AsyncClient:
+        if self._closed:
+            raise RuntimeError("Async HTTP pool has been shut down")
+        # Construction contains no await, so it is atomic on the owning ASGI loop.
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                limits=self._limits,
+                http2=self._http2,
+                cookies=_DiscardingCookieJar(),
+                transport=self._transport,
+                trust_env=False,
+                follow_redirects=False,
+            )
+        return self._client
+
+    def stream(self, method: str, url: str, **kwargs: Any):
+        return self._pooled_client().stream(method, url, **kwargs)
+
+    def build_request(self, method: str, url: str, **kwargs: Any) -> httpx.Request:
+        return self._pooled_client().build_request(method, url, **kwargs)
+
+    async def send(self, request: httpx.Request, *, stream: bool = False) -> httpx.Response:
+        return await self._pooled_client().send(request, stream=stream)
+
+    async def aclose(self) -> None:
+        self._closed = True
+        client, self._client = self._client, None
+        if client is not None:
+            await client.aclose()
+
+    async def teardown(self) -> None:
+        await self.aclose()

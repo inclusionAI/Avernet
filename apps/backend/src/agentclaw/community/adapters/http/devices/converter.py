@@ -19,7 +19,7 @@ from agentclaw.community.adapters.http.devices.schemas import (
     Env,
 )
 from agentclaw.community.core.devices.models import DeviceConnectionInfo
-from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord, public_device_props
 
 
 def _normalize_device_props(props: dict[str, Any]) -> dict[str, Any]:
@@ -51,7 +51,7 @@ def record_to_response(record: DeviceBindingRecord | Any) -> DeviceBindingRespon
         device_id=record.device_id,
         device_provider=record.device_provider,
         env=Env.from_string(record.env),
-        device_props=_normalize_device_props(record.device_props),
+        device_props=_normalize_device_props(public_device_props(record.device_props)),
         status=DeviceBindingStatus(record.status),
         last_alive_at=record.last_alive_at,
     )
@@ -80,6 +80,8 @@ def connection_info_to_response(info: DeviceConnectionInfo) -> DeviceConnectionR
     在此边界:
     - type 归一化 (tunnel/arca → remote)
     - available / message 透传
+    - a2a_base_url 原样透传:BaaS ws-info 签发的 A2A 面权威 base,空串 =
+      该设备无可交付的 A2A 面,caller 按原行为回落、不得代填/推导
 
     Args:
         info: 领域层的 DeviceConnectionInfo 实例
@@ -95,6 +97,8 @@ def connection_info_to_response(info: DeviceConnectionInfo) -> DeviceConnectionR
         available=info.available,
         message=info.message,
         url=info.url,
+        a2a_base_url=info.a2a_base_url,
+        a2a_withheld=info.a2a_withheld,
     )
 
 

@@ -31,3 +31,13 @@ fn bcsfuse_auth_uses_a_serializable_reference_and_redacts_resolved_material() {
     assert!(serialized.contains("bcsfuse-auth"));
     assert!(!serialized.contains("test-token"));
 }
+
+#[test]
+fn catalog_api_version_defaults_to_v1_and_rejects_unknown_versions() {
+    use bcs_config_api::BcsFuseApiVersion;
+    let legacy: BcsFuseConfig = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+    assert_eq!(legacy.api_version, BcsFuseApiVersion::V1);
+    let cards: BcsFuseConfig = serde_json::from_str(r#"{"api_version":"v2"}"#).unwrap();
+    assert_eq!(cards.api_version, BcsFuseApiVersion::V2);
+    assert!(serde_json::from_str::<BcsFuseConfig>(r#"{"api_version":"v3"}"#).is_err());
+}

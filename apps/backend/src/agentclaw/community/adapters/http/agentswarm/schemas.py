@@ -5,7 +5,8 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentclaw.community.core.agentswarm.domain.models import (
-    AgentKind, ProviderKind,
+    WIRE_BOT_CHAT_TIMEOUT_CAP, WIRE_MAX_TOTAL_AGENTS_CAP,
+    WIRE_MAX_TURNS_CAP, AgentKind, ProviderKind,
 )
 
 
@@ -13,7 +14,7 @@ class AgentSpecDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(max_length=128)
-    role: str = Field(max_length=256)
+    role: str = Field(max_length=20000)
     instructions: str = Field(default="", max_length=20000)
     kind: AgentKind = AgentKind.LLM
     model: str | None = None
@@ -41,11 +42,22 @@ class RunOptionsDTO(BaseModel):
     """Per-request operational overrides — values absent from the request
     fall back to the deployment's `agentswarm.orchestration.*` config.
 
-    Keys mirror the yaml config keys so operators think in one vocabulary.
-    All values are upper-bounded by the deployment config: a caller can
-    tighten a budget (shorter timeout, fewer turns) but never loosen it
-    past what the deployment allows (the max in `_validated` clamps to
-    the configured value)."""
+    Keys mirror the yaml config keys so operators think in one
+    vocabulary. Honored at runtime, clamped to deployment authority:
+    model_name (provider default when unset), max_width and
+    max_attempts (tighten-only), per_attempt_timeout_seconds and
+    slice_max_seconds (tighten-only), and setup_timeout_seconds —
+    which may raise up to the deployment's slice room
+    (slice_max_seconds minus per_attempt_timeout), so slow-env
+    provisioning can be re-budgeted from the request alone.
+    bot_chat_timeout_seconds and the bot_chat/per-attempt pairing
+    follow the same slice math: the request may re-budget one engine
+    chat round trip up to 3600s, with the per-attempt wait_for as the
+    runtime cap.
+    max_turns and max_total_agents are the run's own budgets: a
+    request value replaces the deployment default, bounded by the
+    wire caps below (a run may widen its turn budget for slow
+    human-in-the-loop authorizations, or tighten its spawn ceiling)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -56,13 +68,30 @@ class RunOptionsDTO(BaseModel):
         default=None, gt=0, le=3600,
         description="Orchestrator deadline per slice (seconds).")
     per_attempt_timeout_seconds: float | None = Field(
-        default=None, gt=0, le=600,
+        default=None, gt=0, le=1800,
         description="Upper bound for one attempt task (seconds).")
+    bot_chat_timeout_seconds: float | None = Field(
+        default=None, gt=0, le=WIRE_BOT_CHAT_TIMEOUT_CAP,
+        description="Upper bound for one engine chat round trip (seconds). "
+        "Replaces the deployment's executor.bot_chat_timeout_seconds "
+        "(default 1800) within this cap, so long-running turns can be "
+        "given more room without a redeploy; the per-attempt timeout "
+        "still bounds the whole leg.")
+    setup_timeout_seconds: float | None = Field(
+        default=None, gt=0, le=1800,
+        description="Upper bound for one agent's provisioning phase "
+        "(spawn + authorization + READY, seconds). Parked time waiting "
+        "on human consent never counts against it. Falls to the "
+        "deployment's setup_timeout; a requested value wins up to the "
+        "deployment's slice room (slice_max_seconds minus "
+        "per_attempt_timeout).")
     max_turns: int | None = Field(
-        default=None, ge=1, le=50,
-        description="Orchestrator decision-turn budget.")
+        default=None, ge=1, le=WIRE_MAX_TURNS_CAP,
+        description="Orchestrator decision-turn budget. Replaces the "
+        "deployment default within this cap — human-in-the-loop runs "
+        "(bot personas parked on authorization) can widen it.")
     max_total_agents: int | None = Field(
-        default=None, ge=1, le=64,
+        default=None, ge=1, le=WIRE_MAX_TOTAL_AGENTS_CAP,
         description="Total spawn ceiling for the run.")
     max_width: int | None = Field(
         default=None, ge=1, le=16,
@@ -84,6 +113,17 @@ class SubmitRunDTO(BaseModel):
     provider: ProviderKind | None = None
     model: str | None = None
     idempotency_key: str | None = Field(default=None, max_length=190)
+    identity_bot_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "The Bot whose AgentPass identity this run's Bot agents run under. "
+            "Required when any agent is bot-kind: a submit that omits it is "
+            "refused with 400, and one naming a Bot the caller does not own, or "
+            "that holds no issued passport, with 422. An llm-only run needs none "
+            "and any value supplied is ignored."
+        ),
+    )
     options: RunOptionsDTO | None = None
 
 
@@ -99,6 +139,17 @@ class RunSummaryDTO(BaseModel):
     error: str | None = None
     started_at: int | None = None
     ended_at: int | None = None
+    goal_excerpt: str = ""
+    """The goal's prefix, for telling one run from another in a list.
+
+    `goal` is up to 8000 characters; a full page of them would be the whole
+    prompt each. The full text stays on ``GET /runs/{id}/detail``.
+
+    Defaulted rather than required because an empty goal is a legitimate state:
+    a run with no goal yields an empty excerpt, and a reader must be able to tell
+    that apart from a missing field. Declaring it required would also publish a
+    backward-incompatible change for a field that is purely additive.
+    """
 
 
 class RunListDTO(BaseModel):
@@ -112,6 +163,24 @@ class AgentResultDetailDTO(BaseModel):
     payload: Any | None = None
     artifact_key: str | None = None
     routed_at: int
+
+
+class BotAuthorizationDTO(BaseModel):
+    """Pending human-authorization gate for one agent's bot (additive).
+
+    Present on an agent exactly while its bot sits at the human gate
+    (``state=AWAITING_AUTHORIZATION``): ``iframe_url``/``redirect_url``
+    are the tcauthmng consent surfaces, ``deadline`` the window horizon as
+    the ISO-8601 spelling the creation-job payload itself carries —
+    empty strings when the payload cannot answer a fact.
+    ``application_id`` is the passport application's identifier so a
+    consumer can address the decision surface from this read alone.
+    """
+    state: str
+    iframe_url: str
+    redirect_url: str
+    deadline: str
+    application_id: str
 
 
 class AgentAttemptDetailDTO(BaseModel):
@@ -166,6 +235,7 @@ class AgentDetailDTO(BaseModel):
     result: AgentResultDetailDTO | None = None
     attempt_ledger: list[AgentAttemptDetailDTO] = Field(default_factory=list)
     messages: list[AgentMessageDetailDTO] = Field(default_factory=list)
+    authorization: BotAuthorizationDTO | None = None
 
 
 class RoundDetailDTO(BaseModel):

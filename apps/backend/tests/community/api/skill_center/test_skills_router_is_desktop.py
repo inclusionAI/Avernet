@@ -1,3 +1,4 @@
+from tests.community.bot_address_fakes import support_legacy_locator
 """Regression guard: upload_skill path routing by bot_type.
 
 Verifies that the is_desktop flag flows correctly from _get_path_params
@@ -26,6 +27,7 @@ def _make_ctx(user_id="user_001", bot_id="bot_x"):
 
 def _make_repo(bot_type: str):
     repo = MagicMock()
+    support_legacy_locator(repo)
     repo.get_by_id_and_owner.return_value = {
         "bot_id": "bot_x",
         "owner_id": "user_001",
@@ -91,6 +93,7 @@ def test_owner_id_takes_priority_over_user_id():
     """
     ctx = _make_ctx(user_id="viewer_999")
     mock_repo = MagicMock()
+    support_legacy_locator(mock_repo)
     mock_repo.get_by_id_and_owner.return_value = {"active_engine": "openclaw", "bot_type": "desktop"}
 
     _get_path_params(ctx, entity_id="owner_001", entity_type="proj", bot_id="bot_x", engine_type=None, bot_repo=mock_repo)

@@ -14,7 +14,7 @@ export function ChannelSwitch({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-start gap-3 border-t border-border py-4 first:border-t-0">
+    <label className="flex cursor-pointer items-start gap-3 border-t border-divider py-4 first:border-t-0">
       <Checkbox className="mt-0.5" checked={checked} onCheckedChange={onChange} />
       <span className="min-w-0">
         <span className="block text-sm font-medium">{label}</span>

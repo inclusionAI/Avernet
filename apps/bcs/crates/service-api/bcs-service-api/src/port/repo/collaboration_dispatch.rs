@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StateMachineDispatchTarget {
     WebSocket,
+    A2a { provider_id: String, provider_bot_ref: String, interface: bcs_domain::a2a::A2aInterface },
     HttpProvider { provider_id: String, provider_bot_ref: String, protocol_version: String },
 }
 

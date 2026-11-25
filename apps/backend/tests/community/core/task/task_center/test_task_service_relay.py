@@ -7,6 +7,7 @@ import pytest
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
+    BotCandidate,
     NodeAction,
     TaskReportCommand,
     TaskReportEventType,
@@ -27,7 +28,14 @@ class _Graph:
 
 
 class _Search:
-    async def search_catalog(self, query):
+    async def search_catalog(
+        self,
+        query,
+        *,
+        viewer_actor_type=None,
+        viewer_actor_id=None,
+        visibility=None,
+    ):
         return {
             "candidates": [
                 {
@@ -46,6 +54,7 @@ class _Service(TaskServiceRelayMixin):
     def __init__(self) -> None:
         self._graph = _Graph()
         self._relay_adapter = SimpleNamespace(search=_Search())
+        self._temporary_duty_candidates = ()
 
 
 @pytest.mark.asyncio
@@ -56,6 +65,7 @@ async def test_search_bots_records_relay_search_trace() -> None:
         query="payment risk",
         task_id="task-1",
         node_id="node-1",
+        relay_token="generation-1",
     )
 
     assert [candidate.bot_id for candidate in candidates] == ["bot-1"]
@@ -64,6 +74,75 @@ async def test_search_bots_records_relay_search_trace() -> None:
     assert payload["phase"] == "search"
     assert payload["candidate_count"] == 1
     assert payload["candidates"][0]["score"] == 0.91
+
+
+@pytest.mark.asyncio
+async def test_search_bots_uses_configured_temporary_duty_fallback_without_overlap(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SERVER_ENV", "prod")
+    service = _Service()
+    service._temporary_duty_candidates = (
+        BotCandidate(bot_id="bot-2", name="Fallback", description="duty", score=None),
+        BotCandidate(bot_id="bot-3", name="Other", description="", score=None),
+    )
+
+    candidates = await service.search_bots(
+        query="payment risk",
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+    )
+
+    assert [candidate.bot_id for candidate in candidates] == ["bot-1", "bot-2", "bot-3"]
+    _, _, _, payload, _ = service._graph.events[-1]
+    assert payload["candidate_source"] == "search_plus_fallback"
+    assert payload["fallback_candidate_count"] == 2
+    assert payload["candidates"][-1]["score"] is None
+
+
+@pytest.mark.asyncio
+async def test_search_bots_does_not_add_fallback_candidates_when_search_overlaps(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SERVER_ENV", "prod")
+    service = _Service()
+    service._temporary_duty_candidates = (
+        BotCandidate(bot_id="bot-1", name="Risk Bot", description="duty", score=None),
+    )
+
+    candidates = await service.search_bots(
+        query="payment risk",
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+    )
+
+    assert [candidate.bot_id for candidate in candidates] == ["bot-1"]
+    _, _, _, payload, _ = service._graph.events[-1]
+    assert payload["candidate_source"] == "search"
+    assert payload["fallback_candidate_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_search_bots_skips_temporary_duty_fallback_in_pre(monkeypatch) -> None:
+    monkeypatch.setenv("SERVER_ENV", "pre")
+    service = _Service()
+    service._temporary_duty_candidates = (
+        BotCandidate(bot_id="bot-2", name="Fallback", description="duty", score=None),
+    )
+
+    candidates = await service.search_bots(
+        query="payment risk",
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+    )
+
+    assert [candidate.bot_id for candidate in candidates] == ["bot-1"]
+    _, _, _, payload, _ = service._graph.events[-1]
+    assert payload["candidate_source"] == "search"
+    assert payload["fallback_candidate_count"] == 0
 
 
 # ===== report():上报即落轨迹(写时发射,读侧不再依赖投影重建) =====
@@ -233,3 +312,44 @@ async def test_report_precheck_failure_degrades_to_emit() -> None:
 
     assert result.status == TaskReportStatus.APPLIED
     assert len(ctx.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_no_trace_report_skips_observation_precheck_and_writes() -> None:
+    class Graph(_ReportGraph):
+        def query_task_dashboard(self, task_id, node_id=None):
+            pytest.fail("execution report without trace needs no observation read")
+
+    graph = Graph()
+    ctx = _RecordingContextService()
+    service = _ReportService(graph, ctx)
+    command = _report_command("no-trace")
+    assert (await service.report(command)).status == TaskReportStatus.APPLIED
+    assert graph.apply_commands == [command]
+    assert ctx.calls == []
+
+
+@pytest.mark.asyncio
+async def test_no_trace_successor_report_still_hydrates_search_receipts() -> None:
+    class Graph(_ReportGraph):
+        def __init__(self):
+            super().__init__()
+            self.loaded = False
+
+        def load_action_logs(self, graph):
+            self.loaded = True
+
+        def apply_relay_report(self, command):
+            assert self.loaded, "report worker must load persisted search receipts"
+            return super().apply_relay_report(command)
+
+    graph = Graph()
+    ctx = _RecordingContextService()
+    service = _ReportService(graph, ctx)
+    command = replace(
+        _report_command("no-trace-plan"),
+        event_type=TaskReportEventType.PLAN_RESULT,
+        event=SimpleNamespace(),
+    )
+    assert (await service.report(command)).status == TaskReportStatus.APPLIED
+    assert ctx.calls == []

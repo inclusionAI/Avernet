@@ -118,7 +118,7 @@ export function MembersPanel({
 
   return (
     <aside className={cn('flex h-full flex-col bg-background')}>
-      <header className="flex items-center justify-between border-b border-border px-3 py-2.5">
+      <header className="flex items-center justify-between border-b border-divider px-3 py-2.5">
         <div className="min-w-0">
           <h2 className="m-0 truncate text-sm font-semibold text-foreground">成员管理</h2>
           <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">
@@ -138,7 +138,7 @@ export function MembersPanel({
         {renderedParticipants.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-muted-foreground">暂无成员</p>
         ) : (
-          <div className="divide-y divide-border">
+          <div className="divide-y divide-divider">
             {renderedParticipants.map((p) => (
               <ParticipantRow
                 key={p.actorId}

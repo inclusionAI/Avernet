@@ -5,6 +5,19 @@ use axum::http::HeaderMap;
 
 use bcs_auth_api::{AuthError, AuthPlugin, AuthPrincipal, AuthSource, LocalAuthConfig};
 
+/// Window granted to local mock Human identities so caller ingress
+/// extraction at the WS upgrade / HTTP boundaries sees the same windowed
+/// Human shape production logins provide. Deep material keeps its own
+/// short-lived windows; this only anchors the mock login lifetime.
+const LOCAL_MOCK_HUMAN_WINDOW_MS: u64 = 24 * 60 * 60 * 1000;
+
+fn now_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 /// Local-dev plugin: emits a mock principal from config (no IO).
 pub struct LocalAuthPlugin {
     user_id: Option<String>,
@@ -58,6 +71,8 @@ impl AuthPlugin for LocalAuthPlugin {
             Some(user_id) if !user_id.is_empty() => {
                 let mut p = AuthPrincipal::new(AuthSource::Local);
                 p.user_id = Some(user_id);
+                p.human_expires_at_ms =
+                    Some(now_unix_ms().saturating_add(LOCAL_MOCK_HUMAN_WINDOW_MS));
                 p.user_name = self
                     .mock_user_name_from_headers(headers)
                     .or_else(|| self.user_name.clone());

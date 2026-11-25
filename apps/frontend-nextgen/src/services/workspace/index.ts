@@ -1,4 +1,3 @@
-export * from './agentCodingNavigation';
 export * from './botChatProvider';
 export * from './botSessionService';
 export { ensureReactGlobal } from './ensureReactGlobal';

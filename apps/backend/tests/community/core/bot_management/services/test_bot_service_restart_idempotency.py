@@ -24,6 +24,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+from agentclaw.community.core.skill_center.runtime_projection_contract import RuntimeProjectionResult
 from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
 
 from agentclaw.community.core.bot_management.engines.default import (
@@ -803,6 +804,7 @@ class TestRestartGuardOrchestration:
             env="dev",
             user_id="user001",
             bot_type=bot_type,
+            engine_bucket=active_engine,
         )
 
     @pytest.mark.parametrize(
@@ -1284,6 +1286,7 @@ class TestRestartGuardOrchestration:
             owner_workno="user001",
             name="TestBot",
             summary="",
+            avatar_url="",
         )
         baas.upgrade_bot.assert_called_once()
         assert call_order == ["bcn", "upgrade"]
@@ -2253,7 +2256,7 @@ class TestRestartAuthorizationResyncWiring:
         svc._repository.update_by_owner.return_value = {**bot, "binding_id": 42}
         svc._skill_set_factory.create.return_value.get_symlink_mappings.return_value = []
         svc._skill_set_factory.create.return_value.project_skills = AsyncMock(return_value=True)
-        svc._runtime_reconciler = SimpleNamespace(project_mcp_and_cli=AsyncMock(return_value=None))
+        svc._runtime_reconciler = SimpleNamespace(project_mcp_and_cli=AsyncMock(return_value=RuntimeProjectionResult.converged()))
         svc._template_service.get_template_config.return_value = {}
         refresh_strategy = RecordingRestartProvisioningStrategy(test_engine)
 
@@ -2368,7 +2371,7 @@ class TestRestartAuthorizationResyncWiring:
         )
         svc._repository.get_by_id_and_owner.return_value = bot
         svc._skill_set_factory.create.return_value.project_skills = AsyncMock(return_value=True)
-        svc._runtime_reconciler = SimpleNamespace(project_mcp_and_cli=AsyncMock(return_value=None))
+        svc._runtime_reconciler = SimpleNamespace(project_mcp_and_cli=AsyncMock(return_value=RuntimeProjectionResult.converged()))
 
         with _temporarily_register_strategy(refresh_strategy), patch.object(
             svc, "_restart_bot_baas", return_value=bot

@@ -34,6 +34,17 @@ class ResourceKeyRepository(Protocol):
         """Look up record by resource_key and tenant."""
         ...
 
-    def exists_bot_mapping(self, resource_key_id: int, bot_id: str) -> bool:
-        """Check whether a mapping between resource_key_id and bot_id exists."""
+    def exists_bot_mapping(
+        self,
+        resource_key_id: int,
+        bot_id: str,
+        *,
+        claimed_bot_id: str | None = None,
+    ) -> bool:
+        """Check whether a mapping between resource_key_id and bot_id exists.
+
+        ``claimed_bot_id`` is the bot a service principal names in its
+        ``app.bot_id`` claim; it is matched inside the same resource-key scope
+        and never bypasses the need for a grant.
+        """
         ...

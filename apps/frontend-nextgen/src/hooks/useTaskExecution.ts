@@ -1,11 +1,7 @@
 /**
- * useTaskExecution —— 任务发起编排：选择动态/工作流任务、校验、提交、打开任务副屏（taskPanel.TaskLoopView）。
- * 对齐 spec Task 10：提交期间防重入、disabledReason、execute 成功经 submitPanelMessage 发声明式 <AixUI component="taskPanel.TaskLoopView"> 落库持久。
- *
- * workflow 列表经 taskService.fetchWorkflows(ownerUserId, ownerBotId) 动态加载（ownerBotId 形如 "default:146836"，
- * controller 裁成裸 botId 后连同 botOwnerId(=ownerUserId) 直连 clawweb /api/workflows；替代写死列表）。
- * 提交工作流任务时经 taskService.resolveWorkflowCommand 取 facade.command 作为 execution_config.workflow_id。
- * Controller 调用收口在 service 层，Hook 不直接 import controller（守卫 TC-G002）。
+ * 任务发起：动态/工作流选择、校验及声明式 TaskLoopView 消息提交（spec Task 10）。
+ * 工作流列表/command 经 taskService 动态解析；Hook 不直接 import controller（TC-G002）。
+ * 提交只登记显式 open intent；SDK 真正展示后的焦点由共享 controller 投影。
  */
 import { TASK_API_BASE } from '@/services/tasks/taskConfig';
 import type {
@@ -17,12 +13,18 @@ import type {
 import { composerSelectionKey } from '@/services/tasks/taskMapper';
 import { buildTaskLaunchMessage, buildTaskPanelAixUI } from '@/services/tasks/taskPanelMessage';
 import { executeTaskService, resolveWorkflowCommand, type WorkflowListItem } from '@/services/tasks/taskService';
+import { botSkillService } from '@/services/workspace/botSkillService';
+import { splitBotId } from '@/services/workspace/botSessionService';
 import { useTaskStore } from '@/stores/taskStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import type { PanelHandle } from '@tc-chat/core';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useWorkflowList } from './useWorkflowList';
+
+function taskSkillCacheKey(context: TaskComposerContext): string {
+  return `${context.sourceType}:${context.ownerBotId}:${context.ownerUserId}`;
+}
 
 export interface UseTaskExecutionOptions {
   panelRef: React.RefObject<PanelHandle | null>;
@@ -38,6 +40,9 @@ export type { ComposerSelection, WorkflowSelection } from '@/services/tasks/task
 export interface UseTaskExecutionResult {
   submitting: boolean;
   error: string | null;
+  /** 当前 Bot/协作群 Driver Bot 是否已安装可用的 task-intake。 */
+  dynamicTaskEnabled: boolean;
+  dynamicTaskChecking: boolean;
   lastTaskId: string | null;
   workflows: WorkflowListItem[];
   workflowsLoading: boolean;
@@ -66,6 +71,55 @@ export function useTaskExecution({
   const [error, setError] = useState<string | null>(null);
   const lastTaskId = useTaskStore((s) => s.lastTaskId);
   const { workflows, workflowsLoading, loadWorkflows } = useWorkflowList(context);
+  const [dynamicTaskEnabled, setDynamicTaskEnabled] = useState(false);
+  const [dynamicTaskChecking, setDynamicTaskChecking] = useState(Boolean(context));
+  const taskSkillCacheRef = useRef(new Map<string, boolean>());
+
+  useEffect(() => {
+    if (!context?.ownerBotId || !context.ownerUserId) {
+      setDynamicTaskEnabled(false);
+      setDynamicTaskChecking(false);
+      return undefined;
+    }
+    const cacheKey = taskSkillCacheKey(context);
+    const cachedSkill = taskSkillCacheRef.current.get(cacheKey);
+    if (cachedSkill !== undefined) {
+      // Same driver Bot + same initiator means the Skill capability is unchanged;
+      // switching sessions should not trigger another Skills request.
+      setDynamicTaskEnabled(cachedSkill);
+      setDynamicTaskChecking(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setDynamicTaskChecking(true);
+    const { realBotId, ownerId } = splitBotId(context.ownerBotId);
+    void botSkillService
+      .hasTaskIntentSkillForBot({
+        realBotId,
+        botUuid: context.ownerBotId,
+        ownerId,
+        currentUserId: context.ownerUserId,
+      })
+      .then((result) => {
+        if (cancelled) return;
+        const enabled = result.ok && result.data;
+        taskSkillCacheRef.current.set(cacheKey, enabled);
+        setDynamicTaskEnabled(enabled);
+      })
+      .catch(() => {
+        // 技能探测只决定任务入口是否可点；意外失败需安全降级为不可点，
+        // 不产生未处理 Promise，也不触发全局错误提示。
+        if (cancelled) return;
+        taskSkillCacheRef.current.set(cacheKey, false);
+        setDynamicTaskEnabled(false);
+      })
+      .finally(() => {
+        if (!cancelled) setDynamicTaskChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [context]);
 
   const validate = useCallback(
     (form: TaskComposerForm): string | null => {
@@ -115,13 +169,19 @@ export function useTaskExecution({
           },
         });
         const launchMessage = buildTaskLaunchMessage(panelMessage, record);
-        if (launchMessage.shouldTriggerBot) {
-          (submitTaskExecutionMessage ?? submitPanelMessage)(launchMessage.content, context.ownerBotId);
-        } else {
-          submitPanelMessage(launchMessage.content);
+        // Explicit intent authorizes the SDK open; only actual presentation may project activeTaskId.
+        const taskStore = useTaskSidePanelStore.getState();
+        taskStore.markTaskPanelOpenIntent(record.task_id);
+        try {
+          if (launchMessage.shouldTriggerBot) {
+            (submitTaskExecutionMessage ?? submitPanelMessage)(launchMessage.content, context.ownerBotId);
+          } else {
+            submitPanelMessage(launchMessage.content);
+          }
+        } catch (error) {
+          taskStore.consumeTaskPanelOpenIntent(record.task_id);
+          throw error;
         }
-        // V2 多任务切换(spec §3.2):发起任务即自动切换活跃任务(AixUI 面板消息落库后自动开该任务 tab)
-        useTaskSidePanelStore.getState().setActiveTask(record.task_id);
         return { ok: true, taskId: record.task_id } as const;
       } catch (err) {
         const msg = err instanceof Error ? err.message : '任务提交失败';
@@ -159,9 +219,10 @@ export function useTaskExecution({
     });
   }, []);
   const selectDynamic = useCallback(() => {
+    if (!dynamicTaskEnabled) return;
     // 动态任务全场至多一个：已有则忽略。
     setSelections((prev) => (prev.some((s) => s.kind === 'dynamic') ? prev : [...prev, { kind: 'dynamic' }]));
-  }, []);
+  }, [dynamicTaskEnabled]);
   const removeSelection = useCallback((key: string) => {
     setSelections((prev) => prev.filter((s) => composerSelectionKey(s) !== key));
   }, []);
@@ -181,6 +242,8 @@ export function useTaskExecution({
     selectDynamic,
     removeSelection,
     clearSelection,
+    dynamicTaskEnabled,
+    dynamicTaskChecking,
     submit,
     validate,
   };

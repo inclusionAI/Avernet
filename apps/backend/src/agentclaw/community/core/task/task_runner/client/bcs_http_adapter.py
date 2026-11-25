@@ -23,6 +23,11 @@ from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 
 logger = logging.getLogger(__name__)
 
+# httpx defaults to roughly five seconds. Production BCS POST /groups can
+# legitimately take longer than that; a short client-side wall makes durable
+# dispatch look like repeated backend failures before BCS finishes.
+_DEFAULT_HTTP_TIMEOUT_SECONDS = 30.0
+
 
 def _response_summary(resp: httpx.Response) -> str:
     """Return a bounded response summary without leaking auth headers or large bodies."""
@@ -93,7 +98,9 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
     def __init__(self, token: BcsTokenProvider, *, http_client: httpx.AsyncClient | None = None) -> None:
         self._t = token
         self._owns_client = http_client is None
-        self._client = http_client or httpx.AsyncClient(base_url=token.base_url)
+        self._client = http_client or httpx.AsyncClient(
+            base_url=token.base_url, timeout=_DEFAULT_HTTP_TIMEOUT_SECONDS
+        )
         # An httpx AsyncClient/connection pool is not safe to share across
         # asyncio event loops. The task module has a FastAPI loop plus poller
         # and harness loops, so keep the owned client pinned to the first loop
@@ -126,7 +133,9 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
             id(self._client_loop),
             id(current_loop),
         )
-        client = httpx.AsyncClient(base_url=self._t.base_url)
+        client = httpx.AsyncClient(
+            base_url=self._t.base_url, timeout=_DEFAULT_HTTP_TIMEOUT_SECONDS
+        )
         try:
             yield client
         finally:
@@ -159,6 +168,14 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         try:
             async with self._client_for_current_loop() as client:
                 r = await client.request(method, path, json=json, headers=headers)
+        except httpx.TimeoutException as exc:
+            logger.warning(
+                "[task][bcs_http] <<< request timeout method=%s path=%s elapsed_ms=%s error_type=%s",
+                method, path, int((time.monotonic() - _t0) * 1000), type(exc).__name__,
+            )
+            raise BcsTimeoutError(
+                f"{method} {path} timed out after {int((time.monotonic() - _t0) * 1000)}ms"
+            ) from exc
         except Exception:
             logger.exception("[task][bcs_http] <<< request transport failed method=%s path=%s elapsed_ms=%s",
                              method, path, int((time.monotonic() - _t0) * 1000))
@@ -239,7 +256,9 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
 
     async def get_session_messages(self, session_id: str, *, limit: int = 50,
                                    since_msg_id: str | None = None,
-                                   caller_bearer: str | None = None) -> list[Any]:
+                                   caller_bearer: str | None = None,
+                                   include_pending: bool = False,
+                                   before: int | None = None) -> list[Any]:
         path = f"/sessions/{session_id}/messages"
         ts = str(int(time.time()))
         headers = self._sign("GET", path, ts)
@@ -251,6 +270,10 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
         if caller_bearer:
             headers["Authorization"] = f"Bearer {caller_bearer}"
         params: dict[str, Any] = {"limit": limit}
+        if include_pending:
+            params["include_pending"] = "true"
+        if before is not None:
+            params["before"] = before
         if since_msg_id:
             params["since_msg_id"] = since_msg_id
         logger.info("[task][bcs_http] >>> get_session_messages GET path=%s base_url=%s limit=%s since=%s caller_identity=%s",
@@ -263,6 +286,22 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
                     path, r.status_code, int((time.monotonic() - _t0) * 1000), _response_summary(r))
         _map_status(r)
         return r.json()
+
+    async def query_message_deliveries(
+        self, session_id: str, *, message_ids: list[str],
+        caller_bearer: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if not 1 <= len(message_ids) <= 100 or any(not value for value in message_ids):
+            raise ValueError("delivery query requires 1..100 message IDs")
+        response = await self._req(
+            "POST", f"/openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query",
+            json={"message_ids": message_ids},
+            extra_headers={"Authorization": f"Bearer {caller_bearer}"} if caller_bearer else None,
+        )
+        data = response.json()
+        if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
+            raise BcsClientError("delivery status response is not an object list")
+        return data
 
     async def start_state_machine_run(self, group_id, *, definition_yaml, definition_ref,
                                       session_id, input) -> str:

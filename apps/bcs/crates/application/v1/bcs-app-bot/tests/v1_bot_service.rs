@@ -3,14 +3,17 @@
     reason = "test assertions intentionally fail fast"
 )]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_app_bot::{BotServiceConfig, BotServiceImpl};
-use bcs_bot::{BotControlPlaneCore, BotCore};
+use bcs_bot::{BotCandidateSearchCore, BotControlPlaneCore, BotCore, EmptyWorkerProfileCoreService};
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_friend::FriendCore;
+use bcs_service_api::application::connect::{
+    FriendEntriesPage, FriendListQuery,
+};
 use bcs_service_api::application::{ConnectService, RequestDirection, RequestsPage};
 use bcs_service_api::application::v1::{
     ApplicationError, Bot, BotCandidatePurpose, BotCandidateSearchMode, BotDescriptorPatch,
@@ -19,9 +22,10 @@ use bcs_service_api::application::v1::{
     SearchBotCandidates, UpdateBot, UserVisibility,
 };
 use bcs_service_api::{
-    ActorKind, ActorStatus, BotCandidateSearchCoreResult, BotCandidateSearchCoreService,
-    BotCandidateSearchHit, BotCandidateSearchMode as CoreCandidateSearchMode,
-    BotCandidateSearchQuery, BotCapabilities, BotControlPlaneCoreService,
+    ActorKind, ActorStatus, AuthorizedCandidateSearchQuery, BotCandidateSearchCoreResult,
+    BotCandidateSearchCoreService, BotCandidateSearchHit,
+    BotCandidateSearchMode as CoreCandidateSearchMode, BotCandidateSearchQuery,
+    BotCandidateVisibility, BotCapabilities, BotControlPlaneCoreService,
     BotControlPlaneDescriptor, BotControlPlaneRecord, BotControlPlaneView, BotRegistryCoreService,
     BotRepoPort, FriendCoreService, LegacyBotCandidateSearchCoreResult, ProviderBotBinding,
     ProviderBotBindingRepoPort, ProviderRecord, ProviderRepoPort, RegisteredBot, ServiceError,
@@ -30,69 +34,11 @@ use bcs_service_api::{
 use bcs_domain::edge_permission::{FriendListEntry, PermissionRequest, RequestStatus};
 use bcs_test_support::{NoopBotRegistryCoreService, NoopConnectService, NoopFriendCoreService};
 
-#[test]
-fn v1_bot_commands_expose_the_approved_control_plane_surface() {
-    let caller = human_caller("staff-1");
-
-    let _ = ListBotCandidates {
-        caller: caller.clone(),
-        bot_id: "bot-1".to_string(),
-        purpose: Default::default(),
-        name: None,
-        offset: 0,
-        limit: 20,
-    };
-    let _ = SearchBotCandidates {
-        caller: caller.clone(),
-        bot_id: "bot-1".to_string(),
-        purpose: Default::default(),
-        query: Some("planning".to_string()),
-    };
-    let _ = QueryBots {
-        caller: caller.clone(),
-        bot_ids: vec!["bot-1".to_string()],
-    };
-    let _ = GetBot {
-        caller: caller.clone(),
-        bot_id: "bot-1".to_string(),
-    };
-    let _ = UpdateBot {
-        caller: caller.clone(),
-        bot_id: "bot-1".to_string(),
-        patch: BotPatch {
-            name: Some("Renamed".to_string()),
-            visibility: Some(BotVisibility::Protected),
-            status: Some(BotStatus::Online),
-            descriptor: Some(BotDescriptorPatch {
-                summary: Some("summary".to_string()),
-                domains: None,
-                skills: None,
-                scopes: None,
-            }),
-            task_claim_mode: None,
-            task_dream_mode: None,
-            user_visibility: None,
-            friend_ext: None,
-            friend_check_in_strategy: None,
-        },
-    };
-    let _ = ListMyBots {
-        caller,
-        kind: Some(BotKind::Bot),
-        name: None,
-        status: None,
-        reachability: Some(BotReachability::Reachable),
-        offset: 0,
-        limit: 20,
-    };
-
-    let _assert_object_safe: fn(&dyn BotService) = |_| {};
-}
-
 struct Fixture {
     service: BotServiceImpl,
     repo: Arc<MemoryBotRepo>,
     friends: Arc<FriendCore>,
+    connect: Arc<RecordingConnectService>,
     providers: Arc<MemoryProviderStore>,
     _temp: tempfile::TempDir,
 }
@@ -103,6 +49,7 @@ impl Fixture {
         let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
         let registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_repo(repo.clone()));
         let friends = Arc::new(FriendCore::memory());
+        let connect = Arc::new(RecordingConnectService::default());
         let providers = Arc::new(MemoryProviderStore::new());
         let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(
             BotControlPlaneCore::new(repo.clone(), providers.clone(), providers.clone()),
@@ -112,14 +59,16 @@ impl Fixture {
             control_plane,
             registry,
             friends.clone(),
-            Arc::new(NoopConnectService),
+            connect.clone(),
             Arc::new(RecordingCandidateSearch::empty()),
             BotServiceConfig { env: env.clone() },
-        );
+        )
+        .with_bot_authority_hook(bcs_test_support::authority_hook_for(repo.clone()));
         Self {
             service,
             repo,
             friends,
+            connect,
             providers,
             _temp: temp,
         }
@@ -144,27 +93,111 @@ impl Fixture {
             )
             .await
             .expect("register bot");
+        if !owner.is_empty() {
+            bcs_test_support::grant_owner_edge(&self.repo, bot_id, owner)
+                .await;
+        }
         self.repo
             .update_actor_status(bot_id, status)
             .await
             .expect("update actor status");
     }
+
+    /// A bot the Human CONTROLS under the authority model:
+    /// the preset Human registry entry plus the governance
+    /// initialize (owner edge + version 1) on top of
+    /// `add_bot`'s created_by registration.
+    async fn add_controlled_bot(
+        &self,
+        bot_id: &str,
+        owner: &str,
+        visibility: &str,
+        status: ActorStatus,
+    ) {
+        self.repo
+            .ensure_human_actor(owner, owner)
+            .await
+            .expect("ensure fixture Human actor row");
+        self.add_bot(bot_id, owner, visibility, status).await;
+        self.repo
+            .initialize_ownership(
+                bot_id,
+                owner,
+                bcs_service_api::types::bot_authority::AuthorityMutation {
+                    mutation_id: format!("fixture-{bot_id}"),
+                    actor: bcs_service_api::types::bot_authority::AuthorityActor::
+                        Human {
+                            user_id: owner.to_string(),
+                        },
+                },
+            )
+            .await
+            .expect("initialize ownership");
+    }
 }
 
 struct RecordingCandidateSearch {
-    queries: Mutex<Vec<BotCandidateSearchQuery>>,
+    queries: Mutex<Vec<AuthorizedCandidateSearchQuery>>,
     result: BotCandidateSearchCoreResult,
+    derive_friend_markers: bool,
 }
 
+#[derive(Default)]
 struct RecordingConnectService {
-    friends: Mutex<Vec<FriendListEntry>>,
+    /// Friends served to any actor without an actor-specific set.
+    default_friends: Mutex<Vec<FriendListEntry>>,
+    /// Actor-scoped edge sets: the perspective whose approved edges are read.
+    actor_friends: Mutex<HashMap<String, Vec<FriendListEntry>>>,
+    queries: Mutex<Vec<(String, FriendListQuery)>>,
 }
 
 impl RecordingConnectService {
     fn new(friends: Vec<FriendListEntry>) -> Self {
         Self {
-            friends: Mutex::new(friends),
+            default_friends: Mutex::new(friends),
+            ..Self::default()
         }
+    }
+
+    fn add_friend(&self, actor_id: &str, kind: ActorKind) {
+        self.default_friends
+            .lock()
+            .expect("friends lock")
+            .push(friend_entry(actor_id, kind));
+    }
+
+    /// Approved edges served only when `owner` is the actor whose friend set
+    /// is read, so a test can pin that each perspective reads its own actor.
+    fn add_friend_for(&self, owner: &str, actor_id: &str, kind: ActorKind) {
+        self.actor_friends
+            .lock()
+            .expect("actor friends lock")
+            .entry(owner.to_string())
+            .or_default()
+            .push(friend_entry(actor_id, kind));
+    }
+
+    fn queries(&self) -> Vec<FriendListQuery> {
+        self.queries
+            .lock()
+            .expect("friend queries lock")
+            .iter()
+            .map(|(_, query)| query.clone())
+            .collect()
+    }
+
+    fn actor_queries(&self) -> Vec<(String, FriendListQuery)> {
+        self.queries.lock().expect("friend queries lock").clone()
+    }
+}
+
+fn friend_entry(actor_id: &str, kind: ActorKind) -> FriendListEntry {
+    FriendListEntry {
+        actor_id: actor_id.to_string(),
+        name: Some(actor_id.to_string()),
+        summary: None,
+        is_online: false,
+        kind,
     }
 }
 
@@ -220,17 +253,45 @@ impl ConnectService for RecordingConnectService {
 
     async fn list_friends_paginated(
         &self,
-        _: &str,
-        _: bcs_service_api::application::connect::FriendListQuery,
-    ) -> ServiceResult<bcs_service_api::application::connect::FriendEntriesPage> {
-        unreachable!("legacy caller must retain the unpaginated query")
+        actor_id: &str,
+        query: FriendListQuery,
+    ) -> ServiceResult<FriendEntriesPage> {
+        self.queries
+            .lock()
+            .expect("friend queries lock")
+            .push((actor_id.to_string(), query.clone()));
+        let actor_friends = self.actor_friends.lock().expect("actor friends lock");
+        let entries = match actor_friends.get(actor_id) {
+            Some(entries) => entries.clone(),
+            None => self
+                .default_friends
+                .lock()
+                .expect("friends lock")
+                .clone(),
+        };
+        let filtered = entries
+            .iter()
+            .filter(|entry| {
+                query
+                    .target_type
+                    .is_none_or(|target_type| entry.kind == target_type)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let total = filtered.len() as u64;
+        let items = filtered
+            .into_iter()
+            .skip(query.offset as usize)
+            .take(query.limit as usize)
+            .collect();
+        Ok(FriendEntriesPage { items, total })
     }
 
     async fn list_friends(
         &self,
         _: &str,
     ) -> ServiceResult<Vec<FriendListEntry>> {
-        Ok(self.friends.lock().expect("friends lock").clone())
+        panic!("v1 candidates must read approved edges, not the legacy list_friends");
     }
 
     async fn list_requests(
@@ -315,7 +376,15 @@ impl RecordingCandidateSearch {
         Self {
             queries: Mutex::new(Vec::new()),
             result,
+            derive_friend_markers: false,
         }
+    }
+
+    /// Mirror the production Core's friend marker derivation so a test can
+    /// compare the list and search views of the same approved edge set.
+    fn deriving_friend_markers(mut self) -> Self {
+        self.derive_friend_markers = true;
+        self
     }
 
     fn empty() -> Self {
@@ -330,13 +399,9 @@ impl RecordingCandidateSearch {
 impl BotCandidateSearchCoreService for RecordingCandidateSearch {
     async fn search_candidates(
         &self,
-        query: BotCandidateSearchQuery,
+        _query: BotCandidateSearchQuery,
     ) -> BotCandidateSearchCoreResult {
-        self.queries
-            .lock()
-            .expect("candidate search queries lock")
-            .push(query);
-        self.result.clone()
+        panic!("OpenAPI V1 must use the authorized candidate-search entry point")
     }
 
     async fn search_candidates_for_legacy(
@@ -344,6 +409,23 @@ impl BotCandidateSearchCoreService for RecordingCandidateSearch {
         _query: BotCandidateSearchQuery,
     ) -> LegacyBotCandidateSearchCoreResult {
         panic!("OpenAPI V1 must not call the legacy candidate-search entry point")
+    }
+
+    async fn search_authorized_candidates(
+        &self,
+        query: AuthorizedCandidateSearchQuery,
+    ) -> ServiceResult<BotCandidateSearchCoreResult> {
+        let mut result = self.result.clone();
+        if self.derive_friend_markers {
+            for hit in result.hits.iter_mut() {
+                hit.is_friend = query.friend_ids.contains(&hit.bot.bot_uuid);
+            }
+        }
+        self.queries
+            .lock()
+            .expect("candidate search queries lock")
+            .push(query);
+        Ok(result)
     }
 }
 
@@ -433,1096 +515,6 @@ impl BotControlPlaneCoreService for AuthorizationProbeCore {
     }
 }
 
-#[tokio::test]
-async fn ownership_denial_precedes_provider_hydration() {
-    let env = bcs_config::resolve_env_str();
-    let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(AuthorizationProbeCore {
-        record: BotControlPlaneRecord {
-            bot_id: "owned".to_string(),
-            kind: ActorKind::Bot,
-            name: "Owned".to_string(),
-            visibility: "public".to_string(),
-            status: ActorStatus::Online,
-            env: env.clone(),
-            created_by: Some("staff-1".to_string()),
-            descriptor: BotControlPlaneDescriptor {
-                summary: String::new(),
-                domains: Vec::new(),
-                skills: Vec::new(),
-                scopes: Vec::new(),
-            },
-            agent_code: None,
-            task_claim_mode: false,
-            task_dream_mode: false,
-            created_at: 1,
-            updated_at: 1,
-            user_visibility: Default::default(),
-            friend_ext: Default::default(),
-            friend_check_in_strategy: Default::default(),
-        },
-    });
-    let service = BotServiceImpl::new(
-        control_plane,
-        Arc::new(NoopBotRegistryCoreService),
-        Arc::new(NoopFriendCoreService),
-        Arc::new(NoopConnectService),
-        Arc::new(RecordingCandidateSearch::empty()),
-        BotServiceConfig { env },
-    );
-
-    let error = service
-        .update(UpdateBot {
-            caller: human_caller("staff-2"),
-            bot_id: "owned".to_string(),
-            patch: BotPatch {
-                name: Some("Nope".to_string()),
-                ..Default::default()
-            },
-        })
-        .await
-        .expect_err("ownership denial must not hydrate Provider metadata");
-
-    assert_eq!(error.code(), "forbidden");
-}
-
-#[tokio::test]
-async fn search_candidates_calls_core_once_and_preserves_ranked_enrichment() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
-    let registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_repo(repo.clone()));
-    let providers = Arc::new(MemoryProviderStore::new());
-    let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(BotControlPlaneCore::new(
-        repo.clone(),
-        providers.clone(),
-        providers.clone(),
-    ));
-    let friends = Arc::new(FriendCore::memory());
-    let candidate_search = Arc::new(RecordingCandidateSearch::new(
-        BotCandidateSearchCoreResult {
-            hits: vec![
-                search_hit("recommended-b", true, Some(0.0), Some("best match")),
-                search_hit("recommended-a", false, Some(0.7), Some("second match")),
-            ],
-            mode: CoreCandidateSearchMode::Semantic,
-        },
-    ));
-    let env = bcs_config::resolve_env_str();
-    let service = BotServiceImpl::new(
-        control_plane,
-        registry,
-        friends,
-        Arc::new(NoopConnectService),
-        candidate_search.clone(),
-        BotServiceConfig { env },
-    );
-
-    for bot_id in ["acting", "recommended-a", "recommended-b"] {
-        repo.register_with_owner_and_token(
-            bot_id.to_string(),
-            BotCapabilities {
-                name: Some(bot_id.to_string()),
-                summary: Some(format!("summary-{bot_id}")),
-                visibility: if bot_id == "acting" {
-                    "private".to_string()
-                } else {
-                    "public".to_string()
-                },
-                ..Default::default()
-            },
-            if bot_id == "acting" {
-                "staff-1"
-            } else {
-                "staff-2"
-            },
-            &format!("token-{bot_id}"),
-        )
-        .await
-        .expect("register search bot");
-    }
-    repo.register_streaming_connection("recommended-b".to_string())
-        .await
-        .expect("connect recommended bot");
-    providers
-        .insert_provider(ProviderRecord {
-            provider_id: "provider-search".to_string(),
-            slug: None,
-            name: "Search Provider".to_string(),
-            config: "{}".to_string(),
-            created_by: "staff-2".to_string(),
-            owners: "[]".to_string(),
-            disabled: false,
-            created_at: 1,
-            updated_at: 1,
-        })
-        .await
-        .expect("insert search provider");
-    providers
-        .insert_binding(ProviderBotBinding {
-            webhook_url: None,
-            bot_uuid: "recommended-b".to_string(),
-            provider_id: "provider-search".to_string(),
-            provider_bot_ref: "private-provider-reference".to_string(),
-            disabled: false,
-            created_at: 1,
-            updated_at: 1,
-        })
-        .await
-        .expect("insert search provider binding");
-
-    let result = service
-        .search_candidates(SearchBotCandidates {
-            caller: human_caller("staff-1"),
-            bot_id: "acting".to_string(),
-            purpose: BotCandidatePurpose::Collaboration,
-            query: Some("  planning help  ".to_string()),
-        })
-        .await
-        .expect("search candidates");
-
-    let commands = candidate_search
-        .queries
-        .lock()
-        .expect("candidate search queries lock")
-        .clone();
-    assert_eq!(commands.len(), 1);
-    assert_eq!(commands[0].query, "planning help");
-    assert_eq!(commands[0].acting_actor_id, "acting");
-    assert_eq!(
-        commands[0].visibility,
-        bcs_service_api::BotCandidateVisibility::Collaboration
-    );
-    assert_eq!(commands[0].limit, 20);
-    assert_eq!(
-        result
-            .items
-            .iter()
-            .map(|item| item.bot.bot_id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["recommended-b", "recommended-a"]
-    );
-    assert!(result.items[0].is_friend);
-    assert_eq!(result.items[0].score, Some(0.0));
-    assert_eq!(result.items[0].short_profile.as_deref(), Some("best match"));
-    assert_eq!(result.items[0].bot.kind, BotKind::Bot);
-    assert_eq!(result.items[0].bot.name, "recommended-b");
-    assert_eq!(
-        result.items[0].bot.descriptor.summary,
-        "summary-recommended-b"
-    );
-    assert_eq!(result.items[0].bot.reachability, BotReachability::Reachable);
-    assert_eq!(
-        result.items[0]
-            .bot
-            .provider
-            .as_ref()
-            .map(|provider| provider.name.as_str()),
-        Some("Search Provider")
-    );
-    assert_eq!(
-        result.items[0].tags.get("specialty"),
-        Some(&serde_json::json!("planning"))
-    );
-    assert_eq!(result.search_mode, BotCandidateSearchMode::Semantic);
-    let serialized = serde_json::to_value(&result).expect("serialize search result");
-    assert!(serialized.get("context").is_none());
-    assert!(serialized.get("recommend_response").is_none());
-}
-
-#[tokio::test]
-async fn search_candidates_normalizes_missing_empty_and_whitespace_queries() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
-    let registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_repo(repo.clone()));
-    let providers = Arc::new(MemoryProviderStore::new());
-    let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(BotControlPlaneCore::new(
-        repo.clone(),
-        providers.clone(),
-        providers,
-    ));
-    let candidate_search = Arc::new(RecordingCandidateSearch::empty());
-    let service = BotServiceImpl::new(
-        control_plane,
-        registry,
-        Arc::new(FriendCore::memory()),
-        Arc::new(NoopConnectService),
-        candidate_search.clone(),
-        BotServiceConfig {
-            env: bcs_config::resolve_env_str(),
-        },
-    );
-    repo.register_with_owner_and_token(
-        "acting".to_string(),
-        BotCapabilities {
-            name: Some("acting".to_string()),
-            visibility: "private".to_string(),
-            ..Default::default()
-        },
-        "staff-1",
-        "token-acting",
-    )
-    .await
-    .expect("register acting bot");
-
-    for query in [None, Some(String::new()), Some("  \t\n ".to_string())] {
-        let result = service
-            .search_candidates(SearchBotCandidates {
-                caller: human_caller("staff-1"),
-                bot_id: "acting".to_string(),
-                purpose: BotCandidatePurpose::Discovery,
-                query,
-            })
-            .await
-            .expect("empty query search");
-
-        assert!(result.items.is_empty());
-        assert_eq!(result.search_mode, BotCandidateSearchMode::EmptyQuery);
-    }
-
-    let queries = candidate_search
-        .queries
-        .lock()
-        .expect("candidate search queries lock");
-    assert_eq!(queries.len(), 3);
-    assert!(queries.iter().all(|query| query.query.is_empty()));
-}
-
-#[tokio::test]
-async fn search_candidates_preserves_name_fallback_order_and_omits_semantic_enrichment() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
-    let registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_repo(repo.clone()));
-    let providers = Arc::new(MemoryProviderStore::new());
-    let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(BotControlPlaneCore::new(
-        repo.clone(),
-        providers.clone(),
-        providers,
-    ));
-    let candidate_search = Arc::new(RecordingCandidateSearch::new(
-        BotCandidateSearchCoreResult {
-            hits: vec![
-                search_hit(
-                    "fallback-b",
-                    false,
-                    Some(0.0),
-                    Some("must not escape fallback mode"),
-                ),
-                search_hit(
-                    "fallback-a",
-                    true,
-                    Some(0.0),
-                    Some("must not escape fallback mode"),
-                ),
-            ],
-            mode: CoreCandidateSearchMode::NameFallback,
-        },
-    ));
-    let service = BotServiceImpl::new(
-        control_plane,
-        registry,
-        Arc::new(FriendCore::memory()),
-        Arc::new(NoopConnectService),
-        candidate_search,
-        BotServiceConfig {
-            env: bcs_config::resolve_env_str(),
-        },
-    );
-    for bot_id in ["acting", "fallback-a", "fallback-b"] {
-        repo.register_with_owner_and_token(
-            bot_id.to_string(),
-            BotCapabilities {
-                name: Some(bot_id.to_string()),
-                visibility: if bot_id == "acting" {
-                    "private".to_string()
-                } else {
-                    "public".to_string()
-                },
-                ..Default::default()
-            },
-            if bot_id == "acting" {
-                "staff-1"
-            } else {
-                "staff-2"
-            },
-            &format!("token-{bot_id}"),
-        )
-        .await
-        .expect("register fallback bot");
-    }
-
-    let result = service
-        .search_candidates(SearchBotCandidates {
-            caller: human_caller("staff-1"),
-            bot_id: "acting".to_string(),
-            purpose: BotCandidatePurpose::Discovery,
-            query: Some(" fallback ".to_string()),
-        })
-        .await
-        .expect("fallback search");
-
-    assert_eq!(result.search_mode, BotCandidateSearchMode::NameFallback);
-    assert_eq!(
-        result
-            .items
-            .iter()
-            .map(|item| item.bot.bot_id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["fallback-b", "fallback-a"]
-    );
-    assert!(result.items.iter().all(|item| item.score.is_none()));
-    assert!(result.items.iter().all(|item| item.short_profile.is_none()));
-}
-
-#[tokio::test]
-async fn search_candidates_omits_enrichment_for_empty_query_mode() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
-    let registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_repo(repo.clone()));
-    let providers = Arc::new(MemoryProviderStore::new());
-    let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(BotControlPlaneCore::new(
-        repo.clone(),
-        providers.clone(),
-        providers,
-    ));
-    let candidate_search = Arc::new(RecordingCandidateSearch::new(
-        BotCandidateSearchCoreResult {
-            hits: vec![search_hit(
-                "unexpected-empty-hit",
-                false,
-                Some(0.9),
-                Some("must not escape empty mode"),
-            )],
-            mode: CoreCandidateSearchMode::EmptyQuery,
-        },
-    ));
-    let service = BotServiceImpl::new(
-        control_plane,
-        registry,
-        Arc::new(FriendCore::memory()),
-        Arc::new(NoopConnectService),
-        candidate_search,
-        BotServiceConfig {
-            env: bcs_config::resolve_env_str(),
-        },
-    );
-    for bot_id in ["acting", "unexpected-empty-hit"] {
-        repo.register_with_owner_and_token(
-            bot_id.to_string(),
-            BotCapabilities {
-                name: Some(bot_id.to_string()),
-                visibility: if bot_id == "acting" {
-                    "private".to_string()
-                } else {
-                    "public".to_string()
-                },
-                ..Default::default()
-            },
-            if bot_id == "acting" {
-                "staff-1"
-            } else {
-                "staff-2"
-            },
-            &format!("token-{bot_id}"),
-        )
-        .await
-        .expect("register empty-mode bot");
-    }
-
-    let result = service
-        .search_candidates(SearchBotCandidates {
-            caller: human_caller("staff-1"),
-            bot_id: "acting".to_string(),
-            purpose: BotCandidatePurpose::Discovery,
-            query: None,
-        })
-        .await
-        .expect("empty-mode search");
-
-    assert_eq!(result.search_mode, BotCandidateSearchMode::EmptyQuery);
-    assert_eq!(result.items.len(), 1);
-    assert!(result.items[0].score.is_none());
-    assert!(result.items[0].short_profile.is_none());
-}
-
-#[tokio::test]
-async fn search_candidates_never_projects_human_hits_as_physical_bots() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
-    let registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_repo(repo.clone()));
-    let providers = Arc::new(MemoryProviderStore::new());
-    let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(BotControlPlaneCore::new(
-        repo.clone(),
-        providers.clone(),
-        providers,
-    ));
-    let mut human_hit = search_hit("human_staff-2", false, Some(0.5), None);
-    human_hit.bot.actor_kind = ActorKind::Human;
-    let candidate_search = Arc::new(RecordingCandidateSearch::new(
-        BotCandidateSearchCoreResult {
-            hits: vec![human_hit],
-            mode: CoreCandidateSearchMode::Semantic,
-        },
-    ));
-    let service = BotServiceImpl::new(
-        control_plane,
-        registry,
-        Arc::new(FriendCore::memory()),
-        Arc::new(NoopConnectService),
-        candidate_search,
-        BotServiceConfig {
-            env: bcs_config::resolve_env_str(),
-        },
-    );
-    repo.register_with_owner_and_token(
-        "acting".to_string(),
-        BotCapabilities {
-            name: Some("acting".to_string()),
-            visibility: "private".to_string(),
-            ..Default::default()
-        },
-        "staff-1",
-        "token-acting",
-    )
-    .await
-    .expect("register acting bot");
-    repo.ensure_human_actor("staff-2", "Other Human")
-        .await
-        .expect("ensure human actor");
-
-    let error = service
-        .search_candidates(SearchBotCandidates {
-            caller: human_caller("staff-1"),
-            bot_id: "acting".to_string(),
-            purpose: BotCandidatePurpose::Discovery,
-            query: Some("human".to_string()),
-        })
-        .await
-        .expect_err("Human hit must never be projected as a physical Bot");
-
-    assert_eq!(error.code(), "internal_error");
-}
-
-#[tokio::test]
-async fn search_candidates_denies_unauthorized_perspective_before_core_search() {
-    let temp = tempfile::tempdir().expect("temp dir");
-    let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
-    let registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_repo(repo.clone()));
-    let providers = Arc::new(MemoryProviderStore::new());
-    let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(BotControlPlaneCore::new(
-        repo.clone(),
-        providers.clone(),
-        providers,
-    ));
-    let candidate_search = Arc::new(RecordingCandidateSearch::empty());
-    let service = BotServiceImpl::new(
-        control_plane,
-        registry,
-        Arc::new(FriendCore::memory()),
-        Arc::new(NoopConnectService),
-        candidate_search.clone(),
-        BotServiceConfig {
-            env: bcs_config::resolve_env_str(),
-        },
-    );
-    repo.register_with_owner_and_token(
-        "acting".to_string(),
-        BotCapabilities {
-            name: Some("acting".to_string()),
-            visibility: "private".to_string(),
-            ..Default::default()
-        },
-        "staff-1",
-        "token-acting",
-    )
-    .await
-    .expect("register acting bot");
-
-    let error = service
-        .search_candidates(SearchBotCandidates {
-            caller: human_caller("staff-2"),
-            bot_id: "acting".to_string(),
-            purpose: BotCandidatePurpose::Discovery,
-            query: Some("planning".to_string()),
-        })
-        .await
-        .expect_err("non-owner search must fail");
-
-    assert_eq!(error.code(), "forbidden");
-    assert!(
-        candidate_search
-            .queries
-            .lock()
-            .expect("candidate search queries lock")
-            .is_empty()
-    );
-}
-
-#[tokio::test]
-async fn candidates_require_a_human_owner_and_allow_the_current_human_actor() {
-    let fixture = Fixture::new();
-    fixture
-        .add_bot("acting", "staff-1", "private", ActorStatus::Online)
-        .await;
-    fixture
-        .repo
-        .ensure_human_actor("staff-1", "Human")
-        .await
-        .expect("ensure human");
-    fixture
-        .repo
-        .ensure_human_actor("staff-2", "Other Human")
-        .await
-        .expect("ensure other human");
-
-    let error = fixture
-        .service
-        .list_candidates(ListBotCandidates {
-            caller: human_caller("staff-2"),
-            bot_id: "acting".to_string(),
-            purpose: BotCandidatePurpose::Discovery,
-            name: None,
-            offset: 0,
-            limit: 20,
-        })
-        .await
-        .expect_err("non-owner must fail");
-    assert_eq!(error.code(), "forbidden");
-
-    let page = fixture
-        .service
-        .list_candidates(ListBotCandidates {
-            caller: human_caller("staff-1"),
-            bot_id: "human_staff-1".to_string(),
-            purpose: BotCandidatePurpose::Discovery,
-            name: None,
-            offset: 0,
-            limit: 20,
-        })
-        .await
-        .expect("current human actor may select candidates");
-    assert_eq!(page.total, 0);
-
-    let error = fixture
-        .service
-        .list_candidates(ListBotCandidates {
-            caller: human_caller("staff-1"),
-            bot_id: "human_staff-2".to_string(),
-            purpose: BotCandidatePurpose::Discovery,
-            name: None,
-            offset: 0,
-            limit: 20,
-        })
-        .await
-        .expect_err("another human actor must fail");
-    assert_eq!(error.code(), "forbidden");
-}
-
-#[tokio::test]
-async fn human_actor_collaboration_candidates_include_only_private_friends() {
-    let fixture = Fixture::new();
-    fixture
-        .repo
-        .ensure_human_actor("staff-1", "Human")
-        .await
-        .expect("ensure human");
-    fixture
-        .add_bot("private-friend", "staff-2", "private", ActorStatus::Hidden)
-        .await;
-    fixture
-        .add_bot(
-            "private-stranger",
-            "staff-3",
-            "private",
-            ActorStatus::Online,
-        )
-        .await;
-    fixture
-        .friends
-        .add_friendship("human_staff-1", "private-friend")
-        .await
-        .expect("add human friendship");
-
-    let page = fixture
-        .service
-        .list_candidates(ListBotCandidates {
-            caller: human_caller("staff-1"),
-            bot_id: "human_staff-1".to_string(),
-            purpose: BotCandidatePurpose::Collaboration,
-            name: None,
-            offset: 0,
-            limit: 20,
-        })
-        .await
-        .expect("list human candidates");
-
-    assert_eq!(page.total, 1);
-    assert_eq!(page.items[0].bot.bot_id, "private-friend");
-    assert!(page.items[0].is_friend);
-}
-
-#[tokio::test]
-async fn collaboration_candidates_include_private_friends_without_status_filtering() {
-    let fixture = Fixture::new();
-    fixture
-        .add_bot("acting", "staff-1", "private", ActorStatus::Online)
-        .await;
-    fixture
-        .add_bot("private-friend", "staff-2", "private", ActorStatus::Hidden)
-        .await;
-    fixture
-        .friends
-        .add_friendship("acting", "private-friend")
-        .await
-        .expect("add friendship");
-
-    let page = fixture
-        .service
-        .list_candidates(ListBotCandidates {
-            caller: human_caller("staff-1"),
-            bot_id: "acting".to_string(),
-            purpose: BotCandidatePurpose::Collaboration,
-            name: Some(" FRIEND ".to_string()),
-            offset: 0,
-            limit: 20,
-        })
-        .await
-        .expect("list candidates");
-    assert_eq!(page.total, 1);
-    assert_eq!(page.items[0].bot.bot_id, "private-friend");
-    assert_eq!(page.items[0].bot.status, BotStatus::Hidden);
-    assert_eq!(page.items[0].bot.reachability, BotReachability::Unreachable);
-    assert!(page.items[0].is_friend);
-}
-
-#[tokio::test]
-async fn eligible_candidates_use_edge_permission_but_keep_the_same_projection() {
-    let env = bcs_config::resolve_env_str();
-    let record = BotControlPlaneRecord {
-        bot_id: "acting".to_string(),
-        kind: ActorKind::Bot,
-        name: "Acting".to_string(),
-        visibility: "private".to_string(),
-        status: ActorStatus::Online,
-        env: env.clone(),
-        created_by: Some("staff-1".to_string()),
-        descriptor: BotControlPlaneDescriptor {
-            summary: String::new(),
-            domains: Vec::new(),
-            skills: Vec::new(),
-            scopes: Vec::new(),
-        },
-        agent_code: None,
-        task_claim_mode: false,
-        task_dream_mode: false,
-        created_at: 1,
-        updated_at: 1,
-        user_visibility: Default::default(),
-        friend_ext: Default::default(),
-        friend_check_in_strategy: Default::default(),
-    };
-    let control_plane = Arc::new(RecordingBotControlPlane::new(record));
-    let connect = Arc::new(RecordingConnectService::new(vec![
-        FriendListEntry {
-            actor_id: "bot-friend".to_string(),
-            name: Some("Bot Friend".to_string()),
-            summary: Some("bot summary".to_string()),
-            is_online: true,
-            kind: ActorKind::Bot,
-        },
-        FriendListEntry {
-            actor_id: "human-friend".to_string(),
-            name: Some("Human Friend".to_string()),
-            summary: Some("human summary".to_string()),
-            is_online: true,
-            kind: ActorKind::Human,
-        },
-    ]));
-    let service = BotServiceImpl::new(
-        control_plane.clone(),
-        Arc::new(NoopBotRegistryCoreService),
-        Arc::new(NoopFriendCoreService),
-        connect,
-        Arc::new(RecordingCandidateSearch::empty()),
-        BotServiceConfig { env: env.clone() },
-    );
-
-    let page = service
-        .list_eligible_candidates(ListBotCandidates {
-            caller: human_caller("staff-1"),
-            bot_id: "acting".to_string(),
-            purpose: BotCandidatePurpose::Collaboration,
-            name: Some(" FRIEND ".to_string()),
-            offset: 0,
-            limit: 20,
-        })
-        .await
-        .expect("eligible candidates");
-
-    assert_eq!(page.total, 0);
-    let queries = control_plane.queries.lock().expect("queries lock");
-    let query = queries.first().expect("recorded query");
-    assert!(query.friend_ids.contains("bot-friend"));
-    assert!(!query.friend_ids.contains("human-friend"));
-    assert_eq!(query.name.as_deref(), Some("FRIEND"));
-}
-
-#[tokio::test]
-async fn query_preserves_first_occurrence_and_projects_both_kinds_provider_and_reachability() {
-    let fixture = Fixture::new();
-    fixture
-        .add_bot("physical", "staff-1", "private", ActorStatus::Online)
-        .await;
-    fixture
-        .repo
-        .ensure_human_actor("staff-1", "Human")
-        .await
-        .expect("ensure human");
-    fixture
-        .repo
-        .register_streaming_connection("physical".to_string())
-        .await
-        .expect("connect physical bot");
-    fixture
-        .providers
-        .insert_provider(ProviderRecord {
-            provider_id: "provider-1".to_string(),
-            slug: None,
-            name: "Provider One".to_string(),
-            config: "{}".to_string(),
-            created_by: "staff-1".to_string(),
-            owners: "[]".to_string(),
-            disabled: false,
-            created_at: 1,
-            updated_at: 1,
-        })
-        .await
-        .expect("insert provider");
-    fixture
-        .providers
-        .insert_binding(ProviderBotBinding {
-            webhook_url: None,
-            bot_uuid: "physical".to_string(),
-            provider_id: "provider-1".to_string(),
-            provider_bot_ref: "secret-internal-ref".to_string(),
-            disabled: false,
-            created_at: 1,
-            updated_at: 1,
-        })
-        .await
-        .expect("insert binding");
-
-    let bots = fixture
-        .service
-        .query(QueryBots {
-            caller: human_caller("staff-2"),
-            bot_ids: vec![
-                "human_staff-1".to_string(),
-                "missing".to_string(),
-                "physical".to_string(),
-                "human_staff-1".to_string(),
-            ],
-        })
-        .await
-        .expect("query bots");
-    assert_eq!(
-        bots.iter().map(Bot::bot_id).collect::<Vec<_>>(),
-        vec!["human_staff-1", "physical"]
-    );
-    let Bot::Human(human) = &bots[0] else {
-        panic!("expected human bot");
-    };
-    assert_eq!(human.user_visibility, UserVisibility::Protected);
-    assert_eq!(human.friend_ext, serde_json::Map::new());
-    assert_eq!(human.friend_check_in_strategy, FriendCheckInStrategy::Approval);
-    let Bot::Physical(physical) = &bots[1] else {
-        panic!("expected physical bot");
-    };
-    assert_eq!(physical.reachability, BotReachability::Reachable);
-    assert_eq!(physical.user_visibility, UserVisibility::Protected);
-    assert_eq!(physical.friend_ext, serde_json::Map::new());
-    assert_eq!(physical.friend_check_in_strategy, FriendCheckInStrategy::Approval);
-    assert_eq!(
-        physical.provider.as_ref().map(|p| p.name.as_str()),
-        Some("Provider One")
-    );
-    assert_eq!(physical.agent_code.as_deref(), Some("agent-physical"));
-}
-
-#[tokio::test]
-async fn update_requires_created_by_and_rejects_descriptor_for_human() {
-    let fixture = Fixture::new();
-    fixture
-        .add_bot("owned", "staff-1", "public", ActorStatus::Online)
-        .await;
-    fixture
-        .repo
-        .ensure_human_actor("staff-1", "Human")
-        .await
-        .expect("ensure human");
-
-    let error = fixture
-        .service
-        .update(UpdateBot {
-            caller: human_caller("staff-2"),
-            bot_id: "owned".to_string(),
-            patch: BotPatch {
-                name: Some("Nope".to_string()),
-                ..Default::default()
-            },
-        })
-        .await
-        .expect_err("non-owner update");
-    assert_eq!(error.code(), "forbidden");
-
-    let error = fixture
-        .service
-        .update(UpdateBot {
-            caller: human_caller("staff-1"),
-            bot_id: "human_staff-1".to_string(),
-            patch: BotPatch {
-                descriptor: Some(BotDescriptorPatch {
-                    summary: Some("not allowed".to_string()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        })
-        .await
-        .expect_err("human descriptor update");
-    assert_eq!(error.code(), "invalid_bot_kind");
-
-    let error = fixture
-        .service
-        .update(UpdateBot {
-            caller: human_caller("staff-1"),
-            bot_id: "human_staff-1".to_string(),
-            patch: BotPatch {
-                task_claim_mode: Some(true),
-                ..Default::default()
-            },
-        })
-        .await
-        .expect_err("human task-mode update");
-    assert_eq!(error.code(), "invalid_bot_kind");
-
-    let updated = fixture
-        .service
-        .update(UpdateBot {
-            caller: human_caller("staff-1"),
-            bot_id: "owned".to_string(),
-            patch: BotPatch {
-                name: Some(" Renamed ".to_string()),
-                visibility: Some(BotVisibility::Protected),
-                status: Some(BotStatus::Hidden),
-                descriptor: Some(BotDescriptorPatch {
-                    domains: Some(vec![]),
-                    scopes: Some(vec!["new-scope".to_string()]),
-                    ..Default::default()
-                }),
-                task_claim_mode: None,
-                task_dream_mode: None,
-                user_visibility: Some(UserVisibility::Private),
-                friend_ext: Some(serde_json::Map::from_iter([(
-                    "no_check_scope_friend_deps".to_string(),
-                    serde_json::json!(["dep-1"]),
-                )])),
-                friend_check_in_strategy: Some(FriendCheckInStrategy::DeptFree),
-            },
-        })
-        .await
-        .expect("owner update");
-    let Bot::Physical(updated) = updated else {
-        panic!("expected physical bot");
-    };
-    assert_eq!(updated.name, "Renamed");
-    assert_eq!(updated.visibility, BotVisibility::Protected);
-    assert_eq!(updated.status, BotStatus::Hidden);
-    assert_eq!(updated.user_visibility, UserVisibility::Private);
-    assert_eq!(updated.friend_check_in_strategy, FriendCheckInStrategy::DeptFree);
-    assert_eq!(
-        updated.friend_ext["no_check_scope_friend_deps"],
-        serde_json::json!(["dep-1"])
-    );
-    assert!(updated.descriptor.domains.is_empty());
-    assert_eq!(updated.descriptor.scopes, vec!["new-scope"]);
-}
-
-#[tokio::test]
-async fn mine_materializes_the_current_human_before_listing() {
-    let fixture = Fixture::new();
-    assert!(fixture.repo.get("human_staff-1").await.is_none());
-
-    let mut caller = human_caller("staff-1");
-    let user = caller.user.as_mut().expect("human caller");
-    user.display_name = Some(" Display Name ".to_string());
-    user.full_name = Some("Full Name".to_string());
-
-    let page = fixture
-        .service
-        .list_mine(ListMyBots {
-            caller,
-            kind: Some(BotKind::Human),
-            name: None,
-            status: None,
-            reachability: None,
-            offset: 0,
-            limit: 20,
-        })
-        .await
-        .expect("list mine");
-
-    assert_eq!(page.total, 1);
-    let Bot::Human(human) = &page.items[0] else {
-        panic!("expected human actor");
-    };
-    assert_eq!(human.bot_id, "human_staff-1");
-    assert_eq!(human.name, "Display Name");
-}
-
-#[tokio::test]
-async fn mine_uses_non_empty_identity_name_fallbacks_for_materialized_humans() {
-    let fixture = Fixture::new();
-    let cases = [
-        (
-            "staff-display",
-            Some(" Display "),
-            Some("Full"),
-            "username",
-            "Display",
-        ),
-        (
-            "staff-full",
-            Some("   "),
-            Some(" Full "),
-            "username",
-            "Full",
-        ),
-        (
-            "staff-username",
-            None,
-            Some("   "),
-            " username ",
-            "username",
-        ),
-        ("staff-id", None, None, "   ", "staff-id"),
-    ];
-
-    for (staff_no, display_name, full_name, username, expected_name) in cases {
-        let mut caller = human_caller(staff_no);
-        let user = caller.user.as_mut().expect("human caller");
-        user.display_name = display_name.map(str::to_string);
-        user.full_name = full_name.map(str::to_string);
-        user.username = username.to_string();
-
-        fixture
-            .service
-            .list_mine(ListMyBots {
-                caller,
-                kind: Some(BotKind::Human),
-                name: None,
-                status: None,
-                reachability: None,
-                offset: 0,
-                limit: 20,
-            })
-            .await
-            .expect("list mine");
-
-        let stored = fixture
-            .repo
-            .get(&format!("human_{staff_no}"))
-            .await
-            .expect("materialized human actor");
-        assert_eq!(stored.capabilities.name.as_deref(), Some(expected_name));
-    }
-}
-
-#[tokio::test]
-async fn mine_validates_pagination_before_materializing_the_human() {
-    let fixture = Fixture::new();
-
-    let error = fixture
-        .service
-        .list_mine(ListMyBots {
-            caller: human_caller("invalid"),
-            kind: None,
-            name: None,
-            status: None,
-            reachability: None,
-            offset: 0,
-            limit: 0,
-        })
-        .await
-        .expect_err("invalid pagination must fail");
-
-    assert_eq!(error.code(), "invalid_request");
-    assert!(fixture.repo.get("human_invalid").await.is_none());
-}
-
-#[tokio::test]
-async fn mine_accepts_tenantless_users_and_callers_without_user_are_forbidden() {
-    let fixture = Fixture::new();
-    fixture
-        .add_bot("reachable", "staff-1", "public", ActorStatus::Online)
-        .await;
-    fixture
-        .add_bot("unreachable", "staff-1", "public", ActorStatus::Online)
-        .await;
-    fixture
-        .repo
-        .register_streaming_connection("reachable".to_string())
-        .await
-        .expect("connect bot");
-    fixture
-        .repo
-        .ensure_human_actor("staff-1", "Human")
-        .await
-        .expect("ensure human");
-
-    let mut tenantless_user = human_caller("staff-1");
-    tenantless_user.tenant = None;
-    let page = fixture
-        .service
-        .list_mine(ListMyBots {
-            caller: tenantless_user,
-            kind: None,
-            name: None,
-            status: None,
-            reachability: Some(BotReachability::Reachable),
-            offset: 0,
-            limit: 1,
-        })
-        .await
-        .expect("list mine");
-    assert_eq!(page.total, 1);
-    assert_eq!(page.items.len(), 1);
-    assert_eq!(page.items[0].bot_id(), "reachable");
-
-    let error = fixture
-        .service
-        .get(GetBot {
-            caller: bot_only_caller("reachable"),
-            bot_id: "reachable".to_string(),
-        })
-        .await
-        .expect_err("caller without User must be rejected");
-    assert_eq!(error.code(), "forbidden");
-}
-
-#[tokio::test]
-async fn invalid_application_inputs_use_stable_codes() {
-    let fixture = Fixture::new();
-    let error = fixture
-        .service
-        .query(QueryBots {
-            caller: human_caller("staff-1"),
-            bot_ids: (0..101).map(|index| format!("bot-{index}")).collect(),
-        })
-        .await
-        .expect_err("oversized query must fail");
-    assert!(matches!(error, ApplicationError::InvalidInput { .. }));
-    assert_eq!(error.code(), "invalid_request");
-}
-
 fn human_caller(staff_no: &str) -> bcs_service_api::application::v1::AuthenticatedCaller {
     bcs_service_api::application::v1::AuthenticatedCaller {
         tenant: Some("tenant-1".into()),
@@ -1554,3 +546,29 @@ fn bot_only_caller(bot_uuid: &str) -> bcs_service_api::application::v1::Authenti
         access_key: None,
     }
 }
+
+/// Version-initialized Bots on the fixture's shared authority state.
+async fn initialized_count(repo: &MemoryBotRepo) -> usize {
+    repo.authority_state()
+        .read()
+        .await
+        .ownership_versions
+        .values()
+        .filter(|version| **version > 0)
+        .count()
+}
+
+#[path = "v1_bot_service/commands.rs"]
+mod commands;
+
+#[path = "v1_bot_service/candidate_search.rs"]
+mod candidate_search;
+
+#[path = "v1_bot_service/candidates_and_projection.rs"]
+mod candidates_and_projection;
+
+#[path = "v1_bot_service/mine.rs"]
+mod mine;
+
+#[path = "v1_bot_service/avatars.rs"]
+mod avatars;

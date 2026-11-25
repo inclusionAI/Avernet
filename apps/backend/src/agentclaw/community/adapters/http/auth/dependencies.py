@@ -15,9 +15,11 @@ identity DTO.
 import base64
 import hmac
 import json
+import logging
 
 from fastapi import Depends, Header, Request
 
+from agentclaw.community.core.access import admin_scopes
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.core.errors import (
     DomainError,
@@ -174,4 +176,18 @@ async def require_operator(
     """
     if not auth_plugin.is_operator_allowed(user.staffId):
         raise Forbidden("权限不足：您没有操作员权限")
+    return user
+
+
+async def require_super_admin(
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> AuthenticatedUser:
+    """Require the authenticated caller to belong to admin.super_admin."""
+    # COSEC: membership writes authorize the SSO actor, never the target entity.
+    allowed = user.staffId in admin_scopes.super_admin()
+    logging.getLogger(__name__).info(
+        "auth.super_admin actor_id=%s allowed=%s", user.staffId, allowed,
+    )
+    if not allowed:
+        raise Forbidden("权限不足：您没有超级管理员权限")
     return user

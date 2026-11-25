@@ -70,7 +70,7 @@ export class RunReadRepository {
     if (q.beforeId !== undefined) { where.push("id < ?"); args.push(q.beforeId); }
     if (!q.includeHidden) where.push("COALESCE(CAST(JSON_EXTRACT(state_json, '$.workflowData.flowHidden') AS CHAR), 'false') NOT IN ('true', '1')");
     const readBatch = (batch?: typeof grants) => this.db.query<Record<string, unknown>>(
-      `SELECT id, flow_id, workflow_id, status, origin_bot_id, origin_session_key, origin_session_id, identity_key, started_at, gmt_modified
+      `SELECT id, flow_id, workflow_id, status, env, tag, origin_bot_id, origin_session_key, origin_session_id, identity_key, started_at, gmt_modified
        FROM flow_runs WHERE ${[...where, ...(batch ? [`(${batch.map(g => g.sql).join(" OR ")})`] : [])].join(" AND ")}
        ORDER BY id DESC LIMIT ?`, [...args, ...(batch?.flatMap(g => g.args) ?? []), limit + 1]);
     if (!grants) return page(await readBatch(), limit);

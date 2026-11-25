@@ -8,6 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+from agentclaw.community.adapters.http.openapi_v1.bot_address import resolve_bot_entity
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
@@ -103,13 +104,14 @@ async def get_caller_context(
 ) -> Envelope[CallerContext]:
     """Return aggregate and per-resource Caller overrides for one Bot runtime."""
     _validate_stage(stage, publish_id)
+    entity_id = await resolve_bot_entity(request, bot_id=bot_id, locator=owner_id)
     result = await asyncio.to_thread(
         service.get_context,
         bot_id=bot_id,
         actor_id=user_id,
         stage=CoreCallerIdentityStage(stage.value),
         publish_id=publish_id,
-        entity_id=owner_id,
+        entity_id=entity_id,
     )
     logger.info(
         "openapi_caller_context_get_succeeded bot_id=%s stage=%s publish_id=%s "
@@ -162,13 +164,14 @@ async def update_mcp_call_type(
         owner_id=owner_id,
         user_id=user_id,
     )
+    entity_id = await resolve_bot_entity(request, bot_id=bot_id, locator=owner_id)
     result = await service.update_mcp_call_type(
         bot_id=bot_id,
         server_code=server_code,
         call_type=CoreMcpCallType(body.call_type.value),
         actor_id=user_id,
         lock_epoch=lock_epoch,
-        entity_id=owner_id,
+        entity_id=entity_id,
     )
     return envelope(
         McpCallTypeResult(
@@ -202,13 +205,14 @@ async def update_cli_call_type(
         owner_id=owner_id,
         user_id=user_id,
     )
+    entity_id = await resolve_bot_entity(request, bot_id=bot_id, locator=owner_id)
     result = await service.update_cli_call_type(
         bot_id=bot_id,
         cli_code=cli_code,
         call_type=CoreMcpCallType(body.call_type.value),
         actor_id=user_id,
         lock_epoch=lock_epoch,
-        entity_id=owner_id,
+        entity_id=entity_id,
     )
     return envelope(
         CliCallTypeResult(

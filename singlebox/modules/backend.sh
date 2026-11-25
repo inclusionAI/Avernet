@@ -26,6 +26,45 @@ backend_setup() {
     log_info "Python dependencies synced successfully"
 }
 
+# Keep the runtime snapshot taken after graceful shutdown: Uvicorn re-raises
+# SIGTERM after lifecycle teardown, bypassing coverage's ordinary final save.
+# Generate a coverage-only config; never change normal Backend termination.
+backend_coverage_config() {
+    local python="$1" coverage_dir="$2"
+    "$python" - "$coverage_dir" <<'PYCONFIG'
+import configparser
+from pathlib import Path
+import sys
+
+from coverage import Coverage
+import tomlkit
+
+source_name = Coverage().config.config_file
+source = Path(source_name) if source_name else None
+name = source.name if source else "backend-runtime.ini"
+# .coverage* is reserved for runtime data consumed by coverage combine.
+if name.startswith(".coverage"):
+    name = "backend-runtime.ini"
+output = Path(sys.argv[1]) / name
+if source and source.suffix == ".toml":
+    document = tomlkit.parse(source.read_text(encoding="utf-8"))
+    document.setdefault("tool", {}).setdefault("coverage", {}).setdefault("run", {})["sigterm"] = True
+    output.write_text(tomlkit.dumps(document), encoding="utf-8")
+else:
+    document = configparser.ConfigParser(interpolation=None)
+    if source:
+        with source.open(encoding="utf-8") as stream:
+            document.read_file(stream)
+    section = "coverage:run" if source and source.name in {"setup.cfg", "tox.ini"} else "run"
+    if not document.has_section(section):
+        document.add_section(section)
+    document.set(section, "sigterm", "true")
+    with output.open("w", encoding="utf-8") as stream:
+        document.write(stream)
+print(output)
+PYCONFIG
+}
+
 backend_start() {
     mkdir -p "${LOG_DIR}"
 
@@ -73,6 +112,17 @@ backend_start() {
     # substring, which the fuller submodule path still contains.
     local community_src="${BACKEND_DIR}/src"
     local community_main="${community_src}/agentclaw/community/main.py"
+    local backend_pythonpath="${community_src}:${BACKEND_DIR}:${PYTHONPATH:-}"
+    # Test-only credential/runtime seam. Never installed by an ordinary boot.
+    if [ "$LOCAL_MODE" = true ] && [ "${SINGLEBOX_COVERAGE:-0}" = "1" ] && \
+        [ "${SINGLEBOX_ACCEPTANCE_OWNER_HANDOFF:-0}" = "1" ]; then
+        local owner_fixture_runtime="${BACKEND_DIR}/tests/community/acceptance/bot_ownership_sync/runtime"
+        if [ ! -f "${owner_fixture_runtime}/sitecustomize.py" ]; then
+            log_error "Owner handoff acceptance runtime is missing"
+            return 1
+        fi
+        backend_pythonpath="${owner_fixture_runtime}:${backend_pythonpath}"
+    fi
     local backend_cmd=(
         python
         "${community_main}"
@@ -82,8 +132,11 @@ backend_start() {
         mkdir -p "$coverage_dir"
         export COVERAGE_FILE="${coverage_dir}/.coverage"
         uv pip install --python "$venv_python" coverage >/dev/null
+        local coverage_config
+        coverage_config="$(backend_coverage_config "$venv_python" "$coverage_dir")" || return 1
         backend_cmd=(
             "$venv_python" -m coverage run
+            --rcfile="$coverage_config"
             --parallel-mode
             --save-signal=USR1
             --source="${community_src}"
@@ -93,6 +146,12 @@ backend_start() {
     fi
 
     if [ "${SERVER_ENV:-dev}" = "local" ] || [ "${DEPLOY_PROFILE:-}" = "singlebox" ]; then
+        # The shared gateway-principal signing key — the same dev literal the
+        # gateway signs with (gateway.sh) and BCS verifies with (bcs.sh), and
+        # the key the Backend both verifies /openapi/v1 principals with and
+        # signs its own direct-BCS manager-sync service principals with. A
+        # clearly-marked synthetic stand-in: never a real secret, and an
+        # .env.local value overrides all ends together.
         export AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="${AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
     fi
 
@@ -118,7 +177,7 @@ backend_start() {
             CHAT_ENGINE="${CHAT_ENGINE}" \
             AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             LOCAL_AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
-            PYTHONPATH="${community_src}:${BACKEND_DIR}:${PYTHONPATH:-}" \
+            PYTHONPATH="${backend_pythonpath}" \
             start_in_detached_session "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
         backend_pid=$!
         unset backend_openapi_header_value
@@ -126,7 +185,7 @@ backend_start() {
         SERVER_ENV=dev DEPLOY_PROFILE=corp CHAT_ENGINE="${CHAT_ENGINE}" \
             AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
             LOCAL_AIDESKTOP_ROOT="${LOCAL_AIDESKTOP_DIR}" \
-            PYTHONPATH="${community_src}:${BACKEND_DIR}:${PYTHONPATH:-}" \
+            PYTHONPATH="${backend_pythonpath}" \
             start_in_detached_session "${backend_cmd[@]}" < /dev/null >> "${BACKEND_LOG}" 2>&1 &
         backend_pid=$!
     fi

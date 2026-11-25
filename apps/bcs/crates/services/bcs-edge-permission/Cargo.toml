@@ -18,6 +18,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+bcs-relation = { workspace = true }
 bcs-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-group-store = { workspace = true }

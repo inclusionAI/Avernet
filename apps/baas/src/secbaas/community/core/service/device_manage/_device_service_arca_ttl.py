@@ -211,13 +211,18 @@ class ArcaScheduleAwareDeviceService(DefaultDeviceService):
         return result
 
     async def destroy_device_by_uuid(
-        self, tenant, device_uuid, modifier, for_restart=False
+        self,
+        tenant,
+        device_uuid,
+        modifier,
+        for_restart=False,
+        allow_residue_success=False,
     ):
         record = self._repository.get_active_or_updating_by_device_uuid(
             device_uuid, tenant=tenant, env=get_current_env()
         )
         result = await super().destroy_device_by_uuid(
-            tenant, device_uuid, modifier, for_restart
+            tenant, device_uuid, modifier, for_restart, allow_residue_success
         )
         if (
             not for_restart

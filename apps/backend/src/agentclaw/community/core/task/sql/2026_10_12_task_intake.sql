@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS `task_delivery_intent` (
     `task_id` varchar(128) NOT NULL,
     `node_id` varchar(128) NOT NULL,
     `relay_token` varchar(64) NOT NULL,
+    `env` varchar(32) NOT NULL DEFAULT 'pre',
+    `executor_app` varchar(32) NOT NULL DEFAULT 'agentclawengine',
     `state` varchar(32) NOT NULL DEFAULT 'PENDING',
     `attempt` int NOT NULL DEFAULT 0,
     `lease_until_ms` bigint DEFAULT NULL,
@@ -34,5 +36,7 @@ CREATE TABLE IF NOT EXISTS `task_delivery_intent` (
     `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_task_delivery_intent` (`task_id`, `node_id`),
-    KEY `idx_task_delivery_pending` (`state`, `lease_until_ms`)
+    KEY `idx_task_delivery_pending` (`state`, `lease_until_ms`),
+    KEY `idx_task_delivery_env_pending` (`env`, `state`, `lease_until_ms`),
+    KEY `idx_task_delivery_executor_app_env_pending` (`executor_app`, `env`, `state`, `lease_until_ms`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT='接力单节点待投递意图';

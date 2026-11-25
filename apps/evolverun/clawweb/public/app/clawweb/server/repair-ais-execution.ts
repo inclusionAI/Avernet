@@ -257,7 +257,7 @@ export function createRepairAisExecution(db: IDatabase, ais: AistudioService,
     },
     async status(request) { return ais.getJobStatusDetail(request.jobId); },
     async readResult(request) { return git.result(request); },
-    async stop(request) { await ais.stopExecution(request.jobId); },
+    async stop(request) { await ais.stopExecution(request.jobId, request.actorId); },
     diff: input => git.diff(input),
   };
 }

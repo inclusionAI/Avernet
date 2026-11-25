@@ -17,7 +17,20 @@ from scripts.validate_openapi_contract import load_contract  # noqa: E402
 
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 
-EXPECTED_OPERATIONS = {
+GROUP_CONTEXT_OPERATIONS = {
+    ("post", f"/openapi/v1/collaboration/groupcontext/{operation}")
+    for operation in (
+        "shared-info",
+        "list-preset",
+        "manage/list-preset",
+        "manage/add-preset",
+        "manage/update-preset",
+        "manage/delete-preset",
+    )
+}
+
+EXPECTED_OPERATIONS = GROUP_CONTEXT_OPERATIONS | {
+    ("get", "/openapi/v1/collaboration/me"),
     ("get", "/openapi/v1/auth/url"),
     ("get", "/openapi/v1/auth/callback/{provider}"),
     ("get", "/openapi/v1/auth/user"),
@@ -59,6 +72,7 @@ EXPECTED_OPERATIONS = {
     ("delete", "/openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}"),
     ("post", "/openapi/v1/collaboration/groups/{group_id}/invitations"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/invitations"),
+    ("get", "/openapi/v1/collaboration/invitations/{token}"),
     ("post", "/openapi/v1/collaboration/invitations/{token}/accept"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/token"),
     ("get", "/openapi/v1/collaboration/messages/ws"),
@@ -141,6 +155,8 @@ def test_operations_use_the_approved_gateway_security_boundary() -> None:
                 "/openapi/v1/collaboration/invite-codes/claim",
             }:
                 expected = {}
+            elif (method, path) in GROUP_CONTEXT_OPERATIONS:
+                expected = {"user": "required"}
             elif path == "/openapi/v1/collaboration/public-groups":
                 expected = {"user": "required"}
             elif path == "/openapi/v1/collaboration/register/token":
@@ -182,6 +198,35 @@ def test_contract_excludes_unapproved_runtime_and_routing_surfaces() -> None:
     assert not any(path.startswith("/openapi/v1/bcn/") for _, path in actual)
     assert not any(path.startswith("/openapi/v1/actors/") for _, path in actual)
     assert not any(path.startswith("/openapi/v1/internal/") for _, path in actual)
+
+
+def test_candidate_deprecation_preserves_inventory_and_identity_requirement() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    candidates = contract["paths"][
+        "/openapi/v1/collaboration/bots/{bot_id}/candidates"
+    ]
+    alias = contract["paths"][
+        "/openapi/v1/collaboration/bots/{bot_id}/eligible-candidates"
+    ]
+
+    assert set(candidates) & HTTP_METHODS == {"get"}
+    assert set(alias) & HTTP_METHODS == {"get"}
+    # Intentional tripwire: this exact set must change only when the inventory
+    # changes deliberately. Do not loosen it to admit a new deprecation.
+    deprecated = {
+        (method, path)
+        for path, path_item in contract["paths"].items()
+        for method, operation in path_item.items()
+        if method.lower() in HTTP_METHODS and operation.get("deprecated") is True
+    }
+    assert deprecated == {
+        ("get", "/openapi/v1/collaboration/bots/{bot_id}/eligible-candidates")
+    }
+    for operation in (candidates["get"], alias["get"]):
+        assert operation["x-avernet-security"] == {
+            "user": "required",
+            "app": "required",
+        }
 
 
 def test_friend_connections_filter_and_pagination_contract() -> None:

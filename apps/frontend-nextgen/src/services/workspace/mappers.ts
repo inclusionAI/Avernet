@@ -2,29 +2,21 @@ import type {
   GroupKind,
   GroupView,
   HumanMentionNotifyMode,
+  ParticipantMode,
   ParticipantRole,
+  ParticipantSummaryView,
   ParticipantView,
   SessionKind,
   SessionView,
 } from '@/domain/collaboration';
-import type { SessionDetailData } from '@/services/backendApi/collaboration/sessionController';
+import { getParticipantDisplayCount } from '@/domain/collaboration/participantPresentation';
+import type { GroupSummaryData } from '@/services/backendApi/collaboration/collaborationGroupController';
+import type { ParticipantSummaryReadDto } from '@/services/backendApi/collaboration/participantTypes';
+import type { SessionDetailData, SessionParticipantDto } from '@/services/backendApi/collaboration/sessionController';
+import { normalizeAvatarUrl } from '@/utils/avatarSource';
 
 type GroupStrategy = 'chat' | 'manager_worker' | 'state_machine';
-export interface GroupListItemDto {
-  group_id: string;
-  version?: number;
-  kind: 'normal' | 'dm';
-  status: 'active' | 'dissolved';
-  visibility: 'private' | 'public';
-  membership?: 'direct' | 'session_only';
-  originator_actor_id: string;
-  participant_count: number;
-  driver_bot_uuid: string;
-  strategy: GroupStrategy;
-  name?: string;
-  created_at: number;
-  updated_at: number;
-}
+export type GroupListItemDto = GroupSummaryData;
 export interface GroupSessionDto {
   session_id: string;
   group_id: string;
@@ -33,8 +25,8 @@ export interface GroupSessionDto {
   status?: 'running' | 'completed';
   /** 会话成员总数（列表接口可能直接返回，替代 participants 列表）。 */
   participant_count?: number;
-  /** 会话成员（列表/详情接口可能返回；缺省视为未知）。 */
-  participants?: SessionDetailData['participants'];
+  /** 会话成员：列表接口下发轻量摘要，详情接口下发完整成员；缺省视为未知。 */
+  participants?: Array<ParticipantSummaryReadDto | SessionParticipantDto>;
   created_at: number;
   updated_at: number;
   collected?: boolean;
@@ -91,6 +83,25 @@ const ROLE_NATIVE_TO_DOMAIN: Record<string, ParticipantRole> = {
   observer: 'member',
 };
 
+export function mapParticipantSummary(dto: {
+  actor_id: string;
+  actor_kind: 'human' | 'bot';
+  name?: string | null;
+  avatar_url?: string | null;
+}): ParticipantSummaryView {
+  return {
+    actorId: dto.actor_id,
+    kind: dto.actor_kind,
+    name: dto.name?.trim() || dto.actor_id,
+    avatarUrl: normalizeAvatarUrl(dto.avatar_url),
+  };
+}
+
+/** 完整成员 → 轻量摘要（详情映射后派生，不额外请求）。 */
+export function toParticipantSummary(p: ParticipantView): ParticipantSummaryView {
+  return { actorId: p.actorId, kind: p.kind, name: p.name, avatarUrl: p.avatarUrl };
+}
+
 export function mapGroupListItem(dto: GroupListItemDto): GroupView {
   const strategy = isGroupStrategy(dto.strategy) ? dto.strategy : 'chat';
   const membership = dto.membership === 'direct' || dto.membership === 'session_only' ? dto.membership : undefined;
@@ -100,10 +111,15 @@ export function mapGroupListItem(dto: GroupListItemDto): GroupView {
     kind: STRATEGY_TO_KIND[strategy],
     status: dto.status === 'dissolved' ? 'dissolved' : 'active',
     participants: [],
+    participantDetailsLoaded: false,
+    ...(Array.isArray(dto.participants) ? { participantSummaries: dto.participants.map(mapParticipantSummary) } : {}),
     sessions: [],
     lastMessageAt: safeNumber(dto.updated_at),
     createdAt: safeNumber(dto.created_at),
-    participantCount: safeNumber(dto.participant_count),
+    participantCount: getParticipantDisplayCount(
+      dto.participant_count,
+      Array.isArray(dto.participants) ? dto.participants.map(mapParticipantSummary) : [],
+    ),
     driverBotUuid: safeString(dto.driver_bot_uuid),
     ...(membership ? { membership } : {}),
     isPublic: dto.visibility === 'public',
@@ -118,12 +134,14 @@ export function mapParticipant(dto: {
   role: string;
   mode: 'auto' | 'muted' | 'present' | 'absent';
   message_view_scope?: 'full' | 'participant';
+  avatar_url?: string | null;
 }): ParticipantView {
   const actorId = safeString(dto.actor_id);
   const participant: ParticipantView = {
     actorId,
     kind: isParticipantKind(dto.actor_kind) ? dto.actor_kind : 'bot',
-    name: safeString(dto.name, actorId),
+    name: typeof dto.name === 'string' && dto.name.trim() ? dto.name.trim() : actorId,
+    avatarUrl: normalizeAvatarUrl(dto.avatar_url),
     role: ROLE_NATIVE_TO_DOMAIN[isParticipantRole(dto.role) ? dto.role : ''] ?? 'member',
     mode: isParticipantMode(dto.mode) ? dto.mode : 'auto',
   };
@@ -131,8 +149,8 @@ export function mapParticipant(dto: {
   return participant;
 }
 
+/** 会话列表映射：只保留轻量摘要，不写入完整成员/控制字段（详情由 mapSessionDetail 补齐）。 */
 export function mapSessionListItem(dto: GroupSessionDto): SessionView {
-  const participants = Array.isArray(dto.participants) ? dto.participants : [];
   const status = dto.status === 'completed' ? 'completed' : 'running';
   return {
     sessionId: safeString(dto.session_id),
@@ -140,7 +158,9 @@ export function mapSessionListItem(dto: GroupSessionDto): SessionView {
     title: safeString(dto.title, '未命名会话'),
     kind: dto.kind === 'service_invocation' ? 'service_invocation' : 'chat',
     status,
-    participants: participants.map(mapParticipant),
+    participants: [],
+    participantDetailsLoaded: false,
+    ...(Array.isArray(dto.participants) ? { participantSummaries: dto.participants.map(mapParticipantSummary) } : {}),
     ...(typeof dto.participant_count === 'number' && Number.isFinite(dto.participant_count)
       ? { participantCount: dto.participant_count }
       : {}),
@@ -149,6 +169,17 @@ export function mapSessionListItem(dto: GroupSessionDto): SessionView {
     favorite: dto.collected === true,
     ...(typeof dto.created_by === 'string' ? { createdBy: dto.created_by } : {}),
     ...(typeof dto.caller_principal === 'string' ? { callerPrincipal: dto.caller_principal } : {}),
+  };
+}
+
+/** 会话详情映射：完整成员 + 由成员派生的摘要，并显式标记详情已加载（含空详情）。 */
+export function mapSessionDetail(dto: SessionDetailData): SessionView {
+  const participants = dto.participants.map(mapParticipant);
+  return {
+    ...mapSessionListItem(dto),
+    participants,
+    participantSummaries: participants.map(toParticipantSummary),
+    participantDetailsLoaded: true,
   };
 }
 
@@ -163,6 +194,8 @@ export interface BcsParticipantRaw {
   role?: string;
   mode?: 'auto' | 'muted' | 'present' | 'absent';
   joined_at?: number;
+  /** 成员头像；历史 BCS raw 可能缺省。 */
+  avatar_url?: string | null;
 }
 
 /** BCS raw 会话项（/groups/{id}/sessions 返回的 items 元素）：session_id/id、session_title、session_kind。 */
@@ -186,7 +219,21 @@ export interface BcsSessionRaw {
 /** BCS raw 会话项 → SessionView 兜底映射（execute 建群链路专用，不碰预发 mapSessionListItem）。
  *  BCS 用 session_id/id、session_title、session_kind、bot_uuid/bot_name，按实际结构兜底取值。 */
 export function mapBcsSessionItem(raw: BcsSessionRaw, fallbackGroupId: string): SessionView {
-  const participants = Array.isArray(raw.participants) ? raw.participants : [];
+  const rawRows = Array.isArray(raw.participants) ? raw.participants : [];
+  const identityRows = rawRows.map((p) => ({
+    actor_id: safeString(p.bot_uuid, safeString(p.actor_id, safeString(p.bot_id))),
+    actor_kind: isParticipantKind(p.actor_kind) ? p.actor_kind : ('bot' as const),
+    name: safeString(p.bot_name, safeString(p.name, safeString(p.bot_uuid, safeString(p.actor_id)))),
+    avatar_url: p.avatar_url,
+  }));
+  // 只有每一行都携带合法 role/mode 时才视为完整控制信息；V1 轻量行不伪造 observer/auto。
+  const detailRows = rawRows.filter(
+    (p): p is BcsParticipantRaw & { role: string; mode: ParticipantMode } =>
+      typeof p.role === 'string' &&
+      Object.prototype.hasOwnProperty.call(ROLE_NATIVE_TO_DOMAIN, p.role) &&
+      isParticipantMode(p.mode),
+  );
+  const hasDetail = rawRows.length > 0 && detailRows.length === rawRows.length;
   const sessionId = safeString(raw.session_id, safeString(raw.id));
   const groupId = safeString(raw.group_id, fallbackGroupId);
   return {
@@ -195,15 +242,19 @@ export function mapBcsSessionItem(raw: BcsSessionRaw, fallbackGroupId: string): 
     title: safeString(raw.session_title, safeString(raw.title, '未命名会话')),
     kind: raw.session_kind === 'service_invocation' ? 'service_invocation' : 'chat',
     status: raw.status === 'completed' ? 'completed' : 'running',
-    participants: participants.map((p) =>
-      mapParticipant({
-        actor_id: safeString(p.bot_uuid, safeString(p.actor_id, safeString(p.bot_id))),
-        actor_kind: isParticipantKind(p.actor_kind) ? p.actor_kind : 'bot',
-        name: safeString(p.bot_name, safeString(p.name, safeString(p.bot_uuid, safeString(p.actor_id)))),
-        role: safeString(p.role, 'observer'),
-        mode: isParticipantMode(p.mode) ? p.mode : 'auto',
-      }),
-    ),
+    participants: hasDetail
+      ? detailRows.map((p, index) =>
+          mapParticipant({
+            ...identityRows[index],
+            role: p.role,
+            mode: p.mode,
+          }),
+        )
+      : [],
+    participantDetailsLoaded: hasDetail,
+    ...(Array.isArray(raw.participants)
+      ? { participantSummaries: identityRows.map(mapParticipantSummary) }
+      : {}),
     ...(typeof raw.participant_count === 'number' && Number.isFinite(raw.participant_count)
       ? { participantCount: raw.participant_count }
       : {}),

@@ -1,4 +1,3 @@
-import { MessageViewScopeMenuButton } from '@/components/MessageViewScope';
 import { Badge, Button, IconButton } from '@/components/ui';
 import {
   AlertDialog,
@@ -12,11 +11,13 @@ import {
 } from '@/components/ui/AlertDialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
+import { getDisplayParticipants, getParticipantDisplayCount } from '@/domain/collaboration/participantPresentation';
 import { cn } from '@/utils/cn';
-import { ChevronDown, MoreHorizontal, Plus, Settings2, Share2, Trash2 } from 'lucide-react';
+import { ChevronDown, MoreHorizontal, Settings2, Share2, Trash2 } from 'lucide-react';
 import React, { useRef, useState } from 'react';
 import { SharePopover } from '../ManagePanel/SharePopover';
 import { SessionScopeFilter } from '../SessionScopeFilter';
+import { CreateSessionMenu } from './CreateSessionMenu';
 import { GroupAvatarStack } from './GroupAvatarStack';
 import type { GroupItemProps, SessionTab } from './GroupItem.types';
 import { KIND_LABEL } from './GroupItem.types';
@@ -26,12 +27,6 @@ import { GroupSessionsList } from './GroupSessionsList';
 export { GroupAvatarStack } from './GroupAvatarStack';
 export type { SessionTab } from './GroupItem.types';
 
-/** 群类型标签配色：自由聊天=蓝、自定义协同=绿、任务协作=橙。 */
-const KIND_TONE: Record<GroupItemProps['group']['kind'], 'primary' | 'success' | 'warning'> = {
-  free_chat: 'primary',
-  task_dag: 'success',
-  task_master_slave: 'warning',
-};
 
 export const GroupItem = React.memo(function GroupItem({
   group,
@@ -41,9 +36,8 @@ export const GroupItem = React.memo(function GroupItem({
   sessionTab,
   onSessionTabChange,
   favoriteSessionIds,
-  selectedGroupId,
   selectedSessionId,
-  onSelectGroup,
+  hasSelectedSession = false,
   onToggleGroupExpanded,
   onSelectSession,
   onToggleFavorite,
@@ -76,12 +70,14 @@ export const GroupItem = React.memo(function GroupItem({
   // 操作区常显条件：展开 / 收藏 Tab / dots 菜单开启（2026-10-12 用户反馈移除选中态——
   // 群行不再有选中背景）。常显必须与下方标题让位 pr-[88px] 同条件生效，否则按钮与群名称重叠。
   const actionsPinned = expanded || sessionTab === 'favorite' || actionsOpen;
-  // 头像堆成员人数口径：participantCount 为列表接口权威总数；缺计数时用明细数组兜底。
-  // participants 明细由 useGroupWorkspace.enrichParticipants 按群详情补拉（列表接口只有计数）。
-  const stackTotalCount = group.participantCount > 0 ? group.participantCount : group.participants.length;
+  // 头像堆展示口径：优先列表接口下发的成员摘要（缺省回退完整明细），人数用接口权威计数；
+  // 显式 0 保持 0，仅在计数缺省/非法时回退到展示成员数。
+  const displayParticipants = getDisplayParticipants(group);
+  const stackTotalCount = getParticipantDisplayCount(group.participantCount, displayParticipants);
 
+  // 点击群行只做展开/收起，不抢占右侧主舞台（2026-11-02 反馈：展开与切台解耦）；
+  // 主舞台仅在用户点具体会话（onSelectSession）/竖轨头像直达时切换。
   const handleCardClick = () => {
-    if (selectedGroupId !== group.groupId) onSelectGroup(group.groupId);
     onToggleGroupExpanded(group.groupId);
   };
   const handleSessionScopeChange = (tab: SessionTab) => {
@@ -121,23 +117,29 @@ export const GroupItem = React.memo(function GroupItem({
           )}
         >
           <span className="flex h-9 w-9 shrink-0 items-center justify-center [&>span]:mr-0">
-            <GroupAvatarStack participants={group.participants} totalCount={stackTotalCount} size={20} />
+            <GroupAvatarStack participants={displayParticipants} totalCount={stackTotalCount} size={20} />
           </span>
           <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="w-full min-w-0 truncate text-[13px] font-normal leading-5 text-content-strong">
+                  <span
+                    className={cn(
+                      'w-full min-w-0 truncate text-[13px] font-normal leading-5 text-content-strong',
+                      // 群挂着舞台选中会话时群名点亮 #09090B（2026-11-02 稿 = text-foreground）：
+                      // 与 Bot 行 botSelected 点名、会话行灰阶选中胶囊同一选中语言;
+                      // 收起时下挂选中会话不可见,由群名顶位承载「当前在哪」。
+                      hasSelectedSession && 'text-foreground',
+                    )}
+                  >
                     {group.name}
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>{group.name}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
-            <Badge
-              tone={KIND_TONE[group.kind]}
-              className="block max-w-full truncate rounded px-1.5 py-0.5 text-[10px] font-normal leading-3"
-            >
+            {/* 群类型标签统一用默认 neutral 色（2026-11-02 裁决），不再按 kind 区分配色。 */}
+            <Badge className="block max-w-full truncate rounded px-1.5 py-0.5 text-[10px] font-normal leading-3">
               {KIND_LABEL[group.kind]}
             </Badge>
           </span>
@@ -163,20 +165,10 @@ export const GroupItem = React.memo(function GroupItem({
           )}
           onClick={(event) => event.stopPropagation()}
         >
-          {viewerKind === 'user' ? (
-            <MessageViewScopeMenuButton onSelect={(scope) => onCreateSession(group.groupId, scope)} />
-          ) : (
-            <IconButton
-              label="新建会话"
-              size="sm"
-              icon={<Plus className="h-3.5 w-3.5" />}
-              className="h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-              onClick={(event) => {
-                event.stopPropagation();
-                onCreateSession(group.groupId);
-              }}
-            />
-          )}
+          <CreateSessionMenu
+            viewerKind={viewerKind}
+            onCreate={(scope, contextDelivery) => onCreateSession(group.groupId, scope, contextDelivery)}
+          />
           <SessionScopeFilter
             compact
             value={sessionTab}

@@ -2,12 +2,11 @@
 // 富文本 HTML 来自受信内部运营平台（雨燕配置）。先经 DOMPurify 白名单净化，再由受约束的
 // React 元素树渲染，不将原始 HTML 字符串直接写入 DOM。数据由 useReleaseNotes 提供（Open Core
 // capability=null → 此 Modal 不被渲染）。禁 antd/裸 button，用项目 <Modal>/<Button>。≤150 行。
-import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
-import { sanitizeRichHtml } from '@/assets/TaskPanel/sanitizeHtml';
+import { SafeHtml } from '@/components/Common/RichContent';
+import { sanitizeRichHtml } from '@/components/Common/RichContent';
 import type { ReleaseNotesData } from '@/capabilities';
 import { Button, Modal, ModalContent } from '@/components/ui';
 import { X } from 'lucide-react';
-import { Fragment } from 'react';
 
 interface ReleaseNotesModalProps {
   open: boolean;
@@ -19,13 +18,14 @@ function EmptyContent() {
   return <p className="italic text-sm text-muted-foreground">暂无内容</p>;
 }
 
-/** 内嵌富文本：先白名单净化，再由 SafeHtml 输出受约束的 React 元素树。 */
+/** 内嵌富文本：先白名单净化，再由 SafeHtml richText 模式输出受约束的 React 元素树（.markdown-body 同源排版）。 */
 function RichText({ html }: { html?: string }) {
   if (!html) return <EmptyContent />;
   return (
     <SafeHtml
-      className="prose prose-sm max-w-none break-words text-foreground [&_ol]:pl-4 [&_ul]:pl-4"
+      className="markdown-body break-words text-foreground [&_ol]:list-decimal [&_ul]:list-disc"
       html={sanitizeRichHtml(html)}
+      richText
     />
   );
 }
@@ -35,7 +35,7 @@ export function ReleaseNotesModal({ open, data, onClose }: ReleaseNotesModalProp
     <Modal open={open} onOpenChange={(v) => !v && onClose()}>
       <ModalContent size="xl" showClose={false} className="flex max-h-[85vh] flex-col gap-0 p-0">
         {/* 标题栏 */}
-        <div className="flex flex-shrink-0 items-center justify-between border-b border-border px-6 py-4">
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-divider px-6 py-4">
           <h2 className="text-base font-medium">版本发布说明</h2>
           <Button variant="ghost" size="sm" leftIcon={<X className="h-4 w-4" />} onClick={onClose}>
             关闭
@@ -60,10 +60,10 @@ export function ReleaseNotesModal({ open, data, onClose }: ReleaseNotesModalProp
                 <span className="h-2 w-2 rounded-full bg-blue-500" />
                 <span className="text-sm font-medium text-blue-600">新版本发布</span>
               </div>
-              {data?.version && (
+              {(data?.version || data?.date) && (
                 <span className="text-xs text-blue-500">
-                  v{data.version}
-                  {data?.date ? <Fragment> · {data.date}</Fragment> : null}
+                  {data?.version ? `v${data.version}${data?.date ? ' · ' : ''}` : ''}
+                  {data?.date}
                 </span>
               )}
             </div>

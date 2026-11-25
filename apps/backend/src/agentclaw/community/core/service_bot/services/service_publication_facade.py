@@ -28,6 +28,7 @@ from agentclaw.community.core.bot_inventory.policies.combo_policy import (
     assert_service_upgrade,
 )
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_management.engines.registry import resolve_published_status_ext
 from agentclaw.community.core.devices.errors import (
     DeviceServiceError,
     InvalidDeviceStatusError,
@@ -39,6 +40,8 @@ from agentclaw.community.core.devices.services.device_instance_service import (
     InstanceHealthStatus,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.repository.protocols.publishing import (
     BotPublishRepositoryProtocol,
 )
@@ -55,6 +58,8 @@ from agentclaw.community.core.service_bot.errors import (
     ServicePublicationLockedError,
     ServicePublicationNotFoundError,
     ServicePublicationUnsupportedError,
+    ServicePublicationGateBlockedError,
+    ServicePublicationGatePendingError,
 )
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     BotPublishService,
@@ -62,6 +67,7 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 from agentclaw.community.core.service_bot.services.publish_exceptions import (
     PublishNotFoundError,
     PublishStatusInvalidError,
+    UpgradeDraftRestartError,
 )
 from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
 from agentclaw.community.core.service_bot.services.publish_approval_service import (
@@ -72,6 +78,10 @@ from agentclaw.community.core.service_bot.services.publish_flow_service import (
 )
 from agentclaw.community.core.service_bot.types import (
     can_upgrade_publication_from_records,
+)
+from agentclaw.community.plugin_api.service_bot_eval import (
+    ServiceBotEvalContext,
+    ServiceBotEvalPlugin,
 )
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -107,6 +117,7 @@ class ServicePublicationFacade:
         lock_service: CollaboratorLockService,
         bot_service: BotService,
         device_service: ServiceRuntimeDevicePort,
+        eval_gate: ServiceBotEvalPlugin,
     ) -> None:
         self._bot_repo = bot_repo
         self._publish_repo = publish_repo
@@ -117,6 +128,7 @@ class ServicePublicationFacade:
         self._lock_service = lock_service
         self._bot_service = bot_service
         self._device_service = device_service
+        self._eval_gate = eval_gate
 
     def _resolve_bot(
         self,
@@ -162,15 +174,18 @@ class ServicePublicationFacade:
         The ``require_service`` refusal is a bot-type answer, not a
         collaborator one, and the surface still reports it separately.
         """
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if not bot:
-            raise ServicePublicationNotFoundError("bot not found")
+        try:
+            bot = dict(BotAddressResolver(self._bot_repo).resolve(
+                bot_id=bot_id, legacy_owner_id=owner_id,
+            ).bot)
+        except BotAddressNotFoundError as exc:
+            raise ServicePublicationNotFoundError("bot not found") from exc
 
         level = resolve_operable_permission_level(
             self._collaborator_service,
             bot=bot,
             user_id=actor_id,
-            owner_id=owner_id,
+            owner_id=str(bot["owner_id"]),
             env=get_current_env(),
         )
         if level < required_level:
@@ -314,7 +329,7 @@ class ServicePublicationFacade:
             key=lambda item: ((item.version or 0), (item.id or 0)),
             default=None,
         )
-        return {
+        result = {
             "bot_id": record.source_bot_id,
             "publication_id": record.id,
             "card_id": f"service:{record.source_bot_id}:{record.id}",
@@ -330,6 +345,11 @@ class ServicePublicationFacade:
             "created_at": record.gmt_create,
             "updated_at": record.gmt_modified,
         }
+
+        ext = resolve_published_status_ext(record, public=True)
+        if ext:
+            result["ext"] = ext
+        return result
 
     @staticmethod
     def _visible_records(records: list[BotPublishRecord]) -> list[BotPublishRecord]:
@@ -526,6 +546,12 @@ class ServicePublicationFacade:
                 publish_id=record.id,
                 owner_id=bot["owner_id"],
             )
+        except UpgradeDraftRestartError as exc:
+            # The draft remains available through get/list lifecycle; retain the
+            # public API's existing upstream failure envelope.
+            raise ServiceContainerUpstreamError(
+                f"draft {exc.draft_record.id} created but restart submission failed"
+            ) from exc
         except (PublishNotFoundError, PublishStatusInvalidError) as exc:
             # The record may have changed between the projection check and the
             # domain write. Expose that race as the same stable state conflict.
@@ -676,6 +702,22 @@ class ServicePublicationFacade:
                 owner_id=owner_id,
             )
             self._require_draft_lock(bot_id, bot["owner_id"], actor_id)
+            context = ServiceBotEvalContext(
+                bot_id=str(bot["bot_id"]),
+                bot_version=str(record.version),
+                release_id=str(record.id),
+                publish_id=str(record.id),
+                operator_id=actor_id,
+                latest_bot_modified_at=str(bot.get("gmt_modified") or ""),
+            )
+            gate_result = await self._eval_gate.precheck(
+                context,
+                trigger_source="draft_to_validate",
+            )
+            if gate_result.get("allowed") is not True:
+                if gate_result.get("gate_status") == "PENDING":
+                    raise ServicePublicationGatePendingError(gate_result)
+                raise ServicePublicationGateBlockedError(gate_result)
             result = await self._flow_service.process(record.id, actor_id)
             return self._operation(
                 record, action="publish_staging", result=result.model_dump()
@@ -723,7 +765,10 @@ class ServicePublicationFacade:
         result = self._flow_service.restart_bot(record.id, actor_id)
         if not result.get("success"):
             raise ServicePublicationConflictError("restart is unavailable")
-        return self._operation(record, action="restart_publish", result=result)
+        acknowledgement = self._operation(record, action="restart_publish", result=result)
+        if result.get("ext"):
+            acknowledgement["ext"] = result["ext"]
+        return acknowledgement
 
     async def cancel_staging(
         self, bot_id: str, *, actor_id: str, owner_id: str

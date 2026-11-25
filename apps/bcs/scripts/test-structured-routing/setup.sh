@@ -45,7 +45,7 @@ info() { echo -e "  \033[0;36m→\033[0m $1" >&2; }
 # ── Step 1: Build BCS ─────────────────────────────────────────────────────
 
 info "Building BCS + bcs-cli..."
-cargo build --package bcs --package bcs-cli --manifest-path "$PROJECT_ROOT/Cargo.toml" 2>&1 | tail -1 >&2
+(cd "$PROJECT_ROOT" && cargo build --package bcs --package bcs-cli) 2>&1 | tail -1 >&2
 pass "BCS built"
 
 # ── Step 2: Fixed ports ───────────────────────────────────────────────────
@@ -270,7 +270,7 @@ setup_profile() {
     },
     "list": [{ "id": "main" }]
   },
-  "tools": { "profile": "coding", "alsoAllow": ["bcs_route", "bcs_assign_task", "bcs_send_task_message", "bcs_task_complete"] },
+  "tools": { "profile": "coding", "alsoAllow": ["bcs_route", "bcs_assign_task", "bcs_task_status", "bcs_cancel_task", "bcs_task_complete"] },
   "messages": { "ackReactionScope": "group-mentions" },
   "commands": { "native": "auto", "nativeSkills": "auto", "restart": true, "ownerDisplay": "raw" },
   "session": { "dmScope": "per-channel-peer" },

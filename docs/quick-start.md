@@ -33,6 +33,9 @@ stack, demo bot, and frontend. `start bcs` starts only BCS; use `start bcs_bots`
 for BCS plus the 5 demo bots. `bcs_frontend` serves the default `legacy`
 frontend; for other frontend variants, see [the frontend guide](singlebox-nextgen-local.md).
 
+Start [Qdrant Server 1.20 or later](../apps/bcsfuse/docs/qdrant-modes.md) before
+using `start all` or `start bcsfuse`.
+
 ## Runtime isolation
 
 `singlebox.sh` has one supported mode: the isolated singlebox mode. It avoids

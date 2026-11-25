@@ -8,20 +8,10 @@ from agentclaw.community.core.expert_chat.errors import BotNotFoundError, Connec
 
 
 class ExpertChatOwnedSessionMixin:
-    def _require_owned_session(
-        self, user_id: str, bot_id: str, owner_id: str, session_key: str, *,
-        bcn_friend_authorized: bool = False,
-    ) -> Dict[str, Any]:
-        """Resolve the chat Bot and prove session ownership before I/O."""
-        bot = self._get_authorized_chat_bot(
-            user_id,
-            bot_id,
-            owner_id,
-            bcn_friend_authorized=bcn_friend_authorized,
-        )
-        if not self._repo.get_owned_session(user_id, bot_id, owner_id, session_key):
-            raise BotNotFoundError("Session不存在或不属于当前用户")
-        return bot
+    async def _invoke_session_operation(self, bot, connection, user_id, method, path, **kwargs):
+        if self._is_independent_caller(bot):
+            return await self._invoke_caller_session(bot, connection, user_id, method, path, **kwargs)
+        return await self._transport.invoke(connection, method, path, **kwargs)
 
     async def get_owned_chat_session(
         self,
@@ -31,9 +21,9 @@ class ExpertChatOwnedSessionMixin:
         session_key: str,
         iam_token: Optional[str] = None,
         *,
-        bcn_friend_authorized: bool = False,
+        bcn_friend_authorized: bool = False, actor_user_id: str | None = None,
     ) -> Dict[str, Any]:
-        """Read one Backend-owned expert-chat session from its existing runtime."""
+        """Read a session authorized by its Caller container or shared-runtime index."""
         result = await self.list_chat_sessions(
             user_id=user_id,
             bot_id=bot_id,
@@ -43,7 +33,10 @@ class ExpertChatOwnedSessionMixin:
             offset=0,
             iam_token=iam_token,
             bcn_friend_authorized=bcn_friend_authorized,
+            actor_user_id=actor_user_id,
         )
+        if result.get("need_poll"):
+            raise ConnectionError("Bot服务正在启动，请稍后重试", error_code="5001")
         items = result.get("items") or []
         if not items:
             raise BotNotFoundError("Session不存在或不属于当前用户")
@@ -59,24 +52,26 @@ class ExpertChatOwnedSessionMixin:
         offset: int = 0,
         iam_token: Optional[str] = None,
         *,
-        bcn_friend_authorized: bool = False,
+        bcn_friend_authorized: bool = False, actor_user_id: str | None = None,
     ) -> Dict[str, Any]:
-        bot = self._require_owned_session(
-            user_id, bot_id, owner_id, session_key,
+        bot = self._get_authorized_chat_bot(
+            user_id, bot_id, owner_id,
             bcn_friend_authorized=bcn_friend_authorized,
         )
-        connection, need_poll = await self._prepare_chat_connection(
+        connection, need_poll = await self._prepare_authorized_session_connection(
             bot,
             user_id,
             owner_id,
+            session_key,
             iam_token,
             bcn_friend_authorized=bcn_friend_authorized,
+            actor_user_id=actor_user_id,
         )
         if need_poll or connection is None:
             raise ConnectionError("Bot服务正在启动，请稍后重试", error_code="5001")
         encoded = quote(session_key, safe="")
-        response = await self._transport.invoke(
-            connection,
+        response = await self._invoke_session_operation(
+            bot, connection, user_id,
             "GET",
             f"/api/sessions/{encoded}/messages",
             params={"limit": limit, "offset": offset},
@@ -98,22 +93,23 @@ class ExpertChatOwnedSessionMixin:
         *,
         bcn_friend_authorized: bool = False,
     ) -> Dict[str, Any]:
-        bot = self._require_owned_session(
-            user_id, bot_id, owner_id, session_key,
+        bot = self._get_authorized_chat_bot(
+            user_id, bot_id, owner_id,
             bcn_friend_authorized=bcn_friend_authorized,
         )
-        connection, need_poll = await self._prepare_chat_connection(
+        connection, need_poll = await self._prepare_authorized_session_connection(
             bot,
             user_id,
             owner_id,
+            session_key,
             iam_token,
             bcn_friend_authorized=bcn_friend_authorized,
         )
         if need_poll or connection is None:
             raise ConnectionError("Bot服务正在启动，请稍后重试", error_code="5001")
         encoded = quote(session_key, safe="")
-        response = await self._transport.invoke(
-            connection,
+        response = await self._invoke_session_operation(
+            bot, connection, user_id,
             "POST",
             f"/api/sessions/{encoded}/update",
             params=fields,
@@ -133,22 +129,23 @@ class ExpertChatOwnedSessionMixin:
         *,
         bcn_friend_authorized: bool = False,
     ) -> bool:
-        bot = self._require_owned_session(
-            user_id, bot_id, owner_id, session_key,
+        bot = self._get_authorized_chat_bot(
+            user_id, bot_id, owner_id,
             bcn_friend_authorized=bcn_friend_authorized,
         )
-        connection, need_poll = await self._prepare_chat_connection(
+        connection, need_poll = await self._prepare_authorized_session_connection(
             bot,
             user_id,
             owner_id,
+            session_key,
             iam_token,
             bcn_friend_authorized=bcn_friend_authorized,
         )
         if need_poll or connection is None:
             raise ConnectionError("Bot服务正在启动，请稍后重试", error_code="5001")
         encoded = quote(session_key, safe="")
-        await self._transport.invoke(
-            connection, "DELETE", f"/api/sessions/{encoded}/messages"
+        await self._invoke_session_operation(
+            bot, connection, user_id, "DELETE", f"/api/sessions/{encoded}/messages"
         )
         return True
 
@@ -163,22 +160,23 @@ class ExpertChatOwnedSessionMixin:
         *,
         bcn_friend_authorized: bool = False,
     ) -> bool:
-        bot = self._require_owned_session(
-            user_id, bot_id, owner_id, session_key,
+        bot = self._get_authorized_chat_bot(
+            user_id, bot_id, owner_id,
             bcn_friend_authorized=bcn_friend_authorized,
         )
-        connection, need_poll = await self._prepare_chat_connection(
+        connection, need_poll = await self._prepare_authorized_session_connection(
             bot,
             user_id,
             owner_id,
+            session_key,
             iam_token,
             bcn_friend_authorized=bcn_friend_authorized,
         )
         if need_poll or connection is None:
             raise ConnectionError("Bot服务正在启动，请稍后重试", error_code="5001")
         encoded = quote(session_key, safe="")
-        await self._transport.invoke(
-            connection,
+        await self._invoke_session_operation(
+            bot, connection, user_id,
             "PUT" if favorited else "DELETE",
             f"/api/session-favorites/{encoded}",
             params={"user_id": user_id},

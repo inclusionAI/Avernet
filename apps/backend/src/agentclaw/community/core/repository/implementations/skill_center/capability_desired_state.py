@@ -7,6 +7,16 @@ would make a SkillSet only *eventually* atomic.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextvars import ContextVar
+
+from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import (
+    SkillBatchTransactions,
+    find_capability_bot,
+    lock_bot_capabilities,
+    verify_runtime_binding_for_write,
+)
+
 from injector import inject
 from sqlalchemy import and_, or_
 from agentclaw.community.core.models.skill import (
@@ -46,8 +56,8 @@ from agentclaw.community.core.repository.implementations.skill_center.direct_ins
 from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_set_control_plane import (
     McpSkillSetControlPlaneCommands,
 )
-from agentclaw.community.core.repository.implementations.skill_center.manifest_direct_claim_commands import (
-    ManifestDirectClaimCommands,
+from agentclaw.community.core.repository.implementations.skill_center.apply_claim_commands import (
+    ApplyClaimCommands,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
     set_skill_mcp_dependency_codes,
@@ -64,8 +74,8 @@ from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.models.skill_installation_source import SkillInstallationSourceKind
 
 from agentclaw.community.core.skill_center.errors import (
-    SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
+    SkillSetControlPlaneLockUnavailableError,
     SkillSetControlPlaneNotFoundError,
 )
 from agentclaw.community.core.skill_center.offline_policy import require_skill_online
@@ -74,20 +84,59 @@ from agentclaw.community.core.skill_center.policies.capability_ownership import 
 )
 
 
+
+from .apply_skill_set_commands import ApplySkillSetCommands
+
+
 class CapabilityDesiredStateRepository(
+    ApplySkillSetCommands,
+    SkillBatchTransactions,
     BotSkillSetInstallations,
     DefaultExclusionCommands,
     DirectInstallationCommands,
-    ManifestDirectClaimCommands,
+    ApplyClaimCommands,
     LegacySkillSetScopeQueries,
     McpSkillSetControlPlaneCommands,
     CapabilityDesiredStateRepositoryProtocol,
 ):
-    """Desired-state UoW for SkillSet Membership and Installations."""
+    """SkillSet Membership and Installation UoW; lifecycle edits preserve overrides."""
 
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
+        self._batch_session = ContextVar("skill_batch_session", default=None)
+
+    def commit_capability_mutation(
+        self, *, bot_id: str, entity_id: str,
+        mutation: Callable[[], DesiredStateMutation],
+        require_bot: bool,
+    ) -> DesiredStateMutation:
+        """Run a capability command under the Bot mutation fence."""
+        with self._db.transactional_orm_session() as session:
+            bot = find_capability_bot(
+                session, bot_id=bot_id, entity_id=entity_id, lock=True,
+            )
+            if bot is None:
+                if require_bot:
+                    raise SkillSetControlPlaneLockUnavailableError("Bot capability fence unavailable")
+                return mutation()
+            verify_runtime_binding_for_write(
+                session, bot_id=bot_id, entity_id=entity_id, locked_bot=bot,
+            )
+            token = self._batch_session.set(session)
+            try:
+                return mutation()
+            finally:
+                self._batch_session.reset(token)
+
+    @staticmethod
+    def normalize_mcp_config_address(session, *, bot_id: str, owner_id: str, env: str) -> None:
+        """Participate in handoff's transaction without opening a second Session.
+
+        The capability UoW remains the owner of configuration table commands;
+        handoff coordinates this normalization before switching Bot ownership.
+        """
+        bot_mcp_configs.normalize(session, bot_id=bot_id, owner_id=owner_id, env=env)
 
     def purge_bot_installations(
         self, *, bot_id: str, owner_id: str, env: str
@@ -164,6 +213,8 @@ class CapabilityDesiredStateRepository(
         description: str | None,
         engine_type: str | None = None,
     ) -> dict:
+        if name == "default":
+            raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_RESERVED")
         with self._db.transactional_orm_session() as session:
             duplicate = (
                 self._scope(session.query(SkillSet), SkillSet)
@@ -203,6 +254,8 @@ class CapabilityDesiredStateRepository(
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> dict:
+        if name == "default":
+            raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_RESERVED")
         with self._db.transactional_orm_session() as session:
             row = self._set(
                 session,
@@ -330,7 +383,8 @@ class CapabilityDesiredStateRepository(
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
+            lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             excluded_default_ids = default_exclusions.lock_skill_exclusions(
                 session, bot_id=bot_id, owner_id=owner_id,
                 skill_id=int(skill_id),
@@ -429,13 +483,15 @@ class CapabilityDesiredStateRepository(
                 ),
                 is_in_another_set=bool(conflicting_memberships),
             )
-            if row.is_active:
-                self._require_unique_runtime_names(
-                    session,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    candidate_ids={int(skill.id)},
-                )
+            self._require_unique_runtime_names(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                candidate_ids={int(skill.id)},
+                extra_ids=self._member_ids(session, {int(row.id)}),
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            )
             session.add(
                 SkillSetSkill(
                     skill_set_id=row.id,
@@ -482,7 +538,8 @@ class CapabilityDesiredStateRepository(
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
+            lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             row = self._set(
                 session,
                 bot_id=bot_id,
@@ -550,7 +607,8 @@ class CapabilityDesiredStateRepository(
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
+            lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             row = self._set(
                 session,
                 bot_id=bot_id,
@@ -604,7 +662,8 @@ class CapabilityDesiredStateRepository(
             row.is_active = active
             if active:
                 self._require_unique_runtime_names(
-                    session, bot_id=bot_id, owner_id=owner_id, candidate_ids=ids
+                    session, bot_id=bot_id, owner_id=owner_id, candidate_ids=ids,
+                    engine_type=engine_type, default_engine_types=default_engine_types,
                 )
                 for skill_id in sorted(ids):
                     skill_installations.install(
@@ -638,13 +697,6 @@ class CapabilityDesiredStateRepository(
                     env=get_current_env(),
                     server_codes=direct_mcp_codes,
                 )
-                bot_mcp_configs.delete(
-                    session,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    env=get_current_env(),
-                    server_codes=direct_mcp_codes,
-                )
             session.flush()
             # The projection needs the Set's direct and Skill-derived MCP
             # candidates. Resolve them under this transaction's row locks so
@@ -667,6 +719,7 @@ class CapabilityDesiredStateRepository(
     ) -> None:
         """Atomically restore Membership, set-state and Installation facts."""
         with self._db.transactional_orm_session() as session:
+            lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             query = self._scope(session.query(SkillSet), SkillSet).filter(
                 SkillSet.bolt_id == bot_id,
                 SkillSet.user_id == owner_id,
@@ -754,24 +807,9 @@ class CapabilityDesiredStateRepository(
             mcp_installations.uninstall_all(
                 session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
             )
-            # Compensation restores the prior installed set. Keep overrides for
-            # codes that are about to be restored, but remove orphan rows for
-            # codes the restored desired state no longer owns.
-            existing_override_codes = set(
-                bot_mcp_configs.get_all(
-                    session,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    env=get_current_env(),
-                )
-            )
-            bot_mcp_configs.delete(
-                session,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                env=get_current_env(),
-                server_codes=existing_override_codes - set(state.mcp_installations),
-            )
+            # Capability compensation restores supply, not Bot configuration.
+            # Overrides can remain dormant or have been explicitly edited since
+            # this snapshot; neither case is an orphan or a value to roll back.
             for server_code in sorted(state.mcp_installations):
                 mcp_installations.install(
                     session,
@@ -861,34 +899,6 @@ class CapabilityDesiredStateRepository(
         return mcp_installations.installed_codes(
             session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
         )
-
-    def _require_unique_runtime_names(
-        self,
-        session,
-        *,
-        bot_id: str,
-        owner_id: str,
-        candidate_ids: set[int],
-        retired_ids: set[int] | None = None,
-    ) -> None:
-        """Validate the complete post-command projection before any write."""
-        selected_ids = (
-            self._installations(session, bot_id, owner_id) - (retired_ids or set())
-        ) | candidate_ids
-        if not selected_ids:
-            return
-        rows = (
-            self._scope(session.query(Skill.id, Skill.name), Skill)
-            .filter(Skill.id.in_(selected_ids))
-            .all()
-        )
-        owner_by_name: dict[str, int] = {}
-        for skill_id, name in rows:
-            runtime_name = str(name or "")
-            existing = owner_by_name.get(runtime_name)
-            if existing is not None and existing != int(skill_id):
-                raise SkillRuntimeNameConflictError()
-            owner_by_name[runtime_name] = int(skill_id)
 
     def _snapshot(
         self,

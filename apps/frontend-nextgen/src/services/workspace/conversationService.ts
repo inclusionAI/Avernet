@@ -2,8 +2,14 @@
 // 组合 botSessionService / collaborationCandidateService 的既有映射,不重复协议转换。
 // 由调用方(Hook)传入已鉴权的 Human ID,本 Service 不读取任何 Store / 路由。
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
+import { getCapabilities } from '@/capabilities';
 import { supportsBotSessionFavorites } from '@/domain/botEngine';
-import type { ConversationSessionRequestRange, ConversationSessionScope } from '@/domain/conversation/types';
+import { codingSessionOriginOf } from '@/domain/conversation/codingSessionOwnership';
+import type {
+  ConversationOrigin,
+  ConversationSessionRequestRange,
+  ConversationSessionScope,
+} from '@/domain/conversation/types';
 import {
   BOT_SESSION_PAGE_SIZE,
   botSessionService,
@@ -12,8 +18,9 @@ import {
   type ChatBotView,
 } from './botSessionService';
 import { collaborationCandidateService, type CollaborationBotView } from './collaborationCandidateService';
-import { conversationFavoriteService } from './conversationFavoriteService';
 import type { DomainResult } from './identityService';
+import { listConversationSource } from './conversationSourceService';
+import { deleteFriendConnection } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 
 export interface ConversationDirectoryResult {
   /** 当前用户管理的 Bot;包含 AgentCoding Bot,行点击走专用 coding-chat 入口。 */
@@ -39,12 +46,78 @@ function toConversationFriendBotView(view: CollaborationBotView): ChatBotView {
     avatarUrl: view.avatarUrl,
     online: view.online,
     reachability: view.reachability,
-    chatable: view.detailsResolved !== false,
+    chatable: view.detailsResolved !== false && !(view.botType === 'service' && view.onlineAvailable === false),
     engine: view.engine,
     botType: view.botType,
+    onlineAvailable: view.onlineAvailable,
     isFriendBot: true,
     isAgentCodingBot: runtime.isAgentCodingBot,
+    // Caller 模式标记透传(openspec add-iam-caller-runtime-target);缺失保持 undefined。
+    callType: view.callType,
   };
+}
+
+const CODING_SESSION_SCAN_PAGE_SIZE = 100;
+const CODING_SESSION_MAX_SCAN_PAGES = 20;
+
+/**
+ * 收藏接口没有 source 窗口，保持原有 Coding 收藏归属过滤。
+ * 普通 mine/others 列表改走 listConversationSource，不再由浏览器扫描原始页。
+ */
+async function listCodingSessionsByOrigin(
+  bot: ChatBotView,
+  userId: string,
+  scope: ConversationSessionScope,
+  origin: ConversationOrigin,
+  page: number,
+  pageSize: number,
+  sessionKey: string,
+  range?: ConversationSessionRequestRange,
+): Promise<DomainResult<BotSessionPageView>> {
+  const matching: BotSessionPageView['items'] = [];
+  const targetEnd = page * pageSize;
+  const isSessionHidden = getCapabilities().getCodingBotConversationHost().value?.isSessionHidden;
+  let rawPage = 1;
+  let exhausted = false;
+
+  while (matching.length < targetEnd && rawPage <= CODING_SESSION_MAX_SCAN_PAGES) {
+    const rangeArgs: [] | [ConversationSessionRequestRange] = range ? [range] : [];
+    const result =
+      scope === 'favorite' && supportsBotSessionFavorites(bot.engine)
+        ? await botSessionService.listFavoriteSessionsPage(
+            bot,
+            userId,
+            rawPage,
+            CODING_SESSION_SCAN_PAGE_SIZE,
+            ...rangeArgs,
+          )
+        : await botSessionService.listSessionsPage(
+            bot,
+            userId,
+            rawPage,
+            CODING_SESSION_SCAN_PAGE_SIZE,
+            sessionKey,
+            ...rangeArgs,
+          );
+    if (!result.ok) return result;
+
+    matching.push(
+      ...result.data.items.filter(
+        (session) => !isSessionHidden?.(session) && codingSessionOriginOf(session.sessionId, userId) === origin,
+      ),
+    );
+    exhausted =
+      result.data.items.length < CODING_SESSION_SCAN_PAGE_SIZE ||
+      rawPage * CODING_SESSION_SCAN_PAGE_SIZE >= result.data.total;
+    if (exhausted) break;
+    rawPage += 1;
+  }
+
+  const items = matching.slice((page - 1) * pageSize, targetEnd);
+  // 未扫到尾时只暴露“至少还有一页”的有界 total；真正到尾后再给精确过滤总数。
+  const total = exhausted ? matching.length : Math.max(targetEnd + 1, matching.length + 1);
+  const data = { items, total };
+  return { ok: true, data };
 }
 
 export const conversationService = {
@@ -78,13 +151,18 @@ export const conversationService = {
     pageSize: number = BOT_SESSION_PAGE_SIZE,
     sessionKey: string = '',
     range?: ConversationSessionRequestRange,
+    origin: ConversationOrigin = 'mine',
+    cursor?: string | null,
   ): Promise<DomainResult<BotSessionPageView>> {
+    if ((scope === 'favorite' || origin === 'collab') && bot.isAgentCodingBot) {
+      return listCodingSessionsByOrigin(bot, userId, scope, origin, page, pageSize, sessionKey, range);
+    }
+    if (origin === 'collab') return { ok: true, data: { items: [], total: 0 } };
     const rangeArgs: [] | [ConversationSessionRequestRange] = range ? [range] : [];
     if (scope === 'favorite' && supportsBotSessionFavorites(bot.engine)) {
       return botSessionService.listFavoriteSessionsPage(bot, userId, page, pageSize, ...rangeArgs);
     }
-    const result = await botSessionService.listSessionsPage(bot, userId, page, pageSize, sessionKey, ...rangeArgs);
-    return result.ok ? { ok: true, data: await conversationFavoriteService.hydrate(bot, userId, result.data) } : result;
+    return listConversationSource(bot, userId, origin, pageSize, sessionKey, range, cursor);
   },
 
   /** Human→Bot 好友 Bot 会话分页:鉴权 Human 既作 user_id 也作 f_user_id;
@@ -103,9 +181,20 @@ export const conversationService = {
     if (scope === 'favorite' && supportsBotSessionFavorites(bot.engine)) {
       return botSessionService.listFavoriteSessionsPage(friendBot, userId, page, pageSize, ...rangeArgs);
     }
-    const result = await botSessionService.listSessionsPage(friendBot, userId, page, pageSize, sessionKey, ...rangeArgs);
-    return result.ok
-      ? { ok: true, data: await conversationFavoriteService.hydrate(friendBot, userId, result.data) }
-      : result;
+    const result = await botSessionService.listSessionsPage(
+      friendBot,
+      userId,
+      page,
+      pageSize,
+      sessionKey,
+      ...rangeArgs,
+    );
+    return result;
+  },
+
+  /** 移除好友关系(移除好友动线的 Service 层封装,Hook 经此调用 API):主体为登录用户,
+   *  目标由 query 指定(契约 delete_friend_connection);静默解除、幂等,失败由调用方收敛提示。 */
+  removeFriendConnection(botId: string, signal?: AbortSignal) {
+    return deleteFriendConnection({ target_actor_type: 'bot', target_actor_id: botId }, signal);
   },
 };

@@ -71,6 +71,35 @@ export function extractErrorMessage(error: unknown, fallback = DEFAULT_ERROR_MES
   return fallback;
 }
 
+/**
+ * 后端 ``ENVELOPE_ERRORS`` 固定输出英文(设计规则:固定 message,不透传异常原文),
+ * 用户侧看到的 toast 却需要中文。这里把已知的配额/上限类英文固定串映射为中文,
+ * 与后端 ``bot_service._check_bot_count_limit`` 既有中文文案("已达到 Bot 数量上限 ... 请删除部分 Bot 后再创建新的")
+ * 同口径,保证创建 Bot 与复制 Bot 超额时提示一致。仅做精确串匹配,不影响其余可读 message。
+ */
+const BACKEND_MESSAGE_CHINESE_OVERRIDES: Record<string, string> = {
+  'Bot quota exceeded for this Space': '已达到当前空间 Bot 数量上限，请删除部分 Bot 后再创建新的。',
+  'Bot creation limit reached': '已达到 Bot 数量上限，请删除部分 Bot 后再创建新的。',
+};
+
+function overrideBackendMessage(message: string): string {
+  return BACKEND_MESSAGE_CHINESE_OVERRIDES[message] ?? message;
+}
+
+/**
+ * 按 HTTP 状态回退的语义化中文文案:后端无可读 message 时,401/403/404 等语义仍以
+ * 中文预设透传给用户(缺陷 2026111600120664873:静默错误呈现族,错误语义不可区分)。
+ * 供协议层 extractFriendlyErrorMessage 与 service 层 catch 压平错误(群/会话成员操作等)共用同一口径。
+ */
+export function friendlyStatusFallback(status: number | undefined, fallback: string): string {
+  if (status === 401) return '登录已过期，请重新登录';
+  if (status === 403) return '当前账号暂无权限执行该操作';
+  if (status === 404) return '访问的资源不存在或已被移除';
+  if (status === 429) return '请求过于频繁，请稍后再试';
+  if (status !== undefined && status >= 500) return '服务器暂时不可用，请稍后重试';
+  return fallback;
+}
+
 export function extractFriendlyErrorMessage(error: unknown, fallback = DEFAULT_ERROR_MESSAGE): string {
   const status = getErrorStatus(error);
   const message = extractErrorMessage(error, '');
@@ -84,15 +113,10 @@ export function extractFriendlyErrorMessage(error: unknown, fallback = DEFAULT_E
 
   // 有后端可读 message 时优先返回,不被状态相关预设覆盖(核心修复):
   // 后端 { code, message, data, request_id } 的 message 才是给用户看的真实原因。
-  if (message) return message;
+  // 已知英文固定串(配额/上限类)在此映射为中文,与创建/复制两路 toast 保持一致。
+  if (message) return overrideBackendMessage(message);
 
-  // 无可读 message 时,按 HTTP 状态回退预设文案。
-  if (status === 401) return '登录已过期，请重新登录';
-  if (status === 403) return '当前账号暂无权限执行该操作';
-  if (status === 429) return '请求过于频繁，请稍后再试';
-  if (status && status >= 500) return '服务器暂时不可用，请稍后重试';
-
-  return fallback;
+  return friendlyStatusFallback(status, fallback);
 }
 
 export function normalizeRequestError(

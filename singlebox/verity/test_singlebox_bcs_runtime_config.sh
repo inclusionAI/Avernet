@@ -30,11 +30,16 @@ fail() {
 }
 
 write_local_template() {
+    cp "${ROOT}/apps/bcs/configs/catalog-labels.toml" "${BCS_DIR}/configs/catalog-labels.toml"
     cat > "${BCS_DIR}/configs/bcs-config-local.toml" <<'EOF'
 bind = "127.0.0.1"
 port = 21000
 bcs_endpoint = "http://127.0.0.1:21000"
 botchat_url = "http://localhost:8000"
+
+[metrics]
+enabled = false
+mode = "pull"
 
 [llm]
 type = "openai_compatible"
@@ -80,11 +85,15 @@ test_local_llm_stays_disabled_without_env_config() {
     reset_case "default"
 
     prepare_bcs_runtime_config
+    [ ! -L "${BCS_CONFIG_DIR}/catalog-labels.toml" ] || fail "policy must be an independent regular file"
+    cmp -s "${BCS_DIR}/configs/catalog-labels.toml" "${BCS_CONFIG_DIR}/catalog-labels.toml" || fail "policy bytes must not depend on environment overlay"
+    assert_contains "${BCS_CONFIG_DIR}/catalog-labels.toml" 'allow_multiple = false'
 
     assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'type = "none"'
     assert_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'type = "none"'
     assert_not_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'legacy-template-secret'
     assert_not_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'legacy-template-secret'
+    assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'enabled = false'
 }
 
 test_botchat_url_can_be_overridden() {
@@ -173,6 +182,8 @@ test_e2e_mock_takes_precedence_over_env_config() {
     assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'api_key_env = "BCS_E2E_JUDGE_API_KEY"'
     assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'model = "e2e-judge"'
     assert_not_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'real-provider-model'
+    assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'enabled = true'
+    assert_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'enabled = true'
 }
 
 test_local_llm_stays_disabled_without_env_config
@@ -200,3 +211,29 @@ prepare_bcs_runtime_config
 assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'registration_self_service_provider_ids = ["prv_qwenwork"]'
 assert_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'registration_self_service_provider_ids = ["prv_qwenwork"]'
 echo 'PASS: QwenWork authorization survives regeneration'
+
+# A coverage-only Provider fixture affects generated runtime copies, never the
+# tracked template, and the initial start is allowed before provisioning.
+unset SINGLEBOX_QWENWORK_PROVIDER_STATE
+write_local_template
+export BCS_E2E_APP_IDENTITY=1
+prepare_bcs_runtime_config
+assert_not_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'e2e-loopback-identity'
+export SINGLEBOX_COVERAGE=1
+export SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE="${TEST_ROOT}/repair-provider.json"
+prepare_bcs_runtime_config
+printf '{"provider_id":"prv_repair_coverage","provider_admin_token":"test-token"}' > "$SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE"
+prepare_bcs_runtime_config
+prepare_bcs_runtime_config
+assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'allowed_switch_provider_ids = ["prv_repair_coverage"]'
+assert_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'allowed_switch_provider_ids = ["prv_repair_coverage"]'
+assert_not_contains "${BCS_DIR}/configs/bcs-config-local.toml" 'prv_repair_coverage'
+assert_not_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'test-token'
+assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'plugin = "e2e-loopback-identity"'
+assert_not_contains "${BCS_DIR}/configs/bcs-config-local.toml" 'e2e-loopback-identity'
+unset SINGLEBOX_COVERAGE BCS_E2E_APP_IDENTITY
+if prepare_bcs_runtime_config >/dev/null 2>&1; then
+    fail "Provider fixture must be rejected outside coverage mode"
+fi
+unset SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE
+printf 'PASS: coverage-only collaboration repair Provider runtime configuration\n'

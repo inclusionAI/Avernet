@@ -36,7 +36,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
-from tests.community.core.bot_config_manifest.cli_tools._fakes import elf as _elf_header
+from tests.community.core.apply_engine.cli_tools._fakes import elf as _elf_header
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_collaborator
 from tests.community.framework import (

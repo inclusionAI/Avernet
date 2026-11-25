@@ -22,11 +22,13 @@ from agentclaw.community.core.task.task_runner.client.ports import (
 )
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
     build_benchmark_task_launch_message,
+    format_benchmark_prompt,
 )
 
 
 class _StubService:
     def __init__(self, result: TaskOpResult | None = None) -> None:
+        self.node_updates: list[dict[str, Any]] = []
         self.result = result or TaskOpResult(
             task_id="task-1",
             node_id="task-1",
@@ -42,6 +44,14 @@ class _StubService:
     async def execute(self, request):
         self.requests.append(request)
         return self.result
+
+    async def update_task_node_info(
+        self, task_id, node_id, **kwargs
+    ):
+        self.node_updates.append(
+            {"task_id": task_id, "node_id": node_id, **kwargs}
+        )
+        return TaskOpResult(task_id=task_id, node_id=node_id, success=True)
 
 
 class _StubBotPort:
@@ -198,6 +208,39 @@ class _AixUIParser(HTMLParser):
             self.attrs = {str(key): value or "" for key, value in attrs if key}
 
 
+class TestBenchmarkRuntimeProfile:
+    def test_benchmark_defaults_to_single_bot_and_coop_group(self):
+        service = _StubService()
+        client = _client(service, _StubBotPort(), _StubBcsClient())
+
+        response = client.post(
+            "/api/v1/collaboration/tasks/benchmark_execute", json=_body()
+        )
+
+        assert response.status_code == 200, response.text
+        assert service.requests[0].execution_config["runtime_profile"] == {
+            "allowed_run_modes": ["single_bot", "coop_group"]
+        }
+
+    def test_benchmark_preserves_explicit_runtime_profile(self):
+        service = _StubService()
+        client = _client(service, _StubBotPort(), _StubBcsClient())
+
+        response = client.post(
+            "/api/v1/collaboration/tasks/benchmark_execute",
+            json=_body(
+                runtime_profile={
+                    "allowed_run_modes": ["single_bot", "coop_group", "bbs"]
+                }
+            ),
+        )
+
+        assert response.status_code == 200, response.text
+        assert service.requests[0].execution_config["runtime_profile"] == {
+            "allowed_run_modes": ["single_bot", "coop_group", "bbs"]
+        }
+
+
 class TestBenchmarkExecute:
     def test_openapi_branch_executes_in_the_created_benchmark_session(self):
         service = _StubService()
@@ -219,7 +262,12 @@ class TestBenchmarkExecute:
 
         assert len(service.requests) == 1
         assert service.requests[0].execution_config["main_session_id"] == "benchmark-session-1"
-        assert service.requests[0].execution_config["lifecycle_stage"] == "draft"
+        assert service.requests[0].execution_config["lifecycle_stage"] == "online"
+        assert service.node_updates[-1] == {
+            "task_id": "task-1",
+            "node_id": "task-1",
+            "extend_props_patch": {"run_id": "openapi-run-2"},
+        }
         assert service.requests[0].owner_bot_id == "bot-1"
         assert service.requests[0].owner_user_id == "owner-1"
 
@@ -228,13 +276,13 @@ class TestBenchmarkExecute:
         assert bot_port.send_calls[0]["metadata"] == {
             "benchmark": True,
             "sender_options": {"from": "owner-1"},
-            "bot_options": {"lifecycle_stage": "draft"},
+            "bot_options": {"lifecycle_stage": "online"},
         }
         assert bot_port.send_calls[1]["metadata"] == {
             "benchmark": True,
             "session_id": "benchmark-session-1",
             "sender_options": {"from": "owner-1"},
-            "bot_options": {"lifecycle_stage": "draft"},
+            "bot_options": {"lifecycle_stage": "online"},
         }
         launch = bot_port.send_calls[1]["message"]
         assert "taskPanel.TaskLoopView" in launch
@@ -385,3 +433,29 @@ class TestBenchmarkExecute:
         assert re.findall(r"--!?>", message) == ["-->"]
         assert "--\u200b>" in message
         assert "--\u200b!>" in message
+
+
+def test_benchmark_prompt_allows_internal_fact_execution_and_requires_relay() -> None:
+    prompt = format_benchmark_prompt(
+        {
+            "metadata": {
+                "title": "排查当前特征",
+                "instruction": "排查特征 123 当前查询无值的原因",
+            },
+            "goal": {
+                "objective": "取得当前特征的实际排查结论",
+                "acceptances": [
+                    {"id": "a1", "acceptance": "结论有当前对象事实支撑"}
+                ],
+            },
+        }
+    )
+
+    assert prompt.startswith("/task-loop [TASK-LOOP-EVALUATION]")
+    assert "禁止公共互联网检索，允许内部事实执行与接力" in prompt
+    assert "内部查询/操作工具" in prompt
+    assert "context、report、search、dispatch" in prompt
+    assert "必须保留对应任务缺口并按 TaskLoop Relay 协议搜索、交接" in prompt
+    assert "不能单独把相关验收项判为通过或将任务收口为 DONE" in prompt
+    assert "仅依据上方给定上下文与自身知识完成执行" not in prompt
+    assert "不得因无法联网核实而跳过验收或判 FAILED" not in prompt

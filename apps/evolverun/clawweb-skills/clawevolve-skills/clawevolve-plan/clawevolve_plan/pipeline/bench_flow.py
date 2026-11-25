@@ -117,6 +117,7 @@ def _ensure_clawweb_domains(
     result = upload_bench_domains(
         plan=plan, manifest=manifest, task_id=task_id,
         step_id=str(getattr(args, "step_id", "") or ""),
+        owner_id=str(getattr(args, "owner_id", "") or ""),
     )
     result["required"] = True
     logger.info(

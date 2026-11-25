@@ -110,7 +110,7 @@ async fn exercise(db: Arc<MysqlDbPlugin>, snapshot: StateMachineRunSnapshot) -> 
 }
 
 async fn service_rerun_reactivates_once(store: &MySqlCollaborationStore, db: &dyn DbPlugin, snapshot: &StateMachineRunSnapshot) -> Result<(), Box<dyn std::error::Error>> {
-    db.execute(DbStatement::new("INSERT INTO bcs_group_sessions (env, session_id, group_id, session_kind, status, activation_count, callback_status, participants, output) VALUES ('test', 'service-rerun', 'group-1', 'service_invocation', 'completed', 4, 'not_applicable', '[]', 'old output')")).await?;
+    db.execute(DbStatement::new("INSERT INTO bcs_group_sessions (env, session_id, group_id, session_kind, status, activation_count, participants, output) VALUES ('test', 'service-rerun', 'group-1', 'service_invocation', 'completed', 4, '[]', 'old output')")).await?;
     let mut source = test_run();
     source.run_id = "service-source".into();
     source.root_run_id = Some(source.run_id.clone());
@@ -168,7 +168,7 @@ async fn snapshot_write_failure_is_visible(store: &MySqlCollaborationStore, db: 
 }
 
 async fn rerun_snapshot_failure_rolls_back_activation(store: &MySqlCollaborationStore, db: &dyn DbPlugin, snapshot: &StateMachineRunSnapshot) -> Result<(), Box<dyn std::error::Error>> {
-    db.execute(DbStatement::new("INSERT INTO bcs_group_sessions (env, session_id, group_id, session_kind, status, activation_count, callback_status, participants, output) VALUES ('test', 'service-rollback', 'group-1', 'service_invocation', 'completed', 4, 'not_applicable', '[]', 'original output')")).await?;
+    db.execute(DbStatement::new("INSERT INTO bcs_group_sessions (env, session_id, group_id, session_kind, status, activation_count, participants, output) VALUES ('test', 'service-rollback', 'group-1', 'service_invocation', 'completed', 4, '[]', 'original output')")).await?;
     let mut source = test_run();
     source.run_id = "rollback-source".into();
     source.root_run_id = Some(source.run_id.clone());

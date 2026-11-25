@@ -103,6 +103,8 @@ pub struct LegacyGroupDeliveryPolicyRequest {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LegacyUpdateGroupRequest {
+    #[serde(default,deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
+    pub catalog_labels:Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub name: Option<String>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
@@ -136,6 +138,7 @@ where
 impl From<LegacyUpdateGroupRequest> for GroupPatch {
     fn from(value: LegacyUpdateGroupRequest) -> Self {
         Self {
+            catalog_labels:value.catalog_labels,
             name: value.name,
             context: value.context,
             opening_message: value.opening_message,
@@ -184,12 +187,6 @@ pub struct UpgradeGroupCollaborationDefinitionRequest {
 #[derive(Debug, Deserialize)]
 pub struct UpdateVisibilityRequest {
     pub visibility: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct PatchGroupSettingsRequest {
-    #[serde(default)]
-    pub service_spec: Option<Option<ServiceSpec>>,
 }
 
 #[cfg(test)]

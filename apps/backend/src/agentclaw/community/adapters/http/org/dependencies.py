@@ -33,6 +33,8 @@ from agentclaw.community.core.gateway_principal import (
     verify_principal_token,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import (
     ORDINARY_HTTP_ISSUERS,
     get_principal_verifier_config,
@@ -58,17 +60,28 @@ async def require_org_user_caller(connection: HTTPConnection) -> VerifiedCaller:
 
 
 async def require_baas_caller(connection: HTTPConnection) -> None:
-    """Authenticate the BaaS service without projecting JWT claims to identities."""
+    """Authenticate the BaaS connection operation without projecting identities."""
+    _require_baas_service(connection, operation="app_caller_connection")
+
+
+async def require_baas_caller_status(connection: HTTPConnection) -> None:
+    """Authenticate only the BaaS service for its read-only Caller observation."""
+    _require_baas_service(connection, operation="app_caller_instance_status")
+
+
+def _require_baas_service(connection: HTTPConnection, *, operation: str) -> None:
+    """Share signature verification while keeping diagnostic operation names exact."""
     started_at = time.perf_counter()
     context = {
         "system": "backend", "direction": "inbound",
-        "operation": "app_caller_connection", "method": connection.scope.get("method"),
+        "operation": operation, "method": connection.scope.get("method"),
+        "tenant": get_current_avernet_tenant(), "env": get_current_env(),
         "route": connection.url.path,
         "request_id": connection.headers.get("x-request-id"),
         "params": {name: connection.query_params.get(name) for name in
                    ("bot_id", "owner_id", "user_id", "force_upgrade")},
     }
-    logger.info("event=expert_chat.app_caller_connection.authentication_request context=%s", context)
+    logger.info("event=expert_chat.%s.authentication_request context=%s", operation, context)
     try:
         config = replace(
             get_principal_verifier_config(), issuer="baas", verify_audience=False,
@@ -79,9 +92,11 @@ async def require_baas_caller(connection: HTTPConnection) -> None:
         context.update(status=401, reason="baas_authentication_required",
                        exception_type=type(exc).__name__,
                        duration_ms=(time.perf_counter() - started_at) * 1000)
-        logger.warning("event=expert_chat.app_caller_connection.denied context=%s", context)
+        logger.warning("event=expert_chat.%s.denied context=%s", operation, context)
         # COSEC: decoder errors can contain attacker-controlled JOSE fields.
         raise MissingPrincipalError("BaaS authentication required") from None
+    context.update(status=200, duration_ms=(time.perf_counter() - started_at) * 1000)
+    logger.info("event=expert_chat.%s.authenticated context=%s", operation, context)
 
 
 async def require_user_caller(connection: HTTPConnection) -> VerifiedCaller:

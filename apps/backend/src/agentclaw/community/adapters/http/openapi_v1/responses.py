@@ -2,13 +2,16 @@
 
 Every public route returns the same :class:`Envelope` shape — on success and on
 the known failure cases alike — so external callers parse one structure
-everywhere. This module owns:
+everywhere. This module owns the domain-error → envelope mapping and the
+:func:`envelope_errors` decorator that turns a raised domain error into an
+enveloped error response with the right HTTP status, leaving unmapped
+exceptions to the app's 500 handler.
 
-- the envelope/page builders that stamp the request's trace id into
-  ``request_id`` (mirroring the ``X-Trace-ID`` response header), and
-- the domain-error → envelope mapping plus the :func:`envelope_errors` decorator
-  that turns a raised domain error into an enveloped error response with the
-  right HTTP status, leaving unmapped exceptions to the app's 500 handler.
+The success builders (``envelope``, ``page``, ``created``, ``accepted``,
+``deleted``) now live in :mod:`~...openapi_v1.response_envelopes` — the plural
+name is the builders module; the singular ``response_envelope`` is the low-level
+envelope/error-response primitive — and are re-exported here so existing
+imports keep working.
 
 Handlers therefore never build an :class:`Envelope` by hand for errors; they call
 a builder on success and let the decorator handle the mapped failures.
@@ -16,26 +19,27 @@ a builder on success and let the decorator handle the mapped failures.
 
 from __future__ import annotations
 
-import inspect
-from functools import wraps
 from json import JSONDecodeError
-from typing import Awaitable, Callable, TypeVar
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from agentclaw.community.adapters.http.error_logging import (
-    capture_call_params,
-    log_public_error,
-    remember_call_params,
-)
+from agentclaw.community.adapters.http.openapi_v1.error_decorator import envelope_errors as envelope_errors
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope as Envelope
+from agentclaw.community.core.expert_market.models import ExpertNotFoundError, ExpertCreationError
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_ACCEPTED,
     CODE_CREATED,
     CODE_OK,
     Deleted,
-    Envelope,
     Page,
+)
+from agentclaw.community.adapters.http.openapi_v1.response_envelopes import (
+    accepted,
+    created,
+    deleted,
+    envelope,
+    page,
 )
 from agentclaw.community.adapters.http.openapi_v1.response_envelope import (
     error_response,
@@ -45,6 +49,7 @@ from agentclaw.community.adapters.http.openapi_v1.response_envelope import (
     unmapped_error_response,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_payloads import error_data
+from agentclaw.community.core.bot_management.avatar import AvatarTooLargeError
 from agentclaw.community.core.bot_management.engine_version.errors import (
     EngineVersionStageUnsupportedError, EngineVersionInstanceSelectionError,
 )
@@ -58,13 +63,20 @@ from agentclaw.community.api.bot_startup_script_service import (
     StartupScriptTooLargeError,
 )
 from agentclaw.community.api.bot_config_manifest_service import (
+    ManifestBindingMismatchError,
     MAX_DOCUMENT_BYTES,
     ManifestNotEncodableError,
     ManifestTooLargeError,
     ManifestValidationError,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    ManifestApplyInProgressError,
+from agentclaw.community.api.apply_run_service import (
+    ApplyInProgressError,
+)
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError,
+    ContextCollabParentEventError,
+    ContextCollabValidationError,
+    ContextCollabVersionConflict,
 )
 from agentclaw.community.api.bot_cli_tool_service import (
     CliToolConflictError,
@@ -89,14 +101,21 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     StartupScriptUnsupportedError,
     UnsupportedEngineError,
     UserIdMismatchError,
+    BotAccessCheckForbiddenError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_bot_create import BOT_CREATE_HTTP_ERRORS
-from agentclaw.community.adapters.http.openapi_v1.errors_genome import GENOME_ENVELOPE_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.errors_genome import (
+    GENOME_ENVELOPE_ERROR_CODES,
+    GENOME_ENVELOPE_ERRORS,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials import (
     SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
 from agentclaw.community.adapters.http.openapi_v1.errors_space_skill import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.task.errors_todo import (
+    TODO_HTTP_ERRORS,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors_work_order import (
     WORK_ORDER_ERROR_STATUS, WORK_ORDER_ERROR_CODES,
 )
@@ -128,6 +147,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     DeviceLimitError,
 )
 from agentclaw.community.core.bot_dormant.recycle_service import RecycleReleaseFailed
+from agentclaw.community.core.bot_management.engines.restart_contract import RecycleUnavailable
 from agentclaw.community.core.bot_management.bot_quota import (
     BotQuotaBusyError,
     BotQuotaExceededError,
@@ -162,7 +182,9 @@ from agentclaw.community.core.bot_inventory.errors import (
 )
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
+    DeviceConnectionUnavailableError,
     DeviceNotBoundError,
+    DeviceOfflineError,
     UnknownProviderError,
 )
 from agentclaw.community.core.cron.errors import (
@@ -200,6 +222,8 @@ from agentclaw.community.core.caller_identity.contracts import (
 from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
     EngineHistoryDepthExceededError,
+    EngineSessionCursorError,
+    EngineSessionScanDepthError,
     EngineCapabilityUnsupportedError,
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
@@ -219,6 +243,7 @@ from agentclaw.community.core.market_favorites.errors import (
     FavoriteTargetInvalidError,
 )
 from agentclaw.community.core.spaces.errors import (
+    PersonalSpaceDeletionError,
     PersonalSpaceInvariantError,
     SpaceAccessDeniedError,
     SpaceAlreadyExistsError,
@@ -227,6 +252,7 @@ from agentclaw.community.core.spaces.errors import (
     SpaceMemberInvalidError,
     SpaceMemberNotFoundError,
     SpaceNameInvalidError,
+    SpaceNotEmptyError,
     SpaceNotFoundError,
 )
 
@@ -298,6 +324,10 @@ from agentclaw.community.core.task.domain.errors import (
     NodeNotFoundError,
     TaskError,
     TaskArtifactContentError,
+    TaskArtifactObjectNotFoundError,
+    TaskArtifactStorageError,
+    TaskArtifactStorageNotConfiguredError,
+    TaskArtifactUploadTooLargeError,
     TaskNotFoundError,
     TaskStateError,
     TrajectoryAnalysisError,
@@ -312,6 +342,8 @@ from agentclaw.community.core.service_bot.errors import (
     ServiceContainerNotFoundError,
     ServiceContainerUpstreamError,
     ServicePublicationConflictError,
+    ServicePublicationGateBlockedError,
+    ServicePublicationGatePendingError,
     ServicePublicationLockedError,
     ServicePublicationNotFoundError,
     ServicePublicationUnsupportedError,
@@ -323,50 +355,27 @@ from agentclaw.community.plugin_api.skill_center_client import (
 )
 
 __all__ = [
+    "accepted",
+    "created",
+    "deleted",
+    "envelope",
     "error_response",
     "error_response_for",
     "is_public_api",
+    "page",
     "trace_id",
     "unmapped_error_response",
 ]
-T = TypeVar("T")
+
+# The envelope-code constants the pre-split module carried in its own
+# namespace; existing importers (e.g. the task-callback orchestration tests)
+# keep importing them from here, so the split must not drop the re-export.
+__all__ += ["CODE_ACCEPTED", "CODE_CREATED", "CODE_OK", "Deleted", "Page"]
+
 
 
 class SkillCenterMarketplaceUnavailableError(RuntimeError):
     """A public Skill Center marketplace read could not be served."""
-
-
-def envelope(
-    data: T,
-    request: Request,
-    *,
-    code: int = CODE_OK,
-    message: str = "OK",
-) -> Envelope[T]:
-    """Wrap ``data`` in the standard success envelope."""
-    return Envelope(
-        code=code, message=message, data=data, request_id=trace_id(request)
-    )
-
-
-def page(total: int, items: list[T], request: Request) -> Envelope[Page[T]]:
-    """Wrap a page of ``items`` in the standard envelope."""
-    return envelope(Page(total=total, items=items), request)
-
-
-def created(data: T, request: Request) -> Envelope[T]:
-    """201 success envelope."""
-    return envelope(data, request, code=CODE_CREATED, message="Created")
-
-
-def accepted(data: T, request: Request) -> Envelope[T]:
-    """202 success envelope (e.g. bot creation pending user authorization)."""
-    return envelope(data, request, code=CODE_ACCEPTED, message="Accepted")
-
-
-def deleted(request: Request) -> Envelope[Deleted]:
-    """Standard delete-success envelope."""
-    return envelope(Deleted(), request)
 
 
 # Domain error → (HTTP status, fixed public message). Only the specific leaf
@@ -375,7 +384,10 @@ def deleted(request: Request) -> Envelope[Deleted]:
 # identifiers and internal-language text never leak to external callers, and
 # (b) the two 404-mapped errors are byte-for-byte identical — a caller cannot
 # tell "exists but not yours/other tenant" from "does not exist".
+
 ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
+    ExpertNotFoundError: (404, "Not found"),
+    ExpertCreationError: (422, "Expert cannot be created"),
     EngineVersionStageUnsupportedError: (409, "Engine version inspection supports draft only"),
     EngineVersionInstanceSelectionError: (409, "Select an existing workspace instance"),
     IamTokenUnavailableError: (401, "IAM credential is unavailable"),
@@ -424,6 +436,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # two have different fixes. The message says nothing about which user was
     # asked for; both ids are on the warning line in ``principal.py``.
     UserIdMismatchError: (403, "Forbidden"),
+    BotAccessCheckForbiddenError: (403, "Forbidden"),
     SpaceAccessDeniedError: (403, "Forbidden"),
     SpaceNotFoundError: (404, "Not found"),
     SpaceMemberInvalidError: (400, "Invalid space member"),
@@ -436,6 +449,11 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     **SPACE_SKILL_HTTP_ERRORS,
     SpaceCreatorInvariantError: (409, "Space creator cannot be removed or demoted"),
     PersonalSpaceInvariantError: (409, "Personal space membership is immutable"),
+    PersonalSpaceDeletionError: (
+        409,
+        SpacePublicErrorMessage.PERSONAL_SPACE_NOT_DELETABLE,
+    ),
+    SpaceNotEmptyError: (409, SpacePublicErrorMessage.SPACE_NOT_EMPTY),
     SkillCenterTeamCreateError: (
         502,
         SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED,
@@ -537,6 +555,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LockNotHeldError: (404, "Not found"),
     LockReleaseDeniedError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),
+    AvatarTooLargeError: (400, "Avatar does not fit in Bot metadata"),
     BotNameInvalidError: (400, "Invalid bot name"),
     BotLimitExceededError: (409, "Bot creation limit reached"),
     BotQuotaExceededError: (409, "Bot quota exceeded for this Space"),
@@ -549,6 +568,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ),
     BotOperationNotAllowedError: (409, "Operation not supported for this bot"),
     RecycleReleaseFailed: (502, "Bot resource release failed"),
+    RecycleUnavailable: (503, "Bot recycle service unavailable"),
     BotInventoryOperationNotAllowedError: (409, "Operation not supported for this bot"),
     BotInventoryPermissionError: (404, "Not found"),
     BotInventoryUpstreamError: (502, "Desktop service error"),
@@ -561,6 +581,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Operation not supported for this bot",
     ),
     ServicePublicationLockedError: (423, "Edit lock required"),
+    ServicePublicationGateBlockedError: (
+        403,
+        "评测未通过，无法推进发布",
+    ),
+    ServicePublicationGatePendingError: (
+        409,
+        "评测认证处理中，请稍后再试",
+    ),
     ChannelEditLockedError: (423, "Edit lock required"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
@@ -576,9 +604,15 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # The binding row names a device provider the resolver does not know: bad
     # data on our side, never something the caller can correct.
     UnknownProviderError: (500, "Device binding is misconfigured"),
-    # The connection-info build called the underlying device service and it
-    # failed — an upstream dependency problem, hence 502 like the other
-    # downstream-service mappings.
+    # The provider confirms the downstream device is offline. Keep the
+    # upstream-dependency 502 while distinguishing this lifecycle state.
+    DeviceOfflineError: (502, "Bot device is offline"),
+    # A transient provider connection failure where the device state is
+    # unknown. Still 502 (upstream dependency), but with a distinct message
+    # so callers can tell it apart from a permanent configuration error.
+    DeviceConnectionUnavailableError: (502, "Device connection temporarily unavailable"),
+    # Catch-all for other ConnInfoBuildError subclasses — upstream dependency
+    # problem, hence 502 like the other downstream-service mappings.
     ConnInfoBuildError: (502, "Device service error"),
     # The passport service answered with nothing at all — upstream problem, not
     # a caller mistake, and not an unhandled crash.
@@ -629,7 +663,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillLayoutRollbackError: (409, "Skill layout rollback is in progress"),
     LocalSkillEditLockUnavailableError: (503, "Skill update service is temporarily unavailable"),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
-    SkillRuntimeNameConflictError: (409, "Skill runtime name conflicts with an active Skill"),
+    SkillRuntimeNameConflictError: (409, "Skill runtime name conflicts with another Skill"),
     SkillEngineNotSupportedError: (409, "Skill is not supported by this bot type and engine"),
     RepositoryCatalogNotFoundError: (404, "Not found"),
     RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
@@ -637,6 +671,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
     **SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
     **GENOME_ENVELOPE_ERRORS,
+    **TODO_HTTP_ERRORS,
     FileTooLargeError: (413, "File too large for preview"),
     # download-dir: one fixed message for all three caps (per-file / count / total).
     DirectoryTooLargeError: (413, "Directory too large to download"),
@@ -675,7 +710,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # holds the lock is an ordinary, retryable state — not an internal error.
     # Unregistered, ``@envelope_errors`` re-raised it and the caller got a 500
     # where the route's own documentation promises a 409.
-    ManifestApplyInProgressError: (409, "An apply is already running for this bot"),
+    ManifestBindingMismatchError: (409, "Bound Manifest changed"),
+    ApplyInProgressError: (409, "An apply is already running for this bot"),
     # W9's CLI tools. ``Refused`` is 422 rather than 400 for the reason the
     # manifest's own validation error is: the request was well-formed and the
     # platform refused what it *named* — an unmatched digest, an absent archive
@@ -748,9 +784,11 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # Byte-identical to the other 404s above, so an engine-side missing resource
     # cannot be distinguished from a bot that is not the caller's.
     EngineResourceNotFoundError: (404, "Not found"),
+    EngineSessionCursorError: (422, "Invalid session source cursor or window"),
+    EngineSessionScanDepthError: (422, "Session source scan depth limit reached; more sessions may exist"),
     EngineUpstreamError: (502, "Engine service error"),
     # Base of the Engine* errors above — LAST of its group.
-    EngineRuntimeError: (502, "Engine service error"),
+    EngineRuntimeError: (500, "Internal error"),
     # Cron upstream fallback; mapped_error_response preserves the relay's
     # explicit business statuses. The timeout subclass keeps its own mapping.
     CronApiTimeoutError: (504, "Cron relay timed out"),
@@ -824,12 +862,34 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # relay 回调解析/发布路径抛给客户端的是请求问题,落 422 而非 TaskError 500 兜底
     # (列在 TaskError 基类之前,同上 trajectory leaves)。
     TaskArtifactContentError: (422, "Invalid artifact report"),
+    # OBJECT_FILE 上传/下载(spec 2026-10-26 修订):四个状态对应四个不同的运维
+    # 动作——413 调大 task_artifact_storage.max_upload_mb / 分块通道;502 查对象存储
+    # 本身;503 修列绑定(task_artifact_storage 块);404 行未知或对象已被清理。列在
+    # ``TaskError`` 基类之前(同上 trajectory leaves;ENVELOPE_ERRORS 首个 isinstance
+    # 命中即返回)。
+    TaskArtifactUploadTooLargeError: (413, "Artifact upload exceeds configured size cap"),
+    TaskArtifactObjectNotFoundError: (404, "Artifact object not found"),
+    TaskArtifactStorageNotConfiguredError: (503, "Task artifact object storage is not configured"),
+    TaskArtifactStorageError: (502, "Task artifact object storage failed"),
     TaskError: (500, "Internal error"),
+    # BBS context collaboration protocol (spec 2026-11-09 §6). Leaf rows for
+    # every error the service/repository raises at the three delivery routes.
+    # The ENVELOPE_ERRORS table has no rows for the ``ValidationError`` /
+    # ``NotFound`` / ``Conflict`` bases these subclass, and the app-level
+    # ``_DOMAIN_ERROR_STATUS_MAP`` matches on exact type — a subclass would
+    # otherwise fall through to the 500 catch-all. Fixed messages per the
+    # table rule: no caller data, no internal ids.
+    ContextCollabNotFoundError: (404, "Not found"),
+    ContextCollabVersionConflict: (409, "Context version conflict"),
+    ContextCollabValidationError: (422, "Invalid context collab request"),
+    ContextCollabParentEventError: (422, "Parent event not found"),
 }
 # Most public categories retain the ordinary ``xxx000`` business code.  A
 # small, explicit override table lets a category expose a stable actionable
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
+    PersonalSpaceDeletionError: SpaceErrorCode.PERSONAL_SPACE_NOT_DELETABLE,
+    SpaceNotEmptyError: SpaceErrorCode.SPACE_NOT_EMPTY,
     SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
     **SPACE_SKILL_ERROR_CODES,
     **WORK_ORDER_ERROR_CODES,
@@ -843,7 +903,9 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillStorageError: 502101,
     SkillParameterValidationError: 422101,
     ManifestValidationError: 422109,
-    ManifestApplyInProgressError: 409109,
+    ApplyInProgressError: 409109,
+    ManifestBindingMismatchError: 409112,
+    **GENOME_ENVELOPE_ERROR_CODES,
     CliToolConflictError: 409110,
     CliToolUnsupportedError: 409111,
     CliToolRefusedError: 422110,
@@ -858,6 +920,8 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillSetAccessDeniedError: 403201,
     McpEndpointUnavailableError: 422211,
     McpPermissionDeniedError: 403202,
+    ServicePublicationGateBlockedError: 403210,
+    ServicePublicationGatePendingError: 409210,
 }
 
 _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {
@@ -873,59 +937,8 @@ _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {
     "SKILL_SET_NAME_CONFLICT": (409206, "SkillSet name already exists"),
     "IDEMPOTENCY_KEY_REUSED": (409207, "Idempotency key was reused with a different request"),
     "BOT_MUTATION_BUSY": (409208, "Another SkillSet mutation is in progress"),
+    "SKILL_SET_STATE_CHANGED_RETRY": (409211, "SkillSet state changed; retry the request"),
 }
-
-
-def _find_request(args: tuple, kwargs: dict) -> Request | None:
-    candidate = kwargs.get("request")
-    if isinstance(candidate, Request):
-        return candidate
-    for value in args:
-        if isinstance(value, Request):
-            return value
-    return None
-
-
-def envelope_errors(
-    fn: Callable[..., Awaitable[Envelope[T]]],
-) -> Callable[..., Awaitable[object]]:
-    """Map the domain errors in :data:`ENVELOPE_ERRORS` to enveloped responses.
-
-    The wrapped handler must take a ``request: Request`` parameter (used for the
-    error envelope's ``request_id``). Unmapped exceptions are re-raised so the
-    app's 500 handler still owns them.
-
-    Every failure is also logged here, with its traceback and the arguments the
-    handler was called with. This is the only frame that has both: the public
-    response carries a fixed message by design, so without this the sole record
-    of a mapped failure was the status code on the access log. Capture is lazy —
-    a successful request pays nothing — and the parameters are stashed on the
-    request for the unmapped case, where ``app.py`` logs further out.
-    """
-    # Resolved once, at import: ``fn`` is the undecorated handler, so the bind
-    # in the except-branch recovers real parameter names for positional args.
-    signature = inspect.signature(fn)
-
-    @wraps(fn)
-    async def wrapper(*args: object, **kwargs: object) -> object:
-        try:
-            return await fn(*args, **kwargs)
-        except Exception as exc:  # noqa: BLE001 — re-raised unless mapped
-            request = _find_request(args, kwargs)
-            if request is None:
-                raise
-            params = capture_call_params(signature, args, kwargs)
-            # Stashed before the mapping decision: an unmapped error is
-            # re-raised out of this frame, and the handler that catches it can
-            # no longer see the arguments.
-            remember_call_params(request, params)
-            response = mapped_error_response(exc, request)
-            if response is None:
-                raise
-            log_public_error(request, exc, status=response.status_code, params=params)
-            return response
-
-    return wrapper
 
 
 def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | None:

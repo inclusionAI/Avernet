@@ -74,5 +74,10 @@ class EngineConfigServiceProtocol(Protocol):
     async def read_publish_config(
         self, record: BotPublishRecord, engine_type: str
     ) -> dict[str, Any]:
-        """Read a published bot's engine config from its active-stage device."""
+        """Read from this record's stage binding using source-Bot coordinates.
+
+        source_bot_pk selects the Bot; historical owner_id is not assumed to
+        be an entity. Missing/conflicting sources fail rather than guessing
+        paths. The existing orphaned-default metadata compatibility is retained.
+        """
         ...

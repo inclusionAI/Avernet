@@ -1,3 +1,4 @@
+import { captureApiError, errorStack } from "./error-log-format.js";
 /**
  * Workflows API routes — database-persisted workflow specs and YAML export.
  * ClawWeb's own endpoints (not from ClawFlow).
@@ -261,7 +262,7 @@ export function createWorkflowsRouter(
           });
         } catch (permErr) {
           // Non-fatal: permission write failure should not block workflow save
-          console.error(`[clawweb] Failed to write bot permission for workflow ${workflowId}:`, permErr instanceof Error ? permErr.message : String(permErr));
+          console.error("[clawweb] Failed to write bot permission for workflow %s: %s", workflowId, permErr instanceof Error ? permErr.message : String(permErr), errorStack(permErr));
         }
       }
 
@@ -303,7 +304,7 @@ export function createWorkflowsRouter(
           await workflowSpecRepo.updateVersion(workflowId, newVersion);
         } catch (dhErr) {
           // Non-fatal: deploy history write failure should not block workflow save
-          console.error(`[clawweb] Failed to write deploy_history for workflow ${workflowId}:`, dhErr instanceof Error ? dhErr.message : String(dhErr));
+          console.error("[clawweb] Failed to write deploy_history for workflow %s: %s", workflowId, dhErr instanceof Error ? dhErr.message : String(dhErr), errorStack(dhErr));
         }
       }
 
@@ -315,7 +316,7 @@ export function createWorkflowsRouter(
         res.status(400).json({ error: "Bad Request", message: msg });
         return;
       }
-      res.status(500).json({ error: "Internal Server Error", message: msg });
+      console.error("[workflows] request failed:", captureApiError(res, error)); res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
 
@@ -520,7 +521,7 @@ export function createWorkflowsRouter(
       res.status(404).json({ error: "Not Found", message: `Workflow "${workflowId}" not found` });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: "Internal Server Error", message: msg });
+      console.error("[workflows] request failed:", captureApiError(res, error)); res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
 
@@ -559,7 +560,7 @@ export function createWorkflowsRouter(
       res.send(yaml);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: "Internal Server Error", message: msg });
+      console.error("[workflows] request failed:", captureApiError(res, error)); res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
 
@@ -600,7 +601,7 @@ export function createWorkflowsRouter(
       res.json({ ok: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: "Internal Server Error", message: msg });
+      console.error("[workflows] request failed:", captureApiError(res, error)); res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
 
@@ -609,7 +610,11 @@ export function createWorkflowsRouter(
     const workflowId = String(req.params.workflowId);
     const canView = await hasWorkflowAccess(req, botPermRepo, workflowId, "view");
     const canEdit = await hasWorkflowAccess(req, botPermRepo, workflowId, "edit");
-    res.json({ workflowId, canView, canEdit });
+    const actorId = resolveWorkflowActorId(req);
+    const canExecute = Boolean(actorId && botPermRepo && await botPermRepo.hasExecutePermission(workflowId, actorId));
+    // Editor deployment publishes a complete Pack; legacy execute-only access is insufficient.
+    const canDeploy = Boolean(actorId && botPermRepo && await botPermRepo.hasEditPermission(workflowId, actorId));
+    res.json({ workflowId, canView, canEdit, canExecute, canDeploy });
   }));
 
   /** GET /:workflowId/bot-permissions — list bot permissions for a workflow editor */
@@ -632,7 +637,7 @@ export function createWorkflowsRouter(
       })));
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: "Internal Server Error", message: msg });
+      console.error("[workflows] request failed:", captureApiError(res, error)); res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
 
@@ -684,7 +689,7 @@ export function createWorkflowsRouter(
       res.json({ ok: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: "Internal Server Error", message: msg });
+      console.error("[workflows] request failed:", captureApiError(res, error)); res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
 
@@ -726,7 +731,7 @@ export function createWorkflowsRouter(
       res.json({ ok: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: "Internal Server Error", message: msg });
+      console.error("[workflows] request failed:", captureApiError(res, error)); res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
 
@@ -757,7 +762,7 @@ export function createWorkflowsRouter(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: "Internal Server Error", message: msg });
+      console.error("[workflows] request failed:", captureApiError(res, error)); res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
 
@@ -809,7 +814,7 @@ export function createWorkflowsRouter(
       res.json({ ok: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: "Internal Server Error", message: msg });
+      console.error("[workflows] request failed:", captureApiError(res, error)); res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
 
@@ -831,7 +836,7 @@ export function createWorkflowsRouter(
       res.json({ ok: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      res.status(500).json({ error: "Internal Server Error", message: msg });
+      console.error("[workflows] request failed:", captureApiError(res, error)); res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
 
@@ -855,7 +860,7 @@ export function createWorkflowsRouter(
       res.json(masked);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      console.error("[workflows] GET callback-configs failed:", msg);
+      console.error("[workflows] GET callback-configs failed:", msg, captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: "Internal error" });
     }
   }));
@@ -914,7 +919,7 @@ export function createWorkflowsRouter(
       res.status(201).json({ ...dto, secret: dto.secret.length > 4 ? `****${dto.secret.slice(-4)}` : "****" });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      console.error("[workflows] POST callback-configs failed:", msg);
+      console.error("[workflows] POST callback-configs failed:", msg, captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: "Internal error" });
     }
   }));
@@ -952,7 +957,7 @@ export function createWorkflowsRouter(
       res.json(dto ? { ...dto, secret: dto.secret.length > 4 ? `****${dto.secret.slice(-4)}` : "****" } : { ok: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      console.error("[workflows] PUT callback-configs failed:", msg);
+      console.error("[workflows] PUT callback-configs failed:", msg, captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: "Internal error" });
     }
   }));
@@ -976,7 +981,7 @@ export function createWorkflowsRouter(
       res.json({ ok: true });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      console.error("[workflows] DELETE callback-configs failed:", msg);
+      console.error("[workflows] DELETE callback-configs failed:", msg, captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: "Internal error" });
     }
   }));

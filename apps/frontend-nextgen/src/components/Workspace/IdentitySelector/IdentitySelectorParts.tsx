@@ -1,3 +1,4 @@
+import { BotDisplayAvatar } from '@/components/Workspace/BotDisplayAvatar';
 import { Avatar, Badge, Button } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { getBotEngineLabel } from '@/domain/botEngine';
@@ -13,7 +14,7 @@ import { type ReactNode } from 'react';
 export { IdentityTriggerButton } from './IdentityTriggerButton';
 
 function isAvatarUrl(avatar: string): boolean {
-  return /^https?:\/\//.test(avatar);
+  return /^(?:(?:https?:)?\/\/|data:image\/|\/)/.test(avatar);
 }
 
 export type IdentitySelectorLayout = 'default' | 'sidebar' | 'collapsed' | 'collaboration' | 'sidebarChip' | 'inline';
@@ -79,19 +80,23 @@ export function IdentityAvatar({
   className,
 }: {
   identity: Identity;
-  size?: 'xxs' | 'xs' | 'sm' | 'md' | 'lg';
+  size?: 'xxs' | 'xs' | 'sm' | 'md' | 'lg' | 20;
   userAvatarUrl?: string;
   className?: string;
 }) {
-  const avatarUrl = identity.kind === 'user' ? userAvatarUrl : identity.avatar;
-  const avatarSize = size === 'xxs' ? 16 : size === 'xs' ? 24 : size === 'sm' ? 32 : size === 'lg' ? 48 : 36;
+  const avatarSize = size === 20 ? 20 : size === 'xxs' ? 16 : size === 'xs' ? 24
+    : size === 'sm' ? 32 : size === 'lg' ? 48 : 36;
   return (
     <span className={cn('shrink-0', className)}>
-      <Avatar
-        name={identity.name}
-        src={avatarUrl && isAvatarUrl(avatarUrl) ? avatarUrl : undefined}
-        size={avatarSize}
-      />
+      {identity.kind === 'bot' ? (
+        <BotDisplayAvatar botId={identity.id} name={identity.name} avatarUrl={identity.avatar} size={avatarSize} />
+      ) : (
+        <Avatar
+          name={identity.name}
+          src={userAvatarUrl && isAvatarUrl(userAvatarUrl) ? userAvatarUrl : undefined}
+          size={avatarSize}
+        />
+      )}
     </span>
   );
 }

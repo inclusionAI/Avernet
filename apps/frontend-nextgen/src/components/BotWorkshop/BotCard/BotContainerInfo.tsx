@@ -1,7 +1,6 @@
 import { Button } from '@/components/ui/Button';
 import type { BotDomain } from '@/services/botWorkshop';
 import { botContainerService, type ContainerSnapshot } from '@/services/botWorkshop/botContainerService';
-import { Boxes } from 'lucide-react';
 import React from 'react';
 
 export interface BotContainerInfoProps {
@@ -14,13 +13,14 @@ export interface BotContainerInfoProps {
 }
 
 function isEligible(bot: BotDomain) {
-  return bot.deployment === 'cloud' && bot.serviceMode === 'service' && bot.lifecycle === 'running';
+  return bot.runtime.engine !== 'teclaw' &&
+    bot.deployment === 'cloud' && bot.serviceMode === 'service' && bot.lifecycle === 'running';
 }
 
 /**
  * 服务 Bot 列表的「容器信息」单元格。
  *
- * 老版本只在独立列内展示“活跃数 / 实例总数”，并通过悬浮文案提示点击查看详情。
+ * 按稿以蓝色文字链接呈现“活跃数 / 实例总数”（如 2/3），点击打开容器详情。
  * 列表接口未携带 summary 时，仅为当前页合格 Bot 请求一次容器快照。
  */
 export function BotContainerInfo({ bot, userId, canView = true, onOpen }: BotContainerInfoProps) {
@@ -49,19 +49,11 @@ export function BotContainerInfo({ bot, userId, canView = true, onOpen }: BotCon
   if (!eligible) return <span className="select-none text-sm text-muted-foreground">—</span>;
   const summary = snapshot?.summary;
   const label = summary ? `${summary.healthy}/${summary.total}` : failed ? '加载失败' : '加载中…';
-  const hasIssue = Boolean(summary && (summary.abnormal > 0 || summary.unknown > 0));
-  const toneClass = failed
-    ? 'border-border text-muted-foreground'
-    : hasIssue
-    ? 'border-warning/50 text-warning'
-    : 'border-success/50 text-success';
   return (
     <Button
-      variant="outline"
-      size="sm"
+      variant="link"
       aria-label={`查看 ${bot.name} 容器实例`}
-      className={`min-w-[78px] justify-center font-medium ${toneClass}`}
-      leftIcon={<Boxes aria-hidden className="size-3.5" />}
+      className="h-auto justify-start p-0 text-sm font-normal"
       onClick={(event) => {
         event.stopPropagation();
         onOpen(bot);

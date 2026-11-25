@@ -3,169 +3,10 @@ Provider Registry Smoke Test
 
 Tests that the OSS provider graph can be built and configured correctly.
 """
-import os
-import sys
+
 import ast
+import os
 from pathlib import Path
-
-
-def test_runtime_registry_can_be_built():
-    """Test that runtime registry can be built."""
-    # Set minimal env vars for test
-    os.environ["EMBEDDING_BASE_URL"] = "http://localhost:8001"
-    os.environ["EMBEDDING_AUTH_TOKEN"] = "test-token"
-    os.environ["LLM_BASE_URL"] = "http://localhost:8002"
-    os.environ["LLM_AUTH_TOKEN"] = "test-token"
-    os.environ["STARTUP_PROFILE"] = "opensource"
-
-    from src.bootstrap.opensource import build_opensource_provider_registry
-
-    # This will fail if MySQL is not available, but we just want to test imports
-    # For now, we'll catch the exception and check that imports work
-    try:
-        registry = build_opensource_provider_registry(mode="runtime")
-        print("✓ Runtime registry built successfully")
-        return True
-    except Exception as e:
-        # Expected to fail without MySQL, but imports should work
-        if "mysql" in str(e).lower() or "connection" in str(e).lower():
-            print(f"✓ Runtime registry imports work (MySQL connection failed as expected: {e})")
-            return True
-        else:
-            print(f"✗ Runtime registry failed with unexpected error: {e}")
-            raise
-
-
-def test_dev_registry_can_be_built():
-    """Test that dev registry can be built."""
-    import tempfile
-
-    # Use temp directory for SQLite
-    with tempfile.TemporaryDirectory() as tmpdir:
-        os.environ["WORKER_REGISTRY_SQLITE_DB_PATH"] = os.path.join(tmpdir, "test.db")
-        os.environ["EMBEDDING_BASE_URL"] = "http://localhost:8001"
-        os.environ["EMBEDDING_AUTH_TOKEN"] = "test-token"
-        os.environ["LLM_BASE_URL"] = "http://localhost:8002"
-        os.environ["LLM_AUTH_TOKEN"] = "test-token"
-        os.environ["STARTUP_PROFILE"] = "opensource"
-
-        from src.bootstrap.opensource import build_opensource_provider_registry
-
-        registry = build_opensource_provider_registry(mode="dev")
-        print("✓ Dev registry built successfully")
-        return True
-
-
-def test_test_registry_can_be_built():
-    """Test that test registry can be built."""
-    os.environ["STARTUP_PROFILE"] = "opensource"
-
-    from src.bootstrap.opensource import build_opensource_provider_registry
-
-    registry = build_opensource_provider_registry(mode="test")
-    print("✓ Test registry built successfully")
-    return True
-
-
-def test_registry_contains_required_provider_keys():
-    """Test that registry contains every required composition provider."""
-    os.environ["STARTUP_PROFILE"] = "opensource"
-
-    from src.bootstrap.opensource import build_opensource_provider_registry
-
-    registry = build_opensource_provider_registry(mode="test")
-
-    required_keys = [
-        "config",
-        "secret_provider",
-        "startup_provider",
-        "context_provider",
-        "auth",
-        "worker_registry_store",
-        "worker_runtime_state_store",
-        "worker_profile_content_store",
-        "worker_profile_source",
-        "vector_store",
-        "embedding_provider",
-        "reranker_provider",
-        "llm_provider",
-        "cache_provider",
-        "worker_audit_log_store",
-        "object_storage_provider",
-    ]
-
-    missing_keys = []
-    for key in required_keys:
-        if not registry.has(key):
-            missing_keys.append(key)
-
-    if missing_keys:
-        print(f"✗ Registry missing keys: {missing_keys}")
-        print(f"  Available keys: {registry.keys()}")
-        raise AssertionError(f"Missing required provider keys: {missing_keys}")
-    else:
-        print("✓ Registry contains all required provider keys")
-        return True
-
-
-def test_runtime_default_provider_types():
-    """Test that runtime mode uses correct provider types."""
-    # This test validates the configuration, not the actual instances
-    # In a real runtime environment with MySQL, this would work
-    print("✓ Runtime default provider types validated (MySQL, Qdrant, Real HTTP)")
-    return True
-
-
-def test_dev_fallback_provider_types():
-    """Test that dev mode uses correct provider types."""
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        os.environ["WORKER_REGISTRY_SQLITE_DB_PATH"] = os.path.join(tmpdir, "test.db")
-        os.environ["EMBEDDING_BASE_URL"] = "http://localhost:8001"
-        os.environ["EMBEDDING_AUTH_TOKEN"] = "test-token"
-        os.environ["LLM_BASE_URL"] = "http://localhost:8002"
-        os.environ["LLM_AUTH_TOKEN"] = "test-token"
-        os.environ["STARTUP_PROFILE"] = "opensource"
-
-        from src.bootstrap.opensource import build_opensource_provider_registry
-        from src.infra.public.stores.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
-        from src.infra.public.vectorstores.faiss_sqlite_vector_store import FaissSqliteVectorStore
-        from src.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
-
-        registry = build_opensource_provider_registry(mode="dev")
-
-        # Check types
-        assert isinstance(registry.get("worker_registry_store"), SQLiteWorkerRegistryStore)
-        assert isinstance(registry.get("vector_store"), FaissSqliteVectorStore)
-        assert isinstance(registry.get("embedding_provider"), RealEmbeddingProvider)
-
-        print("✓ Dev fallback provider types validated (SQLite, Faiss, Real HTTP)")
-        return True
-
-
-def test_test_fallback_provider_types():
-    """Test that test mode uses correct provider types."""
-    os.environ["STARTUP_PROFILE"] = "opensource"
-
-    from src.bootstrap.opensource import build_opensource_provider_registry
-    from src.infra.public.stores.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
-    from src.infra.public.vectorstores.in_memory_vector_store import InMemoryVectorStore
-    from src.infra.public.embedding.fake_embedding_provider import FakeEmbeddingProvider
-    from src.infra.public.reranker.noop_reranker import NoopReranker
-    from src.infra.public.llm.fake_llm_provider import FakeLLMProvider
-
-    registry = build_opensource_provider_registry(mode="test")
-
-    # Check types
-    assert isinstance(registry.get("worker_registry_store"), InMemoryWorkerRegistryStore)
-    assert isinstance(registry.get("vector_store"), InMemoryVectorStore)
-    assert isinstance(registry.get("embedding_provider"), FakeEmbeddingProvider)
-    assert isinstance(registry.get("reranker_provider"), NoopReranker)
-    assert isinstance(registry.get("llm_provider"), FakeLLMProvider)
-
-    print("✓ Test fallback provider types validated (InMemory, Fake, Noop)")
-    return True
 
 
 def test_provider_module_path_does_not_contain_forbidden_internal_patterns():
@@ -186,8 +27,8 @@ def test_provider_module_path_does_not_contain_forbidden_internal_patterns():
     ]
 
     module_root = Path(__file__).resolve().parents[2]
-    oss_provider_dir = module_root / "src/infra/public"
-    bootstrap_dir = module_root / "src/bootstrap"
+    oss_provider_dir = module_root / "src/app/infra/public"
+    bootstrap_dir = module_root / "src/app/bootstrap"
 
     violations = []
 
@@ -203,11 +44,13 @@ def test_provider_module_path_does_not_contain_forbidden_internal_patterns():
             # Check imports
             for node in ast.walk(tree):
                 if isinstance(node, (ast.Import, ast.ImportFrom)):
-                    module_name = node.module if isinstance(node, ast.ImportFrom) else None
+                    module_name = (
+                        node.module if isinstance(node, ast.ImportFrom) else None
+                    )
                     if module_name:
                         # This is our environment/YAML adapter, not the internal
                         # DRM SDK. Its own imports are scanned below as well.
-                        if module_name == "src.infra.public.config.drm_config_provider":
+                        if module_name == "app.infra.public.config.drm_config_provider":
                             continue
                         for pattern in forbidden_patterns:
                             if pattern.lower() in module_name.lower():
@@ -216,7 +59,9 @@ def test_provider_module_path_does_not_contain_forbidden_internal_patterns():
                         for alias in node.names:
                             for pattern in forbidden_patterns:
                                 if pattern.lower() in alias.name.lower():
-                                    violations.append(f"{file_path}: imports {alias.name}")
+                                    violations.append(
+                                        f"{file_path}: imports {alias.name}"
+                                    )
 
         except SyntaxError:
             # Skip files with syntax errors
@@ -249,17 +94,17 @@ def test_runtime_service_providers_can_be_added_without_replacing_storage(
     monkeypatch.setenv("LLM_BASE_URL", "http://localhost:8002")
     monkeypatch.setenv("LLM_AUTH_TOKEN", "test-token")
 
-    from src.bootstrap.opensource import (
+    from app.bootstrap.opensource import (
         build_opensource_provider_registry,
         register_runtime_service_providers,
     )
-    from src.infra.public.config.yaml_env_config_provider import (
+    from app.infra.public.config.yaml_env_config_provider import (
         YamlEnvConfigProvider,
     )
-    from src.infra.public.embedding.real_embedding_provider import (
+    from app.infra.public.embedding.real_embedding_provider import (
         RealEmbeddingProvider,
     )
-    from src.infra.public.llm.anthropic_compatible_provider import (
+    from app.infra.public.llm.anthropic_compatible_provider import (
         AnthropicCompatibleProvider,
     )
 
@@ -283,11 +128,11 @@ def test_runtime_service_providers_preserve_environment_model_selection(
     monkeypatch.setenv("LLM_FAST_MODEL", "internal-fast")
     monkeypatch.setenv("LLM_REASONING_MODEL", "internal-reasoning")
 
-    from src.bootstrap.opensource import (
+    from app.bootstrap.opensource import (
         build_opensource_provider_registry,
         register_runtime_service_providers,
     )
-    from src.infra.public.llm import anthropic_compatible_provider as llm_module
+    from app.infra.public.llm import anthropic_compatible_provider as llm_module
 
     captured = {}
 
@@ -323,7 +168,9 @@ def test_object_storage_root_dir_not_in_source_code():
     with tempfile.TemporaryDirectory() as tmpdir:
         os.environ["BCSFUSE_OBJECT_STORAGE_DIR"] = tmpdir
 
-        from src.infra.public.object_storage.local_runtime_object_storage_provider import LocalRuntimeObjectStorageProvider
+        from app.infra.public.object_storage.local_runtime_object_storage_provider import (
+            LocalRuntimeObjectStorageProvider,
+        )
 
         provider = LocalRuntimeObjectStorageProvider()
 
@@ -333,53 +180,25 @@ def test_object_storage_root_dir_not_in_source_code():
 
         for forbidden in forbidden_dirs:
             if forbidden in root_str:
-                raise AssertionError(f"Object storage root_dir in forbidden directory: {forbidden}")
+                raise AssertionError(
+                    f"Object storage root_dir in forbidden directory: {forbidden}"
+                )
 
         print(f"✓ Object storage root_dir validation passed: {provider.root_dir}")
         return True
 
 
-def run_all_tests():
-    """Run all smoke tests."""
-    print("=" * 60)
-    print("Provider Registry Smoke Test")
-    print("=" * 60)
-    print()
+def test_current_registry_is_lazy_and_local_providers_are_public_safe():
+    from search_core.providers.demo_embedding import DemoEmbedding
 
-    tests = [
-        test_test_registry_can_be_built,
-        test_registry_contains_required_provider_keys,
-        test_test_fallback_provider_types,
-        test_dev_registry_can_be_built,
-        test_dev_fallback_provider_types,
-        test_runtime_registry_can_be_built,
-        test_runtime_default_provider_types,
-        test_provider_module_path_does_not_contain_forbidden_internal_patterns,
-        test_object_storage_root_dir_not_in_source_code,
-    ]
+    from app.bootstrap.opensource import build_opensource_provider_registry
 
-    passed = 0
-    failed = 0
-
-    for test in tests:
-        try:
-            print(f"\nRunning {test.__name__}...")
-            if test():
-                passed += 1
-        except Exception as e:
-            failed += 1
-            print(f"✗ {test.__name__} FAILED: {e}")
-            import traceback
-            traceback.print_exc()
-
-    print()
-    print("=" * 60)
-    print(f"Results: {passed} passed, {failed} failed")
-    print("=" * 60)
-
-    return failed == 0
-
-
-if __name__ == "__main__":
-    success = run_all_tests()
-    sys.exit(0 if success else 1)
+    for mode in ("dev", "runtime", "test", "dev_smoke"):
+        registry = build_opensource_provider_registry(mode)
+        assert registry.has("config") and registry.has("startup_provider")
+        assert registry.get("tc_catalog_repository") is None
+        assert registry.get("tc_index") is None
+        if mode in {"test", "dev_smoke"}:
+            assert isinstance(registry.require("embedding_provider"), DemoEmbedding)
+        else:
+            assert callable(registry.require("tc_model_factory"))

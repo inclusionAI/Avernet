@@ -20,13 +20,13 @@ writers before permitting department or Bot-specific records: old processes igno
 these dimensions and can misread/delete/upsert new records. The same requirement
 applies to ad-hoc operations and external consumers.
 
-Keep legacy user comparisons unchanged. Department reads/deletes use exact binary
-comparison. With a legacy case-insensitive unique index, distinct department paths
-that collate equally cannot coexist in the same scope. Writes explicitly reject
-this conflict (HTTP 409); an upsert is rechecked before commit, including a competing
-insert after preflight, so a different spelling is never silently reported as stored.
-SQLite with a case-sensitive index may permit both paths; this is a documented
-storage constraint, not implicit case-insensitive department authorization.
+User and department reads, candidate lookups, deletes and upserts use normal
+string comparison under the existing entity_id column/index collation. On a
+case-insensitive collation, paths differing only in case identify the same
+membership within one scope; an upsert is idempotent and deletion accepts either
+spelling. No binary cast or Python spelling-conflict check is applied. SQLite's
+default collation is case-sensitive; tests use an explicit NOCASE fixture to
+verify case-insensitive behavior without changing the production schema.
 
 Rollback is not a blind code downgrade. Pause writes and identify new-scope records
 and collisions that would violate the old three-column unique key. Preserve a

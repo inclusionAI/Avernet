@@ -13,8 +13,11 @@ import type {
   AgentCodingInternalResources,
   AppCapabilities,
   BotEngineOption,
+  BotModelBadge,
   CapabilityResult,
+  CodingBotConversationHost,
   ConversationInstanceScopeCapability,
+  GuideAssistantSpec,
   HumanIdentity,
   InviteCodeGatePolicy,
   LegacyVersionSwitchSpec,
@@ -38,10 +41,36 @@ function unsupported<T>(value: T, reason: string): CapabilityResult<T> {
 
 const DEFAULT_TASK_API_BASE = '/openapi/v1/collaboration/tasks';
 
+/**
+ * 可选 Backend 增强（BCS 独立好友发现）的本地配置读取：运行时显式设置优先，
+ * 其次编译常量 TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED（config define 注入，缺省全栈 true）。
+ * 供 getPublicBotBackendEnabled 与 getShellVisibility 共用同一决策，不从默认能力实现
+ * 反向调用 registry 造成循环；页面/Service 不得绕过能力散落环境变量访问。
+ */
+function publicBotBackendEnabled(): boolean {
+  const runtime =
+    typeof window === 'undefined'
+      ? undefined
+      : (window as { AVERNET_RUNTIME_CONFIG?: { PUBLIC_BOT_BACKEND_ENABLED?: unknown } }).AVERNET_RUNTIME_CONFIG;
+  // 运行时（部署 profile 写入）只认布尔值；字符串 'false' 不当作关闭。
+  if (typeof runtime?.PUBLIC_BOT_BACKEND_ENABLED === 'boolean') return runtime.PUBLIC_BOT_BACKEND_ENABLED;
+  if (typeof TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED === 'boolean') return TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED;
+  return true;
+}
+
 function configuredTaskApiBase(): string {
   return typeof TEAMCLAW_TASK_API_BASE !== 'undefined' && TEAMCLAW_TASK_API_BASE
     ? TEAMCLAW_TASK_API_BASE
     : DEFAULT_TASK_API_BASE;
+}
+
+function normalizeTaskConversationRouteUrl(routeUrl: string): string | null {
+  if (!routeUrl.startsWith('/')) return null;
+  const base = new URL(typeof window === 'undefined' ? 'http://localhost' : window.location.origin);
+  const parsed = new URL(routeUrl, base);
+  if (parsed.origin !== base.origin) return null;
+  if (!['/workspace/chat', '/workspace/collaboration'].includes(parsed.pathname)) return null;
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
 
 export const defaultCapabilities: AppCapabilities = {
@@ -60,37 +89,32 @@ export const defaultCapabilities: AppCapabilities = {
   getLegacyVersionSwitch: (): CapabilityResult<LegacyVersionSwitchSpec | null> =>
     unsupported(null, '当前部署形态不提供版本切换'),
   openExternal: () => unsupported(null, '当前运行环境暂不支持打开外部链接'),
-  // 任务副屏 V2 会话联动(P4,spec §3.2):会话宿主内只替换左侧 ChatArea，
-  // 不切真实会话/路由，避免 ChatLayout.Panel 被会话切换副作用强制关闭。
-  // 会话宿主外（如我的任务抽屉）仍按目标类型路由进入对应页面。
+  // 任务节点联动统一切真实会话路由：URL 与左侧 Bot/群、Session 选中态由既有
+  // 路由 hydration 同源更新；TaskPanel 的跨会话保活由 taskConversationNavigationStore 编排。
   navigateToConversation: (target: TaskSessionJumpTarget): CapabilityResult<null> => {
     if (!target.sessionId) {
       return unsupported(null, '会话跳转目标缺少 sessionId');
     }
-    const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
-    const inConversationHost =
-      pathname.startsWith('/workspace/collaboration') || pathname.startsWith('/workspace/chat');
-    // 群会话形态判别以 session id 为准(与 sessionResolution 同一契约):
-    // 派生会话分支可能产出 kind='unknown',此处仍需识别 bcs_grp_ 物理形态。
     const isGroupTarget = target.kind === 'group' || target.sessionId.startsWith('bcs_grp_');
+    const routeUrl = target.routeUrl
+      ? normalizeTaskConversationRouteUrl(target.routeUrl)
+      : isGroupTarget
+      ? getCollaborationGroupConversationUrl(target.groupId ?? null, target.sessionId)
+      : getCollaborationBotConversationUrl(target.botId ?? '', target.sessionId);
+    if (!routeUrl) return unsupported(null, '会话跳转地址不是受支持的站内会话路由');
 
-    if (inConversationHost) {
-      useTaskSidePanelStore.getState().openLinkedSession({
-        sessionId: target.sessionId,
-        kind: isGroupTarget ? 'group' : target.kind,
-        groupId: isGroupTarget ? target.groupId ?? null : null,
-        botId: isGroupTarget ? null : target.botId ?? null,
-      });
-      return { status: 'available', value: null };
-    }
+    useTaskSidePanelStore.getState().closeLinkedSession();
+    const currentUrl =
+      typeof window === 'undefined'
+        ? ''
+        : `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (currentUrl === routeUrl) return { status: 'available', value: null };
 
-    const chatUrl = getCollaborationBotConversationUrl(target.botId ?? '', target.sessionId);
-    const groupUrl = getCollaborationGroupConversationUrl(target.groupId ?? null, target.sessionId);
     // 懒 require umi history:静态 import 会把 @umijs/max 拉进 jest 依赖图(esbuild 环境不变量崩),
     // 且 capability 求值频率低;只在真正发生路由跳转时取模块。
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const umiHistory = (require('@umijs/max') as { history: { push: (url: string) => void } }).history;
-    umiHistory.push(isGroupTarget ? groupUrl : chatUrl);
+    umiHistory.push(routeUrl);
     return { status: 'available', value: null };
   },
   // Open Core 默认路由重定向：当前无收敛项——/space-admin、/ticket-center 由页面级 getAdminSections
@@ -149,6 +173,11 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: null,
   }),
+  // 产品引导（新版助手）：内源专属功能，Open Core 无此能力（入口不渲染、浮层不挂载）。
+  getGuideAssistant: (): CapabilityResult<GuideAssistantSpec | null> => ({
+    status: 'available',
+    value: null,
+  }),
   // Open Core 无员工目录数据源 → 员工搜索不支持（添加成员弹窗降级为手填工号）。
   getUserSearchCapability: (): CapabilityResult<UserSearchCapability | null> => ({
     status: 'available',
@@ -169,6 +198,8 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: null,
   }),
+  // Open Core 无内源运营配置：模型列表不渲染徽标。
+  getModelBadge: (): CapabilityResult<BotModelBadge | null> => ({ status: 'available', value: null }),
   getAgentCodingInternalResources: (): CapabilityResult<AgentCodingInternalResources> => ({
     status: 'available',
     value: {
@@ -245,7 +276,13 @@ export const defaultCapabilities: AppCapabilities = {
   // Open Core / 阿里云不具备内部 SkillCenter 与能力工坊产品入口，只展示用户自己的 Skill。
   getBotSkillPickerSources: () => ({ status: 'available', value: ['mine'] }),
   getBotSkillPickerDetailUrl: () => ({ status: 'unsupported', value: null }),
+  getBotEditorPanels: () => ({ status: 'available', value: [] }),
+  getConversationComposer: () => ({ status: 'available', value: null }),
+  getUserMessagePresentation: () => ({ status: 'available', value: null }),
   getBotMcpPickerEnabled: () => ({ status: 'available', value: false }),
+  // Open Core 默认全量来源（与既有硬编码 Segmented 行为一致，零变化）；
+  // 部署 overlay 可收窄（见 types.getBotMcpPickerSources 契约）。
+  getBotMcpPickerSources: () => ({ status: 'available', value: ['internal', 'open-platform'] }),
   // Open Core 品牌：Avernet（横版 wordmark 用于页头；方版 mark 备用于登录/空态方形场景）。
   getProductBrand: (): CapabilityResult<ProductBrand> => ({
     status: 'available',
@@ -323,10 +360,13 @@ export const defaultCapabilities: AppCapabilities = {
   // Open Core（阿里云部署）壳层可见性：展示页头通知中心（notificationBell=true），
   // 不展示侧栏空间切换器（spaceSwitcher=false）；空间数据链路（initSpaceContext / 默认个人空间）
   // 与此开关无关，不受本默认值影响。internal overlay 覆盖为两项全 true（extensions/internal.ts）。
+  // BCS-only 部署形态经同一 publicBotBackendEnabled() 决策隐藏铃铛：Backend 可选增强关闭时
+  // 铃铛不挂载，未读轮询随 AppSidebar 条件挂载自然停止（不在 notification service 捕获 404 伪装禁用）。
   // 注：原 adminEntry 已随【管理后台】导航项退役移除（split-admin-space-ticket-pages）。
+  getPublicBotBackendEnabled: publicBotBackendEnabled,
   getShellVisibility: (): CapabilityResult<ShellVisibility> => ({
     status: 'available',
-    value: { spaceSwitcher: false, notificationBell: true },
+    value: { spaceSwitcher: false, notificationBell: publicBotBackendEnabled() },
   }),
   // Open Core（阿里云部署）管理后台页内分区：隐藏【空间管理】Tab、仅保留【通知中心】
   // （管理后台入口已开放，空间管理收敛在页内完成；空间数据链路不受影响）。
@@ -340,4 +380,17 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: null,
   }),
+  // Open Core 没有 AIXCoding 微应用货源:Coding Bot 会话可选择,但工作区显式提示未配置。
+  getCodingBotConversationHost: (): CapabilityResult<CodingBotConversationHost | null> => ({
+    status: 'available',
+    value: null,
+  }),
+  // SPM 埋点 adapter(add-spm-tracking):Open Core 默认 no-op——零上报、
+  // 不加载任何埋点 SDK;internal overlay 注入真实 Tracert 实现(码表在 overlay 侧维护,
+  // 开源仓库只见语义点位常量 src/tracking/points.ts)。
+  trackerAdapter: {
+    click: () => {},
+    expo: () => {},
+    config: () => {},
+  },
 };

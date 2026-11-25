@@ -16,7 +16,7 @@ class BbsTaskConfig:
 
     All instances may start the same loop. They compete for that task's named
     lease; only the token holder executes a tick. The heartbeat must be shorter
-    than the lock TTL so long model calls do not cross an expiry boundary
+    than the lock TTL so a long tick does not cross an expiry boundary
     without a renewal attempt.
     """
 
@@ -30,6 +30,26 @@ class BbsTaskConfig:
 @dataclass(frozen=True)
 class BbsDigestTaskConfig(BbsTaskConfig):
     """Settings for the BBS digest task, protected by ``bbs:summary``."""
+
+    enabled: bool = False
+    interval: int = 300
+
+
+@dataclass(frozen=True)
+class BbsPollStatisticsTaskConfig(BbsTaskConfig):
+    """Settings for the deterministic BBS poll-statistics task."""
+
+    enabled: bool = True
+    interval: int = 300
+
+
+@dataclass(frozen=True)
+class BbsTopicTagTaskConfig(BbsTaskConfig):
+    """Settings for automatic Topic tagging, protected by ``bbs:topic_tags``."""
+
+    enabled: bool = True
+    interval: int = 7200
+    jitter: int = 30
 
 
 @dataclass(frozen=True)
@@ -74,5 +94,7 @@ __all__ = [
     "BbsDingTalkConfig",
     "BbsDigestTaskConfig",
     "BbsLLMConfig",
+    "BbsPollStatisticsTaskConfig",
+    "BbsTopicTagTaskConfig",
     "BbsTaskConfig",
 ]

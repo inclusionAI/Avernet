@@ -166,7 +166,7 @@ function GlobalSearchDialogBody({ onOpenChange }: Omit<GlobalSearchDialogProps, 
       >
         <ModalTitle className="sr-only">搜索</ModalTitle>
         {/* 头部（设计稿：64px 高、底描边；图标距左 16，关闭钮距右 18） */}
-        <div className="flex h-16 shrink-0 items-center gap-2 border-b border-border pl-4 pr-[18px]">
+        <div className="flex h-16 shrink-0 items-center gap-2 border-b border-divider pl-4 pr-[18px]">
           <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <input
             ref={inputRef}

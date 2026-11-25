@@ -2,7 +2,15 @@
 import type { IdentityView } from '@/domain/collaboration';
 import * as botCtrl from '@/services/backendApi/bots/botController';
 import * as ctrl from '@/services/backendApi/bots/privateBotSessionController';
-import { botSessionService, listChatBots, splitBotId } from '@/services/workspace/botSessionService';
+import {
+  botSessionService,
+  extractSessionUuidFromSessionId,
+  listChatBots,
+  mapBotSessionSummary,
+  splitBotId,
+} from '@/services/workspace/botSessionService';
+import { BackendRequestError } from '@/services/backendApi/httpClient';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/bots/privateBotSessionController');
@@ -144,7 +152,7 @@ describe('botSessionService', () => {
     ]);
   });
 
-  it('服务 Bot 的真实目录未返回阶段时仍保留草稿操作上下文', async () => {
+  it('服务 Bot 的在线目录使用 online，但不从 inventory 扩大操作权限', async () => {
     ownedMocked.listBots.mockResolvedValue({
       code: 200000,
       data: {
@@ -180,7 +188,7 @@ describe('botSessionService', () => {
       data: [
         {
           botType: 'service',
-          runtimeStage: 'draft',
+          runtimeStage: 'online',
           actions: [],
           ownerId: 'owner-1',
         },
@@ -262,7 +270,6 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessions).toHaveBeenCalledWith('20260402_ab', {
       user_id: '900003',
       owner_id: '2088',
-      stage: 'draft',
       page: 1,
       page_size: 50,
     });
@@ -291,7 +298,7 @@ describe('botSessionService', () => {
     const res = await botSessionService.createSession(bot, 'human_900003', '新');
     expect(mocked.createBotSession).toHaveBeenCalledWith(
       '20260402_ab',
-      { user_id: '900003', owner_id: '2088', stage: 'draft' },
+      { user_id: '900003', owner_id: '2088' },
       { title: '新' },
     );
     expect((res as any).data.sessionId).toBe('sid-new');
@@ -317,7 +324,7 @@ describe('botSessionService', () => {
 
     expect(mocked.createBotSession).toHaveBeenCalledWith(
       '20260402_ab',
-      { user_id: '900003', owner_id: '2088', stage: 'draft' },
+      { user_id: '900003', owner_id: '2088' },
       { title: '新会话' },
     );
   });
@@ -333,7 +340,6 @@ describe('botSessionService', () => {
     expect(mocked.deleteBotSession).toHaveBeenCalledWith('20260402_ab', 'sid-9', {
       user_id: '900003',
       owner_id: '2088',
-      stage: 'draft',
     });
     expect(res.ok).toBe(true);
   });
@@ -361,7 +367,6 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessionMessages).toHaveBeenCalledWith('20260402_ab', 's', {
       user_id: '2088',
       owner_id: '2088',
-      stage: 'draft',
       page: 1,
       page_size: 50,
     });
@@ -380,7 +385,6 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessionMessages).toHaveBeenCalledWith('20260402_ab', 's', {
       user_id: '900003',
       owner_id: '2088',
-      stage: 'draft',
       page: 1,
       page_size: 50,
     });
@@ -403,7 +407,6 @@ describe('botSessionService', () => {
     expect(mocked.listBotModels).toHaveBeenCalledWith('20260402_ab', {
       user_id: '900003',
       owner_id: '2088',
-      stage: 'draft',
       page: 1,
       page_size: 50,
     });
@@ -429,7 +432,7 @@ describe('botSessionService', () => {
     expect(mocked.updateBotSession).toHaveBeenCalledWith(
       '20260402_ab',
       's1',
-      { user_id: '900003', stage: 'draft' },
+      { user_id: '900003' },
       { model: 'openai/gpt-5.3' },
     );
     expect(res.ok && res.data.model).toBe('openai/gpt-5.3');
@@ -447,7 +450,7 @@ describe('botSessionService', () => {
     };
     const messageDto = { message_id: 'm1', session_id: 's1', role: 'user', content: 'q', gmt_create: '' };
     const friendBot = { ...bot, isFriendBot: true };
-    const baseParams = { user_id: '900003', owner_id: '2088', f_user_id: '900003', stage: 'draft' };
+    const baseParams = { user_id: '900003', owner_id: '2088', f_user_id: '900003' };
 
     mocked.listBotSessions.mockResolvedValue({ data: { items: [], total: 0 } });
     mocked.createBotSession.mockResolvedValue({ data: sessionDto });
@@ -519,7 +522,6 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessions).toHaveBeenLastCalledWith('20260402_ab', {
       user_id: '900003',
       owner_id: '2088',
-      stage: 'draft',
       page: 1,
       page_size: 10,
     });
@@ -556,7 +558,6 @@ it('listSessionsPage 与收藏分页复用统一标题映射并透传分页参�
   expect(mocked.listBotSessions).toHaveBeenCalledWith('20260402_ab', {
     user_id: '900003',
     owner_id: '2088',
-    stage: 'draft',
     page: 2,
     page_size: 10,
   });
@@ -581,7 +582,147 @@ describe('owned directory engine context stays deferred', () => {
     ownedMocked.listBots.mockResolvedValue({ data: { items: [{ bot_id: 'deferred', bot_name: 'Bot', owner_entity_id: 'owner', bot_type, status: 'ACTIVE', engine: 'openclaw' }] } });
     ownedMocked.listBotInventory.mockClear();
     const result = await botSessionService.listOwnedBots('caller');
-    expect(result).toMatchObject({ ok: true, data: [{ actions: [], chatable: true, runtimeStage: 'draft' }] });
+    expect(result).toMatchObject({ ok: true, data: [{ actions: [], chatable: true, runtimeStage: bot_type === 'service' ? 'online' : 'draft' }] });
     expect(ownedMocked.listBotInventory).not.toHaveBeenCalled();
+  });
+});
+
+it('managed handoff Bot separates BCN address, resource entity and personnel Owner', async () => {
+  ownedMocked.listBots.mockResolvedValue({ data: { items: [{
+    bot_id: 'service', bot_name: 'Transferred', bot_type: 'service',
+    bcn_bot_id: 'service:original', entity_id: 'staff_original',
+    owner_entity_id: 'new-owner', status: 'ACTIVE', engine: 'openclaw',
+  }], total: 1 } });
+  const result = await botSessionService.listOwnedBots('new-owner');
+  expect(result).toMatchObject({ ok: true, data: [{
+    botId: 'service:original', realBotId: 'service', ownerId: 'staff_original',
+    engineOwnerId: 'new-owner',
+  }] });
+});
+
+describe('instance session lookup error notifications', () => {
+  const bot = { botId: 'bot:1', realBotId: 'bot', ownerId: '1', displayName: 'Bot', online: true, chatable: true };
+  it.each([404, 401, 403, 500])('only cancels expected probe misses: HTTP %s', async (status) => {
+    useErrorNotifyStore.getState().reset();
+    useErrorNotifyStore.getState().enqueue({ toastKey: 'probe', message: 'failure' });
+    mocked.getBotSession.mockRejectedValueOnce(new BackendRequestError('failure', {
+      status, apiPath: '/sessions/s', toastKey: 'probe',
+    }));
+    const result = await botSessionService.getSessionDetail(bot, '1', 's',
+      { deviceUuid: 'device-a', stage: 'online' }, { silentNotFound: true });
+    expect(result.ok).toBe(false);
+    expect(useErrorNotifyStore.getState().queue[0].cancelled === true).toBe(status === 404);
+    expect(result).toMatchObject({ error: { code: status === 404 ? 'NOT_FOUND' : 'BOT_SESSION_FAILED' } });
+  });
+  it('cancels the notification produced by the real HTTP request chain', async () => {
+    const originalFetch = global.fetch;
+    const actual = jest.requireActual<typeof ctrl>('@/services/backendApi/bots/privateBotSessionController');
+    useErrorNotifyStore.getState().reset();
+    mocked.getBotSession.mockImplementationOnce(actual.getBotSession);
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue({
+      ok: false, status: 404,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ code: 404000, message: 'Not Found' }),
+    } as unknown as Response);
+    try {
+      const result = await botSessionService.getSessionDetail(bot, '1', 's',
+        { deviceUuid: 'device-a', stage: 'online' }, { silentNotFound: true });
+      expect(result).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(useErrorNotifyStore.getState().queue).toHaveLength(1);
+      expect(useErrorNotifyStore.getState().queue[0].cancelled).toBe(true);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+  it('keeps ordinary session detail 404 notifications', async () => {
+    useErrorNotifyStore.getState().reset();
+    useErrorNotifyStore.getState().enqueue({ toastKey: 'detail', message: 'not found' });
+    mocked.getBotSession.mockRejectedValueOnce(new BackendRequestError('not found', {
+      status: 404, apiPath: '/sessions/s', toastKey: 'detail',
+    }));
+    await botSessionService.getSessionDetail(bot, '1', 's');
+    expect(useErrorNotifyStore.getState().queue[0].cancelled).not.toBe(true);
+  });
+});
+
+// OpenSpec fix-session-title-auto-rename §session-title-normalization：
+// adapter 写引擎 label 有两种后缀形态（create `_<裸uuid>` / update `_<完整id>`），
+// mapBotSessionSummary 的剥除判据必须锚定本会话自身标识，宁漏剥不误剥。
+describe('mapBotSessionSummary 标题后缀剥除（锚定本会话）', () => {
+  const uuid = '9a4cadce-44a7-41de-8826-749b3b0b79f7';
+  const base = {
+    title: '',
+    message_count: 0,
+    gmt_modified: '',
+    gmt_create: '',
+  };
+
+  it('update 形态 `_<完整 session_id>`：照旧剥净', () => {
+    const sessionId = `agent:main:session:${uuid}:user:900003`;
+    expect(
+      mapBotSessionSummary({ ...base, session_id: sessionId, title: `标题A_${sessionId}` }).title,
+    ).toBe('标题A');
+  });
+
+  it('create 形态 `_<裸uuid>`：锚定本会话 id 补齐剥净（完整 AID 与裸 key 两种 id 形态）', () => {
+    expect(
+      mapBotSessionSummary({
+        ...base,
+        session_id: `agent:main:session:${uuid}:user:900003`,
+        title: `新会话_${uuid}`,
+      }).title,
+    ).toBe('新会话');
+    expect(
+      mapBotSessionSummary({
+        ...base,
+        session_id: `session:${uuid}:user:900003`,
+        title: `新对话_${uuid}`,
+      }).title,
+    ).toBe('新对话');
+  });
+
+  it('人类标题自带下划线尾巴不误剥（teclaw 回归锚点）', () => {
+    expect(
+      mapBotSessionSummary({
+        ...base,
+        session_id: `agent:main:session:${uuid}:user:900003`,
+        title: '技能回放-ODPS_APPROVAL-100008',
+      }).title,
+    ).toBe('技能回放-ODPS_APPROVAL-100008');
+  });
+
+  it('尾段 uuid 非本会话自己：宁漏剥，原样保留', () => {
+    expect(
+      mapBotSessionSummary({
+        ...base,
+        session_id: 'solo-id',
+        title: `报告_77777777-7777-4777-8777-777777777777`,
+      }).title,
+    ).toBe(`报告_77777777-7777-4777-8777-777777777777`);
+  });
+
+  it('幂等：干净标题重复映射为 no-op；空 title 仍回退「新会话」', () => {
+    const sessionId = `agent:main:session:${uuid}:user:900003`;
+    expect(mapBotSessionSummary({ ...base, session_id: sessionId, title: '新会话' }).title).toBe('新会话');
+    expect(mapBotSessionSummary({ ...base, session_id: sessionId, title: '' }).title).toBe('新会话');
+  });
+});
+
+describe('extractSessionUuidFromSessionId', () => {
+  const uuid = '9a4cadce-44a7-41de-8826-749b3b0b79f7';
+
+  it('裸 key `session:<uuid>:user:<id>` 提取 uuid', () => {
+    expect(extractSessionUuidFromSessionId(`session:${uuid}:user:1`)).toBe(uuid);
+  });
+
+  it('完整 AID `agent:<provider>:session:<uuid>:user:<id>` 提取 uuid', () => {
+    expect(extractSessionUuidFromSessionId(`agent:main:session:${uuid}:user:1`)).toBe(uuid);
+  });
+
+  it('未知形态返回 null（宁漏剥不误剥）', () => {
+    expect(extractSessionUuidFromSessionId('solo-id')).toBeNull();
+    expect(extractSessionUuidFromSessionId('')).toBeNull();
+    expect(extractSessionUuidFromSessionId(undefined)).toBeNull();
   });
 });

@@ -174,6 +174,7 @@ export class ApprovalCardRepository {
     empId: string,
     action: "approve" | "reject",
     comment?: string,
+    retryAttempt = 0,
   ): Promise<ApprovalActionResult> {
     const card = await this.findById(cardId);
     if (!card) {
@@ -232,11 +233,11 @@ export class ApprovalCardRepository {
     // resolved_at is BIGINT (unix timestamp) in MySQL / INTEGER in SQLite — always use integer.
     const resolvedAt = newStatus !== "pending" ? Math.floor(Date.now() / 1000) : null;
 
-    await this.db.exec(
+    const update = await this.db.exec(
       `UPDATE approval_cards
        SET approved_by = ?, rejected_by = ?, status = ?, resolved_at = COALESCE(?, resolved_at),
            comment = COALESCE(?, comment)
-       WHERE id = ?`,
+       WHERE id = ? AND status = ? AND approved_by = ? AND rejected_by = ?`,
       [
         approvedBy.join(","),
         rejectedBy.join(","),
@@ -244,12 +245,19 @@ export class ApprovalCardRepository {
         resolvedAt,
         comment ?? null,
         cardId,
+        card.status,
+        card.approved_by,
+        card.rejected_by,
       ],
     ).catch((err) => {
       logDbError("recordAction", err);
       throw err;
     });
 
+    if (update.affectedRows === 0) {
+      if (retryAttempt < 3) return this.recordAction(cardId, empId, action, comment, retryAttempt + 1);
+      return { ok: false, status: "pending", approvedBy: [], rejectedBy: [], error: "审批状态已变更，请刷新后重试" };
+    }
     return policyResult;
   }
 

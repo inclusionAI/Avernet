@@ -395,3 +395,100 @@ def test_baas_rejects_unsafe_logical_id_before_query(service, logical_id):
         )
     assert error.value.reason == "invalid_target"
     service.list_devices_by_bot_uuid.assert_not_called()
+
+
+@pytest.mark.parametrize("selected", ["DEVICE-2", " 副本/A:2 "])
+def test_select_current_baas_replica_by_uuid_within_binding(service, selected):
+    devices = [
+        {"device_uuid": "DEVICE-1", "status": "ACTIVE", "provider_device_id": "ARCA-SANDBOX-1@2"},
+        {"device_uuid": selected, "status": "ACTIVE", "provider_device_id": "ARCA-SANDBOX-2@2"},
+    ]
+    service._active_token_replica_devices = MagicMock(return_value=devices)
+    assert service.resolve_token_outbound_device_id(
+        binding(device_provider="baas"), device_uuid=selected,
+    ) == "ARCA-SANDBOX-2@2"
+    service._active_token_replica_devices.assert_called_once_with("logical-bot")
+
+
+@pytest.mark.parametrize("devices,reason", [
+    ([{"device_uuid": "other", "status": "ACTIVE"}], "target_not_found"),
+    ([{"device_uuid": "selected", "status": "RELEASED"}], "target_not_found"),
+    ([{"device_uuid": "selected"}], "target_not_found"),
+    ([{"device_uuid": "selected", "status": "ACTIVE"}] * 2, "target_ambiguous"),
+])
+def test_reject_unavailable_or_ambiguous_replica(service, devices, reason):
+    service._active_token_replica_devices = MagicMock(return_value=devices)
+    with pytest.raises(module.BaasOutboundTargetError) as exc:
+        service.resolve_token_outbound_device_id(binding(device_provider="baas"), device_uuid="selected")
+    assert exc.value.reason == reason
+
+
+def test_direct_arca_uuid_requires_matching_active_binding_metadata(service):
+    record = binding(device_props={"sandbox_id": TARGET, "device_uuid": "selected"})
+    assert service.resolve_token_outbound_device_id(record, device_uuid="selected") == TARGET
+    for rejected in (record, binding()):
+        with pytest.raises(module.BaasOutboundTargetError) as exc:
+            service.resolve_token_outbound_device_id(rejected, device_uuid="foreign")
+        assert exc.value.reason == "target_not_found"
+    service.list_devices_by_bot_uuid.assert_not_called()
+
+
+@pytest.mark.parametrize("outcome", ["current", "foreign", "inactive", "swapped", "http_error"])
+def test_select_replica_only_from_current_bot_record(outcome, caplog):
+    import httpx
+
+    caplog.set_level("INFO")
+    service = object.__new__(module.BaasService)
+    service._tenant = "example"
+    requested_paths = []
+
+    def inventory(request):
+        requested_paths.append(request.url.path)
+        assert request.url.params["tenant"] == "example"
+        if request.url.path == "/api/v1/bots/logical-bot/device-status":
+            data = {"bot_uuid": "logical-bot", "bot_id": 31,
+                    "bot_status": "STOPPED" if outcome == "inactive" else "ACTIVE"}
+        else:
+            assert request.url.path == "/api/v1/bots/31/detail-by-id"
+            if outcome == "http_error":
+                return httpx.Response(500, text="<private-response>")
+            data = {"id": 31, "status": "ACTIVE", "bot_uuid": "foreign" if outcome == "swapped" else "logical-bot",
+                    "config": {"token": "<private-response>"}, "devices": [
+                        {"device_uuid": "DEVICE-1", "status": "ACTIVE", "provider_device_id": "ARCA-SANDBOX-first@1"},
+                        {"device_uuid": "DEVICE-2", "status": "ACTIVE", "provider_device_id": TARGET},
+                    ]}
+        return httpx.Response(200, json={"code": 0, "data": data})
+
+    with httpx.Client(transport=httpx.MockTransport(inventory), base_url="https://example.test") as client:
+        service._http = client
+        if outcome == "current":
+            assert service.resolve_token_outbound_device_id(binding(device_provider="baas"), device_uuid="DEVICE-2") == TARGET
+        elif outcome == "http_error":
+            with pytest.raises(httpx.HTTPStatusError):
+                service.resolve_token_outbound_device_id(binding(device_provider="baas"), device_uuid="DEVICE-2")
+            assert "token_replica_inventory_failed" in caplog.text
+        else:
+            selection = "historical-device" if outcome == "foreign" else "DEVICE-2"
+            with pytest.raises(module.BaasOutboundTargetError, match="target_not_found"):
+                service.resolve_token_outbound_device_id(binding(device_provider="baas"), device_uuid=selection)
+    assert len(requested_paths) == (1 if outcome == "inactive" else 2)
+    assert "token_replica_inventory_started" in caplog.text
+    assert "token_replica_inventory_succeeded" in caplog.text
+    assert "<private-response>" not in caplog.text
+
+
+def test_no_uuid_keeps_original_inventory_exception(service):
+    error = module.BaasServiceError("legacy inventory failure")
+    service.list_devices_by_bot_uuid.side_effect = error
+    with pytest.raises(module.BaasServiceError) as exc:
+        service.resolve_token_outbound_device_id(binding(device_provider="baas"))
+    assert exc.value is error
+    service.list_devices_by_bot_uuid.assert_called_once_with("logical-bot", timeout=3.0)
+
+
+@pytest.mark.parametrize("provider", ["baas", "arca"])
+def test_explicit_empty_device_never_falls_back_or_matches_empty_metadata(service, provider):
+    record = binding(device_provider=provider, device_props={"device_uuid": "", "sandbox_id": TARGET})
+    with pytest.raises(module.BaasOutboundTargetError, match="target_not_found"):
+        service.resolve_token_outbound_device_id(record, device_uuid="")
+    service.list_devices_by_bot_uuid.assert_not_called()

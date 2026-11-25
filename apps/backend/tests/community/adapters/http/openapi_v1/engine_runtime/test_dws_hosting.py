@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 from injector import InstanceProvider
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
+from agentclaw.community.plugin_api.dws_identity import DwsRolloutIdentity
 
 import pytest
 
@@ -18,6 +19,19 @@ from agentclaw.community.di.dws_management_config import (
 from .conftest import BOT, OWNER, fails, ok
 
 KEY = b"offline-test-management-key-32-bytes"
+
+
+def test_eligibility_uses_composed_identity_policy(client, relay):
+    class AliasIdentity(DwsRolloutIdentity):
+        def key(self, value):
+            return OWNER if value == "alias" else value
+
+    client.app.state.injector.binder.bind(DwsRolloutIdentity, to=AliasIdentity())
+    client.app.state.injector.binder.bind(SystemConfigServiceProtocol, to=InstanceProvider(
+        SimpleNamespace(get_config=lambda **_: {"mode": "allowlist", "staff_ids": ["alias"]})
+    ))
+    assert ok(client.get(f"/openapi/v1/bots/{BOT}/dws-hosting/eligibility")) == {"available": True}
+    assert not relay.attempts
 
 
 @pytest.fixture

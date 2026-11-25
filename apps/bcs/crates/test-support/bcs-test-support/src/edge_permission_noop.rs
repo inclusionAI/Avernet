@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use bcs_domain::edge_permission::{
     AdmissionReason, AdmissionResult, AuthzContext, EdgeGrant, FriendListEntry,
-    PermissionProfile, PermissionRequest, RequestStatus,
+    PermissionProfile, PermissionRequest, RequestKind, RequestStatus,
 };
 use bcs_service_api::application::{
     AdmissionService, ConnectResult, ConnectService, ConnectStatus, RequestDirection, RequestsPage,
@@ -44,8 +44,9 @@ pub struct NoopPermissionRequestRepo;
 impl PermissionRequestRepoPort for NoopPermissionRequestRepo {
     async fn insert(&self, _: PermissionRequest) -> ServiceResult<()> { Ok(()) }
     async fn get(&self, _: &str, _: &str) -> Option<PermissionRequest> { None }
-    async fn list_inbox(&self, _: &str, _: &str, _: Option<RequestStatus>) -> Vec<PermissionRequest> { vec![] }
-    async fn list_sent(&self, _: &str, _: &str, _: Option<RequestStatus>) -> Vec<PermissionRequest> { vec![] }
+    async fn find_request(&self, _: &str, _: &str, _: &str, _: RequestKind, _: RequestStatus, _: &str) -> Option<PermissionRequest> { None }
+    async fn list_inbox(&self, _: &str, _: &str, _: Option<RequestStatus>) -> ServiceResult<Vec<PermissionRequest>> { Ok(vec![]) }
+    async fn list_sent(&self, _: &str, _: &str, _: Option<RequestStatus>) -> ServiceResult<Vec<PermissionRequest>> { Ok(vec![]) }
     async fn decide(&self, _: &str, _: &str, _: RequestStatus, _: &str, _: Option<&str>) -> ServiceResult<()> { Ok(()) }
     async fn backfill_edge_id(&self, _: &str, _: &str, _: u64) -> ServiceResult<()> { Ok(()) }
 }

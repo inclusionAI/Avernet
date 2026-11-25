@@ -151,6 +151,16 @@ impl BotRepoPort for NoConnectBotRepo {
         self.inner.list_bots_by_creator(created_by).await
     }
 
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        created_by: &str,
+        limit: usize,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        self.inner
+            .list_uninitialized_bots_by_creator(created_by, limit)
+            .await
+    }
+
     async fn discover(&self, query: &str) -> Vec<RegisteredBot> {
         self.inner.discover(query).await
     }
@@ -481,6 +491,7 @@ async fn conformance_empty_worker_profile_core_service() {
             query: "contract query".to_string(),
             top_k: 7,
             min_score: 0.42,
+            scope: bcs_service_api::WorkerRecommendationScope::LegacyDefault,
         },
         &[],
         &serde_json::Value::Null,

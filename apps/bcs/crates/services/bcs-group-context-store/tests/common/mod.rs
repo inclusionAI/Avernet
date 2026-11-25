@@ -8,6 +8,7 @@ pub fn entry(context_id: &str, name: &str, scope: &str, content: &str) -> NewGro
         .single()
         .unwrap();
     NewGroupContextEntry {
+        created_from_preset: false,
         context_id: context_id.into(),
         name: name.into(),
         scope_level: ScopeLevel::Session,
@@ -41,7 +42,10 @@ pub async fn create_duplicate_active_conflicts(repo: &dyn GroupContextRepo) {
 
 pub async fn supersede_preserves_history(repo: &dyn GroupContextRepo) {
     let first = repo
-        .create_active(entry("ctx-1", "player_state", "sess-001", "张三存活"))
+        .create_active(NewGroupContextEntry {
+            created_from_preset: true,
+            ..entry("ctx-1", "player_state", "sess-001", "张三存活")
+        })
         .await
         .expect("create active");
     let second = repo
@@ -50,6 +54,7 @@ pub async fn supersede_preserves_history(repo: &dyn GroupContextRepo) {
             "sess-001",
             first.id, // CAS token: must match the active row's id
             NewGroupContextEntry {
+                created_from_preset: first.created_from_preset,
                 context_id: first.context_id.clone(), // preserve context_id across versions
                 name: "player_state".into(),
                 scope_level: ScopeLevel::Session,
@@ -75,6 +80,8 @@ pub async fn supersede_preserves_history(repo: &dyn GroupContextRepo) {
         .await
         .expect("supersede active");
 
+    assert!(first.created_from_preset);
+    assert!(second.created_from_preset);
     assert_eq!(second.context_id, first.context_id);
     assert_eq!(second.supersedes, Some(first.id));
     assert_eq!(second.change_reason.as_deref(), Some("第一轮投票"));
@@ -115,6 +122,7 @@ pub async fn supersede_preserves_multiple_history_versions(repo: &dyn GroupConte
             "sess-chain",
             first.id,
             NewGroupContextEntry {
+                created_from_preset: false,
                 context_id: first.context_id.clone(),
                 name: "version_chain".into(),
                 scope_level: ScopeLevel::Session,
@@ -146,6 +154,7 @@ pub async fn supersede_preserves_multiple_history_versions(repo: &dyn GroupConte
             "sess-chain",
             second.id,
             NewGroupContextEntry {
+                created_from_preset: false,
                 context_id: first.context_id.clone(),
                 name: "version_chain".into(),
                 scope_level: ScopeLevel::Session,
@@ -205,6 +214,7 @@ pub async fn supersede_stale_id_returns_conflict(repo: &dyn GroupContextRepo) {
         .expect("create v1");
 
     let v2_entry = NewGroupContextEntry {
+        created_from_preset: false,
         context_id: first.context_id.clone(),
         name: "cas_test".into(),
         scope_level: ScopeLevel::Session,
@@ -236,6 +246,7 @@ pub async fn supersede_stale_id_returns_conflict(repo: &dyn GroupContextRepo) {
     // Now v2 is the active row. Writer B tries to supersede using stale first.id.
     // The CAS UPDATE WHERE id=first.id AND is_superseded=FALSE affects 0 rows -> Conflict.
     let stale_entry = NewGroupContextEntry {
+        created_from_preset: false,
         context_id: first.context_id.clone(),
         name: "cas_test".into(),
         scope_level: ScopeLevel::Session,
@@ -404,4 +415,45 @@ pub async fn current_row_with_expired_business_validity_still_blocks_and_is_retu
         .await
         .expect("list active");
     assert!(rows.iter().any(|row| row.name == created.name));
+}
+
+pub async fn preset_names_are_case_sensitive(repo: &dyn GroupContextRepo) {
+    use bcs_domain::group_context::GroupContextItemPresetChange::{Add, Delete};
+
+    let group = "case-sensitive-presets";
+    repo.change_preset(group, "owner", Add {
+        name: "Timeline".into(),
+        description: String::new(),
+    }).await.unwrap();
+    assert!(repo.preset_exists(group, "Timeline").await.unwrap());
+    assert!(!repo.preset_exists(group, "timeline").await.unwrap());
+
+    repo.change_preset(group, "owner", Add {
+        name: "timeline".into(),
+        description: String::new(),
+    }).await.unwrap();
+    assert_eq!(repo.list_presets(group).await.unwrap().len(), 2);
+
+    repo.change_preset(group, "owner", Delete { name: "timeline".into() }).await.unwrap();
+    assert!(repo.preset_exists(group, "Timeline").await.unwrap());
+    assert!(!repo.preset_exists(group, "timeline").await.unwrap());
+    repo.change_preset(group, "owner", Delete { name: "Timeline".into() }).await.unwrap();
+}
+
+pub async fn editing_missing_preset_returns_not_found(repo: &dyn GroupContextRepo) {
+    use bcs_domain::group_context::GroupContextItemPresetChange::Edit;
+    use bcs_group_context_store::GroupContextStoreError;
+
+    let group = "missing-preset-edit";
+    let result = repo.change_preset(group, "owner", Edit {
+        name: "timeline".into(),
+        new_name: Some("events".into()),
+        description: Some("edited".into()),
+    }).await;
+    assert!(matches!(
+        result,
+        Err(GroupContextStoreError::NotFound { name, scope })
+            if name == "timeline" && scope == group
+    ));
+    assert!(repo.list_presets(group).await.unwrap().is_empty());
 }

@@ -9,6 +9,21 @@ export interface IamTokenResponse {
 
 export type BotIamTokenStage = BotRuntimeStage;
 
+export interface BotIamTokenChatContext {
+  sessionKey: string;
+  /** 好友会话由 OpenAPI 校验归属后再把 session_id 转成内部 session_key。 */
+  friendUserId?: string;
+  ownerId?: string;
+  /** 多实例服务 Bot 的选中实例:后端据此把 Caller 身份签发到选中实例
+   * (openspec add-servicebot-iam-device-uuid)。门控=非 teclaw + 已选实例,
+   * 不按运行态/Caller 模式门控。编排层的注入条件见 botChatProvider.fetchIamToken。 */
+  deviceUuid?: string;
+  /** Caller 模式 Bot(call_type === 'caller')的运行时目标(openspec add-iam-caller-runtime-target):
+   * service=Bot 的服务实例池(我管理的/我协作的服务 Bot 会话,实例仍由 stage/device_uuid 定位);
+   * caller_instance=当前用户的独立 Caller 实例(好友 Bot 会话)。非 Caller Bot 不传即不带。 */
+  callerRuntimeTarget?: 'service' | 'caller_instance';
+}
+
 /** 获取当前登录用户的 IAM Token，用于 OpenClaw WebSocket 请求身份鉴权。 */
 export async function getIamToken(userId?: string): Promise<string> {
   const response = await backendRequest<BackendApiEnvelope<IamTokenResponse>>('/openapi/v1/org/user/iam-token', {
@@ -27,7 +42,8 @@ export async function getBotIamToken(
   botId: string,
   userId?: string,
   entityId?: string,
-  stage: BotIamTokenStage = 'online',
+  stage?: BotIamTokenStage,
+  chatContext?: BotIamTokenChatContext,
 ): Promise<string> {
   const response = await backendRequest<BackendApiEnvelope<IamTokenResponse>>(
     `/openapi/v1/bots/${encodeURIComponent(botId)}/iam-token`,
@@ -36,7 +52,22 @@ export async function getBotIamToken(
       params: userScopedParams({
         ...(userId ? { user_id: userId } : {}),
         ...(entityId ? { entity_id: entityId } : {}),
-        stage,
+        ...(stage ? { stage } : {}),
+        ...(chatContext?.deviceUuid ? { device_uuid: chatContext.deviceUuid } : {}),
+        // TODO(2026-11-19): 后端 iam_token 接口的 caller_runtime_target 参数暂未就绪,
+        // 先不携带;接口上线后取消下方注释恢复携带(openspec add-iam-caller-runtime-target)。
+        // ...(chatContext?.callerRuntimeTarget
+        //   ? { caller_runtime_target: chatContext.callerRuntimeTarget }
+        //   : {}),
+        ...(chatContext?.friendUserId
+          ? {
+              owner_id: chatContext.ownerId ?? entityId,
+              f_user_id: chatContext.friendUserId,
+              session_id: chatContext.sessionKey,
+            }
+          : chatContext?.sessionKey
+          ? { session_key: chatContext.sessionKey }
+          : {}),
       }),
     },
   );

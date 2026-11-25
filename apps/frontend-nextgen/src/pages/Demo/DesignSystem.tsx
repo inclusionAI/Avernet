@@ -45,7 +45,7 @@ const DesignSystem: React.FC = () => {
   return (
     <div className="h-full overflow-y-auto bg-background text-foreground">
       {/* ════════ 顶部展示栏 h-14(56px) ════════ */}
-      <header className="sticky top-0 z-50 h-14 border-b border-border bg-background/95 backdrop-blur flex items-center px-4 gap-3">
+      <header className="sticky top-0 z-50 h-14 border-b border-divider bg-background/95 backdrop-blur flex items-center px-4 gap-3">
         <div className="flex items-center gap-2 font-semibold tracking-tight shrink-0">
           <div className="size-7 rounded-lg bg-brand text-white grid place-items-center text-xs font-bold">tc</div>
           <span className="hidden sm:inline">tc-ui · 设计规范展示</span>
@@ -70,7 +70,7 @@ const DesignSystem: React.FC = () => {
       </header>
 
       {/* ════════ 信息条 ════════ */}
-      <div className="h-12 border-b border-border bg-muted/30 flex items-center px-4 gap-3 text-xs text-muted-foreground">
+      <div className="h-12 border-b border-divider bg-muted/30 flex items-center px-4 gap-3 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">
           {activePage === 'design' ? '设计规范预览' : activePage === 'chat' ? '对话协作预览' : activePage === 'bot' ? 'Bot 工作台预览' : '管理后台预览'}
         </span>
@@ -254,7 +254,7 @@ const DesignSystem: React.FC = () => {
               {/* Tabs §3.x */}
               <div className="rounded-lg border border-border bg-card p-6 space-y-4">
                 <h3 className="text-xs font-medium text-muted-foreground">Tabs / Segmented</h3>
-                <div className="flex items-center gap-1 border-b border-border">
+                <div className="flex items-center gap-1 border-b border-divider">
                   {[
                     { id: 'colors', label: '色彩' },
                     { id: 'fonts', label: '字体' },
@@ -325,14 +325,14 @@ const DesignSystem: React.FC = () => {
                 </div>
                 <div className="rounded-lg border border-border bg-card p-6">
                   <h3 className="text-xs font-medium text-muted-foreground mb-3">Accordion</h3>
-                  <div className="border-b border-border">
+                  <div className="border-b border-divider">
                     <div className="flex items-center py-3 px-2 text-xs font-medium hover:bg-accent/50 cursor-pointer" onClick={() => setAccordionOpen(!accordionOpen)}>
                       什么是 vibecoding？
                       <svg className={`size-4 ml-auto text-muted-foreground transition-transform ${accordionOpen ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg>
                     </div>
                     {accordionOpen && <div className="pb-3 px-2 text-xs text-muted-foreground">用自然语言描述需求，AI 生成代码，人工微调。</div>}
                   </div>
-                  <div className="border-b border-border">
+                  <div className="border-b border-divider">
                     <div className="flex items-center py-3 px-2 text-xs font-medium hover:bg-accent/50 cursor-pointer">如何接入规范？<svg className="size-4 ml-auto text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg></div>
                   </div>
                   <div><div className="flex items-center py-3 px-2 text-xs font-medium hover:bg-accent/50 cursor-pointer opacity-50">已禁用项<svg className="size-4 ml-auto text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg></div></div>
@@ -362,9 +362,9 @@ const DesignSystem: React.FC = () => {
                     <div className="flex flex-col items-center"><div className="size-9 rounded-full bg-primary text-primary-foreground border-2 border-primary grid place-items-center"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6 9 17l-5-5" /></svg></div><span className="text-xs font-medium mt-2">账号</span></div>
                     <div className="h-px flex-1 bg-primary mx-2 -mt-6" />
                     <div className="flex flex-col items-center"><div className="size-9 rounded-full bg-primary text-primary-foreground border-2 border-primary grid place-items-center text-[10px] font-medium">2</div><span className="text-xs font-medium mt-2">配置</span></div>
-                    <div className="h-px flex-1 bg-border mx-2 -mt-6" />
+                    <div className="h-px flex-1 bg-divider mx-2 -mt-6" />
                     <div className="flex flex-col items-center"><div className="size-9 rounded-full border-2 border-muted-foreground/30 text-muted-foreground grid place-items-center text-[10px]">3</div><span className="text-xs text-muted-foreground mt-2">确认</span></div>
-                    <div className="h-px flex-1 bg-border mx-2 -mt-6" />
+                    <div className="h-px flex-1 bg-divider mx-2 -mt-6" />
                     <div className="flex flex-col items-center"><div className="size-9 rounded-full border-2 border-muted-foreground/30 text-muted-foreground grid place-items-center text-[10px]">4</div><span className="text-xs text-muted-foreground mt-2">完成</span></div>
                   </div>
                 </div>
@@ -373,9 +373,9 @@ const DesignSystem: React.FC = () => {
 
             {/* Empty / Error §3.10 §5.13 */}
             <div className="rounded-lg border border-border bg-card overflow-hidden">
-              <div className="px-6 py-3 border-b border-border text-xs font-medium text-muted-foreground">Empty / Error 状态</div>
+              <div className="px-6 py-3 border-b border-divider text-xs font-medium text-muted-foreground">Empty / Error 状态</div>
               <div className="grid md:grid-cols-2">
-                <div className="text-center py-12 px-4 border-r border-border">
+                <div className="text-center py-12 px-4 border-r border-divider">
                   <div className="size-12 mx-auto rounded-full bg-brand/10 grid place-items-center text-brand"><svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" /></svg></div>
                   <h3 className="text-base font-semibold mt-4">暂无数据</h3>
                   <p className="text-xs text-muted-foreground mt-1">还没有创建任何 Bot</p>
@@ -426,7 +426,7 @@ const DesignSystem: React.FC = () => {
                 <div className="w-48 rounded-lg border border-border bg-popover p-1 shadow-md">
                   <button type="button" className="w-full flex items-center gap-2 px-2 py-2 rounded-md hover:bg-accent text-xs"><svg className="size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>编辑</button>
                   <button type="button" className="w-full flex items-center gap-2 px-2 py-2 rounded-md hover:bg-accent text-xs"><svg className="size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></svg>查看</button>
-                  <div className="h-px bg-border my-1" />
+                  <div className="h-px bg-divider my-1" />
                   <button type="button" className="w-full flex items-center gap-2 px-2 py-2 rounded-md hover:bg-destructive/10 text-destructive text-xs"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>删除</button>
                 </div>
               </div>
@@ -447,7 +447,7 @@ const DesignSystem: React.FC = () => {
                 <h3 className="text-xs font-medium text-muted-foreground mb-4">Transfer 穿梭框</h3>
                 <div className="flex items-center gap-2">
                   <div className="w-40 rounded-md border border-border">
-                    <div className="px-2 py-1.5 border-b border-border text-xs text-muted-foreground flex items-center justify-between">可选权限 <span>4</span></div>
+                    <div className="px-2 py-1.5 border-b border-divider text-xs text-muted-foreground flex items-center justify-between">可选权限 <span>4</span></div>
                     <div className="max-h-36 overflow-y-auto">
                       <div className="px-2 py-1.5 text-xs hover:bg-accent cursor-pointer rounded-sm m-0.5">读取用户</div>
                       <div className="px-2 py-1.5 text-xs hover:bg-accent cursor-pointer rounded-sm m-0.5">写入配置</div>
@@ -460,7 +460,7 @@ const DesignSystem: React.FC = () => {
                     <button type="button" className="size-8 rounded-md border border-border bg-background grid place-items-center hover:bg-accent opacity-40"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 8-4 4 4 4M18 16l4-4-4-4M10 4l-4 0M10 20l-4 0M10 12l-4 0" /></svg></button>
                   </div>
                   <div className="w-40 rounded-md border border-border">
-                    <div className="px-2 py-1.5 border-b border-border text-xs text-muted-foreground flex items-center justify-between">已选 <span>1</span></div>
+                    <div className="px-2 py-1.5 border-b border-divider text-xs text-muted-foreground flex items-center justify-between">已选 <span>1</span></div>
                     <div className="max-h-36 overflow-y-auto">
                       <div className="px-2 py-1.5 text-xs bg-secondary m-0.5 rounded-sm">读取用户</div>
                     </div>
@@ -494,7 +494,7 @@ const DesignSystem: React.FC = () => {
               <div className="rounded-lg border border-border bg-card p-6">
                 <h3 className="text-xs font-medium text-muted-foreground mb-3">Notification 下拉</h3>
                 <div className="w-72 max-h-[300px] overflow-y-auto">
-                  <div className="flex items-center gap-1 px-2 py-1.5 border-b border-border"><button type="button" className="px-2 h-7 rounded-md text-xs font-medium bg-secondary">全部</button><button type="button" className="px-2 h-7 rounded-md text-xs text-muted-foreground hover:bg-accent">未读</button></div>
+                  <div className="flex items-center gap-1 px-2 py-1.5 border-b border-divider"><button type="button" className="px-2 h-7 rounded-md text-xs font-medium bg-secondary">全部</button><button type="button" className="px-2 h-7 rounded-md text-xs text-muted-foreground hover:bg-accent">未读</button></div>
                   <div className="relative px-3 py-2.5 hover:bg-accent cursor-pointer border-l-2 border-brand">
                     <div className="text-xs font-medium">部署成功</div>
                     <div className="text-xs text-muted-foreground">代码审查 Bot 已上线</div>
@@ -510,13 +510,13 @@ const DesignSystem: React.FC = () => {
               <div className="rounded-lg border border-border bg-card p-6">
                 <h3 className="text-xs font-medium text-muted-foreground mb-3">UserMenu</h3>
                 <div className="w-56 rounded-lg border border-border bg-popover p-1 shadow-md">
-                  <div className="px-2 py-2 border-b border-border mb-1">
+                  <div className="px-2 py-2 border-b border-divider mb-1">
                     <div className="text-xs font-medium">张三</div>
                     <div className="text-xs text-muted-foreground truncate">zhangsan@teamclaw.cn</div>
                   </div>
                   <button type="button" className="w-full flex items-center gap-2 px-2 py-2 rounded-md hover:bg-accent text-xs">个人资料</button>
                   <button type="button" className="w-full flex items-center gap-2 px-2 py-2 rounded-md hover:bg-accent text-xs">设置</button>
-                  <div className="h-px bg-border my-1" />
+                  <div className="h-px bg-divider my-1" />
                   <button type="button" className="w-full flex items-center gap-2 px-2 py-2 rounded-md hover:bg-destructive/10 text-destructive text-xs">退出登录</button>
                 </div>
               </div>
@@ -536,11 +536,11 @@ const DesignSystem: React.FC = () => {
               <div className="rounded-lg border border-border bg-card p-6">
                 <h3 className="text-xs font-medium text-muted-foreground mb-4">Cascader 级联</h3>
                 <div className="flex rounded-md border border-border overflow-hidden">
-                  <div className="w-32 border-r border-border p-1">
+                  <div className="w-32 border-r border-divider p-1">
                     <div className="px-2 py-1.5 rounded-sm text-xs bg-accent font-medium cursor-pointer">中国</div>
                     <div className="px-2 py-1.5 rounded-sm text-xs hover:bg-accent cursor-pointer">美国</div>
                   </div>
-                  <div className="w-32 border-r border-border p-1">
+                  <div className="w-32 border-r border-divider p-1">
                     <div className="px-2 py-1.5 rounded-sm text-xs bg-accent font-medium cursor-pointer">浙江省</div>
                     <div className="px-2 py-1.5 rounded-sm text-xs hover:bg-accent cursor-pointer">广东省</div>
                   </div>
@@ -556,10 +556,10 @@ const DesignSystem: React.FC = () => {
             {/* Master-Detail + Table */}
             <div className="grid md:grid-cols-2 gap-4">
               <div className="rounded-lg border border-border bg-card overflow-hidden">
-                <div className="px-6 py-3 border-b border-border text-xs font-medium text-muted-foreground">Master-Detail 主从布局</div>
+                <div className="px-6 py-3 border-b border-divider text-xs font-medium text-muted-foreground">Master-Detail 主从布局</div>
                 <div className="flex h-[280px]">
-                  <div className="w-48 border-r border-border shrink-0 flex flex-col">
-                    <div className="p-2 border-b border-border"><div className="relative"><svg className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg><input placeholder="搜索…" className="w-full h-8 pl-8 pr-2 rounded-md border border-border bg-background text-xs" /></div></div>
+                  <div className="w-48 border-r border-divider shrink-0 flex flex-col">
+                    <div className="p-2 border-b border-divider"><div className="relative"><svg className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg><input placeholder="搜索…" className="w-full h-8 pl-8 pr-2 rounded-md border border-border bg-background text-xs" /></div></div>
                     <div className="flex-1 overflow-y-auto">
                       <a className="block px-3 py-2.5 border-l-2 border-primary bg-secondary cursor-pointer"><div className="text-xs font-medium truncate">重构登录流程</div><div className="text-xs text-muted-foreground">进行中 · 75%</div></a>
                       <a className="block px-3 py-2.5 border-l-2 border-transparent hover:bg-accent cursor-pointer"><div className="text-xs font-medium truncate">生成 Mock 数据</div><div className="text-xs text-muted-foreground">已完成 · 100%</div></a>
@@ -577,16 +577,16 @@ const DesignSystem: React.FC = () => {
                 </div>
               </div>
               <div className="rounded-lg border border-border bg-card overflow-hidden">
-                <div className="px-6 py-3 border-b border-border text-xs font-medium text-muted-foreground">Table 表格</div>
+                <div className="px-6 py-3 border-b border-divider text-xs font-medium text-muted-foreground">Table 表格</div>
                 <table className="w-full">
-                  <thead><tr className="h-10 text-xs font-medium text-muted-foreground uppercase tracking-wider border-b border-border"><th className="text-left px-4">名称</th><th className="text-left px-4">状态</th><th className="text-right px-4">进度</th></tr></thead>
+                  <thead><tr className="h-10 text-xs font-medium text-muted-foreground uppercase tracking-wider border-b border-divider"><th className="text-left px-4">名称</th><th className="text-left px-4">状态</th><th className="text-right px-4">进度</th></tr></thead>
                   <tbody>
                     {[
                       { name: '重构登录流程', status: '进行中', statusColor: 'warning', progress: 75 },
                       { name: '生成 Mock 数据', status: '已完成', statusColor: 'success', progress: 100 },
                       { name: '排查 404', status: '待开始', statusColor: 'muted', progress: 0 },
                     ].map((row) => (
-                      <tr key={row.name} className="h-10 hover:bg-muted/50 transition-colors border-b border-border last:border-0">
+                      <tr key={row.name} className="h-10 hover:bg-muted/50 transition-colors border-b border-divider last:border-0">
                         <td className="px-4 text-xs">{row.name}</td>
                         <td className="px-4"><span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${row.statusColor === 'success' ? 'border-success/30 bg-success/10 text-success' : row.statusColor === 'warning' ? 'border-warning/30 bg-warning/10 text-warning' : 'border-border bg-secondary text-muted-foreground'}`}>{row.status}</span></td>
                         <td className="px-4 text-right text-xs tabular-nums">{row.progress}%</td>
@@ -599,22 +599,22 @@ const DesignSystem: React.FC = () => {
 
             {/* PageHeader + FilterBar + BulkActionBar */}
             <div className="rounded-lg border border-border bg-card overflow-hidden">
-              <div className="px-6 py-3 border-b border-border text-xs font-medium text-muted-foreground">PageHeader + FilterBar + BulkActionBar</div>
+              <div className="px-6 py-3 border-b border-divider text-xs font-medium text-muted-foreground">PageHeader + FilterBar + BulkActionBar</div>
               <div className="p-6 space-y-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1"><h3 className="text-2xl font-semibold tracking-tight">Bot 管理</h3><p className="text-xs text-muted-foreground">管理所有 AI Bot</p></div>
                   <div className="flex items-center gap-2"><button type="button" className={btn.outline}>导入</button><button type="button" className={btn.default}>创建 Bot</button></div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 py-3 border-t border-border">
+                <div className="flex flex-wrap items-center gap-2 py-3 border-t border-divider">
                   <div className="relative w-64"><svg className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg><input placeholder="搜索…" className="w-full h-9 pl-8 pr-2 rounded-md border border-border bg-background text-xs" /></div>
                   <select className="h-9 rounded-md border border-border bg-background px-3 text-xs min-w-[140px]"><option>全部状态</option><option>运行中</option></select>
                   <button type="button" className="ml-auto h-9 px-3 rounded-md text-xs text-muted-foreground hover:bg-accent">重置</button>
                   <span className="text-xs text-muted-foreground">共 24 条</span>
                 </div>
-                <div className="h-14 bg-card border-b border-border shadow flex items-center px-4 gap-3">
+                <div className="h-14 bg-card border-b border-divider shadow flex items-center px-4 gap-3">
                   <span className="text-xs font-medium">已选 3 项</span>
                   <button type="button" className="text-xs text-muted-foreground hover:text-foreground underline">取消选择</button>
-                  <div className="h-4 w-px bg-border mx-1" />
+                  <div className="h-4 w-px bg-divider mx-1" />
                   <button type="button" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-destructive/30 text-destructive text-xs hover:bg-destructive/10"><svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>批量删除</button>
                   <button type="button" className="inline-flex items-center h-8 px-3 rounded-md border border-border bg-background text-xs hover:bg-accent">批量导出</button>
                 </div>
@@ -638,7 +638,7 @@ const DesignSystem: React.FC = () => {
 
             {/* 5.12 空状态 + 建议提示词 */}
             <div className="rounded-lg border border-border bg-card overflow-hidden">
-              <div className="px-6 py-3 border-b border-border text-xs font-medium text-muted-foreground">5.12 空状态与引导</div>
+              <div className="px-6 py-3 border-b border-divider text-xs font-medium text-muted-foreground">5.12 空状态与引导</div>
               <div className="text-center py-16">
                 <h3 className="text-3xl font-semibold tracking-tight">有什么可以帮你？</h3>
                 <p className="text-xs text-muted-foreground mt-2">选一个起点，或直接在下面输入</p>
@@ -660,7 +660,7 @@ const DesignSystem: React.FC = () => {
 
             {/* 5.13 错误与重试 */}
             <div className="rounded-lg border border-border bg-card overflow-hidden">
-              <div className="px-6 py-3 border-b border-border text-xs font-medium text-muted-foreground">5.13 错误与重试</div>
+              <div className="px-6 py-3 border-b border-divider text-xs font-medium text-muted-foreground">5.13 错误与重试</div>
               <div className="p-6 space-y-4">
                 {/* AI 出错 */}
                 <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
@@ -680,7 +680,7 @@ const DesignSystem: React.FC = () => {
 
             {/* 5.14 键盘快捷键 */}
             <div className="rounded-lg border border-border bg-card overflow-hidden">
-              <div className="px-6 py-3 border-b border-border text-xs font-medium text-muted-foreground">5.14 键盘快捷键</div>
+              <div className="px-6 py-3 border-b border-divider text-xs font-medium text-muted-foreground">5.14 键盘快捷键</div>
               <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-2">
                 {[
                   { key: '⌘K', label: '命令面板' },
@@ -694,7 +694,7 @@ const DesignSystem: React.FC = () => {
                   { key: '⌘B', label: '折叠/展开左侧会话列表' },
                   { key: '⌘.', label: '折叠/展开右侧面板' },
                 ].map((s) => (
-                  <div key={s.key} className="flex items-center justify-between border-b border-border py-1.5">
+                  <div key={s.key} className="flex items-center justify-between border-b border-divider py-1.5">
                     <span className="text-xs text-muted-foreground">{s.label}</span>
                     <kbd className="px-2 py-0.5 rounded border border-border bg-muted text-xs font-mono"><span className="text-[10px]">{s.key}</span></kbd>
                   </div>
@@ -704,7 +704,7 @@ const DesignSystem: React.FC = () => {
 
             {/* 5.15 上下文用量三态 */}
             <div className="rounded-lg border border-border bg-card overflow-hidden">
-              <div className="px-6 py-3 border-b border-border text-xs font-medium text-muted-foreground">5.15 上下文用量（三态）</div>
+              <div className="px-6 py-3 border-b border-divider text-xs font-medium text-muted-foreground">5.15 上下文用量（三态）</div>
               <div className="p-6 space-y-3">
                 <div className="flex items-center gap-3"><div className="flex-1 h-1 rounded-full bg-muted overflow-hidden"><div className="h-full bg-brand" style={{ width: '42%' }} /></div><span className="text-xs text-muted-foreground tabular-nums">42% · 正常</span></div>
                 <div className="flex items-center gap-3"><div className="flex-1 h-1 rounded-full bg-muted overflow-hidden"><div className="h-full bg-warning" style={{ width: '84%' }} /></div><span className="text-xs text-warning tabular-nums">84% · 接近上限</span></div>
@@ -758,11 +758,11 @@ const DesignSystem: React.FC = () => {
         {/* ════════════════ 对话协作页 §5 ════════════════ */}
         {activePage === 'chat' && (
           <div className="rounded-lg border border-border bg-card overflow-hidden">
-            <div className="px-6 py-3 border-b border-border text-xs font-medium text-muted-foreground">三栏对话布局 · 会话列表 / 消息区 / 上下文面板</div>
+            <div className="px-6 py-3 border-b border-divider text-xs font-medium text-muted-foreground">三栏对话布局 · 会话列表 / 消息区 / 上下文面板</div>
             <div className="flex h-[600px]">
               {/* 左：会话列表 §5.1 */}
-              <aside className="w-64 border-r border-border bg-muted/30 shrink-0 flex flex-col">
-                <div className="p-3 border-b border-border"><button type="button" className="w-full h-9 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>新建会话</button></div>
+              <aside className="w-64 border-r border-divider bg-muted/30 shrink-0 flex flex-col">
+                <div className="p-3 border-b border-divider"><button type="button" className="w-full h-9 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity flex items-center justify-center gap-2"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>新建会话</button></div>
                 <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
                   <div className="text-xs font-medium text-muted-foreground px-2 py-1">今天</div>
                   {['Skill报错排查', '部署问题', '数据库迁移方案'].map((title, i) => (
@@ -775,7 +775,7 @@ const DesignSystem: React.FC = () => {
                   <div className="text-xs font-medium text-muted-foreground px-2 py-1 mt-2">昨天</div>
                   <button type="button" className="w-full text-left px-3 py-2 rounded-md hover:bg-accent transition-colors"><div className="text-xs font-medium truncate">权限配置讨论</div><div className="text-xs text-muted-foreground truncate mt-0.5">RBAC 角色与资源…</div><div className="text-xs text-muted-foreground mt-1">昨天 16:40</div></button>
                 </div>
-                <div className="flex-none p-3 border-t border-border">
+                <div className="flex-none p-3 border-t border-divider">
                   <div className="flex items-center justify-between mb-1.5"><span className="text-xs text-muted-foreground">上下文用量</span><span className="text-xs text-muted-foreground tabular-nums">42%</span></div>
                   <div className="h-1 rounded-full bg-muted overflow-hidden"><div className="h-full bg-brand" style={{ width: '42%' }} /></div>
                 </div>
@@ -783,7 +783,7 @@ const DesignSystem: React.FC = () => {
 
               {/* 中：消息区 §5.2-5.6 */}
               <main className="flex-1 flex flex-col min-w-0">
-                <div className="flex-none h-14 border-b border-border flex items-center px-6 gap-3">
+                <div className="flex-none h-14 border-b border-divider flex items-center px-6 gap-3">
                   <div className="flex items-center gap-2">
                     <h1 className="text-xs font-medium truncate">Skill报错排查</h1>
                     <span className="inline-flex items-center h-5 px-2 rounded-md bg-secondary text-secondary-foreground text-xs font-medium">Skill Bot</span>
@@ -864,7 +864,7 @@ const DesignSystem: React.FC = () => {
                   </div>
                 </div>
                 {/* 输入区 §5.10 */}
-                <div className="flex-none p-4 border-t border-border">
+                <div className="flex-none p-4 border-t border-divider">
                   <div className="rounded-2xl border border-border shadow-sm bg-background p-2">
                     <textarea placeholder="给 tc 助手发消息…" className="w-full bg-transparent px-2 py-2 text-xs outline-none resize-none min-h-[56px] max-h-[200px]" defaultValue="生成迁移脚本，参考架构图.png" />
                     <div className="flex items-center justify-between px-1">
@@ -885,8 +885,8 @@ const DesignSystem: React.FC = () => {
               </main>
 
               {/* 右：艺术品/引用面板 §5.9 */}
-              <aside className="w-80 border-l border-border shrink-0 hidden xl:flex flex-col bg-background">
-                <div className="flex-none h-12 border-b border-border flex items-center px-3 gap-0.5">
+              <aside className="w-80 border-l border-divider shrink-0 hidden xl:flex flex-col bg-background">
+                <div className="flex-none h-12 border-b border-divider flex items-center px-3 gap-0.5">
                   <button type="button" className="h-8 px-3 rounded-md text-xs font-medium bg-secondary text-secondary-foreground">代码</button>
                   <button type="button" className="h-8 px-3 rounded-md text-xs text-muted-foreground hover:bg-accent transition-colors">预览</button>
                   <button type="button" className="h-8 px-3 rounded-md text-xs text-muted-foreground hover:bg-accent transition-colors">文档</button>
@@ -908,7 +908,7 @@ const DesignSystem: React.FC = () => {
                   </div>
                 </div>
                 {/* 引用来源 §5.8 */}
-                <div className="border-t border-border p-3 shrink-0">
+                <div className="border-t border-divider p-3 shrink-0">
                   <div className="text-xs font-medium text-muted-foreground mb-2">引用来源</div>
                   <div className="space-y-1.5">
                     <button type="button" className="w-full text-left rounded-md border border-border bg-card p-2.5 hover:bg-accent hover:border-brand/40 transition-colors">
@@ -978,7 +978,7 @@ const DesignSystem: React.FC = () => {
                     <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"><svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" /></svg>{bot.skill}</span>
                   </div>
                   {/* 操作区 §3.3b */}
-                  <div className="border-t border-border/50 pt-3 mt-3 flex items-center justify-between">
+                  <div className="border-t border-divider/50 pt-3 mt-3 flex items-center justify-between">
                     <div className="flex flex-wrap gap-2">
                       <button type="button" className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md bg-primary text-primary-foreground text-xs hover:opacity-90 transition-opacity">对话</button>
                       <button type="button" className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md border border-border bg-background text-xs hover:bg-accent transition-colors"><svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>编辑</button>
@@ -998,7 +998,7 @@ const DesignSystem: React.FC = () => {
           <div className="space-y-6">
 
             {/* 顶栏 §4.1 h-14 */}
-            <div className="sticky top-14 z-40 h-14 border-b border-border bg-background/80 backdrop-blur flex items-center px-4 md:px-6 gap-3 shrink-0 rounded-lg">
+            <div className="sticky top-14 z-40 h-14 border-b border-divider bg-background/80 backdrop-blur flex items-center px-4 md:px-6 gap-3 shrink-0 rounded-lg">
               {/* 面包屑 */}
               <nav className="flex items-center gap-1.5 text-xs">
                 <svg className="size-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" /></svg>
@@ -1036,7 +1036,7 @@ const DesignSystem: React.FC = () => {
             </div>
 
             {/* Tabs §3.x */}
-            <div className="border-b border-border">
+            <div className="border-b border-divider">
               <div className="flex items-center gap-1">
                 <div className="tab-item active">空间列表</div>
                 <div className="tab-item">成员管理</div>
@@ -1076,7 +1076,7 @@ const DesignSystem: React.FC = () => {
             <div className="rounded-lg border border-border bg-card overflow-hidden">
               <table className="w-full">
                 <thead>
-                  <tr className="h-10 text-xs font-medium text-muted-foreground uppercase tracking-wider border-b border-border">
+                  <tr className="h-10 text-xs font-medium text-muted-foreground uppercase tracking-wider border-b border-divider">
                     <th className="text-left px-4">空间名</th>
                     <th className="text-left px-4">成员数</th>
                     <th className="text-left px-4">资源数</th>
@@ -1093,7 +1093,7 @@ const DesignSystem: React.FC = () => {
                     { name: '数据分析', members: 8, resources: 24, date: '2026-08-05', status: '待审核', statusColor: 'warning' },
                     { name: '安全合规', members: 6, resources: 12, date: '2026-08-08', status: '已归档', statusColor: 'muted' },
                   ].map((row) => (
-                    <tr key={row.name} className="h-10 hover:bg-muted/50 transition-colors border-b border-border last:border-0">
+                    <tr key={row.name} className="h-10 hover:bg-muted/50 transition-colors border-b border-divider last:border-0">
                       <td className="px-4 text-xs font-medium">{row.name}</td>
                       <td className="px-4 text-xs tabular-nums">{row.members}</td>
                       <td className="px-4 text-xs tabular-nums">{row.resources}</td>
@@ -1113,7 +1113,7 @@ const DesignSystem: React.FC = () => {
                 </tbody>
               </table>
               {/* 分页栏 */}
-              <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+              <div className="flex items-center justify-between px-4 py-3 border-t border-divider">
                 <span className="text-xs text-muted-foreground">共 8 条 · 第 1-5 条</span>
                 <div className="flex items-center gap-1">
                   <button type="button" className="size-9 rounded-md border border-border bg-background grid place-items-center hover:bg-accent text-muted-foreground"><svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m15 18-6-6 6-6" /></svg></button>
@@ -1188,7 +1188,7 @@ const DesignSystem: React.FC = () => {
                 <p className="text-xs text-muted-foreground">用于「通知设置」等表单页，当前空间列表页不展示此栏。下方为规范演示：</p>
               </div>
               <div className="rounded-lg border border-border bg-background">
-                <div className="sticky bottom-0 bg-background/80 backdrop-blur border-t border-border py-3 px-4 flex items-center justify-between gap-3">
+                <div className="sticky bottom-0 bg-background/80 backdrop-blur border-t border-divider py-3 px-4 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
                     有未保存的更改

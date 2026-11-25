@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agentclaw.community.adapters.http.openapi_v1.contracts import ExtensibleResponse
+
 
 _STRICT = ConfigDict(extra="forbid")
 
@@ -50,7 +52,7 @@ class ServiceApproval(BaseModel):
     )
 
 
-class ServicePublication(BaseModel):
+class ServicePublication(ExtensibleResponse):
     """One independently actionable service-Bot version card."""
 
     bot_id: str = Field(description="Stable Bot identifier.")
@@ -102,7 +104,7 @@ class ServicePublicationList(BaseModel):
     )
 
 
-class ServicePublicationOperation(BaseModel):
+class ServicePublicationOperation(ExtensibleResponse):
     """Acknowledgement for an asynchronous lifecycle command."""
 
     bot_id: str = Field(description="Stable Bot identifier.")

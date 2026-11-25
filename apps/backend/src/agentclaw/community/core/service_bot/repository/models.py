@@ -192,6 +192,17 @@ class BotPublishModel(Base):
         Index("idx_owner_name", "owner_name"),
         Index("idx_name", "name"),
         Index("idx_last_pub_id", "last_pub_id"),
+        # Current-draft guards run both before and inside selection writes.
+        Index("idx_publish_current_source", "env", "source_bot_pk", "version", "id"),
+        Index(
+            "idx_publish_current_default",
+            "env",
+            "publish_bot_id",
+            "owner_id",
+            "version",
+            "id",
+            mysql_length={"publish_bot_id": 512},
+        ),
     )
 
     def to_dict(self) -> dict:

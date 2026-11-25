@@ -13,6 +13,10 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module, provider, singleton
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
+from agentclaw.community.adapters.http.task.artifact_actor import (
+    ArtifactWriteActor,
+    resolve_artifact_write_actor,
+)
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.api.task.task_artifact_service import (
@@ -125,6 +129,12 @@ def _client() -> tuple[TestClient, _StubArtifactRepo]:
         staffId="owner-1",
         operatorName="owner",
     )
+    # POST 双凭证分支(spec §14)换用 actor 依赖——沿用同一登录用户身份打桩,
+    # 绕开轻量 injector 里未绑定的 AuthPlugin;GET 列表口仍走 get_current_user。
+    app.dependency_overrides[resolve_artifact_write_actor] = lambda: ArtifactWriteActor(
+        relay_token=None,
+        user=AuthenticatedUser(id="id-1", staffId="owner-1", operatorName="owner"),
+    )
     attach_injector(app, injector)
     # 换用共享同一张空表的仓储,让 client 持有替身以便断言落库行
     service._artifact_repo = repo
@@ -232,13 +242,13 @@ class TestAddArtifact:
         response = client.post("/api/v1/collaboration/tasks/artifacts", json=body)
         assert response.status_code == 422
 
-    def test_post_extra_field_rejected(self):
+    def test_post_extra_field_ignored(self):
         client, _ = _client()
         response = client.post(
             "/api/v1/collaboration/tasks/artifacts",
             json=_file_body(unexpected="x"),
         )
-        assert response.status_code in (400, 422)
+        assert response.status_code == 200, response.text
 
     def test_post_content_object_form_accepted(self):
         """content 字段支持 JSON 对象形态(独立 API 放开 relay 字符串包袱)。"""

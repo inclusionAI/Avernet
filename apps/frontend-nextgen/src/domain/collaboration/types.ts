@@ -22,6 +22,9 @@ export type SessionStatus = 'running' | 'completed';
 export type SenderKind = 'human' | 'bot' | 'system';
 export type ParticipantRole = 'owner' | 'driver' | 'manager' | 'worker' | 'member';
 export type ParticipantMode = 'auto' | 'muted' | 'present' | 'absent';
+/** 新建会话时群上下文的投递方式。 */
+export type GroupContextDelivery = 'send' | 'inject';
+
 /** 消息可见域：full=完整视角；participant=参与者视角（仅公共/与自己相关/自己的消息）。 */
 export type MessageViewScope = 'full' | 'participant';
 export type DeliveryPolicy = 'send_to_driver' | 'inject_observers';
@@ -38,6 +41,13 @@ export interface ParticipantView {
   online?: boolean;
   /** 消息可见域回显（只读；bot 恒为 full）。 */
   messageViewScope?: MessageViewScope;
+}
+/** 轻量成员摘要：列表接口已下发时优先展示；缺省时回退到完整成员详情。 */
+export interface ParticipantSummaryView {
+  actorId: string;
+  kind: 'human' | 'bot';
+  name: string;
+  avatarUrl?: string;
 }
 export interface SidePanelConfig {
   initializeSidePanel?: boolean;
@@ -59,6 +69,11 @@ export interface GroupView {
   kind: GroupKind;
   status: GroupStatus;
   participants: ParticipantView[];
+  /** 列表接口下发的轻量成员；缺省表示旧响应，展示时回退 participants。 */
+  participantSummaries?: ParticipantSummaryView[];
+  /** 内部加载标记：新列表为 false，完整详情为 true；缺省时沿用 participants.length 判断。
+   *  Group 头像兼容补拉只返回成员数组、不含完整群配置，不得置 true。不进入 wire 或授权契约。 */
+  participantDetailsLoaded?: boolean;
   sessions: SessionView[];
   lastMessageAt: number;
   createdAt: number;
@@ -95,6 +110,10 @@ export interface SessionView {
   kind: SessionKind;
   status: SessionStatus;
   participants: ParticipantView[];
+  /** 列表接口下发的轻量成员；缺省表示旧响应，展示时回退 participants。 */
+  participantSummaries?: ParticipantSummaryView[];
+  /** 内部加载标记：新列表为 false，完整详情为 true；缺省时沿用 participants.length 判断。 */
+  participantDetailsLoaded?: boolean;
   /** 会话成员总数（列表接口返回；未返回时可用 participants.length 兜底）。 */
   participantCount?: number;
   lastMessageAt: number;
@@ -155,8 +174,25 @@ export type DeliveryFlowKind = 'group' | 'direct_a2a' | 'task' | 'system' | 'sta
 /** 投递类型（与后端 DeliveryType 对齐）。 */
 export type DeliveryType = 'send' | 'inject';
 
+/** 服务端白名单任务投影；仅任务派发投递携带，时间均为 epoch 毫秒。 */
+export interface TaskDeliveryView {
+  /** Complete admitted assignment identity; absent for legacy deliveries. */
+  intent_id?: string;
+  task_ref: string;
+  summary: string;
+  manager_id: string;
+  worker_id: string;
+  worker_name: string;
+  queued_at: number;
+  started_at: number | null;
+  last_activity_at: number;
+  finished_at: number | null;
+  timed_out: boolean;
+}
+
 /** 后端推送的投递状态视图（message.delivery.updated 载荷）。 */
 export interface DeliveryStatusView {
+  task?: TaskDeliveryView;
   delivery_id: string;
   message_id: string;
   target_bot_id: string;

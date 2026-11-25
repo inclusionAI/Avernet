@@ -21,10 +21,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.core.bot_config_manifest.capabilities import (
-    ManifestCategory,
+from agentclaw.community.core.apply_engine.constructs import CURRENT_CATEGORIES
+from agentclaw.community.core.apply_engine.capabilities import (
+    Category,
 )
-from agentclaw.community.core.bot_config_manifest.support_matrix import (
+from agentclaw.community.core.apply_engine.support_matrix import (
     MATRIX,
     SourceKind,
     refusal_for,
@@ -37,6 +38,9 @@ from agentclaw.community.utils.gateway_principal_config import (
 
 _OWNER = "matrix-owner"
 _BOT_ID = "matrix-bot"
+#: The ``protocol: bot`` source the bot-source documents name. Seeded under the
+#: same owner so the access gate admits the caller (see ``_seed``).
+_SRC_BOT_ID = "src-bot"
 _KEY = "config-manifest-framework-signing-key-at-least-32-bytes"
 _DIGEST = "sha256:" + "0" * 64
 _REPO = "https://code.example.com/team/content.git"
@@ -97,6 +101,28 @@ def _seed(world) -> None:
             "bot_type": "personal",
         }
     )
+    # The bot-source access gate (``assert_from_bot_source_access``) runs before
+    # storage on any document that declares a ``protocol: bot`` source: it
+    # refuses 409 for a source bot that does not exist and 403 for one the
+    # caller cannot edit. A literal id is no longer enough once the gate resolves
+    # it, so the source bot is seeded under the caller's owner_id — the gate
+    # admits every bot-source document, and the cell verdict alone decides the
+    # rest: an open bot cell stores and answers 200, a closed one is refused 422
+    # by ``put``'s validate after the gate has passed.
+    world.get(BotRepository).insert(
+        {
+            "bot_id": _SRC_BOT_ID,
+            "bot_name": "Matrix Source Bot",
+            "owner_id": _OWNER,
+            "owner_name": _OWNER,
+            "entity_id": _OWNER,
+            "entity_type": "staff",
+            "creator_id": _OWNER,
+            "status": "ACTIVE",
+            "active_engine": "openclaw",
+            "bot_type": "personal",
+        }
+    )
 
 
 # ── documents, one per cell ─────────────────────────────────────────────────
@@ -112,21 +138,21 @@ def _seed(world) -> None:
 #: read, so a document trying to give them one is refused earlier and would
 #: never carry the cell's message.
 _FETCHING = (
-    ManifestCategory.IDENTITY,
-    ManifestCategory.RESOURCES,
-    ManifestCategory.SKILLS,
-    ManifestCategory.CLI_TOOLS,
+    Category.IDENTITY,
+    Category.RESOURCES,
+    Category.SKILLS,
+    Category.CLI_TOOLS,
 )
 
 _ENTITY_FIELDS = {
-    ManifestCategory.IDENTITY: "      type: SOUL.md\n",
-    ManifestCategory.RESOURCES: "      path: data/a.md\n",
-    ManifestCategory.SKILLS: "      name: qc\n",
-    ManifestCategory.CLI_TOOLS: "      name: rg\n",
+    Category.IDENTITY: "      type: SOUL.md\n",
+    Category.RESOURCES: "      path: data/a.md\n",
+    Category.SKILLS: "      name: qc\n",
+    Category.CLI_TOOLS: "      name: rg\n",
 }
 
 
-def _document(category: ManifestCategory, kind: SourceKind) -> str:
+def _document(category: Category, kind: SourceKind) -> str:
     """A minimal, otherwise-valid document exercising exactly one cell."""
     entry = _ENTITY_FIELDS[category]
     if kind is SourceKind.CONTENT:
@@ -141,6 +167,23 @@ def _document(category: ManifestCategory, kind: SourceKind) -> str:
             f"    url: {_REPO}\n"
             "    ref: v1.2.0\n"
             "    subpath: pkg\n"
+        )
+    elif kind is SourceKind.BOT:
+        # A bot source is bot copy's file-sync protocol: it names the source
+        # bot by ``bot_id`` (and disambiguates the row with ``owner_id`` — a
+        # ``bot_id`` is not globally unique, so the addressing is the pair)
+        # and converges that bot's workspace tree at apply time. The matrix
+        # cell alone governs which categories accept it, but the submission
+        # gate (``assert_from_bot_source_access``) resolves the source bot
+        # before storage, so {_SRC_BOT_ID!r} must exist and be caller-owned
+        # (seeded in ``_seed``) — otherwise the cell verdict is masked by a
+        # 409 instead of the cell's own 422/200.
+        source = (
+            "sources:\n"
+            "  src:\n"
+            "    protocol: bot\n"
+            f"    bot_id: {_SRC_BOT_ID}\n"
+            "    owner_id: src-owner\n"
         )
     else:
         source = (
@@ -157,9 +200,9 @@ def _document(category: ManifestCategory, kind: SourceKind) -> str:
     # are the cell's own neighbouring rules, not its verdict — supplying them
     # is what keeps this test about the cell.
     if kind is SourceKind.OSS:
-        if category in (ManifestCategory.SKILLS, ManifestCategory.CLI_TOOLS):
+        if category in (Category.SKILLS, Category.CLI_TOOLS):
             entry += f'      digest: "{_DIGEST}"\n'
-        if category is ManifestCategory.SKILLS:
+        if category is Category.SKILLS:
             entry += "      unpack: zip\n"
     return (
         f"schema_version: 1\n{source}manifest:\n  {category.value}:\n"
@@ -201,7 +244,7 @@ def test_the_put_surface_matches_the_matrix_cell(
 
 
 @pytest.mark.parametrize(
-    "category", [ManifestCategory.MCP, ManifestCategory.ENGINE_CONFIG]
+    "category", [Category.MCP, Category.ENGINE_CONFIG]
 )
 def test_the_categories_with_no_source_axis_are_closed_in_every_cell(category):
     """Both are closed for all three protocols, and the table says why.
@@ -272,8 +315,9 @@ def test_the_capabilities_endpoint_publishes_the_same_table(
         (cell["category"], cell["protocol"]): cell
         for cell in response.json()["data"]["source_matrix"]
     }
-    assert len(published) == len(MATRIX)
-    for (category, kind), refusal in MATRIX.items():
+    active = {key: value for key, value in MATRIX.items() if key[0] in CURRENT_CATEGORIES}
+    assert len(published) == len(active)
+    for (category, kind), refusal in active.items():
         cell = published[(category.value, kind.value)]
         assert cell["supported"] is (refusal is None), cell
         if refusal is not None:

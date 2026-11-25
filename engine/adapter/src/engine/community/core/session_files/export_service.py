@@ -65,6 +65,13 @@ class SessionFileExportService:
         source: SessionFileExportSource,
         session_key: str,
     ) -> ExportRequestResult:
+        # Revalidate even a cached/pending request: caller observations can become
+        # stale before the coordinator gets control, and must never return old URLs.
+        try:
+            await asyncio.to_thread(self._session_file_service.revalidate_export_source, source)
+        except SessionFileError as exc:
+            log.info("engine.session_file_export.stale resource_id=%s error_code=%s", source.resource_id, str(exc))
+            return ExportRequestResult(state="failed", error_code=str(exc))
         key = (source.resource_id, source.content_hash, source.transfer_id)
         now = time.monotonic()
         async with self._lock:
@@ -150,9 +157,6 @@ class SessionFileExportService:
             if download is not None:
                 job.download = download
                 job.expires_monotonic = time.monotonic() + cache_ttl_seconds
-                return
-            if error_code == "resource_changed":
-                self._jobs.pop(key, None)
                 return
             job.error_code = error_code or "file_export_failed"
             job.error_expires_monotonic = time.monotonic() + EXPORT_ERROR_CACHE_SECONDS

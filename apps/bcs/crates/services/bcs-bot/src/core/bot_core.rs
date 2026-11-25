@@ -1,5 +1,9 @@
+#[path = "bot_delivery.rs"]
+mod delivery;
 #[path = "bot_coordination.rs"]
 mod coordination;
+#[path = "bot_profile.rs"]
+mod profile;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -11,17 +15,30 @@ use bcs_service_api::lifecycle::{LifecycleError, ServiceLifecycle};
 use bcs_service_api::port::repo::{
     BotRepoPort, ProviderBotBindingRepoPort, ProviderCredentialRepoPort, ProviderRepoPort,
 };
+use bcs_service_api::core::registry::CommittedBotRegistration;
 use bcs_service_api::{
     ActorStatus, AgentCredentials, BotCapabilities, BotConnectParams, BotConnectResult,
     BotDeliveryTarget, BotRegistryCoreService, ConnectError,
     ConnectStreamError, ConnectionKind, CoordinationSurface, EnsureHumanResult, RedactedToken,
     RegisteredBot, ServiceError, ServiceResult,
 };
+use bcs_service_api::types::bot_authority::BotOwnershipView;
 use tracing::{debug, info, warn};
 
 use super::ids::{new_bot_uuid, new_session_token};
 use super::provider_core::{parse_coordination_config, parse_downlink_config};
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
+use bcs_service_api::core::registry::RuntimeActivitySnapshot;
+
+/// Unix milliseconds of the current instant — the
+/// observation-instant clock of [`BotCore::
+/// try_runtime_activity_for`].
+fn unix_millis_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 /// Core bot registry service implementation.
 ///
@@ -30,13 +47,26 @@ use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 #[derive(Clone)]
 pub struct BotCore {
     pub(super) repo: Arc<dyn BotRepoPort>,
+    catalog_changes: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>,
     pub(super) provider_repo: Option<Arc<dyn ProviderRepoPort>>,
     provider_credentials: Option<Arc<dyn ProviderCredentialRepoPort>>,
     pub(super) provider_bindings: Option<Arc<dyn ProviderBotBindingRepoPort>>,
     pub(super) bot_providers: Option<Arc<dyn BotProviderRepoPort>>,
+    pub(super) a2a_cards: Option<Arc<dyn bcs_service_api::port::repo::a2a_bot::A2aBotRepoPort>>,
+    a2a_url_guard:bcs_route_security::OutboundUrlGuard,
+    a2a_grpc_urls:Vec<String>,
 }
 
 impl BotCore {
+    pub fn with_catalog_changes(mut self, port: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>) -> Self {
+        self.catalog_changes = port;
+        self
+    }
+
+    fn catalog_changed(&self, id: &str) {
+        if let Some(port) = &self.catalog_changes { port.agent_changed(id); }
+    }
+
     pub fn new() -> Self {
         Self::memory()
     }
@@ -52,10 +82,14 @@ impl BotCore {
     pub fn with_repo(repo: Arc<dyn BotRepoPort>) -> Self {
         Self {
             repo,
+            catalog_changes: None,
             provider_repo: None,
             provider_credentials: None,
             provider_bindings: None,
             bot_providers: None,
+            a2a_cards: None,
+            a2a_url_guard:bcs_route_security::OutboundUrlGuard::strict(),
+            a2a_grpc_urls:vec![],
         }
     }
 
@@ -67,11 +101,27 @@ impl BotCore {
     ) -> Self {
         Self {
             repo,
+            catalog_changes: None,
             provider_repo: Some(provider_repo),
             provider_credentials: Some(provider_credentials),
             provider_bindings: Some(provider_bindings),
             bot_providers: None,
+            a2a_cards: None,
+            a2a_url_guard:bcs_route_security::OutboundUrlGuard::strict(),
+            a2a_grpc_urls:vec![],
         }
+    }
+
+    /// Compatibility builder; admitted anonymous Cards no longer need a runtime opt-in.
+    pub fn with_a2a_anonymous(self,_allow:bool)->Self {self}
+
+    pub fn with_a2a_route_policy(mut self, guard:bcs_route_security::OutboundUrlGuard, grpc_urls:Vec<String>)->Self {
+        self.a2a_url_guard=guard;self.a2a_grpc_urls=grpc_urls;self
+    }
+
+    pub fn with_a2a_cards(mut self, cards: Arc<dyn bcs_service_api::port::repo::a2a_bot::A2aBotRepoPort>) -> Self {
+        self.a2a_cards = Some(cards);
+        self
     }
 
     pub fn with_bot_provider_repo(mut self, repo: Arc<dyn BotProviderRepoPort>) -> Self {
@@ -86,6 +136,26 @@ impl BotCore {
         &self,
     ) -> Option<&Arc<dyn ProviderBotBindingRepoPort>> {
         self.provider_bindings.as_ref()
+    }
+
+    /// Project the observed ids onto the requested bot ids
+    /// and stamp the observation instant. The snapshot
+    /// NEVER reports activity for ids the caller did not
+    /// ask about.
+    fn activity_snapshot(
+        &self,
+        observed_at_ms: u64,
+        bot_ids: &[String],
+        active: HashSet<String>,
+    ) -> RuntimeActivitySnapshot {
+        let requested = bot_ids.iter().cloned().collect::<HashSet<_>>();
+        RuntimeActivitySnapshot {
+            observed_at_ms,
+            active_bot_ids: active
+                .into_iter()
+                .filter(|bot_id| requested.contains(bot_id))
+                .collect(),
+        }
     }
 
     /// Check affiliation before a delivery switch can create owner edges.
@@ -199,12 +269,111 @@ impl BotRegistryCoreService for BotCore {
     async fn create_registration_if_absent(
         &self, bot_id: String, capabilities: BotCapabilities, created_by: &str, token: &str,
     ) -> ServiceResult<bool> {
-        self.repo.create_registration_if_absent(bot_id, capabilities, created_by, token).await
+        let result = self.repo.create_registration_if_absent(bot_id.clone(), capabilities, created_by, token).await?;
+        if result { self.catalog_changed(&bot_id); }
+        Ok(result)
+    }
+
+    /// Trusted human registration (spec §10.2): the core
+    /// assigns the Bot ID and runtime token and hands the
+    /// whole committed state to the repo's composite create.
+    /// Failure means NOTHING committed, so no credential ever
+    /// reaches the caller.
+    async fn register_with_ownership(
+        &self,
+        registration: bcs_service_api::core::registry::TrustedBotRegistration,
+    ) -> ServiceResult<CommittedBotRegistration> {
+        let bcs_service_api::core::registry::TrustedBotRegistration {
+            capabilities,
+            initialization,
+        } = registration;
+        let owner = initialization.owner_user_id.trim().to_string();
+        if owner.is_empty() {
+            return Err(ServiceError::InvalidOperation {
+                message: "trusted registration requires an owner".into(),
+                request_id: None,
+            });
+        }
+        if capabilities.name.as_deref().unwrap_or("").trim().is_empty() {
+            return Err(ServiceError::InvalidOperation {
+                message: "trusted registration requires a bot name".into(),
+                request_id: None,
+            });
+        }
+        let bot_id = new_bot_uuid();
+        let token = new_session_token();
+        let created = self
+            .repo
+            .create_registration_if_absent_with_ownership(
+                bot_id.clone(),
+                capabilities,
+                owner.trim(),
+                &token,
+                initialization,
+            )
+            .await?;
+        if !created {
+            return Err(ServiceError::Conflict(
+                "Bot registration identity already exists".into(),
+            ));
+        }
+        self.catalog_changed(&bot_id);
+        Ok(CommittedBotRegistration {
+            bot_name: self
+                .repo
+                .get(&bot_id)
+                .await
+                .and_then(|bot| bot.capabilities.name)
+                .unwrap_or_default(),
+            bot_uuid: bot_id,
+            bot_token: token,
+        })
+    }
+
+    async fn initialize_ownership(
+        &self,
+        bot_id: &str,
+        owner_user_id: &str,
+        mutation: bcs_service_api::types::bot_authority::AuthorityMutation,
+    ) -> ServiceResult<BotOwnershipView> {
+        self.repo.initialize_ownership(bot_id, owner_user_id, mutation).await
+    }
+
+    async fn initialize_provider_authority(
+        &self, bot_id: &str,
+        initialization: bcs_service_api::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<bcs_service_api::types::bot_authority::BotOwnershipView> {
+        self.repo.initialize_provider_authority(bot_id, initialization).await
+    }
+
+
+    async fn ownership_governance_state(
+        &self,
+        bot_id: &str,
+    ) -> ServiceResult<
+        Option<bcs_service_api::types::bot_authority::BotOwnershipGovernance>,
+    > {
+        self.repo.ownership_governance_state(bot_id).await
+    }
+
+    async fn retire_with_authority(
+        &self,
+        bot_id: &str,
+        mutation: bcs_service_api::types::bot_authority::AuthorityMutation,
+    ) -> ServiceResult<bool> {
+        // The ordinary `retire` is its own command — never
+        // chained into a Provider retirement (spec §7.1).
+        // The real mutation actor is the audit initiator.
+        let retired = self.repo.retire_with_authority(bot_id, mutation).await?;
+        if retired { self.catalog_changed(bot_id); }
+        Ok(retired)
     }
 
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
         let capabilities = self.protect_provider_identity(&bot_id, capabilities).await?;
-        self.repo.register(bot_id, capabilities).await
+        self.repo.register(bot_id.clone(), capabilities).await?;
+        self.catalog_changed(&bot_id);
+        Ok(())
     }
 
     async fn register_with_owner_and_token(
@@ -216,8 +385,10 @@ impl BotRegistryCoreService for BotCore {
     ) -> ServiceResult<()> {
         let capabilities = self.protect_provider_identity(&bot_id, capabilities).await?;
         self.repo
-            .register_with_owner_and_token(bot_id, capabilities, created_by, token)
-            .await
+            .register_with_owner_and_token(bot_id.clone(), capabilities, created_by, token)
+            .await?;
+        self.catalog_changed(&bot_id);
+        Ok(())
     }
 
     async fn update_capabilities(
@@ -226,7 +397,9 @@ impl BotRegistryCoreService for BotCore {
         capabilities: BotCapabilities,
     ) -> ServiceResult<()> {
         let capabilities = self.protect_provider_identity(bot_id, capabilities).await?;
-        self.repo.update_capabilities(bot_id, capabilities).await
+        self.repo.update_capabilities(bot_id, capabilities).await?;
+        self.catalog_changed(bot_id);
+        Ok(())
     }
 
     async fn update_status(&self, bot_id: &str) -> bool {
@@ -239,6 +412,10 @@ impl BotRegistryCoreService for BotCore {
 
     async fn try_get(&self, bot_id: &str) -> ServiceResult<Option<RegisteredBot>> {
         self.repo.try_get(bot_id).await
+    }
+
+    async fn try_get_many(&self, bot_ids: &[String]) -> ServiceResult<Vec<RegisteredBot>> {
+        self.repo.try_get_many(bot_ids).await
     }
 
     async fn get_including_deleted(&self, bot_id: &str) -> Option<RegisteredBot> {
@@ -262,104 +439,11 @@ impl BotRegistryCoreService for BotCore {
     }
 
     async fn resolve_delivery_target(&self, bot_id: &str) -> ServiceResult<BotDeliveryTarget> {
-        let bot = self
-            .repo
-            .get(bot_id)
-            .await
-            .ok_or_else(|| ServiceError::BotNotFound(bot_id.to_string()))?;
+        self.resolve_delivery_target_impl(bot_id,false).await
+    }
 
-        let Some(bindings) = &self.provider_bindings else {
-            debug!(bot_id = %bot_id, "resolve_delivery_target: provider_bindings repo not configured, fallback to websocket");
-            return Ok(BotDeliveryTarget::WebSocket { bot_id: bot.bot_uuid });
-        };
-        let Some(binding) = bindings.get_binding_by_bot_uuid(bot_id).await? else {
-            debug!(bot_id = %bot_id, "resolve_delivery_target: no provider binding, fallback to websocket");
-            return Ok(BotDeliveryTarget::WebSocket { bot_id: bot.bot_uuid });
-        };
-        if binding.disabled {
-            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %binding.provider_id, "resolve_delivery_target: provider bot binding disabled");
-            return Err(ServiceError::InvalidOperation {
-                message: format!("provider bot '{}' is disabled", bot_id),
-                request_id: None,
-            });
-        }
-
-        let providers = self.provider_repo.as_ref().ok_or_else(|| {
-            ServiceError::InternalError("provider repo not configured".to_string())
-        })?;
-        let provider = providers
-            .get_provider(&binding.provider_id)
-            .await?
-            .ok_or_else(|| {
-                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %binding.provider_id, "resolve_delivery_target: provider not found");
-                ServiceError::InvalidOperation {
-                    message: format!("provider '{}' not found", binding.provider_id),
-                    request_id: None,
-                }
-            })?;
-        if provider.disabled {
-            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: provider disabled");
-            return Err(ServiceError::InvalidOperation {
-                message: format!("provider '{}' is disabled", provider.provider_id),
-                request_id: None,
-            });
-        }
-        let downlink = parse_downlink_config(&provider.config)?;
-        if !downlink.enabled {
-            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: provider downlink disabled");
-            return Err(ServiceError::InvalidOperation {
-                message: format!("provider '{}' downlink is disabled", provider.provider_id),
-                request_id: None,
-            });
-        }
-
-        let credentials = self.provider_credentials.as_ref().ok_or_else(|| {
-            ServiceError::InternalError("provider credential repo not configured".to_string())
-        })?;
-        let credential = credentials
-            .get_credential_by_kind(&provider.provider_id, "downlink_bcs_to_provider")
-            .await?
-            .ok_or_else(|| {
-                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: downlink credential not found");
-                ServiceError::InvalidOperation {
-                    message: format!(
-                        "provider '{}' downlink credential not found",
-                        provider.provider_id
-                    ),
-                    request_id: None,
-                }
-            })?;
-        if credential.disabled {
-            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: downlink credential disabled");
-            return Err(ServiceError::InvalidOperation {
-                message: format!(
-                    "provider '{}' downlink credential is disabled",
-                    provider.provider_id
-                ),
-                request_id: None,
-            });
-        }
-
-        let webhook_url = binding.webhook_url.as_ref().or(downlink.webhook_url.as_ref())
-            .ok_or_else(|| ServiceError::InvalidOperation {
-                message: "missing_delivery_endpoint: configure a Bot or Provider webhook_url".to_string(),
-                request_id: None,
-            })?.clone();
-        info!(
-            bot_id = %bot_id,
-            provider_id = %provider.provider_id,
-            provider_bot_ref = %binding.provider_bot_ref,
-            protocol_version = %downlink.protocol_version,
-            "resolve_delivery_target: resolved http provider target"
-        );
-        Ok(BotDeliveryTarget::HttpProvider {
-            bot_id: bot.bot_uuid,
-            provider_id: provider.provider_id,
-            provider_bot_ref: binding.provider_bot_ref,
-            webhook_url,
-            bcs_to_provider_token: RedactedToken::new(credential.secret_value),
-            protocol_version: downlink.protocol_version,
-        })
+    async fn resolve_abort_target(&self,bot_id:&str)->ServiceResult<BotDeliveryTarget> {
+        self.resolve_delivery_target_impl(bot_id,true).await
     }
 
     async fn resolve_coordination_surface(
@@ -410,6 +494,16 @@ impl BotRegistryCoreService for BotCore {
         created_by: &str,
     ) -> ServiceResult<Vec<RegisteredBot>> {
         self.repo.try_list_bots_by_creator(created_by).await
+    }
+
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        created_by: &str,
+        limit: usize,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        self.repo
+            .list_uninitialized_bots_by_creator(created_by, limit)
+            .await
     }
 
     async fn discover(&self, query: &str) -> Vec<RegisteredBot> {
@@ -494,7 +588,9 @@ impl BotRegistryCoreService for BotCore {
             }
         }
         // Also clear the registry's runtime/token caches after the durable write.
-        self.repo.soft_delete(bot_id).await || deleted
+        let result = self.repo.soft_delete(bot_id).await || deleted;
+        if result { self.catalog_changed(bot_id); }
+        result
     }
 
     async fn cleanup_expired(&self) {
@@ -507,20 +603,55 @@ impl BotRegistryCoreService for BotCore {
 
     async fn save_to_storage(&self, bot_id: &str, caps: &BotCapabilities) -> ServiceResult<()> {
         let caps = self.protect_provider_identity(bot_id, caps.clone()).await?;
-        self.repo.save_to_storage(bot_id, &caps).await
+        self.repo.save_to_storage(bot_id, &caps).await?;
+        self.catalog_changed(bot_id);
+        Ok(())
     }
 
     async fn update_visibility(&self, bot_id: &str, visibility: &str) -> ServiceResult<()> {
-        self.repo.update_visibility(bot_id, visibility).await
+        self.repo.update_visibility(bot_id, visibility).await?;
+        self.catalog_changed(bot_id);
+        Ok(())
+    }
+
+    async fn update_profile_existing(
+        &self,
+        bot_id: &str,
+        update: bcs_service_api::types::bot_profile::ExistingProfileUpdate,
+    ) -> ServiceResult<bcs_service_api::types::bot_profile::ProfileWrite> {
+        let result = self.update_profile_existing_impl(bot_id, update).await?;
+        if result == bcs_service_api::types::bot_profile::ProfileWrite::Updated {
+            self.catalog_changed(bot_id);
+        }
+        Ok(result)
+    }
+
+    async fn update_avatar_existing(
+        &self,
+        bot_id: &str,
+        avatar: bcs_service_api::types::bot_profile::AvatarChange,
+    ) -> ServiceResult<bcs_service_api::types::bot_profile::ProfileWrite> {
+        self.update_avatar_existing_impl(bot_id, avatar).await
+    }
+
+    async fn avatar_urls(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<bcs_service_api::types::bot_profile::BotAvatarMap> {
+        self.avatar_urls_impl(bot_ids).await
     }
 
     #[allow(deprecated)]
     async fn set_hidden(&self, bot_id: &str, hidden: bool) -> ServiceResult<()> {
-        self.repo.set_hidden(bot_id, hidden).await
+        self.repo.set_hidden(bot_id, hidden).await?;
+        self.catalog_changed(bot_id);
+        Ok(())
     }
 
     async fn update_actor_status(&self, bot_id: &str, status: ActorStatus) -> ServiceResult<()> {
-        self.repo.update_actor_status(bot_id, status).await
+        self.repo.update_actor_status(bot_id, status).await?;
+        self.catalog_changed(bot_id);
+        Ok(())
     }
 
     async fn ensure_human_actor(
@@ -622,106 +753,34 @@ impl BotRegistryCoreService for BotCore {
         self.repo.is_connected(bot_id).await
     }
 
+    /// ONE runtime-activity observation (spec §8.0
+    /// point 2): ONE WS connection-set read of the
+    /// current instance, then the Provider
+    /// binding/provider/credential resolution over the
+    /// NOT-WS-active ids in bounded batches (≤
+    /// `AUTHORITY_QUERY_CHUNK` ids per bindings query;
+    /// the one provider and credential batch). The
+    /// `WS active || HTTP Provider routable` semantics of
+    /// `list_runtime_active_bot_ids` are preserved
+    /// exactly — but read failures PROPAGATE instead of
+    /// the legacy warn-and-degrade, so a store outage can
+    /// never masquerade as "unreachable".
+    async fn try_runtime_activity_for(&self, bot_ids: &[String]) -> ServiceResult<RuntimeActivitySnapshot> {
+        self.try_runtime_activity_for_impl(bot_ids).await
+    }
+
+    /// Batch check runtime-active actors for owner-facing
+    /// lists (the legacy per-page helper).
+    ///
+    /// Runtime active intentionally ignores actor lifecycle
+    /// visibility (`Hidden`) and means either an active WS
+    /// connection or a routable HTTP provider target. On
+    /// provider read failures this kept the historical
+    /// degraded-success shape — the mine path does NOT use
+    /// it any more; [`Self::try_runtime_activity_for`] is
+    /// the strict §8.0 observation.
     async fn list_runtime_active_bot_ids(&self, bot_ids: &[String]) -> Vec<String> {
-        let mut active = HashSet::new();
-        let mut provider_candidates = Vec::new();
-        for bot_id in bot_ids {
-            if self.repo.is_connected(bot_id).await {
-                active.insert(bot_id.clone());
-            } else {
-                provider_candidates.push(bot_id.clone());
-            }
-        }
-
-        let Some(provider_bindings) = &self.provider_bindings else {
-            return active.into_iter().collect();
-        };
-        let Some(provider_repo) = &self.provider_repo else {
-            return active.into_iter().collect();
-        };
-        let Some(provider_credentials) = &self.provider_credentials else {
-            return active.into_iter().collect();
-        };
-
-        let bindings = match provider_bindings
-            .list_bindings_by_bot_uuids(&provider_candidates)
-            .await
-        {
-            Ok(bindings) => bindings,
-            Err(error) => {
-                warn!(request_id = %bcs_observability::CurrentRequestId, error = %error, "list_runtime_active_bot_ids: failed to list provider bindings");
-                return active.into_iter().collect();
-            }
-        };
-        let provider_ids = bindings
-            .iter()
-            .filter(|binding| !binding.disabled)
-            .map(|binding| binding.provider_id.clone())
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        if provider_ids.is_empty() {
-            return active.into_iter().collect();
-        }
-
-        let providers = match provider_repo.list_providers_by_ids(&provider_ids).await {
-            Ok(providers) => providers,
-            Err(error) => {
-                warn!(request_id = %bcs_observability::CurrentRequestId, error = %error, "list_runtime_active_bot_ids: failed to list providers");
-                return active.into_iter().collect();
-            }
-        };
-        let credentials = match provider_credentials
-            .list_credentials_by_kind_for_providers(
-                &provider_ids,
-                "downlink_bcs_to_provider",
-            )
-            .await
-        {
-            Ok(credentials) => credentials,
-            Err(error) => {
-                warn!(request_id = %bcs_observability::CurrentRequestId, error = %error, "list_runtime_active_bot_ids: failed to list provider credentials");
-                return active.into_iter().collect();
-            }
-        };
-
-        let providers = providers
-            .into_iter()
-            .map(|provider| (provider.provider_id.clone(), provider))
-            .collect::<HashMap<_, _>>();
-        let credentials = credentials
-            .into_iter()
-            .map(|credential| (credential.provider_id.clone(), credential))
-            .collect::<HashMap<_, _>>();
-
-        for binding in bindings {
-            if binding.disabled {
-                continue;
-            }
-            let Some(provider) = providers.get(&binding.provider_id) else {
-                continue;
-            };
-            if provider.disabled {
-                continue;
-            }
-            let Ok(downlink) = parse_downlink_config(&provider.config) else {
-                continue;
-            };
-            if !downlink.enabled
-                || binding.webhook_url.as_ref().or(downlink.webhook_url.as_ref()).is_none()
-            {
-                continue;
-            }
-            let Some(credential) = credentials.get(&binding.provider_id) else {
-                continue;
-            };
-            if credential.disabled {
-                continue;
-            }
-            active.insert(binding.bot_uuid);
-        }
-
-        active.into_iter().collect()
+        self.list_runtime_active_bot_ids_impl(bot_ids).await
     }
 
     async fn is_effectively_online(&self, bot_id: &str) -> bool {
@@ -736,7 +795,7 @@ impl BotRegistryCoreService for BotCore {
         }
         matches!(
             bcs_observability::observe_result("bot.online.delivery_target", self.resolve_delivery_target(bot_id)).await,
-            Ok(BotDeliveryTarget::HttpProvider { .. })
+            Ok(BotDeliveryTarget::HttpProvider { .. } | BotDeliveryTarget::A2a { .. })
         )
     }
 

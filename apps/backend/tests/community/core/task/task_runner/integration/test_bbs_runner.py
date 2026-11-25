@@ -799,6 +799,37 @@ class _TrajectoryContext:
         self.events.append((task_id, node_id, action_type, kwargs))
 
 
+def test_notify_rejects_bbs_when_runtime_profile_disallows_it():
+    """The frozen runtime profile is a hard gate before roster or bidding starts."""
+    execution_graph = _execution_graph("t-no-bbs")
+    execution_graph.extend_props["runtime_profile"] = {
+        "allowed_run_modes": ["single_bot", "coop_group"]
+    }
+    graph = _FakeGraph()
+    bot = _FakeBot(rates={"A": 80})
+    bcn = _FakeBcn(_roster("A"))
+    trajectory = _TrajectoryContext()
+
+    with pytest.raises(TaskStateError, match="bbs run mode is not allowed"):
+        _run(notify(
+            execution_graph,
+            bcn=bcn,
+            bot=bot,
+            graph=graph,
+            backend_url="http://x",
+            task_context_service=trajectory,
+        ))
+
+    assert bot.bid_prompts == []
+    assert bot.sent_messages == []
+    assert graph.claimed is None
+    assert trajectory.events[0][3]["action_result"] == "bbs_disabled"
+    assert trajectory.events[0][3]["error_type"] == "policy_error"
+    assert trajectory.events[0][3]["ext_info"]["allowed_run_modes"] == [
+        "single_bot", "coop_group"
+    ]
+
+
 def test_notify_records_bbs_milestones_in_trajectory():
     trajectory = _TrajectoryContext()
     graph = _FakeGraph()

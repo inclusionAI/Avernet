@@ -80,7 +80,7 @@ export function createApprovalRouter(db: IDatabase, options: ApprovalRouterOptio
         res.status(403).json({ error: "Forbidden", message: result.error });
         return;
       }
-      if (result.error === "审批已处理") {
+      if (result.error === "审批已处理" || result.error === "审批状态已变更，请刷新后重试") {
         res.status(409).json({
           error: "Conflict",
           message: result.error,

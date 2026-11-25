@@ -68,7 +68,7 @@ export function NodeOutputViewer({ label, data, className }: NodeOutputViewerPro
       </Button>
 
       {expanded && (
-        <div className="border-t border-border">
+        <div className="border-t border-divider">
           <div className="flex items-center justify-between bg-muted px-3 py-1">
             <span className="text-[10px] text-muted-foreground">
               {formatted.length > 1024 ? `${(formatted.length / 1024).toFixed(1)} KB` : `${formatted.length} 字符`}

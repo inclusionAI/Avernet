@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 from injector import Injector, inject
 
@@ -26,6 +26,7 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 
 log = logging.getLogger("session_resource.materialization")
 MATERIALIZE_TASK_TYPE = "session_resource.materialize"
+_DATABASE_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
 
 class SessionResourceMaterializeHandler:
@@ -101,6 +102,7 @@ class SessionResourceMaterializeHandler:
                 "session_key_hash": record.session_key_hash,
                 "workspace_relative_path": record.workspace_relative_path,
                 "filename": record.filename,
+                "creator_name": record.creator_name,
                 "size_bytes": record.size_bytes,
                 "content_hash": record.client_content_hash,
                 "uploaded_at": self._format_uploaded_at(record.gmt_create),
@@ -114,6 +116,13 @@ class SessionResourceMaterializeHandler:
                     else None
                 ),
             }
+            if record.gmt_create is not None and record.gmt_create.tzinfo is None:
+                log.info(
+                    "session_resource.materialize.upload_time.normalized resource_id=%s source_timezone=Asia/Shanghai source_time=%s uploaded_at=%s",
+                    record.resource_id,
+                    record.gmt_create.isoformat(),
+                    body["uploaded_at"],
+                )
             response = asyncio.run(
                 self._transport.invoke(
                     context.conn_info,
@@ -146,7 +155,8 @@ class SessionResourceMaterializeHandler:
         if uploaded_at is None:
             return None
         if uploaded_at.tzinfo is None:
-            uploaded_at = uploaded_at.replace(tzinfo=UTC)
+            # Database gmt_* values are timezone-less Beijing wall-clock times.
+            uploaded_at = uploaded_at.replace(tzinfo=_DATABASE_TIMEZONE)
         return uploaded_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 

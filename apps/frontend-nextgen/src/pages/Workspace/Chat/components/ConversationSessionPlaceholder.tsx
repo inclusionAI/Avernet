@@ -21,9 +21,9 @@ export function ConversationSessionPlaceholder({
         <IconButton label="打开会话列表" icon={<List className="h-4 w-4" />} onClick={onOpenSessionList} />
       </div>
       {model.status === 'loading' ? (
-        // 展开 Bot 后会话列表在途：借用 ChatMessageSkeleton 的「誊写稿」占位——
-        // 主导走向是自动选中会话后 ChatPanel 仍以同一骨架装载消息，全程同一画布语言
-        // （expand-selection spec 的零跳变延伸）；本段仅短暂在途，读屏话术覆写为「加载会话列表」。
+        // 目标 Bot 会话列表在途（深链/删除回退进入未选态）：借用 ChatMessageSkeleton 的
+        // 「誊写稿」占位，用户随后点行后 ChatPanel 仍以同一骨架装载消息，全程同一画布语言；
+        // 本段仅短暂在途，读屏话术覆写为「加载会话列表」。
         <ChatMessageSkeleton ariaLabel="加载会话列表" />
       ) : (
         <div className="flex flex-1 items-center justify-center">
@@ -36,6 +36,10 @@ export function ConversationSessionPlaceholder({
                 ? `${model.botName} 暂无会话`
                 : model.status === 'favorite-empty'
                 ? '暂无已收藏会话'
+                : model.status === 'archive-empty'
+                ? '暂无已归档会话'
+                : model.status === 'archive-unselected'
+                ? '请选择一个归档会话'
                 : '请选择一个会话'
             }
             description={
@@ -45,6 +49,10 @@ export function ConversationSessionPlaceholder({
                 ? '创建会话后，即可开始与此 Bot 对话。'
                 : model.status === 'favorite-empty'
                 ? '切换到全部会话查看已有会话，或创建新会话。'
+                : model.status === 'archive-empty'
+                ? '切换到全部会话查看已有会话，或从左侧筛选恢复归档。'
+                : model.status === 'archive-unselected'
+                ? '可从左侧查看消息摘要，或恢复需要继续对话的会话。'
                 : '请从左侧列表选择会话；如尚未加载目标会话，可继续加载更多。'
             }
             action={
@@ -60,7 +68,7 @@ export function ConversationSessionPlaceholder({
                 <Button variant="outline" onClick={model.retry}>
                   重试
                 </Button>
-              ) : model.status === 'favorite-empty' ? (
+              ) : model.status === 'favorite-empty' || model.status === 'archive-empty' ? (
                 <Button variant="outline" onClick={model.showAll}>
                   查看全部会话
                 </Button>

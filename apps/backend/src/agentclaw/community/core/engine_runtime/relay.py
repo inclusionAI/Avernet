@@ -5,7 +5,7 @@ The single place Track C crosses into a bot's device. Every public
 so the four
 things that must hold on *every* such request are enforced once:
 
-1. **The caller's bot is resolved owner-scoped, before any device work.** The
+1. **The scoped Bot address is resolved and the caller authorized before device work.** The
    engine has no tenant axis — once a request lands on a device nothing
    constrains it — so this is the last point at which isolation exists.
 2. **The device is resolved through ``DeviceContextResolver``**, the repo's
@@ -22,7 +22,6 @@ public surface existed.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from injector import inject
@@ -30,7 +29,7 @@ from injector import inject
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
-from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.engine_runtime.bot_lookup import RuntimeBotLookup
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
     DeviceContext,
@@ -62,6 +61,7 @@ from agentclaw.community.core.repository.protocols.publishing import (
     BotPublishRepositoryProtocol,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.runtime_list_timing import mark, timed_thread
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
@@ -90,7 +90,7 @@ class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
     @inject
     def __init__(
         self,
-        bot_service: BotService,
+        bot_service: RuntimeBotLookup,
         resolver: DeviceContextResolver,
         transport: DeviceAdapterTransport,
         publish_repo: BotPublishRepositoryProtocol,
@@ -109,26 +109,19 @@ class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
     def resolve_bot(self, bot_id: str, owner_id: str, caller_id: str) -> BotFacts:
         """Return the few bot facts handlers need, or raise.
 
-        **The isolation seam, in two steps.** ``BotService.get_bot`` resolves
-        ``(bot_id, owner_id)`` through ``get_by_id_and_owner``, so a bot that
-        does not exist under that owner — or belongs to another tenant, which
-        the Track A guard on ``BotModel`` filters out before ownership is even
-        considered — raises ``BotNotFoundError``. Then
-        :func:`require_bot_operator` decides whether *this caller* may operate
-        the resolved bot: the owner, or a collaborator at member level or
-        above; anyone else raises the same ``BotNotFoundError``, so a refused
-        non-operator cannot tell a bot they may not operate from one that does
-        not exist. The adapter maps both to a masked 404.
+        ``RuntimeBotLookup.get_bot_by_address`` resolves a unique Bot from the legacy
+        locator, matching its permanent entity or current Owner within repository
+        tenant/environment scope. Missing or ambiguous matches fail closed.
+        ``require_bot_operator`` then checks the authenticated ``caller_id``
+        against the resolved current Owner and collaborator roles. A locator is
+        never proof of permission; unauthorized callers receive a masked 404.
 
-        ``caller_id`` must come from the authenticated principal; ``owner_id``
-        is the owner the request *addresses* and may name someone else — the
-        adjudication is exactly what makes that safe.
+        ``owner_id`` retains its compatibility parameter name and may contain an
+        entity locator. All downstream ownership checks use the resolved row.
 
-        Returns :class:`BotFacts`, **not** the raw record. ``get_bot`` attaches
-        ``device_binding`` — ``device_id``, ``device_provider``, ``device_props``
-        — and this is a public-surface entry point whose entire purpose is to
-        stop publishing device topology. A narrow value object makes leaking it
-        impossible rather than merely discouraged.
+        Returns :class:`BotFacts`, **not** the raw record. The lookup deliberately
+        skips management-page binding/template enrichment. The narrow value
+        object also prevents other stored fields from reaching public handlers.
 
         The adjudication's ``bot_pk`` comes from the row read just above, not
         from :class:`BotFacts`. ``ac_bot_collaborator`` is keyed on
@@ -136,7 +129,8 @@ class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
         join value with no business on a projection built to be narrow — the
         row is right here, so there is nothing to carry and nothing to re-read.
         """
-        bot = self._bot_service.get_bot(bot_id, owner_id)
+        bot = self._bot_service.get_bot_by_address(bot_id, owner_id)
+        mark("bot.resolved")
         facts = BotFacts.from_record(bot, bot_id=bot_id, owner_id=owner_id)
         require_bot_operator(
             self._collaborators,
@@ -152,9 +146,8 @@ class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
     ) -> BotFacts:
         """:meth:`resolve_bot`, run in a worker thread.
 
-        ``resolve_bot`` is synchronous and not cheap: ``BotService.get_bot``
-        does an owner-scoped row read, a device-binding fetch and a template
-        fetch, and the operator adjudication may add a collaborator query.
+        ``resolve_bot`` still performs synchronous scoped repository reads,
+        and the operator adjudication may add a collaborator query.
         Running that inline parks the event loop for the length of one slow
         database round trip and stalls every unrelated request on the worker —
         the same reason :meth:`call` already offloads device resolution.
@@ -163,7 +156,7 @@ class EngineRuntimeRelay(EngineRuntimeRelayProtocol):
         the result to :meth:`call` as ``facts`` so the bot is resolved once per
         request rather than once per gate plus once per forward.
         """
-        return await asyncio.to_thread(self.resolve_bot, bot_id, owner_id, caller_id)
+        return await timed_thread("bot", self.resolve_bot, bot_id, owner_id, caller_id)
 
     def _resolve_device(self, facts: BotFacts, stage: str, device_uuid: str | None = None) -> DeviceContext:
         """Resolve the bot's device, translating "not reachable" to one error.
@@ -244,9 +237,9 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         the device binding and the template, which is a provider call and a
         second query to buy an int.
 
-        It states no new identity. ``get_bot_pk`` resolves through the same
-        ``get_by_id_and_owner`` :meth:`resolve_bot` used, so it returns the key
-        of the row that call already adjudicated, not a wider match.
+        It states no new identity. ``get_bot_pk`` uses the current Owner from
+        the resolved facts with ``get_by_id_and_owner``, so it returns the key
+        of the row already adjudicated rather than reusing the request locator.
 
         The re-read adds exactly one failure the single-read path could not
         have: the bot is soft-deleted between the adjudication and here. That
@@ -340,8 +333,8 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
 
         Bot and device resolution share one **worker thread** hop. Both legs are
         synchronous and neither belongs on the event loop:
-        ``BotService.get_bot`` does an owner-scoped row read plus device-binding
-        and template fetches, and the device leg's provider call is blocking
+        ``RuntimeBotLookup`` resolves the scoped address with repository reads,
+        and the device leg's provider call is blocking
         network I/O — a BaaS-backed bot resolves through
         ``BaasService.get_ws_info``, a sync ``httpx`` call with a 30-second
         timeout — so running either inline would park the event loop for the
@@ -362,7 +355,8 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         rather than sniffing for a ``success`` key, because a body that happens
         to lack one is exactly the malformed case that must still fail.
         """
-        ctx = await asyncio.to_thread(
+        ctx = await timed_thread(
+            "device",
             self._resolve_bot_and_device, bot_id, owner_id, facts, stage, device_uuid
         )
         if device_uuid is not None and (

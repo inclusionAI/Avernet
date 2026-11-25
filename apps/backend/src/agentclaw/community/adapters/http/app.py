@@ -23,11 +23,10 @@ the worker's injector (``bootstrap`` → ``startup`` → yield → ``shutdown`` 
 components that own it, and ``app.state.injector`` is the single injector handle.
 """
 import asyncio
-import logging
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from agentclaw.community.adapters.http.space_knowledge.registration import mount_resource_routers, mount_space_routers
 
 # ─── Phase 1: pre-DI bootstrap ───────────────────────────────────────────
 # No injector is built here. ``Injected(X)`` is a per-request lookup, so
@@ -37,6 +36,7 @@ from fastapi import FastAPI, Request
 # fork.
 from agentclaw.community.adapters.http.boot import (
     BootMode,
+    install_openclaw_config_path,
     install_worker_runtime_guard,
     require_worker_injector,
 )
@@ -68,30 +68,9 @@ register_corp_modules(_deploy_profile)  # noqa: FLA010 — composition root, bef
 _boot_mode = BootMode.detect()
 # ──────────────────────────────────────────────────────────────────────────
 
-# =============================================================================
-# Pre-import side effects: AGENTCLAW_CONFIG_PATH + OpenClaw DB config
-# =============================================================================
-def _set_openclaw_config_path():
-    """Set AGENTCLAW_CONFIG_PATH env var so OpenClaw can find application.yaml."""
-    try:
-        from pathlib import Path
-        # B11: configs live in the community subtree (agentclaw/community/configs);
-        # a deploy's assembled runtime `configs/` (cwd) holds them too. This file is
-        # at agentclaw/community/adapters/http/app.py, so parents[2] is
-        # agentclaw/community.
-        possible_config_dirs = [
-            Path.cwd() / "configs",
-            Path(__file__).resolve().parents[2] / "configs",  # agentclaw/community/configs
-        ]
-        for config_dir in possible_config_dirs:
-            if config_dir.exists() and (config_dir / "application.yaml").exists():
-                os.environ["AGENTCLAW_CONFIG_PATH"] = str(config_dir)
-                logging.info(f"Set AGENTCLAW_CONFIG_PATH to {config_dir}")
-                break
-    except Exception as e:
-        logging.warning(f"Could not set AGENTCLAW_CONFIG_PATH: {e}")
-
-_set_openclaw_config_path()  # noqa: FLA010 — composition root, must run at import time before OpenClaw imports below read AGENTCLAW_CONFIG_PATH
+# OpenClaw reads its configuration path during the router imports below, so
+# this pre-import bootstrap must run before them.
+install_openclaw_config_path()  # noqa: FLA010 — composition root, must run at import time before OpenClaw imports below read AGENTCLAW_CONFIG_PATH
 
 # =============================================================================
 # Router imports (post-DI-bootstrap)
@@ -134,6 +113,7 @@ from agentclaw.community.adapters.http.bot_render_screen.router import router as
 from agentclaw.community.adapters.http.antprocess import router as antprocess_router  # noqa: E402
 from agentclaw.community.adapters.http.antcode.router import router as antcode_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_public import bot_public_auth_router, bot_public_router, bot_public_noauth_router  # noqa: E402
+from agentclaw.community.adapters.http.bot_public.risk_routes import legacy_router as risk_legacy_router  # noqa: E402
 from agentclaw.community.adapters.http.oss_to_nas.router import router as oss_to_nas_router  # noqa: E402
 from agentclaw.community.adapters.http.system import system_health_router, system_readiness_router, system_disk_usage_router  # noqa: E402
 from agentclaw.community.adapters.http.desktop.router import bot_router as desktop_bot_router, device_router as desktop_device_router  # noqa: E402
@@ -147,9 +127,6 @@ from agentclaw.community.adapters.http.aicoding.router import router as aicoding
 from agentclaw.community.adapters.http.aicoding.data_proxy_router import router as aicoding_data_proxy_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding.workitem_noauth_router import router as workitem_noauth_router  # noqa: E402
 from agentclaw.community.adapters.http.enums.router import router as enums_router  # noqa: E402
-from agentclaw.community.adapters.http.resources import router as resources_router  # noqa: E402
-from agentclaw.community.adapters.http.session_resources import internal_router as session_resources_internal_router, router as session_resources_router  # noqa: E402
-from agentclaw.community.adapters.http.tc_file_upload_integrations.resource_context_router import router as tc_resource_context_router  # noqa: E402
 from agentclaw.community.adapters.http.mcp import router as mcp_router  # noqa: E402
 from agentclaw.community.adapters.http.cron import router as cron_router  # noqa: E402
 from agentclaw.community.adapters.http.cron.cron_noauth_router import router as cron_noauth_router  # noqa: E402
@@ -161,13 +138,14 @@ from agentclaw.community.adapters.http.caller_identity.router import router as c
 from agentclaw.community.adapters.http.acli_clis.router import router as acli_clis_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant import router as bot_dormant_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant.router import internal_router as bot_dormant_internal_router  # noqa: E402
-from agentclaw.community.adapters.http.spaces_internal import router as spaces_internal_router  # noqa: E402
-from agentclaw.community.adapters.http.spaces_management import router as spaces_management_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_build import router as service_bot_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_publish import router as service_bot_publish_router  # noqa: E402
+from agentclaw.community.adapters.http.service_bot.router_eval import router as service_bot_eval_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_file_count import router as service_bot_file_count_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_collaborator import router as bot_collaborator_router  # noqa: E402
 from agentclaw.community.adapters.http.task import task_internal_router, task_callback_router  # noqa: E402
+from agentclaw.community.adapters.http.task.context_collab import router as context_collab_router  # noqa: E402
+from agentclaw.community.adapters.http.task.todos.artifact_routes import router as todo_artifact_router  # noqa: E402
 # skills / skillsets / skill_scan / skill_auth 全部切换到新架构 (core/skill_center + device plugin 抽象)
 from agentclaw.community.adapters.http.skill_center import skills, skillsets, skill_scan, skill_auth, skill_category, verify, sync, batch_sync, installations_internal  # noqa: E402
 
@@ -258,7 +236,6 @@ app = FastAPI(lifespan=_app_lifespan)
 # middleware, and at construction, because the lifespan guard above only fires
 # on hosts that drive the lifespan protocol.
 install_worker_runtime_guard(app)
-
 def finalize_worker_runtime() -> None:
     """Initialize everything this worker process owns — see :mod:`.boot`.
 
@@ -316,6 +293,7 @@ from agentclaw.community.core.errors import (  # noqa: E402
     InternalError,
     LoginRedirectRequired,
     NotFound,
+    TopicClosedConflict,
     Unauthorized,
     ValidationError,
 )
@@ -340,14 +318,17 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerIdentityPermissionError,
     CallerIdentityReadOnlyError,
     CallerLockEpochError,
-    CallerMcpNotFoundError, CallerMcpSyncError,
+    CallerMcpNotFoundError, CallerMcpSyncError, CallerBcsSyncError,
 )
 from agentclaw.community.adapters.http.acli_cli_status import ACLI_CLI_ERROR_STATUS  # noqa: E402
+from agentclaw.community.core.task.todos import errors as _TodoErrors  # noqa: E402
+from agentclaw.community.adapters.http.context_collab_status import CONTEXT_COLLAB_ERROR_STATUS  # noqa: E402
 from agentclaw.community.core.skill_center.errors import (  # noqa: E402
     McpEndpointUnavailableError,
     McpPermissionDeniedError,
     LocalSkillNotReadyError,
     SkillSetAccessDeniedError,
+    SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
     SkillSetControlPlaneNotFoundError,
@@ -363,15 +344,14 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     Forbidden:             403,
     NotFound:              404,
     Conflict:              409,
+    TopicClosedConflict:  409,
     InternalError:         500,
     CallerIdentityPermissionError: 403,
     CallerIdentityAmbiguousError: 409,
     CallerIdentityIrreversibleError: 409,
-    CallerIdentityNotFoundError: 404,
-    CallerIdentityReadOnlyError: 409,
+    CallerIdentityNotFoundError: 404, CallerIdentityReadOnlyError: 409,
     CallerLockEpochError: 409,
-    CallerMcpNotFoundError: 404,
-    CallerMcpSyncError: 500,
+    CallerMcpNotFoundError: 404, CallerMcpSyncError: 500, CallerBcsSyncError: 500,
     CallerCliNotFoundError: 404,
     CallerCliSyncError: 500,
     CallerCallTypeInvalidError: 500,
@@ -389,20 +369,33 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     # 400, not 409: the published wire echoes the reason code as a rejected
     # request and clients already parse it that way. Kept-as-is deliberately.
     SkillSetControlPlaneConflictError: 400,
+    SkillRuntimeNameConflictError: 409,
     # 409, not 503. The mutation fence could not be taken, so the command never
     # ran and the service itself is up and serving, which is the only thing a
     # 503 is allowed to mean. Answering 503 also tells proxies and clients to
     # back off the whole endpoint over what is a per-Bot lock conflict.
     SkillSetControlPlaneLockUnavailableError: 409,
     SkillSetRuntimeReconcileError: 500,
+    _TodoErrors.TodoNotFoundError: 404, _TodoErrors.TodoStateConflictError: 409,
+    _TodoErrors.TodoBotScopeError: 403, _TodoErrors.TodoBotAmbiguousError: 409,
+    _TodoErrors.TodoExecutionAuthError: 401, _TodoErrors.TodoSourceAuthError: 401,
+    _TodoErrors.TodoArtifactNotFoundError: 404, _TodoErrors.TodoSourceWorkItemNotFoundError: 404,
+    _TodoErrors.TodoArtifactContentError: 422,
+    _TodoErrors.TodoArtifactUploadTooLargeError: 413,
+    _TodoErrors.TodoArtifactObjectNotFoundError: 404,
+    _TodoErrors.TodoArtifactStorageNotConfiguredError: 503, _TodoErrors.TodoSourceUnavailableError: 503,
+    _TodoErrors.TodoArtifactStorageError: 502, _TodoErrors.TodoSourceResponseError: 502,
+    _TodoErrors.TodoTemplateValidationError: 400,
+    _TodoErrors.TodoTemplateNotFoundError: 404,
+    _TodoErrors.TodoTemplateStateConflictError: 409, _TodoErrors.TodoSourceAlreadyImportedError: 409,
     **ACLI_CLI_ERROR_STATUS,
+    **CONTEXT_COLLAB_ERROR_STATUS,
 }
 
 _DATA_PROXY_ERROR_STATUS_MAP: dict[type[DataProxyError], int] = {
     EngineUrlNotConfigured: 500,
     EngineUnreachable:      502,
 }
-
 def _trace_headers(request: Request) -> dict[str, str]:
     """Return ``{"X-Trace-ID": <id>}`` for echoing on error responses.
 
@@ -412,7 +405,6 @@ def _trace_headers(request: Request) -> dict[str, str]:
     """
     trace_id = getattr(request.state, "trace_id", None)
     return {"X-Trace-ID": trace_id} if trace_id else {}
-
 def _is_public_api(request: Request) -> bool:
     """Whether this request belongs to the public OpenAPI surface."""
     from agentclaw.community.adapters.http.openapi_v1.responses import is_public_api
@@ -474,11 +466,15 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
             params_suffix(request),
         )
     elif status >= 400:
+        # A Topic close must stay a routine warning. The 409 response and
+        # ``conflict`` semantics are unchanged, but attaching a traceback can
+        # make company log collectors classify this expected business race as
+        # an error. Other 4xx conflicts retain their raise-site stack.
         logger.warning(
             "[DomainError %s] %s on %s %s: %s%s",
             status, type(exc).__name__, request.method, request.url.path,
             exc.detail, params_suffix(request),
-            exc_info=exc,
+            exc_info=None if isinstance(exc, TopicClosedConflict) else exc,
         )
     else:
         # 3xx is only ``LoginRedirectRequired``, an ordinary step in the login
@@ -919,6 +915,8 @@ app.include_router(bot_message_feedback_router)
 app.include_router(task_internal_router)
 app.include_router(task_callback_router)
 app.include_router(task_router)
+app.include_router(context_collab_router)  # /api/v1/collaboration/task/context_collab — BBS context collab (spec §6.1)
+app.include_router(todo_artifact_router)
 app.include_router(work_orders_http_router)
 app.include_router(agentswarm_router_module.router)
 agentswarm_router_module.register_exception_handlers(app)
@@ -932,6 +930,7 @@ app.include_router(antprocess_router)
 app.include_router(antcode_router)  # AntCode 集成
 app.include_router(bot_public_auth_router)
 app.include_router(bot_public_router)
+app.include_router(risk_legacy_router)
 app.include_router(bot_public_noauth_router)
 app.include_router(workitem_noauth_router)  # 工作项接口 (route URL still /api/public/dima)
 app.include_router(oss_to_nas_router)
@@ -940,15 +939,9 @@ app.include_router(system_readiness_router)
 app.include_router(system_disk_usage_router)
 app.include_router(desktop_device_router)
 app.include_router(desktop_bot_router)
-
 # 2. OpenClawEnterprise 路由（统一挂载到 /api 下）
 # 注意：OpenClaw 的路由前缀和 AgentClaw 不冲突
-# - AgentClaw: /api/v1/devices
-# - OpenClaw: /api/resources, /api/sessions, /api/chat, /api/skills, /api/skillsets
-app.include_router(resources_router)
-app.include_router(session_resources_router)
-app.include_router(session_resources_internal_router)
-app.include_router(tc_resource_context_router)
+mount_resource_routers(app)
 app.include_router(skills.router)
 app.include_router(skillsets.router)
 app.include_router(approvals_router)
@@ -963,10 +956,10 @@ app.include_router(caller_identity_router)
 app.include_router(acli_clis_router)
 app.include_router(bot_dormant_router.router)
 app.include_router(bot_dormant_internal_router)
-app.include_router(spaces_internal_router)
-app.include_router(spaces_management_router)
+mount_space_routers(app)
 app.include_router(service_bot_router)
 app.include_router(service_bot_publish_router)
+app.include_router(service_bot_eval_router)
 app.include_router(service_bot_file_count_router)
 app.include_router(bot_collaborator_router)
 app.include_router(skill_scan.router)
@@ -986,9 +979,6 @@ app.include_router(economy_governance_router)
 app.include_router(economy_governance_admin_router)
 app.include_router(economy_governance_workflow_router)
 app.include_router(enums_router)
-app.include_router(task_internal_router)
-app.include_router(task_callback_router)
-
 # Runtime-mode-conditional routers (bound by DI: empty in prod, populated in
 # local boots via the test column's app-services module) are NOT mounted here:
 # they are the one route registration that needs a resolved binding, so

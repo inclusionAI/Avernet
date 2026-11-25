@@ -109,13 +109,14 @@ echo ""
 # ── Step 1: Build BCS ─────────────────────────────────────────────────────
 
 info "Building BCS + bcs-cli..."
-cargo build --package bcs --package bcs-cli --manifest-path "$PROJECT_ROOT/Cargo.toml" 2>&1 | tail -1
+(cd "$PROJECT_ROOT" && cargo build --package bcs --package bcs-cli) 2>&1 | tail -1
 pass "BCS built"
 
 # ── Step 2: Write BCS config ─────────────────────────────────────────────
 
 BCS_WS_URL="ws://127.0.0.1:${BCS_PORT}/ws/bot"
 
+cp "$PROJECT_ROOT/configs/catalog-labels.toml" "$CONFIG_DIR/catalog-labels.toml"
 cat > "$CONFIG_DIR/bcs-config.toml" <<EOF
 bind = "127.0.0.1"
 port = ${BCS_PORT}

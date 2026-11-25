@@ -7,7 +7,7 @@ Taxonomy Models Unit Tests
 import pytest
 from pydantic import ValidationError
 
-from src.domain.taxonomy.models import (
+from app.domain.taxonomy.models import (
     DomainDefinition,
     ScenarioDefinition,
     RiskSignalDefinition,
@@ -164,14 +164,14 @@ class TestStructuredRiskAssessment:
 
     def test_import_and_create(self):
         """测试导入和创建"""
-        from src.domain.models.structured_risk_assessment import (
+        from app.domain.models.structured_risk_assessment import (
             RiskFactor,
             BlockingCondition,
             ExpertEvidence,
             ScenarioPriorRisk,
             StructuredRiskAssessment,
         )
-        from src.domain.models.expert_risk_assessment import RiskLevel
+        from app.domain.models.expert_risk_assessment import RiskLevel
 
         # 创建风险因素
         factor = RiskFactor(

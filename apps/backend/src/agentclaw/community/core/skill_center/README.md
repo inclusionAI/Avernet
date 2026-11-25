@@ -15,6 +15,13 @@ provides:
   - "SkillAuthService"
   - "CurrentRuntimeLayoutProbeService"
   - "SkillQueryService"
+  - "SkillReferenceService"
+  - "SkillReferenceServiceProtocol"
+  - "SkillAccessScope"
+  - "ReadySharedSkill"
+  - "ReadyRepoSkill"
+  - "PublicSkillPreview"
+  - "ValidatedExactSkillPackage"
   - "LocalSkillUploadService"
   - "LocalSkillSecurityScanTaskHandler"
   - "LocalSkillSecuritySyncTaskHandler"
@@ -73,6 +80,7 @@ provides:
   - "DesktopSkillRecoveryServiceProtocol"
   - "DesktopSkillRecoveryService"
   - "DesktopSkillRecoveryTaskHandler"
+  - "CapabilityProjectionRecovery"
   - "SkillParser"
   - "SkillMetadata"
   - "SkillManifestError"
@@ -137,8 +145,13 @@ consumes:
   - "DesktopSkillRecoveryConfig"
   - "ServiceArtifactLineageReaderProtocol"
 internal_dependencies:
+  - agentclaw.community.core.apply_engine.fetch_budget # execution ledger shared by exact package acquisition; absent outside Apply
+  - agentclaw.community.core.ports.mcp_config  # shared Direct MCP preserve / clear / replace command types
+  - agentclaw.community.core.ports.skill_package_upload_port  # Local Skill publication receipts
+  - agentclaw.community.core.expert_market
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.core.bot_config_surface    # BotConfigCoords, the shared config-category address type
+  - agentclaw.community.core.ports.shared_skill_port    # SharedSkillPort, which SkillQueryService implements for the apply engine
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.local_skill_security_observation
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
@@ -161,6 +174,8 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.skill_installation
   - agentclaw.community.core.repository.protocols.skills_pool    # Skills Pool repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.capability_desired_state
+  - agentclaw.community.core.repository.protocols.devices # current physical binding for capability delivery
+  - agentclaw.community.core.repository.capability_projection_types
   - agentclaw.community.core.repository.capability_desired_state_types
   - agentclaw.community.core.repository.protocols.identity    # per-Bot MCP execution identity, read for the Passport scope
   - agentclaw.community.core.access
@@ -432,9 +447,12 @@ entry that cannot safely be replaced is reported as `PENDING` / `DEGRADED`; it
 does not restore a committed Installation row.
 They do not acquire `SkillsPoolEditGuard`: Pool editing is a file-corpus and
 layout-migration concern, retained only by Local package upload/replacement/
-deletion and Pool cutover/rollback paths. Phase 1 intentionally has no
-cache-backed cross-command Bot mutation fence; durable serialization is
-deferred to the task-queue design.
+deletion and Pool cutover/rollback paths. Skill membership and activation,
+Direct Skill installation, Default Skill exclusions, Apply Skill claims and
+installation reconciliation serialize their database transactions on the
+scoped Bot row where row locks are supported. SQLite relies on its database
+write transaction. This fence does not cover every Set or MCP command, runtime
+projection, or global Default template changes.
 
 `desktop_skill_recovery.py` owns the durable event-triggered follow-up:
 `skill_center.desktop_skill_recovery`, one task type deduped by
@@ -494,3 +512,27 @@ metadata transaction. A later metadata failure is returned as a storage error
 without restoring runtime files, so this flow is not a cross-storage atomic
 transaction. The exact trade-off and Teclaw adapter semantics are recorded in
 `docs/adr/0014-engine-owned-package-deletion.md`.
+
+### Stable references for Apply
+
+Direct Skills and SkillSet members share `SkillReferenceServiceProtocol`.
+UUID reads resolve an existing visible Center asset and its latest PUBLISHED
+Version; public-code reads prefer the exact persisted locator and UUID.
+First-time public references use `preview_exact` to validate the downloaded
+package, digest, runtime name and dependency metadata without management writes.
+The private preview keeps the exact content and actual `download_size` for the
+caller's Apply fetch budget. Only `prepare_public_reference` may create the
+shared asset/Version, publish canonical content and ensure Track Latest work.
+
+Preparation checks Ready reuse and refuses competing unprepared versions in the
+same existing Skill lock transaction that allocates the exact Version. A Ready
+version must retain the previewed runtime name and dependency codes. Legacy
+Reference/Sync allocation and by-name Genome resolution retain their contracts.
+These contracts are exercised at the real repository and service seams in
+`test_skill_center_reference_repository.py`, `test_skill_reference_service.py`
+and `test_skill_version_materializer.py`.
+
+`resolve_shared_skill_id` reads actual name, identity and dependencies for IDs
+returned by the legacy by-name/path port. Repo assets retain the existing
+NULL/empty dependency decoding; malformed collections or dependency entries
+fail. Center dependencies always come from the resolved PUBLISHED Version.

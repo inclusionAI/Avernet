@@ -52,6 +52,8 @@ pub struct BotSearchQuery {
 /// One bot entry in the search response.
 #[derive(Debug, Clone, Serialize)]
 pub struct BotSearchEntry {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_card: Option<Value>,
     pub bot_uuid: String,
     pub name: Option<String>,
     pub summary: Option<String>,
@@ -165,6 +167,8 @@ pub struct DynamicStatusResponse {
 /// All communication must go through BCS endpoints.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct BotInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_card: Option<Value>,
     /// Bot UUID (unique identifier assigned by BCS).
     pub bot_uuid: String,
     /// Bot display name (from streaming registration).
@@ -239,6 +243,8 @@ pub struct DiscoverBotsExtendedResponse {
 /// Extended bot entry in discover results with visibility and friendship info.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoverBotEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_card: Option<Value>,
     /// Bot UUID.
     pub bot_uuid: String,
     /// Bot capabilities.

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Dict, Optional, Protocol, Set, runtime_checkable
 
-from agentclaw.community.core.task_queue.types import TaskOutcome
+from agentclaw.community.core.task_queue.types import TaskOutcome, TaskRecord
 
 
 @runtime_checkable
@@ -39,6 +39,24 @@ class TaskHandler(Protocol):
         Side effects must be safe to re-run — the queue guarantees
         single-claim execution but at-least-once invocation across crashes.
         """
+        ...
+
+
+@runtime_checkable
+class GivesUp(Protocol):
+    """Optional: a handler that wants to know when the queue gives up on one of its tasks.
+
+    The queue gives up on a task when its deadline passes (the claim scan
+    retires it, or a ``Reschedule``/``Retry`` would land past it) and when its
+    handler returns ``Fail``. No handler code runs on those paths otherwise,
+    so a task whose work owns state elsewhere (a record it was going to
+    finish, a lock it holds) can leave that state behind. ``on_give_up``
+    receives the terminal record, after the transition, on the worker that
+    made it; a raise is logged and swallowed — the task is already terminal.
+    A handler without it is unaffected.
+    """
+
+    def on_give_up(self, task: TaskRecord) -> None:
         ...
 
 

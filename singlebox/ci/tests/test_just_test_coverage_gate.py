@@ -11,7 +11,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 HELPER_PATH = REPO_ROOT / "singlebox/lib/resolve_base_ref.sh"
 
 # ci_test.sh is the entrypoint GitHub CI and local devs share for each Python
-# module (see .github/workflows/unit-tests.yml). backend/engine have no justfile,
+# module. Backend runs from .github/workflows/backend-unit-tests.yml; the other
+# modules use .github/workflows/unit-tests.yml. backend/engine have no justfile,
 # so ci_test.sh is their only local surface; baas/gateway also expose `just test-ci`.
 CI_TEST = {
     "backend": REPO_ROOT / "apps/backend/scripts/ci_test.sh",
@@ -224,9 +225,11 @@ class CiTestCoverageGateWiringTest(unittest.TestCase):
                 self.assertIn('base="$(resolve_base_ref)"', text)
 
     def test_ci_test_changed_line_thresholds_match_github_ci(self) -> None:
-        # CI passes --base via unit-tests.yml (the workflow-diff test asserts
-        # that wiring for all four modules); the threshold lives in each
-        # ci_test.sh and must match what CI effectively enforces.
+        # CI passes --base via backend-unit-tests.yml for Backend and via
+        # unit-tests.yml (or each module's owning workflow) for BaaS, Engine and
+        # Gateway (the workflow-diff test asserts that wiring for all four
+        # modules); the threshold lives in each ci_test.sh and must match what CI
+        # effectively enforces.
         for module in CI_TEST:
             with self.subTest(module=module):
                 self.assertIn(

@@ -11,7 +11,7 @@ use bcs_service_api::{
     BotCandidateSearchCoreService, BotCandidateSearchMode, BotCandidateSearchQuery,
     BotCandidateVisibility, BotRegistryCoreService, FriendCoreService, FriendRequestCoreService,
     FriendRequestDirection, FusionCoreService, GroupCoreService, OrganizationCoreService,
-    ProposalCoreService, RelationCoreService, RoutingCoreService, ServiceError,
+    RelationCoreService, RoutingCoreService, ServiceError,
     SystemMessageDispatcherService, SystemMessageProducerService,
 };
 
@@ -219,8 +219,6 @@ pub async fn organization_core_service_contract_tests<T: OrganizationCoreService
     ));
 }
 
-pub async fn proposal_core_service_contract_tests<T: ProposalCoreService + ?Sized>(_svc: &T) {}
-
 pub async fn relation_core_service_contract_tests<T: RelationCoreService + ?Sized>(_svc: &T) {}
 
 pub async fn routing_core_service_contract_tests<T: RoutingCoreService + ?Sized>(_svc: &T) {}
@@ -239,3 +237,5 @@ pub async fn system_message_dispatcher_service_contract_tests<
     _svc: &T,
 ) {
 }
+
+pub mod run_budget;

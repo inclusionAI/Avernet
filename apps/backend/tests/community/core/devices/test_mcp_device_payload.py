@@ -117,11 +117,70 @@ def test_endpoints_as_json_string():
     assert cfg.url == "http://e"
 
 
-def test_malformed_json_strings_fall_back_to_empty():
-    # invalid endpoints + stdio JSON → both decode to [] → REMOTE w/ no endpoints.
-    cfg = convert_to_device_format({
-        "server_code": "x", "run_mode": "REMOTE",
-        "endpoints": "not-json", "stdio_configs": "also-not-json",
-    })
+def test_malformed_json_endpoint_override_still_used():
+    cfg = convert_to_device_format(
+        {
+            "server_code": "x", "run_mode": "REMOTE",
+            "endpoints": "not-json", "stdio_configs": "also-not-json",
+        },
+        url_override="https://custom.example/mcp",
+    )
     assert cfg.transport == "sse"
-    assert cfg.url is None
+    assert cfg.url == "https://custom.example/mcp"
+
+
+def test_endpoints_without_valid_no_override_still_fails():
+    with pytest.raises(Exception, match="没有可用的"):
+        convert_to_device_format(
+            {
+                "server_code": "x", "run_mode": "REMOTE",
+                "endpoints": [
+                    {"url": "https://center.example/other", "networkType": "INTERNET", "env": "DAY"},
+                ],
+            },
+            endpoint_env="PROD",
+        )
+
+
+def test_no_center_endpoint_no_override_still_fails():
+    with pytest.raises(Exception, match="没有可用的"):
+        convert_to_device_format(
+            {"server_code": "x", "run_mode": "REMOTE", "endpoints": []},
+            endpoint_env="PROD",
+        )
+
+
+def test_endpoints_without_valid_override_still_used():
+    cfg = convert_to_device_format(
+        {
+            "server_code": "x", "run_mode": "REMOTE",
+            "endpoints": [
+                {"url": "https://center.example/other", "networkType": "INTERNET", "env": "DAY"},
+            ],
+        },
+        endpoint_env="PROD",
+        url_override="https://custom.example/mcp",
+    )
+    assert cfg.transport == "sse"
+    assert cfg.url == "https://custom.example/mcp"
+
+
+def test_no_center_endpoint_override_still_used_with_ok_transport_protocol():
+    cfg = convert_to_device_format(
+        {"server_code": "x", "run_mode": "REMOTE", "endpoints": []},
+        endpoint_env="PROD",
+        url_override="https://custom.example/mcp",
+    )
+    assert cfg.url == "https://custom.example/mcp"
+    assert cfg.transport == "sse"
+
+
+def test_no_center_endpoint_override_still_used_when_protocol_is_valid_for_override():
+    cfg = convert_to_device_format(
+        {"server_code": "x", "run_mode": "REMOTE", "endpoints": []},
+        endpoint_env="PROD",
+        url_override="https://custom.example/mcp",
+        strict_transport_protocol=True,
+    )
+    assert cfg.url == "https://custom.example/mcp"
+    assert cfg.transport == "sse"

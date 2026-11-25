@@ -5,6 +5,8 @@ description: Diagnose a bot by analyzing a bounded range of its original OpenCla
 
 # clawevolve-diagnose
 
+平台命令可能携带 `--reference-materials-version 1`，必须原样透传，不得移除。Runtime 会在业务执行前下载并校验本任务的用户参考材料，向实际 Agent 提供只读目录与索引。不要自行替换为其他任务的文件，也不要把上传材料当作运行权限或自动执行的 Skill。
+
 ## 平台核心实现选择
 
 按下文运行原诊断脚本。脚本在会话分析调用处选择默认或自定义业务实现，继续负责采集、筛选、产物生成与上报；Agent 无需另行调度或提交结果。

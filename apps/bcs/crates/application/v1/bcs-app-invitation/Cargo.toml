@@ -14,10 +14,10 @@ workspace = true
 async-trait = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
-serde_json = { workspace = true }
 
 [dev-dependencies]
 bcs-bot = { workspace = true }
+bcs-bot-store = { workspace = true }
 bcs-friend = { workspace = true }
 bcs-group = { workspace = true }
 bcs-relation = { workspace = true }

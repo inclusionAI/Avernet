@@ -1,0 +1,27 @@
+[package]
+name = "bcs-dist-gateway-store"
+description = "Gateway-side store providers of the distributed executor plane: task reader and session spec read"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bcs-dist-model = { workspace = true }
+bcs-dist-store = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-store-api = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+bcs-dist-projection = { workspace = true }
+bcs-test-support = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

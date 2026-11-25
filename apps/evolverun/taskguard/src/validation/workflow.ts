@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { normalizeSubworkflowFanout, validateSubworkflowFanouts } from "./subworkflow-fanout.js";
+import { snapshotWorkflowDependencies } from "../workflow-dependencies.js";
 import type { ActionRegistry } from "../actions/types.js";
 import type {
   Assertion,
@@ -1140,6 +1142,7 @@ function normalizeExecutorByType(raw: unknown, nodeId: string): NodeExecutor {
       }
 
     case "subworkflow": {
+      const fanout = normalizeSubworkflowFanout(obj.fanout, obj.version, `node ${nodeId}.executor`, fail, obj.onFailure);
       const workflowId = requireString(obj, "workflowId", `node ${nodeId}`);
       const packId = optionalString(obj, "packId");
       let params: Record<string, string> | undefined;
@@ -1160,6 +1163,8 @@ function normalizeExecutorByType(raw: unknown, nodeId: string): NodeExecutor {
       }
       return {
         type: "subworkflow",
+        ...(obj.version === "pinned" ? { version: "pinned" as const } : {}),
+        ...(fanout ? { fanout } : {}),
         workflowId,
         ...(packId ? { packId } : {}),
         ...(params ? { params } : {}),
@@ -2366,7 +2371,14 @@ export function normalizeWorkflowSpec(raw: unknown): WorkflowSpec {
     nodes: obj.nodes.map(normalizeNode),
     tests: normalizeTestCases(obj.tests, "tests"),
     nodeTemplates: normalizeNodeTemplates(obj.nodeTemplates),
+    subworkflowDependencies: obj.subworkflowDependencies as WorkflowSpec["subworkflowDependencies"],
   };
+
+  if (obj.subworkflowDependencies !== undefined) {
+    spec.subworkflowDependencies = snapshotWorkflowDependencies(spec);
+    // Validate child schemas without replacing any byte-significant release content.
+    for (const dependency of Object.values(spec.subworkflowDependencies)) normalizeWorkflowSpec(dependency.spec);
+  }
 
   // Preserve unknown top-level fields (aligns with ClawWeb's normalizeWorkflowSpec).
   // Same rationale as node-level passthrough in `normalizeNode`: keeps user/authored
@@ -2501,6 +2513,8 @@ export function analyzeContractSatisfiability(workflow: WorkflowSpec): {
 }
 
 export function validateWorkflowSemantics(workflow: WorkflowSpec): { warnings: ValidationIssue[] } {
+  validateSubworkflowFanouts(workflow, fail);
+  if (workflow.subworkflowDependencies !== undefined) snapshotWorkflowDependencies(workflow);
   const issues: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
   const nodeIds = new Set<string>();

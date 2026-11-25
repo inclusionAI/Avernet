@@ -228,3 +228,75 @@ AcceptInvitationPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
+
+PreviewInvitationPath:
+  get:
+    operationId: preview_invitation
+    tags: ["Collaboration / Invitations"]
+    summary: Preview an invitation and check the authenticated Human's membership.
+    description: >-
+      Verifies the signature, version, type and expiration before reading strict
+      current membership snapshots. Expired invitations remain invalid even for
+      members. This request never accepts the invitation, creates a Human actor,
+      updates message scope or returns participant details. Acceptance revalidates
+      independently; preflight is not an authorization grant for later requests.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - $ref: ../shared.yaml#/InvitationTokenPath
+    responses:
+      "200":
+        description: Minimal target metadata and direct Human membership.
+        headers:
+          Cache-Control:
+            schema:
+              type: string
+              const: "private, no-store"
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/InvitationPreviewEnvelope
+      "400":
+        description: Invalid invitation token.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          A User identity is required to preview invitation membership.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Token is unknown or its target is missing.
+        x-error-codes:
+          - invitation_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "410":
+        description: Invitation token has expired.
+        x-error-codes:
+          - invitation_expired
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse

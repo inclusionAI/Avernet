@@ -1,5 +1,6 @@
 import type { RuntimeRequestConfig } from '@/adapters/request';
 import { defaultRequestAdapter } from '@/adapters/request';
+import { resolveApiUrl } from '@/services/backendApi/apiBaseUrl';
 import { resolveAuthFailureDisposition } from '@/services/backendApi/authFailurePolicy';
 import { AceLoginRedirectError } from '@/services/backendApi/httpClient';
 import { isEnvelopeFailure } from '@/services/backendApi/types';
@@ -55,11 +56,12 @@ interface ReportFailureInput {
  * 投递默认提示(`errorNotifyStore.enqueue`)+ 抛 `RequestProtocolError`(挂 toastKey/alreadyHandled)。
  * 守分层:不直接 toast(由顶层观察者 `useErrorNotifyObserver` 消费);与通道 B 一致仅 enqueue 上抛。
  *
- * 未登录处置(与通道 B 对偶,见 `resolveAuthFailureDisposition`):oauth-provider 策略下,
- * - 未登录失败(HTTP 401 / 信封未登录体)→ 弹窗信号已由策略内单飞登记,静默抛 `AceLoginRedirectError`
- *   (与通道 B 同类错误,下游统一识别),不投递逐条错误 toast——未登录 UX 唯一出口是登录弹窗;
- * - 已确认未登录后的其余失败(cidm 500 等)→ 静默抛 `RequestProtocolError`(仍挂 alreadyHandled,
- *   下游 `safeReportError` 也不补发);ace-gateway 一律既有路径。
+ * 未登录处置(与通道 B 对偶,见 `resolveAuthFailureDisposition`):
+ * - 未登录失败(HTTP 401 / 信封未登录体,两策略均覆盖)→ 单飞登录信号已由策略内登记,静默抛
+ *   `AceLoginRedirectError`(与通道 B 同类错误,下游统一识别),不投递逐条错误 toast---未登录 UX
+ *   唯一出口是登录引导(oauth: `ExternalLoginPromptModal` / ace: `GatewayReauthModal`);
+ * - oauth 已确认未登录后的其余失败(cidm 500 等)→ 静默抛 `RequestProtocolError`(仍挂
+ *   alreadyHandled,下游 `safeReportError` 也不补发)。
  */
 export function reportProtocolFailure(input: ReportFailureInput): never {
   const disposition = resolveAuthFailureDisposition({ status: input.status, data: input.data });
@@ -132,6 +134,9 @@ export const request: RequestConfig = {
       const adapted = defaultRequestAdapter(config, { platform: getPlatform() });
       return {
         ...adapted,
+        // 与通道 B(httpClient)共用同一 URL 变体接缝:Open Core 恒等,
+        // 内部 Overlay 注册绝对地址改写规则后两通道行为一致。
+        url: typeof adapted.url === 'string' ? resolveApiUrl(adapted.url) : adapted.url,
         headers: {
           ...adapted.headers,
         },

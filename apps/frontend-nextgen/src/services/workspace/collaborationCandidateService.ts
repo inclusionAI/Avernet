@@ -1,3 +1,4 @@
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import type { IdentityReachability, IdentityStatus } from '@/domain/collaboration';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
 import { listBotMetadata, type BotMetadataDto } from '@/services/backendApi/bots/botController';
@@ -12,7 +13,7 @@ import {
   listFriendConnections,
   type FriendConnectionSummaryDto,
 } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
-import { discoverPublicBots } from '@/services/backendApi/collaboration/publicBotController';
+import { discoverPublicBots, type PublicBotDiscoveryDto } from '@/services/backendApi/collaboration/publicBotController';
 import type { DomainError, DomainResult } from './identityService';
 
 export interface CollaborationBotView {
@@ -30,8 +31,13 @@ export interface CollaborationBotView {
   isFriend?: boolean;
   engine?: string;
   botType?: string;
+  /** 服务 Bot 是否有可用的 online 发布；旧接口缺省不触发禁用。 */
+  onlineAvailable?: boolean | null;
   templateType?: string;
   templateName?: string;
+  /** Caller 模式标记('caller'):好友 Bot 会话 IAM 换签带 caller_runtime_target 使用
+   * (openspec add-iam-caller-runtime-target);缺失视为非 Caller Bot。 */
+  callType?: string;
   detailsResolved?: boolean;
 }
 
@@ -66,7 +72,7 @@ function mapBot(dto: CollaborationBotDto, isFriend?: boolean): CollaborationBotV
   return {
     id: dto.bot_id,
     name: dto.name ?? dto.bot_id,
-    avatarUrl: dto.avatar_url,
+    avatarUrl: resolveBotAvatarUrl(dto.avatar_url, dto.bot_id),
     summary: dto.descriptor?.summary,
     online: dto.status === 'online' && dto.reachability !== 'unreachable',
     status: dto.status === 'hidden' ? 'hidden' : 'online',
@@ -74,7 +80,36 @@ function mapBot(dto: CollaborationBotDto, isFriend?: boolean): CollaborationBotV
     visibility: dto.visibility ?? 'private',
     engine: dto.engine,
     botType: dto.bot_type,
+    // Caller 模式标记透传(openspec add-iam-caller-runtime-target);缺失保持 undefined。
+    callType: dto.call_type,
     ...(isFriend !== undefined ? { isFriend } : {}),
+  };
+}
+
+/** Discover 已按 viewer 过滤可见性；已加载候选只补充元数据，不限制搜索结果。 */
+function mapDiscoveredBot(dto: PublicBotDiscoveryDto, id: string, known?: CollaborationBotView): RecommendCandidateView {
+  const online = typeof dto.is_online === 'boolean' ? dto.is_online : known?.online ?? dto.status === 'online';
+  const visibility = dto.visibility === 'public' || dto.visibility === 'protected' || dto.visibility === 'private'
+    ? dto.visibility : known?.visibility ?? 'private';
+  const recommendation = dto.recommendation ?? {};
+  const shortProfile = typeof recommendation.short_profile === 'string' ? recommendation.short_profile.trim() : '';
+  return {
+    ...known,
+    id,
+    name: dto.name?.trim() || known?.name || id,
+    avatarUrl: resolveBotAvatarUrl(dto.avatar_url === undefined ? known?.avatarUrl : dto.avatar_url, dto.bot_id?.trim() || id),
+    summary: dto.description?.trim() || known?.summary,
+    online: online && known?.reachability !== 'unreachable',
+    status: online ? 'online' : 'hidden',
+    botStatus: dto.status || known?.botStatus,
+    reachability: known?.reachability ?? 'reachable',
+    visibility,
+    isFriend: typeof dto.is_friend === 'boolean' ? dto.is_friend : known?.isFriend,
+    engine: dto.engine || known?.engine,
+    botType: dto.bot_type || known?.botType,
+    recommendScore: typeof recommendation.score === 'number' && Number.isFinite(recommendation.score)
+      ? recommendation.score : 0,
+    ...(shortProfile ? { shortProfile } : {}),
   };
 }
 
@@ -82,6 +117,7 @@ function mapBotMetadata(dto: BotMetadataDto, id: string): CollaborationBotView {
   return {
     id,
     name: dto.bot_name || dto.bot_id,
+    avatarUrl: resolveBotAvatarUrl(dto.avatar_url, dto.bot_id),
     online: dto.status === 'ACTIVE' || dto.status === 'online',
     status: 'online',
     // 实例运行状态透传(2026-10-21):不再在视图层丢弃,FAILED/PENDING 供行级禁用与悬停提示感知。
@@ -91,8 +127,11 @@ function mapBotMetadata(dto: BotMetadataDto, id: string): CollaborationBotView {
     isFriend: true,
     engine: dto.engine,
     botType: dto.bot_type,
+    onlineAvailable: dto.online_available,
     templateType: dto.template_type,
     templateName: dto.template_name,
+    // Caller 模式标记透传(openspec add-iam-caller-runtime-target);缺失保持 undefined。
+    callType: dto.call_type,
   };
 }
 
@@ -106,6 +145,7 @@ function toUnavailableFriendBot(id: string, name?: string): CollaborationBotView
   return {
     id,
     name: name ?? id,
+    avatarUrl: resolveBotAvatarUrl(undefined, splitCompoundBotId(id).botId),
     online: false,
     status: 'hidden',
     reachability: 'reachable',
@@ -119,6 +159,7 @@ function toUnknownFriendBot(id: string): CollaborationBotView {
   return {
     id,
     name: id,
+    avatarUrl: resolveBotAvatarUrl(undefined, splitCompoundBotId(id).botId),
     online: false,
     status: 'hidden',
     reachability: 'reachable',
@@ -145,7 +186,7 @@ async function loadMetadataFriendDetails(
     },
   );
   const detailsByKey = new Map(
-    (botResp.data?.items ?? []).map((bot) => [bot.owner_id ? `${bot.bot_id}:${bot.owner_id}` : bot.bot_id, bot]),
+    (botResp.data?.items ?? []).map((bot) => [bot.bcn_bot_id || (bot.owner_id ? `${bot.bot_id}:${bot.owner_id}` : bot.bot_id), bot]),
   );
   return friendIds.map((friendId) => {
     const detail = detailsByKey.get(friendId);
@@ -300,12 +341,13 @@ export const collaborationCandidateService = {
     }
   },
 
-  /** 发起协作智能推荐：discover 结果与当前可协作列表求交集，在线优先、推荐分降序。 */
+  /** 发起协作语义发现：展示当前 viewer 的 discover 结果，在线优先、推荐分降序。 */
   async recommendCandidates(
     input: {
       actorId: string;
       actorKind: 'user' | 'bot';
       keyword: string;
+      /** 仅补充历史响应缺失的字段，不用本地已加载条目限制发现结果。 */
       candidates: CollaborationBotView[];
     },
     signal?: AbortSignal,
@@ -328,17 +370,12 @@ export const collaborationCandidateService = {
       );
       const candidateById = new Map(input.candidates.map((bot) => [bot.id, bot]));
       const recommended: RecommendCandidateView[] = [];
+      const seen = new Set<string>();
       for (const item of response.data?.items ?? []) {
-        const base = item.bot_uuid ? candidateById.get(item.bot_uuid) : undefined;
-        if (!base) continue;
-        const recommendation = (item.recommendation ?? {}) as { score?: unknown; short_profile?: unknown };
-        recommended.push({
-          ...base,
-          recommendScore: typeof recommendation.score === 'number' ? recommendation.score : 0,
-          ...(typeof recommendation.short_profile === 'string' && recommendation.short_profile
-            ? { shortProfile: recommendation.short_profile }
-            : {}),
-        });
+        const id = item.bot_uuid?.trim() || item.bot_id?.trim();
+        if (!id || (item.actor_kind && item.actor_kind !== 'bot') || seen.has(id)) continue;
+        seen.add(id);
+        recommended.push(mapDiscoveredBot(item, id, candidateById.get(id)));
       }
       recommended.sort((a, b) => (a.online === b.online ? b.recommendScore - a.recommendScore : a.online ? -1 : 1));
       return { ok: true, data: recommended };

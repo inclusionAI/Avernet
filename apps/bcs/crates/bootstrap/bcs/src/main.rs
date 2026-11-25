@@ -2,7 +2,6 @@
 //!
 //! A standalone service for multi-bot collaboration:
 //! - Bot registry (bot_uuid → bot with heartbeat)
-//! - Proposal generation for group chat creation
 //! - Group session management (Agent/Fusion modes)
 //! - Context fusion (single LLM call to merge bot contexts)
 //! - Message routing between bots
@@ -10,6 +9,10 @@
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
+
+#[cfg(feature = "a2a-http-e2e")]
+#[path = "../tests/a2a_http_identity/plugin.rs"]
+mod a2a_http_identity_fixture;
 
 /// Bot Coordination Service (BCS)
 #[derive(Parser, Debug)]

@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui';
+import { UserMessageText } from '@/components/Workspace/ChatPanel/UserMessageText';
 import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import {
   MessageCopyAction,
@@ -122,6 +123,18 @@ export function ChatMessageList({
               const isLastMessage = index === messages.length - 1;
               const sender = resolveSender(message);
               const messageText = getMessageText(message);
+              const blocks = getMessageBlocks(message);
+              // Project every user text block, but collapse only single-text messages.
+              // Copy/edit below intentionally retain the original message.
+              const userText = message.role === 'user'
+                ? (text: string) => (
+                    <UserMessageText
+                      content={text}
+                      collapsible={blocks.length === 1 && blocks[0].type === 'text'}
+                      forceExpanded={isRequesting && message.id === latestUserMessageId}
+                    />
+                  )
+                : undefined;
               return (
                 // 分组间距(mb-4/mb-6)落在消息项外壳：操作行随内容列渲染在气泡紧下方，
                 // 不再隔着 mb 间距悬浮（dmore 实测：操作图标 x=36 与正文左对齐、距正文 ~8px）。
@@ -152,8 +165,9 @@ export function ChatMessageList({
                         maxWidth: '48rem',
                       }}
                       timestamp={undefined}
-                      blocks={getMessageBlocks(message)}
+                      blocks={blocks}
                       preset="openclaw"
+                      renderText={userText}
                       markdown={{ preset: 'full', extensions: [aixUiPlugin, fileRefPlugin] }}
                       tool={{ defaultCollapsed: !(isLastMessage && isRequesting) }}
                       isStreaming={isLastMessage && isRequesting && message.role === 'assistant'}

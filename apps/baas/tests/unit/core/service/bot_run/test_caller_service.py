@@ -211,3 +211,30 @@ class TestSelectorCallerRouting:
             claw_service=claw, baas_service=baas, caller_service=caller
         )
         assert selector.select(_binding(sandbox_id=None)) is caller
+
+
+@pytest.mark.parametrize("sandbox_id", ["sbx-1", None])
+async def test_runtime_status_requires_caller_binding_and_delegates(sandbox_id):
+    inner = MagicMock()
+    inner.get_session_runtime_status = AsyncMock(return_value="observation")
+    service = CallerBotService(inner)
+    binding = _binding(sandbox_id=sandbox_id)
+    if sandbox_id is None:
+        with pytest.raises(BotServiceError, match="explicit sandbox_id"):
+            await service.get_session_runtime_status(
+                session_id="s-1", binding_info=binding
+            )
+        inner.get_session_runtime_status.assert_not_called()
+    else:
+        assert (
+            await service.get_session_runtime_status(
+                session_id="s-1",
+                binding_info=binding,
+            )
+            == "observation"
+        )
+        inner.get_session_runtime_status.assert_awaited_once_with(
+            session_id="s-1",
+            binding_info=binding,
+            context=None,
+        )

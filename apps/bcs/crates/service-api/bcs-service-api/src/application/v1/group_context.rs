@@ -50,6 +50,8 @@ pub struct GroupContextRequestContext {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AddGroupContext {
+    #[serde(default)]
+    pub preset: bool,
     pub actor_id: String,
     pub request_context: GroupContextRequestContext,
     pub name: String,
@@ -191,9 +193,62 @@ pub struct GroupContextGetResponse {
     pub items: Vec<GroupContextGetItem>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct SharedGroupContextItem {
+    pub name: String,
+    pub scope_level: ScopeLevel,
+    pub scope: String,
+    pub content: String,
+    pub creator: String,
+    pub gmt_modified: GroupContextTime,
+}
+
+pub struct ListSharedGroupContexts {
+    pub group_id: String,
+    pub session_id: Option<String>,
+    pub actor_ids: Vec<String>,
+}
+
 #[async_trait]
 pub trait GroupContextApplicationService: Send + Sync {
     async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError>;
+
+    async fn shared_info(
+        &self,
+        _group_id: &str,
+        _session_id: Option<&str>,
+        _view_bot_id: Option<&str>,
+        _caller: &super::AuthenticatedCaller,
+    ) -> Result<Vec<SharedGroupContextItem>, ApplicationError> {
+        Err(ApplicationError::internal("shared information authorization unavailable"))
+    }
+
+    async fn list_shared_contexts(
+        &self,
+        _query: ListSharedGroupContexts,
+    ) -> Result<Vec<SharedGroupContextItem>, ApplicationError> {
+        Err(ApplicationError::internal("shared information query unavailable"))
+    }
+
+    async fn can_manage_presets(&self, _group_id: &str, _actor: &str) -> Result<bool, ApplicationError> {
+        Ok(false)
+    }
+
+    async fn list_presets(&self, _group_id: &str, _caller: &super::AuthenticatedCaller, _session_id: Option<&str>) -> Result<Vec<GroupContextItemPreset>, ApplicationError> {
+        Err(ApplicationError::internal("presets unavailable"))
+    }
+
+    async fn add_preset(&self, _group_id: &str, _actor: &str, _name: String, _description: String) -> Result<(), ApplicationError> {
+        Err(ApplicationError::internal("presets unavailable"))
+    }
+
+    async fn update_preset(&self, _group_id: &str, _actor: &str, _name: String, _new_name: Option<String>, _description: Option<String>) -> Result<(), ApplicationError> {
+        Err(ApplicationError::internal("presets unavailable"))
+    }
+
+    async fn delete_preset(&self, _group_id: &str, _actor: &str, _name: String) -> Result<(), ApplicationError> {
+        Err(ApplicationError::internal("presets unavailable"))
+    }
 
     async fn update(
         &self,
@@ -215,3 +270,5 @@ pub trait GroupContextApplicationService: Send + Sync {
         command: SystemSetGroupContext,
     ) -> Result<GroupContextAck, ApplicationError>;
 }
+
+pub use bcs_domain::group_context::{GroupContextItemPreset, GroupContextItemPresetChange};

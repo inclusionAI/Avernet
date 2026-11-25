@@ -1,3 +1,4 @@
+import { captureApiError } from "./error-log-format.js";
 /** Workflow list endpoints. Cache data, but re-evaluate access on every request. */
 import { Router, type Request, type Response } from "express";
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
@@ -99,6 +100,7 @@ export function registerWorkflowListRoutes(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[workflows-list] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -160,6 +162,7 @@ export function registerWorkflowListRoutes(
       res.json(result);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[workflows-list] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));

@@ -3,6 +3,11 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
+from agentclaw.community.core.service_bot.repository.models import (
+    BotPublishRecord,
+)
+from agentclaw.community.kernel.device_dto import ResourceSpecification
+
 
 @runtime_checkable
 class PublishFlowServiceProtocol(Protocol):
@@ -25,3 +30,56 @@ class PublishFlowServiceProtocol(Protocol):
     async def execute_rollback(self, *args: Any, **kwargs: Any) -> Any: ...
 
     async def execute_restore_draft(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    async def eval_publish(
+        self,
+        publish_id: int,
+        operator: str,
+        biz_id: str = "",
+        default_tag: str = "",
+        template_uuid: str = "",
+        ttl_seconds: int | None = None,
+        migration_path: str | None = None,
+        config_artifact: str | None = None,
+        docker_image: str | None = None,
+        resource_spec: ResourceSpecification | None = None,
+        device_count: int = 1,
+    ) -> dict[str, Any]:
+        """Submit an eval deployment without advancing the main publication.
+
+        Callers validate resource addressing and authorize the actor separately.
+        Submission success is not readiness.
+        resource_spec replaces template resource settings for this deployment only;
+        None preserves existing defaults. Disk units/support are provider-defined.
+        device_count is the number of BaaS deployment instances in this eval
+        environment; 1 preserves prior behavior and provider-defined upper limits
+        still apply.
+        """
+        ...
+
+    def compose_eval_delivery(
+        self,
+        publish_record: BotPublishRecord,
+        *,
+        default_tag: str,
+        device_provider: str,
+    ) -> Any:
+        """Compose the final EVAL delivery artifact for one evaluation instance."""
+        ...
+
+    def get_baas_publish_progress(
+        self, *, baas_publish_id: int, include_devices: bool = True,
+    ) -> dict[str, Any]:
+        """Read BaaS workflow progress; callers authorize workflow access separately."""
+        ...
+
+    def eval_teardown(
+        self,
+        bot_uuid: str,
+        *,
+        operator: str = "system",
+        publish_id: int = 0,
+        default_tag: str = "",
+    ) -> dict[str, Any]:
+        """Enqueue durable eval teardown; acceptance does not imply completion."""
+        ...

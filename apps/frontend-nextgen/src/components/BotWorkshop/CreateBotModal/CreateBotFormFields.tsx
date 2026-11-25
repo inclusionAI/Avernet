@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Switch } from '@/components/ui/Switch';
 import { Textarea } from '@/components/ui/Textarea';
 import { useBotEngineOptions } from '@/hooks/useBotEngineOptions';
@@ -7,7 +8,8 @@ import type { BotCreateInput, BotCreateSpace } from '@/services/botWorkshop';
 import { supportsServiceBot, type AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
 import { cn } from '@/utils/cn';
 import type React from 'react';
-import AvatarEditor from '../BotAvatar/AvatarEditor';
+import { useState } from 'react';
+import AvatarEditor, { type AvatarProcessingStatus } from '../BotAvatar/AvatarEditor';
 import { AgentCodingSection } from './agentCoding/AgentCodingSection';
 import { CreateBotEngineSelector } from './CreateBotEngineSelector';
 import { DesktopDeviceFields } from './DesktopDeviceFields';
@@ -18,6 +20,7 @@ interface CreateBotFormFieldsProps {
   spaces: BotCreateSpace[];
   creating: boolean;
   error?: string;
+  onErrorChange?: (error?: string) => void;
   agentCodingError?: string;
   agentCodingTemplates: AgentCodingTemplate[];
   agentCodingTemplatesLoading?: boolean;
@@ -38,6 +41,7 @@ export function CreateBotFormFields({
   spaces,
   creating,
   error,
+  onErrorChange,
   agentCodingError,
   agentCodingTemplates,
   agentCodingTemplatesLoading,
@@ -48,6 +52,7 @@ export function CreateBotFormFields({
   onCancel,
   onSubmit,
 }: CreateBotFormFieldsProps) {
+  const [avatarStatus, setAvatarStatus] = useState<AvatarProcessingStatus>('idle');
   const configuredEngines = useBotEngineOptions();
   const engineOptions =
     values.scenario === 'local'
@@ -112,7 +117,7 @@ export function CreateBotFormFields({
     ) : null;
 
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
+    <form className="space-y-4" onSubmit={(event) => { if (avatarStatus !== 'idle') event.preventDefault(); else onSubmit(event); }}>
       {isLocal ? <DesktopDeviceFields values={values} setValues={setValues} /> : null}
       <div className="space-y-4">
         <label className="block space-y-2 text-xs font-medium text-foreground">
@@ -127,7 +132,12 @@ export function CreateBotFormFields({
             maxLength={40}
             placeholder="例如：项目知识助手"
             className={inputFocusClass}
-            onChange={(event) => setValues((current) => ({ ...current, name: event.target.value }))}
+            onChange={(event) => {
+              // 名称修正后立即清理上一次提交遗留的名称错误，避免旧错误
+              // 持续置红名称输入框，也避免遮挡 AgentCoding 配置校验提示。
+              onErrorChange?.(undefined);
+              setValues((current) => ({ ...current, name: event.target.value }));
+            }}
             aria-invalid={Boolean(error || nameHasInvalidCharacter)}
           />
           {nameHasInvalidCharacter ? (
@@ -153,6 +163,7 @@ export function CreateBotFormFields({
         <div className="space-y-2 text-xs font-medium text-foreground">
           <span className="block">Bot 头像</span>
           <AvatarEditor
+            onProcessingChange={setAvatarStatus}
             value={values.avatarUrl ?? ''}
             seed={values.name.trim() || 'new-bot'}
             disabled={creating}
@@ -185,15 +196,21 @@ export function CreateBotFormFields({
           <span id="create-bot-space-label" className="block">
             归属空间
           </span>
-          <div
-            aria-labelledby="create-bot-space-label"
-            className="flex h-9 w-full items-center truncate rounded-md border border-input bg-muted/30 px-3 text-xs font-normal text-foreground"
+          <Select
+            value={values.spaceId}
+            disabled={creating || isLocal}
+            onValueChange={(spaceId) => {
+              const space = spaces.find((item) => item.id === spaceId);
+              if (space) setValues((current) => ({ ...current, spaceId: space.id, ownership: space.ownership }));
+            }}
           >
-            {spaces[0]?.name ?? '当前空间不可用'}
-          </div>
-          <span className="block text-[10px] font-normal text-muted-foreground">
-            跟随当前工作空间，不支持在创建时切换
-          </span>
+            <SelectTrigger aria-labelledby="create-bot-space-label"><SelectValue placeholder="当前空间不可用" /></SelectTrigger>
+            <SelectContent>
+              {spaces.map((space) => (
+                <SelectItem key={space.id} value={space.id} disabled={!space.canCreate}>{space.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="flex flex-col gap-2 text-xs font-medium text-foreground">
@@ -227,7 +244,13 @@ export function CreateBotFormFields({
           </Button>
           <Button
             type="submit"
-            disabled={!hasEngineOptions || creating || (isLocal && !values.local?.mountPath)}
+            disabled={
+              !hasEngineOptions ||
+              Boolean(isAgentCoding && agentCodingError) ||
+              creating ||
+              avatarStatus !== 'idle' ||
+              (isLocal && !values.local?.mountPath)
+            }
             loading={creating}
           >
             {isLocal ? '创建本地 Bot' : '创建云端 Bot'}

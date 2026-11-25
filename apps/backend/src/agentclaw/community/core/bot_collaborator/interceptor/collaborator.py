@@ -2,6 +2,7 @@
 
 检查用户是否有操作 Bot 的权限，支持操作日志记录。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -9,11 +10,14 @@ import inspect
 import json
 from typing import Callable
 
+from agentclaw.community.core.access import admin_scopes
 from agentclaw.community.core.bot_collaborator.interceptor.base import (
     InterceptedResponse,
     InterceptorContext,
 )
-from agentclaw.community.core.bot_collaborator.interceptor.expression import ExpressionResolver
+from agentclaw.community.core.bot_collaborator.interceptor.expression import (
+    ExpressionResolver,
+)
 from agentclaw.community.core.bot_collaborator.interceptor.extractors import (
     PermissionParams,
     PermissionParamsExtractor,
@@ -96,6 +100,7 @@ class CollaboratorPermissionInterceptor:
         # 编辑/操作域：权限必须立足于显式协作者行或所有权，空间成员
         # 身份合成的 MEMBER 不算
         explicit: bool = False,
+        allow_super_admin: bool = False,
     ):
         """初始化拦截器。
 
@@ -111,6 +116,8 @@ class CollaboratorPermissionInterceptor:
             audit_excluded_params: 审计日志中排除的请求参数名，用于敏感字段脱敏。
             skip_lock_check: 是否跳过锁检查，默认 False。
                 设置为 True 时，只检查协作者权限，不检查锁状态（用于抢锁等特殊操作）。
+            allow_super_admin: 仅显式启用的运维路由允许 super_admin 白名单跨 Bot
+                操作，无需编辑锁；仍检查 Bot 交接维护状态并保留真实操作者审计。
             explicit: 编辑/操作域置 True —— 权限判定走显式阶梯，只认所
                 有权与显式协作者行（迭代11 编辑权限申请审批策略 §3.1），
                 Space 身份合成的 MEMBER 在该域没有发言权。读类面保持默认。
@@ -124,6 +131,7 @@ class CollaboratorPermissionInterceptor:
         self.audit_excluded_params = frozenset(audit_excluded_params or ())
         self.skip_lock_check = skip_lock_check
         self.explicit = explicit
+        self.allow_super_admin = allow_super_admin
         self.resolver = ExpressionResolver()
 
         # 简单模式的提取器
@@ -166,6 +174,71 @@ class CollaboratorPermissionInterceptor:
         # 提取权限参数
         params = await self._extract_params(ctx)
 
+        if (
+            ctx.request is not None
+            and user_id != "anonymous"
+            and params.bot_id
+        ):
+            from agentclaw.community.core.bot_management.addressing import (
+                BotAddressResolver,
+            )
+            from agentclaw.community.core.bot_management.errors import (
+                BotAddressNotFoundError,
+            )
+            from agentclaw.community.core.bot_management.owner_handoff.guard import (
+                assert_bot_mutable,
+            )
+            from agentclaw.community.core.bot_management.owner_handoff.contracts import (
+                HandoffError,
+            )
+
+            if ctx.injector is not None:
+                from agentclaw.community.core.repository.protocols.bot import (
+                    BotRepository,
+                )
+
+                repository = ctx.injector.get(BotRepository)
+                try:
+                    address_resolver = BotAddressResolver(repository)
+                    if params.source_bot_pk is not None:
+                        addressed = await asyncio.to_thread(
+                            address_resolver.resolve_publish_source,
+                            source_bot_pk=params.source_bot_pk,
+                            source_bot_id=params.bot_id,
+                            legacy_owner_id=params.owner_id or user_id,
+                        )
+                    else:
+                        addressed = await asyncio.to_thread(
+                            address_resolver.resolve,
+                            bot_id=params.bot_id,
+                            legacy_owner_id=params.owner_id or user_id,
+                        )
+                except BotAddressNotFoundError:
+                    if params.source_bot_pk is not None:
+                        ctx.response = InterceptedResponse(
+                            success=False, message="发布记录关联的 Bot 不存在", error_code=404,
+                        )
+                        return None
+                    pass  # The existing route retains its missing-Bot behavior.
+                else:
+                    try:
+                        if ctx.request.method not in {"GET", "HEAD", "OPTIONS"}:
+                            assert_bot_mutable(addressed.bot)
+                    except HandoffError:
+                        ctx.response = InterceptedResponse(
+                            success=False,
+                            message="BOT_OWNER_HANDOFF_IN_PROGRESS",
+                            error_code=423,
+                        )
+                        return None
+
+                    # Historical resource locators remain stable across handoff;
+                    # authority belongs to the resolved Bot's current Owner.
+                    params = PermissionParams(
+                        bot_id=addressed.bot_id,
+                        owner_id=addressed.current_owner_id,
+                    )
+
         # 缓存日志所需信息（用于 after 阶段）
         ctx.metadata["_log_user_id"] = user_id
         ctx.metadata["_log_bot_id"] = params.bot_id
@@ -174,17 +247,36 @@ class CollaboratorPermissionInterceptor:
         # 获取 trace_id
         try:
             import opentracing
+
             scope = opentracing.tracer.scope_manager.active
             if scope and scope.span:
                 ctx.metadata["_log_trace_id"] = str(scope.span.context.trace_id)
         except Exception:
             pass
 
+        # Opt-in operations permission: do not turn platform admins into Bot
+        # collaborators globally. Resolution and the handoff write fence above
+        # still apply; the after hook retains the actual actor's audit record.
+        if (
+            self.allow_super_admin
+            and user_id != "anonymous"
+            and user_id in admin_scopes.super_admin()
+        ):
+            ctx.metadata["permission_level"] = PermissionLevel.ADMIN.name
+            ctx.metadata["platform_admin"] = True
+            logger.info(
+                "[before] platform admin operation: user_id=%s bot_id=%s owner_id=%s",
+                user_id, params.bot_id, params.owner_id,
+            )
+            return ctx
+
         # 没有 owner_id 时尝试主动解析 Bot 归属，而非直接放行
         # 修复：省略 owner_id 不应绕过鉴权（水平越权漏洞）
         if not params.owner_id:
             resolved_owner_id = self._resolve_owner_id(
-                ctx, params.bot_id, user_id,
+                ctx,
+                params.bot_id,
+                user_id,
             )
             if resolved_owner_id is None:
                 # 无法解析（BotRepository 不可用或 bot 不存在）：
@@ -282,7 +374,9 @@ class CollaboratorPermissionInterceptor:
             # 不应被 bot 级锁拦截。因此对 coding 应用等效 skip_lock_check。
             # 仅在「本会强制锁」时才查 bot，避免给 Service Bot 写路径平添开销。
             skip_lock = self.skip_lock_check or not self.persist_audit_log
-            if not skip_lock and self._is_coding_app(ctx, params.bot_id, params.owner_id):
+            if not skip_lock and self._is_coding_app(
+                ctx, params.bot_id, params.owner_id
+            ):
                 skip_lock = True
 
             # 跳过锁检查（抢锁/禁用审计/coding 应用）：只校验协作者权限
@@ -400,7 +494,9 @@ class CollaboratorPermissionInterceptor:
             return
 
         # 获取方法全路径
-        func_path = f"{ctx.func.__module__}.{ctx.func.__qualname__}" if ctx.func else "unknown"
+        func_path = (
+            f"{ctx.func.__module__}.{ctx.func.__qualname__}" if ctx.func else "unknown"
+        )
 
         # 跳过权限检查或没有权限则不记录日志
         permission_level = ctx.metadata.get("permission_level")
@@ -410,18 +506,33 @@ class CollaboratorPermissionInterceptor:
         owner_id = ctx.metadata.get("_log_owner_id")
         if permission_skipped:
             # 没有 owner_id 且无法解析，跳过权限检查，不记录日志
-            logger.info("[after] 跳过权限检查（无 owner_id），不插入操作日志, user_id=%s, bot_id=%s, owner_id=%s, func=%s",
-                        user_id, bot_id, owner_id, func_path)
+            logger.info(
+                "[after] 跳过权限检查（无 owner_id），不插入操作日志, user_id=%s, bot_id=%s, owner_id=%s, func=%s",
+                user_id,
+                bot_id,
+                owner_id,
+                func_path,
+            )
             return
         if not permission_level:
             # 权限检查未通过，打印日志但不插入操作记录
-            logger.info("[after] 没有权限，不插入操作日志, user_id=%s, bot_id=%s, owner_id=%s, func=%s",
-                        user_id, bot_id, owner_id, func_path)
+            logger.info(
+                "[after] 没有权限，不插入操作日志, user_id=%s, bot_id=%s, owner_id=%s, func=%s",
+                user_id,
+                bot_id,
+                owner_id,
+                func_path,
+            )
             return
         if permission_level == "OWNER":
             # owner 操作只打印日志，不插入操作记录
-            logger.info("[after] owner 操作，不插入操作日志, user_id=%s, bot_id=%s, owner_id=%s, func=%s",
-                        user_id, bot_id, owner_id, func_path)
+            logger.info(
+                "[after] owner 操作，不插入操作日志, user_id=%s, bot_id=%s, owner_id=%s, func=%s",
+                user_id,
+                bot_id,
+                owner_id,
+                func_path,
+            )
             return
 
         try:
@@ -437,7 +548,7 @@ class CollaboratorPermissionInterceptor:
                     try:
                         if key == "user" or key in self.audit_excluded_params:
                             continue
-                        if hasattr(value, 'model_dump'):
+                        if hasattr(value, "model_dump"):
                             params[key] = value.model_dump()
                         elif isinstance(value, (str, int, float, bool, type(None))):
                             params[key] = value
@@ -448,18 +559,28 @@ class CollaboratorPermissionInterceptor:
                 if not log_repo:
                     return
 
-                logger.info("[after] Logged: user_id=%s, bot_id=%s, owner_id=%s, func=%s, params=%s",
-                            user_id, bot_id, owner_id, func_path, json.dumps(params))
+                logger.info(
+                    "[after] Logged: user_id=%s, bot_id=%s, owner_id=%s, func=%s, params=%s",
+                    user_id,
+                    bot_id,
+                    owner_id,
+                    func_path,
+                    json.dumps(params),
+                )
 
-                log_repo.insert({
-                    "bot_id": bot_id,
-                    "owner_id": owner_id or "",
-                    "detail": json.dumps({
-                        "func": func_path,
-                        "trace_id": ctx.metadata.get("_log_trace_id"),
-                    }),
-                    "operator_id": user_id,
-                })
+                log_repo.insert(
+                    {
+                        "bot_id": bot_id,
+                        "owner_id": owner_id or "",
+                        "detail": json.dumps(
+                            {
+                                "func": func_path,
+                                "trace_id": ctx.metadata.get("_log_trace_id"),
+                            }
+                        ),
+                        "operator_id": user_id,
+                    }
+                )
 
             asyncio.create_task(asyncio.to_thread(_do_log))
         except Exception as e:
@@ -479,8 +600,8 @@ class CollaboratorPermissionInterceptor:
 
             # 根据函数签名决定是否传入 ctx
             sig = inspect.signature(self.params_extractor)
-            if 'ctx' in sig.parameters:
-                kwargs['ctx'] = ctx
+            if "ctx" in sig.parameters:
+                kwargs["ctx"] = ctx
 
             # 调用回调函数
             result = self.params_extractor(**kwargs)
@@ -526,12 +647,14 @@ class CollaboratorPermissionInterceptor:
 
         if ctx.injector is None:
             logger.warning(
-                "[_resolve_owner_id] injector 不可用，bot_id=%s", bot_id,
+                "[_resolve_owner_id] injector 不可用，bot_id=%s",
+                bot_id,
             )
             return None
 
         try:
             from agentclaw.community.core.repository.protocols.bot import BotRepository
+
             repo = ctx.injector.get(BotRepository)
             bot = repo.get_by_id(bot_id)
             if (
@@ -542,12 +665,15 @@ class CollaboratorPermissionInterceptor:
             ):
                 return bot["owner_id"]
             logger.warning(
-                "[_resolve_owner_id] bot 未找到或无 owner_id, bot_id=%s", bot_id,
+                "[_resolve_owner_id] bot 未找到或无 owner_id, bot_id=%s",
+                bot_id,
             )
             return None
         except Exception as e:
             logger.warning(
-                "[_resolve_owner_id] 查询 bot 失败: %s, bot_id=%s", e, bot_id,
+                "[_resolve_owner_id] 查询 bot 失败: %s, bot_id=%s",
+                e,
+                bot_id,
             )
             return None
 
@@ -650,7 +776,10 @@ class CollaboratorPermissionInterceptor:
         if injector is None:
             return None
         try:
-            from agentclaw.community.core.repository.protocols.bot import BotCollabLogRepositoryProtocol
+            from agentclaw.community.core.repository.protocols.bot import (
+                BotCollabLogRepositoryProtocol,
+            )
+
             return injector.get(BotCollabLogRepositoryProtocol)
         except Exception:
             return None

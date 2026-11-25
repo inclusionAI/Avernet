@@ -90,6 +90,7 @@ def downgrade_to_v4(directory):
         db.execute("CREATE INDEX outbox_due ON outbox(binding_id, state, due_ms)")
         db.execute("DROP TABLE hosting_resolutions")
         db.execute("ALTER TABLE inbox DROP COLUMN received_ms")
+        db.execute("ALTER TABLE executions DROP COLUMN review_json")
         db.execute("PRAGMA user_version = 4")
 
 
@@ -111,7 +112,7 @@ def test_v4_migration_preserves_pending_and_final_records(tmp_path, phase):
     after = SqliteHostingOutbox(directory).get("binding", item.delivery_id)
     assert before == after
     with sqlite3.connect(directory / "dws_hosting.sqlite3") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 7
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
 
 

@@ -100,7 +100,11 @@ class CronTargetedOperationsMixin:
                 raise CronRelayError(
                     "Cron delegation requires Bot management permission", 403
                 ) from exc
-        if bot.get("call_type") == "caller" and runtime_stage != "online":
+        if (
+            bot.get("call_type") == "caller"
+            and str(bot.get("active_engine") or "").strip().lower() != "teclaw"
+            and runtime_stage != "online"
+        ):
             raise CronRelayError(
                 "Caller Cron targets only support runtime_stage=online", 400
             )
@@ -195,6 +199,7 @@ class CronTargetedOperationsMixin:
         body: dict | None = None,
         params: dict | None = None,
         include_bot_context: bool = False,
+        _resolved_target: CronRuntimeTarget | None = None,
     ) -> dict:
         started = monotonic()
         authenticated_user = authenticated_user_id or user_id
@@ -217,14 +222,20 @@ class CronTargetedOperationsMixin:
         )
         transport_started = False
         try:
-            bot, target = await self._resolve_single_cron_target(
-                bot_id=bot_id,
-                user_id=user_id,
-                runtime_stage=runtime_stage,
-                device_uuid=device_uuid,
-                operator_id=operator_id,
-                authenticated_user_id=authenticated_user,
-            )
+            if _resolved_target is None:
+                bot, target = await self._resolve_single_cron_target(
+                    bot_id=bot_id,
+                    user_id=user_id,
+                    runtime_stage=runtime_stage,
+                    device_uuid=device_uuid,
+                    operator_id=operator_id,
+                    authenticated_user_id=authenticated_user,
+                )
+            else:
+                # COSEC: Only the authenticated list's resolved binding and member
+                # snapshot enter here; HTTP target fields cannot supply this value.
+                target = _resolved_target
+                bot = {"bot_name": target.bot_name}
             logger.info(
                 "cron.transport.request system=engine direction=out fields=%s binding_id=%s body=%s params=%s",
                 fields,

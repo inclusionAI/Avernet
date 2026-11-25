@@ -4,8 +4,9 @@ import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import type { BotEditorResource, BotEditorResourcePreview } from '@/domain/botEditor';
 import { buildVisibleResourceTree } from '@/services/botWorkshop/resourceTree';
-import { ChevronRight, Folder, FolderPlus, Upload } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { FolderPlus, Upload } from 'lucide-react';
+import { toast } from 'sonner';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ResourcePanelRow } from './ResourcePanelRow';
 import { ResourcePreviewDrawer } from './ResourcePreviewDrawer';
 
@@ -22,6 +23,10 @@ export function ResourcePanel({
   onCopyPath,
   onLoadDirectory,
   loadingPaths,
+  errors = {},
+  loadedPaths,
+  onRetry,
+  rootReady = true,
 }: {
   resources: BotEditorResource[];
   editable: boolean;
@@ -35,6 +40,10 @@ export function ResourcePanel({
   onCopyPath: (path: string) => Promise<void>;
   onLoadDirectory: (path: string) => Promise<void>;
   loadingPaths: string[];
+  errors?: Record<string, string>;
+  loadedPaths?: string[];
+  onRetry?: (path: string) => Promise<void>;
+  rootReady?: boolean;
 }) {
   const [path, setPath] = useState('');
   const [preview, setPreview] = useState<{ path: string; result: BotEditorResourcePreview }>();
@@ -42,11 +51,39 @@ export function ResourcePanel({
   const [createOpen, setCreateOpen] = useState(false);
   const [createParent, setCreateParent] = useState('');
   const [expanded, setExpanded] = useState<string[]>([]);
-  const [loaded, setLoaded] = useState<string[]>([]);
+  const [localLoadedPaths, setLocalLoadedPaths] = useState<string[]>([]);
+  const effectiveLoadedPaths = loadedPaths ?? localLoadedPaths;
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadDirectoryRef = useRef('');
+  const uploadTargetInvalid = useRef(false);
+  useEffect(() => {
+    if (loadedPaths) setExpanded((current) => {
+      const retained = current.filter((path) => loadedPaths.includes(path) || loadingPaths.includes(path) || Boolean(errors[path]));
+      return retained.length === current.length ? current : retained;
+    });
+  }, [loadedPaths, loadingPaths, errors]);
+  useEffect(() => {
+    if (!rootReady || loadingPaths.includes('') || errors['']) return;
+    // A missing descendant is only conclusive when its direct parent was loaded.
+    const confirmedMissing = (candidate: string) => {
+      let parent = '';
+      for (const part of candidate.split('/').filter(Boolean)) {
+        if (!(loadedPaths ?? ['']).includes(parent) || loadingPaths.includes(parent) || errors[parent]) return false;
+        const currentParent = parent;
+        const child = currentParent ? `${currentParent}/${part}` : part;
+        if (!resources.some((item) => item.parentPath === currentParent && item.path === child && item.type === 'folder')) return true;
+        parent = child;
+      }
+      return false;
+    };
+    if (directory && confirmedMissing(directory)) setDirectory('');
+    if (uploadDirectoryRef.current && confirmedMissing(uploadDirectoryRef.current)) uploadTargetInvalid.current = true;
+    if (createOpen && createParent && confirmedMissing(createParent)) {
+      setCreateOpen(false);
+      setCreateParent('');
+    }
+  }, [resources, rootReady, loadingPaths, loadedPaths, errors, directory, createOpen, createParent]);
   const visibleResources = useMemo(() => buildVisibleResourceTree(resources, expanded), [expanded, resources]);
-  const breadcrumbSegments = useMemo(() => directory.split('/').filter(Boolean), [directory]);
   const uploadToDirectory = async (target: string, file: File) => {
     await onUpload(target ? `${target}/${file.name}` : file.name, file);
     if (target) await onLoadDirectory(target);
@@ -59,22 +96,22 @@ export function ResourcePanel({
       return;
     }
     setExpanded((current) => [...current, target]);
-    if (!loaded.includes(target)) {
-      void onLoadDirectory(target)
-        .then(() => setLoaded((current) => [...new Set([...current, target])]))
-        .catch(() => undefined);
+    if (!effectiveLoadedPaths.includes(target)) {
+      void onLoadDirectory(target).then(() => {
+        if (!loadedPaths) setLocalLoadedPaths((current) => [...new Set([...current, target])]);
+      }).catch(() => undefined);
     }
   };
   return (
     <div className="flex min-h-full flex-col bg-background">
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border bg-card px-8 py-5 lg:px-10">
-        <div>
-          <h2 className="m-0 text-sm font-semibold tracking-tight">资源目录</h2>
-          <p className="m-0 mt-1 text-xs text-muted-foreground">上传文件、新建目录，支持预览、下载与删除。</p>
+      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-divider bg-card px-8 lg:px-10">
+        <div className="min-w-0">
+          <h2 className="m-0 truncate text-sm font-semibold">资源目录</h2>
+          <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">上传文件、新建目录，支持预览、下载与删除。</p>
         </div>
-        <div className="flex max-w-full shrink-0 flex-wrap justify-end gap-2">
+        <div className="flex max-w-full shrink-0 justify-end gap-2">
           {desktop && onOpenFolder ? (
-            <Button variant="outline" size="sm" onClick={() => void onOpenFolder(directory || undefined)}>
+            <Button variant="outline" size="md" onClick={() => void onOpenFolder(directory || undefined)}>
               打开本地目录
             </Button>
           ) : null}
@@ -87,24 +124,27 @@ export function ResourcePanel({
               const file = event.target.files?.[0];
               const target = uploadDirectoryRef.current;
               // 失败提示已由 act 的 toast 负责，吞掉传播避免 dev 遮罩报 Unhandled Rejection
-              if (file) void uploadToDirectory(target, file).catch(() => undefined);
+              if (file && uploadTargetInvalid.current) toast.error('目标目录已不存在，请重新选择');
+              else if (file) void uploadToDirectory(target, file).catch(() => undefined);
               event.target.value = '';
             }}
           />
           <Button
             variant="outline"
-            size="sm"
+            size="md"
             disabled={!editable}
             leftIcon={<Upload className="size-4" />}
             onClick={() => {
               uploadDirectoryRef.current = directory;
+              uploadTargetInvalid.current = false;
               uploadRef.current?.click();
             }}
           >
             上传文件
           </Button>
           <Button
-            size="sm"
+            variant="outline"
+            size="md"
             disabled={!editable}
             leftIcon={<FolderPlus className="size-4" />}
             onClick={() => {
@@ -116,30 +156,18 @@ export function ResourcePanel({
           </Button>
         </div>
       </div>
-      <div className="w-full px-8 pb-10 pt-6 lg:px-10">
-        <div className="mb-4 flex min-h-11 items-center gap-2 rounded-lg border border-border bg-card px-4">
-          <Folder aria-hidden className="size-4 shrink-0 text-zinc-400" />
-          <nav aria-label="当前目录路径" className="flex min-w-0 items-center gap-1.5 text-[13px]">
-            <span className="shrink-0 text-zinc-500 dark:text-zinc-400">根目录</span>
-            {breadcrumbSegments.map((segment, index) => (
-              <span key={`${index}:${segment}`} className="flex min-w-0 items-center gap-1.5">
-                <ChevronRight aria-hidden className="size-3 shrink-0 text-zinc-300 dark:text-zinc-600" />
-                <span
-                  className={`truncate ${
-                    index === breadcrumbSegments.length - 1
-                      ? 'font-medium text-foreground'
-                      : 'text-zinc-600 dark:text-zinc-400'
-                  }`}
-                >
-                  {segment}
-                </span>
-              </span>
-            ))}
-          </nav>
-          <span className="ml-auto hidden shrink-0 pl-4 text-xs text-zinc-400 sm:block">点击文件夹可切换上传位置</span>
-        </div>
+      <div className="w-full px-4 pb-6 pt-3">
+        {(loadingPaths.includes('') || (!rootReady && !errors[''])) && (
+          <div role="status" className="mb-3 text-sm text-muted-foreground">正在加载资源…</div>
+        )}
+        {Object.entries(errors).map(([failedPath, message]) => (
+          <div key={failedPath} role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-md border border-border p-3">
+            <span>{failedPath ? `${failedPath}：` : ''}{message}</span>
+            <Button variant="outline" size="sm" disabled={loadingPaths.includes(failedPath)} onClick={() => void onRetry?.(failedPath).catch(() => undefined)}>重试</Button>
+          </div>
+        ))}
         {resources.length ? (
-          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          <div>
             {visibleResources.map(({ item, depth }) => (
               <ResourcePanelRow
                 key={item.path}
@@ -153,6 +181,7 @@ export function ResourcePanel({
                 onToggleDirectory={toggleDirectory}
                 onAddFileTo={(target) => {
                   uploadDirectoryRef.current = target;
+                  uploadTargetInvalid.current = false;
                   uploadRef.current?.click();
                 }}
                 onCreateSubdirectory={(parent) => {
@@ -170,11 +199,11 @@ export function ResourcePanel({
               />
             ))}
           </div>
-        ) : (
+        ) : rootReady && !errors[''] && !loadingPaths.includes('') ? (
           <div className="rounded-xl border border-dashed border-border bg-card py-14">
             <Empty compact title="工作区为空" description="当前目录没有文件或文件夹。" />
           </div>
-        )}
+        ) : null}
       </div>
       <ResourcePreviewDrawer preview={preview} onClose={() => setPreview(undefined)} />
       <Modal open={createOpen} onOpenChange={setCreateOpen}>

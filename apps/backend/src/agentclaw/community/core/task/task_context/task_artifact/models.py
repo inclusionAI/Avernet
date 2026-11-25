@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from enum import StrEnum
 from typing import Any
 
@@ -19,6 +19,7 @@ _MAX_URL_LENGTH = 2048
 _MAX_TYPE_LENGTH = 64
 _MAX_PR_DESC_LENGTH = 8 * 1024
 _MAX_FILE_PATH_LENGTH = 512
+_FINAL_ARTIFACT_VALUES = frozenset(("true", "false"))
 
 
 class ArtifactKind(StrEnum):
@@ -35,6 +36,7 @@ class StorageType(StrEnum):
 
     BOT_WORKSPACE = "bot_workspace"
     SESSION_FILE = "session_file"
+    OBJECT_FILE = "object_file"
 
 
 @dataclass(frozen=True)
@@ -51,12 +53,22 @@ class ArtifactScope:
 class ArtifactContent:
     """内容分支基类:互斥表示的 tagged union,分支不带 kind 字段。"""
 
+    is_final_artifact: str = field(default="false", kw_only=True)
+
+    def __post_init__(self) -> None:
+        if self.is_final_artifact not in _FINAL_ARTIFACT_VALUES:
+            raise TaskArtifactContentError(
+                "is_final_artifact 只接受 \"true\" 或 \"false\": "
+                f"{self.is_final_artifact!r}"
+            )
+
 
 @dataclass(frozen=True)
 class TextContent(ArtifactContent):
     text: str
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if not isinstance(self.text, str):
             raise TaskArtifactContentError(f"text 分支要求 str,得到 {type(self.text).__name__}")
 
@@ -72,6 +84,7 @@ class FileContent(ArtifactContent):
     file_id: str | None
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         if not isinstance(self.storage_type, StorageType):
             raise TaskArtifactContentError(f"storage_type 非法: {self.storage_type!r}")
         for name in ("storage_id", "file_type", "file_name"):
@@ -90,9 +103,15 @@ class FileContent(ArtifactContent):
                     "BOT_WORKSPACE 按工作区相对路径寻址,file_id 必须为 None"
                 )
             _validate_workspace_relative_path(self.storage_id)
-        else:
+        elif self.storage_type is StorageType.SESSION_FILE:
             if not self.file_id:
                 raise TaskArtifactContentError("SESSION_FILE 必须提供 file_id")
+        elif self.storage_type is StorageType.OBJECT_FILE:
+            if self.file_id is not None:
+                raise TaskArtifactContentError(
+                    "OBJECT_FILE 按对象 key 寻址,file_id 必须为 None"
+                )
+            _validate_object_key(self.storage_id)
 
 
 def _validate_workspace_relative_path(path: str) -> None:
@@ -103,6 +122,22 @@ def _validate_workspace_relative_path(path: str) -> None:
         raise TaskArtifactContentError(f"工作区 storage_id 不允许 .. 逃逸: {path!r}")
 
 
+def _validate_object_key(key: str) -> None:
+    """OBJECT_FILE 稳定对象 key 的结构性校验(与配置无关,服务层另做前缀域校验)。"""
+
+    if "\\" in key:
+        raise TaskArtifactContentError(f"对象 key 不允许反斜杠: {key!r}")
+    if key.startswith("/") or key.startswith("~"):
+        raise TaskArtifactContentError(f"对象 key 不得以 / 或 ~ 开头: {key!r}")
+    if any(ord(char) < 0x20 for char in key):
+        raise TaskArtifactContentError(f"对象 key 不允许控制字符: {key!r}")
+    segments = key.split("/")
+    if any(segment in ("", ".", "..") for segment in segments):
+        raise TaskArtifactContentError(
+            f"对象 key 不允许空段、. 或 .. 段: {key!r}"
+        )
+
+
 @dataclass(frozen=True)
 class UrlLinkContent(ArtifactContent):
     """稳定业务链接(需求条目/语雀文档)——链接是产物内容本身,非临时下载能力。"""
@@ -111,6 +146,7 @@ class UrlLinkContent(ArtifactContent):
     type: str
 
     def __post_init__(self) -> None:
+        super().__post_init__()
         _validate_http_url(self.url, "url")
         if not isinstance(self.type, str) or not self.type.strip():
             raise TaskArtifactContentError("url_link 分支 type 不得为空")
@@ -206,8 +242,8 @@ def content_to_json(content: ArtifactContent) -> str:
     if kind is None:
         raise TaskArtifactContentError(f"未知内容分支: {branch.__name__}")
     payload = {"kind": kind.value}
-    for field in fields(branch):
-        payload[field.name] = getattr(content, field.name)
+    for dataclass_field in fields(branch):
+        payload[dataclass_field.name] = getattr(content, dataclass_field.name)
     return canonical_json(payload)
 
 
@@ -234,8 +270,9 @@ def content_from_json(payload: str) -> ArtifactContent:
     if unknown:
         raise TaskArtifactContentError(f"{kind.value} 分支不接受字段: {sorted(unknown)}")
     missing = field_names - set(provided)
-    if missing:
+    if missing - {"is_final_artifact"}:
         raise TaskArtifactContentError(f"{kind.value} 分支缺少字段: {sorted(missing)}")
+    provided.setdefault("is_final_artifact", "false")
     if branch is FileContent and isinstance(provided.get("storage_type"), str):
         try:
             provided["storage_type"] = StorageType(provided["storage_type"])

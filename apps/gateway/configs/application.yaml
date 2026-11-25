@@ -228,6 +228,20 @@ user_config:
     # still require a human — rather than the ~57 that admit a machine caller.
     # Six rules a reviewer can check against the table beats fifty-seven nobody
     # will read.
+    # Isolated service environments: backend owns OPEN admission and NoCheck.
+    "/openapi/v1/service-envs/**":
+      user: optional
+      app: optional
+      bot: optional
+
+    "/openapi/v1/experts/**":
+      user: optional
+      app: optional
+      bot: optional
+
+    "/openapi/v1/collaboration/tasks/todos/**":
+      user: required
+
     "/openapi/v1/bots/**":
       user: optional
       app: optional
@@ -308,6 +322,9 @@ user_config:
       app: optional
       bot: optional
 
+    "POST /openapi/v1/collaboration/groupcontext/**":
+      user: required
+
     # Bot registration. The token-issuance GET is Human-Principal only: the
     # caller IS the person receiving the token (bcs additionally 403s
     # non-Human principals). The anonymous POST's only credential is the
@@ -332,6 +349,9 @@ user_config:
       user: optional
       app: optional
       bot: optional
+    # A2A routes validate Provider-admin / Bot Bearer credentials in BCS.
+    # Do not interpret those credentials as Gateway User, App or Bot identities.
+    "/api/v1/collaboration/a2a/**": {}
     # BCS verifies Agent identity here, including agents with no Bot registration.
     "GET /api/v1/collaboration/bots/me": {}
     "/api/v1/collaboration/sessions/{session_id}/files/**":
@@ -442,12 +462,27 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
+      service-envs:
+        server: backend
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
+      experts:
+        server: backend
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
       bots:
         server: backend
         schema:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
+      # Human Todo workbench: rides collaboration-tasks under
+      # /openapi/v1/collaboration/tasks/todos and forwards verbatim to the
+      # backend's public OpenAPI artifact.
       # The backend's agent-swarm surface: submit/poll/cancel SSE runs under
       # /openapi/v1/agentswarm (additive-only within v1; a breaking change
       # ships as /openapi/v2/agentswarm). Forwards verbatim — the gateway only
@@ -498,6 +533,22 @@ user_config:
         protocols: [http]
       collaboration-tasks-internal:
         match: /api/v1/collaboration/tasks/**
+        server: backend
+        protocols: [http]
+      # BBS context collaboration protocol P1 (spec §6.1/§14.1): the Collet
+      # three-API surface — under /openapi/v1/collaboration/task/context_collab
+      # (singular "task") — is implemented in the backend, both faces carved out
+      # of the broad collaboration→bcs and collaboration-internal→bcs rules the
+      # same way collaboration-tasks above is. No `schema:` — the backend
+      # publishes its public artifact; route_security is inherited from
+      # /openapi/v1/collaboration/** and /api/v1/collaboration/** (the backend
+      # enforces the gateway-signed principal itself).
+      collaboration-task-context-collab:
+        match: /openapi/v1/collaboration/task/context_collab/**
+        server: backend
+        protocols: [http]
+      collaboration-task-context-collab-internal:
+        match: /api/v1/collaboration/task/context_collab/**
         server: backend
         protocols: [http]
 

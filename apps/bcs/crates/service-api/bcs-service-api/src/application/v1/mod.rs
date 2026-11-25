@@ -4,12 +4,15 @@
 //! HTTP requests into these commands and never pass credentials or
 //! request-supplied caller identities into domain services.
 
+pub mod a2a;
 pub mod auth;
 pub mod authorization;
+pub mod bot_authority;
 pub mod bot;
 pub mod bot_self;
 pub mod collaboration_definition;
 pub mod collaboration_template;
+pub mod delivery_authorization;
 pub mod error;
 pub mod event_subscription;
 pub mod friend_connection;
@@ -29,13 +32,15 @@ pub mod session_file;
 
 pub use auth::*;
 pub use authorization::{
-    Action, AuthorizationService, IdentityPolicy, ResourceRef, require_authenticated_user,
-    require_human, select_principal,
+    Action, AuthorizationService, IdentityPolicy, ResourceRef,
+    require_authenticated_user, require_human, resolve_authorized_principal,
+    select_principal,
 };
 pub use bot::*;
 pub use bot_self::*;
 pub use collaboration_definition::*;
 pub use collaboration_template::*;
+pub use delivery_authorization::*;
 pub use error::*;
 pub use event_subscription::*;
 pub use friend_connection::*;

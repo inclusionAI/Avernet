@@ -37,8 +37,20 @@ fi
 
 while IFS=$'\t' read -r path_glob pattern doc; do
   [[ -z "$path_glob" || "$path_glob" =~ ^# ]] && continue
-  # 用 rg 直接支持 glob
-  if rg --no-heading -n -F "$pattern" -g "$path_glob" . 2>/dev/null; then
+  # Rule 5 permits composition in Cargo's crate-level integration tests.
+  # Keep src/** (even src/tests/**) and contract-layer checks unchanged.
+  matches=$(rg --no-heading -n -F "$pattern" -g "$path_glob" \
+    -g '!crates/services/*/tests/**' \
+    -g '!crates/adapters/*/*/tests/**' \
+    -g '!crates/external-clients/*/tests/**' . 2>/dev/null || true)
+  # Pure output adapters implement the declared formatting port. Delivery
+  # adapters still call application only; no output adapter may reach core or
+  # arbitrary repository ports through this exception.
+  if [[ "$pattern" == 'use bcs_service_api::port::' ]]; then
+    matches=$(printf '%s\n' "$matches" | rg -v '^\./crates/adapters/output/[^/]+/src/[^:]+:[0-9]+:use bcs_service_api::port::dist_output::' || true)
+  fi
+  if [[ -n "$matches" ]]; then
+    echo "$matches"
     echo "FAIL [LINT-1]: matched \"${pattern}\" (${doc})"
     fail=1
   fi

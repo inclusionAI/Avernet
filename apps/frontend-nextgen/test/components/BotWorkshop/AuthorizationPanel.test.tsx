@@ -1,25 +1,27 @@
 /** @jest-environment jsdom */
 
 import { AuthorizationPanel } from '@/components/BotWorkshop/CreateBotModal/AuthorizationPanel';
+import type { BotCreateAuthorization } from '@/services/botWorkshop';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 test('AgentPass 授权加载期间保留背景列表，加载完成后再展示全屏 iframe', () => {
+  const authorization: BotCreateAuthorization = {
+    type: 'authorization_required',
+    botId: 'bot-1',
+    iframeUrl: 'https://agentpass.example/authorize',
+    redirectUrl: '',
+    request: {
+      bot_name: '测试 Bot',
+      bot_desc: '等待 AgentPass 授权',
+      engine: 'openclaw',
+      cluster_name: 'ACRA',
+      bot_type: 'personal',
+    },
+  };
   render(
     <AuthorizationPanel
-      authorization={{
-        type: 'authorization_required',
-        botId: 'bot-1',
-        iframeUrl: 'https://agentpass.example/authorize',
-        redirectUrl: '',
-        request: {
-          bot_name: '测试 Bot',
-          bot_desc: '等待 AgentPass 授权',
-          engine: 'openclaw',
-          cluster_name: 'ACRA',
-          bot_type: 'personal',
-        },
-      }}
+      authorization={authorization}
     />,
   );
 

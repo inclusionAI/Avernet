@@ -32,6 +32,7 @@ _LOCAL_PROFILES = (
 _REDACTED_FOR_LOG = "<redacted>"
 _REDACTED_RUNTIME_CONFIG_PATHS = {
     ("user_config", "openapi_bot", "api_key_secret"),
+    ("user_config", "openapi_bot", "api_key_secret_prod"),
     ("user_config", "bcs_client", "token_secret"),
     ("user_config", "bcs_client", "secret_secret"),
 }

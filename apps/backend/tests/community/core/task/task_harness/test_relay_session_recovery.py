@@ -4,11 +4,14 @@ import unittest
 
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.task_harness.relay_session_recovery import (
-    RELAY_HARNESS_RESUME_PROMPT,
+    RelaySessionPreconditionError,
     RelaySessionRecovery,
-    RelaySessionRecoveryError,
+    RELAY_HARNESS_RESUME_PROMPT,
+    relay_harness_resume_prompt,
 )
-from agentclaw.community.core.task.task_harness.runtime_probe import TaskRuntimeLivenessProbe
+from agentclaw.community.core.task.task_harness.runtime_probe import (
+    _last_message_cursor,
+)
 
 
 class _FakeOpenApiBot:
@@ -93,16 +96,14 @@ class RelaySessionRecoveryTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.channel, "openapi_bot_session")
         self.assertEqual(result.session_id, "engine-session")
-        self.assertEqual(
-            RELAY_HARNESS_RESUME_PROMPT,
-            "继续执行当前未完成的 task-loop S1~S6。不要新建任务、不要重新澄清、不要重新提交 execute。如果当前步骤无法完成，请输出明确失败原因，并继续执行后续步骤。",
-        )
+        self.assertEqual(relay_harness_resume_prompt(), RELAY_HARNESS_RESUME_PROMPT)
+
         self.assertEqual(
             bot.calls,
             [
                 {
                     "bot_id": compose_bot_identity("bot1", "146836"),
-                    "message": RELAY_HARNESS_RESUME_PROMPT,
+                    "message": relay_harness_resume_prompt(),
                     "metadata": {"session_id": "engine-session"},
                 }
             ],
@@ -142,39 +143,61 @@ class RelaySessionRecoveryTest(unittest.IsolatedAsyncioTestCase):
             [
                 {
                     "session_id": "group-session",
-                    "message": RELAY_HARNESS_RESUME_PROMPT,
+                    "message": relay_harness_resume_prompt(),
                     "caller_bearer": "bearer-token",
                 }
             ],
         )
 
-    async def test_missing_session_fails_closed_without_dispatch(self):
+    async def test_all_resume_steps_use_the_same_continuation_prompt(self):
+        bot = _FakeOpenApiBot()
+        recovery = RelaySessionRecovery(bot=bot)
+        node = _Node(assignee="bot1", owner_id="146836", session_id="engine-session")
+
+        for resume_step in (None, "S1-S4a", "S5", "S6"):
+            with self.subTest(resume_step=resume_step):
+                await recovery.resume(node, resume_step=resume_step)
+
+        self.assertEqual(bot.calls[0]["message"], RELAY_HARNESS_RESUME_PROMPT)
+        self.assertIn("后端恢复范围：S1-S4a", bot.calls[1]["message"])
+        self.assertIn("后端恢复范围：S5", bot.calls[2]["message"])
+        self.assertIn("后端恢复范围：S6", bot.calls[3]["message"])
+        self.assertNotIn("从当前会话历史", RELAY_HARNESS_RESUME_PROMPT)
+        self.assertIn("复用已完成成果", RELAY_HARNESS_RESUME_PROMPT)
+        self.assertIn("直到协议收口", RELAY_HARNESS_RESUME_PROMPT)
+
+    async def test_missing_session_is_a_precondition_error(self):
         recovery = RelaySessionRecovery(bot=_FakeOpenApiBot())
-        with self.assertRaisesRegex(RelaySessionRecoveryError, "no existing session_id"):
+        with self.assertRaisesRegex(RelaySessionPreconditionError, "no existing session_id"):
             await recovery.resume(_Node(assignee="bot1"))
+
+    async def test_placeholder_assignee_is_a_precondition_error(self):
+        recovery = RelaySessionRecovery(bot=_FakeOpenApiBot())
+        with self.assertRaisesRegex(RelaySessionPreconditionError, "no valid assignee"):
+            await recovery.resume(
+                _Node(assignee="NOT_DECIDED", session_id="engine-session")
+            )
+
+    async def test_group_without_session_is_a_precondition_error(self):
+        recovery = RelaySessionRecovery(
+            bot=object(), bcs=_FakeBcs(), bot_tokens=_FakeTokens()
+        )
+        with self.assertRaisesRegex(
+            RelaySessionPreconditionError, "group node has no existing session_id"
+        ):
+            await recovery.resume(_Node(assignee="g1", group_id="g1"))
 
 
 class RuntimeProbeMessageCursorTest(unittest.IsolatedAsyncioTestCase):
     async def test_latest_message_is_selected_from_newest_first_payload(self):
         bot = _FakeOpenApiBot()
-        probe = TaskRuntimeLivenessProbe(bot=bot)
-        node = _Node(session_id="engine-session")
-
-        first = await probe.probe(node)
-        # A different source position with an earlier timestamp must not count as
-        # progress just because it is the list's last element.
-        second = await probe.probe(node, previous_cursor=first.heartbeat_cursor)
-
-        self.assertEqual(first.state, "active")
-        self.assertFalse(first.progressed)
-        self.assertEqual(second.state, "active")
-        self.assertFalse(second.progressed)
+        first = _last_message_cursor(bot.messages)
+        second = _last_message_cursor(list(reversed(bot.messages)))
+        self.assertEqual(first, second)
 
     async def test_new_timestamp_progresses_even_if_messages_are_newest_first(self):
         bot = _FakeOpenApiBot()
-        probe = TaskRuntimeLivenessProbe(bot=bot)
-        node = _Node(session_id="engine-session")
-        first = await probe.probe(node)
+        first = _last_message_cursor(bot.messages)
 
         bot.messages = [
             {
@@ -188,9 +211,32 @@ class RuntimeProbeMessageCursorTest(unittest.IsolatedAsyncioTestCase):
                 "content": "old",
             },
         ]
-        second = await probe.probe(node, previous_cursor=first.heartbeat_cursor)
-        self.assertTrue(second.progressed)
+        second = _last_message_cursor(bot.messages)
+        self.assertNotEqual(first, second)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_resume_instructions_use_runtime_local_ledger_not_backend_projection():
+    for step in (None, "S1-S4a", "S5", "S6"):
+        prompt = relay_harness_resume_prompt(step)
+        assert "统一 resume 入口" in prompt
+        assert "本节点账本" in prompt
+        assert "decision" in prompt
+        assert "不要重放结果未知" in prompt
+        assert len(prompt) < 240
+
+
+class GroupDeliveryRejectionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_explicit_undelivered_resume_is_not_success(self):
+        from agentclaw.community.core.task.task_harness.relay_session_recovery import RelaySessionRecoveryError
+
+        class Undelivered(_FakeBcs):
+            async def send_session_chat(self, *args, **kwargs):
+                return {"delivered": False, "session_id": "s1"}
+
+        recovery = RelaySessionRecovery(bcs=Undelivered(), bot_tokens=_FakeTokens())
+        with self.assertRaises(RelaySessionRecoveryError):
+            await recovery.resume(_Node(group_id="g1", session_id="s1"))

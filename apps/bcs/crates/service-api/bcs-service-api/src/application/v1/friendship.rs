@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::group::{DeleteResult, Page};
 use super::{ApplicationError, AuthenticatedCaller};
+use crate::principal::RequestAuthHeaders;
 
 /// Reuse the domain friend-request status vocabulary.
 ///
@@ -81,6 +82,9 @@ pub struct CreateBotFriendRequest {
     pub caller: AuthenticatedCaller,
     pub bot_uuid: String,
     pub to_bot_uuid: String,
+    /// Forwarded inbound auth context, used only for downstream
+    /// notification/auth-sync calls.
+    pub request_auth: Option<RequestAuthHeaders>,
 }
 
 /// List friend requests sent by or received by `bot_uuid`.
@@ -99,6 +103,9 @@ pub struct ListBotFriendRequests {
 pub struct AcceptFriendRequest {
     pub caller: AuthenticatedCaller,
     pub request_id: String,
+    /// Forwarded inbound auth context, used only for downstream
+    /// notification/auth-sync calls.
+    pub request_auth: Option<RequestAuthHeaders>,
 }
 
 /// Reject a friend request as the receiver; idempotent after rejection.
@@ -106,6 +113,9 @@ pub struct AcceptFriendRequest {
 pub struct RejectFriendRequest {
     pub caller: AuthenticatedCaller,
     pub request_id: String,
+    /// Forwarded inbound auth context, used only for downstream
+    /// notification/auth-sync calls.
+    pub request_auth: Option<RequestAuthHeaders>,
 }
 
 /// Transport-independent friendship use cases for BCN OpenAPI v1.

@@ -7,7 +7,7 @@ Stage 1 Domain Model Tests
 import pytest
 from datetime import datetime
 
-from src.domain.models.worker_source_info import WorkerSourceType, WorkerSourceInfo
+from app.domain.models.worker_source_info import WorkerSourceType, WorkerSourceInfo
 
 
 class TestWorkerSourceType:

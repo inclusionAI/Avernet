@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::error::HttpAdapterError;
+use crate::mapping::bot_profile::to_core_avatar;
 use crate::mapping::capabilities::{to_core_binding_channels, to_core_skill};
 use crate::state::{HttpAppState, VisibilitySyncRequest};
 
@@ -131,6 +132,7 @@ pub async fn admin_onboard_bot(
             scopes: req.scopes,
             binding_channels: req.binding_channels.map(to_core_binding_channels),
             actor_identity,
+            avatar: to_core_avatar(req.avatar_url),
         })
         .await?;
 

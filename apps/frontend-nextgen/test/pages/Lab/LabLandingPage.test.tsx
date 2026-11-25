@@ -1,10 +1,10 @@
 /** @jest-environment jsdom */
-// 实验室落地页:功能卡网格(社区 + 任务)。PRD(TeamClaw-demo /lab):任务卡点「开始体验」
-// 进入任务列表页(/work/my-task,状态类别筛选 + V2 任务副屏抽屉)。
+jest.mock('@/pages/Lab/assets/community.svg', () => 'community.svg');
+// 实验室暂不展示待办入口，社区和任务保持原路由。
 import LabLandingPage from '@/pages/Lab';
-import { history } from '@umijs/max';
-import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from '@jest/globals';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { history } from '@umijs/max';
 
 // Lab 页静态 import @umijs/max history;真模块进 jest 依赖图会踩 esbuild Buffer 不变量,必须 mock。
 // factory 经 hoist 先于 @jest/globals 绑定求值,故用全局 jest(同 defaultCapabilities.test.ts 先例)。
@@ -17,10 +17,21 @@ describe('LabLandingPage(实验室落地页)', () => {
     pushMock.mockClear();
   });
 
-  it('渲染社区与任务两张功能卡', () => {
+  it('按原型展示社区和任务，并为描述保留两行高度', () => {
     render(<LabLandingPage />);
-    expect(screen.getByRole('article', { name: '社区' })).toBeTruthy();
-    expect(screen.getByRole('article', { name: '任务' })).toBeTruthy();
+    const cards = screen.getAllByRole('article');
+    expect(cards).toHaveLength(2);
+    expect(cards.map((card) => within(card).getByRole('heading').textContent)).toEqual(['社区', '任务']);
+    for (const card of cards) {
+      const descriptions = within(card).getAllByText(/./, { selector: 'p' });
+      expect(descriptions).toHaveLength(1);
+      expect(descriptions[0].className).toContain('min-h-[46px]');
+    }
+  });
+
+  it('暂不展示待办入口', () => {
+    render(<LabLandingPage />);
+    expect(screen.queryByRole('article', { name: '待办' })).toBeNull();
   });
 
   it('任务卡:描述对齐 PRD 文案;开始体验跳任务列表页(任务类别)', () => {

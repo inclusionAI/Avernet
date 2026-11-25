@@ -56,6 +56,10 @@ describe('Open Core default capabilities', () => {
     expect(r.value).toEqual({ url: null });
   });
 
+  test('getCodingBotConversationHost 默认 null（Open Core 不加载内部 AIXCoding Runtime）', () => {
+    expect(defaultCapabilities.getCodingBotConversationHost()).toEqual({ status: 'available', value: null });
+  });
+
   test('getAgentCodingInternalResources 默认全部为 null（Open Core 不泄漏内部资源地址）', () => {
     const r = defaultCapabilities.getAgentCodingInternalResources();
     expect(r.status).toBe('available');
@@ -129,6 +133,13 @@ describe('Open Core default capabilities', () => {
 
   test('Open Core / 阿里云隐藏 MCP 添加能力', () => {
     expect(defaultCapabilities.getBotMcpPickerEnabled()).toEqual({ status: 'available', value: false });
+  });
+
+  test('getBotMcpPickerSources 默认全量来源（与既有 Segmented 行为一致，零变化）', () => {
+    expect(defaultCapabilities.getBotMcpPickerSources()).toEqual({
+      status: 'available',
+      value: ['internal', 'open-platform'],
+    });
   });
 
   test('getProductBrand 默认 Avernet（横版 wordmark + 方版 mark 视觉组件）', () => {
@@ -234,7 +245,7 @@ describe('Open Core default capabilities', () => {
   });
 });
 
-// ── 任务副屏 V2 会话联动(P4):会话宿主内只替换左侧内容，宿主外才走路由 ──
+// ── 任务副屏 V2 会话联动:统一走真实路由，同步 URL 与左侧会话目录 ──
 jest.mock('@umijs/max', () => ({ history: { push: jest.fn(), replace: jest.fn() } }));
 
 describe('defaultCapabilities.navigateToConversation', () => {
@@ -251,69 +262,9 @@ describe('defaultCapabilities.navigateToConversation', () => {
     replaceMock?.mockClear();
   });
 
-  it.each(['/workspace/chat', '/workspace/collaboration'])(
-    '%s 内点群节点 → 左侧联动群会话，TaskPanel 宿主路由不变',
-    (pathname) => {
-      setPath(pathname);
-      const result = defaultCapabilities.navigateToConversation({
-        sessionId: 'bcs_grp_902:round:2',
-        kind: 'group',
-        groupId: 'g-902',
-      });
-
-      expect(result.status).toBe('available');
-      expect(useTaskSidePanelStore.getState().linkedSession).toEqual({
-        sessionId: 'bcs_grp_902:round:2',
-        kind: 'group',
-        groupId: 'g-902',
-        botId: null,
-      });
-      expect(pushMock).not.toHaveBeenCalled();
-      expect(replaceMock).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each(['/workspace/chat', '/workspace/collaboration'])(
-    '%s 内点 Bot 节点 → 左侧联动 Bot 会话，TaskPanel 宿主路由不变',
-    (pathname) => {
-      setPath(pathname);
-      const result = defaultCapabilities.navigateToConversation({
-        sessionId: 'agent:main:session:s-1',
-        kind: 'bot',
-        botId: 'bot-9',
-      });
-
-      expect(result.status).toBe('available');
-      expect(useTaskSidePanelStore.getState().linkedSession).toEqual({
-        sessionId: 'agent:main:session:s-1',
-        kind: 'bot',
-        groupId: null,
-        botId: 'bot-9',
-      });
-      expect(pushMock).not.toHaveBeenCalled();
-      expect(replaceMock).not.toHaveBeenCalled();
-    },
-  );
-
-  it('kind=unknown 但 sessionId 为 bcs_grp_ 形态 → 按群会话联动', () => {
-    setPath('/workspace/chat');
-    defaultCapabilities.navigateToConversation({
-      sessionId: 'bcs_grp_902:round:2',
-      kind: 'unknown',
-    });
-
-    expect(useTaskSidePanelStore.getState().linkedSession).toEqual({
-      sessionId: 'bcs_grp_902:round:2',
-      kind: 'group',
-      groupId: null,
-      botId: null,
-    });
-    expect(pushMock).not.toHaveBeenCalled();
-    expect(replaceMock).not.toHaveBeenCalled();
-  });
-
-  it('会话宿主之外点群节点 → 路由进入协作群会话页', () => {
-    setPath('/work/my-task');
+  it.each(['/workspace/chat', '/workspace/collaboration'])('%s 内点群节点也进入真实协作群路由', (pathname) => {
+    setPath(pathname);
+    useTaskSidePanelStore.getState().openLinkedSession({ sessionId: 'stale', kind: 'bot' });
     const result = defaultCapabilities.navigateToConversation({
       sessionId: 'bcs_grp_902:round:2',
       kind: 'group',
@@ -323,19 +274,21 @@ describe('defaultCapabilities.navigateToConversation', () => {
     expect(result.status).toBe('available');
     const url = pushMock.mock.calls[0][0] as string;
     expect(url.startsWith('/workspace/collaboration?')).toBe(true);
+    expect(url).toContain('group=g-902');
     expect(url).toContain('session=');
-    expect(url).toContain('group=');
     expect(useTaskSidePanelStore.getState().linkedSession).toBeNull();
+    expect(replaceMock).not.toHaveBeenCalled();
   });
 
-  it('会话宿主之外点 Bot 节点 → 路由进入单聊会话页', () => {
-    setPath('/work/my-task');
-    defaultCapabilities.navigateToConversation({
+  it.each(['/workspace/chat', '/workspace/collaboration'])('%s 内点 Bot 节点也进入真实单聊路由', (pathname) => {
+    setPath(pathname);
+    const result = defaultCapabilities.navigateToConversation({
       sessionId: 'agent:main:session:s-1',
       kind: 'bot',
       botId: 'bot-9',
     });
 
+    expect(result.status).toBe('available');
     const url = pushMock.mock.calls[0][0] as string;
     expect(url.startsWith('/workspace/chat?')).toBe(true);
     expect(url).toContain('bot=bot-9');
@@ -343,11 +296,93 @@ describe('defaultCapabilities.navigateToConversation', () => {
     expect(useTaskSidePanelStore.getState().linkedSession).toBeNull();
   });
 
-  it('sessionId 缺失 → unsupported，不触发联动或路由', () => {
+  it('kind=unknown 但 sessionId 为 bcs_grp_ 形态时按群会话路由', () => {
+    setPath('/workspace/chat');
+    defaultCapabilities.navigateToConversation({ sessionId: 'bcs_grp_902:round:2', kind: 'unknown' });
+
+    expect(pushMock.mock.calls[0][0]).toEqual(expect.stringMatching(/^\/workspace\/collaboration\?/));
+  });
+
+  it('根节点恢复时使用记录的精确 routeUrl', () => {
+    setPath('/workspace/chat?bot=other&session=other');
+    const routeUrl = '/workspace/chat?section=friend&bot=bot-origin&session=s-origin#message';
+    const result = defaultCapabilities.navigateToConversation({
+      sessionId: 's-origin',
+      routeUrl,
+      kind: 'friend',
+      botId: 'bot-origin',
+    });
+
+    expect(result.status).toBe('available');
+    expect(pushMock).toHaveBeenCalledWith(routeUrl);
+  });
+
+  it('拒绝 routeUrl 指向站外或非会话页面', () => {
+    const external = defaultCapabilities.navigateToConversation({
+      sessionId: 's-origin',
+      routeUrl: '//evil.example/workspace/chat?session=s-origin',
+      kind: 'bot',
+    });
+    const unrelated = defaultCapabilities.navigateToConversation({
+      sessionId: 's-origin',
+      routeUrl: '/work/my-task?session=s-origin',
+      kind: 'bot',
+    });
+
+    expect(external.status).toBe('unsupported');
+    expect(unrelated.status).toBe('unsupported');
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it('sessionId 缺失 → unsupported，不触发路由', () => {
     const result = defaultCapabilities.navigateToConversation({ sessionId: '', kind: 'unknown' });
     expect(result.status).toBe('unsupported');
-    expect(useTaskSidePanelStore.getState().linkedSession).toBeNull();
     expect(pushMock).not.toHaveBeenCalled();
     expect(replaceMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── BCS 独立好友发现：可选 Backend 增强开关（bcs-standalone-friend-discovery Task 2）──
+// 显式覆盖运行时 false、true 以及无覆盖时的默认行为；运行时显式设置优先于编译常量。
+describe('getPublicBotBackendEnabled / getShellVisibility 可选 Backend 决策', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'AVERNET_RUNTIME_CONFIG');
+    Reflect.deleteProperty(globalThis, 'TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED');
+  });
+
+  test('无运行时/编译覆盖时默认开启（全栈），铃铛展示', () => {
+    expect(defaultCapabilities.getPublicBotBackendEnabled()).toBe(true);
+    expect(defaultCapabilities.getShellVisibility()).toEqual({
+      status: 'available',
+      value: { spaceSwitcher: false, notificationBell: true },
+    });
+  });
+
+  test('运行时 PUBLIC_BOT_BACKEND_ENABLED=false → 关闭，通知铃铛随之隐藏', () => {
+    Object.defineProperty(window, 'AVERNET_RUNTIME_CONFIG', {
+      value: { PUBLIC_BOT_BACKEND_ENABLED: false },
+      configurable: true,
+    });
+    expect(defaultCapabilities.getPublicBotBackendEnabled()).toBe(false);
+    expect(defaultCapabilities.getShellVisibility()).toEqual({
+      status: 'available',
+      value: { spaceSwitcher: false, notificationBell: false },
+    });
+  });
+
+  test('运行时 PUBLIC_BOT_BACKEND_ENABLED=true 覆盖编译 false（部署显式运行时设置优先）', () => {
+    Object.defineProperty(globalThis, 'TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED', { value: false, configurable: true });
+    Object.defineProperty(window, 'AVERNET_RUNTIME_CONFIG', {
+      value: { PUBLIC_BOT_BACKEND_ENABLED: true },
+      configurable: true,
+    });
+    expect(defaultCapabilities.getPublicBotBackendEnabled()).toBe(true);
+    expect(defaultCapabilities.getShellVisibility().value.notificationBell).toBe(true);
+  });
+
+  test('编译常量 TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED=false（本地 BCS-only profile）→ 关闭', () => {
+    Object.defineProperty(globalThis, 'TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED', { value: false, configurable: true });
+    expect(defaultCapabilities.getPublicBotBackendEnabled()).toBe(false);
+    expect(defaultCapabilities.getShellVisibility().value.notificationBell).toBe(false);
   });
 });

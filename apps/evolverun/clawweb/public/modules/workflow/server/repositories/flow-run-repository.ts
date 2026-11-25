@@ -1,3 +1,5 @@
+import { normalizeFlowRunMarkers } from '../services/flow-run-markers.js';
+import { OrdinaryRunRequestService } from '../services/ordinary-run-request.js';
 import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
 import { registerRunRequest } from '../services/run-request-registration.js';
 import { productionRunSql, trialRunSql, productionRunsSql, isTrialRun, type RunPurpose } from "@avernet/clawweb-shared/server/services/run-purpose";
@@ -6,6 +8,9 @@ import { productionRunSql, trialRunSql, productionRunsSql, isTrialRun, type RunP
  * No dependency on ClawFlow; shares the same database schema.
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import { FanoutStateRepository } from "./fanout-state-repository.js";
+import { RunLogRepository } from "./run-log-repository.js";
+import { registerParentRelatedRun, type ParentRelation } from '../services/parent-related-run-registration.js';
 
 function isMissingEvolutionAnalysisStatusColumn(message: string): boolean {
   const normalized = message.toLowerCase();
@@ -18,6 +23,8 @@ export type FlowRunRow = {
   flow_id: string;
   workflow_id: string;
   workflow_title: string | null;
+  env: string | null;
+  tag: string | null;
   status: string;
   triggered_by: string | null;
   params_json: string | null;
@@ -47,10 +54,17 @@ export type FlowRunRow = {
   evolution_analysis_status: string | null;
 };
 
+export type RunOriginScope = {
+  workflowId: string;
+  originBotId: string | null;
+};
+
 export type FlowRunInsert = {
   flowId: string;
   workflowId: string;
   workflowTitle?: string | null;
+  env?: string | null;
+  tag?: string | null;
   status: string;
   stateJson?: string | null;
   paramsJson?: string | null;
@@ -128,8 +142,24 @@ export type FindWorkflowTypesPageResult = {
   total: number;
 };
 
+class RetryCancelledError extends Error {}
+
 export class FlowRunRepository {
-  constructor(private db: IDatabase) {}
+  readonly fanoutState: FanoutStateRepository;
+  readonly ordinaryRequests: OrdinaryRunRequestService;
+  readonly runLogs: RunLogRepository;
+
+  constructor(private db: IDatabase) {
+    this.fanoutState = new FanoutStateRepository(db);
+    this.runLogs = new RunLogRepository(db);
+    this.ordinaryRequests = new OrdinaryRunRequestService(db, async (tx, run) => {
+      if (!await new FlowRunRepository(tx).insert(run)) throw new Error("Run persistence failed");
+    });
+  }
+
+  registerParentRelatedRun(body: Record<string, unknown>, run: FlowRunInsert, relation: ParentRelation) {
+    return registerParentRelatedRun(this.db, body, run, relation);
+  }
 
   insertForRequest(body: Record<string, unknown>, run: FlowRunInsert): Promise<'created' | 'existing' | null> {
     return registerRunRequest(this.db, body, async tx => {
@@ -137,19 +167,46 @@ export class FlowRunRepository {
     });
   }
 
+  private flowIdPredicate(flowId: string, expectedScope?: RunOriginScope) {
+    const conditions = ["flow_id = ?"];
+    const params = [flowId];
+    if (expectedScope) {
+      // Scope IDs are identities, not text to compare under the table's collation.
+      const exact = (column: "workflow_id" | "origin_bot_id") => this.db.dialect.driver === "mysql2"
+        ? `BINARY ${column} = BINARY ?`
+        : `${column} COLLATE BINARY = ?`;
+      conditions.push(exact("workflow_id"));
+      params.push(expectedScope.workflowId);
+      if (expectedScope.originBotId === null) {
+        conditions.push("origin_bot_id IS NULL");
+      } else {
+        conditions.push(exact("origin_bot_id"));
+        params.push(expectedScope.originBotId);
+      }
+    }
+    return { sql: conditions.join(" AND "), params };
+  }
+
   // ── Read methods ──
+
+  /** Propagate lookup errors so conflict/not-found classification cannot hide database failures. */
+  async findStatusByFlowId(flowId: string): Promise<{ status: string } | null> {
+    const rows = await this.db.query<{ status: string }>(
+      "SELECT status FROM flow_runs WHERE flow_id = ?",
+      [flowId],
+    );
+    return rows[0] ?? null;
+  }
 
   /**
    * Find a flow run by flow_id, returning only lightweight columns (no TEXT blobs).
    * Prefer this method for status checks, UI listings, and metadata-only access.
    */
-  async findByFlowId(flowId: string): Promise<FlowRunRow | null> {
+  async findByFlowId(flowId: string, expectedScope?: RunOriginScope): Promise<FlowRunRow | null> {
+    const { sql, params } = this.flowIdPredicate(flowId, expectedScope);
     const tryQuery = async (legacy: boolean): Promise<FlowRunRow[]> => {
       const cols = FlowRunRepository.listColumns(legacy).join(", ");
-      return this.db.query<FlowRunRow>(
-        `SELECT ${cols} FROM flow_runs WHERE flow_id = ?`,
-        [flowId],
-      );
+      return this.db.query<FlowRunRow>(`SELECT ${cols} FROM flow_runs WHERE ${sql}`, params);
     };
     try {
       const rows = await tryQuery(false);
@@ -163,10 +220,12 @@ export class FlowRunRepository {
         } catch (error2) {
           const msg2 = error2 instanceof Error ? error2.message : String(error2);
           console.warn(`[db] FlowRunRepository.findByFlowId failed: ${msg2}`);
+          if (expectedScope) throw error2;
           return null;
         }
       }
       console.warn(`[db] FlowRunRepository.findByFlowId failed: ${msg}`);
+      if (expectedScope) throw error;
       return null;
     }
   }
@@ -181,7 +240,12 @@ export class FlowRunRepository {
         "SELECT * FROM flow_runs WHERE flow_id = ?",
         [flowId],
       );
-      return rows[0] ?? null;
+      if (!rows[0]) return null;
+      // SELECT * must retain legacy fields, but internal incarnation markers
+      // are never part of a flow-run response or a repository caller's data.
+      const { ordinary_run_marker: _ordinaryMarker, parent_run_marker: _parentMarker,
+        child_run_marker: _childMarker, ...run } = rows[0] as FlowRunRow & Record<string, unknown>;
+      return run as FlowRunRow;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] FlowRunRepository.findFullByFlowId failed: ${msg}`);
@@ -244,7 +308,7 @@ export class FlowRunRepository {
     "started_at", "completed_at",
     "triggered_by", "identity_key", "current_phase",
     "origin_session_key", "origin_session_id", "origin_bot_id",
-    "user_id", "plugin_version", "engine",
+    "user_id", "plugin_version", "engine", "env", "tag",
     "workflow_version", "workflow_deploy_number",
     "gmt_create", "gmt_modified",
     "evolution_analysis_status",
@@ -312,13 +376,14 @@ export class FlowRunRepository {
 
   async insert(run: FlowRunInsert): Promise<boolean> {
     try {
+      const markers = normalizeFlowRunMarkers(run);
       // The run must not survive a failed snapshot read/write. Transaction-bound
       // repositories reuse their caller's transaction for purpose registration.
       return await this.db.transaction(async tx => {
         const now = tx.dialect.now();
         await tx.exec(
-          `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, gmt_create, gmt_modified)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, env, tag, gmt_create, gmt_modified)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             run.flowId,
             run.workflowId,
@@ -341,6 +406,8 @@ export class FlowRunRepository {
             run.engine ?? null,
             run.workflowVersion ?? null,
             run.workflowDeployNumber ?? null,
+            markers.env,
+            markers.tag,
             now,
             now,
           ],
@@ -415,11 +482,11 @@ export class FlowRunRepository {
     // New and legacy clients use the original completion contract. Explicit
     // epochs remain supported for already deployed clients during upgrade.
     const epochGuard = completion.retryEpoch === undefined ? '' : ` AND COALESCE(retry_epoch, 0) = ?
-       AND status NOT IN ('succeeded', 'cancelled', 'canceled')
+       AND status <> 'succeeded'
        AND (COALESCE(retry_epoch, 0) = 0 OR status <> 'failed' OR completed_at IS NULL)`;
     if (completion.retryEpoch !== undefined) values.push(completion.retryEpoch);
     const result = await this.db.exec(
-      `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ?${epochGuard}`,
+      `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled')${epochGuard}`,
       values,
     );
     return result.affectedRows > 0;
@@ -441,7 +508,7 @@ export class FlowRunRepository {
   }): Promise<boolean> {
     const result = await this.db.exec(
       `UPDATE flow_runs SET status = 'failed', result_json = ?, current_phase = ?, total_duration_ms = ?, completed_at = ?
-       WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled')${fields.retryEpoch === undefined ? '' : ' AND COALESCE(retry_epoch, 0) = ?'}`,
+       WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled', 'canceled')${fields.retryEpoch === undefined ? '' : ' AND COALESCE(retry_epoch, 0) = ?'}`,
       [fields.reason, fields.currentPhase, fields.totalDurationMs ?? null, fields.completedAt, flowId,
         ...(fields.retryEpoch === undefined ? [] : [fields.retryEpoch])],
     );
@@ -457,7 +524,7 @@ export class FlowRunRepository {
           // epoch. Do this in the same write, before assigning the new status.
           const result = await this.db.exec(
             `UPDATE flow_runs SET retry_epoch = CASE WHEN status <> 'running' AND retry_epoch > 0 THEN 0 ELSE retry_epoch END,
-             status = ?, gmt_modified = ?, completed_at = NULL WHERE flow_id = ?`,
+             status = ?, gmt_modified = ?, completed_at = NULL WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled')`,
             [status, now, flowId],
           );
           return result.affectedRows > 0;
@@ -467,7 +534,7 @@ export class FlowRunRepository {
         }
       }
       const result = await this.db.exec(
-        `UPDATE flow_runs SET status = ?, gmt_modified = ?${status === 'running' ? ', completed_at = NULL' : ''} WHERE flow_id = ?`,
+        `UPDATE flow_runs SET status = ?, gmt_modified = ?${status === 'running' ? ', completed_at = NULL' : ''} WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled')`,
         [status, now, flowId],
       );
       return result.affectedRows > 0;
@@ -475,10 +542,10 @@ export class FlowRunRepository {
     const result = await this.db.exec(
       // Compatibility with already deployed clients that explicitly send an epoch.
       status === 'running'
-        ? `UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ?
+        ? `UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled') AND COALESCE(retry_epoch, 0) = ?
            AND status IN ('failed', 'blocked', 'waiting', 'running')
            AND (COALESCE(retry_epoch, 0) = 0 OR status <> 'failed' OR completed_at IS NULL)`
-        : `UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ?
+        : `UPDATE flow_runs SET status = ?, gmt_modified = ? WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled') AND COALESCE(retry_epoch, 0) = ?
            AND (COALESCE(retry_epoch, 0) = 0 OR (status NOT IN ('succeeded', 'cancelled', 'canceled')
              AND (status <> 'failed' OR completed_at IS NULL)))`,
       [status, now, flowId, retryEpoch],
@@ -549,17 +616,7 @@ export class FlowRunRepository {
    * the DB maintains it (manual assignment was rejected on pre).
    */
   async updateStateJson(flowId: string, stateJson: string): Promise<boolean> {
-    try {
-      const result = await this.db.exec(
-        "UPDATE flow_runs SET state_json = ? WHERE flow_id = ?",
-        [stateJson, flowId],
-      );
-      return result.affectedRows > 0;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      console.warn(`[db] FlowRunRepository.updateStateJson failed: ${msg} (dbType=${this.db.dbType}, flowId=${flowId}, bytes=${stateJson.length})`);
-      return false;
-    }
+    return this.fanoutState.updateMirror(flowId, stateJson);
   }
 
   /** Read back the mirrored TaskFlow stateJson, or null when absent. */
@@ -581,20 +638,34 @@ export class FlowRunRepository {
   async resetFailedForRetry(
     flowId: string,
     resetFailedNodes: (tx: IDatabase) => Promise<number>,
-  ): Promise<{ status: 'updated'; resetCount: number } | { status: 'not_found' }> {
-    return this.db.transaction(async tx => {
-      await tx.exec("UPDATE flow_runs SET flow_id = flow_id WHERE flow_id = ?", [flowId]);
-      const rows = await tx.query<{ status: string }>("SELECT status FROM flow_runs WHERE flow_id = ?", [flowId]);
-      if (!rows.length) return { status: 'not_found' };
-      const resetCount = await resetFailedNodes(tx);
-      const now = this.db.dialect.now();
-      const result = await tx.exec(
-        "UPDATE flow_runs SET failed_count = GREATEST(failed_count - ?, 0), status = 'running', completed_at = NULL, gmt_modified = ? WHERE flow_id = ?",
-        [resetCount, now, flowId],
-      );
-      if (result.affectedRows !== 1) throw new Error(`Failed to reset flow run ${flowId} for retry`);
-      return { status: 'updated', resetCount };
-    });
+  ): Promise<{ status: 'updated'; resetCount: number } | { status: 'not_found' } | { status: 'conflict' }> {
+    try {
+      return await this.db.transaction(async tx => {
+        // Serialize against abort without touching an already cancelled run.
+        await tx.exec("UPDATE flow_runs SET flow_id = flow_id WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled')", [flowId]);
+        const rows = await tx.query<{ status: string }>("SELECT status FROM flow_runs WHERE flow_id = ?", [flowId]);
+        if (!rows.length) return { status: 'not_found' };
+        if (['cancelled', 'canceled'].includes(rows[0].status)) return { status: 'conflict' };
+        const resetCount = await resetFailedNodes(tx);
+        const now = tx.dialect.now();
+        const result = await tx.exec(
+          "UPDATE flow_runs SET failed_count = GREATEST(failed_count - ?, 0), status = 'running', completed_at = NULL, gmt_modified = ? WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled')",
+          [resetCount, now, flowId],
+        );
+        if (result.affectedRows !== 1) {
+          const current = await tx.query<{ status: string }>("SELECT status FROM flow_runs WHERE flow_id = ?", [flowId]);
+          // Throw through the transaction so the child-node reset rolls back.
+          if (current[0] && ['cancelled', 'canceled'].includes(current[0].status)) {
+            throw new RetryCancelledError(`Flow run ${flowId} is cancelled`);
+          }
+          throw new Error(`Failed to reset flow run ${flowId} for retry`);
+        }
+        return { status: 'updated', resetCount };
+      });
+    } catch (error) {
+      if (error instanceof RetryCancelledError) return { status: 'conflict' };
+      throw error;
+    }
   }
 
   /** Resume a locally authorized manual retry without rewriting node history or started_at. */
@@ -602,7 +673,7 @@ export class FlowRunRepository {
     const now = this.db.dialect.now();
     const result = await this.db.exec(
       `UPDATE flow_runs SET status = 'running', retry_epoch = ?, completed_at = NULL, gmt_modified = ?
-       WHERE flow_id = ? AND COALESCE(retry_epoch, 0) = ?`,
+       WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled') AND COALESCE(retry_epoch, 0) = ?`,
       [retryEpoch, now, flowId, retryEpoch - 1],
     );
     if (result.affectedRows > 0) return 'resumed';
@@ -658,12 +729,15 @@ export class FlowRunRepository {
     }
   }
 
-  /** Update BaaS session info (origin_bot_id, origin_session_key, origin_session_id) for a flow run. */
+  /**
+   * Update BaaS session info, optionally only if the stored origin still matches.
+   * With a scope, DB errors propagate so a failed write is distinguishable from a denied one.
+   */
   async updateSessionInfo(flowId: string, patch: {
     originBotId?: string | null;
     originSessionKey?: string | null;
     originSessionId?: string | null;
-  }): Promise<boolean> {
+  }, expectedScope?: RunOriginScope): Promise<boolean> {
     try {
       const now = this.db.dialect.now();
       const sets: string[] = [];
@@ -682,16 +756,16 @@ export class FlowRunRepository {
       }
       if (sets.length === 0) return false;
       sets.push("gmt_modified = ?");
-      params.push(now);
-      params.push(flowId);
+      const where = this.flowIdPredicate(flowId, expectedScope);
       const result = await this.db.exec(
-        `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ?`,
-        params,
+        `UPDATE flow_runs SET ${sets.join(", ")} WHERE ${where.sql}`,
+        [...params, now, ...where.params],
       );
       return result.affectedRows > 0;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`[db] FlowRunRepository.updateSessionInfo failed: ${msg}`);
+      if (expectedScope) throw error;
       return false;
     }
   }

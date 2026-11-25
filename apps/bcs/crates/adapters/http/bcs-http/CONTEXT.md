@@ -1,6 +1,24 @@
 # bcs-http Context
 
+## Direct chat empty-input rejection (v1)
+
+POST /bots/{id}/chat-async and its named Provider/Bot alias retain caller
+credential authentication before application admission. The real direct-chat
+service rejects message="" with InvalidOperation; the existing HTTP mapping is
+400 and the chat digest records success=false/status_code=400, not acceptance.
+The UUID route retains {error,status}; the named alias retains its existing
+sanitized "Chat admission failed" error body. No Run is returned or admitted.
+The text-only DTO has no attachment field. Nonempty text is passed unchanged,
+including whitespace-only text. Other attachment-capable routes are unchanged.
+
 ## Provides
+
+`POST /providers/{provider_id}/bots` accepts optional `agent_card_url` and
+dispatches that branch to A2aBotManagementService. Missing/null preserves the
+legacy Provider management path. Provider/Bot registration handlers live under
+routes/providers/registration.rs; HTTP does not fetch Cards or write stores.
+The request/atomicity/duplicate contract is documented in
+docs/specs/a2a/provider-admin-registration-v1.md at the repository root.
 
 `GET /api/v1/collaboration/providers/by-slug/{slug}` is unauthenticated and exposes only Provider
 identity, name, auth mode, enabled status, protocol version and audit timestamps.
@@ -93,3 +111,128 @@ encode caller identity; route policy declares allowed principals explicitly.
 - `cargo check --workspace --all-targets --manifest-path src/bcs/Cargo.toml`
 
 Provider Bot registration and list responses expose the saved optional webhook_url. PATCH maps omitted/null/string to the application endpoint change contract; the application rejects mixing URL and capability writes. URL inheritance is decided in BotCore, not the HTTP adapter.
+
+## Bot avatar wire mapping (bot-avatar plan)
+
+`mapping/bot_profile.rs` translates the protocol presence-aware
+`AvatarField` into the service-api `AvatarChange` transitions: omitted →
+Keep, `""` → Clear, string → Set; wire rejection of `null`/non-strings
+happens at deserialization, in the adapter's DTOs, not in the
+application. Legacy surface freeze (design §5.1): no legacy route
+serializes participant avatars — the PATCH `/groups/{id}` response maps
+the shared V1 `GroupDetail` through an explicit legacy participant DTO
+(`routes/groups/projections.rs`), so the avatar column and any future V1
+participant field cannot leak into legacy JSON; list/detail keep their
+pre-avatar projections. V1 surfaces under `/openapi/v1/collaboration`
+are served by `bcs-api-http` and do carry `avatar_url`.
+
+## Service Session policy retirement
+
+Service Sessions retain creation, authorization, completion, completion events,
+activation fencing and reactivation. The Group `service_spec` policy, Service
+Session timeout scanner, external completion callbacks and callback recovery are
+retired. Reactivation requires a Completed Service Session; it has no callback
+status prerequisite. State Machine Node deadlines, progression/IM recovery,
+Provider callbacks and Event subscriptions retain their existing contracts.
+Legacy Group creation accepts and discards `service_spec` for Backend compatibility, and the legacy settings
+endpoint returns 410. Service invocation needs no Group policy marker. Existing
+Group policy and Session callback columns, indexes and values remain unchanged;
+runtime stores no longer read or write those fields. This retirement adds no
+schema migration. Stop old binaries to prevent legacy scanners and callbacks
+from continuing to run. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
+
+## A2A Card administration
+
+`PUT /providers/{provider_id}/bots/{bot_uuid}/a2a` accepts exactly one of source Card URL or
+inline JSON Card plus the expected configuration revision. `POST .../a2a/card:refresh` re-fetches only the
+saved source. Both extract a Provider-admin Bearer and call
+`A2aBotManagementService`; core affiliation/authorization rules remain in the
+service. Memory-only test servers may omit this durable capability and return
+503 explicitly. Neither route submits a probe task or exposes credential values.
+
+Versioned A2A registration and Card management are owned by `bcs-api-http` at
+`/api/v1/collaboration/a2a/` and is not mounted in this adapter. Legacy root
+`/a2a/...` paths retain their bare success objects and v0.1 error shape.
+Chat and run controls remain on the legacy root routes.
+Both management adapters reuse the same application capabilities and Provider-admin credentials;
+V1 wraps results in its standard envelope through a dedicated application facade.
+Remote AgentCard interface URLs and persistence are unchanged.
+
+Public AgentCard management uses POST `/a2a/agents`, GET/PUT
+`/a2a/agents/{bot_id}/agent-card` and POST `.../agent-card:refresh`. Location
+uses the ID resource. PUT accepts complete Card source and/or visibility, without
+a body identity; refresh accepts empty body or {}. GET `/a2a/agents` requires
+provider_bot_ref and returns items (zero or one), scoped by Provider credentials.
+Public registration requires provider_bot_ref, returns it alongside bot_id, and permits
+duplicate Card display names. Owners remain required. Old source_agent_id is rejected.
+Old name-management URLs are not aliased; no versions or PATCH endpoint exists.
+Provider-name registration also requires/returns provider_bot_ref. Chat uses
+`/a2a/providers/{provider_name}/bots/{provider_bot_ref}/chat-async`; it does not resolve Card.name.
+
+`GET /bots/{id}/agent-card` calls the same authorized Bot detail use case and
+returns the registered source Card, or 404 for a legacy Bot. It does not advertise
+BCS as an A2A server. Detail, discovery, search and batched query views carry the
+full optional `agent_card` alongside existing fields; legacy responses omit it.
+Legacy Bot JSON projections are isolated in routes/bot_views.rs.
+
+
+## OAuth challenge transport
+
+Legacy login challenge issuance, callback extraction and cleanup derive their
+mode from the configured OAuth public base URL scheme. The legacy
+`cookie_secure` override controls session cookies only; it cannot downgrade
+an HTTPS challenge or turn an HTTP challenge into a Secure `__Host-` cookie.
+Application cookie instructions and response shapes are unchanged.
+
+## Provider attribute visibility propagation
+
+Successful Provider attributes PATCH requests containing `visibility`,
+`friend_check_in_strategy` or `friend_ext` dispatch the existing visibility sync
+using the application's returned `attributes.visibility`, not the request value.
+The application/store owns normalization; HTTP never reads pending approval
+sub-blocks to derive permissions. A whole-object friend_ext replacement can change
+active scope even when submitted as approval metadata, so it also triggers sync.
+User-visibility-only writes, rejected requests and failed application writes do
+not dispatch it.
+
+Each newly covered successful request adds one existing Bot detail lookup (which
+may use registry cache; it is not necessarily a DB query) and one asynchronous
+sync dispatch. Unchanged visibility can produce an extra idempotent sync. BCSFuse
+V1 keeps its existing bounded availability-update retry and missing-worker fallback;
+V2 keeps the existing committed catalog-change publication instead. No new scan,
+policy pre-read, local persistence write, retry mechanism or bootstrap wiring is added.
+
+Regression coverage lives in `suite_providers` / Provider attributes tests, with
+service-controlled normalized results that differ from the requested visibility,
+strategy/scope-only restrictions, pending metadata, and failed writes. The existing
+OpenAPI v1 owner/manager PATCH path lacks the independent BCSFuse V1 visibility
+sync; that separate propagation gap is recorded here but intentionally not changed
+by this Provider-only fix.
+
+## Friend-connection decision authorization
+
+The legacy `/collaboration/friend-connections/requests/{id}/accept` and
+`.../reject` routes authenticate before looking up the request, then authorize
+against its persisted `to_id`. Only that receiver Bot or a Human authorized by
+its current `BotAuthorityPort::can_manage` check may decide. Controlling the
+requester does not grant receiver authority. The check precedes all lifecycle
+calls, including idempotent retries; authority storage failures remain internal
+errors rather than allowing the decision or masquerading as a denial.
+Creation and decisions share the same act-as authorization helper. The shared
+ConnectService still rejects generated reverse mirrors, even if the caller can
+represent the mirror's apparent receiver. Existing success envelopes, edge IDs,
+reject reasons and forwarded approval auth headers are preserved.
+
+The added authorization read is one request-ID lookup (at most one SQL row),
+plus at most one live authority check for a Human acting as the receiver Bot.
+For an initialized Bot, the SQL authority implementation performs up to four
+bounded queries: Bot state (one row), owner integrity (at most two rows), Human
+liveness (one row), and that Human's management edges (at most two rows). Memory
+composition uses its existing in-process stores. Authentication and the
+lifecycle's existing reads/writes are unchanged; denied decisions never invoke
+lifecycle mutation. No cache, scan, retry loop, new transaction or external
+network call is added. Tests establish correctness, not production load limits.
+
+Evidence: [route implementation](src/routes/friend_connections.rs),
+[authority and failure contracts](tests/cases/friend_connections_contract/decision_authorization.rs),
+and [real-HTTP cross-entry lifecycle regressions](../../../bootstrap/bcs/tests/integration_friend_connect_store.rs).

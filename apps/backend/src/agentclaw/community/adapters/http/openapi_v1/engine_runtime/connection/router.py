@@ -7,7 +7,6 @@ this API, so the engine's frame format never becomes a public contract.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
 import json
@@ -63,6 +62,7 @@ from agentclaw.community.core.expert_chat.errors import (
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.di.config import GatewayEndpoint
+from agentclaw.community.utils.runtime_list_timing import timed_thread
 from fastapi import APIRouter, Query, Request
 
 router = APIRouter(
@@ -174,9 +174,9 @@ async def get_connection(
     if f_user_id is not None and device_uuid is not None:
         raise EngineResourceNotFoundError("instance selection is unavailable for friend chat")
     if f_user_id is not None:
-        if stage is not RuntimeStage.DRAFT or not session_id:
+        if not session_id:
             raise EngineResourceNotFoundError(
-                "friend connection requires a draft session_id"
+                "friend connection requires a session_id"
             )
         await authorize_friend_chat(
             request=request,
@@ -186,6 +186,7 @@ async def get_connection(
             friend_user_id=f_user_id,
             friendships=friendships,
             expert=expert,
+            stage=stage.value,
         )
         try:
             result = await expert.connect_chat_session(
@@ -228,8 +229,8 @@ async def get_connection(
     # ``async`` keeps it callable from the sync paths and keeps its declared
     # signature — which ``test_service_api_conformance`` pins, coroutine status
     # included — the same on both sides.
-    result = await asyncio.to_thread(
-        connections.build,
+    result = await timed_thread(
+        "connection", connections.build,
         **({"device_uuid": device_uuid} if device_uuid is not None else {}),
         bot_id=bot_id,
         owner_id=owner_id,
@@ -240,12 +241,15 @@ async def get_connection(
         (DesktopConnection if result.transport_mode else Connection)(
             engine=result.engine,
             expires_at=result.expires_at,
+            # 用户灰度负结果必须透传到 wire——schema default False 会在缺席时
+            # 把核心层的"明确拒绝"冲掉，名单外用户在可推导直连拓扑下绕回 A2A。
+            a2a_withheld=result.a2a_withheld,
             **(
                 {"transport_mode": result.transport_mode}
                 if result.transport_mode
                 else {}
             ),
-            sockets=[Socket(kind=s.kind, url=s.url) for s in result.sockets],
+            sockets=[Socket(kind=s.kind, url=s.url, headers=s.headers) for s in result.sockets],
         ),
         request,
     )

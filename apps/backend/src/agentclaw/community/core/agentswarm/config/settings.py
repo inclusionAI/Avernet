@@ -100,16 +100,16 @@ class LlmConfig:
 
 @dataclass(frozen=True)
 class AgentSwarmOrchestrationConfig:
-    max_turns: int = 50
-    max_total_agents: int = 100
+    max_turns: int = 999
+    max_total_agents: int = 256
     max_width: int = 8
     max_depth: int = 5
     repair_max: int = 2
     agent_max_attempts: int = 3
-    per_attempt_timeout: float = 300.0
-    setup_timeout: float = 300.0
+    per_attempt_timeout: float = 1800.0
+    setup_timeout: float = 900.0
     orchestrator_turn_interval: float = 1.0
-    slice_max_seconds: float = 900.0
+    slice_max_seconds: float = 3600.0
     slice_interval: float = 1.0
     respawn_max: int = 3
     reclaim_max: int = 5
@@ -117,8 +117,12 @@ class AgentSwarmOrchestrationConfig:
     poll_interval: float = 2.0
     poll_jitter: float = 0.5
     batch_size: int = 10
-    wall_clock_seconds: float = 3600.0
+    wall_clock_seconds: float = 86400.0
     no_progress_threshold: int = 3
+    # Simulator-only fault injection: artificial delay inside each
+    # subagent's setup() — llm and bot kind alike — defaulting to zero
+    # everywhere that does not configure it (prod/pre never set the key).
+    subagent_setup_delay_seconds: float = 0.0
 
     @classmethod
     def from_block(cls, block: dict) -> "AgentSwarmOrchestrationConfig":
@@ -149,6 +153,8 @@ class AgentSwarmOrchestrationConfig:
                 block, "wall_clock_seconds", d.wall_clock_seconds, exclusive=True),
             no_progress_threshold=_as_int(
                 block, "no_progress_threshold", d.no_progress_threshold, minimum=1),
+            subagent_setup_delay_seconds=_as_float(
+                block, "subagent_setup_delay_seconds", d.subagent_setup_delay_seconds),
         )
         # A single attempt is setup() then run_task(); if their budgets do
         # not fit inside one slice, the slice cancels the attempt mid-phase,
@@ -273,6 +279,12 @@ class AgentSwarmExecutorConfig:
     """
 
     max_platform_workers: int = 4
+    # The bot persona chat leg's own deadline (host adapter): one engine
+    # chat round trip may occupy the whole per-attempt task budget on
+    # long-running coding/review turns, so the default follows
+    # orchestration.per_attempt_timeout (1800s) rather than the old 300s
+    # slice cadence — setup(900) + chat(1800) still fits slice_max(3600).
+    bot_chat_timeout_seconds: float = 1800.0
 
     @classmethod
     def from_block(cls, block: dict) -> "AgentSwarmExecutorConfig":
@@ -282,6 +294,9 @@ class AgentSwarmExecutorConfig:
             max_platform_workers=_as_int(
                 block, "max_platform_workers",
                 d.max_platform_workers, minimum=1),
+            bot_chat_timeout_seconds=_as_float(
+                block, "bot_chat_timeout_seconds",
+                d.bot_chat_timeout_seconds),
         )
 
 
@@ -318,6 +333,73 @@ class AgentSwarmRetentionConfig:
 
 
 @dataclass(frozen=True)
+class AgentSwarmChatBaasConfig:
+    """The ``agentswarm.chat.baas_gateway`` block — platform chat channel.
+
+    Only read when ``agentswarm.chat.transport`` names the BaaS channel; the
+    engine channel needs none of it. ``resource_key_prefix`` is combined with
+    the platform tenant into the key the platform authorizes against
+    (``<prefix>_<tenant>``) — encoding the tenant into the key is what keeps
+    ``baas_resource_key``'s single-column unique constraint satisfiable while
+    the platform looks rows up by ``(resource_key, tenant)``.
+
+    The chat deadline is deliberately NOT a key here: the deployment default
+    is ``agentswarm.executor.bot_chat_timeout_seconds``, the same value the
+    engine channel receives, so both channels agree on what "the deployment
+    default" means. A per-run ``bot_chat_timeout_seconds`` overrides either.
+    """
+
+    resource_key_prefix: str = "agent_swarm"
+    issuer: str = "backend"
+    audience: str = "baas"
+    key_id: str = "bare"
+
+    @classmethod
+    def from_block(cls, block: dict) -> "AgentSwarmChatBaasConfig":
+        d = cls()
+        block = block or {}
+        return cls(
+            resource_key_prefix=_as_str(
+                block, "resource_key_prefix", d.resource_key_prefix),
+            issuer=_as_str(block, "issuer", d.issuer),
+            audience=_as_str(block, "audience", d.audience),
+            key_id=_as_str(block, "key_id", d.key_id),
+        )
+
+
+@dataclass(frozen=True)
+class AgentSwarmChatConfig:
+    """The ``agentswarm.chat`` block — which chat transport the pod uses.
+
+    ``transport`` is ``engine_ws`` (default) or ``baas_gateway``. The default
+    is the pre-existing engine leg, so a profile that ships this block with no
+    value keeps today's behaviour and an unconfigured deployment cannot
+    silently switch channels.
+    """
+
+    transport: str = "engine_ws"
+    baas_gateway: AgentSwarmChatBaasConfig = field(
+        default_factory=AgentSwarmChatBaasConfig
+    )
+
+    @classmethod
+    def from_block(cls, block: dict) -> "AgentSwarmChatConfig":
+        d = cls()
+        block = block or {}
+        transport = _as_str(block, "transport", d.transport).strip().lower()
+        if transport not in ("engine_ws", "baas_gateway"):
+            raise ValueError(
+                f"agentswarm.chat.transport must be 'engine_ws' or "
+                f"'baas_gateway', got {transport!r}"
+            )
+        return cls(
+            transport=transport,
+            baas_gateway=AgentSwarmChatBaasConfig.from_block(
+                block.get("baas_gateway")),
+        )
+
+
+@dataclass(frozen=True)
 class AgentSwarmConfig:
     llm: LlmConfig | None = None
     orchestration: AgentSwarmOrchestrationConfig = field(
@@ -346,6 +428,9 @@ class AgentSwarmConfig:
     )
     egress: AgentSwarmEgressConfig = field(
         default_factory=AgentSwarmEgressConfig
+    )
+    chat: AgentSwarmChatConfig = field(
+        default_factory=AgentSwarmChatConfig
     )
     artifact_store_root: str = "/tmp/agentswarm/artifacts"
     artifact_inline_threshold: int = 16384
@@ -381,6 +466,7 @@ class AgentSwarmConfig:
             retention=AgentSwarmRetentionConfig.from_block(
                 block.get("retention")),
             egress=AgentSwarmEgressConfig.from_block(block.get("egress")),
+            chat=AgentSwarmChatConfig.from_block(block.get("chat")),
             artifact_store_root=_as_path(
                 block, "artifact_store_root", cls().artifact_store_root),
             artifact_inline_threshold=_as_int(
@@ -389,6 +475,6 @@ class AgentSwarmConfig:
             message_retention_tail=_as_int(
                 block, "message_retention_tail",
                 cls().message_retention_tail, minimum=0),
-            enabled=_as_bool(block, "enabled", True),
+            enabled=_as_bool(block, "agentswarm_enabled", True),
         )
 

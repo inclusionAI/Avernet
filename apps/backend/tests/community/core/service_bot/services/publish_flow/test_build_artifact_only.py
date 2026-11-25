@@ -68,7 +68,7 @@ def _runner(producer, *, ext=None):
         dict(ext or {}),
     )
     bot_service = Mock()
-    bot_service.get_bot.return_value = {
+    bot_service.get_bot_by_address.return_value = {
         "bot_id": "b1",
         "owner_id": "u1",
         "entity_id": "u1",
@@ -184,7 +184,7 @@ async def test_build_artifact_only_captures_employee_snapshot_before_produce() -
     ext_state.get_latest_ext_snapshot.return_value = ({}, {})
 
     bot_service = Mock()
-    bot_service.get_bot.return_value = {
+    bot_service.get_bot_by_address.return_value = {
         "bot_id": "b1",
         "owner_id": "u1",
         "active_engine": "openclaw",

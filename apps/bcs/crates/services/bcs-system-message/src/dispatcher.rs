@@ -356,6 +356,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                     group_id: group.id.clone(),
                     bcs_session_id: Some(session_id.to_string()),
                     cmd: BotDeliveryCommand {
+                        a2a_test_user: None,
                         target,
                         run_id,
                         frame,
@@ -394,19 +395,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                                 terminal: false,
                             })
                             .await;
-                        let transport_owner = match &cmd.cmd.target {
-                            BotDeliveryTarget::WebSocket { .. } => {
-                                BotRunTransportOwner::WebSocket
-                            }
-                            BotDeliveryTarget::HttpProvider {
-                                provider_id,
-                                provider_bot_ref,
-                                ..
-                            } => BotRunTransportOwner::HttpProvider {
-                                provider_id: provider_id.clone(),
-                                provider_bot_ref: provider_bot_ref.clone(),
-                            },
-                        };
+                        let transport_owner = BotRunTransportOwner::from_target(&cmd.cmd.target);
                         let context = ActiveBotRunContext {
                             canonical_run_id: cmd.run_id.clone(),
                             downstream_run_id: cmd.run_id.clone(),
@@ -522,6 +511,12 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                     exclude_conn_id: None,
                     visibility_domain,
                     audience,
+                    // System/member notifications are independent
+                    // resource events: authorized per event against
+                    // current facts, never borrowing a run permit.
+                    operation_id: None,
+                    terminal: false,
+                    run_id: None,
                 })
                 .await
             {
@@ -554,6 +549,12 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                     exclude_conn_id: None,
                     visibility_domain,
                     audience,
+                    // System/member notifications are independent
+                    // resource events: authorized per event against
+                    // current facts, never borrowing a run permit.
+                    operation_id: None,
+                    terminal: false,
+                    run_id: None,
                 })
                 .await
             {

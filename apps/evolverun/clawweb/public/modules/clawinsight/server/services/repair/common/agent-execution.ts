@@ -40,12 +40,13 @@ export class AgentExecutionService {
 /** Freeze Base's archive/report contract independently of business-stage artifacts. */
 export async function createAgentExecutionStep(repo: EvolveRepository, input: {
   taskId: string; executionId: string; executionNo: number; handler: string;
+  metadata?: Record<string, string>;
 }): Promise<AisArtifactContract> {
   const contract = agentExecutionContract(input);
   const stepId = contract.stepId;
   // Auxiliary execution records do not consume the positive business Step sequence.
   await repo.createStep({ taskId: input.taskId, stepId, stepType: "agent_execution", stepNo: -input.executionNo,
-    command: "agent_execution", ext: { executionId: input.executionId, aisExecution: contract } });
+    command: "agent_execution", ext: { ...input.metadata, executionId: input.executionId, aisExecution: contract } });
   return contract;
 }
 

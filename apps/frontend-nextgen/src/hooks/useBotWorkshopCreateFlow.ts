@@ -1,5 +1,7 @@
+import { reconcileOwnedBotGrants } from '@/services/collaboration/botGrantReconciliationService';
 import type { BotCreateInput, BotDomain } from '@/services/botWorkshop';
-import { botWorkshopService } from '@/services/botWorkshop';
+import { botWorkshopService, BackendRequestError } from '@/services/botWorkshop';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
 import { useBotCreateAuthorization } from './useBotCreateAuthorization';
@@ -14,6 +16,7 @@ export function useBotWorkshopCreateFlow({ load, setCreateScenario }: BotWorksho
   const [creating, setCreating] = useState(false);
   const handleCreated = useCallback(
     async (bot: BotDomain) => {
+      void reconcileOwnedBotGrants(bot.id);
       setCreateScenario(undefined);
       toast.success(`${bot.name} 已创建`);
       await load();
@@ -43,6 +46,11 @@ export function useBotWorkshopCreateFlow({ load, setCreateScenario }: BotWorksho
         }
         await handleCreated(result.bot);
       } catch (error) {
+        // 撤掉 httpClient 默认 enqueue 的那条提示,与 useBotWorkshopCopyFlow 同源范式,
+        // 只留 hook 自己的兜底文案(否则两条相同中文 toast 重复)。
+        if (error instanceof BackendRequestError && error.toastKey) {
+          useErrorNotifyStore.getState().cancel(error.toastKey);
+        }
         toast.error(error instanceof Error ? error.message : 'Bot 创建失败');
         throw error;
       } finally {

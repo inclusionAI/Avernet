@@ -11,17 +11,21 @@ from __future__ import annotations
 from typing import Any, Optional, Sequence
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
-from agentclaw.community.api.bot_config_manifest_apply_service import (
+from agentclaw.community.adapters.http.openapi_v1.schemas_runtime_projection import (
+    RuntimeProjectionResult,
+)
+from agentclaw.community.api.apply_run_service import (
     ApplyReport,
-    BotConfigManifestApplyServiceProtocol,
-    ManifestApplyInProgressError,
+    ApplyRunServiceProtocol,
+    ApplyInProgressError,
 )
 from agentclaw.community.api.bot_config_manifest_service import (
-    ManifestCapabilities,
+    MANIFEST_STATE,
+    Capabilities,
     ManifestWriteResult,
 )
-from agentclaw.community.core.bot_config_manifest.apply.delivery import DeliveryStrategy
-from agentclaw.community.core.bot_config_manifest.apply.triggers import PUT as PUT_TRIGGER
+from agentclaw.community.core.apply_engine.delivery import DeliveryStrategy
+from agentclaw.community.core.apply_engine.triggers import PUT as PUT_TRIGGER
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.bot_config_manifest.repository.models import (
     BotConfigManifestRecord,
@@ -34,6 +38,7 @@ from .schemas_config_manifest_apply import (
     ConfigManifestApply,
     ConfigManifestApplyCategory,
     ConfigManifestApplyEntry,
+    ConfigManifestApplyState,
     ConfigManifestApplySource,
 )
 from .schemas import (
@@ -42,6 +47,7 @@ from .schemas import (
     ConfigManifestCapabilities,
     ManifestConstruct,
     ManifestSourceCell,
+    ManifestSkillReference,
 )
 
 logger = get_logger()
@@ -150,7 +156,7 @@ def put_warnings(
 
 
 def delivery_or_none(
-    apply_service: BotConfigManifestApplyServiceProtocol, bot: dict[str, Any]
+    apply_service: ApplyRunServiceProtocol, bot: dict[str, Any]
 ) -> Optional[DeliveryStrategy]:
     """The bot's delivery strategy for the response's notes, or ``None``.
 
@@ -173,7 +179,7 @@ def delivery_or_none(
 
 
 def start_put_apply(
-    apply_service: BotConfigManifestApplyServiceProtocol,
+    apply_service: ApplyRunServiceProtocol,
     *,
     entity_id: str,
     bot_id: str,
@@ -196,9 +202,10 @@ def start_put_apply(
             owner_id=owner_id,
             actor_id=actor_id,
             audit_actor=audit,
+            state=MANIFEST_STATE,
             trigger=PUT_TRIGGER,
         )
-    except ManifestApplyInProgressError:
+    except ApplyInProgressError:
         return ConfigManifestApplyStarted(
             apply_id="", result="NOT_STARTED", reason="apply_in_progress"
         )
@@ -216,7 +223,7 @@ def start_put_apply(
 
 
 def capabilities_payload(
-    bot_id: str, capabilities: ManifestCapabilities
+    bot_id: str, capabilities: Capabilities
 ) -> ConfigManifestCapabilities:
     """Shape the resolver's answer as the response model."""
     return ConfigManifestCapabilities(
@@ -228,10 +235,14 @@ def capabilities_payload(
         # pair of plain strings. Reading it here rather than unpacking the enum
         # keeps one definition of how a construct serialises.
         constructs=[ManifestConstruct(**item.as_dict()) for item in capabilities.constructs],
-        # Same reasoning, same method: the cell defines its own wire shape, and
-        # the reason string it carries is the *validator's* string — a
+        # The reference/cell owns its wire shape, and the reason it carries
+        # is the *validator's* string — a
         # capabilities answer that paraphrased the refusal would be a second
         # wording for callers to reconcile.
+        skill_references=[
+            ManifestSkillReference(**entry.as_dict())
+            for entry in capabilities.skill_references
+        ],
         source_matrix=[
             ManifestSourceCell(**cell.as_dict())
             for cell in capabilities.source_matrix
@@ -249,6 +260,7 @@ def apply_payload(report: ApplyReport) -> ConfigManifestApply:
     that drifted would be the one nobody was reading.
     """
     payload = report.as_payload()
+    projection = payload.get("runtime_projection")
     return ConfigManifestApply(
         apply_id=payload["apply_id"],
         bot_id=payload["bot_id"],
@@ -265,6 +277,10 @@ def apply_payload(report: ApplyReport) -> ConfigManifestApply:
         ],
         entries=[ConfigManifestApplyEntry(**entry) for entry in payload["entries"]],
         notes=list(payload.get("notes") or ()),
+        state=ConfigManifestApplyState(**payload["state"]),
+        runtime_projection=(
+            RuntimeProjectionResult.model_validate(projection) if projection is not None else None
+        ),
     )
 
 
@@ -282,6 +298,7 @@ def empty_apply_payload(bot_id: str) -> ConfigManifestApply:
         result="",
         started_at=None,
         finished_at=None,
+        state=ConfigManifestApplyState(kind="manifest"),
         sources=[],
         categories=[],
         entries=[],

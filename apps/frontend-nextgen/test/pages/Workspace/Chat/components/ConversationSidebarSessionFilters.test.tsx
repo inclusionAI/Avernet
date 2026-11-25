@@ -86,11 +86,13 @@ const directoryModel = (over: Partial<ConversationDirectoryModel> = {}): Convers
 const sessionsModel = (over: Partial<ConversationSessionsModel> = {}): ConversationSessionsModel => ({
   actions: { run: jest.fn(async () => true), isPending: jest.fn(() => false) },
   favorites: { toggleFavorite: jest.fn(async () => true), isPending: jest.fn(() => false) },
+  archives: { host: null, load: jest.fn(), retry: jest.fn(), restore: jest.fn(), preview: jest.fn() },
   openBotIds: {},
   toggleBot: jest.fn(),
   selectMineSession: jest.fn(),
   selectFriendBotSession: jest.fn(),
   createSession: jest.fn(),
+  isCreatingSession: jest.fn(() => false),
   retrySessions: jest.fn(),
   loadMoreSessions: jest.fn(),
   ...over,
@@ -116,7 +118,8 @@ function sidebarProps(over: Partial<ConversationSidebarProps> = {}): Conversatio
     onOpenSession: jest.fn(),
     onOpenPublicBots: jest.fn(),
     onOpenBotWorkshop: jest.fn(),
-    onOpenAgentCodingBot: jest.fn(),
+    onCreateBotInSpace: jest.fn(),
+    replyingSessionId: null,
     ...over,
   };
 }
@@ -303,5 +306,31 @@ describe('管理 Bot 搜索与既有筛选共用(装配)', () => {
     // 已有主选中保持(搜索只过滤列表)。
     expect(next.selectedBotId).toBe(botId);
     expect(next.selectedSessionId).toBe('s-0');
+  });
+});
+
+describe('协作 Bot 发起人筛选(装配)', () => {
+  it('启用他人发起按钮并写入来源筛选，仍可切回我发起', () => {
+    const botId = teamBot.bot.botId;
+    renderSidebar({ teamBots: [teamBot], directory: directoryModel({ teamBots: [teamBot] }) });
+    fireEvent.click(screen.getByRole('button', { name: '发起人与会话筛选' }));
+    const others = screen.getByRole('button', { name: '他人发起' });
+    expect(others).toBeEnabled();
+    fireEvent.click(others);
+    expect(useConversationStore.getState().originByManagedBotId[botId]).toBe('others');
+    expect(screen.getByRole('button', { name: '我发起' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '新建会话' })).toBeInTheDocument();
+  });
+
+  it('已有他人发起筛选时仍可切回我发起，不会被禁用按钮困住', () => {
+    const botId = teamBot.bot.botId;
+    useConversationStore.getState().setManagedBotOrigin(botId, 'others');
+    const { syncStore } = renderSidebar({ teamBots: [teamBot], directory: directoryModel({ teamBots: [teamBot] }) });
+    fireEvent.click(screen.getByRole('button', { name: '发起人与会话筛选' }));
+    expect(screen.getByRole('button', { name: '他人发起' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '我发起' }));
+    expect(useConversationStore.getState().originByManagedBotId[botId]).toBe('mine');
+    syncStore();
+    expect(screen.getByRole('button', { name: '新建会话' })).toBeInTheDocument();
   });
 });

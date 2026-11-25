@@ -13,6 +13,7 @@ import type { ConversationTarget } from '@/services/workspace/workspaceModel';
 import type { ChatMessage } from '@tc-chat/core';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { History } from 'lucide-react';
+import { useSessionInitiators } from '../Chat/hooks/useSessionInitiators';
 
 export interface ReadOnlyConversationPanelProps {
   bot: Pick<ChatBotView, 'displayName' | 'avatarUrl'> | null;
@@ -43,18 +44,20 @@ export function ReadOnlyConversationPanel({
   onLoadMore,
   onOpenSessionList,
 }: ReadOnlyConversationPanelProps) {
+  const initiatorFor = useSessionInitiators(session ? [session.sessionId] : []);
+  const initiator = session ? initiatorFor(session.sessionId) : undefined;
   const interactions = useMessageInteractions({
     sessionId: session?.sessionId,
     messages,
     isRequesting: false,
   });
 
-  if (!bot || !friend || !session) {
+  if (!bot || !session) {
     return (
       <section className="flex min-w-0 flex-1 items-center justify-center bg-background">
         <Empty
-          title="请选择一个好友用户会话"
-          description="展开好友用户并选择一个会话后，可在这里查看历史消息。"
+          title="请选择一个他人发起的会话"
+          description="选择会话后，可在这里查看历史消息。"
           icon={<History className="h-5 w-5" />}
         />
       </section>
@@ -78,13 +81,19 @@ export function ReadOnlyConversationPanel({
     );
   }
 
+  const friendName = friend?.displayName?.trim();
+  const friendMatches = !initiator || initiator.userId === friend?.userId;
+  const senderName =
+    initiator?.displayName ||
+    (friendMatches && friendName !== friend?.userId ? friendName : undefined) ||
+    '用户';
   const target: ConversationTarget = {
     id: session.sessionId,
-    name: friend.displayName,
-    avatar: friend.displayName.charAt(0) || '人',
+    name: initiator ? bot.displayName : friend?.displayName ?? bot.displayName,
+    avatar: senderName.charAt(0) || '人',
     engine: 'OpenClaw',
     status: 'available',
-    summary: `与 ${friend.displayName} 的历史对话`,
+    summary: `与 ${senderName} 的历史对话`,
     kind: 'single',
   };
 
@@ -96,8 +105,8 @@ export function ReadOnlyConversationPanel({
           avatar: <Avatar name={bot.displayName} src={bot.avatarUrl} size={24} />,
         }
       : {
-          name: friend.displayName,
-          avatar: <Avatar name={friend.displayName} size={24} />,
+          name: senderName,
+          avatar: <Avatar key={initiator?.avatarUrl ?? senderName} name={senderName} src={initiator?.avatarUrl} size={24} />,
         };
 
   return (

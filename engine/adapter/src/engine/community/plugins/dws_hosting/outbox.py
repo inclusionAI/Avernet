@@ -62,6 +62,8 @@ class SqliteHostingOutbox:
         binding = State._binding(db, binding_id)
         conversation = State._conversation(db, binding_id, batch["conversation_id"])
         execution = Executions._record(Executions._row(db, binding_id, turn_id))
+        if execution.invocation.scope is None or execution.invocation.scope.decision != "allow":
+            return False
         context = execution.invocation.hosting_context
         turn = Turn.model_validate_json(batch["snapshot_json"])
         # COSEC: persisted, recipient-bound evidence is required even for old
@@ -131,6 +133,10 @@ class SqliteHostingOutbox:
             if existing is not None:
                 return self._record(existing)
             execution = Executions._record(Executions._row(db, binding_id, turn_id))
+            if execution.invocation.scope is None or execution.invocation.scope.decision != "allow":
+                if execution.state in {"manual", "resolved", "cancelled"}:
+                    db.execute("UPDATE batches SET state='completed' WHERE batch_id=?", (turn_id,))
+                return None
             turn = Turn.model_validate_json(
                 State._turn_row(db, binding_id, turn_id)["snapshot_json"]
             )

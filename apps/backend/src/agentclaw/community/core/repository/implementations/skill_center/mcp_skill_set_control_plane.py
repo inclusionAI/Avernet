@@ -22,9 +22,6 @@ from agentclaw.community.core.skill_center.policies.capability_ownership import 
     require_can_join_set,
     require_non_platform_mcp,
 )
-from agentclaw.community.core.skill_center.errors import (
-    SkillSetControlPlaneConflictError,
-)
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -76,7 +73,7 @@ class McpSkillSetControlPlaneCommands:
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             excluded_default_ids = default_exclusions.lock_mcp_exclusions(
                 session, bot_id=bot_id, owner_id=owner_id,
                 server_code=server_code,
@@ -166,7 +163,7 @@ class McpSkillSetControlPlaneCommands:
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             row = self._set(session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type, default_engine_types=default_engine_types, locked=True)
             self._ordinary(row)
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
@@ -180,10 +177,6 @@ class McpSkillSetControlPlaneCommands:
             session.delete(membership)
             if row.is_active:
                 mcp_installations.uninstall(
-                    session, bot_id=bot_id, owner_id=owner_id,
-                    env=get_current_env(), server_codes={server_code},
-                )
-                bot_mcp_configs.delete(
                     session, bot_id=bot_id, owner_id=owner_id,
                     env=get_current_env(), server_codes={server_code},
                 )
@@ -211,7 +204,7 @@ class McpSkillSetControlPlaneCommands:
         because a stray code must not leave a dangling row that would
         pre-exclude the server if the platform ever adds it.
         """
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             default_exclusions.lock_mcp_exclusions(
                 session, bot_id=bot_id, owner_id=owner_id,
                 server_code=server_code,
@@ -234,8 +227,8 @@ class McpSkillSetControlPlaneCommands:
                 session, bot_id=bot_id, owner_id=owner_id,
                 set_id=int(row.id), server_code=server_code,
             )
-            # An active ordinary Set can supply the same MCP after Default
-            # exclusion. Its Installation and configuration belong to that Set.
+            # An active ordinary Set can still supply the MCP after Default
+            # exclusion. Bot overrides are independent of either supply source.
             active_ordinary_claim = any(
                 old.set_active[set_id]
                 and any(member[0] == server_code for member in members)
@@ -244,10 +237,6 @@ class McpSkillSetControlPlaneCommands:
             removed_installation = 0
             if not active_ordinary_claim:
                 removed_installation = mcp_installations.uninstall(
-                    session, bot_id=bot_id, owner_id=owner_id,
-                    env=get_current_env(), server_codes={server_code},
-                )
-                bot_mcp_configs.delete(
                     session, bot_id=bot_id, owner_id=owner_id,
                     env=get_current_env(), server_codes={server_code},
                 )
@@ -261,10 +250,11 @@ class McpSkillSetControlPlaneCommands:
 
     def unexclude_default_mcp(
         self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
+        platform_default_codes: frozenset[str],
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             excluded_default_ids = default_exclusions.lock_mcp_exclusions(
                 session, bot_id=bot_id, owner_id=owner_id,
                 server_code=server_code,
@@ -275,13 +265,31 @@ class McpSkillSetControlPlaneCommands:
                 default_engine_types=default_engine_types,
             )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
-            if int(row.id) in excluded_default_ids and any(
-                member[0] == server_code
-                for members in old.mcp_memberships.values()
-                for member in members
-            ):
-                raise SkillSetControlPlaneConflictError(
-                    "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
+            member_codes = set_member_mcp_codes(
+                self._scope, session, skill_set_id=int(row.id)
+            )
+            restores_supply = server_code in member_codes | platform_default_codes
+            if int(row.id) in excluded_default_ids and restores_supply:
+                active_set_claim = self._has_active_mcp_set_claim(
+                    session,
+                    bot_sets=self._bot_sets(
+                        session, bot_id=bot_id, owner_id=owner_id,
+                        engine_type=engine_type, default_engine_types=default_engine_types,
+                    ),
+                    membership_set_ids=self._mcp_referencing_set_ids(
+                        session, server_code=server_code
+                    ),
+                    server_code=server_code, bot_id=bot_id, owner_id=owner_id,
+                )
+                require_can_join_set(
+                    is_directly_active=(
+                        server_code in old.mcp_installations and not active_set_claim
+                    ),
+                    is_in_another_set=any(
+                        member[0] == server_code
+                        for members in old.mcp_memberships.values()
+                        for member in members
+                    ),
                 )
             removed = default_exclusions.unexclude_mcp(
                 session, bot_id=bot_id, owner_id=owner_id,
@@ -289,9 +297,7 @@ class McpSkillSetControlPlaneCommands:
             )
             if not removed:
                 return DesiredStateMutation(self._as_item(row), False, old)
-            if server_code in set_member_mcp_codes(
-                self._scope, session, skill_set_id=int(row.id)
-            ):
+            if server_code in member_codes:
                 mcp_installations.install(
                     session, bot_id=bot_id, owner_id=owner_id,
                     env=get_current_env(), server_code=server_code,
@@ -299,7 +305,7 @@ class McpSkillSetControlPlaneCommands:
             session.flush()
             return DesiredStateMutation(
                 self._as_item(row), True, old,
-                mcp_codes=frozenset({server_code}),
+                mcp_codes=frozenset({server_code}) if restores_supply else frozenset(),
             )
 
     def excluded_default_mcp_codes(
@@ -317,14 +323,19 @@ class McpSkillSetControlPlaneCommands:
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             require_direct_mcp_control_allowed(
                 server_code=server_code,
-                platform_default_codes=platform_default_codes,
+                platform_default_codes=self._effective_direct_policy(
+                    session, bot_id=bot_id, owner_id=owner_id, server_code=server_code,
+                    platform_default_codes=platform_default_codes, engine_type=engine_type,
+                    default_engine_types=default_engine_types,
+                ),
             )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             self._require_not_set_managed(
                 session,
+                member=server_code,
                 set_ids=self._mcp_referencing_set_ids(
                     session, server_code=server_code
                 ),
@@ -356,7 +367,7 @@ class McpSkillSetControlPlaneCommands:
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
         """Atomically install one direct MCP and replace its Bot override."""
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             manifest_direct = self._manifest_direct_mcp_in_session(
                 session,
                 bot_id=bot_id,
@@ -369,12 +380,17 @@ class McpSkillSetControlPlaneCommands:
             if not manifest_direct:
                 require_direct_mcp_control_allowed(
                     server_code=server_code,
-                    platform_default_codes=platform_default_codes,
+                    platform_default_codes=self._effective_direct_policy(
+                        session, bot_id=bot_id, owner_id=owner_id, server_code=server_code,
+                        platform_default_codes=platform_default_codes, engine_type=engine_type,
+                        default_engine_types=default_engine_types,
+                    ),
                 )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             if not manifest_direct:
                 self._require_not_set_managed(
                     session,
+                    member=server_code,
                     set_ids=self._mcp_referencing_set_ids(
                         session, server_code=server_code
                     ),
@@ -423,7 +439,7 @@ class McpSkillSetControlPlaneCommands:
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
             manifest_direct = self._manifest_direct_mcp_in_session(
                 session,
                 bot_id=bot_id,
@@ -436,12 +452,17 @@ class McpSkillSetControlPlaneCommands:
             if not manifest_direct:
                 require_direct_mcp_control_allowed(
                     server_code=server_code,
-                    platform_default_codes=platform_default_codes,
+                    platform_default_codes=self._effective_direct_policy(
+                        session, bot_id=bot_id, owner_id=owner_id, server_code=server_code,
+                        platform_default_codes=platform_default_codes, engine_type=engine_type,
+                        default_engine_types=default_engine_types,
+                    ),
                 )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             if not manifest_direct:
                 self._require_not_set_managed(
                     session,
+                    member=server_code,
                     set_ids=self._mcp_referencing_set_ids(
                         session, server_code=server_code
                     ),
@@ -477,29 +498,34 @@ class McpSkillSetControlPlaneCommands:
         with self._db.orm_session() as session:
             return self._mcp_installations(session, bot_id, owner_id)
 
-    def set_managed_mcp_codes(
+
+    def _effective_direct_policy(
         self,
+        session,
         *,
-        bot_id: str,
-        owner_id: str,
-        server_codes: set[str],
-        engine_type: str | None = None,
-        default_engine_types: tuple[str, ...] | None = None,
-    ) -> set[str]:
-        managed: set[str] = set()
-        with self._db.orm_session() as session:
-            for server_code in sorted(server_codes):
-                try:
-                    self._require_not_set_managed(
-                        session,
-                        set_ids=self._mcp_referencing_set_ids(
-                            session, server_code=server_code
-                        ),
-                        bot_id=bot_id,
-                        owner_id=owner_id,
-                        engine_type=engine_type,
-                        default_engine_types=default_engine_types,
-                    )
-                except SkillSetControlPlaneConflictError:
-                    managed.add(server_code)
-        return managed
+        bot_id,
+        owner_id,
+        server_code,
+        platform_default_codes,
+        engine_type,
+        default_engine_types,
+    ):
+        excluded_ids = default_exclusions.lock_mcp_exclusions(
+            session, bot_id=bot_id, owner_id=owner_id, server_code=server_code
+        )
+        applicable = {
+            int(row.id)
+            for row in self._bot_sets(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            )
+            if row.is_default
+        }
+        return (
+            platform_default_codes - {server_code}
+            if applicable and applicable <= excluded_ids
+            else platform_default_codes
+        )

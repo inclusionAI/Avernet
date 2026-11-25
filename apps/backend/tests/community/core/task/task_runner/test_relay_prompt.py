@@ -84,6 +84,16 @@ def test_relay_prompt_forbids_dispatch_for_terminal_and_bbs_plans() -> None:
     assert "HTTP 422 表示契约非法" in prompt
     assert "HTTP 409 表示状态冲突或执行代次失效" in prompt
     assert "禁止换 event_id 或 token" in prompt
+    assert "S5a 结合" in prompt
+    assert "S5b 有 gaps" in prompt
+    assert "S5c 根据" in prompt
+    assert "S5d 本地" in prompt
+    assert "S5e 仅上报" in prompt
+    assert "S5.1" not in prompt
+    assert "S5.2" not in prompt
+    assert "S5.3" not in prompt
+    assert "S5.4" not in prompt
+    assert "S5.5" not in prompt
 
 
 def test_relay_prompt_pins_s4a_execution_budget() -> None:
@@ -104,21 +114,9 @@ def test_relay_prompt_pins_s4a_execution_budget() -> None:
     assert "到达任一上限立即停止业务调用" in prompt
     assert "并继续 S4b 上报" in prompt
     assert "禁止卡住不切下一步" in prompt
-    assert "失败记录必须能还原关键问题现场" in prompt
-    assert "failure_type" in prompt
-    assert "actual_goal_digest" in prompt
-    assert "last_operation" in prompt
-    assert "raw_error_excerpt" in prompt
-    assert "evidence_refs" in prompt
-    assert "impacted_acceptances" in prompt
-    assert "impact_and_next_hint" in prompt
-    assert "只记录一个最相关的触发操作" in prompt
-    assert "单份失败 JSON 不超过 2000 字符" in prompt
-    assert "raw_error_excerpt 不超过 500 字符" in prompt
-    assert "evidence_refs 最多 5 个" in prompt
-    assert "发生裁剪时增加 truncation 并保留必需键" in prompt
-    assert "不得转储完整日志、会话、Prompt或全部产物" in prompt
-    assert "DECLINED 时 event.failure_reason 与 S4A_EXECUTION.error_msg 写同一份" in prompt
+    assert "失败说明只保留关键失败原因、受影响验收项、必要证据引用" in prompt
+    assert "不为归因分析另行构造执行轨迹或重复现场 JSON" in prompt
+    assert "DECLINED 将能力不足原因写入 event.failure_reason" in prompt
     assert "ACCEPTED 但 verdict=FAILED 时顶层 failure_reason 仍为 null" in prompt
     assert "不得包含 relay_token、密钥、会话凭证或完整原始日志" in prompt
 
@@ -164,7 +162,7 @@ def test_relay_prompt_pins_acceptance_wire_contract() -> None:
     assert "禁止新增 planning_failure_reason 字段" in prompt
 
 
-def test_relay_prompt_requires_structured_diagnostic_trace() -> None:
+def test_relay_prompt_keeps_trace_optional_and_business_facts_required() -> None:
     prompt = format_relay_execution_instruction(
         task_id="task-1",
         node_id="node-1",
@@ -175,41 +173,21 @@ def test_relay_prompt_requires_structured_diagnostic_trace() -> None:
         acceptances=[],
     )
 
-    assert "每次 report 请求都必须带顶层 trace={steps:[...]}" in prompt
-    assert "HTTP 契约允许省略 trace" in prompt
-    assert "本 Runtime 不得省略" in prompt
-    assert "EXECUTION_RESULT.trace.steps 必须按顺序恰好 5 条" in prompt
-    assert "S1_CONTEXT、S2_GAPS、S3_CAPABILITY、S4A_EXECUTION、S4B_REPORT" in prompt
-    assert "PLAN_RESULT.trace.steps 必须按顺序恰好 5 条" in prompt
-    assert (
-        "S5A_REFRESH_GAPS、S5B_PLAN_NEXT_NODE、S5C_SEARCH_CANDIDATES、"
-        in prompt
-    )
-    assert "S5D_SELECT_EXECUTOR、S5E_REPORT_PLAN" in prompt
-    assert "action_type、action_input、action_result、status_from、status_to、boost_reason、error_msg" in prompt
-    assert "允许为 null 的键也必须显式传 null" in prompt
-    assert "action_type 和 action_result 必须是非空字符串" in prompt
-    assert "action_input 必须是字符串或 null" in prompt
-    assert "action_result 记录该步骤的推理输出内容" in prompt
-    assert "必须序列化为紧凑 JSON object" in prompt
-    assert "包含非空 status 字段" in prompt
-    assert "等状态值只能作为 JSON 内的 status 字段" in prompt
-    assert "boost_reason 记录执行过程证据：为什么推进、为什么选择等等维度信息" in prompt
-    assert "结构化内容先序列化为紧凑 JSON 文本" in prompt
-    assert "禁止 step/status/detail 或下挂 detail 的旧结构" in prompt
-    assert "step.detail" not in prompt
-    assert "action_type=execute" not in prompt
-    assert "action_type=plan" not in prompt
-    assert "S6 不进入 report trace" in prompt
-    assert "S4A_EXECUTION 记录执行计划、关键工具调用摘要、产物路径" in prompt
-    assert "S5C_SEARCH_CANDIDATES 记录搜索词、raw_item_count、候选评分" in prompt
-    assert "manager-only manager_worker 群" in prompt
-    assert "S5D 选择失败" in prompt
-    assert "不放 relay_token、密钥、会话凭证" in prompt
-    assert "trace JSON 在构造后固定" in prompt
+    assert "分布式接力不要求构造或上报 trace" in prompt
+    assert "通用上报接口仍支持可选 trace" in prompt
+    assert "不依赖 Bot 自报轨迹" in prompt
+    assert "网络重试必须原样复用" in prompt
+    assert "本 Runtime 不得省略" not in prompt
+    assert "EXECUTION_RESULT.trace.steps" not in prompt
+    assert "PLAN_RESULT.trace.steps" not in prompt
+    assert "S4A_EXECUTION.error_msg" not in prompt
+    assert "原样记入 S5D 的输入" not in prompt
+    assert "actual_goal_digest" not in prompt
+    assert "gap_items[].summary" in prompt
+    assert "排除当前执行者和 S1 used_executor_ids" in prompt
 
 
-def test_relay_delivery_prompt_uses_required_trace_contract() -> None:
+def test_relay_delivery_prompt_uses_optional_trace_contract() -> None:
     from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
         format_task_node_business_instruction,
     )
@@ -230,10 +208,41 @@ def test_relay_delivery_prompt_uses_required_trace_contract() -> None:
     assert "业务 Skill 只能在 S2/S3/S4/S5 中作为工具被 task-loop 调用" in prompt
     assert "S0 只做入口路由，不进入 trace.steps，也不新增 report event" in prompt
 
-    assert "每次 report 请求都必须带顶层 trace={steps:[...]}" in prompt
-    assert "HTTP 契约允许省略 trace" in prompt
-    assert "本 Runtime 不得省略" in prompt
-    assert "EXECUTION_RESULT.trace.steps" in prompt
-    assert "PLAN_RESULT.trace.steps" in prompt
-    assert "禁止 step/status/detail 或下挂 detail 的旧结构" in prompt
+    assert "分布式接力不要求构造或上报 trace" in prompt
+    assert "通用上报接口仍支持可选 trace" in prompt
+    assert "本 Runtime 不得省略" not in prompt
     assert "backend_url=https://backend.example" in prompt
+
+
+
+def test_relay_prompt_defaults_to_all_run_modes() -> None:
+    prompt = format_relay_execution_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+        backend_url="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+    )
+
+    assert "S5d后继允许执行模态=[\"single_bot\", \"coop_group\", \"bbs\"]" in prompt
+
+
+def test_relay_prompt_injects_allowed_run_modes() -> None:
+    prompt = format_relay_execution_instruction(
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+        backend_url="https://backend.example",
+        objective="完成任务",
+        instruction="执行并上报",
+        acceptances=[],
+        allowed_run_modes=["single_bot", "coop_group"],
+    )
+
+    assert "S5d后继允许执行模态=[\"single_bot\", \"coop_group\"]" in prompt
+    assert "只能从该列表中选择下一棒 run_mode" in prompt
+    assert "HIT_MULTI_BOTS 或 MISS" in prompt
+    assert "当 bbs 在白名单内时，MISS 才可填 run_mode=bbs" in prompt
+    assert "bbs_disabled_and_no_candidate" in prompt

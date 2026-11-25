@@ -16,32 +16,12 @@ from unittest.mock import MagicMock, patch
 class TestBindingStoreInjection:
     """验证 binding_store 注入"""
 
-    def test_binding_store_injected_into_retrieval_service(self):
-        """
-        验证：binding_store 必须注入到 WorkerProfileRetrievalService
-
-        这是之前发现的 bug：binding_store 没有被注入
-        """
-        from src.domain.services.worker_profile_retrieval_service import WorkerProfileRetrievalService
-
-        # 模拟 binding store
-        mock_binding_store = MagicMock()
-        mock_source = MagicMock()
-
-        service = WorkerProfileRetrievalService(
-            source=mock_source,
-            binding_store=mock_binding_store,
-        )
-
-        # 验证 binding_store 被正确保存
-        assert service._canonicalizer is not None
-        assert service._canonicalizer._binding_store is mock_binding_store
 
     def test_binding_store_used_in_canonicalization(self):
         """
         验证：canonicalization 过程中必须使用 binding_store
         """
-        from src.domain.services.profile_key_canonicalizer import ProfileKeyCanonicalizer
+        from app.domain.services.profile_key_canonicalizer import ProfileKeyCanonicalizer
 
         # 模拟 binding
         mock_binding = MagicMock()
@@ -60,16 +40,6 @@ class TestBindingStoreInjection:
         # 验证 binding_store 被调用
         mock_binding_store.get_binding_by_profile_key.assert_called()
 
-    def test_fusion_dependencies_injects_binding_store(self):
-        """
-        验证：fusion_dependencies.py 正确注入 binding_store
-        """
-        # 这个测试验证依赖注入配置
-        from src.interfaces.api.dependencies import fusion_dependencies
-
-        # 检查 _get_profile_binding_store 函数存在
-        assert hasattr(fusion_dependencies, '_get_profile_binding_store'), \
-            "fusion_dependencies 必须有 _get_profile_binding_store 函数"
 
 
 class TestBindingStoreFormatHandling:
@@ -82,7 +52,7 @@ class TestBindingStoreFormatHandling:
         API binding: wrk_test:default
         Profile Source: staff_wrk_test:default
         """
-        from src.domain.services.profile_key_canonicalizer import ProfileKeyCanonicalizer
+        from app.domain.services.profile_key_canonicalizer import ProfileKeyCanonicalizer
 
         mock_binding = MagicMock()
         mock_binding.worker_id = "wrk_test"
@@ -109,7 +79,7 @@ class TestBindingStoreFormatHandling:
         FILE binding: staff_wrk_test:default
         Profile Source: staff_wrk_test:default
         """
-        from src.domain.services.profile_key_canonicalizer import ProfileKeyCanonicalizer
+        from app.domain.services.profile_key_canonicalizer import ProfileKeyCanonicalizer
 
         mock_binding = MagicMock()
         mock_binding.worker_id = "wrk_test"
@@ -127,29 +97,7 @@ class TestBindingStoreFormatHandling:
         assert result == "staff_wrk_test:default"
 
 
-class TestDependencyInjectionChain:
-    """验证完整依赖注入链"""
 
-    def test_complete_injection_chain(self):
-        """
-        验证完整的依赖注入链：
-
-        fusion_dependencies.py -> get_profile_retrieval_service()
-            -> WorkerProfileRetrievalService(binding_store=...)
-                -> ProfileKeyCanonicalizer(binding_store=...)
-        """
-        # 检查依赖注入函数存在
-        from src.interfaces.api.dependencies import fusion_dependencies
-
-        # 检查关键函数
-        required_functions = [
-            '_get_profile_binding_store',
-            'get_profile_retrieval_service',
-        ]
-
-        for func_name in required_functions:
-            assert hasattr(fusion_dependencies, func_name), \
-                f"fusion_dependencies 必须有 {func_name} 函数"
 
 
 class TestBindingStoreNotFound:
@@ -161,7 +109,7 @@ class TestBindingStoreNotFound:
 
         这是合理的 fallback 行为
         """
-        from src.domain.services.profile_key_canonicalizer import ProfileKeyCanonicalizer
+        from app.domain.services.profile_key_canonicalizer import ProfileKeyCanonicalizer
 
         mock_binding_store = MagicMock()
         mock_binding_store.get_binding_by_profile_key.return_value = None
@@ -178,7 +126,7 @@ class TestBindingStoreNotFound:
         """
         验证：binding 找不到且前缀也不匹配时，保留原值
         """
-        from src.domain.services.profile_key_canonicalizer import ProfileKeyCanonicalizer
+        from app.domain.services.profile_key_canonicalizer import ProfileKeyCanonicalizer
 
         mock_binding_store = MagicMock()
         mock_binding_store.get_binding_by_profile_key.return_value = None

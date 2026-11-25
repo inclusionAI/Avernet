@@ -76,8 +76,10 @@ class BotFacts:
         grant record where it must name a real owner. Its rule is stricter on
         purpose and is not folded in here.
 
-        ``record`` must come from an **owner-scoped** ``(bot_id, owner_id)``
-        read. ``bot_id`` carries no unique constraint and every user's first bot
+        ``record`` must come from a scoped, uniquely resolved Bot address.
+        A legacy entity/Owner locator must be resolved before this projection;
+        downstream ownership checks use the row's current Owner. ``bot_id`` carries
+        no unique constraint and every user's first bot
         is called ``default``, so a row fetched by ``bot_id`` alone can belong to
         another owner.
 
@@ -99,17 +101,20 @@ class BotFacts:
 
 @dataclass(frozen=True)
 class SocketInfo:
-    """One WebSocket a caller may open against a bot.
+    """One endpoint a caller may reach a bot on.
 
     ``url`` is complete and opaque — the caller opens it verbatim, appending
-    nothing and rebuilding nothing. It is also the *only* field: the credential
-    travels inside it, because a browser's WebSocket handshake can carry one
-    nowhere else, and publishing it a second time alongside would leave a caller
-    guessing which one the socket honours.
+    nothing and rebuilding nothing. It is also the *only* field: on the socket
+    kinds that carry a credential, that credential travels inside the URL,
+    because a browser's WebSocket handshake can carry one nowhere else, and
+    publishing it a second time alongside would leave a caller guessing which
+    one the socket honours. The ``a2a`` kind is an HTTP base URL; optional
+    ``headers`` authenticate its card and RPC paths, not the WebSocket.
     """
 
     kind: str
     url: str
+    headers: dict[str, str] = field(default_factory=dict, repr=False)
 
 
 @dataclass(frozen=True)
@@ -123,8 +128,8 @@ class ConnectionResult:
     ``expires_at`` is an ISO 8601 UTC instant bounding when a socket here can be
     *opened*, not how long one stays open. The credential is checked once, at
     the handshake, so a socket already open outlives it. A caller re-fetches
-    before connecting or reconnecting; a caller that polls on a timer to keep a
-    live socket alive has misread it.
+    before connecting or reconnecting. Credentialed A2A uses the same expiry
+    and must refresh before each new HTTP request after that deadline.
 
     Mandatory: without it a caller cannot tell a credential that has aged out
     from a device that is refusing, and would retry the socket instead of
@@ -135,6 +140,12 @@ class ConnectionResult:
     expires_at: str
     sockets: list[SocketInfo] = field(default_factory=list)
     transport_mode: str = ""
+    a2a_withheld: bool = False
+    """服务端治理后明确拒绝签发 A2A 面（用户灰度未命中）。
+
+    客户端据此禁用 ws 推导兜底与 A2A 探测——"没有地址"与"明确拒绝"
+    不同：前者允许直连拓扑的推导兜底，后者是用户级控制的负结果。
+    """
 
 
 __all__ = ["BotFacts", "ConnectionResult", "EngineResult", "SocketInfo"]

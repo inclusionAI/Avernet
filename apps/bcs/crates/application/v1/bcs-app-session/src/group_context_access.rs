@@ -1,26 +1,28 @@
-//! Add-only access guard for the public Group Context application service.
+//! Group and Session resource checks for public Group Context operations.
 //!
-//! The guard resolves the resource identity from the current Group/Session and
-//! returns before the Group Context service can create a write. All other
-//! operations are plain delegation; this is deliberately not a global
-//! interceptor or generic authorization framework.
+//! The guard resolves the canonical Group for adds and preset definitions, and
+//! checks Session membership when a Bot lists presets with a Session ID.
+//! Entry-level permissions remain in the Group Context application service.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_domain::ScopeLevel;
+use bcs_domain::{ActorKind, ScopeLevel};
+use std::collections::HashSet;
 use bcs_service_api::application::v1::{
     AddGroupContext, ApplicationError, GetGroupContext, GroupContextAck,
     GroupContextApplicationService, GroupContextGetResponse, GroupContextListResponse,
     GroupContextRequestContext, ListGroupContexts, SystemSetGroupContext, UpdateGroupContext,
+    AuthenticatedCaller, ListSharedGroupContexts, SharedGroupContextItem,
 };
-use bcs_service_api::port::repo::SessionRepoPort;
+use bcs_service_api::port::{BotAuthorityPort, repo::SessionRepoPort};
 use bcs_service_api::{Group, GroupCoreService, Participant, Session};
 
 pub struct GroupContextAddAccessGuard {
     inner: Arc<dyn GroupContextApplicationService>,
     groups: Arc<dyn GroupCoreService>,
     sessions: Arc<dyn SessionRepoPort>,
+    bot_authority: Arc<dyn BotAuthorityPort>,
 }
 
 impl GroupContextAddAccessGuard {
@@ -28,11 +30,13 @@ impl GroupContextAddAccessGuard {
         inner: Arc<dyn GroupContextApplicationService>,
         groups: Arc<dyn GroupCoreService>,
         sessions: Arc<dyn SessionRepoPort>,
+        bot_authority: Arc<dyn BotAuthorityPort>,
     ) -> Self {
         Self {
             inner,
             groups,
             sessions,
+            bot_authority,
         }
     }
 
@@ -148,11 +152,183 @@ suffix when scope_level=round",
     }
 }
 
+impl GroupContextAddAccessGuard {
+    async fn authorize_preset_write(&self, group_id: &str, actor: &str) -> Result<Group, ApplicationError> {
+        let group = self.load_group(group_id).await?;
+        let user_id = actor.strip_prefix("human_").filter(|id| !id.is_empty())
+            .ok_or_else(|| ApplicationError::forbidden_code("permission_denied", "preset management requires a Human caller"))?;
+        let authorized = self.bot_authority.can_manage(user_id, &group.driver_bot).await
+            .map_err(|error| ApplicationError::internal(format!("Bot authority lookup failed: {error}")))?;
+        if !authorized {
+            return Err(ApplicationError::forbidden_code(
+                "permission_denied",
+                "preset management requires owner or admin authority on the Group driver Bot",
+            ));
+        }
+        Ok(group)
+    }
+}
+
 #[async_trait]
 impl GroupContextApplicationService for GroupContextAddAccessGuard {
     async fn add(&self, mut command: AddGroupContext) -> Result<GroupContextAck, ApplicationError> {
         self.authorize_add(&mut command).await?;
         self.inner.add(command).await
+    }
+
+    async fn shared_info(
+        &self,
+        group_id: &str,
+        session_id: Option<&str>,
+        view_bot_id: Option<&str>,
+        caller: &AuthenticatedCaller,
+    ) -> Result<Vec<SharedGroupContextItem>, ApplicationError> {
+        let group = self.groups.read_authorization_snapshot(group_id).await
+            .map_err(|error| ApplicationError::internal(format!("Group lookup failed: {error}")))?
+            .filter(|group| group.live)
+            .ok_or_else(|| ApplicationError::not_found("group_not_found", "Group was not found"))?;
+        let session = if let Some(id) = session_id {
+            let session = self.sessions.read_authorization_snapshot(id).await
+                .map_err(|error| ApplicationError::internal(format!("Session lookup failed: {error}")))?
+                .filter(|session| session.live)
+                .ok_or_else(|| ApplicationError::not_found("session_not_found", "Session was not found"))?;
+            if session.group_id != group.id {
+                return Err(invalid_param("sessionId must identify a Session in the requested Group"));
+            }
+            Some(session)
+        } else {
+            None
+        };
+        let members: Vec<_> = group.participants.iter()
+            .chain(session.iter().flat_map(|session| session.participants.iter()))
+            .collect();
+        let bots: HashSet<_> = members.iter()
+            .filter(|member| member.actor_kind == ActorKind::Bot)
+            .map(|member| member.actor_id.as_str())
+            .collect();
+        let session_has_bot = |bot_id: &str| session.as_ref().is_some_and(|session| {
+            session.participants.iter().any(|member| {
+                member.actor_kind == ActorKind::Bot && member.actor_id == bot_id
+            })
+        });
+        let has_bot = |bot_id: &str| {
+            if session.is_some() { session_has_bot(bot_id) } else { bots.contains(bot_id) }
+        };
+        let actor_ids = if let Some(id) = view_bot_id {
+            let user = caller.user.as_ref().filter(|_| caller.bot.is_none())
+                .ok_or_else(|| permission_denied(id, group_id))?;
+            if !has_bot(id) || !self.bot_authority.can_manage(&user.id, id).await
+                .map_err(|error| ApplicationError::internal(format!("Bot authority lookup failed: {error}")))?
+            {
+                return Err(permission_denied(id, group_id));
+            }
+            vec![id.to_string()]
+        } else if let Some(bot) = &caller.bot {
+            if !has_bot(&bot.bot_uuid) {
+                return Err(permission_denied(&bot.bot_uuid, group_id));
+            }
+            vec![bot.bot_uuid.clone()]
+        } else if let Some(user) = &caller.user {
+            let human = format!("human_{}", user.id);
+            let mut actor_ids = vec![human.clone()];
+            let mut manages_member = false;
+            let mut can_read_session = session.as_ref().is_some_and(|session| {
+                session.participants.iter().any(|member| {
+                    member.actor_kind == ActorKind::Human && member.actor_id == human
+                })
+            });
+            if session.is_some() {
+                use futures::{StreamExt, TryStreamExt};
+
+                // Bound outstanding authority reads per request to protect the shared DB pool.
+                let bot_ids: Vec<_> = bots.iter().map(|id| id.to_string()).collect();
+                let managed: Vec<_> = futures::stream::iter(bot_ids)
+                    .map(|id| async move {
+                        self.bot_authority.can_manage(&user.id, &id).await
+                            .map(|allowed| allowed.then_some(id))
+                    })
+                    .buffer_unordered(8)
+                    .try_collect()
+                    .await
+                    .map_err(|error| ApplicationError::internal(format!("Bot authority lookup failed: {error}")))?;
+                for id in managed.into_iter().flatten() {
+                    can_read_session |= session_has_bot(&id);
+                    actor_ids.push(id);
+                }
+            } else if group.visibility != "public" && !group.participants.iter().any(|member| {
+                member.actor_kind == ActorKind::Human && member.actor_id == human
+            }) {
+                for id in bots {
+                    if self.bot_authority.can_manage(&user.id, id).await
+                        .map_err(|error| ApplicationError::internal(format!("Bot authority lookup failed: {error}")))?
+                    {
+                        manages_member = true;
+                        break;
+                    }
+                }
+            }
+            let admitted = if session.is_some() {
+                can_read_session
+            } else {
+                group.visibility == "public" || manages_member || group.participants.iter().any(|member| {
+                    member.actor_kind == ActorKind::Human && member.actor_id == human
+                })
+            };
+            if !admitted {
+                return Err(permission_denied(&human, group_id));
+            }
+            actor_ids
+        } else {
+            return Err(ApplicationError::Unauthenticated);
+        };
+        self.inner.list_shared_contexts(ListSharedGroupContexts {
+            group_id: group.id,
+            session_id: session.map(|session| session.id),
+            actor_ids,
+        }).await
+    }
+
+    async fn can_manage_presets(&self, group_id: &str, actor: &str) -> Result<bool, ApplicationError> {
+        match self.authorize_preset_write(group_id, actor).await {
+            Ok(_) => Ok(true),
+            Err(ApplicationError::Forbidden(_) | ApplicationError::ForbiddenCode { .. }) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn list_presets(&self, group_id: &str, caller: &AuthenticatedCaller, session_id: Option<&str>) -> Result<Vec<bcs_service_api::application::v1::GroupContextItemPreset>, ApplicationError> {
+        let group = self.load_group(group_id).await?;
+        if let Some(bot) = &caller.bot
+            && !group.participants.iter().any(|member| member.bot_uuid == bot.bot_uuid)
+        {
+            let session_id = session_id.filter(|id| !id.trim().is_empty()).ok_or_else(|| {
+                ApplicationError::forbidden_code(
+                    "permission_denied",
+                    "This Bot is not a Group member. If it participates in a Session in this Group, pass sessionId (CLI: --session-id) to verify Session membership.",
+                )
+            })?;
+            let session = self.load_session(session_id).await?;
+            if session.group_id != group.id {
+                return Err(invalid_param("sessionId must identify a Session in the requested Group"));
+            }
+            ensure_participant(&session.participants, &bot.bot_uuid, "the specified Session")?;
+        }
+        self.inner.list_presets(&group.id, caller, session_id).await
+    }
+
+    async fn add_preset(&self, group_id: &str, actor: &str, name: String, description: String) -> Result<(), ApplicationError> {
+        let group = self.authorize_preset_write(group_id, actor).await?;
+        self.inner.add_preset(&group.id, actor, name, description).await
+    }
+
+    async fn update_preset(&self, group_id: &str, actor: &str, name: String, new_name: Option<String>, description: Option<String>) -> Result<(), ApplicationError> {
+        let group = self.authorize_preset_write(group_id, actor).await?;
+        self.inner.update_preset(&group.id, actor, name, new_name, description).await
+    }
+
+    async fn delete_preset(&self, group_id: &str, actor: &str, name: String) -> Result<(), ApplicationError> {
+        let group = self.authorize_preset_write(group_id, actor).await?;
+        self.inner.delete_preset(&group.id, actor, name).await
     }
 
     async fn update(

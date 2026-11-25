@@ -821,6 +821,7 @@ def _session_row_from_manifest(item: dict[str, Any], path: Path) -> SessionRow:
     ).strip()
     return SessionRow(
         session_id=session_id,
+        session_key=str(item.get("sessionKey") or item.get("session_key") or ""),
         path=str(path),
         bot_id=str(item.get("botId") or ""),
         created_at=created_at,

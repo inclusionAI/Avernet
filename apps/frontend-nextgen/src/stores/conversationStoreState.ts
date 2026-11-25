@@ -65,12 +65,24 @@ export interface ConversationState {
   selectedSessionSnapshot: SelectedSessionSnapshot | null;
 
   setExpandedBot(botId: string, expanded: boolean): void;
-  setManagedBotOrigin(botId: string, origin: ConversationOrigin): void;
-  setManagedBotScope(botId: string, scope: ConversationSessionScope): void;
+  setManagedBotOrigin(
+    botId: string,
+    origin: ConversationOrigin,
+    options?: { supportsScopesOutsideMine?: boolean },
+  ): void;
+  setManagedBotScope(
+    botId: string,
+    scope: ConversationSessionScope,
+    options?: { preserveSelection?: boolean },
+  ): void;
   setSessionKeyFilter(botId: string, sessionKey: string): void;
+  /** 失效该 Bot 的会话列表缓存(managed/others 好友分组一并)并递增过滤代次,由列表 Hook 重拉。供外部建聊(协作广场等)后强制刷新侧栏列表。 */
+  invalidateBotSessionList(botId: string): void;
   /** 写入多实例服务 Bot 的选中实例(device UUID);实际变化时失效该 Bot 列表缓存并递增过滤代次。 */
   setBotInstanceSelection(botId: string, instanceUuid: string): void;
   setFriendBotScope(botId: string, scope: ConversationSessionScope): void;
+  /** 移除好友后的本地状态清理:该 Bot 的好友会话缓存/范围/检索条件与展开位(服务端关系已解除,重加好友从默认态开始)。 */
+  removeFriendBotState(botId: string): void;
   setExpandedFriend(botId: string, friendUserId: string, expanded: boolean): void;
   setBotGroupCollapsed(groupId: string, collapsed: boolean): void;
   selectConversation(input: {
@@ -94,8 +106,10 @@ export type ConversationInitialData = Omit<
   | 'setManagedBotOrigin'
   | 'setManagedBotScope'
   | 'setSessionKeyFilter'
+  | 'invalidateBotSessionList'
   | 'setBotInstanceSelection'
   | 'setFriendBotScope'
+  | 'removeFriendBotState'
   | 'setExpandedFriend'
   | 'setBotGroupCollapsed'
   | 'selectConversation'

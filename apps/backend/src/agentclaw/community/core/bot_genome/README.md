@@ -33,18 +33,43 @@ owner changes it with its own operation (`set_policy`).
 
 ## Delivery
 
-A promotion (`promotion/`) moves `active` and `previous` in one
-compare-and-swap, marks the revision `promoted`, records the promotion with
-the compiled document and its digest, and hands the compiled revision to the
-`RevisionApplier` seam. The only applier bound here (`PendingDeliveryApplier`)
-refuses before any ref moves: direct delivery into the apply engine is
-RSI-04. No Manifest document is written by anything in this package; the
-`/config-manifest` endpoints keep working as before and are unrelated.
+A promotion (`promotion/`) compiles the revision into the apply engine's
+typed desired state (`compile.py`) to check it, asks the delivery seam
+whether it can take the bot (`RevisionApplier.preflight`), files the
+promotion `pending`, and starts the delivery: `DirectApplier` starts an apply
+run whose state reference is `StateRef("genome", promotion_id)`, under the
+bot's apply lock (a busy bot is refused, `ApplyBusy`, with nothing moved).
+The row turns `applying` with the apply id. In the worker, `GenomeCompiler`
+maps the promotion to its revision and compiles it (no status check: the
+compile is pure, so a re-run after a crash compiles the same state), and the
+apply engine applies it.
 
-"Which revision does this bot run" joins the bot's last Manifest apply to the
-promotion that started it; a mismatch, or a last apply nobody promoted, is
-**drift**. Owners may promote on a drifted bot (that is how they reconcile);
-automated actors may not.
+The refs move when that apply ends, not before. The apply engine publishes
+every apply's end to the subscriber registered for its state kind
+(`core/apply_engine/completion.py`); the genome's is `GenomeCompletionHandler`
+over `PromotionSettler` (`promotion/settle.py`), which in one transaction moves
+`active` (and `previous`) by compare-and-swap against the promotion's
+`from_revision`, marks the revision `promoted` and gives the row its final
+status: `applied`, `applied_partial` (the refs move and `active` is labelled
+`partial`), or `apply_failed` (nothing moves; also when `active` moved while
+the apply ran). An automated actor's apply runs with the bot owner as its
+principal; the row records the actor. A revision, like an apply, speaks only
+for the bot's Direct skills and MCP servers: capture leaves out what the bot's
+skill sets supply (the platform's default MCP servers included), and the apply
+neither counts nor removes it. A Center skill is delivered by name and a
+shared-repository skill by path (`SharedSkillPort`). No Manifest document is
+written by anything in this package; the `/config-manifest` endpoints keep
+working as before and are unrelated. Promoting a service bot's verify or
+online stage through the publish pipeline is inclusionAI/Avernet#3212.
+
+"Which revision does this bot run" is observed, never recorded:
+`GenomeRegistryProtocol.drift` captures the bot's state as `capture` would,
+computes the revision id it would record under `active`'s policy and compares
+it with `active`, both specs put in one representation first (a directory
+resource is one tree in a revision but its member files, one row each, on the
+applied bot). A promotion by an automated actor asks first and is
+refused (`Drifted`) while the bot holds something else; an owner's is how the
+owner reconciles.
 
 ## Storage
 
@@ -59,14 +84,16 @@ digest is readable for a bot only when a provenance row ties the two.
 ## Context Boundary
 
 ```yaml
-purpose: Own a bot's Genome Revisions (immutable, content-addressed versions of its definition plus policy), the refs that name them, the patches that change them, diffs, the compiled desired-state document, and the promotion record; hand delivery to one seam.
+purpose: Own a bot's Genome Revisions (immutable, content-addressed versions of its definition plus policy), the refs that name them, the patches that change them, diffs, the revision's compiled desired state and the drift observed against it, and the promotion record; hand delivery to one seam.
 provides:
   - GenomeRegistryProtocol  # the registry Service API (api/bot_genome_registry_service.py re-exports it)
   - GenomeRegistryService
   - GenomePromotionServiceProtocol  # the promotion Service API (api/bot_genome_promotion_service.py re-exports it)
   - GenomePromotionService
-  - RevisionApplier  # the delivery seam RSI-04 binds its direct-delivery applier into
-  - PendingDeliveryApplier
+  - RevisionApplier  # the delivery seam
+  - DirectApplier  # its binding: a promotion's revision delivered as an apply run (RSI-04)
+  - PromotionSettler  # a promotion's final status, and the refs it moves, once its apply ends
+  - GenomeCompletionHandler  # the genome row of the apply run service's completion map
   - BotRef
   - Provenance
   - RunScope
@@ -79,9 +106,9 @@ provides:
   - RefMover
   - GenomeDiff
   - GeneChange
-  - CompiledManifest
+  - GenomeCompiler  # the DesiredStateCompiler for the "genome" kind (compile.py); compile_spec renders a spec
+  - Drift
   - ContentReceipt
-  - ApplyResult
   - Promotion
   - PromotionPage
   - PolicyRejected
@@ -110,22 +137,30 @@ consumes:
   - "canonical_tree_bytes / decode_tree_bytes (core.content_store) — the acm-tree-v1 encoding a skill or directory resource is stored as; MAX_AUDIT_ACTOR_CHARS sizes the actor columns"
   - "SkillPackageValidator (core.skill_center.skill_package) — a local skill's tree is what the validator keeps (README §4.2)"
   - "admission_refusal (core.resources.services.file_service) — every resource file a revision writes must pass the workspace admission rule"
-  - "legal_identity_types (core.bot_config_manifest.schema.entries) — the persona types the bot's engine accepts"
+  - "legal_identity_types (core.apply_engine.identity_types) — the persona types the bot's engine accepts"
   - "MCPAuthServiceProtocol (core.mcp) and MCPConfigServiceProtocol (core.mcp) — the MCP permission and bot-override checks apply runs, re-run at record time"
   - "placeholders.resolve (core.bot_config_manifest.schema.placeholders) — the ${BOT_*} substitution a captured script body gets, as apply would"
   - "IdentityFilePort (core.ports), BotCapabilityStateReaderProtocol, DirectActivationServiceProtocol, SkillServiceFactory local package storage (core.skill_center), ResourceService / ResourceFileService (core.resources, core.services), BotStartupScriptServiceProtocol (core.bot_startup_script) — what capture reads a bot through"
-  - "BotConfigManifestApplyServiceProtocol.last_apply (core.bot_config_manifest) — the join applied_revision makes to find which promotion started the bot's last apply"
   - "the limits of core.bot_config_manifest.fetch.limits and schema.limits — mirrored, never redefined"
   - "the genome repository Protocols (core.repository) — persistence for the five ac_genome_* tables"
+  - "ApplyRunServiceProtocol (core.apply_engine.run) — DirectApplier starts the apply run that delivers a promotion; the run service publishes its end to GenomeCompletionHandler"
 consumed_by:
   - "adapters/http/openapi_v1/bots/genome — the public /openapi/v1/bots/{bot_id}/genome surface"
   - "di/modules/bot_genome_module — binds the repositories, both services and the applier seam"
-  - "RSI-04 (direct delivery) — binds a real RevisionApplier; RSI-08 (evolution runs) records candidates through GenomeRegistryProtocol"
+  - "core.apply_engine — compiles a promotion's revision through GenomeCompiler and tells GenomeCompletionHandler when its apply ends"
+  - "RSI-08 (evolution runs) — records candidates through GenomeRegistryProtocol"
 internal_dependencies:
   - agentclaw.community.core.base
-  - agentclaw.community.core.bot_config_manifest.apply.outcomes  # ApplyStatus: only a SUCCEEDED apply is "what the bot runs"
-  - agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol  # last_apply, for applied_revision
-  - agentclaw.community.core.bot_config_manifest.capabilities  # ManifestCapabilities, for the Manifest's MCP entry rules
+  - agentclaw.community.core.workspace.protected_entries  # the one list of workspace entries that are never resources (spec_checks refuses them)
+  - agentclaw.community.core.apply_engine.compiler  # Compiled, StateRef — the genome is one of the run service's compilers, under GENOME_STATE_KIND
+  - agentclaw.community.core.apply_engine.completion  # ApplyCompletionHandler, ApplyOutcome — the genome subscribes to its applies' ends to settle promotions
+  - agentclaw.community.core.apply_engine.outcomes  # ApplyStatus, read off an apply's outcome when settling
+  - agentclaw.community.core.apply_engine.run.service_protocol  # ApplyRunServiceProtocol — DirectApplier starts the apply run that delivers a promotion
+  - agentclaw.community.core.apply_engine.constructs  # the construct vocabulary a creation half narrows a state by
+  - agentclaw.community.core.apply_engine.context  # ApplyContext, the run the genome compiler compiles for (typing only)
+  - agentclaw.community.core.apply_engine.desired_state  # the DesiredState a revision compiles to
+  - agentclaw.community.core.apply_engine.identity_types  # legal_identity_types — the persona types the bot's engine accepts
+  - agentclaw.community.core.apply_engine.capabilities  # Capabilities, for the Manifest's MCP entry rules
   - agentclaw.community.core.bot_config_manifest.fetch.limits  # the fetch-time caps the contract mirrors
   - agentclaw.community.core.bot_config_manifest.schema  # limits, legal_identity_types, placeholders, the MCP entry rules
   - agentclaw.community.core.bot_startup_script  # the script body capture reads

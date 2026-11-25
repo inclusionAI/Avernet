@@ -23,6 +23,11 @@ logger = get_logger("plugin-bot-service")
 # 与 backend verifier 对称的 pin：签什么算法由契约决定，不由 token 决定。
 _ALGORITHM = "HS256"
 
+# app-caller-instance/status 的 decode 契约：同一把共享密钥，但 iss 固定
+# "baas" 且不校验 aud（见对接文档 §3.1，与 app-caller-connection 的
+# iss="gateway"/aud="backend" 形状不同）。
+_STATUS_PRINCIPAL_ISSUER = "baas"
+
 
 @dataclass(frozen=True)
 class CallerPrincipalConfig:
@@ -63,6 +68,22 @@ class CallerPrincipalSigner:
         claims: dict[str, Any] = {
             "iss": cfg.issuer,
             "aud": cfg.audience,
+            "iat": now,
+            "exp": now + cfg.ttl_seconds,
+        }
+        return jwt.encode(claims, key, algorithm=_ALGORITHM)
+
+    def mint_status(self) -> str:
+        """现签 app-caller-instance/status 的 BaaS 服务 JWT（只读状态查询）。
+
+        与 :meth:`mint` 共享同一把密钥与 TTL 契约，但 claims 形状不同：
+        ``iss="baas"``、无 ``aud``（该接口不校验 audience）。
+        """
+        key = self._resolve_key()
+        cfg = self._config
+        now = int(time.time())
+        claims: dict[str, Any] = {
+            "iss": _STATUS_PRINCIPAL_ISSUER,
             "iat": now,
             "exp": now + cfg.ttl_seconds,
         }

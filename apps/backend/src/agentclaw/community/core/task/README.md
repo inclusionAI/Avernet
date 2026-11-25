@@ -5,14 +5,33 @@
 > 权威源(冲突时以此为准):
 > - 设计三件套:`apps/backend/specs/2026-08-09-task-goal-driven-execution-framework/{plan,spec,tasks}.md`
 
-## 四层目录结构(对齐 `docs/arch/arch.rules.md §8`)
+## 任务副屏资产
+
+展示、声明恢复与导航编排由独立的 [task-panel 资产](../../../../../../frontend-nextgen/assets/task-panel/README.md) 持有；
+frontend-nextgen 和旧产品仅适配宿主能力。资产构建不进入 Python 运行时，
+不改变本域的任务执行或 Relay 协议。
+
+## Harness 运行活动观测
+
+Bot 会话通过 SecBaaS 查询 Engine 的同一 run 事件序号，而非仅以可见消息判断静默。
+首次观测、run 更换或序号回退重建观察基线；查询不可用不触发恢复或失败。
+事件活动不等于业务进展，不改变 Relay 上报和 S1～S6。
+部署顺序为 Engine → SecBaaS → Backend；多实例复用现有会话亲和路由，不保证跨实例恢复。
+
+## BBS 回复通知
+
+帖子先持久化，再向被回复作者发送通知。对裸 named Bot 作者，回复通知在当前租户和环境中用一次快照分类：唯一软删除且没有活跃候选时跳过通知并记录事件；零候选或多个候选保持失败。唯一活跃 Bot 按已有规则通知其 owner；default 身份及关注、点赞、收藏沿用原规则。相同请求的重放返回既有帖子，不再次发送通知。快照不能识别历史 ID 复用，也不与后续删除或恢复操作原子同步；跳过通知不代表历史通知已补偿。
+
+## Task 所有权目录结构(对齐 `docs/arch/arch.rules.md §8`)
 
 | 层 | 路径 | 职责 |
 |---|---|---|
 | api/ | `community/api/task/` | 对外 Service API Protocols(transport-agnostic) |
 | core/ | `community/core/task/` | 业务实现(transport-agnostic,禁 transport import) |
-| adapters/http/ | `community/adapters/http/task/`(内部:execute/dashboard/list 公开面镜像 + callback-report/bbs/feedback,前缀 `/api/v1/collaboration/tasks`,不经 spanner)+ `community/adapters/http/openapi_v1/task/`(前端公开面:execute/dashboard/list + bbs/feedback,前缀 `/openapi/v1/collaboration/tasks`,经 gateway spanner) | HTTP transport(thin:router+schema,不持 domain policy) |
-| di/modules/ | `community/di/modules/task_module.py` | composition root(DI 接线) |
+| adapters/http/ | `community/adapters/http/task/`(内部:execute/dashboard/list 公开面镜像 + callback-report/bbs/feedback/todos,不经 spanner)+ `community/adapters/http/openapi_v1/task/`(前端公开面:execute/dashboard/list + bbs/feedback/todos,经 gateway spanner) | HTTP transport(thin:router+schema,不持 domain policy) |
+| di/modules/ | `community/di/modules/task_module.py` + `community/di/modules/task/` | Task composition root；BBS/Todo 等子域绑定不得恢复为与 Task 并列的业务模块 |
+| plugin_api/task/ | `community/plugin_api/task/` | Task 拥有、可替换的出站能力契约；core 只依赖协议，不依赖具体插件 |
+| plugins/{community,local}/task/ | `community/plugins/community/task/` + `community/plugins/local/task/` | Task 出站能力的生产适配器与本地模拟器；保留插件分层，但不得漂移回通用顶层 |
 
 ## core/task/ 目录树
 
@@ -22,13 +41,16 @@ core/task/
 ├── domain/                        # TaskSpec/TaskNode/Graph 等共享领域模型
 ├── feedback/                       # task 域反馈通道(models/service/DDL)
 ├── forum/                          # BBS Topic/Post、Browse Loop 订阅/feed/报告
-├── task_center/                   # TaskService facade 与双模式入口
+├── context_collab/                 # Context 生命周期与 Todo BCS 执行器
+├── todos/                          # Todo 生命周期、自动调度、验收与事件/互动投影
+├── task_center/                   # TaskService facade、intake/delivery/relay/control Mixin 与双模式入口
 ├── task_plan/                     # TaskPlanner + static_plan.py 统一领域定义/Runtime
 ├── task_dispatch/                 # TaskDispatcher + query-only TaskSearch
 ├── task_runner/                   # TaskRunner、模式 Adapter、语义事件分发与回投适配
 ├── task_context/                  # 统一 TaskGraphService + TaskContext 投影 + TaskTrajectoryService
 │   ├── task_graph_service.py      # 唯一公开图谱领域服务与事实入口
-│   └── task_graph_support.py      # 私有 report/状态策略/查询/TaskContext 投影函数
+│   ├── task_graph_support.py      # 私有 report/状态策略/查询/TaskContext 投影函数
+│   └── relay_report.py            # Relay 两事件回投的原子图谱写入与重放回执
 ├── task_harness/                  # TaskHarness 重试、超时、恢复与 redrive
 └── task_discovery/                # Bot 候选发现与会话创建
 ```
@@ -165,6 +187,13 @@ stateDiagram-v2
 - 多节点投递并发:`asyncio.gather` + `asyncio.Semaphore(_DELIVER_CONCURRENCY=8)` **下沉 `TaskRunner.start_run` 内部**(投递是 runner 职责;engine 批量调 `start_run`,不持锁内拆单节点)。
 - 对齐 backend `desktop_bot/lifecycle.py` 的 `_check_one_bot` Semaphore 限流模式,防多节点投递雪崩。
 
+### Todo ContextCollab 执行边界
+
+Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.py`
+直接复用 Task 已有的 `BcsClientPort`、`BcsCreateGroupRequest`、
+`BcsBotTokenProvider` 及其 DI adapter/binding，复制 Todo 所需的群创建、恢复和
+状态查询编排；本轮不修改 `TaskExecutor`，也不抽取 Task/Todo 公共执行层。
+
 ### BCS Bot 身份边界
 
 - 任务领域只保存产品 Bot ID:`SearchResult.bot_id`/`GroupFormation.bot_ids`/单 Bot `assignee` 不保存 BCS UUID。
@@ -178,6 +207,7 @@ stateDiagram-v2
 - 空内容、非法 JSON、缺 `success`、`success` 非 bool、FAIL 无 gaps 均转 `exec_error=terminal_result_invalid`,进入 Harness;不得默认 PASS。
 - `TaskExecutorResultPoller` 是 worker fire-and-poll 业务 SLA 的唯一所有者。SLA 超时/连续轮询失败属于执行异常(`exec_error`),不是验收 FAIL。
 - Poller 超时后 best-effort `cancel_run`;Singlebox 真实取消后台 WebSocket collector。Singlebox Adapter 仅保留连接/握手/send ACK 等传输超时,不再用更短业务超时提前截断 Bot。
+- `OpenApiBotPort.send_message` 的已知 transport/protocol/business 投递失败统一使用 transport-neutral 的 `OpenApiBotError`；具体 Adapter 可以提供子类，但上层消费者不得依赖具体 HTTP 实现异常。未声明的编程错误不应被宽泛包装。
 
 ### graph 与 harness
 
@@ -200,13 +230,45 @@ stateDiagram-v2
 - `TaskGraphService` 是唯一图谱领域服务；中心化与 Relay 不再通过 Mixin、monkey patch 或模式专用 Graph 类扩展它。
 - `task_graph_support.py` 仅承载私有 report、状态策略、查询和 TaskContext 投影函数，不构成第二套领域对象。
 - `TaskSpec` 只保存 `context + goal`；`task_id` 属于任务/节点实体，执行指令由业务事实按需投影。
-- `TaskGraphService.report(...)` 是 Planner、Dispatcher、Runner、Harness、BBS 和 Relay 写入图谱事实的统一入口。
+- `TaskGraphService.report(...)` 仍是 Planner、Dispatcher、Runner、Harness、BBS 以及 Relay
+  节点事实（`NODE_PATCH` 等）的统一入口；Relay 的 `EXECUTION_RESULT` / `PLAN_RESULT`
+  两事件回投另经 `TaskServiceRelayMixin.report` → `TaskGraphService.apply_relay_report`
+  原子写入图谱与回执（`_relay_report_event_ids` / `_relay_report_receipts`）。同一
+  `event_id` 重放返回既有结果，指纹冲突报错。事件指纹不含未持久化的图引用，终态产物仅在
+  携带时纳入以兼容旧报文。
+- `task_service_control.py` 承载 TaskService 的控制面 Mixin（手动停止、节点更新），不拥有
+  intake、执行或投递恢复；公开签名与执行适配路由保持不变。人工停止经
+  `POST /api/v1/collaboration/tasks/{task_id}/stop` → `stop_task`：只把非终态节点收敛为
+  `CANCELLED` 并结算 Relay 投递意图，不重跑候选、不把节点复位为 `PENDING`；已终态任务报冲突。
 - `GET /api/v1/collaboration/tasks/{task_id}/nodes/{node_id}/context` 返回当前棒的只读
   `TaskContext`；`all_done_output` 只包含已接纳的前序节点事实。
-- Relay Skill 在本地完成 GAP 推理、下一棒规划和执行者决策；`/search` 只检索候选，
+- Relay Skill 在本地完成 GAP 推理、下一棒规划和执行者决策；`/search` 只检索候选
+  （请求携带 `relay_token`，用于校验当前节点执行代次）。后继 `PLAN_RESULT` 的单 Bot
+  assignee 或协作群成员必须来自该次候选响应；单 Bot 使用外部权威身份形态，由 Backend
+  落图时拆分为产品 `bot_id` 与 `assignee_owner_id`；
   `PLAN_RESULT` 原子地持久化唯一后继节点，`/dispatch` 执行实际投递。
+- Relay 同实例 Harness resume 仅发送短续跑触发；Skill 的
+  `relay_ledger_runtime.py` 统一入口真实读取 S1、读取当前节点本地账本并输出精简决策。后端已接纳状态优先；
+  本地账本负责方法止损、在途等待/对账及细粒度阶段续跑，不上传完整账本，
+  不从节点扩展属性消费第二份恢复投影，不保证跨容器恢复。
+  `relay_runtime_monitor.py` 区分 Runtime 失败、终态未上报、active 无消息活动；
+  active 停滞按最后可观测活动的单调时间计算，默认 5×120 秒（10 分钟）后请求同会话恢复，
+  不因探针临时不可用而清零；活动只证明 Runtime/消息变化，不证明业务验收进展。
+  run/session 的版本与更新时间变化不单独算活动；当前进程同节点恢复互斥，发送后
+  留一个探针观察窗口避免重复介入；active 静默即使耗尽续跑次数也不直接判 HUNG。无后端分布式恢复锁，不保证多进程全局去重。
+- `manager_worker` 协作群以当前协调 Bot 的 `send` delivery 为执行状态依据，不以群的
+  `active` 生命周期或错误文本代替执行状态。沿用现有参与者 Bearer 查询消息和 delivery；
+  同一节点代次、run、delivery 连续两个检测间隔确认失败且无新执行/消息活动，才恢复原会话。
+  新输入尚不可观测、排队/派发中、状态不确定或读取失败时不抢占；worker 失败不代表协调 Bot 失败。
+  消息按 BCS `timestamp` 排序，首次定位源消息最多回溯 8 页，随后保存源消息关联；无法定位时不猜测。
+  `queue_admission` 明确接纳协调 Bot 即视为恢复已受理，即使 `delivered=false`；保存源消息和 run
+  继续观察，避免反复恢复旧失败。受理不等于业务成功，不直接完成任务；保持原有重试预算和进程内互斥。
 - Relay 报告仅有 `EXECUTION_RESULT` 与 `PLAN_RESULT`。`event_id` 用于同一请求重试的幂等回放；
   `relay_token` 是当前节点执行代次的服务端围栏，不写入任务轨迹。
+  通用接口长期保留可选 `trace` 的结构校验、步骤轨迹写入和内容指纹能力；分布式接力
+  Runtime 不要求构造或上报 trace，无 trace 不影响业务校验，也不新增 Bot 步骤轨迹。
+  后继执行者由服务端根据当前代次搜索回执及图谱已用 Bot 身份校验，排除当前/历史执行者，
+  包括持久化组群方案的成员；群 ID 不作为 Bot 身份。
 - `TaskRuntimeProfile` 在建图时冻结策略名和允许的执行模态。
 
 模式差异：
@@ -233,3 +295,38 @@ TaskService.execute
 
 语义事件记录持久化在 Graph 的 `_semantic_outbox` 中，并支持 pending/acked 状态。
 `handle_dispatch_requested` 通过 `TaskDispatcher._prepare_into` 与 `TaskRunner._drain` 完成派发准备和锁外投递；不再引入 `Centralized*Handler`，也不再使用多继承拼装中心化执行链路。
+
+## Owner handoff and BCS identity
+
+`BotServiceBcsBotIdentityResolver` resolves bare product IDs through authoritative
+Bot rows, then uses the shared `bcn_identity.bcn_bot_reference` rule from BCN
+registration: preserve a converted service's stored Provider reference, otherwise
+use entity for service Bots and the existing Owner-qualified reference for
+personal/default/desktop Bots. The narrow BotService contract includes `bot_type`,
+`entity_id`, current `owner_id` and `ext`. Missing required coordinates, corrupt
+stored references and ambiguous bare IDs (including default) fail closed. Already
+qualified IDs remain opaque, validated and unchanged. This is the established
+TeamClaw composite addressing contract, not an assumption that arbitrary external
+Providers' `bot_uuid` and `provider_bot_ref` are interchangeable. This resolver
+does not rewrite remote identities or grant permissions.
+
+## Owned-Bot secbaas grant reconciliation
+
+Task exposes a best-effort compensation endpoint for converging secbaas
+`allowed-bots` grants after authentication or Bot creation. A Human login
+schedules a sequential scan of that verified principal's live Bots; successful
+Bot creation may narrow the same operation to the new product Bot ID. Personal
+and service Bots share the established `bcn_bot_reference` identity rule.
+
+The verified `Principal.user_id` is the only Owner authority. A caller cannot
+select another Owner, and a single-Bot request is resolved through
+`get_by_id_and_owner` before any grant call. Browser Cookie and Referer are used
+only by the short-lived in-process compensation and are neither persisted nor
+logged.
+
+Reconciliation is deliberately best effort: it returns `202 Accepted`, runs in
+the process background, visits Bots in order, bounds each secbaas request, and
+isolates lookup, identity and grant failures as warnings. There is no new table,
+durable queue or login/Bot-creation failure coupling; a later login retries and
+converges idempotently. BBS periodic-task creation keeps its existing synchronous
+grant safety gate unchanged.

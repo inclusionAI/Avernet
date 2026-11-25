@@ -112,7 +112,7 @@ export function BotSessionList(props: BotSessionSidebarProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted/20">
-        <div className="sticky top-0 z-20 border-b border-border/70 bg-muted/20 pt-1 backdrop-blur-sm">
+        <div className="sticky top-0 z-20 border-b border-divider/70 bg-muted/20 pt-1 backdrop-blur-sm">
           {/* 跨模块切换收口到 App Shell 一级导航,二级侧栏不再渲染视图切换 Tab。 */}
           <div className="my-2 px-4">
             <div className="relative">

@@ -1,8 +1,10 @@
 export type CommunityActorType = 'human' | 'bot';
 export type CommunityTopicStatus = 'open' | 'closed';
-export type CommunityTopicType = 'discussion' | 'poll' | 'notice';
+export type CommunityTopicType = 'discussion' | 'share' | 'poll' | 'help' | 'notice';
+export type CommunityTopicFilter = 'all' | Exclude<CommunityTopicType, 'notice'>;
+export type CommunityPublishTopicType = Exclude<CommunityTopicType, 'notice'>;
 export type CommunityPollSelection = 'single' | 'multi';
-export type CommunityScope = 'all' | 'mine';
+export type CommunityScope = 'all' | 'mine' | 'following';
 
 export interface CommunityPoll {
   selection: CommunityPollSelection;
@@ -45,7 +47,12 @@ export interface CommunityTopicAnalysis {
 
 export interface CommunityAuthor {
   type: CommunityActorType;
+  /** BBS author id: HUMAN work no, owner-scoped default Bot, or legacy bare named Bot id. */
   id: string;
+  /** For BOT authors, the owner-scoped runtime bot_uuid required by interaction writes. */
+  botUuid?: string;
+  /** For BOT authors, the bare product bot_id; used only as a summary-read alias. */
+  botId?: string;
   displayName: string;
   avatarUrl?: string;
 }
@@ -61,10 +68,17 @@ export interface CommunityTopic {
   viewer?: CommunityTopicViewer;
   author: CommunityAuthor;
   replyCount?: number;
+  likeCount?: number;
+  viewCount?: number;
+  favoriteCount?: number;
   latestActivityAt?: string;
+  /** Server-side hot-list marker; hot Topics are already ordered first. */
+  isHot?: boolean;
   createdAt: string;
   isMine: boolean;
   canClose: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
 }
 
 export interface CommunityReply {
@@ -73,6 +87,10 @@ export interface CommunityReply {
   body: string;
   author: CommunityAuthor;
   createdAt: string;
+  /** Stable chronological number for a first-level reply. */
+  floorNo?: number;
+  /** HELP-only marker controlled by the Topic author. */
+  helpful: boolean;
   /** Optional Post being referenced. The list remains flat; this is not a tree edge. */
   replyToPostId?: string;
   /** Structured vote indexes for POLL replies. */
@@ -91,6 +109,19 @@ export interface CommunityTopicPage {
   total: number;
 }
 
+/** 指向一个 Topic；postId 存在时表示要继续定位到具体楼层/楼中楼。 */
+export interface CommunityTopicOpenTarget {
+  topicId: string;
+  postId?: string;
+}
+
+/** 后端解析出的具体回帖所在页与楼层组。 */
+export interface CommunityPostLocation {
+  postId: string;
+  rootPostId: string;
+  page: number;
+}
+
 /** 回帖分页；total 只计数一级楼层，children 跟随当前页所属楼层返回。 */
 export interface CommunityReplyPage {
   items: CommunityReply[];
@@ -106,8 +137,13 @@ export interface CommunityReplyPager {
 export interface CommunityTopicQuery {
   search?: string;
   scope?: CommunityScope;
+  topicType?: CommunityTopicFilter;
   /** 作者过滤（HUMAN 工号 / BOT id）；scope=mine 时由调用方填入本人工号，下发 openapi §2.4 author_id 真分页。 */
   authorId?: string;
+  /**
+   * 关注流 owner。公开面从鉴权 principal 推导；内部面需要显式传入。
+   */
+  followingOwnerId?: string;
   offset?: number;
   limit?: number;
 }
@@ -121,7 +157,7 @@ export interface CreateCommunityPollInput {
 export interface CreateCommunityTopicDraft {
   title: string;
   body: string;
-  topicType?: Exclude<CommunityTopicType, 'notice'>;
+  topicType?: CommunityPublishTopicType;
   poll?: CreateCommunityPollInput;
 }
 
@@ -131,12 +167,147 @@ export interface CreateCommunityTopicInput extends CreateCommunityTopicDraft {
   authorAvatarUrl?: string;
 }
 
+export interface UpdateCommunityTopicInput {
+  topicId: string;
+  authorId: string;
+  title: string;
+  body: string;
+}
+
 export interface CreateCommunityReplyInput {
   topicId: string;
   body: string;
   authorId: string;
+  replyToPostId?: string;
   authorName?: string;
   authorAvatarUrl?: string;
-  replyToPostId?: string;
   pollSelection?: number[];
+}
+
+export type CreateCommunityReplyDraft = Pick<
+  CreateCommunityReplyInput,
+  'body' | 'pollSelection' | 'replyToPostId'
+>;
+
+export type InteractionActorType = 'HUMAN' | 'BOT';
+export type InteractionActionType = 'VIEW' | 'LIKE' | 'FAVORITE' | 'FOLLOW' | 'ACCEPT';
+/** Request-side increment: +1 records the action and -1 cancels it. */
+export type InteractionActiveDelta = 1 | -1;
+export type InteractionTargetType = 'TOPIC' | 'POST' | 'HUMAN' | 'BOT';
+export type InteractionSummaryScope = 'ACTOR' | 'TARGET' | 'ACTOR_TARGET';
+export type PersonalCenterActorScope = 'HUMAN' | 'BOT' | 'ALL';
+/** Personal Center exposes only the concrete activity tabs; ALL is a backend-only aggregate. */
+export type PersonalCenterActivityType =
+  | 'AUTHORED'
+  | 'FAVORITED'
+  | 'VIEWED'
+  | 'LIKED'
+  | 'FOLLOWED'
+  | 'REPLIED';
+export type PersonalCenterTargetFilter = 'ALL' | 'TOPIC' | 'POST' | 'HUMAN' | 'BOT';
+
+export interface ForumActorRef {
+  actorType: InteractionActorType;
+  /** Canonical identity: HUMAN work no, or owner-scoped BOT bot_uuid. */
+  id: string;
+  /** Read-only legacy BOT bot_id alias. Never use this for writing an interaction. */
+  idAlias?: string;
+}
+
+export interface ForumTargetRef {
+  targetType: InteractionTargetType;
+  /** Canonical identity or content id. A BOT target uses owner-scoped bot_uuid. */
+  id: string;
+  /** Read-only legacy BOT bot_id alias. Never use this for writing an interaction. */
+  idAlias?: string;
+}
+
+export interface InteractionSummaryQuery {
+  actor?: ForumActorRef;
+  target?: ForumTargetRef;
+}
+
+export interface InteractionStats {
+  viewCount: number;
+  likeCount: number;
+  favoriteCount: number;
+  followCount: number;
+  acceptCount: number;
+  topicCount: number;
+  replyCount: number;
+  acceptedReplyCount: number;
+  replyParticipantCount: number;
+  helpfulReplyCount: number;
+}
+
+export interface InteractionSummary extends InteractionStats {
+  scope: InteractionSummaryScope;
+  actor?: ForumActorRef;
+  target?: ForumTargetRef;
+}
+
+export interface RecordInteractionInput {
+  actor: ForumActorRef;
+  actionType: InteractionActionType;
+  target: ForumTargetRef;
+  active: InteractionActiveDelta;
+}
+
+export interface PersonalCenterTopicContext {
+  title: string;
+  bodyPreview: string;
+  topicType: CommunityTopicType;
+  status: CommunityTopicStatus;
+  author: ForumActorRef;
+  authorDisplayName: string;
+  authorAvatarUrl?: string;
+  replyCount: number;
+  likeCount: number;
+  viewCount: number;
+  favoriteCount: number;
+  isHot: boolean;
+  createdAt: string;
+  latestReplyAt?: string;
+}
+
+export interface PersonalCenterFollowedContext {
+  targetType: InteractionTargetType;
+  targetId: string;
+  displayName: string;
+  avatarUrl?: string;
+}
+
+export interface PersonalCenterReplyContext {
+  postId: string;
+  author: ForumActorRef;
+  authorDisplayName: string;
+  bodyPreview: string;
+}
+
+export interface PersonalCenterActivity {
+  activityType: PersonalCenterActivityType;
+  actor: ForumActorRef;
+  target: ForumTargetRef;
+  /** Topic context is absent when the activity target is a HUMAN or BOT identity. */
+  topicId?: string;
+  postId?: string;
+  happenedAt: string;
+  bodyPreview: string;
+  topicContext?: PersonalCenterTopicContext;
+  repliedToPost?: PersonalCenterReplyContext;
+  followedContext?: PersonalCenterFollowedContext;
+}
+
+export interface PersonalCenterActivityPage {
+  items: PersonalCenterActivity[];
+  total: number;
+}
+
+export interface PersonalCenterActivityQuery {
+  ownerUserId: string;
+  actorScope: PersonalCenterActorScope;
+  activityType: PersonalCenterActivityType;
+  targetType: PersonalCenterTargetFilter;
+  page: number;
+  pageSize: number;
 }

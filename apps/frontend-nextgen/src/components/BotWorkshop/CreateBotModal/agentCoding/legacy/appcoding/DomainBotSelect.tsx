@@ -251,7 +251,7 @@ export function DomainBotSelect({
                   disabled={disabled}
                   className={cn(
                     'h-auto min-h-0 w-full justify-start rounded-none border-0 bg-transparent px-3 py-2 text-left font-normal shadow-none cursor-pointer hover:bg-slate-50 transition-colors',
-                    'border-b border-slate-100 last:border-b-0',
+                    'border-b border-divider last:border-b-0',
                     value === bot.bot_id && 'bg-lavender-50',
                   )}
                 >

@@ -70,7 +70,7 @@ LLM 编写的技能在没有评测引导修订时往往毫无增益；harness �
 | `RiskTier` | 补丁的严重程度类别 `T0..T3`；决定默认晋升路径 | 晋升（等级表）；基因组 `policy` 中按 bot 的 `risk_overrides` | 每个候选在被记录时计算一次；对该候选不可变 |
 | `GateDecision` | 平台对一个候选的决定：每项检查及其结果、风险等级以及结果（`auto_promote`、`needs_review`、`not_promotable`） | 晋升 | 静态底线失败时在提交时创建，否则在验证判定最终确定时创建；不可变；仅当输入变化时（例如 holdout 事件）才记录新的决定 |
 | `ReviewItem` | 等待人工决定的候选，附带评审者需要的一切 | 晋升 | `open` → `approved` / `rejected` / `superseded`；永不删除 |
-| `Promotion` | 将 `active`（或 `canary`）移动到某个修订版的一次操作，包括回到旧版本，附带参与者、原因和应用结果 | 晋升 | `applying` → `applied` / `apply_failed`；仅追加 |
+| `Promotion` | 将 `active`（或 `canary`）移动到某个修订版的一次操作，包括回到旧版本，附带参与者、原因和投递它的那次 apply | 晋升 | `pending` → `applying` → `applied` / `applied_partial` / `apply_failed`；仅追加 |
 | `CandidateReport` | 读视图，联接候选的 diff、验证摘要、门禁决定和评审状态 | 晋升（视图） | 读取时派生；不存储 |
 
 本文使用但在别处定义的类型：`GenomeRevision`、`GenomeRef`、
@@ -309,9 +309,11 @@ class ReviewItem:
 
 ```python
 class PromotionStatus(StrEnum):
-    APPLYING = "applying"
-    APPLIED = "applied"
-    APPLY_FAILED = "apply_failed"
+    PENDING = "pending"                 # filed; its delivery is starting, no ref has moved
+    APPLYING = "applying"               # the apply run delivering it holds the bot; no ref has moved
+    APPLIED = "applied"                 # the apply ended APPLIED; the refs moved
+    APPLIED_PARTIAL = "applied_partial" # the apply ended PARTIAL; the refs moved, `active` labelled `partial`
+    APPLY_FAILED = "apply_failed"       # it never started, failed, or `active` moved meanwhile; nothing moved
 
 class ActorKind(StrEnum):
     USER = "user"
@@ -323,20 +325,10 @@ class PromotableRef(StrEnum):       # the refs a promotion moves (01-genome.md �
     ACTIVE = "active"
     CANARY = "canary"
 
-class ApplyKind(StrEnum):
-    MANIFEST_APPLY = "manifest_apply"     # personal bot: Manifest apply
-    SERVICE_PUBLISH = "service_publish"   # service bot: publish flow
-
 @dataclass(frozen=True)
 class Actor:
     kind: ActorKind
     id: str                         # user id, pipeline credential name, or policy/binding id
-
-@dataclass(frozen=True)
-class ApplyResult:
-    kind: ApplyKind
-    reference: str | None           # apply report id or published version, once known
-    detail: str                     # short human-readable progress or failure text
 
 @dataclass(frozen=True)
 class Promotion:
@@ -346,16 +338,16 @@ class Promotion:
     revision_id: str                # what the ref now points at
     revision_seq: int
     from_revision_id: str           # what the ref pointed at before
-    document_digest: str            # digest of the compiled Manifest document applied for `revision_id`; the
-                                    # apply report or publish record carries only this digest (01-genome.md §8)
     going_back: bool                # informational: target is an ancestor that was promoted before
     candidate_id: str | None        # set when the promotion came from a candidate
     gate_decision_id: str | None
     actor: Actor
     reason: str
     status: PromotionStatus
-    apply: ApplyResult
+    apply_id: str | None            # the apply run delivering it; None until it started
+    apply_detail: str               # short human-readable progress or failure text
     created_at: str
+    settled_at: str | None          # when its apply ended and it took its final status; None while in flight
 ```
 
 ```jsonc
@@ -367,15 +359,16 @@ class Promotion:
   "revision_id": "sha256:7c1e…",
   "revision_seq": 42,
   "from_revision_id": "sha256:a90b…",
-  "document_digest": "sha256:f27a…",    // r42 compiles to this; the apply report records it
   "going_back": false,
   "candidate_id": "sha256:c41e…",
   "gate_decision_id": "gd_204",
   "actor": {"kind": "user", "id": "user_owner_17"},
   "reason": "Reviewed diff and verification report; escalation fix is correct.",
   "status": "applied",
-  "apply": {"kind": "manifest_apply", "reference": "apply_8812", "detail": "all categories converged"},
-  "created_at": "2026-10-08T09:12:00Z"
+  "apply_id": "apl_3f1",                       // apply 运行；其状态引用指明这次晋升
+  "apply_detail": "apply apl_3f1: applied",
+  "created_at": "2026-10-08T09:12:00Z",
+  "settled_at": "2026-10-08T09:12:41Z"         // apply 结束时，引用在此刻移动
 }
 ```
 
@@ -805,46 +798,48 @@ open ──approve──▶ approved   (Promotion created; revision status → p
 
 ### 7.1 步骤
 
-1. **对引用执行 CAS。** `active` 从期望的修订版移动到
-   目标修订版，`previous` 被设为旧的 `active`，这在基因组注册表的引用上
-   通过一次比较并交换完成。并发的晋升会以 `409` 失败，
-   且不做任何改变。引用日志记录参与者和原因。
-2. **修订版状态。** 目标修订版的状态变为 `promoted`。
-3. **应用。** 修订版被编译为固定版本的 Manifest 文档，精选记忆放在其
-   `memory` 类别中（[01-genome.zh-CN.md](01-genome.zh-CN.md)），
-   然后被应用：
-   - **个人 bot：** 通过 Manifest apply。Manifest apply 是一次性
-     命令，而不是控制器（ADR 0018）；apply 报告记录
-     所应用文档的摘要，而不记录任何关于修订版的信息。
-   - **服务 bot：** 作为**下一个发布版本**，通过现有的
-     draft → verify → publish 流程；发布记录会记录所发布文档的摘要。
-     该流程的 VERIFY 阶段是影子验证
-     接入的地方（§8.1），而在
-     `VALIDATING → ONLINE_PUB` 转换上可选的自动验证门禁是工作项 RSI-22
-     （[07-verification.zh-CN.md](07-verification.zh-CN.md)）。
-4. **记录。** 一条 `Promotion` 记录和一条实验记录条目，包含参与者、原因、
-   门禁决定、批准以及评测链接
+1. **登记。** 目标修订版被编译为应用引擎的类型化期望状态
+   （[01-genome.zh-CN.md](01-genome.zh-CN.md) §2.7）以做检查，投递接缝的
+   preflight 运行，然后一行 `Promotion` 以 `pending` 登记。若 `expected_revision`
+   已与 `active` 不符，则在此处以 `409` 拒绝，不写入任何内容。
+2. **应用。** 接缝启动投递，该行变为 `applying` 并记录 apply 的 id。对个人 bot
+   或服务 bot 的草稿，接缝是一次直接 apply 运行，其状态引用为
+   `StateRef("genome", promotion_id)`：worker 把这次晋升编译回它的修订版，并通过
+   各物化器应用，中间不经过 Manifest 文档。该运行获取 bot 的 apply 锁；若另一次
+   apply 占用该 bot，则以 `409 apply_busy` 拒绝，该行为 `apply_failed`；若在本次 apply 获取锁之前
+   `active` 已移动（另一次晋升已结算），则以 `409 ref_conflict` 拒绝，该行同样为 `apply_failed`。自动化
+   参与者的 apply 以 bot 所有者作为主体运行；该行记录参与者。通过
+   draft → verify → publish 流程晋升服务 bot 的 verify 或 online 阶段见
+   [#3212](https://github.com/inclusionAI/Avernet/issues/3212)；该流程的 VERIFY
+   阶段是影子验证接入的地方（§8.1），而在 `VALIDATING → ONLINE_PUB` 转换上可选的
+   自动验证门禁是工作项 RSI-22（[07-verification.zh-CN.md](07-verification.zh-CN.md)）。
+3. **结算。** 应用引擎发布每一次 apply 的结束，无论以何种方式结束（包括任务队列
+   放弃的任务）。基因组的订阅者在一个事务中：以比较并交换把 `active` 从晋升的
+   `from_revision` 移到目标并把 `previous` 设为旧的 `active`；把目标修订版标记为
+   `promoted`；并给该行最终状态。`APPLIED` → `applied`；`PARTIAL` →
+   `applied_partial`，引用移动且 `active` 带上标签 `partial`；其他 → `apply_failed`，
+   不移动任何引用。若 apply 运行期间 `active` 已移动，比较并交换失败，该行为
+   `apply_failed`。引用日志记录参与者和原因。
+4. **记录。** 一条实验记录条目，包含参与者、原因、门禁决定、批准以及评测链接
    （[05-experiment-ledger.zh-CN.md](05-experiment-ledger.zh-CN.md)）。`Promotion`
-   记录在修订版 id 旁边保存所应用文档的摘要，基因组注册表也会记录该修订版编译出了
-   这个摘要，因此 apply 报告或发布记录上的摘要可以映射回该修订版
-   （[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。
+   记录保存移动的引用和投递它的那次 apply，不保存它所投递状态的任何内容：Bot 持有
+   哪个修订版靠读取 Bot 来观察（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。
 5. **归因。** 从此以后，片段携带新的修订版 id
    （[02-experience.zh-CN.md](02-experience.zh-CN.md)），这使得
    在线比较 `r41` 和 `r42` 成为可能。
 
 **漂移。** 在第 1 步之前，晋升会询问基因组注册表该 bot 是否发生了漂移
-（`GenomeRegistry.applied_revision` 与 `active` 不同）：其最近一次应用的文档摘要
-与 `active` 编译出的摘要不同，通常发生在直接 `PUT /config-manifest` 之后
-（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。发生漂移时，由门禁
+（`GenomeRegistry.drift(bot)`）：注册表读取 bot 的当前状态，而该状态会记录成的
+修订版 id 与 `active` 不同，通常发生在直接 `PUT /config-manifest` 或设备上的手工
+编辑之后（[01-genome.zh-CN.md](01-genome.zh-CN.md) §5.5）。发生漂移时，由门禁
 （`gate_policy`）、评审队列批准以及自动回滚规则（`rollout_policy`）发起的晋升
 都会以 `409 drifted` 被拒绝。所有者的晋升是允许的，因为这正是所有者进行调和的
 方式：晋升一个根据 bot 当前 Manifest 记录的修订版（保留直接编辑），或者再次晋升
 `active`（重新应用它并覆盖直接编辑）。
 
-如果应用失败，晋升的状态为 `apply_failed`，apply 报告
-说明原因，所有者通过晋升 `previous` 回到旧版本（§8.4）。对于
-服务 bot，`active` 相对于发布流程究竟何时移动，是
-待定决策 P-2（§13）。
+如果应用失败，晋升的状态为 `apply_failed`，`active` 保持原位，apply 报告说明
+bot 最终持有什么；所有者再次晋升 `active` 或另一个修订版（§8.4）。对于服务 bot 的
+verify 与 online 阶段，`active` 仅在发布流程到达该阶段时移动（P-2，已决定；§13）。
 
 ### 7.2 谁可以晋升什么
 
@@ -914,8 +909,8 @@ Idempotency-Key: goback-bot_123-r42-to-r41
 ```
 
 对平台的其余部分而言，这只是“应用这个修订版”，与
-向前晋升完全一样：个人 bot 通过 Manifest apply 获得它；服务
-bot 通过现有的发布流程，将其作为**下一个发布版本**获得。
+向前晋升完全一样：个人 bot 通过一次直接 apply 运行获得它；服务 bot 的 verify 或
+online 阶段将通过现有的发布流程，把它作为**下一个发布版本**获得（#3212）。
 它适用于个人 bot 和服务 bot，并可回到该 bot 的任意较早修订版，
 而不仅是回退一步。
 
@@ -1201,15 +1196,16 @@ Idempotency-Key: review-bot_123-sha256:c41e-approve
     "revision_id": "sha256:7c1e…",
     "revision_seq": 42,
     "from_revision_id": "sha256:a90b…",
-    "document_digest": "sha256:f27a…",
     "going_back": false,
     "candidate_id": "sha256:c41e…",
     "gate_decision_id": "gd_204",
     "actor": {"kind": "user", "id": "user_owner_17"},
     "reason": "Reviewed diff and verification report; escalation fix is correct.",
     "status": "applying",
-    "apply": {"kind": "manifest_apply", "reference": null, "detail": "apply started"},
-    "created_at": "2026-10-08T09:12:00Z"
+    "apply_id": "apl_3f1",
+    "apply_detail": "",                         // apply 结束前为空
+    "created_at": "2026-10-08T09:12:00Z",
+    "settled_at": null
   }
 }
 ```
@@ -1296,25 +1292,26 @@ Idempotency-Key: 4b0f6c1e-9a7d-4f53-8d1e-2c6a9e1b7f02
   "revision_id": "sha256:a90b…",
   "revision_seq": 41,
   "from_revision_id": "sha256:7c1e…",
-  "document_digest": "sha256:91d4…",  // what r41 compiles to
   "going_back": true,
   "candidate_id": null,
   "gate_decision_id": null,
   "actor": {"kind": "user", "id": "user_owner_17"},
   "reason": "r42 mis-routes VIP refunds",
   "status": "applying",
-  "apply": {"kind": "manifest_apply", "reference": null, "detail": "apply started"},
-  "created_at": "2026-10-09T08:02:00Z"
+  "apply_id": "apl_40c",
+  "apply_detail": "",
+  "created_at": "2026-10-09T08:02:00Z",
+  "settled_at": null
 }
 ```
 
-引用会立即移动；应用进度可通过晋升的
-`apply` 字段查看，其来源是现有的 Manifest apply 报告（个人 bot）或
-发布记录（服务 bot）。两者都只记录所应用文档的摘要；晋升的
-`document_digest` 把该摘要与修订版关联起来。
+引用在 apply 结束时移动，而不是立即移动；应用进度可通过该 apply 运行的报告
+（`apply_id`）查看，其状态引用指明这次晋升。报告不携带所应用内容的摘要：bot
+是否持有 `active` 靠读取 bot 来观察。
 
 值得注意的错误：`404 not_found`（未知修订版或不属于该 bot）；
 `409 ref_conflict`（`expected_revision` 不匹配；未做任何改变）；
+`409 apply_busy`（另一次 apply 占用该 bot；未做任何改变）；
 `422 not_promotable`（门禁决定为
 `not_promotable` 的候选修订版）；`403 policy_denied`（调用方无权晋升）；
 `400 invalid_argument`（`ref` 不是 `active` 或 `canary`；
@@ -1421,7 +1418,7 @@ UI 后端发出同样的调用。
 
 | 其他部分 | 方向 | 流转内容 |
 | --- | --- | --- |
-| 基因组（[01-genome.zh-CN.md](01-genome.zh-CN.md)） | 晋升 → 基因组 | 晋升前的漂移检查；对 `active`、`previous`、`canary` 的 CAS 移动；修订版状态变更（`promoted`、`rejected`）；记录已应用的修订版编译出了哪个文档摘要；读取补丁、diff 和 `policy` |
+| 基因组（[01-genome.zh-CN.md](01-genome.zh-CN.md)） | 晋升 → 基因组 | 自动晋升前的漂移检查（通过读取 bot）；对 `active`、`previous`、`canary` 的 CAS 移动；修订版状态变更（`promoted`、`rejected`）；编译修订版的期望状态；读取补丁、diff 和 `policy` |
 | 基因组（[01-genome.zh-CN.md](01-genome.zh-CN.md)） | 基因组 → 晋升 | 记录时的补丁级底线结果（基础修订版、可变基因、固定项、rewrite 标记） |
 | 经验（[02-experience.zh-CN.md](02-experience.zh-CN.md)） | 晋升 → 经验（间接） | 晋升之后，片段携带新的修订版 id |
 | 进化策略（[03-strategy.zh-CN.md](03-strategy.zh-CN.md)） | 无直接交互 | 策略只提交候选并读取判定；永远看不到门禁决定或队列 |
@@ -1432,17 +1429,17 @@ UI 后端发出同样的调用。
 | 验证（[07-verification.zh-CN.md](07-verification.zh-CN.md)） | 晋升 → 验证 | 缺少 holdout 或基线结果时调用 `verify(candidate, profile)` |
 | 进化 API（[09-evolution-api.zh-CN.md](09-evolution-api.zh-CN.md)） | API → 晋升 | §10 的公开端点 |
 | 元进化（[10-meta-evolution.zh-CN.md](10-meta-evolution.zh-CN.md)） | 元进化 → 晋升 | 通过独立的门禁配置进行机制采用（默认 T3，需要比较报告） |
-| 现有的 Manifest apply 与服务 bot 发布流程（Backend） | 晋升 → 现有服务 | 应用已晋升修订版编译出的文档；apply 报告和发布记录携带所应用文档的摘要，从不携带修订版 id |
+| 现有的 Manifest apply 与服务 bot 发布流程（Backend） | 晋升 → 现有服务 | 对已晋升修订版的期望状态执行一次 apply 运行（其状态引用指明这次晋升）；apply 报告和发布记录既不携带摘要也不携带修订版 id |
 
 ## 13. 待定决策
 
 - **P-1：批准时父修订版过时。** 是对候选的父修订版执行 CAS 批准并提供
   显式覆盖（§6.2 中的提议），还是自动将过时条目标记为
   `superseded` 并要求策略重新提议？
-- **P-2：服务 bot 的 `active` 何时移动。** 在批准时（期望状态
-  先行，发布随后），还是仅在发布流程到达
-  `ONLINE_PUB` 时？后者使 `active` 与用户所见保持一致，但使
-  晋升目前要等待一个手动的“上线”步骤。
+- **P-2：服务 bot 的 `active` 何时移动。** 已决定：仅在投递到达该阶段时移动。
+  草稿通过一次直接 apply 运行投递，并在其结束时移动引用（RSI-04）；verify 与 online
+  在发布流程到达该阶段时移动各自的引用，见
+  [#3212](https://github.com/inclusionAI/Avernet/issues/3212)。
 - **P-3：Holdout 节奏。** 时机定义在
   [07-verification.zh-CN.md](07-verification.zh-CN.md) 中：在晋升前对一次运行的最终候选
   评分一次（当配置要求时），并定期在

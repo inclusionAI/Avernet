@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Callable
 import httpx
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.avatar import validate_avatar_storage
 from agentclaw.community.core.desktop_bot.errors import (
     DesktopBotOrphanError,
     DesktopBotServiceError,
@@ -68,6 +69,9 @@ from agentclaw.community.plugin_api.passport import PassportPlugin, PassportErro
 from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.desktop_bot.desktop_bot_service_protocol import DesktopBotServiceProtocol
+from agentclaw.community.core.bot_management.collaboration_repair.profile import (
+    outbound_avatar_from_record,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -221,6 +225,9 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 bot_name=bot.get("bot_name") or bot_id,
                 bot_summary=bot.get("bot_desc") or "",
                 connection_mode=connection_mode,
+                avatar_url=outbound_avatar_from_record(
+                    bot, log_context="[DesktopBotService]"
+                ),
                 respect_drm=False,
             )
         except Exception as error:
@@ -684,6 +691,11 @@ class DesktopBotService(DesktopBotServiceProtocol):
             dict: need_authorization, bot_id, iframe_url, redirect_url
         """
         bot_id = bot.get("bot_id", f"desktop_bot_{int(time.time() * 1000)}")
+        if avatar_url is not None:
+            validate_avatar_storage({
+                "avatar_url": avatar_url, "bot_id": bot_id, "user_id": user_id,
+                "machine_id": machine_id, "mount_path": mount_path, "reserved": "x" * 8192,
+            })
 
         # 前置校验 mount_path，与 BaaS 侧规则保持一致
         self._validate_mount_path(mount_path)
@@ -777,6 +789,12 @@ class DesktopBotService(DesktopBotServiceProtocol):
         Raises:
             DesktopBotServiceError: bot_id 缺失、Passport 不存在或创建流程失败
         """
+        if bot.get("avatar_url") is not None:
+            validate_avatar_storage({
+                "avatar_url": bot["avatar_url"], "bot_id": bot.get("bot_id", ""),
+                "user_id": user_id, "machine_id": machine_id, "mount_path": mount_path,
+                "migration_path": migration_path, "reserved": "x" * 8192,
+            })
         bot_id = bot.get("bot_id", "")
         if not bot_id:
             raise DesktopBotServiceError("bot_id is required for create_after_authorization")
@@ -1536,6 +1554,7 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 bot_name=bot_name,
                 bot_desc=bot_desc,
                 engine_type=engine_type,
+                bot_type="desktop",
                 access_mode="RESTRICTED",
                 device_token=device_token,
                 workspace_path=workspace_path,

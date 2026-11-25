@@ -82,6 +82,15 @@ def _without_instance(endpoint, _method, _path):
     return shim
 
 
+def _without_session_selectors(endpoint, method, path):
+    shim = _without_instance(endpoint, method, path)
+    if method == "GET" and path == "/openapi/v1/bots/{bot_id}/sessions":
+        for name in ("source", "source_cursor"):
+            shim = without_parameter(shim, name)
+        shim.__name__ = endpoint.__name__
+    return shim
+
+
 connection: APIRouter = relocate(
     connection_router,
     legacy_router("/openapi/v1/bots/connection", "connection"),
@@ -118,7 +127,7 @@ sessions: APIRouter = relocate(
     sessions_router,
     legacy_router("/openapi/v1/bots/sessions", "sessions"),
     bot_first_to_component_first("sessions"),
-    transform=_without_instance,
+    transform=_without_session_selectors,
     # The retiring component-first contract is frozen. Favorite operations
     # were introduced after bot-first addressing and therefore have no legacy
     # address to preserve.

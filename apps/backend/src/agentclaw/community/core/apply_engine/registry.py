@@ -1,0 +1,516 @@
+"""What materialises each construct, and the three-stage contract they honour.
+
+**The contract is ``resolve`` → ``plan`` → ``write``**, and each stage has its
+own currency. Worked end to end for ``mcp``, on a bot that already has ``gh``
+installed plus an ``old`` server the document no longer declares::
+
+    # The declared entries the orchestrator hands in:
+    [{"server_code": "gh"}, {"server_code": "slack"}]
+
+    # 1. resolve(ctx, entries) -> ResolveResult
+    #    Declared entries become intents. Everything that can fail before
+    #    touching the bot fails here.
+    ResolveResult(
+        intents=(Intent(identity="gh", value="gh", note=None),
+                 Intent(identity="slack", value="slack", note=None)),
+        failures=(),
+    )
+
+    # 2. plan(ctx, intents) -> CategoryPlan
+    #    Read-only. Each intent is classified against what is actually there,
+    #    and what is there but no longer declared becomes a removal.
+    CategoryPlan(
+        entries=(PlannedEntry(Intent("gh", "gh"), "unchanged"),
+                 PlannedEntry(Intent("slack", "slack"), "created")),
+        removals=("old",),
+    )
+
+    # 3. write(ctx, plan) -> CategoryWriteResult
+    #    Executes it. "unchanged" calls nothing; removals are deactivated.
+    CategoryWriteResult(
+        entries=(EntryResult(Category.MCP, "gh", EntryOutcome.UNCHANGED),
+                 EntryResult(Category.MCP, "slack", EntryOutcome.CREATED)),
+        removals=("old",),
+    )
+
+Had ``slack`` been unpermitted, ``resolve`` would have answered
+``ResolveResult(intents=(...gh...), failures=(ResolveFailure("slack", "this
+tenant does not have permission to enable this MCP server"),))`` and the
+orchestrator would have aborted the category without calling ``plan`` at all —
+so ``gh`` reports ``skipped`` and ``old`` is never removed.
+
+**The registry is sparse on purpose.** ``APPLY_ORDER`` names every construct the
+vocabulary defines; this maps only the ones some shipped code can act on. A
+construct declared in a document with no entry here is an **expected state**,
+not a gap: the orchestrator fails its entries with a readable reason and aborts
+the category, so nothing is destroyed, and the window closes by registering a
+materialiser rather than by deleting a branch.
+"""
+from __future__ import annotations
+
+from abc import abstractmethod
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, Sequence, TypeVar, runtime_checkable
+
+from agentclaw.community.core.content_store import ContentReader
+from agentclaw.community.core.apply_engine.context import ApplyContext
+
+if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see below
+    from agentclaw.community.core.ports.activation_port import (
+        ActivationPort,
+    )
+    from agentclaw.community.core.ports.bot_file_sync_port import BotFileSyncPort
+    from agentclaw.community.core.apply_engine.materialisers.bot_config_kind_registry import (
+        BotConfigKindRegistry,
+    )
+    from agentclaw.community.core.ports.identity_file_port import (
+        IdentityFilePort,
+    )
+    from agentclaw.community.core.ports.resource_file_port import (
+        ResourceFilePort,
+    )
+    from agentclaw.community.core.ports.resource_rows_port import ResourceRowsPort
+    from agentclaw.community.core.ports.shared_skill_port import SharedSkillPort
+    from agentclaw.community.core.ports.skill_package_upload_port import (
+        SkillPackageUploadPort,
+    )
+    from agentclaw.community.core.apply_engine.cli_tools.service import (
+        CliToolService,
+    )
+    from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
+        BotStartupScriptServiceProtocol,
+    )
+    from agentclaw.community.core.mcp.mcp_auth_service_protocol import (
+        MCPAuthServiceProtocol,
+    )
+    from agentclaw.community.core.mcp.mcp_config_service_protocol import (
+        MCPConfigServiceProtocol,
+    )
+    from agentclaw.community.core.skill_center.skill_reference_contract import SkillReferenceServiceProtocol
+    from agentclaw.community.core.apply_engine.skill_set_apply_port import SkillSetApplyPort
+    from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
+from agentclaw.community.core.apply_engine.outcomes import (
+    ApplyConstruct,
+    EntryResult,
+)
+
+
+from agentclaw.community.core.ports.skill_package_upload_port import LocalSkillPackageReceipt
+
+
+class ConfirmedPartialWriteError(RuntimeError):
+    """A materialiser knows an earlier durable step committed before failure."""
+
+
+class CapabilityWriteError(RuntimeError):
+    """A capability write stopped after observing independently committed facts."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        confirmed_partial: bool,
+        local_skill_packages: tuple[LocalSkillPackageReceipt, ...] = (),
+        entries: tuple[EntryResult, ...] = (),
+        removals: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.local_skill_packages = local_skill_packages
+        self.confirmed_partial = confirmed_partial
+        self.entries = entries
+        self.removals = removals
+
+
+@dataclass(frozen=True)
+class CategoryWriteResult:
+    """Entry results and removals confirmed by a successful category write."""
+
+    entries: tuple[EntryResult, ...]
+    removals: tuple[str, ...]
+    local_skill_packages: tuple[LocalSkillPackageReceipt, ...] = ()
+
+
+@dataclass(frozen=True)
+class Intent:
+    """One declared entry, resolved into something writable.
+
+    ``value`` is the materialiser's own currency and differs completely per
+    category::
+
+        # mcp: the server code, again — there is nothing else to write
+        Intent(identity="gh", value="gh")
+
+        # script: the substituted body, never the raw document text
+        Intent(identity="script", value="#!/bin/sh\necho prod\n")
+
+        # skills: the materialiser's private package dataclass
+        Intent(identity="code-review", value=_SkillPackage(...),
+               note="delivered from the platform's stored copy (keep_last): "
+                    "the git fetch failed")
+
+    Created by: each materialiser's ``resolve``.
+    Consumed by: that same materialiser's ``plan`` and ``write``, wrapped in a
+    :class:`PlannedEntry`.
+
+    ``identity`` is what the category keys entries by. The orchestrator never
+    inspects ``value``, which is what keeps category knowledge out of it.
+
+    ``note`` is a successful write's caveat, surfaced on the entry's report
+    row — today's only producer is a ``keep_last`` fallback, whose published
+    contract is that the report states it. It rides with the intent because the
+    fetch resolved it and the write reports it, and neither stage should reach
+    into the other's currency.
+    """
+
+    #: How the entry names itself, e.g. ``"gh"`` or ``"data/faq.csv"``. The
+    #: same string that ends up as ``EntryResult.identity``.
+    identity: str
+    #: Whatever this materialiser needs in order to write, already substituted
+    #: and validated. Opaque to everything except the materialiser that made it.
+    value: Any = None
+    #: A caveat to put on the entry's report row even though the write
+    #: succeeded. ``None`` on the ordinary path.
+    note: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ResolveFailure:
+    """One entry that could not be turned into an intent, and why::
+
+        ResolveFailure(
+            identity="slack",
+            reason=("this tenant does not have permission to enable this "
+                    "MCP server"),
+        )
+
+    Created by: each materialiser's ``resolve``.
+    Consumed by: ``apply/orchestrator``, which turns each into a ``FAILED``
+    :class:`~...outcomes.EntryResult` and marks every other entry in the
+    category ``SKIPPED``.
+
+    A single one of these aborts its whole category: under overwrite a partial
+    set is *destructive*, because writing ``{A}`` when the declaration was
+    ``{A, B}`` deletes B.
+    """
+
+    #: The entry's own name, or ``entry_identity``'s ``"[0]"`` fallback when
+    #: the entry was too malformed to name itself.
+    identity: str
+    #: Report-safe text, handed to the report verbatim. May name a credential;
+    #: never carries its value.
+    reason: str
+
+
+@dataclass(frozen=True)
+class ResolveResult:
+    """What ``resolve`` learned, keyed so the orchestrator can report per entry.
+
+    The two halves are independent: an entry is in exactly one of them, and a
+    result may carry both::
+
+        # every entry resolved; the category proceeds to plan
+        ResolveResult(intents=(Intent("gh", "gh"),), failures=())
+
+        # one entry failed: the category is aborted, and the resolved
+        # intents are never written
+        ResolveResult(
+            intents=(Intent("gh", "gh"),),
+            failures=(ResolveFailure("slack", "this tenant does not have "
+                                     "permission to enable this MCP server"),),
+        )
+
+    Created by: each materialiser's ``resolve``.
+    Consumed by: ``apply/orchestrator``, which checks :attr:`ok` before calling
+    ``plan``.
+
+    Both halves are returned rather than raising on the first problem: a caller
+    fixing a document should see every entry that failed, not discover them one
+    resubmission at a time.
+    """
+
+    #: The entries that resolved, in declaration order.
+    intents: tuple[Intent, ...] = ()
+    #: The entries that did not. Non-empty means the category is aborted.
+    failures: tuple[ResolveFailure, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        """True when every declared entry resolved."""
+        return not self.failures
+
+
+@dataclass(frozen=True)
+class PlannedEntry:
+    """One intent, classified against what is actually there::
+
+        PlannedEntry(intent=Intent("gh", "gh"), outcome="unchanged")
+        PlannedEntry(intent=Intent("slack", "slack"), outcome="created")
+
+    Created by: each materialiser's ``plan``.
+    Consumed by: that materialiser's ``write``, which reads ``outcome`` to
+    decide whether to call the service at all.
+    """
+
+    intent: Intent
+    #: The plain **string** value of an :class:`~...outcomes.EntryOutcome`, not
+    #: the enum: ``"created"``, ``"updated"`` or ``"unchanged"``; or ``"skipped"``
+    #: for an entry the materialiser deliberately does not deliver (its
+    #: ``write`` then reports the reason). Never ``"failed"``, which is the
+    #: orchestrator's to assign.
+    outcome: str
+    #: Internal convergence can require a source transition even when the
+    #: public effective state remains unchanged (for example SkillSet → Direct).
+    requires_write: bool = False
+    #: Why, for a planned ``"skipped"``: the materialiser's reason, carried into
+    #: the dry-run projection and its own ``write`` result. ``None`` otherwise.
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class CategoryPlan:
+    """What ``write`` would do, computed without doing any of it::
+
+        CategoryPlan(
+            entries=(PlannedEntry(Intent("gh", "gh"), "unchanged"),
+                     PlannedEntry(Intent("slack", "slack"), "created")),
+            removals=("old",),
+        )
+
+        # A converged document: nothing to write, nothing to remove.
+        # ``is_noop`` is True here, and for a plan whose only other entries
+        # are deliberate ``skipped`` ones, which write nothing either.
+        CategoryPlan(
+            entries=(PlannedEntry(Intent("gh", "gh"), "unchanged"),),
+            removals=(),
+        )
+
+    Created by: each materialiser's ``plan``.
+    Consumed by: that materialiser's ``write``, and by ``dry_run``, which stops
+    here.
+
+    ``dry_run`` returning after this stage is why the stage exists as its own
+    call: a preview that cannot write is one that is *missing the call*, rather
+    than one that is disciplined about not making it.
+    """
+
+    #: One per resolved intent, in declaration order.
+    entries: tuple[PlannedEntry, ...] = ()
+    #: Identities present in the area and no longer declared — what overwriting
+    #: removes, e.g. ``("old",)``. Sorted by the materialisers that produce
+    #: them, so a report reads deterministically. Reported separately from entry
+    #: outcomes because a removal has no declared entry to attach to.
+    removals: tuple[str, ...] = field(default=())
+    #: Identities the writer must clean up. Usually identical to ``removals``;
+    #: it is wider when a derived Skill dependency retains an MCP in the final
+    #: runtime closure and therefore must not be reported as removed.
+    removal_writes: tuple[str, ...] | None = None
+
+    @property
+    def is_noop(self) -> bool:
+        """True when applying this plan would write nothing at all.
+
+        The convergence criterion depends on this: re-applying an unchanged
+        document must not merely produce equal output, it must make **no
+        writes**, and that is observable only if the plan can say so. A
+        deliberate ``skipped`` entry writes nothing, so it does not break a
+        no-op; it is not thereby converged, which the entry's own outcome says.
+        """
+        return not (self.removal_writes if self.removal_writes is not None else self.removals) and all(
+            entry.outcome in ("unchanged", "skipped") and not entry.requires_write
+            for entry in self.entries
+        )
+
+
+E = TypeVar("E", contravariant=True)
+
+
+@runtime_checkable
+class Materialiser(Protocol[E]):
+    """Three stages, because three acceptance criteria need boundaries there.
+
+    The currencies, in order: the construct's typed desired entries in
+    (``core/apply_engine/desired_state``), :class:`ResolveResult`,
+    :class:`CategoryPlan`, ``CategoryWriteResult`` out. This module's own
+    docstring works one category through all three.
+
+    Six ship: ``script``, ``mcp``, ``identity``, ``skills``, ``resources`` and
+    ``cli_tools``. All three stages are ``async``, including the ones whose
+    shipped implementations never await.
+
+    Every member is ``@abstractmethod`` and each materialiser **inherits** this
+    Protocol rather than merely satisfying it structurally. Omitting a stage
+    then fails at construction naming it, rather than as an ``AttributeError``
+    the first time a category reaches that stage: for ``write``, that would be
+    mid-apply on a real bot, after ``resolve`` and ``plan`` had already
+    succeeded.
+    """
+
+    #: Which construct this materialises, e.g. ``Category.MCP``. Also
+    #: the key :func:`build_materialisers` files the instance under, so a
+    #: materialiser cannot be registered under the wrong one.
+    construct: ApplyConstruct
+
+    @abstractmethod
+    async def resolve(self, ctx: ApplyContext, entries: Sequence[E]) -> ResolveResult:
+        """Desired entries → intents.
+
+        ``entries`` are the construct's typed desired entries in declaration
+        order, e.g. ``[DesiredMcpServer("gh"), DesiredMcpServer("slack",
+        override)]``, their content already in the content store. A construct
+        declared empty arrives as ``[]`` and must still be handled: it means
+        "remove everything", not "do nothing".
+
+        Everything that can fail **before touching the bot** and belongs to
+        the engine or its ports fails here: engine capability, permission,
+        package validation, admission, reserved names. Grammar and fetch are
+        the compiler's and never reach this stage.
+        """
+        ...
+
+    @abstractmethod
+    async def plan(
+        self, ctx: ApplyContext, intents: Sequence[Intent]
+    ) -> CategoryPlan:
+        """Read current state, classify each intent, and compute removals.
+
+        ``intents`` is :attr:`ResolveResult.intents`, reached only when that
+        result carried no failures.
+
+        **Read-only.** Nothing here writes, and ``dry_run`` stops after it.
+        """
+        ...
+
+    @abstractmethod
+    async def write(
+        self, ctx: ApplyContext, plan: CategoryPlan
+    ) -> CategoryWriteResult:
+        """Execute the plan, and answer one :class:`~...outcomes.EntryResult`
+        per planned entry.
+
+        Return entry outcomes and confirmed removals together. Writers that
+        execute the planned removals return :attr:`CategoryPlan.removals`
+        after success. Writers that re-observe their area return the removals
+        confirmed during the write. A removal has no declared entry row.
+
+        Reached only when ``resolve`` produced no failures. A plan that is
+        ``is_noop`` must perform no write at all — that absence is what the
+        convergence test asserts.
+        """
+        ...
+
+
+def build_materialisers(
+    *,
+    script_service: BotStartupScriptServiceProtocol,
+    activation_service: ActivationPort,
+    mcp_auth_service: MCPAuthServiceProtocol,
+    mcp_config_service: MCPConfigServiceProtocol,
+    identity_service: IdentityFilePort,
+    upload_service: SkillPackageUploadPort,
+    skill_references: SkillReferenceServiceProtocol,
+    skill_sets: SkillSetApplyPort,
+    package_validator: SkillPackageValidator,
+    content: ContentReader,
+    resource_service: ResourceFilePort,
+    resource_rows: Callable[[str], ResourceRowsPort],
+    cli_tool_service: CliToolService,
+    shared_skills: SharedSkillPort,
+    file_sync: BotFileSyncPort | None = None,
+    bot_config: "BotConfigKindRegistry | None" = None,
+) -> dict[ApplyConstruct, Materialiser]:
+    """The registry, built from injected services::
+
+        {
+            Section.SCRIPT:          ScriptMaterialiser(...),
+            Category.CAPABILITIES:   CapabilitiesMaterialiser(...),
+            Category.IDENTITY:       IdentityMaterialiser(...),
+            Category.RESOURCES:      ResourcesMaterialiser(...),
+            Section.BOT_FILE_SYNC:   BotFileSyncMaterialiser(...),
+            Category.CLI_TOOLS:      CliToolsMaterialiser(...),
+        }
+
+    Five mandatory keys, optional file-sync and bot-config keys, and
+    ``Category.ENGINE_CONFIG`` deliberately absent: a
+    document declaring it takes the orchestrator's no-materialiser path, which
+    is an expected state rather than a gap.
+
+    Called by: the composition root, once, and by the test rigs that assemble
+    an engine.
+
+    A function taking its dependencies rather than a module-level dict: the
+    materialisers hold service references, and a module-level registry would
+    both construct services at import time and pull the bot-configuration graph
+    into anything that merely wants the ordering table.
+
+    The map is keyed by each materialiser's own ``construct`` rather than by a
+    name written here, so a materialiser cannot be registered under the wrong
+    key. ``content`` is the engine's one read port onto the content store:
+    every desired file is there by digest, and ``identity``, ``skills`` and
+    ``resources`` read their bytes through it; ``package_validator`` is the
+    upload path's own gate, re-asked on the stored package. ``cli_tools``
+    takes one dependency, the service both *it* and the management API call,
+    which already holds the family's delivery port and its own store read.
+    """
+    from agentclaw.community.core.apply_engine.materialisers.cli_tools import (
+        CliToolsMaterialiser,
+    )
+    from agentclaw.community.core.apply_engine.materialisers.bot_file_sync import (
+        BotFileSyncMaterialiser,
+    )
+    from agentclaw.community.core.apply_engine.materialisers.identity import (
+        IdentityMaterialiser,
+    )
+    from agentclaw.community.core.apply_engine.materialisers.capabilities import (
+        CapabilitiesMaterialiser,
+    )
+    from agentclaw.community.core.apply_engine.materialisers.resources import (
+        ResourcesMaterialiser,
+    )
+    from agentclaw.community.core.apply_engine.materialisers.script import (
+        ScriptMaterialiser,
+    )
+
+    materialisers: list[Materialiser] = [
+        ScriptMaterialiser(script_service),
+        IdentityMaterialiser(identity_service, content),
+        CapabilitiesMaterialiser(
+            upload_service, activation_service, package_validator, content,
+            shared_skills, skill_references, skill_sets,
+            mcp_auth_service, mcp_config_service,
+        ),
+        ResourcesMaterialiser(resource_service, content, resource_rows),
+        CliToolsMaterialiser(cli_tool_service),
+    ]
+    # BOT_FILE_SYNC is registered only when a real (or noop) port is wired.
+    # ``None`` — what an older deployment or test rig passes when it has no
+    # bot-copy concern at all — leaves the construct unregistered, the same
+    # expected-no-materialiser state ``ENGINE_CONFIG`` keeps: a bot that
+    # declares no ``bot_file_sync`` never reaches it.
+    if file_sync is not None:
+        materialisers.append(BotFileSyncMaterialiser(file_sync))
+    # BOT_CONFIG is registered only when the composition root bound a kind
+    # registry — ``None`` (an older deployment or a test rig that exercises no
+    # bot copy) leaves the construct unregistered, the same
+    # expected-no-materialiser state ``ENGINE_CONFIG`` keeps: a bot that
+    # declares no ``bot_config`` never reaches it, and one that does gets the
+    # orchestrator's readable no-materialiser refusal rather than an
+    # ``ImportError`` at apply time.
+    if bot_config is not None:
+        from agentclaw.community.core.apply_engine.materialisers.bot_config import (
+            BotConfigMaterialiser,
+        )
+        materialisers.append(BotConfigMaterialiser(bot_config))
+    return {m.construct: m for m in materialisers}
+
+
+__all__ = [
+    "CategoryPlan",
+    "CategoryWriteResult",
+    "ConfirmedPartialWriteError",
+    "Intent",
+    "Materialiser",
+    "PlannedEntry",
+    "ResolveFailure",
+    "ResolveResult",
+    "build_materialisers",
+]

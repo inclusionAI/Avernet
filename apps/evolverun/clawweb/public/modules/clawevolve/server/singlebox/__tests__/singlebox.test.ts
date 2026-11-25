@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startSinglebox } from "../../singlebox.js";
 import type { SingleboxConfig } from "../config.js";
+import { EvolveRepository } from "../../repositories/evolve-repository.js";
+import { SqliteDatabase } from "@avernet/clawweb-shared/server/db";
 
 let root = "";
 let app: Awaited<ReturnType<typeof startSinglebox>> | undefined;
@@ -134,6 +136,16 @@ it("uses readonly Backend Bots, starts local Bash, and advances Diagnose to Plan
     status: "failed", summary: "fixture plan failure", error: { code: "PLAN_FAILED", message: "fixture", retryable: true },
   })).status).toBe(200);
   const taskDb = new Database(join(config.dataDirectory, "clawevolve.db"));
+  // Singlebox has no Skill Host; historical Skill tasks remain readable without
+  // querying modern collaboration columns in its minimal local Bot catalog.
+  const legacyRepo = new EvolveRepository(new SqliteDatabase(taskDb));
+  await legacyRepo.createTask({ taskId: "EV-legacy-skill", taskType: "hardening", userId: "owner",
+    botId: "bot", createdBy: "owner", taskName: "Historical Skill", configJson: "{}" });
+  taskDb.prepare("UPDATE ce_tasks SET status='waiting_acceptance', config_json=? WHERE task_id='EV-legacy-skill'")
+    .run(JSON.stringify({ botEnv: "dev", targetSkill: { assetId: "legacy-asset", name: "legacy-skill", candidate: {} } }));
+  const legacyDetail = await fetch(`${base}/api/evolve/tasks/EV-legacy-skill`);
+  expect(legacyDetail.status).toBe(200);
+  expect(await legacyDetail.json()).toMatchObject({ canManage: true, canApplySkill: false });
   taskDb.prepare("UPDATE ce_tasks SET user_id=? WHERE task_id=?").run("other", task.task_id);
   expect((await fetch(logUrl)).status).toBe(403);
   expect((await post(retryUrl(planId), {})).status).toBe(403);

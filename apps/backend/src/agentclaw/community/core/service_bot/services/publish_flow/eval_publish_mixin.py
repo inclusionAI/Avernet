@@ -3,12 +3,19 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from agentclaw.community.kernel.device_dto import ResourceSpecification
+
 from agentclaw.community.core.service_bot.repository.models import (
+    BotPublishRecord,
     PublishOperationKind,
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
+)
+from agentclaw.community.core.service_bot.baas_service_errors import BaasBotNotFoundError
+from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
+    DeliveryArtifact,
 )
 from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
     service_publish_extra_envs,
@@ -35,12 +42,16 @@ class EvalPublishMixin:
         publish_id: int,
         operator: str,
         biz_id: str = "",
-        default_tag: str = "",
+        default_tag: str = "eval",
         template_uuid: str = "",
         ttl_seconds: int | None = None,
         migration_path: str | None = None,
         config_artifact: str | None = None,
         docker_image: str | None = None,
+        resource_spec: ResourceSpecification | None = None,
+        device_count: int = 1,
+        *,
+        artifact_ext: dict[str, Any] | None = None,
     ) -> dict:
         """Publish to the eval environment.
 
@@ -64,10 +75,23 @@ class EvalPublishMixin:
                 publish_record.ext 中的值，用于 Eval DRAFT 构建路径。
             config_artifact: 外部传入的 config_artifact（可选）。优先级高于
                 publish_record.ext 中的值。
+            resource_spec: 本次发布的资源覆盖；None 保持原配置，不修改源 Bot。
+            device_count: 本次发布的 BaaS 设备/实例数量。小于 1 视为调用方错误发失败。
             docker_image: 外部传入的镜像 pin（可选）。非空时跳过
                 resolve_publish_image_pin，用于 Eval DRAFT 构建路径。
+            artifact_ext: 本次 Eval DRAFT build 的临时产物元数据，对应
+                BuildArtifactOnlyResult.artifact_ext。仅用于本次 eval 发布，
+                不写入 ac_bot_publish.ext；skills_manifest 以该参数为准，
+                参数中缺少该键时表示本次构建没有 skills_manifest，不能回退
+                ac_bot_publish.ext 中的旧值。
         """
         # This flow is EVAL-only; the stage is fixed here rather than taken as an arg.
+        # `default_tag` is an orthogonal instance dimension, not a lifecycle stage.
+        if not default_tag:
+            raise PublishFlowServiceError(
+                "eval_publish requires default_tag to distinguish default/eval environments"
+            )
+
         publish_stage = PublishStage.EVAL
         logger.info(
             f"[PublishFlowService.eval_publish] Start release: "
@@ -79,27 +103,52 @@ class EvalPublishMixin:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
 
         owner_id = self._get_owner_id(publish_record)
-        mp = migration_path or (publish_record.ext or {}).get("migration_path", "")
-        ca = config_artifact or (publish_record.ext or {}).get("config_artifact")
+
+        base_ext = publish_record.ext or {}
+        if artifact_ext is None:
+            effective_ext = base_ext
+        else:
+            effective_ext = {**base_ext, **artifact_ext}
+            # The current DRAFT build is authoritative for the Skills manifest.
+            # A missing key must not fall back to a stale value in ac_bot_publish.ext.
+            effective_ext["skills_manifest"] = artifact_ext.get("skills_manifest")
+
+        mp = migration_path or effective_ext.get("migration_path", "")
+        ca = config_artifact or effective_ext.get("config_artifact")
         if not mp and not ca:
             raise PublishFlowServiceError("Build artifact path not found; run the build first")
 
-        bot = self._bot_service.get_bot(
+        bot = self._bot_service.get_bot_by_address(
             bot_id=publish_record.source_bot_id,
             user_id=owner_id,
+            source_bot_pk=publish_record.source_bot_pk,
         )
         if not bot:
             raise PublishFlowServiceError(f"Bot not found: {publish_record.source_bot_id}")
 
-        # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
-        # config_artifact read above is only the build-artifact presence guard. Eval
-        # does not persist, so the applied overrides are discarded.
-        delivery, _ = self._ext_state.compose_live(publish_record, publish_stage)
+        if device_count < 1:
+            raise PublishFlowServiceError("device_count must be at least 1")
+
+        # Resolve the provider once. It selects the TeClaw delivery-specific engine
+        # stage inside the shared eval composer below, and is reused by image-pin
+        # resolution so the two layers cannot disagree about the target runtime.
+        provider = self.device_provider(bot)
+
+        # Compose through the single delivery seam (LIVE overrides re-fetch). This is
+        # the same seam used by eval refresh/update, ensuring every path receives
+        # ``eval`` or ``eval-default`` rather than the raw production ``release``
+        # artifact. The raw config_artifact read above is only the build-artifact
+        # presence guard, and eval discards the live overlay snapshot.
+        delivery = self.compose_eval_delivery(
+            publish_record,
+            default_tag=default_tag,
+            device_provider=provider,
+        )
         if docker_image:
             image_pin_docker_image = docker_image
         else:
             image_pin = self.resolve_publish_image_pin(
-                publish_record, device_provider=self.device_provider(bot)
+                publish_record, device_provider=provider
             )
             image_pin_docker_image = image_pin.docker_image
 
@@ -108,8 +157,9 @@ class EvalPublishMixin:
             ext_info["biz_id"] = biz_id
         if default_tag:
             ext_info["default_tag"] = default_tag
-        if publish_record.ext.get("skills_manifest") is not None:
-            ext_info["skills_manifest"] = publish_record.ext["skills_manifest"]
+        skills_manifest = effective_ext.get("skills_manifest")
+        if skills_manifest is not None:
+            ext_info["skills_manifest"] = skills_manifest
 
         # (#197) Crash-safe issuance via the operation runner. Eval is a CREATION
         # (no bot to adopt), so a crash after the BaaS create but before the id is
@@ -125,22 +175,30 @@ class EvalPublishMixin:
 
         async def _issue():
             # 注入评测环境容器环境变量，使容器内进程可通过 os.environ 感知区标识
-            eval_envs = dict(service_publish_extra_envs(publish_record.ext, bot))
+            eval_envs = dict(service_publish_extra_envs(effective_ext, bot))
             if default_tag:
                 eval_envs[DYNAMIC_ENV_TAG_KEY] = default_tag
+
+            template_config = service_publish_template_config(bot)
+            if resource_spec is not None:
+                template_config = {
+                    **(template_config or {}),
+                    "resource_spec": resource_spec.to_dict(),
+                }
 
             release_kwargs: dict[str, Any] = dict(
                 bot=bot,
                 user_id=owner_id,
                 migration_path=mp,
-                device_count=1,
+                device_count=device_count,
                 publish_stage=publish_stage,
                 version=str(publish_record.version or 1),
                 delivery=delivery,
+                runtime_kind=provider,
                 ext_info=ext_info,
                 extra_envs=eval_envs,
                 docker_image=image_pin_docker_image,
-                template_config=service_publish_template_config(bot),
+                template_config=template_config,
             )
             if template_uuid:
                 release_kwargs["template_uuid"] = template_uuid
@@ -190,6 +248,20 @@ class EvalPublishMixin:
             f"[PublishFlowService.eval_publish] Release success: {result}"
         )
         return result
+
+    def compose_eval_delivery(
+        self,
+        publish_record: BotPublishRecord,
+        *,
+        default_tag: str,
+        device_provider: str,
+    ) -> DeliveryArtifact:
+        """Compose the final EVAL delivery artifact for one evaluation instance."""
+        return self._ext_state.compose_eval_delivery(
+            publish_record,
+            default_tag=default_tag,
+            device_provider=device_provider,
+        )
 
     def eval_teardown(
         self,
@@ -266,9 +338,19 @@ class EvalPublishMixin:
 
         # acquire_workflow exceptions propagate (durable retry resumes the same
         # non-terminal op → adopt-by-query), mirroring execute_restart.
-        op = await self._operation_runner.acquire_workflow(op, _issue)
+        try:
+            op = await self._operation_runner.acquire_workflow(op, _issue)
+        except BaasBotNotFoundError:
+            # Teardown's postcondition already holds. Complete the same ledger
+            # operation so the durable task does not retry an absent target.
+            logger.info(
+                "[PublishFlowService.execute_eval_teardown] Target already absent: bot_uuid=%s",
+                bot_uuid,
+            )
+            self._operation_runner.complete_without_workflow(op)
+        else:
+            self._operation_runner.complete_operation(op)
         destroy_publish_id = op.baas_publish_id
-        self._operation_runner.complete_operation(op)
 
         result = {
             "success": True,

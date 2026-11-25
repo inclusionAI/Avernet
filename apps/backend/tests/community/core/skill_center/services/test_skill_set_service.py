@@ -329,7 +329,7 @@ class TestCollectBotActiveMcps:
         with patch.object(svc, "get_set_mcp_servers") as mock_get_mcps:
             mock_get_mcps.return_value = []
             snapshot = BotCapabilitySnapshot(
-                "default", "user1",
+                "default", "entity1",
                 (RegisteredSkillAsset(
                     skill_id=1, name="center", git_path="center://public-code",
                     skill_uuid="00000000-0000-4000-8000-000000000001",
@@ -849,8 +849,47 @@ class TestSyncMcpDesiredState:
             claimed=frozenset({"mcp.new"}), released=frozenset(), declared={"mcp.new"}
         )
         assert events == ["details", "declare"]
-        svc._resolver.resolve_for_bot.assert_called_once_with("bot1", "staff_user1")
+        svc._resolver.resolve_for_bot.assert_called_once_with("bot1", "user1")
         svc._device_sync_dispatcher.dispatch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_runtime_retries_credential_preparation_without_declaring_an_incomplete_set(self):
+        from agentclaw.community.core.skill_center.errors import McpProjectionNotDispatchedError
+        from tests.community.core.mcp.services.test_sync_service import _make_sync_service
+
+        svc, plugin = self._make_svc()
+        sync = _make_sync_service()
+        attempts = iter([RuntimeError("credential service is unavailable"), (None, {}, "PROD", None)])
+        sync.mcp_config_service.build_mcp_sync_payload.side_effect = attempts
+        svc._mcp_sync_service = sync
+        plugin.sync_single_mcp.return_value = True
+        scope = dict(claimed=frozenset({"mcp.new"}), released=frozenset(), declared={"mcp.new"})
+
+        with pytest.raises(McpProjectionNotDispatchedError):
+            await svc.project_mcps(**scope)
+        plugin.sync_single_mcp.assert_not_called()
+        plugin.sync_all_mcp_servers.assert_not_called()
+
+        assert await svc.project_mcps(**scope)
+        plugin.sync_single_mcp.assert_called_once()
+        plugin.sync_all_mcp_servers.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_missing_catalogue_configuration_proves_no_projection_was_dispatched(self):
+        from agentclaw.community.core.skill_center.errors import McpProjectionNotDispatchedError
+
+        svc, plugin = self._make_svc()
+        svc.mcp_center.get_mcp_detail.side_effect = [None, {"server_code": "mcp.new"}]
+        scope = dict(claimed=frozenset({"mcp.new"}), released=frozenset(), declared={"mcp.new"})
+
+        with pytest.raises(McpProjectionNotDispatchedError):
+            await svc.project_mcps(**scope)
+        svc._mcp_sync_service.sync_mcp_details_for_bot.assert_not_awaited()
+        plugin.sync_all_mcp_servers.assert_not_called()
+
+        assert await svc.project_mcps(**scope)
+        svc._mcp_sync_service.sync_mcp_details_for_bot.assert_awaited_once()
+        plugin.sync_all_mcp_servers.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_projection_failure_does_not_declare_and_next_call_resolves_again(self):

@@ -340,3 +340,24 @@ def test_pending_completion_does_not_create():
 
     assert result.status == AuthStatus.PENDING
     bot_service.create_bot.assert_not_called()
+
+
+def test_expert_origin_is_present_in_initial_create_even_if_later_work_fails():
+    from dataclasses import replace
+    from agentclaw.community.core.bot_management.expert_origin import ExpertOrigin
+    origin = ExpertOrigin("catalog", "writer", "Writer", "a" * 40, "b" * 64, "c" * 64)
+    service = _bot_service()
+    service.create_bot.side_effect = BotServiceError("failure after row creation")
+    service.get_bot.return_value = {"bot_id": _BOT_ID, "status": "PENDING"}
+    from agentclaw.community.core.bot_management.errors import BotCreationRetainedError
+    with pytest.raises(BotCreationRetainedError):
+        complete_bot_authorization(
+            user_id="85020", nick_name="Alice", bot_id=_BOT_ID,
+            spec=replace(_factory_snapshot_spec(bot_type="service"), expert_origin=origin, avatar_url="https://example.test/avatar.png"),
+            context=_cloud_context(), bot_service=service,
+            passport_plugin=_passport(), auth_rel_plugin=MagicMock(),
+        )
+    ext = service.create_bot.call_args.kwargs["ext"]
+    assert ext["expert_origin"] == origin.as_payload()
+    assert ext["avatar_url"] == "https://example.test/avatar.png"
+    assert ext["passport"]["agent_code"] == "ac-1"

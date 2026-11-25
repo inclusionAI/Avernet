@@ -146,7 +146,16 @@ class Story:
             "owners": [self.args.human], "provider_bot_ref": "loop-e2e-" + uuid.uuid4().hex,
             "domains": ["release"], "skills": ["review"], "scopes": ["local"],
         }, headers={"Authorization": "Bearer " + self.provider["provider_admin_token"]})
-        self.request(f"/bots/{segment(self.bot['bot_uuid'])}/visibility", {"visibility": "public"}, method="PUT")
+        # Provider-admin publication now mints the declared owner's
+        # Human authority edge, but this fixture deliberately publishes
+        # visibility with the BOT's own runtime credential — keeping the
+        # bot-self credential path under e2e coverage (the owner-header
+        # path is covered by the nested loop story).
+        self.request(
+            f"/bots/{segment(self.bot['bot_uuid'])}/visibility",
+            {"visibility": "public"}, method="PUT",
+            headers={"X-BCS-Bot-Token": self.bot["bot_runtime_token"]},
+        )
         self.post("/friends/request", {"from_bot": self.args.driver, "to_bot": self.bot["bot_uuid"]})
 
     def start(self, approved: bool, directory: Path) -> None:

@@ -7,17 +7,30 @@ mod participants;
 mod response;
 mod spec;
 
-pub use definition::*;
-pub use participants::*;
-pub use response::*;
-pub use spec::*;
+pub(crate) use definition::*;
+pub(crate) use participants::*;
+pub(crate) use response::*;
+pub(crate) use spec::*;
 
 pub async fn create_group(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
     uri: Uri,
-    Json(req): Json<CreateGroupRequest>,
+    body: Result<Json<CreateGroupRequest>, JsonRejection>,
 ) -> Response {
+    let Json(req) = match body {
+        Ok(body) => body,
+        Err(error) => return crate::routes::catalog_label_errors::rejection_response(error),
+    };
+    if let Some(input)=req.catalog_labels.clone() {
+        let labels=match state.services.group_management.normalize_catalog_labels(input) {
+            Ok(labels)=>labels,Err(e)=>return group_use_case_error_to_http(e.into()).into_response(),
+        };
+        if !labels.is_empty() && (req.group_kind.as_deref()==Some("dm") || !(req.collaboration_definition_yaml.is_some()
+            || matches!(req.group_strategy.as_deref(),Some("manager_worker"|"state_machine")))) {
+            return HttpAdapterError::BadRequest("catalog_labels unsupported for this Group".into()).into_response();
+        }
+    }
     // Reject unsupported combinations before definition persistence or event
     // subscription provisioning can create resources.
     if !req.create_initial_session
@@ -168,6 +181,7 @@ pub(crate) async fn create_group_without_inline_subscriptions(
         None
     };
     let cmd = GroupCreateCommand {
+        catalog_labels:req.catalog_labels.map(|input|state.services.group_management.normalize_catalog_labels(input)).transpose().map_err(|e|group_use_case_error_to_http(e.into()))?,
         human_mention_notify_mode: req.human_mention_notify_mode,
         create_initial_session: req.create_initial_session,
         group_id: req.id,
@@ -182,10 +196,6 @@ pub(crate) async fn create_group_without_inline_subscriptions(
         participants,
         member_bot_ids,
         group_kind,
-        service_spec: req
-            .service_spec
-            .clone()
-            .and_then(|v| serde_json::from_value(v).ok()),
         group_strategy,
         visibility: req.visibility,
         provisioning: false,
@@ -220,6 +230,7 @@ pub(crate) async fn create_group_without_inline_subscriptions(
                 &result,
                 caller_actor_id.clone(),
                 authenticated_human,
+                &headers,
             )
             .await?
             {

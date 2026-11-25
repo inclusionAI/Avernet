@@ -1,3 +1,4 @@
+import { registerNotificationPersistenceTests } from './notification-persistence-cases.js';
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, writeFile, appendFile, rm } from "node:fs/promises";
@@ -14,7 +15,6 @@ import { AgentToolCallRepository } from "../../../../repositories/repair/agent-t
 import { SessionRecoveryTaskService } from "../task-service.js";
 import { SessionRecoveryAgentService, recoveryTargetSnapshot } from "../agent-service.js";
 import { RecoverySessionReader } from "../session-reader.js";
-import { SessionRecoveryGroupNotifier } from "../notification.js";
 import { createSessionRecoveryRouter } from "../../../../routes/session-recovery.js";
 import { reconcileAgentExecutions } from "../../common/agent-execution-monitor.js";
 import type { RecoveryTaskResult, RecoveryPlan, RecoveryStoredTask } from "../task-contracts.js";
@@ -70,16 +70,6 @@ beforeEach(async () => {
   reporter = { report: async result => { callbacks.push(result); } };
   service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target), actionNotifier });
 });
-it("persists candidate handbooks and restores the exact references in Agent bootstrap", async () => {
-  const task = await create();
-  const stored = new SessionRecoveryTaskRepository(db, repo, artifactStore);
-  const restored = (await stored.find(task.taskId))!;
-  expect((await agent.bootstrap(restored)).handbook).toMatchObject({
-    handbookVersion: "clawevolve-recovery-handbook/v2", category: "TC.MCP",
-    chapters: ["mcp/handbook.md", "file-download/handbook.md"],
-  });
-  expect(runtime.sendMessage).not.toHaveBeenCalled();
-});
 it("queries private event tasks for administrators while preserving Owner and sharing filters", async () => {
   const task = await create();
   expect((await service.list(request.event_id, { userId: "admin", isAdmin: true })).map(value => value.task_id)).toEqual([task.taskId]);
@@ -100,74 +90,8 @@ it("continues Owner confirmation without recording a sent notification when disa
   expect((await current(task.taskId)).phase).toBe("apply");
 });
 
-it("persists deduplicated group delivery facts without changing the business version or exposing them to the Agent", async () => {
-  const task = await create();
-  const sent = await agent.retryMessage(task, { clientRequestId: "group-advice", purpose: "纠正原操作", message: "请按真实工具参数继续" });
-  expect(actionNotifier.after).toHaveBeenCalledWith({ taskId: task.taskId, eventId: sent.toolCallId, kind: "message" });
-  const before = await current(task.taskId);
-  let finish!: () => void;
-  const sender = { send: vi.fn(() => new Promise<void>(resolve => { finish = resolve; })) };
-  const deps = { controlPlaneEnvironment: "pre" as const, tasks, sender, publicBaseUrl: "https://service.invalid",
-    config: { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ webhook: "https://robot.invalid/send", timeout_seconds: 10 }) }) } };
-  const notice = { taskId: task.taskId, eventId: sent.toolCallId, kind: "message" as const };
-  new SessionRecoveryGroupNotifier(deps).after(notice);
-  new SessionRecoveryGroupNotifier(deps).after(notice);
-  await vi.waitFor(() => expect(sender.send).toHaveBeenCalledOnce());
-  expect((await current(task.taskId)).version).toBe(before.version);
-  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message",
-    summary: "已有现场证据，已发出指引", evidence_ids: [sent.evidenceId] });
-  expect((await current(task.taskId)).phase).toBe("observe");
-  finish();
-  await vi.waitFor(async () => expect((await current(task.taskId)).timeline.some(event => event.payload.channel === "group_webhook" && event.payload.sent === true)).toBe(true));
-  const after = await current(task.taskId);
-  expect(after.version).toBe(before.version + 1);
-  expect((await agent.bootstrap(after)).task.timeline.some(event => event.payload.channel === "group_webhook")).toBe(false);
-  expect((await repo.findTask(task.taskId))!.config_json).not.toContain("https://robot.invalid");
-});
-it("persists sharing and authorizes read-only task links without granting Owner actions", async () => {
-  const task = await create();
-  const read = await inspect(task, "share-evidence");
-  let principal: typeof actor | null = actor;
-  const app = express();
-  app.use(createSessionRecoveryRouter({ service, tasks: service, agent, resolveActor: async () => principal }));
-  const server = await new Promise<ReturnType<typeof app.listen>>(resolve => { const opened = app.listen(0, "127.0.0.1", () => resolve(opened)); });
-  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/monitoring/session-recoveries`;
-  const call = async (path: string, method = "GET", body?: unknown) => {
-    const response = await fetch(base + path, { method, ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) });
-    return { status: response.status, body: await response.json() };
-  };
-  try {
-    const version = (await current(task.taskId)).version;
-    const scope = `/${task.taskId}`;
-    expect(await call(scope + "/share", "PATCH", { shared: true })).toMatchObject({ status: 200, body: { shared: true, canOperate: true } });
-    const restored = new SessionRecoveryTaskRepository(db, new EvolveRepository(db), artifactStore);
-    expect(await restored.find(task.taskId)).toMatchObject({ shared: true, version: version + 1, phase: "assess", status: "running", execution: task.execution });
-    const raw = JSON.parse((await repo.findTask(task.taskId))!.config_json);
-    expect(raw.shared).toBe(true);
-    principal = { userId: "reader", isAdmin: false };
-    expect(await call(`?event_id=${request.event_id}`)).toMatchObject({ status: 200, body: { items: [{ task_id: task.taskId }] } });
-    const visible = await call(scope);
-    expect(visible).toMatchObject({ status: 200, body: { shared: true, canOperate: false, canManageShare: false } });
-    expect(visible.body.execution).toBeUndefined(); expect(visible.body.aisExecution).toBeUndefined();
-    expect((await call(scope + `/tool-calls/${read.toolCallId}`)).status).toBe(200);
-    for (const [suffix, method, body] of [
-      ["/share", "PATCH", { shared: false }],
-      ["/decision", "POST", { plan_digest: "digest", approved: true, cooperation_done: true }],
-      ["/annotations", "POST", { layer: "effect", correct: true, reason: "read only", evidence_ids: [] }],
-      ["/terminate", "POST", { reason: "read only" }],
-    ] as const) expect((await call(scope + suffix, method, body)).status).toBe(403);
-    principal = null;
-    expect((await call(scope)).status).toBe(401);
-    principal = actor;
-    expect((await call(scope + "/share", "PATCH", { shared: "true" })).status).toBe(422);
-    expect((await call(scope + "/share", "PATCH", { shared: false })).status).toBe(200);
-    principal = { userId: "reader", isAdmin: false };
-    expect((await call(scope)).status).toBe(403);
-    expect((await call(scope + `/tool-calls/${read.toolCallId}`)).status).toBe(403);
-    expect(await call(`?event_id=${request.event_id}`)).toMatchObject({ status: 200, body: { items: [] } });
-    expect(runtime.sendMessage).not.toHaveBeenCalled();
-  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
-});
+registerNotificationPersistenceTests(() => ({ request, runtime, create, current, inspect, actionNotifier, agent, tasks, repo, db, artifactStore, service, actor }));
+
 it("Agent-first MCP sends one targeted message without an environment approval and recovers the original session", async () => {
   let task = await create("approval", {});
   expect(task.phase).toBe("assess"); expect(runtime.sendMessage).not.toHaveBeenCalled();
@@ -228,7 +152,7 @@ it("stops a late AIS dispatch receipt instead of leaving a new Agent running", a
   await vi.waitFor(() => expect(submissions).toHaveLength(1));
   expect(await service.terminate(ack.task_id, actor)).toMatchObject({ status: "canceled", termination: { status: "stop_pending" } });
   finish("late-job");
-  await vi.waitFor(() => expect(ais.stopExecution).toHaveBeenCalledWith("late-job"));
+  await vi.waitFor(() => expect(ais.stopExecution).toHaveBeenCalledWith("late-job", "owner"));
   await vi.waitFor(async () => expect((await service.detail(ack.task_id, actor)).termination?.status).toBe("remote_stopped"));
   expect((await current(ack.task_id)).status).toBe("canceled");
   expect((await repo.findStep((await current(ack.task_id)).aisExecution!.stepId))!.status).toBe("canceled");
@@ -253,36 +177,12 @@ it("non-MCP goes to one environment plan without any initial retry message", asy
   await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "环境文件有确定错误，需修复后继续", evidence_ids: [read.evidenceId] });
   task = await current(task.taskId); expect(task.phase).toBe("plan"); expect(runtime.sendMessage).not.toHaveBeenCalled();
   await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId);
-  expect(task.status).toBe("waiting_owner"); expect(notifier.notify).toHaveBeenCalledTimes(1);
+  expect(task.status).toBe("waiting_owner"); expect(notifier.notify).not.toHaveBeenCalled();
   expect(actionNotifier.after).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.taskId, kind: "plan" }));
   await service.decide(task.taskId, task.plan!.digest, true, actor);
   await agent.apply(await current(task.taskId), { actionId: "fix", clientRequestId: "fix-skill", purpose: "执行获批环境修复" });
   await agent.retryMessage(await current(task.taskId), { clientRequestId: "retry-skill", purpose: "修复后继续原任务", message: "局部错误已修正，请继续原任务" });
   expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
-});
-it("Agent can observe existing progress without sending, and an unknown send is never replayed", async () => {
-  let task = await create("automatic", { tc_fault_label: null }); const read = await inspect(task, "read-progress");
-  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "observe", summary: "原任务正在推进，先观察", evidence_ids: [read.evidenceId] });
-  expect((await current(task.taskId)).observationDeadlineAt).toBe(now + 3600000); expect(runtime.sendMessage).not.toHaveBeenCalled();
-  task = await create("approval", { event_id: "second-event", delivery_key: "second-initial" });
-  vi.mocked(runtime.sendMessage).mockRejectedValueOnce(new Error("transport outcome unknown"));
-  const body = { clientRequestId: "unknown-advice", purpose: "纠正操作后继续", message: "请按真实返回修正原操作" };
-  const send = await agent.retryMessage(task, body); expect(send.status).toBe("unknown");
-  expect((await current(task.taskId)).delivery!.delivery.status).toBe("unknown");
-  await agent.retryMessage(await current(task.taskId), body); expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
-  await expect(agent.retryMessage(await current(task.taskId), { ...body, clientRequestId: "blind-repeat" })).rejects.toMatchObject({ status: 409 });
-});
-it("historical intervention cannot confirm this delivery but existing recovery can complete without a new message", async () => {
-  let task = await create();
-  await appendFile(sessionFile, JSON.stringify({ type: "message", id: "old-advice", message: { role: "user", content: "[会话自愈：old-delivery]\n继续" } }) + "\n");
-  const read = await inspect(task, "historical-read");
-  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "observe", summary: "原任务此前已恢复", evidence_ids: [read.evidenceId] });
-  task = await current(task.taskId);
-  const judgment = { delivery: "confirmed", response: "acted", effect: "recovered", summary: "原任务已恢复，本次未发消息", evidence_ids: [read.evidenceId] };
-  await expect(agent.report(task, { kind: "observation", phase: "observe", judgment })).rejects.toMatchObject({ status: 422 });
-  await agent.report(task, { kind: "observation", phase: "observe", judgment: { ...judgment, delivery: "unconfirmed" } });
-  expect((await current(task.taskId)).status).toBe("completed");
-  expect(runtime.sendMessage).not.toHaveBeenCalled();
 });
 it("trajectory content paging stays within the task scope and preserves the audited result", async () => {
   const read = vi.fn(async () => ({ source: "aivision_tclog", content: "正文片段", next_content_offset: 100 }));
@@ -311,7 +211,7 @@ it("an oversized trajectory page is recorded as a readable failure instead of br
 afterEach(async () => { await db.close(); await rm(directory, { recursive: true, force: true }); });
 it("approves one plan in the same execution, retries the original session, recovers with durable evidence", async () => {
   let task = await toPlan(await create()); expect(submissions).toHaveLength(1); expect(submissions[0].input.credentials.executionTicket).toBeTruthy();
-  await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId); expect(task.status).toBe("waiting_owner"); expect(notifier.notify).toHaveBeenCalledTimes(1);
+  await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId); expect(task.status).toBe("waiting_owner"); expect(notifier.notify).not.toHaveBeenCalled();
   await expect(agent.apply(task, { actionId: "fix", clientRequestId: "fix-1", purpose: "修正配置" })).rejects.toMatchObject({ status: 403 });
   await service.decide(task.taskId, task.plan!.digest, true, actor); task = await current(task.taskId); expect(submissions).toHaveLength(1);
   const body = { actionId: "fix", clientRequestId: "fix-1", purpose: "修正配置" }, apply = await agent.apply(task, body); expect(apply.status).toBe("succeeded");
@@ -384,6 +284,29 @@ it("NAS reads bind delivery to the current retry's actual user record, never an 
   const found = await agent.sessionRead(task, { clientRequestId: "nas-current-found", purpose: "读取实际新消息", nas_evidence: evidence });
   expect(found.result).toMatchObject({ delivery_confirmed: true, delivery: { message_id: "actual" } });
 });
+it("redacts OC NAS URL arguments and drops supplied comparison claims", async () => {
+  const task = await create("automatic");
+  const original = "fixture".repeat(8), copied = original.slice(0, 6) + original.slice(7);
+  const url = (value: string) => {
+    const url = new URL("https://example.invalid/file");
+    url.searchParams.set("token", value);
+    return url.href;
+  };
+  const receipt = await agent.sessionRead(task, { clientRequestId: "nas-url-argument", purpose: "比较原链接和工具入参",
+    nas_evidence: {
+      source: `${directory}/prod/prod_staff_owner_openclaw_default/.openclaw/agents/main/sessions/original.jsonl`,
+      session_id: "original", delivery_key: request.delivery_key,
+      url_argument_comparisons: [{ status: "match", source_line: 20 }],
+      messages: [
+        { line_no: 5, record: { message: { role: "user", content: url(original) } } },
+        { line_no: 6, record: { message: { role: "assistant", content: [{ type: "toolCall", arguments: { url: url(copied) } }] } } },
+      ],
+    } });
+  expect(receipt).toMatchObject({ status: "succeeded" });
+  expect(receipt.result).not.toHaveProperty("url_argument_comparisons");
+  expect(JSON.stringify(receipt)).not.toContain(original);
+  expect(JSON.stringify(receipt)).not.toContain(copied);
+});
 it.each(["apply", "blocked"])("%s failure callbacks retain saved evidence without a prior effect judgment", async kind => {
   let task = await create("automatic"); const read = await inspect(task, "failure-source");
   await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "environment", summary: "需要环境修复", evidence_ids: [read.evidenceId] });
@@ -442,12 +365,40 @@ it("retries dispatch failures with revoked tickets instead of failing the accept
   now += 20000; await service.maintenance(); task = await current(ack.task_id);
   expect(task.execution!.jobId).toBeTruthy(); expect(ais.execute).toHaveBeenCalledTimes(2);
 });
+it("uses the original execution owner when an administrator stops recovery", async () => {
+  const task = await create();
+  await service.terminate(task.taskId, { userId: "admin", isAdmin: true });
+  expect(ais.stopExecution).toHaveBeenCalledWith("job-1", "owner");
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+it("keeps a rejected stop fenced and resumes the existing retry only after remote termination", async () => {
+  let task = await create();
+  const executionId = task.execution!.executionId;
+  now = task.execution!.leaseExpiresAt * 1000 + 1;
+  ais.stopExecution.mockRejectedValueOnce(new Error("temporary stop rejected"));
+  const reconcile = () => reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo,
+    handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais },
+    nowSeconds: () => Math.floor(now / 1000) });
+  await reconcile(); await service.maintenance(); task = await current(task.taskId);
+  expect(task.execution!.executionId).toBe(executionId);
+  expect(task.execution!.state).not.toBe("ended");
+  expect(submissions).toHaveLength(1);
+  expect(ais.stopExecution).toHaveBeenCalledWith("job-1", "owner");
+  await reconcile(); await service.maintenance();
+  expect((await current(task.taskId)).execution!.state).not.toBe("ended");
+  expect(submissions).toHaveLength(1);
+  ais.getJobStatusDetail.mockResolvedValue({ status: "stopped", rawStatus: "stopped", errorMessage: null });
+  await reconcile(); now += 20000; await service.maintenance();
+  expect(submissions).toHaveLength(2);
+  expect((await current(task.taskId)).execution!.executionId).not.toBe(executionId);
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
 it("waits for the expired AIS job to stop before replacing its execution", async () => {
   let task = await create(); const executionId = task.execution!.executionId;
   now = task.execution!.leaseExpiresAt * 1000 + 1;
   await reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
   await service.maintenance(); task = await current(task.taskId);
-  expect(ais.stopExecution).toHaveBeenCalledWith("job-1"); expect(submissions).toHaveLength(1);
+  expect(ais.stopExecution).toHaveBeenCalledWith("job-1", "owner"); expect(submissions).toHaveLength(1);
   expect(task.status).toBe("running"); expect(task.execution!.executionId).toBe(executionId);
   ais.getJobStatusDetail.mockResolvedValue({ status: "stopped", rawStatus: "stopped", errorMessage: null });
   await reconcileAgentExecutions({ controlPlaneEnvironment: "pre", db, repo, handlers: { session_recovery: agent.handleAisStatus }, providers: { session_recovery: ais }, nowSeconds: () => Math.floor(now / 1000) });
@@ -609,8 +560,13 @@ it("accepts internal requests without independent tokens while execution tickets
     expect((await fetch(`${origin}/internal/monitoring/session-recoveries/${task.taskId}/continue`, { method: "POST" })).status).toBe(409);
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${input.credentials.executionTicket}` };
     expect((await fetch(`${worker}/bootstrap`)).status).toBe(401);
+    const taskReads = vi.spyOn(tasks, "find");
     const bootstrap = await fetch(`${worker}/bootstrap`, { headers }); expect(bootstrap.status).toBe(200);
+    expect(taskReads).toHaveBeenLastCalledWith(task.taskId, { forBootstrap: true });
     expect((await bootstrap.json()).task.execution.ticketDigest).toBeUndefined();
+    taskReads.mockClear();
+    expect((await fetch(`${worker}/heartbeat`, { method: "POST", headers, body: "{}" })).status).toBe(200);
+    expect(taskReads.mock.calls.some(([, options]) => options?.forBootstrap === true)).toBe(false);
     const read = await fetch(`${worker}/tools/session/read`, { method: "POST", headers, body: JSON.stringify({ clientRequestId: "http-read", purpose: "观察原故障及实际触达" }) });
     const evidence = await read.json(); expect(read.status).toBe(200); expect(evidence.result.delivery_confirmed).toBe(true);
     const ownerUrl = `${origin}/monitoring/session-recoveries/${task.taskId}`;
@@ -742,7 +698,7 @@ it("old dispatch cannot attach its job to a replacement execution after a versio
   });
   await agent.start(task);
   expect((await current(task.taskId)).execution).toMatchObject({ executionId: "replacement", jobId: "replacement-job" });
-  expect(ais.stopExecution).toHaveBeenCalledWith("job-2");
+  expect(ais.stopExecution).toHaveBeenCalledWith("job-2", "owner");
 });
 
 it.each([false, true])("the same tool key cannot identify changed advice, including legacy envelope fields: %s", async legacyEnvelope => {
@@ -1003,8 +959,24 @@ it.each([true, false])("accepts AIVision delivery from the current actual receip
   const receipt = (await agent.toolGet(task, String(sent.payload.tool_call_id))).result as any;
   read.mockResolvedValue({ delivery_confirmed: true, delivery: { location: "trace.input", marker: "verified" }, traces: [] });
   const evidence = await agent.trajectoryRead(task, { clientRequestId: "te-observe", purpose: "从真实用户轨迹核实触达" });
-  expect(read).toHaveBeenCalledWith(expect.objectContaining({ messageMarker: `[会话自愈：${receipt.delivery_key}]\n`, notBeforeMs: receipt.started_at_ms }));
+  expect(read).toHaveBeenCalledWith(expect.objectContaining({ messageMarker: `[会话自愈：${receipt.delivery_key}]\n`,
+    sentMessage: receipt.message, notBeforeMs: receipt.started_at_ms }));
   await agent.report(await current(task.taskId), { kind: "observation", phase: initial ? "observe" : "verify", judgment: {
     delivery: "confirmed", response: "acted", effect: "recovered", summary: "完整轨迹确认执行恢复", evidence_ids: [evidence.evidenceId] } });
   expect((await current(task.taskId)).status).toBe("completed");
+});
+
+it("returns actionable 422 feedback for missing delivery and shortened evidence without changing the phase", async () => {
+  let task = await create();
+  const read = await inspect(task); task = await current(task.taskId);
+  await expect(agent.report(task, { kind: "assessment", phase: "assess", decision: "message", summary: "无法投递", evidence_ids: [read.evidenceId] }))
+    .rejects.toMatchObject({ status: 422, message: expect.stringContaining("blocked") });
+  await expect(agent.report(task, { kind: "assessment", phase: "assess", decision: "observe", summary: "保留调查结论", evidence_ids: ["evidence-tc-short"] }))
+    .rejects.toMatchObject({ status: 422, message: expect.stringContaining("完整 evidenceId") });
+  await expect(agent.report(task, { kind: "blocked", phase: "assess", reason: "session_unavailable", summary: "原会话不可投递" }))
+    .rejects.toMatchObject({ status: 422, message: expect.stringContaining("省略 reason") });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase: "assess" });
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+  await agent.report(task, { kind: "blocked", phase: "assess", summary: "原会话不可投递，当前无法继续" });
+  expect(await current(task.taskId)).toMatchObject({ status: "failed", judgment: { effect: "unknown" } });
 });

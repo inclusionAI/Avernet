@@ -20,6 +20,9 @@ class TokenExchangeContext:
     publish_id: int | None
     binding_id: int | None
     request_id: str | None
+    actor_user_id: str | None = None
+    friend_user_id: str | None = None
+    device_uuid: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

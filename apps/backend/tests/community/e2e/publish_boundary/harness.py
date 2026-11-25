@@ -16,6 +16,8 @@ endpoint suite trusts.
 """
 from __future__ import annotations
 
+from agentclaw.community.api.bot_knowledge_service import BotKnowledgePublicationSelectionProtocol
+
 import httpx
 from httpx import ASGITransport
 
@@ -83,6 +85,7 @@ async def _ensure_handlers(world) -> None:
     registry._handlers[PROGRESS_POLL_TASK] = PublishProgressPollHandler(
         flow=injector.get(PublishFlowService),
         task_queue_service=injector.get(TaskQueueService),
+        selection_provider=lambda: injector.get(BotKnowledgePublicationSelectionProtocol),
         poll_delay_seconds=0.0,
     )
 

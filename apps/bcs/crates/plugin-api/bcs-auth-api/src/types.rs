@@ -47,6 +47,13 @@ pub struct AuthPrincipal {
     pub owner_id: Option<String>,
     pub owner_name: Option<String>,
     pub token: Option<String>,
+    /// Human-session validity in epoch milliseconds, populated only by
+    /// plugins that verify a real login/session artifact carrying an expiry.
+    /// HTTP adapter layer for the strict caller identity extraction
+    /// (runtime-only ingress construction); `None` elsewhere does not imply
+    /// an identity without expiry — callers requiring the deployment treat
+    /// it as missing trust material, not negative infinity.
+    pub human_expires_at_ms: Option<u64>,
 }
 
 impl AuthPrincipal {

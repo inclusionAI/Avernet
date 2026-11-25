@@ -9,12 +9,14 @@ import base64
 import json
 import shlex
 import uuid
-import zlib
 import time
 import math
 from ..artifact_transfer import ArtifactTransferStrategy
 from .artifact_command import run_artifact_command
 from .artifact_config import FastdiskPublishConfig
+from .fastdisk_probe import (
+    DETECTION as DETECTION, detection_command, parse_detection_result, FastdiskDetectionError,
+)
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Protocol
 
@@ -42,27 +44,6 @@ class FastdiskPublishError(RuntimeError):
 # Only the detector is embedded in Backend. Business transfer scripts are
 # installed by the container scripts repository and are never sent as fallback.
 ENTRY = '/home/admin/bin/service_publish.py'
-DETECTION = Path(__file__).parent / 'fastdisk_detection'
-
-
-def detection_command() -> str:
-    gate = (DETECTION / 'persist_mount_gate.py').read_text()
-    # Avoid the CLI entrypoint; run the same gate function with runtime paths.
-    gate = gate.split("if __name__ == '__main__':", 1)[0]
-    layout = (DETECTION / 'runtime_layout.py').read_text()
-    source = gate + '\n' + layout + '\n' + (
-        'layout = runtime_layout()\n'
-        'status = check_mounts(layout["storage"], layout["home"], '
-        'layout["storage"] + "/.fastdisk.ready", "/proc/self/mountinfo")\n'
-        'print(json.dumps(dict(status=status, **layout)))\n'
-    )
-    encoded = base64.b64encode(zlib.compress(source.encode())).decode()
-    command = 'python3 -c ' + shlex.quote(
-        f'import base64,zlib; exec(zlib.decompress(base64.b64decode({encoded!r})))'
-    )
-    if len(command.encode()) > 8192:
-        raise FastdiskPublishError('embedded detector exceeds command size limit')
-    return command
 
 
 class AicodingArtifactTransferStrategy(ArtifactTransferStrategy):
@@ -133,19 +114,10 @@ class AicodingArtifactTransferStrategy(ArtifactTransferStrategy):
 
     @staticmethod
     def _layout(result: CommandResult) -> dict:
-        if result.exit_code != 0:
-            raise FastdiskPublishError('fastdisk detection failed')
         try:
-            data = json.loads(result.stdout)
-            if data['status'] not in ('run', 'skip_no_fastdisk'):
-                raise ValueError('invalid gate result')
-            for key in ('storage', 'home'):
-                path = PurePosixPath(data[key])
-                if not path.is_absolute() or '..' in path.parts:
-                    raise ValueError('invalid runtime path')
-        except (ValueError, TypeError, KeyError) as error:
-            raise FastdiskPublishError('invalid fastdisk detection result') from error
-        return data
+            return parse_detection_result(result)
+        except FastdiskDetectionError as error:
+            raise FastdiskPublishError(str(error)) from error
 
     def detect(self, device_id: str, *, timeout_seconds: float | None = None) -> dict:
         budget = self.config.detect_timeout_seconds

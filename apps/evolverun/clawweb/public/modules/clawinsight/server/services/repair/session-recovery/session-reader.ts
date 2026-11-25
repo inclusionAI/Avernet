@@ -1,8 +1,10 @@
+import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import type { BotRuntime, ResolvedBotTarget } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import { redactEvidenceValue } from "@avernet/clawweb-shared/server/services/redaction";
 import { SessionRecoveryError } from "./errors.js";
+import { redactSessionReadEvidence } from "./session-argument-evidence.js";
 import { gzipSync } from "node:zlib";
-import { cronRunSessionId } from "./session-identity.js";
+import { cronRunSessionId, cronConversationKey } from "./session-identity.js";
 
 const HEADER = String.raw`
 const fs=require('node:fs'), path=require('node:path'), readline=require('node:readline');
@@ -45,22 +47,26 @@ const CC_PROGRAM = String.raw`    const id=/(?:^|:)session:([A-Za-z0-9_-]+)(?::|
     if(candidates.length!==1) throw Error('CC session mapping unavailable or ambiguous');
     const file=fs.realpathSync(candidates[0]); if(!file.startsWith(projects+'/')) throw Error('CC session outside scope');
     if(input.cutoff){console.log(JSON.stringify(await readHistorical(file,id)));return;}
-    const messages=[],matches=[]; let line=0,size=0;
+    const messages=[],matches=[]; let line=0,size=0,nextLine=1;
     for await(const text of readline.createInterface({input:fs.createReadStream(file),crlfDelay:Infinity})){
-      line++; if(Buffer.byteLength(text)>80000) continue; let record;try{record=JSON.parse(text)}catch{continue}
+      line++; nextLine=line+1; if(Buffer.byteLength(text)>80000) continue; let record;try{record=JSON.parse(text)}catch{continue}
       const msg=record.message||{},content=typeof msg.content==='string'?msg.content:Array.isArray(msg.content)?msg.content.filter(p=>p.type==='text').map(p=>p.text).join('\n'):'';
       if((msg.role||record.type)==='user'&&content.includes(input.marker+'\n')) matches.push({message_id:record.uuid||record.id||null,line_no:line,text:content});
-      if(line>=(input.fromLine||1)){if(size+Buffer.byteLength(text)>80000)break;messages.push({line_no:line,record});size+=Buffer.byteLength(text);if(messages.length>=input.limit)break;}
+      if(line>=(input.fromLine||1)){if(size+Buffer.byteLength(text)>80000){nextLine=line;break;}messages.push({line_no:line,record});size+=Buffer.byteLength(text);if(messages.length>=input.limit)break;}
     }
     if(input.expectedSessionId&&input.expectedSessionId!==id)throw Error('CC session changed');
-    console.log(JSON.stringify({session_id:id,source:file,messages,delivery:matches[0]||null,delivery_matches:matches,delivery_confirmed:matches.length>0,next_line:line+1,transport:'shell'})); return;
+    console.log(JSON.stringify({session_id:id,source:file,messages,delivery:matches[0]||null,delivery_matches:matches,delivery_confirmed:matches.length>0,next_line:nextLine,transport:'shell'})); return;
 `;
 const OC_PROGRAM = String.raw`  const match=/^agent:([A-Za-z0-9_-]+):.+/.exec(input.sessionKey);
   if(!match) throw Error('invalid session key');
   const state=process.env.OPENCLAW_STATE_DIR||path.join(process.env.HOME||'/home/admin','.openclaw');
   const root=fs.realpathSync(path.join(state,'agents',match[1],'sessions'));
   const indexPath=path.join(root,'sessions.json');
-  let entry=fs.existsSync(indexPath)?JSON.parse(fs.readFileSync(indexPath,'utf8'))[input.sessionKey]:undefined;
+  const store=fs.existsSync(indexPath)?JSON.parse(fs.readFileSync(indexPath,'utf8')):{};
+  let indexedKey=input.sessionKey, entry=store[indexedKey];
+  if(input.requireIndex&&input.conversationKey!==indexedKey&&store[input.conversationKey]?.sessionId===input.expectedSessionId){
+    indexedKey=input.conversationKey;entry=store[indexedKey];
+  }
   if(input.cutoff&&input.expectedSessionId&&entry?.sessionId!==input.expectedSessionId)entry=undefined;
   if(input.requireIndex&&!entry) throw Error('original session is not indexed for message delivery');
   const sessionId=entry?entry.sessionId:input.expectedSessionId;
@@ -70,9 +76,9 @@ const OC_PROGRAM = String.raw`  const match=/^agent:([A-Za-z0-9_-]+):.+/.exec(in
   if(path.dirname(file)!==root) throw Error('session path outside scope');
   if(input.cutoff){console.log(JSON.stringify(await readHistorical(file,sessionId,!entry)));return;}
   const stream=fs.createReadStream(file), reader=readline.createInterface({input:stream,crlfDelay:Infinity});
-  let line=0, size=0, beforeSize=0, found=false, located=null, matches=[], messages=[], before=[], headerVerified=!!entry;
+  let line=0, nextLine=1, size=0, beforeSize=0, found=false, located=null, matches=[], messages=[], before=[], headerVerified=!!entry;
   try { for await(const text of reader){
-    line++; const lineBytes=Buffer.byteLength(text,'utf8'); if(lineBytes>80000) continue;
+    line++; nextLine=line+1; const lineBytes=Buffer.byteLength(text,'utf8'); if(lineBytes>80000) continue;
     let record; try{record=JSON.parse(text)}catch{if(!entry&&line===1)throw Error('invalid session header');continue}
     if(!entry&&line===1&&(record.type!=='session'||record.id!==sessionId)) throw Error('session header mismatch');
     if(!entry&&line===1) headerVerified=true;
@@ -85,15 +91,15 @@ const OC_PROGRAM = String.raw`  const match=/^agent:([A-Za-z0-9_-]+):.+/.exec(in
       matches.push({message_id:delivery.message_id,line_no:line}); if(!located) located=delivery;
     }
     const select=input.fromLine?line>=input.fromLine:found;
-    if(select){ if(size+lineBytes>80000) break; messages.push(item); size+=lineBytes; if(messages.length>=input.limit) break; }
+    if(select){ if(size+lineBytes>80000){nextLine=line;break;} messages.push(item); size+=lineBytes; if(messages.length>=input.limit) break; }
     else { before.push(item); beforeSize+=lineBytes; while(before.length>10||beforeSize>8000){const removed=before.shift(); beforeSize-=Buffer.byteLength(JSON.stringify(removed.record),'utf8');} }
   }}finally{reader.close();stream.destroy()}
   if(!headerVerified) throw Error('missing session header');
-  const after=fs.existsSync(indexPath)?JSON.parse(fs.readFileSync(indexPath,'utf8'))[input.sessionKey]:undefined;
+  const after=fs.existsSync(indexPath)?JSON.parse(fs.readFileSync(indexPath,'utf8'))[indexedKey]:undefined;
   if(entry?after?.sessionId!==sessionId:after&&after.sessionId!==sessionId) throw Error('session changed while reading');
   if(!input.fromLine&&!found) messages=before;
-  console.log(JSON.stringify({session_id:sessionId,source:file,delivery:located,messages,
-    failure_context:input.fromLine?[]:before,next_line:line+1,delivery_confirmed:!!located,delivery_matches:matches}));
+  console.log(JSON.stringify({session_id:sessionId,session_key:indexedKey,source:file,delivery:located,messages,
+    failure_context:input.fromLine?[]:before,next_line:nextLine,delivery_confirmed:!!located,delivery_matches:matches}));
 `;
 const FOOTER = String.raw`})().catch(error=>{console.error(String(error.code||'')+': '+String(error.message||'original session unavailable or changed'));process.exitCode=1});
 `;
@@ -116,13 +122,14 @@ export class RecoverySessionReader {
     const cronId = input.target.activeEngine === "openclaw" ? cronRunSessionId(input.sessionKey) : undefined;
     if (cronId && input.expectedSessionId && cronId !== input.expectedSessionId) throw unavailable("Cron session ID mismatch");
     const encoded = gzipSync(Buffer.from(JSON.stringify({ sessionKey: input.sessionKey, engine: input.target.activeEngine, marker: `[会话自愈：${input.deliveryKey}]`,
-      expectedSessionId: input.expectedSessionId ?? cronId, requireIndex: input.requireIndex, fromLine: input.fromLine, limit, deliveryKey: input.deliveryKey, ...(input.cutoff ? { cutoff: input.cutoff } : {}) }))).toString("base64");
+      expectedSessionId: input.expectedSessionId ?? cronId, conversationKey: cronConversationKey(input.sessionKey, input.expectedSessionId ?? cronId), requireIndex: input.requireIndex, fromLine: input.fromLine, limit, deliveryKey: input.deliveryKey, ...(input.cutoff ? { cutoff: input.cutoff } : {}) }))).toString("base64");
     // Compress the fixed read-only program so runtime-user wrapping stays within BaaS's command limit.
     const loader = `eval(require("node:zlib").gunzipSync(Buffer.from("${gzipSync(HEADER + (input.target.activeEngine === "claude_code" ? CC_PROGRAM : OC_PROGRAM) + FOOTER).toString("base64")}","base64")).toString())`;
     const result = await this.runtime.executeShell({ target: input.target, command: `node -e ${quote(loader)} ${quote(encoded)}`, timeoutMs: 30000 })
-      .catch((error: unknown) => { const cause = error as { stderr?: string; code?: string }; throw unavailable(cause?.stderr || cause?.code || "受控 Shell 请求失败"); });
+      .catch((error: unknown) => { if (error instanceof BotRuntimeError && error.code === "target_unavailable") throw new SessionRecoveryError(410, error.code, "目标运行环境已不可用");
+        const cause = error as { stderr?: string; code?: string }; throw unavailable(cause?.stderr || cause?.code || "受控 Shell 请求失败"); });
     if (result.status !== "success" || result.exitCode !== 0) throw unavailable(result.stderr || `Shell exit=${result.exitCode}, status=${result.status}`);
-    try { return redactEvidenceValue(JSON.parse(result.stdout)) as Record<string, unknown>; }
+    try { return redactSessionReadEvidence(JSON.parse(result.stdout), input.target.activeEngine === "claude_code"); }
     catch { throw new SessionRecoveryError(503, "original_session_unavailable", "原会话记录格式无效"); }
   }
 }

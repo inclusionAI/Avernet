@@ -1,5 +1,7 @@
 """Skill-only AUTO Grant step against real SQLite persistence."""
 
+
+from agentclaw.community.core.repository.implementations.spaces.persistence_effects import NoKnowledgeSpacePersistenceEffects
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -12,6 +14,9 @@ from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.models.space_skill import SkillGrant, SkillSpaceBinding
+from agentclaw.community.core.bot_collaborator.manager_sync.dispatcher import (
+    DisabledBotManagerSync,
+)
 from agentclaw.community.core.skill_center.errors import SpaceSkillGrantForbiddenError
 from agentclaw.community.core.repository.implementations.skill_center.skill_editor_request import (
     SkillEditorRequestRepository,
@@ -75,15 +80,15 @@ def _skill_editor_requests(db):
 
 
 def _work_orders(db):
-    return WorkOrderRepository(db, _skill_editor_requests(db))
+    return WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
 
 
 def _space_skills(db):
-    return SpaceSkillRepository(db, _skill_editor_requests(db))
+    return SpaceSkillRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
 
 
 def _space_skill(db):
-    spaces = SpaceRepository(db)
+    spaces = SpaceRepository(db, NoKnowledgeSpacePersistenceEffects())
     with spaces.create_team_transaction(
         name="Team", creator_id="owner-1", creator_user_name=None, env="dev"
     ) as team:
@@ -402,6 +407,7 @@ def test_skill_application_auto_path_grants_and_notifies_without_owner_todo(db) 
         staff,
         MagicMock(),
         callbacks,
+        DisabledBotManagerSync(),
     )
     service = SpaceSkillEditorRequestService(
         work_orders, skill_repository, work_order_service, staff, lambda: "dev"
@@ -471,6 +477,7 @@ def test_concurrent_auto_applications_create_only_one_approved_order(
         staff,
         MagicMock(),
         callbacks,
+        DisabledBotManagerSync(),
     )
     service = SpaceSkillEditorRequestService(
         work_orders, skill_repository, work_order_service, staff, lambda: "dev"

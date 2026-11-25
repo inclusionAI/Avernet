@@ -333,6 +333,14 @@ class SkillRepository(Protocol):
     def get_by_git_path(self, git_path: str) -> dict | None: ...
 
     @abstractmethod
+    def list_center_by_name(self, name: str) -> list[dict]:
+        """Online Center assets (``center://`` locators) with this runtime name in the current env.
+
+        Who may use one is the query service's question, asked per row.
+        """
+        ...
+
+    @abstractmethod
     def get_by_link_name(
         self, link_name: str, bolt_id: str | None = None
     ) -> dict | None: ...

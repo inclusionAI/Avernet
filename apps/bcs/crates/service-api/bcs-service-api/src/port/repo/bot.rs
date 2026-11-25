@@ -42,6 +42,100 @@ pub trait BotRepoPort: Send + Sync {
         Err(crate::types::ServiceError::InternalError("atomic registration creation is not configured".into()))
     }
 
+    /// Trusted atomic registration with ownership initialization
+    /// (bot authority spec §10.2).
+    ///
+    /// One store transaction commits: the Bot identity (created only
+    /// when absent; existing active/deleted records are never
+    /// updated, so a reused Bot ID never resets its owner), the
+    /// Human for `initialization.owner_user_id` — the Human ACTOR
+    /// row (`bcs_bots`) is ensured in the SAME transaction so the
+    /// Task-2/3 human-existence guards accept the fresh owner —
+    /// the approved owner edge, `ownership_version = 1`
+    /// (never from a version-0 runtime path), the default runtime
+    /// permission profile, the Provider gateway projection when the
+    /// command needs one, and the `initialize` audit row. The
+    /// owner is also the first `created_by`; later re-registrations
+    /// or onboards only update their own fields and never reset the
+    /// owner. Failure is all-or-nothing: everything unwritten, no
+    /// token mapped, no cache publish and no runtime activation.
+    ///
+    /// `initialization.owner_user_id` comes only from a verified
+    /// registration token; the mutation keeps the real initiator.
+    async fn create_registration_if_absent_with_ownership(
+        &self, _bot_id: String, _capabilities: BotCapabilities,
+        _created_by: &str, _token: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<bool> {
+        Err(crate::types::ServiceError::InternalError("trusted ownership registration is not configured".into()))
+    }
+
+    /// Initialize ownership on an already-existing live Bot (governance
+    /// backfill; never used for trusted registration, which uses
+    /// [`Self::create_registration_if_absent_with_ownership`]).
+    ///
+    /// Returns the current owner view. When the Bot is already
+    /// initialized (version > 0) nothing is written; a repeat by
+    /// the SAME owner is idempotent and returns the CURRENT owner,
+    /// while a different owner is REFUSED — a reused or transferred
+    /// Bot ID never has its owner reset. Deleted IDs never
+    /// resurrect ownership.
+    async fn initialize_ownership(
+        &self, _bot_id: &str, _owner_user_id: &str,
+        _mutation: crate::types::bot_authority::AuthorityMutation,
+    ) -> ServiceResult<crate::types::bot_authority::BotOwnershipView> {
+        Err(crate::types::ServiceError::InternalError("ownership initialization is not configured".into()))
+    }
+
+    /// Provider-authenticated, create-only authority initialization. The application
+    /// verifies Provider ownership of the Bot. Atomically initialize owner/version,
+    /// initial managers and their Human actors/audit; version > 0 is never rewritten.
+    /// This is not a replacement for Human edits or trusted-Service manager sync.
+    async fn initialize_provider_authority(
+        &self, _bot_id: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<crate::types::bot_authority::BotOwnershipView> {
+        Err(crate::ServiceError::InternalError("Provider authority initialization is not configured".into()))
+    }
+
+    /// Governance facts of ONE Bot for the bcs-admin
+    /// ownership-backfill dry-run read (bot-authority spec
+    /// §10.4/§10.5). Pure read over the SAME facts the
+    /// [`Self::initialize_ownership`] guard checks — live
+    /// state, `created_by`, the Human identity registry,
+    /// the current version and the approved owner edges —
+    /// so the dry-run classification and the apply write
+    /// can never disagree about the world. `None` when the
+    /// Bot is unknown; failures propagate.
+    async fn ownership_governance_state(
+        &self,
+        _bot_id: &str,
+    ) -> ServiceResult<Option<crate::types::bot_authority::BotOwnershipGovernance>> {
+        Err(crate::types::ServiceError::InternalError("the ownership governance read is not configured".into()))
+    }
+
+    /// Atomic ordinary-Bot retirement (bot authority spec §7.1).
+    /// Only physical Bot targets are supported. Human actors are rejected
+    /// independently of caller authorization, including owners of live Bots.
+    ///
+    /// ONE transaction commits the Bot tombstone, the owner/
+    /// manager edge revocation, the pending-transfer closure
+    /// (system decision, fixed reason) and the `retire` audit —
+    /// the real mutation actor is the audit initiator. This is
+    /// the ordinary-retirement command; a Provider-managed Bot
+    /// must go through `BotProviderRepoPort::retire_with_authority`
+    /// instead (never chained one after the other). `Ok(true)`
+    /// when this command executed the tombstone transition;
+    /// `Ok(false)` when the Bot was already tombstoned
+    /// (idempotent re-execution, no duplicate audit; the
+    /// revocation/closure steps still run and are no-ops).
+    async fn retire_with_authority(
+        &self, _bot_id: &str,
+        _mutation: crate::types::bot_authority::AuthorityMutation,
+    ) -> ServiceResult<bool> {
+        Err(crate::types::ServiceError::InternalError("bot retirement with authority is not configured".into()))
+    }
+
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()>;
 
     async fn register_with_owner_and_token(
@@ -86,6 +180,25 @@ pub trait BotRepoPort: Send + Sync {
     /// distinguish "missing" from "store unavailable" can do so.
     async fn try_get(&self, bot_id: &str) -> ServiceResult<Option<RegisteredBot>> {
         Ok(self.get(bot_id).await)
+    }
+
+    /// Strict batch read (input order, deduplicated by bot_uuid,
+    /// absent ids skipped): every persistence failure is an `Err`
+    /// — never a silently omitted candidate. SQL stores SHOULD
+    /// override with a real batched query instead of the strict
+    /// per-id fallback below.
+    async fn try_get_many(&self, bot_ids: &[String]) -> ServiceResult<Vec<RegisteredBot>> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for bot_id in bot_ids {
+            if !seen.insert(bot_id.as_str()) {
+                continue;
+            }
+            if let Some(bot) = self.try_get(bot_id).await? {
+                out.push(bot);
+            }
+        }
+        Ok(out)
     }
 
     /// Like [`get`](Self::get) but also returns soft-deleted bots.
@@ -135,6 +248,21 @@ pub trait BotRepoPort: Send + Sync {
 
     async fn list_active(&self) -> Vec<RegisteredBot>;
     async fn list_bots_by_creator(&self, created_by: &str) -> Vec<RegisteredBot>;
+
+    /// Bounded, store-side ownership-migration candidates: live
+    /// physical Bots whose stored creator matches `created_by`
+    /// byte-for-byte and whose ownership is still uninitialized
+    /// (`ownership_version = 0`), ordered by id and capped at
+    /// `limit`. The `/bots/mine` legacy sweep reads ONLY this
+    /// list, so a fully-migrated owner costs one indexed lookup
+    /// instead of a per-Bot governance rescan of the whole
+    /// creator backlist. Persistence failures must surface as
+    /// errors — never collapse silently to an empty page.
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        created_by: &str,
+        limit: usize,
+    ) -> ServiceResult<Vec<RegisteredBot>>;
 
     /// List Bots by creator without hiding persistence failures.
     ///
@@ -234,6 +362,70 @@ pub trait BotRepoPort: Send + Sync {
     async fn cleanup_expired(&self);
     async fn load_from_storage(&self, bot_id: &str) -> Option<BotCapabilities>;
     async fn save_to_storage(&self, bot_id: &str, caps: &BotCapabilities) -> ServiceResult<()>;
+
+    /// Existing-only Bot profile write (bot-authority spec, bot-avatar plan
+    /// Task 3): atomically replace the live record's stored capabilities and
+    /// apply `update.avatar` to the record's dedicated avatar field in the
+    /// same write/transaction boundary.
+    ///
+    /// The write targets an already-existing live record only — no INSERT
+    /// and no upsert: a missing or soft-deleted target returns
+    /// [`ProfileWrite::Missing`] and leaves storage untouched, and existing
+    /// owner/token fields are never part of the statement. The runtime
+    /// registry identity (`agent_code`/`agent_token`) is never part of the
+    /// statement either and keeps its current stored and published values.
+    /// `AvatarChange::Keep`
+    /// must not appear in the storage `SET` clause, so a capabilities
+    /// replacement cannot clear the stored avatar. Backends where an
+    /// unchanged value reports zero affected rows (MySQL without
+    /// found-rows semantics) must not misclassify those writes as `Missing`.
+    async fn update_profile_existing(
+        &self,
+        _bot_id: &str,
+        _update: crate::types::bot_profile::ExistingProfileUpdate,
+    ) -> ServiceResult<crate::types::bot_profile::ProfileWrite> {
+        Err(crate::types::ServiceError::InternalError(
+            "bot profile update is not configured".into(),
+        ))
+    }
+
+    /// Existing-only avatar write: apply one avatar transition to the live
+    /// record's dedicated avatar field without touching any other field.
+    ///
+    /// Same existing-only contract as
+    /// [`update_profile_existing`](Self::update_profile_existing):
+    /// `Missing` writes nothing, `Keep` writes nothing for the avatar and
+    /// only confirms the live record, and a `Set`/`Clear` of an already
+    /// stored value still reports [`ProfileWrite::Updated`].
+    async fn update_avatar_existing(
+        &self,
+        _bot_id: &str,
+        _avatar: crate::types::bot_profile::AvatarChange,
+    ) -> ServiceResult<crate::types::bot_profile::ProfileWrite> {
+        Err(crate::types::ServiceError::InternalError(
+            "bot avatar update is not configured".into(),
+        ))
+    }
+
+    /// Batched avatar read (display face): the stored avatar URL for every
+    /// requested Bot id, keyed in one map.
+    ///
+    /// The input is deduplicated and bounded (at most 256 distinct ids;
+    /// more is an `InvalidOperation` error and an empty input queries
+    /// nothing). The read keeps the repository's current environment
+    /// isolation, excludes Human actor rows, and retains live and
+    /// soft-deleted (tombstone display) Bot rows: a present `None` value is
+    /// a record without an avatar, while an absent key resolved to no
+    /// record.
+    async fn read_avatar_batch(
+        &self,
+        _bot_ids: &[String],
+    ) -> ServiceResult<crate::types::bot_profile::BotAvatarMap> {
+        Err(crate::types::ServiceError::InternalError(
+            "bot avatar batch read is not configured".into(),
+        ))
+    }
+
     async fn update_visibility(&self, bot_id: &str, visibility: &str) -> ServiceResult<()>;
     async fn set_hidden(&self, bot_id: &str, hidden: bool) -> ServiceResult<()>;
 

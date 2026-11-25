@@ -1,4 +1,5 @@
 import type { ConversationBotView } from '@/domain/conversation';
+import { isManagedConversationSection } from '@/domain/conversation/types';
 import { conversationBotSelectionService } from '@/services/workspace/conversationBotSelectionService';
 import { useConversationStore } from '@/stores/conversationStore';
 import { selectedSnapshotMatches } from '@/stores/conversationStoreState';
@@ -8,7 +9,14 @@ import type { ConversationSessionsModel } from './useConversationSessions.types'
 
 export interface ConversationSessionPlaceholderModel {
   botName: string;
-  status: 'loading' | 'error' | 'empty' | 'favorite-empty' | 'unselected';
+  status:
+    | 'loading'
+    | 'error'
+    | 'empty'
+    | 'favorite-empty'
+    | 'archive-unselected'
+    | 'archive-empty'
+    | 'unselected';
   error?: string;
   creating: boolean;
   create(): Promise<void>;
@@ -24,12 +32,20 @@ export function useConversationSessionPlaceholder(options: {
   sessions: ConversationSessionsModel;
 }): ConversationSessionPlaceholderModel | null {
   const state = useConversationStore();
-  const [creating, setCreating] = useState(false);
+  const [friendCreating, setFriendCreating] = useState(false);
   const inFlight = useRef(false);
   const view = [...options.managedBots, ...options.friendBots].find(
     (item) => item.bot.botId === state.selectedBotId && item.section === state.selectedSection,
   );
-  if (!view || state.selectedOrigin !== 'mine') return null;
+  // 好友 Bot 的生效范围读 scopeByFriendBotId(选中范围恒 all,不随好友筛选投影);
+  // 管理/团队空间 Bot 沿用已同步的 selectedScope。
+  const effectiveScope =
+    view?.section === 'friend' ? state.scopeByFriendBotId[view.bot.botId] ?? 'all' : state.selectedScope;
+  const managedCodingBot =
+    view !== undefined && isManagedConversationSection(view.section) && view.bot.isAgentCodingBot === true;
+  const archiveScope = managedCodingBot && effectiveScope === 'archived';
+  // Coding Bot 的 others/collab 归档也允许占位装配;普通 Bot 的 others 仍保持只读链路。
+  if (!view || (!archiveScope && state.selectedOrigin !== 'mine')) return null;
   // 已打开的主会话被过滤条件移出列表(spec: 搜索只改变侧栏列表,不自动关闭主会话),
   // 占位一律不遮蔽:加载/空态/失败/未命中都不会切换舞台,仍由保留快照驱动。
   if (
@@ -43,10 +59,34 @@ export function useConversationSessionPlaceholder(options: {
     })
   )
     return null;
-  // 好友 Bot 的生效范围读 scopeByFriendBotId(选中范围恒 all,不随好友筛选投影);
-  // 管理/团队 Bot 沿用已同步的 selectedScope。
-  const effectiveScope =
-    view.section === 'friend' ? state.scopeByFriendBotId[view.bot.botId] ?? 'all' : state.selectedScope;
+  // 归档列表不是普通 session list 缓存;不能把它的空占位误判成「Bot 暂无会话」。
+  // URL 带 sessionId 但详情快照未就绪时保持 loading,让深链 hydration 精确拉取会话。
+  if (archiveScope) {
+    const archives = state.sessionsByBotId[view.bot.botId]?.sessionArchives ?? null;
+    const status = state.selectedSessionId
+      ? 'loading'
+      : !archives || archives.loading
+      ? 'loading'
+      : archives.error
+      ? 'error'
+      : archives.items.length
+      ? 'archive-unselected'
+      : 'archive-empty';
+    return {
+      botName: view.bot.displayName,
+      status,
+      error: archives?.error ?? undefined,
+      creating: false,
+      create: async () => undefined,
+      retry: () => {
+        void options.sessions.archives.retry(view);
+      },
+      showAll: () => {
+        conversationBotSelectionService.showAll(view.bot.botId, view.section);
+        options.sessions.retrySessions(view.bot.botId, view.section);
+      },
+    };
+  }
   const list = conversationBotSelectionService.getList({
     botId: view.bot.botId,
     section: view.section,
@@ -55,32 +95,43 @@ export function useConversationSessionPlaceholder(options: {
   });
   if (list && !list.loading && !list.error && list.items.some((item) => item.sessionId === state.selectedSessionId))
     return null;
-  const status =
-    !list || list.loading
-      ? 'loading'
-      : list.error
-      ? 'error'
-      : list.items.length || list.hasMore
-      ? 'unselected'
-      : effectiveScope === 'favorite'
-      ? 'favorite-empty'
-      : 'empty';
+  const managedCodingBotCreating =
+    isManagedConversationSection(view.section) &&
+    view.bot.isAgentCodingBot === true &&
+    options.sessions.isCreatingSession(view.bot.botId);
+
+  // 跨 Bot 点击 `+` 后目标 Bot 已被选中但 sessionId 仍为 null；此时不是自然的
+  // “请选择一个会话”未选态。复用 loading 状态的鱼骨屏，Stage 仍在下面完成
+  // Runtime bootstrap；不额外增加文案。
+  const status = managedCodingBotCreating
+    ? 'loading'
+    : !list || list.loading
+    ? 'loading'
+    : list.error
+    ? 'error'
+    : list.items.length || list.hasMore
+    ? 'unselected'
+    : effectiveScope === 'favorite'
+    ? 'favorite-empty'
+    : 'empty';
   return {
     botName: view.bot.displayName,
     status,
     error: list?.error ?? undefined,
-    creating,
+    // Friend Bot 保持既有本地 pending；managed/team 与行尾 + 共享同一 Bot 级 pending。
+    creating: view.section === 'friend' ? friendCreating : options.sessions.isCreatingSession(view.bot.botId),
     create: async () => {
       if (inFlight.current || !options.userId || status !== 'empty') return;
+      const isFriendBot = view.section === 'friend';
       inFlight.current = true;
-      setCreating(true);
+      if (isFriendBot) setFriendCreating(true);
       try {
         await options.sessions.createSession(view.bot.botId);
       } catch {
         toast.error('创建会话失败，请稍后重试。');
       } finally {
         inFlight.current = false;
-        setCreating(false);
+        if (isFriendBot) setFriendCreating(false);
       }
     },
     retry: () => options.sessions.retrySessions(view.bot.botId, view.section),

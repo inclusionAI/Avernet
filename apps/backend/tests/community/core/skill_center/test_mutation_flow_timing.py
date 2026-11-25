@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -349,3 +349,68 @@ async def test_apply_plan_validates_retired_mappings_before_runtime_write() -> N
     )
 
     assert engine.validated_retired == retired
+
+
+@pytest.mark.asyncio
+async def test_unchanged_desired_state_retries_a_failed_runtime_delivery() -> None:
+    runtime = _PlanRuntime()
+    flow = MutationProjectionFlow(
+        repository=_Repository(), runtime=runtime, recovery=MagicMock()
+    )
+    outcomes = []
+    runtime.fail_apply_once = True
+    for changed in (True, False):
+        outcomes.append(await flow.apply(
+            bot={"owner_id": "owner-1", "status": "ACTIVE"},
+            bot_id="bot-1",
+            engine_type="openclaw",
+            scope=ProjectionScope(skills=True),
+            mutation=lambda: DesiredStateMutation(
+                item={"id": "set-1"}, changed=changed,
+                previous_state=CapabilityDesiredState(set(), {}, {}),
+            ),
+        ))
+    assert outcomes[0]["runtime_projection"]["status"] == "PENDING"
+    assert outcomes[0]["runtime_projection"]["issues"][0]["code"] == "RUNTIME_PROJECTION_UNAVAILABLE"
+    assert outcomes[1]["changed"] is False
+    assert outcomes[1]["runtime_projection"]["status"] == "CONVERGED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("preflight", ["not_ready", "initial_snapshot", "final_snapshot"])
+async def test_early_runtime_failure_retains_committed_release_candidates(preflight):
+    class Repository(_Repository):
+        def commit_capability_mutation(self, *, mutation, **_kwargs):
+            return mutation()
+
+    runtime = _PlanRuntime()
+    runtime.remember_release_candidates = AsyncMock()
+    if preflight == "initial_snapshot":
+        runtime.snapshot_skill_mappings = AsyncMock(side_effect=RuntimeError("runtime snapshot unavailable"))
+    runtime.fail_resolve = preflight == "final_snapshot"
+    flow = MutationProjectionFlow(repository=Repository(), runtime=runtime, recovery=MagicMock())
+    released = frozenset({"retired-mcp"})
+    result = await flow.apply(
+        bot={
+            "owner_id": "owner-1", "entity_id": "entity-1", "device_id": "device-1",
+            "status": "OFFLINE" if preflight == "not_ready" else "ACTIVE",
+        },
+        bot_id="bot-1",
+        engine_type="openclaw",
+        scope=ProjectionScope(skills=True, mcp=True, released_mcp=released),
+        mutation=lambda: DesiredStateMutation(
+            item={"id": "retired-mcp"},
+            changed=True,
+            previous_state=CapabilityDesiredState(
+                installations=set(), set_active={}, memberships={},
+            ),
+        ),
+    )
+    assert result["changed"] is True
+    assert result["runtime_projection"]["status"] == "PENDING"
+    assert runtime.applied_plan is None
+    runtime.remember_release_candidates.assert_awaited_once_with(
+        bot_id="bot-1", entity_id="entity-1", codes=released,
+        candidates=runtime.before if preflight == "final_snapshot" else (),
+        candidate_device_id="device-1" if preflight == "final_snapshot" else None,
+    )

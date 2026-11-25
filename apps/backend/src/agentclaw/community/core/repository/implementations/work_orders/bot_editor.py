@@ -86,6 +86,11 @@ class _BotEditorWorkOrderRepository:
         )
         if bot is None:
             raise WorkOrderNotFoundError("Bot not found")
+        from agentclaw.community.core.bot_management.owner_handoff.guard import (
+            assert_bot_mutable,
+        )
+
+        assert_bot_mutable({"ext": bot.ext})
         space = (
             db.query(SpaceModel.id)
             .filter(
@@ -166,6 +171,11 @@ class _BotEditorWorkOrderRepository:
             if bot is None:
                 raise WorkOrderNotFoundError("Bot not found during request creation")
 
+            from agentclaw.community.core.bot_management.owner_handoff.guard import (
+                assert_bot_mutable,
+            )
+
+            assert_bot_mutable({"ext": bot.ext})
             member = (
                 db.query(self._Member.id)
                 .filter(

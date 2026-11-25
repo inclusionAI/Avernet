@@ -23,6 +23,24 @@ impl Default for RegistrationSettings {
     fn default() -> Self { Self { api_url: None, webhook_url: None, provider_auth: None } }
 }
 
+/// Global runtime endpoint settings for the CLI launched by every Provider.
+/// This section is intentionally not part of the persisted Provider runtime
+/// schema; it is resolved once by the application and copied into memory.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CliSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_base_url: Option<String>,
+}
+
+impl CliSettings {
+    pub(crate) fn is_empty(&self) -> bool { self.api_base_url.is_none() }
+
+    pub(crate) fn from_value(value: toml::Value) -> anyhow::Result<Self> {
+        value.try_into().map_err(|_| anyhow::anyhow!("Invalid [cli] configuration; expected api_base_url"))
+    }
+}
+
 fn parse(text: &str) -> anyhow::Result<(RegistrationSettings, toml::Table)> {
     let mut table: toml::Table = toml::from_str(text).map_err(|_| anyhow::anyhow!("Invalid bridge TOML configuration"))?;
     let settings = match table.remove("registration") {
@@ -36,6 +54,10 @@ fn parse(text: &str) -> anyhow::Result<(RegistrationSettings, toml::Table)> {
 pub fn runtime(table: &toml::Table, path: &Path, webhook_token: Option<&str>) -> anyhow::Result<ProviderConfig> {
     let mut runtime = table.clone();
     runtime.remove("registration");
+    // `api_url` is legacy registration metadata. `[cli]` is a document-level
+    // section and is resolved by multi_config before a Provider is parsed.
+    runtime.remove("api_url");
+    runtime.remove("cli");
     if let Some(bots) = runtime.get_mut("bot").and_then(toml::Value::as_array_mut) {
         for bot in bots { if let Some(bot) = bot.as_table_mut() { bot.remove("registration"); } }
     }
@@ -92,8 +114,11 @@ pub fn read_registration_source(path: &Path, replace_existing: bool) -> anyhow::
         return Ok(Bootstrap { settings, original, previous: Some(table), document: toml::Table::new(), edit: None });
     }
     table.remove("bcs_to_provider_token");
-    if !table.is_empty() { bail!("Before registration, configuration may contain only [registration] settings"); }
-    Ok(Bootstrap { settings, original, previous: None, document: toml::Table::new(), edit: None })
+    let cli = table.remove("cli");
+    if let Some(value) = cli.as_ref() { CliSettings::from_value(value.clone())?; }
+    if !table.is_empty() { bail!("Before registration, configuration may contain only [registration] and [cli] settings"); }
+    let document = cli.map(|value| toml::Table::from_iter([("cli".into(), value)])).unwrap_or_default();
+    Ok(Bootstrap { settings, original, previous: None, document, edit: None })
 }
 
 pub(crate) fn read_existing(path: &Path) -> anyhow::Result<Option<String>> {

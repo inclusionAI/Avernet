@@ -3,8 +3,9 @@
 //! Implements both [`InvitationService`] and [`FriendshipService`]. The facade
 //! owns Caller-based resource authorization and V1 projections while
 //! delegating friendship/friend-request side effects to the legacy
-//! [`FriendCoreService`] / [`FriendRequestCoreService`] cores and invitation
-//! accept-join side effects to the legacy [`InviteService`]
+//! [`FriendService`] use-case facade (itself converged onto the edge-permission
+//! connect use case), friendship listing to [`FriendCoreService`], and
+//! invitation accept-join side effects to the legacy [`InviteService`]
 //! (`join_group_by_invite` / `join_session_by_invite`). No HTTP type crosses
 //! this boundary.
 //!
@@ -23,12 +24,15 @@
 //!   creates a Human Participant (Consultant role, Present mode). This matches
 //!   the legacy invite-link accept semantics exactly.
 
+mod invitations;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_domain::{
-    invite_token_decode_and_verify, invite_token_encode, ActorKind, InviteTargetType,
-    InviteTokenError, InviteTokenPayload,
+    edge_permission::{PermissionRequest, RequestStatus as EdgeRequestStatus},
+    invite_token_decode_and_verify, invite_token_encode, ActorKind, FriendRequestStatus,
+    InviteTargetType, InviteTokenError, InviteTokenPayload,
 };
 use bcs_service_api::application::v1::{
     friend_connection::{
@@ -48,14 +52,30 @@ use bcs_service_api::application::v1::{
     Invitation, ListBotFriendRequests, ListBotFriendships, Page, Principal,
     RejectFriendRequest, require_authenticated_user, require_human,
 };
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::{
     application::{ConnectService, ConnectStatus, RequestDirection},
-    BotRegistryCoreService, FriendCoreService, FriendRequestCoreService,
-    FriendRequest as DomainFriendRequest, FriendRequestDirection as DomainFriendRequestDirection,
+    BotRegistryCoreService, CreateFriendRequestCommand, FriendCoreService,
+    FriendRequest as DomainFriendRequest, FriendRequestDecisionCommand,
+    FriendRequestDirection as DomainFriendRequestDirection, FriendService, FriendUseCaseError,
     Friendship as DomainFriendship, Group as DomainGroup, GroupCoreService, GroupKind,
     GroupStatus, GroupStrategy, InviteService, InviteUseCaseError, JoinByInviteCommand,
-    ParticipantRole, RegisteredBot, ServiceError, SessionManagementService, SessionUseCaseError,
+    ListFriendRequestsCommand, ParticipantRole, RegisteredBot, ServiceError,
+    SessionManagementService, SessionUseCaseError,
 };
+
+/// Map one authority read to application errors: a strict
+/// deny (`Forbidden`) is 403; every other read failure
+/// propagates as an internal error (spec §3.2: 存储错误
+/// 返回错误 — never a deny-as-false).
+pub(crate) fn map_authority_error(error: ServiceError) -> ApplicationError {
+    match error {
+        ServiceError::Forbidden(message) => ApplicationError::forbidden(message),
+        other => ApplicationError::internal(format!(
+            "bot authority lookup failed: {other}"
+        )),
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct InvitationFriendshipServiceConfig {
@@ -66,7 +86,8 @@ pub struct InvitationFriendshipServiceConfig {
 
 /// OpenAPI v1 Invitation + Friendship facade.
 ///
-/// Holds the legacy cores needed for friendship management, invitation token
+/// Holds the legacy friend use-case facade (friend-request mutations/reads),
+/// the `FriendCoreService` friendship listing, invitation token
 /// mint/verify (via the shared `bcs_domain` HMAC helpers and `token_secret`),
 /// and Human-only invitation accept-join. `GroupManagementService` is
 /// intentionally absent: V1 accept delegates to the legacy `InviteService`
@@ -74,12 +95,21 @@ pub struct InvitationFriendshipServiceConfig {
 /// `SessionManagementService` directly (see module docs).
 pub struct InvitationFriendshipServiceImpl {
     friends: Arc<dyn FriendCoreService>,
-    friend_requests: Arc<dyn FriendRequestCoreService>,
+    /// Legacy friend use-case facade. It is converged onto the edge-permission
+    /// connect use case, so every friend-request mutation and read below runs
+    /// through the same owner-notification/edge lifecycle as the new friend
+    /// APIs.
+    legacy_friend: Arc<dyn FriendService>,
     groups: Arc<dyn GroupCoreService>,
     sessions: Arc<dyn SessionManagementService>,
     registry: Arc<dyn BotRegistryCoreService>,
     invite: Arc<dyn InviteService>,
     connect: Option<Arc<dyn ConnectService>>,
+    /// The narrow authority hook (bot-authority plan Task
+    /// 6.3): every Human→Bot control judgment consults it
+    /// live; a missing wiring fails closed.
+    bot_authority: Option<Arc<dyn BotAuthorityPort>>,
+    session_snapshots: Option<Arc<dyn bcs_service_api::core::SessionAuthorizationCoreService>>,
     token_secret: Vec<u8>,
     config: InvitationFriendshipServiceConfig,
 }
@@ -88,7 +118,7 @@ impl InvitationFriendshipServiceImpl {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         friends: Arc<dyn FriendCoreService>,
-        friend_requests: Arc<dyn FriendRequestCoreService>,
+        legacy_friend: Arc<dyn FriendService>,
         groups: Arc<dyn GroupCoreService>,
         sessions: Arc<dyn SessionManagementService>,
         registry: Arc<dyn BotRegistryCoreService>,
@@ -98,12 +128,14 @@ impl InvitationFriendshipServiceImpl {
     ) -> Self {
         Self {
             friends,
-            friend_requests,
+            legacy_friend,
             groups,
             sessions,
             registry,
             invite,
             connect: None,
+            bot_authority: None,
+            session_snapshots: None,
             token_secret,
             config,
         }
@@ -115,6 +147,41 @@ impl InvitationFriendshipServiceImpl {
     ) -> Self {
         self.connect = Some(connect);
         self
+    }
+
+    /// Wire the authority hook (bot-authority plan Task 6.3).
+    pub fn with_bot_authority_hook(
+        mut self,
+        bot_authority: Arc<dyn BotAuthorityPort>,
+    ) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// The wired authority hook; failing to wire one is a
+    /// composition error and must fail closed (never deny-as-Ok).
+    fn authority(&self) -> Result<&dyn BotAuthorityPort, ApplicationError> {
+        self.bot_authority
+            .as_deref()
+            .ok_or_else(|| {
+                ApplicationError::internal(
+                    "bot authority hook is not wired",
+                )
+            })
+    }
+
+    /// Row 11 Human→Bot control leg: a live `can_manage`
+    /// edge; the historical `created_by` no longer
+    /// authorizes anything here.
+    async fn human_controls_bot(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> Result<bool, ApplicationError> {
+        self.authority()?
+            .can_manage(user_id, bot_id)
+            .await
+            .map_err(map_authority_error)
     }
 
     fn connect_service(&self) -> Result<&Arc<dyn ConnectService>, ApplicationError> {
@@ -138,103 +205,26 @@ impl InvitationFriendshipServiceImpl {
             })
     }
 
-    /// The authenticated User must own the Bot through exact `created_by`.
+    /// Row 11: the authenticated User may manage the Bot
+    /// through its CURRENT `can_manage` edge; the
+    /// historical `created_by` no longer authorizes
+    /// (bot-authority plan Task 6.3, spec §3.2/§3.3).
     async fn authorize_bot_resource(
         &self,
         caller: &bcs_service_api::application::v1::AuthenticatedCaller,
         bot_uuid: &str,
     ) -> Result<(), ApplicationError> {
         let user = require_authenticated_user(caller)?;
-        let bot = self.load_bot(bot_uuid).await?;
-        if bot.created_by.as_deref() == Some(user.id.as_str()) {
+        self.load_bot(bot_uuid).await?;
+        let controls = self
+            .human_controls_bot(&user.id, bot_uuid)
+            .await?;
+        if controls {
             Ok(())
         } else {
             Err(ApplicationError::forbidden(format!(
                 "Authenticated User cannot manage Bot '{bot_uuid}'"
             )))
-        }
-    }
-
-    /// Manager of a group: driver, originator, or ManagerWorker manager.
-    /// A Human may also act for an owned driver/originator Bot, preserving the
-    /// legacy invitation authorization contract.
-    async fn can_manage_group(
-        &self,
-        principal: &Principal,
-        group: &DomainGroup,
-    ) -> Result<bool, ApplicationError> {
-        let actor_id = principal.actor_id();
-        if actor_id == group.driver_bot
-            || actor_id == group.originator()
-            || (group.group_strategy == GroupStrategy::ManagerWorker
-                && group.participants.iter().any(|p| {
-                    p.bot_uuid == actor_id && p.role == ParticipantRole::Manager
-                }))
-        {
-            return Ok(true);
-        }
-        let Principal::Human(human) = principal else {
-            return Ok(false);
-        };
-        let owned_bots = self
-            .registry
-            .try_list_bots_by_creator(&human.subject.id)
-            .await
-            .map_err(map_service_error)?;
-        Ok(owned_bots.iter().any(|bot| {
-            bot.actor_kind == ActorKind::Bot
-                && (bot.bot_uuid == group.driver_bot || bot.bot_uuid == group.originator())
-        }))
-    }
-
-    async fn load_manageable_group(
-        &self,
-        principal: &Principal,
-        group_id: &str,
-    ) -> Result<DomainGroup, ApplicationError> {
-        let group = self
-            .groups
-            .try_get(group_id)
-            .await
-            .map_err(map_service_error)?
-            .ok_or_else(|| {
-                ApplicationError::not_found(
-                    "group_not_found",
-                    format!("Group '{group_id}' was not found"),
-                )
-            })?;
-        if !self.can_manage_group(principal, &group).await? {
-            return Err(ApplicationError::forbidden(
-                "Only the Group originator, driver, or manager may manage this Group",
-            ));
-        }
-        Ok(group)
-    }
-
-    // ── invitation helpers ─────────────────────────────────────────────
-
-    fn mint_invitation(
-        &self,
-        target_type: InvitationTargetType,
-        target_id: &str,
-        ttl_seconds: Option<u64>,
-    ) -> Invitation {
-        let now = now_secs();
-        let exp = now.saturating_add(ttl_seconds.unwrap_or(self.config.default_ttl_seconds));
-        let payload = InviteTokenPayload {
-            v: 1,
-            id: target_id.to_string(),
-            exp,
-            target_type: Some(map_v1_target_to_domain(target_type)),
-        };
-        let token = invite_token_encode(&payload, &self.token_secret);
-        Invitation {
-            token,
-            target_type,
-            target_id: target_id.to_string(),
-            state: InvitationState::Pending,
-            expires_at: Some(exp),
-            created_at: now,
         }
     }
 
@@ -247,170 +237,32 @@ impl InvitationFriendshipServiceImpl {
     ) -> Result<(), ApplicationError> {
         self.authorize_bot_resource(caller, bot_uuid).await
     }
-}
 
-#[async_trait]
-impl InvitationService for InvitationFriendshipServiceImpl {
-    async fn create_group_invitation(
+    /// Rebuild the V1 projection after a friend-request decision.
+    ///
+    /// The legacy `accept/reject_friend_request` commands answer with no row,
+    /// so read the decided request from the connect store by id. The legacy
+    /// facade listing cannot serve this: its `created_by == from_id`
+    /// projection drops the Bot↔Bot reverse pending row, yet deciding that
+    /// reverse row is legal and the mutation already happened. A missing row
+    /// is a server inconsistency after a successful decision, so it maps to an
+    /// internal error (never a 404).
+    async fn decided_friend_request(
         &self,
-        command: CreateGroupInvitation,
-    ) -> Result<Invitation, ApplicationError> {
-        let principal = require_human(&command.caller)?;
-        let group = self
-            .load_manageable_group(&principal, &command.group_id)
-            .await?;
-        // VaGQI: DM (DirectMessage) groups are pairwise (participant_count=2);
-        // minting an invitation + accept would add a third participant. Mirror
-        // the legacy invite service, which rejects DM groups with Forbidden.
-        if group.group_kind == GroupKind::Dm {
-            return Err(ApplicationError::forbidden(
-                "Invitations are not available for direct-message groups",
-            ));
-        }
-        // Vcj6P: legacy `create_group_invite_token` L151-153 rejects minting on
-        // a non-active group ("group is not active"). Mirror it so V1 does not
-        // hand out tokens for Completed/Closed/Error targets.
-        if group.status != GroupStatus::Active {
-            return Err(ApplicationError::conflict(
-                "conflict",
-                "group is not active",
-            ));
-        }
-        Ok(self.mint_invitation(
-            InvitationTargetType::Group,
-            &command.group_id,
-            command.expires_in_seconds,
-        ))
-    }
-
-    async fn create_session_invitation(
-        &self,
-        command: CreateSessionInvitation,
-    ) -> Result<Invitation, ApplicationError> {
-        let principal = require_human(&command.caller)?;
-        let session = self
-            .sessions
-            .get(&command.session_id)
+        receiver: &str,
+        request_id: &str,
+    ) -> Result<FriendRequest, ApplicationError> {
+        let request = self
+            .connect_service()?
+            .get_request(request_id)
             .await
-            .map_err(map_session_error)?
-            .ok_or_else(|| {
-                ApplicationError::not_found(
-                    "session_not_found",
-                    format!("Session '{}' was not found", command.session_id),
-                )
+            .map_err(|error| {
+                ApplicationError::internal(format!(
+                    "friend request '{request_id}' (receiver '{receiver}') is not readable from \
+                     the connect store after the decision: {error}"
+                ))
             })?;
-        let group = self
-            .groups
-            .try_get(&session.group_id)
-            .await
-            .map_err(map_service_error)?
-            .ok_or_else(|| {
-                ApplicationError::not_found(
-                    "group_not_found",
-                    format!("Group '{}' was not found", session.group_id),
-                )
-            })?;
-        // Vcj6M: legacy `create_session_invite_token` L186-189 rejects DM parent
-        // groups. Mirror it so session invitations on pairwise DM targets are
-        // not minted. The legacy session path skips `session.status` (it never
-        // checked session status); V1 follows the same precedent.
-        if group.group_kind == GroupKind::Dm {
-            return Err(ApplicationError::forbidden(
-                "Invitations are not available for direct-message groups",
-            ));
-        }
-        // Vcj6P: legacy `create_group_invite_token` L151-153 rejects non-active
-        // groups. The session path's parent shares the same lifecycle as the
-        // group, so mirror the inactive guard on the parent here too.
-        if group.status != GroupStatus::Active {
-            return Err(ApplicationError::conflict(
-                "conflict",
-                "group is not active",
-            ));
-        }
-        // Minting is gated on session membership only: any participant of the
-        // session (any role) may create an invitation for it. A Human caller
-        // also qualifies through any owned Bot that participates in the
-        // session. Group-level roles (driver, originator, manager) are
-        // intentionally NOT required, mirroring the relaxed legacy
-        // `create_session_invite_token`.
-        let is_member = |actor_id: &str| {
-            session
-                .participants
-                .iter()
-                .any(|p| p.bot_uuid == actor_id)
-        };
-        if is_member(&principal.actor_id()) {
-            return Ok(self.mint_invitation(
-                InvitationTargetType::Session,
-                &command.session_id,
-                command.expires_in_seconds,
-            ));
-        }
-        if let Principal::Human(human) = principal {
-            let owned_bots = self
-                .registry
-                .try_list_bots_by_creator(&human.subject.id)
-                .await
-                .map_err(map_service_error)?;
-            if owned_bots.iter().any(|bot| {
-                bot.actor_kind == ActorKind::Bot && is_member(bot.bot_uuid.as_str())
-            }) {
-                return Ok(self.mint_invitation(
-                    InvitationTargetType::Session,
-                    &command.session_id,
-                    command.expires_in_seconds,
-                ));
-            }
-        }
-        Err(ApplicationError::forbidden(
-            "Only Session participants may create invitations for this Session",
-        ))
-    }
-
-    async fn accept_invitation(
-        &self,
-        command: AcceptInvitation,
-    ) -> Result<InvitationAcceptResult, ApplicationError> {
-        let payload = invite_token_decode_and_verify(&command.token, &self.token_secret)
-            .map_err(map_invite_token_error)?;
-        let target_type = payload.target_type.ok_or_else(|| {
-            ApplicationError::invalid(
-                "invalid_request",
-                "legacy invitation token without target_type is not supported by V1",
-            )
-        })?;
-        let user = require_authenticated_user(&command.caller)?;
-        let nick_name = user
-            .display_name
-            .clone()
-            .filter(|value| !value.is_empty())
-            .or_else(|| (!user.username.is_empty()).then(|| user.username.clone()));
-        let join_command = JoinByInviteCommand {
-            token: command.token.clone(),
-            staff_no: user.id.clone(),
-            nick_name,
-            message_view_scope: command.message_view_scope,
-        };
-        let result = match target_type {
-            InviteTargetType::Group => self.invite.join_group_by_invite(join_command).await,
-            InviteTargetType::Session => {
-                self.invite.join_session_by_invite(join_command).await
-            }
-        };
-        let result = result.map_err(map_invite_use_case_error)?;
-        let mapped_target_type = match target_type {
-            InviteTargetType::Group => InvitationTargetType::Group,
-            InviteTargetType::Session => InvitationTargetType::Session,
-        };
-        Ok(InvitationAcceptResult {
-            target_type: mapped_target_type,
-            target_id: result.target_id,
-            joined: result.joined,
-            // `already_member == !joined` from the legacy result; flip the
-            // boolean to populate the V1 `already_joined` idempotency flag.
-            already_joined: Some(!result.joined),
-        })
+        Ok(project_connect_friend_request(&request))
     }
 }
 
@@ -459,12 +311,17 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
                     .await?;
             }
         }
-        let deleted = self
-            .friends
-            .remove_friendship(&command.bot_uuid, &command.friend_bot_uuid)
+        // Friendship removal is owned by the edge-permission connect use case,
+        // so the V1 delete cannot diverge from the friend edges the new
+        // friend-connect APIs read. `deleted` stays "an edge was revoked".
+        let revoked = self
+            .connect_service()?
+            .revoke_friend(&command.bot_uuid, &command.friend_bot_uuid, None)
             .await
             .map_err(map_service_error)?;
-        Ok(DeleteResult { deleted })
+        Ok(DeleteResult {
+            deleted: !revoked.is_empty(),
+        })
     }
 
     async fn create_bot_friend_request(
@@ -474,10 +331,14 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
         self.ensure_bot_resource(&command.caller, &command.bot_uuid)
             .await?;
         let request = self
-            .friend_requests
-            .create_request(&command.bot_uuid, &command.to_bot_uuid)
+            .legacy_friend
+            .create_friend_request(CreateFriendRequestCommand {
+                caller_actor_id: command.bot_uuid,
+                to_bot: command.to_bot_uuid,
+                request_auth: command.request_auth.clone(),
+            })
             .await
-            .map_err(map_service_error)?;
+            .map_err(map_friend_use_case_error)?;
         Ok(project_friend_request(&request))
     }
 
@@ -498,15 +359,21 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
             FriendRequestDirection::Received => DomainFriendRequestDirection::Received,
         };
         let mut requests = self
-            .friend_requests
-            .try_list_requests(&command.bot_uuid, direction, command.status)
+            .legacy_friend
+            .list_friend_requests(ListFriendRequestsCommand {
+                caller_actor_id: command.bot_uuid.clone(),
+                direction,
+                // V1 status is the domain vocabulary (`pending|accepted|
+                // rejected`), and only an explicitly requested status is
+                // pushed down to the facade.
+                status_filter: command.status,
+            })
             .await
-            .map_err(map_service_error)?;
-        // The repo returns all matches without ordering or pagination. Sort
+            .map_err(map_friend_use_case_error)?;
+        // The facade returns the matching rows without V1 ordering. Sort
         // `created_at` DESC with a `request_id` ASC tie-breaker, then apply
-        // offset/limit so V1 pagination is stable. `try_list_requests`
-        // propagates persistence failures (HTTP 500) instead of masking them
-        // as an empty 200 page.
+        // offset/limit so V1 pagination is stable. Listing failures propagate
+        // (HTTP 500) instead of masking them as an empty 200 page.
         requests.sort_by(|a, b| {
             b.created_at
                 .cmp(&a.created_at)
@@ -531,48 +398,48 @@ impl FriendshipService for InvitationFriendshipServiceImpl {
         &self,
         command: AcceptFriendRequest,
     ) -> Result<FriendRequest, ApplicationError> {
-        let request = self
-            .friend_requests
-            .get_request(&command.request_id)
+        let to_bot = self
+            .legacy_friend
+            .friend_request_receiver(&command.request_id)
             .await
-            .map_err(map_service_error)?;
+            .map_err(map_friend_use_case_error)?;
         // Only the receiver may accept; this also covers Human-owned bots via
         // `authorize_bot_resource`.
-        self.ensure_bot_resource(&command.caller, &request.to_bot)
-            .await?;
-        self.friend_requests
-            .accept_request(&command.request_id)
+        self.ensure_bot_resource(&command.caller, &to_bot).await?;
+        self.legacy_friend
+            .accept_friend_request(FriendRequestDecisionCommand {
+                caller_actor_id: to_bot.clone(),
+                request_id: command.request_id.clone(),
+                request_to_bot: Some(to_bot.clone()),
+                request_auth: command.request_auth.clone(),
+            })
             .await
-            .map_err(map_service_error)?;
-        let updated = self
-            .friend_requests
-            .get_request(&command.request_id)
+            .map_err(map_friend_use_case_error)?;
+        self.decided_friend_request(&to_bot, &command.request_id)
             .await
-            .map_err(map_service_error)?;
-        Ok(project_friend_request(&updated))
     }
 
     async fn reject_friend_request(
         &self,
         command: RejectFriendRequest,
     ) -> Result<FriendRequest, ApplicationError> {
-        let request = self
-            .friend_requests
-            .get_request(&command.request_id)
+        let to_bot = self
+            .legacy_friend
+            .friend_request_receiver(&command.request_id)
             .await
-            .map_err(map_service_error)?;
-        self.ensure_bot_resource(&command.caller, &request.to_bot)
-            .await?;
-        self.friend_requests
-            .reject_request(&command.request_id)
+            .map_err(map_friend_use_case_error)?;
+        self.ensure_bot_resource(&command.caller, &to_bot).await?;
+        self.legacy_friend
+            .reject_friend_request(FriendRequestDecisionCommand {
+                caller_actor_id: to_bot.clone(),
+                request_id: command.request_id.clone(),
+                request_to_bot: Some(to_bot.clone()),
+                request_auth: command.request_auth.clone(),
+            })
             .await
-            .map_err(map_service_error)?;
-        let updated = self
-            .friend_requests
-            .get_request(&command.request_id)
+            .map_err(map_friend_use_case_error)?;
+        self.decided_friend_request(&to_bot, &command.request_id)
             .await
-            .map_err(map_service_error)?;
-        Ok(project_friend_request(&updated))
     }
 }
 
@@ -602,10 +469,27 @@ fn project_friend_request(request: &DomainFriendRequest) -> FriendRequest {
     }
 }
 
-fn map_v1_target_to_domain(target: InvitationTargetType) -> InviteTargetType {
-    match target {
-        InvitationTargetType::Group => InviteTargetType::Group,
-        InvitationTargetType::Session => InviteTargetType::Session,
+/// Project a decided connect request onto the V1 friend-request wire shape.
+///
+/// The connect vocabulary is `pending|approved|rejected|cancelled`; V1 speaks
+/// `pending|accepted|rejected`, so `approved` maps to `accepted` and the
+/// terminal `cancelled` state projects as `rejected` (mirroring the legacy
+/// facade's status projection).
+fn project_connect_friend_request(request: &PermissionRequest) -> FriendRequest {
+    FriendRequest {
+        request_id: request.request_id.clone(),
+        from_bot_uuid: request.from_id.clone(),
+        to_bot_uuid: request.to_id.clone(),
+        status: match request.status {
+            EdgeRequestStatus::Pending => FriendRequestStatus::Pending,
+            EdgeRequestStatus::Approved => FriendRequestStatus::Accepted,
+            EdgeRequestStatus::Rejected | EdgeRequestStatus::Cancelled => {
+                FriendRequestStatus::Rejected
+            }
+        },
+        message: None,
+        created_at: request.created_at,
+        updated_at: request.updated_at,
     }
 }
 
@@ -622,53 +506,13 @@ fn saturating_usize(value: u64) -> usize {
 
 // ── error mappers ─────────────────────────────────────────────────────
 
-fn map_invite_token_error(error: InviteTokenError) -> ApplicationError {
+/// Map the legacy `FriendService` use-case error onto the V1 friendship
+/// contract: a facade deny is a 403, everything else keeps the stable
+/// `ServiceError` projection below.
+fn map_friend_use_case_error(error: FriendUseCaseError) -> ApplicationError {
     match error {
-        InviteTokenError::Expired => ApplicationError::Gone {
-            code: "invitation_expired".to_string(),
-            message: "invitation link has expired".to_string(),
-        },
-        InviteTokenError::InvalidEncoding | InviteTokenError::InvalidSignature => {
-            ApplicationError::invalid("invalid_request", "invalid invitation token")
-        }
-        InviteTokenError::UnsupportedVersion => {
-            ApplicationError::invalid("invalid_request", "unsupported invitation token version")
-        }
-        InviteTokenError::MalformedPayload(message) => {
-            ApplicationError::invalid("invalid_request", format!("malformed invitation token: {message}"))
-        }
-    }
-}
-
-/// Map legacy `InviteService::join_*_by_invite` errors onto the V1
-/// `acceptInvitation` contract surface. The contract declares `forbidden`
-/// (403), `invitation_not_found` (404), `conflict` (409), and
-/// `invitation_expired` (410); the join path may surface any of these via
-/// `InviteUseCaseError`. `InvalidToken` maps to `invalid_request` (400) so a
-/// malformed token is still rejected at the contract boundary. `LoginRequired`
-/// and `Service` collapse to `internal_error` (500) — they are not part of the
-/// V1 accept contract surface.
-fn map_invite_use_case_error(error: InviteUseCaseError) -> ApplicationError {
-    match error {
-        InviteUseCaseError::Forbidden(message) => ApplicationError::forbidden(message),
-        InviteUseCaseError::NotFound(target) => ApplicationError::not_found(
-            "invitation_not_found",
-            format!("Invitation target '{target}' was not found"),
-        ),
-        InviteUseCaseError::Conflict(message) => {
-            ApplicationError::conflict("conflict", message)
-        }
-        InviteUseCaseError::Expired => ApplicationError::Gone {
-            code: "invitation_expired".to_string(),
-            message: "invitation link has expired".to_string(),
-        },
-        InviteUseCaseError::InvalidToken(message) => {
-            ApplicationError::invalid("invalid_request", message)
-        }
-        InviteUseCaseError::LoginRequired => {
-            ApplicationError::internal("login required to accept invitation")
-        }
-        InviteUseCaseError::Service(error) => map_service_error(error),
+        FriendUseCaseError::Forbidden(message) => ApplicationError::forbidden(message),
+        FriendUseCaseError::Service(error) => map_service_error(error),
     }
 }
 
@@ -680,9 +524,6 @@ fn map_session_error(error: SessionUseCaseError) -> ApplicationError {
         ),
         SessionUseCaseError::InvalidParams(message) => {
             ApplicationError::invalid("invalid_request", message)
-        }
-        SessionUseCaseError::CallbackPending(message) => {
-            ApplicationError::conflict("conflict", message)
         }
         SessionUseCaseError::Conflict(message) => ApplicationError::conflict("conflict", message),
         SessionUseCaseError::Internal(service_error) => map_service_error(service_error),
@@ -726,6 +567,12 @@ fn map_service_error(error: ServiceError) -> ApplicationError {
         ),
         ServiceError::Unauthorized(_) => ApplicationError::Unauthenticated,
         ServiceError::Forbidden(message) => ApplicationError::forbidden(message),
+        // A hidden Bot and a Bot that refuses collaboration are both
+        // authorization failures on the friend-request surface.
+        hidden @ ServiceError::BotHidden(_) => ApplicationError::forbidden(hidden.to_string()),
+        ServiceError::PrivateBotCannotCollaborate => {
+            ApplicationError::forbidden(ServiceError::PrivateBotCannotCollaborate.to_string())
+        }
         ServiceError::Conflict(message) => ApplicationError::conflict("conflict", message),
         ServiceError::InvalidOperation { message, .. }
         | ServiceError::SessionInvalidParams(message) => {
@@ -784,8 +631,14 @@ impl InvitationFriendshipServiceImpl {
         }
         if requested.actor_type == FriendConnectionActorType::Bot {
             if let Some(user) = &caller.user {
-                let bot = self.load_bot(&requested.id).await?;
-                if bot.created_by.as_deref() == Some(user.id.as_str()) {
+                self.load_bot(&requested.id).await?;
+                // Row 11: act-as-Bot through the CURRENT
+                // `can_manage`; the historical `created_by`
+                // no longer authorizes.
+                if self
+                    .human_controls_bot(&user.id, &requested.id)
+                    .await?
+                {
                     return Ok(requested_id);
                 }
             }
@@ -798,7 +651,7 @@ impl InvitationFriendshipServiceImpl {
     async fn resolve_request_decider(
         &self,
         caller: &bcs_service_api::application::v1::AuthenticatedCaller,
-        request: &bcs_domain::edge_permission::PermissionRequest,
+        request: &PermissionRequest,
     ) -> Result<String, ApplicationError> {
         let default_actor = Self::caller_default_actor(caller)?;
         if request.to_id == default_actor {
@@ -806,8 +659,14 @@ impl InvitationFriendshipServiceImpl {
         }
         if let Some(user) = &caller.user {
             if !request.to_id.starts_with("human_") {
-                let bot = self.load_bot(&request.to_id).await?;
-                if bot.created_by.as_deref() == Some(user.id.as_str()) {
+                self.load_bot(&request.to_id).await?;
+                // Row 11: decide for a target Bot through the
+                // CURRENT `can_manage`; the historical
+                // `created_by` no longer authorizes.
+                if self
+                    .human_controls_bot(&user.id, &request.to_id)
+                    .await?
+                {
                     return Ok(request.to_id.clone());
                 }
             }
@@ -821,7 +680,7 @@ impl InvitationFriendshipServiceImpl {
     async fn ensure_can_cancel_request(
         &self,
         caller: &bcs_service_api::application::v1::AuthenticatedCaller,
-        request: &bcs_domain::edge_permission::PermissionRequest,
+        request: &PermissionRequest,
     ) -> Result<(), ApplicationError> {
         let default_actor = Self::caller_default_actor(caller)?;
         if request.created_by == default_actor || request.from_id == default_actor {
@@ -829,8 +688,17 @@ impl InvitationFriendshipServiceImpl {
         }
         if let Some(user) = &caller.user {
             if !request.from_id.starts_with("human_") {
-                let bot = self.load_bot(&request.from_id).await?;
-                if bot.created_by.as_deref() == Some(user.id.as_str()) {
+                self.load_bot(&request.from_id).await?;
+                // Row 11: cancel on behalf of a requesting Bot
+                // through the CURRENT `can_manage`; the
+                // historical `created_by` no longer
+                // authorizes. The friend-request asset leg
+                // above (`created_by == default_actor`) is
+                // preserved (row 12).
+                if self
+                    .human_controls_bot(&user.id, &request.from_id)
+                    .await?
+                {
                     return Ok(());
                 }
             }
@@ -1041,7 +909,7 @@ impl FriendConnectionService for InvitationFriendshipServiceImpl {
 }
 
 fn project_friend_connection_request(
-    request: &bcs_domain::edge_permission::PermissionRequest,
+    request: &PermissionRequest,
 ) -> FriendConnectionRequestView {
     FriendConnectionRequestView {
         request_id: request.request_id.clone(),
@@ -1091,63 +959,4 @@ fn project_friend_connection(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn invite_token_errors_map_to_stable_v1_codes() {
-        assert_eq!(
-            map_invite_token_error(InviteTokenError::Expired).code(),
-            "invitation_expired"
-        );
-        assert_eq!(
-            map_invite_token_error(InviteTokenError::InvalidEncoding).code(),
-            "invalid_request"
-        );
-        assert_eq!(
-            map_invite_token_error(InviteTokenError::InvalidSignature).code(),
-            "invalid_request"
-        );
-        assert_eq!(
-            map_invite_token_error(InviteTokenError::UnsupportedVersion).code(),
-            "invalid_request"
-        );
-        assert_eq!(
-            map_invite_token_error(InviteTokenError::MalformedPayload("bad".into())).code(),
-            "invalid_request"
-        );
-    }
-
-    #[test]
-    fn service_errors_map_to_stable_v1_codes() {
-        assert_eq!(
-            map_service_error(ServiceError::FriendRequestNotFound("r1".into())).code(),
-            "friend_request_not_found"
-        );
-        assert_eq!(
-            map_service_error(ServiceError::CannotAddSelf).code(),
-            "cannot_add_self"
-        );
-        assert_eq!(
-            map_service_error(ServiceError::PendingRequestExists {
-                request_id: "r2".into(),
-                from_bot: None,
-                to_bot: None,
-            })
-            .code(),
-            "friend_request_already_exists"
-        );
-        assert_eq!(
-            map_service_error(ServiceError::CannotAcceptRejected).code(),
-            "conflict"
-        );
-        assert_eq!(
-            map_service_error(ServiceError::CannotRejectAccepted).code(),
-            "conflict"
-        );
-        assert_eq!(
-            map_service_error(ServiceError::Conflict("dup".into())).code(),
-            "conflict"
-        );
-    }
-}
+mod tests;

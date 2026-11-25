@@ -69,6 +69,7 @@ def _gate_config(*, grace: float = 0.2, slice_seconds: float = 2.0,
 def _submit_request(tenant: str = TENANT, *, goal: str = "gate goal",
                     idem: str | None = None) -> SubmitRunRequest:
     return SubmitRunRequest(
+        identity_bot_id=IDENTITY_SOURCE,
         tenant=tenant, goal=goal,
         agents=(dm.AgentSpec(name="a1", role="worker"),),
         provider=dm.ProviderKind.STUB, idempotency_key=idem,
@@ -93,6 +94,23 @@ class _StoryLLM:
             text = self._script[0]
         return dm.CompletionResponse(
             text=text, model=dm.ModelId("story"),
+            token_usage=dm.TokenUsage(), finish_reason=dm.FinishReason.STOP,
+        )
+
+
+class _BacklogLLM:
+    """Decide from each run's prompt, independent of slice interleaving."""
+
+    async def complete(self, request):
+        state = request.user_prompt.splitlines()
+        if "agents_spawned=0" in state:
+            text = _spawn_decision("a1", "work")
+        elif "routed_results=0" in state:
+            text = _wait_decision("a1")
+        else:
+            text = _finish_decision("loaded")
+        return dm.CompletionResponse(
+            text=text, model=dm.ModelId("backlog"),
             token_usage=dm.TokenUsage(), finish_reason=dm.FinishReason.STOP,
         )
 
@@ -146,7 +164,9 @@ class TestChaosFencing:
         db = _gate_db()
         env = _build_env(
             db, [], FakeFactory(scripts={"a1": [{"did": 1}]}),
-            config=_gate_config(),
+            # Expiry is forced below; this gate tests fencing, not the slice
+            # budget. Allow the production turn cadence and threaded DB work.
+            config=_gate_config(slice_seconds=30.0),
             llm=_StoryLLM([
                 _spawn_decision("a1", "work"),
                 _wait_decision("a1"),
@@ -192,19 +212,15 @@ class TestChaosFencing:
 
 class TestLoadQueueSaturation:
 
-    def test_saturation_rejects_without_side_effects_then_backlog_drains(self):
+    @pytest.mark.parametrize("slice_seconds", [2.0, 0.02])
+    def test_saturation_rejects_without_side_effects_then_backlog_drains(
+        self, slice_seconds,
+    ):
         db = _gate_db()
-        story = []
-        for i in range(5):
-            story.extend([
-                _spawn_decision("a1", "work"),
-                _wait_decision("a1"),
-                _finish_decision("loaded"),
-            ])
         env = _build_env(
             db, [], FakeFactory(scripts={"a1": [{"did": 1}]}),
-            config=_gate_config(),
-            llm=_StoryLLM(story),
+            config=_gate_config(slice_seconds=slice_seconds),
+            llm=_BacklogLLM(),
         )
         svc = AgentSwarmService(
             run_repo=env.run_repo, dispatch_repo=env.dispatch_repo,
@@ -258,15 +274,29 @@ class TestLoadQueueSaturation:
 class TestRollingDeploy:
 
     def test_mid_slice_redeploy_resumes_without_reexecution(self):
+        class PausedAfterSpawnLLM(_StoryLLM):
+            """Park a real in-flight decision after the first spawn turn."""
+
+            def __init__(self):
+                super().__init__([_spawn_decision("a1", "work")])
+                self.parked = asyncio.Event()
+                self.resume = asyncio.Event()
+                self.spawned = False
+
+            async def complete(self, request):
+                if self.spawned:
+                    self.parked.set()
+                    await self.resume.wait()
+                self.spawned = True
+                return await super().complete(request)
+
         db = _gate_db()
         factory = FakeFactory(scripts={"a1": [{"did": 1}]})
-        story = _StoryLLM([
-            _spawn_decision("a1", "work"),
-            _wait_decision("ghost"),
-        ])
+        story = PausedAfterSpawnLLM()
         env = _build_env(
             db, [], factory,
-            config=_gate_config(grace=0.05, slice_seconds=10.0),
+            # This gate tests deploy/drain, not 100ms lease-expiry races.
+            config=_gate_config(grace=0.05, slice_seconds=30.0, lease=10),
             llm=story,
         )
         run = _mk_run(goal="rolling")
@@ -274,26 +304,50 @@ class TestRollingDeploy:
         env.dispatch_repo.enqueue(run_id=run.run_id, tenant=TENANT, deadline_seconds=3600)
 
         async def main():
+            async def wait_for_result():
+                while not await asyncio.to_thread(env.result_repo.list_by_run, run.run_id, TENANT):
+                    await asyncio.sleep(0.01)
+
             worker_a = AgentSwarmWorker(
                 config=env.cfg, handler=env.handler, dispatch_repo=env.dispatch_repo,
             )
             await worker_a.startup()
-            # Slice A: spawn a1, its result persists, then the slice parks
-            # waiting on "ghost" — a deploy lands over-grace and releases
-            # the dispatch for the next worker.
-            await asyncio.sleep(0.4)
-            story.set_script([_finish_decision("deployed")])
-            await worker_a.shutdown()
+            try:
+                # Prove the deploy happens mid-slice, after the result commit.
+                # A wall-clock sleep cannot establish either fact on busy CI.
+                await asyncio.wait_for(story.parked.wait(), timeout=15)
+                await asyncio.wait_for(wait_for_result(), timeout=15)
+            finally:
+                await worker_a.shutdown()
 
-            worker_b = AgentSwarmWorker(
-                config=env.cfg, handler=env.handler, dispatch_repo=env.dispatch_repo,
+            assert env.run_repo.get(run.run_id, TENANT).status is dm.RunStatus.RUNNING
+            assert len(env.result_repo.list_by_run(run.run_id, TENANT)) == 1
+
+            # A fresh process has no in-memory orchestrator/runtime state.
+            resumed = _build_env(
+                db, [], factory, config=env.cfg,
+                llm=_StoryLLM([_finish_decision("deployed")]),
             )
-            for _ in range(40):
-                if env.dispatch_repo.count_pending_dispatches() == 0:
-                    break
-                await worker_b.run_once()
-                await asyncio.sleep(0.01)
-            await worker_b.shutdown()
+            worker_b = AgentSwarmWorker(
+                config=resumed.cfg, handler=resumed.handler, dispatch_repo=resumed.dispatch_repo,
+            )
+
+            async def wait_for_terminal():
+                while True:
+                    current = await asyncio.to_thread(env.run_repo.get, run.run_id, TENANT)
+                    dispatch_status, _ = await asyncio.to_thread(_job_row, db, run.run_id)
+                    if current.status is not dm.RunStatus.RUNNING and dispatch_status in {
+                        dm.DispatchStatus.DONE.value, dm.DispatchStatus.FAILED.value,
+                    }:
+                        return
+                    await asyncio.sleep(0.01)
+
+            await worker_b.startup()
+            try:
+                # READY=0 can also mean LEASED, so wait for the actual Run.
+                await asyncio.wait_for(wait_for_terminal(), timeout=15)
+            finally:
+                await worker_b.shutdown()
 
         asyncio.run(main())
 
@@ -305,6 +359,8 @@ class TestRollingDeploy:
         assert len(results) == 1
         assert (results[0].payload is None) != (results[0].artifact_key is None)
         assert len(env.round_repo.list_by_run(run.run_id, TENANT)) == 1
+        assert factory.creates == {"a1": 1}
+        assert factory.run_effects == [("a1", {"did": 1})]
         row_status, row_epoch = _job_row(db, run.run_id)
         assert row_status == dm.DispatchStatus.DONE.value
         assert row_epoch >= 2
@@ -421,10 +477,11 @@ class TestMigrationCompat:
 class TestUpstreamDegradation:
 
     def test_dead_llm_fails_the_slice_fast_not_to_deadline(self):
+        slice_seconds = 30.0
         db = _gate_db()
         env = _build_env(
             db, [], FakeFactory(),
-            config=_gate_config(slice_seconds=30.0),
+            config=_gate_config(slice_seconds=slice_seconds),
             llm=_FailingLLM(),
         )
         run = _mk_run(goal="degrade")
@@ -440,7 +497,10 @@ class TestUpstreamDegradation:
             return time.monotonic() - started
 
         elapsed = asyncio.run(main())
-        assert elapsed < 5.0
+        # Compare with the actual slice deadline, not an arbitrary CI wall-clock
+        # threshold: a fast failure may still contend with a loaded runner,
+        # while a real deadline burn exceeds the configured slice budget.
+        assert elapsed < slice_seconds
         stored = env.run_repo.get(run.run_id, TENANT)
         assert stored.status is dm.RunStatus.FAILED
         assert stored.termination_reason is dm.TerminationReason.ERROR
@@ -477,3 +537,9 @@ class TestUpstreamDegradation:
         assert result["agent_id"] == agent_id
         assert result["status"] is dm.AgentStatus.FAILED
         assert result["error"] == "upstream_breaker_open"
+
+#: The Bot every submit in this suite names as its identity source. The
+#: service refuses a submit without one, so the value is fixed here rather
+#: than repeated at each call site; the seam resolves it (or is unbound, in
+#: which case the service takes the id as given).
+IDENTITY_SOURCE = "identity-source-bot"

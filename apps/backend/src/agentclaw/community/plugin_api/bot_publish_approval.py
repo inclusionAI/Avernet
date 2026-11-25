@@ -92,6 +92,9 @@ class BotPublishCallbacks:
     build_approval_context: Callable[
         [Dict[str, Any], Optional["OperatorContext"]], Dict[str, str]
     ]
+    replay_risk_approval: Optional[Callable[..., bool]] = None
+    mark_risk_target_ready: Optional[Callable[[str, str], None]] = None
+    stage_risk_approval: Optional[Callable[..., None]] = None
 
 
 class BotPublishApprovalPlugin(Plugin, Protocol):
@@ -111,6 +114,9 @@ class BotPublishApprovalPlugin(Plugin, Protocol):
         friend_approval: str,
         access_mode: str,
         callbacks: BotPublishCallbacks,
+        approval_biz_id: Optional[str] = None,
+        risk_check_id: Optional[str] = None,
+        on_approval_started: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
         """Publish ``bot`` under the owner-permission flow.
 

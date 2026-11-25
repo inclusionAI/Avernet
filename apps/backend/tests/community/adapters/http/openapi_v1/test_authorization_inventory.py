@@ -319,7 +319,7 @@ def test_scaffolding_burn_down_is_reported():
 
 
 #: The exact operations that may still be ``ServiceChecked`` once this feature
-#: lands — twenty-seven of them, deferred for seven reasons recorded in
+#: lands — twenty-eight of them, deferred for seven reasons recorded in
 #: ``spec.md``'s *Out of Scope*. It was ten when the plan was written; the
 #: engine-runtime and bot-chat traces added the rest, each for a reason the
 #: table could not have shown. That is what this set is for.
@@ -331,6 +331,13 @@ def test_scaffolding_burn_down_is_reported():
 #: operation cannot be renamed to escape.
 _DEFERRED_OPERATIONS = frozenset(
     {
+        # Caller observation uses owner/public/chat-member policy in core;
+        # a collaborator-only MEMBER gate would exclude public chat users.
+        ("GET", "/openapi/v1/bots/{bot_id}/caller-instance/status"),
+        # IAM friend preparation is not operator authorization: the adapter
+        # verifies friendship plus own session and the service confines writes
+        # to that subject's Caller instance. Operator MEMBER alone is not enough.
+        ("POST", "/openapi/v1/bots/{bot_id}/iam-token"),
         # Advisory needs visibility + non-raising restart eligibility in core.
         ("GET", "/openapi/v1/bots/{bot_id}/engine-version"),
         # Not a structural limit: these routes do carry {bot_id} on the path.
@@ -371,9 +378,15 @@ _DEFERRED_OPERATIONS = frozenset(
         # relocate it. The seam adjudicates one level; this is a disjunction,
         # and expressing it is not a question this feature settles.
         #
-        # The six *file* operations under the same prefix are not here: they
-        # call ``resolve_operable_bot`` directly, with no fallback, and did
-        # migrate.
+        # File operations now have the same disjunction: file_access checks
+        # MEMBER or BCN friendship plus Backend-owned session identity. Friend
+        # mutations additionally require a non-TeClaw Caller instance.
+        ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"),
+        ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content"),
+        ("GET", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/materialize-status"),
+        ("POST", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-intents"),
+        ("POST", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-complete"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}"),
         ("GET", "/openapi/v1/bots/{bot_id}/sessions"),
         ("POST", "/openapi/v1/bots/{bot_id}/sessions"),
         ("GET", "/openapi/v1/bots/{bot_id}/sessions/favorites"),
@@ -511,6 +524,39 @@ def test_caller_identity_keeps_legacy_read_and_write_permission_levels():
     assert cli_write.edit_lock is EDIT_LOCK
 
 
+def test_standard_evaluation_follows_the_publication_lifecycle_permission_model():
+    """Evaluation mutations advance the same publish workflow as lifecycle.
+
+    A collaborator who can advance the Bot publication can trigger evaluation,
+    but still passes the explicit-address and edit-lock checks used by that
+    flow. Polling stays read-only, while direct gate-result writes stay owner-only.
+    """
+    sample_sets = AUTHORIZATION[
+        ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/sample-sets")
+    ]
+    current_environment = AUTHORIZATION[
+        ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments/current")
+    ]
+    mutations = {
+        ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/tasks"),
+        ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments/current"),
+    }
+    result_save = AUTHORIZATION[
+        ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/standard-eval/results")
+    ]
+
+    assert sample_sets.level is PermissionLevel.MEMBER
+    assert sample_sets.explicit is False
+    assert current_environment.level is PermissionLevel.MEMBER
+    assert current_environment.explicit is False
+    assert all(AUTHORIZATION[key].level is PermissionLevel.MEMBER for key in mutations)
+    assert all(AUTHORIZATION[key].edit_lock is EDIT_LOCK for key in mutations)
+    assert all(AUTHORIZATION[key].explicit is True for key in mutations)
+    assert result_save.level is PermissionLevel.OWNER
+    assert result_save.explicit is True
+
+
 def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
     expected = {
         ("POST", "/openapi/v1/bots/{bot_id}/channels"),
@@ -521,6 +567,10 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         # Promotion reaches the running bot the way apply does, so it takes apply's bar.
         ("POST", "/openapi/v1/bots/{bot_id}/genome/promotions"),
         ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"),
+        # Standard evaluation mutates the same publish lifecycle as advancement.
+        ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/tasks"),
+        ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments/current"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"),
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"),
         ("PUT", "/openapi/v1/bots/{bot_id}/lifecycle/approval"),
@@ -531,6 +581,7 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"),
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"),
         ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/config"),
         ("PATCH", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"),
         ("POST", "/openapi/v1/bots/{bot_id}/clis"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"),
@@ -1047,6 +1098,10 @@ def test_the_check_the_exempted_twins_rely_on_still_exists():
     assert "_require_view_access" in resolve_source
 
     source = inspect.getsource(query_service.SkillQueryService._require_view_access)
+    assert "_authorize_view_access" in source, (
+        "_require_view_access must reach the resolved Bot authorization check"
+    )
+    source = inspect.getsource(query_service.SkillQueryService._authorize_view_access)
     assert "check_collaborator_permission" in source, (
         "_require_view_access no longer performs a collaborator check, so the "
         "four legacy skills twins exempted in _TWINS_CHECKED_INDEPENDENTLY are "
@@ -1098,6 +1153,10 @@ def test_the_asset_service_check_the_unseamed_surfaces_rely_on_still_exists():
     for name, source in guarded.items():
         assert "_require_view_access" in source, f"{name} must reach the shared ACL"
         source = inspect.getsource(asset_service.SkillQueryService._require_view_access)
+        assert "_authorize_view_access" in source, (
+            f"{name} must reach the resolved Bot authorization check"
+        )
+        source = inspect.getsource(asset_service.SkillQueryService._authorize_view_access)
         assert "check_collaborator_permission" in source, (
             f"{name} no longer performs a collaborator check. The seven "
             "{skill_id} rows are fine — the seam adjudicates them — but the "

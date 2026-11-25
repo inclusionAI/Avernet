@@ -27,10 +27,11 @@ class CoreDispatchResult(NamedTuple):
     value: Any
 
 
-def begin_stage_core(*, task_id: str, step_id: str, clawweb_url: str) -> dict[str, Any]:
+def begin_stage_core(*, task_id: str, step_id: str, clawweb_url: str, reference_materials_version: str = "") -> dict[str, Any]:
     import argparse
     return runtime._begin_core(argparse.Namespace(
         task_id=task_id, step_id=step_id, clawweb_url=clawweb_url, action="execute",
+        reference_materials_version=reference_materials_version,
     ))
 
 
@@ -286,6 +287,9 @@ def _business_prompt(context: dict[str, Any]) -> str:
         "长篇 Markdown 可写入结果文件同目录的 UTF-8 文件：总结用 summaryFile 引用，文本交互（含执行确认）用 question.contentFile 引用，表单 contents 各项用 contentFile 引用；文件引用与对应的内联文本不能同时提供。平台读取原文并序列化，不需要调用平台脚本。",
         f"文件引用以 {Path(context['resultFile']).parent} 为基准；子目录必须写入引用，例如 work/material.md。",
     ]
+    from .reference_materials import prompt as material_prompt
+    if context.get("reference_materials"):
+        lines.append(material_prompt(context["reference_materials"]))
     if context.get("outputContract"):
         lines.append("本次输出 Contract：\n" + json.dumps(context["outputContract"], ensure_ascii=False))
     return "\n".join(lines)

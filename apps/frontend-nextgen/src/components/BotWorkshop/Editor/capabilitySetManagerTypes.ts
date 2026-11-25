@@ -3,16 +3,18 @@ import type { PendingSkillSetToggle } from '@/hooks/useSkillSetActivation';
 
 export interface CapabilitySetManagerProps {
   botId?: string;
+  /** 当前登录用户；未解析身份时仅保留本次编辑内的选择。 */
+  authenticatedUserId?: string;
   ownerId?: string;
   sets: BotCapabilitySet[];
-  /** 编辑器与调试面板并列时使用单列成员布局。 */
-  compact?: boolean;
   mySkills: BotEditorSkill[];
   marketSkills: BotEditorSkill[];
   skillCenterSkills: BotEditorSkill[];
   workshopSkills: BotEditorSkill[];
   marketMcps: BotEditorMcp[];
   editable: boolean;
+  /** 调试对话同屏时为 true：成员列表退回单列；调试区收起后恢复多列断点 */
+  compact?: boolean;
   onCreate: (name: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onActive: (set: BotCapabilitySet, active: boolean) => Promise<void>;

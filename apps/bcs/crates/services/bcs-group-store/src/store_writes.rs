@@ -19,6 +19,7 @@ impl MySqlGroupStore {
                     "DELETE FROM bcs_groups WHERE group_id = ? AND env = ?",
                     vec![Value::from(group_id), Value::from(env)],
                 )),
+                self.card_template_delete_step(DbTransactionParam::value(group_id)),
             ])
             .await
             .map_err(|e| {
@@ -32,7 +33,8 @@ impl MySqlGroupStore {
     }
 
     /// Create or update a session.
-    pub(crate) async fn upsert_sql(&self, group: Group) -> ServiceResult<()> {
+    pub(crate) async fn upsert_sql(&self, group: Group, labels: Option<bcs_service_api::types::catalog_labels::CatalogLabels>, create_only:bool) -> ServiceResult<()> {
+        validate_catalog_labels(&group,labels.as_ref())?;
         let group_id = group.id.clone();
         let env = self.env.clone();
         let _start = std::time::Instant::now();
@@ -75,13 +77,6 @@ impl MySqlGroupStore {
         let g_group_strategy_str = Self::group_strategy_to_str(group.group_strategy);
         let g_service_group_uuid: Option<String> = group.service_group_uuid.clone();
         let g_service_mode: Option<String> = group.service_mode.clone();
-        let g_service_spec_json: Option<String> = match group.service_spec {
-            Some(ref spec) => Some(
-                serde_json::to_string(spec)
-                    .map_err(|e| ServiceError::InternalError(format!("service_spec: {e}")))?,
-            ),
-            None => None,
-        };
         let g_version: i64 = group.version as i64;
         let g_record_status = group.record_status.clone();
         // Build participant tuples: (bot_uuid, role_str, actor_kind_str, mode_str, tags_json, scope)
@@ -105,7 +100,7 @@ impl MySqlGroupStore {
         let g_visibility = group.visibility.clone();
         let g_notify_mode_str = Self::human_mention_notify_mode_to_str(group.human_mention_notify_mode);
 
-        let upsert_clause = self.flavor.on_conflict_update(
+        let upsert_clause = if create_only {String::new()} else {self.flavor.on_conflict_update(
             &["group_id", "env"],
             &[
                 "label",
@@ -115,23 +110,23 @@ impl MySqlGroupStore {
                 "routing_policy_json",
                 "context",
                 "opening_message_json",
-                "service_spec",
+
                 "version",
                 "record_status",
                 "visibility",
                 "human_mention_notify_mode",
             ],
             &[("gmt_modified", self.flavor.now())],
-        );
+        )};
         let upsert_sql = format!(
-            "INSERT INTO bcs_groups (group_id, label, status, driver_bot, originator, env, routing_policy_json, context, opening_message_json, group_kind, dm_pair_key, group_strategy, service_group_uuid, service_mode, service_spec, version, record_status, visibility, human_mention_notify_mode, gmt_create, gmt_modified) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {now}, {now}) \
+            "INSERT INTO bcs_groups (group_id, label, status, driver_bot, originator, env, routing_policy_json, context, opening_message_json, group_kind, dm_pair_key, group_strategy, service_group_uuid, service_mode, version, record_status, visibility, human_mention_notify_mode, gmt_create, gmt_modified) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {now}, {now}) \
              {upsert}",
             now = self.flavor.now(),
             upsert = upsert_clause,
         );
 
-        let mut steps = Vec::with_capacity(2 + g_participants.len());
+        let mut steps = Vec::with_capacity(3 + g_participants.len());
         let guard_step = if let Some(lock) = self.public_provider_lock(&group)? {
             steps.push(DbTransactionStep::Query(lock));
             steps.push(DbTransactionStep::Query(self.public_bot_lock(&group)));
@@ -157,7 +152,7 @@ impl MySqlGroupStore {
                 Value::from(g_group_strategy_str),
                 Value::from(g_service_group_uuid.as_deref()),
                 Value::from(g_service_mode.as_deref()),
-                Value::from(g_service_spec_json.as_deref()),
+
                 Value::from(g_version),
                 Value::from(g_record_status.as_str()),
                 Value::from(g_visibility.as_str()),
@@ -190,6 +185,8 @@ impl MySqlGroupStore {
             )));
         }
 
+        steps.push(self.card_template_upsert_step(&group_id)?);
+        if let Some(labels)=&labels { steps.push(self.catalog_labels_step(&group_id,labels)?); }
         if let Some(guard) = guard_step {
             // Bind the first group_id INSERT value to the assertion row. An
             // empty assertion fails before the write and rolls back the txn.
@@ -203,6 +200,9 @@ impl MySqlGroupStore {
         self.db.plugin().transaction(steps).await.map_err(|e| {
             if provider_scope_guard::public_scope_denied(&e, guard_step) {
                 return ServiceError::Forbidden("same_owner groups must remain private".into());
+            }
+            if create_only && e.is_duplicate_key() {
+                return ServiceError::Conflict("Group identity already exists".into());
             }
             warn!(group_id = %group_id, error = %e, "upsert transaction failed");
             ServiceError::InternalError(e.to_string())
@@ -245,6 +245,11 @@ impl MySqlGroupStore {
             }
         };
 
+        if let Some(labels)=&patch.catalog_labels {
+            let current=self.try_get(id).await?.ok_or_else(||ServiceError::GroupNotFound(id.into()))?;
+            validate_catalog_labels(&current,Some(labels))?;
+        }
+        let updates_card = patch.label.is_some() || patch.context.is_some() || patch.catalog_labels.is_some();
         let mut assignments = Vec::new();
         let mut params = Vec::new();
         if let Some(label) = patch.label {
@@ -283,7 +288,7 @@ impl MySqlGroupStore {
                 guard_routing_policy = true;
             }
         }
-        if assignments.is_empty() {
+        if assignments.is_empty() && patch.catalog_labels.is_none() {
             if routing_policy_snapshot.is_some() {
                 self.cache.write().await.remove(id);
             }
@@ -306,14 +311,29 @@ impl MySqlGroupStore {
                 .and_then(|(_, stored_json)| stored_json.as_deref());
             params.push(Value::from(stored_json));
         }
-        let affected_rows = self
-            .db
-            .execute_with(&self.logical_db, &sql, params)
-            .await
-            .map_err(|error| {
-                warn!(group_id = %id, error = %error, "Failed to patch mutable group fields");
-                ServiceError::InternalError(error.to_string())
-            })?;
+        let affected_rows = if updates_card {
+            let statement = DbStatement::with_params(&sql, params);
+            let write = if guard_routing_policy {
+                DbTransactionStep::ExecuteChecked { statement, expected_affected_rows: 1 }
+            } else {
+                DbTransactionStep::Execute(statement)
+            };
+            let mut steps=vec![write,self.card_template_upsert_step(id)?];
+            if let Some(labels)=&patch.catalog_labels { steps.push(self.catalog_labels_step(id,labels)?); }
+            match self.db.plugin().transaction(steps).await {
+                Ok(results) => match results.first() {
+                    Some(DbTransactionStepResult::Executed(result)) => result.affected_rows,
+                    _ => return Err(ServiceError::InternalError("Missing Group patch result".into())),
+                },
+                // The transaction has rolled back. Reuse the zero-row path
+                // below to invalidate cache and distinguish deletion from CAS conflict.
+                Err(DbError::ConditionFailed { .. }) if guard_routing_policy => 0,
+                Err(error) => return Err(ServiceError::InternalError(error.to_string())),
+            }
+        } else {
+            self.db.execute_with(&self.logical_db, &sql, params).await
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?
+        };
 
         // Invalidate instead of reconstructing the row so hidden routing fields
         // changed concurrently are always reloaded from the authoritative store.
@@ -648,35 +668,21 @@ impl MySqlGroupStore {
 
     /// Update session label.
     pub(crate) async fn update_label_sql(&self, id: &str, label: Option<String>) -> ServiceResult<()> {
-        // Verify group exists
-        if self.get(id).await.is_none() {
-            return Err(ServiceError::GroupNotFound(id.to_string()));
-        }
-
-        // Persist to MySQL using parameter binding
-        self.db
-            .execute_with(
-                &self.logical_db,
+        self.try_get(id).await?
+            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
+        // Even a cleared/unchanged label must leave a current template. The
+        // SELECT in the second step cannot create one for a deleted Group.
+        let results = self.db.plugin().transaction(vec![
+            DbTransactionStep::Execute(DbStatement::with_params(
                 "UPDATE bcs_groups SET label = ? WHERE group_id = ? AND env = ?",
-                vec![
-                    Value::from(label.as_deref()),
-                    Value::from(id),
-                    Value::from(self.env.as_str()),
-                ],
-            )
-            .await
-            .map_err(|e| {
-                warn!(group_id = %id, error = %e, "Failed to update group label");
-                ServiceError::InternalError(e.to_string())
-            })?;
-
-        debug!(group_id = %id, "Group label updated");
-        // Update cache
-        {
-            let mut cache = self.cache.write().await;
-            if let Some(group) = cache.get_mut(id) {
-                group.label = label;
-            }
+                vec![Value::from(label.as_deref()), Value::from(id), Value::from(self.env.as_str())],
+            )),
+            self.card_template_upsert_step(id)?,
+        ]).await.map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        self.cache.write().await.remove(id);
+        if matches!(results.first(), Some(DbTransactionStepResult::Executed(result)) if result.affected_rows == 0)
+            && self.try_get(id).await?.is_none() {
+            return Err(ServiceError::GroupNotFound(id.to_string()));
         }
         Ok(())
     }
@@ -710,54 +716,6 @@ impl MySqlGroupStore {
             let mut cache = self.cache.write().await;
             if let Some(group) = cache.get_mut(id) {
                 group.status = status;
-            }
-        }
-        Ok(())
-    }
-
-    /// Persist a `service_spec` patch to MySQL. `Some(spec)` writes a JSON
-    /// blob into the `service_spec` column; `None` clears the column. Caller
-    /// is responsible for validation (route-field lock, callback_config
-    /// immutability) — this method only writes.
-    pub(crate) async fn update_service_spec_sql(
-        &self,
-        id: &str,
-        service_spec: Option<bcs_service_api::ServiceSpec>,
-    ) -> ServiceResult<()> {
-        // Verify group exists
-        if self.get(id).await.is_none() {
-            return Err(ServiceError::GroupNotFound(id.to_string()));
-        }
-
-        let spec_json = match service_spec.as_ref() {
-            Some(s) => {
-                serde_json::to_string(s).map_err(|e| ServiceError::InternalError(e.to_string()))?
-            }
-            None => String::new(),
-        };
-        let spec_value: Value = if service_spec.is_some() {
-            Value::from(spec_json.as_str())
-        } else {
-            Value::Null
-        };
-
-        self.db
-            .execute_with(
-                &self.logical_db,
-                "UPDATE bcs_groups SET service_spec = ? WHERE group_id = ? AND env = ?",
-                vec![spec_value, Value::from(id), Value::from(self.env.as_str())],
-            )
-            .await
-            .map_err(|e| {
-                warn!(group_id = %id, error = %e, "Failed to update group service_spec");
-                ServiceError::InternalError(e.to_string())
-            })?;
-
-        debug!(group_id = %id, "Group service_spec updated");
-        {
-            let mut cache = self.cache.write().await;
-            if let Some(group) = cache.get_mut(id) {
-                group.service_spec = service_spec;
             }
         }
         Ok(())

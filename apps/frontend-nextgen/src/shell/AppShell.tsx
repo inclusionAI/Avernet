@@ -1,17 +1,24 @@
 import { Drawer, DrawerContent, DrawerTitle, IconButton } from '@/components/ui';
+import { PersistentChatLayoutPanelViewport } from '@/components/Workspace/PersistentChatLayoutPanelViewport';
 import { PrimaryNavContext, type PrimaryNavApi } from '@/components/Workspace/PrimaryNav';
+import { getCapabilities } from '@/capabilities';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useMinWidth } from '@/hooks/useMediaQuery';
 import { ensurePersonalSpaceOnAppEntry, initSpaceContext } from '@/hooks/useSpaceContext';
 import { workspaceService } from '@/services/workspace/workspaceService';
+import { isTaskNavigationAtCurrentRoute } from '@/services/tasks/taskConversationNavigation';
+import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
 import { history, useLocation } from '@umijs/max';
 import { Menu } from 'lucide-react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppSidebar } from './AppSidebar';
 import { OpenSourceExperienceNotice } from './OpenSourceExperienceNotice';
 import { SidebarNavList } from './SidebarNavList';
+import { SidebarUserFooter } from './SidebarUserFooter';
 import { getMergedNavigationItems, getNavigationItem } from './navigation';
 import { getRouteMeta } from './routeMeta';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 
 /**
  * 全局壳（refactor-global-nav-shell）：单侧边栏 + 内容区两栏布局，顶栏（AppHeader）已退役，
@@ -25,6 +32,9 @@ import { getRouteMeta } from './routeMeta';
 export function AppShell({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const hideNavigation = getRouteMeta(location.pathname)?.navigationVisibility === 'hidden';
+  // 产品引导（新版助手）全局浮层：capability 门控（Open Core null → 不挂载，零渲染）
+  const guideAssistant = getCapabilities().getGuideAssistant();
+  const GuideOverlay = guideAssistant.status === 'available' ? guideAssistant.value?.Overlay : undefined;
   const activeItem = useMemo(() => getNavigationItem(location.pathname), [location.pathname]);
   // 合并 Open Core 基线与 internal overlay 注入的额外导航项（capability 同步返回，无请求）。
   const mergedItems = useMemo(() => getMergedNavigationItems(), []);
@@ -47,6 +57,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // 被形态开关隐藏（spaceSwitcher=false）时 Bot 页面对 spaceContextStore 的消费；
   // 切换器自身的挂载/打开触发由 SpaceSwitcher 承担（幂等+并发单飞，同帧不重复请求）。
   const activeSection = activeItem?.section;
+  // 任务副屏的保活 lease 只覆盖「源会话 → 导航目标会话」这一次 handoff。
+  // 如果路由实际离开目标（退出会话页/普通路由切换），必须通知持久副屏宿主强制关闭；
+  // 否则旧任务 tab 会跨路由悬挂，并在后续会话里把别的会话任务继续展示出来。
+  const previousTaskRouteKeyRef = useRef<string | null>(null);
+  const taskRouteKey = `${location.pathname}${location.search ?? ''}${location.hash ?? ''}`;
+  useEffect(() => {
+    const previousTaskRouteKey = previousTaskRouteKeyRef.current;
+    previousTaskRouteKeyRef.current = taskRouteKey;
+    if (previousTaskRouteKey === null) return;
+    const { navigation, requestStaleRouteRelease } = useTaskConversationNavigationStore.getState();
+    if (navigation?.routeCommitted && !isTaskNavigationAtCurrentRoute(navigation)) {
+      requestStaleRouteRelease();
+    }
+  }, [taskRouteKey]);
   useEffect(() => {
     if (activeSection === 'bot') void initSpaceContext();
   }, [activeSection]);
@@ -56,6 +80,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [isDesktop, hideNavigation]);
   // <lg 抽屉内点导航：跳转并收起抽屉。
   const handleMobileNavigate = (path: string) => {
+    Tracert.click(Points.shell.navClick, { nav_target: path });
     history.push(path);
     setMobileNavOpen(false);
   };
@@ -87,13 +112,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <PrimaryNavContext.Provider value={hideNavigation ? null : primaryNavApi}>
       <div className="flex h-full flex-col bg-[var(--color-bg)]">
         <OpenSourceExperienceNotice />
+        {GuideOverlay ? <GuideOverlay /> : null}
         <div className="flex min-h-0 flex-1">
           {!hideNavigation && (
             <AppSidebar
               activePath={location.pathname}
               collapsed={sidebarCollapsed}
               items={mergedItems}
-              onNavigate={(path) => history.push(path)}
+              onNavigate={(path) => {
+                Tracert.click(Points.shell.navClick, { nav_target: path });
+                history.push(path);
+              }}
               onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
               currentUser={currentUser}
             />
@@ -105,20 +134,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {!hideNavigation && inlineNavEntries === 0 && (
               <div
                 data-testid="primary-nav-fallback-strip"
-                className="flex h-12 shrink-0 items-center border-b border-border bg-card px-2 lg:hidden"
+                className="flex h-12 shrink-0 items-center border-b border-divider bg-card px-2 lg:hidden"
               >
                 <IconButton label="打开导航" icon={<Menu className="h-4 w-4" />} onClick={openNav} />
               </div>
             )}
-            <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
+            <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+              {children}
+              <PersistentChatLayoutPanelViewport />
+            </main>
           </div>
         </div>
-        {/* <lg 一级导航抽屉：≥lg 内流侧栏可见；<lg 由页头内联入口或兜底条带的汉堡钮触发本抽屉。 */}
+        {/* <lg 一级导航抽屉：≥lg 内流侧栏可见；<lg 由页头内联入口或兜底条带的汉堡钮触发本抽屉。
+            底部用户区（返回旧版/头像/新版助手/更多）经 SidebarUserFooter 与内流侧栏展开态共用，
+            新版助手为流内 fixed 浮层（z 同 Drawer 层会被 Dialog portal 压住），点击后先收起抽屉。 */}
         {!hideNavigation && (
           <Drawer open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
             <DrawerContent side="left" size="sm" showClose={false} bodyClassName="p-0 flex flex-col">
               <DrawerTitle className="sr-only">主导航</DrawerTitle>
               <SidebarNavList activePath={location.pathname} items={mergedItems} onNavigate={handleMobileNavigate} />
+              <SidebarUserFooter currentUser={currentUser} onGuideEntryIntent={() => setMobileNavOpen(false)} />
             </DrawerContent>
           </Drawer>
         )}

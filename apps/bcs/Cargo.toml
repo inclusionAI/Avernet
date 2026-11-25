@@ -1,21 +1,40 @@
 [workspace]
 members = [
+    "crates/plugin-api/bcs-a2a-binding-api",
+    "crates/plugin-api/bcs-app-identity-api",
+    "crates/plugin-api/bcs-tracing-api",
+    "crates/auxiliary/bcs-network-tracing",
+    "crates/auxiliary/bcs-dist-encoding",
     # bootstrap
     "crates/bootstrap/bcs",
     # adapters
+    "crates/adapters/output/bcs-dist-a2a-output",
+    "crates/adapters/http/bcs-dist-worker-http",
     "crates/adapters/http/bcs-api-http",
+    "crates/adapters/http/bcs-dist-gateway-http",
     "crates/adapters/http/bcs-http",
     "crates/adapters/http/bcs-provider-http",
+    "crates/external-clients/bcs-a2a-http",
     "crates/adapters/ws/bcs-ws",
     # service-api
     "crates/service-api/bcs-config-api",
     "crates/service-api/bcs-service-api",
     "crates/service-api/bcs-services-container",
     # contracts
+    "crates/contracts/bcs-dist-model",
     "crates/contracts/bcs-domain",
     "crates/contracts/bcs-protocol",
     # services
+    "crates/services/bcs-dist-store",
+    "crates/services/bcs-dist-projection",
+    "crates/services/bcs-dist-worker",
+    "crates/application/bcs-app-dist-runtime",
+    "crates/services/bcs-dist-gateway-store",
+    "crates/services/bcs-dist-gateway",
+    "crates/services/bcs-dist-connector",
+    "crates/services/bcs-dist-connector-store",
     "crates/services/bcs-config",
+    "crates/services/bcs-db-migrations",
     "crates/services/bcs-eventing",
     "crates/services/bcs-friend",
     "crates/services/bcs-friend-store",
@@ -34,11 +53,12 @@ members = [
     "crates/services/bcs-organization",
     "crates/services/bcs-organization-store",
     "crates/services/bcs-bot",
+    "crates/application/bcs-app-a2a-bot",
+    "crates/application/bcs-app-dist-gateway",
     "crates/services/bcs-bot-store",
     "crates/services/bcs-chat-run-store",
     "crates/services/bcs-channel-store",
     "crates/services/bcs-channel",
-    "crates/services/bcs-callback",
     "crates/services/bcs-collaboration-template",
     "crates/services/bcs-collaboration-runtime",
     "crates/services/bcs-collaboration-store",
@@ -53,8 +73,6 @@ members = [
     "crates/services/bcs-edge-permission-store",
     "crates/services/bcs-edge-permission",
     "crates/services/bcs-user-identity",
-    "crates/services/bcs-proposal",
-    "crates/services/bcs-proposal-store",
     "crates/services/bcs-route-security",
     "crates/services/bcs-secret",
     "crates/services/bcs-session",
@@ -64,6 +82,7 @@ members = [
     "crates/application/v1/bcs-app-register",
     "crates/application/v1/bcs-app-collaboration-template",
     "crates/application/v1/bcs-app-collaboration-definition",
+    "crates/application/v1/bcs-app-auth",
     "crates/services/bcs-session-file",
     "crates/services/bcs-session-file-store",
     "crates/services/bcs-invite-code-store",
@@ -72,6 +91,7 @@ members = [
     # plugin-api
     "crates/plugin-api/bcs-auth-api",
     "crates/plugin-api/bcs-cache-api",
+    "crates/plugin-api/bcs-store-api",
     "crates/plugin-api/bcs-channel-api",
     "crates/plugin-api/bcs-db-api",
     "crates/plugin-api/bcs-human-notify-api",
@@ -100,7 +120,10 @@ members = [
     "crates/plugins/bcs-auth-alipay",
     "crates/plugins/bcs-auth-local",
     "crates/plugins/bcs-auth-oauth",
+    "crates/plugins/bcs-caller-identity-jwt",
+    "crates/plugin-api/bcs-caller-identity-api",
     # external-clients
+    "crates/external-clients/bcs-dist-worker-client",
     "crates/external-clients/bcs-fuse-client",
     "crates/external-clients/bcs-webhook-client",
     "crates/services/bcs-coordination-store",
@@ -119,6 +142,7 @@ members = [
     "crates/auxiliary/ding-logger",
     # test-support
     "crates/test-support/bcs-test-support",
+    "crates/test-support/bcs-dist-test-runner",
 ]
 resolver = "2"
 
@@ -138,6 +162,21 @@ rust-version = "1.91"
 version      = "0.1.4-beta.3"
 
 [workspace.dependencies]
+bcs-dist-model = { path = "crates/contracts/bcs-dist-model" }
+bcs-dist-encoding = { path = "crates/auxiliary/bcs-dist-encoding" }
+bcs-dist-store = { path = "crates/services/bcs-dist-store" }
+bcs-dist-projection = { path = "crates/services/bcs-dist-projection" }
+bcs-dist-worker = { path = "crates/services/bcs-dist-worker" }
+bcs-dist-worker-client = { path = "crates/external-clients/bcs-dist-worker-client" }
+bcs-app-dist-runtime = { path = "crates/application/bcs-app-dist-runtime" }
+bcs-dist-gateway-store = { path = "crates/services/bcs-dist-gateway-store" }
+bcs-dist-gateway = { path = "crates/services/bcs-dist-gateway" }
+bcs-dist-connector = { path = "crates/services/bcs-dist-connector" }
+bcs-dist-connector-store = { path = "crates/services/bcs-dist-connector-store" }
+bcs-a2a-binding-api = { path = "crates/plugin-api/bcs-a2a-binding-api" }
+bcs-app-identity-api = { path = "crates/plugin-api/bcs-app-identity-api" }
+bcs-tracing-api = { path = "crates/plugin-api/bcs-tracing-api" }
+bcs-network-tracing = { path = "crates/auxiliary/bcs-network-tracing" }
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
@@ -164,6 +203,7 @@ inventory = "0.3"
 # Logging
 tracing            = "0.1"
 tracing-appender   = "0.2"
+tracing-serde      = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "local-time"] }
 tracing-opentelemetry = "=0.32.0"
 
@@ -261,7 +301,6 @@ bcs-bot-store = { path = "crates/services/bcs-bot-store" }
 bcs-chat-run-store = { path = "crates/services/bcs-chat-run-store" }
 bcs-channel-store = { path = "crates/services/bcs-channel-store" }
 bcs-channel = { path = "crates/services/bcs-channel" }
-bcs-callback   = { path = "crates/services/bcs-callback" }
 bcs-collaboration-template = { path = "crates/services/bcs-collaboration-template" }
 bcs-collaboration-runtime = { path = "crates/services/bcs-collaboration-runtime" }
 bcs-collaboration-store = { path = "crates/services/bcs-collaboration-store" }
@@ -290,8 +329,6 @@ bcs-webhook-client = { path = "crates/external-clients/bcs-webhook-client" }
 bcs-security-gateway-local = { path = "crates/plugins/bcs-security-gateway-local" }
 bcs-security-gateway-api = { path = "crates/plugin-api/bcs-security-gateway-api" }
 bcs-secret-api             = { path = "crates/plugin-api/bcs-secret-api" }
-bcs-proposal   = { path = "crates/services/bcs-proposal" }
-bcs-proposal-store = { path = "crates/services/bcs-proposal-store" }
 bcs-friend     = { path = "crates/services/bcs-friend" }
 bcs-friend-store = { path = "crates/services/bcs-friend-store" }
 bcs-relation   = { path = "crates/services/bcs-relation" }
@@ -308,7 +345,13 @@ bcs-domain       = { path = "crates/contracts/bcs-domain" }
 bcs-protocol     = { path = "crates/contracts/bcs-protocol" }
 bcs-config-api   = { path = "crates/service-api/bcs-config-api" }
 bcs-test-support = { path = "crates/test-support/bcs-test-support" }
+bcs-dist-test-runner = { path = "crates/test-support/bcs-dist-test-runner" }
 bcs-http         = { path = "crates/adapters/http/bcs-http" }
+bcs-app-a2a-bot = { path = "crates/application/bcs-app-a2a-bot" }
+bcs-app-dist-gateway = { path = "crates/application/bcs-app-dist-gateway" }
+bcs-dist-gateway-http = { path = "crates/adapters/http/bcs-dist-gateway-http" }
+bcs-dist-a2a-output = { path = "crates/adapters/output/bcs-dist-a2a-output" }
+bcs-a2a-http = { path = "crates/external-clients/bcs-a2a-http" }
 bcs-provider-http = { path = "crates/adapters/http/bcs-provider-http" }
 bcs-ws           = { path = "crates/adapters/ws/bcs-ws" }
 # New in C6
@@ -324,11 +367,13 @@ bcs-app-register = { path = "crates/application/v1/bcs-app-register" }
 bcs-app-invite-code = { path = "crates/application/v1/bcs-app-invite-code" }
 bcs-app-collaboration-template = { path = "crates/application/v1/bcs-app-collaboration-template" }
 bcs-app-collaboration-definition = { path = "crates/application/v1/bcs-app-collaboration-definition" }
+bcs-app-auth               = { path = "crates/application/v1/bcs-app-auth" }
 bcs-session-file-store     = { path = "crates/services/bcs-session-file-store" }
 bcs-invite-code-store      = { path = "crates/services/bcs-invite-code-store" }
 bcs-session-file           = { path = "crates/services/bcs-session-file" }
 bcs-system-message         = { path = "crates/services/bcs-system-message" }
 bcs-cache-api              = { path = "crates/plugin-api/bcs-cache-api" }
+bcs-store-api              = { path = "crates/plugin-api/bcs-store-api" }
 bcs-channel-api            = { path = "crates/plugin-api/bcs-channel-api" }
 bcs-db-api                 = { path = "crates/plugin-api/bcs-db-api" }
 bcs-human-notify-api       = { path = "crates/plugin-api/bcs-human-notify-api" }
@@ -342,6 +387,7 @@ bcs-cache-local            = { path = "crates/plugins/bcs-cache-local" }
 bcs-cache-redis            = { path = "crates/plugins/bcs-cache-redis" }
 bcs-db-local               = { path = "crates/plugins/bcs-db-local" }
 bcs-db-mysql               = { path = "crates/plugins/bcs-db-mysql" }
+bcs-db-migrations          = { path = "crates/services/bcs-db-migrations" }
 bcs-human-notify-dummy     = { path = "crates/plugins/bcs-human-notify-dummy" }
 bcs-human-notify-work-order  = { path = "crates/plugins/bcs-human-notify-work-order" }
 bcs-llm-anthropic          = { path = "crates/plugins/bcs-llm-anthropic" }
@@ -354,6 +400,8 @@ bcs-auth-wechat            = { path = "crates/plugins/bcs-auth-wechat" }
 bcs-auth-alipay            = { path = "crates/plugins/bcs-auth-alipay" }
 bcs-auth-local             = { path = "crates/plugins/bcs-auth-local" }
 bcs-auth-oauth             = { path = "crates/plugins/bcs-auth-oauth" }
+bcs-caller-identity-jwt = { path = "crates/plugins/bcs-caller-identity-jwt" }
+bcs-caller-identity-api = { path = "crates/plugin-api/bcs-caller-identity-api" }
 
 # ────────────────────────────────────────────────────────────────
 # Optimize the bignum stack even in dev/test builds.

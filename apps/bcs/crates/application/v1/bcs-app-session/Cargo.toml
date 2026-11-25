@@ -11,6 +11,7 @@ version = { workspace = true }
 workspace = true
 
 [dependencies]
+futures.workspace = true
 async-trait = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
@@ -18,11 +19,14 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+bcs-db-migrations = { workspace = true }
+bcs-jwt = { workspace = true }
 bcs-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-db-api = { workspace = true }
 bcs-friend = { workspace = true }
 bcs-group = { workspace = true }
+bcs-db-local = { workspace = true }
 bcs-group-store = { workspace = true }
 bcs-relation = { workspace = true }
 bcs-session = { workspace = true }
@@ -31,6 +35,9 @@ bcs-session-file-store = { workspace = true }
 bcs-session-store = { workspace = true }
 bcs-storage-api = { workspace = true }
 bcs-test-support = { workspace = true }
+hex = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
 bytes = { workspace = true }
 tokio = { workspace = true }
 time = { workspace = true }

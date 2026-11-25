@@ -1,0 +1,457 @@
+use std::sync::Arc;
+use bcs_bot_store::a2a::DbA2aBotStore;
+use bcs_db_api::{DbPlugin, DbStatement};
+use bcs_db_local::LocalSqliteDbPlugin;
+use bcs_service_api::port::repo::a2a_bot::{
+    A2aBotRecord, A2aBotRepoPort, };
+use serde_json::json;
+
+async fn database() -> Arc<LocalSqliteDbPlugin> {
+    let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
+    db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_info TEXT DEFAULT '{}', bot_uuid TEXT NOT NULL, env TEXT NOT NULL, name TEXT, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
+    db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode,is_deleted) VALUES ('bot', 'test', 'provider', 'remote', 'gateway', 0), ('bot', 'other', 'provider', 'remote', 'gateway', 0), ('plugin', 'test', 'provider', 'plugin', 'plugin', 0)")).await.unwrap();
+    for sql in bcs_db_api::split_sql_statements(&[include_str!("../../../../migrations/sqlite/039_bot_a2a.sql"),"ALTER TABLE bcs_bots ADD COLUMN catalog_labels TEXT NULL;"].concat()).into_iter() {
+        db.execute(DbStatement::new(sql)).await.unwrap();
+    }
+    db
+}
+
+fn record() -> A2aBotRecord {
+    A2aBotRecord { catalog_labels:Default::default(),
+        bot_uuid:"bot".into(), provider_id:"provider".into(), provider_bot_ref:"remote".into(),
+        agent_card_url:Some("https://example.org/a2a/remote/card".into()),
+        agent_card:json!({"name":"Agent", "supportedInterfaces":[{"url":"https://example.org/a2a/remote","protocolBinding":"HTTP+JSON","protocolVersion":"1.0"}], "skills":[{"id":"lookup", "name":"查询", "description":"完整说明", "futureField":{"nested":true}}]}), revision:1,}
+}
+
+#[tokio::test]
+async fn migration_preserves_legacy_rows_and_card_round_trip_is_lossless() {
+    let db = database().await;
+    let store = DbA2aBotStore::sqlite(db.clone(), "test".into());
+    assert_eq!(store.get("bot").await.unwrap(), None);
+    assert!(store.refreshable(None,16).await.unwrap().is_empty());
+    let expected = record();
+    assert!(store.compare_and_set(&expected, 0).await.unwrap());
+    assert_eq!(store.get("bot").await.unwrap(), Some(expected));
+    assert_eq!(DbA2aBotStore::sqlite(db, "other".into()).get("bot").await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn card_capabilities_are_synchronized_with_bot_info() {
+    let db=database().await;
+    db.execute(DbStatement::with_params("UPDATE bcs_bots SET bot_info=? WHERE env='test' AND bot_uuid='bot'",
+        vec![json!({"summary":"Legacy summary","domains":["legacy"],"skills":[{"name":"legacy","description":"Legacy description"}],
+            "scopes":["legacy:read"],"agent_code":"legacy-agent"}).to_string().into()])).await.unwrap();
+    let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    let first=record();
+    assert!(store.compare_and_set(&first,0).await.unwrap());
+    let info=stored_bot_info(&db,"bot").await;
+    // Every Card write rebuilds the Card-owned keys from the committed Card:
+    // fields the Card does not carry are cleared, never preserved from bot_info.
+    assert_eq!(info["name"],"Agent");
+    assert_eq!(info["summary"],"");
+    assert_eq!(info["domains"],json!([]));
+    assert_eq!(info["skills"],json!([{"name":"lookup","description":"完整说明"}]));
+    assert_eq!(info["scopes"],json!([]));
+    assert_eq!(info["agent_code"],"legacy-agent");
+
+    let mut second=record();second.revision=2;
+    second.agent_card["description"]=json!("New card description");
+    second.agent_card["domains"]=json!(["orders"]);
+    second.agent_card["scopes"]=json!(["orders:read"]);
+    second.agent_card["skills"]=json!([]);
+    assert!(store.compare_and_set(&second,1).await.unwrap());
+    let info=stored_bot_info(&db,"bot").await;
+    assert_eq!(info["summary"],"New card description");
+    assert_eq!(info["domains"],json!(["orders"]));
+    assert_eq!(info["skills"],json!([]));
+    assert_eq!(info["scopes"],json!(["orders:read"]));
+    assert_eq!(info["agent_code"],"legacy-agent");
+
+    db.execute(DbStatement::with_params("UPDATE bcs_bots SET bot_info=JSON_SET(bot_info,'$.summary','Local drift','$.domains',JSON_ARRAY('legacy')) WHERE env='test' AND bot_uuid='bot'",vec![])).await.unwrap();
+    store.synchronize_card_projection(&second).await.unwrap();
+    let info=stored_bot_info(&db,"bot").await;
+    assert_eq!(info["summary"],"New card description");
+    assert_eq!(info["domains"],json!(["orders"]));
+    assert_eq!(store.get("bot").await.unwrap().unwrap().revision,2);
+
+    let mut third=second;third.revision=3;
+    third.agent_card.as_object_mut().unwrap().remove("description");
+    third.agent_card.as_object_mut().unwrap().remove("domains");
+    third.agent_card.as_object_mut().unwrap().remove("scopes");
+    third.agent_card["skills"]=json!([{"id":"query","name":"Query","description":"Queries","tags":["billing"]}]);
+    assert!(store.compare_and_set(&third,2).await.unwrap());
+    let info=stored_bot_info(&db,"bot").await;
+    // Card fields are used verbatim: skill tags travel on the stored skill and
+    // never feed bot_info.domains; dropped Card fields clear their stored values.
+    assert_eq!(info["summary"],"");
+    assert_eq!(info["domains"],json!([]));
+    assert_eq!(info["skills"],json!([{"name":"query","description":"Queries","tags":["billing"]}]));
+    assert_eq!(info["scopes"],json!([]));
+    assert_eq!(info["agent_code"],"legacy-agent");
+}
+
+#[tokio::test]
+async fn stale_refresh_cannot_overwrite_card_or_management_metadata() {
+    let db = database().await;
+    let store = DbA2aBotStore::sqlite(db, "test".into());
+    let mut current = record();
+    assert!(store.compare_and_set(&current, 0).await.unwrap());
+    let stale = current.clone();
+    current.revision = 2;
+    current.agent_card["name"] = json!("New Agent");
+    assert!(store.compare_and_set(&current, 1).await.unwrap());
+    assert!(!store.compare_and_set(&stale, 0).await.unwrap());
+    assert_eq!(store.get("bot").await.unwrap(), Some(current));
+}
+
+#[tokio::test]
+async fn unchanged_card_synchronize_is_not_reported_as_conflict() {
+    let db = database().await;
+    let store = DbA2aBotStore::sqlite(db.clone(), "test".into());
+    let current = record();
+    assert!(store.compare_and_set(&current, 0).await.unwrap());
+    let mut committed = current.clone();
+    committed.revision = 2;
+    committed.agent_card["description"] = json!("Same-second Card refresh");
+    assert!(store.compare_and_set(&committed, 1).await.unwrap());
+    // A refresh that lands on the same committed values (MySQL would report
+    // zero affected rows here) is a success, not a revision conflict.
+    store.synchronize_card_projection(&committed).await.unwrap();
+    store.synchronize_card_projection(&committed).await.unwrap();
+    assert_eq!(store.get("bot").await.unwrap().unwrap().revision, 2);
+    // A synchronize fenced against an obsolete revision still conflicts;
+    // the SELECT fence check must not soften a genuine revision mismatch.
+    let mut advanced = committed.clone();
+    advanced.revision = 3;
+    advanced.agent_card["name"] = json!("Concurrently renamed");
+    assert!(store.compare_and_set(&advanced, 2).await.unwrap());
+    let conflict = store.synchronize_card_projection(&committed).await.unwrap_err();
+    assert!(matches!(conflict, bcs_service_api::ServiceError::Conflict(_)),"{conflict:?}");
+}
+
+
+async fn stored_bot_info(db:&Arc<LocalSqliteDbPlugin>,bot:&str)->serde_json::Value {
+    let rows=db.query(DbStatement::with_params("SELECT bot_info FROM bcs_bots WHERE env='test' AND bot_uuid=?",vec![bot.into()])).await.unwrap();
+    serde_json::from_str(&rows[0].get_string("bot_info").unwrap().unwrap()).unwrap()
+}
+#[tokio::test]
+async fn public_card_batch_is_lossless_fresh_bounded_and_scoped() {
+    let db=database().await;
+    let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    let mut value=record();
+    assert!(store.compare_and_set(&value,0).await.unwrap());
+    let ids=vec!["bot".into(),"plugin".into(),"absent".into(),"bot".into()];
+    let cards=store.cards_for_bots(&ids).await.unwrap();
+    assert_eq!(cards.len(),1);assert_eq!(cards["bot"],value.agent_card);
+    db.execute(DbStatement::new("UPDATE bcs_bots SET name='Billing %_exact' WHERE env='test' AND bot_uuid='bot'")).await.unwrap();
+    for query in ["BILLING", "%_exact"] {
+        assert_eq!(store.discovery_cards(&ids,Some(query),&[]).await.unwrap()["bot"],Some(value.agent_card.clone()));
+    }
+    assert_eq!(store.discovery_cards(&ids,Some("billing"),&["LOOKUP".into()]).await.unwrap()["bot"],Some(value.agent_card.clone()));
+    assert_eq!(store.discovery_cards(&ids,Some("billing"),&["legacy-skill".into()]).await.unwrap()["bot"],None);
+    assert_eq!(store.discovery_cards(&ids,Some("Billing X_exact"),&[]).await.unwrap()["bot"],None);
+    let unmatched=store.discovery_cards(&ids,Some("absent-description"),&[]).await.unwrap();
+    assert_eq!(unmatched.len(),1);assert_eq!(unmatched["bot"],None);
+    let matches=store.discovery_cards(&ids,None,&["LOOKUP".into()]).await.unwrap();
+    assert_eq!(matches["bot"],Some(value.agent_card.clone()));
+    assert!(DbA2aBotStore::sqlite(db.clone(),"other".into()).cards_for_bots(&ids).await.unwrap().is_empty());
+    value.revision=2;value.agent_card["skills"][0]["description"]=json!("fresh Card-only description");
+    assert!(store.compare_and_set(&value,1).await.unwrap());
+    assert_eq!(store.cards_for_bots(&ids).await.unwrap()["bot"],value.agent_card);
+    assert!(store.cards_for_bots(&vec!["bot".into();257]).await.is_err());
+    db.execute(DbStatement::new("UPDATE bcs_bots SET is_deleted=1 WHERE env='test'")).await.unwrap();
+    assert!(store.cards_for_bots(&ids).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn updates_are_fenced_by_provider_reference_mode_and_deletion() {
+    let db = database().await;
+    let store = DbA2aBotStore::sqlite(db.clone(), "test".into());
+    let mut wrong = record();
+    wrong.provider_id = "other-provider".into();
+    assert!(!store.compare_and_set(&wrong, 0).await.unwrap());
+    wrong = record();
+    wrong.provider_bot_ref = "other-remote".into();
+    assert!(!store.compare_and_set(&wrong, 0).await.unwrap());
+    wrong = record();
+    wrong.bot_uuid = "plugin".into();
+    wrong.provider_bot_ref = "plugin".into();
+    assert!(!store.compare_and_set(&wrong, 0).await.unwrap());
+    wrong = record();
+    wrong.revision = 9;
+    assert!(store.compare_and_set(&wrong, 0).await.is_err());
+    assert!(store.compare_and_set(&record(), 0).await.unwrap());
+    db.execute(DbStatement::new("UPDATE bcs_bots SET is_deleted=1 WHERE env='test'")).await.unwrap();
+    assert_eq!(store.get("bot").await.unwrap(), None);
+    assert!(store.refreshable(None,16).await.unwrap().is_empty());
+    let mut update = record(); update.revision = 2;
+    assert!(!store.compare_and_set(&update, 1).await.unwrap());
+}
+
+#[tokio::test]
+async fn refresh_scan_is_keyset_bounded_and_excludes_inline_cards() {
+    let db=database().await;
+    for i in 0..105 {
+        db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode,agent_card,agent_card_url,agent_card_revision) VALUES (?,'test','provider',?,'gateway','{}',?,1)",
+            vec![format!("source-{i:03}").into(),format!("ref-{i}").into(),if i==50 {bcs_db_api::DbValue::Null} else {"https://example.org/card".into()}])).await.unwrap();
+    }
+    let store=DbA2aBotStore::sqlite(db,"test".into());
+    let first=store.refreshable(None,u32::MAX).await.unwrap();assert_eq!(first.len(),16);
+    let next=store.refreshable(Some(&first[15].bot_uuid),16).await.unwrap();assert_eq!(next[0].bot_uuid,"source-016");
+    let mut cursor=None;let mut count=0;
+    loop {let page=store.refreshable(cursor.as_deref(),16).await.unwrap();if page.is_empty() {break;}
+        assert!(page.iter().all(|c|c.agent_card_url.is_some()));count+=page.len();cursor=Some(page.last().unwrap().bot_uuid.clone());}
+    assert_eq!(count,104);
+}
+
+#[tokio::test]
+async fn malformed_data_and_database_write_errors_are_not_success() {
+    let db = database().await;
+    let store = DbA2aBotStore::sqlite(db.clone(), "test".into());
+    assert!(store.compare_and_set(&record(), 0).await.unwrap());
+    db.execute(DbStatement::new("UPDATE bcs_bots SET agent_card='invalid-json' WHERE env='test'")).await.unwrap();
+    assert!(store.get("bot").await.is_err());
+    db.execute(DbStatement::new("CREATE TRIGGER reject_refresh BEFORE UPDATE ON bcs_bots BEGIN SELECT RAISE(ABORT, 'test failure'); END")).await.unwrap();
+    let mut update = record(); update.revision = 2;
+    assert!(store.compare_and_set(&update, 1).await.is_err());
+    let rows = db.query(DbStatement::new("SELECT agent_card_revision FROM bcs_bots WHERE env='test' AND bot_uuid='bot'")).await.unwrap();
+    assert_eq!(rows[0].get_i64("agent_card_revision").unwrap(), Some(1));
+}
+
+#[tokio::test]
+async fn sqlite_a2a_repository_conformance() {
+    use bcs_test_support::contract::a2a_bot::a2a_bot_repo_port_contract_tests;
+    let store = DbA2aBotStore::sqlite(database().await, "test".into());
+    a2a_bot_repo_port_contract_tests(&store, record()).await;
+}
+
+#[tokio::test]
+async fn availability_is_bounded_scope_local_and_retains_invalid_a2a_markers() {
+    let db = database().await;
+    let store = DbA2aBotStore::sqlite(db.clone(), "test".into());
+    assert!(store.availability_many(&["bot".into()]).await.unwrap().is_empty());
+    assert!(store.compare_and_set(&record(), 0).await.unwrap());
+    let states = store.availability_many(&["bot".into(), "plugin".into(), "missing".into()]).await.unwrap();
+    assert_eq!(states.len(), 1);
+    assert!(states[0].ready);
+    assert!(DbA2aBotStore::sqlite(db.clone(), "other".into()).availability_many(&["bot".into()]).await.unwrap().is_empty());
+    db.execute(DbStatement::new("UPDATE bcs_bots SET agent_card='{}' WHERE env='test' AND bot_uuid='bot'")).await.unwrap();
+    assert!(!store.availability_many(&["bot".into()]).await.unwrap()[0].ready);
+    assert!(store.availability_many(&vec!["bot".into(); 257]).await.is_err());
+}
+
+#[tokio::test]
+async fn source_key_lookup_is_exact_bounded_and_propagates_read_failures() {
+    use std::sync::atomic::{AtomicBool,AtomicUsize,Ordering};
+    use bcs_service_api::types::a2a_bot::a2a_management::SOURCE_AGENT_EXTENSION;
+    let inner=database().await;
+    let setup=DbA2aBotStore::sqlite(inner.clone(),"test".into());
+    let mut value=record();
+    value.agent_card["capabilities"]=json!({"extensions":[{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":"first_party"}}]});
+    setup.compare_and_set(&value,0).await.unwrap();
+    let db=Arc::new(CountedDb {inner:inner.clone(),transactions:Default::default(),queries:AtomicUsize::new(0),fail:AtomicBool::new(false)});
+    let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    assert_eq!(store.get_by_provider_ref("provider","remote").await.unwrap(),Some(value.clone()));
+    assert_eq!(db.queries.swap(0,Ordering::SeqCst),1);
+    for source in ["001ab","1Ab","001Ab' OR 1=1 --"] {
+        assert!(store.get_by_provider_ref("provider",source).await.unwrap().is_none());
+        assert_eq!(db.queries.swap(0,Ordering::SeqCst),1);
+    }
+    assert!(store.get_by_provider_ref("other-provider","remote").await.unwrap().is_none());
+    assert!(DbA2aBotStore::sqlite(db.clone(),"other".into()).get_by_provider_ref("provider","remote").await.unwrap().is_none());
+    // Corrupt legacy duplicates must fail rather than choosing an arbitrary identity.
+    inner.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode,agent_card,agent_card_revision) VALUES ('duplicate','test','provider','remote','gateway',?,1)",vec![value.agent_card.to_string().into()])).await.unwrap();
+    assert!(store.get_by_provider_ref("provider","remote").await.is_err());
+    db.fail.store(true,Ordering::SeqCst);
+    assert!(store.get_by_provider_ref("provider","remote").await.is_err());
+}
+
+struct CountedDb {
+    transactions:std::sync::Mutex<Vec<usize>>,
+    inner:Arc<LocalSqliteDbPlugin>,
+    queries:std::sync::atomic::AtomicUsize,
+    fail:std::sync::atomic::AtomicBool,
+}
+#[async_trait::async_trait]
+impl DbPlugin for CountedDb {
+    async fn query(&self, statement:DbStatement)->bcs_db_api::DbResult<Vec<bcs_db_api::DbRow>> {
+        self.queries.fetch_add(1,std::sync::atomic::Ordering::SeqCst);
+        if self.fail.load(std::sync::atomic::Ordering::SeqCst) {return Err(bcs_db_api::DbError::Backend("injected read failure".into()));}
+        self.inner.query(statement).await
+    }
+    async fn execute(&self,statement:DbStatement)->bcs_db_api::DbResult<bcs_db_api::DbExecuteResult> {self.inner.execute(statement).await}
+    async fn transaction(&self,steps:Vec<bcs_db_api::DbTransactionStep>)->bcs_db_api::DbResult<Vec<bcs_db_api::DbTransactionStepResult>> {self.transactions.lock().unwrap().push(steps.len());self.inner.transaction(steps).await}
+    async fn health_check(&self)->bcs_db_api::DbResult<bcs_db_api::DbHealth> {self.inner.health_check().await}
+}
+
+#[tokio::test]
+async fn refresh_and_availability_have_one_bounded_query_even_on_failure() {
+    use std::sync::atomic::{AtomicBool,AtomicUsize,Ordering};
+    let inner=database().await;
+    let setup=DbA2aBotStore::sqlite(inner.clone(),"test".into());
+    assert!(setup.compare_and_set(&record(),0).await.unwrap());
+    for n in 0..256 {
+        inner.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode,agent_card,agent_card_url,agent_card_revision) VALUES (?,'test','provider',?,'gateway',?,?,1)",
+            vec![format!("batch-{n:03}").into(),format!("remote-{n}").into(),record().agent_card.to_string().into(),"https://example.org/card".into()])).await.unwrap();
+    }
+    let db=Arc::new(CountedDb {inner,transactions:Default::default(),queries:AtomicUsize::new(0),fail:AtomicBool::new(false)});
+    let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    assert_eq!(store.refreshable(None,u32::MAX).await.unwrap().len(),16);
+    assert_eq!(db.queries.swap(0,Ordering::SeqCst),1);
+    let ids=(0..256).map(|n|format!("batch-{n:03}")).collect::<Vec<_>>();
+    assert_eq!(store.availability_many(&ids).await.unwrap().len(),256);
+    assert_eq!(db.queries.swap(0,Ordering::SeqCst),1);
+    assert!(store.availability_many(&vec!["bot".into();257]).await.is_err());
+    assert_eq!(db.queries.load(Ordering::SeqCst),0);
+    db.fail.store(true,Ordering::SeqCst);
+    assert!(store.refreshable(None,16).await.is_err());
+    assert_eq!(db.queries.swap(0,Ordering::SeqCst),1);
+    assert!(store.availability_many(&ids).await.is_err());
+    assert_eq!(db.queries.load(Ordering::SeqCst),1);
+}
+
+#[tokio::test]
+async fn repeated_names_do_not_merge_or_block_card_updates() {
+    let db=database().await;
+    let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    let first=store.replace(&record()).await.unwrap();
+    db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode) VALUES ('second','test','provider','second','gateway')")).await.unwrap();
+    let mut second=record();second.bot_uuid="second".into();second.provider_bot_ref="second".into();
+    let second=store.replace(&second).await.unwrap();
+    assert_eq!(first.agent_card["name"],second.agent_card["name"]);
+    assert_eq!(store.get_by_provider_ref("provider","remote").await.unwrap().unwrap().bot_uuid,"bot");
+    assert_eq!(store.get_by_provider_ref("provider","second").await.unwrap().unwrap().bot_uuid,"second");
+    let mut next=first;next.agent_card["description"]=json!("updated");
+    store.replace(&next).await.unwrap();
+    assert_eq!(store.get("second").await.unwrap().unwrap(),second);
+}
+
+#[tokio::test]
+async fn concurrent_explicit_replacements_return_their_own_committed_revision() {
+    let db=database().await;let store=DbA2aBotStore::sqlite(db,"test".into());
+    let mut left=record();left.agent_card["name"]=json!("Left");
+    let mut right=record();right.agent_card["name"]=json!("Right");right.agent_card_url=None;
+    let (left,right)=tokio::join!(store.replace(&left),store.replace(&right));
+    let left=left.unwrap();let right=right.unwrap();
+    assert_ne!(left.revision,right.revision);
+    assert_eq!(left.agent_card["name"],"Left");assert_eq!(right.agent_card["name"],"Right");
+    let last=if left.revision>right.revision {left} else {right};
+    assert_eq!(last.revision,2);assert_eq!(store.get("bot").await.unwrap(),Some(last));
+}
+
+#[tokio::test]
+async fn existing_duplicate_names_are_reported_as_conflicts() {
+    let db=database().await;let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    store.replace(&record()).await.unwrap();
+    // Existing legacy duplicates must not require a migration or select an arbitrary Bot.
+    db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,env,provider_id,name,connection_mode) VALUES ('legacy','test','provider','Agent','plugin')")).await.unwrap();
+    assert!(matches!(store.get_by_name("provider","Agent").await,Err(bcs_service_api::ServiceError::Conflict(_))));
+    db.execute(DbStatement::new("UPDATE bcs_bots SET is_deleted=1 WHERE bot_uuid='legacy'")).await.unwrap();
+    assert!(store.get_by_name("provider","Agent").await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn first_card_attachment_rejects_invalid_source_without_mutating_bot() {
+    use bcs_service_api::{ServiceError,types::a2a_bot::a2a_management::SOURCE_AGENT_EXTENSION};
+    let db=database().await;
+    let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    db.execute(DbStatement::new("UPDATE bcs_bots SET name='Original' WHERE env='test' AND bot_uuid='bot'")).await.unwrap();
+    let v1=SOURCE_AGENT_EXTENSION.replace("v2.md","v1.md");
+    for extension in [
+        json!({"uri":v1,"required":false,"params":{"agentId":"retired"}}),
+        json!({"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"agentId":"retired"}}),
+        json!({"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":"invalid_party"}}),
+        json!({"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":null}}),
+        json!({"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":""}}),
+    ] {
+        let mut incoming=record();
+        incoming.agent_card["capabilities"]=json!({"extensions":[extension]});
+        assert!(store.get("bot").await.unwrap().is_none());
+        assert!(matches!(store.compare_and_set(&incoming,0).await,Err(ServiceError::A2aManagement(_))));
+        assert!(matches!(store.replace(&incoming).await,Err(ServiceError::A2aManagement(_))));
+        assert!(store.get("bot").await.unwrap().is_none());
+        let rows=db.query(DbStatement::new("SELECT name,agent_card_revision FROM bcs_bots WHERE env='test' AND bot_uuid='bot'")).await.unwrap();
+        assert_eq!(rows[0].get_string("name").unwrap().as_deref(),Some("Original"));
+        assert_eq!(rows[0].get_i64("agent_card_revision").unwrap(),Some(0));
+    }
+    let mut valid=record();
+    valid.agent_card["capabilities"]=json!({"extensions":[{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":"first_party"}}]});
+    assert!(store.compare_and_set(&valid,0).await.unwrap());
+    assert_eq!(store.get("bot").await.unwrap().unwrap().agent_card,valid.agent_card);
+}
+
+#[tokio::test]
+async fn source_classification_can_be_removed_without_affecting_provider_identity() {
+    use bcs_service_api::types::a2a_bot::a2a_management::SOURCE_AGENT_EXTENSION;
+    let db=database().await;let store=DbA2aBotStore::sqlite(db,"test".into());
+    let mut first=record();
+    first.agent_card["capabilities"]=json!({"extensions":[{"uri":SOURCE_AGENT_EXTENSION,"required":false,"params":{"party":"first_party"}}]});
+    let saved=store.replace(&first).await.unwrap();
+    let mut changed=saved.clone();changed.agent_card["capabilities"]["extensions"]=json!([]);
+    let next=store.replace(&changed).await.unwrap();
+    assert_eq!(next.provider_bot_ref,saved.provider_bot_ref);
+    assert_eq!(next.bot_uuid,saved.bot_uuid);
+    assert_eq!(next.agent_card["capabilities"]["extensions"],json!([]));
+}
+
+#[tokio::test]
+async fn labels_have_constant_read_and_atomic_write_round_trips() {
+    use std::sync::atomic::{AtomicUsize,AtomicBool,Ordering};
+    let inner=database().await;
+    let db=Arc::new(CountedDb {inner,transactions:Default::default(),queries:AtomicUsize::new(0),fail:AtomicBool::new(false)});
+    let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    for (revision,keys) in [(1,0),(2,1),(3,64)] {
+        let mut card=record();card.revision=revision;
+        let labels=(0..keys).map(|key|(format!("key-{key}"),vec!["value".to_string()])).collect::<std::collections::BTreeMap<_,_>>();
+        card.catalog_labels=serde_json::from_value(serde_json::to_value(labels).unwrap()).unwrap();
+        db.queries.store(0,Ordering::SeqCst);db.transactions.lock().unwrap().clear();
+        assert!(store.compare_and_set(&card,revision-1).await.unwrap());
+        assert_eq!(db.queries.load(Ordering::SeqCst),1);assert_eq!(*db.transactions.lock().unwrap(),vec![2]);
+        db.queries.store(0,Ordering::SeqCst);assert_eq!(store.get("bot").await.unwrap().unwrap().catalog_labels,card.catalog_labels);
+        assert_eq!(db.queries.load(Ordering::SeqCst),1);
+        db.queries.store(0,Ordering::SeqCst);assert_eq!(store.get_by_provider_ref("provider","remote").await.unwrap().unwrap().catalog_labels,card.catalog_labels);
+        assert_eq!(db.queries.load(Ordering::SeqCst),1);
+    }
+}
+
+#[tokio::test]
+async fn catalog_labels_accept_driver_bytes_without_relaxing_storage_validation() {
+    use bcs_db_api::DbValue;
+    let db = database().await;
+    let store = DbA2aBotStore::sqlite(db.clone(), "test".into());
+    assert!(store.compare_and_set(&record(), 0).await.unwrap());
+    let raw = r#"{"stage":["trial"],"region":["杭州","a"]}"#;
+    let labels: bcs_service_api::types::catalog_labels::CatalogLabels = serde_json::from_str(raw).unwrap();
+    // SQLite preserves BLOB parameters as DbValue::Bytes, matching the native
+    // MySQL JSON result shape without requiring a local database service.
+    for (stored, expected) in [
+        (DbValue::String(raw.into()), labels.clone()),
+        (DbValue::Bytes(raw.as_bytes().to_vec()), labels),
+        (DbValue::Null, Default::default()),
+    ] {
+        db.execute(DbStatement::with_params(
+            "UPDATE bcs_bots SET catalog_labels=? WHERE env='test' AND bot_uuid='bot'",
+            vec![stored],
+        )).await.unwrap();
+        assert_eq!(store.get("bot").await.unwrap().unwrap().catalog_labels, expected);
+        assert_eq!(store.get_by_provider_ref("provider", "remote").await.unwrap().unwrap().catalog_labels, expected);
+        assert_eq!(store.refreshable(None, 16).await.unwrap()[0].catalog_labels, expected);
+    }
+    for stored in [
+        DbValue::Bytes(vec![0xff]),
+        DbValue::Bytes(b"not-json".to_vec()),
+        DbValue::Bytes(b"null".to_vec()),
+        DbValue::Bytes(b"[]".to_vec()),
+        DbValue::Bytes(br#"{"stage":[]}"#.to_vec()),
+        DbValue::Bytes(br#"{"stage":["trial","trial"]}"#.to_vec()),
+        DbValue::I64(1),
+    ] {
+        db.execute(DbStatement::with_params(
+            "UPDATE bcs_bots SET catalog_labels=? WHERE env='test' AND bot_uuid='bot'",
+            vec![stored],
+        )).await.unwrap();
+        assert!(store.get("bot").await.is_err());
+        assert!(store.get_by_provider_ref("provider", "remote").await.is_err());
+        assert!(store.refreshable(None, 16).await.is_err());
+    }
+}

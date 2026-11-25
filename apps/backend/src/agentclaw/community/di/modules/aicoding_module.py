@@ -7,8 +7,52 @@ constructor and pulls ``BotService`` + ``DeviceService`` straight
 from the injector — no module-specific construction logic, so a
 ``configure(binder)`` self-binding is enough.
 """
+
 from __future__ import annotations
 
+
+from agentclaw.community.api.aicoding.architect_rebind_service import (
+    ArchitectRebindServiceProtocol,
+)
+from agentclaw.community.api.common_config_service import CommonConfigServiceProtocol
+from agentclaw.community.api.data_proxy_service import DataProxyServiceProtocol
+from agentclaw.community.api.workitem_service import WorkItemServiceProtocol
+from agentclaw.community.api.workspace_service import WorkspaceServiceProtocol
+from agentclaw.community.core.aicoding.protocols import (
+    AicodingBotResolutionServiceProtocol,
+    AicodingHostedWorkspaceServiceProtocol,
+)
+from agentclaw.community.core.aicoding.services.architect_rebind_service import (
+    ArchitectRebindService,
+)
+from agentclaw.community.core.aicoding.services.bot_resolution_service import (
+    AicodingBotResolutionService,
+)
+from agentclaw.community.core.aicoding.services.data_proxy_service import (
+    DataProxyService,
+)
+from agentclaw.community.core.aicoding.services.hosted_workspace_service import (
+    AicodingHostedWorkspaceService,
+)
+from agentclaw.community.core.aicoding.services.workspace_hosting_workitem_service import (
+    WorkspaceHostingWorkItemService,
+)
+from agentclaw.community.core.aicoding.services.workspace_service import (
+    WorkspaceService,
+)
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_runtime import ArcaRecycleTransport
+from agentclaw.community.core.bot_management.engines.registry import (
+    configure_restart_common_config,
+)
+from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import (
+    WorkspaceHostingService,
+)
+from agentclaw.community.core.bot_management.services.template_service import (
+    TemplateService,
+)
+from agentclaw.community.core.repository.protocols.bot import (
+    BotRepository,
+)
 from injector import (
     Binder,
     CallError,
@@ -19,39 +63,6 @@ from injector import (
     provider,
     singleton,
 )
-
-from agentclaw.community.api.data_proxy_service import DataProxyServiceProtocol
-from agentclaw.community.api.workitem_service import WorkItemServiceProtocol
-from agentclaw.community.api.workspace_service import WorkspaceServiceProtocol
-from agentclaw.community.api.aicoding.architect_rebind_service import (
-    ArchitectRebindServiceProtocol,
-)
-from agentclaw.community.core.aicoding.services.data_proxy_service import DataProxyService
-from agentclaw.community.core.aicoding.services.workspace_hosting_workitem_service import (
-    WorkspaceHostingWorkItemService,
-)
-from agentclaw.community.core.aicoding.services.workspace_service import WorkspaceService
-from agentclaw.community.core.aicoding.protocols import (
-    AicodingBotResolutionServiceProtocol,
-    AicodingHostedWorkspaceServiceProtocol,
-)
-from agentclaw.community.core.aicoding.services.bot_resolution_service import (
-    AicodingBotResolutionService,
-)
-from agentclaw.community.core.aicoding.services.architect_rebind_service import (
-    ArchitectRebindService,
-)
-from agentclaw.community.core.aicoding.services.hosted_workspace_service import (
-    AicodingHostedWorkspaceService,
-)
-from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import (
-    WorkspaceHostingService,
-)
-from agentclaw.community.core.bot_management.services.template_service import (
-    TemplateService,
-)
-from agentclaw.community.core.repository.protocols.bot import BotRepository
-
 
 
 class AICodingModule(Module):
@@ -64,8 +75,16 @@ class AICodingModule(Module):
 
     def configure(self, binder: Binder) -> None:
         binder.bind(WorkspaceService, to=WorkspaceService, scope=singleton)
-        binder.bind(AicodingBotResolutionService, to=AicodingBotResolutionService, scope=singleton)
-        binder.bind(AicodingBotResolutionServiceProtocol, to=AicodingBotResolutionService, scope=singleton)
+        binder.bind(
+            AicodingBotResolutionService,
+            to=AicodingBotResolutionService,
+            scope=singleton,
+        )
+        binder.bind(
+            AicodingBotResolutionServiceProtocol,
+            to=AicodingBotResolutionService,
+            scope=singleton,
+        )
         binder.bind(DataProxyService, to=DataProxyService, scope=singleton)
         binder.bind(
             WorkspaceHostingWorkItemService,
@@ -73,6 +92,12 @@ class AICodingModule(Module):
             scope=singleton,
         )
         binder.bind(ArchitectRebindService, to=ArchitectRebindService, scope=singleton)
+        # Resolve only when a coding restart reads its switch, after all module
+        # overrides are installed. Capturing this injector avoids a service locator.
+        injector = binder.injector
+        configure_restart_common_config(
+            lambda: injector.get(CommonConfigServiceProtocol)
+        )
 
     @singleton
     @provider
@@ -133,3 +158,8 @@ class AICodingModule(Module):
         self, svc: AicodingHostedWorkspaceService
     ) -> AicodingHostedWorkspaceServiceProtocol:
         return svc
+
+    @singleton
+    @provider
+    def arca_recycle_transport(self) -> ArcaRecycleTransport:
+        return ArcaRecycleTransport()

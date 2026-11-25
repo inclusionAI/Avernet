@@ -1,0 +1,208 @@
+# Knowledge management
+
+This module enriches a bounded provider catalog/grant page with public workspace
+and Bot metadata. It does not store knowledge assets, canonical ACLs or grants.
+Bot enablement remains owned by the existing bot_knowledge module.
+
+The configured space_tenant identifies the current public space dataset; because
+legacy spaces are not tenant-column scoped, reads outside that configured tenant
+fail before SQL. Grant platform/environment and composite Bot identity are checked
+before enrichment. Compatibility wire names such as kgbase_status describe the
+existing browser contract, not a vendor-specific engine dependency.
+
+## Context Boundary
+
+```yaml
+purpose: Provider-neutral workspace knowledge management and bounded display aggregation.
+provides:
+  - KnowledgeManagementService
+  - ConversationKnowledgeService
+  - KnowledgeSourceRepository
+  - KnowledgeManagementConfig
+consumes:
+  - KnowledgeCatalog
+  - DatabasePlugin
+  - SpaceKnowledgeSync
+  - CollaboratorServiceProtocol
+  - HumanBotFriendshipServiceProtocol
+internal_dependencies:
+  - agentclaw.community.core.knowledge_management
+  - agentclaw.community.core.bot_knowledge
+  - agentclaw.community.core.bot_chat
+  - agentclaw.community.core.bot_collaborator
+  - agentclaw.community.core.spaces
+  - agentclaw.community.plugin_api
+  - agentclaw.community.kernel
+  - agentclaw.community.utils
+```
+
+### Change impact
+Management browser clients and external knowledge providers consume this contract.
+Configuration is disabled by default. Providers retain native authorization,
+content construction and schedule execution. No schema or publication change.
+
+## Legacy personal Bot ownership
+
+Candidate pages and composite Bot/Owner lookups accept historical Bots whose
+`space_id` is NULL only in their Owner's existing, undeleted PERSONAL space in
+the same environment. Explicit space assignments are unchanged. Team spaces
+and other Owners' personal spaces never inherit NULL Bots. The two disjoint
+SQL branches each apply seek, keyword, tenant and LIMIT filters before a bounded
+merge (at most twice the page size plus two). A point lookup determines whether
+the target is PERSONAL; Team pages retain their single Bot query. This avoids
+wide OR scans and does not depend on database UNION LIMIT pushdown. No Bot is
+moved and no space is created during reads.
+Grant-state, grant writes and authorized-Bot display use this same lookup.
+
+
+## Conversation-only references
+
+`GET /api/knowledge/bots/{bot_id}/conversation-knowledge-bases` accepts the
+composite `owner_id`, an opaque integer `cursor` (initially 0), and `limit` 1–20.
+The authenticated actor must have native conversation access: owner, public Bot,
+native MEMBER permission, or an accepted Human-to-Bot friendship verified by the
+existing friendship service. Dependency failures deny access. A browser page or
+client-supplied actor identity is never admission evidence.
+
+The response is `{"items":[{"kb_id":"...","name":"..."}],"next_cursor":null}`.
+Only currently granted, enabled and ready knowledge is projected. Grant pages,
+selection reads and metadata batches are bounded; filtered pages may be empty
+with a non-null cursor. Clients must follow that cursor rather than mistake an
+empty page for completion. No per-KB transport fan-out or full-list scan is used.
+
+After admission and supported-Bot validation, one indexed existence query checks
+for local enabled selections under the exact tenant/environment/Bot PK/space.
+When none exist (including first use or all selections disabled), return an empty
+terminal page without contacting the provider or creating its tenant. This also
+applies to legacy personal Bots resolved from NULL space IDs. Any enabled row
+retains the existing provider grant/metadata checks and their errors; no provider
+404, denial or dependency failure is converted to an empty result. Existence-read
+failures also propagate rather than being treated as absence.
+
+Bot sharing does not require the chatting actor to hold a direct KB viewer ACL.
+After conversation admission, provider metadata is resolved using the trusted Bot
+Owner, and only reference IDs/names are returned. This never grants direct KB
+asset, original-file, management or Editor access; existing management routes
+retain their original checks. ACLs, grants and enablement rows are never mutated.
+
+Both Bot GET URLs now accept `runtime_stage=draft|verify|online` (default draft).
+Personal draft responses retain their exact original fields. Service responses
+with valid stage state also expose selection_status, publication_id and captured_at. The shared local
+stage reader resolves native publications; draft uses enabled, verify uses the
+publication observation, online uses online_enabled with exact version/workflow
+provenance. Valid non-draft items have a boolean enabled and revision=null
+(read-only). Missing/corrupt stage data or optional stage-store failures return
+exactly {"items": [], "next_cursor": null} for both URLs: no unknown-state notice,
+status metadata or underlying exception is exposed. This is not a disabled-state
+write; existing permissions/invalid-input/provider errors are not swallowed. Service draft/verify additionally
+require native Editor standing; online keeps native conversation admission.
+Neither interface substitutes draft data for unknown historical state. Snapshots
+are always intersected with current grants and conversation-ready metadata.
+No new URL, runtime retrieval policy, ACL or native publish transaction is added.
+
+## Authorization activity display snapshots
+
+Grant writes forward a bounded `bot_name` from the existing scoped Bot display
+read to the provider. The browser cannot set that display snapshot. Missing
+metadata on retained-grant revocation sends an empty name; native authorization,
+CAS revision and composite Bot/Owner identity are unchanged. The authenticated
+actor stays separate from the target Owner. This adds no display lookup or
+per-target I/O. Activity responses remain provider-owned and pass through the
+content adapter without reconstructing historical names locally.
+
+## Whole-book content delivery
+
+The ordinary content router also exposes `yuque/books` (q/offset/limit) and
+`yuque/book-imports` (list/start/detail/cancel/sync/sync-runs/auto-sync) under
+the existing space/KB prefix. A start accepts exactly one positive `book_id`;
+there is no document-subset or caller-selected execution target. The provider
+must enforce native KB read/write ACLs and exact source/run ownership before
+repair or mutations. The remote adapter uses one fixed KB-scoped upstream request
+per operation; it does not enumerate documents, persist jobs or run a scheduler.
+
+Catalog search precedes pagination upstream. Import-list `next_offset` counts
+examined source rows, so sparse/empty pages may have a continuation. Task
+acceptance is not completion; preserve partial, capped, empty-skip and blocked
+calendar semantics. Whole-book operations must not widen preexisting subtree
+sources. Calendar writes retain the existing version CAS and do not imply an
+enabled platform worker. Existing single-document routes remain unchanged.
+
+The book catalog additionally accepts optional `source=personal|team`; omission
+preserves the existing combined catalog. `sources?exclude_book_documents=true`
+opts into a provider-side filtered page with matching totals. The default source
+list is unchanged. Book list/detail responses pass through the provider's
+persisted `current_run` progress; the BFF never repairs or guesses task state.
+
+`DELETE yuque/book-imports/{source_id}` sends one fixed provider request. `202`
+means the provider durably accepted asynchronous removal, not that child cleanup
+finished. `GET yuque/book-imports/{source_id}/deletion` reads its progress after
+the connector disappears from the active list. The provider disables scheduling,
+fences old work, preserves independent document participation, and owns child
+cleanup, recovery and terminal results. No document fan-out, mutation retries,
+local task records or scheduler are added to this adapter. Neither operation
+deletes the original remote book or its documents. Native authorization and
+failures are preserved; accepted deletion is never projected as completed.
+
+
+## Knowledge-base deletion forwarding
+
+`DELETE /api/knowledge/spaces/{space_id}/knowledge-bases/{kb_id}` forwards one
+provider deletion request. The default requests a configurable cancellable grace
+period; `?immediate=true` skips that period. A successful response is durable
+acceptance, not confirmation that physical resources have been reclaimed.
+`POST .../{kb_id}/cancel-delete` asks the provider to cancel before its deadline.
+Both reuse authentication, local space membership and native provider Owner/KB
+checks. No active catalog/registry read is required before cancellation: pending
+KBs can be hidden from those read surfaces. The adapter preserves native statuses,
+opaque KB identities, deadline, warnings and cleanup state. It adds no scheduler,
+worker, table, automatic retry, restore policy or frontend UI. Protected default
+KBs and expired/deleted cancellation remain provider-denied; the adapter does not
+weaken those rules.
+
+
+### Management-list lifecycle metadata
+
+`GET /api/knowledge/spaces/{space_id}/knowledge-bases` forwards the provider's
+management page, including `active` and `pending_delete` knowledge bases within
+the existing space membership and native ACL visibility. Both `items` and
+`knowledge_bases` expose the same optional provider fields:
+
+- `status`: `active` or `pending_delete`, independent of `kgbase_status`.
+- `delete_at_ms`: the persisted epoch-millisecond deadline, or null when active.
+- `can_cancel_delete`: the current actor's provider-owned cancellation capability.
+
+Explicit false/null values and the cursor are preserved. An older provider that
+omits these fields remains compatible; the adapter does not fabricate defaults,
+filter lifecycle states, read a clock or infer cancellation from `can_manage`.
+The provider owns Owner/deadline checks and excludes permanently deleted KBs.
+Seeing pending management metadata does not grant content/retrieval/Bot access.
+No extra provider request, local lifecycle state or database change is added.
+
+
+### Opt-in Yuque catalog browsing
+
+`GET .../yuque/books` additionally accepts `pagination=cursor` and optional
+`cursor` (up to 4096 characters). Both are forwarded only when supplied. The
+provider owns cursor authentication, source/query compatibility, page bounds and
+`{items,next_cursor}` response semantics. The adapter never decodes the bookmark
+or stores a query session. No total is synthesized. Clients must use the
+provider continuation, including on a short or empty page.
+
+Omitting the mode retains the existing q/source/offset/limit request unchanged.
+Global name and URL search stays on that full-catalog path, not on a partially
+loaded page. No import, synchronization, deletion or scheduler behavior changes.
+
+### Unified source catalog
+
+`GET /api/knowledge/spaces/{space_id}/knowledge-bases/{kb_id}/data-sources`
+accepts `offset >= 0` (default 0) and `1 <= limit <= 100` (default 20).
+After the existing login and space membership gates, `data_sources` forwards
+one GET to the configured provider's fixed KB-scoped `/data-sources` path with
+the prepared session. Native provider KB authorization remains authoritative.
+The response is passed through unchanged: `{total, offset, limit, next_offset,
+items}`. A document item has `kind=document` and nested `document`; a whole-book
+item has `kind=yuque_book` and nested `book`. IDs are provider-owned opaque strings.
+The provider owns ordering, filtering, totals and progress. The BFF does not merge
+pages, enrich items, retry via legacy lists, or schedule work. Existing `/sources`
+and `/yuque/book-imports` contracts are unchanged. Deploy provider support before
+clients switch to this additive endpoint.

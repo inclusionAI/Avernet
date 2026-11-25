@@ -12,6 +12,8 @@ from engine.community.kernel.dws_execution import (
     ExecutionError,
     GatewayWitness,
     RunObservation,
+    HostingDecision,
+    HostingReview,
 )
 from engine.community.plugins.dws_hosting.openclaw_transport import (
     HostingGatewayConfig,
@@ -23,6 +25,11 @@ class OpenClawHostingEngine:
     def __init__(self, config: HostingGatewayConfig):
         self._transport = HostingGatewayTransport(config)
         self._config = config
+
+    async def classify_scope(self, data: dict, prompt: str):
+        from engine.community.plugins.dws_hosting.llm_task import classify
+
+        return await classify(self._config, data, prompt)
 
     async def execute(self, request: AgentInvocation):
         try:
@@ -60,23 +67,23 @@ class OpenClawHostingEngine:
             pass
 
     async def repair(self, request: AgentInvocation) -> str:
-        return await self._model_result(request, "format_repair_unavailable")
+        return await self._model_result(request, HostingDecision, "format_repair_unavailable")
 
     async def review_reply(self, request: AgentInvocation) -> str:
-        return await self._model_result(request, "reply_review_unavailable")
+        return await self._model_result(request, HostingReview, "reply_review_unavailable")
 
-    async def _model_result(self, request: AgentInvocation, failure: str) -> str:
+    async def _model_result(self, request: AgentInvocation, model, failure: str) -> str:
+        from engine.community.plugins.dws_hosting.llm_task import invoke
+
         try:
-            async with aclosing(self._execute(request, raw_model=True)) as updates:
-                async for update in updates:
-                    if update.status == "completed":
-                        return update.result_json
-                    if update.status not in ("prepared", "accepted"):
-                        raise ExecutionError(failure)
-        except asyncio.CancelledError:
-            await self._abort(request)
-            raise
-        raise ExecutionError(failure)
+            value = await invoke(
+                self._config, request.message, request.instructions,
+                model.model_json_schema(), failure=failure,
+            )
+            checked = model.model_validate(value)
+            return json.dumps({"payloads": [{"text": checked.model_dump_json(exclude_unset=True)}]})
+        except ValueError:
+            raise ExecutionError(failure) from None
 
     async def _execute(self, request: AgentInvocation, *, raw_model: bool):
         params = {

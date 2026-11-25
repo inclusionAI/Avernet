@@ -102,6 +102,24 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def classify_forum_recipient(self, bot_id: str) -> tuple[str, str | None]:
+        """Classify one bare Bot ID in the current tenant and environment.
+
+        Return live with its owner, deleted without an owner, or missing/ambiguous.
+        The classification is a single read snapshot, not a lifecycle lock.
+        """
+        ...
+
+    @abstractmethod
+    def list_live_by_bot_id(self, bot_id: str) -> List[Dict[str, Any]]:
+        """List ALL live rows sharing this bot_id in this env (no .first()).
+
+        共享 bot_id(如 ``default``,每用户一行)与启动订正的归属判定
+        都依赖看到全部 live 行。
+        """
+        ...
+
+    @abstractmethod
     def get_by_id_and_entity(
         self, bot_id: str, entity_id: str
     ) -> Optional[Dict[str, Any]]:
@@ -111,6 +129,17 @@ class BotRepository(Protocol):
     @abstractmethod
     def get_by_pk(self, bot_pk: int) -> Optional[Dict[str, Any]]:
         """Get one live Bot by its immutable database primary key in this env."""
+        ...
+
+    @abstractmethod
+    def list_matches_by_current_owner(
+        self, bot_id: str, owner_id: str
+    ) -> List[Dict[str, Any]]:
+        """List at most two live Bots by exact human owner in this tenant/env.
+
+        An entity identifier with the same spelling is not an owner match.
+        Callers must reject multiple matches rather than select arbitrarily.
+        """
         ...
 
     @abstractmethod
@@ -161,13 +190,15 @@ class BotRepository(Protocol):
     @abstractmethod
     def page_live_bots_by_pks(
         self, bot_pks: list[int], *, exclude_owner_id: str, entity_pairs: list[tuple[str, str]] | None,
-        page: int, page_size: int,
+        page: int, page_size: int, stage: str | None = None,
     ) -> tuple[int, list[dict[str, Any]]]:
         """Page live relation targets by stable PK; optional app scope is exact entity pairs.
 
         None means a human listing, an empty list means no application scope.
         Historical collaborator owner snapshots are never used to locate Bots.
         Current Owners are excluded from their own collaboration collection.
+        Optional stage filters only service Bots before count/pagination, using
+        the canonical published-runtime selection. Other kinds are unchanged.
         """
         ...
 
@@ -233,6 +264,7 @@ class BotRepository(Protocol):
         page: int = 1,
         page_size: int = 20,
         bot_ids: list[str] | None = None,
+        stage: str | None = None,
     ) -> tuple[int, List[Dict[str, Any]]]:
         """List bots by conditions with pagination.
 
@@ -245,6 +277,8 @@ class BotRepository(Protocol):
         business Space (exact after canonical string persistence), ``engine``
         filters on the active engine (exact), and ``status`` filters on lifecycle
         status (exact). All are optional and additive.
+        ``stage`` selects service Bots with that runtime before pagination;
+        other Bot kinds retain the existing matching behavior.
         """
         ...
 
@@ -267,6 +301,21 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_metadata_locator_candidates(
+        self, pairs: List[tuple[str, str]],
+    ) -> Dict[tuple[str, str], List[Dict[str, Any]]]:
+        """At most two live candidates per metadata pair, this tenant/env.
+
+        At most 100 distinct pairs; empty input returns {}. Owner/entity
+        matches (marked by private bool ``_metadata_locator_match``, using
+        database comparison semantics) take precedence over bare-ID candidates;
+        default never falls back to bare ID. The consumer must reject ambiguity and validate any
+        retained BCN reference before accepting a nonmatching locator.
+        This is a display lookup, not an authorization grant.
+        """
+        ...
+
+    @abstractmethod
     def list_bots_by_owner_bot_pairs(
         self,
         pairs: List[tuple[str, str]],
@@ -274,6 +323,18 @@ class BotRepository(Protocol):
         page_size: int = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
         """List live Bots matching exact ``(bot_id, owner_id)`` pairs."""
+        ...
+
+    @abstractmethod
+    def list_catalog_bots_by_owner_bot_pairs(
+        self, pairs: List[tuple[str, str]],
+    ) -> List[Dict[str, Any]]:
+        """Stage-enriched first ``len(pairs)`` matches, without COUNT.
+
+        Same tenant/env/deletion scope and newest-first ordering as
+        list_bots_by_owner_bot_pairs(page=1, page_size=len(pairs)). At most
+        100 input pairs; empty input returns []. This grants no permissions.
+        """
         ...
 
     @abstractmethod
@@ -360,6 +421,7 @@ class BotRepository(Protocol):
         exclude_bot_type: str | None = None,
         *,
         exclude_active_engine: str | None = None,
+        exclude_identity_inheriting: bool = False,
     ) -> int:
         """Count bots by owner_id.
 
@@ -372,6 +434,9 @@ class BotRepository(Protocol):
                 Used to exclude desktop bots from cloud bot limits.
             exclude_active_engine: Optional case-insensitive engine exclusion for
                 quota checks. NULL engines still count. Default counts all engines.
+            exclude_identity_inheriting: If provided, exclude bots that inherit
+                another bot's identity. Those hold no passport of their own, so
+                they consume no identity slot.
         """
         ...
 
@@ -413,8 +478,29 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def count_identity_bot_children(self, bot_id: str, *, owner_id: str) -> int:
+        """How many live Bots inherit identity from ``bot_id``.
+
+        Guards deletion of an identity Bot: while any live Bot depends on its
+        passport, deleting the source would strand them with no identity and no
+        way to be re-pointed. Soft-deleted Bots are not counted.
+        """
+        ...
+
+    @abstractmethod
     def exists_by_owner_and_bot_type(self, owner_id: str, bot_type: str) -> bool:
         """Check if the owner has a live Bot of the requested type."""
+        ...
+
+    @abstractmethod
+    def is_soft_deleted(self, bot_id: str, entity_id: str) -> bool:
+        """Whether a soft-deleted Bot already exists for this bot and entity.
+
+        Every ordinary lookup filters ``is_delete == 0``, so a caller that
+        must tell "already deleted" apart from "never landed" cannot use
+        them: both answer ``None``. This is that distinction, scoped to the
+        current env like every other query on the table.
+        """
         ...
 
     @abstractmethod
@@ -718,4 +804,14 @@ class RenderScreenRepository(Protocol):
     @abstractmethod
     def delete_by_id(self, *, record_id: int) -> None:
         """软删除（is_delete=1）。"""
+        ...
+
+    @abstractmethod
+    def list_all_for_backfill(self) -> list[RenderScreenRecord]:
+        """启动订正专用:当前 env 全量未删除记录,不带 owner 过滤。"""
+        ...
+
+    @abstractmethod
+    def update_owner_by_id(self, *, record_id: int, owner_id: str) -> None:
+        """启动订正专用:按主键归位记录的 owner scope。"""
         ...

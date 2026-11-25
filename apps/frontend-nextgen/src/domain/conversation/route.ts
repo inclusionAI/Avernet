@@ -13,8 +13,8 @@ import type {
 } from './types';
 
 const SECTIONS: readonly ConversationBotSection[] = ['managed', 'team', 'friend'];
-const ORIGINS: readonly ConversationOrigin[] = ['mine', 'others'];
-const SCOPES: readonly ConversationSessionScope[] = ['all', 'favorite'];
+const ORIGINS: readonly ConversationOrigin[] = ['mine', 'others', 'collab'];
+const SCOPES: readonly ConversationSessionScope[] = ['all', 'favorite', 'archived'];
 
 function toEnumValue<T extends string>(candidates: readonly T[], raw: string | null): T | undefined {
   return candidates.find((candidate) => candidate === raw);
@@ -28,16 +28,20 @@ function nonEmpty(value: string | null): string | undefined {
 export function parseConversationRoute(input: URLSearchParams | string): ConversationRouteState {
   const params = typeof input === 'string' ? new URLSearchParams(input) : input;
   const section = toEnumValue(SECTIONS, params.get('section'));
-  const botId = nonEmpty(params.get('bot'));
+  // 老版分享链接兼容（老版 /private-chat/chat?id=bot_id:owner_id 重定向后落本页）：
+  // bot 缺省时，含冒号的 id 复合串视同 bot 别名；bot 参数始终优先，无冒号的 id 不接管。
+  const legacyBotId = params.get('id');
+  const botId =
+    nonEmpty(params.get('bot')) ??
+    (legacyBotId && legacyBotId.includes(':') ? nonEmpty(legacyBotId) : undefined);
   let origin = toEnumValue(ORIGINS, params.get('origin'));
   let scope = toEnumValue(SCOPES, params.get('scope'));
   let friendUserId = nonEmpty(params.get('friend'));
   const sessionId = nonEmpty(params.get('session'));
 
-  // 非法组合归一化:others 移除 scope(强制按 all 读取);
-  // friend section 移除 managed-only 字段(origin/scope/friend);
+  // 管理/团队空间 Bot 保留 scope，由 Store 按 Bot 类型决定普通 Bot others 是否强制 all;
+  // friend section 移除 managed-only 字段(origin/scope/friend)。
   // section 缺省时保持未解析,由 Hook 的目录匹配推导。
-  if (origin === 'others') scope = undefined;
   if (section === 'friend') {
     origin = undefined;
     scope = undefined;
@@ -62,9 +66,8 @@ export function serializeConversationRoute(route: ConversationRouteState): strin
     params.set('origin', origin);
     if (origin === 'others') {
       if (route.friendUserId) params.set('friend', route.friendUserId);
-    } else if (route.scope === 'favorite') {
-      params.set('scope', route.scope);
     }
+    if (route.scope && route.scope !== 'all') params.set('scope', route.scope);
     if (route.sessionId) params.set('session', route.sessionId);
     return params.toString();
   }

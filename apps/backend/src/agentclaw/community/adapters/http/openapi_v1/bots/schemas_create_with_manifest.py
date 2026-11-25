@@ -119,6 +119,22 @@ class BotCreateWithManifest(BotCreate):
         ),
     )
 
+    identity_bot_id: str | None = Field(
+        default=None,
+        description=(
+            "Create this bot as an **identity-inheriting bot**: it holds no "
+            "passport of its own and runs under the given bot's AgentPass "
+            "identity. The target must be a bot you own whose passport is "
+            "issued, and this request's declared MCP/CLI scope must be a "
+            "subset of its scope.\n\n"
+            "Omit for an ordinary bot — behaviour is unchanged, and ordinary "
+            "creation is what every existing caller does.\n\n"
+            "When set, creation never authorizes: the status starts at "
+            "`CREATING` and `AWAITING_AUTHORIZATION` is never reported. Both "
+            "`iframe_url` and `redirect_url` are empty in the response."
+        ),
+    )
+
 
 class BotCreateWithManifestAccepted(BaseModel):
     """What submission answers with: an id, and where to send the user.

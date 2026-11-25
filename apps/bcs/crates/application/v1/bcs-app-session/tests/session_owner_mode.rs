@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use bcs_app_session::{SessionServiceConfig, SessionServiceImpl};
+use bcs_app_session::SessionServiceImpl;
 use bcs_bot::BotCore;
+use bcs_bot_store::MemoryBotRepo;
 use bcs_friend::FriendCore;
 use bcs_group::{GroupCore, MemoryGroupRepo};
-use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, SessionService,
     UpdateSession, UpdateSessionParticipant,
@@ -19,6 +19,7 @@ use bcs_session::{SessionLaunchApplication, SessionManagementServiceImpl};
 use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::{
     NoopCollaborationRuntimeService, NoopGroupMessageHistoryService, NoopSystemMessageService,
+    authority_hook_for,
 };
 
 fn human(id: &str) -> AuthenticatedCaller {
@@ -33,7 +34,12 @@ fn human(id: &str) -> AuthenticatedCaller {
 async fn fixture() -> (SessionServiceImpl, Arc<MemorySessionRepo>, String) {
     let group_repo = Arc::new(MemoryGroupRepo::new());
     let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
-    let bots = Arc::new(BotCore::memory());
+    // Ownership arrives as the historical `created_by` fact only, so the
+    // legacy compat window is armed exactly as production defaults —
+    // the authority hook resolves it into the current control edge.
+    let bot_repo = Arc::new(MemoryBotRepo::new());
+    bot_repo.set_legacy_created_by_fallback(true);
+    let bots = Arc::new(BotCore::with_repo(bot_repo.clone()));
     for (id, owner) in [("driver", "manager"), ("owned", "alice"), ("other", "bob")] {
         bots.register(id.into(), BotCapabilities::default()).await.unwrap();
         bots.save_created_by(id, owner, true).await.unwrap();
@@ -62,10 +68,9 @@ async fn fixture() -> (SessionServiceImpl, Arc<MemorySessionRepo>, String) {
     ));
     let service = SessionServiceImpl::new(
         launch, sessions, groups, bots, Arc::new(FriendCore::memory()),
-        Arc::new(RelationCore::memory()), repo.clone(),
-        Arc::new(NoopGroupMessageHistoryService), runtime, system,
-        SessionServiceConfig { relation_env: "dev".into() },
-    );
+        repo.clone(), Arc::new(NoopGroupMessageHistoryService), runtime, system,
+    )
+    .with_bot_authority_hook(authority_hook_for(bot_repo));
     (service, repo, session.id)
 }
 

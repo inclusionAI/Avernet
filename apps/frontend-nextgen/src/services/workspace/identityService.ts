@@ -1,14 +1,17 @@
 import type { IdentityView } from '@/domain/collaboration';
 import { normalizeOpenApiUserId } from '@/domain/userIdentity';
+import { getCapabilities } from '@/capabilities';
 import { listBots } from '@/services/backendApi/bots/botController';
 import { listMyBots } from '@/services/backendApi/collaboration/collaborationBotController';
 import { isEnvelopeSuccessAnyDialect } from '@/services/backendApi/types';
+import { normalizeAvatarUrl } from '@/utils/avatarSource';
 import { ENABLE_TEST_USER, TEST_USER_IDENTITY } from './testUser';
 
 export interface DomainError {
   code: string;
   friendlyMessage: string;
   canRetry: boolean;
+  alreadyHandled?: boolean;
 }
 export type DomainResult<T> = { ok: true; data: T } | { ok: false; error: DomainError };
 
@@ -161,6 +164,11 @@ async function enrichBotMetadata<T extends { id: string; kind: string; engine?: 
   items: T[],
   userId?: string,
 ): Promise<T[]> {
+  // BCS-only（可选 Backend 增强，bcs-standalone-friend-discovery）：能力关闭时直接保留
+  // bots/mine 装配的 Human/受管 Bot 身份，不发起批量 Bot 补充请求；不能等 Backend 404
+  // 后才降级，也不在此捕获 404 伪装“未部署 Backend”。
+  if (!getCapabilities().getPublicBotBackendEnabled()) return items;
+
   const hasBots = items.some((item) => item.kind === 'bot');
   if (!hasBots) return items;
 
@@ -220,7 +228,7 @@ async function doLoadIdentities(): Promise<DomainResult<LoadIdentitiesResult>> {
             id,
             kind: b.kind === 'human' ? 'user' : 'bot',
             displayName: readString(b.name) ?? '未命名',
-            avatarUrl: readString(b.avatar_url),
+            avatarUrl: normalizeAvatarUrl(b.avatar_url),
             online,
             status: online ? 'online' : 'hidden',
             reachability,

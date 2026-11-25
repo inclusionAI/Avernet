@@ -172,7 +172,7 @@ class ServiceLifecycleView(ServiceLifecyclePort):
         }
         records_by_pk: dict[int, list[BotPublishRecord]] = defaultdict(list)
         for record in self._publish_repo.list_by_source_bots(
-            tuple(bot_by_pk), get_current_env()
+            tuple(bot_by_pk), get_current_env(), resolve_artifacts=False
         ):
             bot = bot_by_pk.get(record.source_bot_pk)
             if bot is not None and record.source_bot_id == bot.get("bot_id"):
@@ -205,7 +205,10 @@ class ServiceLifecycleView(ServiceLifecyclePort):
                     live_version=live.version if live else None,
                     has_draft=has_draft,
                 )
-                for record in self._visible(records)
+                # Select the visible versions by lifecycle policy first.
+                for record in sorted(
+                    self._visible(records), key=lambda r: r.gmt_create, reverse=True
+                )
             )
             result[bot_id] = cards or (
                 ServiceLifecycleCard(

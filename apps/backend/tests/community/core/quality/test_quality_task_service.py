@@ -164,7 +164,7 @@ class TestQualityTaskService:
         created_record = make_record(id=1, uuid="a1b2c3d4e5f67890a1b2c3d4e5f67890")
         mock_repo.create.return_value = created_record
 
-        with patch("agentclaw.community.core.quality.services.quality_task_service.uuid.uuid4") as mock_uuid:
+        with patch("agentclaw.community.core.quality.services.quality_task_service.uuid_mod.uuid4") as mock_uuid:
             mock_uuid.return_value.hex = "a1b2c3d4e5f67890a1b2c3d4e5f67890"
             result = service.create_task(
                 task_type="eval",

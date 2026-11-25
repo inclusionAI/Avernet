@@ -50,16 +50,23 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
     _window,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.converter_creation import reconcile_created_session
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import OpenApiSessionFileAdapter
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import (
+    OpenApiSessionFileAdapter,
+    SessionFileRuntimeTargetDep,
+    UploadActorNameDep,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.file_access import (
+    authorize_file_list,
+    authorize_file_operation,
+)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     DeviceUuidQuery,
     OwnerIdDep,
     StageQuery,
 )
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.friend_chat import (
-    FriendUserIdQuery, authorize_friend_chat,
-)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.friend_chat import FriendUserIdQuery
+from .backend import resolve_session_backend as _resolve_session_backend
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
@@ -79,16 +86,16 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.core.engine_runtime.session_key import SessionKeyCodecRegistry
 from agentclaw.community.core.resources.service import FileTooLargeError
-from agentclaw.community.core.expert_chat.errors import (
-    BotNotFoundError as ExpertBotNotFoundError,
-    ConnectionError as ExpertConnectionError,
-)
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest
+from .listing import list_sessions, _raise_expert_error
 from agentclaw.community.di import Injected
+from agentclaw.community.utils.runtime_list_timing import mark
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/sessions",
     tags=["sessions"],
     route_class=PublicAPIRoute,
 )
+router.add_api_route("", list_sessions, methods=["GET"], response_model=Envelope[SessionPage])
 
 #: The path parameter naming the session an operation addresses.
 SessionIdPath = Annotated[
@@ -114,118 +121,6 @@ _LOOKAHEAD = 1
 #: Generous for a conversation; bounded enough that a page number cannot be
 #: turned into device load.
 _MAX_HISTORY_DEPTH = 5000
-
-async def _resolve_session_backend(
-    *,
-    relay: EngineRuntimeRelayProtocol,
-    friendships: HumanBotFriendshipServiceProtocol,
-    expert: ExpertChatServiceProtocol,
-    request: Request,
-    bot_id: str,
-    user_id: str,
-    owner_id: str,
-    friend_user_id: str | None,
-    stage: RuntimeStage,
-    device_uuid: str | None = None,
-):
-    """Select the unchanged operator backend or explicit friend backend."""
-    if friend_user_id is None:
-        return await resolve_operable_bot(
-            relay,
-            bot_id,
-            caller_id=user_id,
-            owner_id=owner_id,
-            stage=stage.value,
-            surface="sessions",
-        )
-    if device_uuid is not None:
-        raise EngineResourceNotFoundError("instance selection is unavailable for friend chat")
-    if stage is not RuntimeStage.DRAFT:
-        raise EngineResourceNotFoundError("friend chat is available only in draft")
-    await authorize_friend_chat(
-        request=request, bot_id=bot_id, caller_id=user_id, owner_id=owner_id,
-        friend_user_id=friend_user_id, friendships=friendships, expert=expert,
-    )
-    return None
-
-
-def _raise_expert_error(error: Exception) -> None:
-    if isinstance(error, ExpertBotNotFoundError):
-        raise EngineResourceNotFoundError("friend session not found") from error
-    if isinstance(error, ExpertConnectionError):
-        raise EngineDeviceNotReadyError("friend bot runtime is not ready") from error
-    raise error
-
-
-@router.get("", response_model=Envelope[SessionPage])
-@envelope_errors
-async def list_sessions(
-    bot_id: BotIdPath,
-    page: PageParamsDep,
-    user_id: UserIdDep,
-    owner_id: OwnerIdDep,
-    request: Request,
-    stage: StageQuery = RuntimeStage.DRAFT,
-    device_uuid: DeviceUuidQuery = None,
-    f_user_id: FriendUserIdQuery = None,
-    agent_id: Annotated[
-        str | None, Query(description="Only sessions belonging to this agent.")
-    ] = None,
-    session_key: Annotated[
-        str | None,
-        Query(
-            description="Only the session with this key. Pass the value "
-            "verbatim; no encoding is required."
-        ),
-    ] = None,
-    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
-    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
-    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
-) -> Envelope[SessionPage]:
-    """List the bot's sessions."""
-    facts = await _resolve_session_backend(
-        relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
-    )
-    params: dict[str, Any] = _window(page)
-    if owner_id == user_id:
-        params.update(user_id=user_id, source="all_but_others")
-    if agent_id:
-        params["agent_id"] = agent_id
-    # Both filters are applied upstream, *before* the engine paginates — so
-    # they have to travel with the window rather than being applied to what
-    # came back, or the page boundaries would not line up with the filter.
-    if session_key:
-        params["session_key"] = session_key
-    if facts is None:
-        try:
-            friend_result = await expert.list_chat_sessions(
-                user_id=f_user_id, bot_id=bot_id, owner_id=owner_id,
-                session_key=session_key, limit=params["limit"],
-                offset=params["offset"],
-                iam_token=request.cookies.get("IAM_TOKEN") or None,
-                bcn_friend_authorized=True,
-            )
-        except Exception as error:
-            _raise_expert_error(error)
-        mapped = [_map_session(d) for d in _as_list(friend_result)]
-        total, items = _page(mapped, page, reported=friend_result.get("total"))
-        return page_envelope(total, items, request)
-    result = await relay.call(
-        bot_id=bot_id,
-        owner_id=owner_id,
-        facts=facts,
-        stage=stage.value,
-        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
-        method="GET",
-        path="/api/sessions",
-        params=params,
-    )
-    mapped = [_map_session(d, engine_type=facts.active_engine) for d in _as_list(result.data)]
-    # The session list reports no total; derive it from the window.
-    total, items = _page(mapped, page, reported=result.total)
-    return page_envelope(total, items, request)
-
 
 @router.post("", status_code=201, response_model=Envelope[Session])
 @envelope_errors
@@ -296,7 +191,11 @@ async def create_session(
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError("engine returned no session")
-    item = await reconcile_created_session(relay=relay, facts=facts, bot_id=bot_id, owner_id=owner_id, user_id=user_id, stage=stage, created_item=result.data, requested_title=body.title, device_uuid=device_uuid)
+    item = await reconcile_created_session(
+        relay=relay, facts=facts, bot_id=bot_id, owner_id=owner_id,
+        user_id=user_id, stage=stage, device_uuid=device_uuid,
+        created_item=result.data, requested_title=body.title,
+    )
     return created(_map_session(item, engine_type=facts.active_engine), request)
 
 
@@ -319,6 +218,7 @@ async def list_session_favorites(
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
 ) -> Envelope[SessionPage]:
     """List sessions the acting user has favorited on this bot runtime."""
+    mark("handler")
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
         bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
@@ -330,7 +230,7 @@ async def list_session_favorites(
                 user_id=f_user_id, bot_id=bot_id, owner_id=owner_id,
                 favorite_only=True, limit=window["limit"], offset=window["offset"],
                 iam_token=request.cookies.get("IAM_TOKEN") or None,
-                bcn_friend_authorized=True,
+                bcn_friend_authorized=True, actor_user_id=user_id,
             )
         except Exception as error:
             _raise_expert_error(error)
@@ -390,7 +290,7 @@ async def get_session(
             item = await expert.get_owned_chat_session(
                 f_user_id, bot_id, owner_id, session_id,
                 request.cookies.get("IAM_TOKEN") or None,
-                bcn_friend_authorized=True,
+                bcn_friend_authorized=True, actor_user_id=user_id,
             )
         except Exception as error:
             _raise_expert_error(error)
@@ -650,29 +550,34 @@ async def create_session_file_upload_intents(
     bot_id: BotIdPath,
     session_id: SessionIdPath,
     body: SessionFileUploadIntentRequest,
+    creator_name: UploadActorNameDep,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
+    runtime_target: SessionFileRuntimeTargetDep,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[SessionFileUploadIntentResult]:
-    facts = await resolve_operable_bot(
-        relay,
-        bot_id,
-        caller_id=user_id,
-        owner_id=owner_id,
-        stage=stage.value,
-        surface="sessions",
+    access = await authorize_file_operation(
+        request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+        relay=relay, friendships=friendships, expert=expert,
+        runtime_target=runtime_target, require_caller_instance=True,
     )
     try:
         intents = adapter.create_upload_intents(
             actor_user_id=user_id,
+            creator_name=creator_name,
+            target=runtime_target,
             owner_id=owner_id,
             bot_id=bot_id,
             session_key=session_id,
-            stage=stage.value,
-            engine_type=facts.active_engine,
+            stage=access.stage,
+            engine_type=access.facts.active_engine,
             files=[
                 (item.filename, item.size_bytes, item.content_hash)
                 for item in body.files
@@ -710,12 +615,16 @@ async def complete_session_file_upload(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[SessionFile]:
-    await resolve_operable_bot(
-        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
-        surface="sessions",
+    await authorize_file_operation(
+        request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+        relay=relay, friendships=friendships, expert=expert,
     )
     try:
         record = adapter.complete_upload(
@@ -743,12 +652,16 @@ async def session_file_materialize_status(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[SessionFile]:
-    await resolve_operable_bot(
-        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
-        surface="sessions",
+    await authorize_file_operation(
+        request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+        relay=relay, friendships=friendships, expert=expert,
     )
     try:
         record = adapter.get_status(
@@ -770,24 +683,32 @@ async def list_ready_session_files(
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
+    runtime_target: SessionFileRuntimeTargetDep,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[SessionFileList]:
-    await resolve_operable_bot(
-        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
-        surface="sessions",
+    resolved_stage = await authorize_file_list(
+        request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id, runtime_target=runtime_target,
+        relay=relay, friendships=friendships, expert=expert,
     )
     try:
-        records = adapter.list_ready(
-            owner_id=owner_id,
-            bot_id=bot_id,
+        records = await adapter.list_ready(
+            target=RuntimeBindingRequest(
+                target=runtime_target,
+                bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=resolved_stage,
+            ),
             session_key=session_id,
+            session_user_id=f_user_id,
         )
     except ValueError as exc:
         _session_file_not_found(exc)
     return envelope(
-        SessionFileList(files=[_session_file_resource(record) for record in records]),
+        SessionFileList(files=[SessionFile(**record) for record in records]),
         request,
     )
 
@@ -809,23 +730,33 @@ async def stream_session_file_content(
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
+    runtime_target: SessionFileRuntimeTargetDep,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     disposition: DispositionQuery = "inline",
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> StreamingResponse:
-    await resolve_operable_bot(
-        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
-        surface="sessions",
+    resolved_stage = await authorize_file_list(
+        request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id, runtime_target=runtime_target,
+        relay=relay, friendships=friendships, expert=expert,
     )
     try:
-        record, upstream = await adapter.open_content(
-            owner_id=owner_id,
-            bot_id=bot_id,
+        upstream = await adapter.open_content(
+            target=RuntimeBindingRequest(
+                target=runtime_target,
+                bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=resolved_stage,
+            ),
             session_key=session_id,
+            session_user_id=f_user_id,
             resource_id=resource_id,
             disposition=disposition,
         )
+    except FileTooLargeError:
+        raise
     except ValueError as exc:
         if str(exc) == "resource_preview_too_large":
             raise FileTooLargeError("File too large for preview") from exc
@@ -840,8 +771,6 @@ async def stream_session_file_content(
         finally:
             await upstream.close()
     headers = _session_file_headers(upstream.headers)
-    if upstream.status_code == 200 and headers.get("Content-Type", "").split(";", 1)[0].lower() != "application/json":
-        headers.setdefault("Content-Disposition", f'{disposition}; filename="{record.filename}"')
     return StreamingResponse(
         body(),
         status_code=upstream.status_code,
@@ -858,18 +787,26 @@ async def delete_session_file(
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
+    runtime_target: SessionFileRuntimeTargetDep,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
 ) -> Envelope[Deleted]:
-    await resolve_operable_bot(
-        relay, bot_id, caller_id=user_id, owner_id=owner_id, stage=stage.value,
-        surface="sessions",
+    access = await authorize_file_operation(
+        request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+        relay=relay, friendships=friendships, expert=expert,
+        runtime_target=runtime_target, require_caller_instance=True,
     )
     try:
-        adapter.delete(
-            owner_id=owner_id,
-            bot_id=bot_id,
+        await adapter.delete(
+            target=RuntimeBindingRequest(
+                target=runtime_target,
+                bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=access.stage,
+            ),
             session_key=session_id,
             resource_id=resource_id,
         )
@@ -904,6 +841,7 @@ async def list_session_messages(
     depth is rejected with 422 rather than returned empty, so an end of history
     is never confused with the limit of what this endpoint serves.
     """
+    mark("handler")
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
         bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
@@ -916,7 +854,7 @@ async def list_session_messages(
                 f_user_id, bot_id, owner_id, session_id,
                 limit=window["limit"], offset=0,
                 iam_token=request.cookies.get("IAM_TOKEN") or None,
-                bcn_friend_authorized=True,
+                bcn_friend_authorized=True, actor_user_id=user_id,
             )
         except Exception as error:
             _raise_expert_error(error)

@@ -8,6 +8,7 @@ async fn two_subbots_register_with_one_parent_and_distinct_refs() {
     let a = f.core.register(a).await.unwrap();
     let mut b = request(&f, ProviderRegistrationMode::Plugin);
     b.provider_bot_ref = "stable-ref:coder".into();
+    b.bot_name = "Coder bot".into();
     let b = f.core.register(b).await.unwrap();
     assert_ne!(a.record.bot_uuid, b.record.bot_uuid);
     assert_eq!(a.record.provider_bot_ref, "stable-ref:reviewer");
@@ -17,6 +18,7 @@ async fn two_subbots_register_with_one_parent_and_distinct_refs() {
     }
     let mut duplicate = request(&f, ProviderRegistrationMode::Plugin);
     duplicate.provider_bot_ref = "stable-ref:reviewer".into();
+    duplicate.bot_name = "Distinct name with duplicate ref".into();
     assert!(matches!(f.core.register(duplicate).await, Err(ServiceError::Conflict(_))));
 }
 
@@ -136,4 +138,99 @@ async fn generic_writes_cannot_reparent_a_provider_bot() {
     caps.agent_code = Some("other".into());
     assert!(core.save_to_storage(&bot.record.bot_uuid, &caps).await.is_err());
     assert!(core.register(bot.record.bot_uuid.clone(), caps).await.is_err());
+}
+
+#[tokio::test]
+async fn admin_avatar_update_preserves_provider_parent_identity() {
+    use bcs_bot::BotOnboarding;
+    use bcs_service_api::{AdminBotOnboardCommand, BotOnboardingService};
+    use bcs_service_api::types::bot_profile::AvatarChange;
+
+    for mode in [ProviderAuthMode::AgentPass, ProviderAuthMode::AgentPassSubbots] {
+        let f = fixture_with_auth(None, true, None, mode).await;
+        let mut command = request(&f, ProviderRegistrationMode::Plugin);
+        command.provider_bot_ref = "stable-ref:reviewer".into();
+        let registered = f.core.register(command).await.unwrap();
+        let id = &registered.record.bot_uuid;
+        let parent = registered.identity.agent_code;
+        let onboarding = BotOnboarding::new(f.registry.clone(), f.relations.clone(), true, None);
+        let result = onboarding.admin_onboard_bot(AdminBotOnboardCommand {
+            bot_uuid: id.clone(),
+            name: None,
+            summary: None,
+            domains: vec![],
+            skills: vec![],
+            scopes: vec![],
+            binding_channels: None,
+            actor_identity: None,
+            avatar: AvatarChange::Set("https://example.test/avatar.png".into()),
+        }).await.unwrap();
+
+        assert!(result.onboarded);
+        let stored = f.registry.try_get(id).await.unwrap().unwrap();
+        assert_eq!(stored.capabilities.agent_code, parent, "auth mode: {mode:?}");
+        assert_eq!(
+            f.registry.avatar_urls(&[id.clone()]).await.unwrap()[id].as_deref(),
+            Some("https://example.test/avatar.png"),
+        );
+    }
+}
+
+#[tokio::test]
+async fn profile_update_rejects_reparenting_before_mutating_avatar() {
+    use bcs_service_api::types::bot_profile::{AvatarChange, ExistingProfileUpdate};
+
+    for mode in [ProviderAuthMode::AgentPass, ProviderAuthMode::AgentPassSubbots] {
+        let f = fixture_with_auth(None, true, None, mode).await;
+        let mut command = request(&f, ProviderRegistrationMode::Plugin);
+        command.provider_bot_ref = "stable-ref:reviewer".into();
+        let registered = f.core.register(command).await.unwrap();
+        let id = &registered.record.bot_uuid;
+        f.registry.update_avatar_existing(id, AvatarChange::Set("https://example.test/original.png".into())).await.unwrap();
+        let mut caps = f.registry.try_get(id).await.unwrap().unwrap().capabilities;
+        caps.agent_code = Some("other-parent".into());
+
+        let result = f.registry.update_profile_existing(id, ExistingProfileUpdate {
+            capabilities: caps,
+            avatar: AvatarChange::Set("https://example.test/rejected.png".into()),
+        }).await;
+
+        assert!(matches!(result, Err(ServiceError::Unauthorized(_))), "auth mode: {mode:?}, result: {result:?}");
+        let stored = f.registry.try_get(id).await.unwrap().unwrap();
+        assert_eq!(stored.capabilities.agent_code, registered.identity.agent_code);
+        assert_eq!(
+            f.registry.avatar_urls(&[id.clone()]).await.unwrap()[id].as_deref(),
+            Some("https://example.test/original.png"),
+        );
+    }
+}
+
+#[tokio::test]
+async fn profile_update_of_deleted_provider_bot_returns_missing_without_mutation() {
+    use bcs_service_api::types::bot_profile::{AvatarChange, ExistingProfileUpdate, ProfileWrite};
+
+    for mode in [ProviderAuthMode::AgentPass, ProviderAuthMode::AgentPassSubbots] {
+        let f = fixture_with_auth(None, true, None, mode).await;
+        let mut command = request(&f, ProviderRegistrationMode::Plugin);
+        command.provider_bot_ref = "stable-ref:reviewer".into();
+        let registered = f.core.register(command).await.unwrap();
+        let id = &registered.record.bot_uuid;
+        f.registry.update_avatar_existing(id, AvatarChange::Set("https://example.test/retained.png".into())).await.unwrap();
+        let mut caps = f.registry.try_get(id).await.unwrap().unwrap().capabilities;
+        caps.agent_code = None;
+        assert!(f.registry.soft_delete(id).await);
+        assert!(f.membership.get_provider_bot(id).await.unwrap().unwrap().is_deleted);
+
+        let result = f.registry.update_profile_existing(id, ExistingProfileUpdate {
+            capabilities: caps,
+            avatar: AvatarChange::Set("https://example.test/rejected.png".into()),
+        }).await.unwrap();
+
+        assert_eq!(result, ProfileWrite::Missing, "auth mode: {mode:?}");
+        assert!(f.registry.try_get(id).await.unwrap().is_none());
+        assert_eq!(
+            f.registry.avatar_urls(&[id.clone()]).await.unwrap()[id].as_deref(),
+            Some("https://example.test/retained.png"),
+        );
+    }
 }

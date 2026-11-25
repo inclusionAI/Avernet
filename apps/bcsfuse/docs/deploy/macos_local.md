@@ -605,6 +605,6 @@ BCSFuse Open-Core macOS local deployment provides:
 ✅ **Comprehensive troubleshooting guide**
 ✅ **Isolated danger script for data reset**
 
-For Docker deployment, see: [docker.md](docker.md)
+For Docker deployment, see: [Docker image definition](../../../../docker/services/bcsfuse.dockerfile)
 
-For troubleshooting, see: [troubleshooting.md](troubleshooting.md)
+For troubleshooting, see: [Troubleshooting](open-source-deployment-guide.md#troubleshooting)

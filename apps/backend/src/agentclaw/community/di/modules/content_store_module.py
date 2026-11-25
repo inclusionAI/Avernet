@@ -6,21 +6,21 @@ Registry files what it produces and reads it back scoped by the rows it filed.
 Both inject :class:`ContentStoreProtocol`, so the store binds once, here,
 rather than inside either consumer's module.
 
-The blob root is a ``user_config.bot_config_manifest.content_store_dir``
-decision. The one yaml read stays in ``ManifestFetchModule.bot_config_manifest``
-(the typed ``cfg.BotConfigManifestConfig`` cluster, parsed by the store's own
-``content_store_root_from_config``); this module only consumes the parsed
-value, so the key keeps its name and its deployment overlays keep working.
+Where the bytes live is the :class:`BlobStore` contract. This module binds the
+default — the deployment's object storage, which every backend instance
+shares. A profile whose object storage is a test double overrides the key in
+its own column (``infrastructure/test/content_blob_store.py``); nothing here
+branches on a profile or a setting.
 """
 from __future__ import annotations
-
-from pathlib import Path
 
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.core.content_store import (
+    BlobStore,
     ContentStoreProtocol,
     ContentStoreService,
+    ObjectStorageBlobStore,
 )
 from agentclaw.community.core.repository.implementations.bot.content_store import (
     ContentStoreRepository,
@@ -28,11 +28,11 @@ from agentclaw.community.core.repository.implementations.bot.content_store impor
 from agentclaw.community.core.repository.protocols.bot import (
     ContentStoreRepositoryProtocol,
 )
-from agentclaw.community.di import config as cfg
+from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 
 
 class ContentStoreModule(Module):
-    """Bind the provenance-log repository and provide the store over it."""
+    """Bind the provenance-log repository, the default blob store, and the store over them."""
 
     def configure(self, binder: Binder) -> None:
         # The append-only provenance log behind the store: one ORM body, the
@@ -46,13 +46,17 @@ class ContentStoreModule(Module):
     @singleton
     @provider
     @inject
+    def blob_store(self, storage: ObjectStoragePlugin) -> BlobStore:
+        """The default medium: the deployment's object storage."""
+        return ObjectStorageBlobStore(storage)
+
+    @singleton
+    @provider
+    @inject
     def content_store(
         self,
         repository: ContentStoreRepositoryProtocol,
-        manifest_config: cfg.BotConfigManifestConfig,
+        blobs: BlobStore,
     ) -> ContentStoreProtocol:
-        """The store: blob root from the typed config cluster, never an environment read."""
-        return ContentStoreService(
-            repository,
-            Path(manifest_config.content_store_dir),
-        )
+        """The store over whichever blob store the profile wired."""
+        return ContentStoreService(repository, blobs)

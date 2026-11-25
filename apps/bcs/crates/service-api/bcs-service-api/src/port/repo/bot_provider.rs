@@ -5,6 +5,9 @@ use crate::bot_provider::{BotConnectionMode, BotProviderRecord};
 
 #[async_trait]
 pub trait BotProviderRepoPort: Send + Sync {
+    /// Fresh active-name preflight, scoped to the repository environment and Provider.
+    /// Exclude only the existing identity being re-registered. Not an atomic reservation.
+    async fn validate_provider_bot_name(&self, provider_id:&str, name:&str, exclude_bot:Option<&str>) -> ServiceResult<()>;
     /// Bounded batch of fresh authorization projections. Implementations must not
     /// interpret storage failures as missing affiliation or standard policy.
     async fn collaboration_actors(&self, _ids: &[String]) -> ServiceResult<Vec<super::collaboration_actor::CollaborationActor>> {
@@ -34,12 +37,104 @@ pub trait BotProviderRepoPort: Send + Sync {
     async fn attach_provider_bot(&self, record: BotProviderRecord) -> ServiceResult<()>;
 
     /// Strict create: do not replace an existing Bot, token or Provider/ref.
+    /// Reject a name already used by an active Bot in the same Provider/environment.
+    /// This is a fresh server preflight; until a DB unique index is deployed it
+    /// does not guarantee uniqueness across concurrent registrations.
     /// SQL implementations atomically create the Bot and gateway projection.
     /// Upstream must never create a compatibility binding.
     async fn create_provider_bot(
         &self, record: BotProviderRecord, capabilities: BotCapabilities,
         owner: &str, token: &str,
     ) -> ServiceResult<()>;
+
+    /// Reactivate the tombstoned Provider/ref with a completely new registration
+    /// snapshot. The Bot UUID is retained; credentials, owner/manager authority
+    /// and the gateway projection are replaced atomically. Strict creates above
+    /// keep rejecting tombstones.
+    async fn restore_provider_bot_with_ownership(
+        &self, _record: BotProviderRecord, _capabilities: BotCapabilities,
+        _owner: &str, _token: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError(
+            "Provider Bot reactivation is not configured".into(),
+        ))
+    }
+
+    /// Trusted atomic Provider registration with ownership
+    /// initialization (bot authority spec §10.2).
+    ///
+    /// The same atomic semantics as
+    /// [`BotRepoPort::create_registration_if_absent_with_ownership`],
+    /// including the NECESSARY gateway projection (the compatibility
+    /// binding for gateway-mode records) inside the SAME
+    /// transaction. Duplicate Provider/ref — including tombstoned
+    /// rows — conflicts and writes nothing. `initialization.
+    /// owner_user_id` comes only from the verified registration
+    /// token; the mutation keeps the real initiator.
+    async fn create_provider_bot_with_ownership(
+        &self, _record: BotProviderRecord, _capabilities: BotCapabilities,
+        _owner: &str, _token: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<()> {
+        Err(crate::types::ServiceError::InternalError(
+            "trusted Provider registration is not configured".into(),
+        ))
+    }
+
+    /// Provider-admin ordinary registration: Bot, binding and initial authority
+    /// commit together. Requires a Provider actor matching record.provider_id;
+    /// the Human-token entry remains Human-only. No version-0 Bot is published.
+    async fn create_provider_admin_bot_with_ownership(
+        &self, _record: BotProviderRecord, _capabilities: BotCapabilities,
+        _owner: &str, _token: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError("atomic Provider-admin registration is not configured".into()))
+    }
+
+    /// Strict create with Bot, ownership, gateway projection and validated
+    /// A2A Card in one transaction. Card identities must equal the new Bot.
+    async fn create_a2a_provider_bot_with_ownership(
+        &self, _record: BotProviderRecord, _capabilities: BotCapabilities,
+        _owner: &str, _token: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+        _card: crate::port::repo::a2a_bot::A2aBotRecord,
+    ) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError("atomic A2A registration is not configured".into()))
+    }
+
+    /// Provider-admin delegation is a separate trusted operation. The Core has
+    /// verified the management credential; the store requires a Provider audit
+    /// actor matching record.provider_id. The Human-token operation above stays
+    /// Human-only. Both commit Bot/ownership/Card in one transaction.
+    async fn create_provider_admin_a2a_bot_with_ownership(
+        &self, _record: BotProviderRecord, _capabilities: BotCapabilities,
+        _owner: &str, _token: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+        _card: crate::port::repo::a2a_bot::A2aBotRecord,
+    ) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError("atomic Provider-admin A2A registration is not configured".into()))
+    }
+
+    /// Atomic Provider retirement (bot authority spec §7.1):
+    /// ONE command commits the Bot tombstone, the Provider/ref
+    /// tombstone, the necessary binding disable, the owner/
+    /// manager edge revocation, the pending-transfer closure
+    /// (system decision, fixed reason) and the retire audit —
+    /// with the branch re-verified under the lock (`expected_
+    /// branch` mismatch is an error, never a reinterpretation).
+    /// Never followed by a second ordinary delete; a repeated
+    /// command on an already-tombstoned Bot is idempotent and
+    /// returns `changed = false` with the identity still
+    /// retrievable from the retained tombstone/metadata/binding.
+    async fn retire_with_authority(
+        &self, _retire: crate::core::provider::ProviderRetire,
+    ) -> ServiceResult<crate::core::provider::ProviderRetirement> {
+        Err(crate::types::ServiceError::InternalError(
+            "atomic Provider retirement is not configured".into(),
+        ))
+    }
 
     /// Atomically update the gateway Bot override and compatibility binding.
     /// Authorization and effective-endpoint validation belong to the core.

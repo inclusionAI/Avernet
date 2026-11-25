@@ -1,0 +1,28 @@
+[package]
+name         = "bcs-caller-identity-jwt"
+description  = "Default JWT CallerIdentityPlugin — EdDSA profile, runtime-only caller proofs"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bcs-config-api = { workspace = true }
+inventory = { workspace = true }
+hex = { workspace = true }
+bcs-caller-identity-api = { workspace = true }
+async-trait     = { workspace = true }
+jsonwebtoken    = { workspace = true, features = ["use_pem"] }
+serde           = { workspace = true, features = ["derive"] }
+sha2            = { workspace = true }
+hmac            = { workspace = true }
+uuid            = { workspace = true, features = ["v4"] }
+thiserror       = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+tokio = { workspace = true }

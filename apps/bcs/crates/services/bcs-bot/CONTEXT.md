@@ -2,6 +2,8 @@
 
 ## Provides
 
+- Optional post-commit catalog change notifications for Bot registration, descriptors, visibility and deletion.
+
 ProviderCore validates optional slugs and returns a credential-free
 ProviderBasicInfo projection for public discovery, including disabled Providers.
 ProviderManagement consumes this through its core contract. Additive slug-aware
@@ -15,8 +17,38 @@ Provider admin and Human owner checks. Corrupt discovery config remains an error
 - Authenticated provider coordination callbacks share reference claims with stream intake.
 - Bot service implementations for BCS, including the independent Bot
   control-plane Core.
+- Authorized candidate search (`BotCandidateSearchCore::search_authorized`)
+  used by the OpenAPI V1 search entry. It reuses the existing worker
+  recommendation and tag enrichment, asks the control plane to validate the
+  whole deduplicated recall batch with the viewer dimension plus approved
+  `friend_ids`, preserves provider order, then hydrates `RegisteredBot` rows
+  with the strict batched `registry.try_get_many`. Provider absence/failure or
+  an empty authorized subset falls back to a viewer-scoped name query;
+  control-plane and registry failures propagate as errors. Authorization
+  uses the control-plane `search_candidate_records` contract, which must not
+  hydrate Provider metadata; only final displayed Bot IDs use the hydrated
+  control-plane projection. The legacy `search_candidates` policy is unchanged, and the authorized entry fails
+  closed until composition wiring injects the control plane. Genuinely missing
+  registry ids are skipped even when the entire semantic subset vanishes,
+  returning an empty `Semantic` result without triggering name fallback.
 - Bot onboarding, discovery, status, connectivity, and binding metadata behavior.
 - Application-facing orchestration around registry reads and writes.
+- Admin onboard (`BotOnboarding`) applies an optional `AvatarChange`
+  together with the merged capabilities through the single existing-only
+  profile write (bot-avatar plan Task 5). BotCore applies the existing Provider
+  identity protection before that composite write: an omitted `agent_code`
+  retains the persisted parent, and an explicit reparent is rejected before
+  either capabilities or avatar can change. If identity validation rejects an
+  unavailable Bot, a strict repository read confirms absence before classifying
+  it as `Missing`; read failures propagate. A missing or soft-deleted target
+  — including one that slips away between the precheck and the write —
+  returns the legacy `onboarded=false` shape and persists no row. Independently
+  of that application-layer guard, the store implementations treat the runtime
+  AgentPass identity (`agent_code`/`agent_token`) as registry-owned: the
+  profile write covers profile fields only and preserves the live identity in
+  both the durable record and the in-memory publication (PR-3488 review — the
+  merged profile snapshot carries no credentials, and publishing it wholesale
+  would silently disable the Bot's outbound interceptor chain).
 
 ## Consumes
 
@@ -76,6 +108,13 @@ nonblank secret. Credential read failures propagate; issuance and upstream never
 read or require that credential. Bot creation and gateway projection are atomic in SQL;
 Human/owner-edge writes follow and failures propagate, without journal-based resume.
 Duplicate Provider/ref returns Conflict; distinct refs may share a valid register token.
+New Provider registrations also preflight the active name within the current
+Provider/environment, including non-A2A Bots. Legacy Provider-admin registration
+uses BotProviderRepoPort before registry writes; trusted atomic registration
+performs the same fresh lookup in its store. Existing binding replay retains its
+idempotent behavior. The additional lookup returns at most one identifier and does
+not provide a cross-process uniqueness guarantee; a DB index is deferred pending
+production data repair. Lookup failures propagate rather than allowing registration.
 Upstream memberships never create delivery bindings or MOCK credentials through this
 flow. Legacy Provider-admin plugin registration retains its MOCK/preserved-token rules.
 Both flows derive ordinary AgentPass Bot `agent_code` from `provider_bot_ref`.
@@ -113,3 +152,105 @@ identity before mutation. See `docs/agentpass-subbots.md` for the full contract.
 Provider collaboration scope is resolved from live Provider metadata by BotRegistryCoreService.collaboration_owner. Same-owner authorization uses persisted created_by; missing affiliated Providers and malformed policies fail closed. Provider admin commands expose optional scope, and cannot relax same_owner. See specs/2026-10-13-provider-collaboration-scope/spec.md.
 
 Legacy Provider registration preflights affiliation before merging Bot capabilities or credentials, for both plugin and gateway modes. This catches existing public memberships without modifying the Bot; storage independently revalidates under its policy/row locks.
+
+## A2A Card core
+
+`A2aBotCore` implements `A2aBotCoreService` using active Gateway affiliation and
+the `A2aBotRepoPort` CAS boundary, including the unchanged-Card projection resync
+used by refresh. It does not perform HTTP access, parse SDK
+types or authenticate Provider management requests. Those use cases live in
+`crates/application/bcs-app-a2a-bot`. Bootstrap injects the collaborators.
+
+The Bot query facade receives the same Core as a read collaborator. Detail,
+discovery and search responses expose an optional full `agent_card`, preserving
+skills/descriptions and unknown fields without rewriting legacy capabilities.
+Existing BCS visibility, ownership, organization and friendship gates run first.
+Core batches Card reads; discovery predicates identify nonmatching A2A Bots
+without loading their full payload or falling back to legacy capabilities.
+Cards are read from persistence, so refresh needs no duplicated query cache.
+Query/discovery orchestration is in application/bot_query.rs and bot_cards.rs.
+Refresh failure preserves the last validated Card for new sends and cancellation.
+New delivery interfaces derive from current egress/gRPC policy, without a saved
+route projection; availability uses the same pure selector.
+Affiliation, disabled binding/Provider/downlink and credential checks remain
+unchanged. Cancellation skips new extension negotiation and the outbound adapter
+uses the already-frozen Run endpoint/Task. No new database read or cache is added.
+Delivery targets project typed extension declarations with their required flag
+and full params. Core does not select an experimental draft/business profile;
+that interpretation belongs to the outbound protocol adapter. Invalid stored
+declarations fail rather than silently dropping negotiation data.
+
+
+ProviderRegistrationCore supports explicit validated A2A registration. It requires
+current Provider management authority (not self-service alone), Gateway mode,
+enabled downlink/credential and matching Card identities. No webhook default is
+required; the repository commits Card and existing ownership lifecycle together.
+
+
+`A2aProviderRegistrationCore` implements the Provider-admin A2A admission Core.
+It consumes ProviderCoreService and the existing BotProviderRepoPort atomic
+ownership/Card create; no network or SDK code is added to Core. It repeats
+management/downlink authorization after application Card fetch, normalizes the
+Provider identity, preserves a delegated owner and audits the actual Provider.
+Duplicates, tombstones and concurrent collisions fail without credential replay.
+The transaction is the existing composite; no migration or second partial Bot
+write is introduced. Admission adds bounded per-request reads, no registry scan.
+
+Custom AgentCard bindings use the deployment-installed bcs-a2a-binding-api registry for pure route selection. No transport or plugin implementation is imported by core.
+
+
+## Provider identity versus authority initialization
+
+Ordinary `ProviderBotCoreService::register_provider_bot_with_bot_uuid` registers
+identity/delivery metadata only and requires exactly one owner. Multi-user input
+returns `InvalidOperation` before any Bot write instead of silently ignoring
+managers. `ProviderManagement` validates/splits the public `owners` snapshot,
+passes only the first owner to that Core, then uses the separate
+`register_provider_bot_with_initial_managers` Core entry for a nonempty snapshot.
+Fresh multi-user admissions commit Bot/binding/authority together through the
+existing ownership repository composite. Existing version-0 multi-user
+attachments conflict before writes; they need explicit reconciliation. Empty
+snapshots retain the legacy identity-plus-Registry initialization path. A2A's separate registration Core continues to consume the
+entire snapshot because its store composite commits identity/Card/authority
+atomically. Re-registration never synchronizes existing manager/owner authority.
+
+Provider retirement refuses a Bot that still has an active organization membership;
+disabling an organization disables its memberships, so a disabled organization does
+not block retirement. Re-registering a retired Provider/ref is instead an explicit
+reactivation: it retains the original Bot UUID (ignoring any supplied replacement),
+replaces the registration snapshot and runtime credential, and initializes only the
+new owner/manager snapshot. Both metadata tombstones and legacy binding-only
+tombstones are supported. Active-Bot replay semantics, strict create-only methods,
+and the separate A2A registration flow are unchanged.
+
+The fresh multi-user path adds one indexed Bot lookup, not a scan. It reuses the
+bounded ownership transaction (maximum 100 managers, no network within it).
+Provider authentication, endpoint checks and Plugin MOCK/subbot credential rules
+remain unchanged. Initialized replays never synchronize managers. The new Core
+entry fails closed on unsupported nonempty snapshots; its empty default delegates
+the legacy method for source-compatible implementations.
+
+## Effective Bot visibility
+
+Control-plane explicit visibility/strategy patches delegate visibility
+normalization to the repository's atomic write boundary. Private stays private;
+otherwise only Open strategy plus an empty active organization scope becomes
+public. All other visible configurations are protected, including when
+restrictions are introduced on a formerly public Bot. A friend_ext-only write
+normalizes only on an empty/non-empty active-scope transition; approval
+metadata and same-category replacements preserve visibility. The repository
+supports legacy public-only requests as all-visible intent by atomically
+deriving Open and clearing active agent scope while preserving other extension
+fields. Explicit visibility=public together with Open also clears scope;
+explicit non-Open strategies preserve it, and supplied friend_ext still wins. Core must not synthesize unconditional
+visibility from a pre-read. Catalog notification follows successful writes as before.
+
+## AgentCard catalog notifications
+
+A2aProviderRegistrationCore and A2aBotCore accept an optional CatalogChangePort.
+Registration, replace and successful Card CAS writes notify exactly once after
+commit. Failed writes do not notify; a subsequent response read failure does not
+undo a committed notification. The call site emits an allowlisted
+`agent_card.catalog_change_requested` observation (Bot/Provider/ref/revision and
+existing request ID). The port and queue still carry only resource identities;
+no tracing or transport context is required by Core.

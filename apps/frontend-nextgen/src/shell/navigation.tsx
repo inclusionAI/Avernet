@@ -1,6 +1,6 @@
 import { getCapabilities } from '@/capabilities';
 import type { LucideIcon } from 'lucide-react';
-import { Bot, Compass, FlaskConical, MessagesSquare, Users, Zap } from 'lucide-react';
+import { Bot, Compass, FlaskConical, MessagesSquare, ShieldCheck, Users, Zap } from 'lucide-react';
 import { getRouteMeta, type RouteSection } from './routeMeta';
 
 /** 产品侧栏只展示协作与 Bot 两个固定分组。 */
@@ -9,7 +9,7 @@ export type NavigationSection = Extract<RouteSection, 'collab' | 'bot'>;
 /** 产品侧栏分组展示名。 */
 export const navSectionLabels: Record<NavigationSection, string> = {
   collab: '协作',
-  bot: 'Bot',
+  bot: '管理',
 };
 
 export interface NavigationItem {
@@ -19,6 +19,8 @@ export interface NavigationItem {
   icon: LucideIcon;
   section: NavigationSection;
   description: string;
+  /** Optional overlay placement, after the baseline section ordering. */
+  placement?: 'last';
 }
 
 // Open Core 基线一级导航项。内部专属入口已剥离（capability 注入），
@@ -57,7 +59,7 @@ export const navigationItems: NavigationItem[] = [
     path: '/collaboration-square',
     icon: Compass,
     section: 'collab',
-    description: '发现公开 Bot、协作群与任务',
+    description: '发现专家模板、公开 Bot 与协作群',
   },
   {
     id: 'lab',
@@ -69,11 +71,19 @@ export const navigationItems: NavigationItem[] = [
   },
   {
     id: 'bot-workshop',
-    label: 'Bot管理',
+    label: 'Bot 管理',
     path: '/bot-workshop',
     icon: Bot,
     section: 'bot',
     description: '创建、配置和发布 Bot',
+  },
+  {
+    id: 'task-escort',
+    label: '任务护航',
+    path: '/evolution-factory/task-escort',
+    icon: ShieldCheck,
+    section: 'bot',
+    description: '观察任务运行并处置护航问题',
   },
   {
     id: 'evolution-factory',
@@ -107,10 +117,15 @@ export function getMergedNavigationItems(): NavigationItem[] {
       if (grouped[item.section]) grouped[item.section].push(item);
     }
   }
-  // Evolution stays last in the Bot group, including after internal overlays.
-  const evolution = grouped.bot.findIndex((item) => item.id === 'evolution-factory');
-  if (evolution >= 0) grouped.bot.push(...grouped.bot.splice(evolution, 1));
-  return [...grouped.collab, ...grouped.bot];
+  // Keep Task Escort immediately above Evolution after ordinary overlays, before explicit last items.
+  for (const id of ['task-escort', 'evolution-factory']) {
+    const index = grouped.bot.findIndex((item) => item.id === id);
+    if (index >= 0) grouped.bot.push(...grouped.bot.splice(index, 1));
+  }
+  return [grouped.collab, grouped.bot].flatMap((items) => [
+    ...items.filter((item) => item.placement !== 'last'),
+    ...items.filter((item) => item.placement === 'last'),
+  ]);
 }
 
 export function getNavigationItem(pathname: string) {

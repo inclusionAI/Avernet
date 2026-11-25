@@ -1,0 +1,154 @@
+/** @jest-environment jsdom */
+import { extendCapabilities } from '@/capabilities';
+import { getMergedNavigationItems } from '@/shell/navigation';
+import { describe, expect, it, jest } from '@jest/globals';
+import '@testing-library/jest-dom/jest-globals';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { Compass } from 'lucide-react';
+
+jest.mock('@/shell/SpaceSwitcher', () => ({ SpaceSwitcher: () => null }));
+
+const { SidebarNavList } = require('@/shell/SidebarNavList') as typeof import('@/shell/SidebarNavList');
+
+// 展开侧栏与移动端抽屉共用列表；折叠侧栏使用相同导航归属。
+describe.each([false, true])('SidebarNavList (collapsed=%s)', (collapsed) => {
+  const renderNavigation = (activePath: string, onNavigate = jest.fn()) =>
+    render(
+      <SidebarNavList
+        activePath={activePath}
+        items={getMergedNavigationItems()}
+        onNavigate={onNavigate}
+        collapsed={collapsed}
+      />,
+    );
+
+  it('只隐藏任务护航的侧栏入口，保留智能进化导航', () => {
+    const onNavigate = jest.fn();
+    renderNavigation('/workspace/chat', onNavigate);
+    expect(screen.queryByRole('button', { name: '任务护航' })).not.toBeInTheDocument();
+    const evolution = screen.getByRole('button', { name: '智能进化' });
+    fireEvent.click(evolution);
+    expect(onNavigate.mock.calls).toEqual([['/evolution-factory']]);
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+  });
+
+  it.each(['/evolution-factory/task-escort', '/evolution-factory/task-escort/detail'])(
+    '直接访问护航路径 %s 时，侧栏不显示护航入口或高亮其他入口',
+    (path) => {
+      const view = renderNavigation(path);
+      expect(screen.queryByRole('button', { name: '任务护航' })).not.toBeInTheDocument();
+      expect(view.container.querySelectorAll('button.bg-selected')).toHaveLength(0);
+    },
+  );
+
+  it.each([
+    '/evolution-factory',
+    '/evolution-factory/new',
+    '/evolution-factory/tasks/task-1',
+    '/evolution-factory/domains/owner/domain',
+    '/evolution-factory/bench/runs/run-1',
+    '/evolution-factory/task-escort-other',
+  ])('路径 %s 通过 metadata 高亮智能进化，非点击目的地前缀', (path) => {
+    const view = renderNavigation(path);
+    expect(screen.getByRole('button', { name: '智能进化' })).toHaveClass('bg-selected');
+    expect(view.container.querySelectorAll('button.bg-selected')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Bot 管理' })).not.toHaveClass('bg-selected');
+    expect(screen.queryByRole('button', { name: '任务护航' })).not.toBeInTheDocument();
+  });
+
+  it.each(['/space-admin', '/ticket-center', '/evolution-factory-other', '/bot-workshop-other'])(
+    '无导航归属路径 %s 不会误命中相似前缀',
+    (path) => {
+      const view = renderNavigation(path);
+      expect(view.container.querySelectorAll('button.bg-selected')).toHaveLength(0);
+    },
+  );
+
+  it('保留其它分组导航的高亮与原有点击目的地', () => {
+    const onNavigate = jest.fn();
+    renderNavigation('/workspace/chat', onNavigate);
+    const conversation = screen.getByRole('button', { name: '对话' });
+    expect(conversation).toHaveClass('bg-selected');
+    expect(screen.getByRole('button', { name: '智能进化' })).not.toHaveClass('bg-selected');
+    fireEvent.click(conversation);
+    expect(onNavigate).toHaveBeenCalledWith('/workspace/chat');
+  });
+});
+
+// capability 扩展不可恢复，故注入回归放在默认形态用例之后。
+it.each([false, true])('无 route meta 的 overlay 项保留最长路径兜底 (collapsed=%s)', (collapsed) => {
+  extendCapabilities({
+    getInternalNavigationItems: () => ({
+      status: 'available',
+      value: [{ id: 'custom', label: '扩展能力', path: '/custom', icon: Compass, section: 'bot', description: '' }],
+    }),
+  });
+  const onNavigate = jest.fn();
+  const view = render(
+    <SidebarNavList
+      activePath="/custom/detail"
+      items={getMergedNavigationItems()}
+      onNavigate={onNavigate}
+      collapsed={collapsed}
+    />,
+  );
+  const custom = screen.getByRole('button', { name: '扩展能力' });
+  expect(custom).toHaveClass('bg-selected');
+  expect(view.container.querySelectorAll('button.bg-selected')).toHaveLength(1);
+  fireEvent.click(custom);
+  expect(onNavigate).toHaveBeenCalledWith('/custom');
+});
+
+it.each([false, true])('overlay 合并后仍隐藏护航，保留其他管理菜单顺序 (collapsed=%s)', (collapsed) => {
+  extendCapabilities({
+    getInternalNavigationItems: () => ({
+      status: 'available',
+      value: [
+        {
+          id: 'capability-workshop',
+          label: '能力管理',
+          path: '/capability-workshop',
+          icon: Compass,
+          section: 'bot',
+          description: '',
+        },
+        { id: 'market', label: '能力市场', path: '/market', icon: Compass, section: 'bot', description: '' },
+        {
+          id: 'custom-tail',
+          label: '尾部扩展',
+          path: '/custom-tail',
+          icon: Compass,
+          section: 'bot',
+          description: '',
+          placement: 'last',
+        },
+      ],
+    }),
+  });
+  const onNavigate = jest.fn();
+  const items = getMergedNavigationItems();
+  const view = render(
+    <SidebarNavList
+      activePath="/evolution-factory/task-escort"
+      items={items}
+      onNavigate={onNavigate}
+      collapsed={collapsed}
+    />,
+  );
+  const labels = screen.getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent);
+  expect(labels.slice(-5)).toEqual(['Bot 管理', '能力管理', '能力市场', '智能进化', '尾部扩展']);
+  expect(screen.queryByRole('button', { name: '任务护航' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '智能进化' })).not.toHaveClass('bg-selected');
+  fireEvent.click(screen.getByRole('button', { name: '智能进化' }));
+  expect(onNavigate).toHaveBeenCalledWith('/evolution-factory');
+  view.rerender(
+    <SidebarNavList
+      activePath="/evolution-factory/tasks/task-1"
+      items={items}
+      onNavigate={onNavigate}
+      collapsed={collapsed}
+    />,
+  );
+  expect(screen.getByRole('button', { name: '智能进化' })).toHaveClass('bg-selected');
+  expect(view.container.querySelectorAll('button.bg-selected')).toHaveLength(1);
+});

@@ -36,14 +36,14 @@ def require(*keys):
 
 def embedding_provider():
     require("EMBEDDING_BASE_URL", "EMBEDDING_AUTH_TOKEN", "EMBEDDING_MODEL", "EMBEDDING_DIMENSION")
-    from src.infra.embedding.config.embedding_settings import EmbeddingSettings
-    from src.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
+    from app.infra.embedding.config.embedding_settings import EmbeddingSettings
+    from app.infra.public.embedding.real_embedding_provider import RealEmbeddingProvider
     return RealEmbeddingProvider(EmbeddingSettings())
 
 
 def rerank():
     require("RERANKER_BASE_URL", "RERANKER_API_KEY", "RERANKER_MODEL")
-    from src.infra.public.reranker.http_reranker import HttpReranker
+    from app.infra.public.reranker.http_reranker import HttpReranker
     candidates = [
         {"id": "python", "text": "Python FastAPI code review and backend testing specialist"},
         {"id": "design", "text": "Visual designer specializing in illustrations and typography"},
@@ -61,10 +61,10 @@ def rerank():
 
 def test_real_llm_connectivity():
     require("LLM_BASE_URL", "LLM_AUTH_TOKEN", "LLM_FAST_MODEL")
-    from src.domain.models.llm_request import LLMRequest
-    from src.domain.models.llm_task_spec import LLMTaskSpec, TaskType
-    from src.infra.llm.config.llm_settings import LLMSettings
-    from src.infra.public.llm.anthropic_compatible_provider import AnthropicCompatibleProvider
+    from app.domain.models.llm_request import LLMRequest
+    from app.domain.models.llm_task_spec import LLMTaskSpec, TaskType
+    from app.infra.llm.config.llm_settings import LLMSettings
+    from app.infra.public.llm.anthropic_compatible_provider import AnthropicCompatibleProvider
 
     provider = AnthropicCompatibleProvider(LLMSettings())
     try:

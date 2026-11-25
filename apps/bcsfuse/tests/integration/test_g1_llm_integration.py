@@ -6,13 +6,13 @@ G1 Fusion 与 LLM Gateway 接入测试
 
 import pytest
 
-from src.application.services.group_fusion_service import GroupFusionService
-from src.application.services.fusion_recommendation_service import FusionRecommendationService
-from src.application.services.llm_gateway_service import LLMGatewayService
-from src.infra.llm.providers.fake_provider import FakeLLMProvider
-from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
-from src.domain.models.fusion_result import Perspective
-from src.domain.models.fusion_request import FusionRequest, FuseOptions
+from app.application.services.group_fusion_service import GroupFusionService
+from app.application.services.fusion_recommendation_service import FusionRecommendationService
+from app.application.services.llm_gateway_service import LLMGatewayService
+from app.infra.llm.providers.fake_provider import FakeLLMProvider
+from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
+from app.domain.models.fusion_result import Perspective
+from app.domain.models.fusion_request import FusionRequest, FuseOptions
 
 
 class MockPerspectiveProvider(PerspectiveProvider):

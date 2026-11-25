@@ -19,6 +19,7 @@ from secbaas.community.api.bot_runtime import (
     BotResponse,
     MessageInfo,
     SessionInfo,
+    SessionRuntimeStatus,
 )
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.bot_run_queue import BotRunQueueRecord
@@ -28,10 +29,12 @@ from secbaas.community.core.repository.bot_run_queue import BotRunQueueRecord
 class PostRunCallback(Protocol):
     """执行完成后触发的回调协议。
 
-     Worker 在 executor 执行完毕后根据 ``record.meta["callback_function"]`` 解析
+    Worker 在 executor 执行完毕、结果已落终态后根据 ``record.meta["callback_function"]`` 解析
     回调名称，从 DI 注入的 factories 字典中查找对应的 ``PostRunCallback`` 实例并调用。
 
-     回调接收 ``run_id`` 字符串，可自行查库补充上下文。
+    回调接收 ``run_id`` 字符串，可自行查库补充上下文。执行 deadline 不覆盖回调；
+    requeue 或结果未落终态时不通知。网络重试与跨进程恢复不承诺 exactly-once，
+    接收端仍需按 ``run_id`` 幂等处理。
     """
 
     async def __call__(self, run_id: str) -> None: ...
@@ -155,6 +158,16 @@ class BotService(Protocol):
             session_pending: session_id 为提前构造的计划值，尚未在 adapter 侧物化，
                 注入前需先执行物化
         """
+        ...
+
+    async def get_session_runtime_status(
+        self,
+        *,
+        session_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+    ) -> SessionRuntimeStatus:
+        """Observe an existing run without creating a session or sending a message."""
         ...
 
     async def get_session(

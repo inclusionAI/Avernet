@@ -15,6 +15,7 @@
 ## Allowed dependencies
 
 - Tracing logging/subscriber APIs, async timing, UUID and serialization utilities.
+- `bcs-tracing-api` for the optional, read-only log identity contract.
 
 ## Forbidden dependencies
 
@@ -50,17 +51,22 @@ one ordinary Rust implementation instead of duplicating its expression across
 tracing and legacy-log macro branches, whose source coverage can map to the unused
 branch. Existing log targets, fields, levels and request IDs are preserved.
 
-The package does not acquire, store or emit distributed trace IDs. Future tracing
-integration needs its own declared context/propagation contract; the base must
-never import its implementation. This extraction uses the existing tracing
-event/subscriber extension mechanism and adds no plugin runtime or spans.
+`observe_key_result` is explicit opt-in for selected outer dependency operations.
+It marks only error/cancelled/panicked completion and the existing one-time stalled
+warning as `log_class="business_key"`. Successful slow calls stay ordinary. The
+operation captures a bounded optional `bcs-tracing-api::LogCorrelation` and uses
+it during emission, including Drop outside the original request scope. Bootstrap
+owns field serialization. It creates no network spans, changes no headers, and
+never imports a provider/SDK implementation. Ordinary observe helpers and request
+summaries remain unselected. Request-ID helpers do not propagate this separate
+identity; derived tasks must explicitly capture it at their owning boundary.
 
 ## Change impact
 
 Public and internal operation callers depend on this package. GenAI encoders stay
 in bcs-telemetry. The temporary trace-ID helper APIs and added observation
 `trace_id` fields are removed from public and internal consumers together.
-Correlation uses request/operation IDs; levels, thresholds and result semantics
+Ordinary correlation uses request/operation IDs; levels, thresholds and result semantics
 are unchanged. Existing A2A tracing and dependency protocol trace fields remain
 independent. The public revision and internal path dependencies must move together.
 
@@ -74,3 +80,17 @@ independent. The public revision and internal path dependencies must move togeth
   correlation, run aliases and missing trace mappings remain intact.
 - `bash scripts/ci/check-observability-deps.sh` checks the normal/build dependency
   tree with all features for trace/metric implementations.
+
+## Explicit business warning snapshots
+
+`business_warning` is an opt-in, failure-only diagnostic scope, separate from
+argument-free operation observations. Delivery adapters supply the bounded
+original request body and parsed Provider token; applications report typed
+code/field/reason before their facade removes details. The first report wins
+within a request. The helper emits WARN to `bcs_business_warning`, with request
+and neutral trace/RPC log identities; it does not start spans or change results.
+Payload JSON is recursively credential-redacted, known token occurrences are
+removed, and output is capped at 64 KiB after redaction. Invalid JSON is omitted
+with an explicit marker rather than falling back to unsafe raw bytes. Token
+prefixes expose at most four characters, and short tokens are fully hidden.
+No automatic task inheritance or durable payload storage is introduced.

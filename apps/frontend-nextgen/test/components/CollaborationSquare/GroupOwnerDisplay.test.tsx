@@ -20,6 +20,13 @@ const group: PublicGroup = {
 };
 const actions = { busy: false, onOpenMembers: jest.fn(), onShare: jest.fn(), onCreateSession: jest.fn() };
 
+test.each(['未公开', '列表中的 Owner'])('群卡不显示 Owner 用户字段（%s）', (ownerUserName) => {
+  render(<GroupCard group={{ ...group, ownerUserName }} {...actions} />);
+  expect(screen.queryByText('Owner 用户：')).not.toBeInTheDocument();
+  expect(screen.queryByText(ownerUserName)).not.toBeInTheDocument();
+  expect(screen.getByText('服务助手 (bot-1:owner)')).toBeInTheDocument();
+});
+
 test('群主行展示名称 (UUID)，无 title 属性，悬停可查看完整文本', async () => {
   render(<GroupCard group={group} {...actions} />);
   const label = screen.getByText('服务助手 (bot-1:owner)');
@@ -78,10 +85,11 @@ test.each([2, 120])('成员入口 %s 位位于底部左侧，点击与键盘仍�
   const currentGroup = { ...group, memberCount };
   render(<GroupCard group={currentGroup} {...actions} onOpenMembers={onOpenMembers} />);
   const button = screen.getByRole('button', { name: `${memberCount} 位成员` });
-  const header = screen.getByRole('heading', { name: group.name }).parentElement;
+  // dmore-004：名称行（非 heading）与类型胶囊同一行，成员入口在底部行。
+  const nameRow = screen.getByText(group.name).parentElement;
   const type = screen.getByText(group.typeLabel);
-  expect(header).not.toContainElement(button);
-  expect(header).toContainElement(type);
+  expect(nameRow).not.toContainElement(button);
+  expect(nameRow).toContainElement(type);
   expect(button.parentElement).toHaveClass('mt-auto', 'justify-between');
   expect(screen.getAllByRole('button', { name: `${memberCount} 位成员` })).toHaveLength(1);
   await userEvent.click(button);
@@ -91,13 +99,13 @@ test.each([2, 120])('成员入口 %s 位位于底部左侧，点击与键盘仍�
   expect(onOpenMembers).toHaveBeenCalledTimes(2);
 });
 
-test('群卡采用圆角浅灰底、右上类型标签和底部图标操作', async () => {
+test('群卡采用白底描边圆角、右上类型标签和底部图标操作（dmore-004）', async () => {
   const onShare = jest.fn();
   const onCreateSession = jest.fn();
   render(<GroupCard group={{ ...group, memberCount: 2 }} {...actions} onShare={onShare} onCreateSession={onCreateSession} />);
   expect(screen.getByText(group.typeLabel)).toHaveClass('bg-success/10');
   const memberButton = screen.getByRole('button', { name: '2 位成员' });
-  expect(memberButton).toHaveTextContent('成员 · 2');
+  expect(memberButton).toHaveTextContent('成员 2');
   const share = screen.getByRole('button', { name: `分享 ${group.name}` });
   expect(share).toHaveClass('text-foreground');
   const create = screen.getByRole('button', { name: '创建新会话' });

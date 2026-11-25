@@ -54,18 +54,45 @@ GroupsPath:
             - chat
             - manager_worker
             - state_machine
+      - name: sort
+        in: query
+        description: >-
+          Result ordering. `created_at` (the default) keeps the historical
+          `created_at` descending order with the `group_id` ascending
+          tie-breaker. `last_activity` orders by the Group's conversation
+          activity key (`last_activity_at`, epoch milliseconds: the newest
+          persisted message or Session creation across the Group's Sessions)
+          descending, with the same `group_id` ascending tie-breaker, falling
+          back to `created_at` for a Group without activity rows.
+          The alternative ordering covers the full filtered result set before
+          pagination. Under `last_activity` the sort key changes on every
+          message and on Session creation, so an entry can shift between two
+          page requests and an offset page boundary can repeat or skip an
+          entry: the order is a live feed, not a stable snapshot. Any other
+          value is rejected with `invalid_request`.
+        schema:
+          type: string
+          enum:
+            - created_at
+            - last_activity
+          default: created_at
     responses:
       "200":
         description: >-
           Groups ordered by created_at descending (group_id ascending
-          tie-breaker) after selected View Actor membership, visibility,
-          strategy, kind, and search filtering and deduplication, then
-          paginated with offset/limit.
+          tie-breaker), or by last_activity_at descending with the same
+          group_id ascending tie-breaker when `sort=last_activity`, after
+          selected View Actor membership, visibility, strategy, kind, and
+          search filtering and deduplication, then paginated with offset/limit.
           Omitting view_bot_id selects the authenticated Human Actor. An explicit
           Human Actor must be that same User; an explicit Bot must be owned by
           the authenticated User. Both items and total are scoped before
           pagination. An authorized View Actor with no matching Group relation
           receives an empty page.
+          Each item carries a lightweight `participants` array in stored member
+          order: `name` is the Group-membership snapshot verbatim (may be
+          null) and `avatar_url` is the current Bot avatar (null when absent
+          or for Human actors). No detail-only control fields are included.
         content:
           application/json:
             schema:
@@ -131,6 +158,8 @@ GroupsPath:
           an initial responder run, initial_session_id identifies its Session
           and initial_run exposes the Driver run for a chat group or the Manager
           run for a manager-worker group, including its current dispatch state.
+          Participant rows carry `avatar_url` under the same semantics as the
+          Group detail read.
         content:
           application/json:
             schema:
@@ -229,6 +258,10 @@ PublicGroupsPath:
           strategy and label substring query, then paginated with offset/limit.
           Items carry membership=none because the catalog is caller-agnostic;
           participation is evaluated when a session is instantiated.
+          Each item reuses the same `participants` summary shape as the
+          authenticated Group list, bounded by the public Group's own member
+          rows: membership name snapshots verbatim (may be null) plus current
+          Bot avatars.
         content:
           application/json:
             schema:
@@ -266,7 +299,10 @@ GroupPath:
       - $ref: ../shared.yaml#/GroupIdPath
     responses:
       "200":
-        description: Group detail.
+        description: >-
+          Group detail. Every participant row keeps its full control fields
+          and additionally carries `avatar_url` — the current Bot display
+          avatar, null when absent and always null for Human participants.
         content:
           application/json:
             schema:
@@ -339,7 +375,9 @@ GroupPath:
             $ref: "#/UpdateGroup"
     responses:
       "200":
-        description: Updated group detail.
+        description: >-
+          Updated group detail. Participant rows carry `avatar_url` under the
+          same semantics as the Group detail read.
         content:
           application/json:
             schema:
@@ -593,6 +631,9 @@ CreateCollaborationGroup:
     - participants
     - collaboration
   properties:
+    catalog_labels:
+      $ref: ../domain-models.yaml#/CatalogLabelsInput
+      description: Omission initializes empty labels for new Groups; Chat/DM reject normalized nonempty labels.
     human_mention_notify_mode:
       $ref: ../domain-models.yaml#/HumanMentionNotifyMode
       default: all
@@ -625,12 +666,15 @@ CreateCollaborationGroup:
       description: >
         Optional caller-designated originator. When omitted, the selected
         HumanOrOwnedBot Principal becomes the originator. A Human Principal
-        may instead select a registered Bot it owns (`created_by` matches the
-        caller). A Bot Principal may select only itself. Every Bot participant
-        — including the driver when it differs from the originator — is
-        anchored on the originator: a public bot is always reachable; a
-        protected bot is reachable only if the originator is a Human that owns
-        it (`created_by` matches the caller) or a Bot that is friends with it.
+        may instead select a registered Bot it currently manages. A Bot
+        Principal may select only itself. Every Bot participant — including
+        the driver when it differs from the originator — is checked against
+        the originator. An authenticated Human creating a private normal
+        Group as itself can include public Bots, Bots it currently manages,
+        and non-hidden protected or private Bots with an active friendship
+        between that Human and Bot. For a Bot originator the existing Bot
+        reachability policy applies. Public Groups still require public Bot
+        participants, and Provider collaboration scope still applies.
         The `dm` group kind does not carry an originator.
     event_subscriptions:
       type: array
@@ -645,6 +689,9 @@ CreateDirectMessageGroup:
     - group_kind
     - target_actor_id
   properties:
+    catalog_labels:
+      $ref: ../domain-models.yaml#/CatalogLabelsInput
+      description: Omission initializes empty labels for new Groups; Chat/DM reject normalized nonempty labels.
     group_kind:
       const: dm
     target_actor_id:
@@ -665,6 +712,9 @@ UpdateGroup:
   additionalProperties: false
   minProperties: 1
   properties:
+    catalog_labels:
+      $ref: ../domain-models.yaml#/CatalogLabelsInput
+      description: Omission preserves stored labels; explicit object replaces all labels.
     name:
       type: string
     context:
@@ -718,7 +768,10 @@ AddGroupParticipantPath:
             $ref: "#/AddGroupParticipantRequest"
     responses:
       "200":
-        description: Added participant.
+        description: >-
+          Added participant. The shared Participant model carries the current
+          `avatar_url` — null when the Bot has none and always null for Human
+          participants.
         content:
           application/json:
             schema:
@@ -797,7 +850,10 @@ GroupParticipantPath:
             $ref: "#/UpdateGroupParticipantRequest"
     responses:
       "200":
-        description: Updated participant with its effective persisted scope.
+        description: >-
+          Updated participant with its effective persisted scope and the
+          current `avatar_url` (null when the Bot has none, always null for
+          Human participants).
         content:
           application/json:
             schema:

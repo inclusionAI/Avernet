@@ -51,9 +51,14 @@ pub struct DeliveryRuntime {
     pub preparation: Arc<dyn ManagedDeliveryPreparationService>,
     pub transport: Arc<dyn BotDeliveryPort>,
     pub config: DeliveryRuntimeConfig,
+    /// Protected caller dispatch (spec §7.5.1). `None` keeps the §15.4
+    /// anti-downgrade guard: caller rows converge to Failed before any
+    /// context read (current production behavior until composition opts in).
+    pub caller_dispatch: Option<Arc<crate::caller_dispatch_pipeline::CallerDispatchPipeline>>,
 }
 
 enum WorkResult {
+    CallerFinished(String),
     Prepared(
         PersistedMessageDelivery,
         ServiceResult<PreparedManagedDelivery>,
@@ -65,12 +70,15 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-const TASK_ABORT_RESERVE: Duration = Duration::from_secs(5 * 60);
+pub(crate) const TASK_ABORT_RESERVE: Duration = Duration::from_secs(5 * 60);
 
 fn run_timeout_for(row: &PersistedMessageDelivery, provider_timeout: Duration) -> Duration {
     let is_worker_task = row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::Task
         && matches!(crate::queued_task::intent(row), Ok(Some(task)) if task.leg == crate::queued_task::TaskLeg::Dispatch);
     if is_worker_task {
+        if let Ok(Some(task)) = crate::queued_task::intent(row) {
+            if let Some(seconds) = task.timeout_s { return Duration::from_secs(seconds); }
+        }
         provider_timeout.checked_sub(TASK_ABORT_RESERVE).filter(|time| !time.is_zero())
             .unwrap_or(provider_timeout / 2)
     } else {
@@ -80,6 +88,9 @@ fn run_timeout_for(row: &PersistedMessageDelivery, provider_timeout: Duration) -
 
 fn event(row: &PersistedMessageDelivery, kind: Event) -> DeliveryTransitionCommand {
     DeliveryTransitionCommand {
+        caller_dispatch_commit: None,
+        caller_cancel: None,
+        caller_terminal: None,
         delivery_id: row.delivery_id.clone(),
         expected_state_version: row.state.state_version,
         event: kind,
@@ -90,6 +101,28 @@ fn event(row: &PersistedMessageDelivery, kind: Event) -> DeliveryTransitionComma
         transport_context_json: None,
         deadline_at_ms: None,
     }
+}
+
+/// The trusted ordinary sender facts a caller admission committed alongside
+/// the `caller_required` marker (written only by the trusted producers —
+/// caller_admission / queued_admission, never a request body). They are the
+/// envelope `from` zone's source; the protected caller subject never
+/// substitutes for them. None = the row predates the fact or was misbuilt:
+/// the protected dispatch fails closed rather than shipping `from: null`.
+pub(super) fn caller_channel_facts(row: &PersistedMessageDelivery) -> Option<(String, String)> {
+    let channel = row.semantic_projection_json.get("caller_channel")?;
+    let actor_id = channel
+        .get("actor_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?;
+    let actor_name = channel
+        .get("actor_name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    Some((actor_id.to_string(), actor_name))
 }
 
 fn schedule_rows(rows: &[PersistedMessageDelivery], bot: &str) -> Vec<DeliveryScheduleEntry> {
@@ -149,6 +182,24 @@ impl DeliveryRuntime {
     }
     /// Deployment guarantees one scheduler per database. A
     /// shutdown aborts owned I/O futures and reconciles possible sends to Unknown.
+    /// Protected caller branch for one caller-required row (spec §7.5.1).
+    /// Never inserts the row into the ordinary preparation pipeline. The
+    /// method itself converges the row through the ordinary lifecycle
+    /// events; every outcome is fail-closed by construction.
+    /// Transition wrapper for the caller branch: CAS outcomes are advisory
+    /// here (a lost race means the row already converged elsewhere), and
+    /// storage failures surface as warnings — the scheduler retry policy
+    /// owns retry/backoff.
+    async fn transition_ok(&self, command: DeliveryTransitionCommand) -> Option<PersistedMessageDelivery> {
+        match self.transition(command).await {
+            Ok(row) => row,
+            Err(error) => {
+                tracing::warn!(%error, "caller protected dispatch: transition rejected");
+                None
+            }
+        }
+    }
+
     pub async fn run(
         self,
         mut shutdown: tokio::sync::watch::Receiver<bool>,
@@ -170,13 +221,69 @@ impl DeliveryRuntime {
                     crate::storage_retry::managed_storage, || $work).await?
             };
         }
+        // Row-scoped operations: bounded retries, then the row is isolated
+        // and the loop moves on (`row_isolation`). Never `?` out of `run()`.
+        let mut isolation = row_isolation::RowIsolation::default();
+        macro_rules! row_transition {
+            ($command:expr) => {{
+                let command = $command;
+                let delivery_id = command.delivery_id.clone();
+                match self.row_op(&delivery_id, &mut isolation, || self.transition(command.clone())).await {
+                    Some(value) => value,
+                    None => continue,
+                }
+            }};
+        }
+        macro_rules! row_get {
+            ($id:expr) => {{
+                let delivery_id: String = ($id).to_string();
+                match self.row_op(&delivery_id, &mut isolation, || self.get(&delivery_id)).await {
+                    Some(value) => value,
+                    None => continue,
+                }
+            }};
+        }
+        // Transport completions (send outcome, abort outcome, pre-I/O
+        // registration failure) are one-shot evidence: an outage keeps them
+        // retrying exactly like `storage!` instead of dropping them, and only
+        // a deterministic fault falls through to row isolation.
+        macro_rules! evidence {
+            ($id:expr, $work:expr) => {{
+                let delivery_id: String = ($id).to_string();
+                match crate::storage_retry::retry(Some(shutdown.clone()), "scheduler_evidence",
+                    crate::storage_retry::managed_storage, || $work).await {
+                    Ok(value) => value,
+                    Err(error) if crate::storage_retry::managed_storage(&error) => return Err(error),
+                    Err(_) => match self.row_op(&delivery_id, &mut isolation, || $work).await {
+                        Some(value) => value,
+                        None => continue,
+                    },
+                }
+            }};
+        }
+        macro_rules! evidence_transition {
+            ($command:expr) => {{
+                let command = $command;
+                evidence!(command.delivery_id.clone(), self.transition(command.clone()))
+            }};
+        }
+        macro_rules! evidence_get {
+            ($id:expr) => {{
+                let id: String = ($id).to_string();
+                evidence!(id.clone(), self.get(&id))
+            }};
+        }
         storage!(self.service.recover(now_ms()));
         let epoch = Instant::now();
         // Never store old-policy future deadlines: new intervals apply to the
         // same last-start timestamp without resetting rate history.
         let mut last_send: BTreeMap<String, u64> = BTreeMap::new();
         let mut cursors: BTreeMap<String, String> = BTreeMap::new();
+        // §15.98 visibility: bots whose rows got the NoPolicy wait-marker
+        // this run — they stop being re-scanned until a policy lands.
+        let mut no_policy_marked: BTreeSet<String> = BTreeSet::new();
         let mut preparing = BTreeSet::new();
+        let mut caller_tasks: BTreeMap<String, (String, futures::future::AbortHandle)> = BTreeMap::new();
         let mut aborting = BTreeSet::new();
         let mut work = JoinSet::new();
         let mut abort_work: JoinSet<(
@@ -196,15 +303,38 @@ impl DeliveryRuntime {
             tokio::select! {
                 _ = shutdown.changed() => { break; }
                 _ = expiry_ticker.tick() => {
-                    let expired = storage!(self.service.work_batch(DeliveryWorkBatch::Expired, now_ms(), "", 100));
-                    for row in expired { storage!(self.transition(event(&row, Event::QueueExpired))); }
+                    let expired = { let excluded = isolation.excluded(); storage!(self.service.work_batch_excluding(DeliveryWorkBatch::Expired, now_ms(), "", 100, &excluded)) };
+                    for row in expired {
+                        if isolation.blocked(&row.delivery_id) { continue; }
+                        // A maybe-sent caller row never expires into a
+                        // "stopped" lane release: TTL lapse converts to a
+                        // cancel intent; only stop/terminal evidence settles
+                        // it (spec 队列 TTL 与执行期限).
+                        if matches!(row.state.status, Status::Unknown | Status::CancelUnknown)
+                            && row.semantic_projection_json.get("caller_required").is_some()
+                        {
+                            let mut command = event(&row, Event::CancelRequested);
+                            command.deadline_at_ms = Some(now_ms().saturating_add(self.config.cancel_timeout.as_millis() as i64));
+                            row_transition!(command.clone());
+                        } else {
+                            row_transition!(event(&row, Event::QueueExpired));
+                        }
+                    }
                 }
                 _ = ticker.tick() => {
                     let tick_started = Instant::now();
-                    let rows = storage!(self.service.work_batch(DeliveryWorkBatch::Control, now_ms(), "", 32));
+                    let rows = { let excluded = isolation.excluded(); storage!(self.service.work_batch_excluding(DeliveryWorkBatch::Control, now_ms(), "", 32, &excluded)) };
                     for row in &rows {
+                        if isolation.blocked(&row.delivery_id) { continue; }
+                        if row.state.status == Status::Cancelling
+                            || (matches!(row.state.status, Status::Dispatching | Status::Running)
+                                && row.run_deadline_at_ms.is_some_and(|t| t <= now_ms())) {
+                            if let Some((_, handle)) = caller_tasks.get(&row.delivery_id) {
+                                handle.abort();
+                            }
+                        }
                         if row.state.status == Status::PendingContext && row.expire_at_ms.is_some_and(|t| t <= now_ms()) {
-                            storage!(self.transition(event(row, Event::QueueExpired)));
+                            row_transition!(event(row, Event::QueueExpired));
                         } else if matches!(row.state.status, Status::Dispatching | Status::Running)
                             && row.run_deadline_at_ms.is_some_and(|t| t <= now_ms()) {
                             let mut command = event(row, Event::CancelRequested);
@@ -216,19 +346,51 @@ impl DeliveryRuntime {
                                     "task_timeout": true,
                                 }));
                             }
-                            storage!(self.transition(command.clone()));
+                            row_transition!(command.clone());
+                        } else if row.state.status == Status::Unknown
+                            && row.run_deadline_at_ms.is_some_and(|t| t <= now_ms())
+                            && row.semantic_projection_json.get("caller_required").is_some()
+                        {
+                            // Run-deadline convergence (spec 队列 TTL 与执行期
+                            // 限): a maybe-sent caller dispatch never expires
+                            // into a "stopped" lane release, but its lapsed
+                            // execution budget is durable evidence the
+                            // dispatch will not settle on its own — convert
+                            // it to a cancel intent exactly like the queue-TTL
+                            // lapse, so the stop/terminal arbitration and the
+                            // manual resolution keep their authority.
+                            let mut command = event(row, Event::CancelRequested);
+                            command.deadline_at_ms = Some(now_ms().saturating_add(self.config.cancel_timeout.as_millis() as i64));
+                            tracing::warn!(
+                                delivery_id = %row.delivery_id,
+                                bot_id = %row.target_bot_id,
+                                run_deadline_at_ms = ?row.run_deadline_at_ms,
+                                "uncertain caller delivery passed its run deadline; converting to a cancel intent"
+                            );
+                            row_transition!(command.clone());
                         } else if row.state.status == Status::Cancelling && !aborting.contains(&row.delivery_id) {
                             if row.cancel_deadline_at_ms.is_some_and(|t| t <= now_ms()) {
-                                storage!(self.transition(event(row, Event::AbortUnconfirmed)));
+                                row_transition!(event(row, Event::AbortUnconfirmed));
                             } else if row.abort_request_id.is_none() && abort_work.len() < self.config.max_abort_tasks {
                                 let mut cmd = match tokio::time::timeout(self.config.io_timeout, self.preparation.prepare_abort(row)).await {
                                     Ok(Ok(cmd)) => cmd,
-                                    _ => { storage!(self.transition(event(row, Event::AbortUnconfirmed))); continue; }
+                                    Ok(Err(error)) => {
+                                        tracing::warn!(delivery_id=%row.delivery_id, error_kind=error.as_ref(), reason=abort_reason(&error), "delivery abort preparation failed");
+                                        row_transition!(event(row, Event::AbortUnconfirmed)); continue;
+                                    }
+                                    Err(_) => {
+                                        tracing::warn!(delivery_id=%row.delivery_id, "delivery abort preparation timed out");
+                                        row_transition!(event(row, Event::AbortUnconfirmed)); continue;
+                                    }
                                 };
                                 let mut start = event(row, Event::StartAbort);
                                 start.deadline_at_ms = Some(now_ms().saturating_add(self.config.cancel_timeout.as_millis() as i64));
-                                let Some(started) = storage!(self.transition(start.clone())) else { continue; };
-                                cmd.command_id = started.abort_request_id.clone().ok_or(ManagedDeliveryError::Conflict)?;
+                                let Some(started) = row_transition!(start.clone()) else { continue; };
+                                let Some(abort_request_id) = started.abort_request_id.clone() else {
+                                    tracing::error!(delivery_id = %started.delivery_id, "abort start committed without an abort request id");
+                                    continue;
+                                };
+                                cmd.command_id = abort_request_id;
                                 aborting.insert(row.delivery_id.clone());
                                 let io = self.transport.clone();
                                 let timeout = self.config.cancel_timeout;
@@ -242,12 +404,13 @@ impl DeliveryRuntime {
                                     .and_then(|value| value.as_str()).map(str::to_owned))
                                     .or_else(|| started.run_id.clone());
                                 abort_work.spawn(async move {
-                                    let result = tokio::time::timeout(timeout, async {
+                                    // A panic counts as an unconfirmed abort (None).
+                                    let result = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(tokio::time::timeout(timeout, async {
                                         match connection_id {
                                             Some(id) => io.abort_on_connection(cmd, &id).await,
                                             None => io.abort(cmd).await,
                                         }
-                                    }).await.ok();
+                                    }))).await.ok().and_then(Result::ok);
                                     (started.delivery_id, abort_request_id, downstream_run_id, result)
                                 });
                             }
@@ -265,22 +428,58 @@ impl DeliveryRuntime {
                             self.service.observe_operation("budget_exhausted", tick_started.elapsed().as_secs_f64(), work.len(), true); break;
                         }
                         last_bot = bot.clone();
-                        let Some(policy) = policies.get(&bot) else { continue; };
-                        let active = storage!(self.service.active_count(&bot)) as usize;
+                        let Some(policy) = policies.get(&bot) else {
+                // §15.98 visibility: a policy-less bot's rows used to be
+                // invisible — never scanned, never claimed, no wait_reason.
+                // Mark them once so the stall is observable on the row.
+                if no_policy_marked.insert(bot.clone()) {
+                    let entries = storage!(self.service.queued_heads(&bot, "", 8));
+                    if !entries.is_empty() {
+                        let waiting: Vec<(String, bcs_domain::message_delivery::DeliveryWaitReason)> = entries
+                            .iter()
+                            .map(|entry| {
+                                (
+                                    entry.delivery_id.clone(),
+                                    bcs_domain::message_delivery::DeliveryWaitReason::NoPolicy,
+                                )
+                            })
+                            .collect();
+                        storage!(self.service.update_wait_reasons(waiting.clone(), now_ms()));
+                    }
+                }
+                continue;
+            };
+                        // Conservatively reserve capacity until the protected future finishes;
+                        // its StartSend may not have reached durable storage yet.
+                        let reserved = caller_tasks.values().filter(|(id, _)| id == &bot).count();
+                        let active = storage!(self.service.active_count(&bot)) as usize + reserved;
                         let after = cursors.get(&bot).map(String::as_str).unwrap_or("");
                         let mut entries = storage!(self.service.queued_heads(&bot, after, 8));
                         if entries.is_empty() && !after.is_empty() { entries = storage!(self.service.queued_heads(&bot, "", 8)); }
                         if let Some(last) = entries.last() { cursors.insert(bot.clone(), last.session_id.clone()); }
+                        // An isolated head must not keep winning selection
+                        // (e.g. as an Expire action) over healthy sessions.
+                        entries.retain(|entry| !isolation.blocked(&entry.delivery_id));
                         if entries.is_empty() { continue; }
                         let rate_ready = epoch.elapsed().as_millis() as u64 >= last_send.get(&bot).copied().unwrap_or(0).saturating_add(policy.min_send_interval_ms);
                         let transport_ready = !paused && active < policy.max_running && rate_ready;
                         let online = if transport_ready { self.bot_available(&bot).await } else { true };
-                        let selected = MessageDeliveryCore.select(DeliveryScheduleSnapshot {
+                        let selected = match MessageDeliveryCore.select(DeliveryScheduleSnapshot {
                             entries: &entries, max_running: policy.max_running.saturating_sub(active).max(1), bot_online: online,
                             paused, now_ms: now_ms(), monotonic_now_ms: epoch.elapsed().as_millis() as u64,
                             next_send_tick_ms: last_send.get(&bot).copied().unwrap_or(0).saturating_add(policy.min_send_interval_ms), after_session_id: None,
                             preparing_delivery_ids: &preparing,
-                        })?;
+                        }) {
+                            Ok(selected) => selected,
+                            // §15.98 visibility: one bot's corrupted
+                            // snapshot must cost THAT bot's tick, not the
+                            // whole scheduler loop.
+                            Err(error) => {
+                                tracing::error!(bot_id = %bot, error = ?error,
+                                    "delivery schedule snapshot rejected: skipping this bot this tick");
+                                continue;
+                            }
+                        };
                         if active >= policy.max_running {
                             storage!(self.service.update_wait_reasons(entries.iter().map(|d| (d.delivery_id.clone(), bcs_domain::message_delivery::DeliveryWaitReason::BotCapacity)).collect(), now_ms()));
                             continue;
@@ -300,30 +499,99 @@ impl DeliveryRuntime {
                                 .collect();
                             storage!(self.service.update_wait_reasons(waiting.clone(), now_ms()));
                             for delivery_id in offline_ids {
-                                let Some(row) = storage!(self.get(&delivery_id)) else { continue; };
+                                let Some(row) = row_get!(&delivery_id) else { continue; };
                                 tracing::warn!(
                                     delivery_id = %row.delivery_id,
                                     bot_id = %row.target_bot_id,
                                     startup_recovery_grace_ms = self.config.startup_recovery_grace.as_millis() as u64,
                                     "delivery target remained offline after startup recovery grace; marking failed"
                                 );
-                                storage!(self.transition(event(&row, Event::PreparationFailed)));
+                                row_transition!(event(&row, Event::PreparationFailed));
                             }
                             continue;
                         }
                         storage!(self.service.update_wait_reasons(selected.waiting.clone(), now_ms()));
                         match selected.action {
                             Some(DeliveryScheduleAction::Expire { delivery_id, .. }) => {
-                                if let Some(row) = storage!(self.get(&delivery_id)) { storage!(self.transition(event(&row, Event::QueueExpired))); }
+                                if let Some(row) = row_get!(&delivery_id) { row_transition!(event(&row, Event::QueueExpired)); }
                             }
                             Some(DeliveryScheduleAction::Prepare { delivery_id, .. }) => {
-                                let row = storage!(self.get(&delivery_id)).ok_or(ManagedDeliveryError::NotFound)?;
+                                if isolation.blocked(&delivery_id) { continue; }
+                                let Some(row) = row_get!(&delivery_id) else { continue; };
+                                // Caller anti-downgrade guard (spec §7.5.1): the
+                                // key's presence alone decides for the ordinary
+                                // path — anomalous false/null reject too. With
+                                // no protected pipeline attached, or without the
+                                // committed digest/deadline facts, the row stays
+                                // fail-closed exactly as before.
+                                if row.semantic_projection_json.get("caller_required").is_some() {
+                                    // Plan-A identity-readiness gate (the P2
+                                    // admission race): the admission
+                                    // reserve()s this row's slot BEFORE the
+                                    // queue commit and publish()es only
+                                    // after it, so a tick landing in between
+                                    // sees a Reserved-but-unpublished slot.
+                                    // Reserved means the identity is still
+                                    // IN FLIGHT — park the attempt here (no
+                                    // StartSend, no last_send bump, no
+                                    // spawn) and pick the row up again on a
+                                    // later tick once the publish lands.
+                                    // Converging now would permanently fail
+                                    // an accepted task (retry:false) whose
+                                    // identity arrives microseconds later.
+                                    // Every other readiness (Published, or
+                                    // Gone via the None/Claimed slots)
+                                    // proceeds, so the fail-closed
+                                    // convergence and the DefinitelyNotSent
+                                    // evidence rules stay untouched — the
+                                    // queue TTL stays the parked row's
+                                    // convergence bound.
+                                    if let Some(pipeline) = self.caller_dispatch.as_ref() {
+                                        if matches!(
+                                            pipeline.dispatch_identity_readiness(&row).await,
+                                            bcs_service_api::application::caller_handoff::HandoffIdentityReadiness::Reserved
+                                        ) {
+                                            tracing::debug!(
+                                                delivery_id = %row.delivery_id,
+                                                bot_id = %row.target_bot_id,
+                                                "caller identity reserved but not yet published; the row parks this tick"
+                                            );
+                                            continue;
+                                        }
+                                    }
+                                    let (handle, registration) = futures::future::AbortHandle::new_pair();
+                                    caller_tasks.insert(delivery_id.clone(), (bot.clone(), handle));
+                                    preparing.insert(delivery_id.clone());
+                                    last_send.insert(bot.clone(), epoch.elapsed().as_millis() as u64);
+                                    let runtime = self.clone();
+                                    work.spawn(async move {
+                                        // No outer window (spec 2026-11-03): every
+                                        // stage inside the attempt carries its own
+                                        // liveness bound and converges with
+                                        // stage-accurate evidence; liveness of the
+                                        // whole task stays with the cancel handle
+                                        // (run-deadline arbiter / AbortUnconfirmed),
+                                        // the same model the ordinary path uses.
+                                        let _result = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
+                                            futures::future::Abortable::new(
+                                                runtime.attempt_caller_protected_dispatch(&row),
+                                                registration,
+                                            ),
+                                        )).await;
+                                        WorkResult::CallerFinished(delivery_id)
+                                    });
+                                    continue;
+                                }
                                 preparing.insert(delivery_id);
                                 let preparation = self.preparation.clone();
                                 let timeout = self.config.io_timeout;
                                 work.spawn(async move {
-                                    let result = tokio::time::timeout(timeout, preparation.prepare(&row)).await
-                                        .unwrap_or_else(|_| Err(bcs_service_api::ServiceError::InternalError("delivery preparation timed out".into())));
+                                    let result = match futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
+                                        tokio::time::timeout(timeout, preparation.prepare(&row)))).await {
+                                        Ok(Ok(result)) => result,
+                                        Ok(Err(_)) => Err(bcs_service_api::ServiceError::InternalError("delivery preparation timed out".into())),
+                                        Err(_) => Err(bcs_service_api::ServiceError::InternalError("delivery preparation panicked".into())),
+                                    };
                                     WorkResult::Prepared(row, result)
                                 });
                             }
@@ -333,34 +601,49 @@ impl DeliveryRuntime {
                     self.service.observe_operation("tick", tick_started.elapsed().as_secs_f64(), work.len(), true);
                 }
                 Some(result) = work.join_next(), if !work.is_empty() => {
-                    let result = result.map_err(|_| ManagedDeliveryError::Conflict)?;
+                    // Tasks catch their own panics; a join error is only a
+                    // cancellation and carries nothing to settle.
+                    let Ok(result) = result else { continue; };
                     match result {
+                        WorkResult::CallerFinished(id) => {
+                            preparing.remove(&id);
+                            caller_tasks.remove(&id);
+                        }
                         WorkResult::Prepared(prepared_row, result) => {
                             preparing.remove(&prepared_row.delivery_id);
-                            let Some(current) = storage!(self.get(&prepared_row.delivery_id)) else { continue; };
+                            let Some(current) = row_get!(&prepared_row.delivery_id) else { continue; };
                             let row = &current;
                             if row.state.state_version != prepared_row.state.state_version || row.state.status != Status::Queued { continue; }
                             let mut prepared = match result {
                                 Ok(prepared) => prepared,
-                                Err(_) => { storage!(self.transition(event(row, Event::PreparationFailed))); continue; }
+                                Err(_) => { row_transition!(event(row, Event::PreparationFailed)); continue; }
                             };
                             let bot = &row.target_bot_id;
                             let (policies, paused, retries, policy_version) = self.policies(&[bot.clone()]).await;
                             let Some(policy) = policies.get(bot) else { continue; };
-                            if storage!(self.service.active_count(bot)) >= policy.max_running as u64 { continue; }
+                            if storage!(self.service.active_count(bot)) + caller_tasks.values().filter(|(id, _)| id == bot).count() as u64 >= policy.max_running as u64 { continue; }
                             if storage!(self.service.lane_blocked(row)) { continue; }
                             let entries = schedule_rows(std::slice::from_ref(row), bot);
                             let excluded = entries.iter().filter(|e| e.delivery_id != row.delivery_id).map(|e| e.delivery_id.clone()).collect();
                             let rate_ready = epoch.elapsed().as_millis() as u64 >= last_send.get(bot).copied().unwrap_or(0).saturating_add(policy.min_send_interval_ms);
                             let transport_ready = !paused && rate_ready;
                             let online = if transport_ready { self.bot_available(bot).await } else { true };
-                            let selected = MessageDeliveryCore.select(DeliveryScheduleSnapshot {
+                            let selected = match MessageDeliveryCore.select(DeliveryScheduleSnapshot {
                                 entries: &entries, max_running: policy.max_running, bot_online: online,
                                 paused, now_ms: now_ms(), monotonic_now_ms: epoch.elapsed().as_millis() as u64,
                                 next_send_tick_ms: last_send.get(bot).copied().unwrap_or(0).saturating_add(policy.min_send_interval_ms), after_session_id: None, preparing_delivery_ids: &excluded,
-                            })?;
+                            }) {
+                                Ok(selected) => selected,
+                                // Same §15.98 demotion as the claim loop: a
+                                // corrupted record costs one bot one tick.
+                                Err(error) => {
+                                    tracing::error!(bot_id = %bot, error = ?error,
+                                        "delivery schedule snapshot rejected: skipping this bot this tick");
+                                    continue;
+                                }
+                            };
                             if matches!(selected.action, Some(DeliveryScheduleAction::Expire { .. })) {
-                                storage!(self.transition(event(row, Event::QueueExpired)));
+                                row_transition!(event(row, Event::QueueExpired));
                                 continue;
                             }
                             if selected.action.is_none()
@@ -374,36 +657,80 @@ impl DeliveryRuntime {
                                     startup_recovery_grace_ms = self.config.startup_recovery_grace.as_millis() as u64,
                                     "prepared delivery target disconnected after startup recovery grace; marking failed"
                                 );
-                                storage!(self.transition(event(row, Event::PreparationFailed)));
+                                row_transition!(event(row, Event::PreparationFailed));
                                 continue;
                             }
                             if !matches!(selected.action, Some(DeliveryScheduleAction::Prepare { ref delivery_id, .. }) if delivery_id == &row.delivery_id) { continue; }
                             if !tokio::time::timeout(self.config.io_timeout, self.preparation.still_valid(&prepared)).await.unwrap_or(false) { continue; }
                             if prepared.command.target_bot_id() != bot || prepared.command.run_id.as_str() != row.run_id.as_deref().unwrap_or("")
                                 || prepared.transport_context_json.get("provider_route_headers").cloned().unwrap_or_else(|| serde_json::json!([]))
-                                    != serde_json::json!(prepared.command.provider_bypass_headers) { return Err(ManagedDeliveryError::Conflict); }
+                                    != serde_json::json!(prepared.command.provider_bypass_headers) {
+                                tracing::error!(delivery_id = %row.delivery_id, "prepared delivery does not match its row; isolating");
+                                isolation.isolate(&row.delivery_id);
+                                continue;
+                            }
                             let mut command = event(row, Event::StartSend);
                             if let Some(version) = policy_version { prepared.transport_context_json["policy_version"] = serde_json::json!(version); }
                             command.transport_context_json = Some(prepared.transport_context_json);
                             command.deadline_at_ms = Some(if row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a {
-                                row.semantic_projection_json.get("expires_at_ms").and_then(|v| v.as_i64()).ok_or(ManagedDeliveryError::Conflict)?
-                            } else { now_ms().saturating_add(run_timeout_for(row, self.config.run_timeout).as_millis() as i64) });
-                            let Some(started) = storage!(self.transition(command.clone())) else { continue; };
-                            let request_id = started.request_id.clone().ok_or(ManagedDeliveryError::Conflict)?;
+                                match row.semantic_projection_json.get("expires_at_ms").and_then(|v| v.as_i64()) {
+                                    Some(expires_at_ms) => expires_at_ms,
+                                    None => {
+                                        tracing::error!(delivery_id = %row.delivery_id, "direct A2A row has no expiry; isolating");
+                                        isolation.isolate(&row.delivery_id);
+                                        continue;
+                                    }
+                                }
+                            } else { command.now_ms.saturating_add(run_timeout_for(row, self.config.run_timeout).as_millis() as i64) });
+                            let Some(started) = row_transition!(command.clone()) else { continue; };
+                            // §7.2.1 delegation-only lineage (review batch-3
+                            // §3.1): an ORDINARY Started row carrying the
+                            // trusted `caller_lineage` marker is an Owner
+                            // target of a lease-admitted Human turn — its
+                            // delegation-only root association registers
+                            // best-effort here (the ordinary dispatch never
+                            // depends on it). Without an attached pipeline
+                            // the marker is REPORTED, never silently
+                            // dropped (spec CALLER_LINEAGE_UNSUPPORTED).
+                            if started.semantic_projection_json.get("caller_lineage").is_some() {
+                                match self.caller_dispatch.as_ref() {
+                                    Some(pipeline) => {
+                                        pipeline
+                                            .register_delegation_only_lineage(&started, now_ms())
+                                            .await;
+                                    }
+                                    None => {
+                                        tracing::warn!(
+                                            delivery_id = %started.delivery_id,
+                                            bot_id = %started.target_bot_id,
+                                            "delegation-only lineage marker without a protected pipeline (CALLER_LINEAGE_UNSUPPORTED); derivation stays refused"
+                                        );
+                                    }
+                                }
+                            }
+                            // Nothing was sent yet; the run deadline settles the
+                            // started row if its shape is unusable.
+                            let Some(request_id) = started.request_id.clone() else {
+                                tracing::error!(delivery_id = %started.delivery_id, "started delivery has no request id");
+                                continue;
+                            };
                             match &mut prepared.command.frame {
                                 BcsFrame::Request(frame) if frame.method == "chat.send" => frame.id = request_id.clone(),
-                                _ => return Err(ManagedDeliveryError::Conflict),
+                                _ => {
+                                    tracing::error!(delivery_id = %started.delivery_id, "prepared delivery is not a chat.send request");
+                                    continue;
+                                }
                             }
                             last_send.insert(bot.clone(), epoch.elapsed().as_millis() as u64);
                             cursors.insert(bot.clone(), row.session_id.clone());
                             // All subsequent failures are conservative possible sends.
                             // Registration failure is provably before transport I/O.
                             if !matches!(tokio::time::timeout(self.config.io_timeout, self.preparation.before_send(&started, &prepared.command)).await, Ok(Ok(()))) {
-                                let Some(current) = storage!(self.get(&started.delivery_id)) else { continue; };
+                                let Some(current) = evidence_get!(&started.delivery_id) else { continue; };
                                 let retry = current.attempt_no <= retries;
                                 let mut failed = event(&current, Event::DefinitelyNotSent { retry });
                                 failed.request_id = Some(request_id);
-                                storage!(self.transition(failed.clone()));
+                                evidence_transition!(failed.clone());
                                 continue;
                             }
                             let io = self.transport.clone();
@@ -411,17 +738,18 @@ impl DeliveryRuntime {
                             let connection_id = started.transport_context_json.as_ref()
                                 .and_then(|v| v.get("connection_id")).and_then(|v| v.as_str()).map(str::to_owned);
                             work.spawn(async move {
-                                let result = tokio::time::timeout(timeout, async {
+                                // A panic is an unknown outcome (None): never resent.
+                                let result = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(tokio::time::timeout(timeout, async {
                                     match connection_id {
                                         Some(id) => io.deliver_on_connection(prepared.command, &id).await,
                                         None => io.deliver(prepared.command).await,
                                     }
-                                }).await.ok();
+                                }))).await.ok().and_then(Result::ok);
                                 WorkResult::Sent(started.delivery_id, request_id, result)
                             });
                         }
                         WorkResult::Sent(id, request_id, result) => {
-                            if let Some(row) = storage!(self.get(&id)) {
+                            if let Some(row) = evidence_get!(&id) {
                                 // Submission is not ACK. A delivered=true result keeps
                                 // dispatching until a trusted Bot event proves receipt.
                                 {
@@ -453,20 +781,27 @@ impl DeliveryRuntime {
                                     };
                                     let mut command = event(&row, next);
                                     command.request_id = Some(request_id);
-                                    storage!(self.transition(command.clone()));
+                                    evidence_transition!(command.clone());
                                 }
                             }
                         }
                     }
                 }
                 Some(result) = abort_work.join_next(), if !abort_work.is_empty() => {
-                    let (id, abort_request_id, downstream_run_id, result) = result.map_err(|_| ManagedDeliveryError::Conflict)?;
+                    let Ok((id, abort_request_id, downstream_run_id, result)) = result else { continue; };
                     aborting.remove(&id);
-                    if let Some(row) = storage!(self.get(&id)) {
+                    if let Some(Err(error)) = &result {
+                        tracing::warn!(delivery_id=%id, error_kind=error.as_ref(), reason=abort_reason(error), "delivery abort transport failed");
+                    }
+                    if let Some(row) = evidence_get!(&id) {
                         if row.abort_request_id.as_ref() != Some(&abort_request_id) { continue; }
                         let acknowledged = matches!(result, Some(Ok(ref r)) if r.target_bot_id == row.target_bot_id
                             && downstream_run_id.as_ref().is_some_and(|id| r.aborted_run_ids.len() == 1 && r.aborted_run_ids.contains(id)));
-                        storage!(self.transition(event(&row, if acknowledged { Event::Aborted } else { Event::AbortUnconfirmed })));
+                        let mut command = event(&row, if acknowledged { Event::Aborted } else { Event::AbortUnconfirmed });
+                        if matches!(result, Some(Err(bcs_service_api::ServiceError::BotMethodUnsupported { .. } | bcs_service_api::ServiceError::InvalidOperation { .. }))) {
+                            command.transport_context_json = Some(serde_json::json!({"task_cancel_rejected":true}));
+                        }
+                        evidence_transition!(command.clone());
                     }
                 }
             }
@@ -479,5 +814,36 @@ impl DeliveryRuntime {
         while abort_work.join_next().await.is_some() {}
         self.service.recover(now_ms()).await?;
         outcome
+    }
+}
+
+mod caller_delegate;
+
+mod row_isolation;
+
+mod caller_dispatch;
+
+// Only fixed, locally defined diagnostics are safe to log here. Remote error
+// bodies, command payloads and credential-bearing target Debug values stay out.
+fn abort_reason(error: &bcs_service_api::ServiceError) -> &'static str {
+    use bcs_service_api::ServiceError;
+    let message = match error {
+        ServiceError::InternalError(message) | ServiceError::InvalidOperation { message, .. } => message.as_str(),
+        _ => return "see_error_kind",
+    };
+    match message {
+        "queue original transport is unknown" => "original_transport_missing",
+        "invalid queue transport metadata" => "transport_metadata_invalid",
+        "unsupported queue transport version" => "transport_version_unsupported",
+        "queue run identity missing" => "run_identity_missing",
+        "queue original A2A owner changed" => "a2a_owner_changed",
+        "A2A: cancel scope mismatch" => "a2a_scope_mismatch",
+        "A2A: cancel Run not found" => "a2a_run_missing",
+        "A2A: cancel rejected or unconfirmed" => "a2a_remote_unconfirmed",
+        "A2A: cancel outcome unknown" => "a2a_remote_timeout",
+        "A2A: cancel response identity mismatch" => "a2a_remote_identity_mismatch",
+        "A2A: credential unavailable" => "a2a_credential_unavailable",
+        "A2A: cancel persistence unconfirmed" => "a2a_persistence_unconfirmed",
+        _ => "see_error_kind",
     }
 }

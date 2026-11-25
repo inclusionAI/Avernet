@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from agentclaw.community.core.task.task_harness.harness import (
+from agentclaw.community.core.task.task_harness.timeout_policy import (
     effective_pending_timeout_ms,
     effective_sla_threshold_ms,
 )
 
+from agentclaw.community.core.task.domain.models import TaskRuntimeProfile
 from agentclaw.community.core.task.task_runner.centralized_support import (
     NodeAction,
     ReasonCatalog,
@@ -371,7 +372,7 @@ async def _on_harness_collect(
             status_to=Status.PENDING,
         )
     # static plan:harness 重派走 static prepare(只派发 readiness.ready 的绑定 bot),
-    # 不进搜推/claim_join,避免依赖未满足的节点(strategy_approval/implementation)被提前搜推
+    # 不进搜推,避免依赖未满足的节点(strategy_approval/implementation)被提前搜推
     # 派给 catalog 命中的错误 bot(如 default:35983)。
     _static_runtime = self._static_runtime(task_id)
     if _static_runtime is not None:
@@ -787,6 +788,16 @@ def _enter_root_bbs(self, task_id: str, execution_graph) -> bool:
     the root is blocked.
     """
     if execution_graph.status == Status.HUNG:
+        return False
+    if "bbs" not in TaskRuntimeProfile.run_modes_from_graph(execution_graph):
+        logger.info(
+            "[task][bbs_mode] task=%s BBS recovery disabled by runtime profile", task_id
+        )
+        self._sync_graph_status_to_root(task_id)
+        self._report_graph_patch(
+            task_id,
+            TaskGraphPatch(extend_props_patch={"hung_reason": "bbs_disabled"}),
+        )
         return False
     root = self._root(task_id)
     if root is None or root.run_info.extend_props.get("bbs_owner"):

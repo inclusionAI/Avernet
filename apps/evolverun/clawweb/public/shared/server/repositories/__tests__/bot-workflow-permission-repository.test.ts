@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
 import { SqliteDatabase } from "../../db.js";
 import { BotWorkflowPermissionRepository } from "../bot-workflow-permission-repository.js";
@@ -24,6 +24,47 @@ describe("BotWorkflowPermissionRepository", () => {
     const db = new SqliteDatabase(raw);
     return { repo: new BotWorkflowPermissionRepository(db), db, raw };
   }
+
+  describe("withDatabase", () => {
+    it("keeps Bot-directory policy while routing all permission reads through the transaction", async () => {
+      const { db } = createRepo();
+      const listBots = vi.fn().mockResolvedValue([{ botId: "shared", displayBotId: "shared", ownerId: "owner",
+        source: "test", status: "active", accessType: "collaborator" }]);
+      const repo = new BotWorkflowPermissionRepository(db, { listBots });
+      try {
+        await repo.upsert({ bot_id: "shared", bot_owner_id: "owner", workflow_id: "wf", can_view: 1, can_execute: 1, can_edit: 1 });
+        const outside = vi.spyOn(db, "query");
+        await db.transaction(async tx => {
+          const scoped = repo.withDatabase(tx);
+          expect(scoped).not.toBe(repo);
+          for (const permission of ["hasViewPermission", "hasExecutePermission", "hasEditPermission"] as const) {
+            expect(await scoped[permission]("wf", "collaborator")).toBe(true);
+          }
+          expect(outside).not.toHaveBeenCalled();
+          listBots.mockResolvedValue([]);
+          expect(await scoped.hasEditPermission("wf", "collaborator")).toBe(false);
+          listBots.mockRejectedValue(new Error("Directory unavailable"));
+          expect(await scoped.hasEditPermission("wf", "collaborator")).toBe(false);
+        });
+        expect(await repo.hasEditPermission("wf", "owner")).toBe(true);
+        expect(outside).toHaveBeenCalled();
+        expect(listBots).toHaveBeenCalledTimes(5);
+      } finally { vi.restoreAllMocks(); await db.close(); }
+    });
+
+    it("retains direct grants and does not add Bot inheritance to a repository without a directory", async () => {
+      const { repo, db } = createRepo();
+      try {
+        await repo.upsert({ bot_id: "shared", bot_owner_id: "owner", workflow_id: "wf", can_view: 1, can_execute: 0, can_edit: 1 });
+        await db.transaction(async tx => {
+          const scoped = repo.withDatabase(tx);
+          expect(await scoped.hasEditPermission("wf", "owner")).toBe(true);
+          expect(await scoped.hasEditPermission("wf", "collaborator")).toBe(false);
+          expect(await scoped.hasExecutePermission("wf", "owner")).toBe(false);
+        });
+      } finally { await db.close(); }
+    });
+  });
 
   describe("resolveViewScope", () => {
     it("returns 'all' when bot_id='*' and bot_owner_id='*' and can_view=1", async () => {

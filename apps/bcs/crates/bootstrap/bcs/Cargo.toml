@@ -11,13 +11,58 @@ version     = { workspace = true }
 name = "bcs"
 path = "src/main.rs"
 
+[[bin]]
+name = "bcs-caller-e2e"
+path = "tests/caller_channel/runner.rs"
+required-features = ["test-utils"]
+
+[[bin]]
+name = "bcs-oauth-e2e"
+path = "tests/oauth_e2e/runner.rs"
+required-features = ["test-utils"]
+
+[[bin]]
+name = "bcs-a2a-grpc-peer"
+path = "tests/a2a_grpc/runner.rs"
+required-features = ["test-utils"]
+test = false
+
+[[bin]]
+name = "bcs-worker-e2e"
+path = "tests/worker_runtime/runner.rs"
+required-features = ["worker-runtime-e2e"]
+test = false
+
 [features]
 default = ["prometheus-metrics"]
+worker-runtime-e2e = ["dep:bcs-dist-connector-store", "dep:bcs-dist-model", "dep:bcs-dist-store", "dep:bcs-dist-projection", "dep:bcs-dist-worker", "dep:bcs-app-dist-runtime", "dep:bcs-store-api", "dep:bcs-dist-test-runner", "dep:bcs-app-dist-gateway", "dep:bcs-dist-gateway", "dep:bcs-dist-gateway-http", "dep:bcs-dist-a2a-output"]
 metrics = ["prometheus-metrics"]
+a2a-http-e2e = []
 prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
-test-utils = []
+test-utils = ["dep:bcs-a2a-binding-api", "dep:a2a-e2e-sdk", "dep:reqwest-e2e", "dep:a2a-pb-e2e", "dep:tonic-e2e"]
 
 [dependencies]
+bcs-dist-model = { workspace = true, optional = true }
+bcs-app-dist-gateway = { workspace = true, optional = true }
+bcs-dist-gateway = { workspace = true, optional = true }
+bcs-dist-gateway-http = { workspace = true, optional = true }
+bcs-dist-a2a-output = { workspace = true, optional = true }
+bcs-dist-connector-store = { workspace = true, optional = true }
+bcs-dist-store = { workspace = true, optional = true }
+bcs-dist-projection = { workspace = true, optional = true }
+bcs-dist-worker = { workspace = true, optional = true }
+bcs-dist-test-runner = { workspace = true, optional = true }
+bcs-app-dist-runtime = { workspace = true, optional = true }
+bcs-store-api = { workspace = true, optional = true }
+bcs-app-identity-api.workspace = true
+bcs-a2a-binding-api = { workspace = true, optional = true }
+a2a-e2e-sdk = { package = "a2a-lf", version = "=0.4.2", optional = true }
+reqwest-e2e = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls", "json", "stream"], optional = true }
+a2a-pb-e2e = { package = "a2a-pb", version = "=0.3.2", optional = true }
+tonic-e2e = { package = "tonic", version = "0.14", features = ["transport"], optional = true }
+bcs-network-tracing.workspace = true
+bcs-tracing-api.workspace = true
+bcs-caller-identity-api = { workspace = true }
 bcs-observability = { workspace = true }
 # Async runtime
 tokio = { workspace = true }
@@ -41,6 +86,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-appender    = { workspace = true }
 tracing-subscriber = { workspace = true }
+tracing-serde = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
@@ -56,8 +102,6 @@ reqwest = { workspace = true }
 
 # WebSocket client (for bot communication and DingTalk Stream Mode)
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
-native-tls = "0.2"
-tokio-native-tls = "0.3"
 
 # UUID
 uuid = { workspace = true }
@@ -67,8 +111,6 @@ fastrand = { workspace = true }
 rand = { workspace = true }
 tempfile = { workspace = true }
 
-# Regex
-regex = { workspace = true }
 
 # Time
 time = { workspace = true }
@@ -77,9 +119,8 @@ chrono = { workspace = true }
 # Crypto for Alibaba Cloud signing
 sha2 = { workspace = true }
 hex = { workspace = true }
+bcs-caller-identity-jwt = { workspace = true }
 
-# Directories (for config file discovery)
-dirs = { workspace = true }
 
 # Metrics (optional)
 metrics = { workspace = true, optional = true }
@@ -106,11 +147,13 @@ bcs-auth-wechat  = { workspace = true }
 bcs-auth-alipay  = { workspace = true }
 bcs-auth-local  = { workspace = true }
 bcs-auth-oauth  = { workspace = true }
+bcs-app-auth    = { workspace = true }
 bcs-user-identity = { workspace = true }
 bcs-cache-local = { workspace = true }
 bcs-cache-redis = { workspace = true }
 bcs-db-local    = { workspace = true }
 bcs-db-mysql    = { workspace = true }
+bcs-db-migrations = { workspace = true }
 bcs-ws          = { workspace = true }
 bcs-bot = { workspace = true }
 bcs-channel = { workspace = true }
@@ -127,7 +170,6 @@ bcs-security-gateway-local = { workspace = true }
 bcs-fusion      = { workspace = true }
 bcs-fuse-client = { workspace = true }
 bcs-leader-election = { workspace = true }
-bcs-proposal    = { workspace = true }
 bcs-friend      = { workspace = true }
 bcs-relation    = { workspace = true }
 bcs-system-message = { workspace = true }
@@ -151,6 +193,8 @@ bcs-app-collaboration-definition = { workspace = true }
 bcs-invite-code-store = { workspace = true }
 bcs-app-invite-code = { workspace = true }
 bcs-provider-http = { workspace = true }
+bcs-a2a-http = { workspace = true }
+bcs-app-a2a-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-friend-store = { workspace = true }
 bcs-group-store = { workspace = true }
@@ -175,7 +219,6 @@ bcs-event-store = { workspace = true }
 bcs-eventing = { workspace = true }
 bcs-coordination-store = { workspace = true }
 bcs-webhook-client = { workspace = true }
-bcs-callback = { workspace = true }
 bcs-collaboration-template = { workspace = true }
 bcs-collaboration-runtime = { workspace = true }
 bcs-collaboration-store = { workspace = true }
@@ -199,22 +242,19 @@ base64 = "0.22"
 # CLI argument parsing
 clap = { workspace = true }
 
-# Network interface enumeration
-if-addrs = "0.15"
-
-# URL query string parsing (for AxumRequestAdapter)
-form_urlencoded = "1"
 
 [build-dependencies]
 chrono = { workspace = true }
 
 [dev-dependencies]
+log = "0.4"
 dirs = "5.0"
 futures-util = "0.3"
+rsa = { workspace = true }
 bcs = { path = ".", features = ["test-utils"] }
 bcs-cli = { workspace = true }
 bcs-services-container = { workspace = true, features = ["test-support"] }
-bcs-test-support = { workspace = true }
+bcs-test-support = { workspace = true, features = ["diagnostic-logs"] }
 serial_test = "3"
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 jsonwebtoken = { workspace = true }

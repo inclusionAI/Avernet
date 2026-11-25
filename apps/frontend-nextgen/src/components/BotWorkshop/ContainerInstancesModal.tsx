@@ -37,7 +37,7 @@ export function ContainerInstancesModal({ bot, userId, canRestart = false, onClo
   const [restartingId, setRestartingId] = React.useState<string>();
   const [copiedId, setCopiedId] = React.useState<string>();
   const load = React.useCallback(async () => {
-    if (!bot || !userId) return;
+    if (!bot || !userId || bot.runtime.engine === 'teclaw') return;
     setLoading(true);
     setError('');
     try {
@@ -55,7 +55,7 @@ export function ContainerInstancesModal({ bot, userId, canRestart = false, onClo
   }, [bot, load]);
 
   const restart = async (instance: ContainerInstance) => {
-    if (!bot || !userId || instance.status !== 'abnormal' || !canRestart) return;
+    if (!bot || !userId || bot.runtime.engine === 'teclaw' || instance.status !== 'abnormal' || !canRestart) return;
     setRestartingId(instance.id);
     try {
       await botContainerService.restart(bot.id, instance.id, userId);
@@ -78,7 +78,7 @@ export function ContainerInstancesModal({ bot, userId, canRestart = false, onClo
   return (
     <Modal open={Boolean(bot)} onOpenChange={(open) => !open && onClose()}>
       <ModalContent size="xl" className="max-h-[85vh] p-0">
-        <ModalHeader className="border-b border-border px-6 py-5">
+        <ModalHeader className="border-b border-divider px-6 py-5">
           <ModalTitle>容器实例 · {bot?.name}</ModalTitle>
           <ModalDescription>查看运行态服务 Bot 的实例健康状态；仅 Owner 可以重启异常实例。</ModalDescription>
         </ModalHeader>
@@ -98,7 +98,7 @@ export function ContainerInstancesModal({ bot, userId, canRestart = false, onClo
           ) : null}
           {snapshot ? (
             <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-y border-border bg-muted/50 px-4 py-3 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-y border-divider bg-muted/50 px-4 py-3 text-sm">
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                   <span>共 <strong>{snapshot.summary.total}</strong> 个实例</span>
                   <span className="text-success"><strong>{snapshot.summary.healthy}</strong> 活跃</span>
@@ -118,7 +118,7 @@ export function ContainerInstancesModal({ bot, userId, canRestart = false, onClo
               {snapshot.instances.length ? (
                 <>
                   <div className="overflow-hidden rounded-lg border border-border">
-                    <div className="grid grid-cols-[minmax(0,1fr)_112px_96px] gap-4 border-b border-border bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground">
+                    <div className="grid grid-cols-[minmax(0,1fr)_112px_96px] gap-4 border-b border-divider bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground">
                       <span>实例名称</span>
                       <span className="text-center">心跳状态</span>
                       <span className="text-center">操作</span>
@@ -126,7 +126,7 @@ export function ContainerInstancesModal({ bot, userId, canRestart = false, onClo
                     {snapshot.instances.map((instance) => (
                       <div
                         key={instance.id}
-                        className="grid grid-cols-[minmax(0,1fr)_112px_96px] items-center gap-4 border-b border-border px-4 py-3 last:border-b-0"
+                        className="grid grid-cols-[minmax(0,1fr)_112px_96px] items-center gap-4 border-b border-divider px-4 py-3 last:border-b-0"
                       >
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{instance.providerInstanceId || instance.id}</p>
@@ -166,7 +166,7 @@ export function ContainerInstancesModal({ bot, userId, canRestart = false, onClo
                       </div>
                     ))}
                   </div>
-                  <p className="border-t border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+                  <p className="border-t border-divider bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
                     重启操作将中断该实例上的活跃对话。
                   </p>
                 </>

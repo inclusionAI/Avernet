@@ -32,7 +32,7 @@ class BotReachabilityQueries:
 
     def page_live_bots_by_pks(
         self, bot_pks: List[int], *, exclude_owner_id: str, entity_pairs: List[tuple[str, str]] | None,
-        page: int, page_size: int,
+        page: int, page_size: int, stage: str | None = None,
     ) -> tuple[int, list[dict]]:
         if not bot_pks or entity_pairs == []:
             return 0, []
@@ -43,6 +43,10 @@ class BotReachabilityQueries:
             )
             if entity_pairs is not None:
                 query = query.filter(tuple_(self.Model.bot_id, self.Model.entity_id).in_(set(entity_pairs)))
+            if stage is not None:
+                from .stage_catalog import apply_stage_filter
+
+                query = apply_stage_filter(db, query, self.Model, stage)
             total = query.count()
             rows = query.order_by(self.Model.gmt_create.desc(), self.Model.id.desc()).offset(
                 (page - 1) * page_size

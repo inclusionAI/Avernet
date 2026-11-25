@@ -18,6 +18,8 @@ class PermissionParams:
     """权限检查所需参数。"""
     bot_id: str | None = None
     owner_id: str | None = None
+    # Set only by publish-record extractors; ordinary routes keep locator lookup.
+    source_bot_pk: int | None = None
 
 
 @runtime_checkable

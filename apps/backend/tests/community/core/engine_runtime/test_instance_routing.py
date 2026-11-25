@@ -139,7 +139,10 @@ def test_connection_rejects_unaddressable_instance_provider():
 def test_file_stage_resolution_passes_uuid_without_changing_binding():
     resolver = Mock()
     bots = Mock()
-    bots.get_by_id_and_owner.return_value = {"id": 100, "bot_type": "service"}
+    bots.list_matches_by_legacy_locator.return_value = [{
+        "id": 100, "bot_id": BOT, "bot_type": "service",
+        "owner_id": OWNER, "entity_id": OWNER,
+    }]
     publications = _PublishRepo({100: [_PublishRecord({"binding": {"online": 42}})]})
     resolve_stage_device_context(
         resolver,

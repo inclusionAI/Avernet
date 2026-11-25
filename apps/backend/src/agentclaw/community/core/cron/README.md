@@ -44,8 +44,9 @@ POST /api/cron accepts runtime_stage (draft/verify/online), device_uuid (runtime
 instance UUID), and operator_id (creator and
 Caller identity). The authenticated operator (internal authenticated_user_id) remains separate from
 the requested operator_id/Caller identity;
-delegation requires existing Bot ADMIN/OWNER permission. Explicit Caller targets
-only support online and must reference an existing Caller binding. Device
+delegation requires existing Bot ADMIN/OWNER permission. Independent Caller targets
+only support online and must reference an existing Caller binding. Teclaw service
+Bots use their service stage bindings, including for explicit instance selection. Device
 membership is validated before forwarding once. No provisioning or fallback
 occurs. Omitted creation target fields preserve the legacy draft behavior.
 
@@ -56,3 +57,23 @@ Creation/detail results expose runtime_stage, device_uuid and operator_id
 for subsequent management. Targets are container-local and are not migrated when
 a container is replaced. CronTargetedOperationsMixin records request, resolved
 binding, transport result/failure and response events without connection credentials.
+
+### Default list and Caller identity
+
+GET /api/cron with no operator_id/device_uuid supports bot_id=all and a specific
+Bot. Teclaw service Bots use draft/verify/online service bindings even when
+call_type=caller; no independent Caller instance is required. With no runtime_stage,
+or with runtime_stage=online, non-Teclaw Caller service Bots
+contribute only the authenticated user's existing Caller instances; their parent
+service draft/verify/online targets are not added. The Bot owner's identity stays
+separate from the authenticated Caller. Every returned Caller row includes
+runtime_stage=online, device_uuid where applicable, and operator_id. Missing or
+unavailable Caller instances produce failed_targets while other Bots remain
+queryable. No Caller provisioning or parent fallback occurs.
+
+Explicit draft/verify filters preserve their existing parent-stage query behavior,
+including OpenAPI draft-only queries. Explicit operator_id/device_uuid still use
+the existing targeted-list contract requiring a specific Bot and runtime_stage.
+Auto-selected Caller reads reuse its transport and request/response/failure
+diagnostics after binding resolution and instance enumeration establish
+authorization and device membership.

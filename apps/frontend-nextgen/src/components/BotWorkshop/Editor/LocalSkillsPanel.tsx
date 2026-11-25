@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Input } from '@/components/ui/Input';
 import type { BotEditorSkill } from '@/domain/botEditor';
+import { useLocalSkillUploadError } from '@/hooks/useLocalSkillUploadError';
 import { useRef, useState } from 'react';
 export function LocalSkillsPanel({
   skills,
@@ -20,6 +21,7 @@ export function LocalSkillsPanel({
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const uploadError = useLocalSkillUploadError();
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     try {
@@ -29,7 +31,7 @@ export function LocalSkillsPanel({
     }
   };
   return (
-    <section className={`space-y-3 ${embedded ? 'rounded-lg border border-border p-3' : 'border-t border-border p-5'}`}>
+    <section className={`space-y-3 ${embedded ? 'rounded-lg border border-border p-3' : 'border-t border-divider p-5'}`}>
       <h3 className="text-sm font-semibold">本地 Skill 管理</h3>
       <p className="text-xs text-muted-foreground">上传同名 Skill 会替换已有内容。删除前请先停用并移除能力集引用。</p>
       <Input
@@ -41,12 +43,16 @@ export function LocalSkillsPanel({
         onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = '';
-          if (file) void run(() => onUpload(file)).catch(() => undefined);
+          if (file) {
+            uploadError.setMessage('');
+            void run(() => onUpload(file)).catch(uploadError.handleError);
+          }
         }}
       />
       <Button variant="outline" size="sm" disabled={!editable || busy} onClick={() => input.current?.click()}>
         {busy ? '处理中…' : '上传 / 替换 ZIP'}
       </Button>
+      {uploadError.message ? <p role="alert" className="text-sm text-destructive">{uploadError.message}</p> : null}
       {skills.map((skill) => (
         <div key={skill.id} className="flex items-center gap-2 rounded-md border border-border p-2">
           <span className="min-w-0 flex-1 truncate text-sm">{skill.name}</span>

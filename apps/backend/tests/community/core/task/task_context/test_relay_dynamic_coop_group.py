@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -15,6 +16,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
     Context,
     Goal,
+    NodeAction,
     RuntimeInfo,
     Status,
     TaskExecutionGraph,
@@ -78,6 +80,22 @@ def _graph_service() -> TaskGraphService:
     graph.tasks.append(root)
     service = TaskGraphService()
     service._graphs[graph.task_id] = graph
+    service.append_action_event(
+        "task-1",
+        "task-1",
+        NodeAction.DISPATCH,
+        {
+            "phase": "search",
+            "action_result": "search",
+            "query": "manager worker candidates",
+            "relay_token_fingerprint": hashlib.sha256(b"generation-1").hexdigest(),
+            "candidate_count": 2,
+            "candidates": [
+                {"bot_id": "bot-manager", "name": "Manager", "score": 0.9},
+                {"bot_id": "bot-worker", "name": "Worker", "score": 0.8},
+            ],
+        },
+    )
     return service
 
 
@@ -608,3 +626,34 @@ def _run(coroutine):
     import asyncio
 
     return asyncio.run(coroutine)
+
+
+@pytest.mark.parametrize("selected", ["bot-manager", "bot-worker"])
+def test_no_trace_plan_excludes_prior_group_members(selected) -> None:
+    service = _graph_service()
+    root = service.query_task_dashboard("task-1").tasks[0]
+    root.run_info.run_mode = "coop_group"
+    root.run_info.assignee = "group-prior"
+    root.run_info.extend_props["pending_group_formation"] = GROUP_FORMATION
+    service.apply_relay_report(_accepted_execution())
+    command = _group_plan()
+    command.event.run_info = RuntimeInfo(run_mode="single_bot", assignee=selected)
+
+    context = service.get_node_context("task-1", "task-1")
+    assert context.used_executor_ids == ["bot-manager", "bot-worker"]
+    assert command.trace is None
+    with pytest.raises(TaskStateError, match="current or historical executor"):
+        service.apply_relay_report(command)
+
+
+@pytest.mark.parametrize("used", ["bot-manager", "bot-worker"])
+def test_no_trace_group_plan_excludes_used_coordinator_and_worker(used) -> None:
+    service = _graph_service()
+    root = service.query_task_dashboard("task-1").tasks[0]
+    root.run_info.assignee = used
+    service.apply_relay_report(_accepted_execution())
+    command = _group_plan(extend_props={"pending_group_formation": GROUP_FORMATION})
+
+    with pytest.raises(TaskStateError, match="current or historical executor"):
+        service.apply_relay_report(command)
+    assert len(service.query_task_dashboard("task-1").tasks) == 1

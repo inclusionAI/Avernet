@@ -30,9 +30,10 @@ import json
 import threading
 import time
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -58,7 +59,6 @@ from agentclaw.community.plugins.local.agentswarm.factory import (
 from agentclaw.community.core.agentswarm.orchestration.decision_parser import (
     DecisionParser,
 )
-from agentclaw.community.plugins.local.agentswarm.llm_stub import StubLLMProvider
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.guard import GuardEventRepository
 from agentclaw.community.core.agentswarm.repository.run_dispatch import RunDispatchRepository
@@ -73,15 +73,17 @@ from agentclaw.community.core.agentswarm.service import AgentSwarmService
 from agentclaw.community.core.agentswarm.service.protocols import (
     SubmitRunRequest,
 )
-from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
+from agentclaw.community.core.apply_engine.apply_task import (
     APPLY_TASK_TYPE,
 )
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
+    BotCreateWithManifestHandler,
     CREATE_JOB_TASK_TYPE,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
+    CREATE_PRE_CONTAINER_TRIGGER,
 )
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
@@ -93,8 +95,8 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.platform import (
     TaskQueueRepositoryProtocol,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.core.task_queue.types import (
     Complete, DEFAULT_APP, Fail, Reschedule, TaskStatus,
@@ -109,18 +111,58 @@ OWNER = "bot-e2e-owner"
 class _TestDB:
     def __init__(self, engine):
         self._factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+        # StaticPool shares one connection across slice, lease and test threads.
+        # Serialize the entire transaction, matching the local SqliteDB plugin.
+        self._session_lock = threading.RLock()
 
     @contextmanager
     def orm_session(self):
-        db = self._factory()
-        try:
-            yield db
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        with self._session_lock:
+            db = self._factory()
+            try:
+                yield db
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+
+
+def test_swarm_db_concurrent_commit_does_not_commit_a_rolled_back_session():
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    database = _TestDB(engine)
+    with database.orm_session() as session:
+        session.execute(text("CREATE TABLE transaction_probe (id INTEGER PRIMARY KEY)"))
+    attempted = threading.Event()
+
+    def commit_second():
+        attempted.set()
+        with database.orm_session() as session:
+            session.execute(text("INSERT INTO transaction_probe VALUES (2)"))
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with pytest.raises(ValueError, match="rollback first"):
+                with database.orm_session() as session:
+                    session.execute(text("INSERT INTO transaction_probe VALUES (1)"))
+                    future = pool.submit(commit_second)
+                    assert attempted.wait(2)
+                    try:
+                        future.result(timeout=0.2)
+                    except FutureTimeoutError:
+                        pass  # An isolated transaction waits for the first rollback.
+                    raise ValueError("rollback first")
+            future.result(timeout=2)
+        with database.orm_session() as session:
+            rows = session.execute(
+                text("SELECT id FROM transaction_probe ORDER BY id"),
+            ).scalars().all()
+        assert rows == [2]
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture()
@@ -131,7 +173,10 @@ def swarm_db():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
-    yield _TestDB(engine)
+    try:
+        yield _TestDB(engine)
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture()
@@ -159,7 +204,9 @@ def world():
 def _config() -> AgentSwarmConfig:
     orch = AgentSwarmOrchestrationConfig(
         max_turns=10,
-        slice_max_seconds=5.0,
+        setup_timeout=20.0,
+        per_attempt_timeout=5.0,
+        slice_max_seconds=30.0,
         slice_interval=0.0,
         orchestrator_turn_interval=0.01,
         agent_max_attempts=1,
@@ -172,15 +219,19 @@ def _config() -> AgentSwarmConfig:
     )
 
 
-def _build_swarm(db, script, platform):
+def _build_swarm(db, platform):
     cfg = _config()
+    setup_ceiling = (
+        cfg.orchestration.slice_max_seconds
+        - cfg.orchestration.per_attempt_timeout
+    )
     repos = {
         "run": RunRepository(db), "agent": AgentRepository(db),
         "message": MessageRepository(db), "result": AgentResultRepository(db),
         "round": RoundRepository(db), "guard": GuardEventRepository(db),
         "dispatch": RunDispatchRepository(db),
     }
-    llm = StubLLMProvider(script=script)
+    llm = _BotRoundLLM()
     orchestrator = Orchestrator(
         llm=llm,
         parser=DecisionParser(),
@@ -191,10 +242,17 @@ def _build_swarm(db, script, platform):
         config=cfg,
     )
     runtime = SubagentRuntime(
-        factory=DefaultSubagentFactory(llm=llm, platform=platform),
+        factory=DefaultSubagentFactory(
+            llm=llm,
+            platform=platform,
+            setup_timeout=cfg.orchestration.setup_timeout,
+            setup_ceiling=setup_ceiling,
+        ),
         max_width=cfg.orchestration.max_width,
         max_attempts=cfg.orchestration.agent_max_attempts,
         per_task_timeout=cfg.orchestration.per_attempt_timeout,
+        setup_timeout=cfg.orchestration.setup_timeout,
+        setup_ceiling=setup_ceiling,
         artifact_inline_threshold=cfg.artifact_inline_threshold,
     )
     handler = SwarmRunHandler(
@@ -213,7 +271,7 @@ def _build_swarm(db, script, platform):
         round_repo=repos["round"], guard_repo=repos["guard"],
         result_repo=repos["result"], config=cfg,
     )
-    return service, worker, repos
+    return service, worker, handler, repos
 
 
 def _spawn_decision(*agents: tuple[str, str]) -> str:
@@ -229,6 +287,23 @@ def _wait_decision(*refs: str) -> str:
 
 def _finish_decision(answer: str) -> str:
     return json.dumps({"kind": "finish", "answer": answer})
+
+
+class _BotRoundLLM:
+    """Wait for the durable result, including after a provisioning slice ends."""
+
+    async def complete(self, request):
+        state = request.user_prompt.splitlines()
+        if "agents_spawned=0" in state:
+            text = _spawn_decision(("surveyor", "survey the incident"))
+        elif "routed_results=0" in state:
+            text = _wait_decision("surveyor")
+        else:
+            text = _finish_decision("e2e-bot-done")
+        return dm.CompletionResponse(
+            text=text, model=dm.ModelId("bot-round"),
+            token_usage=dm.TokenUsage(), finish_reason=dm.FinishReason.STOP,
+        )
 
 
 class _ScriptedEngineWs:
@@ -346,10 +421,39 @@ def _stand_in_for_provisioning(world) -> list[dict]:
                 "status": "ACTIVE",
                 "active_engine": kwargs.get("engine_type") or "openclaw",
                 "binding_id": bind_id,
+                # What the real create_bot stores: the agent code the run
+                # named (inherited from its source) and the identity source
+                # itself, so the assertions can prove both.
+                "ext": kwargs.get("ext"),
+                "identity_bot_id": kwargs.get("identity_bot_id"),
             }
         )
+        # Creation applies a complete Manifest, including empty capability
+        # targets; the platform supplies a real scope for Default exclusions.
+        from tests.community.endpoints.manifest_device_seed import seed_empty_default_scope
+        seed_empty_default_scope(world, record["active_engine"])
         created.append(record)
         return record
+
+    # A real identity source: the platform validates the run's source against
+    # the live row and its issued passport, so the stand-in world needs one.
+    source = bot_repo.insert(
+        {
+            "bot_id": IDENTITY_SOURCE,
+            "bot_name": IDENTITY_SOURCE,
+            "owner_id": OWNER,
+            "owner_name": OWNER,
+            "entity_id": OWNER,
+            "entity_type": "staff",
+            "creator_id": OWNER,
+            "bot_type": "personal",
+            "status": "ACTIVE",
+            "active_engine": "openclaw",
+            "ext": {"passport": {"agent_code": SOURCE_AGENT_CODE,
+                                 "status": "ISSUED"}},
+        }
+    )
+    assert source is not None
 
     from agentclaw.community.api.bot_service import BotServiceProtocol
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -384,7 +488,7 @@ class _TaskQueuePump(threading.Thread):
         if task.task_type == CREATE_JOB_TASK_TYPE:
             return self._world.get(BotCreateWithManifestHandler).handle(task.payload)
         if task.task_type == APPLY_TASK_TYPE:
-            self._world.get(BotConfigManifestApplyServiceProtocol).run_apply_task(
+            self._world.get(ApplyRunServiceProtocol).run_apply_task(
                 task.payload
             )
             return Complete()
@@ -432,8 +536,14 @@ class _TaskQueuePump(threading.Thread):
 class TestBotKindEndToEnd:
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("defer_creation, observe_phase_gap", [
+        pytest.param(False, False, id="same-slice"),
+        pytest.param(True, False, id="creation-after-slice"),
+        pytest.param(True, True, id="creation-between-phases"),
+    ])
     async def test_bot_agent_runs_a_real_swarm_round(
-            self, world, swarm_db, tmp_path, monkeypatch):
+            self, world, swarm_db, tmp_path, monkeypatch, defer_creation,
+            observe_phase_gap):
         from agentclaw.community.core.config.provider import load_config
         load_config().user_config["aidesktop_root"] = str(tmp_path)
 
@@ -446,6 +556,12 @@ class TestBotKindEndToEnd:
         )
         from agentclaw.community.plugin_api.passport import PassportPlugin
 
+        from tests.community.framework.device_seams import (
+            RecordingDeviceSync, install_fake_sync_dispatcher,
+        )
+        # Provisioning supplies a local filesystem binding, so its native MCP
+        # delivery edge needs the same no-network stand-in as the engine WS.
+        install_fake_sync_dispatcher(world, plugin=RecordingDeviceSync())
         created = _stand_in_for_provisioning(world)
         ws = _ScriptedEngineWs(reply='{"answer": "survey ok"}')
         platform = AvernetBotPlatform(
@@ -454,19 +570,65 @@ class TestBotKindEndToEnd:
             passport_plugin=world.get(PassportPlugin),
             skill_set_factory=world.get(SkillSetServiceFactoryProtocol),
             bot_repo=world.get(BotRepository),
-            apply_service=world.get(BotConfigManifestApplyServiceProtocol),
+            apply_service=world.get(ApplyRunServiceProtocol),
             space_context=world.get(BusinessSpaceContextProtocol),
             baas_service=world.get(BaasService),
         )
+        # The same-slice case pins the live status contract: keep the real
+        # RUNNING report visible until the swarm polls it.  The cross-slice
+        # case instead owns durable resume; forcing that recovered slice to
+        # rendezvous with this background apply couples two independent CI
+        # schedulers and does not add coverage beyond the final report checks.
+        polled_running = threading.Event()
+        polled_phase_gap = threading.Event()
+        phase_gap_states = []
+        applies = world.get(ApplyRunServiceProtocol)
+        compile_and_finish = applies._compile_apply_and_finish
+        bot_status = platform.bot_status
+
+        async def finish_after_poll(*args, **kwargs):
+            if (
+                not defer_creation
+                and kwargs["trigger"] == CREATE_ON_CONTAINER_TRIGGER
+            ):
+                # Full-suite xdist workers can be CPU-starved long enough to
+                # miss the former 10s scheduling window.  Keep the handshake
+                # bounded below the test's outer 60s timeout while preserving
+                # the assertion that RUNNING was actually observed.
+                assert polled_running.wait(30), "swarm never polled the running creation Apply"
+            return await compile_and_finish(*args, **kwargs)
+
+        def observe_status(bot_id, owner_id=""):
+            status = bot_status(bot_id, owner_id=owner_id)
+            report = applies.last_apply(entity_id=owner_id, bot_id=bot_id)
+            if (report is not None and report.trigger == CREATE_PRE_CONTAINER_TRIGGER
+                    and report.status is ApplyStatus.SUCCEEDED
+                    and created):
+                phase_gap_states.append(status)
+                polled_phase_gap.set()
+            if (report is not None and report.trigger == CREATE_ON_CONTAINER_TRIGGER
+                    and report.status is ApplyStatus.RUNNING):
+                polled_running.set()
+            return status
+
+        monkeypatch.setattr(applies, "_compile_apply_and_finish", finish_after_poll)
+        monkeypatch.setattr(platform, "bot_status", observe_status)
+        if observe_phase_gap:
+            creation_handler = world.get(BotCreateWithManifestHandler)
+            after_bot_exists = creation_handler._after_the_bot_exists
+
+            def after_phase_gap_poll(payload, bot):
+                if not polled_phase_gap.is_set():
+                    return Reschedule(0)
+                return after_bot_exists(payload, bot)
+
+            # Hold the real phase boundary until the swarm has polled it.
+            monkeypatch.setattr(creation_handler, "_after_the_bot_exists", after_phase_gap_poll)
         endpoints = _patch_engine_edges(monkeypatch, platform, ws)
 
-        script = [
-            _spawn_decision(("surveyor", "survey the incident")),
-            _wait_decision("surveyor"),
-            _finish_decision("e2e-bot-done"),
-        ]
-        service, worker, repos = _build_swarm(swarm_db, script, platform)
+        service, worker, handler, repos = _build_swarm(swarm_db, platform)
         req = SubmitRunRequest(
+        identity_bot_id=IDENTITY_SOURCE,
             tenant=TENANT,
             goal="e2e: a bot-kind agent answers through the platform",
             owner_id=OWNER,
@@ -475,6 +637,9 @@ class TestBotKindEndToEnd:
                     name="surveyor", role="swarm surveyor persona",
                     instructions="Be a concise surveyor.",
                     kind=dm.AgentKind.BOT,
+                    # The per-agent source the router populates from the
+                    # run-level field; this test builds the request directly.
+                    identity_bot_id=IDENTITY_SOURCE,
                 ),
             ),
         )
@@ -484,6 +649,30 @@ class TestBotKindEndToEnd:
         # slices run on the loop; the subagent's 1s READY poll yields in
         # between, and a later poll sees READY.
         pump = _TaskQueuePump(world)
+        if defer_creation:
+            # Force a cooperative slice boundary after submission has landed,
+            # while leaving the task queue unpumped. This covers cross-slice
+            # resume without making the test's outcome depend on whether a
+            # loaded CI runner can finish provisioning inside a tiny deadline.
+            first_slice = asyncio.create_task(worker.run_once())
+            seam = world.get(ManifestCreationSeam)
+            for _ in range(500):
+                agents = repos["agent"].list_by_run(dm.RunId(run_id), TENANT)
+                if agents:
+                    expected_id = "agent_swarm_" + spawn_digest(
+                        run_id, agents[0].agent_id, 1, 16,
+                    )
+                    if seam.find_job(entity_id=OWNER, bot_id=expected_id) is not None:
+                        break
+                await asyncio.sleep(0.01)
+            else:
+                pytest.fail("first slice did not submit the bot creation job")
+            handler.set_slice_lost(True, dm.RunId(run_id))
+            await asyncio.wait_for(first_slice, timeout=10)
+            unfinished = repos["run"].get(dm.RunId(run_id), TENANT)
+            assert unfinished is not None
+            assert unfinished.status is dm.RunStatus.RUNNING
+            assert repos["result"].list_by_run(dm.RunId(run_id), TENANT) == []
         pump.start()
 
         async def _drive():
@@ -502,13 +691,44 @@ class TestBotKindEndToEnd:
             pump.stop_and_join()
 
         assert run is not None, "run row vanished"
-        assert run.status is dm.RunStatus.COMPLETED
+        if not defer_creation:
+            assert polled_running.is_set(), {
+                "error": "creation Apply was not observed in flight",
+                "run": run,
+                "agents": repos["agent"].list_by_run(dm.RunId(run_id), TENANT),
+                "results": repos["result"].list_by_run(dm.RunId(run_id), TENANT),
+            }
+        if observe_phase_gap:
+            assert phase_gap_states
+            assert set(phase_gap_states) == {dm.BotState.PROVISIONING.value}
+        assert run.status is dm.RunStatus.COMPLETED, {
+            "run": run,
+            "creation_reports": [
+                world.get(ApplyRunServiceProtocol).last_apply(
+                    entity_id=OWNER, bot_id=bot["bot_id"],
+                )
+                for bot in created
+            ],
+        }
         assert run.termination_reason is dm.TerminationReason.FINISH
         assert run.final_answer == "e2e-bot-done"
 
         agents = repos["agent"].list_by_run(dm.RunId(run_id), TENANT)
-        assert [a.name for a in agents] == ["surveyor"]
-        assert all(a.status is dm.AgentStatus.COMPLETED for a in agents)
+        assert [a.name.split("_", 1)[0] for a in agents] == ["surveyor"]
+        assert all(a.status is dm.AgentStatus.COMPLETED for a in agents), agents
+
+        # The gate never opens: the Bot inherited an existing identity, so
+        # there was no authorization for a human to grant. This is the whole
+        # point of the run-level identity source.
+        assert all(
+            a.bot_state is not dm.BotState.AWAITING_AUTHORIZATION
+            for a in agents
+        ), [a.bot_state for a in agents]
+        detail = service.get_run_detail(run_id, TENANT)
+        assert [
+            d for d in getattr(detail, "agents", ())
+            if getattr(d, "authorization", None) is not None
+        ] == []
 
         results = repos["result"].list_by_run(dm.RunId(run_id), TENANT)
         assert len(results) == 1
@@ -528,18 +748,28 @@ class TestBotKindEndToEnd:
         assert bot["bot_id"] == expected_id
         assert bot["status"] == "ACTIVE"
         assert bot["owner_id"] == OWNER
-        assert bot["bot_desc"] == "swarm surveyor persona"
-        assert bot["bot_name"] == f"surveyor-{expected_id[12:20]}"
+        assert bot["bot_desc"].endswith("swarm surveyor persona")
+        assert bot["bot_desc"].startswith("surveyor-")
+        # Id-format naming contract: bot_name IS the derived persona id.
+        assert bot["bot_name"] == expected_id
+
+        # The agent's Bot runs under the SOURCE's code, recorded on the row --
+        # never one derived from its own id, which would fabricate an
+        # identity nothing issued.
+        assert bot["identity_bot_id"] == IDENTITY_SOURCE
+        code = ((bot.get("ext") or {}).get("passport") or {}).get("agent_code")
+        assert code == SOURCE_AGENT_CODE
+        assert code != expected_id
 
         job = seam.find_job(entity_id=OWNER, bot_id=expected_id)
         assert job is not None and job.status is TaskStatus.SUCCEEDED
 
-        report = world.get(BotConfigManifestApplyServiceProtocol).last_apply(
+        report = world.get(ApplyRunServiceProtocol).last_apply(
             entity_id=OWNER, bot_id=expected_id,
         )
         assert report is not None
         assert report.trigger == CREATE_ON_CONTAINER_TRIGGER
-        assert report.status is ApplyStatus.SUCCEEDED
+        assert report.status is ApplyStatus.SUCCEEDED, report
 
         # The chat leg: one round per leg — the reset of the engine-served
         # session first, then the message the orchestrator spawned, on the
@@ -555,3 +785,11 @@ class TestBotKindEndToEnd:
         assert reset_frame["params"]["key"] == "agent:main:default"
         assert chat_frame["params"]["sessionKey"] == "agent:main:default"
         assert ws.closed
+#: The Bot every submit in this suite names as its identity source. The
+#: service refuses a submit without one, so the value is fixed here rather
+#: than repeated at each call site; the seam resolves it (or is unbound, in
+#: which case the service takes the id as given).
+IDENTITY_SOURCE = "identity-source-bot"
+#: The agent code that source's passport carries; a Bot that inherits it must
+#: record exactly this, never one derived from its own id.
+SOURCE_AGENT_CODE = "fcfab821-6751-4d90-aa5d-7b988cb4189d"

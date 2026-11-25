@@ -36,9 +36,10 @@ describe('backendApi envelope 成败判定', () => {
     expect(isEnvelopeSuccess({ code: 502201, message: 'x', data: null })).toBe(false);
   });
 
-  it('2xx 成功段(201000/204000 等,后端按 HTTP status×1000 编码)视为成功', () => {
+  it('2xx 成功段(201000/202000/204000 等,后端按 HTTP status×1000 编码)视为成功', () => {
     // 创建类接口返回 201000(Created)、无数据接口返回 204000(No Content)等,均属成功。
     expect(isEnvelopeSuccess({ code: 201000, message: 'Created', data: { space_id: 64 }, request_id: 'r' })).toBe(true);
+    expect(isEnvelopeSuccess({ code: 202000, message: 'Accepted', data: { bot_id: 'bot-a' } })).toBe(true);
     expect(isEnvelopeSuccess({ code: 204000, message: 'No Content', data: null })).toBe(true);
     expect(isEnvelopeSuccess({ code: '201000', message: 'Created', data: null })).toBe(true);
     // 2xx 成功信封不应被判为业务失败(回归:createTeamSpace 曾把 201000 误判失败而弹错)。

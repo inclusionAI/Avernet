@@ -72,6 +72,8 @@ class Capability(Enum):
     SKILLS_CLEAN_SYMLINKS = "skills.clean_symlinks"
     SKILLS_CENTER_ENSURE = "skills.center_ensure"
     SKILLS_LOCAL_PACKAGE_APPLY = "skills.local_package.apply.v1"
+    # A single layout supports overlapping publication of distinct targets.
+    SKILLS_LOCAL_PACKAGE_PARALLEL_TARGETS = "skills.local_package.parallel_targets.v1"
 
     # ── CLI tools ──
     # Model-callable command-line binaries placed into the bot by a config
@@ -132,6 +134,7 @@ class Capability(Enum):
     CRON_HISTORY = "cron.history"
 
     # ── Model ──
+    MODEL_DEFAULT_GET = "models.default.get"
     MODEL_LIST = "model.list"
     MODEL_SWITCH = "model.switch"
 

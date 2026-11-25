@@ -17,12 +17,73 @@ function canValidateServiceBot(bot: BotDomain): boolean {
 }
 
 /**
- * 进入编辑/查询详情页必须是 Owner 或后端明确授予 edit 的协作者。
+ * 进入配置详情页必须是 Owner，或由后端明确授予 view_config/edit 的协作者。
  * 单独的 view action 只允许查看列表基础信息，不能触发详情页的子资源请求。
  */
 export function canEnterBotDetail(bot: BotDomain, currentUserId?: string): boolean {
   if (!currentUserId) return false;
-  return bot.ownerId === currentUserId || bot.actions.includes('edit') || canValidateServiceBot(bot);
+  return (
+    bot.ownerId === currentUserId ||
+    bot.actions.includes('view_config') ||
+    bot.actions.includes('edit') ||
+    canValidateServiceBot(bot)
+  );
+}
+
+/**
+ * 服务 Bot 历史评测记录入口只对具有编辑权限的当前用户开放。
+ *
+ * Draft 卡片由生命周期动作直接给出 EDIT；在线发布卡片出于权限最小化不一定
+ * 暴露 EDIT，但显式协作者会持有 VIEW_CONFIG 站位。Owner 以 owner_id 判定。
+ */
+export function canOpenServiceBotEvalHistory(
+  bot: BotDomain,
+  currentUserId?: string,
+): boolean {
+  if (!currentUserId || bot.serviceMode !== 'service') return false;
+  return (
+    bot.ownerId === currentUserId ||
+    bot.actions.includes('edit') ||
+    bot.actions.includes('view_config')
+  );
+}
+
+/**
+ * TeamClaw's managed chat directory only exposes online service bots. For a
+ * service Coding Bot that is still draft/prestable, AIXCoding owns the usable
+ * runtime and is reached through its standalone route instead.
+ */
+export function isDraftOrPrestableServiceCodingBot(bot: BotDomain): boolean {
+  return Boolean(
+    bot.runtime?.isAgentCodingBot &&
+      bot.serviceMode === 'service' &&
+      (bot.lifecycle === 'draft' || bot.lifecycle === 'prestable'),
+  );
+}
+
+/**
+ * Draft/verify Coding Chat is an authoring/verification surface, not the
+ * normal managed-chat action. Keep it aligned with Bot detail access: Owner,
+ * explicit edit collaborator, or a backend-granted service verification
+ * operator.
+ */
+export function canOpenDraftOrPrestableServiceCodingBot(bot: BotDomain, currentUserId?: string): boolean {
+  return isDraftOrPrestableServiceCodingBot(bot) && canEnterBotDetail(bot, currentUserId);
+}
+
+export function buildDraftOrPrestableServiceCodingBotChatHref(bot: BotDomain): string {
+  const params = new URLSearchParams({ botId: bot.id });
+  if (bot.ownerId) params.set('ownerId', bot.ownerId);
+
+  // AIXCoding maps prestable to stage=verify and requires a valid publish ID
+  // when a stage is selected. If the list DTO omits it, keep the direct Bot
+  // URL and let the runtime surface its own bootstrap error.
+  const publishId = Number(bot.harnessContext?.botPublishId);
+  if (bot.lifecycle === 'prestable' && Number.isInteger(publishId) && publishId > 0) {
+    params.set('publishId', String(publishId));
+    params.set('stage', 'verify');
+  }
+  return `/coding/coding-chat?${params.toString()}`;
 }
 const actions: BotAction[] = [
   'view',
@@ -149,22 +210,44 @@ export function getInventoryActionAvailability(bot: BotDomain, action: BotInvent
   };
 }
 
-export function getBotCollaborationMode(bot: BotDomain, isOwner: boolean): 'authorize' | 'request' | undefined {
+export type BotCollaborationMode = 'authorize' | 'request';
+
+export function getBotCollaborationMode(
+  bot: BotDomain,
+  isOwner: boolean,
+): BotCollaborationMode | undefined {
+  if (bot.serviceMode === 'non-service' && !bot.runtime.isAgentCodingBot) return undefined;
   if (bot.spaceKind !== 'team') return undefined;
   if (isOwner) return 'authorize';
-  return bot.actions.includes('edit') ? undefined : 'request';
+
+  // VIEW_CONFIG grants read-only configuration access, but the inventory
+  // backend emits it only for an explicit service-Bot collaborator. Treat it
+  // as collaboration standing (not edit capability). Approved collaborators
+  // may also be identified by lifecycle/management actions such as EDIT,
+  // RESTART_PUBLISH or OFFLINE. Ordinary Space members are reduced to VIEW/CHAT.
+  // Do not infer standing from disabledActions: denied operations are returned
+  // there for ordinary members as well.
+  const nonStandingActions = new Set(['view', 'chat']);
+  const hasCollaborationStanding = bot.actions.some((action) => !nonStandingActions.has(action));
+  return hasCollaborationStanding ? undefined : 'request';
 }
 
 /**
- * 通用配置菜单项可用性（collab-permission-entry-migration AC-02/AC-03）：
- * 仅 Bot 管理员（Owner）可变更通用配置；他人持编辑锁时同样禁用。
+ * 公开设置菜单项可用性（collab-permission-entry-migration AC-02/AC-03）：
+ * 仅 Bot Owner 可变更公开设置；他人持编辑锁时同样禁用。
+ * 服务 Bot 在发布到线上（lifecycle==='running'）之前不可变更公开设置：未发布的服务 Bot
+ * 尚不可被其他对象使用，开放公开设置会暴露一个不可用的 Bot。个人 Bot / 桌面 Bot 不受此约束。
  * TODO：团队空间下「Owner 非当前用户但已获操作权限」的 Bot 是否放开，待对应模块决策后修订（Spec 2026-09-24 AC-02 登记）。
  */
 export function getGeneralConfigAvailability(
+  bot: BotDomain,
   isOwner: boolean,
   lockedByOther: boolean,
 ): { enabled: boolean; disabledReason?: string } {
-  if (!isOwner) return { enabled: false, disabledReason: '仅 Bot 管理员可变更通用配置' };
+  if (!isOwner) return { enabled: false, disabledReason: '仅 Bot Owner 可变更公开设置' };
+  if (bot.serviceMode === 'service' && bot.lifecycle !== 'running') {
+    return { enabled: false, disabledReason: '服务 Bot 未发布前暂不可变更公开设置' };
+  }
   if (lockedByOther) return { enabled: false, disabledReason: '该 Bot 正被他人编辑，请先抢锁' };
   return { enabled: true };
 }

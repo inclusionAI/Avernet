@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useLangfuseTraces, useAnalyzeTrace } from '@avernet/workflow/web/api/hooks'
-import type { NodeExecution, LangfuseTrace, LangfuseObservation, AnalysisResult } from '@avernet/clawweb-shared/web/types'
-import { formatTimeShort } from '@avernet/workflow/web/utils/time'
+import type { AnalysisResult, NodeExecution } from '@avernet/clawweb-shared/web/types'
+import { TraceDataPanel } from './analysis-trace-reader/TraceDataPanel'
 
 type Phase = 'fetching' | 'analyzing' | 'done' | 'error'
 
@@ -13,6 +13,10 @@ interface AnalysisModalProps {
 export default function AnalysisModal({ node, onClose }: AnalysisModalProps) {
   const [phase, setPhase] = useState<Phase>('fetching')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [focusReading, setFocusReading] = useState(false)
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const titleId = useId()
+  const analysisId = useId()
 
   // Use embedded_session_key for Langfuse correlation — this is the node's
   // real session key in Langfuse (derived as parentKey:embedded:nodeId:flowId).
@@ -54,93 +58,117 @@ export default function AnalysisModal({ node, onClose }: AnalysisModalProps) {
   }, [tracesQuery.status, tracesQuery.data, phase])
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+    const dialog = dialogRef.current
+    if (!dialog) return
+    const opener = document.activeElement
+    if (typeof dialog.showModal === 'function') dialog.showModal()
+    else dialog.open = true
+    return () => {
+      if (typeof dialog.close === 'function') dialog.close()
+      else dialog.open = false
+      // React can remove the dialog before close() restores native focus.
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus({ preventScroll: true })
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  }, [])
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-black/50" onClick={onClose}>
-      <div
-        className="flex h-full w-full flex-col bg-white"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-3">
+    <dialog
+      ref={dialogRef}
+      aria-labelledby={titleId}
+      className="fixed inset-0 m-0 h-full max-h-none w-full max-w-none overflow-hidden border-0 bg-background p-0 text-foreground backdrop:bg-foreground/50"
+      onClick={(event) => event.stopPropagation()}
+      onCancel={(event) => {
+        event.preventDefault()
+        onClose()
+      }}
+    >
+      <div className="flex h-full flex-col">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-6">
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-bold text-gray-900">
+            <h2 id={titleId} className="text-lg font-semibold [overflow-wrap:anywhere]">
               节点分析：{node.node_title || node.node_id}
             </h2>
-            <p className="truncate font-mono text-gray-400 text-xs">
+            <p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={langfuseSessionId ?? node.node_id}>
               {langfuseSessionId ?? node.node_id}
             </p>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="ml-4 rounded-md border border-gray-200 bg-white p-1.5 text-gray-500 shadow-sm transition-colors hover:bg-gray-50 hover:text-gray-700"
-            title="关闭"
+            className="shrink-0 rounded-md border border-border p-2 text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+            aria-label="关闭"
           >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg aria-hidden="true" className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
-        </div>
+        </header>
 
-        {/* Phase indicator */}
-        <div className="flex items-center gap-3 border-b border-gray-100 bg-gray-50 px-6 py-2 text-xs">
-          <PhaseStep label="获取追踪数据" active={phase === 'fetching'} done={phase !== 'fetching' && phase !== 'error' || !!(tracesQuery.data)} />
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-muted/50 px-4 py-2 text-xs sm:gap-3 sm:px-6">
+          <PhaseStep label="获取追踪数据" active={phase === 'fetching'} done={!!tracesQuery.data} />
           <PhaseArrow />
           <PhaseStep label="AI 分析" active={phase === 'analyzing'} done={phase === 'done'} />
           <PhaseArrow />
-          <PhaseStep label="完成" active={phase === 'done'} done={phase === 'done'} />
-
-          {phase === 'error' && (
-            <span className="ml-auto text-red-600">失败</span>
-          )}
+          <PhaseStep label="完成" active={false} done={phase === 'done'} />
+          {phase === 'error' && <span className="ml-auto text-destructive">失败</span>}
         </div>
 
-        {/* Two-panel content */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Left panel: Raw trace data */}
-          <div className="w-1/2 overflow-auto border-r border-gray-200 p-4">
-            <h3 className="mb-3 font-medium text-gray-700 text-sm">Langfuse 追踪数据</h3>
+        <div className={`grid min-h-0 flex-1 grid-cols-1 overflow-y-auto overscroll-contain lg:overflow-hidden ${focusReading ? '' : 'lg:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]'}`}>
+          <section aria-label="Langfuse 追踪数据" className="min-w-0 px-4 pt-4 pb-6 sm:px-6 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">Langfuse 追踪数据</h3>
+              <button
+                type="button"
+                aria-controls={analysisId}
+                aria-expanded={!focusReading}
+                onClick={() => setFocusReading((value) => !value)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                <svg aria-hidden="true" className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d={focusReading ? 'M4 10h6V4m0 6L4 4m16 10h-6v6m0-6 6 6' : 'M14 10l6-6m-6 0h6v6M10 14l-6 6m6 0H4v-6'} />
+                </svg>
+                {focusReading ? '显示 AI 分析' : '专注阅读'}
+              </button>
+            </div>
             {tracesQuery.isLoading ? (
               <LoadingSpinner message="获取追踪数据..." />
             ) : tracesQuery.data ? (
               <TraceDataPanel data={tracesQuery.data} />
-            ) : phase === 'error' && !tracesQuery.data ? (
-              <div className="rounded-md bg-red-50 px-3 py-2 text-red-700 text-xs">
+            ) : phase === 'error' ? (
+              <div className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
                 {errorMessage ?? '无法获取追踪数据'}
               </div>
             ) : null}
-          </div>
+          </section>
 
-          {/* Right panel: LLM analysis */}
-          <div className="w-1/2 overflow-auto p-4">
-            <h3 className="mb-3 font-medium text-gray-700 text-sm">AI 分析结果</h3>
+          <aside
+            id={analysisId}
+            aria-label="AI 分析结果"
+            hidden={focusReading}
+            className="min-w-0 border-t border-border bg-muted/35 p-4 [overflow-wrap:anywhere] sm:px-6 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:border-t-0 lg:border-l"
+          >
+            <h3 className="mb-3 text-sm font-semibold">AI 分析结果</h3>
             {phase === 'fetching' ? (
               <LoadingSpinner message="等待追踪数据..." />
             ) : phase === 'analyzing' ? (
               <LoadingSpinner message="AI 分析中，请稍候..." />
             ) : phase === 'error' && !analysisMutation.data ? (
-              <div className="rounded-md bg-red-50 px-3 py-2 text-red-700 text-xs">
+              <div className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
                 <span className="font-medium">分析失败：</span>{errorMessage}
               </div>
             ) : analysisMutation.data ? (
               <AnalysisResultPanel result={analysisMutation.data} />
             ) : null}
-          </div>
+          </aside>
         </div>
       </div>
-    </div>
+    </dialog>
   )
 }
 
 function PhaseStep({ label, active, done }: { label: string; active: boolean; done: boolean }) {
   return (
-    <span className={`flex items-center gap-1 ${active ? 'font-medium text-blue-600' : done ? 'text-green-600' : 'text-gray-400'}`}>
+    <span className={`flex items-center gap-1 ${active ? 'font-medium text-primary' : done ? 'text-success' : 'text-muted-foreground'}`}>
       {done && <span>&#10003;</span>}
       {active && (
         <svg className="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -154,225 +182,14 @@ function PhaseStep({ label, active, done }: { label: string; active: boolean; do
 }
 
 function PhaseArrow() {
-  return <span className="text-gray-300">&rarr;</span>
+  return <span aria-hidden="true" className="text-muted-foreground">&rarr;</span>
 }
 
 function LoadingSpinner({ message }: { message: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-      <div className="mb-3 h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
+    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+      <div className="mb-3 h-8 w-8 animate-spin rounded-full border-2 border-border border-t-primary" />
       <span className="text-sm">{message}</span>
-    </div>
-  )
-}
-
-function TraceDataPanel({ data }: { data: { data: LangfuseTrace[]; meta?: { totalItems?: number } } }) {
-  const traces = data.data ?? []
-  if (traces.length === 0) {
-    return <p className="text-gray-400 text-sm">未找到追踪数据</p>
-  }
-
-  return (
-    <div className="space-y-3">
-      {data.meta?.totalItems != null && (
-        <p className="text-gray-400 text-xs">共 {data.meta.totalItems} 条追踪</p>
-      )}
-      {traces.map((trace) => (
-        <TraceCard key={trace.id} trace={trace} />
-      ))}
-    </div>
-  )
-}
-
-function TraceCard({ trace }: { trace: LangfuseTrace }) {
-  const [expanded, setExpanded] = useState(false)
-
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center justify-between px-3 py-2 text-left transition-colors hover:bg-gray-50"
-      >
-        <div className="min-w-0 flex-1">
-          <div className="font-medium text-gray-800 text-sm truncate">{trace.name || trace.id}</div>
-          <div className="text-gray-400 text-xs">
-            {formatTimeShort(trace.startTime)}
-            {trace.latencyMs != null && <span className="ml-2">{(trace.latencyMs / 1000).toFixed(1)}s</span>}
-          </div>
-        </div>
-        <svg
-          className={`h-4 w-4 flex-shrink-0 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
-          fill="none" stroke="currentColor" viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-
-      {expanded && (
-        <div className="border-t border-gray-100 px-3 py-2 space-y-2">
-          {trace.metadata && (
-            <JsonSection title="Metadata" data={trace.metadata} />
-          )}
-          {trace.input != null && (
-            <JsonSection title="Input" data={trace.input} />
-          )}
-          {trace.output != null && (
-            <JsonSection title="Output" data={trace.output} />
-          )}
-          {trace.observations && trace.observations.length > 0 && (
-            <ObservationsSection observations={trace.observations} />
-          )}
-          {trace.scores && trace.scores.length > 0 && (
-            <div>
-              <div className="font-medium text-gray-600 text-xs mb-1">Scores</div>
-              <div className="flex flex-wrap gap-2">
-                {trace.scores.map((score) => (
-                  <span key={score.id} className="rounded-full bg-gray-100 px-2 py-0.5 text-gray-600 text-xs">
-                    {score.name}: {score.value}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ObservationsSection({ observations }: { observations: LangfuseObservation[] }) {
-  return (
-    <div>
-      <div className="font-medium text-gray-600 text-xs mb-1">Observations ({observations.length})</div>
-      <div className="space-y-1">
-        {observations.map((obs) => (
-          <ObservationCard key={obs.id} obs={obs} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function ObservationCard({ obs }: { obs: LangfuseObservation }) {
-  const [expanded, setExpanded] = useState(false)
-
-  return (
-    <div className="rounded border border-gray-100 bg-gray-50">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center justify-between px-2 py-1.5 text-left transition-colors hover:bg-gray-100"
-      >
-        <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
-          <span className={`rounded px-1 py-0.5 font-medium ${obs.type === 'generation' ? 'bg-purple-100 text-purple-700' : obs.type === 'span' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
-            {obs.type}
-          </span>
-          <span className="text-gray-700 font-medium truncate">{obs.name || obs.id}</span>
-          {obs.model && <span className="text-gray-400 font-mono shrink-0">{obs.model}</span>}
-          {obs.latencyMs != null && <span className="text-gray-400 shrink-0">{(obs.latencyMs / 1000).toFixed(1)}s</span>}
-          {obs.totalTokens != null && <span className="text-gray-400 shrink-0">{obs.totalTokens} tokens</span>}
-        </div>
-        <svg
-          className={`h-3.5 w-3.5 flex-shrink-0 text-gray-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
-          fill="none" stroke="currentColor" viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-
-      {expanded && (
-        <div className="border-t border-gray-200 px-2 py-2 space-y-2 text-xs">
-          {/* Metadata row */}
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-            <div>
-              <span className="text-gray-400">ID: </span>
-              <span className="font-mono text-gray-600 break-all">{obs.id}</span>
-            </div>
-            {obs.startTime && (
-              <div>
-                <span className="text-gray-400">开始: </span>
-                <span className="text-gray-600">{formatTimeShort(obs.startTime)}</span>
-              </div>
-            )}
-            {obs.endTime && (
-              <div>
-                <span className="text-gray-400">结束: </span>
-                <span className="text-gray-600">{formatTimeShort(obs.endTime)}</span>
-              </div>
-            )}
-            {obs.latencyMs != null && (
-              <div>
-                <span className="text-gray-400">耗时: </span>
-                <span className="text-gray-600">{obs.latencyMs >= 1000 ? `${(obs.latencyMs / 1000).toFixed(2)}s` : `${obs.latencyMs.toFixed(0)}ms`}</span>
-              </div>
-            )}
-            {obs.model && (
-              <div>
-                <span className="text-gray-400">模型: </span>
-                <span className="font-mono text-gray-600">{obs.model}</span>
-              </div>
-            )}
-            {(obs.promptTokens != null || obs.completionTokens != null || obs.totalTokens != null) && (
-              <div className="col-span-2">
-                <span className="text-gray-400">Token: </span>
-                <span className="text-gray-600">
-                  {[
-                    obs.promptTokens != null && `输入 ${obs.promptTokens}`,
-                    obs.completionTokens != null && `输出 ${obs.completionTokens}`,
-                    obs.totalTokens != null && `合计 ${obs.totalTokens}`,
-                  ].filter(Boolean).join(' / ')}
-                </span>
-              </div>
-            )}
-          </div>
-
-          {obs.statusMessage && (
-            <div className="rounded bg-red-50 px-2 py-1 text-red-600 text-xs">
-              <span className="font-medium">状态消息: </span>{obs.statusMessage}
-            </div>
-          )}
-
-          {obs.input != null && (
-            <JsonSection title="Input" data={obs.input} />
-          )}
-
-          {obs.output != null && (
-            <JsonSection title="Output" data={obs.output} />
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function JsonSection({ title, data }: { title: string; data: unknown }) {
-  const [expanded, setExpanded] = useState(false)
-  const formatted = useCallback(() => {
-    try {
-      return JSON.stringify(data, null, 2)
-    } catch {
-      return String(data)
-    }
-  }, [data])
-
-  return (
-    <div>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1 text-gray-600 text-xs hover:text-gray-800"
-      >
-        <svg
-          className={`h-3 w-3 transition-transform ${expanded ? 'rotate-90' : ''}`}
-          fill="none" stroke="currentColor" viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
-        <span className="font-medium">{title}</span>
-      </button>
-      {expanded && (
-        <pre className="mt-1 max-h-64 overflow-auto rounded bg-gray-800 p-2 font-mono text-xs text-green-400">
-          {formatted().length > 10000 ? formatted().slice(0, 10000) + '\n... (truncated)' : formatted()}
-        </pre>
-      )}
     </div>
   )
 }
@@ -381,9 +198,9 @@ function AnalysisResultPanel({ result }: { result: AnalysisResult }) {
   return (
     <div className="space-y-4">
       {result.summary && (
-        <div className="rounded-md bg-blue-50 px-4 py-3 border border-blue-100">
-          <div className="font-medium text-blue-800 text-xs mb-1">摘要</div>
-          <div className="text-blue-900 text-sm">{result.summary}</div>
+        <div className="rounded-md border border-primary/20 bg-primary/5 px-4 py-3">
+          <div className="mb-1 text-xs font-medium text-primary">摘要</div>
+          <div className="text-sm text-foreground">{result.summary}</div>
         </div>
       )}
 
@@ -477,9 +294,9 @@ function AnalysisResultPanel({ result }: { result: AnalysisResult }) {
       )}
 
       {result.analysis && (
-        <div className="rounded-md bg-white px-4 py-3 border border-gray-200">
-          <div className="font-medium text-gray-700 text-xs mb-2">详细分析</div>
-          <div className="text-gray-800 text-sm whitespace-pre-wrap leading-relaxed">{result.analysis}</div>
+        <div className="rounded-md border border-border bg-card px-4 py-3">
+          <div className="mb-2 text-xs font-medium text-muted-foreground">详细分析</div>
+          <div className="whitespace-pre-wrap text-sm leading-relaxed text-card-foreground">{result.analysis}</div>
         </div>
       )}
 

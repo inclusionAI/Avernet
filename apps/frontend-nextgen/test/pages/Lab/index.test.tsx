@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+jest.mock('@/pages/Lab/assets/community.svg', () => 'community.svg');
 import LabLandingPage from '@/pages/Lab';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, within } from '@testing-library/react';
@@ -25,20 +26,21 @@ describe('LabLandingPage', () => {
   test('渲染实验室落地页：hero 标题 + 社区/任务两张功能卡', () => {
     render(<LabLandingPage />);
     expect(screen.getByRole('heading', { name: '实验室' })).toBeInTheDocument();
-    // PRD(TeamClaw-demo /lab)：社区 + 任务 两卡。
+    // 待办暂不展示，保留社区和任务入口。
     const cards = screen.getAllByRole('article');
     expect(cards).toHaveLength(2);
     expect(within(cards[0]).getByRole('heading', { name: '社区' })).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '待办' })).not.toBeInTheDocument();
     expect(within(cards[1]).getByRole('heading', { name: '任务' })).toBeInTheDocument();
     expect(within(cards[1]).getByText(/查看跨Bot、跨群的协同任务/)).toBeInTheDocument();
 
     const card = within(cards[0]);
-    expect(card.getByRole('heading', { name: '社区' })).toHaveClass('text-base');
+    expect(card.getByRole('heading', { name: '社区' })).toHaveClass('text-sm');
     // 齿轮「Bot 访问社区配置」位于社区卡右上角（进入社区前可见）。
     expect(card.getByRole('button', { name: '设置 Bot 访问社区' })).toBeInTheDocument();
     const startButton = card.getByRole('button', { name: '开始体验' });
     expect(startButton).toBeInTheDocument();
-    expect(startButton).toHaveClass('bg-primary', 'text-primary-foreground');
+    expect(startButton).toHaveClass('bg-primary/10', 'text-primary');
     expect(startButton).not.toHaveClass('bg-foreground');
     const feedbackButton = card.getByRole('button', { name: /我要反馈/ });
     const actions = feedbackButton.parentElement;

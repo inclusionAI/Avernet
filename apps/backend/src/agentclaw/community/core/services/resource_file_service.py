@@ -14,11 +14,9 @@ What the service owns (moved out of ``adapters/http/resources/file_router.py``):
   ``workspace`` namespace;
 - directory-listing projection and read-only path classification; listings preserve
   the provider's real entries, while search/archive keep their own curated policies;
-- the ``absolute_path`` field: the device's own absolute path for the entry — the
-  engine returns it per listing entry (``path``: container path for arca/openclaw/
-  aicoding/claude_code, host path for local). teclaw doesn't expose an absolute path
-  yet, so it returns its logical (root-relative) path there for now; once teclaw
-  matches the other engines this works automatically and the fallback can be dropped.
+- the ``absolute_path`` field: prefer the provider's explicit ``absolute_path``,
+  then its legacy ``path`` field, then the workspace-relative logical fallback.
+  Physical container/host path ownership remains with the provider.
 
 Each engine entry also carries ``relative_path`` (relative to the *listed* dir), used
 to build the workspace-relative ``path`` so a future recursive listing stays correct;
@@ -29,13 +27,13 @@ The HTTP adapter maps the returned plain dicts / bytes to its response schemas.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Mapping
 
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
-from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
+from agentclaw.community.core.ports.resource_file_port import ListingFailed, ResourceFilePort, WorkspaceEntry
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_runtime_engine_for_bot,
 )
@@ -54,6 +52,7 @@ from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError as DeviceFileTooLargeError,
 )
 from agentclaw.community.core.resources.service import (
+    DirectoryDeleteFailed,
     DirectoryTooLargeError,
     ResourceNotFoundError,
 )
@@ -62,7 +61,10 @@ from agentclaw.community.core.resources.services.file_service import (
     admission_refusal,
 )
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
-from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
+from agentclaw.community.core.workspace.protected_entries import (
+    PROTECTED_ROOT_DIRS,
+    PROTECTED_ROOT_FILES,
+)
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.log import get_logger
 
@@ -76,21 +78,12 @@ logger = get_logger()
 _SKILLS_LOCAL_RELPATH = "skills/skills-local"
 _POOL_SKILLS_LOCAL_RELPATH = "skills-pool/skills-local"
 
-# System files excluded from search/archive and protected from deletion.
-_HIDDEN_BASENAMES = {
-    "AGENTS.md", "RULES.md", "OKR.md", "SAFETY.md", "SOUL.md",
-    "OUTPUT.md", "MEMORY.md", "IDENTITY.md", "USER.md", "TOOLS.md",
-    "HEARTBEAT.md", "BOOTSTRAP.md",
-}
-
-# System directories excluded from search/archive.
-_HIDDEN_DIRNAMES = {
-    "state",
-    "skills",
-    "skills-pool",
-    "conf",
-    *(f"{engine}_conf" for engine in SUPPORTED_ENGINE_TYPES),
-}
+# System files excluded from search/archive and protected from deletion, and
+# system directories excluded from search/archive: the one list lives in
+# ``core/workspace/protected_entries.py`` (the apply engine's clear skips the
+# same entries); these names are kept for the routers that import them.
+_HIDDEN_BASENAMES = PROTECTED_ROOT_FILES
+_HIDDEN_DIRNAMES = PROTECTED_ROOT_DIRS
 
 
 def is_readonly(path: str) -> bool:
@@ -352,9 +345,27 @@ class ResourceFileService(ResourceFilePort):
         a recursive listing correct; teclaw doesn't, so fall back to the entry name
         (valid for the non-recursive listings we do today).
         """
-        rel_in_listing = entry.get("relative_path")
-        leaf = rel_in_listing if rel_in_listing else entry.get("name", "")
+        leaf = ResourceFileService._entry_relative_path(entry)
         return f"{request_path}/{leaf}" if request_path else leaf
+
+    @staticmethod
+    def _entry_relative_path(entry: Mapping[str, Any]) -> str:
+        """A listing entry's path relative to the directory that was listed.
+
+        The engines do not agree on the key: arca / baas / local give
+        ``relative_path`` (the entry's path relative to the listed directory,
+        ``a.txt`` for a child, ``sub/a.txt`` deeper down a recursive listing),
+        teclaw gives ``name`` only. This reads whichever is there, so the
+        console listing, the archive walk and ``_named_in`` ask one question;
+        ``""`` means the entry names nothing. ``_listed_path`` is the same
+        question for the apply engine's listing, which also reads teclaw's
+        ``path``.
+        """
+        for key in ("relative_path", "name"):
+            value = entry.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return ""
 
     # ── operations ───────────────────────────────────────────────────────────
 
@@ -401,9 +412,10 @@ class ResourceFileService(ResourceFilePort):
             items.append({
                 "name": name,
                 "path": rel,
-                # the device's absolute path (engine ``path``); logic-view fallback
-                # only when the engine doesn't expose one (legacy teclaw).
-                "absolute_path": e.get("path") or self._logical(rel),
+                # Prefer the explicit device path, preserving legacy fallbacks.
+                "absolute_path": (
+                    e.get("absolute_path") or e.get("path") or self._logical(rel)
+                ),
                 "is_dir": is_dir,
                 "readonly": is_readonly(rel),
                 "size": e.get("size") if not is_dir else None,
@@ -411,6 +423,10 @@ class ResourceFileService(ResourceFilePort):
                 "modified_at": e.get("modified_at"),
             })
 
+        logger.debug(
+            "[ResourceFileService.list_dir] bot_id=%s path=%s item_count=%d",
+            bot_id, path, len(items),
+        )
         return items
 
     async def read_file(
@@ -608,8 +624,15 @@ class ResourceFileService(ResourceFilePort):
         engine_type: str,
         path: str,
         runtime_context: DeviceContext | None = None,
+        report_directory_failure: bool = False,
     ) -> bool:
         """Delete a file or directory; returns False when nothing was deleted.
+
+        ``report_directory_failure`` is a concrete-service opt-in for the legacy
+        HTTP adapter: after a listing identifies a directory, a failed tree delete
+        raises ``DirectoryDeleteFailed``. The default ResourceFilePort contract
+        remains boolean for existing callers; a failed listing is not proof of
+        absence and retains the existing file-branch behavior.
 
         A directory needs ``delete_tree``: the engines route the two through
         separate operations (``/api/file/remove`` vs ``/api/file/rmtree``), and
@@ -624,8 +647,114 @@ class ResourceFileService(ResourceFilePort):
         )
         logical = self._logical(path)
         if await self._is_dir(device_fs, path):
-            return await device_fs.delete_tree(logical)
+            deleted = await device_fs.delete_tree(logical)
+            if not deleted and report_directory_failure:
+                raise DirectoryDeleteFailed()
+            return deleted
         return await device_fs.delete_file(logical)
+
+    async def list_entries(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        prefix: str = "",
+        recursive: bool = False,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
+        runtime_context: DeviceContext | None = None,
+    ) -> tuple[WorkspaceEntry, ...]:
+        """The entries under ``prefix`` of the workspace (``""`` is the root), workspace-relative, sorted by path.
+
+        One query: ``recursive`` is handed to the engine, which lists every
+        descendant itself. Complete or raising: the apply engine clears and
+        rewrites a workspace on the strength of this listing, so a directory
+        that does not list raises ``ListingFailed`` rather than answering
+        empty (teclaw's ``list_dir`` gives ``None`` for an absent directory
+        and a failed call alike), and so does an entry that names nothing. An
+        entry that does not say ``is_dir`` is read as a file, with a warning.
+        ``publish_id`` / ``device_uuid`` address a service bot's verify or
+        online stage instance, as ``list_dir`` does. No policy: which entries
+        a resources apply leaves alone is the apply engine's rule.
+        """
+        ctx = runtime_context or self._resolve_ctx(
+            bot_id=bot_id, entity_id=entity_id, publish_id=publish_id, device_uuid=device_uuid,
+        )
+        device_fs = self._device_fs(
+            ctx, entity_type=entity_type, entity_id=entity_id,
+            bot_id=bot_id, engine_type=engine_type,
+        )
+        prefix = prefix.strip("/")
+        entries = await device_fs.list_dir(self._logical(prefix), recursive=recursive)
+        if entries is None:
+            raise ListingFailed(f"{prefix or 'the workspace'} of bot {bot_id} could not be listed")
+        listed: list[WorkspaceEntry] = []
+        for entry in entries:
+            path = self._listed_path(prefix, entry)
+            if path is None:
+                raise ListingFailed(f"{prefix or 'the workspace'} of bot {bot_id} listed an entry without a name")
+            is_dir = self._is_dir_flag(entry)
+            if is_dir is None:
+                logger.warning(
+                    "[%s.list_entries] bot %s: entry %r does not say is_dir; treated as a file",
+                    type(self).__name__, bot_id, path,
+                )
+            listed.append(WorkspaceEntry(path, bool(is_dir)))
+        return tuple(sorted(listed, key=lambda e: e.path))
+
+    async def delete_dir(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        path: str,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
+        runtime_context: DeviceContext | None = None,
+    ) -> bool:
+        """Delete the directory at ``path`` with everything under it; ``False`` when the transport did not.
+
+        The engine's tree delete, with no probe: the caller says it is a
+        directory (a listing just did). ``delete`` is the probing twin for a
+        path whose kind the caller does not know. ``False`` is the device
+        filesystems' one failure signal (they catch their own errors and
+        answer it), so on a directory a listing just showed it is a refusal.
+        """
+        ctx = runtime_context or self._resolve_ctx(
+            bot_id=bot_id, entity_id=entity_id, publish_id=publish_id, device_uuid=device_uuid,
+        )
+        device_fs = self._device_fs(
+            ctx, entity_type=entity_type, entity_id=entity_id,
+            bot_id=bot_id, engine_type=engine_type,
+        )
+        return await device_fs.delete_tree(self._logical(path.strip("/")))
+
+    @staticmethod
+    def _listed_path(prefix: str, entry: Mapping[str, Any]) -> str | None:
+        """A listing entry's workspace-relative path, or ``None`` when the entry names nothing.
+
+        ``relative_path`` (relative to the listed directory) where the engine
+        gives it, which keeps a recursive listing right; else the engine's own
+        ``path`` when it is one of the workspace namespace (teclaw:
+        ``/workspace/sub/x.csv``), which a recursive teclaw listing needs
+        since it carries no ``relative_path``; else ``name``, right for a
+        non-recursive listing.
+        """
+        rel = entry.get("relative_path")
+        if isinstance(rel, str) and rel:
+            return f"{prefix}/{rel}" if prefix else rel
+        engine_path = entry.get("path")
+        marker = f"/{WORKSPACE_NS}/"
+        if isinstance(engine_path, str) and engine_path.startswith(marker) and len(engine_path) > len(marker):
+            return engine_path[len(marker):].strip("/")
+        name = entry.get("name")
+        if isinstance(name, str) and name:
+            return f"{prefix}/{name}" if prefix else name
+        return None
 
     async def _is_dir(self, device_fs: Any, path: str) -> bool:
         """Whether *path* names a directory, asked of the parent's listing.
@@ -648,10 +777,26 @@ class ResourceFileService(ResourceFilePort):
                 type(self).__name__, parent, exc,
             )
             return False
-        for entry in entries or ():
-            if entry.get("name") == leaf:
-                return bool(entry.get("is_dir", False))
-        return False
+        named = self._named_in(entries or (), leaf)
+        return bool(self._is_dir_flag(named)) if named is not None else False
+
+    @staticmethod
+    def _named_in(entries: Any, leaf: str) -> dict[str, Any] | None:
+        """The listing entry named ``leaf``, or ``None`` when the listing has no such child.
+
+        The listings here are never recursive, so an entry's path under the
+        listed directory (``_entry_relative_path``) is its name.
+        """
+        for entry in entries:
+            if ResourceFileService._entry_relative_path(entry) == leaf:
+                return entry
+        return None
+
+    @staticmethod
+    def _is_dir_flag(entry: Mapping[str, Any]) -> bool | None:
+        """The entry's ``is_dir`` as the engine said it (a bool, or ``0``/``1``); ``None`` when it did not say."""
+        flag = entry.get("is_dir")
+        return bool(flag) if isinstance(flag, (bool, int)) else None
 
     async def upload_file(
         self,

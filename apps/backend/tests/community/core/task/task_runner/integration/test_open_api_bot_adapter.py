@@ -7,6 +7,7 @@ import pytest
 from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
     OpenApiAuthError, OpenApiBadRequestError, OpenApiBotAdapter, OpenApiError, OpenApiServerError, OpenApiTimeoutError, parse_bot_id,
 )
+from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotError
 
 
 class _Key:
@@ -113,6 +114,59 @@ def test_send_message_forwards_session_id_when_present():
     rid = _run(_adapter(h).send_message(bot_id="bot9:ent1", message="hi", metadata={}))
     assert rid.run_id == "mid_77"
     assert rid.session_id == "s_99"
+
+
+def test_openapi_error_implements_port_error_contract():
+    assert issubclass(OpenApiError, OpenApiBotError)
+
+
+def test_send_message_normalizes_transport_failure():
+    def h(req):
+        raise httpx.ConnectError("connection failed", request=req)
+
+    with pytest.raises(OpenApiError, match="transport failed") as exc_info:
+        _run(
+            _adapter(h).send_message(
+                bot_id="bot9:ent1",
+                message="hi",
+                metadata={},
+            )
+        )
+
+    assert isinstance(exc_info.value.__cause__, httpx.ConnectError)
+
+
+def test_send_message_normalizes_non_json_response():
+    def h(req):
+        return httpx.Response(200, content=b"not-json")
+
+    with pytest.raises(OpenApiError, match="not valid JSON") as exc_info:
+        _run(
+            _adapter(h).send_message(
+                bot_id="bot9:ent1",
+                message="hi",
+                metadata={},
+            )
+        )
+
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_send_message_rejects_non_object_data():
+    def h(req):
+        return httpx.Response(
+            200,
+            json={"code": 0, "data": ["unexpected"]},
+        )
+
+    with pytest.raises(OpenApiError, match="data must be a JSON object"):
+        _run(
+            _adapter(h).send_message(
+                bot_id="bot9:ent1",
+                message="hi",
+                metadata={},
+            )
+        )
 
 
 def test_send_message_forwards_runtime_metadata_without_putting_it_in_prompt():
@@ -482,3 +536,34 @@ def test_get_session_messages_http_errors_mapped():
         _run(_adapter(lambda req: httpx.Response(404)).get_session_messages(_SID))
     with pytest.raises(OpenApiServerError):
         _run(_adapter(lambda req: httpx.Response(500)).get_session_messages(_SID))
+
+
+@pytest.mark.parametrize("stage", ["draft", "online"])
+def test_runtime_status_query_uses_baas_only_and_preserves_stage(stage):
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.path == "/openapi/v1/sessions/runtime/status"
+        assert request.url.params["session_id"] == "agent:main:session:s/user:u"
+        assert request.url.params["bot_id"] == "b:u"
+        assert request.url.params["lifecycle_stage"] == stage
+        assert request.headers["Authorization"] == "Bearer ak1234567890"
+        return httpx.Response(200, json={"code": 0, "data": {
+            "session_id": request.url.params["session_id"], "found": True,
+            "run_id": "engine-run", "state": "running", "started_at": 1000,
+            "last_event_seq": 7,
+        }})
+    result = _run(_adapter(handler).get_session_runtime_status(
+        "agent:main:session:s/user:u", bot_id="b:u", lifecycle_stage=stage,
+    ))
+    assert result.last_event_seq == 7
+
+
+@pytest.mark.parametrize("data", [
+    {"session_id": "wrong", "found": False, "reason": "NO_ACTIVE_RUN"},
+    {"session_id": "s", "found": True},
+    {"session_id": "s", "found": True, "run_id": "r", "state": "running", "started_at": 1, "last_event_seq": True},
+])
+def test_runtime_status_rejects_malformed_or_wrong_session(data):
+    adapter = _adapter(lambda request: httpx.Response(200, json={"code": 0, "data": data}))
+    with pytest.raises((OpenApiError, ValueError)):
+        _run(adapter.get_session_runtime_status("s"))

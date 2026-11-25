@@ -1,18 +1,63 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
 from agentclaw.community.core.task.domain.models import TaskRuntimeProfile
 
 
-def test_relay_runtime_profile_does_not_select_central_planner() -> None:
-    relay = TaskRuntimeProfile.from_execution_config(
-        {"orchestration_mode": "relay", "runtime_profile": {"dispatcher_strategy": "relay_handoff"}}
+def test_execution_config_defaults_to_all_successor_modes() -> None:
+    profile = TaskRuntimeProfile.from_execution_config(
+        {"orchestration_mode": "relay"}
     )
-    assert relay.planner_strategy is None
-    assert "planner_strategy" not in relay.to_dict()
-    assert relay.to_dict()["dispatcher_strategy"] == "relay_handoff"
-    assert relay.to_dict()["recovery_strategy"] == "relay"
 
-    relay_default = TaskRuntimeProfile.from_execution_config({"orchestration_mode": "relay"})
-    assert relay_default.to_dict()["runner_strategy"] == "relay_prompt"
+    assert list(profile.allowed_run_modes) == [
+        "single_bot",
+        "coop_group",
+        "bbs",
+    ]
+    assert profile.to_dict()["allowed_run_modes"] == [
+        "single_bot",
+        "coop_group",
+        "bbs",
+    ]
 
-    central = TaskRuntimeProfile.from_execution_config({"orchestration_mode": "centralized"})
-    assert central.to_dict()["planner_strategy"] == "default"
-    assert central.to_dict()["recovery_strategy"] == "centralized"
+
+def test_execution_config_preserves_caller_allowlist() -> None:
+    profile = TaskRuntimeProfile.from_execution_config(
+        {
+            "orchestration_mode": "relay",
+            "runtime_profile": {
+                "allowed_run_modes": ["coop_group", "single_bot", "coop_group"]
+            },
+        }
+    )
+
+    assert list(profile.allowed_run_modes) == ["coop_group", "single_bot"]
+
+
+def test_graph_reading_defaults_and_deduplicates_frozen_modes() -> None:
+    default_graph = SimpleNamespace(
+        extend_props={"runtime_profile": {"allowed_run_modes": []}}
+    )
+    frozen_graph = SimpleNamespace(
+        extend_props={
+            "runtime_profile": {
+                "allowed_run_modes": [" single_bot ", "coop_group", "coop_group"]
+            }
+        }
+    )
+
+    assert TaskRuntimeProfile.run_modes_from_graph(SimpleNamespace(extend_props={})) == (
+        "single_bot",
+        "coop_group",
+        "bbs",
+    )
+    assert TaskRuntimeProfile.run_modes_from_graph(default_graph) == (
+        "single_bot",
+        "coop_group",
+        "bbs",
+    )
+    assert TaskRuntimeProfile.run_modes_from_graph(frozen_graph) == (
+        "single_bot",
+        "coop_group",
+    )

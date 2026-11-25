@@ -122,3 +122,16 @@ Retry options are optional so existing rows remain readable. Consumers without
 `options_version: 1` can claim only requests with no execution options. The ClawMind client
 checks server capabilities before posting an options-bearing request and verifies the persisted
 options in the response; existing open requests retain their original parameters.
+
+## 用户中止与重试约束
+
+`cancelled`（兼容历史 `canceled`）是用户中止的权威终态，不是可自动恢复的普通失败。正常 `failed` 运行仍可按既有策略重试；需要重新开展已中止的业务时，应显式创建新运行。
+
+- 迟到的 completion、status 和 retry-resume 写不能重新打开已中止运行；取消保护同样适用于不提供 `retry_epoch` 的旧客户端。
+- `POST /retry-requests` 对已中止运行返回 **409**，即使邮箱已有 pending/claimed 请求也不能以去重成功绕过取消。`POST /retry-requests/claim` 在候选查询和实际 CAS 领取时均排除已中止运行，包含过期 claimed 请求。
+- `PUT /runs/:flowId/status`、`PUT /runs/:flowId/retry-failed`、`PUT /runs/:flowId/retry-resume` 不得用重试撤销中止，取消冲突返回 **409**。retry-failed 被拒绝时，节点重置与运行状态修改必须一起回滚。status 分类读取的数据库故障仍返回 **500**，不得误报为记录不存在。
+- 已入邮箱、已领取或已保存为 retry intent 都不是执行授权。取消发生在领取之后时，ClawMind 仍需在实际尝试、Guardian 救援及重启恢复前重新检查权威状态，并结束已取消请求而不是反复 release；回调的实际发送和网络重投也需要取消检查。
+
+上述服务端保护需与匹配的 ClawMind 取消检查和信号接线一起发布。节点截止或 watchdog 请求 abort 不自动等同于用户中止。中止不会撤销已发生的外部副作用，也不保证已交付引擎的工具或模型请求立即停止。
+
+回归入口：`server/repositories/__tests__/run-cancellation.test.ts`、`flow-retry-cancellation-race.test.ts` 及 `server/routes/internal/__tests__/cancellation.test.ts`。本地双连接 SQLite 竞态测试不替代目标 MySQL/ZDAS 环境的并发与部署验证。

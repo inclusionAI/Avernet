@@ -10,6 +10,7 @@ import type {
   BotHealthCheckSummary,
   BotHealthDimensionKey,
   BotHealthHistoryItem,
+  BotHealthPatch,
 } from '@/domain/botHealthCheck';
 import { useMemo, useState } from 'react';
 
@@ -20,6 +21,8 @@ interface HealthCheckViewProps {
   loading?: boolean;
   checking?: boolean;
   onReDiagnose: () => void;
+  onApplyPatch?: (patch: BotHealthPatch) => void | Promise<void>;
+  applyingPatch?: boolean;
 }
 
 export function HealthCheckView({
@@ -29,6 +32,8 @@ export function HealthCheckView({
   loading,
   checking,
   onReDiagnose,
+  onApplyPatch,
+  applyingPatch,
 }: HealthCheckViewProps) {
   const firstDimension = summary.dimensions[0]?.key ?? 'configuration';
   const [activeDimensionKey, setActiveDimensionKey] = useState<BotHealthDimensionKey>(firstDimension);
@@ -69,7 +74,7 @@ export function HealthCheckView({
           latestAt={formatDateTime(summary.latestAt)}
         />
         {capability.showRadar ? (
-          <div className="flex items-center justify-center border-t border-[var(--color-border)] p-5 lg:border-t-0 lg:border-l">
+          <div className="flex items-center justify-center border-t border-divider p-5 lg:border-t-0 lg:border-l">
             <RadarChart dimensions={summary.dimensions} />
           </div>
         ) : null}
@@ -92,6 +97,8 @@ export function HealthCheckView({
             showHistoryDetails={capability.showLogDetails}
             onViewHistoryDetail={setSelectedHistory}
             onReDiagnose={onReDiagnose}
+            onApplyPatch={onApplyPatch}
+            applyingPatch={applyingPatch}
           />
         ) : null}
       </Card>

@@ -1,9 +1,11 @@
 import type { MessageViewScope } from '@/domain/collaboration/types';
+import { getPublicBotTargetId } from '@/domain/collaborationSquare/types';
 import type {
   BotCatalogViewer,
   FriendRequestActor,
   HumanBotActionContext,
   OpenBotConversationOptions,
+  PublicBot,
   PublicBotDiscoveryQuery,
   PublicBotSearchQuery,
   PublicGroupSearchQuery,
@@ -52,13 +54,15 @@ export class CollaborationSquareService {
     const search = searchHint.trim();
     if (!id || !search) return null;
 
+    // BCS 原始游标遍历：停止条件是 hasMore=false（不能按 page*pageSize>=total 计算——
+    // total 是未过滤口径，metadata 过滤后的展示页会在中途耗尽）。
     const pageSize = 100;
-    let page = 1;
+    let offset = 0;
     while (!signal?.aborted) {
       const result = await this.gateway.listBotPage(
         {
           search,
-          page,
+          offset,
           pageSize,
           ...(viewer ? { viewerActorType: viewer.viewerActorType, viewerActorId: viewer.viewerActorId } : {}),
         },
@@ -67,16 +71,49 @@ export class CollaborationSquareService {
       );
       const matched = result.items.find((bot) => bot.id === id);
       if (matched) return matched;
-      if (page * pageSize >= result.total || result.items.length === 0) return null;
-      page += 1;
+      if (!result.hasMore || result.items.length === 0) return null;
+      offset = result.nextOffset;
+    }
+    return null;
+  }
+  /**
+   * 老版分享链接落地反查：无名称提示时按 canonical 复合 ID（bot_id:owner_id）游标遍历公开 Bot。
+   * 老版 id 与好友申请 canonical target 同构，直接按 getPublicBotTargetId 匹配；
+   * 仅接受含冒号的复合 ID，避免误吞其他用途的 id 参数。目标落在（过滤后）第二页亦可命中。
+   */
+  async resolvePublicBotById(
+    targetId: string,
+    context?: HumanBotActionContext,
+    viewer?: BotCatalogViewer,
+    signal?: AbortSignal,
+  ) {
+    const id = targetId.trim();
+    if (!id || !id.includes(':')) return null;
+
+    const pageSize = 100;
+    let offset = 0;
+    while (!signal?.aborted) {
+      const result = await this.gateway.listBotPage(
+        {
+          offset,
+          pageSize,
+          ...(viewer ? { viewerActorType: viewer.viewerActorType, viewerActorId: viewer.viewerActorId } : {}),
+        },
+        context,
+        signal,
+      );
+      const matched = result.items.find((bot) => getPublicBotTargetId(bot) === id);
+      if (matched) return matched;
+      if (!result.hasMore || result.items.length === 0) return null;
+      offset = result.nextOffset;
     }
     return null;
   }
   discoverBots(query: PublicBotDiscoveryQuery, context?: HumanBotActionContext, signal?: AbortSignal) {
     return this.gateway.discoverBots(query, context, signal);
   }
-  getBotProfile(botId: string, signal?: AbortSignal) {
-    return this.gateway.getBotProfile(botId, signal);
+  getBotProfile(bot: PublicBot, signal?: AbortSignal) {
+    return this.gateway.getBotProfile(bot, signal);
   }
   listGroups(query?: PublicGroupSearchQuery, signal?: AbortSignal) {
     return this.gateway.listGroups(query, signal);
@@ -117,6 +154,13 @@ export class CollaborationSquareService {
     }
     return this.runTargetAction(`friend:${actor.type}:${actor.id}:${targetId}`, () =>
       this.gateway.requestBotFriendship(botId, context, friendRequestBotId, actor),
+    );
+  }
+
+  /** 取消当前身份的 pending 好友申请（发起方撤回；「重新申请」自救入口第一步）。 */
+  cancelBotFriendRequest(requestId: string) {
+    return this.runTargetAction(`friend-cancel:${requestId}`, () =>
+      this.gateway.cancelBotFriendRequest(requestId),
     );
   }
 

@@ -13,9 +13,16 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    // Only browser tests need a DOM. Avoid creating jsdom for server/shared
+    // suites so the full coverage run stays within the CI package budget.
+    environmentMatchGlobs: [["server/**", "node"], ["shared/**", "node"]],
     setupFiles: ["./web/test/setup.ts"],
     globals: true,
     css: false,
+    // The module includes real-git integration tests (clawflows git client) that
+    // spawn several git processes per case; the 5s default times out under
+    // full-suite parallel load.
+    testTimeout: 15_000,
     exclude: ["e2e/**", "node_modules/**", "dist-server/**", "dist/**"],
   },
 });

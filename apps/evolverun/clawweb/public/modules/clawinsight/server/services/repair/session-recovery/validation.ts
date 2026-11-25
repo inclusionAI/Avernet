@@ -2,6 +2,7 @@ import { parseBotRuntimeIdentity } from "@avernet/clawweb-shared/server/services
 import { SessionRecoveryError } from "./errors.js";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import type { RecoveryRequest } from "./contracts.js";
+import type { RecoveryOwnerHandoffContent } from "./task-contracts.js";
 import { cronRunSessionId } from "./session-identity.js";
 
 function invalid(message: string): never { throw new SessionRecoveryError(422, "invalid_session_recovery", message); }
@@ -14,9 +15,23 @@ function text(value: unknown, field: string, max: number): string {
   if (containsSecret(value)) invalid(`${field} 不得包含凭据`);
   return value;
 }
+export function parseOwnerHandoffContent(raw: unknown): RecoveryOwnerHandoffContent {
+  const value = object(raw);
+  if (Object.keys(value).some(key => !["summary", "instructions", "reason"].includes(key))) invalid("Owner 交接说明只能包含 summary、instructions 和 reason");
+  if (value.reason !== undefined && value.reason !== "owner_material_needed") invalid("未知的 Owner 转交原因");
+  const summary = text(value.summary, "handoff.summary", 1024).trim();
+  const instructions = text(value.instructions, "handoff.instructions", 1024).trim();
+  if ([summary, instructions].some(item => Buffer.byteLength(item) > 1024)) invalid("Owner 交接说明的每项文本最多 1024 字节；简洁保留问题、完整处理事项和入口，调查经过留在原 summary 中");
+  return { summary, instructions, ...(value.reason === "owner_material_needed" ? { reason: value.reason } : {}) };
+}
+
+export function isRecoveryTraceId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+}
+
 export function parseRequest(raw: unknown): RecoveryRequest {
   const body = object(raw), target = object(body.target);
-  for (const key of Object.keys(body)) if (!["event_id", "tc_fault_label", "diagnosis", "target", "session_key", "session_id", "delivery_key", "error_location", "execution_level"].includes(key)) invalid(`未知字段 ${key}`);
+  for (const key of Object.keys(body)) if (!["event_id", "tc_fault_label", "diagnosis", "target", "session_key", "session_id", "trace_id", "fault_at_ms", "delivery_key", "error_location", "execution_level"].includes(key)) invalid(`未知字段 ${key}`);
   for (const key of Object.keys(target)) if (!["bot_id", "entity_id", "env", "engine", "runtime_identity"].includes(key)) invalid(`未知 target 字段 ${key}`);
   if (target.env !== "pre" && target.env !== "prod") invalid("target.env 必须是 pre 或 prod");
   if (target.engine !== "OC" && target.engine !== "CC" && target.engine !== "TE") invalid("target.engine 必须是 OC、CC 或 TE");
@@ -34,11 +49,17 @@ export function parseRequest(raw: unknown): RecoveryRequest {
   if (sessionId !== undefined && !/^[A-Za-z0-9_-]+$/.test(sessionId)) invalid("session_id 无效");
   const cronId = target.engine === "OC" ? cronRunSessionId(sessionKey) : undefined;
   if (sessionId && cronId && sessionId !== cronId) invalid("session_id 与 Cron session_key 不一致");
+  const traceId = body.trace_id;
+  if (traceId !== undefined && !isRecoveryTraceId(traceId)) invalid("trace_id 无效");
+  const faultAtMs = body.fault_at_ms;
+  if (faultAtMs !== undefined && (typeof faultAtMs !== "number" || !Number.isSafeInteger(faultAtMs) || faultAtMs <= 0)) invalid("fault_at_ms 无效");
   const errorLocation = body.error_location === undefined ? undefined : text(body.error_location, "error_location", 2048);
   const level = body.execution_level;
   if (level !== undefined && level !== "debug" && level !== "approval" && level !== "automatic") invalid("execution_level 必须是 debug、approval 或 automatic");
   return { ...(errorLocation === undefined ? {} : { error_location: errorLocation }),
     ...(level === undefined ? {} : { execution_level: level }), event_id: text(body.event_id, "event_id", 128), tc_fault_label: label, delivery_key: deliveryKey,
     diagnosis: text(body.diagnosis, "diagnosis", 8000), ...(sessionId === undefined ? {} : { session_id: sessionId }),
+    ...(traceId === undefined ? {} : { trace_id: traceId }),
+    ...(faultAtMs === undefined ? {} : { fault_at_ms: faultAtMs }),
     target: { bot_id: botId, entity_id: entityId, env: target.env, engine: target.engine, ...(runtimeIdentity ? { runtime_identity: runtimeIdentity } : {}) }, session_key: sessionKey };
 }

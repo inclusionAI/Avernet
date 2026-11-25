@@ -6,9 +6,11 @@ import {
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/bots/privateBotSessionController');
+jest.mock('@/services/backendApi/collaboration/collaborationBotController');
 jest.mock('@/services/backendApi/collaboration/collaborationFriendConnectionController');
 
 import * as ctrl from '@/services/backendApi/bots/privateBotSessionController';
+import { queryCollaborationBots } from '@/services/backendApi/collaboration/collaborationBotController';
 import { listFriendConnections } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 
 const mocked = ctrl as unknown as Record<string, jest.Mock<any>>;
@@ -16,6 +18,8 @@ const relationsMocked = listFriendConnections as unknown as jest.Mock<any>;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(queryCollaborationBots).mockReset();
+  jest.mocked(queryCollaborationBots).mockResolvedValue({ code: 200000, data: { items: [] } });
 });
 
 const managedBot: ChatBotView = {
@@ -26,6 +30,17 @@ const managedBot: ChatBotView = {
   online: true,
   chatable: true,
 };
+
+it('loads team others history as the current collaborator without f_user_id', async () => {
+  mocked.listBotSessionMessages.mockResolvedValue({ code: 200, data: { items: [], total: 0 } });
+  const bot = { ...managedBot, isTeamBot: true, botType: 'service' };
+  const result = await managedBotConversationService.listOperatorMessages(bot, 'human_123', 'other-session', 1,
+    { deviceUuid: 'instance', stage: 'online' });
+  expect(result).toMatchObject({ ok: true, data: { messages: [], hasMore: false } });
+  expect(mocked.listBotSessionMessages).toHaveBeenCalledWith('bot-a', 'other-session', {
+    user_id: '123', owner_id: '2088', stage: 'online', device_uuid: 'instance', page: 1, page_size: 50,
+  });
+});
 
 const relationsEnvelope = (ids: string[], total = ids.length) => ({
   code: 20000,
@@ -124,6 +139,121 @@ describe('managedBotConversationService.loadFriendUsers', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.friendlyMessage.length).toBeGreaterThan(0);
+    expect(queryCollaborationBots).not.toHaveBeenCalled();
+  });
+});
+
+describe('managedBotConversationService Human display names', () => {
+  it.each([false, true])(
+    'resolves managed/team names (isTeamBot=%s) once after pagination and deduplication',
+    async (isTeamBot) => {
+      relationsMocked.mockImplementation(async (params: { page?: number }) =>
+        params.page === 1 ? relationsEnvelope(['human_447147'], 2) : relationsEnvelope(['447147', 'human_448148'], 2),
+      );
+      jest.mocked(queryCollaborationBots).mockResolvedValue({
+        code: 200000,
+        data: {
+          items: [
+            { bot_id: 'human_448148', kind: 'human', name: '雨太' },
+            { bot_id: 'human_unrelated', kind: 'human', name: '其他人' },
+            { bot_id: 'human_447147', kind: 'human', name: ' 风太 ' },
+          ],
+        },
+      });
+      const controller = new AbortController();
+      const result = await managedBotConversationService.loadFriendUsers(
+        { ...managedBot, isTeamBot },
+        controller.signal,
+      );
+
+      expect(result).toEqual({
+        ok: true,
+        data: [
+          { userId: '447147', displayName: '风太' },
+          { userId: '448148', displayName: '雨太' },
+        ],
+      });
+      expect(jest.mocked(queryCollaborationBots)).toHaveBeenCalledTimes(1);
+      expect(queryCollaborationBots).toHaveBeenCalledWith(
+        { bot_ids: ['human_447147', 'human_448148'] },
+        controller.signal,
+      );
+    },
+  );
+
+  it('falls back to user IDs for missing or blank names and ignores Bot details', async () => {
+    relationsMocked.mockResolvedValue(relationsEnvelope(['447147', '448148', '449149', '450150']));
+    jest.mocked(queryCollaborationBots).mockResolvedValue({
+      code: 200000,
+      data: {
+        items: [
+          { bot_id: 'human_447147', kind: 'human', name: '风太' },
+          { bot_id: 'human_448148', kind: 'human', name: '  ' },
+          { bot_id: 'human_449149', kind: 'bot', name: '非用户详情' },
+        ],
+      },
+    });
+
+    expect(await managedBotConversationService.loadFriendUsers(managedBot)).toEqual({
+      ok: true,
+      data: [
+        { userId: '447147', displayName: '风太' },
+        { userId: '448148', displayName: '448148' },
+        { userId: '449149', displayName: '449149' },
+        { userId: '450150', displayName: '450150' },
+      ],
+    });
+  });
+
+  it('prefers resolved names over relationship names', async () => {
+    relationsMocked.mockResolvedValue({
+      data: { items: [{ actor: { type: 'human', id: 'human_447147' }, name: '旧名称' }], total: 1 },
+    });
+    jest.mocked(queryCollaborationBots).mockResolvedValue({
+      code: 200000,
+      data: { items: [{ bot_id: 'human_447147', kind: 'human', name: '风太' }] },
+    });
+    expect(await managedBotConversationService.loadFriendUsers(managedBot)).toEqual({
+      ok: true,
+      data: [{ userId: '447147', displayName: '风太' }],
+    });
+  });
+
+  it('keeps the directory usable when name lookup fails', async () => {
+    relationsMocked.mockResolvedValue({
+      data: {
+        items: [
+          { actor: { type: 'human', id: 'human_447147' }, name: '已有名称' },
+          { actor: { type: 'human', id: 'human_448148' } },
+        ],
+        total: 2,
+      },
+    });
+    jest.mocked(queryCollaborationBots).mockRejectedValue(new Error('name lookup unavailable'));
+    expect(await managedBotConversationService.loadFriendUsers(managedBot)).toEqual({
+      ok: true,
+      data: [
+        { userId: '447147', displayName: '已有名称' },
+        { userId: '448148', displayName: '448148' },
+      ],
+    });
+    expect(queryCollaborationBots).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back when the lookup response has no details', async () => {
+    relationsMocked.mockResolvedValue(relationsEnvelope(['447147']));
+    jest.mocked(queryCollaborationBots).mockResolvedValue({ code: 200000 });
+    expect(await managedBotConversationService.loadFriendUsers(managedBot)).toEqual({
+      ok: true,
+      data: [{ userId: '447147', displayName: '447147' }],
+    });
+    expect(queryCollaborationBots).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not query names for an empty directory', async () => {
+    relationsMocked.mockResolvedValue(relationsEnvelope([]));
+    expect(await managedBotConversationService.loadFriendUsers(managedBot)).toEqual({ ok: true, data: [] });
+    expect(queryCollaborationBots).not.toHaveBeenCalled();
   });
 });
 
@@ -311,9 +441,35 @@ describe('managedBotConversationService.listOtherMessages', () => {
 
   it('is read-only: the service exposes no create/update/delete/favorite methods', () => {
     expect(Object.keys(managedBotConversationService).sort()).toEqual([
+      'listOperatorMessages',
       'listOtherMessages',
       'listOtherSessions',
       'loadFriendUsers',
     ]);
   });
 });
+
+it.each(['service', 'personal'])(
+  'owned %s other-user session reads share the conversation runtime',
+  async (botType) => {
+    mocked.listBotSessions.mockResolvedValue({ code: 200000, data: { items: [], total: 0 } });
+    mocked.listBotSessionMessages.mockResolvedValue({ code: 200000, data: { items: [], total: 0 } });
+    const bot = { ...managedBot, botType, runtimeStage: 'online' as const };
+    const stage = botType === 'service' ? 'online' : undefined;
+    await managedBotConversationService.listOtherSessions(bot, 'friend');
+    await managedBotConversationService.listOtherMessages(bot, 'friend', 'session');
+    expect(mocked.listBotSessions).toHaveBeenLastCalledWith(
+      'bot-a',
+      expect.objectContaining({ f_user_id: 'friend', owner_id: '2088' }),
+    );
+    expect(mocked.listBotSessionMessages).toHaveBeenLastCalledWith(
+      'bot-a',
+      'session',
+      expect.objectContaining({ f_user_id: 'friend', owner_id: '2088' }),
+    );
+    expect(mocked.listBotSessions.mock.calls.at(-1)[1].stage).toBe(stage);
+    expect(mocked.listBotSessionMessages.mock.calls.at(-1)[2].stage).toBe(stage);
+    expect(Object.hasOwn(mocked.listBotSessions.mock.calls.at(-1)[1], 'stage')).toBe(botType === 'service');
+    expect(Object.hasOwn(mocked.listBotSessionMessages.mock.calls.at(-1)[2], 'stage')).toBe(botType === 'service');
+  },
+);

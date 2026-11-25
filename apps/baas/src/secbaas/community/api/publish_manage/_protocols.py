@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+from secbaas.community.api.device_manage import DeviceStatus
+
 from ._enums import PublishType
 from ._models import (
     BotPublishSummary,
@@ -40,9 +42,29 @@ class PublishAdminService(Protocol):
         *,
         device_uuid: str,
         tenant: str,
-        status: str,
+        status: DeviceStatus | None,
+        provider_device_id: str | None,
         operator: str,
-    ) -> UpdateDeviceStatusResult: ...
+    ) -> UpdateDeviceStatusResult:
+        """Repair a device record directly, bypassing normal state machine.
+
+        WARNING: Admin operation for test/development use only. Does not
+        trigger any publish workflow or PaaS operation; the target is
+        resolved by ``device_uuid`` across every env and soft-deleted
+        records are not eligible (not found).
+
+        At least ONE of ``status`` / ``provider_device_id`` must be
+        supplied (the router enforces this; direct callers that violate it
+        get a ValueError). ``None`` means "leave the stored value
+        unchanged", so a caller may correct only the provider binding
+        without restating a concurrent writer's status.
+
+        ``operator`` is the audit identity: it is stamped as the row's
+        ``modifier`` in the same UPDATE as the value changes. Raises
+        ``PublishNotFoundError`` when the ``device_uuid`` matches no live
+        device, in which case no row is modified.
+        """
+        ...
 
     async def update_bot_status(
         self,

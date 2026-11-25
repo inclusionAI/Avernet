@@ -1,0 +1,31 @@
+[package]
+name = "bcs-dist-connector"
+description = "Connector engine of the distributed executor plane: rules, loop and per-call actors"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+bcs-dist-encoding = { workspace = true }
+async-trait = { workspace = true }
+bcs-dist-model = { workspace = true }
+bcs-service-api = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+bcs-dist-projection = { workspace = true }
+bcs-dist-test-runner = { workspace = true }
+bcs-dist-connector-store = { workspace = true }
+bcs-dist-store = { workspace = true }
+bcs-store-api = { workspace = true }
+bcs-test-support = { workspace = true }
+
+[lints]
+workspace = true

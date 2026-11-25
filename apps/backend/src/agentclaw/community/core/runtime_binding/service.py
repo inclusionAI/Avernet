@@ -51,10 +51,10 @@ class RuntimeBindingResolutionService:
 
     def resolve(self, request: RuntimeBindingRequest) -> ResolvedRuntimeBinding:
         """Return the current authorized binding for one trusted request."""
-        bot = self._bot_repository.get_by_id_and_owner(
-            request.bot_id,
-            request.owner_id,
-        )
+        if request.entity_id is not None:
+            bot = self._bot_repository.get_by_id_and_entity(request.bot_id, request.entity_id)
+        else:
+            bot = self._bot_repository.get_by_id_and_owner(request.bot_id, request.owner_id)
         if not bot:
             raise RuntimeBotNotFoundError("runtime bot is unavailable")
 
@@ -90,7 +90,11 @@ class RuntimeBindingResolutionService:
                     "personal bot has no Caller Service runtime binding"
                 )
             return self._service_source(request.stage)
-        if bot_type == SERVICE_BOT_TYPE and self._value(bot.get("call_type")) == "caller":
+        if (
+            bot_type == SERVICE_BOT_TYPE
+            and self._value(bot.get("call_type")) == "caller"
+            and self._value(bot.get("active_engine")) != "teclaw"
+        ):
             return RuntimeBindingSource.CALLER_INSTANCE
         if bot_type != SERVICE_BOT_TYPE:
             if request.stage != STAGE_DRAFT:

@@ -15,9 +15,15 @@ reach a caller without being named here first.
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from agentclaw.community.adapters.http.openapi_v1.schemas_runtime_projection import (
+    RuntimeProjectionResult,
+)
 
 
 class ConfigManifestApplyAccepted(BaseModel):
@@ -45,13 +51,14 @@ class ConfigManifestApplyEntry(BaseModel):
 
     category: str = Field(description="The category or section this entry is in.")
     name: str = Field(
-        description="How the entry names itself — a skill `name`, an identity "
-        "`type`, a resource `path`, an mcp `server_code`."
+        description="Entry identity. Current capabilities use `skills/<name>`, "
+        "`skill_sets/<name>` or `mcp/<code>`; other categories use their own "
+        "identity or path. Historical reports retain their original names."
     )
     action: str = Field(
         description="`created` / `updated` / `unchanged` / `skipped` / `failed`. "
-        "`skipped` means the entry was not written because its category was "
-        "aborted — never that it was optional."
+        "`skipped` means the entry was not written: its category was aborted, or its "
+        "materialiser declined to deliver it (`error` says which) — never that it was optional."
     )
     error: str | None = Field(
         default=None, description="Why, when `action` is `failed` or `skipped`."
@@ -106,6 +113,24 @@ class ConfigManifestApplySource(BaseModel):
     )
 
 
+class ConfigManifestLocalSkillPackage(BaseModel):
+    """A package publication observation, independent of installation."""
+
+    name: str = Field(description="Name of the Local Skill package target.")
+    content_digest: str | None = Field(
+        default=None,
+        description="Canonical package content digest, when validation computed it.",
+    )
+    publication: Literal["PUBLISHED", "FAILED", "UNKNOWN", "NOT_DISPATCHED"] = Field(
+        description="PUBLISHED for a confirmed Runtime write, FAILED for a confirmed "
+        "failure, UNKNOWN for an unconfirmed outcome, or NOT_DISPATCHED.",
+    )
+    metadata: Literal["COMMITTED", "FAILED", "UNKNOWN", "NOT_ATTEMPTED"] = Field(
+        description="COMMITTED for committed Backend metadata, FAILED for a confirmed "
+        "failure, UNKNOWN for an unconfirmed outcome, or NOT_ATTEMPTED.",
+    )
+
+
 class ConfigManifestApplyCategory(BaseModel):
     """One category's summary, including what overwriting it removed."""
 
@@ -127,7 +152,27 @@ class ConfigManifestApplyCategory(BaseModel):
         default_factory=list,
         description="Entries that existed in this category's area and are no "
         "longer declared, so overwriting removed them. Reported separately from "
-        "`entries` because a removal has no declared entry.",
+        "`entries` because a removal has no declared entry. Current capabilities "
+        "use the same `skills/`, `skill_sets/` and `mcp/` prefixes as entries.",
+    )
+    local_skill_packages: list[ConfigManifestLocalSkillPackage] = Field(
+        default_factory=list,
+        exclude_if=lambda receipts: not receipts,
+        description="Per-package Runtime publication and Backend metadata when this "
+        "Apply used a Local Skill publication batch.",
+    )
+
+
+class ConfigManifestApplyState(BaseModel):
+    """What the apply applied: the bot's stored Manifest, or a genome promotion's revision."""
+
+    kind: Literal["manifest", "genome"] = Field(
+        description="`manifest` for a stored or submitted document, `genome` for a promotion's revision."
+    )
+    reference: str | None = Field(
+        default=None,
+        description="The producer's reference within the kind: the promotion id for `genome`; `null` for "
+        "`manifest` on ordinary Apply, or a producer-owned digest reference for bound creation.",
     )
 
 
@@ -143,14 +188,15 @@ class ConfigManifestApply(BaseModel):
                 "result": "SUCCEEDED",
                 "started_at": "2026-08-31T09:12:04+00:00",
                 "finished_at": "2026-08-31T09:12:06+00:00",
+                "state": {"kind": "manifest", "reference": None},
                 "sources": [],
                 "categories": [
-                    {"category": "mcp", "aborted": False, "removed": ["mcp.old"]}
+                    {"category": "capabilities", "aborted": False, "removed": ["mcp/mcp.old"]}
                 ],
                 "entries": [
                     {
-                        "category": "mcp",
-                        "name": "mcp.ant.homistudio.meetmcp",
+                        "category": "capabilities",
+                        "name": "mcp/mcp.docs",
                         "action": "created",
                         "error": None,
                         "note": None,
@@ -161,7 +207,7 @@ class ConfigManifestApply(BaseModel):
         }
     )
 
-    apply_id: str = Field(description="Empty when the bot has never been applied.")
+    apply_id: str = Field(description="Empty for a dry run or when the bot has never been applied.")
     bot_id: str = Field(description="The bot this apply targeted.")
     trigger: str = Field(description="What started it; `explicit` for this API.")
     result: str = Field(
@@ -173,6 +219,11 @@ class ConfigManifestApply(BaseModel):
     )
     finished_at: datetime | None = Field(
         default=None, description="Null exactly while `result` is `RUNNING`."
+    )
+    state: ConfigManifestApplyState = Field(
+        default_factory=lambda: ConfigManifestApplyState(kind="manifest"),
+        description="The state applied or previewed. PUT with dry_run=true previews "
+        "its submitted Manifest; a promotion's report names its promotion.",
     )
     sources: list[ConfigManifestApplySource] = Field(
         default_factory=list,
@@ -195,8 +246,12 @@ class ConfigManifestApply(BaseModel):
     )
     notes: list[str] = Field(
         default_factory=list,
-        description="Apply-level notes that belong to no entry. Today only the "
-        "delivery strategy's closing step writes one: on teclaw, a whole-artifact "
-        "redeliver that failed after every category was written is recorded here "
-        "rather than failing the apply. Empty on ARCA.",
+        description="Apply-level notes, including delivery feedback from "
+        "TeClaw's platform-managed artifact closure.",
+    )
+    runtime_projection: RuntimeProjectionResult | None = Field(
+        default=None,
+        exclude_if=lambda result: result is None,
+        description="Capability Runtime synchronization, independent of the Apply write result. "
+        "Omitted for historical reports, previews, and Apply paths without a capability observation.",
     )

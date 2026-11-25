@@ -1,3 +1,4 @@
+from tests.community.bot_address_fakes import support_legacy_locator
 """Regression: POST /api/skills must call SkillService.create_skill with the
 `skill_path` kwarg, not `git_path`.
 
@@ -50,6 +51,7 @@ def _client():
         user_id="default", bot_id="default"
     )
     bot_repo = MagicMock(spec=BotRepository)
+    support_legacy_locator(bot_repo)
     bot_repo.get_by_id_and_owner.return_value = None
     path_factory = MagicMock(spec=WorkspacePathFactory)
     path_factory.get_bot_skills_repo_dir.return_value = "/tmp/skills-repo"

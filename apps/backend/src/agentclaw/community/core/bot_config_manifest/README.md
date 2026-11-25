@@ -205,9 +205,10 @@ through `ContentStoreProtocol` and reads the copy back for delivery and
 git-delivered tree as `canonical_tree_bytes`; `fetch/limits.py` re-exports
 the store's `DIGEST_RE` as the fetch vocabulary. The store itself is
 constructed by `di/modules/content_store_module.py` from the
+blob store the deployment's profile wired (object storage by default; the
+test and singlebox columns bind a local tree rooted at the
 `user_config.bot_config_manifest.content_store_dir` this package's config
-cluster still parses (`cfg.BotConfigManifestConfig`), so the yaml key kept its
-name.
+cluster still parses).
 
 ## Tenancy is load-bearing here
 
@@ -231,8 +232,11 @@ also fit.
 ## Applying (W4, #1472; the fetching categories W5, #1473)
 
 `apply/` holds the engine: an orchestrator, an ordering table, a materialiser
-registry, and the four materialisers shipped so far — `mcp` and `script` with
-W4, `identity` and `skills` with W5.
+registry, and five registered materialisers: `script`, `identity`, `resources`,
+`capabilities` and `cli_tools`. `capabilities` owns Direct Skills, SkillSets/Default
+and MCP together; historical Skills/MCP classes are not registered separately.
+A valid Manifest declares their complete target (omitted lists become empty),
+while the legacy Genome producer leaves SkillSets/Default nonparticipating.
 
 **The ordering table is complete; the registry is sparse.** `APPLY_ORDER` names
 every construct the vocabulary defines, including the ones nothing can act on
@@ -247,7 +251,7 @@ deleting a branch (W5 closed `skills` and `identity` this way; W6 holds
 rule lives there once — serialization, ordering, phase selection, the abort rule,
 the `skipped` cascade, the outcome tally — and a materialiser knows none of it.
 That is the whole of what W5, W6 and W13 get from this item: adding a category is
-writing a materialiser, not rebuilding the engine. `tests/community/core/bot_config_manifest/apply/test_orchestrator_stays_generic.py`
+writing a materialiser, not rebuilding the engine. `tests/community/core/apply_engine/test_orchestrator_stays_generic.py`
 asserts the module names no category, because the moment it does the registry
 stops meaning anything and every later work item adds "just one" special case.
 
@@ -305,9 +309,11 @@ bot); the receipt it files is the platform's record of what the bot was served,
 true whether the apply proceeds.
 
 **The two fetching categories and their areas** (§3.2). `identity` overwrites
-the file set minus the reserved names — `MEMORY.md` and `IDENTITY.md` are
-refused in `resolve` and subtracted from the removals, both halves, so the
-guarantee holds for documents that never met the validator — writing through
+the file set with protected runtime memory and profile omission: `MEMORY.md`
+is refused in `resolve` and excluded from removals. `IDENTITY.md` may be explicitly
+written on engines that accept it, including an empty write, but is excluded from
+omission cleanup (including `identity: []`). Other identity files retain Replace
+semantics. The same rules hold for documents that never met the validator, writing through
 `IdentityService` with the router's own coordinates
 (`identity_coords_from_record`, resolved in core for exactly this consumer);
 "removal" is an empty write because the domain's own contract is that absent
@@ -407,7 +413,7 @@ still what a deployment writes, and it is still strict about booleans — but it
 is read exactly once, at boot, by `delivery_mode.teclaw_delivery_mode_from_config`,
 which answers a `TeclawDeliveryMode` (`PLATFORM` / `DEVICE`) rather than a
 boolean. The composition root then settles *one* strategy and *one* reader from
-it: in `di/modules/manifest_delivery_module` each teclaw shape is a binding of
+it: in `di/modules/apply_engine_module` each teclaw shape is a binding of
 its own and a per-mode provider contributes its strategy to the
 `DeliveryStrategies` map only when the deployment named that mode, so the map —
 and therefore every apply — carries one teclaw row; the compose seam looks the
@@ -425,7 +431,7 @@ the store carries its files: the next apply's redeliver asserts `platform`
 for every category, and an empty prefix under an asserted category means
 "remove the area" to an engine that honours the map.
 
-**`PUT` starts an apply** (§2.6): the document is stored and validated exactly
+**Ordinary `PUT` starts an apply** (§2.6): the document is stored and validated exactly
 as before, then both phases are started under trigger `put`; the response's
 `apply` field says `RUNNING` with the id or `NOT_STARTED` with why, and the
 write is a `200` either way. `warnings` carries the script delivery note and,
@@ -433,6 +439,12 @@ on a bot that is not `ACTIVE` whose strategy has container-bound constructs,
 the note that those will be recorded as failed. Restart and republish are
 **not** apply points in this iteration (spec D-1): a change to the git repo a
 manifest ref points at is picked up by an explicit apply or the next `PUT`.
+
+`PUT …/config-manifest?dry_run=true` validates the submitted YAML and invokes
+the same compiler and planner as stored-document preview. The request owns the
+YAML for the lifetime of the preview. The planner reads current target state
+without taking the Apply lock, so a later Apply can observe different state.
+The preview can fetch and cache sources and finishes before any Apply write.
 
 **The legacy `…/startup-script` routes are untouched.** The manifest is a
 layer the startup script does not know about (review decision on
@@ -472,12 +484,6 @@ below.
 
 ## Known gaps, recorded rather than discovered
 
-- **The apply-scope fetch budget is defined, not enforced** —
-  `APPLY_FETCH_TOTAL_LIMIT` / `APPLY_BUDGET_S` have no mechanism behind
-  them. Per-entry caps, per-hop timeouts and the apply-lock TTL bound one
-  apply today; the ledger lands with the wave that owns more fetch
-  consumers (W6/W7), threaded once through the entry fetcher.
-
 - **Deleting a bot does not delete its manifest.** Bot deletion is a soft update
   and no cascade reaches this table. The row cannot be inherited (the key names
   one bot for the life of the data), so nothing will read it, but a caller's
@@ -503,8 +509,12 @@ below.
   §5's download sizes, unpacked sizes, archive file counts and timeouts cannot
   be enforced by a surface that never fetches; they are **the fetcher's
   numbers** now — `fetch/limits.py` is their single source — while the
-  apply-scope budget stays with apply (W4). Declaring them beside the
-  write-time enforced limits would make them read as enforced there too.
+  apply-scope total limits and execution ledger live in
+  `apply_engine/fetch_budget.py`. A compile reuses the active execution
+  budget, including all Direct and nested Set Local packages; outside a run
+  it starts one bounded standalone ledger. First public-package previews
+  later in capability resolution share the execution budget. Declaring them
+  beside the write-time enforced limits would make them read as enforced there too.
 - **`cli_tools` is validated against the flattened shape** — one entry is one
   command is one file, selected inside an archive with `subpath` (schema §3.7).
   The earlier "directory plus an `entrypoints` list" draft is gone, and with it
@@ -515,54 +525,13 @@ below.
 ## Context Boundary
 
 ```yaml
-purpose: Own a bot's configuration manifest — its storage, its schema v1 validation, and which constructs a bot can be told to have at all; plus (W2) the guarded fetch + unpack transport that fetches a manifest's remote sources on the platform's behalf, and (W11) the platform's own durable copy of what was fetched, with its provenance log.
+purpose: Own a bot's configuration manifest — its storage, its schema v1 validation, the compiler that turns the stored or submitted document into the apply engine's typed DesiredState (grammar, named sources, the fetch funnel, filing bytes in the content store), and the creation flow that applies a document in two phases around container provisioning. What happens after a desired state exists — materialisers, orchestrator, delivery, the apply run — is core.apply_engine's.
 provides:
-  - BotCliToolModel  # W9: the platform's record of a bot's installed CLI tools
-  - BotCliToolRecord
-  - INSTALLED_BY_MANIFEST  # the installed_by value a manifest apply writes
-  - CliToolStore  # W9: the platform's own copy of a bot's tool bytes
-  - CliToolScope
-  - CliToolStoreError
-  - StoredCliTool
-  - CliToolContext
-  - CliToolDeliveryPort  # W9: the per-family delivery boundary, name-addressed
-  - DeliverableCliTool  # W9 rev 8: one tool as the whole-set call carries it
-  - CliToolDeliveryError
-  - CliToolPlacementError
-  - ArcaCliToolPort
-  - TeclawCliToolPort
-  - CliToolDriftUnobservableError
-  - CliToolService  # W9: the one component both callers install through
-  - CliToolDecl
-  - CliToolOutcome
-  - CliToolStatus
-  - CliToolDrift
-  - verify_amd64_elf  # W9: "can this machine run them", which the digest does not answer
-  - select_subpath
   - FetchContext  # exactly what a fetch reads off its caller's context (W9 gave it a second caller)
-  - BotCliToolService  # W9: the bot_id-addressed surface the HTTP routes bind to
-  - BotCliToolServiceProtocol
-  - CliToolsMaterialiser
-  - CliToolNotFoundError
-  - CliToolConflictError
-  - CliToolRefusedError
-  - CliToolUnsupportedError
-  - BotConfigManifestApplyService
-  - BotConfigManifestApplyServiceProtocol
-  - BotConfigManifestApplyRecord
-  - BotConfigManifestApplyLockRecord
-  - ApplyOrchestrator
-  - ApplyReport
-  - ApplyStatus
-  - ApplyPhase
-  - ApplyContext
-  - ApplyTaskHandler
-  - ApplyTaskLifecycle
-  - APPLY_TASK_TYPE
-  - build_apply_task_payload
+  - ManifestCompiler  # the DesiredStateCompiler for MANIFEST_STATE (kind "manifest"): the stored or submitted document → the apply engine's DesiredState
+  - CompileSession
+  - declared_entries
   - BotCreationManifestSeam (the ManifestCreationSeam implementation; only DI names it)
-  - CREATE_PRE_CONTAINER_TRIGGER
-  - CREATE_ON_CONTAINER_TRIGGER
   - preflight_creation_manifest
   - resolve_manifest_entity_id
   - BotCreateWithManifestHandler
@@ -570,38 +539,20 @@ provides:
   - CREATE_JOB_TASK_TYPE
   - enqueue_create_job
   - find_create_job
-  - EntryOutcome
-  - EntryResult
-  - CategoryResult
-  - Materialiser
-  - APPLY_ORDER
-  - build_materialisers
   - DeclaredSourceResolver
   - FetchedEntry
   - EntryFetchError
   - scope_of
-  - IdentityMaterialiser
-  - SkillsMaterialiser
   - BotConfigManifestService
   - BotConfigManifestServiceProtocol
   - BotConfigManifestRecord
   - BotConfigManifestModel
-  - ManifestCapabilities
-  - Capability
-  - Construct
-  - ConstructKind
-  - ManifestCategory
-  - ManifestSection
-  - kind_of
-  - parse_category
   - ManifestWriteResult
   - ManifestValidationError
   - ManifestTooLargeError
   - ManifestNotEncodableError
   - Violation
   - ValidationResult
-  - resolve_capabilities
-  - capabilities_for_bot
   - validate_document
   - MAX_DOCUMENT_BYTES
   - MAX_ENTRIES_PER_CATEGORY
@@ -612,9 +563,6 @@ provides:
   - endpoint_refusal
   - FetchRefusedError
   - FetchFailedError
-  - unpack_archive
-  - UnpackedTree
-  - UnpackError
   - SourceCredentialService
   - SourceCredentialServiceProtocol
   - SourceCredentialRecord
@@ -652,45 +600,25 @@ consumes:
 consumed_by:
   - "adapters/http/openapi_v1/bots — the public read/replace/clear/capabilities surface, and the create-with-manifest pair (W13), which reaches the seam and never the task queue"
   - "core.bot_management create_flow — submission calls the creation seam (preflight, persist, start the job); the dependency runs one way, so the seam is handed its job operations at construction rather than importing them"
-  - "the apply orchestration (`apply/`, W4 #1472 + W5 #1473) — di/modules/manifest_fetch_module.py reads the content store root and the fetch_transport_allowlist (via the store's and W2's pure parsers over config_module's seam; the allowlist reaches SourceCredentialService as endpoint_allow_hosts, its one consumer) and holds the one DeclaredSourceResolver over the object store, the content store (bound by content_store_module) and W3's credentials"
+  - "core.apply_engine — the run service looks the ManifestCompiler up by MANIFEST_STATE's kind and compiles through it; di/modules/manifest_fetch_module.py builds the compiler beside the fetch pipeline (the content store root and the fetch_transport_allowlist via the store's and W2's pure parsers over config_module's seam; the allowlist reaches SourceCredentialService as endpoint_allow_hosts) and holds the one DeclaredSourceResolver over the object store, the content store (bound by content_store_module) and W3's credentials"
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
+  - agentclaw.community.core.ports.mcp_config  # an absent config and an explicit empty object both compile to clear
+  - agentclaw.community.core.workspace.protected_entries  # the one list of workspace entries that are never resources (the validator and the compiler refuse them)
+  - agentclaw.community.core.apply_engine  # the engine the Manifest compiles for: the construct vocabulary and capabilities, DesiredState and the compiler contract, the apply run the creation flow starts, the fetch caps (unpack) and identity vocabulary
   - agentclaw.community.core.base
   - agentclaw.community.core.content_store  # the store Service API, scope, errors, DIGEST_RE and the acm-tree-v1 encoding (W11, moved out in #3064)
   - agentclaw.community.core.bot_app_grant.protocols  # BotAppGrantSweepProtocol — the creation job withdraws the submitting application's creation grant when a creation gives up before a bot exists
-  - agentclaw.community.core.config_compose.models  # the collector-shaped refs the managed-files reader yields to the teclaw composer (W8)
-  - agentclaw.community.core.config_compose.protocols  # ManagedFilesReader + PlatformOwnershipReader — the two compose seams the managed-files reader inherits, rather than satisfying structurally (W8)
-  - agentclaw.community.kernel.bot_config  # OwnershipCategory — the artifact's own category names the managed-files reader answers the composer in (W8)
-  - agentclaw.community.plugin_api.object_storage  # the bot-data object store the managed-files store writes a teclaw bot's manifest-delivered files into (W8), and the cli_tools store keeps a bot's tool bytes in (W9)
   - agentclaw.community.core.bot_startup_script
-  - agentclaw.community.core.bot_management.engines.registry  # the pure runtime-engine routing policy the resources materialiser addresses workspaces through, the router's own rule (W6)
   - agentclaw.community.core.bot_management.manifest_seam  # the Protocol the creation seam is declared as, bound as, and injected as everywhere; declaring it rather than matching it by shape is what checks the contract in one place
   - agentclaw.community.core.bot_management.token_vault
   - agentclaw.community.core.bot_management.utils  # resolve_agent_code — the creation job asks whether completion's *second* write (the owner relationship) actually landed, since the bot record alone cannot tell it
-  - agentclaw.community.core.mcp.mcp_auth_service_protocol  # the permission check DirectActivationService also consults
-  - agentclaw.community.core.mcp.mcp_config_service_protocol  # Center-aware validation for Bot MCP overrides
   - agentclaw.community.core.repository
-  - agentclaw.community.core.resources.services.file_service  # the workspace file surface's admission constants, re-asked at resolve (W6)
-  - agentclaw.community.core.services.identity  # the device-backed IdentityFilePort forwards to it (TYPE_CHECKING only — the module reaches the device dispatcher graph at import)
-  - agentclaw.community.core.services.resource_file_service  # the device-backed ResourceFilePort forwards to it (TYPE_CHECKING only, same reason)
-  - agentclaw.community.core.skill_center.capability_state_contract  # the flush-then-read active-set the `skills` materialiser enumerates (W5)
-  - agentclaw.community.core.ports.resource_file_port  # ResourceFilePort — the outbound port both resource implementations declare
-  - agentclaw.community.core.ports.identity_file_port  # IdentityFilePort — the outbound port both identity implementations declare
-  - agentclaw.community.core.ports.activation_port  # ActivationPort — the outbound port both apply-side activation delegates declare
-  - agentclaw.community.core.ports.skill_package_upload_port  # SkillPackageUploadPort — the outbound port both upload implementations declare
-  - agentclaw.community.core.skill_center.direct_activation_service_protocol  # the activation Service API both delegates wrap and forward `project` to
-  - agentclaw.community.core.skill_center.errors  # internal committed-write marker used to distinguish FAILED from confirmed PARTIAL
-  - agentclaw.community.core.skill_center.local_skill_delete_service_protocol  # device-backed physical Local cleanup
-  - agentclaw.community.core.skill_center.local_skill_security_upload_hook  # retire observed Local Skill identity after platform-managed deletion
-  - agentclaw.community.core.skill_center.local_skill_upload_service_protocol  # the upload road a manifest skill travels (W5)
-  - agentclaw.community.core.skill_center.mcp_dependency_scope  # final Skill dependency closure shared with the MCP wave
   - agentclaw.community.core.skill_center.skill_package  # the manual-upload package gate, reused per fetched skill (W5)
   - agentclaw.community.core.task_queue  # applying runs as a queue task, not a daemon thread (W13) — the queue module imports the DI container at module scope, so TaskQueueService is a TYPE_CHECKING-only annotation behind a lazy provider
-  - agentclaw.community.core.workspace.constants
   - agentclaw.community.kernel.lifecycle  # the apply handler registers itself at boot
+  - agentclaw.community.kernel.build_ignore  # normalize_build_ignore_path governs a copy's excludes — literal relative paths, not a gitignore
   - agentclaw.community.log
-  - agentclaw.community.plugin_api.database
-  - agentclaw.community.plugin_api.device_adapter_transport  # the one engine channel core can reach; the ARCA cli_tools port POSTs an install through it (W9)
   - agentclaw.community.plugin_api.passport  # the creation job reads its own authorization status; the Plugin API type, not the service graph behind it
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.avernet_tenant_guard
@@ -710,8 +638,14 @@ Two things are close to authorization boundaries already:
   because the document is stored as written, read back verbatim by `GET`, and
   recorded as provenance by the platform's own materialisation. Redaction cannot
   un-store what three other places already hold.
-- **The reserved identity files (`MEMORY.md`, `IDENTITY.md`) are refused at
-  write time**, not skipped at apply time. They are engine-generated runtime
-  state that apply is guaranteed never to write or remove, so a document
-  declaring one would be accepted and then never converge. Refusing it is what
-  keeps "accepted" and "appliable" the same set.
+- **Runtime memory (`MEMORY.md`) is refused at write time**, not skipped at
+  apply time, and is never removed. `IDENTITY.md` is explicitly writable within
+  the engine's existing filename whitelist, but remains protected when omitted.
+  Claude Code still accepts only `CLAUDE.md`; expert identity adaptation does not
+  expand this native whitelist.
+
+Creation-spec policy is supplied by the composition root as a required
+`validate_creation_spec` callable to the creation seam and worker. They invoke
+it before worker side effects, without importing the
+policy owner or inspecting its business fields. Manifest scope/document
+binding checks remain local to the Manifest compiler and creation seam.

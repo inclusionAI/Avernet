@@ -1,6 +1,61 @@
 use super::*;
 
 #[tokio::test]
+async fn inbound_chat_sessions_inherit_group_humans_and_preserve_membership() -> TestResult {
+    for group in [chat_group("group_chat"), manager_group("group_manager")] {
+        for conversation_type in ["1", "2"] {
+            for sender_is_member in [false, true] {
+                let mut group = group.clone();
+                let mut observer = Participant::human("human_observer", ParticipantRole::Observer);
+                observer.bot_name = Some("Observer".to_string());
+                observer.mode = Some(ParticipantMode::Absent);
+                observer.message_view_scope = bcs_domain::MessageViewScope::Participant;
+                group.participants.push(observer);
+                if sender_is_member {
+                    let mut sender = Participant::human("human_u1", ParticipantRole::Observer);
+                    sender.bot_name = Some("Existing name".to_string());
+                    sender.mode = Some(ParticipantMode::Present);
+                    sender.message_view_scope = bcs_domain::MessageViewScope::Participant;
+                    group.participants.push(sender);
+                }
+                let group_id = group.id.clone();
+                let inherited = group.participants.clone();
+                let harness = TestHarness::new(group).await?;
+                harness.binding_repo.create(active_binding(
+                    "binding_1", "robot_1", BindingTarget::Group { group_id },
+                    Visibility::FullTranscript,
+                )).await?;
+
+                for msg_id in ["msg_1", "msg_2"] {
+                    let mut message = inbound("conv_1", "u1", Some("Sender"), msg_id);
+                    message.conversation_type = conversation_type.to_string();
+                    harness.service.handle_inbound(message).await?;
+                }
+
+                let sessions = harness.session_repo.sessions.lock().await;
+                assert_eq!(sessions.len(), 1, "the second message reuses the session");
+                let session = sessions.values().next().expect("created chat session");
+                assert_eq!(session.participants.len(), inherited.len() + usize::from(!sender_is_member));
+                for expected in &inherited {
+                    let actual = session.participants.iter()
+                        .find(|participant| participant.bot_uuid == expected.bot_uuid)
+                        .expect("all group members are inherited, including non-senders");
+                    assert_eq!(serde_json::to_value(actual)?, serde_json::to_value(expected)?);
+                }
+                let sender = session.participants.iter()
+                    .find(|participant| participant.bot_uuid == "human_u1")
+                    .expect("the channel sender is a session member");
+                if !sender_is_member {
+                    assert_eq!(sender.role, ParticipantRole::Consultant);
+                    assert_eq!(sender.mode, Some(ParticipantMode::Present));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn inbound_group_target_injects_initial_context_once_for_new_session() -> TestResult {
     let mut group = manager_group("group_1");
     group.label = Some("跨团队协作".to_string());
@@ -86,6 +141,44 @@ async fn inbound_group_target_injects_driver_context_when_binding_configures_inj
     };
     assert_eq!(driver_delivery, &Some(bcs_domain::DeliveryType::Inject),
         "binding group_context_delivery=inject must override the driver's send");
+    Ok(())
+}
+
+#[tokio::test]
+async fn manager_worker_binding_delivery_applies_only_to_new_sessions_and_keeps_user_messages() -> TestResult {
+    let harness = TestHarness::new(manager_group("group_1")).await?;
+    let mut config = dingtalk_config("robot_1");
+    config[GROUP_CONTEXT_DELIVERY_CONFIG] = serde_json::json!("inject");
+    let binding = harness.service.create_binding(CreateBindingCommand {
+        channel_type: channel_type(), account_ref: "robot_1".to_string(),
+        target: BindingTarget::Group { group_id: "group_1".to_string() },
+        group_chat_scope: Some(GroupChatScope::ConversationShared),
+        outbound_visibility: Visibility::FullTranscript, env: "dev".to_string(),
+        created_by: Some("creator".to_string()), config: config.clone(),
+    }).await?;
+
+    harness.service.handle_inbound(group_inbound("conv_1", "u1", Some("张三"), "msg_1", true)).await?;
+    config[GROUP_CONTEXT_DELIVERY_CONFIG] = serde_json::json!("send");
+    harness.service.update_binding_config(&binding.id, config).await?;
+    harness.service.handle_inbound(group_inbound("conv_1", "u1", Some("张三"), "msg_2", true)).await?;
+    harness.service.handle_inbound(group_inbound("conv_2", "u1", Some("张三"), "msg_3", true)).await?;
+
+    let notifications = harness.system_message.notifications.lock().await;
+    assert_eq!(notifications.len(), 2, "reused sessions do not receive context again");
+    for (notification, expected) in notifications.iter().zip([
+        bcs_domain::DeliveryType::Inject, bcs_domain::DeliveryType::Send,
+    ]) {
+        let SystemMessageEvent::SessionContext { driver_delivery, .. } = &notification.event else {
+            return Err("expected session context notification".into());
+        };
+        assert_eq!(*driver_delivery, Some(expected));
+    }
+    let sends = harness.message_flow.web_sends.lock().await;
+    assert_eq!(sends.len(), 3, "context delivery does not suppress or duplicate user messages");
+    assert_eq!(sends[0].session_id, sends[1].session_id);
+    assert_ne!(sends[0].session_id, sends[2].session_id);
+    assert_eq!(sends[0].session_id.as_deref(), Some(notifications[0].session_id.as_str()));
+    assert_eq!(sends[2].session_id.as_deref(), Some(notifications[1].session_id.as_str()));
     Ok(())
 }
 
@@ -215,6 +308,70 @@ async fn direct_bot_group_chat_uses_bounded_channel_session_id() -> TestResult {
     assert_eq!(mapped.bcs_session_id.matches(':').count(), 1);
     assert!(mapped.bcs_session_id.len() <= 128);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn managed_channel_session_has_exclusive_speaker_only_with_live_single_sender_scope() -> TestResult {
+    let harness = TestHarness::new(manager_group("group_1")).await?;
+    let binding_id = "binding_exclusive";
+    let mut binding = active_binding(
+        binding_id, "robot_1", BindingTarget::Bot { bot_id: "target_bot".into() },
+        Visibility::FullTranscript,
+    );
+    binding.group_chat_scope = Some(GroupChatScope::PerSender);
+    harness.binding_repo.create(binding).await?;
+    harness.service.handle_inbound(group_inbound("conv", "u1", None, "msg", true)).await?;
+    let mapping = harness.conversation_repo
+        .get(binding_id, "conv", SessionScope::PerSender, Some("u1"))
+        .await?.expect("channel mapping");
+    let session = harness.session_repo.get(&mapping.bcs_session_id).await.expect("channel Session");
+    let mut group = harness.service.groups.get(&session.group_id).await.expect("channel Group");
+    group.participants = session.participants.clone();
+    assert_eq!(
+        harness.service.exclusive_session_speaker(&session, &group).await?.as_deref(),
+        Some("human_u1"),
+    );
+
+    // A previously private session does not keep its exemption when the
+    // binding is disabled, the Session is no longer marked for this sender,
+    // or the live mapping has moved to another Session.
+    harness.binding_repo.set_status(binding_id, false).await?;
+    assert_eq!(harness.service.exclusive_session_speaker(&session, &group).await?, None);
+    harness.binding_repo.set_status(binding_id, true).await?;
+    let mut wrong_principal = session.clone();
+    wrong_principal.caller_principal = Some("dingtalk:conv:u2".into());
+    assert_eq!(harness.service.exclusive_session_speaker(&wrong_principal, &group).await?, None);
+
+    // Keep the matching metadata and sender but present a Session in a
+    // Group that this binding does not own.
+    let mut foreign_group = group.clone();
+    foreign_group.id = "unrelated_group".into();
+    let mut foreign_session = session.clone();
+    foreign_session.group_id = foreign_group.id.clone();
+    assert_eq!(harness.service.exclusive_session_speaker(&foreign_session, &foreign_group).await?, None);
+
+    let mut missing_binding = session.clone();
+    missing_binding.meta.as_mut().expect("channel meta")["channel"]["binding_id"] =
+        serde_json::json!("missing_binding");
+    assert_eq!(harness.service.exclusive_session_speaker(&missing_binding, &group).await?, None);
+    let mut unmarked = session.clone();
+    unmarked.meta = None;
+    assert_eq!(harness.service.exclusive_session_speaker(&unmarked, &group).await?, None);
+
+    let mut moved = mapping.clone();
+    moved.bcs_session_id = format!("{}:replacement", group.id);
+    harness.conversation_repo.upsert(moved).await?;
+    assert_eq!(harness.service.exclusive_session_speaker(&session, &group).await?, None);
+    harness.conversation_repo.upsert(mapping).await?;
+
+    group.participants.push(Participant::human("human_u2", ParticipantRole::Consultant));
+    assert_eq!(harness.service.exclusive_session_speaker(&session, &group).await?, None);
+    group.participants.pop();
+    assert!(harness.conversation_repo.delete_if_session(
+        binding_id, "conv", SessionScope::PerSender, Some("u1"), &session.id,
+    ).await?);
+    assert_eq!(harness.service.exclusive_session_speaker(&session, &group).await?, None);
     Ok(())
 }
 

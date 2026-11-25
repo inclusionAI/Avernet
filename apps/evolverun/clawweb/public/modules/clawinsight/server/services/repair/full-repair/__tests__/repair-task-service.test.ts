@@ -1044,7 +1044,7 @@ it("terminates the active Repair execution, stops its AIS job and invalidates th
 
   expect(result.status).toBe("canceled");
   expect(result.termination).toEqual({ status: "remote_stopped", aisJobId: "job-1" });
-  expect(harness.stopExecution).toHaveBeenCalledWith("job-1");
+  expect(harness.stopExecution).toHaveBeenCalledWith("job-1", ACTOR);
   const task = await harness.repo.findTask(created.taskId);
   const step = await harness.repo.findStep(created.config.current.stepId);
   const config = JSON.parse(task!.config_json) as RepairTaskConfig;
@@ -1090,7 +1090,7 @@ it("stops a late AIS job created while the Repair dispatch is being terminated",
 
   await expect(harness.repo.findTask(created.taskId)).resolves.toMatchObject({ status: "canceled" });
   expect(harness.stopExecution).toHaveBeenCalledTimes(1);
-  expect(harness.stopExecution).toHaveBeenCalledWith("job-late");
+  expect(harness.stopExecution).toHaveBeenCalledWith("job-late", ACTOR);
   await expect(harness.repo.findStep(created.config.current.stepId)).resolves.toMatchObject({
     status: "canceled",
     bot_run_id: "job-late",

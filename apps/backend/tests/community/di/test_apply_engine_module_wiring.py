@@ -1,0 +1,337 @@
+"""Which delivery strategy each family — and each teclaw mode — is wired to (W8).
+
+The composition root no longer turns the deployment's
+:class:`TeclawDeliveryMode` into a strategy by looking it up in a table. It has
+a binding per strategy, and one provider per mode that contributes its
+strategy to the :data:`DeliveryStrategies` map only when the deployment named
+that mode. That moves two guarantees the retired table's import-time
+exhaustiveness check used to give onto this file, asserted over the real graph
+instead:
+
+* every member of the enum names a strategy — a mode a deployment can write
+  into its yaml and nothing can build is "the surface accepts what it cannot
+  run", the rule this feature is built around;
+* exactly one teclaw strategy reaches the family map, so the two providers can
+  never both be effective and leave which row won to the order the module
+  happens to install its providers in.
+
+The mode is rebound on the injector rather than written into a yaml overlay
+because it is the config object's value that every provider here reads, and the
+point is which strategy comes out of the graph — not how the yaml scalar got
+parsed, which ``delivery_mode``'s own tests cover.
+"""
+from __future__ import annotations
+
+from unittest.mock import Mock
+
+import pytest
+
+from agentclaw.community.core.apply_engine.delivery import (
+    ArcaDelivery,
+    DeliveryStrategies,
+    DeliveryStrategyFactory,
+    DevicePorts,
+    EngineFamily,
+    PlatformPorts,
+    TeclawDeliveryMode,
+    TeclawDeviceDelivery,
+    TeclawPlatformDelivery,
+)
+from agentclaw.community.di import config as cfg
+from agentclaw.community.core.skill_center.local_skill_security_upload_hook import (
+    LocalSkillSecurityUploadHook,
+)
+from agentclaw.community.core.skill_center.services.local_skill_security_upload_observer import (
+    NoopLocalSkillSecurityUploadHook,
+)
+from agentclaw.community.di.local_skill_security_config import (
+    LocalSkillSecurityObservationConfig,
+)
+
+#: The strategy each mode is expected to put in the family map. One row per
+#: mode, and the test below asserts the enum has no member this table misses —
+#: so adding a mode without wiring it a provider fails here rather than at the
+#: first apply on a deployment that set it.
+_EXPECTED = {
+    TeclawDeliveryMode.PLATFORM: TeclawPlatformDelivery,
+    TeclawDeliveryMode.DEVICE: TeclawDeviceDelivery,
+}
+
+
+def _strategies(test_injector, mode: TeclawDeliveryMode):
+    test_injector.binder.bind(
+        cfg.BotConfigManifestConfig,
+        to=cfg.BotConfigManifestConfig(teclaw_delivery_mode=mode),
+    )
+    return test_injector.get(DeliveryStrategies)
+
+
+def test_every_teclaw_mode_binds_a_strategy() -> None:
+    """The coverage the retired selection table checked at import."""
+    assert set(_EXPECTED) == set(TeclawDeliveryMode)
+
+
+@pytest.mark.parametrize("mode", list(TeclawDeliveryMode))
+def test_the_deployments_mode_names_the_teclaw_strategy(test_injector, mode) -> None:
+    """One provider is effective per mode, and it is the one for that mode.
+
+    Asserted through the injector rather than by reading the module: what
+    matters is the object an apply would be handed.
+    """
+    strategies = _strategies(test_injector, mode)
+
+    assert isinstance(strategies[EngineFamily.TECLAW], _EXPECTED[mode])
+    # Not merely "the expected class is in there": no other row may hold a
+    # teclaw shape either, or which one a teclaw bot got would depend on the
+    # order the module happened to install its providers in.
+    others = [s for f, s in strategies.items() if f is not EngineFamily.TECLAW]
+    assert not any(
+        isinstance(s, (TeclawPlatformDelivery, TeclawDeviceDelivery)) for s in others
+    )
+
+
+@pytest.mark.parametrize("mode", list(TeclawDeliveryMode))
+def test_every_family_is_bound_whatever_the_mode(test_injector, mode) -> None:
+    """ARCA's row is not the teclaw switch's business, and the factory refuses a
+    family with no strategy — so this is what makes the factory buildable at
+    all."""
+    strategies = _strategies(test_injector, mode)
+
+    assert set(strategies) == set(EngineFamily)
+    assert isinstance(strategies[EngineFamily.ARCA], ArcaDelivery)
+
+
+def test_the_factory_is_handed_the_bound_strategies_and_builds_none(
+    test_injector,
+) -> None:
+    """``manifest_delivery_strategies`` assembles nothing.
+
+    The strategy a bot applies through is *identically* the object the graph
+    bound, and the family adapter comes off its own binding — which is what
+    lets a test swap either without reaching into the factory.
+    """
+    strategies = _strategies(test_injector, TeclawDeliveryMode.DEVICE)
+    factory = test_injector.get(DeliveryStrategyFactory)
+
+    assert factory.for_family(EngineFamily.ARCA) is strategies[EngineFamily.ARCA]
+    assert factory.for_family(EngineFamily.TECLAW) is strategies[EngineFamily.TECLAW]
+    # And the lookup answers off the engine authority the rest of the platform
+    # asks, adapted once at its own binding.
+    assert isinstance(factory.for_engine("teclaw"), TeclawDeviceDelivery)
+    assert isinstance(factory.for_engine("claude_code"), ArcaDelivery)
+    assert isinstance(factory.for_engine(None), ArcaDelivery)
+
+
+def test_the_device_bundle_is_one_binding_both_shapes_read(test_injector) -> None:
+    """ARCA and the device-backed teclaw shape write through the same ports.
+
+    They are two strategies over one bundle, not two bundles that have to agree:
+    the binding is the seam, so a deployment cannot end up with the ``arca``
+    CLI binding on one and something else on the other. The qualifier is what
+    keeps that bundle distinct from the store-backed one, which has the same
+    ``Callable[[], MaterialiserPorts]`` shape and would otherwise share its key.
+    """
+    strategies = _strategies(test_injector, TeclawDeliveryMode.DEVICE)
+    device_ports = test_injector.get(DevicePorts)
+
+    assert strategies[EngineFamily.ARCA]._ports is device_ports
+    assert strategies[EngineFamily.TECLAW]._ports is device_ports
+
+
+def test_the_two_port_bundles_are_not_the_same_binding(test_injector) -> None:
+    """The bug the qualifiers exist to prevent.
+
+    Both bundles are ``Callable[[], MaterialiserPorts]``. Bound on that bare
+    shape they would be one key, and injector would silently let whichever
+    provider the module installed last answer for both — a teclaw bot writing
+    into a container, or an ARCA bot writing into the platform's store, with
+    nothing in the graph to say so.
+    """
+    device = test_injector.get(DevicePorts)
+    platform = test_injector.get(PlatformPorts)
+
+    assert device is not platform
+    assert DevicePorts != PlatformPorts
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_platform_manifest_deletion_uses_observation_hook_only_when_enabled(
+    test_injector, enabled: bool,
+) -> None:
+    real_hook = Mock(spec=LocalSkillSecurityUploadHook)
+    test_injector.binder.bind(LocalSkillSecurityUploadHook, to=real_hook)
+    test_injector.binder.bind(
+        LocalSkillSecurityObservationConfig,
+        to=LocalSkillSecurityObservationConfig(enabled=enabled),
+    )
+
+    upload = test_injector.get(PlatformPorts)().upload_service
+
+    if enabled:
+        assert upload._security_hook is real_hook
+    else:
+        assert isinstance(upload._security_hook, NoopLocalSkillSecurityUploadHook)
+
+
+@pytest.mark.parametrize("mode", list(TeclawDeliveryMode))
+def test_the_family_map_carries_the_bound_strategy_object(test_injector, mode) -> None:
+    """Each strategy is a binding; the mode decides which one the map names.
+
+    Both teclaw shapes are bound on either mode — a binding is resolvable by
+    definition, and the startup lifecycle walk constructs every one of them — so
+    what the per-mode providers decide is which *bound object* becomes the
+    family's answer. Asserted by identity: the row is the very object the graph
+    holds for that class, not a second one assembled for the map.
+    """
+    strategies = _strategies(test_injector, mode)
+
+    assert strategies[EngineFamily.TECLAW] is test_injector.get(_EXPECTED[mode])
+    assert strategies[EngineFamily.ARCA] is test_injector.get(ArcaDelivery)
+
+
+@pytest.mark.parametrize("mode", list(TeclawDeliveryMode))
+def test_the_shape_the_mode_did_not_name_never_reaches_an_apply(
+    test_injector, mode
+) -> None:
+    """It stays resolvable by name and never becomes the family's answer.
+
+    That is the guarantee the apply path actually rests on: an apply asks
+    :class:`DeliveryStrategyFactory` for a bot's family, so a shape that is not
+    in the map cannot be handed to one however many bindings exist.
+    """
+    unnamed = next(cls for m, cls in _EXPECTED.items() if m is not mode)
+    strategies = _strategies(test_injector, mode)
+
+    assert not isinstance(strategies[EngineFamily.TECLAW], unnamed)
+    assert isinstance(test_injector.get(unnamed), unnamed)
+
+
+# ── bot file sync: per-engine dispatch wired once, both bundles ────────────
+
+
+def test_both_port_bundles_carry_the_delegating_file_sync(test_injector) -> None:
+    """One ``file_sync`` on both bundles: the delegating port, which resolves
+    the destination's engine and dispatches. The delegation, not a per-bundle
+    instance, is what keeps a teclaw dst and an ARCA dst on the same answer
+    (teclaw → noop refusal, openclaw → NAS-rsync)."""
+    from agentclaw.community.core.apply_engine.materialisers.bot_file_sync_registry import (
+        DelegatingBotFileSyncPort,
+    )
+
+    for bundle in (DevicePorts, PlatformPorts):
+        ports = test_injector.get(bundle)()
+        assert isinstance(ports.file_sync, DelegatingBotFileSyncPort), bundle
+
+
+def test_both_port_bundles_carry_the_bot_config_kind_registry(test_injector) -> None:
+    """One ``bot_config`` registry on both bundles: engine-agnostic, so the same
+    registry answers on a device-backed ARCA bot and a platform-managed teclaw
+    one. The registry, not a per-bundle instance, is what keeps the kind set
+    the validator accepts and the handlers apply dispatches in lockstep — one
+    binding, one surface."""
+    from agentclaw.community.core.apply_engine.materialisers.bot_config_kind_registry import (
+        BotConfigKindRegistry,
+    )
+
+    for bundle in (DevicePorts, PlatformPorts):
+        ports = test_injector.get(bundle)()
+        assert isinstance(ports.bot_config, BotConfigKindRegistry), bundle
+
+
+def test_the_kind_registry_routes_real_kinds_to_their_handlers(
+    test_injector,
+) -> None:
+    """``render_screen`` and ``task_nav`` are the v1 kinds and resolve to their
+    real handlers; any other kind lands on the noop refusal, so a kind the
+    validator accepts but no DI-bound handler resolves surfaces as a failed row
+    in the apply report rather than a silent success."""
+    from agentclaw.community.core.apply_engine.materialisers.bot_config_kind_registry import (
+        NoopBotConfigSyncHandler,
+    )
+    from agentclaw.community.core.apply_engine.materialisers.bot_config_render_screen_handler import (
+        RenderScreenSyncHandler,
+    )
+    from agentclaw.community.core.apply_engine.materialisers.bot_config_task_nav_handler import (
+        TaskNavSyncHandler,
+    )
+
+    ports = test_injector.get(DevicePorts)()
+    registry = ports.bot_config
+    assert isinstance(registry.resolve("render_screen"), RenderScreenSyncHandler)
+    assert isinstance(registry.resolve("task_nav"), TaskNavSyncHandler)
+    assert isinstance(
+        registry.resolve("no_such_kind"), NoopBotConfigSyncHandler
+    )
+
+
+
+def test_the_delegating_port_routes_openclaw_to_nas_rsync_and_others_to_noop(
+    test_injector,
+) -> None:
+    """The registry the delegate holds is the one source of which engines run a
+    real strategy: openclaw reaches the NAS-rsync port, every other engine the
+    noop refusal (the capabilities table already refuses BOT_FILE_SYNC on teclaw
+    at PUT; this is the apply path's same verdict)."""
+    from agentclaw.community.core.apply_engine.materialisers.bot_file_sync_noop import (
+        NoopBotFileSyncPort,
+    )
+    from agentclaw.community.core.apply_engine.materialisers.bot_file_sync_registry import (
+        DelegatingBotFileSyncPort,
+    )
+    from agentclaw.community.core.apply_engine.materialisers.nas_bot_file_sync import (
+        NasBotFileSyncPort,
+    )
+    from agentclaw.community.core.ports.bot_file_sync_port import BotFileSyncPort
+
+    delegate = test_injector.get(BotFileSyncPort)
+    assert isinstance(delegate, DelegatingBotFileSyncPort)
+    registry = delegate._registry  # noqa: SLF001 — the test's seam on the bound singleton
+    assert isinstance(registry.resolve("openclaw"), NasBotFileSyncPort)
+    # An engine the root did not register (teclaw, aicoding) → noop refusal.
+    assert isinstance(registry.resolve("teclaw"), NoopBotFileSyncPort)
+    assert isinstance(registry.resolve("aicoding"), NoopBotFileSyncPort)
+    assert isinstance(registry.resolve(""), NoopBotFileSyncPort)
+
+
+def test_the_file_sync_runner_wraps_subprocess_success_and_failures(
+    test_injector,
+) -> None:
+    """The runner binds ``subprocess`` for the NAS strategy and composes each
+    failure into a ``RuntimeError`` (the strategy catches it and stamps a single
+    reason on the entry). Exercised with real, side-effect-free commands so the
+    wrapper's logging + error path is the thing under test, not a mock."""
+    from agentclaw.community.core.apply_engine.materialisers.bot_file_sync_registry import (
+        DelegatingBotFileSyncPort,
+    )
+    from agentclaw.community.core.apply_engine.materialisers.nas_bot_file_sync import (
+        NasBotFileSyncPort,
+    )
+    from agentclaw.community.core.ports.bot_file_sync_port import BotFileSyncPort
+
+    delegate = test_injector.get(BotFileSyncPort)
+    assert isinstance(delegate, DelegatingBotFileSyncPort)
+    nas = delegate._registry.resolve("openclaw")  # noqa: SLF001
+    assert isinstance(nas, NasBotFileSyncPort)
+    runner = nas._run_command  # noqa: SLF001 — the test's seam on the bound port
+
+    # success
+    result = runner(cmd=["true"], command_name="ok", error_message="boom")
+    assert result.returncode == 0
+
+    # nonzero
+    with pytest.raises(RuntimeError, match="boom"):
+        runner(cmd=["false"], command_name="bad", error_message="boom")
+
+    # missing command
+    with pytest.raises(RuntimeError, match="not found"):
+        runner(
+            cmd=["definitely-not-a-real-command-xyz"],
+            command_name="missing", error_message="boom",
+        )
+
+    # timeout
+    with pytest.raises(RuntimeError, match="timed out"):
+        runner(
+            cmd=["sleep", "10"], command_name="slow", error_message="boom",
+            timeout_seconds=0.5,
+        )

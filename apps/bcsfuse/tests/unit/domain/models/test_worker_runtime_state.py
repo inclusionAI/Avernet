@@ -6,7 +6,7 @@ Stage 1 Domain Model Tests
 
 import pytest
 
-from src.domain.models.worker_runtime_state import WorkerRuntimeState
+from app.domain.models.worker_runtime_state import WorkerRuntimeState
 
 
 class TestWorkerRuntimeState:

@@ -6,7 +6,7 @@
 //! - Streaming frame layer (`BcsFrame`, `RequestFrame`, `ResponseFrame`, `EventFrame`)
 //! - Bot connect / status / onboard frame payloads
 //! - Chat event wire types
-//! - HTTP DTOs (bot capabilities, onboard, status, friend requests, group create, fusion, proposal)
+//! - HTTP DTOs (bot capabilities, onboard, status, friend requests, group create, fusion)
 //!
 //! Previously split between `bcs-client/src/protocol.rs` and the top of
 //! `bcs-client/src/lib.rs`. The retired `bcs-client` crate's shared DTOs now
@@ -31,14 +31,14 @@ pub use http::chat_run;
 pub use http::{
     BCN_EVENT_ID_HEADER, BCN_MESSAGE_ID_HEADER, BCN_PROTOCOL_VERSION_HEADER, BCN_TRANSPORT_HEADER,
     BCN_PROVIDER_BOT_REF_HEADER, BCN_PROVIDER_ID_HEADER, BCN_TIMESTAMP_HEADER,
-    AdminOnboardRequest, BCS_CHAT_VERSION, BCS_CHAT_VERSION_HEADER, BotCapabilities,
+    AdminOnboardRequest, AvatarField, BCS_CHAT_VERSION, BCS_CHAT_VERSION_HEADER, BotCapabilities,
     BotContextSummary, BotDynamicStatus, BotInfo, ChatRunCancelResponse, ChatRunResponseContent,
-    ChatRunDeliverySummary, ChatRunState, ChatRunStatusResponse, ChatRunSubmitResponse, ConfirmProposalResponse, Conflict, ConflictPosition,
+    ChatRunDeliverySummary, ChatRunState, ChatRunStatusResponse, ChatRunSubmitResponse, Conflict, ConflictPosition,
     AcceptFriendRequestResponse, CreateFriendRequestBody, CreateFriendRequestResponse,
     CreateGroupRequest, CreateGroupResponse, CreateOrganizationRequest,
     DecisionBody, DiscoverBotEntry,
     DiscoverBotProviderInfo, DiscoverBotsExtendedResponse, DiscoverBotsResponse,
-    DynamicStatusResponse, EngineType, EvaluateProposalRequest, FriendApiResponse,
+    DynamicStatusResponse, EngineType, FriendApiResponse,
     BotSearchEntry, BotSearchQuery,
     EnsureBotRequest, EnsureBotResponse,
     FriendEntry, FriendListResponse, FusionRequest, FusionResponse,
@@ -51,7 +51,7 @@ pub use http::{
     OrganizationMemberListResponse, OrganizationMemberProfileResponse, OrganizationMemberResponse,
     OrganizationResponse, ParticipantBindingInfo, ParticipantInfo, ParticipantPerspective,
     PatchOrganizationMemberProfileRequest, PatchOrganizationRequest, RevokeFriendResponse, StatusResponse,
-    PatchProviderBotRequest, PatchProviderRequest, ProposalContext, ProposalResponse,
+    PatchProviderBotRequest, PatchProviderRequest,
     ProviderAbortResponse, ProviderAckResponse, ProviderAuthDto, ProviderAuthModeDto,
     ProviderCoordinationConfigDto, ProviderBotConnectionModeDto, ProviderCoordinationModeDto,
     ProviderHistoryResponse,

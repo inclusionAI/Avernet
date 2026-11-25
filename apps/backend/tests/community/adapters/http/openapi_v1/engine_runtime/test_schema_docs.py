@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import json
 import pkgutil
 from enum import Enum
+from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
@@ -45,6 +47,21 @@ def _all_enums() -> list[type]:
 
 
 _ENUMS = _all_enums()
+
+
+def test_gateway_connection_components_match_the_published_models():
+    from agentclaw.community.adapters.http.openapi_v1.engine_runtime.connection.schemas import (
+        Connection, DesktopConnection,
+    )
+
+    schema_path = Path(__file__).resolve().parents[7] / "gateway/configs/schemas/bots.openapi.json"
+    pinned = json.loads(schema_path.read_text())["components"]["schemas"]
+    generated = Connection.model_json_schema(mode="serialization", ref_template="#/components/schemas/{model}")
+    for name in ("Socket", "SocketKind"):
+        assert generated["$defs"][name] == pinned[name]
+    for model in (Connection, DesktopConnection):
+        expiry = model.model_json_schema()["properties"]["expires_at"]
+        assert expiry == pinned[model.__name__]["properties"]["expires_at"]
 
 
 def test_enum_discovery_found_something():

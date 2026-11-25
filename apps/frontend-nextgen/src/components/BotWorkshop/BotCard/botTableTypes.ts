@@ -21,11 +21,14 @@ export interface BotTableProps {
   onOpenContainers?: (bot: BotDomain) => void;
   canViewContainers?: (bot: BotDomain) => boolean;
   containerUserId?: string;
+  /** 当前用户 OpenApi ID,copy 态重试/删除 owner 门控用(useBotWorkshop.currentUserId)。 */
+  currentUserId?: string;
   onEngineVersionUpdated?: (bot: BotDomain) => Promise<void> | void;
   onHealthCheck?: (bot: BotDomain) => void;
   onChangeSpace?: (bot: BotDomain) => void;
   onAuthorize?: (bot: BotDomain) => void;
-  onManagePublication?: (bot: BotDomain) => void;
+  onPublicationChanged?: () => Promise<void>;
+  onPublicationGateBlocked?: (bot: BotDomain) => void;
   onAction?: (action: BotCardManagementAction, bot: BotDomain) => Promise<void>;
   onClaimLock?: (bot: BotDomain) => Promise<void>;
   onReleaseLock?: (bot: BotDomain) => Promise<void>;
@@ -35,6 +38,14 @@ export interface BotTableProps {
   getCollaborationMode?: (bot: BotDomain) => 'authorize' | 'request' | undefined;
   getGeneralConfigAvailability?: (bot: BotDomain) => { enabled: boolean; disabledReason?: string } | undefined;
   onGeneralConfig?: (bot: BotDomain) => void;
+  onOpenEvaluation?: (bot: BotDomain) => void;
+  onOpenEvalHistory?: (bot: BotDomain) => void;
+  /** 复制 Bot 入口可用性;engine/编辑权限/状态前置规则在 canCopyBot 内收敛。 */
+  getCopyAvailability?: (bot: BotDomain) => { visible: boolean; enabled: boolean; disabledReason?: string } | undefined;
+  /** 触发复制 Modal。仅在 getCopyAvailability(bot).enabled 时回调。 */
+  onCopy?: (bot: BotDomain) => void;
+  /** 重试复制(dst bot);BotStatusCell 在 copy_state=FAILED 时浮现的重试入口。 */
+  onRetryCopy?: (bot: BotDomain) => void;
 }
 
 export type BotTableColumnOptions = Pick<
@@ -49,10 +60,12 @@ export type BotTableColumnOptions = Pick<
   | 'onOpenContainers'
   | 'canViewContainers'
   | 'containerUserId'
+  | 'currentUserId'
   | 'onHealthCheck'
   | 'onChangeSpace'
   | 'onAuthorize'
-  | 'onManagePublication'
+  | 'onPublicationChanged'
+  | 'onPublicationGateBlocked'
   | 'onAction'
   | 'onClaimLock'
   | 'onReleaseLock'
@@ -62,6 +75,11 @@ export type BotTableColumnOptions = Pick<
   | 'getCollaborationMode'
   | 'getGeneralConfigAvailability'
   | 'onGeneralConfig'
+  | 'onOpenEvaluation'
+  | 'onOpenEvalHistory'
+  | 'getCopyAvailability'
+  | 'onCopy'
+  | 'onRetryCopy'
 > & {
   showOwner: boolean;
   showDescriptionColumn: boolean;

@@ -16,6 +16,14 @@ capabilities such as cache or database access.
 
 ## Contract Shape
 
+- [`bcs-app-identity-api`](bcs-app-identity-api/CONTEXT.md) supplies request-scoped
+  application credentials for the built-in A2A HTTP bindings.
+
+- [`bcs-store-api`](bcs-store-api/README.md) owns runtime state capabilities: KV,
+  conditional writes, atomic JSON, versioned sorted sets and ordered streams.
+  Service stores own business protocols; providers own storage guarantees.
+  Advanced support is explicit and cannot degrade to best-effort writes.
+
 - `bcs-cache-api` owns cache primitives: byte values, hash fields, TTL, and
   conditional writes. Business cache keys and invalidation policy belong to the
   service store layer.
@@ -38,3 +46,8 @@ remain a small infrastructure port, not a business persistence model.
 Every plugin contract must have reusable contract tests in
 `crates/test-support/bcs-test-support`. Every concrete implementation should
 mount those tests in its own crate.
+
+- `bcs-caller-identity-api` owns the v1 subject establishment, execution-proof
+  issuance/verification and static factory contract. The public JWT adapter and
+  private OCB adapters implement it; shared runtime identity envelopes belong to
+  `bcs-domain`. See `bcs-caller-identity-api/CONTEXT.md` for trust and lifecycle.

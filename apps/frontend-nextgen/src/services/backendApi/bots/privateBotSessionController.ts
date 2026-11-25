@@ -16,6 +16,10 @@ export interface BotSessionDto {
 export interface BotSessionPageDto {
   items: BotSessionDto[];
   total: number;
+  source?: 'mine' | 'others';
+  has_more?: boolean;
+  next_cursor?: string | null;
+  scan_limited?: boolean;
 }
 
 export type BotMessageRole = 'user' | 'assistant' | 'system' | 'tool_use' | 'tool_result';
@@ -46,13 +50,18 @@ export interface BotModelPageDto {
 }
 
 export interface BotSocketDto {
-  kind: 'chat';
+  /** B17：a2a = 服务端签发的 A2A base（浏览器可达），card/rpc 挂其下 */
+  kind: 'chat' | 'a2a';
   url: string;
+  /** A2A card/RPC transport headers; never apply to WS or unrelated URLs. */
+  headers?: Record<string, string>;
 }
 export interface BotConnectionDto {
   transport_mode?: 'direct' | 'relay';
   engine: string;
   expires_at: string;
+  /** 用户灰度负结果（服务端治理后明确拒绝 A2A）——与 sockets 缺 a2a 是两个语义 */
+  a2a_withheld?: boolean;
   sockets: BotSocketDto[];
 }
 
@@ -61,6 +70,7 @@ export interface BotRequestParams {
   stage?: 'draft' | 'verify' | 'online';
   owner_id?: string;
   f_user_id?: string;
+  device_uuid?: string;
 }
 
 /** GET /openapi/v1/bots/{bot_id}/sessions — 分页查询会话;session_key 为原始字符串,由 HTTP 层统一编码。 */
@@ -70,6 +80,8 @@ export function listBotSessions(
     page?: number;
     page_size?: number;
     session_key?: string;
+    source?: 'mine' | 'others';
+    source_cursor?: string;
     device_uuid?: string;
     stage?: 'draft' | 'verify' | 'online';
   },
@@ -85,6 +97,7 @@ export function createBotSession(
   params: BotRequestParams,
   body: { title?: string },
   signal?: AbortSignal,
+  serverErrorMessage?: string,
 ) {
   return backendRequest<BackendApiEnvelope<BotSessionDto>>(`/openapi/v1/bots/${botId}/sessions`, {
     method: 'POST',
@@ -92,6 +105,7 @@ export function createBotSession(
     data: body,
     injectUserId: false,
     signal,
+    ...(serverErrorMessage ? { serverErrorMessage } : {}),
   });
 }
 

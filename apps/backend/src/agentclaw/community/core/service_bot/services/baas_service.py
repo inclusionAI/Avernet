@@ -19,11 +19,12 @@ The dataclasses (``BotWsConnectionInfoResponse``, ``HttpConnectionInfo``,
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
 import base64
 import re
 import time
 import uuid
+from urllib.parse import quote
 
 import httpx
 from agentclaw.community.core.service_bot.services.baas_api_response import (
@@ -31,6 +32,7 @@ from agentclaw.community.core.service_bot.services.baas_api_response import (
     read_baas_bot_api_envelope,
 )
 from agentclaw.community.core.service_bot.baas_service_errors import (
+    BaasBotNotFoundError,
     BaasNoActiveDevicesError,
     BaasServiceError,
     BaasTransientServiceError,
@@ -54,6 +56,7 @@ from agentclaw.community.core.service_bot.services.deploy.provider_resolver impo
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.runtime_list_timing import mark
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
 
@@ -244,17 +247,22 @@ class BotWsConnectionInfoResponse:
                   bot 级 invoke-http 链路必需；与 paas_device_id 来源相同，
                   但语义不同：bot_uuid 是逻辑 Bot 标识，paas_device_id 是
                   PaaS 设备实例标识
+        a2a_base_url: 设备 A2A 面（agent-card / rpc）的权威 HTTP base，
+                      浏览器直连可达；BaaS 沙箱平台未定义该地址时空串
+                      （加性字段，旧 BaaS 不回此键同样落空串）
     """
 
     ws_url: str
     token: str
     target: str
     expires_at: str
+    a2a_base_url: str = ""
     paas_device_id: str = ""
     baas_base_url: str = ""
     engine_port: int = 20003
     tenant: str = ""
     bot_uuid: str = ""
+    a2a_auth: str = ""
 
 
 @dataclass
@@ -549,6 +557,7 @@ class BaasService:  # pragma: no cover
         params: Optional[Dict[str, Any]] = None,
         *,
         log_response: bool = True,
+        timeout: float = 30.0,
     ) -> Dict[str, Any]:
         """发送 GET 请求到 BaaS Bot API，处理响应和错误码（内部实现）。
 
@@ -561,7 +570,7 @@ class BaasService:  # pragma: no cover
         response = self._http.get(
             path,
             params=merged_params,
-            timeout=30.0,
+            timeout=timeout,
         )
         response.raise_for_status()
 
@@ -762,6 +771,7 @@ class BaasService:  # pragma: no cover
             mount_home_dir_storage=mount_home_dir_storage,
             stage=stage,
             version=version,
+            default_tag=(ext_info or {}).get("default_tag"),
             mount_path=mount_path,
             ext_info=ext_info,
             storage_type=storage_type,
@@ -813,6 +823,7 @@ class BaasService:  # pragma: no cover
             bot_id,
             owner_id,
             agent_pass_token,
+            engine_type=engine,
             extra_properties=extra_properties,
         )
 
@@ -1294,13 +1305,22 @@ class BaasService:  # pragma: no cover
             return result
 
         except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                try:
+                    payload = e.response.json()
+                except ValueError:
+                    payload = None
+                detail = payload.get("detail") if isinstance(payload, dict) else None
+                if isinstance(detail, dict) and detail.get("error_code") == "BOT_NOT_FOUND":
+                    logger.info("[BaasService.destroy_bot] Target already absent: bot_uuid=%s", bot_uuid)
+                    raise BaasBotNotFoundError("BaaS target Bot does not exist") from e
             logger.error(
                 f"[BaasService.destroy_bot] "
                 f"HTTP error: {e.response.status_code} - {e.response.text}"
             )
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
-            )
+            ) from e
         except BaasServiceError:
             raise
         except Exception as e:
@@ -1310,11 +1330,39 @@ class BaasService:  # pragma: no cover
             )
             raise BaasServiceError(f"Failed to destroy bot in BaaS: {e}")
 
+    def is_physical_device_destroyed(self, *, provider_device_id: str) -> bool:
+        """Read the pinned PaaS resource, including its template/tenant suffix.
+
+        Only typed DEVICE_NOT_FOUND from the physical provider proves absence.
+        A present (even stopped) resource or logical Bot deletion is not proof.
+        Authentication, routing, transport and untyped 404 failures propagate.
+        """
+        if not provider_device_id:
+            raise BaasServiceError("Physical device identity is required")
+        try:
+            self._get_bots_api(
+                path=f"/api/v1/paas/devices/{quote(provider_device_id, safe='')}/info",
+                action="physical_device_info", log_response=False,
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                try:
+                    body = exc.response.json()
+                except ValueError:
+                    body = None
+                detail = body.get("detail") if isinstance(body, dict) else None
+                if isinstance(detail, dict) and detail.get("error_code") == "DEVICE_NOT_FOUND":
+                    return True
+            raise
+        return False
+
     def get_bot(
         self,
         bot_uuid: str,
         health_check: bool = False,
         engine_type: str = "",
+        *,
+        log_response: bool = True,
     ) -> Dict[str, Any]:
         """查询 BaaS 层 bot 详情 / 状态。
 
@@ -1323,6 +1371,7 @@ class BaasService:  # pragma: no cover
             health_check: True 时 BaaS 经 PaaS 层实时探活，刷新 devices 的
                 status/health；False（默认）返回 DB 态，行为与原先一致。
             engine_type: 当前 bot 引擎类型；非空时作为 query 透传，留空则不传。
+            log_response: False omits provider bodies and unsafe error details from logs.
 
         Returns:
             BaaS 层返回的 data 字段（含 ``devices[]``、``bot_uuid``、``status`` 等）。
@@ -1349,6 +1398,7 @@ class BaasService:  # pragma: no cover
                 path=f"/api/v1/bots/{bot_uuid}",
                 action="get_bot",
                 params=params,
+                log_response=log_response,
             )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
@@ -1357,6 +1407,13 @@ class BaasService:  # pragma: no cover
                 )
                 return {"status": "RELEASED"}
 
+            if not log_response:
+                # COSEC: provider error bodies may contain reusable credentials.
+                logger.warning(
+                    "event=baas.get_bot.failed bot_uuid=%s status=%s error_type=%s",
+                    bot_uuid, e.response.status_code, type(e).__name__,
+                )
+                raise BaasServiceError("BaaS bot health query failed") from None
             logger.error(
                 f"[BaasService.get_bot] HTTP error: {e.response.status_code} - {e.response.text}"
             )
@@ -1366,6 +1423,12 @@ class BaasService:  # pragma: no cover
         except BaasServiceError:
             raise
         except Exception as e:
+            if not log_response:
+                logger.warning(
+                    "event=baas.get_bot.failed bot_uuid=%s error_type=%s",
+                    bot_uuid, type(e).__name__,
+                )
+                raise BaasServiceError("BaaS bot health query failed") from None
             logger.error(
                 f"[BaasService.get_bot] Failed to get bot in BaaS: {e}"
             )
@@ -1951,6 +2014,7 @@ class BaasService:  # pragma: no cover
         if binding is None:
             raise BaasServiceError(f"Device binding not found: bind_id={bind_id}")
 
+        mark("baas.ws_info")
         return self.get_ws_info_by_bot_uuid(
             bot_uuid=binding.device_id,
             port=port,
@@ -2032,6 +2096,9 @@ class BaasService:  # pragma: no cover
                 token=data["token"],
                 target=data["target"],
                 expires_at=data["expires_at"],
+                # 加性透传：旧 BaaS 不回该键时 .get 落空串，行为同未升级。
+                a2a_base_url=str(data.get("a2a_base_url") or ""),
+                a2a_auth=str(data.get("a2a_auth") or ""),
                 paas_device_id=bot_uuid,
                 baas_base_url=self._baas_api_base,
                 tenant=effective_tenant,
@@ -2234,6 +2301,18 @@ class BaasService:  # pragma: no cover
         # A list `data` deserializes straight through _get_bots_api's data extract.
         return data if isinstance(data, list) else []
 
+    def _resolve_bot_locator(self, bot_id: str, locator: str) -> dict | None:
+        """Resolve resource identity without treating the locator as an actor."""
+        from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+        from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
+
+        try:
+            return dict(BotAddressResolver(self._bot_repo).resolve(
+                bot_id=bot_id, legacy_owner_id=locator,
+            ).bot)
+        except BotAddressNotFoundError:
+            return None
+
     def get_bind_id(
         self,
         bot_id: str,
@@ -2266,9 +2345,9 @@ class BaasService:  # pragma: no cover
             f"bot_type={bot_type}, publish_status={publish_status}"
         )
 
+        bot = self._resolve_bot_locator(bot_id, owner_id)
         # DRAFT 状态或无状态：从 bot 数据中获取 bind_id
         if publish_status == PublishStatus.DRAFT.value or publish_status is None:
-            bot = self._bot_repo.get_by_id_and_owner(bot_id=bot_id, owner_id=owner_id)
             if bot is None:
                 logger.warning(f"[BaasService.get_bind_id] Bot not found: bot_id={bot_id}")
                 return None
@@ -2280,6 +2359,10 @@ class BaasService:  # pragma: no cover
         # VALIDATING/SUCCESS 等状态：从发布单扩展字段获取
         from agentclaw.community.utils.env_utils import get_current_env
         env = get_current_env()
+        if bot and bot.get("bot_type") == "service" and bot_id != "default":
+            from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
+            owner_id = stable_resource_owner_id(bot)
+        # Keep historical personal/default publication lookups, including orphan lineages.
         publish_record = self._bot_publish_repo.get_by_publish_bot_id(
             publish_bot_id=bot_id,
             owner_id=owner_id,
@@ -2412,6 +2495,7 @@ class BaasService:  # pragma: no cover
                 mount_home_dir_storage=mount_home_dir_storage,
                 stage=stage,
                 version=version or "1",
+                default_tag=(ext_info or {}).get("default_tag"),
                 ext_info=ext_info,
             ),
             startup_script=startup_script,
@@ -2601,9 +2685,7 @@ class BaasService:  # pragma: no cover
 
     def _resolve_bot_type(self, bot_id: str, owner_id: str) -> str | None:
         """根据 bot_id + owner_id 查询 bot_type（供 outbound rule 选择 secret）。"""
-        bot = self._bot_repo.get_by_id_and_owner(
-            bot_id=bot_id, owner_id=owner_id
-        )
+        bot = self._resolve_bot_locator(bot_id, owner_id)
         return (bot or {}).get("bot_type")
 
     def _build_outbound_operation_rule(
@@ -2612,6 +2694,7 @@ class BaasService:  # pragma: no cover
         owner_id: str,
         agent_pass_token: str = "",
         agent_code: str = "",
+        engine_type: str = "",
         *,
         extra_properties: dict[str, Any] | None = None,
     ) -> OutBoundOperationRule:
@@ -2628,6 +2711,7 @@ class BaasService:  # pragma: no cover
             owner_id=owner_id,
             agent_pass_token=agent_pass_token,
             agent_code=agent_code,
+            engine_type=engine_type,
             bot_type_resolver=self._resolve_bot_type,
             extra_properties=extra_properties,
         )
@@ -2698,7 +2782,7 @@ class BaasService:  # pragma: no cover
         for device in devices:
             paas_device_id = device["provider_device_id"]
             device_uuid = device.get("device_uuid", "")
-            self.update_device_outbound_rule(paas_device_id, outbound_rule)
+            self.update_device_outbound_rule(paas_device_id, outbound_rule, mode="replace")
             updated_devices.append({
                 "device_uuid": device_uuid,
                 "paas_device_id": paas_device_id,
@@ -3053,11 +3137,14 @@ class BaasService:  # pragma: no cover
             raise
 
     def update_device_outbound_rule(
-        self, paas_device_id: str, outbound_rule: OutBoundOperationRule
+        self, paas_device_id: str, outbound_rule: OutBoundOperationRule,
+        *, mode: Literal["append", "replace"] = "append",
     ) -> bool:
         """更新 PaaS 设备的出站 header 规则。
 
-        调用 PUT /api/v1/paas/devices/{paas_device_id}/outbound-rule
+        默认使用 append 模式去重替换匹配规则，保留独立下发的其他 header。
+        Teclaw 全局规则使用默认替换语义，不发送 mode 参数（append 仅支持 session 规则）。
+        调用 PUT /api/v1/paas/devices/{paas_device_id}/outbound-rule?mode=append
 
         Args:
             paas_device_id: PaaS 设备 ID（即 provider_device_id）
@@ -3069,41 +3156,59 @@ class BaasService:  # pragma: no cover
         Raises:
             BaasServiceError: 更新失败
         """
-        logger.info(
-            f"[BaasService.update_device_outbound_rule] Updating outbound rule: "
-            f"paas_device_id={paas_device_id}"
-        )
-
+        route = f"/api/v1/paas/devices/{paas_device_id}/outbound-rule"
         payload = self._outbound_rule_to_dict(outbound_rule)
-
+        # COSEC: rule values/placeholders may contain credentials; log descriptors only.
+        rules = [
+            {"domains": rule.domains, "header_name": rule.header_name, "action": rule.action}
+            for rule in outbound_rule.header_operation_rules
+        ]
+        started = time.perf_counter()
+        status_code = None
+        result_code = None
+        logger.info(
+            "baas_outbound_update_requested system=baas operation=update_device_outbound_rule "
+            "method=PUT route=%s paas_device_id=%s mode=%s mode_query_present=%s rules=%s",
+            route, paas_device_id, mode, mode == "append", rules,
+        )
         try:
             response = self._http.put(
-                f"/api/v1/paas/devices/{paas_device_id}/outbound-rule",
+                route,
+                **({"params": {"mode": "append"}} if mode == "append" else {}),
                 json=payload,
                 timeout=30.0,
             )
+            status_code = response.status_code
             response.raise_for_status()
             response_data = response.json()
+            result_code = response_data.get("code")
 
-            if response_data.get("code") != 0:
+            if result_code != 0:
                 raise BaasServiceError(
                     f"BaaS API error: {response_data.get('message', 'Unknown error')}"
                 )
 
             logger.info(
-                f"[BaasService.update_device_outbound_rule] Success: "
-                f"paas_device_id={paas_device_id}"
+                "baas_outbound_update_succeeded system=baas operation=update_device_outbound_rule "
+                "paas_device_id=%s mode=%s status_code=%s result_code=%s duration_ms=%s",
+                paas_device_id, mode, status_code, result_code,
+                int((time.perf_counter() - started) * 1000),
             )
             return True
 
-        except httpx.HTTPStatusError as e:
+        except Exception as exc:
             logger.error(
-                f"[BaasService.update_device_outbound_rule] HTTP error: "
-                f"{e.response.status_code} - {e.response.text}"
+                "baas_outbound_update_failed system=baas operation=update_device_outbound_rule "
+                "paas_device_id=%s mode=%s status_code=%s result_code=%s "
+                "error_type=%s duration_ms=%s",
+                paas_device_id, mode, status_code, result_code, type(exc).__name__,
+                int((time.perf_counter() - started) * 1000),
             )
-            raise BaasServiceError(
-                f"BaaS API error: {e.response.status_code} - {e.response.text}"
-            )
+            if isinstance(exc, httpx.HTTPStatusError):
+                raise BaasServiceError(
+                    f"BaaS API error: {exc.response.status_code} - {exc.response.text}"
+                ) from exc
+            raise
 
     def append_token_outbound_rule(
         self,
@@ -3272,8 +3377,102 @@ class BaasService:  # pragma: no cover
         )
         return True
 
+    def _active_token_replica_devices(self, bot_uuid: str) -> list[dict[str, Any]]:
+        # The grouped /devices endpoint includes historical bot records. Resolve
+        # the live bot row before inspecting devices, even if a stale row still
+        # has a device marked ACTIVE.
+        def read(path: str) -> dict[str, Any]:
+            started = time.monotonic()
+            fields = {"system": "baas", "operation": "token_replica_inventory",
+                      "operation_id": uuid.uuid4().hex, "method": "GET", "route": path,
+                      "tenant": self._tenant, "bot_uuid": bot_uuid}
+            logger.info("token_replica_inventory_started fields=%s", fields)
+            try:
+                data = self._get_bots_api(path, "token_replica_inventory", log_response=False, timeout=3.0)
+            except Exception as exc:
+                logger.warning(
+                    "token_replica_inventory_failed fields=%s error_type=%s duration_ms=%.1f",
+                    fields, type(exc).__name__, (time.monotonic() - started) * 1000,
+                )
+                raise
+            logger.info(
+                "token_replica_inventory_succeeded fields=%s status=%s duration_ms=%.1f",
+                fields, data.get("bot_status") or data.get("status"), (time.monotonic() - started) * 1000,
+            )
+            return data
+
+        status = read(f"/api/v1/bots/{bot_uuid}/device-status")
+        bot_id = status.get("bot_id")
+        if (status.get("bot_uuid") != bot_uuid or status.get("bot_status") != "ACTIVE"
+                or type(bot_id) is not int or bot_id <= 0):
+            raise BaasOutboundTargetError("target_not_found")
+        detail = read(f"/api/v1/bots/{bot_id}/detail-by-id")
+        if (detail.get("bot_uuid") != bot_uuid or detail.get("id") != bot_id
+                or detail.get("status") != "ACTIVE"):
+            raise BaasOutboundTargetError("target_not_found")
+        return detail.get("devices") or []
+
+    def list_runtime_devices(
+        self, binding: DeviceBindingRecord, *, device_uuid: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return all active targets of the current logical Bot record.
+
+        Unlike legacy token-target lookup, an omitted UUID enumerates every
+        current replica. An empty UUID is treated as omitted; nonempty UUID
+        selection must resolve exactly once.
+        """
+        started = time.monotonic()
+        if device_uuid == "":
+            logger.info("runtime_device_uuid_normalized binding_id=%s reason=empty", binding.id)
+            device_uuid = None
+        fields = {"binding_id": binding.id, "provider": binding.device_provider, "device_uuid": device_uuid}
+        logger.info("runtime_device_inventory_started fields=%s", fields)
+        try:
+            if str(binding.status).upper() != "ACTIVE":
+                raise BaasOutboundTargetError("binding_unavailable")
+            provider = binding.device_provider
+            if provider in ("baas", "teclaw"):
+                bot_uuid = binding.device_id
+                # COSEC: the logical identifier enters a fixed relative URL.
+                if not isinstance(bot_uuid, str) or not re.fullmatch(r"[A-Za-z0-9._~-]+", bot_uuid):
+                    raise BaasOutboundTargetError("invalid_target")
+                devices = [device for device in self._active_token_replica_devices(bot_uuid)
+                           if device.get("status") == "ACTIVE"]
+                if device_uuid is not None:
+                    devices = [device for device in devices if device.get("device_uuid") == device_uuid]
+            elif provider == "arca":
+                props = binding.device_props if isinstance(binding.device_props, dict) else {}
+                devices = [{"device_uuid": props.get("device_uuid"), "provider_device_id": props.get("sandbox_id")}]
+                if device_uuid is not None:
+                    devices = [device for device in devices if device.get("device_uuid") == device_uuid]
+            else:
+                raise BaasOutboundTargetError("unsupported_provider")
+            if not devices:
+                raise BaasOutboundTargetError("target_not_found")
+            if device_uuid is not None and len(devices) != 1:
+                raise BaasOutboundTargetError("target_ambiguous")
+            targets = []
+            for device in devices:
+                target = device.get("provider_device_id")
+                if not self._is_valid_paas_device_id(target):
+                    raise BaasOutboundTargetError("invalid_target")
+                if provider == "arca" and not target.startswith("ARCA-SANDBOX-"):
+                    raise BaasOutboundTargetError("invalid_target")
+                targets.append({"device_uuid": device.get("device_uuid"), "provider_device_id": target})
+        except Exception as exc:
+            logger.warning(
+                "runtime_device_inventory_failed fields=%s reason=%s error_type=%s duration_ms=%.1f",
+                fields, getattr(exc, "reason", "query_failed"), type(exc).__name__, (time.monotonic() - started) * 1000,
+            )
+            raise
+        logger.info(
+            "runtime_device_inventory_succeeded fields=%s targets=%s duration_ms=%.1f",
+            fields, targets, (time.monotonic() - started) * 1000,
+        )
+        return targets
+
     def resolve_token_outbound_device_id(
-        self, binding: DeviceBindingRecord | None,
+        self, binding: DeviceBindingRecord | None, *, device_uuid: str | None = None,
     ) -> str:
         """Resolve an authorized runtime binding to its token append target.
 
@@ -3292,6 +3491,8 @@ class BaasService:  # pragma: no cover
         try:
             if binding is None or str(getattr(binding, "status", "")).upper() != "ACTIVE":
                 raise BaasOutboundTargetError("binding_unavailable")
+            if device_uuid == "":
+                raise BaasOutboundTargetError("target_not_found")
             if provider not in ("baas", "arca", "teclaw"):
                 raise BaasOutboundTargetError("unsupported_provider")
             if provider in ("baas", "teclaw"):
@@ -3303,7 +3504,16 @@ class BaasService:  # pragma: no cover
                     r"[A-Za-z0-9._~-]+", bot_uuid,
                 ):
                     raise BaasOutboundTargetError("invalid_target")
-                devices = self.list_devices_by_bot_uuid(bot_uuid, timeout=3.0)
+                if device_uuid is None:
+                    devices = self.list_devices_by_bot_uuid(bot_uuid, timeout=3.0)
+                else:
+                    devices = self._active_token_replica_devices(bot_uuid)
+                    # Only the authorized logical bot's current devices can be selected.
+                    devices = [
+                        device for device in devices
+                        if device.get("device_uuid") == device_uuid
+                        and device.get("status") == "ACTIVE"
+                    ]
                 if not devices:
                     raise BaasOutboundTargetError("target_not_found")
                 if len(devices) != 1:
@@ -3311,6 +3521,10 @@ class BaasService:  # pragma: no cover
                 target = devices[0].get("provider_device_id")
             else:
                 props = getattr(binding, "device_props", None)
+                if device_uuid is not None and (
+                    not isinstance(props, dict) or props.get("device_uuid") != device_uuid
+                ):
+                    raise BaasOutboundTargetError("target_not_found")
                 target = props.get("sandbox_id") if isinstance(props, dict) else None
                 if target is None or target == "":
                     raise BaasOutboundTargetError("target_not_found")
@@ -3335,8 +3549,8 @@ class BaasService:  # pragma: no cover
             raise
         logger.info(
             "token_outbound_target_resolution_succeeded binding_id=%s provider=%s "
-            "reason=resolved error_type=none duration_ms=%.1f",
-            binding_id, provider, (time.monotonic() - started_at) * 1000,
+            "explicit_device=%s reason=resolved error_type=none duration_ms=%.1f",
+            binding_id, provider, device_uuid is not None, (time.monotonic() - started_at) * 1000,
         )
         return target
 
@@ -3789,6 +4003,7 @@ class BaasService:  # pragma: no cover
             http_info_timeout_kwargs = (
                 {"timeout": min(timeout, 5.0)} if timeout is not None else {}
             )
+            mark("baas.http_info")
             info = self.get_http_info(
                 bind_id=bind_id,
                 port=port,
@@ -3812,6 +4027,7 @@ class BaasService:  # pragma: no cover
 
         m = method.upper()
         if m == "GET":
+            mark("adapter.get")
             return self._general_http.get(
                 info.http_url, params=params, headers=headers, **request_timeout_kwargs
             )

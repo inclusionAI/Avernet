@@ -93,3 +93,33 @@ it('queries Bot friends with the full Bot uuid as actor_id', async () => {
     expect.objectContaining({ botId: 'friend-bot:900003', displayName: '好友 Bot' }),
   ]);
 });
+
+it('preserves runtime template metadata used to identify a friend Coding Bot', async () => {
+  mockedListFriends.mockResolvedValue({
+    ok: true,
+    data: {
+      items: [
+        {
+          id: 'coding-friend:900003',
+          name: '好友 Coding Bot',
+          online: true,
+          engine: 'claude_code',
+          templateType: 'application_coding',
+          templateName: '应用研发 Bot',
+        },
+      ],
+      total: 1,
+    },
+  });
+
+  const { result } = renderHook(() => useFriendBots('human_900003', true, true));
+  await act(async () => Promise.resolve());
+
+  expect(result.current.friendBots[0]).toMatchObject({
+    botId: 'coding-friend:900003',
+    engine: 'claude_code',
+    templateType: 'application_coding',
+    templateName: '应用研发 Bot',
+    isFriendBot: true,
+  });
+});

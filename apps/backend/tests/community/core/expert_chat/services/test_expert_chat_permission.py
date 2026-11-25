@@ -48,6 +48,7 @@ def _make_service(
         collaborator_service=collaborator_service or MagicMock(),
         transport=transport or MagicMock(invoke=AsyncMock()),
         instance_service=instance_service or MagicMock(),
+        publish_repository=MagicMock(),
     )
 
 

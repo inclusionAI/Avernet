@@ -125,12 +125,34 @@ export function matchUserTaskScope(status: string, scope: UserTabFilter): boolea
   return true;
 }
 
-export function taskStatusBadge(status: string) {
+export function taskStatusBadge(status: string, showDot = false) {
   const normalizedStatus = normalizeTaskStatus(status);
+  const tone = statusToneMap[normalizedStatus] ?? 'neutral';
+  const label = statusLabelMap[normalizedStatus] ?? normalizedStatus;
+  if (!showDot) return <Badge tone={tone}>{label}</Badge>;
+  // Lab rows use the same tone mapping and capsule geometry as Evolution's task list.
+  const labTone = ['DONE'].includes(normalizedStatus)
+    ? 'success'
+    : ['FAILED', 'CANCELLED'].includes(normalizedStatus)
+    ? 'error'
+    : ['REVIEWING', 'PENDING', 'HUNG'].includes(normalizedStatus)
+    ? 'warning'
+    : 'primary';
+  const color =
+    labTone === 'success'
+      ? 'border-success/20 bg-success/10 text-success'
+      : labTone === 'error'
+      ? 'border-destructive/20 bg-destructive/10 text-destructive'
+      : labTone === 'warning'
+      ? 'border-warning/20 bg-warning/10 text-warning'
+      : labTone === 'primary'
+      ? 'border-primary/20 bg-primary/10 text-primary'
+      : 'border-border bg-muted text-muted-foreground';
   return (
-    <Badge tone={statusToneMap[normalizedStatus] ?? 'neutral'}>
-      {statusLabelMap[normalizedStatus] ?? normalizedStatus}
-    </Badge>
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-1 text-xs ${color}`}>
+      <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
+      {label}
+    </span>
   );
 }
 
@@ -153,7 +175,7 @@ export function sourceTypeBadge(sourceType: string) {
 }
 
 export function getUserTaskTitle(record: any): string {
-  return record.task_spec?.metadata?.title || record.task_id;
+  return record.task_spec?.context?.title || record.task_spec?.metadata?.title || record.task_id;
 }
 
 export function getUserTaskGoal(record: any): string {

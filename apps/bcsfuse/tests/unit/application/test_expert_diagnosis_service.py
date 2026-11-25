@@ -19,9 +19,9 @@ import pytest
 from unittest.mock import Mock, MagicMock
 from datetime import datetime
 
-from src.domain.models.fusion_result import Perspective
-from src.domain.models.expert_risk_assessment import RiskLevel, RiskAssessment
-from src.domain.models.expert_diagnosis import CriticalIssue, ExpertRecommendation, Priority
+from app.domain.models.fusion_result import Perspective
+from app.domain.models.expert_risk_assessment import RiskLevel, RiskAssessment
+from app.domain.models.expert_diagnosis import CriticalIssue, ExpertRecommendation, Priority
 
 
 class TestExpertDiagnosisServiceModule:
@@ -31,12 +31,12 @@ class TestExpertDiagnosisServiceModule:
         """测试 expert_diagnosis_service 模块存在"""
         import importlib
 
-        module = importlib.import_module("src.application.services.expert_diagnosis_service")
+        module = importlib.import_module("app.application.services.expert_diagnosis_service")
         assert module is not None
 
     def test_service_class_exists(self):
         """测试 ExpertDiagnosisService 类存在"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         assert ExpertDiagnosisService is not None
 
@@ -46,14 +46,14 @@ class TestExpertDiagnosisServiceCreation:
 
     def test_service_can_be_created(self):
         """测试服务可以被创建"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
         assert service is not None
 
     def test_service_with_recommendation_service(self):
         """测试服务可以注入 recommendation_service"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         mock_rec_service = Mock()
         service = ExpertDiagnosisService(recommendation_service=mock_rec_service)
@@ -73,7 +73,7 @@ class TestOverallRiskAggregation:
 
     def test_overall_critical_if_any_critical(self):
         """任一专家 critical → overall = critical"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -111,7 +111,7 @@ class TestOverallRiskAggregation:
 
     def test_overall_high_if_no_critical_but_has_high(self):
         """无 critical，但任一 high → overall = high"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -147,7 +147,7 @@ class TestOverallRiskAggregation:
 
     def test_overall_medium_if_no_high_but_has_medium(self):
         """无 high，但任一 medium → overall = medium"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -183,7 +183,7 @@ class TestOverallRiskAggregation:
 
     def test_overall_low_if_all_low(self):
         """全部 low → overall = low"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -219,7 +219,7 @@ class TestOverallRiskAggregation:
 
     def test_overall_default_low_when_no_expert_risks(self):
         """没有专家风险评估时，默认 low"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -247,7 +247,7 @@ class TestCriticalIssuesExtraction:
 
     def test_extracts_critical_issues_from_experts(self):
         """测试从专家视角提取关键问题"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -283,7 +283,7 @@ class TestCriticalIssuesExtraction:
 
     def test_critical_issues_are_problems_not_actions(self):
         """critical_issues 是问题清单，不是行动项"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -313,7 +313,7 @@ class TestRecommendationsGeneration:
 
     def test_generates_expert_recommendations(self):
         """测试生成专家建议"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -340,7 +340,7 @@ class TestRecommendationsGeneration:
 
     def test_recommendations_are_actions_not_problems(self):
         """recommendations 是行动项清单，不是问题"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -365,7 +365,7 @@ class TestRecommendationsGeneration:
 
     def test_recommendations_priority_ordering(self):
         """建议优先级排序"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -411,7 +411,7 @@ class TestGoLiveConditions:
 
     def test_generates_go_live_conditions(self):
         """测试生成上线条件"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -444,7 +444,7 @@ class TestGoLiveConditions:
 
     def test_go_live_conditions_are_prerequisites(self):
         """go_live_conditions 是前置条件，不是行动项"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -473,7 +473,7 @@ class TestThreeWaySeparation:
 
     def test_critical_issues_recommendations_go_live_conditions_not_duplicated(self):
         """critical_issues / recommendations / go_live_conditions 不重复"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -514,7 +514,7 @@ class TestPartialSuccessHandling:
 
     def test_partial_success_when_one_expert_fails(self):
         """测试一个专家失败时标记 partial_success"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -545,7 +545,7 @@ class TestPartialSuccessHandling:
 
     def test_partial_success_when_one_times_out(self):
         """测试一个专家超时时标记 partial_success"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -575,7 +575,7 @@ class TestPartialSuccessHandling:
 
     def test_success_when_all_experts_complete(self):
         """测试所有专家完成时无 partial_success"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -609,7 +609,7 @@ class TestG1G2G5ModeIsolation:
 
     def test_g5_fusion_mode_is_expert_diagnosis(self):
         """测试 G5 模式 fusion_mode 为 expert_diagnosis"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -632,7 +632,7 @@ class TestG1G2G5ModeIsolation:
 
     def test_g5_result_has_g5_fields(self):
         """测试 G5 结果包含 G5 字段"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -659,7 +659,7 @@ class TestG1G2G5ModeIsolation:
 
     def test_g5_result_has_summary(self):
         """测试 G5 结果包含诊断摘要"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -686,7 +686,7 @@ class TestExpertDiagnosisBasic:
 
     def test_diagnose_returns_result(self):
         """测试 diagnose 方法返回结果"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -710,7 +710,7 @@ class TestExpertDiagnosisBasic:
 
     def test_diagnose_with_driver_bot_id(self):
         """测试 diagnose 方法接受 driver_bot_id"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -734,7 +734,7 @@ class TestExpertDiagnosisBasic:
 
     def test_diagnose_with_include_recommendation_false(self):
         """测试禁用 recommendation 时为 None"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -763,7 +763,7 @@ class TestEdgeCases:
 
     def test_single_expert(self):
         """测试单个专家"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -787,7 +787,7 @@ class TestEdgeCases:
 
     def test_all_experts_failed(self):
         """测试所有专家失败"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -819,7 +819,7 @@ class TestEdgeCases:
 
     def test_empty_perspectives_list(self):
         """测试空视角列表"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -836,7 +836,7 @@ class TestExpertRoleSupport:
 
     def test_supports_expert_role(self):
         """测试支持 expert 角色"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 
@@ -859,7 +859,7 @@ class TestExpertRoleSupport:
 
     def test_supports_mixed_roles(self):
         """测试支持混合角色"""
-        from src.application.services.expert_diagnosis_service import ExpertDiagnosisService
+        from app.application.services.expert_diagnosis_service import ExpertDiagnosisService
 
         service = ExpertDiagnosisService()
 

@@ -19,15 +19,15 @@ bot creation (W13) when neither is available.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
-from agentclaw.community.core.bot_config_manifest.capabilities import (
+from agentclaw.community.core.apply_engine.capabilities import (
     SUPPORTED_SCHEMA_VERSIONS,
-    ManifestCapabilities,
-    ManifestCategory,
-    ManifestSection,
+    Capabilities,
+    Category,
+    Section,
     parse_category,
 )
 from agentclaw.community.core.bot_config_manifest.schema._support import (
@@ -44,11 +44,15 @@ from agentclaw.community.core.bot_config_manifest.schema.entries import (
     validate_resource_entry,
     validate_skill_entry,
 )
+from agentclaw.community.core.bot_config_manifest.schema.bot_config_kinds import (
+    BOT_CONFIG_KIND_VALIDATORS,
+)
 from agentclaw.community.core.bot_config_manifest.schema.limits import (
     MAX_DOCUMENT_BYTES,
     MAX_ENTRIES_PER_CATEGORY,
     MAX_SCRIPT_BYTES,
 )
+from agentclaw.community.core.bot_config_manifest.schema.skill_sets import CAPABILITY_KEYS, validate_capabilities
 from agentclaw.community.core.bot_config_manifest.schema.violations import (
     ManifestValidationError,
 )
@@ -113,14 +117,14 @@ class ValidationResult:
 
 
 def validate_document(
-    document: str, capabilities: ManifestCapabilities
+    document: str, capabilities: Capabilities
 ) -> ValidationResult:
     """Validate a manifest document. Raises on anything short of acceptable.
 
     Args:
         document: The document exactly as submitted.
         capabilities: The verdicts from
-            :func:`~agentclaw.community.core.bot_config_manifest.capabilities.resolve_capabilities`.
+            :func:`~agentclaw.community.core.apply_engine.capabilities.resolve_capabilities`.
             Passed in rather than resolved here so the write path and W13's
             pre-creation preflight are provably answering from the same object.
 
@@ -275,7 +279,10 @@ def _validate_manifest(ctx: Context, manifest: Any) -> None:
         ctx.add("manifest", "invalid_manifest", "'manifest' must be a mapping")
         return
 
+    validate_capabilities(ctx, manifest)
     for key, value in manifest.items():
+        if key in CAPABILITY_KEYS or key == "capabilities":
+            continue
         location = f"manifest.{key}"
         category = parse_category(key)
         if category is None:
@@ -283,7 +290,7 @@ def _validate_manifest(ctx: Context, manifest: Any) -> None:
                 location,
                 "unknown_category",
                 f"unknown manifest category '{key}'; allowed: "
-                + ", ".join(c.value for c in ManifestCategory),
+                + ", ".join(c.value for c in Category),
             )
             continue
         if not ctx.capabilities.supports(category):
@@ -295,8 +302,11 @@ def _validate_manifest(ctx: Context, manifest: Any) -> None:
             )
             # Still walked below: a caller fixing an unsupported category should
             # not then discover a second round of shape errors inside it.
-        if category is ManifestCategory.ENGINE_CONFIG:
+        if category is Category.ENGINE_CONFIG:
             _validate_engine_config(ctx, location, value)
+            continue
+        if category is Category.BOT_CONFIG:
+            _validate_bot_config(ctx, location, value)
             continue
         _validate_category_list(ctx, location, category, value)
 
@@ -331,8 +341,74 @@ def _validate_engine_config(ctx: Context, location: str, value: Any) -> None:
         )
 
 
+def _validate_bot_config(ctx: Context, location: str, value: Any) -> None:
+    """A mapping-valued Category like ``engine_config``: one object whose keys
+    are sync kinds (``render_screen`` in v1), each value that kind's entry list.
+
+    Unlike ``engine_config``'s single ``config`` field, the kind set is open at
+    the surface and closed by the handler registry — a kind the apply engine
+    has no handler for would fail the whole category mid-write on the bot's
+    apply lock, so a name no handler resolves is refused here at ``PUT``,
+    from :data:`BOT_CONFIG_KIND_VALIDATORS`. The per-kind entry shape is the
+    handler's own, and its validator lives beside the kind in that table, so
+    what this pass accepts and what apply can act on are the same surface.
+    """
+    if not isinstance(value, dict):
+        ctx.add(location, "invalid_category", "'bot_config' must be a mapping")
+        return
+    for kind, kind_value in value.items():
+        if not isinstance(kind, str) or not kind:
+            ctx.add(
+                location,
+                "invalid_bot_config_kind",
+                "a bot_config kind key must be a non-empty string",
+            )
+            continue
+        kind_location = f"{location}.{kind}"
+        entry_validator = BOT_CONFIG_KIND_VALIDATORS.get(kind)
+        if entry_validator is None:
+            ctx.add(
+                kind_location,
+                "unknown_bot_config_kind",
+                f"unknown bot_config kind '{kind}'; supported: "
+                + ", ".join(sorted(BOT_CONFIG_KIND_VALIDATORS)),
+            )
+            continue
+        _validate_bot_config_kind_list(ctx, kind_location, kind, kind_value, entry_validator)
+
+
+def _validate_bot_config_kind_list(
+    ctx: Context,
+    kind_location: str,
+    kind: str,
+    value: Any,
+    entry_validator: Callable[[Context, str, dict[str, Any]], None],
+) -> None:
+    """One kind's entry list: a list, capped, each entry a mapping the kind owns."""
+    if not isinstance(value, list):
+        ctx.add(
+            kind_location,
+            "invalid_bot_config_kind",
+            f"bot_config kind '{kind}' must be a list of entries",
+        )
+        return
+    if len(value) > MAX_ENTRIES_PER_CATEGORY:
+        ctx.add(
+            kind_location,
+            "too_many_entries",
+            f"{len(value)} entries, over the {MAX_ENTRIES_PER_CATEGORY}-entry "
+            f"limit for one bot_config kind",
+        )
+    for index, entry in enumerate(value):
+        at = f"{kind_location}[{index}]"
+        if not isinstance(entry, dict):
+            ctx.add(at, "invalid_entry", "an entry must be a mapping")
+            continue
+        entry_validator(ctx, at, entry)
+
+
 def _validate_category_list(
-    ctx: Context, location: str, category: ManifestCategory, value: Any
+    ctx: Context, location: str, category: Category, value: Any
 ) -> None:
     """A list category: the count limit, then each entry, then cross-entry rules."""
     if not isinstance(value, list):
@@ -359,7 +435,7 @@ def _validate_category_list(
         entries.append((at, entry))
         _check_entry_placeholders(ctx, at, entry)
 
-    if category is ManifestCategory.MCP:
+    if category is Category.MCP:
         for at, entry in entries:
             validate_mcp_entry(ctx, at, entry)
         _check_duplicates(
@@ -369,15 +445,15 @@ def _validate_category_list(
             code="duplicate_server_code",
             what="MCP server_code",
         )
-    elif category is ManifestCategory.RESOURCES:
+    elif category is Category.RESOURCES:
         paths = [validate_resource_entry(ctx, at, entry) for at, entry in entries]
         _check_resource_layout(ctx, location, [p for p in paths if p])
-    elif category is ManifestCategory.SKILLS:
+    elif category is Category.SKILLS:
         names = [validate_skill_entry(ctx, at, entry) for at, entry in entries]
         _check_duplicates(
             ctx, location, [n for n in names if n], code="duplicate_name", what="skill name"
         )
-    elif category is ManifestCategory.IDENTITY:
+    elif category is Category.IDENTITY:
         for at, entry in entries:
             validate_identity_entry(
                 ctx, at, entry, engine_type=ctx.capabilities.engine_type
@@ -389,7 +465,7 @@ def _validate_category_list(
             code="duplicate_identity_type",
             what="identity type",
         )
-    elif category is ManifestCategory.CLI_TOOLS:
+    elif category is Category.CLI_TOOLS:
         commands = [validate_cli_tool_entry(ctx, at, entry) for at, entry in entries]
         _check_duplicates(
             ctx,
@@ -469,12 +545,12 @@ def _validate_script(ctx: Context, script: Any) -> None:
     if not isinstance(body, str):
         ctx.add("script.body", "invalid_script", "'script.body' must be a string")
         return
-    if not ctx.capabilities.supports(ManifestSection.SCRIPT):
+    if not ctx.capabilities.supports(Section.SCRIPT):
         ctx.add(
             "script",
             "unsupported_script",
             "a startup script is not supported for this bot: "
-            + ctx.capabilities.reason_for(ManifestSection.SCRIPT),
+            + ctx.capabilities.reason_for(Section.SCRIPT),
         )
     try:
         size = len(body.encode("utf-8"))

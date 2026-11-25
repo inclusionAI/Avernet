@@ -8,7 +8,7 @@ row.
 
 Nothing about *what applying does* is decided here. The router resolves the bot,
 calls the service, and shapes the result; the rules live in
-``core/bot_config_manifest/apply``.
+``core/apply_engine``.
 """
 
 from __future__ import annotations
@@ -34,9 +34,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
 )
+from agentclaw.community.api.bot_config_manifest_service import MANIFEST_STATE
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.di import Injected
 
@@ -102,21 +103,19 @@ async def apply_bot_config_manifest(
         Query(
             description="Return the plan without performing it. Synchronous; it "
             "applies no part of your manifest and writes no apply record, so it "
-            "mints no `apply_id` and appears in no history. Two caveats, both "
-            "by design: a declared source MAY really be fetched (a preview "
+            "mints no `apply_id` and appears in no history. A declared source "
+            "may be fetched (a preview "
             "that cannot tell you whether your sources are reachable and your "
             "digests match is a weak preview), bounded by the same per-apply "
             "fetch ledger a real apply uses — and the bytes acquired are kept "
             "as the platform's own copy, because that audit trail records "
-            "acquisition, not delivery; and reading a bot's installed MCP set "
-            "reconciles platform-managed installation rows against SkillSet "
-            "membership, which any read of that state does. Nothing your "
-            "manifest declares is applied to the bot."
+            "acquisition. The Apply snapshot reads MCP installations and SkillSet "
+            "membership without reconciliation."
         ),
     ] = False,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    apply_service: BotConfigManifestApplyServiceProtocol = Injected(
-        BotConfigManifestApplyServiceProtocol
+    apply_service: ApplyRunServiceProtocol = Injected(
+        ApplyRunServiceProtocol
     ),
 ) -> Envelope[ConfigManifestApplyAccepted] | Envelope[ConfigManifestApply]:
     """Apply this bot's stored manifest. Returns immediately with an id to poll.
@@ -132,24 +131,16 @@ async def apply_bot_config_manifest(
     if the stored document no longer validates for it. You never hold an id for
     an apply that did not start.
 
-    **A declared category is overwritten to equal the declaration.** Anything in
-    that category's area that the manifest does not declare is **removed** —
-    including MCP servers enabled by hand through the console. A category the
-    manifest does not mention is not touched at all, and deleting a manifest
-    therefore deletes nothing.
+    **A valid manifest describes the complete target of each supported category.**
+    Omitted categories are treated as empty. Entries outside the target are
+    removed within each category's managed area, including non-protected
+    workspace entries for resources and eligible Direct MCP installations.
 
-    **A category is written all-or-nothing.** Permission and platform-default
-    ownership are checked before the first write, so if a declared entry fails
-    either, that whole category is left exactly as it was and its other entries
-    report `skipped` — a momentary failure never deletes something that was
-    working. Categories do not affect each other.
-
-    A write can still fail for a reason not checked up front — the underlying
-    service is down, a concurrent change lands, or the server is owned by one of
-    the bot's SkillSets, which is refused at write time and not yet preflighted.
-    There is no transaction spanning those calls to roll back, so such a
-    category reports `partially_written` and re-applying converges it. That flag
-    is the one case where `aborted` does not mean "nothing changed".
+    Set supply conflicts refuse the entire apply before any category writes.
+    After that check, categories execute independently. An entry that fails
+    preparation prevents its category from writing. A write-stage failure can
+    leave changes behind and is reported with `partially_written`. A successful
+    cleanup alongside another category's failure yields `PARTIAL`.
 
     A bot with no stored manifest applies nothing and reports nothing applied.
     That is not an error.
@@ -177,6 +168,7 @@ async def apply_bot_config_manifest(
             # A dry run writes no record, so it has no audit column to fill and
             # needs only the principal.
             actor_id=actor_id,
+            state=MANIFEST_STATE,
         )
         return envelope(apply_payload(report), request)
 
@@ -193,6 +185,9 @@ async def apply_bot_config_manifest(
         owner_id=owner_id,
         actor_id=actor_id,
         audit_actor=audit,
+        # This API applies the bot's stored document; a promotion's revision
+        # starts from the genome routes.
+        state=MANIFEST_STATE,
     )
     return envelope(
         ConfigManifestApplyAccepted(
@@ -216,8 +211,8 @@ async def get_bot_config_manifest_apply(
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    apply_service: BotConfigManifestApplyServiceProtocol = Injected(
-        BotConfigManifestApplyServiceProtocol
+    apply_service: ApplyRunServiceProtocol = Injected(
+        ApplyRunServiceProtocol
     ),
 ) -> Envelope[ConfigManifestApply]:
     """Read one apply's report, whether it is still running or finished.
@@ -252,8 +247,8 @@ async def get_bot_config_manifest_last_apply(
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    apply_service: BotConfigManifestApplyServiceProtocol = Injected(
-        BotConfigManifestApplyServiceProtocol
+    apply_service: ApplyRunServiceProtocol = Injected(
+        ApplyRunServiceProtocol
     ),
 ) -> Envelope[ConfigManifestApply]:
     """The most recent apply for this bot.

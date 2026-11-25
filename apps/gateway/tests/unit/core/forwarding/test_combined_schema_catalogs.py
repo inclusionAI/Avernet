@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from gateway.community.config import Config, UserConfig
 from gateway.community.core.authn import RouteSecurity
 from gateway.community.core.forwarding import DomainMap, Forwarding
@@ -63,6 +65,16 @@ class _StubCatalog:
 
 
 class TestDescribeWithMultipleCatalogs:
+    def test_served_document_uses_one_catalog_snapshot(self) -> None:
+        doc = json.loads(_FIXTURE.read_text())
+        catalog = MagicMock()
+        catalog.snapshot.return_value = {"bots": doc}
+        catalog.current.side_effect = AssertionError("must read the captured snapshot")
+        forwarding = _forwarding({"custom": catalog})
+        result = forwarding.served_openapi(_RULES, title="gateway", version="1")
+        assert "/openapi/v1/bots" in result["paths"]
+        catalog.snapshot.assert_called_once_with()
+
     def test_file_catalog_serves_bots_http_serves_chat(self) -> None:
         bots_doc = json.loads(_FIXTURE.read_text())
         chat_doc = json.loads(_BAAS_ARTIFACT.read_text())
@@ -355,7 +367,57 @@ class TestTagsPreservedFromCombinedCatalogs:
 
 
 class TestBuildForwardingWithMixedSources:
-    def test_routes_http_domain_to_http_catalog(self) -> None:
+    def test_unknown_schema_source_is_rejected(self, tmp_path: Path) -> None:
+        from gateway.community.bootstrap._forwarding import build_forwarding
+
+        domain_map = _domain_map(bots=("backend", "unknown", ""))
+        with (
+            patch(
+                "gateway.community.config.ConfigLoader.load",
+                return_value=Config(config_dir=tmp_path),
+            ),
+            patch(
+                "gateway.community.bootstrap._forwarding._load_domain_map",
+                return_value=domain_map,
+            ),
+            pytest.raises(ValueError, match="unsupported schema source"),
+        ):
+            build_forwarding(
+                schema_catalogs={
+                    "file": FileSchemaCatalog(),
+                    "http": HttpSchemaCatalog(),
+                },
+                forwarder=MagicMock(spec=Forwarder),
+                ws_forwarder=MagicMock(spec=WebSocketForwarder),
+            )
+
+    def test_registered_extra_catalog_receives_its_domain(self, tmp_path: Path) -> None:
+        from gateway.community.bootstrap._forwarding import build_forwarding
+
+        domain_map = _domain_map(bots=("backend", "custom", ""))
+        config = Config(config_dir=tmp_path)
+        extra = MagicMock()
+        with (
+            patch("gateway.community.config.ConfigLoader.load", return_value=config),
+            patch(
+                "gateway.community.bootstrap._forwarding._load_domain_map",
+                return_value=domain_map,
+            ),
+        ):
+            result = build_forwarding(
+                schema_catalogs={
+                    "file": FileSchemaCatalog(),
+                    "http": HttpSchemaCatalog(),
+                    "custom": extra,
+                },
+                forwarder=MagicMock(spec=Forwarder),
+                ws_forwarder=MagicMock(spec=WebSocketForwarder),
+            )
+        extra.set_sources.assert_called_once_with({"bots": "."})
+        extra.refresh_all.assert_called_once_with()
+        assert result.schema_catalogs["custom"] is extra
+
+    def test_routes_http_domain_to_http_catalog(self, tmp_path: Path) -> None:
         from gateway.community.bootstrap._forwarding import build_forwarding
 
         config_data = {
@@ -373,9 +435,15 @@ class TestBuildForwardingWithMixedSources:
             "servers": {"baas": {"base_url": "http://baas:9090"}},
         }
 
-        with patch(
-            "gateway.community.bootstrap._forwarding._load_domain_map"
-        ) as mock_dm:
+        with (
+            patch(
+                "gateway.community.bootstrap._forwarding._load_domain_map"
+            ) as mock_dm,
+            patch(
+                "gateway.community.config.ConfigLoader.load",
+                return_value=Config(config_dir=tmp_path),
+            ),
+        ):
             mock_dm.return_value = DomainMap.from_config(config_data, variables={})
 
             http_cat = HttpSchemaCatalog()

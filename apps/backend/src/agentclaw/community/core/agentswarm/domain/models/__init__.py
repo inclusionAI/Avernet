@@ -20,6 +20,7 @@ from agentclaw.community.core.agentswarm.domain.models.enums import (
     AgentKind, AgentStatus, BotState, DecisionKind, FinishReason, GuardKind,
     LlmCallKind, MessageRole, ProviderKind, RunOptions, RunStatus, StreamEventKind, DispatchStatus,
     TerminationReason, WaitMode, WorkerOutcomeKind,
+    WIRE_BOT_CHAT_TIMEOUT_CAP, WIRE_MAX_TOTAL_AGENTS_CAP, WIRE_MAX_TURNS_CAP,
 )
 from agentclaw.community.core.agentswarm.domain.models.errors import (
     NonRetryableProvisioningError,

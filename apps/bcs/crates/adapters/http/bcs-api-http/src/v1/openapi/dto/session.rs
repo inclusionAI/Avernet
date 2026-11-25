@@ -1,12 +1,12 @@
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedCaller, CreateSession, DeliveryType, IdentityPolicy,
-    MessageViewScope, ParticipantMode, ParticipantRole, Principal, SessionCaller, SessionKind,
-    SessionStatus, UpdateSession, select_principal,
+    ApplicationError, AuthenticatedCaller, CreateSession, DeliveryType,
+    MessageViewScope, ParticipantMode, ParticipantRole, SessionKind,
+    SessionListSort, SessionStatus, UpdateSession,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use super::group::deserialize_present_non_null;
+use super::group::{SortQuery, deserialize_present_non_null};
 
 fn default_limit() -> u64 {
     20
@@ -76,9 +76,14 @@ pub struct CreateSessionRequest {
 }
 
 impl CreateSessionRequest {
+    /// Protocol adaptation only. The effective
+    /// Human/Bot caller choice is the application's
+    /// (bcs-app-session `create` resolves the live
+    /// hybrid rule); this carries the raw
+    /// authenticated caller.
     pub fn into_command(
         self,
-        caller: &AuthenticatedCaller,
+        caller: AuthenticatedCaller,
         group_id: String,
     ) -> Result<CreateSession, ApplicationError> {
         if self.acting_bot_id.as_deref() == Some("") {
@@ -90,16 +95,6 @@ impl CreateSessionRequest {
         if let Some(meta) = self.meta.as_ref() {
             validate_session_metadata(meta)?;
         }
-        let caller = match select_principal(caller, IdentityPolicy::HumanOrOwnedBot)? {
-            Principal::Human(human) => SessionCaller::Human {
-                actor_id: format!("human_{}", human.subject.id),
-                owner_id: human.subject.id,
-                display_name: human.subject.display_name.or(human.subject.full_name),
-            },
-            Principal::Bot(bot) => SessionCaller::Bot {
-                bot_uuid: bot.bot_uuid,
-            },
-        };
         Ok(CreateSession {
             caller,
             group_id,
@@ -265,6 +260,17 @@ pub struct ListSessionsQuery {
     pub limit: u64,
     #[serde(default)]
     pub status: Option<SessionStatus>,
+    #[serde(default)]
+    pub sort: SortQuery,
+}
+
+impl ListSessionsQuery {
+    pub fn sort_filter(&self) -> SessionListSort {
+        match self.sort {
+            SortQuery::CreatedAt => SessionListSort::CreatedAt,
+            SortQuery::LastActivity => SessionListSort::LastActivity,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

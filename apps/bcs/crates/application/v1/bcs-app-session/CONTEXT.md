@@ -2,7 +2,24 @@
 
 ## Provides
 
+- Delivery admission shares one Group/Session snapshot across candidates and
+  resolves all distinct Bot-view (User, Bot) pairs through `BotAuthorityPort::roles_for`
+  once. Scalar `can_manage` is not used for fanout. Errors or malformed batch
+  lengths fail the entire admission closed; no partial permits are returned.
+
 - `SessionServiceImpl`, the transport-agnostic BCN V1 Session facade.
+- V1 session list summaries expose lightweight `participants` rows (bot-avatar
+  plan design §5.2): identity plus THIS session's own member name snapshot
+  verbatim (null allowed, session-only dynamic members included, never
+  backfilled from the registry for the list) and `avatar_url` from exactly ONE
+  batched display-profile read per result page
+  (`BotRegistryCoreService::avatar_urls`); the list adds no member name reads.
+  Detail projections keep the existing registry name backfill and fill the
+  shared `SessionParticipant.avatar_url` from one batched read of the visible
+  rows; create/update/member-mutation responses reuse the same fill. Human
+  participants resolve null without a read, retained members of soft-deleted
+  Bots keep their stored face, and avatar read failures surface as service
+  errors, never a success page of null avatars.
 - Human owners may change an existing owned Bot participant's auto/muted mode
   without Session management authority. This exception does not grant scope
   changes, participant insertion, or other Session management rights.
@@ -18,8 +35,9 @@
   file commands, and orchestrates best-effort completion notifications.
 - `GroupContextAddAccessGuard`, which resolves the Group/Session boundary,
   verifies current-Session membership for session/round writes and Group membership for group writes, validates the
-  `{sessionId}:{round}` format, and delegates all Group Context operations to
-  the underlying application service.
+  `{sessionId}:{round}` format, resolves preset management against an existing
+  Group, and authorizes writes against the Group driver Bot.
+  The underlying Group Context service owns preset and entry policies.
 
 ## Consumes
 
@@ -63,8 +81,8 @@
 
 ## Runtime ownership
 
-This crate owns V1 Session, Session File, and the public Group Context add
-resource-membership gate. The Group Context gate reads the persisted Session
+This crate owns V1 Session, Session File, and the public Group Context
+resource-membership gate for adds. The Group Context gate reads the persisted Session
 at request time so dynamically invited Session participants remain allowed;
 Group Context storage and field-policy semantics stay in the Group Context
 application service. For files, it enforces membership and the

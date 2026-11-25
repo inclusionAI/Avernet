@@ -7,6 +7,7 @@ export type RecoveryResultAck = {
 };
 export const DIAGNOSIS_VERSION = "claw-monitoring/diagnosis-event/v2";
 export const DIAGNOSIS_V3_VERSION = "claw-monitoring/diagnosis-event/v3";
+export const DIAGNOSIS_V4_VERSION = "claw-monitoring/diagnosis-event/v4";
 export type RuntimeIdentity = Record<string, string>;
 export const CHECK_VERSION = "claw-monitoring/bot-check/v2";
 export type Engine = "OC" | "TE";
@@ -22,6 +23,8 @@ type DiagnosisFields = {
   engine: Engine;
   sessionKey: string | null;
   sessionId: string | null;
+  /** Optional first-write-only NAS metadata; stored internally, never exposed in page DTOs. */
+  sessionNasPath?: string;
   traceId: string | null;
   occurredAt: string | null;
   diagnosedAt: string;
@@ -37,7 +40,7 @@ type DiagnosisFields = {
 };
 export type DiagnosisEvent = DiagnosisFields & (
   | { schemaVersion: typeof DIAGNOSIS_VERSION; runtimeIdentity?: never }
-  | { schemaVersion: typeof DIAGNOSIS_V3_VERSION; runtimeIdentity: RuntimeIdentity | null }
+  | { schemaVersion: typeof DIAGNOSIS_V3_VERSION | typeof DIAGNOSIS_V4_VERSION; runtimeIdentity: RuntimeIdentity | null }
 );
 export type BotCheck = {
   schemaVersion: typeof CHECK_VERSION;
@@ -49,7 +52,7 @@ export type BotCheck = {
   lastSuccessfulCheckAt: string | null;
   status: CheckStatus;
 };
-export type DiagnosisItem = Omit<DiagnosisEvent, "schemaVersion" | "eventId" | "engine" | "runtimeIdentity">;
+export type DiagnosisItem = Omit<DiagnosisEvent, "eventId" | "engine" | "runtimeIdentity" | "sessionNasPath">;
 export type DiagnosisQuery = {
   startMs: number | null;
   endMs: number | null;

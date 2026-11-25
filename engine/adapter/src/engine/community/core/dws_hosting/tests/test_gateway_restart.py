@@ -14,6 +14,7 @@ from engine.community.plugins.dws_hosting.openclaw_transport import HostingGatew
 from .test_execution import build_execution
 from .test_state_contract import message
 from .test_hosting_gateway import gateway, key_file as gateway_key_fixture, response
+from .test_hosting_gateway import scope_task_for_gateway_tests as scope_task_for_gateway_tests
 from .test_execution import result_json
 
 key_file = gateway_key_fixture
@@ -90,6 +91,10 @@ def test_start_interval_uses_monotonic_clock_and_local_authenticated_snapshot(mo
 @pytest.mark.parametrize("storage_fails", [False, True])
 async def test_real_socket_persists_witness_before_dispatch(tmp_path, key_file, monkeypatch, storage_fails):
     state, ledger, turn, directory = build_execution(tmp_path)
+    from engine.community.plugins.dws_hosting import llm_task
+    async def reviewed(*args, **kwargs):
+        return {"verdict": "approve", "reason_code": "approved", "reason": "Relevant."}
+    monkeypatch.setattr(llm_task, "invoke", reviewed)
     # Cross-platform fixture; production extracts it only after authenticated hello.
     monkeypatch.setattr(HostingGatewayTransport, "_witness", lambda *args: witness())
     if storage_fails:

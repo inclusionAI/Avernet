@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.services.workspace_assembler import WorkspaceAssembler
+from app.domain.services.workspace_assembler import WorkspaceAssembler
 
 
 # =============================================================================
@@ -48,7 +48,7 @@ class TestWorkspaceAssemblerImplementation:
 
     def test_implementation_satisfies_protocol(self):
         """测试实现满足协议"""
-        from src.infra.assemblers.baseline_workspace_assembler import BaselineWorkspaceAssembler
+        from app.infra.assemblers.baseline_workspace_assembler import BaselineWorkspaceAssembler
 
         assembler = BaselineWorkspaceAssembler()
 

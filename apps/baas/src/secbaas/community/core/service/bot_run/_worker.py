@@ -27,7 +27,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from secbaas.community.core.repository.bot_run import BotRunRepository
+from secbaas.community.core.repository.bot_run import (
+    TERMINAL_STATUSES,
+    BotRunRepository,
+)
 from secbaas.community.core.repository.bot_run_queue import (
     ActiveBot,
     BotRunQueueRecord,
@@ -254,11 +257,10 @@ class BotRequestWorker:
                     continue
                 # owner 已 down：先写结果终态再 force_done。否则队列置 DONE 后
                 # recovery/reset_stale_running 不再命中（按 RUNNING 过滤），
-                # baas_bot_run 会永远停在 PENDING/RUNNING。update_error 幂等。
-                with contextlib.suppress(Exception):
-                    self._run_repository.update_error(
-                        record.run_id, "worker lost (stale heartbeat)"
-                    )
+                # baas_bot_run 会永远停在 PENDING/RUNNING。update_timeout 幂等。
+                self._run_repository.update_timeout(
+                    record.run_id, "worker lost (stale heartbeat)"
+                )
                 with contextlib.suppress(Exception):
                     self._queue.force_done(record.run_id)
                 logger.warning(
@@ -269,12 +271,14 @@ class BotRequestWorker:
                     record.assigned_worker,
                 )
             else:
-                # PENDING 超时：走 executor 标 FAILED + force_done
+                # PENDING 超时：走 executor 标 TIME_OUT + force_done
                 await self._executor.execute(record)
+                if not self._has_terminal_result(record):
+                    continue
                 with contextlib.suppress(Exception):
                     self._queue.force_done(record.run_id)
                 logger.warning(
-                    "[BotRequestWorker] timeout scan: run_id=%s status=%s marked failed",
+                    "[BotRequestWorker] timeout scan: run_id=%s status=%s marked timeout",
                     record.run_id,
                     record.status,
                 )
@@ -300,7 +304,7 @@ class BotRequestWorker:
     async def abort_runs_by_session(self, session_id: str, bot_id: str) -> AbortOutcome:
         """按 (bot_id, session_id) 维度取消目标 bot 的 RUNNING run。
 
-        复用 ``_terminate_local_timeout`` 的 cancel+force_done 模板，顺序：
+        主动 abort 先落 ABORTED 再发出取消信号，顺序：
         1. ``run_repository.update_aborted(run_id, ...)`` 标 ABORTED（幂等：已终态时 no-op）；
         2. ``queue.request_abort(run_id)`` 写跨实例信号（持有该 run 的 Worker 通过
            ``_abort_poll_loop`` 轮询感知后 cancel 本机 task）；
@@ -488,68 +492,82 @@ class BotRequestWorker:
         return self._callback_factories.get(cb_name)
 
     async def _run_one(self, record: BotRunQueueRecord) -> None:
-        """包裹单个工作项的执行：后台守护（心跳 + 到点取消）+ 队列终态标记 + 并发计数。
+        """执行阶段受 guardian/abort 保护；终态收尾与 callback 不受执行 deadline 取消。
 
-        ``finally`` 只做本地资源清理。``baas_bot_run`` 的业务终态由 executor
-        链负责；Worker 只根据 executor 结果推进 ``baas_bot_run_queue``。
-
-        异常冒泡时若 callback 尚未发送，``except`` 路径兜底发送 failed 终态
-        回执（Issue 2-B）：避免只走成功分支的 callback 在异常时遗漏通知。
-        ``RequeuedToPendingError`` 在内层捕获后 ``return``，不会进入兜底分支。
+        本机正常完成与异常路径共享收尾入口。只有结果已落终态才结束队列并通知；
+        requeue 不收尾、不通知。结果写入失败时保留队列供恢复，不发送非终态。
         """
         post_run_callback = self._resolve_callback(record)
-        callback_sent = False
+        try:
+            with _trace_context_from_meta(record.meta):
+                try:
+                    await self._execute_with_guardian(record)
+                except RequeuedToPendingError as e:
+                    await self._requeue_pending(record, e)
+                    return
+                except BaseException:
+                    logger.info(
+                        "[BotRequestWorker] assured callback on exception path run_id=%s",
+                        record.run_id,
+                    )
+                    await self._finalize_run(record, post_run_callback)
+                    raise
+                else:
+                    await self._finalize_run(record, post_run_callback)
+        finally:
+            self._running_tasks.pop(record.run_id, None)
+            self._active -= 1
 
+    async def _execute_with_guardian(self, record: BotRunQueueRecord) -> None:
+        """守护仅覆盖 executor；先停止取消来源，再进入队列收尾与网络回调。"""
         run_task = asyncio.current_task()
         guardian = asyncio.create_task(
             self._run_guardian(record, self._record_deadline(record))
         )
+        abort_notifying = asyncio.Event()
         abort_poll_task = (
-            asyncio.create_task(self._abort_poll_loop(record, run_task))
+            asyncio.create_task(
+                self._abort_poll_loop(record, run_task, abort_notifying)
+            )
             if run_task is not None
             else None
         )
         try:
-            with _trace_context_from_meta(record.meta):
-                try:
-                    await self._executor.execute(record)
-                except RequeuedToPendingError as e:
-                    await self._requeue_pending(record, e)
-                    return
-
-                await self._post_run(record, post_run_callback)
-                callback_sent = True
-                self._mark_queue_done(record)
-        except BaseException:
-            # 异常冒泡且 callback 未发送 → 兜底发送 failed 终态回执，
-            # 防止只走成功分支的 callback 路径在异常时遗漏通知。
-            # callback 自身需幂等（PostRunCallback 协议要求）。
-            if not callback_sent and post_run_callback is not None:
-                logger.info(
-                    "[BotRequestWorker] assured callback on exception path run_id=%s",
-                    record.run_id,
-                )
-                try:
-                    await post_run_callback(record.run_id)
-                except Exception as cb_err:
-                    logger.error(
-                        "[BotRequestWorker] assured post_run_callback failed "
-                        "run_id=%s: %s",
-                        record.run_id,
-                        cb_err,
-                        exc_info=True,
-                    )
-            raise
+            await self._executor.execute(record)
         finally:
+            # 同步撤销所有本机执行取消入口，避免停止守护期间或慢 callback 时再次 cancel。
             self._running_tasks.pop(record.run_id, None)
             guardian.cancel()
+            if abort_poll_task is not None and not abort_notifying.is_set():
+                abort_poll_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await guardian
             if abort_poll_task is not None:
-                abort_poll_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await abort_poll_task
-            self._active -= 1
+
+    def _has_terminal_result(self, record: BotRunQueueRecord) -> bool:
+        result = self._run_repository.get_by_run_id(record.run_id)
+        if result is not None and result.status in TERMINAL_STATUSES:
+            return True
+        logger.error(
+            "[BotRequestWorker] result not terminal, preserving queue and skipping "
+            "callback run_id=%s status=%s",
+            record.run_id,
+            result.status if result is not None else "NOT_FOUND",
+        )
+        return False
+
+    async def _finalize_run(
+        self,
+        record: BotRunQueueRecord,
+        post_run_callback: PostRunCallback | None,
+    ) -> None:
+        """本机执行的唯一通知入口：结果终态 → 队列 DONE → callback（不承诺 exactly-once）。"""
+        if not self._has_terminal_result(record):
+            return
+        self._mark_queue_done(record)
+        await self._post_run(record, post_run_callback)
 
     @staticmethod
     def _record_deadline(record: BotRunQueueRecord) -> datetime | None:
@@ -630,7 +648,10 @@ class BotRequestWorker:
             )
 
     async def _abort_poll_loop(
-        self, record: BotRunQueueRecord, run_task: asyncio.Task[None]
+        self,
+        record: BotRunQueueRecord,
+        run_task: asyncio.Task[None],
+        abort_notifying: asyncio.Event | None = None,
     ) -> None:
         """轮询 meta 的 ``abort_requested`` 信号，感知后取消本机执行 task。
 
@@ -661,6 +682,10 @@ class BotRequestWorker:
                 run_id,
                 record.session_id,
             )
+            if abort_notifying is not None:
+                # The owner awaits this poller during teardown, so an abort's
+                # best-effort engine notification is not cancelled with execution.
+                abort_notifying.set()
             if not run_task.done():
                 run_task.cancel()
             with contextlib.suppress(Exception):
@@ -685,9 +710,9 @@ class BotRequestWorker:
         合并原 heartbeat 与本地超时 watchdog：
         - 周期 ``touch_heartbeat`` 刷新 last_heartbeat，供 recovery 判活（避免活着的
           owner 被误回收）；
-        - ``deadline`` 到点则终结本机 task：cancel 执行 task（走 executor 的
-          CancelledError → 标结果 FAILED）+ force_done 队列行 + 触发 post-run 回调，
-          保证本机超时后队列表/结果表都收敛、回调不丢。``sleep`` 取
+        - ``deadline`` 到点只 cancel 本机执行 task，由 executor 写终态、
+          ``_run_one`` 统一结束队列并通知。守护本身不写队列终态、不发 callback。
+          ``sleep`` 取
           ``min(heartbeat_interval, 剩余时间)`` 保证到点精度。
         """
         interval = self._config.heartbeat_interval_seconds
@@ -711,16 +736,12 @@ class BotRequestWorker:
                 )
 
     async def _terminate_local_timeout(self, record: BotRunQueueRecord) -> None:
-        """本机超时终结：cancel 本机 task + force_done 队列行 + 触发回调。
+        """仅发出本机超时取消，不等待执行 task（避免与其清理 guardian 互等）。
 
-        结果终态（FAILED）由被 cancel 的 executor 链（ResultGuardExecutor 的
-        CancelledError 分支）负责；这里补齐队列终态与回调，避免本机超时后队列行
-        停在 RUNNING（占并发额度）且回调丢失。force_done/回调均幂等。
+        cancel() 不代表结果已落 TIME_OUT。必须由 executor 处理取消并写终态后，
+        再由 _run_one 收尾队列、发送 callback，不能在此提前查库发送 RUNNING。
         """
         self._cancel_local_task(record.run_id)
-        with contextlib.suppress(Exception):
-            self._queue.force_done(record.run_id)
-        await self._fire_timeout_callback(record)
 
     def _cancel_local_task(self, run_id: str) -> None:
         """到点取消本机正在执行的 task（若仍在运行）。"""

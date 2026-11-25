@@ -24,9 +24,9 @@ export function buildCreateGroupBody(input: CreateGroupInput): CreateGroupBody {
         ? input.strategy === 'manager_worker'
           ? ('manager' as const)
           : ('driver' as const)
-        : input.strategy === 'chat'
-        ? ('consultant' as const)
-        : ('worker' as const),
+        : input.strategy === 'manager_worker'
+        ? ('worker' as const)
+        : ('consultant' as const),
     ...(participant.message_view_scope ? { message_view_scope: participant.message_view_scope } : {}),
   }));
   const base = {
@@ -60,9 +60,7 @@ export function buildCreateGroupBody(input: CreateGroupInput): CreateGroupBody {
       definition: {
         content_yaml: input.definitionYaml ?? '',
       },
-      participant_bindings: input.participantBindings?.length
-        ? input.participantBindings
-        : [{ binding: 'role-1', actor_ids: actorIds }],
+      participant_bindings: input.participantBindings ?? [{ binding: 'role-1', actor_ids: actorIds }],
     },
   };
 }

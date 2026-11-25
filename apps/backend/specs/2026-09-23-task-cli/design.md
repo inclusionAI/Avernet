@@ -1,5 +1,14 @@
 # avernet-goal-cli 任务发起、批量提交与澄清设计
 
+> 2026-11-07 已审查的 HTTP 入参兼容策略：非 BBS 任务接口忽略请求模型未声明的
+> 多余参数（含 Relay 已类型化的 event/run_info/trace/artifact item），不将其用于
+> 领域命令。必填字段、已知字段取值、认证身份、relay_token 代次、任务状态和产物
+> 内容/归属校验不变；已定义的业务字典与运行时扩展数据不被删除。BBS 接口及响应
+> 模型保持原约定。此策略仅适用于 Backend HTTP，不放开 Skill 或 CLI Batch 的
+> 本地校验规则。实现与验证见
+> [任务请求兼容说明](../2026-11-07-task-request-extra-parameters/spec.md)。
+
+
 任务确认后的 Bot 接力执行函数契约见
 [`bot-s1-s8-functional-contract.md`](../2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md)。
 
@@ -820,6 +829,8 @@ Task Intake Skill 只生成或修订当前 target 对应的 `TaskSpec` 和追问
 每个 Intake Session 只绑定一个 target，因此 Backend `/start` 保持单任务合同，直接返回现有 `TaskOpResult`。多目标聚合属于 CLI，不进入 Backend Task Service API。
 
 ### 9.1 TaskInfoRequest 转换
+
+身份语义：`owner_bot_id` 规范化为 Bot UUID（`bot_id:bot_owner_id`），`owner_user_id` 是任务发起人/访问者；下游执行身份一律拆分为节点 `assignee=bot_id` 与 `extend_props["assignee_owner_id"]=bot_owner_id`。历史裸 Bot id（含 `default` 与非 `default`）统一按 `owner_user_id` 承载的 Bot owner 语义处理；不做 BotService 反查补全。
 
 ```python
 def build_task_info_request(

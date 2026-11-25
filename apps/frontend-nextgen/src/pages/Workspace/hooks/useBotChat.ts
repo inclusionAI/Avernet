@@ -1,13 +1,17 @@
+import { CANCEL_UI_TEXT, SEND_BAN_UI_TEXT } from '@/adapters/a2a/bootstrap';
 import { clearBotCdnConfig, queryAndRegisterBotLibraryCdn } from '@/services/bcs/libraryCdnInjector';
 import { listTaskPreflightMessages, mergeTaskPreflightMessages } from '@/services/tasks/taskPreflightMessageStore';
-import { createBotChatProvider, type BotChatState } from '@/services/workspace/botChatProvider';
+import { createBotChatProvider, isAicodingConnectionEngine, type BotChatState } from '@/services/workspace/botChatProvider';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useChat, type ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { ChatMessage, PanelHandle, PromptFileRef, ResourceReference } from '@tc-chat/core';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
+import { enrichFileRefContent } from './botChatMessagePrefill';
 import { prependUniqueMessages } from './groupChatHistoryUtils';
+import { useBotConnectionRuntime } from './useBotConnectionRuntime';
+import { useBotSessionRange } from './useBotSessionRange';
 import { useSessionDisplayStatus, type SessionEnterOutcome } from './useSessionDisplayStatus';
 
 export interface SendFileRefs {
@@ -15,30 +19,7 @@ export interface SendFileRefs {
   promptFileRefs?: PromptFileRef[];
   fileRefDisplay?: Array<{ insert_id: string; name: string }>;
 }
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/** 仅富化本地乐观消息:把 `<file-ref insert_id="X">` 补上 name,供气泡渲染文件名胶囊。 */
-function enrichFileRefContent(content: string, fileRefDisplay?: Array<{ insert_id: string; name: string }>): string {
-  if (!fileRefDisplay || fileRefDisplay.length === 0) return content;
-  let out = content;
-  for (const ref of fileRefDisplay) {
-    if (!ref.insert_id || !ref.name) continue;
-    const escName = ref.name.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const openTag = new RegExp(
-      `(<file-ref\\b[^>]*?\\binsert_id=["']${escapeRegExp(ref.insert_id)}["'][^>]*?)(\\s*/?>)`,
-      'i',
-    );
-    out = out.replace(openTag, (match, pre, tail) =>
-      /\bname\s*=/i.test(pre) ? match : `${pre} name="${escName}"${tail}`,
-    );
-  }
-  return out;
-}
 export type BotLibraryCdnLoader = (botId: string) => Promise<number>;
-
 /** useBotChat —— bot 单聊对话 Hook(镜像 useGroupChat)。 */
 export function useBotChat(
   bot: ChatBotView | null,
@@ -51,41 +32,40 @@ export function useBotChat(
   const identityId = authenticatedUserId === undefined ? workspaceIdentityId : authenticatedUserId;
   const historyRefreshNonce = useWorkspaceStore((s) => s.historyRefreshNonce);
   const sessionId = session?.sessionId ?? null;
+  const sessionRange = useBotSessionRange(bot);
   const [supportState, setSupportState] = useState<BotChatState>({ phase: 'idle', error: null });
   const [connectionStatus, setConnectionStatus] = useState<ProviderConnectionStatus>('disconnected');
-  // 进入流程信号（连接 / 历史双完成才就绪，任一失败即 failed）：useSessionDisplayStatus 的输入。
-  // 单聊 connect 与 loadHistory 并行（AC-3 边界），手动 reconnect / reloadHistory 成功后也回写信号，
-  // 避免失败态恢复后卡在「连接中」。
+  // 连接状态仍等待双完成，但 HTTP 历史独立就绪，先供阅读，不等待 IAM/握手。
   const [connectDone, setConnectDone] = useState(false);
-  const [historyDone, setHistoryDone] = useState(false);
+  const [historyProvider, setHistoryProvider] = useState<ReturnType<typeof createBotChatProvider> | null>(null);
   const [enterFailed, setEnterFailed] = useState(false);
   const [historyEmpty, setHistoryEmpty] = useState(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
-
   const provider = useMemo(() => {
     if (!bot || !sessionId || !identityId) return null;
-    return createBotChatProvider({ bot, userId: identityId, sessionId });
-  }, [bot, sessionId, identityId]);
+    return createBotChatProvider({ bot, userId: identityId, sessionId, range: sessionRange });
+  }, [bot, sessionId, identityId, sessionRange]);
+  const connectionRuntime = useBotConnectionRuntime(provider);
+  const historyDone = provider !== null && historyProvider === provider;
+  const currentProvider = useRef(provider);
+  currentProvider.current = provider;
 
-  // 副屏方式②数据桥（对应单聊 Bot render screens）：进入会话按 botId 拉 Bot 的 CDN 库映射写
-  // window.aixLibraryCdnMap，供引擎 resolveBusinessEntry 把 <AixUI component="lib.X"> 的 lib 解析成
-  // CDN URL。切换 Bot / 卸载时清旧 botId 的 CDN scope，避免残留串用（对齐 ocb replaceBotCdnScopes；
-  // cleanup 先于下一 effect 运行 → 先清旧再查新）。拉取失败静默降级，不阻塞会话主流程、不 toast
-  // （保持与 useGroupChat manifest 桥一致的静默降级策略）。
+  // 副屏 CDN 映射后台加载；切 Bot/卸载清旧 scope，失败不阻塞历史和连接。
   useEffect(() => {
     const botId = bot?.botId ?? null;
-    if (!botId) return;
+    const runtimeAllowsCdn = !bot?.isFriendBot
+      || (connectionRuntime.resolved && !isAicodingConnectionEngine(connectionRuntime.engine));
+    if (!botId || !runtimeAllowsCdn) return;
     void loadBotLibraryCdn(botId).catch(() => {
       /* 静默降级：方式②副屏不可用不阻断会话主流程 */
     });
     return () => {
       clearBotCdnConfig(botId);
     };
-  }, [bot?.botId, loadBotLibraryCdn]);
+  }, [bot?.botId, bot?.isFriendBot, connectionRuntime, loadBotLibraryCdn]);
 
-  // panelRef 透传 SDK useChat：useChat 拿到 panelRef 后 chat.onRequest 会自动 flushContext()
-  // 并以 panelContext 注入请求，使 bot 引擎感知用户在副屏的交互（对应 useGroupChat:56 的 panelRef 注入）。
+  // panelRef 透传 SDK，发送时自动 flushContext() 注入副屏交互。
   const chat = useChat({
     provider: (provider ?? null) as never,
     conversationKey: sessionId ?? undefined,
@@ -111,7 +91,6 @@ export function useBotChat(
     prevRef.current = sessionId;
     setConnectDone(false);
     setEnterFailed(false);
-    // 切换会话:清空副屏 tab,避免旧会话副屏残留叠加到新会话(对齐 useGroupChat connect effect)。
     panelRef?.current?.closePanelForce();
     provider
       .connect()
@@ -142,12 +121,21 @@ export function useBotChat(
     };
   }, [provider]);
 
+  // A2A M2 bootstrap seam：B12 取消四态播报（单行 toast；文案单源 CANCEL_UI_TEXT，
+  // 与 v3 路径互不干扰——A2A 未启用时 provider 永不触发该订阅源）。
+  useEffect(() => {
+    if (!provider) return;
+    return provider.subscribeToCancelOutcome?.((outcome) => {
+      toast(CANCEL_UI_TEXT[outcome.kind]);
+    });
+  }, [provider]);
+
   useEffect(() => {
     if (!provider || !sessionId) return;
     let cancelled = false;
     setHasMoreHistory(false);
     setIsLoadingMoreHistory(false);
-    setHistoryDone(false);
+    setHistoryProvider(null);
     setHistoryEmpty(false);
     setEnterFailed(false);
     provider
@@ -158,7 +146,7 @@ export function useBotChat(
           chat.setMessages(merged);
           setHasMoreHistory(provider.hasMoreHistory);
           setHistoryEmpty(merged.length === 0);
-          setHistoryDone(true);
+          setHistoryProvider(provider);
         }
       })
       .catch((error: unknown) => {
@@ -175,6 +163,12 @@ export function useBotChat(
 
   const send = (text: string, options?: SendFileRefs) => {
     if (!sessionId || !text.trim() || chat.isRequesting) return;
+    // A2A M2 bootstrap seam：§3.1 context 级发送禁令门——CancelTask 落地"停止未确认"
+    // 期间禁发同 context 新消息（文案单源 SEND_BAN_UI_TEXT）；非 A2A 面恒放行。
+    if (provider?.isSendBanned?.()) {
+      toast.error(SEND_BAN_UI_TEXT);
+      return;
+    }
     const trimmed = text.trim();
     const displayContent = enrichFileRefContent(trimmed, options?.fileRefDisplay);
     chat.onRequest({
@@ -209,14 +203,16 @@ export function useBotChat(
     setIsLoadingMoreHistory(true);
     try {
       const older = await provider.loadMoreHistory();
+      if (currentProvider.current !== provider) return;
       if (older.length > 0) {
         chat.setMessages((current) => prependUniqueMessages(current, older));
       }
       setHasMoreHistory(provider.hasMoreHistory);
     } catch (error) {
+      if (currentProvider.current !== provider) return;
       toast.error(error instanceof Error ? error.message : '加载更多历史消息失败');
     } finally {
-      setIsLoadingMoreHistory(false);
+      if (currentProvider.current === provider) setIsLoadingMoreHistory(false);
     }
   };
 
@@ -224,12 +220,14 @@ export function useBotChat(
     if (!provider || !sessionId) return;
     try {
       const h = await provider.loadHistory();
+      if (currentProvider.current !== provider) return;
       chat.setMessages(h);
       setHasMoreHistory(provider.hasMoreHistory);
       setEnterFailed(false);
       setHistoryEmpty(h.length === 0);
-      setHistoryDone(true);
+      setHistoryProvider(provider);
     } catch (e) {
+      if (currentProvider.current !== provider) return;
       setEnterFailed(true);
       toast.error(e instanceof Error ? e.message : '加载历史消息失败');
     }
@@ -239,6 +237,8 @@ export function useBotChat(
     chat,
     supportState,
     connectionStatus: displayStatus.status,
+    historyReady: historyDone,
+    connectionRuntime,
     send,
     stop,
     reconnect,

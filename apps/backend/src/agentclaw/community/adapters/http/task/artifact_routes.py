@@ -21,6 +21,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
+from agentclaw.community.adapters.http.task.artifact_actor import (
+    ArtifactWriteActor,
+    resolve_artifact_write_actor,
+)
 from agentclaw.community.adapters.http.task.schemas_artifact import (
     TaskArtifactAddRequestDTO,
     TaskArtifactDescriptorDTO,
@@ -46,7 +50,7 @@ router = APIRouter(tags=["task"])
 async def add_task_artifact(
     request: Request,
     payload: TaskArtifactAddRequestDTO,
-    user: AuthenticatedUser = Depends(get_current_user),
+    actor: ArtifactWriteActor = Depends(resolve_artifact_write_actor),
     service: TaskArtifactApiServiceProtocol = Injected(TaskArtifactApiServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskArtifactDescriptorDTO]:
     """手动登记一条任务产物(append-only;幂等命中返回既有行)。
@@ -54,9 +58,9 @@ async def add_task_artifact(
     请求体与 relay 回调上报 item 同构:``artifact_kind`` + 恰好一个 content 字段
     (四个互斥;**JSON 对象或 JSON 字符串均可**,对象由本层归一为字符串);task_id/
     node_id/attempt 与图交叉校验(attempt 失配即拒,session_id 图绑定优先、上报
-    兜底)。结构/内容校验失败 → 422;任务或节点不存在 → 404。成功返回读侧
-    Descriptor(安全字段,spec §7)。"""
-    del user
+    兜底)。双凭证(spec §14):``X-Relay-Token``(relay 尝试 fence,creator 派生
+    照旧)或登录用户二选一。结构/内容校验失败 → 422;任务或节点不存在 → 404;
+    token 失配 → 409。成功返回读侧 Descriptor(安全字段,spec §7)。"""
     raw = payload.model_dump()
     _normalize_content_fields(raw)
     try:
@@ -69,7 +73,7 @@ async def add_task_artifact(
         # 解析层收口的全部结构性失配(互斥/JSON/路径逃逸/非 http(s) 等)统一进
         # 既有 422 域错误信封——产物记录宁可没有,不可有假。
         raise TaskArtifactContentError(str(exc)) from exc
-    record = service.add_artifact(item)
+    record = service.add_artifact(item, relay_token=actor.relay_token)
     return envelope(artifact_record_to_descriptor(record), request)
 
 

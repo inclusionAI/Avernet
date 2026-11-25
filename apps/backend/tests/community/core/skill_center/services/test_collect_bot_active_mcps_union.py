@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.models.mcp import BotMCPInstallation, SkillSetMCPServer
 from agentclaw.community.core.models.skill import BotSkillInstallation, Skill, SkillSet
 from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
@@ -40,6 +41,9 @@ class _Database:
         self.engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(self.engine)
         self.sessions = sessionmaker(bind=self.engine, expire_on_commit=False)
+        with self.sessions.begin() as session:
+            if session.query(BotModel).filter_by(bot_id="bot", entity_id="owner", env="dev").first() is None:
+                session.add(BotModel(bot_id="bot", entity_id="owner", owner_id="owner", entity_type="staff", creator_id="owner", env="dev"))
 
     @contextmanager
     def orm_session(self):
@@ -271,7 +275,7 @@ def test_strict_runtime_policy_context_propagates_provider_failure(tmp_path):
 def test_strict_runtime_policy_context_propagates_template_lookup_failure(tmp_path):
     db = _Database()
     service = _service(db, tmp_path, ext_info_provider=lambda _bot_id: None)
-    service._bot_repo.get_by_id_and_owner.side_effect = RuntimeError(
+    service._bot_repo.get_by_id_and_entity.side_effect = RuntimeError(
         "bot repository unavailable"
     )
 
@@ -287,7 +291,7 @@ def test_strict_runtime_policy_context_propagates_template_lookup_failure(tmp_pa
 def test_display_read_still_degrades_when_template_lookup_fails(tmp_path):
     db = _Database()
     service = _service(db, tmp_path, ext_info_provider=lambda _bot_id: None)
-    service._bot_repo.get_by_id_and_owner.side_effect = RuntimeError(
+    service._bot_repo.get_by_id_and_entity.side_effect = RuntimeError(
         "bot repository unavailable"
     )
 
@@ -296,3 +300,21 @@ def test_display_read_still_degrades_when_template_lookup_fails(tmp_path):
         bot_id="bot",
         user_id="owner",
     ) == []
+
+
+def test_stateless_provider_resolves_template_for_the_requested_entity(tmp_path):
+    db = _Database()
+    service = _service(db, tmp_path, ext_info_provider=lambda _bot_id: None)
+    # The global BotMCPProvider is constructed without a bound entity. Even a
+    # scoped provider must use the requested entity rather than stale state.
+    service.entity_id = "different-entity"
+    service._bot_repo.get_by_id_and_entity.return_value = {"template_type": "custom"}
+
+    service.collect_bot_active_mcps(
+        entity_id="owner",
+        bot_id="bot",
+        user_id="owner",
+        strict_policy_context=True,
+    )
+
+    service._bot_repo.get_by_id_and_entity.assert_called_with("bot", "owner")

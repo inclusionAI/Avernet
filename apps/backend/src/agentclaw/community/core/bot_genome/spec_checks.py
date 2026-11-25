@@ -25,10 +25,11 @@ from agentclaw.community.core.content_store import (
     canonical_tree_bytes,
     decode_tree_bytes,
 )
-from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCapabilities
+from agentclaw.community.core.apply_engine.capabilities import Capabilities
+from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
 from agentclaw.community.core.bot_config_manifest.schema._support import Context
+from agentclaw.community.core.apply_engine.identity_types import legal_identity_types
 from agentclaw.community.core.bot_config_manifest.schema.entries import (
-    legal_identity_types,
     validate_mcp_entry,
 )
 from agentclaw.community.core.bot_genome import contract
@@ -257,6 +258,11 @@ def resource_reasons(spec: GenomeSpec, content: ContentReader) -> list[Reason]:
         if problem is not None:
             reasons.append(Reason("resource_paths", location, problem))
             continue
+        protected = protected_entry_refusal(path)
+        if protected is not None:
+            # The workspace root is the resources root; a protected entry belongs to another construct.
+            reasons.append(Reason("resource_paths", location, protected))
+            continue
         blob = _read(content, entry.digest, location, reasons)
         if blob is None:
             continue
@@ -296,7 +302,7 @@ def resource_reasons(spec: GenomeSpec, content: ContentReader) -> list[Reason]:
 
 def mcp_entry_reasons(spec: GenomeSpec, ctx: SpecCheckContext) -> list[Reason]:
     """The Manifest's own MCP entry rules (URL with a host, header names and values), plus no userinfo."""
-    manifest_ctx = Context(capabilities=ManifestCapabilities(ctx.engine_type, ctx.bot_type, (), ()))
+    manifest_ctx = Context(capabilities=Capabilities(ctx.engine_type, ctx.bot_type, (), ()))
     reasons = []
     for index, entry in enumerate(spec.tools.mcp):
         location = f"spec.tools.mcp[{index}]"

@@ -178,9 +178,13 @@ from .authorized_apps import router as authorized_apps_router
 from .authorized_apps import user_router as user_authorized_apps_router
 from .bots import router as bots_router
 from .bots.classification import router as classification_router
+from .bots.overview import router as bot_overview_router
+from .bot_access_check import router as bot_access_check_router
 from .collaboration_bots import public_router as collaboration_public_router
+from agentclaw.community.adapters.http.bot_public.risk_routes import openapi_router as risk_openapi_router
 from .collaborating_bots import router as collaborating_bots_router
 from .task import task_router
+from .task.context_collab import router as task_context_collab_router
 from .bots.engine_version import router as engine_version_router
 from .bots.engine_config import router as engine_config_router
 from .bots.acli_clis import operations_router as acli_cli_operations_router
@@ -189,6 +193,8 @@ from .bots.cli_tools import router as cli_tools_router
 from .bots.config_manifest import router as config_manifest_router
 from .bots.config_manifest_apply import router as config_manifest_apply_router
 from .bots.create_with_manifest import router as create_with_manifest_router
+from .bots.copy import router as bot_copy_router
+from .bots.collaboration_repair import router as collaboration_repair_router
 from .bots.genome import router as genome_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
@@ -223,6 +229,7 @@ from .harness import harness_router
 from .identity import router as identity_router
 from .local import router as local_router
 from .loadtest import router as loadtest_router
+from .experts import router as experts_router
 from .market import router as market_router
 from .market.acli_clis import router as acli_market_router
 from .mcp import router as mcp_router
@@ -232,6 +239,11 @@ from .bot_chats import router as chats_router
 from .task.bbs import read_router as bbs_read_router
 from .task.bbs import browse_open_router
 from .task.feedback import read_router as feedback_read_router
+from .task.todos import router as todo_router
+from .task.todos.template_capability_router import (
+    router as todo_template_capability_router,
+)
+from .task.todos.template_router import router as todo_template_router
 from .bot_public import router as bot_public_router
 from .resources import router as resources_router
 from .render_screens import router as render_screens_router
@@ -245,6 +257,8 @@ from .skills import (
 from .skills import router as skills_router
 from .skill_sets import router as skill_sets_router
 from .skill_sets.skill_center_references import router as skill_center_references_router
+from .service_envs import router as service_envs_router
+from .service_eval.router import router as service_eval_router
 from .service_publications import (
     edit_lock_router as service_edit_lock_router,
     router as service_lifecycle_router,
@@ -308,6 +322,10 @@ _MIXED_GROUPS = [
 # precede `bots`.
 _OPEN_SUBGROUPS = [
     classification_router,
+    # Transitional, undocumented (include_in_schema=False) app-only access check.
+    bot_access_check_router,
+    # Non-user Bot overview: app-admissible, no user_id, tenant-identical.
+    bot_overview_router,
     # BBS Topics are tenant-wide content, not scoped to one addressed bot.
     bbs_read_router,
     # BBS Browse-Loop per-Bot reads + manual triggers: same /bots/{bot_id}/bbs
@@ -413,6 +431,7 @@ _ADDRESSED_BOT_SUBGROUPS = [
     render_screens_router,
     service_lifecycle_router,
     service_edit_lock_router,
+    service_eval_router,
     containers_router,
     diagnostics_router,
     channels_router,
@@ -448,6 +467,10 @@ _GRANT_CHECKED_SUBGROUPS = [
     # rather than the engine-runtime one, and mounting it here is what gives it
     # both. See ``bots/engine_config.py``.
     engine_config_router,
+    # One-shot collaboration repair names a Bot and is its owner's command; the
+    # router also declares the own-bot grant itself, and the mount states the
+    # same decision so the assembled surface shows it.
+    collaboration_repair_router,
 ]
 
 # Track C — the engine-runtime groups. Mounted separately because they document
@@ -460,7 +483,10 @@ _GRANT_CHECKED_SUBGROUPS = [
 # their order relative to each other and to `_SUBGROUPS` is free. They are still
 # mounted before the bots router for the one rule stated above, not because any
 # of them needs it.
+from .engine_runtime.engine.default_model import router as engine_default_model_router
+
 _ENGINE_RUNTIME_GROUPS = [
+    engine_default_model_router,
     engine_sessions_router,
     engine_engine_router,
     engine_models_router,
@@ -509,6 +535,8 @@ def build_public_router() -> APIRouter:
     user" above).
     """
     public = APIRouter(route_class=PublicAPIRoute)
+    # Explicit business locators, no acting-user query dimension.
+    public.include_router(service_envs_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
     # The caller's own identity — the one operation whose answer IS the user,
     # so it takes no ``user_id`` and can answer no 403: it gets the base error
     # table, not the user-scoped one. The caller is the sole top-level public
@@ -567,6 +595,7 @@ def build_public_router() -> APIRouter:
         )
     # Tenant-identical marketplace queries. This literal group must be mounted
     # before the ``{bot_id}`` wildcard router below.
+    public.include_router(experts_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
     public.include_router(
         market_router,
         responses=ERROR_RESPONSES,
@@ -660,6 +689,13 @@ def build_public_router() -> APIRouter:
     from .dws_hosting.router import router as dws_hosting_router
     public.include_router(dws_hosting_router, responses=ENGINE_RUNTIME_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
 
+    # bot-copy routes (`POST /copy`, `POST /copy/{operation_id}/retry`):
+    # top-level literals under `/openapi/v1/bots`, mounted before the `bots`
+    # `/{bot_id}` wildcard for the same reason `with-manifest` is — otherwise
+    # `/{bot_id}` would capture "copy" as a bot id.
+    public.include_router(
+        bot_copy_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+    )
     # `bots` is mixed too, but stays last for the wildcard-ordering rule above.
     public.include_router(
         bots_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
@@ -675,6 +711,7 @@ def build_public_router() -> APIRouter:
         responses=USER_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
+    public.include_router(risk_openapi_router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
     # Task public surface (execute/dashboard/list) — served at the external
     # contract path the gateway's `collaboration-tasks` domain routes to the
     # backend (pulled out of the broad collaboration→bcs namespace). Not
@@ -684,6 +721,33 @@ def build_public_router() -> APIRouter:
     # the mount uses the base ERROR_RESPONSES, not USER_SCOPED_ERROR_RESPONSES.
     public.include_router(
         task_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    public.include_router(
+        todo_template_capability_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    public.include_router(
+        todo_template_router,
+        responses=SPACE_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    public.include_router(
+        todo_router,
+        responses=SPACE_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Context collab public surface (create / append event / status) — the
+    # spec §6.1 openapi twin of the internal ``/api/v1/collaboration/task``
+    # copy. Not bot-scoped, no grant gate; the operator is the L2
+    # accountability subject the gateway authenticated, which delivery binds
+    # to the verified principal (REFUSED admission — an app-only caller names
+    # no end user to bind). Base error table like the task group: no route
+    # here is scoped by the caller's user_id.
+    public.include_router(
+        task_context_collab_router,
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )

@@ -101,6 +101,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn assignment_display_ref_does_not_override_authoritative_intent() {
+        let raw = r#"{"__bcs_coordination__":true,"v":2,"tool":"bcs_assign_task","intent_id":"bcs_intent_0123456789abcdef0123456789abcdef","task_ref":"T-ffffffff","status":"stored"}"#;
+        for call in [CoordinationCall::from_stdout(raw), CoordinationCall::from_provider_stdout(raw)] {
+            let call = call.expect("additive display field must remain compatible");
+            assert_eq!(call.intent_id.as_deref(), Some("bcs_intent_0123456789abcdef0123456789abcdef"));
+            assert!(call.arguments.is_empty());
+        }
+    }
+
+    #[test]
     fn parses_valid_echo() {
         let s = r#"{"__bcs_coordination__":true,"v":1,"tool":"bcs_assign_task","arguments":{"target_bot":"X","message":"hi"},"status":"received"}"#;
         let call = CoordinationCall::from_stdout(s).expect("should parse");

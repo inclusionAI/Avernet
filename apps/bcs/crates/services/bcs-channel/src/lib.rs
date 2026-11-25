@@ -5,6 +5,7 @@ mod queue_commands;
 mod runtime_inbound;
 mod human_input;
 mod service;
+mod speech_scope;
 mod bindings;
 mod session_outbound;
 mod human_input_notification;
@@ -58,9 +59,8 @@ const GROUP_CHAT_NEW_SESSION_CONFIG: &str = "group_chat_new_session_per_message"
 const FORWARD_SENDER_IDENTITY_CONFIG: &str = "forward_sender_identity";
 /// Well-known binding config key that overrides the initial `<GroupContext>`
 /// delivery for the session lead: `"send"` (default) or `"inject"` (lead
-/// observes the bootstrap context silently via chat.inject). Only Chat groups
-/// honor the override; ManagerWorker groups keep delivering to the manager
-/// via chat.send.
+/// observes the bootstrap context silently via chat.inject). Both Chat and
+/// ManagerWorker groups honor the override for their lead Bot.
 const GROUP_CONTEXT_DELIVERY_CONFIG: &str = "group_context_delivery";
 
 /// Provider-local streaming state is scoped to one card-producing run.
@@ -359,11 +359,7 @@ impl BcsChannelService {
             .get(&ctx.group_id)
             .await
             .ok_or_else(|| ChannelUseCaseError::NotFound(ctx.group_id.clone()))?;
-        let participants = group
-            .participants
-            .into_iter()
-            .filter(|participant| participant.is_bot())
-            .collect();
+        let participants = group.participants;
         let session = self
             .sessions
             .create_channel(
@@ -839,3 +835,5 @@ impl InboundDedupGuard {
 
 #[cfg(test)]
 mod tests;
+
+mod caller_execution;

@@ -7,8 +7,15 @@ import type { ChatBridge } from '@tc-chat/core';
 import type { CommandConfig, SenderRef } from '@tc-chat/ui/es/Sender';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
+
+let mockWorkspacePanelDismissCalls: Array<[boolean, unknown, unknown]> = [];
+jest.mock('@/hooks/useWorkspacePanelDismiss', () => ({
+  useWorkspacePanelDismiss: (...args: [boolean, unknown, unknown]) => {
+    mockWorkspacePanelDismissCalls.push(args);
+  },
+}));
 
 // 捕获 <ChatLayout.Panel> 收到的 props（断言 bridge 透传）。mock 前缀通过 jest.factory 检查。
 let mockPanelRenders: Array<Record<string, unknown>> = [];
@@ -135,9 +142,17 @@ const baseProps = {
 };
 
 describe('ChatPanel interactive', () => {
+  it.each(['connecting', 'error'] as const)('HTTP 历史就绪后 %s 仍展示消息，不被 SDK loading 遮挡', (status) => {
+    render(<ChatPanel {...baseProps} target={botModeTarget as any} mode="bot" interactive
+      connectionStatus={status} historyReady messages={[{ id: 'm', role: 'assistant', content: '历史', status: 'history' } as never]}
+      isRequesting={false} isLoadingMessages retryCount={0} supportState={{ phase: 'idle', error: null }}
+      onSend={jest.fn()} onStop={jest.fn()} onReconnect={jest.fn()} />);
+    expect(screen.getByTestId('bubble')).toBeInTheDocument();
+  });
   beforeEach(() => {
     useTaskSidePanelStore.getState().resetAll();
     mockPanelRenders.length = 0;
+    mockWorkspacePanelDismissCalls.length = 0;
   });
 
   it('任务节点联动只替换左侧会话内容，右侧 ChatLayout.Panel 保持挂载', () => {
@@ -175,6 +190,42 @@ describe('ChatPanel interactive', () => {
     expect(screen.getByTestId('sender')).toBeInTheDocument();
     expect(mockPanelRenders.length).toBeGreaterThanOrEqual(2);
   });
+  it('兼容模式可替换输入提示并完全停用副屏', () => {
+    useTaskSidePanelStore.getState().openLinkedSession({
+      sessionId: 'agent:main:session:s-compat',
+      kind: 'bot',
+      groupId: null,
+      botId: 'bot-9',
+    });
+
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+        composerPlaceholder="请输入你的问题或任务"
+        sidePaneEnabled={false}
+        sidePaneOpen
+        onToggleSidePane={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('sender')).toHaveAttribute('placeholder', '请输入你的问题或任务');
+    expect(screen.queryByTestId('task-linked-session')).not.toBeInTheDocument();
+    expect(mockPanelRenders).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: '收起副屏' })).not.toBeInTheDocument();
+  });
+
   it('副屏镜像开时渲染右上「收起」悬浮钮并触发 toggle；未开或未提供 toggle 时不渲染', () => {
     const onToggleSidePane = jest.fn();
     const { rerender } = render(
@@ -742,6 +793,35 @@ describe('ChatPanel interactive', () => {
     expect(typeof onLoadMore).toBe('function');
     onLoadMore?.();
     expect(onLoadMoreMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('副屏展开后不订阅点外收起，仅允许显式按钮关闭', () => {
+    render(
+      <ChatPanel
+        target={botModeTarget as any}
+        mode="bot"
+        interactive
+        connectionStatus="connected"
+        messages={[]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+        {...baseProps}
+      />,
+    );
+
+    const panelProps = mockPanelRenders.at(-1) as { onIsOpenChange?: (open: boolean) => void };
+    act(() => panelProps?.onIsOpenChange?.(true));
+
+    expect(mockWorkspacePanelDismissCalls.at(-1)).toEqual([
+      false,
+      expect.any(Function),
+      expect.any(Function),
+    ]);
   });
 
   it('把 chatBridge 透传给 ChatLayout.Panel（主→副通道接线）', () => {

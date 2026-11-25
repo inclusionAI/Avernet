@@ -281,10 +281,10 @@ assert.ok(
 );
 assert.equal(previewContainer.querySelector('pre'), null, 'legacy snapshots also open in preview');
 const previewTabs = [...previewContainer.querySelectorAll('[role="tab"]')];
-await act(async () => previewTabs.find(tab => tab.textContent === '源码').click());
+await act(async () => previewTabs.find(tab => tab.textContent === '查看定义').click());
 assert.equal(previewContainer.querySelector('pre').textContent, snapshot.definitionYaml);
 assert.equal(previewContainer.querySelector('[aria-label="Collaboration definition graph"]'), null);
-await act(async () => previewTabs.find(tab => tab.textContent === '预览').click());
+await act(async () => previewTabs.find(tab => tab.textContent === '协作预览').click());
 assert.ok(previewContainer.querySelector('[aria-label="Collaboration definition graph"]'));
 assert.equal(requests.length, 1, 'tab changes must not resubmit inline YAML validation');
 await act(async () => previewRoot.unmount());
@@ -457,6 +457,36 @@ incomplete.graph.loops.rounds.body_node_ids.push('missing');
 await showLoop(incomplete);
 assert.match(loopContainer.querySelector('[role="alert"]').textContent, /缺少逻辑节点 missing/);
 await act(async () => loopRoot.unmount());
+
+// Highlighting must preserve raw source, including CRLF, block strings and
+// HTML-looking text, even when validation is unavailable or YAML is incomplete.
+globalThis.fetch = async () => new Response('{}', { status: 503 });
+let copiedSource;
+Object.defineProperty(globalThis, 'navigator', {
+  value: { clipboard: { writeText: async text => { copiedSource = text; } } },
+  configurable: true,
+});
+const sourceContainer = document.createElement('div');
+document.body.appendChild(sourceContainer);
+for (const source of [
+  '\uFEFF# 注释\r\nname: "协作 🚀"\r\ncount: 3\r\nenabled: true\r\nempty: null\r\nprompt: |\r\n  <img src=x onerror=alert(1)>\r\n  &amp; 原样保留\r\n',
+  'broken: ["未完成\n  <script>alert(1)</script>\n',
+]) {
+  const sourceRoot = createRoot(sourceContainer);
+  await act(async () => sourceRoot.render(React.createElement(CollaborationDefinitionPreview, {
+    snapshot: { ...snapshot, definitionYaml: source },
+  })));
+  const definitionTab = [...sourceContainer.querySelectorAll('[role="tab"]')]
+    .find(tab => tab.textContent === '查看定义');
+  await act(async () => definitionTab.click());
+  const pre = sourceContainer.querySelector('pre');
+  assert.equal(pre.textContent, source, 'highlighting must preserve every source character');
+  assert.ok(pre.querySelector('span'), 'source is highlighted even when validation fails');
+  assert.equal(pre.querySelector('img, script'), null, 'source markup remains inert text');
+  await act(async () => sourceContainer.querySelector('button[aria-label="复制源码"]').click());
+  assert.equal(copiedSource, source, 'copy uses the original, not rendered markup');
+  await act(async () => sourceRoot.unmount());
+}
 
 dom.window.close();
 console.log('Collaboration definition card, contract, and preview tests passed.');

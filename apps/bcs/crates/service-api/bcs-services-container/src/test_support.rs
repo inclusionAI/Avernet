@@ -10,9 +10,9 @@ use bcs_test_support::{
     NoopCollaborationTemplateService, NoopFriendCoreService,
     NoopFriendService, NoopFrontendDeliveryPort,
     NoopFusionCoreService, NoopGroupCoreService, NoopGroupFusionService,
-    NoopGroupManagementService, NoopGroupMessageHistoryService, NoopGroupProposalService,
+    NoopGroupManagementService, NoopGroupMessageHistoryService,
     NoopGroupQueryService, NoopHumanActorService, NoopMessageFlowService,
-    NoopOrganizationManagementService, NoopProposalCoreService,
+    NoopOrganizationManagementService,
     NoopProviderBotCoreService, NoopProviderBotEventService, NoopProviderCoreService,
     NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
     NoopSessionLaunchService, NoopSessionManagementService, NoopSystemMessageService,
@@ -29,7 +29,6 @@ pub fn with_all_noop() -> ServicesBuilder {
         .group(Arc::new(NoopGroupCoreService))
         .routing(Arc::new(NoopRoutingCoreService))
         .fusion(Arc::new(NoopFusionCoreService))
-        .proposal(Arc::new(NoopProposalCoreService))
         .friend(Arc::new(NoopFriendCoreService))
         .relation(Arc::new(NoopRelationCoreService))
         .message_flow(Arc::new(NoopMessageFlowService))
@@ -57,7 +56,6 @@ pub fn with_all_noop() -> ServicesBuilder {
         .group_query(Arc::new(NoopGroupQueryService))
         .group_management(Arc::new(NoopGroupManagementService))
         .workbench_sessions(Arc::new(NoopWorkbenchSessionService))
-        .group_proposals(Arc::new(NoopGroupProposalService))
         .group_message_history(Arc::new(NoopGroupMessageHistoryService))
         .group_context(Arc::new(bcs_app_group_context::GroupContextApplicationServiceImpl::new(
             Arc::new(bcs_group_context_store::MemoryGroupContextRepo::new()),

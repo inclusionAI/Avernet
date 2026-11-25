@@ -76,8 +76,9 @@ class BotRef:
     of that identity: it is the bot's owner as the bot record says
     (``ac_bots.owner_id``), carried here because the platform services
     capture and the spec checks read through (identity files, skills,
-    resources, MCP overrides) scope by the owner's user id, and because the
-    contract's ``revision.bot`` names the owner. The caller resolves both
+    resources, MCP permissions) scope by the owner's user id, and because the
+    contract's ``revision.bot`` names the owner. Persisted Bot MCP overrides
+    are read by the stable entity id. The caller resolves both
     from the bot record; the registry never derives one from the other.
     """
 
@@ -279,6 +280,26 @@ class GenomeRef:
     moved_at: datetime
     moved_by: Provenance
     reason: str | None = None
+    #: What the last move says about the ref; today only ``RefLabel.PARTIAL``, on ``active`` or carried to ``previous``
+    #: with the revision. Rewritten on every move.
+    labels: tuple[str, ...] = ()
+
+
+class RefLabel(StrEnum):
+    """The labels a ref can carry."""
+
+    #: ``active`` was moved by a promotion whose apply ended ``PARTIAL``: the bot holds most of the revision, not all.
+    PARTIAL = "partial"
+
+
+class PromotionStatus(StrEnum):
+    """A promotion's lifecycle: filed, delivering, then settled once its apply ends."""
+
+    PENDING = "pending"  #: filed; its apply is being started
+    APPLYING = "applying"  #: its apply is running; the refs have not moved
+    APPLIED = "applied"  #: the apply succeeded and the refs moved
+    APPLIED_PARTIAL = "applied_partial"  #: the apply was partial; the refs moved and ``active`` is labelled partial
+    APPLY_FAILED = "apply_failed"  #: the apply failed or never started, or ``active`` moved meanwhile; no ref moved
 
 
 @dataclass(frozen=True)
@@ -342,47 +363,42 @@ class ContentReceipt:
 
 
 @dataclass(frozen=True)
-class CompiledManifest:
-    """A revision rendered as the complete desired-state document delivery consumes."""
+class Drift:
+    """The bot runs something other than ``active``: what ``active`` is, and what the bot's state reads as.
 
-    revision_id: str
-    document: dict[str, Any]
-    document_digest: str
+    Observed, never recorded: ``observed`` is the revision id the bot's
+    current state would record under ``active``'s policy, computed by
+    capturing it. No apply id, no document digest — the comparison is the
+    bot against the revision, which is the only thing drift can mean.
+    """
 
-
-@dataclass(frozen=True)
-class ApplyResult:
-    """What the delivery seam answered when it took a compiled revision."""
-
-    kind: str  # the applier: pending | direct | …
-    reference: str | None  # the applier's handle (an apply id), joined by applied_revision
-    detail: str = ""
+    active: str  #: the revision ``active`` points at
+    observed: str  #: the revision id of what the bot holds now
 
 
 @dataclass(frozen=True)
 class Promotion:
-    """One promotion as recorded: the move of ``ref`` from ``from_revision`` to ``revision`` and its delivery.
+    """One promotion as recorded: the delivery of ``revision`` and the move of ``ref`` it makes once that ends.
 
-    Promoting moves ``active`` to the target (and ``previous`` to the old
-    ``active``), records this row with the compiled document, then hands
-    the document to the delivery seam. ``document`` is carried only when the
-    caller asked for it (a single read, not a listing).
+    Promoting files this row ``pending``, starts the apply that delivers the
+    revision (``applying``, with ``apply_id``), and settles when that apply
+    ends: on success or partial success ``active`` moves to the target (and
+    ``previous`` to the old ``active``); otherwise nothing moves. The revision
+    is the record of what was delivered; the row carries no copy of it.
     """
 
     id: str  #: the promotion's id
     ref: str  #: the ref it moved; ``active`` for every promotion today (canary refs are RSI-16)
     revision: str  #: the revision id the ref points at after the promotion
     from_revision: str | None  #: where the ref pointed before; ``None`` for the bot's first promotion
-    document_digest: str  #: ``sha256:<64 hex>`` of the compiled document's canonical JSON
     going_back: bool  #: True when the target had been promoted before and was not the current ``active``
     actor: Provenance  #: who promoted
     reason: str  #: why, as the actor said
-    status: str  #: ``applying`` until the seam answers, then ``applied`` or ``apply_failed``
-    apply_kind: str  #: which delivery seam took it: ``pending`` (none yet, RSI-03) or ``direct`` (RSI-04)
-    apply_reference: str | None  #: the seam's handle for the delivery (an apply id); ``None`` when none started
-    apply_detail: str  #: the seam's one-line answer, e.g. ``started``; a failure names the error type only
-    created_at: datetime  #: when the refs moved
-    document: dict[str, Any] | None = None  #: the compiled document (Manifest v1 layout), when asked for
+    status: PromotionStatus
+    apply_id: str | None  #: the apply run delivering it; ``None`` until it started, or when it never did
+    apply_detail: str  #: one line on how the delivery went; a failure never quotes an exception's text
+    created_at: datetime  #: when the promotion was asked for
+    settled_at: datetime | None  #: when its apply ended and it took its final status; ``None`` while in flight
 
 
 @dataclass(frozen=True)

@@ -21,6 +21,8 @@ export interface ExternalAuthUser {
 
 export interface ExternalAuthState {
   status: ExternalAuthStatus;
+  /** 认证代次：每次成功认证（`setAuthenticated`）自增，用于识别“旧请求”的晚到 401。 */
+  authEpoch: number;
   user: ExternalAuthUser | null;
   loginUrl: string | null;
   isCheckingAuth: boolean;
@@ -30,6 +32,12 @@ export interface ExternalAuthState {
   setCheckingAuth: (loading: boolean) => void;
   setAuthenticated: (user: ExternalAuthUser) => void;
   setUnauthenticated: () => void;
+  /**
+   * 仅推进认证代次（不动 status/user 等 oauth 语义字段）。ace-gateway 重登恢复由观察者调用
+   * （ace-gateway-popup-reauth D5）：晚到的上一代认证请求的 401/ACE 拦截体在登记口按代次防线忽略，
+   * 复用与 oauth 侧同源的 `authEpoch` 计数。
+   */
+  bumpAuthEpoch: () => void;
   setAuthError: (message: string) => void;
   setLoginUrl: (url: string | null) => void;
   setLoadingLoginUrl: (loading: boolean) => void;
@@ -39,6 +47,7 @@ export interface ExternalAuthState {
 
 const initialState = {
   status: 'unknown' as ExternalAuthStatus,
+  authEpoch: 0,
   user: null as ExternalAuthUser | null,
   loginUrl: null as string | null,
   isCheckingAuth: false,
@@ -50,8 +59,9 @@ const initialState = {
 export const useExternalAuthStore = create<ExternalAuthState>((set) => ({
   ...initialState,
   setCheckingAuth: (isCheckingAuth) => set({ isCheckingAuth }),
-  setAuthenticated: (user) => set({ status: 'authenticated', user, error: null, isCheckingAuth: false }),
+  setAuthenticated: (user) => set((state) => ({ status: 'authenticated', user, error: null, isCheckingAuth: false, authEpoch: state.authEpoch + 1 })),
   setUnauthenticated: () => set({ status: 'unauthenticated', user: null, error: null, isCheckingAuth: false }),
+  bumpAuthEpoch: () => set((state) => ({ authEpoch: state.authEpoch + 1 })),
   setAuthError: (message) => set({ status: 'error', user: null, error: message, isCheckingAuth: false }),
   setLoginUrl: (loginUrl) => set({ loginUrl }),
   setLoadingLoginUrl: (isLoadingLoginUrl) => set({ isLoadingLoginUrl }),

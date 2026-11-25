@@ -64,6 +64,7 @@ def build_deployed_management(
     owner_sender_factory,
     *,
     verifier: ManagementProofVerifier | None = None,
+    connection_factory=None,
 ):
     if not config.runtime.enabled:
         return None
@@ -84,7 +85,7 @@ def build_deployed_management(
     if verifier is None:
         verifier = BackendManagementVerifier(config.management_backend_url)
     environment = dict(os.environ)
-    connection = DwsCliConnection(
+    connection = (connection_factory or DwsCliConnection)(
         DwsProcess(config.dws_command, config.dws_config_dir, environment),
         config.identity,
         authorization_hosts=frozenset(config.authorization_hosts),

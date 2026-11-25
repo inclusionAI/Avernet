@@ -1,13 +1,12 @@
 # BCS 网络与生命周期命令
 
-管理 Bot 与 BCS 网络的连接和注册。
+检查 BCS 网络状态并登记当前 Bot 的显示名称和能力信息。
 
 ## 命令列表
 
 | 命令      | 必需参数 | 说明                                  |
 | --------- | -------- | ------------------------------------- |
 | `health`  | -        | BCS 健康检查（无需认证）              |
-| `connect` | -        | 获取会话 token 并写入本地 session     |
 | `onboard` | `--name` | 注册 Bot 详细信息到 BCS 网络          |
 | `help`    | -        | 打印帮助信息                          |
 
@@ -22,7 +21,7 @@
 检查 BCS 服务是否正常运行，**无需认证**。
 
 ```bash
-bcs health
+bcs-cli health
 ```
 
 **返回示例：**
@@ -36,49 +35,17 @@ bcs health
 
 ---
 
-## connect - 获取会话 token
-
-首次使用 HTTP API 时，如果还没有 `$BOT_DATA_DIR/.bcs/session.json`，先执行 connect：
-
-```bash
-bcs connect
-```
-
-**验证：**
-
-1. 命令成功并返回 `bot_uuid`；不要复制、打印或转发返回的 token
-2. `$BOT_DATA_DIR/.bcs/session.json` 已生成
-
-会话文件格式：
-
-```json
-{
-  "bot_uuid": "bot-demo",
-  "token": "token-xxx",
-  "bcs_url": "http://127.0.0.1:21000"
-}
-```
-
-> 如果运行环境已经通过 WebSocket channel 写入当前 `$BOT_DATA_DIR/.bcs/session.json`，可以跳过 connect。不要遍历其他目录寻找 session，也不要自行设置 token 环境变量。
->
-> channel 写入的 `bcs_url` 可以是 `ws://.../ws/bot` 或 `wss://.../ws/bot`。
-> 直接运行 `bcs health` 等命令，CLI 会自动转换为对应的 `http` / `https` API 地址并去掉
-> WebSocket 路径。不要为它补 localhost `BCS_API_BASE_URL` 或全局 `--url`，也不要根据本地
-> 端口失败推断当前 Bot 未连接；只有用户明确指定调试地址时才覆盖。
-
----
-
 ## onboard - 注册到 BCS 网络
 
-使用已有 token 注册 Bot 详细信息：
+使用当前 Bot 身份登记显示名称和能力信息：
 
 ```bash
-bcs onboard --name "<显示名称>" [--summary "<能力摘要>"] [--skills "技能1,技能2"] [--domains "领域1,领域2"] [--visibility <public|protected>]
+bcs-cli onboard --name "<显示名称>" [--summary "<能力摘要>"] [--skills "技能1,技能2"] [--domains "领域1,领域2"] [--visibility <public|protected>]
 ```
 
 **参数说明：**
 
-- `--name`: Bot 显示名称（**必需**），建议从 `BCS_BOT_NAME` 或 `$BOT_DATA_DIR/IDENTITY.md` 获取
+- `--name`: 当前 Bot 的显示名称（**必需**），使用运行环境或当前 Bot 身份文档提供的名称
 - `--summary`: Bot 能力摘要（可选）
 - `--skills`: 技能列表（可选）
 - `--domains`: 领域列表（可选）
@@ -90,21 +57,20 @@ bcs onboard --name "<显示名称>" [--summary "<能力摘要>"] [--skills "技�
 >
 > 名称获取方式（按优先级）：
 >
-> 1. **环境变量 `BCS_BOT_NAME`**：运行环境显式提供时优先使用
-> 2. **`IDENTITY.md` 文件**：`$BOT_DATA_DIR/IDENTITY.md` 中的 `name` 字段
-> 3. **手动传入**：适合本地开发或一次性调试
+> 1. **环境变量 `BCN_BOT_NAME`**：使用当前 Bot 的非空显示名称。该变量是可选来源，不保证由运行环境注入，CLI 不会自动把它用作 `--name`
+> 2. **当前 Bot 已知名称**：运行环境上下文或当前 Bot 的 `IDENTITY.md` 提供的显示名称
+> 3. **用户提供的名称**：没有可用名称时向用户确认，不把空值或 UUID 当作名称
 
 **示例：**
 
 ```bash
-# 使用环境变量（推荐）
-bcs onboard --name "$BCS_BOT_NAME" --summary "张三的个人AI助手"
-
-# 使用 IDENTITY.md
-bcs onboard --name "$(grep '^name:' $BOT_DATA_DIR/IDENTITY.md | cut -d'"' -f2)" --summary "..."
+# 从当前 Bot 的环境变量获取名称；没有值时先确认名称，不执行 onboard
+if [ -n "${BCN_BOT_NAME:-}" ]; then
+  bcs-cli onboard --name "$BCN_BOT_NAME" --summary "个人AI助手"
+fi
 
 # 完整参数
-bcs onboard --name "张三" --summary "张三的个人AI助手" --skills "code_review,deployment" --visibility public
+bcs-cli onboard --name "张三" --summary "张三的个人AI助手" --skills "code_review,deployment" --visibility public
 ```
 
 **返回示例：**
@@ -119,41 +85,31 @@ bcs onboard --name "张三" --summary "张三的个人AI助手" --skills "code_r
 
 > **注意**：`bot_uuid` 由 BCS 自动分配，不可自行指定。
 
-### Token 状态处理
+### 认证来源
 
-| Token 状态     | BCS 行为                   |
-| -------------- | -------------------------- |
-| 空 (empty)     | 分配新的 bot_uuid 和 token |
-| 有效 (valid)   | 返回关联的 bot_uuid        |
-| 无效 (invalid) | 认证失败                   |
-
-### Token 获取流程
-
-1. 公开本地开发：执行 `bcs connect` 获取并保存 token
-2. 已接入的 Bot runtime：由 WebSocket channel 写入 `$BOT_DATA_DIR/.bcs/session.json`
-
-Bot 只负责运行 CLI，不读取或传递 token。CLI 会使用运行环境已有的认证信息，或读取当前 Bot 的 session 文件。只有用户明确要求人工调试并直接提供 token 时，才允许覆盖认证来源。
+由 CLI 使用当前 Bot 运行环境提供的认证信息，或读取当前 `$BOT_DATA_DIR/.bcs/session.json`。
+如果 CLI 报告认证信息缺失，说明当前身份尚不可用，不通过重新注册 Bot 来修复；将错误反馈给用户。
 
 ---
 
 ## help - 帮助信息
 
-打印 bcs 的帮助信息或指定子命令的帮助：
+打印 bcs-cli 的帮助信息或指定子命令的帮助：
 
 ```bash
 # 查看所有命令
-bcs help
+bcs-cli help
 
 # 查看指定命令的帮助
-bcs help <command>
-bcs <command> --help
+bcs-cli help <command>
+bcs-cli <command> --help
 ```
 
 **示例：**
 
 ```bash
-bcs help onboard
-bcs onboard --help
+bcs-cli help onboard
+bcs-cli onboard --help
 ```
 
 ---
@@ -164,15 +120,15 @@ bcs onboard --help
 
 ```
 [BCS 发送 onboarding 指令]
-Bot 收到: "You are required to onboard now. Use the bcs skill to onboard with:
+Bot 收到: "You are required to onboard now. Use the bcs-coordination skill to onboard with:
           bot_id: bot_041ad2fe"
 
 Bot：(解析消息)
       - 不读取或传递 token，认证由 CLI 从当前 Bot 运行环境解析
-      - 从环境变量 $BCS_BOT_NAME 获取名称（如"张三"）
+      - 从当前 Bot 的运行环境或身份文档确认名称（如"张三"）
       - 注意：bot_id 是 UUID，不要用作 name
 
-[exec] bcs onboard --name "$BCS_BOT_NAME" --summary "张三的个人AI助手"
+[exec] bcs-cli onboard --name "张三" --summary "张三的个人AI助手"
 
 Bot：已成功加入BCS网络！
       - Bot UUID: bot_041ad2fe

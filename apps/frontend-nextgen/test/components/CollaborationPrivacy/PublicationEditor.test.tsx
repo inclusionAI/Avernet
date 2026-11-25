@@ -45,11 +45,11 @@ describe('PublicationEditor', () => {
     const { rerender } = render(<PublicationEditor {...props} audience="user" />);
 
     expect(screen.getByRole('heading', { name: 'Bot 可见性：对用户' })).toBeInTheDocument();
-    const squareLink = screen.getByRole('link', { name: '[协作广场/公开Bot]' });
+    const squareLink = screen.getByRole('link', { name: '[发现/公开Bot]' });
     expect(squareLink).toHaveAttribute('href', '/collaboration-square/bots');
     expect(squareLink).not.toHaveClass('underline');
     expect(squareLink.parentElement).toHaveTextContent(
-      '选择当前 Bot 在[协作广场/公开Bot]中的可见性，以及其他用户或 Bot 能否申请当前 Bot 为好友。',
+      '选择当前 Bot 在[发现/公开Bot]中的可见性，以及其他用户或 Bot 能否申请当前 Bot 为好友。',
     );
     fireEvent.click(squareLink);
     expect(history.push).toHaveBeenCalledWith('/collaboration-square/bots');
@@ -61,8 +61,8 @@ describe('PublicationEditor', () => {
     rerender(<PublicationEditor {...props} audience="bot" />);
 
     expect(screen.getByRole('heading', { name: 'Bot 可见性：对 Bot' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '[协作广场/公开Bot]' }).parentElement).toHaveTextContent(
-      '选择当前 Bot 在[协作广场/公开Bot]中的可见性，以及其他用户或 Bot 能否申请当前 Bot 为好友。',
+    expect(screen.getByRole('link', { name: '[发现/公开Bot]' }).parentElement).toHaveTextContent(
+      '选择当前 Bot 在[发现/公开Bot]中的可见性，以及其他用户或 Bot 能否申请当前 Bot 为好友。',
     );
     expect(screen.getByRole('radio', { name: /限定组织可申请/ })).toHaveTextContent(
       '其他 Bot 可见，仅选中组织范围内的用户的 Bot 可申请好友',
@@ -124,7 +124,7 @@ describe('PublicationEditor', () => {
       expect(screen.getByRole('button', { name: /示例集团 \/ 产品事业部 \/ 体验团队/ })).toBeInTheDocument(),
     );
     fireEvent.click(screen.getByRole('button', { name: /示例集团 \/ 产品事业部 \/ 体验团队/ }));
-    fireEvent.click(screen.getByRole('button', { name: '提交审批' }));
+    fireEvent.click(screen.getByRole('button', { name: '发起变更' }));
 
     expect(onSubmit).toHaveBeenCalledWith(
       {
@@ -162,7 +162,7 @@ describe('PublicationEditor', () => {
 
     expect(screen.getByRole('radio', { name: /限定组织可申请/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '提交审批' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '发起变更' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('radio', { name: /限定组织可申请/ }));
     fireEvent.change(screen.getByRole('textbox', { name: '搜索组织范围' }), { target: { value: '大安全' } });
@@ -202,7 +202,9 @@ describe('PublicationEditor', () => {
 
     expect(screen.getByRole('radio', { name: /限定组织可申请/ })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByText('蚂蚁集团-CRO线-大安全技术部')).toBeInTheDocument();
-    expect(screen.queryByText('当前可见性“限定组织可申请”已下线，请重新选择“不可见”或“全部可见”。')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('当前可见性“限定组织可申请”已下线，请重新选择“不可见”或“全部可见”。'),
+    ).not.toBeInTheDocument();
   });
 
   it('外部 Bot 配置未变化时提示无需保存，而非审批话术', () => {
@@ -219,6 +221,6 @@ describe('PublicationEditor', () => {
     );
 
     expect(screen.getByText('可见性未发生变化，无需保存')).toBeInTheDocument();
-    expect(screen.queryByText('可见性未发生变化，无需提交审批')).not.toBeInTheDocument();
+    expect(screen.queryByText('可见性未发生变化，无需提交')).not.toBeInTheDocument();
   });
 });

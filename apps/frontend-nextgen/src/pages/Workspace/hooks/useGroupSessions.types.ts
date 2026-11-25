@@ -1,5 +1,5 @@
 import type { ParticipantMode, SessionView } from '@/domain/collaboration';
-import type { MessageViewScope } from '@/domain/collaboration/types';
+import type { GroupContextDelivery, MessageViewScope } from '@/domain/collaboration/types';
 
 export interface UseGroupSessionsResult {
   sessions: SessionView[];
@@ -12,6 +12,8 @@ export interface UseGroupSessionsResult {
   loadMoreErrorByGroupId: Record<string, string>;
   loadMoreSessions: (groupId: string) => Promise<void>;
   isSessionsLoading: boolean;
+  /** 会话已由当前群的最新列表或指定会话入口确认，任务恢复可启动。 */
+  isSessionSelectionReady: boolean;
   selectedSessionId: string | null;
   selectedSession: SessionView | null;
   favoriteSessionIds: string[];
@@ -31,6 +33,7 @@ export interface UseGroupSessionsResult {
     title?: string,
     contextQuery?: string,
     messageViewScope?: MessageViewScope,
+    contextDelivery?: GroupContextDelivery,
   ) => Promise<SessionView | null>;
   renameSession: (sessionId: string, title: string) => Promise<boolean>;
   deleteSession: (sessionId: string) => Promise<boolean>;

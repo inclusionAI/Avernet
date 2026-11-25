@@ -2,9 +2,16 @@
 
 ## Provides
 
+- Transport-only Fuse v2 Card PUT/DELETE and search contracts.
+
 - Pure HTTP wrapper for the remote BCSFuse service.
 - Request/response DTOs for worker sync, worker recommendation, batch lookup, and fusion APIs.
 - `FuseClientError` for transport and response parsing failures.
+- Typed `RecommendWorkerFilters` on `RecommendWorkersRequest`. The only
+  expressible recall filter is the controlled `availability` string list; raw
+  provider JSON never enters the client contract. `filters: None` omits the
+  field entirely so legacy request bodies stay byte-compatible, while an
+  authorized recall sends `availability: [public, protected, private]`.
 
 ## Consumes
 
@@ -39,3 +46,14 @@ responses may use either the OSS `WORKER_NOT_FOUND` code or the internal
 
 - `cargo test --package bcs-fuse-client --manifest-path Cargo.toml`
 - `cargo check --package bcs-fuse-client --all-targets --manifest-path Cargo.toml`
+
+## Card write observations
+
+PUT/DELETE log `fuse.card.write_started`, `fuse.card.write_succeeded` and
+`fuse.card.write_failed` under `bcs_observation`. Success is logged only after
+HTTP status, JSON decoding and saved/deleted acknowledgment checks. Summaries
+allowlist resource ID, type, bounded name, skill count, visibility labels, status,
+duration and Fuse card_version. They exclude Card details, credentials, source
+URLs, raw errors and remote response bodies. Provider/ref and originating request
+IDs may be unavailable in detached work; no lookup or propagation is added to
+fill them. Existing operation-log and optional tracing contracts are unchanged.

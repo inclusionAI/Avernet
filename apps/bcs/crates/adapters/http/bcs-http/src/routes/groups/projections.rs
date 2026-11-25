@@ -36,6 +36,7 @@ pub(crate) fn group_detail_to_create_json(mut result: GroupDetailResult, created
         "group_kind": result.group_kind,
         "dm_pair_key": result.dm_pair_key,
         "human_mention_notify_mode": result.human_mention_notify_mode,
+        "catalog_labels":result.catalog_labels,
         "created": created
     });
     insert_opening_message(&mut response, opening_message);
@@ -131,14 +132,69 @@ pub(crate) fn group_to_detail_json(mut group: GroupDetailResult) -> Value {
         "group_kind": group.group_kind,
         "dm_pair_key": group.dm_pair_key,
         "group_strategy": group.group_strategy,
-        "service_spec": group.service_spec,
         "latest_running_session_id": group.latest_running_session_id,
         "originator": group.originator,
         "visibility": group.visibility,
         "human_mention_notify_mode": group.human_mention_notify_mode,
+        "catalog_labels":group.catalog_labels,
     });
     insert_opening_message(&mut response, opening_message);
     response
+}
+
+/// Legacy participant row of the PATCH surface: exactly the pre-avatar field
+/// set of the shared V1 `Participant`. Serializing through this dedicated
+/// DTO — instead of the V1 type — keeps any future V1 participant field
+/// (like `avatar_url`) out of the legacy wire shape (bot-avatar plan
+/// design §5.1: 旧版 DTO 不随跨版本共享序列化类型扩展).
+#[derive(Serialize)]
+struct LegacyGroupParticipant {
+    actor_id: String,
+    actor_kind: bcs_domain::ActorKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    role: V1ParticipantRole,
+    mode: ParticipantMode,
+    message_view_scope: MessageViewScope,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tags: Vec<String>,
+}
+
+impl LegacyGroupParticipant {
+    fn from_v1(participant: &bcs_service_api::application::v1::Participant) -> Self {
+        Self {
+            actor_id: participant.actor_id.clone(),
+            actor_kind: participant.actor_kind,
+            name: participant.name.clone(),
+            role: participant.role,
+            mode: participant.mode,
+            message_view_scope: participant.message_view_scope,
+            tags: participant.tags.clone(),
+        }
+    }
+}
+
+/// Map the V1 GroupDetail to the legacy PATCH response: the response keeps
+/// the shape this route has serialized since the group-application refactor
+/// (kind tag, `group_id`, …) while the participant rows go through the
+/// legacy DTO above (bot-avatar plan Task 8, design §5.1).
+pub(crate) fn v1_group_detail_to_legacy_update_json(group: V1GroupDetail) -> Value {
+    let participants = match &group {
+        V1GroupDetail::Collaboration(detail) => detail.participants.as_slice(),
+        V1GroupDetail::DirectMessage(detail) => detail.participants.as_slice(),
+    };
+    let legacy_rows: Vec<Value> = participants
+        .iter()
+        .map(|participant| {
+            serde_json::to_value(LegacyGroupParticipant::from_v1(participant))
+                .expect("legacy participant row serializes")
+        })
+        .collect();
+    let mut value = serde_json::to_value(group).expect("V1 Group detail serializes");
+    if let Some(object) = value.as_object_mut() {
+        object.insert("participants".to_string(), Value::Array(legacy_rows));
+    }
+    value
 }
 
 pub(crate) async fn resolve_driver_bot_owner(

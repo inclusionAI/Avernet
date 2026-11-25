@@ -14,6 +14,7 @@ from agentclaw.community.core.bot_public.catalog_metadata import (
     BotCatalogMetadata,
     BotCatalogMetadataPage,
     BotCatalogMetadataUnavailableError,
+    BotCatalogProfileNotFoundError,
     BotCatalogSearchUnavailableError,
 )
 from agentclaw.community.core.bot_public.repository.models import BotFriendStatus
@@ -42,6 +43,7 @@ def _make_service(
     device_sync_dispatcher=None,
     bcsfuse_config=None,
     catalog_metadata_service=None,
+    risk_repository=None,
 ):
     resolver = device_context_resolver or MagicMock()
     return BotPublicService(
@@ -58,6 +60,7 @@ def _make_service(
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
         bcsfuse_config=bcsfuse_config or MagicMock(base_url=""),
         catalog_metadata_service=catalog_metadata_service or MagicMock(),
+        risk_repository=risk_repository,
     )
 
 def _make_operator(staff_id="op_user", nick_name="Operator") -> OperatorContext:
@@ -87,6 +90,14 @@ def _make_bot(bot_id="bot1", owner_id="owner1", public="0", ext=None):
         "entity_id": "entity1",
         "ext": ext or {},
     }
+
+
+def _make_bot_repository(bot=None):
+    repository = MagicMock()
+    repository.list_matches_by_legacy_locator.return_value = (
+        [] if bot is None else [bot]
+    )
+    return repository
 
 
 def _make_catalog_bot(bot_id: str, entity_id: str):
@@ -1254,9 +1265,9 @@ class TestCreateAuthRelationshipForApproval:
     )
     def test_creates_relationship_for_restricted_bot(self, _mock_resolve):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = _make_bot(
-            ext={"friend_approval": "1"},
-        )
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            _make_bot(ext={"friend_approval": "1"})
+        ]
         plugin = MagicMock()
         plugin.create_relationship.return_value = {"auth_id": 42}
         svc = _make_service(
@@ -1280,9 +1291,9 @@ class TestCreateAuthRelationshipForApproval:
     )
     def test_already_exists_is_idempotent_success(self, _mock_resolve):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = _make_bot(
-            ext={"friend_approval": "1"},
-        )
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            _make_bot(ext={"friend_approval": "1"})
+        ]
         plugin = MagicMock()
         plugin.create_relationship.return_value = {
             "auth_id": None,
@@ -1297,11 +1308,43 @@ class TestCreateAuthRelationshipForApproval:
 
         plugin.create_relationship.assert_called_once()
 
+    @patch(
+        "agentclaw.community.core.bot_management.utils.resolve_agent_code",
+        return_value="agent_123",
+    )
+    def test_transferred_bot_uses_current_owner_for_relationship(self, _mock_resolve):
+        bot_repo = MagicMock()
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            {
+                **_make_bot(
+                    owner_id="current-owner",
+                    ext={"friend_approval": "1"},
+                ),
+                "entity_id": "owner1",
+            }
+        ]
+        plugin = MagicMock()
+        plugin.create_relationship.return_value = {"auth_id": 42}
+        svc = _make_service(
+            bot_repository=bot_repo,
+            auth_relationship_plugin=plugin,
+        )
+
+        svc._create_auth_relationship_for_approval(self._friend_record(), 1)
+
+        bot_repo.list_matches_by_legacy_locator.assert_called_once_with(
+            "bot1", "owner1"
+        )
+        assert (
+            plugin.create_relationship.call_args.kwargs["operator_work_no"]
+            == "current-owner"
+        )
+
     def test_open_bot_skips_explicit_relationship(self):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = _make_bot(
-            ext={"friend_approval": "0"},
-        )
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            _make_bot(ext={"friend_approval": "0"})
+        ]
         plugin = MagicMock()
         svc = _make_service(
             bot_repository=bot_repo,
@@ -1326,7 +1369,7 @@ class TestCreateAuthRelationshipForApproval:
 
     def test_missing_bot_fails_closed(self):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = None
+        bot_repo.list_matches_by_legacy_locator.return_value = []
         svc = _make_service(bot_repository=bot_repo)
 
         with pytest.raises(BotNotFoundError, match="bot1"):
@@ -1336,7 +1379,9 @@ class TestCreateAuthRelationshipForApproval:
 
     def test_invalid_bot_ext_propagates_json_error(self):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = _make_bot(ext="invalid-json")
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            _make_bot(ext="invalid-json")
+        ]
         svc = _make_service(bot_repository=bot_repo)
 
         with pytest.raises(ValueError):
@@ -1350,9 +1395,9 @@ class TestCreateAuthRelationshipForApproval:
     )
     def test_missing_agent_code_fails_closed(self, _mock_resolve):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = _make_bot(
-            ext={"friend_approval": "1"},
-        )
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            _make_bot(ext={"friend_approval": "1"})
+        ]
         svc = _make_service(bot_repository=bot_repo)
 
         with pytest.raises(BotPublicServiceError, match="agent_code"):
@@ -1366,9 +1411,9 @@ class TestCreateAuthRelationshipForApproval:
     )
     def test_none_result_fails_closed(self, _mock_resolve):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = _make_bot(
-            ext={"friend_approval": "1"},
-        )
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            _make_bot(ext={"friend_approval": "1"})
+        ]
         plugin = MagicMock()
         plugin.create_relationship.return_value = None
         svc = _make_service(
@@ -1387,9 +1432,9 @@ class TestCreateAuthRelationshipForApproval:
     )
     def test_plugin_exception_propagates(self, _mock_resolve):
         bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = _make_bot(
-            ext={"friend_approval": "1"},
-        )
+        bot_repo.list_matches_by_legacy_locator.return_value = [
+            _make_bot(ext={"friend_approval": "1"})
+        ]
         plugin = MagicMock()
         plugin.create_relationship.side_effect = RuntimeError(
             "auth unavailable",
@@ -1411,16 +1456,14 @@ class TestCreateAuthRelationshipForApproval:
 
 class TestCreateFriendRequestApproval:
     def test_raises_if_bot_not_found(self):
-        bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = None
+        bot_repo = _make_bot_repository()
         svc = _make_service(bot_repository=bot_repo)
         with pytest.raises(BotPublicServiceError, match="Bot not found"):
             svc.create_friend_request_approval("bot1", "owner1", "op1", "Op One")
 
     def test_auto_accept_when_no_approval_needed_and_no_existing_record(self):
-        bot_repo = MagicMock()
         bot = _make_bot(public="1", ext={"friend_approval": "0"})
-        bot_repo.get_by_id_and_owner.return_value = bot
+        bot_repo = _make_bot_repository(bot)
 
         repo = MagicMock()
         repo.get_by_entity_ids.return_value = None
@@ -1433,11 +1476,11 @@ class TestCreateFriendRequestApproval:
         assert result["success"] is True
         assert result["auto_accepted"] is True
         assert result["bot_friend_id"] == 5
+        assert repo.insert.call_args.args[0]["target_entity_id"] == "entity1"
 
     def test_auto_accept_updates_existing_non_accepted_record(self):
-        bot_repo = MagicMock()
         bot = _make_bot(public="1", ext={"friend_approval": "0"})
-        bot_repo.get_by_id_and_owner.return_value = bot
+        bot_repo = _make_bot_repository(bot)
 
         repo = MagicMock()
         existing = {"id": 7, "status": "PENDING", "ext": {}}
@@ -1452,9 +1495,8 @@ class TestCreateFriendRequestApproval:
         assert result["auto_accepted"] is True
 
     def test_auto_accept_keeps_already_accepted_record(self):
-        bot_repo = MagicMock()
         bot = _make_bot(public="1", ext={"friend_approval": "0"})
-        bot_repo.get_by_id_and_owner.return_value = bot
+        bot_repo = _make_bot_repository(bot)
 
         repo = MagicMock()
         existing = {"id": 7, "status": BotFriendStatus.ACCEPTED, "ext": {}}
@@ -1467,9 +1509,8 @@ class TestCreateFriendRequestApproval:
         repo._update_status_and_ext.assert_not_called()
 
     def test_requires_approval_creates_pending_and_calls_process(self):
-        bot_repo = MagicMock()
         bot = _make_bot(public="1", ext={"friend_approval": "1"})
-        bot_repo.get_by_id_and_owner.return_value = bot
+        bot_repo = _make_bot_repository(bot)
 
         repo = MagicMock()
         repo.get_by_entity_ids.return_value = None
@@ -1484,6 +1525,36 @@ class TestCreateFriendRequestApproval:
         assert result["success"] is True
         assert result["bot_friend_id"] == 3
         repo.create_approval.assert_called_once()
+
+    @pytest.mark.parametrize("request_locator", ["old-owner", "new-owner"])
+    def test_transferred_bot_reuses_friend_record(self, request_locator):
+        bot = {
+            **_make_bot(owner_id="new-owner", public="1", ext={"friend_approval": "0"}),
+            "entity_id": "old-owner",
+        }
+        bot_repo = _make_bot_repository(bot)
+        existing = {"id": 9, "status": BotFriendStatus.ACCEPTED, "ext": {}}
+        friend_repo = MagicMock()
+        friend_repo.get_by_entity_ids.side_effect = (
+            lambda **kwargs: existing
+            if kwargs["target_entity_id"] == "old-owner"
+            else None
+        )
+
+        svc = _make_service(
+            bot_repository=bot_repo,
+            bot_friend_repo=friend_repo,
+        )
+        result = svc.create_friend_request_approval(
+            "bot1", request_locator, "new-owner", "New Owner"
+        )
+
+        assert result["success"] is True
+        assert result["bot_friend_id"] == 9
+        friend_repo.insert.assert_not_called()
+        bot_repo.list_matches_by_legacy_locator.assert_called_once_with(
+            "bot1", request_locator
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1526,14 +1597,14 @@ class TestSearchPublicBotsByKeyword:
         repository = MagicMock()
         non_public = _make_catalog_bot("bot-1", "entity-1")
         non_public["public"] = "0"
-        repository.list_bots_by_owner_bot_pairs.return_value = (1, [non_public])
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = [non_public]
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
         )
 
         result = svc.search_catalog_public_bots_by_keyword(
             search="agent",
-            page=3,
+            page=1,
             page_size=20,
             caller=BotCatalogCaller("tenant-1", "user-1", 7),
             request_id="trace-1",
@@ -1556,15 +1627,13 @@ class TestSearchPublicBotsByKeyword:
         }
         metadata.search_public_bot_metadata.assert_called_once_with(
             search="agent",
-            page=3,
-            page_size=20,
+            page=1,
+            page_size=100,
             caller=BotCatalogCaller("tenant-1", "user-1", 7),
             request_id="trace-1",
         )
-        repository.list_bots_by_owner_bot_pairs.assert_called_once_with(
+        repository.list_catalog_bots_by_owner_bot_pairs.assert_called_once_with(
             [("bot-1", "entity-1"), ("missing", "bcs-owner")],
-            page=1,
-            page_size=2,
         )
 
     def test_catalog_search_prefers_non_blank_backend_fields_and_uses_bcs_fallbacks(self):
@@ -1593,10 +1662,7 @@ class TestSearchPublicBotsByKeyword:
         fallback["entity_id"] = ""
         fallback["owner_id"] = "BCS-owner"
         repository = MagicMock()
-        repository.list_bots_by_owner_bot_pairs.return_value = (
-            2,
-            [backend, fallback],
-        )
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = [backend, fallback]
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
         )
@@ -1611,17 +1677,14 @@ class TestSearchPublicBotsByKeyword:
         assert result["items"][1]["bot_desc"] == "BCS fallback"
         assert result["items"][1]["entity_id"] == "BCS-owner"
 
-    def test_catalog_search_preserves_bcs_total_when_join_has_fewer_items(self):
+    def test_catalog_search_counts_actual_catalog_rows_instead_of_stale_bcs_total(self):
         metadata = MagicMock()
         metadata.search_public_bot_metadata.return_value = _metadata_page(
             [BotCatalogMetadata(BotCatalogAddress("bot-1", "entity-1"), "bot")],
             total=21,
         )
         repository = MagicMock()
-        repository.list_bots_by_owner_bot_pairs.return_value = (
-            1,
-            [_make_catalog_bot("bot-1", "entity-1")],
-        )
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = [_make_catalog_bot("bot-1", "entity-1")]
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
         )
@@ -1631,7 +1694,7 @@ class TestSearchPublicBotsByKeyword:
             request_id="trace-bcs-total",
         )
 
-        assert result["total"] == 21
+        assert result["total"] == 1
         assert len(result["items"]) == 1
 
     def test_catalog_search_prefers_validated_bcs_bot_uuid(self):
@@ -1647,10 +1710,7 @@ class TestSearchPublicBotsByKeyword:
             total=1,
         )
         repository = MagicMock()
-        repository.list_bots_by_owner_bot_pairs.return_value = (
-            1,
-            [_make_catalog_bot("bot-1", "entity-1")],
-        )
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = [_make_catalog_bot("bot-1", "entity-1")]
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
         )
@@ -1671,10 +1731,7 @@ class TestSearchPublicBotsByKeyword:
             [bcs_item], total=1
         )
         repository = MagicMock()
-        repository.list_bots_by_owner_bot_pairs.return_value = (
-            1,
-            [_make_catalog_bot("shared", "entity-a")],
-        )
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = [_make_catalog_bot("shared", "entity-a")]
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
         )
@@ -1710,12 +1767,11 @@ class TestSearchPublicBotsByKeyword:
             [bcs_item], total=1
         )
         repository = MagicMock()
-        repository.list_bots_by_owner_bot_pairs.return_value = (
-            2,
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = (
             [
                 _make_catalog_bot("shared", "entity-a"),
                 _make_catalog_bot("shared", "entity-b"),
-            ],
+            ]
         )
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
@@ -1750,13 +1806,12 @@ class TestSearchPublicBotsByKeyword:
             total=3,
         )
         repository = MagicMock()
-        repository.list_bots_by_owner_bot_pairs.return_value = (
-            3,
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = (
             [
                 _make_catalog_bot("shared", "entity-b"),
                 _make_catalog_bot("shared", "entity-other"),
                 _make_catalog_bot("shared", "entity-a"),
-            ],
+            ]
         )
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
@@ -1766,7 +1821,7 @@ class TestSearchPublicBotsByKeyword:
             caller=BotCatalogCaller("tenant-1", None, 7), request_id="trace-2"
         )
 
-        assert result["total"] == 3
+        assert result["total"] == 2
         assert [bot["entity_id"] for bot in result["items"]] == [
             "entity-a",
             "entity-b",
@@ -1789,7 +1844,7 @@ class TestSearchPublicBotsByKeyword:
             )
 
         assert str(error.value) == ""
-        repository.list_bots_by_owner_bot_pairs.assert_not_called()
+        repository.list_catalog_bots_by_owner_bot_pairs.assert_not_called()
 
     def test_catalog_search_fails_closed_on_unexpected_metadata_error(self, caplog):
         metadata = MagicMock()
@@ -1836,7 +1891,7 @@ class TestSearchPublicBotsByKeyword:
             total=2,
         )
         repository = MagicMock()
-        repository.list_bots_by_owner_bot_pairs.return_value = (2, [malformed, sensitive])
+        repository.list_catalog_bots_by_owner_bot_pairs.return_value = [malformed, sensitive]
         svc = _make_service(
             bot_repository=repository, catalog_metadata_service=metadata
         )
@@ -2091,12 +2146,17 @@ class TestListMyBotFriends:
         repo.list_by_requester.return_value = (1, [
             {"id": 1, "target_entity_id": "owner1", "target_bot_id": "bot1", "status": "ACCEPTED"}
         ])
-        bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = {"bot_id": "bot1", "bot_name": "TestBot"}
+        bot_repo = _make_bot_repository(
+            {
+                **_make_bot(bot_id="bot1", owner_id="new-owner"),
+                "entity_id": "owner1",
+            }
+        )
         svc = _make_service(bot_friend_repo=repo, bot_repository=bot_repo)
         result = svc.list_my_bot_friends("user1")
         assert result["total"] == 1
         assert result["items"][0]["bot"]["bot_id"] == "bot1"
+        assert result["items"][0]["bot"]["owner_id"] == "new-owner"
 
 
 # ---------------------------------------------------------------------------
@@ -2108,7 +2168,10 @@ class TestGetFriendRecord:
         repo = MagicMock()
         expected = {"id": 1}
         repo.get_by_entity_ids.return_value = expected
-        svc = _make_service(bot_friend_repo=repo)
+        svc = _make_service(
+            bot_friend_repo=repo,
+            bot_repository=_make_bot_repository(_make_bot()),
+        )
         result = svc.get_friend_record("user1", "owner1", "bot1")
         assert result == expected
 
@@ -2124,14 +2187,13 @@ class TestGetFriendRecord:
         friend_record = {"id": 1, "status": "ACCEPTED", "requester_entity_id": "user1"}
         repo.get_by_entity_ids.return_value = friend_record
 
-        bot_repo = MagicMock()
         bot = _make_bot(
             bot_id="bot1",
             owner_id="owner1",
             public="1",
             ext={"friend_approval": "1", "other_key": "other_val"},
         )
-        bot_repo.get_by_id_and_owner.return_value = bot
+        bot_repo = _make_bot_repository(bot)
 
         svc = _make_service(bot_friend_repo=repo, bot_repository=bot_repo)
         result = svc.get_friend_record("user1", "owner1", "bot1")
@@ -2153,15 +2215,15 @@ class TestGetFriendRecord:
         friend_record = {"id": 1, "status": "ACCEPTED"}
         repo.get_by_entity_ids.return_value = friend_record
 
-        bot_repo = MagicMock()
         bot = {
             "id": 42,
             "bot_id": "bot1",
             "owner_id": "owner1",
+            "entity_id": "owner1",
             "public": "0",
             "ext": json.dumps({"friend_approval": "0", "custom": "value"}),
         }
-        bot_repo.get_by_id_and_owner.return_value = bot
+        bot_repo = _make_bot_repository(bot)
 
         svc = _make_service(bot_friend_repo=repo, bot_repository=bot_repo)
         result = svc.get_friend_record("user1", "owner1", "bot1")
@@ -2176,9 +2238,8 @@ class TestGetFriendRecord:
         friend_record = {"id": 1}
         repo.get_by_entity_ids.return_value = friend_record
 
-        bot_repo = MagicMock()
         bot = _make_bot(public="1", ext={})  # ext 为空，没有 friend_approval
-        bot_repo.get_by_id_and_owner.return_value = bot
+        bot_repo = _make_bot_repository(bot)
 
         svc = _make_service(bot_friend_repo=repo, bot_repository=bot_repo)
         result = svc.get_friend_record("user1", "owner1", "bot1")
@@ -2191,12 +2252,34 @@ class TestGetFriendRecord:
         repo = MagicMock()
         repo.get_by_entity_ids.return_value = {"id": 1}  # friend_record 存在
 
-        bot_repo = MagicMock()
-        bot_repo.get_by_id_and_owner.return_value = None  # bot 不存在
+        bot_repo = _make_bot_repository()
 
         svc = _make_service(bot_friend_repo=repo, bot_repository=bot_repo)
-        with pytest.raises(ValueError, match="Bot not found"):
+        with pytest.raises(BotPublicServiceError, match="Bot not found"):
             svc.get_friend_record("user1", "owner1", "bot1")
+
+    def test_transferred_bot_is_loaded_by_stable_entity(self):
+        repo = MagicMock()
+        repo.get_by_entity_ids.return_value = {
+            "id": 1,
+            "status": BotFriendStatus.ACCEPTED,
+            "target_entity_id": "old-owner",
+        }
+        bot = {
+            **_make_bot(owner_id="new-owner", public="1"),
+            "entity_id": "old-owner",
+        }
+        bot_repo = _make_bot_repository(bot)
+        svc = _make_service(bot_friend_repo=repo, bot_repository=bot_repo)
+
+        result = svc.get_friend_record("new-owner", "old-owner", "bot1")
+
+        assert result["status"] == BotFriendStatus.ACCEPTED
+        assert result["bot"]["entity_id"] == "old-owner"
+        assert result["bot"]["owner_id"] == "new-owner"
+        bot_repo.list_matches_by_legacy_locator.assert_called_once_with(
+            "bot1", "old-owner"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2225,6 +2308,244 @@ class TestUpdateBotExt:
         update_data = bot_repo.update_by_owner.call_args[0][2]
         assert update_data["ext"]["existing"] == "value"
         assert update_data["ext"]["new_key"] == "new_val"
+
+
+# ---------------------------------------------------------------------------
+# get_catalog_public_bot_profile – 公开 Bot 画像（好友申请弹窗）
+# ---------------------------------------------------------------------------
+
+class TestGetCatalogPublicBotProfile:
+    """BCS 精确裁决公开性；Backend 记录补摘要；能力清单来自能力集 MCP。"""
+
+    @staticmethod
+    def _metadata(bot_uuid="bot-1:owner-1"):
+        return BotCatalogMetadata(
+            BotCatalogAddress("bot-1", "owner-1"),
+            "bot",
+            bot_uuid=bot_uuid,
+            name="BCS Name",
+            summary="BCS summary",
+            created_by="owner-1",
+            status="online",
+        )
+
+    def _backend_bot(self):
+        bot = _make_catalog_bot("bot-1", "owner-1")
+        bot["bot_desc"] = "Backend description"
+        bot["active_engine"] = "openclaw"
+        return bot
+
+    def _metadata_service(self, items):
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.return_value = _metadata_page(items)
+        return metadata
+
+    def test_profile_joins_backend_record_and_dedupes_mcp_capabilities(self):
+        metadata = self._metadata_service([self._metadata()])
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (1, [self._backend_bot()])
+        skill_set_service = MagicMock()
+        skill_set_service.get_all_skill_sets_with_mcps.return_value = [
+            {
+                "name": "能力集A",
+                "is_active": True,
+                "mcps": [
+                    {"id": "m1", "name": "AntV 可视化图表"},
+                    {"server_code": "m2", "name": "Dima MCP"},
+                    {"id": "m1", "name": "AntV 可视化图表"},
+                    {"id": "  ", "name": "   "},
+                ],
+            },
+            {"name": "坏集合", "mcps": "not-a-list"},
+        ]
+        # 技能清单与 MCP 同口径：所有能力集并集、按 id 去重、非法条目跳过。
+        skill_set_service.get_all_skill_sets_with_skills.return_value = [
+            {
+                "name": "能力集A",
+                "skills": [
+                    {"id": "s1", "name": "风太周报"},
+                    {"id": "s2", "name": "虾摸鱼总结"},
+                ],
+                "skill_count": 2,
+            },
+            {
+                "name": "能力集B",
+                "skills": [
+                    {"id": "s1", "name": "风太周报"},
+                    {"id": "  ", "name": "   "},
+                ],
+                "skill_count": 1,
+            },
+            {"name": "坏集合", "skills": "not-a-list"},
+        ]
+        factory = MagicMock()
+        factory.create.return_value = skill_set_service
+        svc = _make_service(
+            bot_repository=repository,
+            catalog_metadata_service=metadata,
+            skill_set_service_factory=factory,
+        )
+
+        result = svc.get_catalog_public_bot_profile(
+            " bot-1:owner-1 ",
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-profile",
+        )
+
+        assert result == {
+            "bot_id": "bot-1",
+            "bot_uuid": "bot-1:owner-1",
+            "bot_name": "TestBot",
+            "owner_name": "owner_nick",
+            "description": "Backend description",
+            "engine_name": "openclaw",
+            "capabilities": [
+                {"capability_id": "m1", "display_name": "AntV 可视化图表"},
+                {"capability_id": "m2", "display_name": "Dima MCP"},
+            ],
+            "skills": [
+                {"skill_id": "s1", "display_name": "风太周报"},
+                {"skill_id": "s2", "display_name": "虾摸鱼总结"},
+            ],
+        }
+        metadata.search_public_bot_metadata.assert_called_once_with(
+            search=None,
+            page=1,
+            page_size=1,
+            bot_uuids=("bot-1:owner-1",),
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-profile",
+        )
+        repository.list_bots_by_owner_bot_pairs.assert_called_once_with(
+            [("bot-1", "owner-1")], page=1, page_size=1
+        )
+        # MCP 与技能两条投影各自独立取数：工厂各 create 一次、入参一致。
+        assert factory.create.call_count == 2
+        factory.create.assert_called_with(entity_id="owner-1", bot_id="bot-1")
+        skill_set_service.get_all_skill_sets_with_mcps.assert_called_once_with(
+            user_id="owner-1", bolt_id="bot-1"
+        )
+        skill_set_service.get_all_skill_sets_with_skills.assert_called_once_with(
+            user_id="owner-1", bolt_id="bot-1"
+        )
+
+    def test_profile_bcs_only_bot_falls_back_to_metadata_and_empty_capabilities(self):
+        metadata = self._metadata_service([self._metadata()])
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (0, [])
+        factory = MagicMock()
+        svc = _make_service(
+            bot_repository=repository,
+            catalog_metadata_service=metadata,
+            skill_set_service_factory=factory,
+        )
+
+        result = svc.get_catalog_public_bot_profile(
+            "bot-1:owner-1",
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace",
+        )
+
+        assert result == {
+            "bot_id": "bot-1",
+            "bot_uuid": "bot-1:owner-1",
+            "bot_name": "BCS Name",
+            "owner_name": None,
+            "description": "BCS summary",
+            "engine_name": "",
+            "capabilities": [],
+            "skills": [],
+        }
+        factory.create.assert_not_called()
+
+    def test_profile_missing_from_catalog_is_not_found(self):
+        metadata = self._metadata_service([])
+        svc = _make_service(catalog_metadata_service=metadata)
+
+        with pytest.raises(BotCatalogProfileNotFoundError):
+            svc.get_catalog_public_bot_profile(
+                "bot-missing:owner-1",
+                caller=BotCatalogCaller("tenant-1", "user-1", None),
+                request_id="trace",
+            )
+
+    def test_profile_blank_identifier_is_not_found(self):
+        svc = _make_service()
+
+        with pytest.raises(BotCatalogProfileNotFoundError):
+            svc.get_catalog_public_bot_profile(
+                "   ",
+                caller=BotCatalogCaller("tenant-1", "user-1", None),
+                request_id="trace",
+            )
+
+    def test_profile_metadata_failure_fails_closed_as_search_unavailable(self):
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.side_effect = (
+            BotCatalogMetadataUnavailableError()
+        )
+        svc = _make_service(catalog_metadata_service=metadata)
+
+        with pytest.raises(BotCatalogSearchUnavailableError):
+            svc.get_catalog_public_bot_profile(
+                "bot-1:owner-1",
+                caller=BotCatalogCaller("tenant-1", "user-1", None),
+                request_id="trace",
+            )
+
+    def test_profile_capability_failure_degrades_to_empty_list(self):
+        metadata = self._metadata_service([self._metadata()])
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (1, [self._backend_bot()])
+        factory = MagicMock()
+        factory.create.side_effect = RuntimeError("skill set source down")
+        svc = _make_service(
+            bot_repository=repository,
+            catalog_metadata_service=metadata,
+            skill_set_service_factory=factory,
+        )
+
+        result = svc.get_catalog_public_bot_profile(
+            "bot-1:owner-1",
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace",
+        )
+
+        assert result["capabilities"] == []
+        assert result["skills"] == []
+        assert result["bot_name"] == "TestBot"
+        assert result["engine_name"] == "openclaw"
+
+    def test_profile_skill_failure_degrades_to_empty_list_without_blocking_mcps(self):
+        metadata = self._metadata_service([self._metadata()])
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (1, [self._backend_bot()])
+        skill_set_service = MagicMock()
+        skill_set_service.get_all_skill_sets_with_mcps.return_value = [
+            {"mcps": [{"id": "m1", "name": "AntV 可视化图表"}]}
+        ]
+        skill_set_service.get_all_skill_sets_with_skills.side_effect = (
+            RuntimeError("skill views down")
+        )
+        factory = MagicMock()
+        factory.create.return_value = skill_set_service
+        svc = _make_service(
+            bot_repository=repository,
+            catalog_metadata_service=metadata,
+            skill_set_service_factory=factory,
+        )
+
+        result = svc.get_catalog_public_bot_profile(
+            "bot-1:owner-1",
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace",
+        )
+
+        # 技能清单降级为空不阻断画像与 MCP 清单。
+        assert result["skills"] == []
+        assert result["capabilities"] == [
+            {"capability_id": "m1", "display_name": "AntV 可视化图表"}
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -2701,3 +3022,355 @@ class TestRebuildAuthRelationships:
                 bot_id="bot1", owner_id="owner1", owner_name="owner_nick",
                 agent_code="agent_123", access_mode="RESTRICTED", public="0",
             )
+
+
+def test_risk_bcs_submission_records_puid_before_inline_approval_callback():
+    process = MagicMock()
+    process.start_approval.return_value = {
+        "success": True, "puid": "p-risk", "state": "COMPLETED", "lastOperate": "AGREE",
+    }
+    service = _make_service(process_service=process)
+    events = []
+    with patch.object(service, "handle_public_approval_callback", side_effect=lambda **_: events.append("callback")):
+        service.public_bcs_bot(
+            "b1", "u1", "user", _make_operator(), visibility="public",
+            approval_biz_id="risk-123", on_approval_started=lambda result: events.append(result["puid"]),
+        )
+    assert process.start_approval.call_args.kwargs["biz_id"] == "risk-123"
+    assert events == ["p-risk", "callback"]
+
+
+def test_risk_bcs_submission_never_applies_inline_when_handoff_fails():
+    process = MagicMock()
+    process.start_approval.return_value = {
+        "success": True, "puid": "p-risk", "state": "COMPLETED", "lastOperate": "AGREE",
+    }
+    service = _make_service(process_service=process)
+
+    def failed_handoff(_result):
+        raise RuntimeError("association write failed")
+
+    with patch.object(service, "handle_public_approval_callback") as callback:
+        with pytest.raises(RuntimeError, match="association write failed"):
+            service.public_bcs_bot(
+                "b1", "u1", "user", _make_operator(), visibility="public",
+                approval_biz_id="risk-123", on_approval_started=failed_handoff,
+            )
+    callback.assert_not_called()
+
+
+@pytest.mark.parametrize("scope", ["legacy", "user", "agent"])
+def test_withdrawal_invalidates_only_observed_risk_record_before_publish(scope):
+    from types import SimpleNamespace
+
+    repository = MagicMock()
+    repository.get_current.return_value = SimpleNamespace(risk_check_id="risk-a", row_version=4)
+    repository.invalidate_if_current.return_value = True
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bots.get_by_id_and_entity.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    service = _make_service(bot_repository=bots, risk_repository=repository)
+    if scope == "legacy":
+        with patch.object(service, "_publish_directly", return_value={}):
+            service.public_bot("b1", "u1", "0", "caller", "0", _make_operator())
+    else:
+        service.public_bcs_bot("b1:u1", "u1", scope, _make_operator(), visibility="private")
+    repository.get_current.assert_called_once_with(env="dev", bot_pk=42, public_scope=scope)
+    repository.invalidate_if_current.assert_called_once_with(env="dev", risk_check_id="risk-a", row_version=4)
+
+
+def test_withdrawal_database_failure_stops_external_publish():
+    repository = MagicMock()
+    repository.get_current.side_effect = RuntimeError("database unavailable")
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bots.get_by_id_and_entity.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bcn = MagicMock()
+    service = _make_service(bot_repository=bots, bcn_service=bcn, risk_repository=repository)
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="private")
+    bcn.patch_attributes.assert_not_called()
+
+
+def test_withdrawal_does_not_invalidate_newer_replacement_after_race():
+    from types import SimpleNamespace
+
+    repository = MagicMock()
+    repository.get_current.side_effect = [
+        SimpleNamespace(risk_check_id="risk-a", row_version=4),
+        SimpleNamespace(risk_check_id="risk-b", row_version=1),
+    ]
+    repository.invalidate_if_current.return_value = False
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bots.get_by_id_and_entity.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    service = _make_service(bot_repository=bots, risk_repository=repository)
+    service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="private")
+    repository.invalidate_if_current.assert_called_once_with(env="dev", risk_check_id="risk-a", row_version=4)
+
+
+def test_risk_callback_guard_denial_never_changes_bcs():
+    bot = _make_bot(bot_id="b1", owner_id="u1")
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = bot
+    bots.get_by_id_and_entity.return_value = bot
+    bcn = MagicMock()
+    guard = MagicMock()
+    guard.check.return_value = "DENIED"
+    service = _make_service(bot_repository=bots, bcn_service=bcn)
+    service._risk_approval_guard = guard
+    result = service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "user", risk_check_id="risk-a")
+    assert result["success"] is False
+    bcn.patch_attributes.assert_not_called()
+
+
+def test_risk_publication_sends_callback_marker_and_replays_deferred_event():
+    process = MagicMock()
+    process.start_approval.return_value = {"success": True, "puid": "p-risk", "state": "PROCESSING"}
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_ext": {}}
+    bcn.patch_attributes.return_value = {}
+    service = _make_service(process_service=process, bot_repository=bots, bcn_service=bcn)
+    guard = MagicMock()
+    guard.replay.return_value = False
+    service._risk_approval_guard = guard
+    service.public_bcs_bot(
+        "b1:u1", "u1", "user", _make_operator(), visibility="public",
+        approval_biz_id="risk-123", on_approval_started=lambda _: None, risk_check_id="risk-a",
+    )
+    assert process.start_approval.call_args.kwargs["context"]["risk_check_id"] == "risk-a"
+    guard.replay.assert_called_once()
+
+
+def test_callback_without_marker_still_blocks_known_risk_approval():
+    from types import SimpleNamespace
+
+    repo = MagicMock()
+    repo.find_approval.return_value = SimpleNamespace(risk_check_id="risk-a")
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bots.get_by_id_and_entity.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    bcn = MagicMock()
+    service = _make_service(bot_repository=bots, bcn_service=bcn, risk_repository=repo)
+    guard = MagicMock()
+    guard.check.return_value = "DENIED"
+    service._risk_approval_guard = guard
+    result = service.handle_public_approval_callback("b1:u1", "u1", "p-risk", "AGREE", "user")
+    assert result["success"] is False
+    guard.check.assert_called_once()
+    bcn.patch_attributes.assert_not_called()
+
+
+def test_new_withdrawal_uses_full_identity_to_select_risk_record():
+    from types import SimpleNamespace
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = {**_make_bot(bot_id='default', owner_id='owner'), 'id': 42, 'entity_id': 'entity-a'}
+    bots.get_by_id_and_entity.return_value = {**_make_bot(bot_id='default', owner_id='owner'), 'id': 77, 'entity_id': 'entity-b'}
+    repository = MagicMock()
+    repository.get_current.return_value = SimpleNamespace(risk_check_id='risk-b', row_version=4)
+    repository.invalidate_if_current.return_value = True
+    service = _make_service(bot_repository=bots, risk_repository=repository)
+    service.public_bcs_bot('default:entity-b', 'owner', 'user', _make_operator(), visibility='private')
+    bots.get_by_id_and_entity.assert_called_once_with('default', 'entity-b')
+    repository.get_current.assert_called_once_with(env='dev', bot_pk=77, public_scope='user')
+    repository.invalidate_if_current.assert_called_once_with(env='dev', risk_check_id='risk-b', row_version=4)
+
+
+def test_legacy_owner_risk_publish_passes_stable_identity_to_approval_plugin():
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot(bot_id="b1", owner_id="u1")
+    plugin = MagicMock()
+    service = _make_service(bot_repository=bots, publish_approval_plugin=plugin)
+    handoff = MagicMock()
+    service._risk_approval_guard = MagicMock()
+    service.public_bot("b1", "u1", "1", "owner", "0", _make_operator(),
+                       approval_biz_id="risk-a", risk_check_id="a", on_approval_started=handoff)
+    kwargs = plugin.publish.call_args.kwargs
+    assert kwargs["approval_biz_id"] == "risk-a"
+    assert kwargs["risk_check_id"] == "a"
+    assert kwargs["on_approval_started"] is handoff
+
+
+def test_callback_between_puid_and_bcs_target_waits_until_target_is_ready():
+    from threading import Event, Thread, Lock
+    from dataclasses import replace
+    from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
+    from agentclaw.community.core.bot_public_risk.repository import RiskCheck
+
+    class Repository:
+        def __init__(self):
+            self.lock = Lock()
+            self.row = RiskCheck(risk_check_id="risk-a", env="dev", bot_pk=42, owner_id="u1", operator_id="op_user",
+                client_scope="openapi:op_user", client_request_id="req", public_scope="user", target_json='{"visibility":"public","view_depts":[]}',
+                request_hash="h", input_json="{}", input_hash="h", approval_biz_id="risk-a", phase="ADVANCING",
+                security_status="PASS", current_target_key="current", workflow_json='{"approval_intent":true}')
+        def get(self, **_):
+            with self.lock:
+                return self.row
+        def update_current(self, *, row_version, changes, **_):
+            with self.lock:
+                if self.row.row_version != row_version:
+                    return False
+                self.row = replace(self.row, **changes, row_version=row_version + 1)
+                return True
+    repo = Repository()
+    started, resume = Event(), Event()
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_owner.return_value = _make_bot("b1", "u1")
+    bot_repo.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_ext": {"public_user_approval": {"puid": "p1", "visibility": "public"}}}
+    process = MagicMock()
+    process.start_approval.return_value = {"success": True, "puid": "p1", "state": "PROCESSING"}
+    service = _make_service(bot_repository=bot_repo, bcn_service=bcn, process_service=process)
+    service._risk_approval_guard = RiskApprovalGuard(repo, lambda _: True)
+    def handoff(_):
+        assert repo.update_current(row_version=repo.row.row_version, changes={"phase": "APPROVING", "approval_puid": "p1"})
+    def persist(**_):
+        started.set()
+        assert resume.wait(5)
+        return True
+    with patch.object(service, "_persist_public_approval", side_effect=persist):
+        errors = []
+        def publish():
+            try:
+                service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="public",
+                    approval_biz_id="risk-a", risk_check_id="risk-a", on_approval_started=handoff)
+            except Exception as exc:
+                errors.append(exc)
+        thread = Thread(target=publish)
+        thread.start()
+        assert started.wait(5)
+        result = service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "user", risk_check_id="risk-a")
+        assert result["message"] == "risk callback deferred"
+        bcn.patch_attributes.assert_not_called()
+        resume.set()
+        thread.join(5)
+        assert not thread.is_alive() and not errors
+    bcn.patch_attributes.assert_called_once()
+
+
+def test_risk_callback_resolves_complete_bot_identity_before_guard():
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = {**_make_bot("default", "owner"), "id": 42, "entity_id": "a"}
+    bots.get_by_id_and_entity.return_value = {**_make_bot("default", "owner"), "id": 77, "entity_id": "b"}
+    service = _make_service(bot_repository=bots)
+    guard = MagicMock()
+    guard.check.return_value = "DENIED"
+    service._risk_approval_guard = guard
+    service.handle_public_approval_callback("default:b", "owner", "p1", "AGREE", "user", risk_check_id="risk-b")
+    bots.get_by_id_and_entity.assert_called_once_with("default", "b")
+    assert guard.check.call_args.args[3] == 77
+
+
+def test_risk_publication_does_not_mark_ready_when_bcs_persistence_is_skipped():
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"skipped": True}
+    process = MagicMock()
+    process.start_approval.return_value = {"success": True, "puid": "p1", "state": "PROCESSING"}
+    service = _make_service(bot_repository=bots, bcn_service=bcn, process_service=process)
+    guard = MagicMock()
+    service._risk_approval_guard = guard
+    with pytest.raises(BotPublicServiceError, match="association could not be persisted"):
+        service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="public",
+            approval_biz_id="risk-a", risk_check_id="risk-a", on_approval_started=lambda _: None)
+    guard.mark_target_ready.assert_not_called()
+
+
+def test_risk_agent_callback_applies_the_approved_target_visibility():
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_check_in_strategy": "OPEN", "friend_ext": {
+        "public_agent_approval": {"puid": "p1", "visibility": "protected"}
+    }}
+    bcn.patch_attributes.return_value = {}
+    service = _make_service(bot_repository=bots, bcn_service=bcn)
+    service._risk_approval_guard = MagicMock()
+    service._risk_approval_guard.check.return_value = "ALLOW"
+    service._risk_approval_guard.revalidate_claim.return_value = True
+    from types import SimpleNamespace
+    service._risk_approval_guard.repo.get.return_value = SimpleNamespace(target_json='{"visibility":"protected","view_depts":[]}')
+    assert service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "agent", risk_check_id="risk-a")["success"]
+    assert bcn.patch_attributes.call_args.kwargs["body"]["visibility"] == "protected"
+
+
+def test_risk_callback_rejects_puid_matching_but_changed_target():
+    from types import SimpleNamespace
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_ext": {"public_user_approval": {
+        "puid": "p1", "visibility": "public", "view_friend_deps": []
+    }}}
+    service = _make_service(bot_repository=bots, bcn_service=bcn)
+    guard = MagicMock()
+    guard.check.return_value = "ALLOW"
+    guard.revalidate_claim.return_value = True
+    guard.repo.get.return_value = SimpleNamespace(target_json='{"visibility":"protected","view_depts":[{"deptNo":"1"}]}')
+    service._risk_approval_guard = guard
+    result = service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "user", risk_check_id="risk-a")
+    assert result["success"] is False
+    bcn.patch_attributes.assert_not_called()
+    assert guard.finish.call_args.args[-1] is False
+
+
+def test_unknown_reserved_risk_puid_cannot_fall_through_to_legacy_callback():
+    repository = MagicMock()
+    repository.find_approval.return_value = None
+    bcn = MagicMock()
+    service = _make_service(risk_repository=repository, bcn_service=bcn)
+    result = service.handle_public_approval_callback(
+        "b1:u1", "u1", "antprocess-agentclaw_botpublic_risk-12345678-1234-1234-1234-123456789abc", "AGREE", "user"
+    )
+    assert result["success"] is False
+    bcn.patch_attributes.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["withdrawn", "skipped", "get_skipped"])
+def test_risk_callback_does_not_report_applied_for_withdrawal_or_skipped_patch(failure):
+    from types import SimpleNamespace
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_ext": {"public_user_approval": {
+        "puid": "p1", "visibility": "public", "view_friend_deps": []}}}
+    if failure == "get_skipped":
+        bcn.get_attributes.return_value = {"skipped": True}
+    bcn.patch_attributes.return_value = {"skipped": True} if failure == "skipped" else {}
+    service = _make_service(bot_repository=bots, bcn_service=bcn)
+    guard = MagicMock()
+    guard.check.return_value = "ALLOW"
+    guard.revalidate_claim.return_value = failure != "withdrawn"
+    guard.repo.get.return_value = SimpleNamespace(target_json='{"visibility":"public","view_depts":[]}')
+    service._risk_approval_guard = guard
+    result = service.handle_public_approval_callback("b1:u1", "u1", "p1", "AGREE", "user", risk_check_id="risk-a")
+    assert result["success"] is False
+    if failure in {"withdrawn", "get_skipped"}:
+        bcn.patch_attributes.assert_not_called()
+    assert guard.finish.call_args.args[-1] is False
+
+
+def test_completed_risk_approval_is_staged_before_target_and_replay_failure_propagates():
+    bots = MagicMock()
+    bots.get_by_id_and_entity.return_value = _make_bot("b1", "u1")
+    bcn = MagicMock()
+    bcn.get_attributes.return_value = {"friend_ext": {}}
+    bcn.patch_attributes.return_value = {}
+    process = MagicMock()
+    process.start_approval.return_value = {"success": True, "puid": "p1", "state": "COMPLETED", "lastOperate": "AGREE"}
+    service = _make_service(bot_repository=bots, bcn_service=bcn, process_service=process)
+    guard = MagicMock()
+    guard.check.return_value = "DEFERRED"
+    guard.replay.side_effect = RuntimeError("H3 unavailable")
+    service._risk_approval_guard = guard
+    with pytest.raises(RuntimeError, match="H3 unavailable"):
+        service.public_bcs_bot("b1:u1", "u1", "user", _make_operator(), visibility="public",
+            approval_biz_id="risk-a", risk_check_id="risk-a", on_approval_started=lambda _: None)
+    guard.check.assert_called_once()
+    guard.mark_target_ready.assert_called_once()
+    guard.replay.assert_called_once()

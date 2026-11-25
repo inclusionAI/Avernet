@@ -17,6 +17,9 @@ from agentclaw.community.core.spaces.repository.models import (
     SpaceMemberModel,
     SpaceModel,
 )
+from agentclaw.community.core.repository.protocols.space_persistence_effects import (
+    SpacePersistenceEffects,
+)
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillEditorRequestRepositoryProtocol,
     SpaceSkillRepository as SpaceSkillRepositoryProtocol,
@@ -65,8 +68,10 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
         self,
         db: DatabasePlugin,
         skill_editor_requests: SkillEditorRequestRepositoryProtocol,
+        effects: SpacePersistenceEffects,
     ):
         self._db = db
+        self._effects = effects
         self._skill_editor_requests = skill_editor_requests
 
     def create_space(self, data: SpaceCreateData) -> SpaceRecord:
@@ -75,6 +80,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             space = SpaceModel(**payload)
             session.add(space)
             session.flush()
+            self._effects.reserve_identity(session, space)
             session.refresh(space)
             return self._space_to_dict(space)
 
@@ -121,6 +127,10 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                         space_id=ownership_data["space_id"],
                     )
                     return self._creation_replay_result(session, replay, env=env)
+                # Take the same row lock delete_team_space holds: without FOR
+                # UPDATE a concurrent soft-delete can commit between this read
+                # and the ownership insert, leaving a Skill bound to a deleted
+                # Space even though the deletion's emptiness recheck passed.
                 space = (
                     session.query(SpaceModel)
                     .filter(
@@ -128,6 +138,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                         SpaceModel.env == env,
                         SpaceModel.deleted_at.is_(None),
                     )
+                    .with_for_update()
                     .one_or_none()
                 )
                 if space is None:

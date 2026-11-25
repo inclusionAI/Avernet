@@ -7,12 +7,15 @@ import uuid
 from typing import Any
 
 from agentclaw.community.core.agentswarm.domain.models import (
-    AgentId, AgentStatus, IdempotencyKey, NonRetryableProvisioningError, Run,
+    AgentId, AgentStatus, BotState, IdempotencyKey,
+    NonRetryableProvisioningError, Run,
     SubagentResult, TaskEnvelope, TenantId, AgentSpec, AgentKind,
 )
 from dataclasses import dataclass
 
-from agentclaw.community.plugin_api.agentswarm.subagent import SubagentFactory
+from agentclaw.community.plugin_api.agentswarm.subagent import (
+    ParkedAwaitingAuthorization, SubagentFactory,
+)
 from agentclaw.community.plugin_api.agentswarm.artifact import ArtifactStore
 from agentclaw.community.core.agentswarm.runtime.breaker import (
     UpstreamBreaker,
@@ -36,6 +39,19 @@ class EnvelopeSchemaInvalid(Exception):
 # unbounded-DB-write vector. 1,000,000 chars ≈ 1 MB: far above any sane
 # routed result, far below the artifact cap, bounded in serialized form.
 _MAX_INLINE_RESULT_CHARS = 1_000_000
+
+# Parked-gate recheck cadence: while an attempt is parked awaiting human authorization, each
+# recheck is the subagent's own cheap status continuation, and this
+# interval only paces those rechecks. The park's bound is the job's
+# authorization deadline — never a new timeout knob — and parked time
+# never counts against ``setup_timeout``.
+_PARK_RECHECK_INTERVAL_SECONDS = 2.0
+
+# Ledger spelling for the parked wait-state transition: one
+# diagnostic write on entry to the gate (the same attempt row a later
+# COMPLETED/FAILED result overwrites via journal_attempt_result) — never
+# a FAILED/TIMEOUT entry, never per-recheck spam.
+_PARK_LEDGER_STATUS = "PARKED_AWAITING_AUTHORIZATION"
 
 
 @dataclass
@@ -65,6 +81,10 @@ class SubagentRuntime:
         - ``metrics=None`` means no metrics backend is configured
           (local/test profiles); a private no-op fills the seam so call
           sites never branch on instrumentation.
+        - ``park_recheck_interval`` paces the rechecks of an attempt
+          parked at a human authorization gate: the
+          default matches the module constant, it is not a settings knob,
+          and parked time is never counted against ``setup_timeout``.
         """
 
     def __init__(
@@ -75,9 +95,11 @@ class SubagentRuntime:
         max_attempts: int = 3,
         per_task_timeout: float = 120.0,
         setup_timeout: float = 240.0,
+        setup_ceiling: float = 600.0,
         artifact_inline_threshold: int = 16384,
         upstream_breaker: UpstreamBreaker | None = None,
         binding_store: "SliceStore | None" = None,
+        park_recheck_interval: float = _PARK_RECHECK_INTERVAL_SECONDS,
     ) -> None:
         self._factory = factory
         self._artifact_store = artifact_store
@@ -85,9 +107,11 @@ class SubagentRuntime:
         self._max_attempts = max_attempts
         self._per_task_timeout = per_task_timeout
         self._setup_timeout = setup_timeout
+        self._setup_ceiling = setup_ceiling
         self._artifact_inline_threshold = artifact_inline_threshold
         self._upstream_breaker = upstream_breaker
         self._binding_store = binding_store
+        self._park_recheck_interval = park_recheck_interval
         self._claim_epoch = 0
         self._work: asyncio.Queue = asyncio.Queue(maxsize=max_width)
         self._completions: asyncio.Queue = asyncio.Queue()
@@ -191,6 +215,22 @@ class SubagentRuntime:
             return self._max_attempts
         return max(1, min(int(override), self._max_attempts))
 
+    def _resolve_setup_timeout(self, run: Run) -> float:
+        # Same snapshot rule as _resolve_max_attempts: the deployment's
+        # setup budget is the fallback, a requested value wins up to the
+        # slice-room ceiling (see RunOptions.resolved_setup_timeout).
+        opts = getattr(run, "run_options", None)
+        if opts is None:
+            return self._setup_timeout
+        return opts.resolved_setup_timeout(self._setup_timeout,
+                                           self._setup_ceiling)
+
+    def _resolve_per_task_timeout(self, run: Run) -> float:
+        opts = getattr(run, "run_options", None)
+        if opts is None:
+            return self._per_task_timeout
+        return opts.resolved_per_attempt_timeout(self._per_task_timeout)
+
     async def wait_for_completions(self, timeout: float | None = None) -> list[dict[str, Any]]:
         if timeout is None or timeout < 0:
             await self._work.join()
@@ -249,7 +289,16 @@ class SubagentRuntime:
     async def _execute_with_retry(self, item: _WorkItem) -> dict[str, Any]:
         spec = self._find_spec(item.run, item.envelope)
         if spec is None:
-            spec = AgentSpec(name=item.envelope.name, role=item.envelope.objective)
+            # An unresolvable spawn inherits the run's unanimous catalog
+            # kind (and engine/bot_type/identity): a bot run whose
+            # decision names miss the catalog must still provision bot
+            # subagents — silently minting llm agents changes the run's
+            # composition. Mixed/empty catalogs keep the llm default.
+            spec = AgentSpec(
+                name=item.envelope.name,
+                role=item.envelope.objective,
+                **self._unanimous_catalog_surface(item.run),
+            )
 
         schema = item.envelope.output_schema
         validator = None
@@ -270,11 +319,15 @@ class SubagentRuntime:
 
         last_error: str | None = None
         attempts_used = item.max_attempts
+        # Lifetime ordinal: the persona id is derived from it, so it cannot restart
+        # at 1 per claim (that re-derives the previous slice's id and collides).
+        ordinal_base = await self._next_ordinal(item)
         for attempt in range(1, item.max_attempts + 1):
             attempts_used = attempt
+            ordinal = ordinal_base + attempt - 1
             if self._slice_lost.is_set():
-                await self._journal_result(item, attempt, "SLICE_LOST", "slice_lost")
-                return self._mk_result(item, AgentStatus.FAILED, None, "slice_lost", attempt)
+                await self._journal_result(item, ordinal, "SLICE_LOST", "slice_lost")
+                return self._mk_result(item, AgentStatus.FAILED, None, "slice_lost", ordinal)
 
             if (self._upstream_breaker is not None
                     and not self._upstream_breaker.allow(time.monotonic())):
@@ -282,12 +335,19 @@ class SubagentRuntime:
                 # through its normal failure path instead of burning the
                 # attempt budget waiting out timeouts against a dead upstream.
                 await self._journal_result(
-                    item, attempt, "FAILED", "upstream_breaker_open")
+                    item, ordinal, "FAILED", "upstream_breaker_open")
                 return self._mk_result(
-                    item, AgentStatus.FAILED, None, "upstream_breaker_open", attempt,
+                    item, AgentStatus.FAILED, None, "upstream_breaker_open", ordinal,
                 )
 
             subagent = None
+            # Park state of this attempt: True only while the
+            # attempt sits at the human authorization gate, so the finally
+            # below can distinguish "cancelled while parked" — where tearing
+            # the persona down would discard the pending authorization and
+            # force the respawn to open a fresh one — from every ordinary
+            # attempt outcome, which keeps the pre-change teardown contract.
+            parked = False
             try:
                 # D23 fresh context per attempt; factory construction stays
                 # inside the attempt's guard so a malformed spec degrades to
@@ -297,18 +357,56 @@ class SubagentRuntime:
                 # per-attempt (D-J) — a retry mints a fresh executor and
                 # can never collide with the torn-down attempt's row.
                 subagent = self._factory.create(
-                    spec, item.run, item.agent_id, attempt,
+                    spec, item.run, item.agent_id, ordinal,
                 )
                 # Write-ahead: the binding INTENT lands before setup()
                 # so a setup failure leaves a reconcilable ledger row.
-                await self._journal_intent(subagent, spec, item, attempt)
-                await asyncio.wait_for(
-                    subagent.setup(), timeout=self._setup_timeout,
-                )
-                await self._journal_binding(subagent, spec, item, attempt)
+                await self._journal_intent(subagent, spec, item, ordinal)
+                # Park-aware setup wait: a ParkedAwaitingAuthorization
+                # outcome is the human gate's wait state, not an attempt
+                # failure — no failed-attempt increment, no new attempt key,
+                # no replacement persona, and no setup clock against the
+                # wait. Each recheck re-invokes the SAME subagent's setup()
+                # (its park continuation: one cheap status poll); the
+                # ``wait_for`` re-arms per recheck so only genuine
+                # provisioning time inside one continuation is ever bounded
+                # by setup_timeout. Slice-end cancellation unwinds through
+                # the CancelledError clause mid-park; the persona survives
+                # for the next slice's D16 respawn.
+                while True:
+                    try:
+                        await asyncio.wait_for(
+                            subagent.setup(),
+                            timeout=self._resolve_setup_timeout(item.run),
+                        )
+                        break
+                    except ParkedAwaitingAuthorization as exc:
+                        if not parked:
+                            parked = True
+                            logger.info(
+                                "[agentswarm][runtime] agent=%s ordinal=%d "
+                                "parked at authorization gate: %s",
+                                item.agent_id, ordinal, exc,
+                            )
+                            await self._journal_result(
+                                item, ordinal, _PARK_LEDGER_STATUS, str(exc),
+                            )
+                        # Write bot_id + AWAITING on EVERY recheck cycle:
+                        # concurrent workers hit the DB simultaneously and
+                        # a first _record_gate_state can be silently lost
+                        # (fenced, thread pool race) — the detail can only
+                        # show the gate when bot_id is on the row, so
+                        # idempotent repeat writes are the recovery path.
+                        await self._record_gate_state(
+                            item, getattr(exc, "bot_id", ""),
+                            BotState.AWAITING_AUTHORIZATION.value,
+                        )
+                        await asyncio.sleep(self._park_recheck_interval)
+                parked = False
+                await self._journal_binding(subagent, spec, item, ordinal)
                 raw = await asyncio.wait_for(
                     subagent.run_task(item.envelope),
-                    timeout=self._per_task_timeout,
+                    timeout=self._resolve_per_task_timeout(item.run),
                 )
                 if validator is not None:
                     schema_error = self._first_schema_error(validator, raw.output)
@@ -316,28 +414,36 @@ class SubagentRuntime:
                         # D42: schema-invalid results are retried, never routed.
                         last_error = f"schema_validation: {schema_error}"
                         await self._journal_result(
-                            item, attempt, "FAILED", last_error)
+                            item, ordinal, "FAILED", last_error)
                         logger.warning(
-                            "[agentswarm][runtime] agent=%s attempt=%d schema_validation=: %s",
-                            item.agent_id, attempt, schema_error,
+                            "[agentswarm][runtime] agent=%s ordinal=%d schema_validation=: %s",
+                            item.agent_id, ordinal, schema_error,
                         )
                         continue
-                result = self._mk_result(item, AgentStatus.COMPLETED, raw, None, attempt, raw)
+                result = self._mk_result(item, AgentStatus.COMPLETED, raw, None, ordinal, raw)
                 if self._upstream_breaker is not None:
                     # 12.5: success only counts once the completed result is
                     # materialized — a spill failure must not pair a recorded
                     # success with the attempt's recorded failure.
                     self._upstream_breaker.record_success()
-                await self._journal_result(item, attempt, "COMPLETED", None)
+                await self._journal_result(item, ordinal, "COMPLETED", None)
                 return result
             except asyncio.TimeoutError:
+                parked = False
                 last_error = "timeout"
-                await self._journal_result(item, attempt, "TIMEOUT", "timeout")
+                await self._journal_result(item, ordinal, "TIMEOUT", "timeout")
                 self._record_upstream_failure()
-                logger.warning("[agentswarm][runtime] agent=%s attempt=%d timeout", item.agent_id, attempt)
+                logger.warning("[agentswarm][runtime] agent=%s ordinal=%d timeout", item.agent_id, ordinal)
             except asyncio.CancelledError:
+                # Mid-park cancellation is the ONLY path that leaves ``parked``
+                # set: a parked persona awaiting its human must survive
+                # the slice boundary so the next slice's D16 respawn adopts
+                # the same authorization window instead of opening a new
+                # one. Every other outcome below clears the flag and keeps
+                # the pre-change teardown contract.
                 raise
             except SliceLost:
+                parked = False
                 # The fenced binding journal rejected this slice's claim —
                 # that is authoritative evidence the claim is gone, so set
                 # the cooperative-unwind event: never feed the breaker
@@ -348,13 +454,14 @@ class SubagentRuntime:
                 self.set_slice_lost(True)
                 last_error = "slice_lost"
                 logger.info(
-                    "[agentswarm][runtime] agent=%s attempt=%d binding journal fenced out",
-                    item.agent_id, attempt,
+                    "[agentswarm][runtime] agent=%s ordinal=%d binding journal fenced out",
+                    item.agent_id, ordinal,
                 )
                 # Terminal cooperative unwind: the item ends at the next
                 # top-of-loop check, so journal this attempt's outcome now.
-                await self._journal_result(item, attempt, "SLICE_LOST", "slice_lost")
+                await self._journal_result(item, ordinal, "SLICE_LOST", "slice_lost")
             except Exception as exc:
+                parked = False
                 if self._is_non_retryable(exc):
                     # Deterministic provisioning failures (a space quota
                     # ceiling) will fail every retry the same way — fail
@@ -362,18 +469,32 @@ class SubagentRuntime:
                     # feed the LLM upstream breaker.
                     last_error = f"{type(exc).__name__}: {exc}"
                     logger.warning(
-                        "[agentswarm][runtime] agent=%s attempt=%d "
+                        "[agentswarm][runtime] agent=%s ordinal=%d "
                         "non_retryable=%s error=%s",
-                        item.agent_id, attempt, type(exc).__name__, exc,
+                        item.agent_id, ordinal, type(exc).__name__, exc,
                     )
-                    await self._journal_result(item, attempt, "FAILED", last_error)
+                    if getattr(exc, "bot_state", ""):
+                        # The authorization's terminal verdict overrides the
+                        # parked state on the agent row so the run surface
+                        # stops serving the consent URL for a bot that can
+                        # no longer be confirmed.
+                        await self._record_gate_state(
+                            item, getattr(exc, "bot_id", ""),
+                            str(getattr(exc, "bot_state", "")),
+                        )
+                    await self._journal_result(item, ordinal, "FAILED", last_error)
                     break
                 last_error = str(exc)
-                await self._journal_result(item, attempt, "FAILED", last_error)
+                await self._journal_result(item, ordinal, "FAILED", last_error)
                 self._record_upstream_failure()
-                logger.warning("[agentswarm][runtime] agent=%s attempt=%d error=%s", item.agent_id, attempt, exc)
+                logger.warning("[agentswarm][runtime] agent=%s ordinal=%d error=%s", item.agent_id, ordinal, exc)
             finally:
-                if subagent is not None:
+                if subagent is not None and not parked:
+                    # Parked (mid-park cancellation, D3): the persona's
+                    # authorization window is the wait itself — teardown
+                    # would discard the pending application and force the
+                    # respawn to open a fresh gate, so the awaiting persona
+                    # survives for the next slice's adopt-on-respawn.
                     try:
                         await subagent.teardown()
                     except Exception:
@@ -391,11 +512,30 @@ class SubagentRuntime:
             item, AgentStatus.FAILED, None, last_error, attempts_used,
         )
 
+    async def _next_ordinal(self, item: _WorkItem) -> int:
+        """Start this slice's ordinals after everything the agent already used.
+
+        Additive SPI read: a store double (or an older composition) without the
+        method falls back to 1 — the pre-change behaviour — instead of taking
+        the worker loop down.
+        """
+        if self._binding_store is None:
+            return 1
+        read = getattr(self._binding_store, "next_attempt_ordinal", None)
+        if read is None:
+            return 1
+        return await read(item.run, item.agent_id)
+
     @staticmethod
     def _is_non_retryable(exc: BaseException) -> bool:
         # Agentswarm-owned marker only — the pool never imports the host
         # platform that raised the original error (D17).
-        return isinstance(exc, NonRetryableProvisioningError)
+        # AgentSwarmConfigError (e.g., no BotPlatform bound) is
+        # deterministic — a deployment-config gap will not resolve mid-run.
+        from agentclaw.community.core.agentswarm.service.protocols import (
+            AgentSwarmConfigError,
+        )
+        return isinstance(exc, (NonRetryableProvisioningError, AgentSwarmConfigError))
 
     async def _journal_intent(self, subagent: Any, spec: AgentSpec,
                                item: _WorkItem, attempt: int) -> None:
@@ -464,19 +604,63 @@ class SubagentRuntime:
             result_status, result_message,
         )
 
+    async def _record_gate_state(self, item: _WorkItem, bot_id: str,
+                                 bot_state: str) -> None:
+        """Mirror the human gate onto the agent row.
+
+        Additive SPI reads only: a marker double carrying no identity
+        skips the write. The store call is fenced and best-effort, so a
+        park or terminal verdict never unwinds its own attempt because its
+        durable-column twin could not land.
+        """
+        if self._binding_store is None or self._slice_lost.is_set():
+            return
+        bot_id = str(bot_id or "").strip()
+        bot_state = str(bot_state or "").strip()
+        if not bot_id or not bot_state:
+            return
+        await self._binding_store.record_agent_bot_state(
+            item.run, item.agent_id, item.claim_epoch, bot_id, bot_state,
+        )
+
     @staticmethod
     def _executor_kind(spec: AgentSpec) -> str:
-        kind = spec.kind if isinstance(spec.kind, AgentKind) else AgentKind.LLM
-        return kind.value
+        kind = getattr(spec, "kind", None)
+        if isinstance(kind, AgentKind):
+            return kind.value
+        try:
+            return AgentKind(kind).value
+        except (ValueError, TypeError, KeyError):
+            return AgentKind.LLM.value
 
     def _record_upstream_failure(self) -> None:
         if self._upstream_breaker is not None:
             self._upstream_breaker.record_failure(time.monotonic())
 
     @staticmethod
+    def _unanimous_catalog_surface(run: Run) -> dict[str, Any]:
+        catalog = getattr(run, "agent_catalog", None) or ()
+        kinds = {s.kind for s in catalog}
+        if len(kinds) != 1:
+            return {}
+        first = catalog[0]
+        return {
+            "kind": first.kind,
+            "engine": first.engine,
+            "bot_type": first.bot_type,
+            "identity_file": first.identity_file,
+        }
+
+    @staticmethod
     def _find_spec(run: Run, envelope: TaskEnvelope) -> AgentSpec | None:
+        # Exact-name match first; then prefix match so the orchestrator's
+        # composite spawn names (e.g. "coder_rust" from catalog "coder")
+        # inherit the catalog entry's kind, config_manifest, and identity.
         for spec in run.agent_catalog:
             if spec.name == envelope.name:
+                return spec
+        for spec in run.agent_catalog:
+            if envelope.name.startswith(spec.name):
                 return spec
         return None
 

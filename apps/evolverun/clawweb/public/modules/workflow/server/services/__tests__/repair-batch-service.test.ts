@@ -499,6 +499,25 @@ describe('repair workbench control service', () => {
     expect(task.execution?.status).toBe('succeeded');
     expect((await f.service.candidates('wf-1')).items.every(i => i.state === 'pending')).toBe(true);
   });
+  it('retains a later revision submitter independently of the task creator and cancelling operator', async () => {
+    const f = await setup();
+    const first = await f.service.create('task-creator', f.request);
+    await f.service.report({ workflowId: 'wf-1', taskId: first.taskId, revision: 1,
+      expectedStateVersion: 0, status: 'failed', error: { code: 'MODEL_FAILED' } });
+    f.setRemoteStatus({ status: 'failed', rawStatus: 'failed', errorMessage: null });
+    await f.service.retryGeneration('retry-operator', first.taskId, { expectedRevision: 1, requestId: 'retry-other-user' });
+    await f.service.cancel('cancelling-operator', first.taskId, 2);
+    expect(f.calls[1].actorId).toBe('retry-operator');
+    expect(f.stops).toHaveLength(1);
+    expect(f.stops[0].actorId).toBe('retry-operator');
+  });
+  it('retains the original submitter when another operator cancels the task', async () => {
+    const f = await setup();
+    const created = await f.service.create('human', f.request);
+    await f.service.cancel('another-operator', created.taskId, 1);
+    expect(f.stops).toHaveLength(1);
+    expect(f.stops[0]).toMatchObject({ actorId: 'human', jobId: 'job-1' });
+  });
   it('persists cancellation before best-effort stopping the exact AIS attempt', async () => {
     const f = await setup();
     const created = await f.service.create('human', f.request);

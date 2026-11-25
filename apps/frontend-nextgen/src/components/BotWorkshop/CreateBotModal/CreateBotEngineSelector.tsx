@@ -92,7 +92,7 @@ export function CreateBotEngineSelector({
             </Button>
 
             {hasPanel && selected ? (
-              <div id={panelId} className="rounded-b-xl border-t border-border/70 bg-background px-3 py-3">
+              <div id={panelId} className="rounded-b-xl border-t border-divider/70 bg-background px-3 py-3">
                 {renderPanel?.(option)}
               </div>
             ) : null}

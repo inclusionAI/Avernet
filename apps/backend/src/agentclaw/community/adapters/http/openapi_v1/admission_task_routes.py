@@ -14,6 +14,10 @@ TASK_BBS_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts",
     ): AdmissionMode.OPEN,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/location",
+    ): AdmissionMode.OPEN,
     # Public BBS unified writes. The author is declared explicitly in the
     # request body (``author_type`` + ``author_id``); this is a backend API
     # reached by humans, Bots and app-to-app callers alike, so the surface does
@@ -27,6 +31,18 @@ TASK_BBS_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "POST",
         "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts",
+    ): AdmissionMode.OPEN,
+    (
+        "PUT",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}",
+    ): AdmissionMode.OPEN,
+    (
+        "DELETE",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}",
+    ): AdmissionMode.OPEN,
+    (
+        "PUT",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/helpful",
     ): AdmissionMode.OPEN,
     (
         "POST",
@@ -47,15 +63,37 @@ TASK_BBS_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # BBS Browse-Loop per-owner list: a backend read keyed by the explicit
     # ``owner_id`` query (subscription owner), not the logged-in user, so an
     # application caller may query any owner just like the unified BBS writes.
+    # BBS interaction events and summaries. The actor and requested dimensions
+    # are explicit inputs and no bot is addressed, so admission is OPEN and
+    # authorization remains NoCheck.
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bbs/interactions",
+    ): AdmissionMode.OPEN,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/interactions/summary",
+    ): AdmissionMode.OPEN,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bbs/interactions/summary/batch",
+    ): AdmissionMode.OPEN,
+    # Personal Center is OPEN only at the admission gate; the handler binds
+    # owner_user_id to the verified human principal and otherwise returns 403.
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/personal-center/activities",
+    ): AdmissionMode.OPEN,
     (
         "GET",
         "/openapi/v1/collaboration/tasks/bbs/browse-subscriptions",
     ): AdmissionMode.OPEN,
     # BBS Browse-Loop per-Bot reads + manual triggers exposed on the public
     # surface so the product can render state and drive a one-shot Browse.
-    # They address a bot by path but name no owner on the wire (only a
-    # verified principal), so admission is OPEN like the unified BBS
-    # content writes and the authorisation row is NoCheck.
+    # They address a product Bot by path and, where subscription identity
+    # matters, name its owner by the required owner_user_id query. Admission
+    # is therefore OPEN like the unified BBS content writes and the
+    # authorization row is NoCheck.
     (
         "GET",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription",
@@ -63,6 +101,10 @@ TASK_BBS_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "GET",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/feed",
+    ): AdmissionMode.OPEN,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/skills/install",
     ): AdmissionMode.OPEN,
     (
         "POST",
@@ -102,10 +144,121 @@ TASK_PUBLIC_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/trajectory"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/list"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/collaboration/tasks/by_session"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/bbs/list"): AdmissionMode.OPEN,
     # Grant/revoke are stateless relays to secbaas (api-key server-side; the
     # human Cookie/Referer authorizes the action) — OPEN at the gate, secbaas
     # authorizes. Same shape as the other task public operations.
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bot-grants/reconcile",
+    ): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/collaboration/tasks/grant"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/collaboration/tasks/revoke"): AdmissionMode.OPEN,
+    # task_config match: a typed config probe (spec 2026-11-02). No addressed
+    # bot — any authenticated principal may read. The authorization row beside
+    # it is NoCheck for the same reason.
+    ("POST", "/openapi/v1/collaboration/tasks/config/match"): AdmissionMode.OPEN,
+    # Context collab public surface — the operator of all three operations is
+    # the L2 accountability subject the delivery binds `ActorContext.actor` (a
+    # `human` PrincipalRef) to, and an application calling alone names no end
+    # user to bind. REFUSED at the gate keeps that contract mechanical instead
+    # of a PrincipalRef empty-id validation later.
+    ("POST", "/openapi/v1/collaboration/task/context_collab"): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/task/context_collab/{collab_context_id}/events",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/task/context_collab/{collab_context_id}",
+    ): AdmissionMode.REFUSED,
+}
+
+
+#: Todo workbench is a browser Human self-service surface; app-only callers are refused.
+TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-template-capabilities",
+    ): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/todo-templates"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todo-templates"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions",
+    ): AdmissionMode.REFUSED,
+    (
+        "PUT",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}/validate",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}/publish",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/archive",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/activate",
+    ): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/projects",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/{project_id}/work-items",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/{project_id}/work-items/{work_item_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/from-template",
+    ): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/stages",
+    ): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/run"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/events"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts/{artifact_id}/content",
+    ): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance"): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/stages/{stage_instance_id}/complete",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/resume",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/cancel",
+    ): AdmissionMode.REFUSED,
 }

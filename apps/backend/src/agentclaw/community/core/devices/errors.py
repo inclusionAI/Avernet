@@ -15,6 +15,10 @@ class DeviceServiceError(Exception):
         self.message = message
 
 
+class DeviceUnavailableError(DeviceServiceError):
+    """The provider confirmed that the requested connection target is unavailable."""
+
+
 class DeviceReleaseError(DeviceServiceError):
     """设备释放错误"""
 
@@ -64,3 +68,7 @@ class DeviceAlreadyExistsError(DeviceDomainError):
 class DeviceLimitExceededError(DeviceDomainError):
     """超过设备数量上限"""
     pass
+
+
+class DeviceFileSystemReadOnlyError(Exception):
+    """The target device explicitly reported a read-only filesystem."""

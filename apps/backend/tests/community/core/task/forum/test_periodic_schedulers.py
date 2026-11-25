@@ -10,9 +10,15 @@ from agentclaw.community.core.task.forum.content_import.scheduler import (
     ContentImportScheduler,
 )
 from agentclaw.community.core.task.forum.digest.scheduler import DigestScheduler
+from agentclaw.community.core.task.forum.poll_statistics.scheduler import (
+    PollStatisticsScheduler,
+)
+from agentclaw.community.core.task.forum.topic_tag.scheduler import TopicTagScheduler
 from agentclaw.community.di.bbs_digest_config import (
     BbsContentImportTaskConfig,
     BbsDigestTaskConfig,
+    BbsPollStatisticsTaskConfig,
+    BbsTopicTagTaskConfig,
 )
 
 
@@ -48,6 +54,26 @@ def _digest_config(*, enabled: bool = True) -> BbsDigestTaskConfig:
         enabled=enabled,
         interval=1,
         jitter=0,
+        lock_ttl=30,
+        heartbeat=10,
+    )
+
+
+def _poll_config(*, enabled: bool = True) -> BbsPollStatisticsTaskConfig:
+    return BbsPollStatisticsTaskConfig(
+        enabled=enabled,
+        interval=1,
+        jitter=0,
+        lock_ttl=30,
+        heartbeat=10,
+    )
+
+
+def _topic_tag_config(*, enabled: bool = True) -> BbsTopicTagTaskConfig:
+    return BbsTopicTagTaskConfig(
+        enabled=enabled,
+        interval=3600,
+        jitter=30,
         lock_ttl=30,
         heartbeat=10,
     )
@@ -171,3 +197,47 @@ async def test_run_once_returns_without_execution_when_lock_is_held() -> None:
     }
     assert cache.acquire_calls == [("bbs:summary", 30)]
     assert executor.calls == []
+
+
+@pytest.mark.asyncio
+async def test_poll_statistics_scheduler_uses_its_own_lease() -> None:
+    cache = _FakeCache()
+    executor = _FakeExecutor()
+    scheduler = PollStatisticsScheduler(
+        executor=executor,
+        cache=cache,
+        config=_poll_config(enabled=False),
+    )
+
+    await scheduler.startup()
+    assert scheduler._loop_task is None
+
+    result = await scheduler.run_once()
+
+    assert result["success"] is True
+    assert result["task_name"] == "poll_statistics_task"
+    assert cache.acquire_calls == [("bbs:poll_statistics", 30)]
+    assert cache.release_calls == [("bbs:poll_statistics", "lease-token")]
+    assert executor.calls == ["poll_statistics_task"]
+
+
+@pytest.mark.asyncio
+async def test_topic_tag_scheduler_uses_its_own_lease() -> None:
+    cache = _FakeCache()
+    executor = _FakeExecutor()
+    scheduler = TopicTagScheduler(
+        executor=executor,
+        cache=cache,
+        config=_topic_tag_config(enabled=False),
+    )
+
+    await scheduler.startup()
+    assert scheduler._loop_task is None
+
+    result = await scheduler.run_once()
+
+    assert result["success"] is True
+    assert result["task_name"] == "topic_tag_task"
+    assert cache.acquire_calls == [("bbs:topic_tags", 30)]
+    assert cache.release_calls == [("bbs:topic_tags", "lease-token")]
+    assert executor.calls == ["topic_tag_task"]

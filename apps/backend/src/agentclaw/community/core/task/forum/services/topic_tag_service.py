@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.task.forum import (
@@ -15,10 +16,14 @@ from agentclaw.community.core.task.forum.models import (
     ForumTopicRecord,
     ForumTopicTagStatisticsResult,
 )
+from agentclaw.community.core.task.forum.shared.llm import BBS_LLM_DISABLED
 from agentclaw.community.core.task.forum.shared.protocols import BbsLLMProtocol
 from agentclaw.community.core.task.forum.topic_tag_service_protocol import (
     ForumTopicTagServiceProtocol,
 )
+from agentclaw.community.log import get_logger
+
+logger = get_logger()
 
 TOPIC_TAG_VOCABULARY = (
     # Product, design, and engineering domains.
@@ -83,35 +88,78 @@ class ForumTopicTagService(ForumTopicTagServiceProtocol):
         self._llm = llm
 
     async def execute(self) -> ForumTopicTagStatisticsResult:
+        started_at = time.perf_counter()
         page = self._repository.list_topics(
             keyword=None,
             status=None,
             offset=0,
             limit=self._TOPIC_PAGE_SIZE,
         )
-        topics_examined = 0
+        untagged = [topic for topic in page.items if not topic.analysis.tags]
+        selected = untagged[: self._TOPICS_PER_RUN]
+        logger.info(
+            "[bbs-topic-tag][service] scan page_items=%s page_total=%s "
+            "already_tagged=%s untagged=%s selected=%s",
+            len(page.items),
+            page.total,
+            len(page.items) - len(untagged),
+            len(untagged),
+            len(selected),
+        )
+
+        topics_examined = len(selected)
         topics_tagged = 0
 
-        for topic in page.items:
-            if topic.analysis.tags:
-                continue
-            if topics_examined >= self._TOPICS_PER_RUN:
-                break
-            topics_examined += 1
+        for index, topic in enumerate(selected, start=1):
+            logger.info(
+                "[bbs-topic-tag][service] classify topic=%s index=%s/%s",
+                topic.topic_id,
+                index,
+                len(selected),
+            )
             prompt = self._build_prompt(topic)
             response = await self._llm.generate_tags(
                 prompt, max_tokens=self._LLM_MAX_TOKENS
             )
             tags = self._parse_tags(response)
             if not tags:
+                reason = (
+                    "llm_disabled"
+                    if response.strip() == BBS_LLM_DISABLED
+                    else "invalid_model_output"
+                )
+                logger.warning(
+                    "[bbs-topic-tag][service] skip topic=%s reason=%s",
+                    topic.topic_id,
+                    reason,
+                )
                 continue
+
+            logger.info(
+                "[bbs-topic-tag][service] generated topic=%s tags=%s",
+                topic.topic_id,
+                ",".join(tags),
+            )
             updated = self._tag_repository.update_topic_tags(
                 topic_id=topic.topic_id,
                 tags=tags,
             )
-            if updated is not None:
-                topics_tagged += 1
+            if updated is None:
+                logger.warning(
+                    "[bbs-topic-tag][service] persist skipped topic=%s reason=topic_not_found",
+                    topic.topic_id,
+                )
+                continue
+            topics_tagged += 1
 
+        duration_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.info(
+            "[bbs-topic-tag][service] completed topics_examined=%s "
+            "topics_tagged=%s duration_ms=%s",
+            topics_examined,
+            topics_tagged,
+            duration_ms,
+        )
         return ForumTopicTagStatisticsResult(
             topics_examined=topics_examined,
             topics_tagged=topics_tagged,

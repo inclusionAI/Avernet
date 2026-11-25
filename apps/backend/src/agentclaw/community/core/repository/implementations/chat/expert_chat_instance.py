@@ -30,11 +30,15 @@ Prod-twin parity (same rationale as the session repo):
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
+from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any, Dict, Optional
 
 from injector import inject
-from sqlalchemy import func
+from sqlalchemy import case, func, literal, update, and_
 
+from agentclaw.community.core.repository.caller_token_refresh_types import CallerTokenRefresh
 from agentclaw.community.core.repository.implementations.bot.resource_locator import resource_locator
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -127,6 +131,7 @@ class ExpertChatInstanceRepository(
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["bot_id", "owner_id", "user_id", "env"],
                     set_={
+                        "caller_token_expires_at": self._expiry_after_change(status, ext_json or "null"),
                         "status": status,
                         "ext": ext_json,
                         "gmt_modified": func.now(),
@@ -148,12 +153,11 @@ class ExpertChatInstanceRepository(
                 from sqlalchemy.dialects.mysql import insert as _insert
 
                 stmt = _insert(table).values(**values)
-                stmt = stmt.on_duplicate_key_update(
-                    id=func.LAST_INSERT_ID(self.Model.id),
-                    status=status,
-                    ext=ext_json,
-                    gmt_modified=func.now(),
-                )
+                stmt = stmt.on_duplicate_key_update([
+                    ("caller_token_expires_at", self._expiry_after_change(status, ext_json or "null")),
+                    ("id", func.LAST_INSERT_ID(self.Model.id)),
+                    ("status", status), ("ext", ext_json), ("gmt_modified", func.now()),
+                ])
                 row_id = db.execute(stmt).lastrowid
 
             row = db.query(self.Model).filter(self.Model.id == row_id).first()
@@ -190,21 +194,161 @@ class ExpertChatInstanceRepository(
         write is the caller's responsibility.
         """
         env = get_current_env()
-        updates: Dict[str, Any] = {self.Model.gmt_modified: func.now()}
+        # Expiry must be evaluated before ext/status assignments on MySQL.
+        updates: Dict[str, Any] = {
+            self.Model.caller_token_expires_at: self._expiry_after_change(
+                status, json.dumps(ext) if ext is not None else None,
+            ),
+            self.Model.gmt_modified: func.now(),
+        }
         if status is not None:
             updates[self.Model.status] = status
         if ext is not None:
             updates[self.Model.ext] = json.dumps(ext)
         with self._db.orm_session() as db:
             owner_id = resource_locator(db, bot_id, owner_id)
-            rowcount = (
-                db.query(self.Model)
-                .filter(
+            statement = (
+                update(self.Model)
+                .where(
                     self.Model.user_id == user_id,
                     self.Model.bot_id == bot_id,
                     self.Model.owner_id == owner_id,
                     self.Model.env == env,
                 )
-                .update(updates, synchronize_session=False)
+                .ordered_values(*updates.items())
             )
-            return rowcount > 0
+            return db.execute(statement).rowcount > 0
+
+    def _expiry_after_change(self, status, ext_json):
+        if status is not None and status not in {"success", "active"}:
+            return None
+        if ext_json is None:
+            return self.Model.caller_token_expires_at
+        same_target = and_(*(
+            func.json_extract(self.Model.ext, f"$.{key}").is_not_distinct_from(
+                func.json_extract(literal(ext_json), f"$.{key}")
+            ) for key in ("binding_id", "bot_uuid", "baas_publish_id")
+        ))
+        return case((same_target, self.Model.caller_token_expires_at), else_=None)
+
+    def list_caller_token_refresh_candidates(
+        self, *, expires_before: datetime, after_id: int = 0, limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if (not isinstance(expires_before, datetime) or expires_before.tzinfo is None
+                or expires_before.utcoffset() is None):
+            raise ValueError("caller_refresh_cutoff_must_be_timezone_aware")
+        if isinstance(after_id, bool) or not isinstance(after_id, int) or after_id < 0:
+            raise ValueError("caller_refresh_cursor_invalid")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("caller_refresh_page_size_invalid")
+        cutoff = expires_before.astimezone(UTC).replace(tzinfo=None)
+        fields = {"env": get_current_env(), "after_id": after_id, "limit": limit,
+                  "expires_before": expires_before.isoformat()}
+        logger.info("caller_refresh_candidates_requested fields=%s", fields)
+        try:
+            with self._db.orm_session() as db:
+                rows = (db.query(self.Model).filter(
+                    self.Model.env == fields["env"], self.Model.id > after_id,
+                    self.Model.status.in_(("init", "success", "active")),
+                    (self.Model.caller_token_expires_at.is_(None)
+                     | (self.Model.caller_token_expires_at <= cutoff)),
+                ).order_by(self.Model.id.asc()).limit(limit).all())
+                result = [row.to_dict() for row in rows]
+        except Exception as exc:
+            logger.warning("caller_refresh_candidates_failed fields=%s error_type=%s", fields, type(exc).__name__)
+            raise
+        logger.info("caller_refresh_candidates_succeeded fields=%s count=%s", fields, len(result))
+        return result
+
+    @contextmanager
+    def caller_token_update(
+        self, *, user_id: str, bot_id: str, owner_id: str,
+        binding_id: int, expires_at: datetime, force_runtime_refresh: bool = False,
+    ) -> Iterator[bool]:
+        if expires_at.tzinfo is None or expires_at <= datetime.now(UTC):
+            raise ValueError("caller_token_expiry_invalid")
+        expiry = expires_at.astimezone(UTC)
+        fields = {"bot_id": bot_id, "owner_id": owner_id, "caller_user_id": user_id,
+                  "env": get_current_env(), "binding_id": binding_id}
+        if force_runtime_refresh:
+            logger.info("caller_token_force_install_requested fields=%s expires_at=%s", fields, expiry.isoformat())
+        try:
+            with self.caller_token_refresh(
+                user_id=user_id, bot_id=bot_id, owner_id=owner_id, binding_id=binding_id,
+                force_runtime_refresh=force_runtime_refresh,
+            ) as state:
+                current = state.instance.get("caller_token_expires_at")
+                if not force_runtime_refresh and current is not None and datetime.fromisoformat(current) >= expiry:
+                    logger.info("caller_token_expiry_preserved bot_id=%s binding_id=%s expires_at=%s",
+                                bot_id, binding_id, current)
+                    yield False
+                    return
+                yield True
+                state.expires_at = expires_at
+        except Exception as exc:
+            if force_runtime_refresh:
+                logger.warning("caller_token_force_install_failed fields=%s error_type=%s", fields, type(exc).__name__)
+            raise
+        if force_runtime_refresh:
+            logger.info("caller_token_force_install_succeeded fields=%s expires_at=%s", fields, expiry.isoformat())
+
+    def correct_caller_token_expiry(
+        self, *, user_id: str, bot_id: str, owner_id: str, binding_id: int,
+        expires_at: datetime, expected_expires_at: datetime | None,
+    ) -> dict:
+        if expires_at.tzinfo is None or (expected_expires_at is not None and expected_expires_at.tzinfo is None):
+            raise ValueError("caller_token_expiry_invalid")
+        expiry = expires_at.astimezone(UTC).replace(tzinfo=None)
+        expected = (expected_expires_at.astimezone(UTC).replace(tzinfo=None)
+                    if expected_expires_at is not None else None)
+        with self._db.transactional_orm_session() as db:
+            # COSEC: exact entity address only; correction shares IAM/ASC's instance row lock.
+            row = (db.query(self.Model).filter(
+                self.Model.user_id == user_id, self.Model.bot_id == bot_id,
+                self.Model.owner_id == owner_id, self.Model.env == get_current_env(),
+            ).populate_existing().with_for_update().first())
+            if (row is None or row.status not in {"init", "success", "active"}
+                    or (row.to_dict()["ext"] or {}).get("binding_id") != binding_id):
+                raise ValueError("caller_instance_changed")
+            previous = row.caller_token_expires_at
+            if previous != expected:
+                raise ValueError("caller_token_expiry_conflict")
+            row.caller_token_expires_at = expiry
+            db.flush()
+            instance_id = row.id
+        return {"instance_id": instance_id, "previous_expires_at":
+                previous.replace(tzinfo=UTC).isoformat() if previous is not None else None}
+
+    @contextmanager
+    def caller_token_refresh(
+        self, *, user_id: str, bot_id: str, owner_id: str, binding_id: int,
+        force_runtime_refresh: bool = False,
+    ) -> Iterator[CallerTokenRefresh]:
+        env = get_current_env()
+        # COSEC: IAM and scheduled signing hold the same exact scoped row lock.
+        with self._db.transactional_orm_session() as db:
+            owner_id = resource_locator(db, bot_id, owner_id)
+            row = (db.query(self.Model).filter(
+                self.Model.user_id == user_id, self.Model.bot_id == bot_id,
+                self.Model.owner_id == owner_id, self.Model.env == env,
+            ).populate_existing().with_for_update().first())
+            if (row is None or row.status not in {"init", "success", "active"}
+                    or (row.to_dict()["ext"] or {}).get("binding_id") != binding_id):
+                raise ValueError("caller_instance_changed")
+            fields = {"bot_id": bot_id, "owner_id": owner_id, "caller_user_id": user_id,
+                      "env": env, "binding_id": binding_id}
+            logger.info("caller_token_refresh_locked fields=%s", fields)
+            state = CallerTokenRefresh(instance=row.to_dict())
+            yield state
+            if state.expires_at is None:
+                return
+            if state.expires_at.tzinfo is None or state.expires_at <= datetime.now(UTC):
+                raise ValueError("caller_token_expiry_invalid")
+            expiry = state.expires_at.astimezone(UTC).replace(tzinfo=None)
+            # COSEC: only explicit runtime recovery may replace a longer installed credential.
+            if (not force_runtime_refresh and row.caller_token_expires_at is not None
+                    and row.caller_token_expires_at >= expiry):
+                raise ValueError("caller_token_expiry_not_advanced")
+            row.caller_token_expires_at = expiry
+            db.flush()
+        logger.info("caller_token_expiry_recorded fields=%s expires_at=%s", fields, state.expires_at.isoformat())

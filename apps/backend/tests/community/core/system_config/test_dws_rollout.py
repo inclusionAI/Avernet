@@ -1,4 +1,5 @@
 from unittest.mock import Mock
+from agentclaw.community.plugin_api.dws_identity import DwsRolloutIdentity
 
 import pytest
 
@@ -42,6 +43,29 @@ def test_failure_closed_and_environment_separation():
     assert not is_allowed(store, "165137", "prod")
     store.get_config.side_effect = RuntimeError("database unavailable")
     assert not is_allowed(store, "165137", "pre")
+
+
+def test_default_policy_preserves_opaque_ids_and_zeroes():
+    store = Mock()
+    store.get_config.return_value = {"mode": "allowlist", "staff_ids": ["004232", "UserA"]}
+    assert is_allowed(store, "004232", "pre")
+    assert not is_allowed(store, "4232", "pre")
+    assert not is_allowed(store, "usera", "pre")
+    assert is_allowed(store, "UserA", "pre")
+
+
+def test_comparison_policy_is_called_without_mutating_stored_values():
+    store = Mock()
+    value = {"mode": "allowlist", "staff_ids": ["alias"]}
+    store.get_config.return_value = value
+    policy = Mock(spec=DwsRolloutIdentity)
+    policy.key.side_effect = lambda v: "canonical" if v in {"actor", "alias"} else ""
+    assert is_allowed(store, "actor", "pre", policy)
+    assert policy.key.call_count == 2
+    assert value == {"mode": "allowlist", "staff_ids": ["alias"]}
+    assert not is_allowed(store, "unknown", "pre", policy)
+    policy.key.side_effect = ValueError("invalid identity")
+    assert not is_allowed(store, "actor", "pre", policy)
 
 
 @pytest.mark.parametrize(

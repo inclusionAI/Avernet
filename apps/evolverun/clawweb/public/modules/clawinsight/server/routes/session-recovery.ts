@@ -1,10 +1,12 @@
 import { AgentToolCallIdempotencyConflictError, AgentToolCallWorkloadConflictError } from "../repositories/repair/agent-tool-call-record.js";
+import { logRepairEvent, repairLogError } from "../services/repair/common/logging.js";
 import { resolveRepairRequestActor } from "../services/repair/common/request-actor.js";
 import { parseAgentExecutionTicket } from "../services/repair/common/agent-execution.js";
 import { AgentToolError } from "../services/repair/common/agent-tools/errors.js";
 import type { RecoveryActor } from "../services/repair/session-recovery/contracts.js";
 import { Router, json, type Request } from "express";
 import { SessionRecoveryError } from "../services/repair/session-recovery/errors.js";
+import { parseRequest } from "../services/repair/session-recovery/validation.js";
 import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import { redactPersistableText } from "@avernet/clawweb-shared/server/services/redaction";
 import type { SessionRecoveryRuntime } from "../services/repair/session-recovery/contracts.js";
@@ -20,6 +22,14 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
   };
   router.post("/internal/monitoring/session-recoveries", json({ limit: "64kb", inflate: false }), async (req, res, next) => {
     try {
+      if (!supplied) {
+        try {
+          const request = parseRequest(req.body);
+          if (request.execution_level !== "debug") logRepairEvent("session-recovery", "session_recovery_task", "CREATE_FAILED", {
+            eventId: request.event_id, botId: request.target.bot_id, targetEnvironment: request.target.env,
+            phase: "create", outcome: "failed", count: 1, errorCode: "recovery_not_ready" });
+        } catch { /* Invalid input is not a failed online creation; preserve the existing unavailable response below. */ }
+      }
       const deps = runtime();
       res.set("Cache-Control", "no-store");
       res.status(202).json(await deps.service.create(req.body, { userId: "session-recovery-service", isAdmin: true }));
@@ -43,6 +53,13 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
     try { res.set("Cache-Control", "no-store").status(202).json(await tasks().createSimulations(req.body, await actor(req))); }
     catch (error) { next(error); }
   });
+  router.get('/monitoring/session-recoveries/tasks', async (req, res, next) => {
+    try {
+      const service = tasks();
+      if (!service.listTasks) throw new SessionRecoveryError(503, 'recovery_not_ready', '自愈任务列表未配置');
+      res.set('Cache-Control', 'no-store').json(await service.listTasks(req.query, await actor(req)));
+    } catch (error) { next(error); }
+  });
   router.get("/monitoring/session-recoveries/:taskId", async (req, res, next) => {
     try { res.set("Cache-Control", "no-store").json(await tasks().detail(String(req.params.taskId), await actor(req))); }
     catch (error) { next(error); }
@@ -50,6 +67,12 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
   router.patch("/monitoring/session-recoveries/:taskId/share", json({ limit: "8kb", inflate: false }), async (req, res, next) => {
     try { res.set("Cache-Control", "no-store").json(await tasks().setTaskShared(String(req.params.taskId), req.body?.shared, await actor(req))); }
     catch (error) { next(error); }
+  });
+  router.post("/monitoring/session-recoveries/:taskId/effect-recheck", json({ limit: "8kb", inflate: false }), async (req, res, next) => {
+    try {
+      const result = await tasks().startEffectRecheck(String(req.params.taskId), req.body?.request_id, await actor(req));
+      res.set("Cache-Control", "no-store").status(202).json(result);
+    } catch (error) { next(error); }
   });
   router.post("/monitoring/session-recoveries/:taskId/terminate", json({ limit: "8kb", inflate: false }), async (req, res, next) => {
     try { res.set("Cache-Control", "no-store").json(await tasks().terminate(String(req.params.taskId), await actor(req), req.body?.reason)); }
@@ -71,6 +94,12 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
       res.json({ ok: true });
     } catch (error) { next(error); }
   });
+  router.post("/monitoring/session-recoveries/:taskId/owner-requests/:requestId/confirm", json({ limit: "16kb", inflate: false }), async (req, res, next) => {
+    try {
+      await tasks().confirmOwner(String(req.params.taskId), String(req.params.requestId), await actor(req), req.body?.feedback ?? "");
+      res.set("Cache-Control", "no-store").json({ ok: true });
+    } catch (error) { next(error); }
+  });
   router.post("/monitoring/session-recoveries/:taskId/annotations", json({ limit: "64kb", inflate: false }), async (req, res, next) => {
     try { await tasks().annotate(String(req.params.taskId), await actor(req), req.body); res.json({ ok: true }); }
     catch (error) { next(error); }
@@ -82,9 +111,9 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
   });
   const workerPath = "/internal/monitoring/session-recoveries/:taskId/executions/:executionId";
   const worker = () => { if (!supplied?.agent) throw new SessionRecoveryError(503, "recovery_not_ready", "自愈执行服务未配置"); return supplied.agent; };
-  const verifyWorker = (req: Request, control = false) => worker().verify(String(req.params.taskId), String(req.params.executionId), parseAgentExecutionTicket(req.header("authorization")), control);
+  const verifyWorker = (req: Request, control = false, forBootstrap = false) => worker().verify(String(req.params.taskId), String(req.params.executionId), parseAgentExecutionTicket(req.header("authorization")), control, forBootstrap);
   router.get(`${workerPath}/bootstrap`, async (req, res, next) => {
-    try { res.set("Cache-Control", "no-store").json(await worker().bootstrap(await verifyWorker(req, true))); } catch (error) { next(error); }
+    try { res.set("Cache-Control", "no-store").json(await worker().bootstrap(await verifyWorker(req, true, true))); } catch (error) { next(error); }
   });
   router.post(`${workerPath}/heartbeat`, json({ limit: "8kb", inflate: false }), async (req, res, next) => {
     try { res.json(await worker().heartbeat(await verifyWorker(req, true), req.body?.ccSessionId)); } catch (error) { next(error); }
@@ -110,10 +139,9 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
       : (error as { type?: string })?.type === "entity.too.large" ? new SessionRecoveryError(413, "invalid_session_recovery", "请求过大")
       : (error as { type?: string })?.type === "entity.parse.failed" ? new SessionRecoveryError(422, "invalid_session_recovery", "JSON 格式无效")
       : new SessionRecoveryError(503, "recovery_unavailable", "自愈发送服务暂不可用；发送结果可能未知");
-    if (failure.status >= 500) console.error("[session-recovery] request failed", JSON.stringify({
-      method: req.method, path: redactPersistableText(req.path, 1024),
-      error: redactPersistableText(error instanceof Error ? error.stack ?? error.message : String(error), 4096),
-    }));
+    if (failure.status >= 500) logRepairEvent("session-recovery", "session_recovery_request", "failed", {
+      operation: `${req.method} ${redactPersistableText(req.path, 1024)}`, ...repairLogError(error),
+    });
     res.status(failure.status).json({ error: failure.code, message: failure.message });
   });
   return router;

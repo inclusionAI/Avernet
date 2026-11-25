@@ -150,3 +150,20 @@ describe('isViewScopeChangedFrame', () => {
     expect(isViewScopeChangedFrame('view_scope_changed')).toBe(false);
   });
 });
+
+
+it('uses the dev-server proxy for a custom local hostname while preserving deployed routing', () => {
+  const previous = process.env.NODE_ENV;
+  (globalThis as Record<string, unknown>).TEAMCLAW_WS_GW_PRE = 'https://gateway-pre.example.com';
+  try {
+    process.env.NODE_ENV = 'development';
+    expect(resolveGroupGatewayOrigin('local-app.example.com')).toBeUndefined();
+    expect(resolveGroupWsOrigin('local-app.example.com')).toBeUndefined();
+    process.env.NODE_ENV = 'production';
+    expect(resolveGroupWsOrigin('app-pre.example.com')).toBe('wss://gateway-pre.example.com');
+  } finally {
+    if (previous === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous;
+    delete (globalThis as Record<string, unknown>).TEAMCLAW_WS_GW_PRE;
+  }
+});

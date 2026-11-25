@@ -10,6 +10,7 @@ from secbaas.community.api.bot_runtime import (
     BotServiceError,
     MessageInfo,
     SessionInfo,
+    SessionRuntimeStatus,
 )
 from secbaas.community.api.sse import StreamChunk
 
@@ -124,6 +125,20 @@ class CallerBotService(BotService):
             context=context,
             attachments=attachments,
             session_pending=session_pending,
+        )
+
+    async def get_session_runtime_status(
+        self,
+        *,
+        session_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+    ) -> SessionRuntimeStatus:
+        """Observe an existing run without creating a session or sending a message."""
+        return await self._inner.get_session_runtime_status(
+            session_id=session_id,
+            binding_info=self._require_sandbox(binding_info),
+            context=context,
         )
 
     async def get_session(

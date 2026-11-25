@@ -2,6 +2,20 @@
 
 ## Provides
 
+- GET/create label-bearing details use the uncached, version-fenced
+  `GroupCoreService::read_detail_snapshot`; GET authorizes that same metadata
+  before display projection. Local snapshot retries are bounded at three.
+  PATCH retains its own commit snapshot without a response-time re-read.
+  The owning [label contract](../../../../docs/catalog-labels.md#detail-response-consistency)
+  records consistency scope, failure behavior and SQL query cost.
+
+- PATCH details use `GroupCoreService::mutate_with_snapshot`: name, version
+  and catalog labels are from the same commit, not a later Card query. Omitted
+  labels preserve that commit's collection; an explicit empty collection clears.
+  Display-profile work after COMMIT cannot replace these committed labels.
+  Deterministic SQLite tests pause A after COMMIT, commit B through another
+  facade/store, and then check both complete responses.
+
 - Normal Group summaries resolve nullable `driver_bot_name` from the driver
   participant after existing Bot-name backfill, without extra registry reads.
   Normal Group details resolve nullable `driver_bot_owner` (`human_<created_by>`)
@@ -9,6 +23,18 @@
   matching legacy display semantics without changing authorization. Missing
   ownership yields nulls; a missing Human name preserves the owner ID. DM
   projections are unchanged. Shared projections also apply to create/update.
+
+- V1 summaries expose lightweight `participants` rows: identity plus the
+  Group-membership name snapshot verbatim (extracted before the driver/peer
+  name backfill mutates the member copies; null stays null) and `avatar_url`
+  from exactly ONE batched display-profile read per result page (`BotRegistryCoreService::avatar_urls`).
+  Detail and shared create/update/participant response models fill
+  `Participant.avatar_url` (and the DM `peer_actor` avatar) from one batched
+  read of the visible rows; Human participants resolve null without a read,
+  and avatar read failures surface as service errors, never null pages.
+  The DM summary projection carries the same exactly-2 member invariant as
+  the detail: a corrupted store row that does not hold exactly two members
+  fails the read loudly instead of returning a contract-violating page.
 
 - `GroupServiceImpl`, the transport-agnostic implementation of the BCN V1
   Group Service API.

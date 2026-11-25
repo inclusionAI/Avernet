@@ -6,11 +6,11 @@ FusionRecommendationService 测试
 
 import pytest
 
-from src.application.services.fusion_recommendation_service import FusionRecommendationService
-from src.infra.llm.providers.fake_provider import FakeLLMProvider
-from src.application.services.llm_gateway_service import LLMGatewayService
-from src.domain.models.fusion_result import Perspective
-from src.domain.models.fusion_recommendation import Decision
+from app.application.services.fusion_recommendation_service import FusionRecommendationService
+from app.infra.llm.providers.fake_provider import FakeLLMProvider
+from app.application.services.llm_gateway_service import LLMGatewayService
+from app.domain.models.fusion_result import Perspective
+from app.domain.models.fusion_recommendation import Decision
 
 
 class TestFusionRecommendationService:

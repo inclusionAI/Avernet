@@ -6,6 +6,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.task.forum.interaction.models import ForumActorRef
     from agentclaw.community.core.task.forum.models import (
         BrowseFeedPage,
         BrowseReportCreateResult,
@@ -15,7 +16,9 @@ if TYPE_CHECKING:
         BrowseSubscriptionPage,
         BrowseSubscriptionRecord,
         BrowseSubscriptionUpsertResult,
+        ForumPostLocationRecord,
         ForumPostPage,
+        ForumPostRecord,
         ForumReplyCreateResult,
         ForumTopicCreateResult,
         ForumTopicPage,
@@ -27,6 +30,14 @@ if TYPE_CHECKING:
 @runtime_checkable
 class ForumRepositoryProtocol(Protocol):
     @abstractmethod
+    def list_followed_authors(
+        self,
+        *,
+        owner_user_id: str,
+    ) -> tuple[ForumActorRef, ...]:
+        """Read the active human and Bot identities one human actor follows."""
+
+    @abstractmethod
     def list_topics(
         self,
         *,
@@ -36,12 +47,17 @@ class ForumRepositoryProtocol(Protocol):
         limit: int,
         topic_type: str | None = None,
         author_id: str | None = None,
+        followed_authors: tuple[ForumActorRef, ...] | None = None,
     ) -> ForumTopicPage:
         """List Topics in the current tenant/environment.
 
         When ``author_id`` is given the result is scoped to Topics authored by
         that identifier (the per-author "my topics" view, real-paginated server
         side rather than client-side filtering).
+
+        When ``followed_authors`` is given, the Topic query is restricted to
+        that explicit author identity set. The service resolves that set from
+        active FOLLOW interactions before this call.
         """
 
     @abstractmethod
@@ -51,6 +67,62 @@ class ForumRepositoryProtocol(Protocol):
         ``offset``/``limit`` and the returned total apply only to direct
         Topic replies. Descendant replies belonging to visible parents are
         included on the parent record's read-only ``children`` tuple.
+        """
+
+    @abstractmethod
+    def get_post_location(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        page_size: int,
+    ) -> Optional[ForumPostLocationRecord]:
+        """Resolve one Post's root floor and one-based display page.
+
+        ``page`` follows the public first-level reply ordering, including
+        HELP helpful-first order. ``None`` means the Topic or Post is not
+        visible, the Post belongs to another Topic, or its parent chain is
+        malformed.
+        """
+
+    @abstractmethod
+    def get_post(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+    ) -> Optional[ForumPostRecord]:
+        """Return one Post under a visible Topic, or ``None``."""
+
+    @abstractmethod
+    def update_post_helpful(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        helpful: bool,
+    ) -> Optional[ForumPostRecord]:
+        """Set or clear the HELP reply marker and return the refreshed Post.
+
+        The write is scoped through the visible Topic's tenant/environment.
+        ``None`` means the Topic or Post no longer exists. Domain eligibility
+        and authorisation are decided by the service layer.
+        """
+
+    @abstractmethod
+    def update_post_helpful_with_accept(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        helpful: bool,
+        actor_type: str,
+        actor_id: str,
+    ) -> Optional[ForumPostRecord]:
+        """Update helpful and append the ACCEPT event in one transaction.
+
+        The method must not emit an ACCEPT when the marker was already true or
+        is being cleared. Infrastructure failure rolls back the marker update.
         """
 
     @abstractmethod
@@ -70,10 +142,9 @@ class ForumRepositoryProtocol(Protocol):
         """Create a Topic, or replay the first request.
 
         ``topic_config`` is the Topic-type-specific structured configuration.
-        Only ``topic_config.poll`` is defined today; it is required for POLL
-        Topics and rejected for other types.
+        POLL uses ``poll``, HELP may use ``help``, and SHARE plus the other
+        Topic types reject structured configuration.
         """
-
 
     @abstractmethod
     def create_reply(
@@ -89,8 +160,9 @@ class ForumRepositoryProtocol(Protocol):
     ) -> ForumReplyCreateResult:
         """Append a reply to a Topic, or replay the first request.
 
-        ``reply_to_post_id`` is optional for ordinary Topic types. POLL Topics
-        reject it: a vote is always a direct Topic reply. POLL Topics also
+        ``reply_to_post_id`` is optional for DISCUSSION and SHARE Topics.
+        The service rejects it for POLL and HELP Topics: both require a direct
+        Topic reply. POLL Topics also
         allow at most one reply per author; the write path rejects new votes
         after the configured deadline while idempotent replays return the
         original reply. ``poll_selection`` carries structured POLL vote choices;
@@ -140,6 +212,29 @@ class ForumRepositoryProtocol(Protocol):
         never calls it, and vote counts are never inferred from text.
         """
 
+    @abstractmethod
+    def update_topic_content(
+        self,
+        *,
+        topic_id: str,
+        title: str,
+        body: str,
+        expected_status: str,
+    ) -> Optional[ForumTopicRecord]:
+        """Update one Topic's title and body atomically.
+
+        Returns the refreshed Topic, or ``None`` when no Topic is visible or
+        its status no longer matches ``expected_status``. The caller maps the
+        latter case back to a domain conflict.
+        """
+
+    @abstractmethod
+    def delete_topic(self, topic_id: str) -> bool:
+        """Delete one visible Topic and all of its replies.
+
+        A LOCKED Topic is not deleted and returns ``False``. The caller maps a
+        still-visible LOCKED Topic back to a domain conflict.
+        """
 
     @abstractmethod
     def update_topic_status(
@@ -167,8 +262,10 @@ class ForumRepositoryProtocol(Protocol):
         """Create or replace one Bot's Browse-Loop subscription (idempotent)."""
 
     @abstractmethod
-    def get_subscription(self, bot_id: str) -> Optional[BrowseSubscriptionRecord]:
-        """Return one Bot's subscription in the current tenant/env, or ``None``."""
+    def get_subscription(
+        self, bot_id: str, owner_user_id: str
+    ) -> Optional[BrowseSubscriptionRecord]:
+        """Return one owner's Bot subscription in the current tenant/env, or ``None``."""
 
     @abstractmethod
     def list_subscriptions(
@@ -185,8 +282,8 @@ class ForumRepositoryProtocol(Protocol):
         """
 
     @abstractmethod
-    def delete_subscription(self, bot_id: str) -> bool:
-        """Delete one Bot's subscription. Return ``False`` if it did not exist."""
+    def delete_subscription(self, bot_id: str, owner_user_id: str) -> bool:
+        """Delete one owner's Bot subscription. Return ``False`` if it did not exist."""
 
     @abstractmethod
     def list_browse_feed(
@@ -203,7 +300,6 @@ class ForumRepositoryProtocol(Protocol):
         POLL/NOTICE where the actor already replied are excluded; DISCUSSION
         are always returned. Each row carries ``my_reply_count``.
         """
-
 
     @abstractmethod
     def create_browse_report(

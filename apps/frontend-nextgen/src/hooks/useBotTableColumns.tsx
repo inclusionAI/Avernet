@@ -1,4 +1,5 @@
 import { BotContainerInfo } from '@/components/BotWorkshop/BotCard/BotContainerInfo';
+import { BotCopyActionsCell } from '@/components/BotWorkshop/BotCard/BotCopyActionsCell';
 import BotDescriptionCell from '@/components/BotWorkshop/BotCard/BotDescriptionCell';
 import BotInfoCell from '@/components/BotWorkshop/BotCard/BotInfoCell';
 import { BotManagementMenu } from '@/components/BotWorkshop/BotCard/BotManagementMenu';
@@ -8,6 +9,7 @@ import type { BotTableColumnOptions } from '@/components/BotWorkshop/BotCard/bot
 import BotTagsCell from '@/components/BotWorkshop/BotCard/BotTagsCell';
 import BotVersionCell from '@/components/BotWorkshop/BotCard/BotVersionCell';
 import { type DataTableColumn } from '@/components/ui/DataTable';
+import { BOT_COPY_FEATURE_ENABLED } from '@/hooks/useBotWorkshopCopyHost';
 import { botTableEngineVersionKey } from '@/hooks/useBotTableEngineVersions';
 import { getBotEntryAvailability, type BotDomain } from '@/services/botWorkshop';
 import { useMemo } from 'react';
@@ -22,6 +24,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     engineVersionStates,
     engineVersionUpdateAvailability,
     containerUserId,
+    currentUserId,
     onView,
     onEdit,
     onConversation,
@@ -29,21 +32,21 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
     onOpenLogs,
     onOpenTaskInstances,
     canOpenTaskInstances,
-    onOpenContainers,
-    canViewContainers,
+    onOpenContainers, canViewContainers,
     onHealthCheck,
     onChangeSpace,
     onAuthorize,
-    onManagePublication,
-    onAction,
-    onClaimLock,
-    onReleaseLock,
+    onPublicationChanged, onPublicationGateBlocked, onOpenEvaluation, onOpenEvalHistory,
+    onAction, onClaimLock, onReleaseLock,
     getInventoryActions,
     getHealthCheckAvailability,
     getLogAction,
     getCollaborationMode,
     getGeneralConfigAvailability,
     onGeneralConfig,
+    getCopyAvailability,
+    onCopy,
+    onRetryCopy,
     onOpenEngineInfo,
     onUpdateEngineVersion,
   } = options;
@@ -79,6 +82,8 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
             bot={bot}
             progressExpanded={expandedProgressIds.has(bot.id)}
             onToggleProgress={() => toggleProgress(bot.id)}
+            onPublicationChanged={onAction ? onPublicationChanged : undefined}
+            onPublicationGateBlocked={onPublicationGateBlocked}
           />
         ),
       },
@@ -87,17 +92,6 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
         header: '版本',
         width: 'w-[clamp(60px,5vw,72px)]',
         cell: (bot) => <BotVersionCell bot={bot} />,
-      },
-      {
-        id: 'tags',
-        header: 'Bot 标签',
-        width: 'w-[clamp(120px,10vw,160px)]',
-        cell: (bot) => {
-          const key = botTableEngineVersionKey(bot);
-          return (
-            <BotTagsCell bot={bot} engineVersionState={engineVersionStates[key]} onOpenEngineInfo={onOpenEngineInfo} />
-          );
-        },
       },
       {
         id: 'containers',
@@ -115,6 +109,18 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
             <span>—</span>
           ),
       },
+      {
+        // 标签单行横铺：下限覆盖引擎+部署+服务化 3 chip（~200px），上限兜住 4 chip 极值
+        id: 'tags',
+        header: 'Bot 标签',
+        width: 'w-[clamp(200px,16vw,264px)]',
+        cell: (bot) => {
+          const key = botTableEngineVersionKey(bot);
+          return (
+            <BotTagsCell bot={bot} engineVersionState={engineVersionStates[key]} onOpenEngineInfo={onOpenEngineInfo} />
+          );
+        },
+      },
       ...(showOwner
         ? [
             {
@@ -130,11 +136,13 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       {
         id: 'actions',
         header: '操作',
-        width: 'w-[284px]',
+        // 240px：最宽按钮行（对话/查看/编辑/日志 + 管理菜单）实测内容约 224px，留 16px 余量。
+        width: 'w-[240px]',
         align: 'end',
-        className: 'sticky right-0 z-10 bg-card group-hover:bg-muted/40',
-        headerClassName: 'sticky right-0 z-10 bg-muted/50',
+        sticky: 'right',
         cell: (bot) => {
+          const copyState = BOT_COPY_FEATURE_ENABLED ? bot.copyState : undefined; // 非空 → 收敛为重试(FAILED)+删除,均 owner 门控,见 BotCopyActionsCell
+          if (copyState) return <BotCopyActionsCell {...{ bot, copyState, onRetryCopy, onAction, currentUserId }} />;
           const entry = getBotEntryAvailability(bot);
           const collaborationAllowsConversation = canOpenConversation?.(bot) ?? true;
           const primaryCell = (
@@ -143,12 +151,14 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
               onView={onView}
               onEdit={onEdit}
               onConversation={onConversation}
+              onRequestAccess={onAuthorize}
+              collaborationMode={getCollaborationMode?.(bot)}
               conversationAllowed={collaborationAllowsConversation && entry.enabled}
               conversationDisabledReason={
                 entry.enabled
                   ? collaborationAllowsConversation
                     ? undefined
-                    : '申请协作权限后才可对话'
+                    : bot.disabledActions?.chat || '申请协作权限后才可对话'
                   : entry.disabledReason
               }
               onOpenLogs={onOpenLogs}
@@ -161,6 +171,7 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
           if (!onAction) return primaryCell;
           const menuKey = botTableEngineVersionKey(bot);
           const generalConfigAvailability = getGeneralConfigAvailability?.(bot);
+          const copyAvailability = getCopyAvailability?.(bot);
           return (
             <div className="flex items-center justify-end gap-0.5" onClick={(event) => event.stopPropagation()}>
               {primaryCell}
@@ -173,7 +184,6 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
                 collaborationMode={getCollaborationMode?.(bot)}
                 lockedByOther={bot.lock?.status === 'other'}
                 onAction={onAction}
-                onManagePublication={onManagePublication}
                 onHealthCheck={onHealthCheck}
                 healthCheckAvailability={getHealthCheckAvailability?.(bot)}
                 onOpenTaskInstances={onOpenTaskInstances}
@@ -183,6 +193,10 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
                 canGeneralConfig={generalConfigAvailability?.enabled}
                 generalConfigDisabledReason={generalConfigAvailability?.disabledReason}
                 onGeneralConfig={onGeneralConfig}
+                onOpenEvaluation={onOpenEvaluation}
+                onOpenEvalHistory={onOpenEvalHistory}
+                copyAvailability={copyAvailability}
+                onCopy={onCopy}
                 engineVersionUpdateAvailability={engineVersionUpdateAvailability[menuKey]}
                 onOpenEngineInfo={onOpenEngineInfo}
                 onUpdateEngineVersion={onUpdateEngineVersion}
@@ -204,10 +218,14 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       onOpenContainers,
       canViewContainers,
       containerUserId,
+      currentUserId,
       onHealthCheck,
       onChangeSpace,
       onAuthorize,
-      onManagePublication,
+      onPublicationChanged,
+      onPublicationGateBlocked,
+      onOpenEvaluation,
+      onOpenEvalHistory,
       onAction,
       onClaimLock,
       onReleaseLock,
@@ -220,6 +238,9 @@ export function useBotTableColumns(options: BotTableColumnOptions): DataTableCol
       toggleProgress,
       getGeneralConfigAvailability,
       onGeneralConfig,
+      getCopyAvailability,
+      onCopy,
+      onRetryCopy,
       onOpenEngineInfo,
       onUpdateEngineVersion,
       engineVersionStates,

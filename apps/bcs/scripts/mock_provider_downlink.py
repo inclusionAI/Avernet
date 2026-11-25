@@ -178,6 +178,26 @@ class MockProviderState:
             return self.handle_chat_history(body)
         if method == "chat.abort":
             return self.handle_chat_abort(body)
+        if method == "caller.container.ensure":
+            # spec §10.8 subset: acknowledge the ensured container with the
+            # required container_bound isolation level plus an opaque binding.
+            return 200, {
+                "ok": True,
+                "sandbox_container_id": f"mock-container-{body.get('bcs_session_id', 'na')}",
+                "isolation": {
+                    "level": "container_bound",
+                    "binding_ref": f"mock-binding-{uuid.uuid4().hex[:12]}",
+                    "generation": 1,
+                    # Long enough to never clip the trusted deadline input.
+                    "expires_at_ms": now_ms() + 3600_000,
+                },
+            }
+        if method == "chat.send.protected":
+            # Guarded caller execution ride path: hand back to the normal
+            # chat.send turn driver so auto-callback replies still work.
+            forwarded = dict(body)
+            forwarded["method"] = "chat.send"
+            return self.handle_chat_send(forwarded, duplicate)
         return 400, {"ok": False, "error": "unsupported_method", "retryable": False}
 
     def validate_auth(self, headers: Any) -> tuple[int, JsonObject] | None:

@@ -39,6 +39,11 @@ pub(crate) fn group_application_error_response(error: ApplicationError) -> Respo
         ApplicationError::BadGateway { code, message } => {
             legacy_group_error_response(StatusCode::BAD_GATEWAY, &code, message)
         }
+        // Auth-flow dependency outage: same stable code family as the V1
+        // envelope, on the legacy response shape.
+        ApplicationError::Unavailable { code, message } => {
+            legacy_group_error_response(StatusCode::SERVICE_UNAVAILABLE, &code, message)
+        }
         // COSEC: keep persistence and infrastructure details out of the legacy response.
         ApplicationError::Internal(error) => {
             tracing::error!(request_id = %bcs_observability::CurrentRequestId, error = %error, "legacy Group application request failed");
@@ -94,15 +99,24 @@ pub(crate) fn group_use_case_error_to_http(error: GroupUseCaseError) -> HttpAdap
         GroupUseCaseError::ActorNotFound(actor_id) => {
             HttpAdapterError::NotFound(format!("Actor '{}' not found", actor_id))
         }
-        GroupUseCaseError::ProposalNotFound(proposal_id)
-        | GroupUseCaseError::ProposalExpired(proposal_id) => {
-            HttpAdapterError::NotFound(format!("Proposal '{}' not found or expired", proposal_id))
-        }
         GroupUseCaseError::InvalidParticipantMode { mode, actor_kind } => {
             HttpAdapterError::BadRequest(format!(
                 "mode '{:?}' is not valid for actor_kind '{:?}'",
                 mode, actor_kind
             ))
+        }
+        GroupUseCaseError::Service(ServiceError::A2aManagement(error))
+            if error.code == bcs_service_api::types::a2a_bot::a2a_management::ManagementCode::InvalidRequest
+                && (error.field == "catalog_labels" || error.field.starts_with("catalog_labels.")) =>
+        {
+            HttpAdapterError::BadRequestStructured {
+                message: format!("invalid catalog_labels: {}", error.reason),
+                params: serde_json::json!({
+                    "code": "invalid_request",
+                    "field": error.field,
+                    "reason": error.reason,
+                }),
+            }
         }
         GroupUseCaseError::Service(ServiceError::ExistNonPublicBots { bots }) => {
             let bot_list: Vec<Value> = bots
@@ -198,11 +212,17 @@ pub(crate) async fn extract_human_actor_id(
         .map(|staff_no| format!("human_{}", staff_no))
 }
 
-/// Resolve the caller bot identity for group member management endpoints.
+/// Resolve the caller bot identity for group member
+/// management endpoints.
 ///
-/// Tries bot token first; falls back to human identity (cookie or
-/// X-Mock-User-Id in local/dev mode) and looks up a bot owned by
-/// the human that has coordinator access to the group.
+/// Tries bot token first; falls back to human identity
+/// (cookie or X-Mock-User-Id in local/dev mode) and
+/// picks the group's coordinator candidate the human
+/// CURRENTLY CONTROLS through the live authority hook
+/// (bot-authority plan Task 6.5, spec §8 Group 成员);
+/// the historical `list_bots_by_creator` probe is gone.
+/// A failing authority read is an internal error, never
+/// a deny-as-403.
 pub(crate) async fn resolve_group_member_caller(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -228,21 +248,48 @@ pub(crate) async fn resolve_group_member_caller(
 
     let staff_no = human_id.strip_prefix("human_").unwrap_or(&human_id);
 
-    let owned = state
-        .services
-        .bot_query
-        .list_bots_by_creator(staff_no)
-        .await
-        .map_err(bot_use_case_error_to_http)?;
-    let coordinator = owned.iter().find(|b| {
-        b.bot_uuid == group.driver_bot_id || group.originator.as_deref() == Some(&b.bot_uuid)
-    });
+    // The group's coordinator candidates: the driver
+    // first, then the originator Bot (the group's
+    // own resource facts — never an ownership list).
+    let mut candidates: Vec<String> = vec![group.driver_bot_id.clone()];
+    if let Some(originator) = group.originator.as_deref() {
+        if originator != group.driver_bot_id {
+            candidates.push(originator.to_string());
+        }
+    }
+    for bot_id in candidates {
+        // A candidate that IS the current Human's own actor id
+        // (the Human is the group's originator or driver
+        // themself) needs no authority edge: the hook by design
+        // carries no Human→Human manage edge, and this
+        // self-identity admission survives driver handover and
+        // manager-edge revocation (the spec §3.3 revocation
+        // boundary). The downstream coordinator check decides
+        // what the Human may do with the group.
+        if bot_id == human_id {
+            return Ok(bot_id);
+        }
+        match state
+            .services
+            .bot_authority_hook
+            .can_manage(staff_no, &bot_id)
+            .await
+        {
+            Ok(true) => return Ok(bot_id),
+            Ok(false) => continue,
+            Err(error) => {
+                return Err(HttpAdapterError::Service(
+                    ServiceError::InternalError(format!(
+                        "bot authority lookup failed: {error}"
+                    )),
+                ));
+            }
+        }
+    }
 
-    coordinator.map(|b| b.bot_uuid.clone()).ok_or_else(|| {
-        HttpAdapterError::Forbidden(
-            "human caller does not own a coordinator bot in this group".to_string(),
-        )
-    })
+    Err(HttpAdapterError::Forbidden(
+        "human caller does not control a coordinator bot in this group".to_string(),
+    ))
 }
 
 pub(crate) async fn resolve_actor_caller(
@@ -293,14 +340,6 @@ pub(crate) fn group_use_case_error_to_mode_response(error: GroupUseCaseError) ->
             Json(serde_json::json!({
                 "success": false,
                 "error": format!("Actor '{}' not found", actor_id)
-            })),
-        ),
-        GroupUseCaseError::ProposalNotFound(proposal_id)
-        | GroupUseCaseError::ProposalExpired(proposal_id) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({
-                "success": false,
-                "error": format!("Proposal '{}' not found or expired", proposal_id)
             })),
         ),
         GroupUseCaseError::InvalidParticipantMode { mode, actor_kind } => (
@@ -394,28 +433,10 @@ pub(crate) fn group_kind_filter(filter: GroupKindFilter) -> Option<GroupKind> {
     }
 }
 
-
-pub(crate) fn validate_service_spec_callback_urls(
-    guard: &OutboundUrlGuard,
-    service_spec: Option<&ServiceSpec>,
-) -> Result<(), String> {
-    let Some(callback_config) = service_spec.and_then(|spec| spec.callback_config.as_ref()) else {
-        return Ok(());
-    };
-    for (index, channel) in callback_config.channels.iter().enumerate() {
-        if let CallbackChannelConfig::Baas { base_url, .. } = channel {
-            guard
-                .validate_configured_http_url(base_url)
-                .map_err(|error| {
-                    format!(
-                        "service_spec.callback_config.channels[{index}].base_url is not allowed: {error}"
-                    )
-                })?;
-        }
-    }
-    Ok(())
-}
-
 // ---------------------------------------------------------------
 // PATCH /groups/{id}/settings
 // ---------------------------------------------------------------
+
+#[cfg(test)]
+#[path = "translation_tests.rs"]
+mod regression_tests;

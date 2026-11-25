@@ -185,6 +185,92 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
 }
 
 #[cfg(feature = "prometheus-metrics")]
+#[tokio::test]
+#[serial]
+async fn metrics_wrapper_forwards_catalog_label_normalization() {
+    let _runtime = install_runtime();
+    let group = MetricsGroupManagementService::new(
+        Arc::new(GroupServiceFake),
+        Arc::from("label-forward"),
+    );
+    // A configured inner service must accept a policy-valid key. Before the
+    // forwarding fix the wrapper silently fell back to the trait's
+    // CatalogLabelPolicy::default(), which rejects every key as UNKNOWN_KEY.
+    let input: bcs_service_api::types::catalog_labels::CatalogLabelsInput = serde_json::from_value(
+        serde_json::json!({"lifecycle": ["draft"]}),
+    )
+    .expect("valid label input");
+    let normalized = group
+        .normalize_catalog_labels(input)
+        .expect("wrapper must forward label normalization to the inner service");
+    assert_eq!(
+        normalized.as_map().get("lifecycle").map(|v| v.as_slice()),
+        Some(&["draft".to_string()][..]),
+        "normalized labels must come from the inner service's policy"
+    );
+
+    // Invalid values must fail with the inner service's rejection, so callers
+    // see the same error whether or not metrics instrumentation is enabled.
+    let rejected: bcs_service_api::types::catalog_labels::CatalogLabelsInput = serde_json::from_value(
+        serde_json::json!({"lifecycle": ["invalid-value"]}),
+    )
+    .expect("parsable label input");
+    let error = group
+        .normalize_catalog_labels(rejected)
+        .expect_err("inner service rejection must propagate through the wrapper");
+    let ServiceError::A2aManagement(error) = error else {
+        panic!("expected the inner service's structured rejection, got: {error}");
+    };
+    assert_eq!(
+        error.code,
+        bcs_service_api::types::a2a_bot::a2a_management::ManagementCode::InvalidRequest,
+    );
+    assert_eq!(error.field, "catalog_labels.lifecycle[0]");
+    assert_eq!(error.reason, "UNKNOWN_VALUE");
+}
+
+#[cfg(feature = "prometheus-metrics")]
+#[tokio::test]
+#[serial]
+async fn metrics_wrapper_preserves_native_task_dispatch_and_rejections() {
+    let runtime = install_runtime();
+    let flow = InstrumentedMessageFlowService::new(
+        Arc::new(MessageFlowFake), Arc::from("native-task-wrapper"),
+    );
+    let outcome = flow
+        .handle_native_task_dispatch("native-request", native_task_dispatch_cmd())
+        .await
+        .expect("native dispatch");
+    assert_eq!(outcome.task_id, "native-task");
+    assert_eq!(outcome.status, "queued");
+    assert_eq!(outcome.real_run_id.as_deref(), Some("native-run"));
+    assert!(outcome.bot_deliveries.is_empty());
+    assert!(outcome.frontend_deliveries.is_empty());
+
+    let error = flow
+        .handle_native_task_dispatch("native-rejected", native_task_dispatch_cmd())
+        .await
+        .expect_err("native rejection must not fall back to ordinary dispatch");
+    assert!(matches!(error, ServiceError::InvalidOperation { message, request_id }
+        if message == "native parent missing" && request_id.as_deref() == Some("native-rejected")));
+
+    let body = runtime.render();
+    for result in ["success", "error"] {
+        let expected = format!(
+            "bcs_message_flow_requests_total{{env=\"native-task-wrapper\",source=\"bot_ws\",operation=\"task_dispatch\",result=\"{result}\"}} 1",
+        );
+        assert!(body.lines().any(|line| line == expected), "missing metric: {expected}\n{body}");
+    }
+}
+
+fn native_task_dispatch_cmd() -> TaskDispatchCommand {
+    let mut cmd = task_dispatch_cmd();
+    cmd.target_bot_name = Some("Native Worker".to_string());
+    cmd.payload = serde_json::json!({"message": "native assignment", "toolCallId": "native-call"});
+    cmd
+}
+
+#[cfg(feature = "prometheus-metrics")]
 fn install_runtime() -> Arc<MetricsRuntime> {
     let bots_dir = helpers::create_temp_bots_dir();
     let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
@@ -198,6 +284,24 @@ struct GroupServiceFake;
 
 #[async_trait]
 impl GroupManagementService for GroupServiceFake {
+    fn normalize_catalog_labels(
+        &self,
+        input: bcs_service_api::types::catalog_labels::CatalogLabelsInput,
+    ) -> ServiceResult<bcs_service_api::types::catalog_labels::CatalogLabels> {
+        let policy = bcs_service_api::types::catalog_labels::CatalogLabelPolicy::new(
+            [(
+                "lifecycle".to_string(),
+                bcs_service_api::types::catalog_labels::CatalogLabelRule {
+                    allowed_values: vec!["draft".to_string()],
+                    allow_multiple: false,
+                },
+            )]
+            .into(),
+        )
+        .expect("valid dictionary policy");
+        policy.normalize(input)
+    }
+
     async fn create_group(
         &self,
         _cmd: GroupCreateCommand,
@@ -297,15 +401,6 @@ impl GroupManagementService for GroupServiceFake {
         })
     }
 
-    async fn patch_group_settings(
-        &self,
-        cmd: GroupPatchSettingsCommand,
-    ) -> Result<GroupPatchSettingsResult, GroupUseCaseError> {
-        Ok(GroupPatchSettingsResult {
-            group_id: cmd.group_id,
-            service_spec: cmd.service_spec.unwrap_or(None),
-        })
-    }
 }
 
 struct MessageFlowFake;
@@ -317,6 +412,7 @@ impl MessageFlowService for MessageFlowFake {
     }
     async fn handle_web_send(&self, _cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
         Ok(WebSendOutcome {
+            operation_id: "op-test".to_string(),
             queue_admission: None,
             primary_run_id: "run-wrapper".to_string(),
             status: "ok".to_string(),
@@ -420,6 +516,35 @@ impl MessageFlowService for MessageFlowFake {
             status: "ok".to_string(),
             bot_deliveries: vec![],
             frontend_deliveries: vec![],
+            real_run_id: None,
+})
+    }
+
+    async fn handle_native_task_dispatch(
+        &self,
+        request_id: &str,
+        cmd: TaskDispatchCommand,
+    ) -> ServiceResult<TaskDispatchOutcome> {
+        let expected = native_task_dispatch_cmd();
+        assert_eq!(cmd.driver_bot_id, expected.driver_bot_id);
+        assert_eq!(cmd.group_id, expected.group_id);
+        assert_eq!(cmd.target_bot_id, expected.target_bot_id);
+        assert_eq!(cmd.target_bot_name, expected.target_bot_name);
+        assert_eq!(cmd.payload, expected.payload);
+        assert_eq!(cmd.caller_delegation, expected.caller_delegation);
+        if request_id == "native-rejected" {
+            return Err(ServiceError::InvalidOperation {
+                message: "native parent missing".to_string(),
+                request_id: Some(request_id.to_string()),
+            });
+        }
+        assert_eq!(request_id, "native-request");
+        Ok(TaskDispatchOutcome {
+            task_id: "native-task".to_string(),
+            status: "queued".to_string(),
+            real_run_id: Some("native-run".to_string()),
+            bot_deliveries: vec![],
+            frontend_deliveries: vec![],
         })
     }
 
@@ -475,6 +600,7 @@ impl A2aChatRunService for A2aRunFake {
 
 fn async_chat_cmd() -> AsyncA2aChatCommand {
     AsyncA2aChatCommand {
+        a2a_test_user: None,
         caller: CallerContext::Public,
         target_bot_id: "bot-target".to_string(),
         message: "hello".to_string(),
@@ -542,7 +668,7 @@ impl FrontendDeliveryPort for FrontendDeliveryFake {
 }
 
 fn group_detail(status: GroupStatus, group_kind: GroupKind) -> GroupDetailResult {
-    GroupDetailResult {
+    GroupDetailResult { catalog_labels:Default::default(),
         group_id: "group-wrapper".to_string(),
         label: None,
         status,
@@ -560,7 +686,6 @@ fn group_detail(status: GroupStatus, group_kind: GroupKind) -> GroupDetailResult
         updated_at: 1,
         chat_url: None,
         context_injected: 0,
-        service_spec: None,
         latest_running_session_id: None,
         initial_run: None,
         originator: None,
@@ -583,7 +708,7 @@ fn participant_view(bot_uuid: &str) -> GroupParticipantView {
 }
 
 fn group_create_cmd() -> GroupCreateCommand {
-    GroupCreateCommand {
+    GroupCreateCommand { catalog_labels:Default::default(),
         human_mention_notify_mode: Default::default(),
         create_initial_session: true,
         group_id: Some("group-wrapper".to_string()),
@@ -598,7 +723,6 @@ fn group_create_cmd() -> GroupCreateCommand {
         participants: vec![],
         member_bot_ids: vec![],
         group_kind: Some(GroupKind::Normal),
-        service_spec: None,
         group_strategy: None,
         visibility: None,
         provisioning: false,
@@ -632,6 +756,9 @@ fn group_delete_cmd() -> GroupDeleteCommand {
 
 fn web_send_cmd() -> WebSendCommand {
     WebSendCommand {
+        caller_execution: None,
+        caller_ingress: None,
+        speaking_lease: None,
         caller: CallerContext::Public,
         group_id: "group-wrapper".to_string(),
         session_id: None,
@@ -651,6 +778,7 @@ fn web_send_cmd() -> WebSendCommand {
 
 fn group_chat_cmd() -> GroupChatCommand {
     GroupChatCommand {
+        caller_ingress: None,
         caller: CallerContext::Public,
         group_id: "group-wrapper".to_string(),
         requested_sender_id: None,
@@ -720,6 +848,7 @@ fn task_dispatch_cmd() -> TaskDispatchCommand {
         target_bot_id: "bot-target".to_string(),
         target_bot_name: None,
         payload: serde_json::json!({}),
+        caller_delegation: None,
     }
 }
 
@@ -734,6 +863,7 @@ fn task_complete_cmd() -> TaskCompleteCommand {
 
 fn bot_delivery_cmd(delivery_kind: BotDeliveryKind) -> BotDeliveryCommand {
     BotDeliveryCommand {
+        a2a_test_user: None,
         target: BotDeliveryTarget::WebSocket {
             bot_id: "bot-target".to_string(),
         },
@@ -770,5 +900,8 @@ fn frontend_delivery_cmd() -> FrontendDeliveryCommand {
         exclude_conn_id: None,
         visibility_domain: bcs_domain::MessageVisibilityDomain::Chat,
         audience: Some(bcs_domain::MessageAudience::Public),
+        operation_id: None,
+        terminal: false,
+        run_id: None,
     }
 }

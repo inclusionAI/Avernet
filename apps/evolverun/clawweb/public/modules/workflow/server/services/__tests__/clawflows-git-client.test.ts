@@ -10,9 +10,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  cloneClawflows, commitAndPushSaved, commitAndPushDeploy, createTempRepo, removeTempRepo,
+  cloneClawflows, commitAndPushSaved, commitAndPushDeploy, createTempRepo, ensurePackManifest,
+  prepareBranchBase, pruneLegacyPackCopy, removeTempRepo, writeWorkflowSpecToRepo,
   type ClawFlowsGitConfig,
 } from "../clawflows-git-client.js";
+import type { WorkflowSpec } from "../../workflow.js";
 import {
   createLocalRemote, credentialFiles, credentialInput, gitEnvironment, runGit,
 } from "./clawflows-git-client-fixture.js";
@@ -187,10 +189,11 @@ describe("ClawFlowsGitClient isolated credentials", () => {
       cwd: repo, env: gitEnvironment(),
     });
     writeFileSync(path.join(repo, "saved.txt"), "saved\n");
-    const saved = await commitAndPushSaved(repo, "git-fixture", "fixture", author);
+    // Exercise a live transport primitive; the old saved writer now fails before Git.
+    const saved = await commitAndPushDeploy(repo, "git-fixture-initial", 1, 1, "fixture", author);
     expect(runGit(root, ["--git-dir", bare, "rev-parse", `refs/heads/${saved.branch}`])).toBe(saved.commit);
     writeFileSync(path.join(repo, "deployed.txt"), "deployed\n");
-    const deployed = await commitAndPushDeploy(repo, "git-fixture", 1, 1, "fixture", author);
+    const deployed = await commitAndPushDeploy(repo, "git-fixture", 2, 2, "fixture", author);
     expect(runGit(root, ["--git-dir", bare, "rev-parse", `refs/tags/${deployed.tagName}^{commit}`])).toBe(deployed.commit);
     expect(counts).toEqual({ authenticatedClones: 1, authenticatedFetches: 1, authenticatedPushes: 2 });
     await removeTempRepo(repo);
@@ -225,7 +228,7 @@ describe("ClawFlowsGitClient isolated credentials", () => {
       cwd: repo, env: gitEnvironment(),
     });
     writeFileSync(path.join(repo, "inherited-helper.txt"), "safe\n");
-    await commitAndPushSaved(repo, "inherited-helper", "fixture", author);
+    await commitAndPushDeploy(repo, "inherited-helper", 1, 1, "fixture", author);
     expect(counts.authenticatedFetches).toBe(1);
     expect(counts.authenticatedPushes).toBe(1);
   });
@@ -282,7 +285,7 @@ describe("ClawFlowsGitClient isolated credentials", () => {
     }) });
     writeFileSync(path.join(repo, "saved.txt"), "saved\n");
     let caught: unknown;
-    try { await commitAndPushSaved(repo, "git-fixture", "fixture", author); } catch (error) { caught = error; }
+    try { await commitAndPushDeploy(repo, "git-fixture", 1, 1, "fixture", author); } catch (error) { caught = error; }
     expect(caught).toBeInstanceOf(Error);
     expectNoSecrets(String(caught));
     await removeTempRepo(repo);
@@ -293,7 +296,7 @@ describe("ClawFlowsGitClient isolated credentials", () => {
     await cloneClawflows(repo, { ...config, remoteUrl: bare, token: withToken ? token : undefined });
     expect(credentialFiles(root)).toEqual([]);
     writeFileSync(path.join(repo, "saved.txt"), "local\n");
-    const result = await commitAndPushSaved(repo, "local-fixture", "local", author);
+    const result = await commitAndPushDeploy(repo, "local-fixture", 1, 1, "local", author);
     expect(runGit(root, ["--git-dir", bare, "rev-parse", `refs/heads/${result.branch}`])).toBe(result.commit);
     await removeTempRepo(repo);
     repo = await createTempRepo();
@@ -314,5 +317,109 @@ describe("ClawFlowsGitClient isolated credentials", () => {
     await cloneClawflows(repo, { ...config, remoteUrl, token: remoteUrl.startsWith("http") ? undefined : token });
     expect(runGit(repo, ["remote", "get-url", "origin"])).toBe(remoteUrl);
     expect(credentialFiles(root)).toEqual([]);
+  });
+});
+
+describe("ClawFlowsGitClient pack content inheritance", () => {
+  const packId = "pack-a";
+  const workflowId = "wf-a";
+  const spec: WorkflowSpec = {
+    id: workflowId,
+    title: "Updated Spec",
+    nodes: [
+      { id: "start", type: "start", title: "Start", config: {}, executor: { type: "start" }, dependsOn: [] },
+      { id: "end", type: "end", title: "End", config: {}, executor: { type: "end" }, dependsOn: ["start"] },
+    ],
+  };
+  const localConfig = (remoteUrl: string): ClawFlowsGitConfig => ({ remoteUrl, username: "", email: author.email });
+  const fullPackFiles: Record<string, string> = {
+    [`${packId}/workflows/${workflowId}.yaml`]: `id: ${workflowId}\ntitle: Old Spec\nnodes: []\n`,
+    [`${packId}/scripts/run.sh`]: "echo pack-script\n",
+    [`${packId}/workflow.pack.yaml`]: `id: ${packId}\nversion: "1.0.0"\nworkflows:\n  - id: ${workflowId}\n    file: workflows/${workflowId}.yaml\n`,
+  };
+
+  function seedBranch(branch: string, files: Record<string, string>): void {
+    const seed = path.join(root, `seed-${branch.replace(/\//g, "_")}`);
+    for (const [rel, content] of Object.entries(files)) {
+      const target = path.join(seed, rel);
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, content);
+    }
+    runGit(seed, ["init"]);
+    runGit(seed, ["config", "user.name", "Seeder"]);
+    runGit(seed, ["config", "user.email", "seeder@example.invalid"]);
+    runGit(seed, ["add", "."]);
+    runGit(seed, ["commit", "-m", "seed"]);
+    runGit(seed, ["push", bare, `HEAD:refs/heads/${branch}`]);
+  }
+
+  async function withClonedWork(fn: (work: string) => Promise<void>): Promise<void> {
+    const work = await createTempRepo();
+    try {
+      await cloneClawflows(work, localConfig(bare));
+      await fn(work);
+    } finally {
+      await removeTempRepo(work);
+    }
+  }
+
+  it("inherits pack scripts when the previous deploy branch exists", async () => {
+    seedBranch(`wf/${workflowId}`, fullPackFiles);
+    await withClonedWork(async (work) => {
+      expect(await prepareBranchBase(work, `wf/${workflowId}`)).toBe("branch");
+      await writeWorkflowSpecToRepo(work, packId, workflowId, spec);
+      await ensurePackManifest(work, packId, workflowId);
+      await commitAndPushDeploy(work, workflowId, 1, 1, "deploy", author);
+      const tree = runGit(bare, ["ls-tree", "-r", "--name-only", `deploy/${workflowId}/#1`]);
+      expect(tree).toContain(`${packId}/scripts/run.sh`);
+      expect(tree).toContain(`${packId}/workflows/${workflowId}.yaml`);
+      expect(tree).toContain(`${packId}/workflow.pack.yaml`);
+      expect(tree).not.toContain(`packs/${packId}`);
+      // The spec is overwritten in place (engine root layout), not written to a second path.
+      const content = runGit(bare, ["show", `deploy/${workflowId}/#1:${packId}/workflows/${workflowId}.yaml`]);
+      expect(content).toContain(`id: ${workflowId}`);
+    });
+  });
+
+  it("retires the unleased saved writer without changing the inherited full Pack", async () => {
+    seedBranch(`wf/${workflowId}`, fullPackFiles);
+    await withClonedWork(async (work) => {
+      expect(await prepareBranchBase(work, `saved/${workflowId}`, `wf/${workflowId}`)).toBe("fallback");
+      await writeWorkflowSpecToRepo(work, packId, workflowId, spec);
+      await ensurePackManifest(work, packId, workflowId);
+      const before = runGit(bare, ["show-ref"]);
+      await expect(commitAndPushSaved(work, workflowId, "save", author)).rejects.toThrow(/retired/);
+      expect(runGit(bare, ["show-ref"])).toBe(before);
+      expect(runGit(bare, ["ls-tree", "-r", "--name-only", `wf/${workflowId}`])).toContain(`${packId}/scripts/run.sh`);
+      expect(runGit(bare, ["branch", "--list", `saved/${workflowId}`])).toBe("");
+    });
+  });
+
+  it("falls back to the default-branch base for a first-ever deploy", async () => {
+    await withClonedWork(async (work) => {
+      expect(await prepareBranchBase(work, `wf/${workflowId}`)).toBe("default");
+      await writeWorkflowSpecToRepo(work, packId, workflowId, spec);
+      await ensurePackManifest(work, packId, workflowId);
+      await commitAndPushDeploy(work, workflowId, 1, 1, "deploy", author);
+      const tree = runGit(bare, ["ls-tree", "-r", "--name-only", `deploy/${workflowId}/#1`]);
+      expect(tree).toContain(`packs/${packId}/workflows/${workflowId}.yaml`);
+      expect(tree).toContain(`packs/${packId}/workflow.pack.yaml`);
+    });
+  });
+
+  it("rejects a polluted base without deleting either pack", async () => {
+    seedBranch(`wf/${workflowId}`, {
+      ...fullPackFiles,
+      [`packs/${packId}/workflows/${workflowId}.yaml`]: `id: ${workflowId}\ntitle: Old Spec\nnodes: []\n`,
+      [`packs/${packId}/workflow.pack.yaml`]: `id: ${packId}\nworkflows: [${workflowId}]\n`,
+      [`packs/${packId}/keep.txt`]: "valuable",
+    });
+    await withClonedWork(async (work) => {
+      await prepareBranchBase(work, `wf/${workflowId}`);
+      await expect(writeWorkflowSpecToRepo(work, packId, workflowId, spec)).rejects.toThrow(/conflict/i);
+      expect(await pruneLegacyPackCopy(work, packId)).toBe(false);
+      expect(readFileSync(path.join(work, "packs", packId, "keep.txt"), "utf8")).toBe("valuable");
+      expect(existsSync(path.join(work, packId, "workflow.pack.yaml"))).toBe(true);
+    });
   });
 });

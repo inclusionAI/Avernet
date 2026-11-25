@@ -34,12 +34,15 @@ from secbaas.community.api.bot_runtime import (
     BotChatContext,
     MessageInfo,
     SessionInfo,
+    SessionRuntimeStatus,
 )
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.bot_run import BotRunRecord, BotRunRepository
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import BotServicePlugin, LogRelationPayload
 from secbaas.community.spi.eval_env import EvalSessionLog
+
+from ..config import SystemConfigKey
 from ._binding_resolver import BotBindingResolver
 from ._bot_run_utils import (
     CALLER_METADATA_TOKEN_KEY,
@@ -57,7 +60,6 @@ from ._bot_run_utils import (
 from ._bot_service_selector import BotServiceSelector
 from ._engine_adapter_registry import BotEngineAdapterRegistry
 from ._internal_protocols import BotService, MessageDispatcher
-from ..config import SystemConfigKey
 
 if TYPE_CHECKING:
     from secbaas.community.api.config_manage import SystemConfigManageService
@@ -627,6 +629,21 @@ class BotRunner:
 
         return await route.bot_service.get_messages(
             session_id=session.session_id,
+            binding_info=route.binding_info,
+            context=context,
+        )
+
+    async def get_session_runtime_status(
+        self,
+        *,
+        bot_id: str,
+        session_id: str,
+        context: BotChatContext,
+        metadata: dict[str, Any],
+    ) -> SessionRuntimeStatus:
+        route = await self._resolve_bot_route(bot_id, metadata)
+        return await route.bot_service.get_session_runtime_status(
+            session_id=session_id,
             binding_info=route.binding_info,
             context=context,
         )
@@ -1321,6 +1338,10 @@ class BotRunner:
             (actual_session_id, session_pending)
             session_pending=True 表示 session_id 为计划值，尚未在 adapter 侧物化。
         """
+        # An empty identifier cannot refer to an existing engine session.
+        # Treat it like an omitted identifier and use the normal planning path.
+        if session_id == "":
+            session_id = None
         if session_id is not None and route.binding_info.engine_type != "teclaw":
             self._run_repository.update_session_id(run_id, session_id)
             logger.info(

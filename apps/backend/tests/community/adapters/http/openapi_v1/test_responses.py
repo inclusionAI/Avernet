@@ -24,6 +24,11 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page,
 )
+from agentclaw.community.core.devices.services.device_context import (
+    ConnInfoBuildError,
+    DeviceConnectionUnavailableError,
+    DeviceOfflineError,
+)
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotPermissionError,
@@ -110,6 +115,58 @@ async def test_envelope_errors_maps_domain_error():
     assert body["data"] is None
     assert body["message"] == "Not found"
     assert body["request_id"] == "trace-123"
+
+
+@pytest.mark.asyncio
+async def test_device_offline_error_returns_502_with_distinct_message():
+    """Offline is a downstream 502 with a distinct, safe message."""
+    import json
+
+    @envelope_errors
+    async def handler(request: Request):
+        raise DeviceOfflineError("No active device for binding=1390508")
+
+    resp = await handler(request=_request())
+    assert isinstance(resp, JSONResponse)
+    assert resp.status_code == 502
+    body = json.loads(bytes(resp.body))
+    assert body["code"] == 502000
+    assert body["message"] == "Bot device is offline"
+    assert body["data"] is None
+
+
+@pytest.mark.asyncio
+async def test_device_connection_unavailable_error_returns_502_distinct_message():
+    """DeviceConnectionUnavailableError → 502 with distinct message."""
+    import json
+
+    @envelope_errors
+    async def handler(request: Request):
+        raise DeviceConnectionUnavailableError("transient failure")
+
+    resp = await handler(request=_request())
+    assert isinstance(resp, JSONResponse)
+    assert resp.status_code == 502
+    body = json.loads(bytes(resp.body))
+    assert body["message"] == "Device connection temporarily unavailable"
+    assert body["data"] is None
+
+
+@pytest.mark.asyncio
+async def test_conn_info_build_error_keeps_502():
+    """Generic ConnInfoBuildError still → 502 (subclass ordering does not break base)."""
+    import json
+
+    @envelope_errors
+    async def handler(request: Request):
+        raise ConnInfoBuildError("unknown baas failure")
+
+    resp = await handler(request=_request())
+    assert isinstance(resp, JSONResponse)
+    assert resp.status_code == 502
+    body = json.loads(bytes(resp.body))
+    assert body["message"] == "Device service error"
+    assert body["data"] is None
 
 
 @pytest.mark.asyncio
@@ -699,6 +756,23 @@ async def test_platform_default_mcp_direct_conflict_has_a_stable_public_error():
     assert response.status_code == 409
     assert body["code"] == 409210
     assert body["message"] == "Resource is managed by the platform Default policy"
+
+
+@pytest.mark.asyncio
+async def test_skill_set_state_race_has_a_retryable_public_conflict():
+    import json
+
+    from agentclaw.community.core.skill_center.errors import SkillSetControlPlaneConflictError
+
+    @envelope_errors
+    async def handler(request: Request):
+        raise SkillSetControlPlaneConflictError("SKILL_SET_STATE_CHANGED_RETRY")
+
+    response = await handler(request=_request())
+    body = json.loads(bytes(response.body))
+    assert response.status_code == 409
+    assert body["code"] == 409211
+    assert body["message"] == "SkillSet state changed; retry the request"
 
 
 @pytest.mark.asyncio

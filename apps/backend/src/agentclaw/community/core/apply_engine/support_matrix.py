@@ -1,0 +1,338 @@
+"""The (category × source protocol) support matrix — one table, two readers.
+
+**Why this module exists.** Which (category, source) combinations actually work
+used to be answered in three places that disagreed: per-category branches in the
+validator, per-materialiser assumptions at apply time, and prose in the manuals.
+Nothing was the authority, so every drift between them shipped — a documented
+example the ``PUT`` refuses, a field accepted at ``PUT`` that fails at apply, a
+digest rule that reads the wrong axis. The fix is not better prose. It is making
+the question have exactly one answer, in code, that both the write path and the
+read path (:mod:`~agentclaw.community.core.apply_engine.capabilities`)
+consult.
+
+**Exhaustive by construction.** :data:`MATRIX` is built by iterating both enums
+against :data:`_VERDICTS`, so a category or a protocol added to the vocabulary
+without a verdict raises at *import*. It cannot resolve to a silent "supported"
+and it cannot resolve to a silent "unsupported": both are how a matrix rots.
+
+**The refusal a caller reads is the cell.** A cell is ``None`` (supported) or a
+:class:`SourceRefusal` carrying the violation code *and* the message. The
+validator emits that object and the capabilities endpoint publishes it, so the
+two are the same string by construction rather than by review.
+
+**``SourceKind`` is the only source axis now.** There was a second,
+``SourceForm`` (``oss``/``git``/``named``/``content``), describing *how an
+entry is spelled* and published on the ``constructs`` array. It is gone: no
+spelling ever carried a verdict of its own in any configuration, so its four
+rows could not disagree, and the per-entry violation it produced only restated
+the category's own refusal in the same words.
+
+``SourceKind`` describes *what protocol the content travels by*, which is the
+axis support actually turns on, and ``named`` was never one: a named source
+declares a protocol, and the protocol's cell is the one that governs. That
+identity is precisely what defect D5 got wrong — ``cli_tools`` reached by
+``from:`` a git source was classified ``NAMED`` and charged the ``oss`` digest
+rule — and with the spelling axis removed the mistake has nowhere left to
+live, rather than merely being kept out of this table by discipline.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import StrEnum
+from types import MappingProxyType
+from typing import Mapping
+
+from agentclaw.community.core.apply_engine.capabilities import (
+    REASON_ENGINE_CONFIG,
+    Category,
+)
+
+
+class SourceKind(StrEnum):
+    """The protocol an entry's content travels by.
+
+    Four members. The first three fetch or carry bytes; the fourth is bot
+    copy's file-sync protocol, which converges through a sync step rather
+    than the fetch→store→write chain:
+
+    * ``CONTENT`` — inline in the document. No fetch, no credential, no URL.
+    * ``OSS`` — an object addressed over https, signed or plain. A public CDN
+      file and a private bucket object are the same protocol; the credential
+      (or its absence) is what differs.
+    * ``GIT`` — a repository resolved to one commit, delivered as a tree.
+    * ``BOT`` — another bot's workspace, addressed by ``bot_id`` on the
+      source. Bot copy's file sync rides this: the entry's ``path`` is a
+      literal constant the copy serializer writes (``workspace/``), and a
+      per-engine strategy builds the real source/target paths at sync time.
+      Sync builds paths only and does not read entry bytes through the
+      content store, so this cell is open for ``resources`` only — every
+      other category's ``BOT`` cell is closed, because a bot-to-bot sync is
+      meaningful for workspace files and not for, say, an mcp registry
+      reference.
+    """
+
+    CONTENT = "content"
+    OSS = "oss"
+    GIT = "git"
+    BOT = "bot"
+
+
+@dataclass(frozen=True)
+class SourceRefusal:
+    """Why one (category, protocol) cell is closed, in the caller's words."""
+
+    #: The violation code on the ``PUT`` response. Specific where a specific
+    #: one says more than the generic ``unsupported_source``.
+    code: str
+    #: The message, complete on its own — no call site prefixes or rewords it.
+    reason: str
+
+
+_UNSUPPORTED_SOURCE = "unsupported_source"
+
+_MCP_HAS_NO_SOURCE = SourceRefusal(
+    _UNSUPPORTED_SOURCE,
+    "an mcp entry is a registry reference ('server_code') and names no "
+    "source; there is nothing for a protocol to fetch",
+)
+
+#: The whole category is refused, so every one of its cells is — and carries the
+#: category's own reason rather than a second wording of it. The capabilities
+#: endpoint intersects the two verdicts and would otherwise publish a cell whose
+#: message disagreed with the ``unsupported_category`` violation the very same
+#: document earns at ``PUT``.
+_ENGINE_CONFIG_HAS_NO_MATERIALISER = SourceRefusal(
+    _UNSUPPORTED_SOURCE, REASON_ENGINE_CONFIG
+)
+
+_SKILL_IS_A_PACKAGE = SourceRefusal(
+    "content_not_a_skill_package",
+    "a skills entry is a package (SKILL.md + the files it names) — inline "
+    "content cannot be one; declare a source with 'protocol: git' or "
+    "'protocol: oss'",
+)
+
+_CLI_TOOL_IS_AN_EXECUTABLE = SourceRefusal(
+    "content_not_an_executable",
+    "a cli_tools entry is an executable file the platform distributes — "
+    "inline text cannot be one; declare a source with 'protocol: git' or "
+    "'protocol: oss'",
+)
+
+#: A bot source is bot copy's file-sync protocol: it converges another bot's
+#: workspace files to this one through a per-engine sync step, not by fetching
+#: bytes into the content store. Only ``resources`` is meaningful that way — a
+#: workspace tree is what a bot-to-bot sync moves. Every other category's
+#: ``BOT`` cell is closed with this one reason, stated once rather than per
+#: cell, because the question "why can I not reach an mcp/skill/identity/...
+#: over a bot source" has the same single answer: those are not workspace
+#: file trees and a bot source moves workspace file trees.
+_BOT_SOURCE_IS_RESOURCES_ONLY = SourceRefusal(
+    _UNSUPPORTED_SOURCE,
+    "a 'protocol: bot' source moves another bot's workspace files, and only "
+    "a 'resources' entry names a workspace path; declare it under 'resources' "
+    "with a 'from: <bot-source>' entry",
+)
+
+#: ``bot_config`` is a copy-only mapping a copy serialises from the source
+#: bot's live configuration rows; no entry names a source, and no protocol
+#: fetches one — the materialiser reads the source bot's rows directly. Stated
+#: once rather than per cell, the same way ``mcp``'s "no source" is: the
+#: question "why can I not reach a bot_config over content/oss/git/bot" has one
+#: answer.
+_BOT_CONFIG_HAS_NO_SOURCE = SourceRefusal(
+    _UNSUPPORTED_SOURCE,
+    "a bot_config entry is the copy-serialised mapping of a source bot's "
+    "configuration rows; it names no source, and no protocol fetches one",
+)
+
+#: Every cell, written out. Listed rather than defaulted: a table whose
+#: unwritten cells mean anything at all is a table that answers questions
+#: nobody ruled on.
+_VERDICTS: dict[tuple[Category, SourceKind], SourceRefusal | None] = {
+    # Identity files are single text bodies. Every protocol can carry one, and
+    # inline is the common case — except a bot source, which moves workspace
+    # trees and is not a single identity body.
+    (Category.IDENTITY, SourceKind.CONTENT): None,
+    (Category.IDENTITY, SourceKind.OSS): None,
+    (Category.IDENTITY, SourceKind.GIT): None,
+    (Category.IDENTITY, SourceKind.BOT): _BOT_SOURCE_IS_RESOURCES_ONLY,
+    # Workspace files and trees. ``git`` is what this change opens (D1): a
+    # tree arrives as a tree, with no packaging step in the middle.
+    # ``bot`` is what bot copy opens: one bot's workspace files converge to
+    # another through a per-engine sync step.
+    (Category.RESOURCES, SourceKind.CONTENT): None,
+    (Category.RESOURCES, SourceKind.OSS): None,
+    (Category.RESOURCES, SourceKind.GIT): None,
+    (Category.CAPABILITIES, SourceKind.CONTENT): _SKILL_IS_A_PACKAGE,
+    (Category.CAPABILITIES, SourceKind.OSS): None,
+    (Category.CAPABILITIES, SourceKind.GIT): None,
+    # A bot source carries a local skill whose package arrives via bot copy's
+    # file-sync (``from: from_bot``), not via a content-store fetch; the
+    # materialiser reads the source bot's ac_skill row for name/description/
+    # digest and recomputes the dst workspace path, so the (CAPABILITIES, BOT)
+    # cell is open for that one honest case.
+    (Category.CAPABILITIES, SourceKind.BOT): None,
+    (Category.RESOURCES, SourceKind.BOT): None,
+    # A skill is a package; only a fetch can deliver one — never a bot source.
+    (Category.SKILLS, SourceKind.CONTENT): _SKILL_IS_A_PACKAGE,
+    (Category.SKILLS, SourceKind.OSS): None,
+    (Category.SKILLS, SourceKind.GIT): None,
+    # Same from:from_bot local-skill case as CAPABILITIES above.
+    (Category.SKILLS, SourceKind.BOT): None,
+    # A tool is an executable file; same reasoning, different noun.
+    (Category.CLI_TOOLS, SourceKind.CONTENT): _CLI_TOOL_IS_AN_EXECUTABLE,
+    (Category.CLI_TOOLS, SourceKind.OSS): None,
+    (Category.CLI_TOOLS, SourceKind.GIT): None,
+    (Category.CLI_TOOLS, SourceKind.BOT): _BOT_SOURCE_IS_RESOURCES_ONLY,
+    # Neither of these has a source axis at all, for two different reasons —
+    # both stated, because "unsupported" without the reason is what sends a
+    # caller looking for a workaround that does not exist.
+    (Category.MCP, SourceKind.CONTENT): _MCP_HAS_NO_SOURCE,
+    (Category.MCP, SourceKind.OSS): _MCP_HAS_NO_SOURCE,
+    (Category.MCP, SourceKind.GIT): _MCP_HAS_NO_SOURCE,
+    (Category.MCP, SourceKind.BOT): _MCP_HAS_NO_SOURCE,
+    (Category.ENGINE_CONFIG, SourceKind.CONTENT): (
+        _ENGINE_CONFIG_HAS_NO_MATERIALISER
+    ),
+    (Category.ENGINE_CONFIG, SourceKind.OSS): (
+        _ENGINE_CONFIG_HAS_NO_MATERIALISER
+    ),
+    (Category.ENGINE_CONFIG, SourceKind.GIT): (
+        _ENGINE_CONFIG_HAS_NO_MATERIALISER
+    ),
+    # The whole category is closed (no materialiser), so its ``bot`` cell
+    # carries the category's own reason — the same way ``mcp``'s ``bot`` cell
+    # carries ``_MCP_HAS_NO_SOURCE``. The capabilities resolver intersects the
+    # category verdict first and would otherwise publish a cell whose message
+    # disagreed with the ``unsupported_category`` violation the document earns.
+    (Category.ENGINE_CONFIG, SourceKind.BOT): (
+        _ENGINE_CONFIG_HAS_NO_MATERIALISER
+    ),
+    # bot_config is copy-only: a mapping the copy serializer writes from the
+    # source bot's live rows, never a source a protocol fetches. Every cell is
+    # closed with the one reason, exactly like ``mcp``'s four cells are.
+    (Category.BOT_CONFIG, SourceKind.CONTENT): _BOT_CONFIG_HAS_NO_SOURCE,
+    (Category.BOT_CONFIG, SourceKind.OSS): _BOT_CONFIG_HAS_NO_SOURCE,
+    (Category.BOT_CONFIG, SourceKind.GIT): _BOT_CONFIG_HAS_NO_SOURCE,
+    (Category.BOT_CONFIG, SourceKind.BOT): _BOT_CONFIG_HAS_NO_SOURCE,
+}
+
+
+def _build_matrix() -> Mapping[
+    tuple[Category, SourceKind], SourceRefusal | None
+]:
+    """Every cell of the cartesian product, or an import-time failure.
+
+    Both directions are checked. A missing verdict raises ``KeyError`` — the
+    comprehension asks for a cell nobody ruled on. A *stale* verdict (for a
+    category or protocol that no longer exists) raises too, because a leftover
+    row silently governing nothing is how a table stops describing the code.
+    """
+    cells = {
+        (category, kind): _VERDICTS[(category, kind)]
+        for category in Category
+        for kind in SourceKind
+    }
+    stale = set(_VERDICTS) - set(cells)
+    if stale:
+        raise RuntimeError(
+            "support matrix carries verdicts for cells that no longer exist: "
+            + ", ".join(sorted(f"({c}, {k})" for c, k in stale))
+        )
+    return MappingProxyType(cells)
+
+
+#: The contract. ``None`` means the combination is accepted at ``PUT`` and
+#: delivered at apply; a :class:`SourceRefusal` means both refuse it, with that
+#: code and that message.
+MATRIX: Mapping[tuple[Category, SourceKind], SourceRefusal | None] = (
+    _build_matrix()
+)
+
+#: Where a ``digest`` is mandatory. The platform is distributing executable
+#: content and an unpinned fetch takes whatever is at the URL at the time.
+#:
+#: ``git`` is absent on purpose and the reason is not leniency: a git source
+#: resolves to a commit SHA, which is a recorded content identity doing exactly
+#: the job a digest does, and a ``sha256`` over git-sourced bytes has no stable
+#: meaning across the checkout / archive / canonical-zip roads. Whether the ref
+#: may move between applies is ``mode: strict``'s question, not a digest's.
+DIGEST_REQUIRED: frozenset[tuple[Category, SourceKind]] = frozenset(
+    {
+        (Category.SKILLS, SourceKind.OSS),
+        (Category.CLI_TOOLS, SourceKind.OSS),
+    }
+)
+
+#: Fields that describe an archive, per protocol.
+#:
+#: They are ``oss``-only, and declaring one elsewhere is **refused** rather than
+#: ignored. On git the platform holds a real tree and ``subpath`` selects it, so
+#: ``unpack`` configures nothing; on inline content there is no object at all. A
+#: field that looks like it configures something and does nothing is the exact
+#: failure mode this change exists to remove.
+ARCHIVE_FIELDS_BY_KIND: Mapping[SourceKind, frozenset[str]] = MappingProxyType(
+    {
+        SourceKind.CONTENT: frozenset(),
+        SourceKind.OSS: frozenset({"unpack", "strip_components"}),
+        SourceKind.GIT: frozenset(),
+    }
+)
+
+#: Every archive field, whichever protocol allows it — the set a refusal is
+#: drawn from, so adding a field to the vocabulary adds it here once.
+ARCHIVE_FIELDS: frozenset[str] = frozenset(
+    field for fields in ARCHIVE_FIELDS_BY_KIND.values() for field in fields
+)
+
+
+def refusal_for(
+    category: Category, kind: SourceKind
+) -> SourceRefusal | None:
+    """The cell. ``None`` when the combination is supported."""
+    return MATRIX[(category, kind)]
+
+
+def supports(category: Category, kind: SourceKind) -> bool:
+    """Whether this build accepts and delivers the combination."""
+    return MATRIX[(category, kind)] is None
+
+
+def digest_required(category: Category, kind: SourceKind) -> bool:
+    """Whether an entry in this cell must declare a ``digest``."""
+    return (category, kind) in DIGEST_REQUIRED
+
+
+def archive_field_refusal(kind: SourceKind, field: str) -> str | None:
+    """Why ``field`` may not be written against a ``kind`` source, if it may not.
+
+    Names both the field and the protocol: "unpack is not valid" alone sends
+    the caller looking for a typo in the value.
+    """
+    if field in ARCHIVE_FIELDS_BY_KIND[kind]:
+        return None
+    if kind is SourceKind.GIT:
+        return (
+            f"'{field}' describes an archive and is not valid on a git source "
+            "— the platform holds the repository's tree and 'subpath' selects "
+            "within it, so there is nothing to unpack"
+        )
+    return (
+        f"'{field}' describes an archive and is not valid on an inline "
+        "'content' entry — nothing is fetched"
+    )
+
+
+__all__ = [
+    "ARCHIVE_FIELDS",
+    "ARCHIVE_FIELDS_BY_KIND",
+    "DIGEST_REQUIRED",
+    "MATRIX",
+    "SourceKind",
+    "SourceRefusal",
+    "archive_field_refusal",
+    "digest_required",
+    "refusal_for",
+    "supports",
+]

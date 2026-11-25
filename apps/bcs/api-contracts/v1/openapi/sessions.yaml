@@ -154,6 +154,8 @@ GroupSessionsPath:
         description: >-
           Created session detail. Participants are inherited from the parent
           Group roster with their existing roles, including Human participants.
+          Participant rows carry `avatar_url` — the current Bot display
+          avatar, null when absent and always null for Human participants.
         content:
           application/json:
             schema:
@@ -229,14 +231,42 @@ GroupSessionsPath:
         in: query
         schema:
           $ref: ../domain-models.yaml#/SessionStatus
+      - name: sort
+        in: query
+        description: >-
+          Result ordering. `created_at` (the default) keeps the historical
+          `created_at` descending order with the `session_id` ascending
+          tie-breaker. `last_activity` orders by the Session's conversation
+          activity key (`last_activity_at`, epoch milliseconds: the newest
+          persisted message in the Session) descending, with the same
+          `session_id` ascending tie-breaker, falling back to the Session's
+          `created_at` when it has no persisted messages.
+          The alternative ordering covers the full viewer-visible candidate
+          set before pagination. Under `last_activity` the sort key changes on
+          every message and on Session creation, so an entry can shift between
+          two page requests and an offset page boundary can repeat or skip an
+          entry: the order is a live feed, not a stable snapshot. Any other
+          value is rejected with `invalid_request`.
+        schema:
+          type: string
+          enum:
+            - created_at
+            - last_activity
+          default: created_at
     responses:
       "200":
         description: >-
           Sessions in which the selected View Actor is a Participant, ordered
-          by created_at descending (session_id ascending tie-breaker), then
-          paginated with offset/limit. Both items and total are scoped before
-          pagination. An authorized View Actor with no matching Session returns
-          an empty page.
+          by created_at descending (session_id ascending tie-breaker), or by
+          last_activity_at descending with the same session_id ascending
+          tie-breaker when `sort=last_activity`, then paginated with
+          offset/limit. Both items and total are scoped before pagination. An
+          authorized View Actor with no matching Session returns an empty page.
+          Each item carries a lightweight `participants` array in stored member
+          order: `name` is this Session's own member snapshot (may be null;
+          session-only dynamic members included) and `avatar_url` is the
+          current Bot avatar (null when absent or for Human actors). No
+          detail-only control fields are included.
         content:
           application/json:
             schema:
@@ -292,7 +322,10 @@ SessionPath:
       - $ref: ../shared.yaml#/SessionIdPath
     responses:
       "200":
-        description: Session detail.
+        description: >-
+          Session detail. Every participant row keeps its full control fields
+          and additionally carries `avatar_url` — the current Bot display
+          avatar, null when absent and always null for Human participants.
         content:
           application/json:
             schema:
@@ -351,7 +384,9 @@ SessionPath:
             $ref: "#/UpdateSessionRequest"
     responses:
       "200":
-        description: Updated session detail.
+        description: >-
+          Updated session detail. Participant rows carry `avatar_url` under the
+          same semantics as the Session detail read.
         content:
           application/json:
             schema:
@@ -691,7 +726,10 @@ AddSessionParticipantPath:
             $ref: "#/SessionParticipantInput"
     responses:
       "200":
-        description: Added session participant.
+        description: >-
+          Added session participant. The shared participant model carries the
+          current `avatar_url` — null when the Bot has none and always null
+          for Human participants.
         content:
           application/json:
             schema:
@@ -777,7 +815,10 @@ SessionParticipantPath:
             $ref: "#/UpdateSessionParticipantRequest"
     responses:
       "200":
-        description: Updated session participant.
+        description: >-
+          Updated session participant, carrying its effective mode and scope
+          plus the current `avatar_url` (null when the Bot has none, always
+          null for Human participants).
         content:
           application/json:
             schema:

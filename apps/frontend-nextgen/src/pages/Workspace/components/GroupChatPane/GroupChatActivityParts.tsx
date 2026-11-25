@@ -85,7 +85,7 @@ export function BotDeliveryQueue({
     );
   }
   return (
-    <ul aria-label={`${bot.botName} 的排队消息`} className="divide-y divide-border">
+    <ul aria-label={`${bot.botName} 的排队消息`} className="divide-y divide-divider">
       {bot.queued.map((delivery: DeliveryStatusView) => {
         const cancelling = cancellingDeliveryIds?.has(delivery.delivery_id) ?? false;
         return (

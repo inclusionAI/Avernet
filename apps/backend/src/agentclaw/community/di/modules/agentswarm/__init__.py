@@ -91,6 +91,57 @@ def _resolve_llm_api_key(secret_name: str, resolver: SecretResolver) -> str:
     return str(value)
 
 
+def _build_chat_transport(injector: Injector, config: AgentSwarmConfig):
+    """Build the configured chat transport, or ``None`` for the engine leg.
+
+    Kept as a module function rather than inline in the provider so the default
+    branch stays trivially auditable: an unconfigured deployment returns
+    ``None`` here and nothing else in this module allocates a transport.
+    """
+    if config.chat.transport != "baas_gateway":
+        return None
+
+    from agentclaw.community.core.gateway_principal import PrincipalSignerConfig
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.di.config import BaasConfig, SecretNamesConfig
+    from agentclaw.community.plugins.community.agentswarm.chat.baas_gateway import (
+        BaasGatewayChatTransport,
+    )
+    from agentclaw.community.utils.gateway_principal_config import (
+        resolve_signing_key,
+    )
+
+    chat_config = config.chat.baas_gateway
+    # Same secret name and conventions the HTTP boot's verifier uses, so the
+    # deployments that can mint are exactly the ones that can verify.
+    signing_key = resolve_signing_key(
+        injector.get(SecretResolver),
+        injector.get(SecretNamesConfig).gateway_principal_signing_key,
+    )
+    signer = PrincipalSignerConfig(
+        signing_key=signing_key,
+        audience=chat_config.audience,
+        issuer=chat_config.issuer,
+        key_id=chat_config.key_id,
+    )
+    baas_config = injector.get(BaasConfig)
+    return BaasGatewayChatTransport(
+        bot_repo=injector.get(BotRepository),
+        base_url=baas_config.api_base_url,
+        signer=signer,
+        resource_key_prefix=chat_config.resource_key_prefix,
+        # The same deployment fact the rest of the BaaS client uses; the chat
+        # leg must address the platform's spelling of it, not one pinned here.
+        platform_tenant=baas_config.tenant,
+        # The deployment's chat deadline is the executor one — the same value
+        # the engine channel receives as ``chat_timeout_seconds`` and the one
+        # a per-run ``bot_chat_timeout_seconds`` resolves against. Reading
+        # ``chat.baas_gateway.default_timeout_seconds`` here would let the two
+        # channels disagree on what "the deployment default" means.
+        default_timeout=config.executor.bot_chat_timeout_seconds,
+    )
+
+
 class AgentSwarmModule(Module):
 
     def configure(self, binder: Binder) -> None:
@@ -110,6 +161,7 @@ class AgentSwarmModule(Module):
         result_repo: AgentResultRepository,
         attempt_repo: AgentAttemptRepository,
         config: AgentSwarmConfig,
+        injector: Injector,
     ) -> AgentSwarmService:
         return AgentSwarmService(
             run_repo=run_repo,
@@ -121,7 +173,43 @@ class AgentSwarmModule(Module):
             result_repo=result_repo,
             attempt_repo=attempt_repo,
             config=config,
+            authorization_source=self._authorization_source(injector),
         )
+
+    @staticmethod
+    def _authorization_source(injector: Injector):
+        """The run surfaces' read-only tower into the pending passport gate.
+
+        Same fail-clear shape as ``bot_platform`` below: profiles that can
+        resolve the manifest seam and the passport plugin get the
+        human-gate descriptor join on run detail and SSE — presence keyed
+        off the facade's live PENDING status; profiles that cannot keep
+        the pre-change reads (parked agents surface their ``bot_state``
+        with ``None`` gate fields, and nothing else changes).
+        """
+        try:
+            from agentclaw.community.core.bot_management.manifest_seam import (
+                ManifestCreationSeam,
+            )
+            from agentclaw.community.plugin_api.passport import PassportPlugin
+            from agentclaw.community.plugins.community.agentswarm.bot_authorization import (
+                ManifestBotAuthorizationSource,
+            )
+            from agentclaw.community.core.repository.protocols.bot import (
+                BotRepository,
+            )
+            return ManifestBotAuthorizationSource(
+                manifest_seam=injector.get(ManifestCreationSeam),
+                passport_plugin=injector.get(PassportPlugin),
+                bot_repo=injector.get(BotRepository),
+            )
+        except Exception:
+            logger.warning(
+                "[agentswarm] authorization source resolution failed — run "
+                "surfaces degrade to pre-change reads (parked agents surface "
+                "no consent URLs)",
+            )
+            return None
 
     @singleton
     @provider
@@ -267,8 +355,8 @@ class AgentSwarmModule(Module):
         construction never refuses for identity reasons.
         ``max_platform_workers`` sizes the module-scoped chat bridge
         (``executor`` block)."""
-        from agentclaw.community.api.bot_config_manifest_apply_service import (
-            BotConfigManifestApplyServiceProtocol,
+        from agentclaw.community.api.apply_run_service import (
+            ApplyRunServiceProtocol,
         )
         from agentclaw.community.api.bot_service import BotServiceProtocol
         from agentclaw.community.core.bot_inventory.protocols import (
@@ -288,10 +376,14 @@ class AgentSwarmModule(Module):
             passport_plugin=injector.get(PassportPlugin),
             skill_set_factory=injector.get(SkillSetServiceFactoryProtocol),
             bot_repo=injector.get(BotRepository),
-            apply_service=injector.get(BotConfigManifestApplyServiceProtocol),
+            apply_service=injector.get(ApplyRunServiceProtocol),
             space_context=injector.get(BusinessSpaceContextProtocol),
             baas_service=injector.get(BaasService),
             max_platform_workers=config.executor.max_platform_workers,
+            chat_timeout_seconds=config.executor.bot_chat_timeout_seconds,
+            # ``None`` leaves this platform as its own engine transport — the
+            # pre-seam code path, and the default for an unconfigured pod.
+            chat_transport=_build_chat_transport(injector, config),
         )
 
     @provider
@@ -334,6 +426,11 @@ class AgentSwarmModule(Module):
         factory = DefaultSubagentFactory(
             llm, platform, attempt_repo=attempt_repo,
             setup_timeout=config.orchestration.setup_timeout,
+            setup_ceiling=(
+                config.orchestration.slice_max_seconds
+                - config.orchestration.per_attempt_timeout
+            ),
+            subagent_setup_delay=config.orchestration.subagent_setup_delay_seconds,
         )
         store = FilesystemArtifactStore(config.artifact_store_root)
         # The pool's binding-journal SliceStore (D-L): the same repos, its
@@ -356,6 +453,10 @@ class AgentSwarmModule(Module):
             max_attempts=config.orchestration.agent_max_attempts,
             per_task_timeout=config.orchestration.per_attempt_timeout,
             setup_timeout=config.orchestration.setup_timeout,
+            setup_ceiling=(
+                config.orchestration.slice_max_seconds
+                - config.orchestration.per_attempt_timeout
+            ),
             artifact_inline_threshold=config.artifact_inline_threshold,
             upstream_breaker=UpstreamBreaker(
                 failure_threshold=config.upstream_breaker.failure_threshold,

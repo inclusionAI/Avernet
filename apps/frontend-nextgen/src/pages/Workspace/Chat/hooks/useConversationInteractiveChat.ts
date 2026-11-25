@@ -22,6 +22,9 @@ import type { ConversationTarget } from '@/services/workspace/workspaceModel';
 import type { ChatBridge, PanelAction, PanelHandle, ResourceReference } from '@tc-chat/core';
 import type { SenderRef, SubmitContext } from '@tc-chat/ui/es/Sender';
 import { useCallback, useEffect, useMemo, useState, type RefObject } from 'react';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
+import type { ConversationPresentation } from '../conversationPresentation';
 
 /** 交互式主舞台依赖的既有会话操作(来自 useBotSessions,按结构最小面收窄)。 */
 export interface ConversationInteractiveSessionOperations {
@@ -50,10 +53,10 @@ export interface UseConversationInteractiveChatOptions {
   panelRef: RefObject<PanelHandle | null>;
   /** 主屏输入框 ref(页面持有;桥注册在页面/旧 useWorkspace 内)。 */
   inputRef: RefObject<SenderRef | null>;
-  /** Agent Coding 引导目标;存在时舞台以引导替代 ChatPanel。 */
-  selectedAgentCodingBot: ChatBotView | null;
   /** 既有会话操作(重命名/清除上下文/模型切换)。 */
   sessions: ConversationInteractiveSessionOperations;
+  /** 当前会话展示能力；好友 Coding Bot 兼容模式用它裁剪普通 CC 扩展能力。 */
+  presentation: ConversationPresentation;
   /** 副屏面板非填充动作的发送出口;缺省按旧页行为(单聊不处理)。 */
   onPanelSend?: (content: string) => void;
 }
@@ -68,8 +71,6 @@ export interface ConversationInteractiveChatModel {
   authenticatedUserId: string | null | undefined;
   authenticatedUserName: string | null | undefined;
   userAvatarUrl: string | undefined;
-  /** Agent Coding 引导目标;存在时舞台渲染引导而非 ChatPanel。 */
-  agentCodingBot: ChatBotView | null;
   draft: string;
   onDraftChange: (draft: string) => void;
   handleSend: (content: string, context?: SubmitContext) => Promise<void>;
@@ -88,16 +89,17 @@ export interface ConversationInteractiveChatModel {
   fileFeature: UseBotSessionFilesFeatureResult;
   /** desktop Bot 无本机文件能力:上传/文件管理/引用入口一并隐藏(desktop-web-migration)。 */
   desktopFileFeaturesHidden: boolean;
+  presentation: ConversationPresentation;
 }
 
 /**
  * 组装交互式单聊主舞台所需模型。仅做装配:目标/会话/身份由调用方(页边界)注入,
- * 与旧 Workspace 页的完整 ChatPanel 能力一一对应(发送/任务/文件/模型/草稿/副屏桥)。
+ * 标准模式与旧 Workspace 页能力一一对应；好友 Coding Bot 兼容模式按 presentation 裁剪扩展能力。
  */
 export function useConversationInteractiveChat(
   options: UseConversationInteractiveChatOptions,
 ): ConversationInteractiveChatModel {
-  const { target, viewer, selectedSession, botChat, panelRef, inputRef, sessions } = options;
+  const { target, viewer, selectedSession, botChat, panelRef, inputRef, sessions, presentation } = options;
 
   const [draft, setDraft] = useState('');
   // 切换目标即清空草稿(对齐旧 Workspace 页 activeTargetId 清空逻辑)。
@@ -116,7 +118,7 @@ export function useConversationInteractiveChat(
   // 真实用户 Bot 单聊:任务发起上下文(owner/session)。会话文件/模型接口沿用请求身份 ID。
   const taskOwnerUserId = options.requesterIdentityId ? resolveUserId(options.requesterIdentityId) : '';
   const taskComposerContext = useMemo<TaskComposerContext | null>(() => {
-    if (viewer?.kind === 'bot') return null;
+    if (!presentation.taskComposer || viewer?.kind === 'bot') return null;
     const ownerBotId = selectedSession?.botId ?? target?.id;
     if (!ownerBotId || !options.requesterIdentityId || !taskOwnerUserId) return null;
     return {
@@ -127,7 +129,7 @@ export function useConversationInteractiveChat(
       mainSessionName: selectedSession?.title,
       parentTaskId: null,
     };
-  }, [viewer?.kind, target?.id, options.requesterIdentityId, selectedSession, taskOwnerUserId]);
+  }, [presentation.taskComposer, viewer?.kind, target?.id, options.requesterIdentityId, selectedSession, taskOwnerUserId]);
 
   const submitPanelMessage = useCallback(
     (content: string) => {
@@ -161,6 +163,7 @@ export function useConversationInteractiveChat(
       await sessions.renameSessionOnFirstMessage(selectedChatBot, selectedSession, content);
     },
     sendMessage: (content, context) => {
+      Tracert.click(Points.workspaceChat.sendMessage, { bot_id: selectedChatBot?.botId });
       const refs = context?.fileRefs;
       if (refs && refs.length > 0) {
         botChat.send(context?.resolvedContent ?? content, {
@@ -185,9 +188,9 @@ export function useConversationInteractiveChat(
   }, [selectedChatBot, selectedSession, sessions, botChat]);
 
   const fileFeature = useBotSessionFilesFeature(
-    selectedChatBot,
-    selectedSession,
-    options.requesterIdentityId,
+    presentation.fileFeatures ? selectedChatBot : null,
+    presentation.fileFeatures ? selectedSession : null,
+    presentation.fileFeatures ? options.requesterIdentityId : null,
     handleClearContext,
   );
 
@@ -211,7 +214,6 @@ export function useConversationInteractiveChat(
     authenticatedUserId: options.authenticatedUserId,
     authenticatedUserName: options.authenticatedUserName,
     userAvatarUrl: options.authenticatedUserAvatarUrl,
-    agentCodingBot: options.selectedAgentCodingBot,
     draft,
     onDraftChange: setDraft,
     handleSend,
@@ -226,5 +228,6 @@ export function useConversationInteractiveChat(
     onSessionModelChange: sessions.updateSessionModel,
     fileFeature,
     desktopFileFeaturesHidden,
+    presentation,
   };
 }

@@ -215,12 +215,40 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "service conformance, and architecture tests in this change; drain when "
         "singlebox has a signed /openapi/v1 principal flow for the new routes."
     ),
+    "bot_overview": (
+        "New non-user Bot overview on /openapi/v1, which needs a gateway-signed "
+        "principal singlebox cannot mint (see _GATEWAY_PRINCIPAL_EXEMPT_REASON); "
+        "its only engine provider (AICoding / Claude Code) is also still a "
+        "draft. Covered by service, HTTP router and endpoint tests; drain when "
+        "singlebox can sign a principal and a provider reports real data."
+    ),
     "bot_message_feedback": (
         "New bot output message feedback module. Covered by endpoint, service, "
         "repository and architecture tests; drain when a real singlebox flow "
         "exercises the feedback submission end-to-end."
     ),
+    "bot_copy": (
+        "Bot-copy v1 module (Route B manifest-reuse: ac_bot_copy ledger + "
+        "POST /openapi/v1/bots/copy + retry + copy_state on Bot). Covered by "
+        "repository, derive, handler-unit, and architecture tests; routes "
+        "mounted + authorization wired. Drain when a real singlebox e2e copy "
+        "flow exercises POST /copy → manifest-creation → /bots/{dst}.copy_state "
+        "end-to-end (needs provision/DaaS stand-in)."
+    ),
     "approval": _EXEMPT_REASON,
+    "apply_engine": (
+        "The engine the Manifest's and the genome's compilers feed: the "
+        "materialisers, the orchestrator, the delivery strategies and the "
+        "apply run (lock, task, report), extracted from bot_config_manifest "
+        "(#3083). Every singlebox-visible flow it has runs through the "
+        "manifest and apply routes, which are blocked on the same missing "
+        "gateway-signed principal as bot_config_manifest below; covered "
+        "meanwhile by tests/community/core/apply_engine/ (the engine over "
+        "fakes that count every write, the run service over a real database, "
+        "the delivery strategies and their port forwarding) and by the apply "
+        "routes in tests/community/endpoints/test_openapi_config_manifest_apply.py. "
+        "Drain this with bot_config_manifest."
+    ),
     "auth": _EXEMPT_REASON,
     "bot_public": _EXEMPT_REASON,
     "bot_config_manifest": (
@@ -239,7 +267,7 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "repository over a real database in "
         "tests/community/repository/bot/test_content_store_repository.py), "
         "by the materialiser suites in "
-        "tests/community/core/bot_config_manifest/apply/ (the two fetching "
+        "tests/community/core/apply_engine/ (the two fetching "
         "categories over fakes that count every write, and the entry-fetch "
         "pipeline's pinned/unpinned/keep_last policy), "
         "and by W1's own cover meanwhile: "

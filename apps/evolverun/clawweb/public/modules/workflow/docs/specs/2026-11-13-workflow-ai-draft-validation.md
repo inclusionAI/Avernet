@@ -1,0 +1,189 @@
+# Workflow Editor AI 草稿：本地验证记录
+
+日期：2026-11-13（Asia/Shanghai）
+
+> 历史验证记录。2026-11-14 已按用户确认改为服务端 `autoHeal.botId → BaaS`，
+> 下文“智能接入 API”为原始版本的前提，不再是当前部署要求。
+> 当前契约见 [AutoHeal/BaaS 草稿说明](../workflow-ai-drafts.md) 和
+> [Editor 变更说明](2026-11-13-workflow-ai-draft-editor.md)。
+> 保留以下当时的验证结果，不将其当作本轮服务端或真实预发验证证据。
+
+## 范围与结论
+
+完成 ClawWeb `@avernet/workflow` 现有 Editor 的 AI 生成 / 修改入口、嵌入式面板、
+真实异步生成 Service API 消费、校验、差异审阅和内存应用。
+HTML Demo 保留为静态交互评审材料，不用它代替实际集成。
+
+本次不新增模型提供方、不修改后端协议、存储、部署或发布链路。
+**代码已在本地验证；没有提交、推送或部署到预发，未执行真实模型联调。**
+
+## 自动化验证
+
+在 `apps/evolverun/clawweb` 执行：
+
+```bash
+npm run check --workspace @avernet/workflow
+npm test --workspace @avernet/workflow -- --run web --maxWorkers=2
+npm run build --workspace @avernet/workflow
+npm run build --workspace @avernet/clawinsight
+npm run build --workspace @avernet/clawweb
+```
+
+| 验证 | 结果 |
+| --- | --- |
+| workflow TypeScript check | 通过 |
+| workflow 前端测试 | AI 定向回归 6 个文件、77 个测试通过；全量 web 运行 185 个文件 / 2572 个测试，其中 183 个文件通过、3 个既有 SQLite 集成测试因 Node 23 的 better-sqlite3 原生 binding 缺失失败 |
+| AI 服务测试 | 31 个测试通过 |
+| AI 请求生命周期 Hook | 13 个测试通过 |
+| AI Drawer | 16 个测试通过 |
+| AI 差异预览 | 9 个测试通过 |
+| Editor 集成及保存并发保护 | 7 个测试通过 |
+| Editor / Drawer / Hook 的真实模式会话集成 | 4 个测试通过 |
+| workflow / clawinsight / clawweb 构建 | 通过 |
+| `git diff --check` | 通过 |
+| 新增 / 修改源码行数 | 全部小于 1,000 行 |
+
+前端测试中现有 jsdom `window.scrollTo` 提示、构建中大于 500 kB 的 chunk 提示
+不影响上述结果；未为通过验证而放宽任何门禁。
+
+覆盖的关键路径：
+
+- 实际需求和完整当前 YAML 的生成请求、pending/running 轮询、completed/failed。
+- 15 分钟超时对提交、轮询、校验三个请求阶段均生效，并传递同一个 AbortSignal。
+- 请求取消、非协作传输返回旧响应、关闭/切换模式/需求/工作流后的旧请求隔离。
+- 无效 YAML、重复节点、未知依赖、依赖环、跨 ID / 版本和 normalizedSpec 身份变化拒绝。
+- 保留原有对象形式 `onResult`，由服务端裁决其协议；不抹掉人工确认等既有配置。
+- 从最终 normalizedSpec 计算节点和元数据差异；删除 / 顶层配置变化需要确认。
+- 元数据逐字段前后值、缺失字段、null / false / 0 的正确显示。
+- 未显式应用不改变编辑器；应用仅标记 dirty，不触发保存 / 部署。
+- 未应用的手工 YAML、已过期草稿、正在进行的保存都阻止 AI 覆盖。
+- 旧保存请求完成后不清除后续修改的 dirty；精确提交快照保存仍正常清除 dirty。
+- 工具栏重复选择模式会开启新会话、取消旧请求；面板模式选择与下一次生成的实际 mode 一致。
+- 未提供生成服务的环境明确失败，不返回固定节点作为伪生成结果。
+
+## 真实编译页面的浏览器验收
+
+使用构建后的 ClawWeb 页面和独立的本地 HTTP 测试夹具；夹具位于临时目录，
+不进入产品源码，也不连接真实模型或业务工作流。
+工作流 ID 为 `ai-editor-fixture`，页面明确标注为本地合成验收数据。
+
+已观察到：
+
+1. 现有 Editor 工具栏出现 AI 生成 / AI 修改，AI 面板与画布共存。
+2. 生成中有取消状态；异步结果显示节点新增和修改，未应用时原图仍为 3 个节点。
+3. 面板打开后手工修改 YAML，生成和 AI 应用按钮均禁用，并显示冲突原因。
+4. 手工 YAML 应用改变原编排后，旧 AI 预览显示已过期，不能应用。
+5. 显式应用新草稿后画布 / YAML 增至 4 个节点，并显示“未保存”和“尚未保存或部署”。
+6. 当前默认窄窗口下收起手工节点库、限制 AI 面板宽度，保留可操作画布；未宣称执行 1440px 等其他尺寸的视觉验收。
+7. 本地请求记录仅包含读取、生成、轮询和校验，无工作流保存、部署或执行请求。
+
+截图在本次 Codex 可视化目录：
+
+- `workflow-ai-editor-preview.png`：画布与 AI 节点差异预览。
+- `workflow-ai-applied.png`：应用后未保存状态。
+
+## 独立审查
+
+作者与审查分别进行。首轮发现对象分支协议兼容、保存请求交错两个高优先级问题，
+已修复并加入回归测试。随后发现的工具栏 / 面板模式同步问题也已修复，并以真实组件集成测试闭环。
+独立 reviewer 最终结论为 APPROVE：原 2 个 HIGH、1 个 MEDIUM 均关闭，无未解决发现；
+其独立复跑了相关回归用例，其中最后一轮模式会话集成 4 / 4 通过。
+
+## 未执行的验证及发布条件
+
+- 未向预发生成服务发送真实业务 YAML，未检验真实模型输出质量、权限及长耗时表现。
+- 公开 bootstrap 不注册智能接入生成服务；该环境中明确报服务未启用。
+  使用本功能的实际部署必须已配置既有智能接入生成 API。
+- 没有修改后端，因此未运行后端 / BCS / Singlebox 全量测试；本记录不宣称仓库全量 CI 通过。全量 web 的 3 个失败均为既有 better-sqlite3 原生 binding 环境问题，不涉及本次 AI 功能。
+- 合并发布后仍需在授权环境验收智能接入服务可用性、编辑权限、模型返回结构和原有保存 / 部署链路。
+
+
+## 2026-11-14 服务端链路纠正与最终核对
+
+当前执行链路为 `autoHeal.botId → sendIntervention → BaaS 消息发送/轮询`，
+不再消费智能接入默认 Bot，也不拼接提交用户 ID。完整服务契约见
+[AutoHeal/BaaS 草稿说明](../workflow-ai-drafts.md)。模型结果仍需通过工作流
+结构、ID、版本和前端校验后才能审阅/手动应用；服务不调用保存、部署或运行接口。
+
+本地、合成数据验证（未调用真实 Bot）：
+
+| 当前相关验证 | 结果 |
+| --- | --- |
+| 草稿 core / 并发 / 验证 / 路由及迁移回归 | 5 文件、103 测试通过 |
+| 最后一轮恢复身份修复的 service / hook 回归 | 4 文件、116 测试通过 |
+| BaaS 传输（含单次派发及重定向拒绝） | 48 测试通过 |
+| 公开 Host 的草稿端到端 / 组装回归 | 4 文件、24 测试通过 |
+| 内部 Host 安全 / 跨实例授权 / 组装独立验证 | 3 文件、60 测试通过 |
+| shared 全量回归 | 33 文件、443 测试通过 |
+| clawevolve 全量串行回归 | 108 文件、1,397 测试通过 |
+
+最末恢复身份补丁之前，完整 workflow web 为 191 文件、2,659 测试通过；
+补丁后仅复跑上述 116 项相关测试，不将前一轮全量结果描述为补丁后的全量验证。
+
+复核发现的重定向转发、错误 envelope/终态识别、当前 Bot 配置影响旧消息轮询、
+轮询期间权限撤销、过期 pending 派发、恢复失败丢失身份、绝对请求目标日志绕过、
+跨实例用户名缓存误判均已补对应回归。内部 Host 管理员必须以规范 actor ID 配置，
+或有工作流编辑授权；不持久化/缓存用户名推导出的授权。
+
+全量运行局限另记：workflow backend 并发轮次曾有 35 项失败，其中 3 项为新增
+迁移后的旧版本断言，已改为当前迁移版本并复跑通过；其余 Git 部署/统一保存的
+两个文件串行复跑 93 项通过。未再声称一次完整 backend 运行全绿。内部 Host
+全量曾为 766 通过、4 失败，清理相关失败项隔离复跑通过，仍有一个未改动的
+Python 脚本路径定位用例未通过；相关 60 项验证不替代全量结论。
+
+本轮仍没有提交、推送、更新内部宿主子模块引用或部署。内部 Host 验证显式指向
+本地新构建的公共依赖；发布前必须同步公共依赖版本。未验证预发实际 Bot 绑定、
+SSO、BaaS 凭证或真实模型输出。未修改 `taskguard`、`docs/demos`。
+
+## 2026-11-15 无新增草稿表版本：本地验证补充
+
+本次用户约束替代旧版任务表方案。当前实现使用预先签发的 metadata receipt 与
+BaaS 原生固定 `message_id`，恢复只轮询原消息；不创建、读写或删除草稿任务表。
+v153 保留为空 SQL 的历史槽位。取消仅停止本地等待；不承诺远端停止、全局撤销或
+页面丢失内存上下文后的恢复。现行契约见[工作流 AI 草稿](../workflow-ai-drafts.md)。
+
+实际本地结果（Node 20，重建公共依赖后）：
+
+- Workflow：15 个聚焦文件，330 项通过。
+- Public app/runtime/BaaS/browser：5 个文件，97 项通过。
+- 共享 BaaS sender：84 项通过。
+- 迁移与 managed database 回归：59 项通过。
+- 企业宿主 AI/安全/Origin/shutdown：180 项通过，测试关联当前公共源码及重建产物，
+  不使用旧依赖产物冒充集成证据。
+- 合计 750 项定向回归通过；不代表仓库全量测试或远端 CI 全绿。
+- Shared、ClawEvolve、Workflow、ClawWeb 构建，以及受影响包和宿主默认生产
+  TypeScript 检查通过；包边界、文件尺寸、无跳过用例与 whitespace 检查通过。
+- 独立安全审查覆盖 provider namespace、固定 ID/冻结 Bot、保守派发分类、查询
+  操作性错误保留 context、ACL/期限、无表及 local-only cancel；无未解决代码级阻断。
+
+本轮未 commit、push 或部署，未调用真实 BaaS。没有据此确认先前预发 500 的实际
+SQL 根因，也未证明预发已支持当前 native-ID 契约、真实配置一致或 Bot 工具权限
+已经满足建议生成边界。发布时必须验证实际服务版本与新旧客户端兼容，不能为旧
+无凭据请求自动创建替代任务。未改 taskguard、docs/demos 或宿主 gitlink。
+
+## 2026-11-16 目标 BaaS 环境选择与失败分类
+
+现行配置契约补充 `autoHeal.baasEnvironment`（环境变量
+`AUTO_HEAL_BAAS_ENVIRONMENT` 优先），按配置的 Bot 运行环境选择完整 endpoint/key
+配对，不再让 Editor 的通用生产传输隐式决定 Bot 的目标环境。目标环境不是服务 Bot
+生命周期阶段；个人 Bot 不增加 `lifecycle_stage`。执行、轮询与 receipt 签名复用同一
+配对和双环境 namespace；该 namespace 升级会使旧 receipt 失效，不自动重派发。
+具体契约与诊断步骤见[工作流 AI 草稿](../workflow-ai-drafts.md)。
+
+本地合成数据验证：
+
+- Shared 配置/配对选择回归：68 项通过。
+- Public app/transport/receipt/失败分类：174 项通过，包含 53 项失败分类回归。
+- Workflow core/并发/校验/路由：101 项通过。
+- 前端生命周期/错误提示：89 项通过。
+- 关联企业宿主目标配置及真实 Host 路由：24 项通过；CI 脚本契约 47 项通过。
+- Shared、ClawEvolve、Workflow、ClawWeb 顺序构建通过；受影响公共包与企业宿主
+  默认生产 TypeScript 检查通过。
+- 扩展企业宿主全量运行：1,747 项通过、1 项失败、0 skipped；失败文件未在本次
+  修改中，断言观察到本地 Git 远端额外产生 `refs/notes/ai`。隔离复跑仍观察到
+  notes 引用变化及 `.git/ai` 清理竞态，未以删除断言或跳过用例掩盖。因此本记录
+  不宣称全量/远端 CI 全绿。
+
+未向真实 Bot 发消息，未修改数据库、Bot 绑定或已部署服务。目标 endpoint 的真实
+上游环境、配对凭据有效性与生成成功仍需配套发布后在授权环境验收；静态配置和
+本地模拟测试不能代替该验收。旧失败消息不会因配置修正而变为成功。

@@ -29,6 +29,7 @@ values matching route-A; route-B test passes default_headers={"x-user-id":
 
 Gotcha: FlowRunner.run_flow does NOT interpolate `expect` (only path/body).
 """
+
 from __future__ import annotations
 
 from tests.community.framework.flow import FlowCase, FlowStep
@@ -41,15 +42,22 @@ BOT_MANAGEMENT_LIFECYCLE_FLOWS: list[FlowCase] = [
         name="bot_management-list-empty",
         covers=["bot_management"],
         steps=[
-            FlowStep(method="GET", path="/api/health", expect_status=200,
-                     expect={"status": "ok"}),
+            FlowStep(
+                method="GET",
+                path="/api/health",
+                expect_status=200,
+                expect={"status": "ok"},
+            ),
             FlowStep(
                 method="GET",
                 path="/api/bots",
                 query={"entity_id": "e2e_user", "entity_type": "staff"},
                 expect_status=200,
-                expect={"success": True, "error_code": 200,
-                        "data": {"total": 0, "items": []}},
+                expect={
+                    "success": True,
+                    "error_code": 200,
+                    "data": {"total": 0, "items": []},
+                },
             ),
         ],
     ),
@@ -63,8 +71,10 @@ BOT_MANAGEMENT_LIFECYCLE_FLOWS: list[FlowCase] = [
                 method="GET",
                 path="/api/bots/check/name?bot_name=NonExistent_E2E_Bot",
                 expect_status=200,
-                expect={"success": True,
-                        "data": {"exists": False, "bot_name": "NonExistent_E2E_Bot"}},
+                expect={
+                    "success": True,
+                    "data": {"exists": False, "bot_name": "NonExistent_E2E_Bot"},
+                },
             ),
         ],
     ),
@@ -89,8 +99,12 @@ BOT_MANAGEMENT_LIFECYCLE_FLOWS: list[FlowCase] = [
         covers=["bot_management"],
         live_only=True,
         steps=[
-            FlowStep(method="GET", path="/api/health", expect_status=200,
-                     expect={"status": "ok"}),
+            FlowStep(
+                method="GET",
+                path="/api/health",
+                expect_status=200,
+                expect={"status": "ok"},
+            ),
             FlowStep(
                 method="POST",
                 path="/api/bots",
@@ -239,7 +253,10 @@ BOT_MANAGEMENT_LIFECYCLE_FLOWS: list[FlowCase] = [
                 method="GET",
                 path="/api/bots/{bot_id}/engine-config",
                 expect_status=200,
-                expect={"success": True, "data": {"singlebox": {"module": "bot_management"}}},
+                expect={
+                    "success": True,
+                    "data": {"singlebox": {"module": "bot_management"}},
+                },
             ),
             FlowStep(
                 method="PATCH",
@@ -257,7 +274,10 @@ BOT_MANAGEMENT_LIFECYCLE_FLOWS: list[FlowCase] = [
                     "ext": {"singlebox_update": True},
                 },
                 expect_status=200,
-                expect={"success": True, "data": {"bot_name": "BotMgmt Live Owner Bot Updated"}},
+                expect={
+                    "success": True,
+                    "data": {"bot_name": "BotMgmt Live Owner Bot Updated"},
+                },
             ),
             FlowStep(
                 method="POST",
@@ -369,3 +389,38 @@ BOT_MANAGEMENT_LIFECYCLE_FLOWS: list[FlowCase] = [
         ],
     ),
 ]
+
+
+# The released default is deliberately closed. This flow covers that real HTTP
+# policy and ordinary Bot reads; it is not evidence of enterprise AAC cutover.
+BOT_MANAGEMENT_LIFECYCLE_FLOWS.append(
+    FlowCase(
+        name="owner-handoff-disabled-preserves-existing-reads",
+        covers=["bot_management"],
+        steps=[
+            FlowStep(
+                method="POST",
+                path="/api/bots/owner-handoffs",
+                body={
+                    "bot_pk": 1,
+                    "new_owner_id": "recipient",
+                    "request_key": "disabled-request",
+                },
+                expect_status=404,
+                expect={"detail": "OWNER_HANDOFF_DISABLED"},
+            ),
+            FlowStep(
+                method="GET",
+                path="/api/bots/owner-handoffs/missing-operation",
+                expect_status=404,
+                expect={"detail": "OWNER_HANDOFF_DISABLED"},
+            ),
+            FlowStep(
+                method="GET",
+                path="/api/bots",
+                query={"entity_id": "e2e_user", "entity_type": "staff"},
+                expect={"success": True},
+            ),
+        ],
+    )
+)

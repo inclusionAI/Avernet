@@ -7,7 +7,7 @@ import type { GroupPanelKind } from './GroupHeader';
 import type { GroupDingTalkConfig } from './ManagePanel/DingTalkConfigPanel';
 import { GroupManagePanel } from './ManagePanel/GroupManagePanel';
 import { SessionManagePanel } from './ManagePanel/SessionManagePanel';
-import { WorkspaceOverlayPanel } from './WorkspaceOverlayPanel';
+import { ResizableWorkspaceSidebar } from './ResizableWorkspaceSidebar';
 
 export interface WorkspaceManagePanelsProps {
   activePanel: GroupPanelKind;
@@ -25,7 +25,7 @@ export interface WorkspaceManagePanelsProps {
   onLeaveGroup: (actorId: string) => Promise<boolean>;
   onAddGroupMember: (actorId: string) => Promise<boolean>;
   onRemoveGroupMember: (actorId: string) => Promise<boolean>;
-  onShareGroup: () => Promise<DomainResult<{ invitationUrl: string }>>;
+  onShareGroup: (expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
   onSaveDingTalk: (config: GroupDingTalkConfig) => Promise<boolean>;
   onToggleDingTalkActive: (active: boolean) => Promise<boolean>;
   onDeleteDingTalk: () => Promise<boolean>;
@@ -36,7 +36,7 @@ export interface WorkspaceManagePanelsProps {
   onLeaveSession: (actorId: string) => Promise<boolean>;
   onAddSessionMember: (actorId: string) => Promise<boolean>;
   onRemoveSessionMember: (actorId: string) => Promise<boolean>;
-  onShareSession: () => Promise<DomainResult<{ invitationUrl: string }>>;
+  onShareSession: (expiresInSeconds?: number) => Promise<DomainResult<{ invitationUrl: string }>>;
 }
 
 /** 右侧群/会话管理面板渲染：只负责 UI 编排，写操作由父级 Hook 提供。 */
@@ -55,20 +55,26 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
 
   if (!group) return null;
 
-  // 会话局部遮罩由公共覆盖层处理，保留内部及 Portal 浮层交互。
+  // 对话区内联副屏（与 chat 页右缘面板同形）：aside 常挂、open 开合，面板本体保持
+  // 「挂载 == 打开」语义（GroupManagePanel key 群切换重建），仅展开态渲染。
+  const manageOpen = activePanel === 'manage';
+  const sessionManageOpen = activePanel === 'sessionManage' && session !== null;
   return (
     <>
-      {activePanel === 'manage' ? (
-        <WorkspaceOverlayPanel
-          ariaLabel="群管理面板"
-          data-manage-panel="true"
-          onDismiss={onClose}
-          {...WORKSPACE_RIGHT_PANEL_LAYOUT}
-          className="z-30 bg-background"
-        >
+      <ResizableWorkspaceSidebar
+        ariaLabel="群管理面板"
+        data-manage-panel="true"
+        side="right"
+        open={manageOpen}
+        onDismiss={manageOpen ? onClose : undefined}
+        {...WORKSPACE_RIGHT_PANEL_LAYOUT}
+        className="bg-background"
+      >
+        {manageOpen ? (
           <GroupManagePanel
             key={group.groupId}
             group={group}
+            sessionId={session?.groupId === group.groupId ? session.sessionId : undefined}
             advancedConfigEnabled={props.groupAdvancedConfigEnabled}
             canManage={canManage}
             candidates={identities}
@@ -88,17 +94,19 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
             dingTalkBinding={props.dingTalkBinding}
             dingTalkLoading={props.dingTalkLoading}
           />
-        </WorkspaceOverlayPanel>
-      ) : null}
+        ) : null}
+      </ResizableWorkspaceSidebar>
 
-      {activePanel === 'sessionManage' && session ? (
-        <WorkspaceOverlayPanel
-          ariaLabel="会话管理面板"
-          data-manage-panel="true"
-          onDismiss={onClose}
-          {...WORKSPACE_RIGHT_PANEL_LAYOUT}
-          className="z-30 bg-background"
-        >
+      <ResizableWorkspaceSidebar
+        ariaLabel="会话管理面板"
+        data-manage-panel="true"
+        side="right"
+        open={sessionManageOpen}
+        onDismiss={sessionManageOpen ? onClose : undefined}
+        {...WORKSPACE_RIGHT_PANEL_LAYOUT}
+        className="bg-background"
+      >
+        {sessionManageOpen && session ? (
           <SessionManagePanel
             key={session.sessionId}
             session={session}
@@ -117,8 +125,8 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
             onRemoveMember={props.onRemoveSessionMember}
             onShare={props.onShareSession}
           />
-        </WorkspaceOverlayPanel>
-      ) : null}
+        ) : null}
+      </ResizableWorkspaceSidebar>
     </>
   );
 }

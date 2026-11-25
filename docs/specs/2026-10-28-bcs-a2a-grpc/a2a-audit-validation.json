@@ -1,0 +1,37 @@
+{
+  "scope": "bcs_a2a_runs / bcs_a2a_contexts standard id and audit columns",
+  "migrations": {
+    "mysql": "038_a2a_audit_columns",
+    "sqlite": "039_a2a_audit_columns"
+  },
+  "passed": [
+    {
+      "command": "cargo test -p bcs-chat-run-store --test conformance_a2a_run",
+      "tests": 7,
+      "log": "/tmp/avernet-a2a-audit-store-tests.log"
+    },
+    {
+      "check": "Real MySQL 8.4.13 complete 001–038 chain and populated 037→038 upgrade; unique constraints, audit defaults and ON UPDATE preservation",
+      "method": "isolated local MySQL, direct SQL assertions"
+    },
+    {
+      "check": "SQLite 038→039 populated upgrade, audit defaults, unique constraints, scope index, transaction rollback and retry",
+      "method": "Python sqlite3, exact migration files and explicit transaction"
+    }
+  ],
+  "not_completed": [
+    {
+      "command": "cargo test -p bcs --lib migrations::",
+      "reason": "Compilation stalled without progress; first attempt and -j 2 retry stopped (143). Migration unit tests did not execute."
+    },
+    {
+      "command": "cargo test -p bcs-bot-store --test a2a_mysql -- --ignored",
+      "reason": "After waiting for the build lock, dependency compilation stalled; stopped (143). Rust MySQL test did not execute."
+    }
+  ],
+  "deployment": "Retained business databases were not migrated. Only isolated disposable databases were used.",
+  "full_workspace_tests": "not run",
+  "status": "historical, superseded",
+  "superseded_by": "../a2a/task-bindings-v1.md",
+  "note": "This records the earlier audit-only draft. Its uncommitted migrations were consolidated into the normalized task-bindings schema at the requester’s direction."
+}

@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "../message_log_tests/bot_event_tests.rs"]
+mod key_log_tests;
+
 pub(super) fn build_default_policy_decision(
     group: &Group,
     sender_bot_id: &str,
@@ -309,6 +313,9 @@ pub(super) fn build_task_result_frame(
         from_bot_id: None,
         from_bot_owner: None,
     };
+    let text = if group.is_some_and(|g| g.group_strategy == GroupStrategy::ManagerWorker) {
+        response_text.to_string()
+    } else { format!("[from:{}] {}", target_bot_name, response_text) };
     let mut params = serde_json::json!({
         "session_key": manager_session_id,
         "bcs_group_id": manager_session_id,
@@ -316,7 +323,7 @@ pub(super) fn build_task_result_frame(
         "task_id": task_id,
         "message": {
             "role": "user",
-            "content": [{"type": "text", "text": format!("[from:{}] {}", target_bot_name, response_text)}],
+            "content": [{"type": "text", "text": text}],
             "timestamp": now_ms() / 1000,
         },
         "channel": {
@@ -370,7 +377,7 @@ pub(super) fn request_id(frame: &BcsFrame) -> Option<String> {
 }
 
 pub(super) fn frame_protocol_version(protocol_version: u32, target: &BotDeliveryTarget) -> u32 {
-    if target.is_http_provider() {
+    if target.is_gateway() {
         protocol_version.max(3)
     } else {
         protocol_version
@@ -413,6 +420,7 @@ pub(super) fn log_route_digest(
 
     info!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::RouteDecided.as_str(),
         status = MessageLogStatus::Routed.as_str(),
@@ -505,6 +513,7 @@ pub(super) fn log_incoming_bot_event(cmd: &BotEventCommand, task_id: Option<&str
     let status = message_log_status_for_bot_event(&cmd.state);
     info!(
         target: MSG_LOG_TARGET,
+        log_class = matches!(cmd.state, ChatEventState::Final | ChatEventState::Error | ChatEventState::Aborted).then_some("business_key"),
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::BotEvent.as_str(),
         status = status.as_str(),
@@ -544,6 +553,7 @@ pub(super) fn log_relay_deliver_result(
     if delivered {
         info!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::BotDeliverResult.as_str(),
             status = status.as_str(),
@@ -565,6 +575,7 @@ pub(super) fn log_relay_deliver_result(
     } else {
         warn!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::BotDeliverResult.as_str(),
             status = status.as_str(),

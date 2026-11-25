@@ -13,8 +13,11 @@ import { useBotEditorCandidates } from '@/hooks/useBotEditorCandidates';
 import { useBotEngineConfig } from '@/hooks/useBotEngineConfig';
 import { useBotLocalSkillUpload } from '@/hooks/useBotLocalSkillUpload';
 import { useResourcePathClipboard } from '@/hooks/useResourcePathClipboard';
+import { useRoutineActivation } from '@/hooks/useRoutineActivation';
+import { useResourceListState } from '@/hooks/useResourceListState';
 import { useSkillSetActivation } from '@/hooks/useSkillSetActivation';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
+import { safeReportError } from '@/utils/errorToast';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -30,15 +33,16 @@ export function useBotEditor(
 ) {
   const copyResourcePath = useResourcePathClipboard();
   const [skills, setSkills] = useState<BotEditorSkill[]>([]);
-  const uploadSkillFolder = useBotLocalSkillUpload(botId, setSkills);
+  const uploadSkillFolder = useBotLocalSkillUpload(botId, setSkills, ownerId);
   const [skillSets, setSkillSets] = useState<BotCapabilitySet[]>([]);
-  const skillSetActivation = useSkillSetActivation(botId, setSkillSets);
+  const skillSetActivation = useSkillSetActivation(botId, setSkillSets, ownerId);
   const [mcps, setMcps] = useState<BotEditorMcp[]>([]);
-  const candidates = useBotEditorCandidates(botId, spaceId);
-  const [resources, setResources] = useState<BotEditorResource[]>([]);
-  const [resourceLoadingPaths, setResourceLoadingPaths] = useState<string[]>([]);
+  const [capabilityLoadError, setCapabilityLoadError] = useState<string>();
+  const candidates = useBotEditorCandidates(botId, spaceId, ownerId);
+  const { resources, resourceLoadingPaths, resourceErrors, resourceLoadedPaths, startResourceRequest, finishResourceRequest } = useResourceListState(botId, ownerId);
   const [screens, setScreens] = useState<BotRenderScreen[]>([]);
   const [routines, setRoutines] = useState<BotEditorRoutine[]>([]);
+  const routineActivation = useRoutineActivation(botId, ownerId, setRoutines);
   const engineConfig = useBotEngineConfig(botId, ownerId, isOwner);
   const [engineStatus, setEngineStatus] = useState<BotEditorEngineStatus>();
   const [mcpCallTypes, setMcpCallTypes] = useState<Record<string, 'caller' | 'owner'>>({});
@@ -49,12 +53,17 @@ export function useBotEditor(
   const load = useCallback(async (options?: { silent?: boolean }) => {
     if (!botId || !enabled) return;
     if (!options?.silent) setLoading(true);
+    const resourceTicket = startResourceRequest('');
+    void botEditorService.listResources(botId, '', ownerId, true).then(
+      (items) => finishResourceRequest(resourceTicket, items),
+      (error) => finishResourceRequest(resourceTicket, undefined, error),
+    );
     try {
-      const data = await botEditorService.load(botId, ownerId, deployment, engine);
+      const data = await botEditorService.load(botId, ownerId, deployment, engine, true);
       setSkills(data.skills);
       setSkillSets(data.skillSets);
       setMcps(data.mcps);
-      setResources(data.resources);
+      setCapabilityLoadError(data.capabilityLoadError);
       setScreens(data.screens);
       setRoutines(data.routines);
       setEngineStatus(data.engineStatus);
@@ -83,7 +92,10 @@ export function useBotEditor(
         toast.success(message);
         await load(options);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : '操作失败');
+        // 协议层已默认提示(alreadyHandled)的错误经 safeReportError 跳过,避免双重 toast;
+        // 纯前端错误仍在此提示一次。失败仍须 throw:调用方(如 RenderScreenPanel.save)
+        // 靠 rejection 跳过 close() 保留表单内容,吞错会清空用户输入。
+        safeReportError(error);
         throw error;
       }
     },
@@ -94,11 +106,15 @@ export function useBotEditor(
     skillSets,
     pendingSkillSetToggle: skillSetActivation.pendingSkillSetToggle,
     mcps,
+    capabilityLoadError,
     ...candidates,
     resources,
+    resourceErrors,
+    resourceLoadedPaths,
     screens,
     routines,
     engineConfig: engineConfig.config,
+    savedEngineConfig: engineConfig.savedConfig,
     engineStatus,
     setEngineConfig: engineConfig.setConfig,
     engineConfigLoading: engineConfig.loading,
@@ -106,26 +122,32 @@ export function useBotEditor(
     loading,
     reload: load,
     toggleSkill: (skill: BotEditorSkill) =>
-      act(() => botEditorService.toggleSkill(botId!, skill), skill.active ? 'Skill 已停用' : 'Skill 已启用'),
+      act(() => botEditorService.toggleSkill(botId!, skill, ownerId), skill.active ? 'Skill 已停用' : 'Skill 已启用'),
     deleteSkill: (id: string) =>
       act(
         async () => {
-          await botEditorService.deleteSkill(botId!, id);
+          await botEditorService.deleteSkill(botId!, id, ownerId);
           // 乐观移除卡片，避免静默全量重载期间卡片滞留(~1s)
           setSkills((current) => current.filter((skill) => skill.id !== id));
         },
         'Skill 已删除',
         { silent: true },
       ),
-    uploadSkill: (file: File) => act(() => botEditorService.uploadSkill(botId!, file), 'Skill 已上传'),
+    uploadSkill: async (file: File) => {
+      await botEditorService.uploadSkill(botId!, file, ownerId);
+      toast.success('Skill 已上传');
+      await load();
+    },
     setMcpActive: (mcp: BotEditorMcp, active: boolean) =>
-      act(() => botEditorService.setMcpActive(botId!, mcp, active), active ? 'MCP 已添加' : 'MCP 已移除'),
+      act(() => botEditorService.setMcpActive(botId!, mcp, active, ownerId), active ? 'MCP 已添加' : 'MCP 已移除'),
     createDirectory: (path: string) => act(() => botEditorService.createDirectory(botId!, path, ownerId), '目录已创建'),
     browseResources: async (directory = '') => {
+      const ticket = startResourceRequest(directory);
       try {
-        setResources(await botEditorService.listResources(botId!, directory, ownerId));
+        const items = await botEditorService.listResources(botId!, directory, ownerId, true);
+        finishResourceRequest(ticket, items);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : '资源目录加载失败');
+        finishResourceRequest(ticket, undefined, error);
       }
     },
     deleteResource: (path: string) => act(() => botEditorService.deleteResource(botId!, path, ownerId), '资源已删除'),
@@ -158,22 +180,22 @@ export function useBotEditor(
             : botEditorService.createScreen(botId!, input, ownerId),
         id ? '副屏配置已更新' : '副屏配置已创建',
       ),
-    createSkillSet: (name: string) => act(() => botEditorService.createSkillSet(botId!, name), '能力集已创建'),
+    createSkillSet: (name: string) => act(() => botEditorService.createSkillSet(botId!, name, ownerId), '能力集已创建'),
     updateSkillSet: (id: string, name: string) =>
-      act(() => botEditorService.updateSkillSet(botId!, id, name), '能力集已更新'),
-    deleteSkillSet: (id: string) => act(() => botEditorService.deleteSkillSet(botId!, id), '能力集已删除'),
+      act(() => botEditorService.updateSkillSet(botId!, id, name, ownerId), '能力集已更新'),
+    deleteSkillSet: (id: string) => act(() => botEditorService.deleteSkillSet(botId!, id, ownerId), '能力集已删除'),
     setSkillSetActive: skillSetActivation.setSkillSetActive,
     setSkillSetSkill: (setId: string, skillId: string, active: boolean) =>
       act(
-        () => botEditorService.setSkillSetSkill(botId!, setId, skillId, active),
+        () => botEditorService.setSkillSetSkill(botId!, setId, skillId, active, ownerId),
         active ? 'Skill 已加入能力集' : 'Skill 已移出能力集',
       ),
     addSkillCenterReferences: (setId: string, skillCodes: string[]) =>
-      act(() => botEditorService.addSkillCenterReferences(botId!, setId, skillCodes), 'SkillCenter Skill 已加入能力集'),
+      act(() => botEditorService.addSkillCenterReferences(botId!, setId, skillCodes, ownerId), 'SkillCenter Skill 已加入能力集'),
     uploadSkillFolder,
     setSkillSetMcp: (setId: string, serverCode: string, active: boolean) =>
       act(
-        () => botEditorService.setSkillSetMcp(botId!, setId, serverCode, active),
+        () => botEditorService.setSkillSetMcp(botId!, setId, serverCode, active, ownerId),
         active ? 'MCP 已加入能力集' : 'MCP 已移出能力集',
       ),
     mcpCallTypes,
@@ -193,19 +215,13 @@ export function useBotEditor(
       }
     },
     loadResourceDirectory: async (directory: string) => {
-      setResourceLoadingPaths((current) => [...new Set([...current, directory])]);
+      const ticket = startResourceRequest(directory);
       try {
-        const children = await botEditorService.listResources(botId!, directory, ownerId);
-        setResources((current) => {
-          const merged = new Map(current.map((item) => [item.path, item]));
-          children.forEach((item) => merged.set(item.path, item));
-          return [...merged.values()];
-        });
+        const children = await botEditorService.listResources(botId!, directory, ownerId, true);
+        if (!finishResourceRequest(ticket, children)) throw new Error('stale resource request');
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : '资源目录加载失败');
+        finishResourceRequest(ticket, undefined, error);
         throw error;
-      } finally {
-        setResourceLoadingPaths((current) => current.filter((path) => path !== directory));
       }
     },
     resourceLoadingPaths,
@@ -219,17 +235,8 @@ export function useBotEditor(
         id ? '定时任务已更新' : '定时任务已创建',
       ),
     loadRoutineModels: () => botEditorService.listRoutineModels(botId!, ownerId),
-    toggleRoutine: (routine: BotEditorRoutine) =>
-      act(
-        () =>
-          botEditorService.updateRoutine(
-            botId!,
-            routine.id,
-            { ...routine, enabled: !routine.enabled, timeoutSecs: routine.timeoutSecs ?? 86400 },
-            ownerId,
-          ),
-        routine.enabled ? '定时任务已停用' : '定时任务已启用',
-      ),
+    toggleRoutine: routineActivation.toggleRoutine,
+    pendingRoutineToggle: routineActivation.pendingRoutineToggle,
     deleteRoutine: (id: string) => act(() => botEditorService.deleteRoutine(botId!, id, ownerId), '定时任务已删除'),
     saveEngineConfig: engineConfig.save,
     restoreDefaultEngineConfig: engineConfig.restoreDefaults,

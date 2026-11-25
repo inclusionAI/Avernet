@@ -1,4 +1,10 @@
-import type { GroupView, IdentityView, MessageViewScope, SessionView } from '@/domain/collaboration/types';
+import type {
+  GroupContextDelivery,
+  GroupView,
+  IdentityView,
+  MessageViewScope,
+  SessionView,
+} from '@/domain/collaboration/types';
 import type { DomainResult } from '@/services/workspace/identityService';
 
 export type SessionTab = 'all' | 'favorite';
@@ -10,14 +16,15 @@ export interface GroupItemProps {
   sessionTab: SessionTab;
   onSessionTabChange: (t: SessionTab) => void;
   favoriteSessionIds: string[];
-  selectedGroupId: string | null;
   selectedSessionId: string | null;
-  onSelectGroup: (groupId: string) => void;
+  /** 该群是否挂着当前舞台选中会话（selectedGroupId/selectedSessionId 同时命中）：群名点亮
+   *  #09090B（text-foreground）——收起时下挂会话不可见，群名顶位承载选中语义（2026-11-02 稿）。 */
+  hasSelectedSession?: boolean;
   onToggleGroupExpanded: (groupId: string) => void;
   onSelectSession: (groupId: string, sessionId: string) => void;
   onToggleFavorite: (sessionId: string) => void;
-  onCreateSession: (groupId: string, scope?: MessageViewScope) => void;
-  /** 当前登录身份类型：human 点「+」弹视角菜单，bot 直接创建会话。 */
+  onCreateSession: (groupId: string, scope?: MessageViewScope, contextDelivery?: GroupContextDelivery) => void;
+  /** 当前登录身份类型：human 可额外配置会话消息视角。 */
   viewerKind: 'user' | 'bot';
   onManageGroup: (groupId: string) => void;
   onManageSession: (groupId: string, sessionId: string) => void;

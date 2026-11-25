@@ -9,9 +9,12 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
+from contextlib import AbstractContextManager
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.repository.caller_token_refresh_types import CallerTokenRefresh
     from agentclaw.community.core.bot_chat.query_support import QueryScope
     from agentclaw.community.core.bot_chat.schemas import (
         ConversationDetail,
@@ -220,6 +223,62 @@ class ExpertChatInstanceRepository(Protocol):
 
         Returns:
             是否命中并更新了行。
+        """
+        ...
+
+
+    @abstractmethod
+    def list_caller_token_refresh_candidates(
+        self, *, expires_before: datetime, after_id: int = 0, limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Page current-environment serving instances with unknown/due expiry.
+
+        ``expires_before`` is timezone-aware and inclusive; ids are ascending
+        and strictly greater than ``after_id``. ``limit`` is between 1 and 1000.
+        Bot, engine and physical-binding eligibility are checked by the caller.
+        """
+        ...
+
+    @abstractmethod
+    def correct_caller_token_expiry(
+        self, *, user_id: str, bot_id: str, owner_id: str, binding_id: int,
+        expires_at: datetime, expected_expires_at: datetime | None,
+    ) -> dict:
+        """Correct one existing ledger under IAM's row lock; CAS against explicit old expiry.
+
+        Aware timestamps may move backward or forward. Missing/replaced instances
+        and stale expected expiry raise ValueError. Return instance id and previous UTC expiry.
+        """
+        ...
+
+    @abstractmethod
+    def caller_token_refresh(
+        self, *, user_id: str, bot_id: str, owner_id: str, binding_id: int,
+        force_runtime_refresh: bool = False,
+    ) -> AbstractContextManager[CallerTokenRefresh]:
+        """Lock the exact instance before signing, sharing IAM's row lock.
+
+        Yield its latest snapshot after locking. Set the transaction state's
+        ``expires_at`` only after successful installation; successful exit records
+        an aware, future expiry. It must strictly increase unless an explicit
+        force_runtime_refresh reinstalls a credential after runtime replacement.
+        Unset expiry does not write.
+        Missing, replaced or released instances raise ValueError.
+        """
+        ...
+
+    @abstractmethod
+    def caller_token_update(
+        self, *, user_id: str, bot_id: str, owner_id: str,
+        binding_id: int, expires_at: datetime, force_runtime_refresh: bool = False,
+    ) -> AbstractContextManager[bool]:
+        """Serialize an install for the exact instance binding.
+
+        Yield False when the installed credential expires later or equally.
+        Yield True otherwise; record UTC expiry only on successful context exit.
+        force_runtime_refresh yields True even for shorter/equal expiry and records
+        the actual installed expiry, retaining the same row lock and target checks.
+        Missing, replaced or released instances raise ValueError.
         """
         ...
 

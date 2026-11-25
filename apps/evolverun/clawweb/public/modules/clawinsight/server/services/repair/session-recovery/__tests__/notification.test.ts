@@ -1,6 +1,13 @@
+import { SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY, SESSION_RECOVERY_NOTIFICATIONS_KEY, legacyOwnerNotificationEnabled } from '../legacy-configuration.js';
+import { notificationBotConfig } from './bot-config-fixture.js';
+import { RECOVERY_NOTIFICATION_ROUTES_KEY } from '../bot-configuration.js';
 import { expect, it, vi } from "vitest";
-import { SessionRecoveryGroupNotifier, SessionRecoveryNotifier, SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY, SESSION_RECOVERY_NOTIFICATIONS_KEY } from "../notification.js";
+import { SessionRecoveryGroupNotifier, SessionRecoveryNotifier } from "../notification.js";
 import type { RecoveryStoredTask, RecoveryTimelineEvent } from "../task-contracts.js";
+import { logRepairEvent } from "../../common/logging.js";
+vi.mock("../../common/logging.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../../common/logging.js")>(), logRepairEvent: vi.fn(),
+}));
 
 function setup() {
   const task = { taskId: "SR-notification", version: 7, status: "running", phase: "assess", level: "approval", controlPlaneEnvironment: "pre",
@@ -13,12 +20,49 @@ function setup() {
       if (events.some(item => item.event_id === event.event_id)) return false;
       events.push(event); return true;
     }) };
-  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://robot.invalid/send", timeout_seconds: 10 }) }) };
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ routes: { test: { webhook: "https://robot.invalid/send", timeout_seconds: 10 } } }) }) };
   const sender = { send: vi.fn().mockResolvedValue(undefined) };
-  const deps = { controlPlaneEnvironment: "pre" as const, tasks, config, sender, publicBaseUrl: "https://service.invalid" };
-  return { task, tasks, events, config, sender, deps, notifier: new SessionRecoveryGroupNotifier(deps) };
+  const botConfigurations = notificationBotConfig();
+  const deps = { botConfigurations, controlPlaneEnvironment: "pre" as const, tasks, config, sender, publicBaseUrl: "https://service.invalid" };
+  return { task, tasks, events, config, sender, botConfigurations, deps, notifier: new SessionRecoveryGroupNotifier(deps) };
 }
 const message = { taskId: "SR-notification", eventId: "call-1", kind: "message" as const };
+
+it("keeps insufficient-evidence closeout silent even when its result hook is replayed", async () => {
+  const { notifier, task, tasks, sender, events } = setup();
+  task.status = "failed"; task.interventionStatus = "performed";
+  task.timeline = [{ event_id: "insufficient", kind: "execution", at_ms: 2, actor: "service",
+    summary: "证据不足", payload: { failure_code: "INSUFFICIENT_EVIDENCE" } }];
+  notifier.after({ ...message, eventId: "insufficient", kind: "result" });
+  await new Promise(resolve => setImmediate(resolve));
+  expect(tasks.find).toHaveBeenCalled();
+  expect(sender.send).not.toHaveBeenCalled();
+  expect(events).toEqual([]);
+});
+
+it("sends a single permission notice to the configured Bot group from a confirmed card delivery", async () => {
+  const { notifier, task, deps, sender, events, config } = setup();
+  task.status = "waiting_owner";
+  task.interventionStatus = "none";
+  task.ownerRequest = { requestId: "request-1", reason: "permission", status: "pending", revision: 1, resumePhase: "assess",
+    createdAtMs: 1, evidence_ids: [], summary: "Bot 无法读取评审文档。", instructions: "请申请评审文档的阅读权限。" };
+  const receipt: RecoveryTimelineEvent = { event_id: "card-receipt", kind: "notification", at_ms: 2, actor: "service",
+    summary: "Owner 待办卡片已同步", payload: { channel: "owner_card", owner_request_id: "request-1", operation: "create", state: "sent", sent: true } };
+  task.timeline.push(receipt, { ...receipt, event_id: "duplicate-receipt" });
+  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ routes: { test: { webhook: "https://test.invalid/send", timeout_seconds: 10 } } }) });
+  const notice = { ...message, eventId: receipt.event_id, kind: "owner_card_sent" as const };
+  notifier.after(notice);
+  new SessionRecoveryGroupNotifier(deps).after({ ...notice, eventId: "duplicate-receipt" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send).toHaveBeenCalledOnce();
+  const delivery = sender.send.mock.calls[0][0];
+  expect(delivery).toMatchObject({ webhook: "https://test.invalid/send", title: "会话自愈｜已向 Owner 发送权限待办卡片" });
+  expect(delivery.text).toContain("Bot 无法读取评审文档。");
+  expect(delivery.text).toContain("请申请评审文档的阅读权限。");
+  expect(delivery.text).toContain("等待 Owner 处理");
+  expect(delivery.text).toContain("已处理，继续任务");
+  expect(delivery.text).toContain("recoveryTaskId=SR-notification");
+});
 
 it.each([
   ["completed", "recovered", undefined],
@@ -26,6 +70,7 @@ it.each([
   ["failed", "unknown", undefined],
   ["canceled", "unknown", undefined],
   ["completed", "unknown", "user_continued"],
+  ["completed", "unknown", "owner_handoff"],
 ] as const)("omits terminal group notices without intervention: %s/%s/%s", async (status, effect, completionReason) => {
   const { notifier, task, tasks, sender, events } = setup();
   task.status = status; task.completionReason = completionReason; task.interventionStatus = "none";
@@ -64,24 +109,22 @@ it.each(["message", "plan", "execution"] as const)("retains %s notices before an
 it.each(["message", "plan", "execution", "result"] as const)("routes %s to the exact Bot and Owner override only", async kind => {
   const { notifier, config, sender, task, events } = setup();
   task.request.target.bot_id = "default";
-  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10,
-    bot_webhooks: [{ bot_id: "default", entity_id: "another-owner", webhook: "https://another.invalid/send" },
-      { bot_id: "default", entity_id: "owner", webhook: "https://test.invalid/send" }] }) });
+  task.request.target.entity_id = "001234";
+  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ routes: { test: { webhook: "https://test.invalid/send", timeout_seconds: 10 }, other: { webhook: "https://another.invalid/send", timeout_seconds: 10 } } }) });
   notifier.after({ ...message, kind });
   await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
   expect(sender.send).toHaveBeenCalledOnce();
   expect(sender.send.mock.calls[0][0]).toMatchObject({ webhook: "https://test.invalid/send", timeoutSeconds: 10 });
+  expect(sender.send.mock.calls[0][0].text).toContain("**Bot**：default\n\n**Entity ID**：001234");
   expect(JSON.stringify(events)).not.toMatch(/https:\/\/(test|business|another)\.invalid/);
 });
-it.each([["bot", "another-owner"], ["another-bot", "owner"]])("retains the default group for unmatched target %s/%s", async (bot_id, entity_id) => {
-  const { notifier, config, sender, events } = setup();
-  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10,
-    bot_webhooks: [{ bot_id, entity_id, webhook: "https://test.invalid/send" }] }) });
-  notifier.after(message);
-  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
-  expect(sender.send).toHaveBeenCalledOnce();
-  expect(sender.send.mock.calls[0][0].webhook).toBe("https://business.invalid/send");
+it("does not use a default group when the referenced route is missing", async () => {
+  const { notifier, config, sender } = setup();
+  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ routes: { other: { webhook: "https://business.invalid/send", timeout_seconds: 10 } } }) });
+  notifier.after(message); await new Promise(resolve => setImmediate(resolve));
+  expect(sender.send).not.toHaveBeenCalled();
 });
+
 it.each([
   [{ bot_id: "bot", webhook: "https://test.invalid/send" }],
   [{ bot_id: "bot", entity_id: "owner", webhook: "http://test.invalid/send" }],
@@ -96,8 +139,7 @@ it.each([
 });
 it("does not leak a failed Bot-specific notification into the default business group", async () => {
   const { notifier, config, sender, events } = setup();
-  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10,
-    bot_webhooks: [{ bot_id: "bot", entity_id: "owner", webhook: "https://test.invalid/send" }] }) });
+  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ routes: { test: { webhook: "https://test.invalid/send", timeout_seconds: 10 } } }) });
   sender.send.mockRejectedValue(new Error("transport offline"));
   notifier.after(message);
   await vi.waitFor(() => expect(events.some(event => event.payload.sent === false)).toBe(true));
@@ -111,7 +153,7 @@ it("delivers asynchronously once across repeated callbacks and separate notifier
   expect(sender.send).not.toHaveBeenCalled();
   await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
   expect(sender.send).toHaveBeenCalledOnce();
-  expect(config.findByKey).toHaveBeenCalledWith(SESSION_RECOVERY_NOTIFICATIONS_KEY);
+  expect(config.findByKey).toHaveBeenCalledWith(RECOVERY_NOTIFICATION_ROUTES_KEY);
   expect(sender.send.mock.calls[0][0]).toMatchObject({ timeoutSeconds: 10, title: "会话自愈｜已提交恢复消息" });
   expect(sender.send.mock.calls[0][0].text).toContain("触达和恢复效果尚待验证");
   expect(sender.send.mock.calls[0][0].text).toContain("recoveryTaskId=SR-notification");
@@ -122,7 +164,7 @@ it.each([null, { enabled: 0, config_json: "{}" }])("leaves notifications disable
   const { notifier, config, sender, tasks } = setup(); config.findByKey.mockResolvedValue(row);
   notifier.after(message);
   await new Promise(resolve => setImmediate(resolve));
-  expect(sender.send).not.toHaveBeenCalled(); expect(tasks.find).not.toHaveBeenCalled(); expect(tasks.appendNotification).not.toHaveBeenCalled();
+  expect(sender.send).not.toHaveBeenCalled(); expect(tasks.appendNotification).not.toHaveBeenCalled(); expect(tasks.appendNotification).not.toHaveBeenCalled();
 });
 it("isolates unavailable config tables and sender failures from the task", async () => {
   const { notifier, config, sender, task, events } = setup();
@@ -203,6 +245,91 @@ it("does not turn missing delivery, a reply or an ended task into confirmed reco
   expect(text).toContain("恢复效果尚未确认"); expect(text).not.toContain("<font");
 });
 
+it.each([
+  ["recovered", "原任务已恢复"],
+  ["not_recovered", "原任务未恢复"],
+  ["unknown", "恢复效果尚未确认"],
+] as const)("shows the saved Owner handoff details without changing effect %s", async (effect, conclusion) => {
+  const { notifier, task, sender, events } = setup();
+  const handoff = "## 转交原因\n\n原任务的外部上报缺少可独立核对的回执。\n\n"
+    + "已核查本轮执行记录，保留现有结果并避免重复业务操作。".repeat(18)
+    + "\n\n## Owner 处理事项\n\n核查 eventKey start-fixture-key、end-fixture-key 对应的服务端记录；核对 worker.py 的实际位置。";
+  task.status = "completed"; task.completionReason = "owner_handoff"; task.interventionStatus = "performed";
+  task.final_summary = "原任务已经核查，具体后续事项在转交说明中。";
+  task.judgment = { delivery: "confirmed", response: "acted", effect, summary: handoff, evidence_ids: [] };
+  task.timeline.push({ event_id: "handoff", kind: "termination", at_ms: 2, actor: "agent", summary: handoff,
+    payload: { completion_reason: "owner_handoff" } });
+  task.timeline.push({ event_id: "released", kind: "execution", at_ms: 3, actor: "service",
+    summary: "本次执行结束，已保存任务上下文", payload: {} });
+  // A queued legacy callback may still refer to the release event; the saved handoff remains authoritative.
+  notifier.after({ ...message, eventId: "released", kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const sent = sender.send.mock.calls[0][0];
+  expect(sent.title).toBe("会话自愈｜已转交 Owner，自愈已结束");
+  expect(sent.text).toContain("**【转交原因与 Owner 处理事项】**");
+  expect(sent.text).toContain("外部上报缺少可独立核对的回执");
+  expect(sent.text).toContain("start\\-fixture\\-key"); expect(sent.text).toContain("end\\-fixture\\-key");
+  expect(sent.text).toContain("worker\\.py");
+  expect(sent.text).toContain(conclusion);
+  expect(sent.text).toContain("本次自愈已结束，后续由 Owner 处理。");
+  expect(sent.text).not.toContain("本次执行结束，已保存任务上下文");
+  expect(sent.text).not.toContain("等待 Owner");
+  expect(task.judgment.effect).toBe(effect);
+});
+
+it.each([
+  ["message", "已提交恢复消息"], ["plan", "已形成修复方案"], ["execution", "修复方案执行未完成"],
+] as const)("keeps a delayed %s notification unchanged after Owner handoff", async (kind, title) => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.completionReason = "owner_handoff";
+  notifier.after({ ...message, kind });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const sent = sender.send.mock.calls[0][0];
+  expect(sent.title).toBe(`会话自愈｜${title}`);
+  expect(sent.text).not.toContain("转交原因与 Owner 处理事项");
+});
+
+it("uses the saved task summary when a legacy handoff has no detailed judgment", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.completionReason = "owner_handoff";
+  task.final_summary = "请 Owner 核查 start-fixture-key 对应的上报记录。";
+  task.timeline[0].summary = "本次执行结束，已保存任务上下文";
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const text = sender.send.mock.calls[0][0].text;
+  expect(text).toContain("start\\-fixture\\-key");
+  expect(text).not.toContain("本次执行结束，已保存任务上下文");
+});
+
+it("prefers the saved handoff event over a generic legacy task summary", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.completionReason = "owner_handoff";
+  task.final_summary = "原任务已经核查，具体后续事项在转交说明中。";
+  task.timeline.push({ event_id: "handoff", kind: "termination", at_ms: 2, actor: "agent",
+    summary: "缺少外部回执，请 Owner 核查 start-fixture-key 对应的服务端记录。",
+    payload: { completion_reason: "owner_handoff" } });
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send.mock.calls[0][0].text).toContain("start\\-fixture\\-key");
+});
+
+it.each([
+  ["Chinese", "请核对原始执行回执。".repeat(700), "任务摘要。".repeat(400)],
+  ["emoji", "😀。".repeat(2000), "任务摘要。".repeat(400)],
+  ["escaped characters", "&&&&。".repeat(1600), "&&&&。".repeat(400)],
+])("bounds long Owner details with %s while retaining the task link", async (_name, summary, finalSummary) => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.completionReason = "owner_handoff";
+  task.final_summary = finalSummary;
+  task.judgment = { delivery: "confirmed", response: "acted", effect: "unknown", summary, evidence_ids: [] };
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const text = sender.send.mock.calls[0][0].text;
+  expect(Buffer.byteLength(text)).toBeLessThan(20000);
+  expect(text).toContain("完整内容见任务页");
+  expect(text).toContain("[查看完整任务与处理记录]");
+});
+
 it("shows the business summary of an audited plan action without claiming unexecuted actions", async () => {
   const { notifier, task, sender, events } = setup();
   task.status = "completed";
@@ -246,25 +373,41 @@ it("shortens Chinese and emoji only at sentence boundaries and treats inline Mar
   expect(other.sender.send.mock.calls[0][0].text).toContain("\\*\\*不要加粗\\*\\* \\[不要变链接\\]\\(https://docs\\.invalid\\)");
 });
 
-it("checks the independent Owner notification switch on each send", async () => {
-  const config = { findByKey: vi.fn<() => Promise<{ enabled: number; config_json: string } | null>>().mockResolvedValue(null) };
-  const sender = { sendNotification: vi.fn().mockResolvedValue(undefined) };
-  const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config);
-  const input = { ownerId: "owner", taskId: "SR-owner", kind: "plan" as const, summary: "需要确认方案" };
+it("reads the explicit Bot Owner switch for each send and ignores the legacy global default", async () => {
+  const sender = { sendNotification: vi.fn(), sendCard: vi.fn() };
+  const config = { findByKey: vi.fn(async key => key === SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY
+    ? { enabled: 0, config_json: '{}' }
+    : { enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template" } }) }) };
+  const bots = notificationBotConfig('{}');
+  const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config, "pre", bots);
+  const input = { ownerId: 'owner', botId: 'bot', targetEnvironment: 'prod' as const, taskId: 'SR-one', sessionKey: 'original', kind: 'result' as const, summary: '处理事项' };
   expect(await notifier.notify(input)).toBe(false);
-  config.findByKey.mockResolvedValue({ enabled: 0, config_json: "{}" });
-  expect(await notifier.notify(input)).toBe(false);
-  expect(sender.sendNotification).not.toHaveBeenCalled();
-  config.findByKey.mockResolvedValue({ enabled: 1, config_json: "{}" });
+  const row = await bots.findForOwner();
+  row.configJson = '{"notifications":{"owner":{"enabled":true}}}';
   expect(await notifier.notify(input)).toBe(true);
-  expect(config.findByKey).toHaveBeenLastCalledWith(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY);
-  expect(sender.sendNotification).toHaveBeenCalledOnce();
-  expect(sender.sendNotification.mock.calls[0][0]).toMatchObject({ recipientUserId: "owner", title: "会话自愈方案待确认" });
-  config.findByKey.mockResolvedValue({ enabled: 0, config_json: "{}" });
+  row.configJson = '{"notifications":{"owner":{"enabled":false}}}';
   expect(await notifier.notify(input)).toBe(false);
-  expect(sender.sendNotification).toHaveBeenCalledOnce();
+  bots.find.mockRejectedValueOnce(new Error('database unavailable'));
+  expect(await notifier.notify(input)).toBe(false);
+  config.findByKey.mockRejectedValueOnce(new Error('transport config unavailable'));
+  expect(await notifier.notify(input)).toBe(false);
+  expect(sender.sendCard).toHaveBeenCalledOnce();
 });
 
+it.each([0, 1])('honors the legacy row switch before Owner overrides during migration: %s', enabled => {
+  const input = { ownerId: 'owner', botId: 'bot', targetEnvironment: 'prod' as const, taskId: '', sessionKey: '', kind: 'plan' as const, summary: '' };
+  expect(legacyOwnerNotificationEnabled('{}', enabled, input)).toBe(enabled === 1);
+  for (const value of [true, false]) {
+    expect(legacyOwnerNotificationEnabled(JSON.stringify({ bot_overrides: [{ bot_id: 'bot', entity_id: 'owner', env: 'prod', enabled: value }] }), enabled, input)).toBe(enabled === 1 && value);
+  }
+});
+
+it.each(['', 'null', '[]', '{"notifications":{"owner":{"enabled":"true"}}}', '{"notifications":{"owner":{"enabled":true},"group":null}}'])('never sends for invalid or absent Bot notification JSON: %s', async raw => {
+  const sender = { sendNotification: vi.fn(), sendCard: vi.fn() };
+  const notifier = new SessionRecoveryNotifier(sender, 'https://service.invalid', { findByKey: async () => ({ enabled: 1, config_json: '{}' }) }, 'pre', notificationBotConfig(raw));
+  expect(await notifier.notify({ ownerId: 'owner', botId: 'bot', targetEnvironment: 'prod', taskId: 'SR', sessionKey: 's', kind: 'plan', summary: '事项' })).toBe(false);
+  expect(sender.sendNotification).not.toHaveBeenCalled();
+});
 
 it("notifies user handoff after intervention without claiming business recovery", async () => {
   const { notifier, task, sender, events } = setup();
@@ -277,4 +420,93 @@ it("notifies user handoff after intervention without claiming business recovery"
   expect(sender.send.mock.calls[0][0].text).toContain("恢复效果尚未确认");
   expect(sender.send.mock.calls[0][0].text).not.toContain("原任务已恢复");
   expect(sender.send.mock.calls[0][0].text).not.toContain("任务执行失败");
+});
+
+
+it("keeps a legacy ended permission handoff terminal and sends a card without feedback continuation", async () => {
+  const sender = { sendNotification: vi.fn(), sendCard: vi.fn() };
+  const config = { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template" } }) }) };
+  const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config, "pre", notificationBotConfig());
+  await expect(notifier.notify({ ownerId: "owner-fixture", botId: "bot", targetEnvironment: "prod", taskId: "SR-permission",
+    sessionKey: "original", kind: "result", summary: "请在能力集中申请 MCP 服务权限。" })).resolves.toBe(true);
+  expect(sender.sendCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ recipientUserId: "owner-fixture",
+    cardParamMap: expect.objectContaining({ summary: "请在能力集中申请 MCP 服务权限。", instructions: "请查看下方任务详情，按完整处理事项继续。", confirm_visible: "false", confirm_status: "disabled" }) }));
+  expect(sender.sendCard.mock.calls[0][0]).not.toHaveProperty("callbackRouteKey");
+  expect(sender.sendNotification).not.toHaveBeenCalled();
+});
+
+it("notifies the Owner of nonblocking suggestions after recovery without requesting approval or repair", async () => {
+  const sender = { sendNotification: vi.fn().mockResolvedValue(undefined), sendCard: vi.fn().mockResolvedValue(undefined) };
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template" } }) }) };
+  const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config, "pre", notificationBotConfig());
+  await notifier.notify({ ownerId: "owner", botId: "bot", targetEnvironment: "prod", taskId: "SR-suggestion", sessionKey: "original", kind: "result", effect: "recovered", summary: "原任务已完成；建议在 Skill 中补充参数示例。" });
+  expect(sender.sendCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ cardParamMap: expect.objectContaining({
+    title: "会话自愈已恢复，有后续建议", summary: expect.stringContaining("原任务已完成"), instructions: "请查看下方任务详情，按完整处理事项继续。",
+    confirm_visible: "false", status: "本次自愈已结束，后续建议可按需处理",
+  }) }));
+  expect(sender.sendNotification).not.toHaveBeenCalled();
+});
+
+it("uses the saved overall summary in final notices while preserving verified facts", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.interventionStatus = "performed";
+  task.final_summary = "原任务需要读取资料。核实调用参数后发送纠正指引，Bot已成功读取并继续原任务。";
+  task.judgment = { delivery: "confirmed", response: "acted", effect: "recovered", summary: "很长的过程分析不代替整体摘要", evidence_ids: [] };
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  const sent = sender.send.mock.calls[0][0];
+  expect(sent.text).toContain(task.final_summary);
+  expect(sent.text).toContain("消息已触达"); expect(sent.text).toContain("原任务已恢复");
+  expect(sent.text).not.toContain(task.judgment.summary);
+});
+it("links to full results when a legacy or failed summary is unavailable", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "completed"; task.interventionStatus = "performed";
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send.mock.calls[0][0].text).toContain("摘要暂不可用");
+  expect(sender.send.mock.calls[0][0].text).toContain("查看完整任务与处理记录");
+});
+it("describes a failed business verification as unrecovered rather than an execution error", async () => {
+  const { notifier, task, sender, events } = setup();
+  task.status = "failed"; task.phase = "verify"; task.interventionStatus = "performed";
+  task.judgment = { delivery: "confirmed", response: "acted", effect: "not_recovered", summary: "原任务仍受阻", evidence_ids: [] };
+  task.final_summary = "已执行完整方案，但原任务的后续步骤仍受阻，需继续处理。";
+  notifier.after({ ...message, kind: "result" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send.mock.calls[0][0].title).not.toContain("执行失败");
+  expect(sender.send.mock.calls[0][0].text).toContain("原任务未恢复");
+});
+
+
+it('delivers legacy and migrated notifications through the same claim and audit pipeline', async () => {
+  const { notifier, botConfigurations, config, sender, task, events } = setup();
+  task.request.target.env = 'prod';
+  const saved = (await botConfigurations.find({ botId: 'bot', entityId: 'owner', env: 'prod' }))!;
+  botConfigurations.find.mockResolvedValue(null);
+  config.findByKey.mockImplementation(async key => {
+    if (key === SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY) return { enabled: 0, config_json: '{}' };
+    if (key === SESSION_RECOVERY_NOTIFICATIONS_KEY) return { enabled: 1, config_json: JSON.stringify({
+      webhook: 'https://business.invalid/send', timeout_seconds: 10,
+      bot_webhooks: [{ bot_id: 'bot', entity_id: 'owner', webhook: 'https://legacy-private.invalid/send' }],
+    }) };
+    return { enabled: 1, config_json: JSON.stringify({ routes: { test: { webhook: 'https://migrated-private.invalid/send', timeout_seconds: 5 } } }) };
+  });
+  notifier.after(message);
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent)).toBe(true));
+  expect(sender.send).toHaveBeenLastCalledWith(expect.objectContaining({ webhook: 'https://legacy-private.invalid/send' }));
+  botConfigurations.find.mockResolvedValue(saved);
+  notifier.after(message); // Changing policy cannot claim/deliver the same notification twice.
+  await new Promise(resolve => setImmediate(resolve));
+  expect(sender.send).toHaveBeenCalledOnce();
+  task.timeline.push({ ...task.timeline[0], event_id: 'call-2' });
+  notifier.after({ ...message, eventId: 'call-2' });
+  await vi.waitFor(() => expect(sender.send).toHaveBeenCalledTimes(2));
+  expect(sender.send).toHaveBeenLastCalledWith(expect.objectContaining({ webhook: 'https://migrated-private.invalid/send', timeoutSeconds: 5 }));
+  expect(JSON.stringify(events)).not.toContain('https:');
+  saved.configJson = '{}';
+  task.timeline.push({ ...task.timeline[0], event_id: 'call-3' });
+  notifier.after({ ...message, eventId: 'call-3' });
+  await new Promise(resolve => setImmediate(resolve));
+  expect(sender.send).toHaveBeenCalledTimes(2); // No inheritance from the still-enabled legacy channel.
 });

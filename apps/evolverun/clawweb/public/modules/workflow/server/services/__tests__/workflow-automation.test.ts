@@ -696,7 +696,7 @@ it('does not let an old reviewed draft permanently block a different deployment,
 });
 
 // A completed generation journal is not a completed human review.
-it.each([false, true])('pauses new automatic drafts across days while analysis continues, then resumes after cancellation (full=%s)', async full => {
+it.each([false, true])('pauses new drafts while analysis continues and resumes at the next daily plan after cancellation (full=%s)', async full => {
   const f = await fixture(true, 6, full);
   await f.service.tick();
   const task = await readyDraft(f);
@@ -717,6 +717,8 @@ it.each([false, true])('pauses new automatic drafts across days while analysis c
   expect(pending.tasks).toHaveLength(1);
   await f.workbench.cancel('owner', task.taskId, task.latestAttempt.revision);
   for (let i = 0; i < 3; i++) { f.advance(); await f.restart().tick(); }
+  expect(f.calls).toHaveLength(1);
+  f.advance(86400000); await f.restart().tick();
   expect(f.calls).toHaveLength(2);
   expect((await f.workbench.candidates('wf-1')).tasks).toHaveLength(2);
 });

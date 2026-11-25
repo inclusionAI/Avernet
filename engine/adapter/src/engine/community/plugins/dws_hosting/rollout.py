@@ -7,6 +7,7 @@ import tempfile
 import time
 
 from engine.community.plugins.dws_hosting.database import HostingDatabase
+from engine.community.kernel.dws_runtime import RolloutUnavailable
 
 
 class BackendHostingRollout:
@@ -14,11 +15,13 @@ class BackendHostingRollout:
         self.path = state_dir / "rollout-proof.json"
         self.binding, self.verifier, self.clock = binding, verifier, clock
         self.until = 0.0
+        self.retry_after = 0.0
         self._lock = asyncio.Lock()
 
     async def remember(self, payload, signature):
         async with self._lock:
             self.until = 0.0
+            self.retry_after = 0.0
             await asyncio.to_thread(self._write, payload, signature)
 
     def _write(self, payload, signature):
@@ -64,14 +67,22 @@ class BackendHostingRollout:
         async with self._lock:
             if self.clock() < self.until:
                 return True
+            if self.clock() < self.retry_after:
+                raise RolloutUnavailable("rollout_retry_pending")
             self.until = 0.0
             started = self.clock()
             try:
                 proof = await asyncio.to_thread(self._read)
-                allowed = await self.verifier.runtime_eligible(**proof)
             except Exception:
                 return False
+            try:
+                allowed = await self.verifier.runtime_eligible(**proof)
+            except (RolloutUnavailable, TimeoutError, OSError):
+                self.retry_after = self.clock() + 5
+                raise RolloutUnavailable("rollout_verifier_unavailable") from None
             if allowed is not True:
                 return False
             self.until = started + 30
-            return self.clock() < self.until
+            if self.clock() >= self.until:
+                raise RolloutUnavailable("rollout_check_expired")
+            return True

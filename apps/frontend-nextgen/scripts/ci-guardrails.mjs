@@ -100,6 +100,10 @@ function report(issues, code, filePath, message, index) {
 }
 
 const issues = [];
+const legacyTaskPanel = path.join(sourceRoot, 'assets/TaskPanel');
+if (fs.existsSync(legacyTaskPanel)) {
+  report(issues, 'TC-G007', legacyTaskPanel, '旧任务副屏目录已迁出；不得恢复兼容源码或转发壳。');
+}
 for (const filePath of walk(sourceRoot)) {
   const rel = relative(filePath);
   const text = fs.readFileSync(filePath, 'utf8');
@@ -113,6 +117,12 @@ for (const filePath of walk(sourceRoot)) {
   const rules = importBoundaryRules.filter(([source, , excluded = []]) => matchesPrefix(rel, source) && !excluded.some((prefix) => matchesPrefix(rel, prefix)));
   for (const item of imports(text)) {
     const normalized = normalizeSpecifier(filePath, item.specifier);
+    if (/assets\/TaskPanel|(?:^|\/)assets\/task-panel|generated\/task-panel|^@task-panel-test/.test(item.specifier) || normalized.startsWith('assets/task-panel')) {
+      report(issues, 'TC-G007', filePath, `任务资产边界违规：${item.specifier}。生产代码只能消费宿主 adapter 或构建后的资产/声明。`, item.index);
+    }
+    if (item.specifier === '@avernet-assets/task-panel' && !/^(?:import|export)\s+type\b/.test(text.slice(item.index))) {
+      report(issues, 'TC-G007', filePath, '共享任务包仅允许 type-only 入口；运行时代码必须经可信 URL 加载。', item.index);
+    }
     for (const [, forbidden] of rules) {
       if (forbidden.some((prefix) => matchesPrefix(normalized, prefix))) {
         report(issues, 'TC-G002', filePath, `分层越界 import：${item.specifier}。调用必须遵循 Component → Hook → Service → API Controller。`, item.index);

@@ -64,6 +64,10 @@ _NON_ENDPOINT_FILES: frozenset[str] = frozenset({
     # The acli CLI rows of app.py's domain-error status map, split out
     # because app.py is at the 1000-line module cap. A status table only.
     "acli_cli_status.py",
+    # The BBS context-collab rows of the same status map, split out at the
+    # same cap. Same shape as acli_cli_status.py: a status table only, no
+    # HTTP stack; concrete-service imports remain checked.
+    "context_collab_status.py",
     # The collaboration-task half of that table, split from authorization_rules
     # at the 1000-line module cap. Same keystroke — policy rows only, no HTTP
     # stack; concrete-service imports remain checked.
@@ -72,6 +76,19 @@ _NON_ENDPOINT_FILES: frozenset[str] = frozenset({
     # at the 1000-line module cap. Same keystroke — policy rows only, no HTTP
     # stack; concrete-service imports remain checked.
     "authorization_rules_genome.py",
+    # Catalog policy rows are declarative HTTP infrastructure, like the tables
+    # above. Concrete-service imports are still checked across all files.
+    "authorization_rules_catalog.py",
+    # Bot MCP declarations are policy rows only, separate from the router.
+    "authorization_rules_bot_mcp.py",
+    # The bots/metadata rows of that table, split from authorization_rules at
+    # the 1000-line module cap. Same keystroke — policy rows only, no HTTP
+    # stack; concrete-service imports remain checked.
+    "authorization_rules_metadata.py",
+    # The service-Bot evaluation rows of that table, split from authorization_rules
+    # at the 1000-line module cap. Policy rows only, no HTTP stack.
+    "authorization_rules_service_eval.py",
+
     "__init__.py",
 })
 
@@ -174,6 +191,10 @@ def _is_endpoint_file(file: pathlib.Path) -> bool:
     for pattern in _NON_ENDPOINT_NAME_PATTERNS:
         if stem == pattern or stem.startswith(pattern + "_"):
             return False
+        if pattern == "schemas" and stem.endswith("_schemas"):
+            # Covers schema splits named by their topic, such as
+            # interaction_schemas and personal_center_schemas.
+            return False
     return True
 
 
@@ -259,13 +280,14 @@ _CORE_SERVICE_MODULE_EXEMPT_SUFFIX: tuple[str, ...] = (
 #   * Helpers — pure functions used to resolve / probe / generate.
 _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     # Errors raised by services that the router translates to HTTP:
+    "UpgradeDraftRestartError",
     "FileTooLargeError",
     "InvalidIdentityEntityTypeError", "InvalidIdentityFileTypeError",
     "BotServiceError", "BotInvalidLifecycleStateError", "BotNotFoundError", "BotPermissionError",
     "BotLimitExceededError", "BotNameExistsError", "BotNameInvalidError",
     "BotOperationNotAllowedError",
     "DefaultBotTeclawNotAllowedError",
-    "DeviceAllocationError", "DeviceLimitError",
+    "DeviceAllocationError", "DeviceLimitError", "TemplateFactoryError",
     # Multi-instance entry-resolution errors raised by DeviceServiceRouter and
     # translated to HTTP by the devices router (§1/§2/§3):
     "BindingNotFoundError", "BotPublishNotFoundError",
@@ -326,6 +348,8 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     "DeviceNotBoundError",
     "UnknownProviderError",
     "ConnInfoBuildError",
+    "DeviceOfflineError",
+    "DeviceConnectionUnavailableError",
     # ── Surfaced by widening the regex to cover ``core/services/<file>`` (R11/F43)
     # Those imports previously matched nothing and skipped this check entirely.
     #

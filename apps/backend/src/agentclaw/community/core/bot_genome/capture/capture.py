@@ -115,15 +115,15 @@ class CapturedSkill:
     - ``SkillOrigin.LOCAL`` (a bot-owned upload): ``files`` holds the package's files, e.g.
       ``CapturedSkill("tidy", SkillOrigin.LOCAL, files=(CapturedFile("SKILL.md", …), CapturedFile("a.py", …)))``;
       capture keeps what ``SkillPackageValidator`` keeps and stores them as one acm-tree-v1 tree.
-    - ``SkillOrigin.CENTER`` (a Skill Center skill): ``center_version`` is the pinned version,
-      e.g. ``CapturedSkill("refund-policy", SkillOrigin.CENTER, center_version="v7")``.
+    - ``SkillOrigin.CENTER`` (a Skill Center skill): the name alone, e.g.
+      ``CapturedSkill("refund-policy", SkillOrigin.CENTER)``; the version in use is not recorded, since the bot
+      runs whatever the Center publishes (ADR 0002) and a new Center version is not drift.
     - ``SkillOrigin.REPO`` (the shared skills repository): ``repo_path`` is the path after ``git://`` on
       the skill row, e.g. ``CapturedSkill("weather", SkillOrigin.REPO, repo_path="team/weather")``.
     """
 
     name: str  #: the skill's name, which becomes the entry's key (``skills/<name>``)
     origin: SkillOrigin  #: where the files come from (the prefix of the skill row's locator)
-    center_version: str | None = None  #: ``center`` only: the Skill Center version in use
     repo_path: str | None = None  #: ``repo`` only: the skill's path inside the shared repository
     files: tuple[CapturedFile, ...] = ()  #: ``local`` only: the package's files, path relative to the skill root
 
@@ -247,8 +247,19 @@ class _Builder:
             return None
 
 
-async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillPackageValidator) -> CapturedSpec:
-    """The bot's current state as a spec, plus the produced bytes to file."""
+async def capture_spec(
+    reader: BotStateReader, bot: BotRef, *, validator: SkillPackageValidator, bounded: bool = True
+) -> CapturedSpec:
+    """The bot's current state as a spec, plus the produced bytes to file.
+
+    ``bounded`` applies the per-category limit a revision may hold
+    (``GenomeSpec``'s list lengths); a capture that will be recorded keeps
+    it. An observation that is only compared, never recorded (the drift
+    check), passes ``False``: an applied directory resource is one revision
+    entry but one row per member file on the bot, so the bot can hold more
+    file entries than a revision may, and still be exactly its revision.
+    Every entry is validated either way; only the list-level limit is skipped.
+    """
     refusal = await reader.refusal(bot)
     if refusal is not None:
         raise CaptureRefused([Reason("not_capturable", "bot", refusal)])
@@ -278,16 +289,7 @@ async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillP
             digest = build.store(canonical_tree_bytes(list(validated.files)))
             entry = build.entry(LocalSkill, location, name=skill.name, origin="local", digest=digest)
         elif skill.origin == SkillOrigin.CENTER:
-            if not skill.center_version:
-                build.reasons.append(
-                    Reason(
-                        "skill_package", location, "a Skill Center skill without a pinned version cannot be recorded"
-                    )
-                )
-                continue
-            entry = build.entry(
-                CenterSkill, location, name=skill.name, origin="center", center_version=skill.center_version
-            )
+            entry = build.entry(CenterSkill, location, name=skill.name, origin="center")
         elif skill.origin == SkillOrigin.REPO:
             if not skill.repo_path:
                 build.reasons.append(
@@ -352,16 +354,22 @@ async def capture_spec(reader: BotStateReader, bot: BotRef, *, validator: SkillP
     if build.reasons:
         raise CaptureRefused(build.reasons)
 
-    try:
-        spec = GenomeSpec(
-            persona=sorted(persona, key=lambda e: e.type),
-            skills=sorted(skills, key=lambda e: e.name),
-            memory=None,
-            resources=sorted(resources, key=lambda e: e.path),
-            tools=ToolsSpec(mcp=sorted(mcp, key=lambda e: e.server_code)),
-            engine_config={},
-            script=script,
+    members: dict[str, Any] = dict(
+        persona=sorted(persona, key=lambda e: e.type),
+        skills=sorted(skills, key=lambda e: e.name),
+        memory=None,
+        resources=sorted(resources, key=lambda e: e.path),
+        tools=ToolsSpec(mcp=sorted(mcp, key=lambda e: e.server_code)),
+        engine_config={},
+        script=script,
+    )
+    if not bounded:
+        return CapturedSpec(
+            spec=GenomeSpec.model_construct(**members),
+            writes=tuple(ProducedBlob(digest, data) for digest, data in build.writes.items()),
         )
+    try:
+        spec = GenomeSpec(**members)
     except (
         ValidationError
     ) as exc:  # a list-level rule the entries cannot carry, e.g. more entries than a category holds

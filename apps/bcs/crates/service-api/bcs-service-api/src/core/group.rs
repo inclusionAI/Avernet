@@ -3,13 +3,12 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 
 use super::{ActorKind, GroupMessage, ServiceResult};
-use crate::types::{EventActor, GroupHumanNotifyPolicy};
+use crate::types::{EventActor, GroupHumanNotifyPolicy, GroupCardSnapshot};
 
 pub use bcs_domain::{
     DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, HumanMentionNotifyMode,
     MessageViewScope, Participant, ParticipantKind, ParticipantMode, ParticipantRole, RoutingMode,
-    RoutingPolicy, SenderRoutesValidationError, ServiceSpec,
-};
+    RoutingPolicy, SenderRoutesValidationError, };
 
 /// Actor input for actor-level DM group creation.
 #[derive(Debug, Clone)]
@@ -46,7 +45,6 @@ pub enum GroupMutationKind {
         mode: Option<ParticipantMode>,
     },
     UpdateRoutingPolicy(RoutingPolicy),
-    UpdateServiceSpec(Option<ServiceSpec>),
     Delete {
         reason: String,
     },
@@ -164,7 +162,31 @@ pub fn validate_sender_routes(
 /// Service for group management.
 #[async_trait]
 pub trait GroupCoreService: Send + Sync {
+    /// Read the current Group/Card snapshot without a display-cache fallback.
+    /// Only a missing Group returns None; storage/decoding failures are errors.
+    async fn read_card_snapshot(&self, _id: &str) -> ServiceResult<Option<GroupCardSnapshot>> {
+        Err(super::ServiceError::InternalError("Group Card snapshot reads are not configured".into()))
+    }
+
+    /// Read uncached metadata/participants and labels from one effective Group
+    /// version. Concurrent version changes are retried at most three times;
+    /// exhausted races and storage failures are errors, never mixed details.
+    async fn read_detail_snapshot(&self, _id: &str) -> ServiceResult<Option<crate::types::GroupMutationSnapshot>> {
+        Err(crate::ServiceError::InternalError("Group detail snapshots are not configured".into()))
+    }
+
     /// Create or update a group.
+    /// Atomic Group/template/labels write. Legacy upserts preserve labels.
+    async fn upsert_with_catalog_labels(&self, group: Group, labels: Option<crate::types::catalog_labels::CatalogLabels>) -> ServiceResult<()> {
+        if labels.is_some() { return Err(crate::ServiceError::InternalError("catalog-label Group write unavailable".into())); }
+        self.upsert(group).await
+    }
+    /// Create-only admission: reject an existing identity atomically, without
+    /// replacing its management anchors, type, participants or catalog labels.
+    /// Implementations must not emulate this using an exists check plus upsert.
+    async fn create_with_catalog_labels(&self, _group: Group, _labels: Option<crate::types::catalog_labels::CatalogLabels>) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError("atomic Group creation unavailable".into()))
+    }
     async fn upsert(&self, group: Group) -> ServiceResult<()>;
 
     async fn finalize_provisioning(
@@ -176,6 +198,13 @@ pub trait GroupCoreService: Send + Sync {
             message: "Group provisioning finalization is not configured".to_string(),
             request_id: None,
         })
+    }
+
+    /// Apply a PATCH and return labels captured by the same commit boundary.
+    /// An unchanged PATCH returns a version-checked read snapshot, without a write.
+    /// The default fails closed rather than mixing a mutation with a later read.
+    async fn mutate_with_snapshot(&self, _command: GroupMutationCommand) -> ServiceResult<crate::types::GroupMutationSnapshot> {
+        Err(super::ServiceError::InternalError("Group mutation snapshots are not configured".into()))
     }
 
     /// Apply one Group lifecycle mutation and its public Event in the same
@@ -209,6 +238,24 @@ pub trait GroupCoreService: Send + Sync {
     /// failures from a missing Group.
     async fn try_get(&self, id: &str) -> ServiceResult<Option<Group>> {
         Ok(self.get(id).await)
+    }
+
+    /// Read the Group's authorization-fact snapshot through the
+    /// strict repo read (spec §8.3).
+    ///
+    /// Only `Ok(None)` means Group not found; any storage or
+    /// decoding failure is `Err`. A Core that has no strict
+    /// snapshot repo keeps the default fail-closed error — it
+    /// must NEVER fall back to the ordinary cached `get`.
+    async fn read_authorization_snapshot(
+        &self,
+        _group_id: &str,
+    ) -> ServiceResult<Option<crate::types::authorization_snapshot::GroupAuthorizationSnapshot>>
+    {
+        Err(super::ServiceError::InvalidOperation {
+            message: "Group authorization snapshot reads are not configured".to_string(),
+            request_id: None,
+        })
     }
 
     /// Add a message to a group.
@@ -290,15 +337,6 @@ pub trait GroupCoreService: Send + Sync {
 
     /// Update group status.
     async fn update_status(&self, id: &str, status: GroupStatus) -> ServiceResult<()>;
-
-    /// Replace (or remove) the group's `service_spec`. Validation of the
-    /// patch (route-field lock, callback_config immutability) is done by the
-    /// HTTP/use-case layer; this contract just persists the new value.
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        service_spec: Option<ServiceSpec>,
-    ) -> ServiceResult<()>;
 
     /// Terminate a group.
     ///

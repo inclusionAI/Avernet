@@ -10,9 +10,13 @@ from agentclaw.community.core.expert_chat.services.expert_chat_owned_session imp
 )
 
 
-class Harness(ExpertChatOwnedSessionMixin):
+from agentclaw.community.core.expert_chat.services.expert_chat_caller_sessions import ExpertChatCallerSessionsMixin
+
+
+class Harness(ExpertChatOwnedSessionMixin, ExpertChatCallerSessionsMixin):
     def __init__(self) -> None:
         self.bot = {"bot_id": "b1"}
+        self._is_independent_caller = lambda bot: False
         self._repo = Mock()
         self._repo.get_owned_session.return_value = {"session_key": "s/1"}
         self._transport = Mock()
@@ -24,6 +28,18 @@ class Harness(ExpertChatOwnedSessionMixin):
         self.list_chat_sessions = AsyncMock(
             return_value={"items": [{"id": "s/1"}], "total": 1}
         )
+
+
+@pytest.mark.asyncio
+async def test_owner_read_identity_is_forwarded_without_changing_session_subject():
+    service = Harness()
+    await service.get_owned_chat_session("friend", "b", "owner", "s/1", bcn_friend_authorized=True, actor_user_id="owner")
+    assert service.list_chat_sessions.await_args.kwargs["user_id"] == "friend"
+    assert service.list_chat_sessions.await_args.kwargs["actor_user_id"] == "owner"
+    service._transport.invoke.return_value = {"data": [], "total": 0}
+    await service.list_owned_chat_session_messages("friend", "b", "owner", "s/1", 20, bcn_friend_authorized=True, actor_user_id="owner")
+    assert service._prepare_chat_connection.await_args.args[1] == "friend"
+    assert service._prepare_chat_connection.await_args.kwargs["actor_user_id"] == "owner"
 
 
 @pytest.mark.asyncio
@@ -61,12 +77,13 @@ async def test_owned_session_operations_reuse_existing_runtime_transport():
     assert calls[-1].args[1] == "DELETE"
 
 
-def test_owned_session_guard_rejects_a_session_not_owned_by_the_user():
+@pytest.mark.asyncio
+async def test_owned_session_guard_rejects_a_session_not_owned_by_the_user():
     service = Harness()
     service._repo.get_owned_session.return_value = None
 
     with pytest.raises(BotNotFoundError):
-        service._require_owned_session("u", "b", "o", "other")
+        await service.list_owned_chat_session_messages("u", "b", "o", "other", 20)
 
 
 @pytest.mark.asyncio

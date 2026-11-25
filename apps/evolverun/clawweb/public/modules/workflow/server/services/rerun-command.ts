@@ -1,3 +1,5 @@
+import { withRerunMarkers } from "./rerun-markers.js";
+
 /**
  * Resolve the slash command that re-triggers a run.
  *
@@ -46,12 +48,14 @@ export async function resolveRerunCommand(input: {
   inputJson: string | null;
   workflowId: string;
   lookupBoundCommand: () => Promise<string | null | undefined>;
+  markers?: { env?: string | null; tag?: string | null };
 }): Promise<string | null> {
+  const mark = (command: string) => input.markers ? withRerunMarkers(command, input.markers) : command;
   const parsed = parseObject(input.inputJson);
   const recorded = typeof parsed?.command === "string" ? parsed.command.trim() : "";
   // A recorded command is the exact original invocation and already carries its
   // own arguments, so it is replayed as-is.
-  if (recorded) return recorded;
+  if (recorded) return mark(recorded);
 
   // Without a workflow id there is nothing left to address, so the caller can
   // report an actionable error instead of sending a malformed command.
@@ -63,8 +67,8 @@ export async function resolveRerunCommand(input: {
     const bound = toSlashCommand(await input.lookupBoundCommand());
     // Without a binding the workflow is still addressable by id, and the
     // documented form accepts a trailing task description.
-    return bound ? `${bound} ${message}` : `/workflow run ${workflowId} ${message}`;
+    return mark(bound ? `${bound} ${message}` : `/workflow run ${workflowId} ${message}`);
   }
 
-  return `/workflow run ${workflowId}`;
+  return mark(`/workflow run ${workflowId}`);
 }

@@ -86,11 +86,12 @@ def test_v5_migration_preserves_records_and_constraints(tmp_path):
     with sqlite3.connect(directory / "dws_hosting.sqlite3") as db:
         db.execute("DROP TABLE hosting_resolutions")
         db.execute("ALTER TABLE inbox DROP COLUMN received_ms")
+        db.execute("ALTER TABLE executions DROP COLUMN review_json")
         db.execute("PRAGMA user_version = 5")
     HostingDatabase(directory)
     assert state.get_turn("binding", turn.turn_id) == turn
     with sqlite3.connect(directory / "dws_hosting.sqlite3") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 7
         assert db.execute("SELECT received_ms FROM inbox").fetchone()[0] == 0
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
 

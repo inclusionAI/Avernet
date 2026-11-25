@@ -86,6 +86,7 @@ class CallerIdentityRepository(
         lock_key: str,
         lock_holder_user_id: str,
         lock_epoch: int | None,
+        allow_owner_transition: bool = False,
     ) -> DraftCallTypeMutationResult:
         normalized_call_type = McpCallType.parse(call_type)
         env = get_current_env()
@@ -167,8 +168,12 @@ class CallerIdentityRepository(
                 env=env,
             )
             # COSEC: the aggregate transition is checked while holding the Bot
-            # row lock so concurrent MCP edits cannot downgrade a Caller Bot.
-            if bot.call_type == McpCallType.CALLER.value and aggregate is McpCallType.OWNER:
+            # row lock; only the service-authorized admin exception may downgrade.
+            if (
+                bot.call_type == McpCallType.CALLER.value
+                and aggregate is McpCallType.OWNER
+                and not allow_owner_transition
+            ):
                 logger.warning(
                     "caller_mcp_call_type_update_rejected_irreversible "
                     "bot_pk=%s server_code=%s previous_bot_call_type=%s "
@@ -179,6 +184,12 @@ class CallerIdentityRepository(
                     aggregate.value,
                 )
                 raise CallerIdentityIrreversibleError
+            if bot.call_type == McpCallType.CALLER.value and aggregate is McpCallType.OWNER:
+                logger.info(
+                    "caller_owner_transition_authorized bot_pk=%s resource_type=mcp "
+                    "resource_code=%s actor_id=%s engine_type=%s env=%s",
+                    bot_pk, server_code, modifier_id, engine_type, env,
+                )
             revision = int(bot.caller_config_revision or 0) + 1
             bot.call_type = aggregate.value
             bot.caller_config_revision = revision
@@ -212,6 +223,7 @@ class CallerIdentityRepository(
         lock_epoch: int | None,
         effective_server_codes: set[str] | None = None,
         effective_cli_codes: set[str] | None = None,
+        allow_owner_transition: bool = False,
     ) -> CliCallTypeMutationResult:
         """Save one CLI override and atomically refresh the Bot aggregate."""
         normalized_call_type = McpCallType.parse(call_type)
@@ -274,8 +286,12 @@ class CallerIdentityRepository(
                 env=env,
             )
             # COSEC: keep the established caller-to-owner guard while holding
-            # the Bot row lock; a CLI cannot bypass the Bot aggregate policy.
-            if bot.call_type == McpCallType.CALLER.value and aggregate is McpCallType.OWNER:
+            # the Bot row lock; only a trusted admin exception may downgrade.
+            if (
+                bot.call_type == McpCallType.CALLER.value
+                and aggregate is McpCallType.OWNER
+                and not allow_owner_transition
+            ):
                 logger.warning(
                     "caller_cli_call_type_update_rejected_irreversible "
                     "bot_pk=%s cli_code=%s previous_bot_call_type=%s "
@@ -286,6 +302,12 @@ class CallerIdentityRepository(
                     aggregate.value,
                 )
                 raise CallerIdentityIrreversibleError
+            if bot.call_type == McpCallType.CALLER.value and aggregate is McpCallType.OWNER:
+                logger.info(
+                    "caller_owner_transition_authorized bot_pk=%s resource_type=cli "
+                    "resource_code=%s actor_id=%s engine_type=%s env=%s",
+                    bot_pk, cli_code, modifier_id, engine_type, env,
+                )
             caller_config_revision = int(bot.caller_config_revision or 0) + 1
             bot.call_type = aggregate.value
             bot.caller_config_revision = caller_config_revision

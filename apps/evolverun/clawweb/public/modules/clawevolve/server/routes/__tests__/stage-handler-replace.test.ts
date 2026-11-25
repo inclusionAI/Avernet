@@ -19,6 +19,7 @@ let skillAssetRepo: SkillAssetRepository;
 let stageSkillRepo: StageSkillRepository;
 let server: ReturnType<express.Application["listen"]> | null;
 let baseUrl: string;
+let lostReportResponse = false;
 const dispatch = vi.fn();
 const dispatchTaskLogArchive = vi.fn();
 const cancelExecution = vi.fn();
@@ -64,7 +65,14 @@ beforeEach(async () => {
   hostLocalSkills.replaceLocalSkill.mockReset();
   hostLocalSkills.replaceLocalSkill.mockResolvedValue({ sha256: `sha256:${"b".repeat(64)}` });
   const app = express();
+  lostReportResponse = false;
   app.use(express.json());
+  app.use((req, res, next) => {
+    if (req.header("X-ClawEvolve-Report-Id") === reportId(99) && !lostReportResponse) {
+      res.json = () => { lostReportResponse = true; res.destroy(); return res; };
+    }
+    next();
+  });
   app.use("/api/evolve", createEvolveRouter(repo, {
     dispatch, dispatchTaskLogArchive, cancelExecution, benchDomainRepo, benchTemplateRepo, benchRunRepo,
     artifactStore: { getObject, putObject, createSignedUrl },
@@ -108,10 +116,10 @@ async function seedArcaBot(userId = "user-1", botId = "bot-arca", env = "pre") {
   );
 }
 
-async function callback(taskId: string, stepId: string, body: Record<string, unknown>) {
+async function callback(taskId: string, stepId: string, body: Record<string, unknown>, reportId?: string) {
   const response = await fetch(`${baseUrl}/api/evolve/internal/tasks/${taskId}/steps/${stepId}/report`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(reportId ? { "X-ClawEvolve-Report-Id": reportId } : {}) },
     body: JSON.stringify(body),
   });
   return { response, body: await response.json() as Record<string, unknown> };
@@ -259,7 +267,13 @@ describe("Stage Handler replacement boundary", () => {
     expect(task.steps.map((step: { stepType: string }) => step.stepType)).toEqual(["skill_prepare"]);
     const workspace = `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace`;
     const targetSkillPath = `${workspace}/skills/skills-local/local-skill`;
-    const prepared = await callback(task.task_id, task.steps[0].stepId, { status: "succeeded", output: { prepared: true, workspace, targetSkillPath } });
+    const preparation = { status: "succeeded", output: { prepared: true, workspace, targetSkillPath } };
+    const prepared = await callback(task.task_id, task.steps[0].stepId, preparation, reportId(10));
+    const dispatchCount = dispatch.mock.calls.length;
+    const duplicate = await callback(task.task_id, task.steps[0].stepId, preparation, reportId(10));
+    expect(duplicate.response.status).toBe(200);
+    expect(duplicate.body.nextStep).toEqual(prepared.body.nextStep);
+    expect(dispatch).toHaveBeenCalledTimes(dispatchCount);
     expect(prepared.response.status, JSON.stringify(prepared.body)).toBe(200);
     const next = prepared.body.nextStep as { stepId: string; stepType: string };
     const step = (await repo.findStep(next.stepId))!;
@@ -294,9 +308,108 @@ describe("Stage Handler replacement boundary", () => {
     // implementation uses the Stage runtime envelope, which the Handler unwraps
     // before applying the same validation, persistence and finalization logic.
     const reportedOutput = replace ? { hitl: false, result: businessOutput } : businessOutput;
-    const completed = await callback(task.task_id, next.stepId, { status: "succeeded", output: reportedOutput });
+    const report = { status: "succeeded", output: reportedOutput };
+    const completed = await callback(task.task_id, next.stepId, report, reportId(11));
+    const finalDispatches = dispatch.mock.calls.length;
+    expect((await callback(task.task_id, next.stepId, report, reportId(11))).response.status).toBe(200);
+    expect(dispatch).toHaveBeenCalledTimes(finalDispatches);
+    expect((await callback(task.task_id, next.stepId, report, reportId(12))).response.status).toBe(409);
     expect.soft(completed.response.status, JSON.stringify(completed.body)).toBe(200);
     expect.soft(JSON.parse((await repo.findStep(next.stepId))!.output_json!)).toEqual(businessOutput);
     expect.soft(completed.body.nextStep).toMatchObject({ stepType: "skill_finalize" });
   });
+});
+
+const reportId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
+it("replays accepted HITL and Loop reports after resume without creating another interaction", async () => {
+  const impl = await seedStageImplementation("replace", "hardening", "skill_hardening");
+  const task = await post(`/stage-skills/${impl}/integration-tests`, { botId: "bot-1", caseInput: { goal: "Harden fixture" } });
+  const step = (await repo.listSteps(task.taskId))[0];
+  const form = { status: "succeeded", output: { hitl: true, question: {
+    format: "form", title: "Scope", contents: [],
+    questions: [{ id: "scope", type: "short_text", title: "Scope", required: true }],
+  } } };
+  const first = await callback(task.taskId, step.step_id, form, reportId(1));
+  expect(first.response.status, JSON.stringify(first.body)).toBe(200);
+  const interaction = first.body.interaction as { interactionId: string };
+  const replay = await callback(task.taskId, step.step_id, form, reportId(1));
+  expect(replay.response.status).toBe(200);
+  expect(replay.body.interaction).toMatchObject({ interactionId: interaction.interactionId });
+  expect(await stageSkillRepo.listInteractions(task.taskId)).toHaveLength(1);
+  expect((await callback(task.taskId, step.step_id, { ...form, summary: "changed" }, reportId(1))).response.status).toBe(409);
+  await post(`/tasks/${task.taskId}/steps/${step.step_id}/interactions/${interaction.interactionId}/answer`, {
+    answer: { answers: { scope: { value: "Only candidate Skill" } } },
+  });
+  const dispatched = dispatch.mock.calls.length;
+  expect((await callback(task.taskId, step.step_id, form, reportId(1))).response.status).toBe(200);
+  expect((await repo.findStep(step.step_id))?.status).toBe("dispatched");
+  expect(await stageSkillRepo.listInteractions(task.taskId)).toHaveLength(1);
+  expect(dispatch).toHaveBeenCalledTimes(dispatched);
+  const loop = { status: "succeeded", output: { hitl: false,
+    result: { summary: "Done", changed: false, changed_files: [] },
+    loop: { action: "request_feedback", prompt: "Continue?", accepts: { text: true, files: [] } },
+  } };
+  const waiting = await callback(task.taskId, step.step_id, loop, reportId(2));
+  expect(waiting.response.status, JSON.stringify(waiting.body)).toBe(200);
+  expect((await callback(task.taskId, step.step_id, loop, reportId(2))).response.status).toBe(200);
+  expect(await stageSkillRepo.listInteractions(task.taskId)).toHaveLength(2);
+  const loopInteraction = waiting.body.interaction as { interactionId: string };
+  await post(`/tasks/${task.taskId}/steps/${step.step_id}/interactions/${loopInteraction.interactionId}/answer`, {
+    answer: { action: "accept" },
+  });
+  const finalDispatches = dispatch.mock.calls.length;
+  expect((await callback(task.taskId, step.step_id, loop, reportId(2))).response.status).toBe(200);
+  expect((await repo.findStep(step.step_id))?.status).toBe("succeeded");
+  expect(await stageSkillRepo.listInteractions(task.taskId)).toHaveLength(2);
+  expect(dispatch).toHaveBeenCalledTimes(finalDispatches);
+});
+
+it("serializes concurrent report delivery across repositories and never retries uncertain orchestration", async () => {
+  const impl = await seedStageImplementation("replace", "hardening", "skill_hardening");
+  const task = await post(`/stage-skills/${impl}/integration-tests`, { botId: "bot-1", caseInput: { goal: "Harden fixture" } });
+  const step = (await repo.listSteps(task.taskId))[0];
+  const other = new EvolveRepository(db);
+  const claims = await Promise.all([
+    repo.stepReports.claim(task.taskId, step.step_id, reportId(3), "same"),
+    other.stepReports.claim(task.taskId, step.step_id, reportId(3), "same"),
+  ]);
+  expect(claims.filter(item => item.claimed)).toHaveLength(1);
+  expect(claims.filter(item => !item.claimed)).toMatchObject([{ response: { statusCode: 503 } }]);
+  expect(await other.stepReports.claim(task.taskId, step.step_id, reportId(4), "new"))
+    .toMatchObject({ claimed: false, response: { statusCode: 503 } });
+  await repo.stepReports.complete(task.taskId, step.step_id, reportId(3), { statusCode: 200, body: { ok: true } });
+  expect(await other.stepReports.claim(task.taskId, step.step_id, reportId(3), "same"))
+    .toMatchObject({ claimed: false, response: { statusCode: 200, body: { ok: true } } });
+});
+
+it("recovers a socket dropped after the real report handler commits without dispatching twice", async () => {
+  const impl = await seedStageImplementation("replace", "hardening", "skill_hardening");
+  const task = await post(`/stage-skills/${impl}/integration-tests`, { botId: "bot-1", caseInput: { goal: "Harden fixture" } });
+  const step = (await repo.listSteps(task.taskId))[0];
+  const body = { status: "succeeded", output: { hitl: false,
+    result: { summary: "Done", changed: false, changed_files: [] },
+  } };
+  await expect(callback(task.taskId, step.step_id, body, reportId(99))).rejects.toThrow();
+  expect(lostReportResponse).toBe(true);
+  expect((await repo.findStep(step.step_id))?.status).toBe("succeeded");
+  const calls = dispatch.mock.calls.length;
+  const replay = await callback(task.taskId, step.step_id, body, reportId(99));
+  expect(replay.response.status).toBe(200);
+  expect(replay.body.ok).toBe(true);
+  expect(dispatch).toHaveBeenCalledTimes(calls);
+});
+
+it("a normal task retry starts a new Step without inheriting an uncertain delivery claim", async () => {
+  const impl = await seedStageImplementation("replace", "hardening", "skill_hardening");
+  const task = await post(`/stage-skills/${impl}/integration-tests`, { botId: "bot-1", caseInput: { goal: "Harden fixture" } });
+  const step = (await repo.listSteps(task.taskId))[0];
+  await repo.stepReports.claim(task.taskId, step.step_id, reportId(5), "uncertain");
+  await repo.updateStepStatus(step.step_id, { status: "failed", errorMessage: "delivery unresolved" });
+  await post(`/tasks/${task.taskId}/steps/${step.step_id}/retry`, {});
+  const retried = (await repo.listSteps(task.taskId)).at(-1)!;
+  expect(retried.step_id).not.toBe(step.step_id);
+  expect(JSON.parse(retried.ext_json ?? "{}").report_delivery).toBeUndefined();
+  expect(await repo.stepReports.claim(task.taskId, retried.step_id, reportId(6), "new report"))
+    .toEqual({ claimed: true });
 });

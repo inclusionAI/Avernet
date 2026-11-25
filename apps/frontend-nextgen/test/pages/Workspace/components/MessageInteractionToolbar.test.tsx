@@ -9,7 +9,7 @@ import {
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 jest.mock('@/components/ui/Tooltip', () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -62,7 +62,9 @@ describe('MessageInteractionToolbar', () => {
     expect(edit).toHaveClass('h-7', 'w-7');
 
     fireEvent.keyDown(copy, { key: 'Enter' });
-    expect(await screen.findByTestId('message-copy-action-feedback')).toHaveTextContent('已复制');
+    await waitFor(() => {
+      expect(screen.getByTestId('message-copy-action-feedback')).toHaveTextContent('已复制');
+    });
     expect(await screen.findByRole('button', { name: '已复制' })).toBeInTheDocument();
     fireEvent.mouseEnter(edit);
     fireEvent.click(edit);
@@ -75,8 +77,31 @@ describe('MessageInteractionToolbar', () => {
     render(<MessageCopyAction testId="message-copy-action" align="left" onCopy={onCopy} />);
 
     fireEvent.click(screen.getByRole('button', { name: '复制整条消息' }));
-    expect(await screen.findByTestId('message-copy-action-feedback')).toHaveTextContent('复制失败');
+    await waitFor(() => {
+      expect(screen.getByTestId('message-copy-action-feedback')).toHaveTextContent('复制失败');
+    });
     expect(await screen.findByRole('button', { name: '复制失败' })).toBeInTheDocument();
+  });
+
+  it.each([
+    [true, '已复制'],
+    [false, '复制失败'],
+  ] as const)('waits for a pending copy to settle with result %s', async (result, feedback) => {
+    let resolveCopy!: (value: boolean) => void;
+    const onCopy = jest.fn(() => new Promise<boolean>((resolve) => { resolveCopy = resolve; }));
+    render(<MessageCopyAction testId="message-copy-action" align="left" onCopy={onCopy} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '复制整条消息' }));
+    expect(screen.getByTestId('message-copy-action-feedback')).toHaveTextContent('复制中');
+    expect(screen.getByRole('button', { name: '复制中' })).toBeDisabled();
+    expect(onCopy).toHaveBeenCalledTimes(1);
+
+    await act(async () => { resolveCopy(result); });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-copy-action-feedback')).toHaveTextContent(feedback);
+    });
+    expect(screen.getByRole('button', { name: feedback })).toBeEnabled();
   });
 
   it('revealOnHover 时默认隐藏，悬停宿主 .group 行/键盘聚焦再显；默认仍常显', () => {

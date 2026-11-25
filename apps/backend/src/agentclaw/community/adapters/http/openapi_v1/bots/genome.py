@@ -187,7 +187,12 @@ def _recorded(recorded: RecordedRevision, response: Response) -> RevisionRecorde
 
 def _ref(ref: GenomeRef) -> GenomeRefPayload:
     return GenomeRefPayload(
-        name=ref.name, revision=ref.revision, moved_at=ref.moved_at, moved_by=ref.moved_by.as_dict(), reason=ref.reason
+        name=ref.name,
+        revision=ref.revision,
+        moved_at=ref.moved_at,
+        moved_by=ref.moved_by.as_dict(),
+        reason=ref.reason,
+        labels=list(ref.labels),
     )
 
 
@@ -197,16 +202,14 @@ def _promotion(promotion: Promotion) -> PromotionPayload:
         ref=promotion.ref,
         revision=promotion.revision,
         from_revision=promotion.from_revision,
-        document_digest=promotion.document_digest,
         going_back=promotion.going_back,
         actor=promotion.actor.as_dict(),
         reason=promotion.reason,
-        status=promotion.status,
-        apply_kind=promotion.apply_kind,
-        apply_reference=promotion.apply_reference,
+        status=promotion.status.value,
+        apply_id=promotion.apply_id,
         apply_detail=promotion.apply_detail,
         created_at=promotion.created_at,
-        document=promotion.document,
+        settled_at=promotion.settled_at,
     )
 
 
@@ -555,13 +558,15 @@ async def promote_genome_revision(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     promotion: GenomePromotionServiceProtocol = Injected(GenomePromotionServiceProtocol),
 ) -> Envelope[PromotionPayload]:
-    """Move `active` to `revision` by compare-and-swap and hand the compiled revision to delivery.
+    """Deliver `revision` to the bot; `active` moves to it, by compare-and-swap, when the delivery ends.
 
-    Going back is promoting an earlier revision again (`previous`). Until
-    direct delivery lands (RSI-04) every promotion is refused as `422` before
-    any ref moves. A delivery that fails to start is recorded as
-    `apply_failed` with the refs moved; the owner goes back by promoting
-    `previous`.
+    Answers the promotion `applying`, with the id of the apply run that
+    delivers the revision; read the promotion again for how it ended. On
+    success `active` moves (and `previous` behind it); on a partial delivery
+    it moves too and is labelled `partial`; on a failure nothing moves.
+    Going back is promoting an earlier revision again (`previous`).
+    `expected_revision` must be where `active` points now (`409` otherwise).
+    `409 apply_in_progress` when another apply is running on the bot.
     """
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
     promoted = await promotion.promote(
@@ -592,7 +597,7 @@ async def list_genome_promotions(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     promotion: GenomePromotionServiceProtocol = Injected(GenomePromotionServiceProtocol),
 ) -> Envelope[Page[PromotionPayload]]:
-    """This bot's promotions, newest first, without their documents."""
+    """This bot's promotions, newest first."""
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
     listed = promotion.list_promotions(bot, page=page_no, page_size=page_size)
     return page(listed.total, [_promotion(item) for item in listed.items], request)
@@ -614,6 +619,6 @@ async def get_genome_promotion(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     promotion: GenomePromotionServiceProtocol = Injected(GenomePromotionServiceProtocol),
 ) -> Envelope[PromotionPayload]:
-    """One promotion with the compiled document it handed to delivery."""
+    """One promotion as recorded."""
     bot = bot_ref(bot_service.get_bot(bot_id, owner_id), owner_id=owner_id, bot_id=bot_id)
     return envelope(_promotion(promotion.get_promotion(bot, promotion_id)), request)

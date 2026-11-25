@@ -38,7 +38,10 @@ emit("control_response", response=dict(subtype="success", request_id=init["reque
 assert read()["type"] == "user"
 
 def epoch():
-    emit("system", subtype="init", claude_code_version="2.1.199" if case != "unknown_version" else "0.0.0")
+    fields = dict(claude_code_version="2.1.199" if case != "unknown_version" else "0.0.0")
+    if len(sys.argv) > 3 and sys.argv[2] == "--init-fields":
+        fields = json.loads(sys.argv[3])
+    emit("system", subtype="init", **fields)
 def result(text):
     emit("result", subtype="success", is_error=False, result=text)
 def idle():

@@ -1,5 +1,14 @@
 # Bot S1-S6 函数式执行协议
 
+> 2026-11-07 已审查的 HTTP 入参兼容策略：非 BBS 任务接口忽略请求模型未声明的
+> 多余参数（含 Relay 已类型化的 event/run_info/trace/artifact item），不将其用于
+> 领域命令。必填字段、已知字段取值、认证身份、relay_token 代次、任务状态和产物
+> 内容/归属校验不变；已定义的业务字典与运行时扩展数据不被删除。BBS 接口及响应
+> 模型保持原约定。此策略仅适用于 Backend HTTP，不放开 Skill 或 CLI Batch 的
+> 本地校验规则。实现与验证见
+> [任务请求兼容说明](../2026-11-07-task-request-extra-parameters/spec.md)。
+
+
 task-cli 的命令、intake session 和 HTTP adapter 设计见 [`task-cli/design.md`](../2026-09-23-task-cli/design.md)。
 
 ## 1. 文档定位
@@ -454,7 +463,7 @@ Group 目标 -> root_node.run_info.run_mode == "coop_group"
            -> root_node.run_info.assignee == initial_target.target_id
 ```
 
-`TaskInfo.owner_bot_id` 是任务归属 Bot；Group 目标时它是 manager/master Bot，不是根节点执行者。`source_type` 是发起来源，不用于反推 Bot/Group 目标。
+`TaskInfo.owner_bot_id` 是任务归属 Bot 的规范 Bot UUID（`bot_id:bot_owner_id`）；Group 目标时它记录 manager/master Bot UUID，不是根节点执行者。`TaskInfo.owner_user_id` 是任务发起人/访问者，不是 Bot owner。根节点继续使用拆分字段：`run_info.assignee` 保存产品 `bot_id`，`run_info.extend_props["assignee_owner_id"]` 保存真实 Bot owner；执行侧用两者组装 Bot UUID。历史裸 `bot_id` 数据按唯一 resolver 兼容解析：`default` 使用任务发起人作 owner，非默认裸 Bot 反查 Bot 真实 owner。`source_type` 是发起来源，不用于反推 Bot/Group 目标。
 
 #### 处理函数
 
@@ -516,7 +525,8 @@ S5.2 规划下一棒（无 gaps 时跳过）
     -> next_node: TaskNode（未落图，仅填任务规格）
 
 S5.3 搜索候选
-  TaskContext + next_node.task_spec.goal.objective
+  TaskContext + next_node.task_spec.goal
+    -> project_candidate_query（本地检索投影）
     -> TaskService.search_bots（POST /search）
     -> candidates: list[BotCandidate]
 
@@ -557,6 +567,9 @@ class TaskContext:
     task_id: str
     node_id: str
 
+    # 由 Backend 从当前节点 harness_retries 权威快照投影。
+    attempt: int = 0
+
     # 整个任务的原始规格，供任务级 GAP 推理使用。
     root_task_spec: TaskSpec
 
@@ -572,12 +585,15 @@ class TaskContext:
     # 严格早于本棒的、已被 Backend 接纳的前序节点事实；排除本棒及后继。
     all_done_output: list[DoneOutput]
 
+    # 本接力链路已派发过的 Bot ID 权威快照；S5D 用它排除历史执行者。
+    used_executor_ids: list[str]
+
     # 仅供本棒恢复判定；均由图谱事实和上报接纳记录即时投影。
     accepted_execution_patch: TaskNodePatch | None = None
     accepted_plan_report: TaskReportResult | None = None
 ```
 
-`TaskContext` 是只读投影，不另行持久化，也不包含任务级 `gaps`。`actual_goal` 是唯一的运行期补全字段：服务端 S1 对新的执行代次投影为 `None`，S3 在 Bot 本地填写；当本棒执行结果已被服务端接纳，恢复读取时从当前节点 `run_info.actual_goal` 投影，避免重新执行 LLM 能力匹配。`all_done_output` 的范围以当前 `node_id` 为界，沿唯一 Relay 前驱链选择已接纳的前序执行事实；本棒的执行结果即使已经上报，也只出现在 `accepted_execution_patch`，绝不回填进 `all_done_output`。空 `output_patch={}` 仍可表示已接纳执行，不能靠输出是否非空判断。`accepted_plan_report` 仅在本棒 `PLAN_RESULT` 已接纳时非空，用于恢复原 `target_node_id` 或完成/HUNG 结果；两字段均由已有领域对象承载，不新增包装对象。同一节点发生 harness 重试时，Backend 只投影当前有效执行尝试的接纳阶段；先前失败尝试留作节点审计事实，不得作为当前尝试的 `accepted_execution_patch` 阻断重试。
+`TaskContext` 是只读投影，不另行持久化，也不包含任务级 `gaps`。`attempt` 由 Backend 从当前节点 `run_info.extend_props["harness_retries"]` 投影；Bot 不得自行计数或硬编码，artifact 上报项中的 `attempt` 必须逐项取该值。`actual_goal` 是唯一的运行期补全字段：服务端 S1 对新的执行代次投影为 `None`，S3 在 Bot 本地填写；当本棒执行结果已被服务端接纳，恢复读取时从当前节点 `run_info.actual_goal` 投影，避免重新执行 LLM 能力匹配。`all_done_output` 的范围以当前 `node_id` 为界，沿唯一 Relay 前驱链选择已接纳的前序执行事实；本棒的执行结果即使已经上报，也只出现在 `accepted_execution_patch`，绝不回填进 `all_done_output`。空 `output_patch={}` 仍可表示已接纳执行，不能靠输出是否非空判断。`accepted_plan_report` 仅在本棒 `PLAN_RESULT` 已接纳时非空，用于恢复原 `target_node_id` 或完成/HUNG 结果；两字段均由已有领域对象承载，不新增包装对象。同一节点发生 harness 重试时，Backend 只投影当前有效执行尝试的接纳阶段；先前失败尝试留作节点审计事实，不得作为当前尝试的 `accepted_execution_patch` 阻断重试。
 
 ### 4.2 BotCapability
 
@@ -656,6 +672,9 @@ class TaskReportCommand:
     task_acceptance_result: AcceptanceResult | None = None
     # Bot 侧执行轨迹；同一 event_id 重试必须原样复用。
     trace: TaskReportTrace | None = None
+    # 终态 PLAN_RESULT(event=null) 必填；写入 TaskExecutionGraph.output[
+    # "final_conclusion"]，仅用于轨迹归因与效果分析，不是产物。
+    final_conclusion: str | None = None
 
 
 class TaskReportStatus(StrEnum):
@@ -688,9 +707,9 @@ PLAN_RESULT(event=TaskNode, run_mode=bbs) + APPLIED -> target_node_id 非空且 
 PLAN_RESULT(event=TaskNode, run_mode=single_bot/coop_group) + APPLIED -> target_node_id 非空，可进入 S6
 ```
 
-`report` 是节点状态迁移，不是可任意追加的事件流：每次有效执行尝试的 `EXECUTION_RESULT` 和每个节点最终的 `PLAN_RESULT` 各只能接纳一次。Backend 在首派前生成 `relay_token`；只有开启新的执行代次并重新 prepare/dispatch 时才轮换该值。Relay 运行时无进展的 same-session harness 恢复不轮换 token，只在既有会话发送自然语言续跑消息。Bot 使用派发指令中的代次值调用节点级 context/report/dispatch，旧执行代次持旧值的迟到请求被拒绝。Relay Skill 只调用生产内网白名单保护的 `/api/v1/collaboration/tasks/**`，不携带用户或 Bot 认证凭证；`relay_token` 仅是节点执行代次栅栏，不是通用身份凭证。`event_id` 由 Bot 调用层为每个上报事件生成，同一 HTTP 请求重试必须复用；Backend 将事件 ID、规范化内容指纹和原 `TaskReportResult` 与图谱迁移同事务保存。相同事件重试返回原结果（包括 `target_node_id`），相同 ID 不同内容或同一阶段不同内容返回冲突；并发由图谱版本和唯一后继关系兜底。Bot 不生成 `relay_token`，也不传 graph_version、attempt 或自报身份；不修改 BaaS/OpenClaw 插件。
+`report` 是节点状态迁移，不是可任意追加的事件流：每次有效执行尝试的 `EXECUTION_RESULT` 和每个节点最终的 `PLAN_RESULT` 各只能接纳一次。Backend 在首派前生成 `relay_token`；只有开启新的执行代次并重新 prepare/dispatch 时才轮换该值。Relay 运行时无进展的 same-session harness 恢复不轮换 token，只在既有会话发送自然语言续跑消息。Bot 使用派发指令中的代次值调用节点级 context/report/dispatch，旧执行代次持旧值的迟到请求被拒绝。Relay Skill 只调用生产内网白名单保护的 `/api/v1/collaboration/tasks/**`，不携带用户或 Bot 认证凭证；`relay_token` 仅是节点执行代次栅栏，不是通用身份凭证。`event_id` 由 Bot 调用层为每个上报事件生成，同一 HTTP 请求重试必须复用；Backend 将事件 ID、规范化内容指纹和原 `TaskReportResult` 与图谱迁移同事务保存。相同事件重试返回原结果（包括 `target_node_id`），相同 ID 不同内容或同一阶段不同内容返回冲突；并发由图谱版本和唯一后继关系兜底。Relay 是 Skill 驱动执行，携带当前 `relay_token` 的新上报代表 Bot 侧最新执行事实，不以节点后台快照状态（例如 `HUNG`）拒绝；上报落地后的终态迁移以该事实为准。Bot 不生成 `relay_token`，也不传 graph_version、attempt 或自报身份；不修改 BaaS/OpenClaw 插件。
 
-`trace` 是使 Bot 本地推理过程在后端可观测的唯一补充载荷，不参与状态机分支。`EXECUTION_RESULT.trace` 必须按顺序覆盖 S1、S2、S3、S4a、S4b 的执行检查点；`PLAN_RESULT.trace` 必须按顺序覆盖 S5.1～S5.5 的检查点。`trace` 是 HTTP 可选字段；一旦提供，`trace.steps` 必须存在，每个 step 必须是扁平七字段 `action_type/action_input/action_result/status_from/status_to/boost_reason/error_msg`，不允许 `step/status/detail` 旧结构或额外一级字段。`action_type` 直接使用该步骤的 S 码，不能使用 `execute/plan` 等旧事件名；`action_input` 只能是字符串或 `None`，记录该步骤输入，结构化内容必须序列化为 JSON 文本；`action_result` 必须是非空字符串，记录该步骤推理输出/产出摘要，且必须是可解析的 JSON object 字符串，包含非空 `status` 字段与至少一个实际输出字段；`completed/failed/ready/not_applicable` 等状态值只能作为 JSON 内的 `status` 字段；`boost_reason` 记录执行过程证据：为什么推进、为什么选择等等维度信息；`error_msg` 记录失败原因；`status_from/status_to` 记录本步骤前后节点状态。每个 `TaskReportTraceStep` 只包含该步骤的事实和必要摘要，不包含 `relay_token`、原始凭证或可被请求方伪造的图谱版本。Backend 在接纳报告时把每个 trace step 独立写入 `task_trajectory_events`；后续同事件的幂等重试不重复追加。trace 变化视作同一 `event_id` 的内容变化，服务端返回冲突。S6 由 dispatch API 的服务端动作日志和 dispatch 轨迹事件记录，不要求 Bot 事后补一条第三个 report 事件；S6 服务端记录同样沿用七字段语义，`action_result` 记录实际派发输出 JSON（包含 `status` 与派发结果字段），不是 delivered/failed 裸状态词，失败原因保存在 `error_msg`。
+`trace` 是使 Bot 本地推理过程在后端可观测的唯一补充载荷，不参与状态机分支。`EXECUTION_RESULT.trace` 必须按顺序覆盖 S1、S2、S3、S4a、S4b 的执行检查点；`PLAN_RESULT.trace` 必须按顺序覆盖 S5.1～S5.5 的检查点。`trace` 是通用上报接口长期保留的 HTTP 可选字段；分布式接力 Runtime 不要求构造或上报轨迹，正确性校验不依赖它。不提供时不写 Bot 步骤轨迹，服务端业务动作日志照常保留；一旦提供，`trace.steps` 必须存在，每个 step 必须是扁平七字段 `action_type/action_input/action_result/status_from/status_to/boost_reason/error_msg`，不允许 `step/status/detail` 旧结构或额外一级字段。`action_type` 直接使用该步骤的 S 码，不能使用 `execute/plan` 等旧事件名；`action_input` 只能是字符串或 `None`，记录该步骤输入，结构化内容必须序列化为 JSON 文本；`action_result` 必须是非空字符串，记录该步骤推理输出/产出摘要，且必须是可解析的 JSON object 字符串，包含非空 `status` 字段与至少一个实际输出字段；`completed/failed/ready/not_applicable` 等状态值只能作为 JSON 内的 `status` 字段；`boost_reason` 记录执行过程证据：为什么推进、为什么选择等等维度信息；`error_msg` 记录失败原因；`status_from/status_to` 记录本步骤前后节点状态。每个 `TaskReportTraceStep` 只包含该步骤的事实和必要摘要，不包含 `relay_token`、原始凭证或可被请求方伪造的图谱版本。Backend 在接纳报告时把每个 trace step 独立写入 `task_trajectory_events`；后续同事件的幂等重试不重复追加。trace 变化视作同一 `event_id` 的内容变化，服务端返回冲突。S6 由 dispatch API 的服务端动作日志和 dispatch 轨迹事件记录，不要求 Bot 事后补一条第三个 report 事件；S6 服务端记录同样沿用七字段语义，`action_result` 记录实际派发输出 JSON（包含 `status` 与派发结果字段），不是 delivered/failed 裸状态词，失败原因保存在 `error_msg`。
 
 响应丢失后 Runtime 先经 S1 查询接纳阶段：已接纳则使用投影的原 patch/结果续跑，不重新调用 LLM 生成第二份可能不同的请求；未接纳才重试当前事件。
 
@@ -718,7 +737,7 @@ class BotCandidate:
     score: float | None = None
 ```
 
-`TaskService.search_bots(*, query: str, task_id: str, node_id: str) -> list[BotCandidate]` 是 Service 合同。HTTP Adapter 在 `POST /api/v1/collaboration/tasks/search` 先校验 `query/task_id/node_id/relay_token` 均必填且当前执行代次有效，再将领域候选投影为类型化 `TaskSearchResultDTO {candidates: list[BotCandidateDTO]}`，不再返回 `dict[str, Any]`；检索分词、失败关键词等诊断信息仅进入服务端轨迹，不进入 Bot 业务输入。`task_id/node_id` 只用于搜索轨迹归属当前棒，不影响候选检索；下一棒此时尚无节点 ID。
+`TaskService.search_bots(*, query: str, task_id: str, node_id: str, viewer_actor_type: Literal["bot", "human"] | None = None, viewer_actor_id: str | None = None) -> list[BotCandidate]` 是 Service 合同。HTTP Adapter 在 `POST /api/v1/collaboration/tasks/search` 先校验 `query/task_id/node_id/relay_token` 均必填且当前执行代次有效，再将领域候选投影为类型化 `TaskSearchResultDTO {candidates: list[BotCandidateDTO]}`，不再返回 `dict[str, Any]`；检索分词、失败关键词等诊断信息仅进入服务端轨迹，不进入 Bot 业务输入。`task_id/node_id` 只用于搜索轨迹归属当前棒，不影响候选检索；下一棒此时尚无节点 ID。
 
 目标 Service 方法为 `TaskService.report(TaskReportCommand) -> TaskReportResult`。当前实现链路仍为 `RelayTaskEventDTO -> report_task_event(散列参数及 payload dict) -> dict`，需要在 Service、HTTP adapter 和测试中一起迁移，不能只修改 Bot 文档。
 
@@ -786,11 +805,13 @@ Task Module：
   task_id + node_id ─> 查询当前节点及已接纳事实 ─> TaskContext
   TaskContext.task_id            = task_id
   TaskContext.node_id            = node_id
+  TaskContext.attempt             = 当前 TaskNode.run_info.extend_props.harness_retries
   TaskContext.root_task_spec     = 任务原始 TaskSpec
   TaskContext.current_task_spec  = 当前 TaskNode.task_spec
   TaskContext.all_done_output    = 仅本棒之前已接纳前序节点的 DoneOutput[]
   TaskContext.accepted_execution_patch = 本棒已接纳的 TaskNodePatch，未接纳则 None
   TaskContext.accepted_plan_report     = 本棒已接纳的 TaskReportResult，未接纳则 None
+  TaskContext.used_executor_ids        = 本接力链路已派发过的 Bot ID 权威快照
 ```
 
 ## 6. S2：计算当前任务级 gaps
@@ -1230,9 +1251,19 @@ def plan_next_node(
     )
 ```
 
-`None` 只表示 `task_gaps=[]`；有缺口但无法规划必须走错误通道，不能误判为完成。此处 `TaskNode` 尚未落图，`node_id/status/node_run_graph` 为合法临时空态。每棒最多初始化一个下一棒节点。
+`None` 只表示 `task_gaps=[]`；有缺口但无法规划必须走错误通道，不能误判为完成。此处 `TaskNode` 尚未落图，`node_id/status/node_run_graph` 为合法临时空态。S5.2 仅允许初始化一个下一棒节点；该节点是唯一剩余节点，必须通过 `next_spec.goal.acceptances` 完整承载每一个 `task_gap`，不得把缺口留给未规划的后续节点。
 
 ### 9.3 S5.3：搜索候选
+
+2026-11-06 已审查的兼容扩展：`POST /search` 可选传入成对的
+`viewer_actor_type`（`bot` / `human`）与非空字符串 `viewer_actor_id`。
+两个字段均省略或均为 null 时完全保留现有 public-only 搜索；只传一个、空 ID
+或非法类型返回 422。显式 viewer 复用产品侧对应的 BCSFuse/BCS 可见性规则，
+不是认证凭据，不覆盖节点执行者；执行代次校验不变。任务候选仍执行运行就绪
+过滤，最多返回 5 个，不能把可发现等同于可派发授权。Backend 保留旧四字段请求兼容；task-loop Skill 固定传入当前执行 Bot 的
+`viewer_actor_type="bot"` 与明确 Runtime 身份 `viewer_actor_id`，不开放 Human
+视角，身份不明不得回退到无 viewer 搜索。
+
 
 输入参数：
 
@@ -1251,16 +1282,18 @@ candidates: list[BotCandidate]
 处理函数：
 
 ```python
-query = next_node.task_spec.goal.objective.strip()
-require(query)
+candidate_query = project_candidate_query(next_node.task_spec.goal)
+require(candidate_query)
 candidates: list[BotCandidate] = await task_service.search_bots(
-    query=query,
+    query=candidate_query,
     task_id=task_context.task_id,
     node_id=task_context.node_id,  # 轨迹归属当前棒；下一棒尚无 ID
 )
 ```
 
-S5.3 直接使用 `TaskService.search_bots`，不新增 Bot 本地搜索包装函数。`task_gaps` 已在 S5.2 转为下一棒规格，不再拼进搜索词。现有中心化检索也直接使用节点目标；搜索服务自行分词。空候选是正常结果，进入 S5.4；搜索服务不可用是可重试错误，不进入 S5.5。搜索不创建节点、不选人。
+`project_candidate_query` 是 Bot 本地检索投影，不是 TaskSpec 字段，也不进入 TaskGraph。它只读取 `next_node.task_spec.goal.objective` 与 `goal.acceptances[].description`，合并出简洁的自然语言能力请求；trim 后不超过 80 个 Unicode code points。压缩时删除修饰词、阶段说明和重复语义，不得尾部截断或模糊到丢失剩余能力范围；不得读取 `context.background/title/extend_props`，也不包含历史输出、报告路径、协议、控制 token、会话/群或执行控制话术。query 只用于能力检索，不改变 TaskSpec 语义。
+
+S5.3 直接使用 `TaskService.search_bots`，不新增 Bot 本地搜索包装函数。`task_gaps` 已在 S5.2 转为下一棒规格且由后继 Acceptances 覆盖；candidate query 只按能力域提取，不再拼接原始缺口列表。空候选是正常结果，进入 S5.4；搜索服务不可用是可重试错误，不进入 S5.5。搜索不创建节点、不选人。
 
 ### 9.4 S5.4：决定执行者
 
@@ -1269,12 +1302,13 @@ S5.3 直接使用 `TaskService.search_bots`，不新增 Bot 本地搜索包装�
 ```python
 next_node: TaskNode
 candidates: list[BotCandidate]
+allowed_run_modes: list[str]
 ```
 
 输出参数：
 
 ```python
-next_node: TaskNode
+next_node: TaskNode | None
 ```
 
 处理函数：
@@ -1283,12 +1317,15 @@ next_node: TaskNode
 def select_executor(
     next_node: TaskNode,
     candidates: list[BotCandidate],
-) -> TaskNode:
+    allowed_run_modes: list[str],
+) -> TaskNode | None:
     decision = select_from_candidates(
         next_spec=next_node.task_spec,
         candidates=candidates,
     )
     if decision.outcome == SearchOutcome.MISS:
+        if "bbs" not in allowed_run_modes:
+            return None
         next_node.run_info.run_mode = "bbs"
         next_node.run_info.assignee = None
         next_node.run_info.failure_reason = require(decision.miss_reason)
@@ -1308,7 +1345,9 @@ def select_executor(
     return next_node
 ```
 
-S5.4 不新增或复用 `SearchResult` 作为协议对象；Skill 的本地决策直接填充同一个未落图 `TaskNode.run_info`，随后随 `PLAN_RESULT` 一次上报。S5.2 已将 `task_gaps` 编入下一棒规格，S5.4 不重复接收缺口列表。Relay 首版的候选接口只返回 Bot，故 S5.4 **不支持 `HIT_GROUP`**；若本地决策意外产生该枚举，显式拒绝并重新决策，不把未经检索的 Group ID 写入图谱。`HIT_MULTI_BOTS` 仅允许可确定唯一 manager/master Bot 的 `manager_worker` 组群，Backend 创建成功后填写最终 Group ID；不满足条件的 chat/state_machine 组群不进入首版 Relay。`MISS` 必须显式为 `run_mode=bbs` 并带原因，不能仅凭 `assignee=None` 推断。用户在发起时显式选择已有 Group 属于首棒目标解析，不受 S5.4 限制。
+服务端下发的 S5d 允许执行模态白名单来自任务创建时冻结的 `runtime_profile.allowed_run_modes`。无论是否连续接力，S5.4 都必须在本地候选中排除当前和 `TaskContext.used_executor_ids` 里的历史执行者；Backend 接纳后继规划时也从图谱执行者事实独立校验该约束，不信任 trace 中的排除声明。快照与校验覆盖单 Bot、BBS 认领者及持久化组群方案中的协调者/成员，单 Bot 转群保留原 Bot 身份，群 ID 不作为 Bot ID。显式不同 owner scope 保持身份隔离；历史 bare Bot 身份缺少 owner 时，不能通过新增或省略 owner 绕过同产品 Bot 的排除；若排除后候选为空，按既有规划失败语义收口。Bot 只能从白名单内选择 `run_mode`；`MISS` 仅在 `bbs` 被允许时转 BBS。若候选不足且 `bbs` 被禁用，S5.4 不伪造 HIT，必须转为规划失败：`event=None`、`task_acceptance_result=None`、`failure_reason=bbs_disabled_and_no_candidate`。
+
+S5.4 不新增或复用 `SearchResult` 作为协议对象；Skill 的本地决策直接填充同一个未落图 `TaskNode.run_info`，随后随 `PLAN_RESULT` 一次上报。对于 `run_mode=single_bot`，该值必须是 S5D 实际选中或根据任务目标冻结的真实 Bot ID；Backend 拒绝空白值和决策占位符（如 `NOT_DECIDED`）。S5.2 已将 `task_gaps` 编入下一棒规格，S5.4 不重复接收缺口列表。Relay 首版的候选接口只返回 Bot，故 S5.4 **不支持 `HIT_GROUP`**；若本地决策意外产生该枚举，显式拒绝并重新决策，不把未经检索的 Group ID 写入图谱。`HIT_MULTI_BOTS` 仅允许可确定唯一 manager/master Bot 的 `manager_worker` 组群，Backend 创建成功后填写最终 Group ID；不满足条件的 chat/state_machine 组群不进入首版 Relay。白名单允许时，`MISS` 必须显式为 `run_mode=bbs` 并带原因，不能仅凭 `assignee=None` 推断；白名单禁用 BBS 时按上述规划失败分支处理。用户在发起时显式选择已有 Group 属于首棒目标解析，不受 S5.4 限制。
 
 ### 9.5 S5.5：统一上报规划节点
 
@@ -1318,7 +1357,7 @@ S5.4 不新增或复用 `SearchResult` 作为协议对象；Skill 的本地决�
 | --- | --- | --- |
 | 根任务完成 | S5.1 返回 `task_gaps=[]` 和非空 `task_acceptance_result`；跳过 S5.2～S5.4 | `event=None`、`task_acceptance_result=上述根任务验收`、`failure_reason=None` |
 | 继续接力或 BBS | S5.2 初始化 `next_node`，S5.4 在同一节点填好 `run_info` | `event=next_node`、`task_acceptance_result=None`、`failure_reason=None` |
-| 规划失败 | S5.2 有缺口但无法生成节点，抛出 `PlanningUnavailable` | `event=None`、`task_acceptance_result=None`、`failure_reason=str(exc).strip()`（必须非空） |
+| 规划失败 | S5.2 有缺口但无法生成节点，或 S5.4 候选不足且 BBS 被白名单禁用 | `event=None`、`task_acceptance_result=None`、`failure_reason=str(exc).strip()`（必须非空） |
 
 处理函数即统一上报接口：
 
@@ -1329,7 +1368,7 @@ class TaskService:
 planning_report: TaskReportResult = await task_service.report(command)
 ```
 
-`PlanningUnavailable` 仅由 S5.2 产生；`planning_failure_reason` 是 Runtime 捕获该异常后填入 command 的错误分支值，不是 `TaskContext`、`TaskNode` 或 S5.1 的字段。S5.3 搜索不可用应重试搜索，不转换为规划失败上报。`execution_report` 是进入 S5 的前置校验结果，`task_service` 是 Runtime 调用依赖，二者都不是 S5.5 的业务入参。
+`PlanningUnavailable` 仅由 S5.2 产生；S5.4 在白名单禁用 BBS 且无候选时直接按规划失败分支上报 `bbs_disabled_and_no_candidate`；`planning_failure_reason` 是 Runtime 捕获该异常后填入 command 的错误分支值，不是 `TaskContext`、`TaskNode` 或 S5.1 的字段。S5.3 搜索不可用应重试搜索，不转换为规划失败上报。`execution_report` 是进入 S5 的前置校验结果，`task_service` 是 Runtime 调用依赖，二者都不是 S5.5 的业务入参。
 
 调用一次 `POST /api/v1/collaboration/tasks/callback/report`。Backend 原子应用：
 
@@ -1412,7 +1451,7 @@ Skill 通过生产内网白名单保护的 `POST /api/v1/collaboration/tasks/dis
 | S4b：上报 | S4b：上报结果 | `node_patch: TaskNodePatch` | Runtime 将 `TaskNodePatch` 原样放入 `TaskReportCommand(EXECUTION_RESULT)`；服务端接纳后写入当前节点运行事实 | `execution_report: TaskReportResult`，成功状态为 `APPLIED` | `POST /callback/report`，事件为 `EXECUTION_RESULT` |
 | S5.1 | 更新缺口 | `task_context: TaskContext`、`node_patch: TaskNodePatch` | 根任务规格 + 历史产出 + 本棒事实重算缺口，缺口为空时生成根任务验收 | `task_gaps: list[str]`、`task_acceptance_result: AcceptanceResult \| None` | 无 |
 | S5.2 | 规划下一棒 | `task_context: TaskContext`、`task_gaps: list[str]`、`node_patch: TaskNodePatch` | 有缺口时生成 `TaskSpec`，初始化未落图 `TaskNode`；无缺口返回 `None` | `next_node: TaskNode \| None` | 无 |
-| S5.3 | 搜索候选 | `task_context: TaskContext`、`next_node: TaskNode`；调用依赖 `task_service: TaskService` | 以 `next_node.task_spec.goal.objective.strip()` 生成字符串查询并调用 `search_bots`；`task_context.node_id` 只用于当前棒轨迹归属 | `candidates: list[BotCandidate]` | `POST /search` |
+| S5.3 | 搜索候选 | `task_context: TaskContext`、`next_node: TaskNode`；调用依赖 `task_service: TaskService` | 以 `project_candidate_query(next_node.task_spec.goal)` 生成本地候选查询并调用 `search_bots`；`task_context.node_id` 只用于当前棒轨迹归属 | `candidates: list[BotCandidate]` | `POST /search` |
 | S5.4 | 决定执行者 | `next_node: TaskNode`、`candidates: list[BotCandidate]` | Skill 本地决策，向同一个未落图节点填入执行模式、执行者；MISS 显式标记 BBS | 已填执行者的 `next_node: TaskNode` | 无 |
 | S5.5 | 上报规划节点 | `command: TaskReportCommand`；由 S5.1 根任务验收、S5.4 `next_node` 或 S5.2 规划异常三选一构造；前置条件为执行上报 `APPLIED` | Runtime 调 `TaskService.report(command)`，只上报一次 `PLAN_RESULT`；Backend 原子收口或创建唯一后继并写入选人决策 | `planning_report: TaskReportResult` | `POST /callback/report`，`PLAN_RESULT` |
 | S6 | 实际交接 | 后继棒：`task_id`、`origin_node_id`、`planning_report.target_node_id`、`relay_token`；Backend 据此读取权威 `next_node: TaskNode` | Skill 调 HTTP；Adapter 校验 relay_token 执行代次并读取节点，调用 `TaskDispatcher.dispatch(next_node)`。接力策略内部调用 Runner 投递；后台消费者恢复未投递后继意图 | HTTP 返回 `{ok: true, node_id: target_node_id}`；成功表示通道接纳，下一棒进入 S1 | `POST /api/v1/collaboration/tasks/dispatch` → `TaskDispatcher.dispatch(next_node)` |
@@ -1444,9 +1483,9 @@ local_acceptance_result: AcceptanceResult = AcceptanceResult(
 ### 14.1 EXECUTION_RESULT
 
 - Backend 以内部 `(task_id, node_id, attempt, EXECUTION_RESULT)` 识别当前尝试唯一的执行结果；同一尝试重复请求不重复写节点事实，同键不同内容返回冲突。
-- 接纳 `exec_error` 时记录该 attempt 失败并停止 S5，不能把错误 patch 当成已完成业务事实。只有新的执行代次重投才轮换 `relay_token`；运行时无进展 harness 采用 same-session 续跑，不推进 attempt、不轮换 token。same-session 续跑预算耗尽则进入 HUNG/待干预，不无限重试。
+- 接纳 `exec_error` 时记录该 attempt 失败并停止 S5，不能把错误 patch 当成已完成业务事实。只有新的执行代次重投才轮换 `relay_token`；`active + 无进展` 达到 stale-active 观察预算后进入同会话续跑。进入恢复态后的 same-session 续跑不推进 attempt、不轮换 token；预算耗尽则进入 HUNG/待干预，不无限重试。
 - S1 只投影当前 attempt 已接纳的执行 patch；旧失败 attempt 保留为审计轨迹，旧绑定的迟到 context/report/dispatch 不得推进当前节点。成功尝试接纳后才允许该节点唯一的 `PLAN_RESULT`。
-- `relay_token` 由 Backend 首派前签发，仅新的执行代次重投时轮换；same-session harness 续跑不轮换。Bot 只原样携带；`event_id` 由 Bot 调用层生成并在同一事件重试时复用。两者不是身份凭证；Bot 不填写 attempt 或图谱版本。
+- `relay_token` 由 Backend 首派前签发，仅新的执行代次重投时轮换；same-session harness 续跑不轮换。Bot 只原样携带；`event_id` 由 Bot 调用层生成并在同一事件重试时复用。两者不是身份凭证。Relay 上报核心定位字段不携带 attempt 或图谱版本；`TaskContext.attempt` 是 S1 暴露的当前节点权威尝试号，仅用于对齐 `artifacts[].attempt`。
 
 ### 14.2 PLAN_RESULT
 
@@ -1463,14 +1502,25 @@ local_acceptance_result: AcceptanceResult = AcceptanceResult(
 
 ### 14.4 harness 恢复
 
-Runtime liveness 连续无进展、连续未知/无响应，或终态成功但未上报时，Relay harness 执行以下 **same-session** 恢复：
+Runtime liveness 采用引擎状态作为事实源：`active + 有进展` 不恢复。`active + 无进展` 连续达到 Harness 观察预算（默认 15 个巡检周期，按部署巡检间隔约 30 分钟）时，视为 Turn 断裂的 stale-active，进入 same-session recovery；未达到预算前仅累计观察指标。`terminal_failed` / `timeout` / `aborted`、`terminal_success` 但图谱未收到报告，或连续 `unknown/unresponsive` 也进入 same-session recovery。同一节点最多 2 次送达成功的 same-session resume；预算耗尽后显式置 `HUNG`。
 
-- 节点保持 `RUNNING`；不重置 `PENDING`，不重新 prepare，不重新 dispatch，不轮换 `relay_token`，不改变 `run_mode`、`assignee`、群/会话或任务标识。
-- 单 Bot/OpenAPI 节点向原始 session 发送：`继续执行当前未完成的 task-loop S1~S6。不要新建任务、不要重新澄清、不要重新提交 execute。如果当前步骤无法完成，请输出明确失败原因，并继续执行后续步骤。`
-- BCS 协作群节点通过既有 `POST /sessions/{sid}/chat` 会话口发送同一条自然语言消息，调用者使用原群内参与者 Bot 身份，不新建群/会话。
-- same-session 续跑次数持久化在节点 `relay_harness_resume_attempts` 中，不写入 `harness_retries`，不参与报告幂等键。默认最多 2 次；最后一次仍无有效进展则节点显式置 `HUNG`，原因是 `relay_harness_resume_exhausted`。该终态不隐式升级 BBS，也不改变执行模态。
-- Bot 继续执行时仍按当前 `relay_token` 调用 S1/context、S4b/report、S5/report 和 S6/dispatch；不新增第三个 report event 或恢复专用标记。
-- 独立的新执行代次重投（例如节点已执行失败且重新 prepare/dispatch）仍由后端状态机控制并可轮换 `relay_token`，与 same-session 续跑是两种不同恢复。
+`terminal_success_unreported` 的三个观察窗分别是 360 秒、600 秒、900 秒。该窗口从服务首次观察到 `terminal_success` 后开始计时；任何离开 `terminal_success` 的后续观察都会清空该计时基准，任务此前处于 active 等状态的时长不得消耗本窗口。`probe_unavailable` 不消耗 resume 预算，也不把部署或接口故障误判为 Bot 失活。
+
+每次成功送达的 resume 都会开启新的“恢复观察窗”：
+
+- **要重置**：本轮无进展计数、未知状态计数、Terminal Success 计数、巡检心跳 cursor 基线、`terminal_success_observed_at` 观察时间起点；
+- **不重置**：`relay_harness_resume_attempts`、`relay_token`、`task_id/node_id`、`run_mode`、`assignee`、会话/群身份。
+
+首个 post-resume probe 使用新的 cursor 基线，确保 resume 消息本身不会被误判为新的业务进展。
+
+Same-session resume 消息按节点权威恢复阶段对齐：
+
+- `accepted_plan_report` 非空：resume 到 `S6`；
+- 仅 `accepted_execution_patch` 非空：resume 到 `S5`；
+- 两者均空：resume 到 `S1-S4a`；
+- 图读取失败时回退到原有 generic resume prompt。
+
+节点保持 `RUNNING`；不重新 prepare、不重新 dispatch、不轮换 `relay_token`、不改变 `run_mode`、`assignee`、群/会话或任务标识。
 
 ### 14.5 本棒已接纳事实与恢复读取
 

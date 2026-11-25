@@ -1,8 +1,10 @@
 //! Direct chat validation and legacy transport dispatch.
 use super::*;
+use bcs_service_api::BotDeliveryTarget;
 
 impl A2aChat {
     pub(super) async fn chat_with_queue_mode(&self, cmd: A2aChatCommand, selected_queue_mode: Option<bool>) -> ServiceResult<A2aChatOutcome> {
+        validate_message(&cmd.message)?;
         let client_kind = direct_chat_client_kind(cmd.client.as_deref());
         let from_bot_id = bot_caller_id(&cmd.caller)?;
         bcs_observability::observe_result("chat.authorize.owner", self.ensure_source_owner(&from_bot_id, cmd.authenticated_staff_id.as_deref())).await?;
@@ -35,6 +37,21 @@ impl A2aChat {
             .session_key
             .clone()
             .unwrap_or_else(|| format!("chat:{}", &run_id[..run_id.len().min(8)]));
+        match &cmd.a2a_test_user {
+            Some(selection) if selection.caller_bot_id != from_bot_id
+                || session_key != format!("a2a-test:{run_id}") =>
+            {
+                return Err(ServiceError::Forbidden("A2A test user session denied".into()));
+            }
+            None if session_key.starts_with("a2a-test:") =>
+            {
+                return Err(ServiceError::InvalidOperation {
+                    message: "session_id uses the reserved A2A test namespace".into(),
+                    request_id: None,
+                });
+            }
+            _ => {}
+        }
         let timeout_ms = cmd.timeout_ms.unwrap_or(self.default_timeout_ms);
         let now_ms = now_ms();
         let expires_at_ms = now_ms.saturating_add(timeout_ms);
@@ -45,14 +62,19 @@ impl A2aChat {
                 other => ServiceError::InternalError(other.to_string()),
             })?;
         }
-        if cmd.async_mode && match selected_queue_mode { Some(queued) => queued, None => self.queue_enabled(&cmd.target_bot_id).await } {
+        if cmd.a2a_test_user.is_none() && cmd.async_mode
+            && match selected_queue_mode { Some(queued) => queued, None => self.queue_enabled(&cmd.target_bot_id).await }
+        {
             return self.admit_direct(&cmd, &from_bot_id, &run_id, &session_key, expires_at_ms).await;
         }
         self.guard_legacy(&cmd.target_bot_id, &session_key).await?;
         let delivery_target = bcs_observability::observe_result("chat.delivery.resolve", self
             .registry
             .resolve_delivery_target(&cmd.target_bot_id)).await?;
-        let target_is_http_provider = delivery_target.is_http_provider();
+        if cmd.a2a_test_user.is_some() && !matches!(delivery_target, BotDeliveryTarget::A2a { .. }) {
+            return Err(ServiceError::Forbidden("A2A test user requires an A2A target".into()));
+        }
+        let target_is_gateway = delivery_target.is_gateway();
         if !bcs_observability::observe_value("chat.delivery.available", self.bot_delivery.is_available(&delivery_target)).await {
             self.emit_run_lifecycle(
                 DirectChatRunEvent::Failed,
@@ -66,7 +88,7 @@ impl A2aChat {
 
         let submit_on_provider_ack =
             cmd.async_mode
-                && target_is_http_provider
+                && target_is_gateway
                 && is_detached_wait_mode(cmd.caller_wait_mode.as_deref());
         let completion_policy = if submit_on_provider_ack {
             ChatRunCompletionPolicy::DetachDeliveryAck
@@ -224,6 +246,7 @@ impl A2aChat {
         let delivery = match bcs_observability::observe_result("chat.delivery.send", self
             .bot_delivery
             .deliver(BotDeliveryCommand {
+                a2a_test_user: cmd.a2a_test_user,
                 target: delivery_target,
                 run_id: run_id.clone(),
                 frame,
@@ -307,4 +330,15 @@ impl A2aChat {
         })
     }
 
+}
+
+/// Text-only direct chat cannot produce an executable request from empty input.
+pub(super) fn validate_message(message: &str) -> ServiceResult<()> {
+    if message.is_empty() {
+        return Err(ServiceError::InvalidOperation {
+            message: "message must not be empty".to_string(),
+            request_id: None,
+        });
+    }
+    Ok(())
 }

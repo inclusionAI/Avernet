@@ -1,3 +1,4 @@
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import { listCollaboratingBots, type CollaboratingBotDto } from '@/services/backendApi/bots/collaboratingBotController';
 import { mapBotActionPermissions } from './botActionPermissionMapper';
@@ -60,7 +61,7 @@ function readTemplateName(dto: CollaboratingBotDto, templateType: string | undef
 function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
   const realBotId = dto.bot_id.trim();
   const ownerId = dto.entity_id?.trim() || undefined;
-  const botId = ownerId ? `${realBotId}:${ownerId}` : realBotId;
+  const botId = dto.bcn_bot_id || (ownerId ? `${realBotId}:${ownerId}` : realBotId);
   const declaredTemplateType = readTemplateType(dto);
   const templateType = normalizeTemplateType(dto.engine, declaredTemplateType);
   const templateName = readTemplateName(dto, templateType);
@@ -79,6 +80,7 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     engineOwnerId: dto.owner_id?.trim() || undefined,
     isTeamBot: true,
     displayName: dto.bot_name?.trim() || realBotId,
+    avatarUrl: resolveBotAvatarUrl(dto.avatar_url, dto.bot_id),
     engine: dto.engine,
     botType: dto.bot_type,
     online: dto.status === 'ACTIVE' || dto.status === 'online',
@@ -87,10 +89,12 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     reachability: 'reachable',
     chatable: Boolean(realBotId && ownerId),
     ...permissions,
-    runtimeStage: 'draft',
+    runtimeStage: dto.bot_type === 'service' ? 'online' : 'draft',
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,
+    // Caller 模式标记透传(openspec add-iam-caller-runtime-target);缺失保持 undefined。
+    callType: dto.call_type,
     spaceId: dto.space?.space_id,
     spaceName: dto.space?.name,
   };
@@ -105,7 +109,10 @@ export const teamBotConversationService = {
       const bots = new Map<string, ChatBotView>();
       for (let page = 1; ; page += 1) {
         if (signal?.aborted) throw new Error('请求已取消');
-        const response = await listCollaboratingBots({ user_id: requester, page, page_size: PAGE_SIZE }, signal);
+        const response = await listCollaboratingBots(
+          { user_id: requester, page, page_size: PAGE_SIZE, stage: 'online' },
+          signal,
+        );
         const data = response.data;
         if (
           response.code !== 200000 ||
@@ -114,7 +121,7 @@ export const teamBotConversationService = {
           !Number.isFinite(data.total) ||
           data.total < 0
         ) {
-          throw new Error(response.message || '团队 Bot 接口返回格式异常');
+          throw new Error(response.message || '团队空间 Bot 接口返回格式异常');
         }
         for (const dto of data.items) {
           if (typeof dto.bot_id !== 'string' || !dto.bot_id.trim()) continue;
@@ -128,7 +135,7 @@ export const teamBotConversationService = {
     } catch {
       return {
         ok: false,
-        error: { code: 'TEAM_BOTS_LOAD_FAILED', friendlyMessage: '加载团队 Bot 失败，请稍后重试。', canRetry: true },
+        error: { code: 'TEAM_BOTS_LOAD_FAILED', friendlyMessage: '加载团队空间 Bot 失败，请稍后重试。', canRetry: true },
       };
     }
   },

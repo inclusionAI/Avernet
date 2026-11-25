@@ -2,11 +2,21 @@
 
 ## Provides
 
+- Native `/collaboration/user` composition with the existing BCS Human browser
+  auth chain and existing V1 Bot/Group services. Its verifier rejects Bot, Actor,
+  Gateway and Draft credentials; it never promotes a Bot's owner to the caller.
+  Gateway V1 verification remains independent and never falls back to this chain.
+  Both Draft HTTP projections receive the same existing Draft service instance.
+
 The Prometheus message-flow decorator transparently forwards one-shot result
 publication, including its original command and errors. Enabling metrics does
 not select the application's unconfigured default or change Group queue/legacy
 acceptance. Its implementation is isolated in message_flow_metrics.rs and keeps
 the existing metrics::InstrumentedMessageFlowService export.
+Native Task dispatch also forwards to the matching inner entrypoint with its
+request ID and command intact, rather than selecting the ordinary-dispatch
+fallback. Parent correlation, Caller inheritance and replay checks remain owned
+by the application; success and failure each record one Task dispatch metric.
 
 - Composition of the internal Bot self facade with the shared registry Core and
   deployment-owned `AgentIdentityFactoryRegistration` verifier. Public builds
@@ -55,8 +65,8 @@ the existing metrics::InstrumentedMessageFlowService export.
 Master epochs reconcile the durable policy version every five seconds to observe
 late writes from the previous replica. Failed checks retain the last snapshot
 and retry; they do not restart runs. Reconciliation is cancelled on demotion.
-The monitor boot ID belongs to the cumulative metrics object, not a sampler epoch,
-and remains stable when the same process regains leadership.
+The queue monitor interval state belongs to the shared metrics object and is
+retained when the same process regains leadership, without replaying emitted counts.
 
 - Coordination store composition using the selected cache plugin without additional settings.
 
@@ -66,6 +76,10 @@ Prometheus feature/config. A dedicated tracing target emits fixed-column records
 through the existing logging.outputs pipeline to message-delivery.log with the
 message-only raw format. Rotation, cleanup, asynchronous writers and LoggingGuard
 are shared with all other log outputs; no separate file infrastructure is used.
+CSV v2 replaces the unused type/code protocol with one 23-column summary per
+sample. Eight Send event delta columns support minute SUM aggregation; fixed
+queue gauge and health columns need no metric-code filtering. Delta state shares
+the metrics lifecycle across sampler restarts and requires no extra SQL queries.
 Failed snapshots retain values and expose freshness/success; writer errors remain
 visible through the logging system. No
 Bot/session/message IDs, message text, Provider keys or credentials enter monitor records.
@@ -159,6 +173,9 @@ Delivery wiring loads DB policy, rejects non-default legacy file policy, and sup
 ## Runtime ownership
 
 The crate owns process lifecycle, adapter mounting, and startup/shutdown wiring.
+The SQLite schema bootstrap and versioned migration chain are owned by the
+`bcs-db-migrations` library (normal dependency); this crate re-exports that
+API as `bcs::migrations` and calls it during startup.
 Eventing workers initialize in orchestrator registration order and shut down in
 reverse order; disabled Eventing injects a capability-disabled application
 service and registers no worker lifecycle.
@@ -202,3 +219,122 @@ whether this call hits storage and must be checked during deployment validation.
 Bot disconnect follows the existing local runtime cleanup, preserving credentials;
 it does not write persistent Bot metadata. Connection cancellation wakes O(N)
 local socket tasks, but does not scan database rows or issue N election queries.
+
+## Service Session policy retirement
+
+Service Sessions retain creation, authorization, completion, completion events,
+activation fencing and reactivation. The Group `service_spec` policy, Service
+Session timeout scanner, external completion callbacks and callback recovery are
+retired. Reactivation requires a Completed Service Session; it has no callback
+status prerequisite. State Machine Node deadlines, progression/IM recovery,
+Provider callbacks and Event subscriptions retain their existing contracts.
+Legacy Group creation accepts and discards `service_spec` for Backend compatibility, and the legacy settings
+endpoint returns 410. Service invocation needs no Group policy marker. Existing
+Group policy and Session callback columns, indexes and values remain unchanged;
+runtime stores no longer read or write those fields. This retirement adds no
+schema migration. Stop old binaries to prevent legacy scanners and callbacks
+from continuing to run. See `apps/bcs/specs/2026-10-27-retire-service-session-policies/spec.md`.
+
+## A2A input composition
+
+The optional `a2a_grpc` configuration is validated before startup and injected
+into both Card selection and the shared delivery adapter. Bootstrap owns this
+concrete binding choice. Its explicit routes map selected Card interfaces to
+deployment-owned MOSN metadata; the adapter dials only the local sidecar. An
+absent configuration preserves HTTP-only selection. Core owns no tonic types,
+channels, registry calls or transport-specific routing headers.
+
+The infrastructure composition root passes full Card declarations to the outbound
+adapter and wires its InteractionProviderPort into the existing Provider mux.
+It injects the same managed-delivery service and tracked Run-context port used by
+the queue, the generic RunBudgetCore and a weak InteractionService back-reference.
+There is no adapter-to-concrete-service import or strong service cycle.
+`a2a_input.wait_timeout_ms` (600000) and `total_timeout_ms` (1800000) configure
+independent human-wait/total caps; typed config validation enforces positive
+wait <= total <= one day. Execution continues to use its existing timeout.
+Test-only server constructors retain the legacy mux unless explicitly configured;
+the production infrastructure path enables the supported Structured Input profile.
+
+## OAuth entry compatibility
+
+When `[api.auth]` is absent and the legacy OAuth facade is mounted, bootstrap
+injects `CompatAuthPrincipalVerifier` only for V1 current-user lookup. Protected
+V1 APIs retain Gateway-only trust; explicit auth chains never use this override.
+The compat projection preserves the verified provider and avatar from one legacy
+chain pass, and propagates dependency failures rather than retrying another chain.
+
+Explicit OAuth selection resolves its signing secret once and rejects a mismatch
+with a configured legacy OAuth session reader/writer's `auth.oauth.jwt_secret`.
+Both entries share one Cookie and session scope; independent signing keys are
+not independent namespaces. Errors identify the configuration fields, not keys.
+
+## Invite-code issuer policy
+
+Bootstrap injects `[invite].issuer_user_ids` (default empty) into the invite-code
+application facade. Only exact verified user IDs are authorized for manual
+issuance, regardless of authentication source or the binding-gate switch.
+Configuration changes require restart; policy enforcement and creator audit
+metadata stay in application, not the router or authentication verifier.
+
+## A2A anonymous access policy
+
+`a2a_allow_anonymous` is a root boolean setting, false by default. Enabling it
+allows anonymous calls only for Cards that permit them. It is injected into
+Provider-admin registration, scoped registration and runtime target resolution.
+It does not disable Provider management authentication or satisfy a Card that
+requires Bearer, OAuth or another unsupported scheme.
+
+
+## Network tracing scope
+
+Composition excludes exact matched routes for health/metrics, manifest/assets,
+WebSocket upgrades, `/me/repair-info`, `/admin/secret/{name}` and the retired
+`/groups/{id}/settings`. Their entire handler scope suppresses network tracing;
+routing, authentication and responses are unchanged. Other matched business and
+identity-support routes remain eligible, including error responses. The public
+executable still defaults to no installed network tracing provider.
+
+Logging owns the selected-event metadata fast path and bounded, reusable text
+scratch buffer. Formatting still runs before asynchronous output; see
+[request and operation observations](../../../docs/observability/request-operation-logging.md#semantics-and-cost)
+for allocation, reentrancy and retention limits.
+## Shared catalog queue for embedding hosts
+
+`BcsServerExtensions::with_shared_card_changes` prepares an optional Fuse V2
+queue for an embedding host. The host can inject its CatalogChangePort view into
+independently assembled A2A cores and pass the same extensions to
+`run_with_resolved_config_and_extensions`. Public bootstrap injects that queue
+into its REST/Agent/Group producers and registers the existing single Fuse worker.
+Explicit queue injection with disabled or V1 integration is rejected. The default
+startup entry retains configuration-selected construction. Hosts own wiring only,
+not a second synchronization implementation.
+
+
+## Configured catalog labels
+
+The [BCS label contract](../../../docs/catalog-labels.md) owns dictionary,
+omission, atomic persistence, refresh fencing and complete-publication semantics.
+Service API 7.0.0 adds typed metadata and explicit preserve/replace commands;
+external Rust consumers rebuild together. Labels are not raw Card or authorization
+state. Bootstrap loads the independent policy file once; no environment overlay
+or request can extend it. See the change validation record for actual test and
+release evidence; local code is not a published or deployed revision.
+
+## Opt-in Worker process verification
+
+The `worker-runtime-e2e` feature builds a separate `bcs-worker-e2e` companion;
+normal bootstrap does not register it. It assembles public distributed services
+with an explicit in-memory Store mock and the existing SQLite Result/Blob
+provider. The external Singlebox story validates functional processing and
+in-process ownership takeover; it cannot certify Store restart persistence or
+capacity. See [companion boundaries and commands](tests/worker_runtime/README.md).
+
+## Business warning output
+
+Logging composition registers a dedicated failure-only `bcs-warning.log` output
+for `bcs_business_warning` even with older explicit output lists. It is isolated
+from console/main/error wildcard sinks; it does not copy every WARN event. File
+creation and daily rotation use the standard rotating writer semantics shared with
+other BCS log files, without a permission exception. See the request-operation
+logging diagnostic contract for redaction, correlation, limits and runtime
+verification boundaries.

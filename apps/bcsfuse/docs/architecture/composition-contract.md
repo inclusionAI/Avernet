@@ -4,6 +4,12 @@ BCSFuse has one public source owner for shared business behavior: Avernet. A
 deployment assembles environment-specific providers outside that shared code
 and passes the completed registry into the public application factory.
 
+The package layout and public/enterprise ownership are recorded in
+[search architecture](search-core-boundary.md). TC uses `app`; the shared
+library uses `search_core`. Enterprise-specific
+business extensions remain in their host and reuse the public search contract;
+they do not become part of the TC application factory.
+
 ## Public composition API
 
 The public boundary consists of these Python APIs:
@@ -16,7 +22,7 @@ ApplicationContext(
     registry: ProviderRegistry,
 )
 
-create_bcsfuse_app(context: ApplicationContext) -> FastAPI
+create_bcsfuse_app(context: ApplicationContext, *, search_router=None) -> FastAPI
 ```
 
 `ApplicationContext` is an explicit, already-assembled dependency container.
@@ -27,13 +33,18 @@ or read internal configuration in order to complete the provider graph.
 public deployment. It builds the public provider registry and delegates to
 `create_bcsfuse_app`.
 
+An explicitly supplied `search_router` adds the shared v2 search/recommendation
+API. The host constructs it with `TcSearchApplication`, authentication and an
+owned executor. Omitting it preserves the existing v1 route surface. Existing
+public and internal entrypoints do not opt in automatically. See
+[shared search boundaries](search-core-boundary.md) and the
+[public v2 contract](../../packages/search-core/docs/search-api.md).
+
 ## Runtime business logging
 
-The composed app configures the shared `src` business logger at construction
-and reapplies its level after provider startup. `LOG_LEVEL` explicitly overrides
-the default: `DEBUG` for `prepub`/`pre`, `INFO` otherwise (including production
-and local startup). Environment selection follows `SERVER_ENV`, then
-`REAL_SERVER_ENV`, then `ALIPAY_APP_ENV`, using the first nonempty value.
+The composed app configures the shared `app` business logger at construction
+and reapplies its level after provider startup. The default is `INFO` in every
+environment, including prepub. Set `LOG_LEVEL=DEBUG` explicitly for diagnostics.
 Accepted levels are `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL`;
 invalid values fail application construction rather than silently falling back.
 
@@ -45,9 +56,9 @@ routing remain intact; their own filtering still applies. Third-party logger
 levels are not raised to DEBUG. A public process without host handlers gets a
 console handler with request trace IDs.
 
-INFO retrieval logs include stage counts, thresholds, timing and bounded batches
-of candidate decisions (IDs, scores, ranks, admission/removal reasons). DEBUG adds
-raw fragment hit details. These diagnostics never log query text, profile
+INFO retrieval logs include stage counts, thresholds, timing and removal records.
+DEBUG adds candidate decision tables (IDs, scores, ranks, admission reasons) and
+raw fragment hit details, in batches of at most 25 rows. These diagnostics never log query text, profile
 contents, vectors or credentials.
 Dependency construction, Qdrant adapter details and embedding request setup are
 shown only when `LOG_LEVEL=DEBUG`; their WARNING/ERROR records remain visible at
@@ -56,7 +67,7 @@ Initialization logs describe defaults, not the current request's rerank state.
 Use `candidate_selection.rerank_enabled` for the effective request decision and
 the subsequent `reranker` input/output/degradation counts for execution evidence.
 Candidate selection is logged before reranking. `candidate_decisions` has an
-explicit `fields` array and at most 25 compact `entries` per INFO record, with no
+explicit `fields` array and at most 25 compact `entries` per DEBUG record, with no
 silent truncation. `max_rank` and `weighted_rank` rank eligible profiles, not
 fragments. `hit_types` identifies the fragment types actually recalled.
 `max_head`, `weighted_head`, `both_heads`, `max_refill`, and `weighted_refill`
@@ -64,7 +75,9 @@ indicate admission; `budget_rejected` means the profile was recalled but did not
 fit the rerank budget. `fragment_type_removed`, `candidate_excluded`, and
 `candidate_metadata_removed` explain earlier filtering. `reranker_returned`,
 `reranker_not_returned`, `result_build_removed`, `registry_removed`,
-`before_threshold`, and `threshold_removed` identify later stages at INFO.
+`before_threshold`, and `threshold_removed` identify later stages. Decision
+tables require DEBUG; removal ID/score batches remain at INFO. There are no
+per-candidate input or metadata-save log records.
 Not being returned by the reranker is not proof of a particular model score:
 the model can return only its top K and existing degradation policy also applies.
 `reranker_returned.score_source` distinguishes model scores from
@@ -77,7 +90,7 @@ payload prefilter rejection, or a fragment outside the initial search limit.
 ### Bounded fragment rerank candidate selection (HTTP v1 compatible)
 
 The existing fragment search limit, eligibility filters, aggregation formula,
-weights, rerank model input text and thresholds are unchanged. For rerank budget
+weights and thresholds are unchanged. For rerank budget
 `N = topK * expand_factor`, select the top `ceil(N/2)` eligible profiles by
 highest **raw** fragment similarity and top `floor(N/2)` by existing aggregate
 score. Deduplicate by complete `profile_key`, then alternate through the max
@@ -151,9 +164,39 @@ These are ranking scores, not probabilities, cosine similarities, or model score
 Existing response fields remain; response metadata adds `keyword_search_used`,
 `rerank_degraded` and `score_source` (`hybrid_rrf`, `vector_weighted`, `reranker`).
 `candidate_source=hybrid` identifies merged recall. INFO `keyword_search`,
-`hybrid_selection`, `hybrid_decisions` and `rerank_fallback` expose counts, ranks
-and selection without logging query/profile text. Contract tests live in
+`hybrid_selection` and `rerank_fallback` expose counts; DEBUG `hybrid_decisions`
+exposes ranks and selection without logging query/profile text. Contract tests live in
 `tests/contract/test_keyword_retrieval.py` and run in the core acceptance gate.
+
+### Reranker model and document input (HTTP v1 compatible)
+
+With `enable_rerank=true`, a request's `reranker_model` takes precedence over
+the configured default and reaches the HTTP payload without mutating process
+environment variables. For example:
+
+```json
+{"question": "UCT2.0 事件策略日志为空", "topK": 10, "enable_rerank": true, "reranker_model": "Qwen3-Reranker-4B"}
+```
+
+Configure `RERANKER_BASE_URL` and `RERANKER_API_KEY` for a gateway authorized
+to serve the selected model. Omitting an explicit HTTP adapter model retains
+`RERANKER_MODEL`, then the `bge-reranker-v2-m3` default. Qwen uses the complete
+system/user prefix and assistant suffix, including `<|im_end|>` and an empty
+`<think>` block. BGE retains its existing query/newline and Passage format.
+Response metadata and the reranker stage log report the adapter's resolved model.
+
+Documents contain only the Bot name and valid `contents.profile` text. Known
+empty configuration boilerplate and the generated worker-ID header are removed.
+Candidate IDs, retrieval scores, fragment type labels, active skills,
+`capabilities`, `skill_sets`, and `full` are excluded. If no profile fragment
+was recalled, selected rerank candidates are loaded from the injected Profile
+content store, reading only `contents.profile` and `display_name`. A missing
+profile retains an available name. Read failures retain the recalled profile/name
+and are reported once with failure counts. Disabling rerank skips these reads.
+Each document is capped at 8,000 characters; existing batching and failure policy
+remain in effect. Name-only input is limited evidence of task capability: model
+scores are not calibrated probabilities. Contract coverage is in
+`tests/contract/test_reranker_profile_inputs.py`.
 
 ## Required providers
 
@@ -180,11 +223,11 @@ Worker/Profile business behavior is owned by Avernet application services. A
 deployment may replace persistence, but its providers must implement the typed,
 transport-agnostic Plugin APIs in:
 
-- `src.application.ports.worker_registry_store.WorkerRegistryStore`
-- `src.application.ports.worker_profile_content_store.WorkerProfileContentStore`
-- `src.domain.services.adapters.worker_runtime_state_store_adapter.WorkerRuntimeStateStoreAdapter`
-- `src.domain.services.adapters.worker_profile_binding_store_adapter.WorkerProfileBindingStoreAdapter`
-- `src.domain.services.adapters.worker_audit_log_adapter.WorkerAuditLogAdapter`
+- `app.application.ports.worker_registry_store.WorkerRegistryStore`
+- `app.application.ports.worker_profile_content_store.WorkerProfileContentStore`
+- `app.domain.services.adapters.worker_runtime_state_store_adapter.WorkerRuntimeStateStoreAdapter`
+- `app.domain.services.adapters.worker_profile_binding_store_adapter.WorkerProfileBindingStoreAdapter`
+- `app.domain.services.adapters.worker_audit_log_adapter.WorkerAuditLogAdapter`
 
 The registry and profile ports exchange `Worker`, `WorkerConfig`, and
 `WorkerProfileContent` domain models; internal providers must not substitute
@@ -314,6 +357,13 @@ read. A missing Profile provider returns 503, and
 Profile read/write/activation failures return 500 `PROFILE_SYNC_FAILED` rather
 than a false success. Worker changes made before such a failure may remain
 committed; repeating the same sync safely completes the Profile step.
+When activation is requested and the configured binding provider raises during
+`bind_profile`, both aliases return 500 `PROFILE_BINDING_FAILED`. They do not
+report `success=true` or proceed to subsequent index refresh and analysis steps.
+Worker and Profile writes before the binding failure may remain committed;
+this is not an atomic rollback. Retrying the same request completes the binding
+once persistence is available. Draft sync (`profile.activate=false`) does not
+write a binding. The existing optional-provider behavior is unchanged.
 SQLite and MySQL Profile stores persist `description` under the reserved
 `__bcsfuse_profile_description_v1__` key in the existing `metadata` JSON
 column. Reads remove that storage key from caller-visible metadata. The key
@@ -438,10 +488,10 @@ exception messages and provider values are not returned to clients.
 ### Retrieval and response compatibility
 
 The `Retriever.retrieve()` Plugin API returns
-`src.domain.models.candidate_retrieval_result.CandidateRetrievalResult`: a
+`app.domain.models.candidate_retrieval_result.CandidateRetrievalResult`: a
 required `candidate_bundle` and lists of warnings, errors, and explanations.
 This batch contract is distinct from the unchanged
-`src.domain.models.retrieval_result.RetrievalResult` single hybrid-search hit
+`app.domain.models.retrieval_result.RetrievalResult` single hybrid-search hit
 (`profile_key`, `score`, provenance). The baseline retriever and its application
 service use the batch type; the single-hit type remains available for compatibility.
 This repairs an incompatible model import without changing HTTP payloads.
@@ -547,3 +597,15 @@ repositories own their concrete providers, internal configuration, composition
 root, container image, and delivery pipeline. Internal code may depend on this
 public composition API; public code must not import internal packages, services,
 domains, credentials, or runtime state.
+
+
+### Shared retrieval and local storage
+
+TC adapter import paths remain available, reexporting vector values and wrapping
+shared model/storage execution. Composition loads TC environment settings and
+retains its diagnostics; shared providers receive explicit configuration. Generic
+sparse retrieval has no Worker-ID priority; the TC keyword adapter enables it.
+`dev` and `dev_smoke` now compose Qdrant Local with SQLite vector persistence and
+startup rebuilding. Existing FAISS files are left untouched and are not automatic
+migration inputs. Re-sync test Workers into a new local dataset; SQLite snapshots
+replace FAISS snapshot artifacts. No online TC database migration is required.

@@ -3,6 +3,9 @@
 ## Provides
 
 System producers choose recipient text, Send/Inject intent and history visibility.
+SessionContext honors explicit Send/Inject intent for Chat drivers and ManagerWorker
+Managers, defaulting to Send; other Bots receive Inject. Manager/Worker instructions
+are determined by participant role independently of delivery intent.
 The dispatcher invokes the application SystemMessageQueueService before legacy
 persistence or I/O. A successful queue batch owns all history for the event;
 its managed recipients are never sent again through BotDeliveryPort. Failure
@@ -32,3 +35,9 @@ and this module does not schedule, select bounded history or own SQL transaction
 `bcs-message-flow/tests/conformance_queued_system.rs` wires the real dispatcher,
 producer, queue service and canonical store, then verifies Send preparation and
 that managed initialization never calls native chat.inject.
+
+Bootstrap supplies the shared tracked `BotRunContextPort`: direct system Send
+registration also installs its independent output lineage before Bot I/O, so
+SessionContext replies remain visible with protected Workbench delivery enabled.
+The dispatcher continues to depend only on the port, never on a concrete
+MessageFlow/tracker. Queued system preparation uses the same context instance.

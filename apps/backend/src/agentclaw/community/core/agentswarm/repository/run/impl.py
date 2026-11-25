@@ -77,12 +77,14 @@ class RunRepository(RunRepositoryProtocol):
         return run
 
     def get(self, run_id: dm.RunId, tenant: dm.TenantId) -> dm.Run | None:
+        # env scopes the read: a shared database holds several deployments.
         with self._db.orm_session() as session:
             row = session.execute(
                 select(om.AcAgentSwarmRunModel).where(
                     om.AcAgentSwarmRunModel.run_id == run_id,
                     om.AcAgentSwarmRunModel.tenant == tenant,
                     om.AcAgentSwarmRunModel.is_deleted.is_(False),
+                    om.AcAgentSwarmRunModel.env == get_current_env(),
                 )
             ).scalar_one_or_none()
             return self._to_domain(row) if row else None
@@ -182,15 +184,28 @@ class RunRepository(RunRepositoryProtocol):
         return result.rowcount == 1
 
     def list_page(self, tenant: dm.TenantId, status: dm.RunStatus | None = None,
-                  page: int = 1, page_size: int = 20) -> dm.RunPage:
+                  page: int = 1, page_size: int = 20,
+                  owner_id: str | None = None) -> dm.RunPage:
+        """One tenant's runs, optionally narrowed to one owner.
+
+        ``owner_id`` is what keeps the end-user list to the caller's own runs: a
+        tenant is a group, not a person. Runs written before the column existed
+        carry an empty owner and stay visible under a tenant-wide read rather
+        than vanishing from every listing.
+
+        ``env`` scopes the read: a preview list otherwise returned production's runs.
+        """
         offset = max(0, (page - 1)) * page_size
         with self._db.orm_session() as session:
             conditions = [
+                om.AcAgentSwarmRunModel.env == get_current_env(),
                 om.AcAgentSwarmRunModel.tenant == tenant,
                 om.AcAgentSwarmRunModel.is_deleted.is_(False),
             ]
             if status is not None:
                 conditions.append(om.AcAgentSwarmRunModel.status == status.value)
+            if owner_id is not None:
+                conditions.append(om.AcAgentSwarmRunModel.owner_id == owner_id)
             total = session.execute(
                 select(func.count()).select_from(om.AcAgentSwarmRunModel).where(*conditions)
             ).scalar_one()
@@ -237,6 +252,7 @@ class RunRepository(RunRepositoryProtocol):
         with self._db.orm_session() as session:
             return session.execute(
                 select(func.count()).select_from(om.AcAgentSwarmRunModel).where(
+                    om.AcAgentSwarmRunModel.env == get_current_env(),
                     om.AcAgentSwarmRunModel.tenant == tenant,
                     om.AcAgentSwarmRunModel.status == dm.RunStatus.RUNNING.value,
                     om.AcAgentSwarmRunModel.is_deleted.is_(False),
@@ -247,6 +263,7 @@ class RunRepository(RunRepositoryProtocol):
         with self._db.orm_session() as session:
             return session.execute(
                 select(func.count()).select_from(om.AcAgentSwarmRunModel).where(
+                    om.AcAgentSwarmRunModel.env == get_current_env(),
                     om.AcAgentSwarmRunModel.status == dm.RunStatus.RUNNING.value,
                     om.AcAgentSwarmRunModel.is_deleted.is_(False),
                 )
@@ -256,6 +273,7 @@ class RunRepository(RunRepositoryProtocol):
         with self._db.orm_session() as session:
             result = session.execute(
                 delete(om.AcAgentSwarmRunModel).where(
+                    om.AcAgentSwarmRunModel.env == get_current_env(),
                     om.AcAgentSwarmRunModel.run_id == run_id,
                     om.AcAgentSwarmRunModel.tenant == tenant,
                 )

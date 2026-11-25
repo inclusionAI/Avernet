@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, model_serializer
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Page
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
@@ -249,6 +249,15 @@ class SessionFile(BaseModel):
     resource_id: str = Field(description="Opaque file resource identifier.")
     display_name: str = Field(description="Original display name.")
     status: str = Field(description="Upload or materialization state.")
+    creator_type: Literal["bot", "user"] | None = Field(
+        default=None, description="Resource origin: bot-generated or user-uploaded; null when unknown.",
+    )
+    creator_name: str | None = Field(
+        default=None, description="Creator display name captured on first creation; null when unknown.",
+    )
+    created_at: str | None = Field(
+        default=None, description="First session resource creation time in UTC ISO 8601; preserved across edits.",
+    )
     size_bytes: int | None = Field(
         default=None,
         description="Recorded byte size when available.",
@@ -330,7 +339,28 @@ class SessionFavorite(BaseModel):
 # the published document. Naming them also gives generated clients `SessionPage`
 # instead of a mangled generic name.
 class SessionPage(BoundedPage[Session]):
-    """A page of sessions whose total is a lower bound, not an exact count."""
+    """A session page, or an opt-in source window with continuation fields.
+
+    With source filtering, follow next_cursor even for short or empty items.
+    Offset cursors are not snapshot-consistent under concurrent session changes.
+    """
+
+    total: int = Field(description="Lower bound on matching sessions. Without source filtering it becomes exact at a short page; with source filtering it counts returned matches so far, not the full matching count.")
+    source: Literal["mine", "others"] | None = Field(default=None, description="Present only for caller-relative source queries: mine retains own and unknown creators; others contains recognised other users only.")
+    has_more: bool | None = Field(default=None, description="Present only for source queries. More candidates may exist; follow next_cursor even when items is short or empty.")
+    next_cursor: str | None = Field(default=None, description="Present only for source queries. Resume the same query; null only when candidate exhaustion is known.")
+    scan_limited: bool | None = Field(default=None, description="Present only for source queries. Scan stopped before exhaustion; continue via next_cursor. At depth 2000 continuation returns 422, not a false end.")
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler: SerializerFunctionWrapHandler):
+        # No return annotation: Pydantic must retain the declared model schema,
+        # not replace SessionPage's properties with a generic dictionary schema.
+        data = handler(self)
+        if self.source is None:
+            # Keep the old wire shape (and stable SessionPage schema name).
+            for key in ("source", "has_more", "next_cursor", "scan_limited"):
+                data.pop(key, None)
+        return data
 
 
 class MessagePage(BoundedPage[Message]):

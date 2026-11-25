@@ -9,7 +9,7 @@ describe('Conversation route contract', () => {
       ).toBe('section=managed&bot=bot-a%3A2088&origin=mine&scope=favorite');
     });
 
-    it('serializes others with friend and no scope', () => {
+    it('serializes others with friend and non-default scope', () => {
       expect(
         serializeConversationRoute({
           section: 'managed',
@@ -19,7 +19,7 @@ describe('Conversation route contract', () => {
           friendUserId: '447147',
           sessionId: 's1',
         }),
-      ).toBe('section=managed&bot=bot-a%3A2088&origin=others&friend=447147&session=s1');
+      ).toBe('section=managed&bot=bot-a%3A2088&origin=others&friend=447147&scope=favorite&session=s1');
     });
 
     it('serializes managed mine default scope with session', () => {
@@ -59,6 +59,27 @@ describe('Conversation route contract', () => {
         'section=managed&bot=bot-a%3A2088&origin=others&friend=447147&session=s1',
       );
     });
+
+    it('round-trips a managed collab archived route', () => {
+      expect(
+        parseConversationRoute('section=managed&bot=bot-a%3A2088&origin=collab&scope=archived&session=s1'),
+      ).toEqual({
+        section: 'managed',
+        botId: 'bot-a:2088',
+        origin: 'collab',
+        scope: 'archived',
+        sessionId: 's1',
+      });
+      expect(
+        serializeConversationRoute({
+          section: 'managed',
+          botId: 'bot-a:2088',
+          origin: 'collab',
+          scope: 'archived',
+          sessionId: 's1',
+        }),
+      ).toBe('section=managed&bot=bot-a%3A2088&origin=collab&scope=archived&session=s1');
+    });
   });
 
   describe('parse', () => {
@@ -79,13 +100,14 @@ describe('Conversation route contract', () => {
       });
     });
 
-    it('drops scope when origin is others', () => {
+    it('keeps scope when origin is others', () => {
       expect(
         parseConversationRoute('section=managed&bot=bot-a%3A2088&origin=others&scope=favorite&friend=447147'),
       ).toEqual({
         section: 'managed',
         botId: 'bot-a:2088',
         origin: 'others',
+        scope: 'favorite',
         friendUserId: '447147',
       });
     });
@@ -117,6 +139,33 @@ describe('Conversation route contract', () => {
       expect(parseConversationRoute('section=impostor&bot=bot-a&origin=weird&scope=none')).toEqual({
         botId: 'bot-a',
       });
+    });
+  });
+
+  describe('legacy share link id alias', () => {
+    it('parses legacy id param as botId when bot param is absent', () => {
+      expect(parseConversationRoute('id=20260407_jmg31orw%3A152819')).toEqual({
+        botId: '20260407_jmg31orw:152819',
+      });
+    });
+
+    it('prefers bot param over legacy id alias', () => {
+      expect(parseConversationRoute('bot=bot-a%3A1&id=20260407_jmg31orw%3A152819')).toEqual({
+        botId: 'bot-a:1',
+      });
+    });
+
+    it('ignores legacy id without composite separator', () => {
+      expect(parseConversationRoute('id=not-a-composite-id')).toEqual({});
+    });
+
+    it('round-trips legacy id alias into canonical bot param', () => {
+      const route = parseConversationRoute('id=20260407_jmg31orw%3A152819');
+      expect(serializeConversationRoute(route)).toBe('bot=20260407_jmg31orw%3A152819');
+    });
+
+    it('ignores empty legacy id', () => {
+      expect(parseConversationRoute('id=')).toEqual({});
     });
   });
 });

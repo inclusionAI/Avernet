@@ -4,6 +4,10 @@
 
 这份文档描述 自建 bot 平台，如何作为一个 Bot Provider 接入 Avernet 的组件之一 ：Bot协作网络（BCN，Bot Coordination Network）。
 
+`chat.inject` 和 `chat.history` 下行方法已弃用（deprecated），新接入无需实现。
+下文保留的相关字段仅用于说明旧协议兼容，不构成当前接入要求。
+这里的弃用不涉及 BCS 自身的会话历史查询 API。
+
 上行和下行的 token/register 注册见[Provider 注册说明](../specs/2026-09-20-provider-token-registration/README.md)。
 Provider 归属统一存入 `bcs_bots`；下行继续双写 binding，上行不写。
 线上切换到连接模式判断前，先完成[存量迁移、校验与回滚准备](provider-bot-storage-migration.md)。
@@ -29,10 +33,9 @@ BCN 不接管 Provider 的运行实例，也不会把完整历史消息自动推
 | 2. 注册 Provider | 记录 Provider ID，并安全保存注册返回的 Provider 管理 token 和 BCS 到 Provider 的下行 token。 |
 | 3. 注册 Bot | 为 Provider 下的每个 bot 注册展示名、简介、owner 和 `provider_bot_ref`，并保存 Bot runtime token。 |
 | 4. 实现 `chat.send` | 1.0 先 ack 再回调；2.0 在同一次响应上协商 SSE 或 JSON callback fallback。 |
-| 5. 实现 `chat.inject` | 把上下文写入 `(provider_bot_ref, session_id)` 的会话状态，但不触发推理。 |
-| 6. 返回事件 | 2.0 在已接受的 SSE 响应中流式返回事件，或仅在返回 JSON ack 后回调 `/bot/events`；`run_id` 使用下行 `id`。 |
+| 5. 返回事件 | 2.0 在已接受的 SSE 响应中流式返回事件，或仅在返回 JSON ack 后回调 `/bot/events`；`run_id` 使用下行 `id`。 |
 
-建议在跑通 `chat.send -> final` 后，再补齐 `chat.abort`、`chat.history`、`bot.ping`、限流、重试和监控。
+建议在跑通 `chat.send -> final` 后，再补齐 `chat.abort`、`bot.ping`、限流、重试和监控。
 
 ## Token 与鉴权边界
 
@@ -46,15 +49,18 @@ Provider 接入至少会产生 Provider 管理 token 和 BCS 到 Provider 的下
 
 这些 token 只应保存在 Bot Provider 自己的安全存储中，不要写入仓库、镜像或公开配置示例。实际部署也可以启用自有 bot 身份体系；这属于部署侧扩展，不影响本文描述的 HTTP Provider 基线协议。
 
+同一环境、同一 Provider 下，所有未删除 Bot（包括非 A2A Bot）的当前名称唯一，按大小写区分。注册或改名重名返回 409，改名及软删除后名称可以复用；不同 Provider 可以使用相同名称。
+
 ## 按 Provider slug 查询基本信息
 
 `POST /providers` 可传 `"slug": "coding-provider"`。使用现有 Provider admin
 认证与 Human owner 校验，`PATCH /providers/{provider_id}` 可设置或重命名 slug；
 省略或传 `null` 保留原值。存量 Provider 可以暂不设置 slug。
 
-slug 长度为 1–64，只允许小写 ASCII 字母、数字和连字符，首尾必须为字母或数字。
+slug 长度为 1–64。A2A 名称格式为 `[a-z][a-z0-9_-]{0,63}`；同时兼容原有仅含小写 ASCII 字母、数字、连字符且首尾为字母或数字的 slug。
 同一环境内唯一，禁用的 Provider 也占用该 slug。非法值返回 HTTP 400；重复值
 返回 409，且本次提交的 name/config/slug 均不变。重命名后旧 slug 不再可查询。
+Provider 经授权使用 A2A 名称管理入口，或成功解析到有效 A2A Bot 后，slug 会被保留，后续不能改名；不存在或无有效绑定的目标查询不会触发该保留。
 
 旧入口 `GET /providers/by-slug/{slug}` 保留兼容，响应和错误语义相同。
 
@@ -82,6 +88,28 @@ owner 或 webhook/callback 地址。原有认证查询响应也增加可空 `slu
 升级前先执行 MySQL 迁移 032；SQLite 启动自动执行迁移 033。存量 slug 保持 null。
 完整约定见 [Provider slug spec](../specs/2026-10-09-provider-slug/spec.md)。
 
+## 直接注册 A2A Bot
+
+使用同一个 `POST /providers/{provider_id}/bots` 和 Provider Admin Bearer，
+传入互斥的 `agent_card_url` 或完整 `agent_card` JSON 即选择 A2A 注册，名称可省略：
+
+```json
+{
+  "owners": ["<owner-staff-id>"],
+  "provider_bot_ref": "order-agent",
+  "agent_card_url": "https://agent.example.org/a2a/bots/order-agent/agent-card.json"
+}
+```
+
+BCS 鉴权后拉取并校验完整 Card，再在同一事务中创建 Bot、归属、权限资料、
+Provider 绑定及 Card。此路径不需要 Bot/Provider webhook；不能同时传 Bot
+`webhook_url`，也不支持 plugin 模式。稳定 ref 和单个 owner 仍必填。名称默认 Card.name，显式 name 为 BCS 展示别名；summary 缺省用 Card.description，能力发现以完整 Card 为准。
+
+A2A 重复 Provider/ref 返回 409，不重发旧凭据或覆盖 Card。已有 Bot 的变更
+继续使用带 expected_revision 的 `/providers/{provider_id}/bots/{bot_uuid}/a2a`。
+两种来源都未提供/null 时保持原注册逻辑，仍要求名称；两种来源同时提供或空 URL 明确拒绝。inline Card 没有刷新 URL，仅显式更新。
+详细契约见仓库根 `docs/specs/a2a/provider-admin-registration-v1.md`。
+
 ## 每个 Bot 使用独立 webhook
 
 由 Provider 接入程序直接向 BCS 注册 Bot。Poolab 可以使用一个 Provider 身份，为每个 Bot 配置创建后基本固定的地址；这条接入链路不需要改造 Backend。
@@ -99,7 +127,7 @@ owner 或 webhook/callback 地址。原有认证查询响应也增加可空 `slu
 }
 ```
 
-Gateway Bot 和 Provider 都未配置地址时，在创建 Bot 前返回 HTTP 400。Plugin/WebSocket Bot 拒绝显式 webhook 地址。URL 复用现有出站地址校验策略，认证和协议版本继续由 Provider 管理。
+未提供任何 Card 来源时，Gateway Bot 和 Provider 都未配置 webhook 地址会在创建 Bot 前返回 HTTP 400。Plugin/WebSocket Bot 拒绝显式 webhook 地址。URL 复用现有出站地址校验策略，认证和协议版本继续由 Provider 管理。
 
 重复注册时，省略地址保留原值；显式传入不同地址返回 HTTP 409，需要使用 PATCH 修改。`PATCH /providers/{provider_id}/bots/{provider_bot_ref}` 的语义如下：
 
@@ -122,9 +150,9 @@ Provider 注册时可提供默认 `webhook_url`，Gateway Bot 注册时可提供
 | Method | 最小要求 | 说明 |
 | --- | --- | --- |
 | `chat.send` | 必须实现 | 要求目标 bot 回复。Provider 应快速确认收到，再异步执行 bot 逻辑。 |
-| `chat.inject` | 必须实现 | 注入上下文，不触发 bot 回复。适合“旁观者接收上下文”的协作语义。 |
+| `chat.inject` | 已弃用 | 旧版仅上下文投递；新接入无需实现。 |
 | `chat.abort` | 建议实现 | 按 `session_id` 尽力停止当前会话下正在运行的任务。 |
-| `chat.history` | 建议实现 | 返回 Provider 自己维护的会话历史，便于恢复上下文和展示。 |
+| `chat.history` | 已弃用 | 旧版 Provider 历史查询；新接入无需实现。 |
 | `bot.ping` | 可选 | 健康探测，返回 bot 是否 ready。 |
 
 Provider 收到请求后至少需要校验：
@@ -291,7 +319,7 @@ Provider 按 `id` 去重只能保护同一请求，不能自动覆盖新 attempt
 支付、发布等有副作用的操作还需由 Bot 和 Provider 在实际执行处按稳定的业务操作键保证幂等；
 确认重复执行安全后再配置节点重试。
 
-Provider 需要按 `(provider_bot_ref, session_id)` 维护会话上下文。`chat.inject` 必须写入上下文，但不能触发 bot 推理。
+Provider 需要按 `(provider_bot_ref, session_id)` 维护会话上下文。仍保留已弃用 `chat.inject` 的旧实现应保持其仅写上下文、不触发推理的兼容语义。
 
 ### `chat.abort` 响应
 
@@ -314,7 +342,6 @@ Bot/Session Scope；越权 ID 不会产生 BCS `Aborted` 终态。
 - Provider 能校验下行 token，并拒绝错误的 `provider_id`。
 - Bot 注册信息能映射到 Provider 自有的 `provider_bot_ref`。
 - `chat.send` 可以启动一次 bot run，并在超时前回调 final。
-- `chat.inject` 只写上下文，不触发回复。
 - Provider 对 `id` 做幂等去重。
 - Provider 记录 `provider_id`、`provider_bot_ref`、`session_id`、`run_id`、错误码和耗时，便于排查。
 

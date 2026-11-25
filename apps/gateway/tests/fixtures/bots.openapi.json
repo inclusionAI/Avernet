@@ -1,6 +1,9 @@
 {
   "openapi": "3.1.0",
-  "info": { "title": "backend", "version": "1.0" },
+  "info": {
+    "title": "backend",
+    "version": "1.0"
+  },
   "paths": {
     "/openapi/v1/bots": {
       "get": {
@@ -9,7 +12,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/BotList" }
+                "schema": {
+                  "$ref": "#/components/schemas/BotList"
+                }
               }
             }
           }
@@ -20,11 +25,17 @@
         "requestBody": {
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/BotCreate" }
+              "schema": {
+                "$ref": "#/components/schemas/BotCreate"
+              }
             }
           }
         },
-        "responses": { "201": { "description": "created" } }
+        "responses": {
+          "201": {
+            "description": "created"
+          }
+        }
       }
     },
     "/openapi/v1/bots/{id}": {
@@ -34,7 +45,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Bot" }
+                "schema": {
+                  "$ref": "#/components/schemas/Bot"
+                }
               }
             }
           }
@@ -42,26 +55,550 @@
       }
     },
     "/api/internal/debug": {
-      "get": { "operationId": "debug", "responses": {} }
+      "get": {
+        "operationId": "debug",
+        "responses": {}
+      }
     }
   },
   "components": {
     "schemas": {
-      "Bot": { "type": "object", "properties": { "id": { "type": "string" } } },
+      "Bot": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
       "BotList": {
         "type": "object",
         "properties": {
           "items": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/Bot" }
+            "items": {
+              "$ref": "#/components/schemas/Bot"
+            }
           }
         }
       },
       "BotCreate": {
         "type": "object",
-        "properties": { "name": { "type": "string" } }
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
       },
-      "Unused": { "type": "object" }
+      "Unused": {
+        "type": "object"
+      },
+      "BotAuthorizationDTO": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "iframe_url": {
+            "type": "string",
+            "title": "Iframe Url"
+          },
+          "redirect_url": {
+            "type": "string",
+            "title": "Redirect Url"
+          },
+          "deadline": {
+            "type": "string",
+            "title": "Deadline"
+          },
+          "application_id": {
+            "type": "string",
+            "title": "Application Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "iframe_url",
+          "redirect_url",
+          "deadline",
+          "application_id"
+        ],
+        "title": "BotAuthorizationDTO",
+        "description": "Pending human-authorization gate for one agent's bot (additive).\n\nPresent on an agent exactly while its bot sits at the human gate\n(``state=AWAITING_AUTHORIZATION``): ``iframe_url``/``redirect_url``\nare the tcauthmng consent surfaces, ``deadline`` the window horizon as\nthe ISO-8601 spelling the creation-job payload itself carries —\nempty strings when the payload cannot answer a fact.\n``application_id`` is the passport application's identifier so a\nconsumer can address the decision surface from this read alone."
+      },
+      "AgentDetailDTO": {
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "parent_agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Agent Id"
+          },
+          "depth": {
+            "type": "integer",
+            "title": "Depth"
+          },
+          "spawn_round": {
+            "type": "integer",
+            "title": "Spawn Round"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "title": "Idempotency Key"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "bot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Id"
+          },
+          "bot_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot State"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "output": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentResultDetailDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attempt_ledger": {
+            "items": {
+              "$ref": "#/components/schemas/AgentAttemptDetailDTO"
+            },
+            "type": "array",
+            "title": "Attempt Ledger"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/AgentMessageDetailDTO"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "authorization": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotAuthorizationDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "agent_id",
+          "name",
+          "kind",
+          "status",
+          "depth",
+          "spawn_round",
+          "idempotency_key",
+          "attempts"
+        ],
+        "title": "AgentDetailDTO"
+      },
+      "AgentAttemptDetailDTO": {
+        "properties": {
+          "claim_epoch": {
+            "type": "integer",
+            "title": "Claim Epoch"
+          },
+          "slice_retry_index": {
+            "type": "integer",
+            "title": "Slice Retry Index"
+          },
+          "executor_kind": {
+            "type": "string",
+            "title": "Executor Kind"
+          },
+          "executor_id": {
+            "type": "string",
+            "title": "Executor Id"
+          },
+          "executor_name": {
+            "type": "string",
+            "title": "Executor Name"
+          },
+          "binding_state": {
+            "type": "string",
+            "title": "Binding State"
+          },
+          "result_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Status"
+          },
+          "result_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Message"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "claim_epoch",
+          "slice_retry_index",
+          "executor_kind",
+          "executor_id",
+          "executor_name",
+          "binding_state"
+        ],
+        "title": "AgentAttemptDetailDTO"
+      },
+      "AgentDetail": {
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "title": "Agentid",
+            "description": "Stable Bot metadata identifier.",
+            "examples": [
+              "17"
+            ]
+          },
+          "platform": {
+            "type": "string",
+            "title": "Platform",
+            "description": "Registered source platform code.",
+            "examples": [
+              "example-platform"
+            ]
+          },
+          "agentName": {
+            "type": "string",
+            "title": "Agentname",
+            "description": "Bot display name.",
+            "examples": [
+              "Support Bot"
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Bot description.",
+            "examples": [
+              "Answers support questions."
+            ]
+          },
+          "creatorNo": {
+            "type": "string",
+            "title": "Creatorno",
+            "description": "Bot creator identifier.",
+            "examples": [
+              "creator-17"
+            ]
+          },
+          "aiWorkNo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aiworkno",
+            "description": "Bound digital employee identifier, when present.",
+            "examples": [
+              "AI00000124"
+            ]
+          },
+          "agentCode": {
+            "type": "string",
+            "title": "Agentcode",
+            "description": "AgentPass agent code.",
+            "examples": [
+              "agent-17"
+            ]
+          },
+          "agentPlatform": {
+            "type": "string",
+            "title": "Agentplatform",
+            "description": "Registered source platform code.",
+            "examples": [
+              "example-platform"
+            ]
+          },
+          "agentFramework": {
+            "type": "string",
+            "title": "Agentframework",
+            "description": "Bot engine type.",
+            "examples": [
+              "openclaw"
+            ]
+          },
+          "modelList": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Modellist",
+            "description": "Models available from a runnable Bot instance.",
+            "examples": [
+              [
+                "provider/model"
+              ]
+            ]
+          },
+          "mcpDetailList": {
+            "items": {
+              "$ref": "#/components/schemas/McpDetail"
+            },
+            "type": "array",
+            "title": "Mcpdetaillist",
+            "description": "Remote MCP capabilities of this version."
+          },
+          "skillList": {
+            "items": {
+              "$ref": "#/components/schemas/SkillDetail"
+            },
+            "type": "array",
+            "title": "Skilllist",
+            "description": "Complete active Skill packages of this version."
+          },
+          "cliLis": {
+            "items": {
+              "$ref": "#/components/schemas/CliDetail"
+            },
+            "type": "array",
+            "title": "Clilis",
+            "description": "Shared AgentPass CLI capabilities. The field spelling follows the platform contract."
+          },
+          "queriedVersionStatus": {
+            "type": "string",
+            "title": "Queriedversionstatus",
+            "description": "Selected configuration version: draft, published, or applying.",
+            "examples": [
+              "draft"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "agentId",
+          "platform",
+          "agentName",
+          "creatorNo",
+          "agentCode",
+          "agentPlatform",
+          "agentFramework",
+          "modelList",
+          "mcpDetailList",
+          "skillList",
+          "cliLis",
+          "queriedVersionStatus"
+        ],
+        "title": "AgentDetail",
+        "description": "Service Bot metadata and the capabilities of the selected version."
+      },
+      "AgentSummary": {
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "title": "Agentid",
+            "description": "Stable Bot metadata identifier.",
+            "examples": [
+              "17"
+            ]
+          },
+          "platform": {
+            "type": "string",
+            "title": "Platform",
+            "description": "Registered source platform code.",
+            "examples": [
+              "example-platform"
+            ]
+          },
+          "agentName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agentname",
+            "description": "Bot display name.",
+            "examples": [
+              "Support Bot"
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Bot description.",
+            "examples": [
+              "Answers support questions."
+            ]
+          },
+          "creatorNo": {
+            "type": "string",
+            "title": "Creatorno",
+            "description": "Bot creator identifier.",
+            "examples": [
+              "creator-17"
+            ]
+          },
+          "aiWorkNo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aiworkno",
+            "description": "Bound digital employee identifier, when present.",
+            "examples": [
+              "AI00000124"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "agentId",
+          "platform",
+          "creatorNo"
+        ],
+        "title": "AgentSummary",
+        "description": "A service Bot available for digital employee registration."
+      }
     }
   }
 }

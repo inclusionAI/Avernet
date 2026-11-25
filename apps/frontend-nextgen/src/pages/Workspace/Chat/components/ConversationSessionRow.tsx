@@ -17,6 +17,7 @@
 //   让位只走 pr 不动 mr 热区,pl 恒定保证标题起点不随状态跳动。
 // 行高 32 / 节奏 36(pitch)由列表容器承载,右余部无消息条数列(稿二级行无该元素)。
 import { Badge, Button, IconButton } from '@/components/ui';
+import type { SessionInitiator } from '@/domain/conversation/sessionInitiator';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import { formatRelativeTime } from '@/utils/format';
 import { cn } from '@/utils/cn';
@@ -24,15 +25,21 @@ import { Star } from 'lucide-react';
 import React from 'react';
 import type { ConversationSessionRowActions } from '../hooks/useConversationSessionMenu';
 import { ConversationSessionActions } from './ConversationSessionActions';
+import { ConversationSessionStatus } from './ConversationSessionStatus';
+import { ConversationInitiatorBadge } from './ConversationInitiatorBadge';
 
 export interface ConversationSessionRowProps {
   session: BotChatSessionView;
   selected: boolean;
+  showInitiator?: boolean;
+  initiator?: SessionInitiator;
   /** 只读会话(他人发起 / 好友视角):仅打开历史,无任何写操作。 */
   readOnly?: boolean;
   onSelect(): void;
   onToggleFavorite?(): void;
   favoritePending?: boolean;
+  /** Bot 正在回复中的会话 id(#2990 还原):命中当前行时标题左侧缩进区渲染 loading 旋转指示。 */
+  replyingSessionId?: string | null;
   /** 恢复的单聊会话操作(编辑标题/清除上下文/删除会话);只读行不传。 */
   actions?: ConversationSessionRowActions;
 }
@@ -40,14 +47,20 @@ export interface ConversationSessionRowProps {
 export const ConversationSessionRow = React.memo(function ConversationSessionRow({
   session,
   selected,
+  showInitiator,
+  initiator,
   readOnly = false,
   onSelect,
   onToggleFavorite,
   favoritePending = false,
+  replyingSessionId,
   actions,
 }: ConversationSessionRowProps) {
   const favorite = session.favorite === true;
   const timeText = formatRelativeTime(session.gmtModified);
+  // Browse-only Coding Bot 会隐藏已有 Session 的 mutation 入口（actions 和收藏回调都不传）。
+  // 此时 hover 没有右侧图标需要让位，标题热区和相对时间必须保持原位，避免时间先左移再消失。
+  const hasHoverActions = Boolean(actions) || Boolean(onToggleFavorite);
   return (
     <div className="group/row relative flex min-h-8 items-center">
       {/* 行背景胶囊:hover 与选中同几何(inset-x-2 全宽 rx6),选中 = bg-selected,
@@ -56,14 +69,21 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
         aria-hidden="true"
         className={cn(
           'absolute inset-y-0 left-2 right-2 rounded-md',
-          // 选中胶囊升级为品牌蓝（2026-10-22 体验精修二轮）：原 dmore #EBEBEB 灰底与
-          // hover muted/60 几乎不可辨，「当前会话」一眼认不出。改判与 shell 主导航
-          // SpaceSwitcher 同语言（bg-primary/10 激活 pill），Bot 蓝名 → 会话蓝胶囊
-          // 构成完整的蓝色路径；几何槽位契约（inset-x-2 全宽 rx6）原样保留。
+          // 选中胶囊回归中性深（2026-11-02 稿：#09090B0F ≈ foreground 6%，即
+          // bg-foreground/[6%]）：品牌蓝底与目录的灰阶层次落差过大，改回稿面灰阶
+          // 选中语言，选中文字同步 #09090B（text-foreground）；几何槽位契约
+          // （inset-x-2 全宽 rx6）原样保留。
           selected
-            ? 'bg-primary/10'
+            ? 'bg-foreground/[6%]'
             : 'bg-muted/60 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
         )}
+      />
+      {/* 会话左侧活动状态槽：标题始终使用固定缩进，因此状态出现/消失不会造成位移；
+          仅在收到 AIXCoding 有效状态或普通 Bot 正在回复时渲染图标，空闲/未知状态留空。 */}
+      <ConversationSessionStatus
+        botId={session.botId}
+        sessionId={session.sessionId}
+        showReplying={!readOnly && replyingSessionId === session.sessionId}
       />
       <Button
         variant="ghost"
@@ -71,6 +91,7 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
         onClick={onSelect}
         className={cn(
           'relative flex h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-md pl-2 pr-2 text-left hover:bg-transparent',
+          showInitiator && 'h-auto min-h-12 py-1.5',
           // 标题左缘对齐一级名称：16px 外距 + 36px 头像槽 + 8px 间隔 = 52px margin + 8px padding。
           // 仅界定点击范围,hover 背景已移交全宽胶囊。
           favorite ? 'ml-[52px] mr-2' : 'ml-[52px] mr-4',
@@ -81,24 +102,27 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
           // - hover/键盘聚焦/触屏,以及「…」菜单打开期间(trigger 钉住 data-state=open,鼠标离行仍可见)
           //   → 让至「…」左界,右界 96px(收藏 mr-2→pr-88,非收藏 mr-4→pr-80)。
           // 只读行无任何图标,维持基础内边距。
-          !readOnly && [
-            favorite && 'pr-[52px]',
-            !favorite && selected && 'pr-[44px]',
-            'group-hover/row:pr-[80px] group-focus-within/row:pr-[80px] [@media(hover:none)]:pr-[80px] group-has-[[data-state=open]]/row:pr-[80px]',
-            favorite &&
-              'group-hover/row:pr-[88px] group-focus-within/row:pr-[88px] [@media(hover:none)]:pr-[88px] group-has-[[data-state=open]]/row:pr-[88px]',
-          ],
+          !readOnly &&
+            hasHoverActions && [
+              favorite && 'pr-[52px]',
+              !favorite && selected && 'pr-[44px]',
+              'group-hover/row:pr-[80px] group-focus-within/row:pr-[80px] [@media(hover:none)]:pr-[80px] group-has-[[data-state=open]]/row:pr-[80px]',
+              favorite &&
+                'group-hover/row:pr-[88px] group-focus-within/row:pr-[88px] [@media(hover:none)]:pr-[88px] group-has-[[data-state=open]]/row:pr-[88px]',
+            ],
         )}
       >
         <span
           className={cn(
             'min-w-0 flex-1 truncate text-[13px] font-normal leading-[18px] text-content-strong',
-            // 选中行标题点亮品牌蓝（twMerge 后发覆盖 text-content-strong）：
-            // 与蓝胶囊共同构成选中锚点，不加粗维持稿「选中不加黑」的克制。
-            selected && 'text-primary',
+            // 选中行标题点亮 #09090B（2026-11-02 稿 = text-foreground，twMerge 后发覆盖）：
+            // 与 6% 灰阶选中胶囊共同构成选中锚点，不加粗维持稿「选中不加黑加粗」的克制。
+            selected && 'text-foreground',
+            showInitiator && 'flex flex-col items-start gap-1',
           )}
         >
-          {session.title}
+          {showInitiator ? <span className="w-full truncate">{session.title}</span> : session.title}
+          {showInitiator && <ConversationInitiatorBadge initiator={initiator} />}
         </span>
         {/* 相对时间(gmtModified 首次启用,2026-10-22 体验精修):静默态可见的右缘轻提示,
             让「最近聊过什么」一眼可辨;hover/键盘聚焦/触屏/「…」菜单打开期隐藏,把右缘
@@ -111,6 +135,7 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
             className={cn(
               'ml-1 shrink-0 text-[11px] font-normal leading-none text-content-hint',
               !readOnly &&
+                hasHoverActions &&
                 'transition-opacity group-hover/row:opacity-0 group-focus-within/row:opacity-0 [@media(hover:none)]:opacity-0 group-has-[[data-state=open]]/row:opacity-0',
             )}
           >
@@ -150,8 +175,8 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
               session.favorite === undefined
                 ? '收藏状态暂不可用，请重新加载会话列表'
                 : session.favorite
-                ? '取消收藏'
-                : '收藏会话'
+                  ? '取消收藏'
+                  : '收藏会话'
             }
             ariaLabel={session.favorite ? '取消收藏' : '收藏会话'}
             size="sm"
@@ -159,9 +184,7 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
               <Star
                 className={cn(
                   'h-3.5 w-3.5',
-                  session.favorite === undefined || !session.favorite
-                    ? 'text-muted-foreground'
-                    : 'fill-star text-star',
+                  session.favorite === undefined || !session.favorite ? 'text-muted-foreground' : 'fill-star text-star',
                 )}
               />
             }

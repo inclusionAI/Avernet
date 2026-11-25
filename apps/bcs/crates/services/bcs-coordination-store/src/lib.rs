@@ -60,13 +60,29 @@ impl CoordinationCacheStore {
         if remaining == 0 { return Err(error("coordination_deadline_exceeded")); }
         let bytes = serde_json::to_vec(value).map_err(|_| error("invalid_coordination_record"))?;
         tokio::time::timeout(Duration::from_millis(remaining), self.cache.set_value(
-            &Self::key(id, suffix)?, bytes, Some(Duration::from_secs(172800)), CacheSetMode::InsertOnly,
+            &Self::key(id, suffix)?, bytes, Some(Duration::from_secs(7 * 24 * 60 * 60)), CacheSetMode::InsertOnly,
         )).await.map_err(|_| error("coordination_cache_timeout"))?
             .map_err(|_| error("coordination_cache_unavailable"))
     }
 }
 #[async_trait]
 impl CoordinationIntentPort for CoordinationCacheStore {
+    async fn task_result(&self, id: &str) -> ServiceResult<Option<CoordinationResult>> {
+        self.read(id, "result", now_ms() + 3000).await?
+            .map(serde_json::from_value).transpose().map_err(|_| error("invalid_coordination_receipt"))
+    }
+    async fn task_delivery(&self, id: &str) -> ServiceResult<Option<String>> {
+        self.read(id, "delivery", now_ms() + 3000).await?
+            .map(serde_json::from_value).transpose().map_err(|_| error("invalid_task_delivery"))
+    }
+    async fn record_task_delivery(&self, id: &str, delivery: &str) -> ServiceResult<()> {
+        if self.create(id, "delivery", &json!(delivery), now_ms() + 3000).await? {
+            return Ok(());
+        }
+        if self.task_delivery(id).await?.as_deref() == Some(delivery) { return Ok(()); }
+        Err(error("task_delivery_conflict"))
+    }
+
     async fn resolve_and_claim(&self, id: &str, tool: &str,
         context: &CoordinationContext, deadline_ms: u64) -> ServiceResult<CoordinationClaim> {
         let value = self.read(id, "payload", deadline_ms).await?
@@ -85,7 +101,8 @@ impl CoordinationIntentPort for CoordinationCacheStore {
         if required.iter().any(|key| !p.arguments.get(*key).and_then(Value::as_str)
             .is_some_and(|v| !v.trim().is_empty()))
             || p.arguments.keys().any(|key| !required.contains(&key.as_str())
-                && !(tool == "bcs_assign_task" && key == "response_mode"))
+                && !(tool == "bcs_assign_task" && matches!(key.as_str(), "response_mode" | "timeout_s")))
+            || p.arguments.get("timeout_s").is_some_and(|v| v.as_u64().is_none_or(|n| n == 0))
             || p.arguments.get("response_mode").is_some_and(|v|
                 !matches!(v.as_str(), Some("full" | "after-last-tool-call"))) {
             return Err(error("invalid_coordination_arguments"));

@@ -7,7 +7,8 @@ export interface AisExecutor {
   jobUrl?(jobId: string): string | null;
   getJobStatus(jobId: string): Promise<AisStatus>;
   getJobStatusDetail(jobId: string): Promise<AisJobStatusDetail>;
-  stopExecution(jobId: string): Promise<void>;
+  /** Stop under the same user passed to execute; never substitute the current operator. */
+  stopExecution(jobId: string, userId: string): Promise<void>;
 }
 /** Deployment values are resolved by the Host, never supplied by public HTTP callers. */
 export type SessionAisOptions = {

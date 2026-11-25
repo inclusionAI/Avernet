@@ -12,6 +12,9 @@ provides:
   - RuntimeBindingTarget
   - ResolvedRuntimeBinding
   - RuntimeBindingResolutionService
+  - RuntimeContainerLocator
+  - RuntimeContainerRequest
+  - ResolvedRuntimeContainers
 consumes:
   - BotRepository
   - BotPublishRepositoryProtocol
@@ -20,13 +23,43 @@ consumes:
 internal_dependencies:
   - agentclaw.community.log
   - agentclaw.community.core.engine_runtime.stage
+  - agentclaw.community.core.devices
+  - agentclaw.community.core.bot_management.engines
+  - agentclaw.community.core.repository
+  - agentclaw.community.core.runtime_binding
+  - agentclaw.community.core.service_bot
 ```
+
+When `entity_id` is supplied, the binding resolver locates the exact Bot by
+that entity; the owner argument is not an additional equality constraint.
+Without an entity it retains the existing Bot/owner lookup.
 
 `RuntimeBindingTarget.CALLER_SERVICE` explicitly resolves a service Bot's draft,
 verify, or online runtime even when the Bot also has a caller instance.
 `RuntimeBindingTarget.CALLER_INSTANCE` resolves the authenticated user's active
-Expert Chat instance. `AUTO` preserves the existing Session Files behavior.
+Expert Chat instance. `AUTO` selects service stage bindings for Teclaw, including
+Bots with call_type=caller; other Caller service Bots select the authenticated
+user's independent instance. Explicit `CALLER_INSTANCE` selection is unchanged.
 
 It does not select a device, retain session affinity, mutate state, or call the
 Session Resource state machine. The OpenAPI adapter resolves once for upload
 creation and passes the resulting `binding_id` to that existing state machine.
+
+`RuntimeContainerLocator` resolves an already authorized `bot_id/entity_id` to
+the canonical owner and an existing binding. Personal Bots use their draft
+binding; service Bots require a stage and use its service binding when
+`f_user_id` is absent. Friend chats on Caller Bots use the existing Expert Chat
+instance only when the registered engine strategy requires an independent
+instance. Shared engines retain their stage binding. This service does not
+authenticate the friend selector or authorize credential writes.
+
+`resolve_binding` performs no physical-device query. `resolve_targets` returns
+all ACTIVE devices from the current ACTIVE BaaS Bot record; a nonempty UUID
+must match exactly once. An empty UUID is equivalent to omission, including
+in IAM/JIT context construction. Provider target IDs preserve safe opaque
+template suffixes; the locator does not require numeric template IDs. `resolve` combines both operations. Results retain the
+provider so callers can distinguish Teclaw from ARCA. Consumers requiring one
+target must reject ambiguity; enumeration does not authorize broadcasting
+credentials. IAM/JIT selects friend versus service runtimes with `f_user_id`
+and no longer consumes `caller_runtime_target`; unrelated session APIs retain
+their explicit selector. Caller refresh and JIT failures remain isolated.

@@ -13,11 +13,12 @@ export interface GroupParticipantPickerProps {
   selectedIds: string[];
   selectedOptions: Array<{ id: string; name: string; avatarUrl?: string }>;
   showMineTab: boolean;
+  activeRoleName?: string;
   cardMode?: boolean;
   onToggle: (id: string) => void;
   excludeId?: string | null;
   /** 置顶 Bot（如发起方 bot）；在 task_dag 模式下将此 Bot 放到列表首位。 */
-  prependBot?: { id: string; name: string } | null;
+  prependBot?: { id: string; name: string; avatarUrl?: string } | null;
   /** 候选列表滚动视口的局部高度覆盖。 */
   listViewportClassName?: string;
   /** 在固定高度面板中占满 Footer 上方的剩余空间。 */
@@ -39,6 +40,7 @@ export function GroupParticipantPicker({
   selectedIds,
   selectedOptions,
   showMineTab,
+  activeRoleName,
   cardMode = false,
   onToggle,
   excludeId,
@@ -67,6 +69,7 @@ export function GroupParticipantPicker({
     const originatorView: CollaborationBotView = {
       id: prependBot.id,
       name: prependBot.name,
+      avatarUrl: prependBot.avatarUrl?.trim() || source.find((bot) => bot.id === prependBot.id)?.avatarUrl,
       summary: '',
       online: true,
       status: 'online',
@@ -93,14 +96,15 @@ export function GroupParticipantPicker({
       data-testid="group-participant-picker"
       className={cn('w-full min-w-0 max-w-full', fillAvailableHeight && 'flex min-h-0 flex-1 flex-col')}
     >
-      <div className="mb-2 flex shrink-0 items-center justify-between">
-        <span className="text-xs font-semibold text-foreground">
+      <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-medium text-foreground">
           成员 Bot <span className="text-destructive">*</span>
         </span>
-        <span className="rounded-lg border border-primary/20 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+        <span className="text-xs text-muted-foreground">
           已选 {selectedIds.length} 个
         </span>
       </div>
+      {activeRoleName && <p className="-mt-1 mb-3 text-xs leading-5 text-muted-foreground">为 <span className="font-medium text-foreground">{activeRoleName}</span> 选择执行 Bot</p>}
 
       {(selectedBots.length > 0 || additionalBots.length > 0) && (
         <div
@@ -135,7 +139,7 @@ export function GroupParticipantPicker({
       </div>
 
       {picker.tab === 'candidates' && (
-        <div className="mb-3 shrink-0">
+        <div className="mb-3 flex shrink-0 justify-end">
           <Segmented<CandidateFilterMode>
             value={picker.filterMode}
             onChange={picker.setFilterMode}
@@ -143,7 +147,7 @@ export function GroupParticipantPicker({
               { value: 'name', label: '按名称筛选' },
               { value: 'profile', label: '按画像筛选' },
             ]}
-            className="w-full min-w-0 rounded-lg"
+            className="min-w-0 rounded-lg bg-transparent p-0 [&_button]:h-7 [&_button]:px-2.5 [&_button]:text-xs [&_button[aria-pressed=true]]:bg-primary/5 [&_button[aria-pressed=true]]:shadow-none"
           />
         </div>
       )}
@@ -151,7 +155,7 @@ export function GroupParticipantPicker({
       <div className="relative mb-3 shrink-0">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
-          className="h-9 rounded-md pl-9"
+          className="h-8 rounded-lg pl-9 text-xs"
           value={picker.search}
           onChange={(event) => picker.setSearch(event.target.value)}
           placeholder={
@@ -168,14 +172,14 @@ export function GroupParticipantPicker({
       </div>
 
       {recommendActive && picker.recommendError ? (
-        <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-sm text-destructive">
+        <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-xs text-destructive">
           <span>{picker.recommendError}</span>
           <Button variant="ghost" size="sm" className="border-0" onClick={picker.retryRecommend}>
             重试
           </Button>
         </div>
-      ) : picker.error ? (
-        <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-sm text-destructive">
+      ) : !recommendActive && picker.error ? (
+        <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-xs text-destructive">
           <span>{picker.error}</span>
           <Button variant="ghost" size="sm" className="border-0" onClick={picker.retry}>
             重试
@@ -212,7 +216,7 @@ export function GroupParticipantPicker({
       ) : (
         <div
           className={cn(
-            'min-w-0 w-full max-w-full overflow-hidden rounded-lg border border-border bg-card',
+            'min-w-0 w-full max-w-full overflow-hidden rounded-xl border border-border bg-card',
             cardMode && 'border-0 bg-transparent',
             fillAvailableHeight && 'min-h-0 flex-1',
           )}
@@ -221,7 +225,7 @@ export function GroupParticipantPicker({
             data-testid="group-participant-list"
             className={cn(
               'app-scrollbar min-h-[180px] max-h-[320px] overflow-y-auto pb-2',
-              cardMode ? 'space-y-1.5' : 'divide-y divide-border',
+              cardMode ? 'space-y-1.5' : 'divide-y divide-divider',
               fillAvailableHeight && 'h-full max-h-none',
               listViewportClassName,
             )}

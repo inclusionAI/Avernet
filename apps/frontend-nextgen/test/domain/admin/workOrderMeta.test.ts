@@ -1,10 +1,15 @@
 import type { WorkOrderTypeMeta } from '@/domain/admin/workOrderMeta';
-import { resolveWorkOrderType, WORK_ORDER_STATUS_LABEL, WORK_ORDER_TYPE_META } from '@/domain/admin/workOrderMeta';
+import {
+  resolveWorkOrderType,
+  WORK_ORDER_STATUS_LABEL,
+  WORK_ORDER_TYPE_META,
+  workOrderCategoryLabel,
+} from '@/domain/admin/workOrderMeta';
 import { describe, expect, it } from '@jest/globals';
 
 /**
  * 消息文案矩阵回归基线。
- * - category 事实源：后端契约《Skill 空间体系改造梳理1.0》§4.2 消息事件枚举（14 个事件，4 APPROVAL / 10 NOTICE）
+ * - category 事实源：后端契约《Skill 空间体系改造梳理1.0》§4.2 消息事件枚举；包含后续 Skill 编辑权限申请事件。
  *   https://yuque.antfin.com/securitytec/otbct4/fn72p6q8tpsog5nk#xPAX3
  * - label / tone 事实源：docs/architecture/admin-visual-interaction-guide.md §2.2
  * title 由后端透传；content 在列表/通知为字符串透传，在详情为结构化对象（mapWorkOrderDto 解析并合成展示文案），均不在文案矩阵断言。
@@ -13,24 +18,27 @@ const MATRIX_BASELINE: Record<string, WorkOrderTypeMeta> = {
   // 审批类（APPROVAL）：PRD 四色
   SPACE_JOIN_APPLIED: { label: '申请加入团队', tone: 'orange', category: 'APPROVAL' },
   BOT_COLLABORATOR_APPLIED: { label: '申请管理权限', tone: 'blue', category: 'APPROVAL' },
+  SKILL_COLLABORATOR_APPLIED: { label: '申请编辑权限', tone: 'blue', category: 'APPROVAL' },
   HUMAN2BOT_FRIEND_APPLIED: { label: '好友申请', tone: 'green', category: 'APPROVAL' },
   BOT2BOT_FRIEND_APPLIED: { label: '好友申请', tone: 'green', category: 'APPROVAL' },
-  // 通知类（NOTICE）：审批通知=绿 / 普通通知=蓝（noticeTypeMeta 二分）
-  SPACE_JOIN_REVIEWED: { label: '审批通知', tone: 'green', category: 'NOTICE' },
+  // 通知类（NOTICE）：审批类=绿 / 普通通知=蓝（noticeTypeMeta 二分）
+  SPACE_JOIN_REVIEWED: { label: '审批类', tone: 'green', category: 'NOTICE' },
   SPACE_MEMBER_ADDED: { label: '通知', tone: 'blue', category: 'NOTICE' },
-  BOT_COLLABORATOR_REVIEWED: { label: '审批通知', tone: 'green', category: 'NOTICE' },
+  BOT_COLLABORATOR_REVIEWED: { label: '审批类', tone: 'green', category: 'NOTICE' },
   BOT_MEMBER_ADDED: { label: '通知', tone: 'blue', category: 'NOTICE' },
-  HUMAN2BOT_FRIEND_REVIEWED: { label: '审批通知', tone: 'green', category: 'NOTICE' },
-  BOT2BOT_FRIEND_REVIEWED: { label: '审批通知', tone: 'green', category: 'NOTICE' },
+  HUMAN2BOT_FRIEND_REVIEWED: { label: '审批类', tone: 'green', category: 'NOTICE' },
+  BOT2BOT_FRIEND_REVIEWED: { label: '审批类', tone: 'green', category: 'NOTICE' },
   // 通知类（NOTICE）：公开工单紫
   HUMAN2BOT_PUBLIC_ORDER_CREATED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },
   HUMAN2BOT_PUBLIC_ORDER_COMPLETED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },
   BOT2BOT_PUBLIC_ORDER_CREATED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },
   BOT2BOT_PUBLIC_ORDER_COMPLETED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },
+  // bot-public-risk-check：Bot 公开风险前置检测结果通知（后端 #3224 已推送）
+  BOT_PUBLIC_RISK: { label: 'Bot公开风险检测', tone: 'purple', category: 'NOTICE' },
 };
 
 describe('消息文案矩阵基线（§4.2 全量事件）', () => {
-  it('覆盖且仅覆盖契约里的 14 个 event_type：后端增删事件必须显式改基线', () => {
+  it('覆盖且仅覆盖基线中的 16 个 event_type：后端增删事件必须显式改基线', () => {
     expect(Object.keys(WORK_ORDER_TYPE_META).sort()).toEqual(Object.keys(MATRIX_BASELINE).sort());
   });
 
@@ -38,10 +46,10 @@ describe('消息文案矩阵基线（§4.2 全量事件）', () => {
     expect(WORK_ORDER_TYPE_META[eventType]).toEqual(expected);
   });
 
-  it('分类配比与契约一致：4 个 APPROVAL / 10 个 NOTICE', () => {
+  it('分类配比与契约一致：5 个 APPROVAL / 11 个 NOTICE', () => {
     const categories = Object.values(WORK_ORDER_TYPE_META).map((m) => m.category);
-    expect(categories.filter((c) => c === 'APPROVAL')).toHaveLength(4);
-    expect(categories.filter((c) => c === 'NOTICE')).toHaveLength(10);
+    expect(categories.filter((c) => c === 'APPROVAL')).toHaveLength(5);
+    expect(categories.filter((c) => c === 'NOTICE')).toHaveLength(11);
   });
 
   it('resolveWorkOrderType 对全量事件都返回基线 meta（不落 fallback）', () => {
@@ -98,5 +106,16 @@ describe('WORK_ORDER_STATUS_LABEL', () => {
     expect(WORK_ORDER_STATUS_LABEL.APPROVED).toBe('已通过');
     expect(WORK_ORDER_STATUS_LABEL.REJECTED).toBe('已驳回');
     expect(WORK_ORDER_STATUS_LABEL.UNKNOWN).toBe('未知');
+  });
+});
+
+describe('workOrderCategoryLabel', () => {
+  it('审批工单与审批结果通知共享展示分类，但不改写通知身份', () => {
+    expect(workOrderCategoryLabel({ itemType: 'APPROVAL' })).toBe('审批类');
+    const notification = { itemType: 'NOTIFICATION' as const, notificationCategory: 'approval' };
+    expect(workOrderCategoryLabel(notification)).toBe('审批类');
+    expect(notification.itemType).toBe('NOTIFICATION');
+    expect(workOrderCategoryLabel({ itemType: 'NOTIFICATION', notificationCategory: 'NOTICE' })).toBe('通知类');
+    expect(workOrderCategoryLabel({ itemType: 'NOTIFICATION' })).toBe('通知类');
   });
 });

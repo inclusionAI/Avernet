@@ -75,6 +75,7 @@ def _world(cli_code: str, *, explicit_caller: bool = True) -> SimpleNamespace:
         lock_repository=lock_repository, mcp_provider=mcp_provider,
         repository=repository, mcp_sync_service=MagicMock(),
         passport_plugin=passport, cli_scope_reconciler=reconciler,
+        bcs_caller_sync=MagicMock(),
     )
     return SimpleNamespace(
         bot=bot, sparse=sparse, passport_state=passport_state, repository=repository,

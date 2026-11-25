@@ -1,6 +1,29 @@
 # `agentclaw.community.core.service_bot`
 
+Publication resource lookups pass the record's `source_bot_pk` to the common
+Bot address resolver. This covers build, verify/online/eval release, scale,
+restart, restore, rollback, approval and deletion: a legacy publish Owner can
+differ from both the current Owner and entity. Config coordinates and engine
+selection use the same source-PK rule. Historical publish fields and per-record
+stage bindings are not rewritten. Only orphaned default metadata retains the
+legacy owner/entity lookup; service-source mismatches fail closed.
+
 Service-bot domain — bot publication facade, BAAS service binding, sub-resource management.
+
+## Online retry and restart recovery
+
+Online publication retry and restart share the same candidate decision and
+ask the selected provider's `should_upgrade_not_live_bot(status)` policy for
+FAILED/STOPPED recovery. Its default preserves the provider's existing recovery
+capability, including custom providers that cannot recover either status.
+Teclaw alone specializes `FAILED` to reuse UPGRADE/UPDATE and preserve the binding:
+operation failure alone does not establish that its instance is gone. Teclaw
+`STOPPED` still retires the candidate before creating a replacement; ARCA recovers
+both statuses through UPDATE. `RELEASED`/`DESTROYING` or no candidate select creation,
+while `STOPPING`, missing status and failed status reads wait through the existing
+retry/error path. Explicit `BOT_NOT_FOUND`/`DEVICE_NOT_FOUND` during UPDATE retain
+the existing recreation fallback. Issuing UPDATE does not declare publication
+success; the existing workflow progress and callback results remain authoritative.
 
 ## Context Boundary
 
@@ -16,6 +39,7 @@ provides:
   - "EmptyBotProcess"
   - "BotProcessRegistry"
   - "BotPublishService"
+  - "ServiceBotEvalService"
   - "BaasService"
   - "BaasServiceError"
   - "BaasNoActiveDevicesError"
@@ -39,8 +63,10 @@ consumes:
   - "PassportPlugin"
   - "UserListRepositoryProtocol"
 internal_dependencies:
+  - agentclaw.community.core.bot_knowledge.protocols    # optional best-effort stage selection Service API
   - agentclaw.community.kernel.file_count
   - agentclaw.community.plugin_api.file_count_runtime
+  - agentclaw.community.plugin_api.service_bot_eval  # service-Bot evaluation gate Protocol, context and uploaded material contract
   - agentclaw.community.core.base
   - agentclaw.community.kernel.build_ignore
   - agentclaw.community.core.repository.protocols.identity
@@ -51,7 +77,7 @@ internal_dependencies:
   - agentclaw.community.kernel.publish_ignore
   - agentclaw.community.plugin_api.publish_ignore_runtime
   - agentclaw.community.core.digital_employee
-  - agentclaw.community.core.bot_config_manifest.cli_tools.store    # W9: a teclaw promotion copies the bot's CLI-tool objects into the new stage's prefix from the platform's own copy, rather than reading them back out of the engine
+  - agentclaw.community.core.apply_engine.cli_tools.store    # W9: a teclaw promotion copies the bot's CLI-tool objects into the new stage's prefix from the platform's own copy, rather than reading them back out of the engine
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
@@ -68,6 +94,8 @@ internal_dependencies:
   - agentclaw.community.core.devices
   - agentclaw.community.core.engine_runtime.stage    # canonical live-stage publish binding resolution for Caller identity updates
   - agentclaw.community.core.quality.services
+  - agentclaw.community.core.quality.quality_service_protocol  # standard evaluation consumes the task Service API Protocol
+  - agentclaw.community.core.quality.task_processor_service_protocol  # standard evaluation advances the durable task lifecycle
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.system_config
   - agentclaw.community.core.task_queue    # durable publish stage tasks (enqueue + handlers + worker)
@@ -114,6 +142,61 @@ newly created default Bot merely because owner and bot id happen to match.
 The existing `owner_id` column remains a compatibility resource locator: new
 rows store the source Bot's immutable `entity_id` while the field name and
 response shape stay unchanged. This stage does not change SecBaaS code.
+
+Legacy publish requests may contain only `publish_id`. The shared permission
+interceptor resolves the source Bot from the extracted resource locator for both
+reads and writes, then checks permissions and edit locks against its current Owner.
+Historical publish `owner_id` values do not grant Owner privileges after a
+handoff. Request payloads and immutable publication resource addresses remain
+unchanged; the handoff maintenance fence still applies to writes before authorization.
+
+Publishing resolves internal Bot reads through `BotService.get_bot_by_address`:
+legacy entity/current-Owner locators select the Bot, then its current Owner is
+used for the enriched detail read. `get_bot` itself keeps strict ownership
+semantics. Build/release/restart/retry/scale/rollback/restore retain the publish
+record's stable entity for resource paths. New approval auditors and approval
+Owner snapshots use the current Owner; existing approval history is not rewritten.
+Deletion resolves and validates the current Bot before destroying version
+resources. The Bot row is deleted under current ownership while Passport, App
+Grant and capability/asset cleanup retain the stable entity. Personal/default
+cleanup and earliest-Bot/employee deletion protections retain existing behavior.
+BaaS binding lookup and outbound Bot-type selection accept legacy/current-Owner
+locators and query service publication resources by entity. Managed read-only
+rules also resolve the stable Bot before reading its policy. Passport hot-update
+checks current ownership first, then locates draft/verify/online/Caller targets
+by entity, including repeated A→B→C handoff.
+
+The existing oversized central Bot/Publish services remain under the repository's
+pre-existing architecture allowlist; this compatibility fix does not extend it.
+Their remaining decomposition is a separate lifecycle/service refactor so this
+fix can be reviewed without moving unrelated creation and restart behavior.
+
+## Service-Bot evaluation gate
+
+`ServiceBotEvalService` authorizes and dispatches the unified service-Bot
+certification surface through the `ServiceBotEvalPlugin` Protocol. Caller-supplied
+owner and version inputs are never authoritative: it resolves the tenant-scoped
+Bot through `BotAddressResolver`, checks the actor's operable collaborator level,
+requires `bot_type=service`, and binds the addressed publish record from the
+Bot's current environment. `precheck` additionally requires a draft record;
+submission status may fall back to the latest record. A missing Bot and
+insufficient permission both report not found. Submit requires OWNER; detail,
+history, precheck, sync and submission status require MEMBER.
+
+The same service backs the bot-first public routes under
+`/openapi/v1/bots/{bot_id}/eval/...` (authorization rules in
+`adapters/http/openapi_v1/authorization_rules_service_eval.py`) and the legacy
+`/api/service-bot/eval/...` routes. Public profiles bind skip implementations
+that allow the release trigger; an enterprise composition supplies the real
+evaluator. The Protocol carries the server-derived context and already-read
+upload material, keeping transport and private provider details out of the
+community domain.
+
+Draft-to-staging publication also runs the gate's `precheck` after the draft
+lock check. A result whose `allowed` is not `True` raises
+`ServicePublicationGateBlockedError`; a `PENDING` gate status raises
+`ServicePublicationGatePendingError`. Both errors expose only the plugin's
+`gate_result` projection and map to HTTP 403/403210 and 409/409210.
 
 ## Publish operation ledger (#197)
 
@@ -165,7 +248,7 @@ or changing either source or target; any existing versioned snapshot is retained
 Disabled `.local/bin` retries still clear existing versioned bin snapshots without
 reading draft CLI directories or creating missing snapshots.
 
-The `PUT /api/v1/user-lists/correct` API requires operator authorization for all
+The `PUT /api/v1/user-lists/correct` API requires `admin.super_admin` authorization for all
 list types. Operators can add or remove this rollout type for an owner or `*`,
 with `env` selecting the environment. Ordinary authenticated users receive
 HTTP 403 without changing membership. Membership checks still require only login.
@@ -268,3 +351,19 @@ mutate the Bot context, or fall back on lookup failure. Other engines never make
 this strategy-specific query; the shared draft flow retains its original context.
 Optional command-timeout forwarding remains infrastructure-only: omitted timeout
 arguments retain the existing provider call/default behavior.
+
+## Optional knowledge observation
+
+The verify-flow task captures knowledge selection at BUILDING entry through a
+lazy ordinary Service API. After a real online deployment reports terminal BaaS
+SUCCESS, publication progress polling may project the target version to existing
+online selection fields. Rollback follows the same target-deploy completion;
+its early native SUCCESS admission flip never triggers the projection. Plain
+restart polling does not invoke knowledge observers: restarting the same version
+must not bless a newly admitted rollback or recopy its auxiliary selection.
+Each observer call is failure-isolated outside native phase calls and outside
+native transactions. Provider/encoding/storage failures do not change native
+Complete/Fail, status/ext/CAS, rollback or restart execution. No new task,
+retry/compensation infrastructure or publish lock is introduced. These optional
+DB calls can still wait on existing driver/connection timeouts; this is not a
+promise of hard time isolation or DB-outage resilience.

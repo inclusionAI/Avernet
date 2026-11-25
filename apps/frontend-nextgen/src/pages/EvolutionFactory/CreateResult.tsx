@@ -45,7 +45,7 @@ export function CreateResult({ task }: { task: Task }) {
             {(plans[task.task_type] ?? []).map((title, index, items) => (
               <li key={title} className="relative flex gap-3.5 pb-[22px] last:pb-0">
                 {index < items.length - 1 && (
-                  <span aria-hidden="true" className="absolute bottom-0 left-[13px] top-7 w-px bg-border" />
+                  <span aria-hidden="true" className="absolute bottom-0 left-[13px] top-7 w-px bg-divider" />
                 )}
                 <span
                   className={`relative flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-full text-xs ${typeTone(

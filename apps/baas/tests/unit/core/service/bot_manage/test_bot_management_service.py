@@ -5715,14 +5715,156 @@ class TestStopBot:
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_stop_bot_already_stopped(self):
+    async def test_stop_bot_stopped_reuses_current_generation_stop(self):
         mock_bot_response = MagicMock()
+        mock_bot_response.id = 1
+        mock_bot_response.bot_uuid = "BOT-001"
         mock_bot_response.status = BotStatus.STOPPED.value
-        service = _make_service()
+        mock_bot_response.model_dump.return_value = {
+            "id": 1,
+            "bot_uuid": "BOT-001",
+            "tenant": "test_tenant",
+            "env": "dev",
+            "domain": "default",
+            "is_deleted": 0,
+            "creator": "user1",
+            "modifier": "user1",
+            "status": BotStatus.STOPPED.value,
+            "name": "Test Bot",
+            "description": None,
+            "template_uuid": None,
+            "replica_desired": 1,
+            "replica_minimum": 1,
+            "replica_maximum": 10,
+            "auto_scaling_enabled": 0,
+            "sla_grade": "standard",
+            "gmt_create": "2024-01-01T00:00:00",
+            "gmt_modified": "2024-01-01T00:00:00",
+            "config": None,
+        }
+        publishes = [
+            MagicMock(
+                id=999,
+                bot_id=2,
+                publish_type=PublishType.STOP.value,
+                status=PublishStatus.SUCCESS.value,
+            ),
+            MagicMock(
+                id=880,
+                bot_id=1,
+                publish_type=PublishType.CREATE.value,
+                status=PublishStatus.SUCCESS.value,
+            ),
+            MagicMock(
+                id=870,
+                bot_id=1,
+                publish_type=PublishType.STOP.value,
+                status=PublishStatus.FAILED.value,
+            ),
+            MagicMock(
+                id=860,
+                bot_id=1,
+                publish_type=PublishType.STOP.value,
+                status=PublishStatus.PENDING.value,
+            ),
+            MagicMock(
+                id=810,
+                bot_id=1,
+                publish_type=PublishType.STOP.value,
+                status=PublishStatus.SUCCESS.value,
+            ),
+            MagicMock(
+                id=800,
+                bot_id=1,
+                publish_type=PublishType.STOP.value,
+                status=PublishStatus.SUCCESS.value,
+            ),
+        ]
+        mock_bot_repo = MagicMock()
+        mock_publish_service = MagicMock()
+        mock_publish_service.list_publishes_by_bot_uuid = AsyncMock(
+            return_value=publishes
+        )
+        service = _make_service(
+            bot_repo=mock_bot_repo, publish_service=mock_publish_service
+        )
         with patch.object(
             service, "get_bot", new_callable=AsyncMock, return_value=mock_bot_response
         ):
-            with pytest.raises(ValueError, match="Cannot stop bot in STOPPED status"):
+            result = await service.stop_bot(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+            )
+
+        assert result.status == BotStatus.STOPPED.value
+        assert result.publish_id == 810
+        mock_publish_service.list_publishes_by_bot_uuid.assert_awaited_once_with(
+            tenant="test_tenant", bot_uuid="BOT-001"
+        )
+        mock_publish_service.create_publish.assert_not_called()
+        mock_bot_repo.update_status.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stop_bot_stopped_missing_current_stop_fails(self):
+        mock_bot_response = MagicMock()
+        mock_bot_response.id = 1
+        mock_bot_response.bot_uuid = "BOT-001"
+        mock_bot_response.status = BotStatus.STOPPED.value
+        mock_bot_response.model_dump.return_value = {
+            "id": 1,
+            "bot_uuid": "BOT-001",
+            "tenant": "test_tenant",
+            "env": "dev",
+            "domain": "default",
+            "is_deleted": 0,
+            "creator": "user1",
+            "modifier": "user1",
+            "status": BotStatus.STOPPED.value,
+            "name": "Test Bot",
+            "description": None,
+            "template_uuid": None,
+            "replica_desired": 1,
+            "replica_minimum": 1,
+            "replica_maximum": 10,
+            "auto_scaling_enabled": 0,
+            "sla_grade": "standard",
+            "gmt_create": "2024-01-01T00:00:00",
+            "gmt_modified": "2024-01-01T00:00:00",
+            "config": None,
+        }
+        publishes = [
+            MagicMock(
+                id=999,
+                bot_id=2,
+                publish_type=PublishType.STOP.value,
+                status=PublishStatus.SUCCESS.value,
+            ),
+            MagicMock(
+                id=880,
+                bot_id=1,
+                publish_type=PublishType.CREATE.value,
+                status=PublishStatus.SUCCESS.value,
+            ),
+            MagicMock(
+                id=870,
+                bot_id=1,
+                publish_type=PublishType.STOP.value,
+                status=PublishStatus.FAILED.value,
+            ),
+        ]
+        mock_publish_service = MagicMock()
+        mock_publish_service.list_publishes_by_bot_uuid = AsyncMock(
+            return_value=publishes
+        )
+        service = _make_service(publish_service=mock_publish_service)
+        with patch.object(
+            service, "get_bot", new_callable=AsyncMock, return_value=mock_bot_response
+        ):
+            with pytest.raises(
+                RuntimeError, match="STOPPED bot BOT-001 has no successful STOP publish"
+            ):
                 await service.stop_bot(
                     tenant="test_tenant",
                     bot_uuid="BOT-001",

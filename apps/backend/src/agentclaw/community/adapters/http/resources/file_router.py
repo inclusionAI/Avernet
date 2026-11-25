@@ -43,6 +43,7 @@ from agentclaw.community.core.bot_management.errors import (
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_runtime_engine_for_bot,
 )
+from agentclaw.community.core.devices.errors import DeviceFileSystemReadOnlyError
 from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError,
 )
@@ -50,6 +51,7 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.publishing import (
     BotPublishRepositoryProtocol,
 )
+from agentclaw.community.core.resources.service import DirectoryDeleteFailed
 from agentclaw.community.core.services.resource_file_service import (
     ResourceFileService,
     is_readonly,
@@ -421,7 +423,13 @@ async def delete_file(
         raise HTTPException(status_code=403, detail="Cannot delete read-only file")
 
     eid, ebid, eeng = _resolve_params(ctx, bot_id, engine_type, owner_id, bot_repo=bot_repo)
-    ok = await file_svc.delete(entity_id=eid, bot_id=ebid, engine_type=eeng, path=path)
+    try:
+        ok = await file_svc.delete(
+            entity_id=eid, bot_id=ebid, engine_type=eeng, path=path,
+            report_directory_failure=True,
+        )
+    except DirectoryDeleteFailed as exc:
+        raise HTTPException(status_code=502, detail="Delete storage failed") from exc
     if not ok:
         raise HTTPException(status_code=404, detail="File not found")
     return FileActionResponse(success=True, message="Deleted")
@@ -445,6 +453,8 @@ async def create_directory(
     eid, ebid, eeng = _resolve_params(ctx, bot_id, engine_type, owner_id, bot_repo=bot_repo)
     try:
         await file_svc.create_directory(entity_id=eid, bot_id=ebid, engine_type=eeng, path=path)
+    except DeviceFileSystemReadOnlyError:
+        raise HTTPException(status_code=403, detail={"code": "filesystem_read_only"})
     except Exception as e:
         logger.error(f"[create_directory] Failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create directory: {str(e)}")

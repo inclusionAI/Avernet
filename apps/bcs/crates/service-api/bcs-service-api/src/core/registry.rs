@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 
 use super::{ActorStatus, EnsureHumanResult, ServiceError, ServiceResult};
+use crate::types::bot_authority::{AuthorityMutation, BotOwnershipView};
+use crate::types::bot_profile::{AvatarChange, BotAvatarMap, ExistingProfileUpdate, ProfileWrite};
 use bcs_domain::Group;
 
 pub use bcs_domain::registry::deserialize_skills;
@@ -66,6 +68,46 @@ pub enum ConnectStreamError {
 }
 
 // ============================================================================
+// Trusted ownership registration (Bot Authority Task 4)
+// ============================================================================
+
+/// Trusted-registration command carried to
+/// [`BotRegistryCoreService::register_with_ownership`].
+///
+/// `initialization.owner_user_id` must come ONLY from a verified
+/// registration token; adapters never contribute a trusted owner.
+/// The mutation inside keeps the real initiating identity.
+pub struct TrustedBotRegistration {
+    pub capabilities: BotCapabilities,
+    pub initialization: crate::types::bot_authority::OwnershipInitialization,
+}
+
+/// The committed credential receipt of a trusted registration.
+///
+/// A SEPARATE type from [`RegisteredBot`]: it is only returned to
+/// the application after the store transaction succeeded, is never
+/// reused as a transport/query DTO, has no general
+/// serialization/logging capability, and never feeds audit rows.
+pub struct CommittedBotRegistration {
+    pub bot_uuid: String,
+    pub bot_name: String,
+    pub bot_token: String,
+}
+
+/// The result of ONE runtime-activity observation
+/// (bot-authority spec §8.0 point 2): the observation instant
+/// (`observed_at_ms`, unix milliseconds of the sampling point)
+/// plus the set of observed bot ids that are runtime active.
+///
+/// The candidate snapshot and this observation are NOT a
+/// cross-system atomic pair — the mine response is a sampling.
+#[derive(Debug, Clone)]
+pub struct RuntimeActivitySnapshot {
+    pub observed_at_ms: u64,
+    pub active_bot_ids: std::collections::HashSet<String>,
+}
+
+// ============================================================================
 // Service Traits
 // ============================================================================
 
@@ -84,6 +126,93 @@ pub trait BotRegistryCoreService: Send + Sync {
         _created_by: &str, _token: &str,
     ) -> ServiceResult<bool> {
         Err(ServiceError::InternalError("atomic registration creation is not configured".into()))
+    }
+
+    /// Trusted atomic registration with ownership initialization
+    /// (spec §10.2).
+    ///
+    /// `owner_user_id` in [`TrustedBotRegistration`] comes ONLY from a
+    /// verified registration token; the mutation keeps the real
+    /// initiator. The core assigns the Bot ID and runtime token and
+    /// calls the repo's composite create command, so Bot, Human,
+    /// owner, ownership version, default runtime profile and the
+    /// initialization audit commit in one store transaction. Failure
+    /// is all-or-nothing: no [`CommittedBotRegistration`] returns and
+    /// no credential, cache publish or runtime activation happens.
+    /// A reused existing Bot ID never results in a committed
+    /// registration.
+    async fn register_with_ownership(
+        &self,
+        _registration: TrustedBotRegistration,
+    ) -> ServiceResult<CommittedBotRegistration> {
+        Err(ServiceError::InternalError(
+            "trusted ownership registration is not configured".into(),
+        ))
+    }
+
+    /// Backfill ownership on an existing live Bot (governance entry;
+    /// spec §10.5). Idempotent: an already-initialized Bot returns its
+    /// current owner state without rewriting `created_by` or resetting
+    /// a since-transferred owner; a reused/deleted Bot ID never
+    /// resurrects ownership.
+    async fn initialize_ownership(
+        &self,
+        _bot_id: &str,
+        _owner_user_id: &str,
+        _mutation: AuthorityMutation,
+    ) -> ServiceResult<BotOwnershipView> {
+        Err(ServiceError::InternalError(
+            "ownership initialization is not configured".into(),
+        ))
+    }
+
+    /// Provider-authenticated, create-only authority initialization. The application
+    /// verifies Provider ownership of the Bot. Atomically initialize owner/version,
+    /// initial managers and their Human actors/audit; version > 0 is never rewritten.
+    /// This is not a replacement for Human edits or trusted-Service manager sync.
+    async fn initialize_provider_authority(
+        &self, _bot_id: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<BotOwnershipView> {
+        Err(ServiceError::InternalError("Provider authority initialization is not configured".into()))
+    }
+
+    /// Governance facts of ONE Bot for the bcs-admin
+    /// ownership-backfill dry-run (spec §10.4/§10.5) —
+    /// the SAME facts the `initialize_ownership` guard
+    /// validates, read through the same Core/facade.
+    /// A pure read; `None` for a Bot unknown in the
+    /// instance's env; failures propagate.
+    async fn ownership_governance_state(
+        &self,
+        _bot_id: &str,
+    ) -> ServiceResult<
+        Option<crate::types::bot_authority::BotOwnershipGovernance>,
+    > {
+        Err(ServiceError::InternalError(
+            "the ownership governance read is not configured".into(),
+        ))
+    }
+
+    /// Atomic ordinary-Bot retirement (bot-authority spec §7.1).
+    ///
+    /// The ordinary `retire` is a command distinct from the
+    /// Provider `retire` (the two are never chained): ONE
+    /// store transaction commits the Bot tombstone, the
+    /// owner/manager edge revocation, the pending-transfer
+    /// closure (system decision, fixed reason) and the
+    /// `retire` audit carrying the real mutation actor.
+    /// `Ok(true)` when this command executed the tombstone
+    /// transition; `Ok(false)` on idempotent re-execution
+    /// of an already-retired Bot (no duplicate audit).
+    async fn retire_with_authority(
+        &self,
+        _bot_id: &str,
+        _mutation: AuthorityMutation,
+    ) -> ServiceResult<bool> {
+        Err(ServiceError::InternalError(
+            "bot retirement with authority is not configured".into(),
+        ))
     }
 
     /// Register or update a bot.
@@ -143,6 +272,25 @@ pub trait BotRegistryCoreService: Send + Sync {
         Ok(self.get(bot_id).await)
     }
 
+    /// Strict batch read (input order, deduplicated by bot_uuid,
+    /// absent ids skipped): every persistence failure is an `Err`
+    /// — never a silently omitted candidate. Implementations over
+    /// a fallible store SHOULD delegate to the store's batched
+    /// strict read instead of this strict per-id fallback.
+    async fn try_get_many(&self, bot_ids: &[String]) -> ServiceResult<Vec<RegisteredBot>> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for bot_id in bot_ids {
+            if !seen.insert(bot_id.as_str()) {
+                continue;
+            }
+            if let Some(bot) = self.try_get(bot_id).await? {
+                out.push(bot);
+            }
+        }
+        Ok(out)
+    }
+
     /// Like [`get`](Self::get) but also returns soft-deleted bots.
     ///
     /// Used for display-only enrichment (e.g. filling in a removed bot's name
@@ -186,6 +334,14 @@ pub trait BotRegistryCoreService: Send + Sync {
         Ok(BotDeliveryTarget::WebSocket {
             bot_id: bot.bot_uuid,
         })
+    }
+
+    /// Cancellation-only target resolution. May use a previously validated A2A
+    /// Card after refresh failure, but must retain current affiliation, enabled
+    /// Provider/binding/downlink and credential checks. It does not authorize a
+    /// send or infer remote task identity; the adapter cancels a frozen Run.
+    async fn resolve_abort_target(&self,bot_id:&str)->ServiceResult<BotDeliveryTarget> {
+        self.resolve_delivery_target(bot_id).await
     }
 
     async fn resolve_coordination_surface(
@@ -247,6 +403,16 @@ pub trait BotRegistryCoreService: Send + Sync {
     ) -> ServiceResult<Vec<RegisteredBot>> {
         Ok(self.list_bots_by_creator(created_by).await)
     }
+
+    /// Bounded ownership-migration candidates for the mine sweep:
+    /// live physical Bots, byte-exact creator, `ownership_version = 0`.
+    /// Straight Repo passthrough (the sweep's steady-state cost stays
+    /// one indexed read instead of a per-Bot governance rescan).
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        created_by: &str,
+        limit: usize,
+    ) -> ServiceResult<Vec<RegisteredBot>>;
 
     /// Discover bots by capability keywords.
     async fn discover(&self, query: &str) -> Vec<RegisteredBot>;
@@ -373,6 +539,57 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// This avoids the risk of overwriting name/summary with stale or None values
     /// when only a visibility change is needed.
     async fn update_visibility(&self, bot_id: &str, visibility: &str) -> ServiceResult<()>;
+
+    /// Existing-only Bot profile write (bot-avatar plan Task 4): the core
+    /// counterpart of `BotRepoPort::update_profile_existing`, delegating
+    /// persistence to the repository. Missing/tombstoned targets stay
+    /// `ProfileWrite::Missing` — no INSERT, and never a silent success.
+    /// Unconfigured core implementations fail closed instead of defaulting
+    /// the repo's per-record write contract to a silent success.
+    async fn update_profile_existing(
+        &self,
+        _bot_id: &str,
+        _update: ExistingProfileUpdate,
+    ) -> ServiceResult<ProfileWrite> {
+        Err(ServiceError::InternalError(
+            "bot profile update is not configured".into(),
+        ))
+    }
+
+    /// Existing-only avatar write (bot-avatar plan Task 4): the core
+    /// counterpart of `BotRepoPort::update_avatar_existing`. Same
+    /// fail-closed default discipline as
+    /// [`update_profile_existing`](Self::update_profile_existing).
+    async fn update_avatar_existing(
+        &self,
+        _bot_id: &str,
+        _avatar: AvatarChange,
+    ) -> ServiceResult<ProfileWrite> {
+        Err(ServiceError::InternalError(
+            "bot avatar update is not configured".into(),
+        ))
+    }
+
+    /// Batched avatar URLs for a whole participant result page (bot-avatar
+    /// plan Task 4).
+    ///
+    /// Unlike the repository's bounded `read_avatar_batch`, the core accepts
+    /// the full submitted page: it deduplicates the ids and chunks them into
+    /// store-sized batches, merging each batch's map into one result. The
+    /// query budget stays one repository batch read per chunk; an empty page
+    /// issues no repository call at all. The core does NOT authorize which
+    /// resources are visible — environment isolation, Human-exclusion and
+    /// tombstone-display semantics belong to the repository read. Read
+    /// failures propagate; they are never swallowed into an empty map.
+    ///
+    /// This default is fail-closed and `NoopBotRegistryCoreService` does NOT
+    /// override it, so Noop-wired V1 fixtures fail every list/detail path
+    /// that projects avatars — loudly by design.
+    async fn avatar_urls(&self, _bot_ids: &[String]) -> ServiceResult<BotAvatarMap> {
+        Err(ServiceError::InternalError(
+            "bot avatar url lookup is not configured".into(),
+        ))
+    }
 
     /// DEPRECATED: Hidden mechanism is deprecated. Use `visibility` field instead,
     /// and use [`update_actor_status`](Self::update_actor_status) for the
@@ -578,6 +795,32 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// Check if a bot has an active streaming connection.
     async fn is_connected(&self, bot_id: &str) -> bool;
 
+    /// ONE fallible runtime-activity observation (bot-authority
+    /// spec §8.0 point 2, plan §3 frozen contract).
+    ///
+    /// Reads the current instance's WS connection set ONCE, then
+    /// resolves HTTP-Provider routability over batch provider
+    /// reads (≤
+    /// [`crate::types::bot_authority::AUTHORITY_QUERY_CHUNK`]
+    /// bot ids per provider-bindings query, then the ONE
+    /// provider + credential batch) — never a per-bot target
+    /// resolution. The keeps the existing
+    /// `WS active || HTTP Provider routable` semantics: the
+    /// snapshot lists which of `bot_ids` are runtime active.
+    ///
+    /// Storage/read failures PROPAGATE as `Err` — they are
+    /// never swallowed into a fake-unreachable success
+    /// (spec §8.0 "存储错误返回错误，不伪装成 unreachable").
+    async fn try_runtime_activity_for(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<RuntimeActivitySnapshot> {
+        let _ = bot_ids;
+        Err(ServiceError::InternalError(
+            "the runtime activity observation is not configured".into(),
+        ))
+    }
+
     /// Batch check runtime-active actors for owner-facing lists.
     ///
     /// Runtime active intentionally ignores actor lifecycle visibility (`Hidden`)
@@ -743,3 +986,7 @@ fn needs_bot_name_backfill(participant: &bcs_domain::Participant) -> bool {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "registry_tests.rs"]
+mod tests;

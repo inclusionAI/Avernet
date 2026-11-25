@@ -44,25 +44,48 @@ its Protocol is given real signatures.
 from __future__ import annotations
 
 import inspect
+from agentclaw.community.api.bot_knowledge_service import (
+    BotKnowledgePublicationSelectionProtocol,
+    BotKnowledgeServiceProtocol,
+)
+from agentclaw.community.core.bot_knowledge.publication_selection import (
+    BotKnowledgePublicationSelection,
+)
+from agentclaw.community.core.bot_knowledge.service import BotKnowledgeService
 
-from agentclaw.community.api.space_management_service import SpaceManagementServiceProtocol
-from agentclaw.community.core.spaces.services.space_management_service import SpaceManagementService
+from agentclaw.community.api.space_management_service import (
+    SpaceManagementServiceProtocol,
+)
+from agentclaw.community.core.spaces.services.space_management_service import (
+    SpaceManagementService,
+)
 
 from agentclaw.community.api.cron_admin_service import CronAdminServiceProtocol
 from agentclaw.community.core.cron.services.cron_admin import CronAdminService
 
 import pytest
 from agentclaw.community.api.file_count_service import FileCountServiceProtocol
-from agentclaw.community.api.mcp_scoped_config_service import MCPScopedConfigServiceProtocol
+from agentclaw.community.api.engine_session_files import EngineSessionFilesProtocol
+from agentclaw.community.core.session_resources.engine_files import (
+    EngineSessionFilesService,
+)
+from agentclaw.community.api.mcp_scoped_config_service import (
+    MCPScopedConfigServiceProtocol,
+)
 from agentclaw.community.core.mcp.scoped_config_flow import MCPScopedConfigService
-from agentclaw.community.core.service_bot.services.file_count_service import FileCountService
+from agentclaw.community.core.service_bot.services.file_count_service import (
+    FileCountService,
+)
 from agentclaw.community.api.build_ignore_service import BuildIgnoreServiceProtocol
-from agentclaw.community.core.service_bot.services.build_ignore_service import BuildIgnoreService
+from agentclaw.community.core.service_bot.services.build_ignore_service import (
+    BuildIgnoreService,
+)
 
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
     BotDormantAuditServiceProtocol,
     BotDormantRecycleServiceProtocol,
+    BotDormantRecycleOperationProtocol,
 )
 from agentclaw.community.api.bot_runtime_projector import (
     BotRuntimeProjectorProtocol,
@@ -81,14 +104,14 @@ from agentclaw.community.api.bot_startup_script_service import (
 from agentclaw.community.api.bot_cli_tool_service import (
     BotCliToolServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
+from agentclaw.community.core.apply_engine.cli_tools.bot_service import (
     BotCliToolService,
 )
 from agentclaw.community.core.common_config.bot_config_service import (
     BotCommonConfigService,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.api.bot_config_manifest_service import (
     BotConfigManifestServiceProtocol,
@@ -104,7 +127,9 @@ from agentclaw.community.api.source_credential_service import (
 )
 from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.engine_version_service import EngineVersionServiceProtocol
-from agentclaw.community.core.bot_management.engine_version.service import EngineVersionService
+from agentclaw.community.core.bot_management.engine_version.service import (
+    EngineVersionService,
+)
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
@@ -116,6 +141,10 @@ from agentclaw.community.api.bot_app_grant_service import (
     BotAppGrantServiceProtocol,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.session_source_listing import SessionSourceListingProtocol
+from agentclaw.community.core.engine_runtime.session_listing import (
+    SessionSourceListingService,
+)
 from agentclaw.community.api.health_diagnosis_service import (
     HealthDiagnosisServiceProtocol,
 )
@@ -207,6 +236,22 @@ from agentclaw.community.api.draft_edit_lease_service import (
     DraftEditLeaseServiceProtocol,
 )
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
+from agentclaw.community.api.task.forum_interaction_service import (
+    ForumAuthorStatsServiceProtocol,
+    ForumInteractionServiceProtocol,
+)
+from agentclaw.community.api.task.forum_personal_center_activity_service import (
+    ForumPersonalCenterActivityServiceProtocol,
+)
+from agentclaw.community.core.task.forum.interaction.forum_author_stats_service import (
+    ForumAuthorStatsService,
+)
+from agentclaw.community.core.task.forum.interaction.forum_interaction_service import (
+    ForumInteractionService,
+)
+from agentclaw.community.core.task.forum.interaction.personal_center_activity_service import (
+    ForumPersonalCenterActivityService,
+)
 from agentclaw.community.core.bot_dormant.audit_service import DormantAuditService
 from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
@@ -229,8 +274,8 @@ from agentclaw.community.core.bot_management.services.bot_space_service import (
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
     BotStartupScriptService,
 )
-from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
-    BotConfigManifestApplyService,
+from agentclaw.community.core.apply_engine.run.service import (
+    ApplyRunService,
 )
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_service import (
     BotConfigManifestService,
@@ -265,6 +310,10 @@ from agentclaw.community.core.skill_center.services.installation_backfill_servic
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
+from agentclaw.community.core.task.task_context.task_artifact.artifact_object_file_service import (
+    TaskArtifactObjectFileService,
+    TaskArtifactObjectFileServiceProtocol,
+)
 from agentclaw.community.core.skill_center.services.direct_activation_service import (
     DirectActivationService,
 )
@@ -290,7 +339,9 @@ from agentclaw.community.core.skill_center.services.skill_center_reference_servi
 from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
     SkillCenterSyncService,
 )
-from agentclaw.community.core.skill_center.services.track_latest import TrackLatestService
+from agentclaw.community.core.skill_center.services.track_latest import (
+    TrackLatestService,
+)
 from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
     SpaceSkillGrantService,
 )
@@ -307,7 +358,9 @@ from agentclaw.community.core.skill_center.services.draft_edit_lease_service imp
     DraftEditLeaseService,
 )
 from agentclaw.community.core.market_favorites.services import MarketFavoriteService
-from agentclaw.community.core.bot_message_feedback.service import BotMessageFeedbackService
+from agentclaw.community.core.bot_message_feedback.service import (
+    BotMessageFeedbackService,
+)
 from agentclaw.community.core.tc_file_upload_integrations.coordinator import (
     TcResourceReadyCoordinator,
 )
@@ -342,7 +395,36 @@ from agentclaw.community.api.user_list_service import UserListServiceProtocol
 from agentclaw.community.core.user_list.service import UserListService
 
 
+from agentclaw.community.api.expert_catalog_service import ExpertCatalogServiceProtocol
+from agentclaw.community.core.expert_market.service import ExpertCatalogService
+from agentclaw.community.api.expert_creation_service import (
+    ExpertCreationServiceProtocol,
+)
+from agentclaw.community.core.expert_market.creation import ExpertCreationService
+
+from agentclaw.community.api.conversation_knowledge_service import (
+    ConversationKnowledgeServiceProtocol,
+)
+from agentclaw.community.core.knowledge_management.services.conversation import (
+    ConversationKnowledgeService,
+)
+
+from agentclaw.community.api.bot_overview_service import BotOverviewServiceProtocol
+from agentclaw.community.core.bot_overview.service import BotOverviewService
+from agentclaw.community.api.task.todo_template_service import (
+    TodoTemplateManagementServiceProtocol,
+)
+from agentclaw.community.core.task.todos.services.todo_template_service import (
+    TodoTemplateService,
+)
+
 _PAIRS = [
+    (TodoTemplateManagementServiceProtocol, TodoTemplateService),
+    (EngineSessionFilesProtocol, EngineSessionFilesService),
+    (BotOverviewServiceProtocol, BotOverviewService),
+    (ConversationKnowledgeServiceProtocol, ConversationKnowledgeService),
+    (BotKnowledgeServiceProtocol, BotKnowledgeService),
+    (BotKnowledgePublicationSelectionProtocol, BotKnowledgePublicationSelection),
     (UserListServiceProtocol, UserListService),
     (SpaceManagementServiceProtocol, SpaceManagementService),
     (CronAdminServiceProtocol, CronAdminService),
@@ -359,7 +441,7 @@ _PAIRS = [
     (BotStartupScriptServiceProtocol, BotStartupScriptService),
     (BotConfigManifestServiceProtocol, BotConfigManifestService),
     (SourceCredentialServiceProtocol, SourceCredentialService),
-    (BotConfigManifestApplyServiceProtocol, BotConfigManifestApplyService),
+    (ApplyRunServiceProtocol, ApplyRunService),
     (GenomeRegistryProtocol, GenomeRegistryService),
     (GenomePromotionServiceProtocol, GenomePromotionService),
     (BotCliToolServiceProtocol, BotCliToolService),
@@ -367,12 +449,14 @@ _PAIRS = [
     (LocalBotWorkflowServiceProtocol, LocalBotWorkflowService),
     (BotDormantActivateServiceProtocol, ActivateBotService),
     (BotDormantRecycleServiceProtocol, RecycleBotService),
+    (BotDormantRecycleOperationProtocol, RecycleBotService),
     (BotDormantAuditServiceProtocol, DormantAuditService),
     (BotInventoryBotPort, BotService),
     (DesktopBotInventoryPort, DesktopBotService),
     (EngineConfigServiceProtocol, EngineConfigService),
     (EngineVersionServiceProtocol, EngineVersionService),
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
+    (SessionSourceListingProtocol, SessionSourceListingService),
     (EngineConnectionServiceProtocol, EngineConnectionService),
     (HealthDiagnosisServiceProtocol, HealthDiagnosisService),
     (BotRuntimeProjectorProtocol, BotRuntimeProjector),
@@ -400,11 +484,20 @@ _PAIRS = [
     (SpaceMemberServiceProtocol, SpaceMemberService),
     (MarketFavoriteServiceProtocol, MarketFavoriteService),
     (BotMessageFeedbackServiceProtocol, BotMessageFeedbackService),
+    (ForumInteractionServiceProtocol, ForumInteractionService),
+    (ForumAuthorStatsServiceProtocol, ForumAuthorStatsService),
+    (
+        ForumPersonalCenterActivityServiceProtocol,
+        ForumPersonalCenterActivityService,
+    ),
     (ServicePublicationFacadeProtocol, ServicePublicationFacade),
     (ServiceEditLockServiceProtocol, ServiceEditLockService),
     (ServiceArtifactLineageReaderProtocol, ServiceArtifactLineageReader),
     (SpaceSkillOfflineServiceProtocol, SpaceSkillOfflineService),
     (AcliCliServiceProtocol, AcliCliService),
+    (TaskArtifactObjectFileServiceProtocol, TaskArtifactObjectFileService),
+    (ExpertCatalogServiceProtocol, ExpertCatalogService),
+    (ExpertCreationServiceProtocol, ExpertCreationService),
 ]
 
 _IDS = [f"{p.__name__}->{c.__name__}" for p, c in _PAIRS]

@@ -20,6 +20,7 @@ use bcs_service_api::port::{
     GroupSessionTokenClaims, GroupSessionTokenError, GroupSessionTokenPort,
     GroupSessionTokenScope, IssuedGroupSessionToken,
 };
+use bcs_service_api::types::authorization_snapshot::SessionAuthorizationSnapshot;
 use time::OffsetDateTime;
 
 #[derive(Clone, Copy)]
@@ -97,6 +98,7 @@ impl SessionService for FakeSessionService {
                     actor_id: "owned-bot".into(),
                     actor_kind: ActorKind::Bot,
                     name: None,
+                    avatar_url: None,
                     role: ParticipantRole::Driver,
                     tags: Vec::new(),
                     mode: ParticipantMode::Auto,
@@ -237,6 +239,20 @@ impl GroupSessionTokenPort for FakeTokenPort {
     }
 }
 
+
+#[derive(Clone, Copy)]
+struct FakeSessionSnapshots;
+
+#[async_trait]
+impl bcs_service_api::core::SessionAuthorizationCoreService for FakeSessionSnapshots {
+    async fn read_authorization_snapshot(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<SessionAuthorizationSnapshot>, bcs_service_api::ServiceError> {
+        Ok(None)
+    }
+}
+
 fn human_caller() -> AuthenticatedCaller {
     AuthenticatedCaller {
         tenant: Some("tenant-a".into()),
@@ -266,6 +282,7 @@ fn session_detail(session_id: &str, group_id: &str) -> SessionDetail {
             actor_id: "human_user-a".into(),
             actor_kind: ActorKind::Human,
             name: None,
+            avatar_url: None,
             role: ParticipantRole::Consultant,
             tags: Vec::new(),
             mode: ParticipantMode::Present,
@@ -287,11 +304,14 @@ async fn authorize_connect_reloads_the_exact_bound_session() {
     let service = GroupSessionConnectionServiceImpl::new(
         sessions.clone(),
         Arc::new(FakeTokenPort::new(TokenMode::Success)),
-    );
+        Arc::new(FakeSessionSnapshots),
+        None,
+        );
 
     let authorized = service
         .authorize_connect(AuthorizeGroupSessionConnection {
             binding: session_binding(),
+            view: bcs_service_api::application::v1::ConnectionView::HumanSelf,
         })
         .await
         .expect("current V1 session access should authorize connect");
@@ -313,11 +333,14 @@ async fn authorize_connect_rejects_a_deleted_session() {
     let service = GroupSessionConnectionServiceImpl::new(
         Arc::new(FakeSessionService::new(SessionMode::NotFound)),
         Arc::new(FakeTokenPort::new(TokenMode::Success)),
-    );
+        Arc::new(FakeSessionSnapshots),
+        None,
+        );
 
     let result = service
         .authorize_connect(AuthorizeGroupSessionConnection {
             binding: session_binding(),
+            view: bcs_service_api::application::v1::ConnectionView::HumanSelf,
         })
         .await;
 
@@ -332,11 +355,14 @@ async fn authorize_connect_rejects_revoked_v1_session_access() {
     let service = GroupSessionConnectionServiceImpl::new(
         Arc::new(FakeSessionService::new(SessionMode::Forbidden)),
         Arc::new(FakeTokenPort::new(TokenMode::Success)),
-    );
+        Arc::new(FakeSessionSnapshots),
+        None,
+        );
 
     let result = service
         .authorize_connect(AuthorizeGroupSessionConnection {
             binding: session_binding(),
+            view: bcs_service_api::application::v1::ConnectionView::HumanSelf,
         })
         .await;
 
@@ -351,11 +377,14 @@ async fn authorize_connect_rejects_a_session_moved_to_another_group() {
     let service = GroupSessionConnectionServiceImpl::new(
         Arc::new(FakeSessionService::new(SessionMode::OtherGroup)),
         Arc::new(FakeTokenPort::new(TokenMode::Success)),
-    );
+        Arc::new(FakeSessionSnapshots),
+        None,
+        );
 
     let result = service
         .authorize_connect(AuthorizeGroupSessionConnection {
             binding: session_binding(),
+            view: bcs_service_api::application::v1::ConnectionView::HumanSelf,
         })
         .await;
 
@@ -370,11 +399,14 @@ async fn authorize_connect_rejects_an_absent_bound_human() {
     let service = GroupSessionConnectionServiceImpl::new(
         Arc::new(FakeSessionService::new(SessionMode::HumanAbsent)),
         Arc::new(FakeTokenPort::new(TokenMode::Success)),
-    );
+        Arc::new(FakeSessionSnapshots),
+        None,
+        );
 
     let result = service
         .authorize_connect(AuthorizeGroupSessionConnection {
             binding: session_binding(),
+            view: bcs_service_api::application::v1::ConnectionView::HumanSelf,
         })
         .await;
 
@@ -389,11 +421,14 @@ async fn authorize_connect_accepts_v1_access_through_an_owned_bot() {
     let service = GroupSessionConnectionServiceImpl::new(
         Arc::new(FakeSessionService::new(SessionMode::OwnedBotOnly)),
         Arc::new(FakeTokenPort::new(TokenMode::Success)),
-    );
+        Arc::new(FakeSessionSnapshots),
+        None,
+        );
 
     let authorized = service
         .authorize_connect(AuthorizeGroupSessionConnection {
             binding: session_binding(),
+            view: bcs_service_api::application::v1::ConnectionView::HumanSelf,
         })
         .await
         .expect("the V1 Session service already authorized the owned Bot");
@@ -407,7 +442,12 @@ async fn authorize_connect_accepts_v1_access_through_an_owned_bot() {
 async fn issues_scope_only_from_human_and_authorized_session() {
     let sessions = Arc::new(FakeSessionService::new(SessionMode::Success));
     let tokens = Arc::new(FakeTokenPort::new(TokenMode::Success));
-    let service = GroupSessionConnectionServiceImpl::new(sessions.clone(), tokens.clone());
+    let service = GroupSessionConnectionServiceImpl::new(
+        sessions.clone(),
+        tokens.clone(),
+        Arc::new(FakeSessionSnapshots),
+        None,
+    );
 
     let result = service
         .issue_token(IssueGroupSessionConnectionToken {
@@ -439,7 +479,12 @@ async fn issues_scope_only_from_human_and_authorized_session() {
 async fn issues_a_tenantless_scope_for_a_tenantless_human() {
     let sessions = Arc::new(FakeSessionService::new(SessionMode::Success));
     let tokens = Arc::new(FakeTokenPort::new(TokenMode::Success));
-    let service = GroupSessionConnectionServiceImpl::new(sessions, tokens.clone());
+    let service = GroupSessionConnectionServiceImpl::new(
+        sessions,
+        tokens.clone(),
+        Arc::new(FakeSessionSnapshots),
+        None,
+    );
     let mut caller = human_caller();
     caller.tenant = None;
 
@@ -458,7 +503,12 @@ async fn issues_a_tenantless_scope_for_a_tenantless_human() {
 async fn rejects_every_non_human_caller_before_reading_session_or_signing() {
     let sessions = Arc::new(FakeSessionService::new(SessionMode::Success));
     let tokens = Arc::new(FakeTokenPort::new(TokenMode::Success));
-    let service = GroupSessionConnectionServiceImpl::new(sessions.clone(), tokens.clone());
+    let service = GroupSessionConnectionServiceImpl::new(
+        sessions.clone(),
+        tokens.clone(),
+        Arc::new(FakeSessionSnapshots),
+        None,
+    );
     let callers = [
         AuthenticatedCaller {
             tenant: Some("tenant-a".into()),
@@ -524,7 +574,12 @@ async fn rejects_every_non_human_caller_before_reading_session_or_signing() {
 async fn does_not_sign_when_session_access_is_forbidden() {
     let sessions = Arc::new(FakeSessionService::new(SessionMode::Forbidden));
     let tokens = Arc::new(FakeTokenPort::new(TokenMode::Success));
-    let service = GroupSessionConnectionServiceImpl::new(sessions, tokens.clone());
+    let service = GroupSessionConnectionServiceImpl::new(
+        sessions,
+        tokens.clone(),
+        Arc::new(FakeSessionSnapshots),
+        None,
+    );
 
     let result = service
         .issue_token(IssueGroupSessionConnectionToken {
@@ -544,7 +599,12 @@ async fn does_not_sign_when_session_access_is_forbidden() {
 async fn does_not_sign_when_session_is_missing() {
     let sessions = Arc::new(FakeSessionService::new(SessionMode::NotFound));
     let tokens = Arc::new(FakeTokenPort::new(TokenMode::Success));
-    let service = GroupSessionConnectionServiceImpl::new(sessions, tokens.clone());
+    let service = GroupSessionConnectionServiceImpl::new(
+        sessions,
+        tokens.clone(),
+        Arc::new(FakeSessionSnapshots),
+        None,
+    );
 
     let result = service
         .issue_token(IssueGroupSessionConnectionToken {
@@ -566,11 +626,15 @@ async fn maps_token_failures_to_closed_application_errors() {
     let unavailable = GroupSessionConnectionServiceImpl::new(
         sessions.clone(),
         Arc::new(FakeTokenPort::new(TokenMode::Unavailable)),
-    );
+        Arc::new(FakeSessionSnapshots),
+        None,
+        );
     let internal = GroupSessionConnectionServiceImpl::new(
         sessions,
         Arc::new(FakeTokenPort::new(TokenMode::Internal)),
-    );
+        Arc::new(FakeSessionSnapshots),
+        None,
+        );
 
     let command = || IssueGroupSessionConnectionToken {
         caller: human_caller(),
@@ -592,11 +656,15 @@ async fn verifies_binding_and_maps_invalid_connection_tokens() {
     let valid = GroupSessionConnectionServiceImpl::new(
         sessions.clone(),
         Arc::new(FakeTokenPort::new(TokenMode::Success)),
-    );
+        Arc::new(FakeSessionSnapshots),
+        None,
+        );
     let invalid = GroupSessionConnectionServiceImpl::new(
         sessions,
         Arc::new(FakeTokenPort::new(TokenMode::Invalid)),
-    );
+        Arc::new(FakeSessionSnapshots),
+        None,
+        );
 
     let binding = valid
         .verify_token(VerifyGroupSessionConnectionToken {

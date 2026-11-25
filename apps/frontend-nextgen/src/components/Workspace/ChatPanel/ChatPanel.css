@@ -1,0 +1,23 @@
+/*
+ * ChatLayout 的 ResizeHandle 默认占 12px 且视觉上透明，形成对话区与副屏之间的
+ * 大空隙。这里在 Workspace 单聊 ChatPanel 与协作群 GroupChatPane 内把它回正为
+ * 1px border token 分隔线，与左侧 Bot 列表/会话区的分隔样式一致；其它 SDK 副屏消费方不受影响。
+ */
+.workspace-chat-panel-layout > div:nth-child(2) {
+  flex-basis: 1px;
+  width: 1px;
+  background: hsl(var(--border));
+}
+.workspace-chat-panel-layout > div:nth-child(2) > div {
+  display: none;
+}
+
+/*
+ * 对话区(ChatArea,LayoutRoot 第一个子 div)默认为「左上/左下直角、右上/右下圆角」
+ * (SDK ChatLayout styles.js)。/workspace/chat 需求:右上角与左下角不用圆角——左下
+ * 本就是直角,这里把右上角的圆角一并取直,对话区四角全直角;选择器以单聊舞台的
+ * data-workspace-conversation 限定作用域,协作群 GroupChatPane 保持 SDK 默认形态。
+ */
+[data-workspace-conversation='true'] .workspace-chat-panel-layout > div:first-child {
+  border-radius: 0;
+}

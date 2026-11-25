@@ -108,7 +108,7 @@ class _RuntimeFakeBps:
 
 
 class _CredentialFakeBps:
-    """Search hits for which one bot has missing runtime credentials."""
+    """Search hits with varying persisted ext.passport.agent_code values."""
 
     def search_catalog_public_bots_by_keyword(
         self, *, search=None, page=1, page_size=20, caller=None, request_id="",
@@ -184,12 +184,12 @@ class TestCatalogKeywordDiscover(unittest.TestCase):
             {"B_OK", "B_UNKNOWN_FIELDS"},
         )
 
-    def test_agent_code_missing_candidates_are_filtered(self) -> None:
+    def test_agent_code_missing_candidates_are_not_filtered(self) -> None:
         d = CatalogKeywordBotDiscover(_CredentialFakeBps())
         res = d.search_by_keyword(keyword="bot", user_id="146836")
         self.assertEqual(
             {item["bot_id"] for item in res["items"]},
-            {"B_HAS_CODE"},
+            {"B_HAS_CODE", "B_EMPTY_CODE", "B_MISSING_CODE", "B_BCS_ONLY"},
         )
 
     def test_missing_runtime_fields_are_not_filtered(self) -> None:

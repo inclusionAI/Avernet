@@ -6,7 +6,7 @@ orchestration Task 14b routes through the notify layer and promises to
 keep ARCA-equivalent.
 
 MCP delivery now rides the ``DeviceSyncPlugin`` boundary: ``MCPSyncService``
-resolves a per-bot plugin via ``DeviceContextResolver.resolve_for_bot`` +
+resolves a per-bot plugin via ``DeviceContextResolver`` (Bot or binding) +
 ``DeviceSyncDispatcher.dispatch(ctx)`` and calls the (synchronous) MCP methods
 on it. Phase 2 Task 6 收口后 ``DeviceSyncPluginSupplier`` 已删,本测试改成
 monkey-patch dispatcher.dispatch 让其返回一个 recording plugin。
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from agentclaw.community.core.models.mcp import BotMCPInstallation
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.utils.env_utils import get_current_env
@@ -68,6 +69,11 @@ def _insert_bot(
     world, bot_id: str, *, owner_id: str = _OWNER,
     entity_id: str = _OWNER, entity_type: str = "staff",
 ) -> None:
+    binding_id = world.get(DeviceBindingRepository).insert_binding(
+        entity_id=entity_id, entity_type=entity_type, device_id=f"device-{bot_id}",
+        device_provider="local", env=get_current_env(), device_props={}, status="ACTIVE",
+        apply_reason="test seed", applied_by=owner_id,
+    )
     world.get(BotRepository).insert(
         {
             "bot_id": bot_id,
@@ -79,6 +85,7 @@ def _insert_bot(
             "entity_id": entity_id,
             "entity_type": entity_type,
             "creator_id": _OWNER,
+            "binding_id": binding_id,
         }
     )
 
@@ -113,10 +120,8 @@ def _configure_seams(world, *, has_mcp: bool = True) -> _RecordingPlugin:
     plugin = _RecordingPlugin(has_mcp)
     install_fake_sync_dispatcher(world, plugin=plugin)
 
-    # Also patch the resolver to return a fake DeviceContext for any bot —
-    # the test bot is inserted via the repo without a real binding, so the
-    # real ``resolve_for_bot`` would raise DeviceNotBoundError and skip
-    # the push entirely.
+    # Persist the Bot's binding above, while replacing external connection
+    # lookup for both locator-based and already-resolved binding delivery.
     install_fake_resolver(world)
     _ACTIVE["plugin"] = plugin
     return plugin

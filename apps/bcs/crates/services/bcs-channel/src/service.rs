@@ -31,6 +31,14 @@ impl BcsChannelService {
 
 #[async_trait]
 impl ChannelService for BcsChannelService {
+    async fn exclusive_session_speaker(
+        &self,
+        session: &Session,
+        group: &Group,
+    ) -> Result<Option<String>, ChannelUseCaseError> {
+        self.resolve_exclusive_session_speaker(session, group).await
+    }
+
     async fn handle_inbound(&self, mut msg: InboundMessage) -> Result<(), ChannelInboundError> {
         msg.conversation_type = normalize_required(&msg.conversation_type, "conversation_type")
             .map_err(|error| invalid_inbound(error))?
@@ -94,6 +102,21 @@ impl ChannelService for BcsChannelService {
                     msg.channel_type, account_ref
                 ),
             ));
+        };
+        let caller_ingress = match msg.caller_ingress.take() {
+            Some(ingress) if matches!(&binding.target, BindingTarget::Bot { .. }) => {
+                if ingress.actor().staff_no != msg.im_user_id
+                    || ingress.actor().actor_id != human_actor_id(&msg.im_user_id)
+                {
+                    return Err(ChannelInboundError::new(
+                        ChannelInboundFailureKind::InvalidInbound,
+                        false,
+                        "authenticated channel sender does not match resolved Human",
+                    ));
+                }
+                Some(ingress)
+            }
+            _ => None,
         };
         info!(
             channel_type = %binding.channel_type,
@@ -171,6 +194,7 @@ impl ChannelService for BcsChannelService {
                 );
                 return Ok(());
             }
+            let caller_execution = self.caller_execution_for(&binding, &msg)?;
             let ctx = self
                 .resolve_inbound_context(&binding, &msg, &actor_id)
                 .await
@@ -194,6 +218,12 @@ impl ChannelService for BcsChannelService {
             );
             self.maybe_execute_stale_reset(&ctx, &msg).await;
 
+            if caller_execution.as_ref().is_some_and(|execution| execution.legacy_enabled)
+                && ctx.state_machine_trigger
+            {
+                return Err(ChannelInboundError::new(ChannelInboundFailureKind::InvalidInbound, false,
+                    "caller execution does not support state-machine targets"));
+            }
             if ctx.state_machine_trigger {
                 return self
                     .start_state_machine_from_inbound(&ctx, &msg, &actor_id)
@@ -292,6 +322,9 @@ impl ChannelService for BcsChannelService {
             let outcome = self
                 .message_flow
                 .handle_web_send(WebSendCommand {
+                    caller_execution,
+                    caller_ingress,
+                    speaking_lease: None,
                     caller,
                     group_id: dispatch_group_id.clone(),
                     session_id: Some(dispatch_session_id.clone()),
@@ -472,6 +505,7 @@ impl ChannelService for BcsChannelService {
                     raw_payload: msg.raw_payload.clone(),
                     render_hint: msg.render_hint,
                     source_im_message_id: msg.source_im_message_id.clone(),
+                    caller_dispatch: msg.caller_dispatch,
                 })
                 .await
             {
@@ -539,7 +573,7 @@ impl ChannelService for BcsChannelService {
         };
         let provider = self.provider_for(&cmd.channel_type)?;
         provider
-            .validate_config(&cmd.config)
+            .validate_binding_config(&cmd.config, &target)
             .map_err(provider_error)?;
         validate_group_chat_session_config(&cmd.config)?;
         validate_group_context_delivery_config(&cmd.config)?;
@@ -677,7 +711,7 @@ impl ChannelService for BcsChannelService {
             return Err(ChannelUseCaseError::NotFound(id.to_string()));
         };
         let provider = self.provider_for(&binding.channel_type)?;
-        provider.validate_config(&config).map_err(provider_error)?;
+        provider.validate_binding_config(&config, &binding.target).map_err(provider_error)?;
         validate_group_chat_session_config(&config)?;
         validate_group_context_delivery_config(&config)?;
         validate_forward_sender_identity_config(&binding.target, &config)?;

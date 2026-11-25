@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
+from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal, require_principal
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     CallerIdentityConflictError,
@@ -15,6 +19,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     UserIdDep,
+    caller_owner_id,
     refuse_app_only_caller,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -34,6 +39,19 @@ from agentclaw.community.api.caller_credential import (
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.auth import AuthRequestContext
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.file_access import authorize_file_list
+from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.api.human_bot_friendship_service import HumanBotFriendshipServiceProtocol
+from agentclaw.community.core.bot_management.addressing import (
+    BotAddressResolverProtocol,
+)
+from agentclaw.community.core.bot_management.errors import (
+    BotAddressConflictError,
+    BotAddressNotFoundError,
+    BotLookupAmbiguousError,
+)
+from agentclaw.community.core.engine_runtime.errors import EngineResourceNotFoundError
 
 
 token_router = APIRouter(
@@ -43,12 +61,13 @@ token_router = APIRouter(
 )
 
 
-def _auth_request(request: Request) -> AuthRequestContext:
+def _auth_request(request: Request, principal: Principal) -> AuthRequestContext:
     return AuthRequestContext(
         cookies=dict(request.cookies),
         headers=dict(request.headers),
         query_params=dict(request.query_params),
         base_url=str(request.base_url),
+        verified_actor_user_id=caller_owner_id(principal),
     )
 
 
@@ -76,6 +95,28 @@ async def get_bot_iam_token(
     bot_id: BotIdPath,
     request: Request,
     user_id: UserIdDep,
+    principal: Annotated[Principal, Depends(require_principal)],
+    owner_id: str | None = Query(
+        default=None,
+        min_length=1,
+        description=(
+            "Bot entity, current-owner or historical-owner locator for an "
+            "explicit friend IAM request; defaults to the acting user."
+        ),
+    ),
+    f_user_id: str | None = Query(default=None, description="Friend-chat user; an empty value selects the Bot's service runtime."),
+    session_id: str | None = Query(default=None, min_length=1, description="Required with f_user_id: an owned friend session identifier."),
+    session_key: str | None = Query(
+        default=None,
+        min_length=1,
+        description="Current chat session key used by TeClaw Caller credential refresh.",
+    ),
+    legacy_session_key: str | None = Query(
+        default=None,
+        min_length=1,
+        alias="sessionKey",
+        description="Compatibility alias for session_key.",
+    ),
     stage: RuntimeStage = Query(
         default=RuntimeStage.DRAFT,
         description="Bot runtime stage whose Caller identity may be prepared.",
@@ -84,10 +125,56 @@ async def get_bot_iam_token(
         default=None,
         description="Entity identifier used to resolve the Bot unambiguously.",
     ),
+    device_uuid: str | None = Query(
+        default=None,
+        description="Opaque device identifier for exact JIT replica selection within the authorized runtime binding.",
+    ),
     service: CallerIamTokenServiceProtocol = Injected(CallerIamTokenServiceProtocol),
+    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    bot_addresses: BotAddressResolverProtocol = Injected(BotAddressResolverProtocol),
 ) -> Envelope[IamToken]:
     """Return the IAM token and prepare Caller identity when the Bot requires it."""
     normalized_entity_id = (entity_id or "").strip() or None
+    f_user_id = f_user_id or None
+    friend_kwargs = {}
+    if f_user_id is not None:
+        owner_id = owner_id or user_id
+        # Reading someone else's sessions does not authorize installing the
+        # owner's IAM token in that other person's Caller instance.
+        if f_user_id != user_id or not session_id:
+            raise EngineResourceNotFoundError("friend IAM requires the caller's own session")
+        resolved_stage = await authorize_file_list(
+            request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
+            owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+            relay=relay, friendships=friendships, expert=expert,
+        )
+        stage = RuntimeStage(resolved_stage)
+        # The friend locator was already authorized; resolve it through the
+        # transfer-aware address seam and do not let a second client-supplied
+        # entity selector switch the token installation target.
+        try:
+            bot = await asyncio.to_thread(
+                bot_addresses.resolve,
+                bot_id=bot_id,
+                legacy_owner_id=owner_id,
+            )
+        except (
+            BotAddressConflictError,
+            BotAddressNotFoundError,
+            BotLookupAmbiguousError,
+        ):
+            raise EngineResourceNotFoundError("friend Bot identity is unavailable")
+        normalized_entity_id = bot.entity_id
+        friend_kwargs = {"friend_user_id": f_user_id, "session_key": session_id}
+    else:
+        # ``session_id`` was the first OpenAPI spelling and remains compatible.
+        # Prefer the legacy IAM contract's canonical snake_case name, followed
+        # by its camelCase alias, without weakening friend-session validation.
+        effective_session_key = session_key or legacy_session_key or session_id
+        if effective_session_key is not None:
+            friend_kwargs = {"session_key": effective_session_key}
     # Every user owns a Bot named ``default``.  When the browser has no explicit
     # chat target yet, scope that otherwise-ambiguous identifier to the verified
     # user instead of attempting a tenant-wide unique lookup.
@@ -95,7 +182,7 @@ async def get_bot_iam_token(
         normalized_entity_id = user_id
     result = await service.get_iam_token(
         iam_token=request.cookies.get("IAM_TOKEN") or "",
-        auth_request=_auth_request(request),
+        auth_request=_auth_request(request, principal),
         bot_id=bot_id,
         stage=CoreCallerIdentityStage(stage.value),
         # Published runtime selection is server-owned.  The runtime updater
@@ -103,6 +190,7 @@ async def get_bot_iam_token(
         publish_id=None,
         entity_id=normalized_entity_id,
         is_test_exchange=False,
+        **friend_kwargs,
     )
     _raise_for_error(result.error)
     return envelope(IamToken(iam_token=result.iam_token), request)

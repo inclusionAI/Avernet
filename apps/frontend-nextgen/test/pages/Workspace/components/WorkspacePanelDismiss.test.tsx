@@ -115,3 +115,9 @@ describe('聊天右侧面板的外部点击', () => {
     expect(screen.getByLabelText('左侧列表')).toBeInTheDocument();
   });
 });
+
+it('协作群文件侧栏以「会话文件面板」作为区域与拖宽手柄的可访问名称', () => {
+  render(<SessionFilesSidebar sessionId="s1" participants={[]} onClose={jest.fn()} />);
+  expect(screen.getByRole('complementary', { name: '会话文件面板' })).toBeInTheDocument();
+  expect(screen.getByRole('separator', { name: '调整会话文件面板宽度' })).toBeInTheDocument();
+});

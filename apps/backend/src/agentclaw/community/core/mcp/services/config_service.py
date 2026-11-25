@@ -109,6 +109,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
     def get_bot_override(
         self, *, bot_id: str, owner_id: str, server_code: str
     ) -> dict[str, Any] | None:
+        """Read at the stable Bot entity coordinate (legacy name: owner_id)."""
         return self.bot_mcp_config_repo.get_by_bot_and_server_code(
             bot_id=bot_id, owner_id=owner_id, server_code=server_code
         )
@@ -138,7 +139,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
         return {"valid": True, "error": None}
 
     def validate_scoped_headers(
-        self, *, server_code: str, entries: tuple[tuple[str, str], ...]
+        self, *, server_code: str, entries: tuple[tuple[str, str | None], ...]
     ) -> dict[str, Any]:
         """Reject invalid and platform-managed names in an aggregate snapshot."""
         managed = {
@@ -149,9 +150,9 @@ class MCPConfigService(MCPConfigServiceProtocol):
             normalized_name = name.strip()
             if not normalized_name or len(normalized_name) > 256:
                 return {"valid": False, "error": "Invalid MCP Header name"}
-            if len(value) > 2000:
+            if value is not None and len(value) > 2000:
                 return {"valid": False, "error": f"Header value too long: {name}"}
-            if normalized_name.lower() in managed:
+            if value is not None and normalized_name.lower() in managed:
                 return {"valid": False, "error": f"Platform-managed Header: {normalized_name}"}
         return {"valid": True, "error": None}
 
@@ -187,6 +188,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
         bot_config: dict[str, Any],
         user_config: dict[str, Any],
         engine_type: str | None,
+        allow_custom_url: bool = False,
     ) -> dict[str, Any]:
         """Validate a prospective aggregate snapshot without reading old rows."""
         return self._validate_effective_config(
@@ -196,6 +198,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
             inherited_config=user_config,
             engine_type=engine_type,
             strict_user_selection=True,
+            allow_custom_url=allow_custom_url,
         )
 
     def validate_user_config_update(
@@ -346,6 +349,7 @@ class MCPConfigService(MCPConfigServiceProtocol):
         inherited_config: dict[str, Any],
         engine_type: str | None,
         strict_user_selection: bool = False,
+        allow_custom_url: bool = False,
     ) -> dict[str, Any]:
         if not config and (detail.get("runMode") or detail.get("run_mode")) == "LOCAL":
             return {"valid": True, "error": None}
@@ -369,6 +373,9 @@ class MCPConfigService(MCPConfigServiceProtocol):
                     "valid": False,
                     "error": f"Header 由平台托管，Manifest 不可覆盖: {', '.join(conflicts)}",
                 }
+
+        if allow_custom_url and effective_mcp_url_override(inherited_config, config):
+            return {"valid": True, "error": None}
 
         endpoint_env = config.get(
             "endpoint_env", inherited_config.get("endpoint_env", "PROD")

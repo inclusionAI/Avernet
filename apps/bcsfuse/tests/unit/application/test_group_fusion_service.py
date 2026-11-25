@@ -11,13 +11,13 @@ from __future__ import annotations
 import pytest
 from datetime import datetime
 
-from src.domain.models.fusion_request import FusionRequest, FuseOptions
-from src.domain.models.fusion_result import (
+from app.domain.models.fusion_request import FusionRequest, FuseOptions
+from app.domain.models.fusion_result import (
     FusionResult,
     Perspective,
     Recommendation,
 )
-from src.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
+from app.domain.services.perspective_provider import PerspectiveProvider, PerspectiveContext
 
 
 # =============================================================================
@@ -92,12 +92,12 @@ class TestGroupFusionServiceModule:
         """测试 group_fusion_service 模块存在"""
         import importlib
 
-        module = importlib.import_module("src.application.services.group_fusion_service")
+        module = importlib.import_module("app.application.services.group_fusion_service")
         assert module is not None
 
     def test_service_class_exists(self):
         """测试 GroupFusionService 类存在"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         assert GroupFusionService is not None
 
@@ -111,7 +111,7 @@ class TestGroupFusionServiceBasic:
 
     def test_service_accepts_provider(self):
         """测试服务接受 Provider 注入"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -120,7 +120,7 @@ class TestGroupFusionServiceBasic:
 
     def test_service_fuse_returns_result(self):
         """测试 fuse 返回 FusionResult"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -138,7 +138,7 @@ class TestGroupFusionServiceBasic:
 
     def test_service_generates_fusion_id(self):
         """测试服务生成 fusion_id"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -163,7 +163,7 @@ class TestParticipantResolution:
 
     def test_service_calls_provider_for_each_participant(self):
         """测试为每个 participant 调用 provider"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -179,7 +179,7 @@ class TestParticipantResolution:
 
     def test_service_collects_perspectives_for_all_participants(self):
         """测试为所有 participant 收集视角"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         responses = {
             "dba": Perspective(
@@ -224,7 +224,7 @@ class TestDriverBotResolution:
 
     def test_explicit_driver_bot_id(self):
         """测试显式指定 driver_bot_id"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -241,7 +241,7 @@ class TestDriverBotResolution:
 
     def test_implicit_driver_bot_first_participant(self):
         """测试隐式使用第一个 participant 作为 driver"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -265,7 +265,7 @@ class TestPartialSuccess:
 
     def test_partial_success_when_one_times_out(self):
         """测试一个 participant 超时时部分成功"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         responses = {
             "dba": Perspective(
@@ -300,7 +300,7 @@ class TestPartialSuccess:
 
     def test_partial_success_when_one_fails(self):
         """测试一个 participant 失败时部分成功"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         responses = {
             "dba": Perspective(
@@ -334,7 +334,7 @@ class TestPartialSuccess:
 
     def test_all_success_not_partial(self):
         """测试所有成功时不是部分成功"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         responses = {
             "dba": Perspective(
@@ -368,7 +368,7 @@ class TestRecommendation:
 
     def test_recommendation_generated_when_all_success(self):
         """测试全部成功时生成 recommendation"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         responses = {
             "dba": Perspective(
@@ -396,7 +396,7 @@ class TestRecommendation:
 
     def test_no_recommendation_when_disabled(self):
         """测试禁用时无 recommendation"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -413,7 +413,7 @@ class TestRecommendation:
 
     def test_recommendation_decision_based_on_perspectives(self):
         """测试 recommendation 决策基于 perspectives"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         responses = {
             "dba": Perspective(
@@ -460,7 +460,7 @@ class TestTiming:
 
     def test_timing_populated(self):
         """测试计时信息填充"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -479,7 +479,7 @@ class TestTiming:
 
     def test_timing_order_correct(self):
         """测试开始时间早于结束时间"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -503,7 +503,7 @@ class TestGroupValidation:
 
     def test_group_id_in_result(self):
         """测试 group_id 出现在结果中"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -527,7 +527,7 @@ class TestWarningsAndErrors:
 
     def test_warnings_include_timed_out_participants(self):
         """测试警告包含超时 participant"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         responses = {
             "dba": Perspective(
@@ -553,7 +553,7 @@ class TestWarningsAndErrors:
 
     def test_warnings_include_failed_participants(self):
         """测试警告包含失败 participant"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         responses = {
             "dba": Perspective(
@@ -595,7 +595,7 @@ class TestFusionModeDispatch:
 
     def test_g1_mode_uses_original_logic(self):
         """测试 G1 模式使用原有逻辑"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -616,7 +616,7 @@ class TestFusionModeDispatch:
 
     def test_g2_mode_dispatches_to_conflict_alignment(self):
         """测试 G2 模式分发到冲突对齐逻辑"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -638,7 +638,7 @@ class TestFusionModeDispatch:
 
     def test_default_fusion_mode_is_agent(self):
         """测试默认模式是 agent（G1）"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -660,7 +660,7 @@ class TestG1G2Isolation:
 
     def test_g1_not_polluted_by_g2_fields(self):
         """测试 G1 不被 G2 字段污染"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -685,7 +685,7 @@ class TestG1G2Isolation:
 
     def test_g1_g2_results_are_independent(self):
         """测试 G1 和 G2 结果相互独立"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -720,7 +720,7 @@ class TestG2WithConflictAlignmentService:
 
     def test_g2_uses_conflict_alignment_service_when_injected(self):
         """测试 G2 使用注入的 ConflictAlignmentService"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
         from unittest.mock import Mock
 
         provider = FakePerspectiveProvider()
@@ -768,7 +768,7 @@ class TestG2PartialSuccess:
 
     def test_g2_partial_success_propagates(self):
         """测试 G2 partial_success 正确传播"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         # 创建一个会有失败视角的 provider
         responses = {
@@ -815,7 +815,7 @@ class TestG5ModeDispatch:
 
     def test_g5_mode_dispatches_to_expert_diagnosis(self):
         """测试 G5 模式分发到专家会诊逻辑"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -839,7 +839,7 @@ class TestG5ModeDispatch:
 
     def test_g5_result_has_g5_fields_populated(self):
         """测试 G5 结果包含 G5 字段"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -866,7 +866,7 @@ class TestG1G2G5ThreeWayIsolation:
 
     def test_g1_not_polluted_by_g5_fields(self):
         """测试 G1 不被 G5 字段污染"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -894,7 +894,7 @@ class TestG1G2G5ThreeWayIsolation:
 
     def test_g2_not_polluted_by_g5_fields(self):
         """测试 G2 不被 G5 字段污染"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -923,7 +923,7 @@ class TestG1G2G5ThreeWayIsolation:
 
     def test_g5_only_activates_in_expert_diagnosis_mode(self):
         """测试 G5 字段只在 expert_diagnosis 模式生效"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -954,7 +954,7 @@ class TestG1G2G5ThreeWayIsolation:
 
     def test_g1_g2_g5_results_are_independent(self):
         """测试 G1/G2/G5 结果相互独立"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         provider = FakePerspectiveProvider()
         service = GroupFusionService(provider=provider)
@@ -987,7 +987,7 @@ class TestG5WithExpertDiagnosisService:
 
     def test_g5_uses_expert_diagnosis_service_when_injected(self):
         """测试 G5 使用注入的 ExpertDiagnosisService"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
         from unittest.mock import Mock
 
         provider = FakePerspectiveProvider()
@@ -1037,7 +1037,7 @@ class TestG5PartialSuccess:
 
     def test_g5_partial_success_propagates(self):
         """测试 G5 partial_success 正确传播"""
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
 
         # 创建一个会有失败视角的 provider
         responses = {
@@ -1083,20 +1083,20 @@ class TestG9FusionEnableFiltering:
     """G9 模式 fusion_enable 检查（直接测 _check_fusion_enabled）"""
 
     def _make_service(self, worker_store=None):
-        from src.application.services.group_fusion_service import GroupFusionService
+        from app.application.services.group_fusion_service import GroupFusionService
         return GroupFusionService(provider=FakePerspectiveProvider(), worker_store=worker_store)
 
     def _make_store(self):
-        from src.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
+        from app.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
         return InMemoryWorkerRegistryStore()
 
     def _create_worker(self, store, worker_id: str, fusion_enable: bool = False):
-        from src.domain.models.worker import (
+        from app.domain.models.worker import (
             Worker, WorkerType, WorkerIdentity, WorkerState,
             Availability, TrustLevel, Capability, CapabilityLevel,
         )
-        from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
-        from src.domain.models.worker_config import WorkerConfig
+        from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
+        from app.domain.models.worker_config import WorkerConfig
 
         worker = Worker(
             id=worker_id,

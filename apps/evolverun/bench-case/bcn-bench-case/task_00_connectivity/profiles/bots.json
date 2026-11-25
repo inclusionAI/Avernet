@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "name": "BCN 两成员连通性团队",
+  "port_start": 32001,
+  "port_step": 10,
+  "scopes": "production",
+  "bots": [
+    {
+      "source": "manager",
+      "profile": "manager",
+      "name": "连通性协调员",
+      "summary": "接收群目标，委托群内 Worker，核对实际回复并提交任务结果。",
+      "domains": "coordination",
+      "skills": "task-delegation,result-collection",
+      "runtime": {
+        "type": "openclaw"
+      }
+    },
+    {
+      "source": "worker",
+      "profile": "worker",
+      "name": "连通性执行员",
+      "summary": "接收 BCN 委托，按要求完成简短任务并返回实际结果。",
+      "domains": "task-execution",
+      "skills": "instruction-following,result-reporting",
+      "runtime": {
+        "type": "openclaw"
+      }
+    }
+  ],
+  "entry_member": "manager"
+}

@@ -25,6 +25,7 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceContext,
     DeviceNotBoundError,
     UnknownProviderError,
+    verify_runtime_binding,
 )
 
 
@@ -80,6 +81,9 @@ class DeviceContextResolver:
             raise DeviceNotBoundError(
                 f"DeviceContextResolver: no active binding for bot={bot_id}"
             )
+        verify_runtime_binding(
+            bot_id=bot_id, user_id=user_id, binding_id=binding.id, device_id=binding.device_id,
+        )
 
         provider = binding.device_provider
         if provider not in self._builders:
@@ -100,6 +104,7 @@ class DeviceContextResolver:
             provider=provider,
             conn_info=conn_info,
             binding_id=binding.id,
+            device_id=binding.device_id,
             bot_id=bot_id,
             user_id=user_id,
             bot_type=bot_type,
@@ -137,6 +142,9 @@ class DeviceContextResolver:
             raise DeviceNotBoundError(
                 f"DeviceContextResolver: binding_id={binding_id} not found"
             )
+        verify_runtime_binding(
+            bot_id=bot_id, user_id=operator_id, binding_id=binding.id, device_id=binding.device_id,
+        )
 
         provider = binding.device_provider
         if provider not in self._builders:
@@ -156,6 +164,7 @@ class DeviceContextResolver:
             provider=provider,
             conn_info=conn_info,
             binding_id=binding.id,
+            device_id=binding.device_id,
             bot_id=bot_id,
             user_id=operator_id,
             bot_type=bot_type,
@@ -180,6 +189,9 @@ class DeviceContextResolver:
             raise DeviceNotBoundError(
                 f"DeviceContextResolver: binding_id={binding_id} not found"
             )
+        verify_runtime_binding(
+            bot_id=bot_id, user_id=operator_id, binding_id=binding.id, device_id=binding.device_id,
+        )
 
         provider = binding.device_provider
         if provider not in self._builders:
@@ -191,6 +203,8 @@ class DeviceContextResolver:
         # 发布态 service binding 不挂在 Bot 主记录上，按业务 Bot 和 owner
         # 获取 bot_type 与 active_engine。
         bot = self._bot_repository.get_by_id_and_owner(bot_id, operator_id)
+        if bot is None:
+            bot = self._bot_repository.get_by_id_and_entity(bot_id, operator_id)
         bot_type = (bot or {}).get("bot_type") or ""
 
         # Desktop 需要完整代理地址；Arca/local 也由各自 builder 生成连接信息。
@@ -226,6 +240,7 @@ class DeviceContextResolver:
             provider=provider,
             conn_info=self._normalize_schema(conn_info, provider),
             binding_id=binding.id,
+            device_id=binding.device_id,
             bot_id=bot_id,
             user_id=operator_id,
             bot_type=bot_type,

@@ -30,8 +30,11 @@ _CANONICAL_ZIP_DATE = (1980, 1, 1, 0, 0, 0)
 class SkillPackageInvalidError(ValueError):
     """A package is malformed or violates the shared Skill layout contract."""
 
-    def __init__(self, reason: str = "invalid_package") -> None:
+    def __init__(
+        self, reason: str = "invalid_package", detail: str | None = None
+    ) -> None:
         self.reason = reason
+        self.detail = detail
         super().__init__(reason)
 
 
@@ -49,6 +52,10 @@ class SkillPathInvalidError(SkillPackageInvalidError):
 
 class SkillPackageTooLargeError(ValueError):
     """A package exceeds a documented compressed or expanded limit."""
+
+    def __init__(self, reason: str = "too_large") -> None:
+        self.reason = reason
+        super().__init__(reason)
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,7 +137,7 @@ class SkillPackageValidator:
         require_wrapper_name_match: bool,
     ) -> ValidatedSkillPackage:
         if len(package) > MAX_COMPRESSED_BYTES:
-            raise SkillPackageTooLargeError()
+            raise SkillPackageTooLargeError("compressed_too_large")
         try:
             archive = zipfile.ZipFile(io.BytesIO(package))
         except (zipfile.BadZipFile, UnicodeDecodeError) as exc:
@@ -154,11 +161,13 @@ class SkillPackageValidator:
                 if normalized_path in seen:
                     raise SkillPackageInvalidError("duplicate_file_path")
                 if info.file_size > MAX_FILE_BYTES:
-                    raise SkillPackageTooLargeError()
+                    raise SkillPackageTooLargeError("file_too_large")
                 seen.add(normalized_path)
                 total += info.file_size
-                if len(seen) > MAX_FILES or total > MAX_EXPANDED_BYTES:
-                    raise SkillPackageTooLargeError()
+                if len(seen) > MAX_FILES:
+                    raise SkillPackageTooLargeError("too_many_files")
+                if total > MAX_EXPANDED_BYTES:
+                    raise SkillPackageTooLargeError("expanded_too_large")
                 try:
                     content = archive.read(info)
                 except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
@@ -211,17 +220,19 @@ class SkillPackageValidator:
             if normalized_path in seen:
                 raise SkillPackageInvalidError("duplicate_file_path")
             if len(content) > MAX_FILE_BYTES:
-                raise SkillPackageTooLargeError()
+                raise SkillPackageTooLargeError("file_too_large")
             seen.add(normalized_path)
             total += len(content)
-            if len(seen) > MAX_FILES or total > MAX_EXPANDED_BYTES:
-                raise SkillPackageTooLargeError()
+            if len(seen) > MAX_FILES:
+                raise SkillPackageTooLargeError("too_many_files")
+            if total > MAX_EXPANDED_BYTES:
+                raise SkillPackageTooLargeError("expanded_too_large")
             entries.append((normalized_path, content))
         canonical_zip = self._build_canonical_zip(
             sorted(entries, key=lambda item: item[0].encode("utf-8"))
         )
         if len(canonical_zip) > MAX_COMPRESSED_BYTES:
-            raise SkillPackageTooLargeError()
+            raise SkillPackageTooLargeError("compressed_too_large")
         return canonical_zip
 
     def _validate_entries(
@@ -235,12 +246,25 @@ class SkillPackageValidator:
         skill_indexes = [
             index
             for index, (path, _content) in enumerate(normalized_entries)
-            if path.split("/")[-1] == "SKILL.md"
-            or (
-                allow_legacy_local_manifest
-                and path.split("/")[-1].lower() == "skill.md"
-            )
+            if path.split("/")[-1].lower() == "skill.md"
         ]
+        # Only a root manifest (possibly inside one transport wrapper) defines
+        # identity. Nested manifests are package content, not additional Skills.
+        root_indexes = [
+            index for index in skill_indexes if "/" not in normalized_entries[index][0]
+        ]
+        roots = {path.split("/")[0] for path, _content in normalized_entries}
+        if not root_indexes and len(roots) == 1:
+            root_indexes = [
+                index
+                for index in skill_indexes
+                if normalized_entries[index][0].count("/") == 1
+            ]
+        if not root_indexes and len(skill_indexes) == 1 and len(roots) > 1:
+            raise SkillPackageInvalidError("invalid_wrapper")
+        if len(root_indexes) > 1 or (skill_indexes and not root_indexes):
+            raise SkillManifestMultipleError("multiple_skill_files")
+        skill_indexes = root_indexes
         skill_files = [normalized_entries[index] for index in skill_indexes]
         if not skill_files:
             raise SkillManifestMissingError("missing_skill_file")
@@ -249,9 +273,9 @@ class SkillPackageValidator:
 
         skill_path, markdown = skill_files[0]
         if skill_path.split("/")[-1] != "SKILL.md":
-            canonical_skill_path = "/".join(
-                [*skill_path.split("/")[:-1], "SKILL.md"]
-            )
+            if not allow_legacy_local_manifest:
+                raise SkillManifestMissingError("missing_skill_file")
+            canonical_skill_path = "/".join([*skill_path.split("/")[:-1], "SKILL.md"])
             normalized_entries[skill_indexes[0]] = (canonical_skill_path, markdown)
             skill_path = canonical_skill_path
         entries = normalized_entries
@@ -282,20 +306,21 @@ class SkillPackageValidator:
                 metadata = self._metadata_parser.parse_legacy_upload_content(text) or {}
                 config = ()
         except SkillManifestError as exc:
-            raise SkillPackageInvalidError("invalid_metadata") from exc
+            raise SkillPackageInvalidError("invalid_metadata", exc.code.value) from exc
 
         name = metadata.get("name")
         description = metadata.get("description")
         if not isinstance(name, str) or not isinstance(description, str):
             raise SkillPackageInvalidError("invalid_metadata")
         name, description = name.strip(), description.strip()
-        if (
-            not name
-            or not description
-            or not _SKILL_NAME.fullmatch(name)
-            or name.lower() in _RESERVED_SKILL_NAMES
-        ):
-            raise SkillPackageInvalidError("invalid_metadata")
+        if not name:
+            raise SkillPackageInvalidError("invalid_metadata", "EMPTY_NAME")
+        if not description:
+            raise SkillPackageInvalidError("invalid_metadata", "EMPTY_DESCRIPTION")
+        if not _SKILL_NAME.fullmatch(name):
+            raise SkillPackageInvalidError("invalid_metadata", "INVALID_NAME")
+        if name.lower() in _RESERVED_SKILL_NAMES:
+            raise SkillPackageInvalidError("invalid_metadata", "RESERVED_NAME")
         if require_wrapper_name_match and wrapper and wrapper != name:
             raise SkillPackageInvalidError("wrapper_name_mismatch")
         if wrapper is not None and any(
@@ -314,7 +339,7 @@ class SkillPackageValidator:
         )
         canonical_zip = self._build_canonical_zip(normalized)
         if len(canonical_zip) > MAX_COMPRESSED_BYTES:
-            raise SkillPackageTooLargeError()
+            raise SkillPackageTooLargeError("compressed_too_large")
         return ValidatedSkillPackage(
             name=name,
             description=description,

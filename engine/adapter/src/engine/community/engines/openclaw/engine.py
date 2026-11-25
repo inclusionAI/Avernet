@@ -104,6 +104,7 @@ class OpenClawEngine(BaseEngine):
             Capability.SKILLS_CLEAN_SYMLINKS,
             Capability.SKILLS_CENTER_ENSURE,
             Capability.SKILLS_LOCAL_PACKAGE_APPLY,
+            Capability.SKILLS_LOCAL_PACKAGE_PARALLEL_TARGETS,
             # CLI tools (W9) — model-callable binaries placed by a manifest.
             Capability.CLI_INSTALL,
             Capability.CLI_DELETE,
@@ -144,6 +145,7 @@ class OpenClawEngine(BaseEngine):
             Capability.CRON_HISTORY,
             # Model
             Capability.MODEL_LIST,
+            Capability.MODEL_DEFAULT_GET,
             Capability.MODEL_SWITCH,
             # Default config
             Capability.DEFAULT_CONFIG_GET,

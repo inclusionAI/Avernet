@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import TaskCallbackData, TaskNode
@@ -23,6 +25,39 @@ class BotSendResult:
     session_id: str | None = None
 
 
+class BotSessionRuntimeStatus(BaseModel):
+    """Live Engine observation, scoped to one run; never Relay task state."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    session_id: str
+    found: bool
+    run_id: str | None = None
+    state: Literal["starting", "running", "final", "error", "aborted"] | None = None
+    started_at: int | None = Field(default=None, ge=0)
+    last_event_seq: int | None = Field(default=None, ge=0)
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def validate_observation(self) -> "BotSessionRuntimeStatus":
+        if self.found and (
+            not self.run_id or self.state is None
+            or self.started_at is None or self.last_event_seq is None
+        ):
+            raise ValueError("A found runtime requires run identity, state and sequence")
+        if not self.found and not self.reason:
+            raise ValueError("A missing observation requires a reason")
+        return self
+
+
+class OpenApiBotError(RuntimeError):
+    """A Bot port operation failed at its external delivery boundary.
+
+    Implementations may expose more specific subclasses, but consumers should
+    depend on this transport-neutral error rather than an adapter exception.
+    """
+
+
 @runtime_checkable
 class OpenApiBotPort(Protocol):
     @property
@@ -34,7 +69,16 @@ class OpenApiBotPort(Protocol):
     async def send_message(
         self, *, bot_id: str, message: str, metadata: dict[str, Any],
         message_id: str | None = None,
-    ) -> BotSendResult: ...
+    ) -> BotSendResult:
+        """Start a Bot run or raise ``OpenApiBotError`` on delivery failure."""
+        ...
+    async def get_session_runtime_status(
+        self, session_id: str, *, bot_id: str | None = None,
+        lifecycle_stage: str | None = None,
+    ) -> BotSessionRuntimeStatus:
+        """Read activity through BaaS; no Engine URL or recovery ticket is exposed."""
+        ...
+
     async def get_run(self, run_id: str) -> dict[str, Any]: ...
     async def cancel_run(self, run_id: str) -> None: ...
     async def get_session_messages(
@@ -71,7 +115,9 @@ class OpenApiBotPort(Protocol):
 
 @runtime_checkable
 class BcsBotIdentityResolver(Protocol):
-    """把任务领域的产品 Bot ID 解析为 BCS 使用的 ``bot_id:owner_id`` UUID。"""
+    """把任务领域的产品 Bot ID 解析为 BCS 使用的稳定 ``bot_id:entity_id`` 身份。
+
+    已限定的外部身份保持不变；裸产品 ID 必须先解析唯一 Bot。"""
 
     def resolve_many(self, product_bot_ids: list[str]) -> dict[str, str]: ...
 
@@ -91,8 +137,15 @@ class BcsClientPort(Protocol):
     async def get_group(self, group_id: str) -> dict[str, Any]: ...
     async def get_session_messages(
         self, session_id: str, *, limit: int = 50, since_msg_id: str | None = None,
-        caller_bearer: str | None = None,
+        caller_bearer: str | None = None, include_pending: bool = False,
+        before: int | None = None,
     ) -> list[Any]: ...
+    async def query_message_deliveries(
+        self, session_id: str, *, message_ids: list[str],
+        caller_bearer: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read existing delivery facts as the same authenticated participant."""
+        ...
     # ``caller_bearer``:会话历史读口有参与者级 ACL("valid Human identity or
     # Bot token is required")——服务 HMAC 签名不足。传入持有者 bot 的
     # session_token 时 HTTP 实现携带 ``Authorization: Bearer``(同 ``create_group``
@@ -152,6 +205,23 @@ class BcsClientPort(Protocol):
     def task_callback_url(self) -> str:
         """Return the callback origin used by task event subscriptions."""
         ...
+
+
+@runtime_checkable
+class BcsSessionFilesPort(Protocol):
+    """Read ready file metadata from a BCS session workspace."""
+
+    async def list_files(
+        self,
+        session_id: str,
+        *,
+        prefix: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        caller_bearer: str | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]: ...
 
 
 @runtime_checkable

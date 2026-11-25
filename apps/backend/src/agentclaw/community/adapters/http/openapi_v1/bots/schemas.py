@@ -8,15 +8,30 @@ internal names belong in ``#`` comments.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field
+from .schemas_manifest_discovery import (
+    ConfigManifestCapabilities as ConfigManifestCapabilities,
+    ManifestConstruct as ManifestConstruct,
+    ManifestSkillReference as ManifestSkillReference,
+    ManifestSourceCell as ManifestSourceCell,
+)
+from .schemas_metadata import (
+    BotMetadata as BotMetadata,
+    BotMetadataId as BotMetadataId,
+    BotMetadataQuery as BotMetadataQuery,
+    BotMetadataQueries as BotMetadataQueries,
+)
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
-from .schemas_inventory import InventoryPublication
-from agentclaw.community.adapters.http.openapi_v1.service_publications.schemas import (
-    EditLock,
+from agentclaw.community.adapters.http.openapi_v1.contracts import ExtensibleResponse
+from .schemas_inventory import (
+    BotInventoryItem as BotInventoryItem,
+    BusinessSpace,
+    DeployMode as DeployMode,
 )
+from agentclaw.community.core.bot_copy.types import BotCopyStateSummary
 
 # Request bodies reject unknown keys. Pydantic's default is to *ignore* them,
 # which on a public API means a typo'd or immutable field (``engine`` on update)
@@ -69,8 +84,14 @@ _BOT_STATUS_DESC = (
 )
 
 
-class Bot(BaseModel):
+class Bot(ExtensibleResponse):
     """An agent (bot) record."""
+
+    entity_id: str = Field(default="", description="Immutable Bot resource locator.")
+    bcn_bot_id: str = Field(
+        default="", description="Established BCN address; stable across Owner handoff."
+    )
+    avatar_url: str | None = Field(default=None, description="Saved Bot avatar URL; null when unset.")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -108,6 +129,10 @@ class Bot(BaseModel):
         "lifecycle is not managed through this API."
     )
     status: str = Field(description=_BOT_STATUS_DESC)
+    expert_name: str | None = Field(
+        default=None,
+        description="Read-only source expert name for a bot created from the expert market; null for ordinary bots.",
+    )
     owner_entity_id: str = Field(
         description="The user who owns the bot — echoes the user_id the request named."
     )
@@ -129,50 +154,13 @@ class Bot(BaseModel):
         description="Business space the bot's record is assigned to (owner view). "
         "Populated on the listing endpoints.",
     )
-
-
-BotMetadataId = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=255),
-]
-
-
-class BotMetadataQuery(BaseModel):
-    """One exact Bot identity whose display metadata should be resolved."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    bot_id: BotMetadataId = Field(description="Bot identifier.")
-    owner_id: BotMetadataId = Field(
-        description="Owner identifier paired with bot_id to identify one Bot."
+    copy_state: BotCopyStateSummary | None = Field(
+        default=None,
+        description="If this bot is the dst of a copy operation, its live progress "
+        "(operation_id / status / source_bot_id); null for bots not created via "
+        "copy. FE shows the retry button whenever copy_state is non-null and "
+        "status != CONVERGED.",
     )
-
-
-class BotMetadataQueries(BaseModel):
-    """Exact Bot identities whose display metadata should be resolved."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    bots: list[BotMetadataQuery] = Field(
-        min_length=1,
-        max_length=100,
-        description=(
-            "Bot and owner identifier pairs to resolve. Pairs may come from any "
-            "upstream source; duplicates are ignored. At most 100 may be submitted."
-        ),
-    )
-
-
-class BotMetadata(BaseModel):
-    """Display-safe Bot metadata, without ownership or runtime internals."""
-
-    bot_id: str = Field(description="Unique Bot identifier.")
-    owner_id: str = Field(description="Owner identifier paired with the Bot identifier.")
-    bot_name: str = Field(description="Display name.")
-    bot_desc: str = Field(description="Display description; may be empty.")
-    engine: str = Field(description="Engine that powers the Bot.")
-    bot_type: str = Field(description="Bot kind, such as personal or service.")
-    status: str = Field(description="Current lifecycle status.")
 
 
 class BotCreateEngineProperties(BaseModel):
@@ -461,7 +449,7 @@ class BotAuthStatus(BaseModel):
     )
 
 
-class BotStatus(BaseModel):
+class BotStatus(ExtensibleResponse):
     """Runtime / device readiness of a bot."""
 
     model_config = ConfigDict(
@@ -693,123 +681,6 @@ class ConfigManifest(BaseModel):
     )
 
 
-class ManifestConstruct(BaseModel):
-    """One thing a manifest can declare, and whether this bot accepts it."""
-
-    kind: str = Field(
-        description=(
-            "`category` (one of the six under `manifest`), `section` (a "
-            "top-level section such as `script`), or `source` (how an entry "
-            "names its content)."
-        )
-    )
-    name: str = Field(description="The construct's name within its kind.")
-    supported: bool = Field(
-        description="False when a document using this construct is refused."
-    )
-    reason: str = Field(description="Empty when supported; otherwise names the cause.")
-
-
-class ManifestSourceCell(BaseModel):
-    """One (category, protocol) combination, and whether this bot accepts it.
-
-    The cartesian view `constructs` structurally cannot express: its rows carry
-    one verdict per construct, so "which categories work with which sources" had
-    no representation at all and callers discovered the answer from a 422 — or,
-    worse, from a failed apply. Read this to decide what to write before writing
-    it.
-    """
-
-    category: str = Field(
-        description="One of the six categories under `manifest`."
-    )
-    protocol: str = Field(
-        description=(
-            "How the content travels: `content` (inline in the document), "
-            "`oss` (an object over https, signed or plain) or `git` (a "
-            "repository resolved to one commit). Reaching a source **by name** "
-            "(`from`) is not a fourth value — a named source declares one of "
-            "these, and that protocol's row is the one that governs."
-        )
-    )
-    supported: bool = Field(
-        description="False when a document using this combination is refused."
-    )
-    reason: str = Field(
-        description="Empty when supported; otherwise the refusal a `PUT` gives."
-    )
-
-
-class ConfigManifestCapabilities(BaseModel):
-    """Which manifest constructs a bot accepts.
-
-    Answered from the same resolver the write path refuses with, so this can
-    never claim support for something a `PUT` then rejects.
-    """
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "bot_id": "20260813_a7k2m9p1",
-                "engine_type": "openclaw",
-                "bot_type": "personal",
-                "schema_versions": [1],
-                "constructs": [
-                    {
-                        "kind": "category",
-                        "name": "identity",
-                        "supported": True,
-                        "reason": "",
-                    },
-                    {
-                        "kind": "section",
-                        "name": "script",
-                        "supported": False,
-                        "reason": "teclaw bots are provisioned without a "
-                        "start sequence, so a script would never execute",
-                    },
-                ],
-                "source_matrix": [
-                    {
-                        "category": "resources",
-                        "protocol": "git",
-                        "supported": True,
-                        "reason": "",
-                    },
-                    {
-                        "category": "skills",
-                        "protocol": "content",
-                        "supported": False,
-                        "reason": "a skills entry is a package (SKILL.md + "
-                        "the files it names) — inline content cannot be one; "
-                        "declare a source with 'protocol: git' or "
-                        "'protocol: oss'",
-                    },
-                ],
-            }
-        }
-    )
-
-    bot_id: str = Field(description="The bot these capabilities describe.")
-    engine_type: str = Field(description="The engine the answer was computed for.")
-    bot_type: str = Field(description="The bot type the answer was computed for.")
-    schema_versions: list[int] = Field(
-        description="The `schema_version` values this deployment accepts."
-    )
-    constructs: list[ManifestConstruct] = Field(
-        description="Every construct, supported or not, with its reason."
-    )
-    source_matrix: list[ManifestSourceCell] = Field(
-        default_factory=list,
-        description=(
-            "Every (category, protocol) combination, supported or not. "
-            "Additive alongside `constructs`, which keeps its exact shape and "
-            "meaning: a construct row says whether a *form* can be resolved at "
-            "all, and a matrix cell says whether a *combination* is delivered."
-        ),
-    )
-
-
 class DataInitRequest(BaseModel):
     """Options for starting a bot's cold-start data initialization."""
 
@@ -842,151 +713,4 @@ class DataInitResult(BaseModel):
     started_at: datetime | None = Field(
         default=None,
         description="Initialization start time, when a running attempt recorded one.",
-    )
-
-
-# ── Bot inventory card surface ─────────────────────────────────────────────
-# Card list returned by ``/openapi/v1/bots/all``. Action affordances are
-# embedded in each item; there is no rich-card detail or standalone actions route.
-# These Literals are trimmed siblings of the core enums in
-# ``core.bot_inventory.types`` (kept as strings so a pydantic schema carries
-# them as JSON enums without a circular import on the core module).
-
-DeployMode = Literal["cloud", "local"]
-BotInventoryKind = Literal["personal_cloud", "local", "service"]
-DisplayState = Literal[
-    "running",
-    "pending",
-    "failed",
-    "dormant",
-    "local_running",
-    "local_offline",
-    "local_pending",
-    "local_failed",
-    "service_draft",
-    "service_deploying",
-    "service_prestable",
-    "service_staging",
-    "service_online",
-    "service_offline",
-]
-BotAction = Literal[
-    "view",
-    "chat",
-    "edit",
-    "delete",
-    "restart",
-    "restart_publish",
-    "data_init",
-    "activate",
-    "open_folder",
-    "passport",
-    "engine_config",
-    "runtime_logs",
-    "engine_restart",
-    "publish_staging",
-    "publish_online",
-    "cancel_staging",
-    "upgrade",
-    "offline",
-    "retry",
-]
-
-
-class BusinessSpace(BaseModel):
-    """Business-space reference surfaced on an inventory card."""
-
-    space_id: str = Field(description="Unique identifier of the business space.")
-    name: str = Field(description="Display name of the business space.")
-    kind: str = Field(description="Space kind from the business-space owner.")
-
-
-class BotInventoryItem(BaseModel):
-    """Unified card for a personal cloud, local, or service bot."""
-
-    bot_id: str = Field(description="Unique identifier of the bot.")
-    card_id: str = Field(
-        description="Stable card identity; service cards include the publication id."
-    )
-    bot_name: str = Field(description="Display name of the bot.")
-    bot_desc: str = Field(
-        description="Description of what the bot is for; may be empty."
-    )
-    engine: str = Field(description="Engine currently assigned to the bot.")
-    bot_type: str = Field(
-        description="Underlying bot type reported by the bot service."
-    )
-    kind: BotInventoryKind = Field(
-        description="Inventory category used to render the bot card."
-    )
-    deploy_mode: DeployMode = Field(
-        description="Whether the bot runs in the cloud or on a local device."
-    )
-    display_state: DisplayState = Field(
-        description="Normalized lifecycle state used by the inventory view."
-    )
-    status: str = Field(
-        description="Stored Bot status for every card kind, identical in meaning to /bots status. For service publication state use publish.status or display_state."
-    )
-    publish: InventoryPublication | None = Field(
-        default=None,
-        description="Publication represented by this service card; null for non-service Bots or when no publication exists.",
-    )
-    internal_status: str | None = Field(
-        default=None,
-        description="Stored service-publication status for diagnostics; null for non-service cards.",
-    )
-    publication_id: int | None = Field(
-        default=None,
-        description="Service publication id represented by this card; otherwise null.",
-    )
-    publication_version: int | None = Field(
-        default=None,
-        description="Service publication version represented by this card; otherwise null.",
-    )
-    live_version: int | None = Field(
-        default=None, description="Currently running service version, when one exists."
-    )
-    owner_entity_id: str = Field(description="User who owns the bot.")
-    space: BusinessSpace | None = Field(
-        default=None, description="Business space containing the bot, when resolved."
-    )
-    template_type: str | None = Field(
-        default=None,
-        description="Template type of the bot, e.g. 'applicationCoding'; null for "
-        "bots created without a template.",
-    )
-    template_config: dict | None = Field(
-        default=None,
-        description="Stored template snapshot, copied verbatim from the bot's "
-        "creation input (no field filtering). Null without a template. May "
-        "carry sensitive values the creator supplied (e.g. 'token', "
-        "'bot_template_config.ext_config.thetaKey') and the server-managed "
-        "'engine_form' marker — treat as sensitive.",
-    )
-    avatar_url: str | None = Field(
-        default=None, description="Avatar URL for the bot, when configured."
-    )
-    machine_id: str | None = Field(
-        default=None,
-        description="Host device identifier for a local bot; otherwise null.",
-    )
-    mount_path: str | None = Field(
-        default=None,
-        description="Mounted workspace path for a local bot; otherwise null.",
-    )
-    passport_id: str | None = Field(
-        default=None,
-        description="Platform identity credential identifier, when issued.",
-    )
-    actions: list[BotAction] = Field(
-        default_factory=list, description="Actions currently available for this bot."
-    )
-    disabled_actions: dict[str, str] | None = Field(
-        default=None,
-        description="Unavailable actions mapped to caller-facing reasons, when any.",
-    )
-    edit_lock: EditLock | None = Field(
-        default=None,
-        description="Current Bot-level collaborative edit lock for an operable service Bot; null for other cards.",
     )

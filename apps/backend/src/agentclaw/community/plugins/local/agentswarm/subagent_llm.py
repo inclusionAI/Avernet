@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from agentclaw.community.core.agentswarm.domain.models import (
@@ -14,12 +15,14 @@ logger = logging.getLogger(__name__)
 class LLMBackedSubagent:
 
     def __init__(self, spec: AgentSpec, run: Run, llm: LLMProvider,
-                 agent_id: AgentId, attempt: int = 1) -> None:
+                  agent_id: AgentId, attempt: int = 1,
+                  setup_delay_seconds: float = 0.0) -> None:
         self._spec = spec
         self._run = run
         self._llm = llm
         self._agent_id = agent_id
         self._attempt = attempt
+        self._setup_delay_seconds = float(setup_delay_seconds)
         self.name = spec.name
         # Executor surfaces (D-J, additive SPI): the bare per-attempt
         # digest — an execution identity even for an llm runtime, but
@@ -28,11 +31,13 @@ class LLMBackedSubagent:
         self.executor_id = spawn_digest(
             str(run.run_id), str(agent_id), attempt, 16)
         self.executor_name = (
-            f"{spec.name}-"
-            f"{spawn_digest(str(run.run_id), str(agent_id), attempt, 8)}"
+            f"{spec.name}_"
+            f"{spawn_digest(str(run.run_id), str(agent_id), attempt, 12)}"
         )
 
     async def setup(self) -> None:
+        if self._setup_delay_seconds > 0:
+            await asyncio.sleep(self._setup_delay_seconds)
         logger.debug("[agentswarm][llm-subagent] %s setup", self.name)
 
     async def run_task(self, envelope: TaskEnvelope) -> SubagentResult:

@@ -10,11 +10,23 @@ engine-neutral contract. Hosting lives in the container Adapter with durable
 SQLite state. No shared Backend business database or account-global Bot limit.
 Group/OA/calendar/todo subscription research does not expand automatic replies.
 
-One session per bound direct conversation. One `agent` turn receives current
-rules via `extraSystemPrompt` and generates a structured decision/reply, using
-the Bot's existing skills and MCP tools. No separate restricted agent or routine
-LLM rule-router step. `llm-task` is reserved for at most one tool-free formatting
-repair when safe; invalid/ambiguous results require manual handling.
+Before each reply turn, `HostingEngine.classify_scope` calls OpenClaw's
+`llm-task` through authenticated `/tools/invoke`. It receives the frozen rules,
+verified directory facts, current batch and bounded real dialogue, never the
+old agent session or unsent candidates. Only `allow/inside_rule` permits the
+tool-enabled `agent` call. `ignore/outside_rule` finishes silently; uncertain,
+invalid and unavailable results are persisted without a peer reply or a
+per-contact owner notice. No fallback to a tool-enabled classifier is allowed.
+
+One reply session remains bound to each direct conversation. `agent` receives
+the same rules via `extraSystemPrompt` and uses existing skills/MCP tools.
+Reply review, identity and owner-activity protections remain in place. Scope
+evidence is persisted in invocation JSON before dispatch (no SQLite migration);
+the outbox requires explicit `allow`, including for owner notices and old queued
+replies. Legacy results without eligibility are not sent. Disable/takeover
+during classification cancels dispatch. A scope-call crash never replays an
+agent turn. Deployment requires the llm-task plugin to be available; a missing
+plugin fails closed rather than notifying about every incoming contact.
 
 ## Checklist
 
@@ -242,9 +254,10 @@ approve verdict. Unknown facts required by a rule must not be guessed.
 
 The directory provider verifies the exact sender and owner regardless of rule
 wording. `disposition=allow` means identity verified, NOT that the rule permits a
-reply. `sender.name_resolution` distinguishes unique/confirmed aliases from
-ambiguous, unknown or other-contact aliases. Operator-confirmed names only resolve
-identity; they are never a hosting whitelist. Failed optional manager enrichment
+reply. Unqualified name rules match verified directory names/nicknames, including
+all same-name accounts. `sender.name_resolution` records uniqueness only and must
+not veto a verified name match. Explicit IDs and relevant relationship restrictions
+still apply; unverified or mismatched sender identities remain blocked. Failed optional manager enrichment
 keeps relations unknown without rejecting unrelated rules. Direct-manager facts
 do not establish the whole leadership chain; missing HR labels do not prove
 non-HR membership, and same manager does not prove equal job grade.
@@ -262,11 +275,12 @@ context snapshots; no database migration, Backend or OpenClaw source change.
 ## Preproduction Recovery Follow-Up
 
 The current implementation supersedes the earlier "format repair disabled"
-phase notes: one plain candidate may use a separate, tool-free OpenClaw raw-model
+phase notes: one plain candidate may use a separate, tool-free OpenClaw llm-task
 run to recover a strict decision. Reply text must remain byte-for-byte identical;
 ambiguous/multiple outputs, failed runs and unavailable repair remain manual.
 No original agent replay, recipient inference, or bypass of the directory permit.
-Formatting sessions are isolated but may persist; cleanup remains follow-up work.
+Scope, review and format repair use llm-task temporary workspaces, not persistent
+agent sessions. Old diagnostic sessions are retained, not automatically deleted.
 
 A no-op reconciliation must preserve an already-completed intake checkpoint.
 Startup/reconnect recovery and failures still close the global claim/send barrier. Runtime
@@ -277,26 +291,29 @@ failures log exception type and code locations, not exception text or message da
 A valid JSON reply is not evidence that it answers the current incoming batch.
 The generation contract now explicitly treats history as background, not an
 unfinished request. Before resolving any reply, the executor calls the DWS-only
-`HostingEngine.review_reply` Plugin API in a separate session/run with
-`modelRun=true`, `promptMode=none`, `deliver=false`. Tools and ordinary history
+`HostingEngine.review_reply` Plugin API through `/tools/invoke` with `llm-task`.
+No agent session key is passed and there is no fallback to persistent agent runs.
+Tools and ordinary history
 are excluded; the original frozen rules, current input and candidate are supplied.
 Review input contains the confirmed rules, verified directory facts, candidate,
 and one chronological copy of real dialogue with the current batch marked.
 No context-count reduction or model change: duplicate generation input, internal
 execution metadata and delivery-status history are omitted. The only response
-field is `verdict`: `approve`, `skip_owner_replied`, or `reject`. Approval keeps
+fields are `verdict` (`approve`, `skip_owner_replied`, or `reject`), an internal
+reason code and a short internal reason. Approval keeps
 the original candidate unchanged. A semantic owner-already-replied verdict also
 requires a complete real owner message later than this batch; it resolves as
 `ignore` without a peer reply or owner notice. Unrelated or uncertain
 content, invalid output, timeout or unsupported mode requires manual handling;
-the original turn is never replayed. Ignore/escalate decisions skip review.
+the original turn is never replayed. Ignore decisions skip review; escalations
+are reviewed before an owner notification is permitted.
 
 Impact: DWS executor, OpenClaw hosting plugin and their conformance fakes only.
 No database migration, frontend, Backend, shared chat client, OpenClaw source
 or other-engine change. One extra inference per proposed reply adds latency;
 missing contextual evidence may cause conservative manual handling. This is a
-model-based safety check, not proof of relevance. Review-session cleanup remains
-unqualified, like formatting sessions.
+model-based safety check, not proof of relevance. Temporary session cleanup is
+owned by OpenClaw llm-task; normal conversation history is never deleted.
 
 ## Incremental real-dialogue context (Adapter only)
 

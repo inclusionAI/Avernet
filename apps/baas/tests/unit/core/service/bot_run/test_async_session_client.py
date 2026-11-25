@@ -18,6 +18,7 @@ Covers:
 """
 
 import base64
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -419,6 +420,59 @@ class TestRequest:
 
         with pytest.raises(RuntimeError, match="Unknown error"):
             await client._request("GET", "/api/test")
+
+    @pytest.mark.asyncio
+    async def test_non_json_content_type_raises_with_body_text(self):
+        """Non-JSON response → RuntimeError message includes the raw body."""
+        client = AsyncSessionClient(base_url="https://api.example.com")
+        mock_session = _make_mock_session(status=502, json_body={})
+        mock_resp = mock_session.request.return_value.__aenter__.return_value
+        mock_resp.json = AsyncMock(
+            side_effect=aiohttp.ContentTypeError(request_info=MagicMock(), history=())
+        )
+        mock_resp.text = AsyncMock(return_value="<html>502 Bad Gateway</html>")
+        client._session = mock_session
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await client._request("GET", "/api/test")
+
+        message = str(exc_info.value)
+        assert "malformed" in message
+        assert "502" in message
+        assert "502 Bad Gateway" in message
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_body_raises_with_body_text(self):
+        """Invalid JSON body → RuntimeError message includes the raw body."""
+        client = AsyncSessionClient(base_url="https://api.example.com")
+        mock_session = _make_mock_session(status=200, json_body={})
+        mock_resp = mock_session.request.return_value.__aenter__.return_value
+        mock_resp.json = AsyncMock(
+            side_effect=json.JSONDecodeError("Expecting value", "Bad Gateway", 0)
+        )
+        mock_resp.text = AsyncMock(return_value="Bad Gateway (plain text)")
+        client._session = mock_session
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await client._request("GET", "/api/test")
+
+        assert "Bad Gateway (plain text)" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_non_object_json_body_raises_with_body_text(self):
+        """JSON array body → RuntimeError message includes the body."""
+        client = AsyncSessionClient(base_url="https://api.example.com")
+        mock_session = _make_mock_session(status=200, json_body=["unexpected", "array"])
+        mock_resp = mock_session.request.return_value.__aenter__.return_value
+        mock_resp.text = AsyncMock(return_value='["unexpected", "array"]')
+        client._session = mock_session
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await client._request("GET", "/api/test")
+
+        message = str(exc_info.value)
+        assert "malformed" in message
+        assert "unexpected" in message
 
 
 # ==================== AsyncSessionClient.create_session Tests ====================
@@ -1021,3 +1075,37 @@ class TestContextManager:
 
         assert isinstance(result, SessionInfo)
         assert client._session is None
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_uses_query_parameter_and_validates_response():
+    from unittest.mock import AsyncMock
+
+    from secbaas.community.core.service.bot_run._async_session_client import (
+        AsyncSessionClient,
+    )
+
+    client = AsyncSessionClient("http://engine")
+    client._request = AsyncMock(
+        return_value={
+            "success": True,
+            "data": {
+                "session_id": "agent:main:session:a/user:u",
+                "found": True,
+                "run_id": "r",
+                "state": "running",
+                "started_at": 1,
+                "last_event_seq": 3,
+            },
+        }
+    )
+    result = await client.get_session_runtime_status("agent:main:session:a/user:u")
+    assert result.last_event_seq == 3
+    client._request.assert_awaited_once_with(
+        "GET",
+        "/api/sessions/runtime/status",
+        params={"session_id": "agent:main:session:a/user:u"},
+    )
+    client._request.return_value["data"]["session_id"] = "another-session"
+    with pytest.raises(ValueError, match="session mismatch"):
+        await client.get_session_runtime_status("agent:main:session:a/user:u")

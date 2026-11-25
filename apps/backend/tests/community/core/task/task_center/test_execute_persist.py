@@ -89,7 +89,7 @@ def test_execute_persists_task_info_row(repo):
     assert row is not None
     assert row.status is Status.PENDING
     assert row.source_type == "api"
-    assert row.owner_user_id == "U1" and row.owner_bot_id == "B1"
+    assert row.owner_user_id == "U1" and row.owner_bot_id == "B1:U1"
     assert "metadata" not in row.task_spec
     assert row.task_spec["context"]["title"] == "T"
     assert row.task_spec["goal"]["acceptances"] == [{"id": "ac1", "description": "acc"}]

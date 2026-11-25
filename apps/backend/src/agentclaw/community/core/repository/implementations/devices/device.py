@@ -77,12 +77,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from collections.abc import Callable
 from injector import inject
 from sqlalchemy import or_, func
 
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.runtime_list_timing import mark
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
@@ -196,12 +198,14 @@ class DeviceRepository(
     def get_by_id(
         self, binding_id: int
     ) -> DeviceBindingRecord | None:
+        mark("binding.by_id")
         with self._db.orm_session() as db:
             m = (
                 db.query(EntityDeviceBinding)
                 .filter(EntityDeviceBinding.id == binding_id)
                 .first()
             )
+            mark("binding.by_id.fetched")
             record = _to_record(m)
             if record:
                 logger.info(
@@ -224,6 +228,7 @@ class DeviceRepository(
         The outer join retains Bots without a binding for ambiguity detection.
         This resolves resources only; the caller remains responsible for access.
         """
+        mark("binding.by_bot")
         with self._db.orm_session() as db:
             m = (
                 db.query(BotModel.id, EntityDeviceBinding)
@@ -241,6 +246,7 @@ class DeviceRepository(
                 .limit(2)
                 .all()
             )
+            mark("binding.by_bot.fetched")
             if len(m) > 1:
                 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
                 raise BotLookupAmbiguousError(f"Ambiguous device Bot locator: {bot_id}")
@@ -377,6 +383,39 @@ class DeviceRepository(
                 bindings.append(record)
             return bindings
 
+    def list_active_caller_refresh_bindings(
+        self, *, bot_id: str, entity_id: str, env: str,
+    ) -> list[DeviceBindingRecord]:
+        fields = {"bot_id": bot_id, "entity_id": entity_id, "env": env, "providers": ("baas", "arca")}
+        logger.info("caller_refresh_bindings_requested fields=%s", fields)
+        try:
+            with self._db.orm_session() as db:
+                rows = (
+                    db.query(EntityDeviceBinding)
+                    .filter(
+                        EntityDeviceBinding.env == env,
+                        EntityDeviceBinding.entity_id == entity_id,
+                        EntityDeviceBinding.entity_type == "staff",
+                        EntityDeviceBinding.status == _DeviceBindingStatus.ACTIVE,
+                        EntityDeviceBinding.device_provider.in_(("baas", "arca")),
+                        EntityDeviceBinding.apply_reason == f"caller_instance:{bot_id}",
+                    )
+                    .order_by(EntityDeviceBinding.id.desc())
+                    .all()
+                )
+                bindings: list[DeviceBindingRecord] = []
+                seen_devices: set[str] = set()
+                for row in rows:
+                    record = _to_record(row)
+                    if record is not None and record.device_id not in seen_devices:
+                        bindings.append(record)
+                        seen_devices.add(record.device_id)
+            logger.info("caller_refresh_bindings_succeeded fields=%s binding_count=%s", fields, len(bindings))
+            return bindings
+        except Exception as exc:
+            logger.warning("caller_refresh_bindings_failed fields=%s error_type=%s", fields, type(exc).__name__)
+            raise
+
     def count_non_released_bindings(
         self,
         *,
@@ -451,15 +490,38 @@ class DeviceRepository(
                 synchronize_session=False,
             )
 
+    def mutate_device_property(
+        self, *, binding_id: int, device_id: str, key: str,
+        mutate: Callable[[Any], Any],
+    ) -> None:
+        with self._db.orm_session() as db:
+            begin_guarded_transaction(db, purpose="Device property mutation")
+            binding = (
+                db.query(EntityDeviceBinding)
+                .filter_by(id=binding_id, device_id=device_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if binding is None:
+                return
+            props = load_device_props(binding.device_props)
+            previous = props.get(key)
+            updated = mutate(previous)
+            if updated != previous:
+                props[key] = updated
+                binding.device_props = json.dumps(props, ensure_ascii=False)
+
     def update_device_props(
         self, *, binding_id: int, props: dict[str, Any]
     ) -> None:
         # Read-merge-write so other device_props keys (callback_token,
         # sandbox_id, adapter_port, ...) survive. Binding gone → silent no-op.
         with self._db.orm_session() as db:
+            begin_guarded_transaction(db, purpose="Device property merge")
             row = (
                 db.query(EntityDeviceBinding.device_props)
                 .filter(EntityDeviceBinding.id == binding_id)
+                .with_for_update()
                 .first()
             )
             if row is None:

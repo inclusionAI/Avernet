@@ -8,6 +8,8 @@ module.exports = {
           'custom-variant',
           'theme',
           'layer',
+          // Standard container queries drive the responsive workflow editor.
+          'container',
         ],
       },
     ],

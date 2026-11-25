@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Protocol, TYPE_CHECKING, runtime_checkable
+from typing import Callable, Protocol, TYPE_CHECKING, runtime_checkable
 
 
 if TYPE_CHECKING:
@@ -52,6 +52,31 @@ class WorkOrderRepositoryProtocol(Protocol):
 
         AUTO is created PROCESSING without approver rows or initial notices.
         Completion receives the same approver-derived recipients separately.
+        """
+        ...
+
+    @abstractmethod
+    def merge_notice(
+        self,
+        *,
+        recipient_user_id: str,
+        event_type: str,
+        group_id: str,
+        biz_type: str,
+        biz_id: str,
+        title: str,
+        content_factory: Callable[
+            [dict[str, object] | None], dict[str, object]
+        ],
+        env: str,
+    ) -> int:
+        """Create or update one per-recipient open NOTICE aggregate.
+
+        The repository resolves the existing group, calls ``content_factory``
+        with the current notification content (or ``None``), and persists the
+        returned object under one lock. Read groups are closed before a new
+        aggregate is opened by the caller, so a notification is never silently
+        changed back to unread after the owner has read it.
         """
         ...
 

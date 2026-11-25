@@ -11,11 +11,16 @@ import re
 from typing import Any
 
 from agentclaw.community.core.task.domain.prompt_constants import (
+    BENCHMARK_EXECUTION_CONSTRAINT,
     NO_WEB_SEARCH_CONSTRAINT,
     OUTPUT_LANGUAGE_CONSTRAINT,
 )
 
-from agentclaw.community.core.task.domain.models import TaskNode, task_spec_instruction
+from agentclaw.community.core.task.domain.models import (
+    TaskNode,
+    TaskRuntimeProfile,
+    task_spec_instruction,
+)
 from agentclaw.community.core.task.task_runner.client.ports import (
     PromptFormatter,
     TaskContextBuilder,
@@ -40,6 +45,7 @@ def format_task_node_business_instruction(
     relay_execution: bool = False,
     relay_blackboard: dict[str, Any] | None = None,
     relay_token: str | None = None,
+    allowed_run_modes: list[str] | None = None,
 ) -> str:
     """Build the single per-node protocol used by runner delivery.
 
@@ -61,6 +67,7 @@ def format_task_node_business_instruction(
             backend_url=backend,
             objective=objective,
             instruction=instruction, acceptances=acceptances,
+            allowed_run_modes=allowed_run_modes,
         )
 
 
@@ -206,6 +213,9 @@ class PromptFormatterImpl(PromptFormatter):
             ),
             relay_blackboard=context.get("relay_blackboard"),
             relay_token=node.run_info.extend_props.get("relay_token"),
+            allowed_run_modes=list(
+                TaskRuntimeProfile.run_modes_from_graph(node.node_run_graph)
+            ),
         )
 
     def format_verify(self, context: dict[str, Any], node: TaskNode) -> str:
@@ -305,10 +315,10 @@ def format_benchmark_prompt(task_spec: dict[str, Any]) -> str:
         parts.append(f"**任务类型**: {business_type}")
 
     # Constraints
-    parts.append(NO_WEB_SEARCH_CONSTRAINT)
+    parts.append(BENCHMARK_EXECUTION_CONSTRAINT)
     parts.append(OUTPUT_LANGUAGE_CONSTRAINT)
 
-    return "/task [TASK-LOOP-EVALUATION] " + "\n\n".join(parts)
+    return "/task-loop [TASK-LOOP-EVALUATION] " + "\n\n".join(parts)
 
 
 def _benchmark_task_title(task_spec: dict[str, Any]) -> str:

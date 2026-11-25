@@ -37,6 +37,7 @@ it('createNewSession maps to SessionView with favorite false', async () => {
     groupId: 'g1',
     title: '新会话',
     favorite: false,
+    participantDetailsLoaded: true,
   });
   // acting_bot_id 取当前角色 id（创建请求时 activeIdentityId 为空则不传）。
   expect(sc.createSession).toHaveBeenCalledWith('g1', { title: '新会话', input: undefined });
@@ -280,6 +281,42 @@ it('updateMemberScope maps failure to friendly error', async () => {
   expect(!res.ok && res.error.friendlyMessage).toContain('切换消息视角失败');
 });
 
+it('loadSessionsByIds keeps identity summaries without throwing away avatars', async () => {
+  sc.listGroupSessions.mockResolvedValue({
+    code: 20000,
+    message: '',
+    request_id: 'r',
+    data: {
+      items: [
+        {
+          session_id: 's1',
+          group_id: 'g1',
+          title: '会话',
+          status: 'running',
+          participants: [
+            { actor_id: 'b1', actor_kind: 'bot', name: 'Alpha', avatar_url: ' /b1.png ' },
+            { actor_id: 'h1', actor_kind: 'human', name: null, avatar_url: null },
+          ],
+          created_at: 1,
+          updated_at: 2,
+        },
+      ],
+      offset: 0,
+      limit: 50,
+      total: 1,
+    },
+  });
+
+  const sessions = await sessionService.loadSessionsByIds('g1', 0);
+
+  expect(sessions[0].participants).toEqual([]);
+  expect(sessions[0].participantDetailsLoaded).toBe(false);
+  expect(sessions[0].participantSummaries).toEqual([
+    { actorId: 'b1', kind: 'bot', name: 'Alpha', avatarUrl: '/b1.png' },
+    { actorId: 'h1', kind: 'human', name: 'h1', avatarUrl: undefined },
+  ]);
+});
+
 it('getSessionDetail returns SessionView with participants', async () => {
   sc.getSession.mockResolvedValue({
     code: 20000,
@@ -304,6 +341,11 @@ it('getSessionDetail returns SessionView with participants', async () => {
     expect.objectContaining({ actorId: 'b1', mode: 'muted' }),
     expect.objectContaining({ actorId: 'human_1', mode: 'present' }),
   ]);
+  expect(res.ok && res.data.participantDetailsLoaded).toBe(true);
+  expect(res.ok && res.data.participantSummaries).toEqual([
+    { actorId: 'b1', kind: 'bot', name: 'Alpha', avatarUrl: undefined },
+    { actorId: 'human_1', kind: 'human', name: '章梧', avatarUrl: undefined },
+  ]);
 });
 
 it('addMember POSTs participant and returns refreshed session', async () => {
@@ -326,6 +368,28 @@ it('addMember POSTs participant and returns refreshed session', async () => {
     expect.objectContaining({ actorId: 'b1' }),
     expect.objectContaining({ actorId: 'human_1' }),
   ]);
+});
+
+// round-7 静默错误呈现族:错误语义不可再压平为「请稍后重试」,按状态透传语义化文案。
+it('addMember maps 403 to permission-denied semantics instead of generic retry copy', async () => {
+  sc.addSessionParticipant.mockRejectedValue({ status: 403 });
+  const res = await sessionService.addMember('s1', 'bot-2');
+  expect(res.ok).toBe(false);
+  expect(!res.ok && res.error.friendlyMessage).toBe('当前账号暂无权限执行该操作');
+});
+
+it('removeMember maps 404 to resource-gone semantics', async () => {
+  sc.deleteSessionParticipant.mockRejectedValue({ status: 404 });
+  const res = await sessionService.removeMember('s1', 'bot-2');
+  expect(res.ok).toBe(false);
+  expect(!res.ok && res.error.friendlyMessage).toBe('访问的资源不存在或已被移除');
+});
+
+it('addMember keeps operation-specific fallback for status-less failures', async () => {
+  sc.addSessionParticipant.mockRejectedValue(new Error('network'));
+  const res = await sessionService.addMember('s1', 'bot-2');
+  expect(res.ok).toBe(false);
+  expect(!res.ok && res.error.friendlyMessage).toBe('添加会话成员失败，请稍后重试。');
 });
 
 it('removeMember DELETEs participant and returns refreshed session', async () => {
@@ -369,3 +433,27 @@ it('getSessionDetail 失败：取消协议层全局错误提示（读侧静默�
   expect(items.some((it) => it.toastKey === 'k-detail-1' && it.cancelled)).toBe(true);
   useErrorNotifyStore.getState().reset();
 });
+
+it.each(['send', 'inject'] as const)(
+  'createNewSession forwards context_delivery=%s with message scope',
+  async (delivery) => {
+    sc.createSession.mockResolvedValue({
+      data: {
+        session_id: 'g1:s11',
+        group_id: 'g1',
+        status: 'running',
+        participants: [],
+        created_at: 1,
+        updated_at: 1,
+      },
+    });
+    await sessionService.createNewSession('g1', undefined, undefined, 'participant', delivery);
+    expect(sc.createSession).toHaveBeenCalledWith(
+      'g1',
+      expect.objectContaining({
+        context_delivery: delivery,
+        message_view_scope: 'participant',
+      }),
+    );
+  },
+);

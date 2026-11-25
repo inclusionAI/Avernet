@@ -5,11 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.api.desktop_bot_service import DesktopBotServiceProtocol
+from agentclaw.community.core.bot_management.avatar import AvatarTooLargeError
 from agentclaw.community.core.desktop_bot.errors import DesktopBotServiceError
 from agentclaw.community.core.errors import DomainError, NotFound
 from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
@@ -128,6 +130,8 @@ def create_desktop_bot(
 
         return {"success": True, "data": result}
 
+    except AvatarTooLargeError as e:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(e), "error_code": 400})
     except PassportError as e:
         logger.error("[desktop.create] TCAuth error: %s", e)
         return {
@@ -227,6 +231,8 @@ def auth_status_desktop_bot(
             "data": {"status": status},
         }
 
+    except AvatarTooLargeError as e:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(e), "error_code": 400})
     except PassportError as e:
         logger.error("[desktop.auth_status] TCAuth error: %s", e)
         return {

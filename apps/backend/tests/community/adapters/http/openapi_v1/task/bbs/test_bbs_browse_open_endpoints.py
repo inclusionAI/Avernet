@@ -23,6 +23,7 @@ from agentclaw.community.adapters.http.openapi_v1.task.bbs.browse_router import 
     trigger_bbs_browse_cron_remove,
     trigger_bbs_browse_framework,
     trigger_bbs_browse_self,
+    trigger_bbs_skills_install,
 )
 from agentclaw.community.adapters.http.openapi_v1.task.bbs.schemas import (
     BrowseFeedTopicItem,
@@ -43,7 +44,9 @@ def _request(method: str, path: str) -> Request:
     return request
 
 
-def _record(*, bot_id: str = "bot-a", mode: str = "openclaw") -> BrowseSubscriptionRecord:
+def _record(
+    *, bot_id: str = "bot-a", mode: str = "openclaw"
+) -> BrowseSubscriptionRecord:
     now = datetime(2026, 9, 21, 0, 0, tzinfo=timezone.utc)
     return BrowseSubscriptionRecord(
         bot_id=bot_id,
@@ -76,24 +79,42 @@ class _FakeRunner:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    async def push_browse_once(self, *, bot_id, expected_mode, timeout=60.0):
-        self.calls.append({"op": "browse", "bot_id": bot_id, "expected_mode": expected_mode})
+    async def push_browse_once(
+        self, *, bot_id, owner_user_id, expected_mode, timeout=60.0
+    ):
+        assert owner_user_id == "111111"
+        self.calls.append(
+            {"op": "browse", "bot_id": bot_id, "expected_mode": expected_mode}
+        )
         return {"run_id": "run_x", "session_id": "sess_x"}
 
-    async def push_cron_event(self, *, bot_id, action, timeout=30.0):
+    async def push_cron_event(self, *, bot_id, owner_user_id, action, timeout=30.0):
+        assert owner_user_id == "111111"
         self.calls.append({"op": "cron", "bot_id": bot_id, "action": action})
         return {"run_id": "run_cron", "session_id": None}
+
+    async def trigger_install_bbs_skills(self, *, bot_id, owner_user_id):
+        assert owner_user_id == "111111"
+        self.calls.append({"op": "install_skills", "bot_id": bot_id})
+        return {
+            "run_id": "run_skill",
+            "session_id": "sess_skill",
+            "mode": "openclaw",
+            "status": "submitted",
+            "action": "install_skills",
+        }
 
 
 @pytest.mark.asyncio
 async def test_get_bbs_browse_subscription_returns_envelope_when_found():
     class Service:
         def get_subscription(self, **kwargs):
-            assert kwargs == {"bot_id": "bot-a"}
+            assert kwargs == {"bot_id": "bot-a", "owner_user_id": "111111"}
             return _record()
 
     payload = await get_bbs_browse_subscription(
         bot_id="bot-a",
+        owner_user_id="111111",
         request=_request("GET", "/openapi/v1/bots/bot-a/bbs/browse-subscription"),
         service=Service(),
     )
@@ -112,6 +133,7 @@ async def test_get_bbs_browse_subscription_raises_not_found_when_missing():
     with pytest.raises(NotFound):
         await get_bbs_browse_subscription(
             bot_id="bot-a",
+            owner_user_id="111111",
             request=_request("GET", "/openapi/v1/bots/bot-a/bbs/browse-subscription"),
             service=Service(),
         )
@@ -130,7 +152,10 @@ async def test_list_bbs_browse_feed_delegates_pagination_and_filters():
             }
             return BrowseFeedPage(
                 total=2,
-                items=(_feed_item(topic_id="t1", my_reply_count=0), _feed_item(topic_id="t2", my_reply_count=3)),
+                items=(
+                    _feed_item(topic_id="t1", my_reply_count=0),
+                    _feed_item(topic_id="t2", my_reply_count=3),
+                ),
             )
 
     payload = await list_bbs_browse_feed(
@@ -148,14 +173,53 @@ async def test_list_bbs_browse_feed_delegates_pagination_and_filters():
 
 
 @pytest.mark.asyncio
+async def test_trigger_bbs_skills_install_delegates_to_runner():
+    runner = _FakeRunner()
+    payload = await trigger_bbs_skills_install(
+        bot_id="bot-a",
+        owner_user_id="111111",
+        request=_request("POST", "/openapi/v1/bots/bot-a/bbs/skills/install"),
+        runner=runner,
+    )
+    assert runner.calls == [{"op": "install_skills", "bot_id": "bot-a"}]
+    assert payload.data == {
+        "run_id": "run_skill",
+        "session_id": "sess_skill",
+        "mode": "openclaw",
+        "status": "submitted",
+        "action": "install_skills",
+    }
+
+
+@pytest.mark.asyncio
+async def test_trigger_bbs_skills_install_propagates_not_found():
+    class Runner:
+        async def trigger_install_bbs_skills(self, *, bot_id, owner_user_id):
+            raise NotFound("subscription not found")
+
+    with pytest.raises(NotFound):
+        await trigger_bbs_skills_install(
+            bot_id="bot-a",
+            owner_user_id="111111",
+            request=_request("POST", "/openapi/v1/bots/bot-a/bbs/skills/install"),
+            runner=Runner(),
+        )
+
+
+@pytest.mark.asyncio
 async def test_trigger_bbs_browse_framework_pushes_with_framework_mode():
     runner = _FakeRunner()
     payload = await trigger_bbs_browse_framework(
         bot_id="bot-a",
-        request=_request("POST", "/openapi/v1/bots/bot-a/bbs/browse-loop/trigger-framework"),
+        owner_user_id="111111",
+        request=_request(
+            "POST", "/openapi/v1/bots/bot-a/bbs/browse-loop/trigger-framework"
+        ),
         runner=runner,
     )
-    assert runner.calls == [{"op": "browse", "bot_id": "bot-a", "expected_mode": "framework"}]
+    assert runner.calls == [
+        {"op": "browse", "bot_id": "bot-a", "expected_mode": "framework"}
+    ]
     assert payload.data == {"run_id": "run_x", "session_id": "sess_x"}
 
 
@@ -164,10 +228,13 @@ async def test_trigger_bbs_browse_self_pushes_with_openclaw_mode():
     runner = _FakeRunner()
     await trigger_bbs_browse_self(
         bot_id="bot-a",
+        owner_user_id="111111",
         request=_request("POST", "/openapi/v1/bots/bot-a/bbs/browse-loop/trigger-self"),
         runner=runner,
     )
-    assert runner.calls == [{"op": "browse", "bot_id": "bot-a", "expected_mode": "openclaw"}]
+    assert runner.calls == [
+        {"op": "browse", "bot_id": "bot-a", "expected_mode": "openclaw"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -175,7 +242,10 @@ async def test_trigger_bbs_browse_cron_register_forwards_register_action():
     runner = _FakeRunner()
     await trigger_bbs_browse_cron_register(
         bot_id="bot-a",
-        request=_request("POST", "/openapi/v1/bots/bot-a/bbs/browse-loop/cron-register"),
+        owner_user_id="111111",
+        request=_request(
+            "POST", "/openapi/v1/bots/bot-a/bbs/browse-loop/cron-register"
+        ),
         runner=runner,
     )
     assert runner.calls == [{"op": "cron", "bot_id": "bot-a", "action": "register"}]
@@ -186,6 +256,7 @@ async def test_trigger_bbs_browse_cron_remove_forwards_remove_action():
     runner = _FakeRunner()
     await trigger_bbs_browse_cron_remove(
         bot_id="bot-a",
+        owner_user_id="111111",
         request=_request("POST", "/openapi/v1/bots/bot-a/bbs/browse-loop/cron-remove"),
         runner=runner,
     )

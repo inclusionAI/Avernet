@@ -1,6 +1,7 @@
 /** Read-only browser contract. Never import server runtime or reporting credentials here. */
 export type Decision = 'ALERT' | 'PASS' | 'UNRESOLVED';
 export type DiagnosisItem = {
+  schemaVersion?: string; // Missing version is legacy/unknown, never assumed v4.
   diagnosisId: string; botId: string; decision: Decision;
   occurredAt: string | null; diagnosedAt: string;
   sessionKey: string | null; sessionId: string | null; traceId: string | null;
@@ -25,7 +26,11 @@ export type MonitoringQuery = {
 };
 export type BotScope = 'mine' | 'monitored' | 'all';
 export type BotOption = {
+  configuration?: { diagnosisEnabled: boolean; recoveryEnabled: boolean; version: number };
   botRef: string; botName: string; botId: string; ownerId: string; env: string;
+  activeEngine?: string; botType?: string | null;
+  isServiceBot?: boolean;
+  configurationDisabledReason?: string;
   enrollmentState: 'ENROLLED' | 'NOT_ENROLLED';
   monitoring: null | {
     status: BotStatus['status']; checkedAt: string; lastSuccessfulCheckAt: string | null;

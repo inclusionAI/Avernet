@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import threading
 import time
+from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import httpx
@@ -102,14 +103,16 @@ class BaasTransport(Protocol):
       transparent-proxy URL (direct httpx POST).
     """
 
+    @abstractmethod
     def post(self, path: str, *, json: Any | None = None) -> httpx.Response: ...
 
+    @abstractmethod
     def post_multipart(
         self, path: str, *, files: Any, data: Any
     ) -> httpx.Response: ...
 
 
-class BaasInvokeTransport:
+class BaasInvokeTransport(BaasTransport):
     """通过 BaaSService.invoke_http(get_http_info → http_url → POST)。
 
     适用云上 baas 容器(未来 personal+baas / service+baas)。
@@ -248,7 +251,7 @@ class BaasInvokeTransport:
         return self._invoke("POST", path, files=files, data=data)
 
 
-class DesktopBaasInvokeTransport:
+class DesktopBaasInvokeTransport(BaasTransport):
     """自拼 secbaas transparent proxy URL,直接 httpx POST。
 
     适用 desktop bot(VM 在用户机器,BaaS get_http_info 返 localhost 拨不通)。

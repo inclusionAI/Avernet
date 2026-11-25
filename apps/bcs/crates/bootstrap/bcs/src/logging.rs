@@ -24,6 +24,8 @@ use tracing_subscriber::{
     EnvFilter, Layer,
 };
 
+mod correlation;
+
 pub(crate) const DELIVERY_MONITOR_TARGET: &str = "bcs_message_delivery_monitor";
 const DELIVERY_MONITOR_OUTPUT: &str = "message-delivery";
 static DELIVERY_MONITOR_DROPS: OnceLock<tracing_appender::non_blocking::ErrorCounter> = OnceLock::new();
@@ -44,6 +46,16 @@ pub(crate) fn effective_outputs(config: &LoggingConfig) -> Vec<LogOutputConfig> 
             path: base.map_or_else(|| "./logs".into(), |output| output.path.clone()),
             file: "message-delivery.log".into(), level: "info".into(), rotation: "daily".into(),
             format: LogOutputFormat::Raw, targets: vec![DELIVERY_MONITOR_TARGET.into()],
+            max_keep_days: base.map_or(7, |output| output.max_keep_days),
+        });
+    }
+    if !outputs.iter().any(|output| output.name == "business-warning") {
+        let base = outputs.iter().find(|output| output.name == "main").or(outputs.first());
+        outputs.push(LogOutputConfig {
+            name: "business-warning".into(),
+            path: base.map_or_else(|| "./logs".into(), |output| output.path.clone()),
+            file: "bcs-warning.log".into(), level: "warn".into(), rotation: "daily".into(),
+            format: LogOutputFormat::Text, targets: vec!["bcs_business_warning".into()],
             max_keep_days: base.map_or(7, |output| output.max_keep_days),
         });
     }
@@ -135,6 +147,7 @@ fn build_env_filter_with_overlay(config: &LoggingConfig, rust_log: Option<&str>)
         directives.push(rust_log.to_owned());
     }
     // Dedicated positional records must not leak to console, even with RUST_LOG.
+    directives.push("bcs_business_warning=off".into());
     directives.push(format!("{DELIVERY_MONITOR_TARGET}=off"));
     EnvFilter::new(directives.join(","))
 }
@@ -147,6 +160,9 @@ fn build_output_targets_filter(output: &LogOutputConfig) -> Targets {
     let level = parse_level(&output.level);
     if output.name == DELIVERY_MONITOR_OUTPUT {
         return Targets::new().with_target(DELIVERY_MONITOR_TARGET, level);
+    }
+    if output.name == "business-warning" {
+        return Targets::new().with_target("bcs_business_warning", LevelFilter::WARN);
     }
     // Wildcard DEBUG outputs exclude profiling unless the target is named.
     let mut filter = Targets::new().with_target("bcs_reply_profile", LevelFilter::OFF);
@@ -175,6 +191,7 @@ fn build_output_targets_filter(output: &LogOutputConfig) -> Targets {
     }
 
     filter.with_target(DELIVERY_MONITOR_TARGET, LevelFilter::OFF)
+        .with_target("bcs_business_warning", LevelFilter::OFF)
 }
 
 /// Get today's date string in local time (YYYY-MM-DD).
@@ -358,7 +375,7 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) -> LoggingGuard {
                 LogOutputFormat::Text => Some(
                     tracing_subscriber::fmt::layer()
                         .with_writer(writer)
-                        .with_timer(output_timer)
+                        .event_format(correlation::text(output_timer))
                         .with_ansi(false)
                         .with_filter(filter)
                         .boxed(),
@@ -370,7 +387,7 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) -> LoggingGuard {
                         .with_current_span(false)
                         .with_span_list(false)
                         .with_writer(writer)
-                        .with_timer(output_timer)
+                        .event_format(correlation::json(output_timer))
                         .with_ansi(false)
                         .with_filter(filter)
                         .boxed(),
@@ -382,7 +399,7 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) -> LoggingGuard {
     let console_layer = if config.console {
         Some(
             tracing_subscriber::fmt::layer()
-                .with_timer(timer.clone())
+                .event_format(correlation::text(timer.clone()))
                 .with_ansi(console_ansi_enabled())
                 .with_filter(build_env_filter(config)),
         )
@@ -529,7 +546,7 @@ mod tests {
             .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(RotatingFileWriter::new(dir.path(), &main.file)).with_filter(build_output_targets_filter(&main)))
             .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(RotatingFileWriter::new(dir.path(), "console.log")).with_filter(build_env_filter(&config)));
         let dispatch = tracing::Dispatch::new(subscriber);
-        let rows = "1,1000,boot,0,0,0,0,0,1,3,0,0,0,1,1000\n1,1000,boot,0,0,0,0,0,2,1,0,0,0,1,1000";
+        let rows = "1000,10000,20,18,16,1,0,0,2,1,3,2,0,1,0,12.5,1,0,1,0,0,0,2";
         tracing::dispatcher::with_default(&dispatch, || {
             tracing::info!(target: DELIVERY_MONITOR_TARGET, ignored = "never-written", "{rows}");
             tracing::error!("ordinary message");
@@ -537,10 +554,10 @@ mod tests {
         drop(guard);
         let monitor = fs::read_to_string(dir.path().join("message-delivery.log")).unwrap();
         assert_eq!(monitor, format!("{rows}\n"));
-        assert!(monitor.lines().all(|line| line.split(',').count() == 15));
+        assert!(monitor.lines().all(|line| line.split(',').count() == 23));
         for file in ["bcs.log", "console.log"] {
             let text = fs::read_to_string(dir.path().join(file)).unwrap();
-            assert!(text.contains("ordinary message"), "{file}: {text:?}"); assert!(!text.contains("1,1000,boot"));
+            assert!(text.contains("ordinary message"), "{file}: {text:?}"); assert!(!text.contains("1000,10000,20,18"));
         }
     }
 
@@ -552,7 +569,7 @@ mod tests {
         assert_eq!(effective_outputs(&config)[0].file, "custom-monitor.log");
         config.outputs[0].name = "main".into();
         let outputs = effective_outputs(&config);
-        assert_eq!(outputs.len(), 2); assert_eq!(outputs[1].path, "/configured/logs");
+        assert_eq!(outputs.len(), 3); assert_eq!(outputs[1].path, "/configured/logs");
         assert_eq!(outputs[1].file, "message-delivery.log"); assert_eq!(outputs[1].format, LogOutputFormat::Raw);
     }
 
@@ -873,4 +890,57 @@ mod tests {
         assert!(events[1].contains("status=200"));
     }
 
+
+    #[test]
+    fn business_warning_output_is_added_once_and_excluded_from_other_sinks() {
+        let mut config = LoggingConfig::default();
+        let outputs = effective_outputs(&config);
+        let warning = outputs.iter().find(|o| o.name == "business-warning").unwrap();
+        assert_eq!(warning.file, "bcs-warning.log");
+        assert!(build_output_targets_filter(warning).would_enable("bcs_business_warning", &Level::WARN));
+        assert!(!build_output_targets_filter(warning).would_enable("unrelated", &Level::WARN));
+        for output in outputs.iter().filter(|o| o.name != "business-warning") {
+            assert!(!build_output_targets_filter(output).would_enable("bcs_business_warning", &Level::ERROR));
+        }
+        config.outputs = outputs;
+        assert_eq!(effective_outputs(&config).iter().filter(|o| o.name == "business-warning").count(), 1);
+    }
+
+    #[tokio::test]
+    async fn actual_failure_is_written_only_to_warning_file_with_details_and_identity() {
+        use tracing::instrument::WithSubscriber;
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = LoggingConfig::default();
+        config.outputs.retain(|o| o.name == "common-error");
+        config.outputs[0].path = dir.path().to_string_lossy().into();
+        config.outputs[0].name = "main".into();
+        config.outputs[0].file = "bcs.log".into();
+        config.outputs[0].level = "info".into();
+        let outputs = effective_outputs(&config);
+        let warning = outputs.iter().find(|o| o.name == "business-warning").unwrap();
+        let main = &outputs[0];
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().with_ansi(false)
+                .with_writer(RotatingFileWriter::new(dir.path(), &main.file))
+                .with_filter(build_output_targets_filter(main)))
+            .with(tracing_subscriber::fmt::layer().with_ansi(false)
+                .with_writer(RotatingFileWriter::new(dir.path(), &warning.file))
+                .with_filter(build_output_targets_filter(warning)));
+        let context = bcs_observability::business_warning::WarningContext::new(
+            "file-request".into(), "register".into(), "pppppppppppp".into(),
+            br#"{"agent_card":{"name":" "},"provider_admin_token":"pppppppppppp"}"#.to_vec());
+        bcs_observability::business_warning::with_warning_context(context, async {
+            let ids = bcs_tracing_api::LogCorrelation::new("sofa_trace_id", "file-trace", "sofa_rpc_id", "0.4").unwrap();
+            bcs_tracing_api::with_log_correlation(Some(ids), || {
+                bcs_observability::business_warning::warn_current("INVALID_CARD", "agent_card.name", "INVALID_NAME");
+            });
+        }).with_subscriber(subscriber).await;
+        let text = fs::read_to_string(dir.path().join("bcs-warning.log")).unwrap();
+        for expected in ["WARN", "file-request", "file-trace", "0.4", "INVALID_CARD", "agent_card.name", "INVALID_NAME", "pppp****", "request_payload"] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+        assert!(!text.contains("pppppppppppp"));
+        assert_eq!(text.lines().count(), 1);
+        assert_eq!(fs::read_to_string(dir.path().join("bcs.log")).unwrap(), "");
+    }
 }

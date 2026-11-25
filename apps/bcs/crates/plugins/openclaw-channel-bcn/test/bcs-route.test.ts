@@ -95,7 +95,7 @@ describe('bcs tool integration', () => {
       response_mode: 'full',
     });
 
-    assert.deepEqual(result, { ok: true, task_id: 'task-1', status: 'dispatched' });
+    assert.deepEqual(result, { ok: true, task_ref: 'T-task1', status: 'dispatched' });
     assert.deepEqual(calls, [
       {
         method: 'task.dispatch',

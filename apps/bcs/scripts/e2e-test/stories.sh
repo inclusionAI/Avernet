@@ -398,13 +398,13 @@ story_user_builds_trusted_team() {
 # Flow:
 #   Create a group -> manage members and visibility -> configure participant mode,
 #   workspace, routing, and service settings -> exchange persistent and live messages
-#   -> process an agent callback -> close the group -> confirm a proposed group.
+#   -> process an agent callback -> close the group.
 #
 # Critical assertions:
 #   - Membership, labels, visibility, and participant identity changes are exact.
 #   - Workspace and routing updates survive an independent read-back.
 #   - Messages and callbacks produce routing or delivery results for the same group.
-#   - Deleted groups return 404, while confirmed proposals create the requested group.
+#   - Deleted groups return 404.
 story_user_operates_group_workspace() {
     info "Story: a user forms a team, configures its workspace, and collaborates"
     # Reuse stable CRUD/CLI steps as implementation details of this story.
@@ -424,7 +424,6 @@ story_user_operates_group_workspace() {
     test_group_status_via_cli
     test_group_terminate_via_cli
     _story_group_metadata_without_workspace || return
-    _story_group_proposal_confirmation || return
 }
 
 _story_group_metadata_without_workspace() {
@@ -460,9 +459,8 @@ _story_group_metadata_without_workspace() {
     assert_json_eq "default delivery is persisted" "$RESPONSE" "routing_policy.default_bot_final_delivery" "inject_observers"
 
     api_patch "/groups/${group_id}/settings" '{"service_spec":{"max_concurrency":2}}'
-    require_status "group is exposed as a bounded service" "200" || return
-    assert_json_eq "service group max concurrency is persisted" "$RESPONSE" "service_spec.max_concurrency" "2"
-    assert_json_eq "group settings update returns stable status" "$RESPONSE" "status" "ok"
+    require_status "retired group policy settings return Gone" "410" || return
+    assert_json_eq "retired policy is identified" "$RESPONSE" "error" "service_policy_retired"
 
     api_post "/groups/${group_id}/messages" \
         "{\"sender\":\"${BOT_CEO_UUID}\",\"content\":\"Please validate the hotfix\",\"message_type\":\"bot\",\"role\":\"user\"}"
@@ -487,37 +485,6 @@ _story_group_metadata_without_workspace() {
     assert_json_eq "group deletion confirms the id" "$RESPONSE" "id" "$group_id"
     api_get "/groups/${group_id}"
     require_status "closed incident group is gone" "404" || return
-}
-
-_story_group_proposal_confirmation() {
-    bot_post "/groups/request" CEO \
-        "{\"topic\":\"Review release readiness\",\"suggested_participants\":[\"${BOT_PM_UUID}\",\"${BOT_QA_UUID}\"],\"suggested_driver\":\"${BOT_CEO_UUID}\"}"
-    require_status "driver requests a release-readiness group" "200" || return
-    assert_json_eq "group proposal is created" "$RESPONSE" "proposal_created" "true"
-    local confirm_url confirm_path
-    confirm_url=$(json_path "$RESPONSE" "confirm_url")
-    assert_not_empty "group proposal returns a confirmation URL" "$confirm_url"
-    [[ -n "$confirm_url" ]] || return
-    confirm_path=$(python3 -c 'import sys,urllib.parse; u=urllib.parse.urlparse(sys.argv[1]); print(u.path)' "$confirm_url")
-
-    api_get "$confirm_path"
-    require_status "user previews the group confirmation page" "200" || return
-    assert_contains "confirmation page shows the proposal topic" "$RESPONSE" "Review release readiness"
-    assert_contains "confirmation page posts back to the same token" "$RESPONSE" "$confirm_path"
-
-    api_post "$confirm_path"
-    require_status "user confirms the proposed group" "200" || return
-    assert_json_eq "confirmed proposal creates a group" "$RESPONSE" "created" "true"
-    local group_id
-    group_id=$(json_path "$RESPONSE" "group_id")
-    assert_not_empty "confirmed proposal returns group id" "$group_id"
-    [[ -n "$group_id" ]] || return
-
-    api_get "/groups/${group_id}"
-    require_status "confirmed group is queryable" "200" || return
-    assert_json_eq "confirmed group uses the proposed driver" "$RESPONSE" "driver_bot" "$BOT_CEO_UUID"
-    api_delete "/groups/${group_id}?bot_id=${BOT_CEO_UUID}"
-    require_status "confirmed group is cleaned up" "200" || return
 }
 
 # User story: A team creates, shares, completes, and invokes collaboration sessions.
@@ -763,10 +730,6 @@ _story_complete_and_invoke_sessions() {
     require_status "completed session can be read back" "200" || return
     assert_json_eq "read-back keeps completed status" "$RESPONSE" "status" "completed"
     assert_json_eq "read-back keeps completion output" "$RESPONSE" "output.summary" "release approved"
-
-    api_patch "/groups/${group_id}/settings" '{"service_spec":{"max_concurrency":2}}'
-    require_status "release group is configured for service invocations" "200" || return
-    assert_json_eq "service invocation concurrency is two" "$RESPONSE" "service_spec.max_concurrency" "2"
 
     bot_post "/services/${group_id}/sessions" PM \
         '{"caller_id":"release-pipeline-1","session_title":"Automated release audit","input":{"commit":"abc123"},"meta":{"source":"e2e"}}'
@@ -1269,9 +1232,14 @@ story_provider_callback_survives_slow_judge() {
     [[ -n "$provider_bot_uuid" && -n "$runtime_token" ]] || return
 
     # Group membership enforces the same trust boundary for Provider-backed
-    # bots as it does for native bots. Make the fixture explicitly public and
-    # establish its relationship with the driver before creating the group.
-    api_put "/bots/${provider_bot_uuid}/visibility" '{"visibility":"public"}'
+    # bots as it does for native bots. Legacy Provider-admin publication
+    # does not mint a Human authority edge (only the trusted register
+    # surface does), so the fixture bot makes itself discoverable with its
+    # own runtime credential; the driver then establishes the relationship
+    # with it before the group is created.
+    api_request_headers PUT "/bots/${provider_bot_uuid}/visibility" \
+        '{"visibility":"public"}' \
+        "X-BCS-Bot-Token: ${runtime_token}"
     require_status "operator makes the slow-Judge Provider bot discoverable" "200" || return
     api_post "/friends/request" \
         "{\"from_bot\":\"${BOT_CEO_UUID}\",\"to_bot\":\"${provider_bot_uuid}\"}"
@@ -1284,6 +1252,18 @@ story_provider_callback_survives_slow_judge() {
     fi
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     [[ "$HTTP_STATUS" == "200" || "$HTTP_STATUS" == "201" ]] || return
+    # Friend requests are pending-by-default (edge-permission connect
+    # convergence, dima 2026110600120400669): the Provider bot decides its own
+    # inbound request with its runtime credential before the driver's trust
+    # list can contain it. A replayed "Already friends" response carries no
+    # request id, so nothing needs accepting on rerun.
+    local friend_request_id
+    friend_request_id=$(json_path "$RESPONSE" "data.id")
+    if [[ -n "$friend_request_id" ]]; then
+        api_request_headers POST "/friends/requests/${friend_request_id}/accept" \
+            '{}' "X-BCS-Bot-Token: ${runtime_token}"
+        assert_eq "slow-Judge Provider bot accepts the friend request" "$HTTP_STATUS" "200"
+    fi
     api_get "/bots/${BOT_CEO_UUID}/friends"
     require_status "driver reads friends after Provider trust setup" "200" || return
     assert_contains "driver trust list contains the slow-Judge Provider bot" \

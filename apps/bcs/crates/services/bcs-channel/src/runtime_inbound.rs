@@ -131,7 +131,7 @@ impl BcsChannelService {
                 authenticated_human: Some(AuthenticatedHumanCaller {
                     actor_id: actor_id.to_string(),
                     display_name: msg.im_user_nick.clone(),
-                }),
+                }), caller_association: None,
             })
             .await;
         if let Err(error) = start_result {
@@ -222,6 +222,7 @@ impl BcsChannelService {
             }),
             render_hint: ChannelRenderHint::Render,
             source_im_message_id: source_im_message_id.map(str::to_string),
+            caller_dispatch: false,
             source_is_channel: false,
         })
         .await

@@ -112,7 +112,7 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 7.
   - [x] The materialiser's `write` is one `CliToolService.replace_all` call; it adds no fetch, verification or placement of its own.
   - [x] `plan` reads the table: matching `(digest, subpath)` plans `unchanged`, rows the declaration no longer names plan removals; `version` never affects convergence.
   - [x] `MaterialiserPorts` gains `cli_tool_service`, bound per strategy with the family's engine port already inside it.
-  - [x] `ManifestCategory.CLI_TOOLS` maps to `None` in `blocked` and `_REASON_CLI_TOOLS` is deleted; desktop and unknown-engine refusals still win.
+  - [x] `Category.CLI_TOOLS` maps to `None` in `blocked` and `_REASON_CLI_TOOLS` is deleted; desktop and unknown-engine refusals still win.
   - [x] **`order.py` is not modified** — it carries the ARCA reading, `ON_CONTAINER`.
   - [x] `TeclawDelivery.phase_of` gains a `cli_tools` branch returning `PRE_CONTAINER` **under either switch position**, because a teclaw creation has no phase B and the artifact is composed before provisioning.
   - [x] `cli_tools` is **always platform-managed and never consults `teclaw_platform_managed`** for ownership, exactly as `mcp` does not.

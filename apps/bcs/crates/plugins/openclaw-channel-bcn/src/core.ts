@@ -8,18 +8,18 @@ import {
   getSessionRoutingMode,
   getSessionTaskGroupInfo,
   handleAssignTask,
-  handleTaskMessage,
+  handleTaskControl,
   handleTaskComplete,
   BCS_ROUTE_TOOL_SCHEMA,
   BCS_ASSIGN_TASK_TOOL_SCHEMA,
-  BCS_TASK_MESSAGE_TOOL_SCHEMA,
   BCS_TASK_COMPLETE_TOOL_SCHEMA,
 } from './inbound-handler.js';
 
 export const BCS_CORE_TOOL_NAMES = [
   'bcs_route',
   'bcs_assign_task',
-  'bcs_send_task_message',
+  'bcs_task_status',
+  'bcs_cancel_task',
   'bcs_task_complete',
 ] as const;
 
@@ -178,34 +178,26 @@ export function registerBcsCore(
     { name: 'bcs_assign_task' },
   );
 
-  // Register bcs_send_task_message tool — only for worker bot in manager_worker service groups
-  api.registerTool(
-    (ctx: OpenClawPluginToolContext) => {
+  for (const control of [
+    { name: 'bcs_task_status', method: 'task.status' as const,
+      description: 'Query 1..20 task refs on demand, not by polling. unknown/not_found never proves stopped or safe to resend.',
+      parameters: { type: 'object', properties: { task_refs: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 20 } }, required: [ 'task_refs' ] } },
+    { name: 'bcs_cancel_task', method: 'task.cancel' as const,
+      description: 'Request cancellation and wait briefly for confirmed stop. unknown/not_found/cancel_failed is not stopped. Cancellation does not roll back side effects.',
+      parameters: { type: 'object', properties: { task_ref: { type: 'string' }, reason: { type: 'string' } }, required: [ 'task_ref', 'reason' ] } },
+  ]) {
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
       const { sessionKey, channel } = rememberSessionSandbox(ctx);
-
-      if (channel !== 'bcs') return null;
-      if (!sessionKey) return null;
-
-      const taskInfo = getSessionTaskGroupInfo(sessionKey);
-      if (!taskInfo || taskInfo.groupType !== 'manager_worker') return null;
-      if (taskInfo.recipientRole !== 'worker') return null;
-
-      return {
-        name: BCS_TASK_MESSAGE_TOOL_SCHEMA.name,
-        label: 'BCS Send Task Message',
-        description: BCS_TASK_MESSAGE_TOOL_SCHEMA.description,
-        parameters: BCS_TASK_MESSAGE_TOOL_SCHEMA.parameters,
-        async execute(_toolCallId: string, params: Record<string, unknown>) {
-          const result = await handleTaskMessage(sessionKey, params);
-          return {
-            content: [{ type: 'text' as const, text: JSON.stringify(result) }],
-            details: result,
-          };
-        },
-      };
-    },
-    { name: 'bcs_send_task_message' },
-  );
+      if (channel !== 'bcs' || !sessionKey) return null;
+      const task = getSessionTaskGroupInfo(sessionKey);
+      if (task?.groupType !== 'manager_worker' || task.recipientRole !== 'manager') return null;
+      return { name: control.name, label: control.name, description: control.description, parameters: control.parameters,
+        async execute(_id: string, params: Record<string, unknown>) {
+          const result = await handleTaskControl(sessionKey, control.method, params);
+          return { content: [{ type: 'text' as const, text: JSON.stringify(result) }], details: result };
+        } };
+    }, { name: control.name });
+  }
 
   // Register bcs_task_complete tool — only for manager bot in manager_worker service groups
   api.registerTool(

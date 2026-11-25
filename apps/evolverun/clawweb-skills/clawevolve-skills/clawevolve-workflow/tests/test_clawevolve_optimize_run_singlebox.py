@@ -117,39 +117,77 @@ def test_internal_workspace_defaults_remain_unchanged(monkeypatch, tmp_path):
     assert handler._resolve_workspace(SimpleNamespace(workspace=str(tmp_path))) == tmp_path
 
 
-def test_frozen_primary_plan_is_copied_without_rerunning_or_overwriting(monkeypatch, tmp_path):
+@pytest.mark.parametrize("version,base", [
+    ("openversion", "http://127.0.0.1:5173"),
+    ("internalversion", "https://example.org"),
+    ("", "https://example.org"),
+])
+def test_frozen_primary_plan_is_copied_without_rerunning_or_overwriting(monkeypatch, tmp_path, version, base):
     import io, json, urllib.request
-    monkeypatch.setenv("CLAWWEB_VERSION", "openversion")
-    args = SimpleNamespace(task_id="EV-new", step_id="STEP-new", owner_id="owner", round=1, clawweb_url="http://127.0.0.1:5173")
+    monkeypatch.setenv("CLAWWEB_VERSION", version)
+    args = SimpleNamespace(task_id="EV-new", step_id="STEP-new", owner_id="owner", round=1, clawweb_url=base)
     source = tmp_path / "clawevolve_results/EV-source/plan/output"
     source.mkdir(parents=True)
     (source / "spec-v0.md").write_text("original spec")
     frozen = {"task": {"taskId": args.task_id, "taskType": "optimize"}, "target": {"userId": "owner"}, "step": {"stepId": args.step_id},
               "inputs": {"diagnoses": [{"role": "primary", "taskId": "EV-source", "plan": {"stepId": "STEP-source"}}]}}
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: io.BytesIO(json.dumps(frozen).encode()))
-    handler._prepare_openversion_source(args, tmp_path)
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", lambda *a, **kw: io.BytesIO(json.dumps(frozen).encode()))
+    handler._prepare_source_plan(args, tmp_path)
     target = tmp_path / "clawevolve_results/EV-new/plan/output/spec-v0.md"
     assert target.read_text() == "original spec"
     target.write_text("retry must preserve")
-    handler._prepare_openversion_source(args, tmp_path)
+    handler._prepare_source_plan(args, tmp_path)
     assert target.read_text() == "retry must preserve"
     assert (source / "spec-v0.md").read_text() == "original spec"
     link = source / "linked-secret"
     link.symlink_to(tmp_path / "outside")
     with pytest.raises(ValueError, match="Symlinked Plan input"):
-        handler._prepare_openversion_source(args, tmp_path)
+        handler._prepare_source_plan(args, tmp_path)
     link.unlink()
     frozen["inputs"]["diagnoses"][0]["taskId"] = "../other-bot"
     with pytest.raises(ValueError, match="source Task"):
-        handler._prepare_openversion_source(args, tmp_path)
+        handler._prepare_source_plan(args, tmp_path)
+
+    frozen["inputs"]["diagnoses"][0]["taskId"] = "EV-source"
+    for name, content in (("objective.md", "source objective"), ("objective.json", '{"goal": "source"}')):
+        (source / name).write_text(content)
+    handler._prepare_source_plan(args, tmp_path)
+    for name in ("objective.md", "objective.json"):
+        assert (target.parent / name).read_text() == (source / name).read_text()
+    assert target.read_text() == "retry must preserve"
 
 
-def test_internal_prepare_never_uses_local_source_adapter(monkeypatch, tmp_path):
+@pytest.mark.parametrize("round_no", [1, 2])
+@pytest.mark.parametrize("directory", ["plan/output", "optimize/input"])
+@pytest.mark.parametrize("spec_name", ["spec-v0.md", "spec_v0.md"])
+def test_existing_inputs_and_later_rounds_do_not_query_source(tmp_path, round_no, directory, spec_name):
     import urllib.request
-    monkeypatch.delenv("CLAWWEB_VERSION", raising=False)
-    with patch.object(urllib.request, "urlopen") as request:
-        handler._prepare_openversion_source(SimpleNamespace(round=1), tmp_path)
+    if round_no == 1:
+        target = tmp_path / "clawevolve_results/EV-new" / directory
+        target.mkdir(parents=True)
+        for name in ("objective.md", "objective.json", spec_name):
+            (target / name).write_text("existing input")
+    with patch.object(urllib.request.OpenerDirector, "open") as request:
+        handler._prepare_source_plan(SimpleNamespace(round=round_no, task_id="EV-new"), tmp_path)
         request.assert_not_called()
+
+
+@pytest.mark.parametrize("base", ["http://example.org", "file:///tmp/source", "https://user:password@example.org", "https://example.org?query=1"])
+def test_source_plan_rejects_invalid_callback_url(tmp_path, base):
+    args = SimpleNamespace(round=1, task_id="EV-new", clawweb_url=base)
+    with pytest.raises(ValueError, match="ClawWeb URL"):
+        handler._prepare_source_plan(args, tmp_path)
+
+
+def test_source_plan_rejects_redirect(tmp_path):
+    import urllib.request
+    args = SimpleNamespace(round=1, task_id="EV-new", step_id="STEP-new", owner_id="owner", clawweb_url="https://example.org")
+    def redirect(opener, url, **kwargs):
+        redirect_handler = next(h for h in opener.handlers if isinstance(h, urllib.request.HTTPRedirectHandler))
+        return redirect_handler.redirect_request(None, None, 302, "Found", {}, "http://example.net")
+    with patch.object(urllib.request.OpenerDirector, "open", redirect):
+        with pytest.raises(ValueError, match="redirect"):
+            handler._prepare_source_plan(args, tmp_path)
 
 
 @pytest.mark.parametrize("version,root", [("openversion", "skills"), ("internalversion", "skills/skills-local")])

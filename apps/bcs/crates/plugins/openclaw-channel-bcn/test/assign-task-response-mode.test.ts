@@ -3,6 +3,7 @@ import {
   abortAllStreams,
   BCS_ASSIGN_TASK_TOOL_SCHEMA,
   handleAssignTask,
+  handleTaskControl,
   rememberTaskToolSession,
 } from '../src/inbound-handler.js';
 
@@ -14,7 +15,7 @@ describe('bcs_assign_task response_mode', () => {
       connected: true,
       async sendRequest(method: string, params: Record<string, unknown>) {
         calls.push({ method, params });
-        return { ok: true, payload: { task_id: 'task-1', status: 'dispatched' } };
+        return { ok: true, payload: { task_id: '1234abcd-0000-0000-0000-000000000000', status: 'dispatched' } };
       },
     };
 
@@ -35,9 +36,10 @@ describe('bcs_assign_task response_mode', () => {
       target_bot: 'Worker',
       message: 'do work',
       response_mode: 'full',
+      timeout_s: 60,
     });
 
-    assert.deepEqual(result, { ok: true, task_id: 'task-1', status: 'dispatched' });
+    assert.deepEqual(result, { ok: true, task_ref: 'T-1234abcd', status: 'dispatched' });
     assert.deepEqual(calls, [
       {
         method: 'task.dispatch',
@@ -46,6 +48,7 @@ describe('bcs_assign_task response_mode', () => {
           target_bot: 'Worker',
           message: 'do work',
           response_mode: 'full',
+          timeout_s: 60,
         },
       },
     ]);
@@ -53,5 +56,17 @@ describe('bcs_assign_task response_mode', () => {
       (BCS_ASSIGN_TASK_TOOL_SCHEMA.parameters.properties as any).response_mode.enum,
       [ 'after-last-tool-call', 'full' ],
     );
+  });
+});
+
+describe('task controls', () => {
+  it('reports unknown on disconnected cancel, but never fabricates status', async () => {
+    abortAllStreams();
+    assert.deepEqual(await handleTaskControl('missing-session', 'task.cancel', {
+      task_ref: 'T-1234abcd', reason: 'stop',
+    }), { ref: 'T-1234abcd', status: 'unknown' });
+    await assert.rejects(handleTaskControl('missing-session', 'task.status', {
+      task_refs: [ 'T-1234abcd' ],
+    }), /not connected/);
   });
 });

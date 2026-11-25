@@ -253,8 +253,9 @@ allowed_profiles = ["native_mcp", "mcporter_mcp"]
 接入继续使用原有路径。
 
 `native_mcp` 固定 MCP server 为 `bcs`，精确工具名为
-`mcp__bcs__bcs_assign_task`、`mcp__bcs__bcs_send_task_message`、
-`mcp__bcs__bcs_task_complete`。`mcporter_mcp` 固定命令 `mcporter` 和
+`mcp__bcs__bcs_assign_task`、`mcp__bcs__bcs_task_complete`。
+旧 `mcp__bcs__bcs_send_task_message` 只作为兼容期接收格式，不再提供给模型调用。
+status/cancel 直接查询后端，不生成 coordination echo。`mcporter_mcp` 固定命令 `mcporter` 和
 server `bcs`，从成功的 `exec`/`bash`/`shell`/`mcporter` 工具输出中解析
 完整 coordination envelope（来源工具名不区分大小写），不套用原生 MCP
 工具名映射。两条路径仍须通过 start/result 配对、run/session、授权和幂等校验。
@@ -692,3 +693,22 @@ BCN 按以下优先级决定路由方式：
 ## 8. 参考实现
 
 OpenClaw 接入参考实现见 [openclaw-channel-bcn](../src/bcs/crates/plugins/openclaw-channel-bcn/README.md)。
+
+
+## Manager–Worker task handles
+
+`bcs_send_task_message` is retired from model-visible tools. Worker final replies
+are automatically returned as task results. When blocked, end the turn and state
+what is needed; the Manager assigns a follow-up to the same Worker, including
+necessary context. Do not use old worker-message examples as invocation guidance.
+
+Managers use `bcs_assign_task` (optional positive `timeout_s`), `bcs_task_status`
+(1–20 refs, on demand only), and `bcs_cancel_task` (ref and reason). `task_ref` is
+`T-` plus eight hex digits; ambiguous refs require a longer prefix. `stored` is not
+admission or completion. `unknown`/`not_found` never proves stopped or safe to
+resend. Cancellation waits briefly for confirmation, never exposes `cancelling`,
+and does not roll back side effects. FIFO is not business idempotence.
+
+The server consumes old task.message/v2 echoes for one compatibility release;
+that compatibility path is not a newly exposed tool. Remove it only after old
+producers and queued work have drained (cached payloads live for 24 hours).

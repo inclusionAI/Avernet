@@ -71,6 +71,8 @@ def _is_engine_runtime(path: str) -> bool:
 #: frozen, so they must not have grown the parameter — which the exclusivity
 #: assertion below is what proves.
 _STAGE_ADDRESSED_ELSEWHERE = {
+    ("get", "/openapi/v1/bots"),
+    ("get", "/openapi/v1/bots/collaborations"),
     # Release inspection explicitly rejects published stages, never falls back
     # to a draft. Its stage parameter is an intentional additive contract.
     ("get", "/openapi/v1/bots/{bot_id}/engine-version"),
@@ -105,13 +107,41 @@ _STAGE_ADDRESSED_ELSEWHERE = {
 #: caller's own bot — because ``bot_id`` alone does not identify one. They do
 #: **not** take ``stage``: there is no runtime in question when you are
 #: recording who may reach a bot, or listing a bot's stored skills.
+_REQUIRED_OWNER_OPERATIONS = {
+    ("post", "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish"),
+}
+
 _OWNER_ADDRESSED_ELSEWHERE = {
+    # Caller status names the source owner and has no stage-selection input.
+    ("get", "/openapi/v1/bots/{bot_id}/caller-instance/status"),
+    # Service-Bot evaluation addresses a bot by (owner, bot_id), but takes no
+    # runtime stage: its records, tasks, and Eval-zone environments are
+    # bot/version scoped, not runtime scoped. Every evaluation route
+    # intentionally uses the same owner-addressing seam as the
+    # collaborator-scoped Workshop groups above.
+    ("get", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}"),
+    ("post", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/simple-cert/precheck"),
+    ("post", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/simple-cert/submissions"),
+    ("get", "/openapi/v1/bots/{bot_id}/eval/submissions/{submission_id}"),
+    ("get", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/history"),
+    ("post", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/simple-cert/sync"),
+    ("get", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/sample-sets"),
+    ("post", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/tasks"),
+    ("get", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/tasks/current"),
+    ("post", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments"),
+    ("get", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments/current"),
+    ("delete", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments/current"),
+    ("post", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/standard-eval/results"),
+    ("post", "/openapi/v1/bots/{bot_id}/iam-token"),
     ("get", "/openapi/v1/bots/{bot_id}/engine-version"),
     ("get", "/openapi/v1/bots/{bot_id}/status"),
     ("post", "/openapi/v1/bots/{bot_id}/activate"),
     ("post", "/openapi/v1/bots/{bot_id}/recycle"),
+    ("get", "/openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}"),
     ("get", "/openapi/v1/bots/{bot_id}/caller-context"),
     ("patch", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"),
+    ("get", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/config"),
+    ("put", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/config"),
     ("patch", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"),
     ("get", "/openapi/v1/bots/{bot_id}/clis"),
     ("post", "/openapi/v1/bots/{bot_id}/clis"),
@@ -479,17 +509,19 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
             assert not params["stage"].get("required", False), path
         if "owner_id" in params:
             carrying_owner.append((method, path))
-            # Never required anywhere: omitting it means the caller's own bot,
-            # which is what every one of these operations meant before the
-            # parameter existed.
-            assert not params["owner_id"].get("required", False), path
+            # Eval publication explicitly names a resource owner; it does not
+            # derive one from the caller as runtime operations do.
+            assert params["owner_id"].get("required", False) is (
+                (method, path) in _REQUIRED_OWNER_OPERATIONS
+            ), path
 
     # The original 16 operations also answer at their former addresses while
     # callers migrate. The three newly added favorite operations have only
     # their bot-first address; engine restart, default-config and nodes also
     # have no legacy alias. Session File is OpenAPI-only, yielding 28 current
     # + 16 retiring operations.
-    assert len(engine_runtime) == 44
+    # The default-model read shares the existing owner and stage addressing.
+    assert len(engine_runtime) == 45
     assert sorted(carrying_stage) == sorted(
         set(engine_runtime) | _STAGE_ADDRESSED_ELSEWHERE
     ), (
@@ -498,7 +530,7 @@ def test_owner_id_and_stage_are_on_exactly_the_engine_runtime_operations():
         "no retiring address of those five, whose contract is frozen"
     )
     assert sorted(carrying_owner) == sorted(
-        set(engine_runtime) | _OWNER_ADDRESSED_ELSEWHERE
+        set(engine_runtime) | _OWNER_ADDRESSED_ELSEWHERE | _REQUIRED_OWNER_OPERATIONS
     ), (
         "owner_id belongs to engine-runtime and the explicitly listed "
         "owner-addressed operations, and to nothing else by accident"
@@ -540,6 +572,7 @@ def test_neither_parameter_is_ever_a_body_field_or_a_path_segment():
 
 def test_friend_user_id_is_optional_and_only_on_human_chat_capable_operations():
     expected = {
+        ("post", "/openapi/v1/bots/{bot_id}/iam-token"),
         ("get", "/openapi/v1/bots/{bot_id}/sessions"),
         ("post", "/openapi/v1/bots/{bot_id}/sessions"),
         ("get", "/openapi/v1/bots/{bot_id}/sessions/favorites"),
@@ -547,6 +580,13 @@ def test_friend_user_id_is_optional_and_only_on_human_chat_capable_operations():
         ("patch", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
         ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
+        # Session file operations use the same owned friend-session guard.
+        ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files"),
+        ("post", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-intents"),
+        ("post", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/upload-complete"),
+        ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/content"),
+        ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}/materialize-status"),
+        ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/files/{resource_id}"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
         ("put", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),
         ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),

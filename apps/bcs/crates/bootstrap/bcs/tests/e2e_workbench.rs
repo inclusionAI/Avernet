@@ -40,7 +40,17 @@
 //! cargo test --package bcs --test e2e_workbench -- --test-threads=1 --nocapture
 //! ```
 
+#[path = "support/e2e_helpers.rs"]
 mod e2e_helpers;
+
+#[path = "e2e_workbench/group_chat.rs"]
+mod group_chat;
+#[path = "e2e_workbench/protocol.rs"]
+mod protocol;
+#[path = "e2e_workbench/authorization.rs"]
+mod authorization;
+#[path = "e2e_workbench/broadcast.rs"]
+mod broadcast;
 
 use std::sync::Once;
 
@@ -263,6 +273,86 @@ async fn connect_bot_ws_with_retry(
     }
 }
 
+/// TRUSTED registration (bot-authority plan Task 6,
+/// ruling T6d-1): the harness seeds each fixture
+/// Bot's authority ownership through the local
+/// trusted register surface —
+/// `GET /register/token` (mock HUMAN principal) →
+/// `POST /register?token&bot-name` (the
+/// `register_with_ownership` composite commits the
+/// authority owner edge). The mock-user header
+/// NEVER reaches authority writes through
+/// onboard-side flows.
+async fn register_trusted_bot(
+    client: &reqwest::Client,
+    bcs_url: &str,
+    name: &str,
+) -> Result<(String, String), Box<dyn std::error::Error>> {
+    let resp = client
+        .get(&format!("{}/register/token", bcs_url))
+        .header("X-Mock-User-Id", WORKBENCH_STAFF_NO)
+        .header("X-Mock-Nick-Name", WORKBENCH_NICK_NAME)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "register token mint failed: {} - {}",
+            status, body
+        )
+        .into());
+    }
+    let body: serde_json::Value = resp.json().await?;
+    let register_token = body["token"]
+        .as_str()
+        .ok_or("register token response missing 'token'")?
+        .to_string();
+
+    let resp = client
+        .post(&format!(
+            "{}/register?token={}&bot-name={}",
+            bcs_url,
+            urlencode(&register_token),
+            urlencode(name)
+        ))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!(
+            "trusted registration failed: {} - {}",
+            status, text
+        )
+        .into());
+    }
+    let body: serde_json::Value = serde_json::from_str(&text)?;
+    let bot_uuid = body["bot_uuid"]
+        .as_str()
+        .ok_or("registration response missing bot_uuid")?
+        .to_string();
+    let bot_token = body["bot_token"]
+        .as_str()
+        .ok_or("registration response missing bot_token")?
+        .to_string();
+    Ok((bot_uuid, bot_token))
+}
+
+fn urlencode(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_'
+            | b'.' | b'~' => encoded.push(byte as char),
+            other => encoded.push_str(&format!("%{other:02X}")),
+        }
+    }
+    encoded
+}
+
 async fn bind_bot_to_workbench_user(
     client: &reqwest::Client,
     bcs_url: &str,
@@ -292,563 +382,4 @@ async fn bind_bot_to_workbench_user(
     }
 
     Ok(())
-}
-
-// ============================================================================
-// Test: AI Workbench Group Chat E2E
-// ============================================================================
-
-/// Full E2E test: AI workbench creates group, sends message, receives bot events.
-///
-/// Prerequisites:
-/// - BCS binary built: `cargo build --package bcs`
-/// - Moltis binary built: `cd submodules/moltis && cargo build`
-/// - LLM provider configured: `~/.config/moltis/provider_keys.json`
-#[tokio::test]
-async fn e2e_workbench_group_chat() {
-    init_logging();
-    println!("\n========== E2E Workbench Group Chat Test ==========\n");
-
-    let (_temp_dir, data_dir) = create_temp_dir();
-    println!("[Setup] Temp data dir: {:?}", data_dir);
-
-    let mut pm = ProcessManager::new();
-
-    // 1. Start BCS server
-    println!("\n[Step 1] Starting BCS server...");
-    let bcs_port = match pm.start_bcs(&data_dir).await {
-        Ok(port) => port,
-        Err(e) => {
-            eprintln!("Failed to start BCS: {}. Skipping E2E test.", e);
-            return;
-        }
-    };
-    let bcs_url = format!("http://127.0.0.1:{}", bcs_port);
-    println!("[Step 1] BCS started on port {}", bcs_port);
-
-    // 2. Start Bot 1 (coordinator)
-    println!("\n[Step 2] Starting Bot 1 (coordinator)...");
-    let bot1_port = next_port();
-    let (bot1_uuid, bot1_token) = match pm
-        .start_moltis(bcs_port, bot1_port, "coordinator", &data_dir)
-        .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("Failed to start bot1: {}. Skipping E2E test.", e);
-            return;
-        }
-    };
-    println!("[Step 2] Bot1 (coordinator) started: uuid={}, port={}", bot1_uuid, bot1_port);
-
-    // 3. Start Bot 2 (consultant)
-    println!("\n[Step 3] Starting Bot 2 (consultant)...");
-    let bot2_port = next_port();
-    let (bot2_uuid, bot2_token) = match pm
-        .start_moltis(bcs_port, bot2_port, "consultant", &data_dir)
-        .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("Failed to start bot2: {}. Skipping E2E test.", e);
-            return;
-        }
-    };
-    println!("[Step 3] Bot2 (consultant) started: uuid={}, port={}", bot2_uuid, bot2_port);
-
-    // Wait for bots to onboard
-    println!("\n[Step 4] Waiting for bots to onboard (5s)...");
-    tokio::time::sleep(Duration::from_secs(5)).await;
-
-    // 5. Create a group via HTTP API
-    println!("\n[Step 5] Creating group via HTTP API...");
-    let client = reqwest::Client::new();
-    if let Err(e) =
-        bind_bot_to_workbench_user(&client, &bcs_url, &bot1_token, "coordinator").await
-    {
-        panic!("[Step 5] Failed to bind bot1 owner: {}", e);
-    }
-    if let Err(e) =
-        bind_bot_to_workbench_user(&client, &bcs_url, &bot2_token, "consultant").await
-    {
-        panic!("[Step 5] Failed to bind bot2 owner: {}", e);
-    }
-    let create_group_resp = client
-        .post(&format!("{}/groups", bcs_url))
-        .header("Authorization", format!("Bearer {}", bot1_token))
-        .json(&serde_json::json!({
-            "driver_bot": bot1_uuid,
-            "participants": [
-                {
-                    "bot_uuid": bot1_uuid,
-                    "role": "driver"
-                },
-                {
-                    "bot_uuid": bot2_uuid,
-                    "role": "consultant"
-                }
-            ],
-            "label": "E2E Workbench Test Group"
-        }))
-        .timeout(Duration::from_secs(10))
-        .send()
-        .await;
-
-    let group_id = match create_group_resp {
-        Ok(resp) if resp.status().is_success() => {
-            let body: serde_json::Value = resp.json().await.unwrap();
-            let gid = body["id"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
-            println!("[Step 5] Group created: {}", gid);
-            gid
-        }
-        Ok(resp) => {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            eprintln!("[Step 5] Failed to create group: {} - {}", status, body);
-            return;
-        }
-        Err(e) => {
-            eprintln!("[Step 5] Failed to create group: {}", e);
-            return;
-        }
-    };
-
-    assert!(!group_id.is_empty(), "Group ID should not be empty");
-
-    // 6. Simulate AI workbench frontend: connect via WebSocket
-    println!("\n[Step 6] Connecting workbench frontend via WebSocket...");
-    let mut wb_client = match WorkbenchClient::connect(bcs_port).await {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("[Step 6] Failed to connect workbench client: {}", e);
-            return;
-        }
-    };
-    println!("[Step 6] Workbench client connected to BCS");
-
-    // 7. Subscribe to the group
-    println!("\n[Step 7] Subscribing to group {}...", group_id);
-    let connect_resp = wb_client.subscribe_group(&group_id).await;
-    match &connect_resp {
-        Ok(resp) => {
-            assert!(resp["ok"].as_bool().unwrap_or(false), "connect should succeed");
-            println!(
-                "[Step 7] Subscribed to group:\n{}",
-                serde_json::to_string_pretty(&resp["payload"]).unwrap()
-            );
-        }
-        Err(e) => {
-            eprintln!("[Step 7] Failed to subscribe to group: {}", e);
-            return;
-        }
-    }
-
-    // 8. Send a group message as a bot owned by the bound Workbench user
-    println!("\n[Step 8] Sending group message...");
-    let send_resp = wb_client
-        .send_group_message(
-            &group_id,
-            "你好，请帮我分析一下数据库性能问题",
-            Some(&bot1_uuid),
-            Some("coordinator"),
-            &[], // no mentions → driver responds
-        )
-        .await;
-
-    match &send_resp {
-        Ok(resp) => {
-            assert!(resp["ok"].as_bool().unwrap_or(false), "chat.send should succeed");
-            let run_id = resp["payload"]["runId"].as_str().unwrap_or("");
-            println!("[Step 8] Message sent, runId: {}", run_id);
-            assert!(!run_id.is_empty(), "runId should not be empty");
-        }
-        Err(e) => {
-            eprintln!("[Step 8] Failed to send group message: {}", e);
-            return;
-        }
-    }
-
-    // 9. Collect events from bot responses (wait up to 60s for LLM response)
-    println!("\n[Step 9] Waiting for bot events (up to 60s)...");
-    let events = wb_client.collect_events(Duration::from_secs(60)).await;
-
-    println!("\n[Step 9] Received {} events:", events.len());
-    for (i, event) in events.iter().enumerate() {
-        let event_type = event["event"].as_str().unwrap_or("unknown");
-        let state = event["payload"]["state"].as_str().unwrap_or("unknown");
-        let bot = event["bot_uuid"].as_str().unwrap_or("unknown");
-        println!("  [{}] type={}, state={}, bot={}", i, event_type, state, bot);
-
-        // Print content preview for chat events
-        if event_type == "chat" {
-            if let Some(content) = event["payload"]["content"].as_str() {
-                let preview = if content.len() > 100 {
-                    format!("{}...", &content[..100])
-                } else {
-                    content.to_string()
-                };
-                println!("       content: {}", preview);
-            }
-        }
-    }
-
-    // Verify we received at least some events
-    assert!(
-        !events.is_empty(),
-        "Should receive at least one event from bot"
-    );
-
-    // Verify we got a final event
-    let has_final = events
-        .iter()
-        .any(|e| e["payload"]["state"].as_str() == Some("final"));
-    assert!(has_final, "Should receive a final event from bot");
-
-    println!("\n========== E2E Workbench Group Chat Test PASSED ==========\n");
-}
-
-// ============================================================================
-// Test: Workbench Protocol (no LLM, protocol-level only)
-// ============================================================================
-
-/// Protocol-level test: verify connect and chat.send work without LLM.
-/// This test only verifies the BCS protocol handling, not bot responses.
-#[tokio::test]
-async fn e2e_workbench_protocol_connect_and_send() {
-    init_logging();
-    println!("\n========== E2E Workbench Protocol Test ==========\n");
-
-    let (_temp_dir, data_dir) = create_temp_dir();
-    println!("[Setup] Temp data dir: {:?}", data_dir);
-
-    let mut pm = ProcessManager::new();
-
-    // Start BCS server only (no Moltis bots needed for protocol test)
-    println!("\n[Step 1] Starting BCS server...");
-    let bcs_port = match pm.start_bcs(&data_dir).await {
-        Ok(port) => port,
-        Err(e) => {
-            eprintln!("Failed to start BCS: {}. Skipping test.", e);
-            return;
-        }
-    };
-    let bcs_url = format!("http://127.0.0.1:{}", bcs_port);
-    println!("[Step 1] BCS started on port {}", bcs_port);
-
-    // Connect a real bot via WebSocket (required for onboard and group creation)
-    println!("\n[Step 2] Connecting bot via WebSocket...");
-    let ws = connect_bot_ws_with_retry(bcs_port).await;
-    let (mut bot_sink, mut bot_stream) = ws.split();
-
-    let connect_frame = serde_json::json!({
-        "type": "req", "id": "bot_connect_1", "method": "bot.connect", "params": {}
-    });
-    bot_sink.send(Message::Text(serde_json::to_string(&connect_frame).unwrap().into())).await.unwrap();
-
-    let connect_resp = loop {
-        match tokio::time::timeout(Duration::from_secs(5), bot_stream.next()).await {
-            Ok(Some(Ok(Message::Text(text)))) => {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                    if v["type"] == "res" && v["id"] == "bot_connect_1" {
-                        break v;
-                    }
-                }
-            }
-            Ok(Some(Ok(Message::Ping(data)))) => {
-                let _ = bot_sink.send(Message::Pong(data)).await;
-                continue;
-            }
-            _ => panic!("No response to bot.connect"),
-        }
-    };
-    let bot_uuid = connect_resp["payload"]["bot_uuid"].as_str().unwrap_or("").to_string();
-    let bot_token = connect_resp["payload"]["token"].as_str().unwrap_or("").to_string();
-    assert!(!bot_uuid.is_empty(), "bot_uuid should not be empty");
-    assert!(!bot_token.is_empty(), "bot_token should not be empty");
-    println!("[Step 2] Bot connected: uuid={}", bot_uuid);
-
-    // Onboard the bot via HTTP API
-    let client = reqwest::Client::new();
-    if let Err(e) =
-        bind_bot_to_workbench_user(&client, &bcs_url, &bot_token, "Protocol Test Bot").await
-    {
-        panic!("[Step 2] Failed to onboard bot: {}", e);
-    }
-    println!("[Step 2] Bot onboarded");
-
-    // Drain onboarding instruction
-    loop {
-        match tokio::time::timeout(Duration::from_millis(200), bot_stream.next()).await {
-            Ok(Some(Ok(Message::Text(_)))) => continue,
-            Ok(Some(Ok(Message::Ping(data)))) => {
-                let _ = bot_sink.send(Message::Pong(data)).await;
-                continue;
-            }
-            _ => break,
-        }
-    }
-
-    // Create a group
-    println!("\n[Step 3] Creating group...");
-    let create_resp = client
-        .post(&format!("{}/groups", bcs_url))
-        .header("Authorization", format!("Bearer {}", bot_token))
-        .json(&serde_json::json!({
-            "driver_bot": bot_uuid,
-            "participants": [
-                { "bot_uuid": bot_uuid, "role": "driver" }
-            ],
-            "label": "Protocol Test Group"
-        }))
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await;
-
-    let group_id = match create_resp {
-        Ok(resp) if resp.status().is_success() => {
-            let body: serde_json::Value = resp.json().await.unwrap();
-            let gid = body["id"].as_str().unwrap_or("").to_string();
-            println!("[Step 3] Group created: {}", gid);
-            gid
-        }
-        Ok(resp) => {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            eprintln!("[Step 3] Failed to create group: {} - {}", status, body);
-            return;
-        }
-        Err(e) => {
-            eprintln!("[Step 3] Failed to create group: {}", e);
-            return;
-        }
-    };
-
-    assert!(!group_id.is_empty());
-    println!("[Step 3] Group created: {}", group_id);
-
-    // Connect workbench client
-    println!("\n[Step 4] Connecting workbench client...");
-    let mut wb_client = match WorkbenchClient::connect(bcs_port).await {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("[Step 4] Failed to connect: {}", e);
-            return;
-        }
-    };
-    println!("[Step 4] Workbench client connected");
-
-    // Test 1: connect (subscribe to group)
-    println!("\n[Step 5] Testing connect (subscribe to group)...");
-    let resp = wb_client.subscribe_group(&group_id).await.unwrap();
-    assert!(resp["ok"].as_bool().unwrap_or(false));
-    assert_eq!(resp["payload"]["group_id"].as_str().unwrap(), &group_id);
-    println!("[Step 5] connect OK: subscribed to group {}", group_id);
-    println!("         Participants: {:?}", resp["payload"]["participants"]);
-
-    // Test 2: connect to non-existent group should fail
-    println!("\n[Step 6] Testing connect to non-existent group (should fail)...");
-    let resp = wb_client.subscribe_group("nonexistent-group").await;
-    match resp {
-        Ok(r) => {
-            assert!(
-                !r["ok"].as_bool().unwrap_or(true),
-                "connect to nonexistent group should fail"
-            );
-            println!("[Step 6] connect correctly failed: {:?}", r["error"]);
-        }
-        Err(e) => {
-            println!("[Step 6] connect correctly errored: {}", e);
-        }
-    }
-
-    // Test 3: chat.send
-    println!("\n[Step 7] Testing chat.send...");
-    let resp = wb_client
-        .send_group_message(
-            &group_id,
-            "Hello from workbench",
-            Some(&bot_uuid),
-            Some("Protocol Test Bot"),
-            &[],
-        )
-        .await;
-
-    match resp {
-        Ok(r) => {
-            println!("[Step 7] chat.send response:\n{}",
-                serde_json::to_string_pretty(&r).unwrap()
-            );
-            assert!(r["ok"].as_bool().unwrap_or(false), "chat.send should be accepted");
-        }
-        Err(e) => {
-            println!("[Step 7] chat.send result: {} (expected if bot not WS-connected)", e);
-        }
-    }
-
-    println!("\n========== E2E Workbench Protocol Test PASSED ==========\n");
-}
-
-// ============================================================================
-// Test: Multiple Frontends Receive Same Events
-// ============================================================================
-
-/// Test that multiple workbench frontends subscribed to the same group
-/// all receive the same bot events.
-#[tokio::test]
-async fn e2e_workbench_multi_frontend_broadcast() {
-    init_logging();
-    println!("\n========== E2E Multi-Frontend Broadcast Test ==========\n");
-
-    let (_temp_dir, data_dir) = create_temp_dir();
-    println!("[Setup] Temp data dir: {:?}", data_dir);
-
-    let mut pm = ProcessManager::new();
-
-    println!("\n[Step 1] Starting BCS server...");
-    let bcs_port = match pm.start_bcs(&data_dir).await {
-        Ok(port) => port,
-        Err(e) => {
-            eprintln!("Failed to start BCS: {}. Skipping test.", e);
-            return;
-        }
-    };
-    let bcs_url = format!("http://127.0.0.1:{}", bcs_port);
-    println!("[Step 1] BCS started on port {}", bcs_port);
-
-    // Connect a real bot via WebSocket (required for group creation)
-    println!("\n[Step 2] Connecting test bot via WebSocket...");
-    let ws = connect_bot_ws_with_retry(bcs_port).await;
-    let (mut bot_sink, mut bot_stream) = ws.split();
-
-    let connect_frame = serde_json::json!({
-        "type": "req", "id": "bot_connect_1", "method": "bot.connect", "params": {}
-    });
-    bot_sink.send(Message::Text(serde_json::to_string(&connect_frame).unwrap().into())).await.unwrap();
-
-    let connect_resp = loop {
-        match tokio::time::timeout(Duration::from_secs(5), bot_stream.next()).await {
-            Ok(Some(Ok(Message::Text(text)))) => {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                    if v["type"] == "res" && v["id"] == "bot_connect_1" {
-                        break v;
-                    }
-                }
-            }
-            Ok(Some(Ok(Message::Ping(data)))) => {
-                let _ = bot_sink.send(Message::Pong(data)).await;
-                continue;
-            }
-            _ => panic!("No response to bot.connect"),
-        }
-    };
-    let bot_uuid = connect_resp["payload"]["bot_uuid"].as_str().unwrap_or("").to_string();
-    let bot_token = connect_resp["payload"]["token"].as_str().unwrap_or("").to_string();
-    assert!(!bot_uuid.is_empty(), "bot_uuid should not be empty");
-    println!("[Step 2] Bot connected: uuid={}", bot_uuid);
-
-    // Onboard the bot via HTTP API
-    let client = reqwest::Client::new();
-    if let Err(e) =
-        bind_bot_to_workbench_user(&client, &bcs_url, &bot_token, "Multi Test Bot").await
-    {
-        panic!("[Step 2] Failed to onboard bot: {}", e);
-    }
-    println!("[Step 2] Bot onboarded: {}", bot_uuid);
-
-    // Drain onboarding instruction
-    loop {
-        match tokio::time::timeout(Duration::from_millis(200), bot_stream.next()).await {
-            Ok(Some(Ok(Message::Text(_)))) => continue,
-            Ok(Some(Ok(Message::Ping(data)))) => {
-                let _ = bot_sink.send(Message::Pong(data)).await;
-                continue;
-            }
-            _ => break,
-        }
-    }
-
-    println!("\n[Step 3] Creating group...");
-    let create_resp = client
-        .post(&format!("{}/groups", bcs_url))
-        .header("Authorization", format!("Bearer {}", bot_token))
-        .json(&serde_json::json!({
-            "driver_bot": bot_uuid,
-            "participants": [
-                { "bot_uuid": bot_uuid, "role": "driver" }
-            ],
-            "label": "Multi Frontend Test"
-        }))
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await;
-
-    let group_id = match create_resp {
-        Ok(resp) if resp.status().is_success() => {
-            let body: serde_json::Value = resp.json().await.unwrap();
-            let gid = body["id"].as_str().unwrap_or("").to_string();
-            println!("[Step 3] Group created: {}", gid);
-            gid
-        }
-        Ok(resp) => {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            eprintln!("[Step 3] Failed to create group: {} - {}", status, body);
-            return;
-        }
-        Err(e) => {
-            eprintln!("[Step 3] Failed to create group: {}", e);
-            return;
-        }
-    };
-
-    // Connect two workbench clients
-    println!("\n[Step 4] Connecting workbench client 1...");
-    let mut client1 = match WorkbenchClient::connect(bcs_port).await {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("[Step 4] Failed to connect client1: {}", e);
-            return;
-        }
-    };
-    println!("[Step 4] Client 1 connected");
-
-    println!("\n[Step 5] Connecting workbench client 2...");
-    let mut client2 = match WorkbenchClient::connect(bcs_port).await {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("[Step 5] Failed to connect client2: {}", e);
-            return;
-        }
-    };
-    println!("[Step 5] Client 2 connected");
-
-    // Both subscribe to the same group
-    println!("\n[Step 6] Client 1 subscribing to group {}...", group_id);
-    let resp1 = client1.subscribe_group(&group_id).await.unwrap();
-    assert!(resp1["ok"].as_bool().unwrap_or(false));
-    println!("[Step 6] Client 1 subscribed");
-
-    println!("\n[Step 7] Client 2 subscribing to group {}...", group_id);
-    let resp2 = client2.subscribe_group(&group_id).await.unwrap();
-    assert!(resp2["ok"].as_bool().unwrap_or(false));
-    println!("[Step 7] Client 2 subscribed");
-
-    println!("\n[Step 8] Sending message from client 1...");
-    // Send a message from client1 as a bot owned by the bound Workbench user
-    let _ = client1
-        .send_group_message(
-            &group_id,
-            "Test broadcast",
-            Some(&bot_uuid),
-            Some("Multi Test Bot"),
-            &[],
-        )
-        .await;
-
-    println!("[Step 8] Message sent");
-
-    println!("\n========== E2E Multi-Frontend Broadcast Test PASSED ==========\n");
 }

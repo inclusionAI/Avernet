@@ -8,13 +8,17 @@ use tracing::warn;
 
 use bcs_service_api::core::{
     WorkerProfile, WorkerProfileCoreService, WorkerRecommendCommand, WorkerRecommendResult,
+    WorkerRecommendationScope,
 };
 use bcs_service_api::{
     ActorKind, BotCandidateSearchCoreResult, BotCandidateSearchCoreService, BotCandidateSearchHit,
     BotCandidateSearchMode, BotCandidateSearchQuery, BotCandidateVisibility,
-    BotRegistryCoreService, FriendCoreService, LegacyBotCandidateSearchCoreResult, RegisteredBot,
-    ServiceResult,
+    BotControlPlaneCoreService, BotRegistryCoreService, FriendCoreService,
+    LegacyBotCandidateSearchCoreResult, RegisteredBot, ServiceResult,
 };
+
+#[path = "candidate_search_authorized.rs"]
+mod authorized;
 
 /// Local/no-network worker-profile provider used when BCSFuse is not configured.
 pub struct EmptyWorkerProfileCoreService;
@@ -45,6 +49,10 @@ pub struct BotCandidateSearchCore {
     friend: Arc<dyn FriendCoreService>,
     worker_profiles: Arc<dyn WorkerProfileCoreService>,
     recommend_min_score: f64,
+    /// Authoritative viewer/edge filter used only by the authorized V1 entry.
+    /// Legacy `search_candidates` / `search_candidates_for_legacy` keep their
+    /// historical policy and ignore it.
+    control_plane: Option<Arc<dyn BotControlPlaneCoreService>>,
 }
 
 impl BotCandidateSearchCore {
@@ -59,7 +67,19 @@ impl BotCandidateSearchCore {
             friend,
             worker_profiles,
             recommend_min_score,
+            control_plane: None,
         }
+    }
+
+    /// Wire the authoritative candidate control plane. Only the BCS
+    /// composition root does this; the authorized entry fails closed when it
+    /// is absent.
+    pub fn with_control_plane(
+        mut self,
+        control_plane: Arc<dyn BotControlPlaneCoreService>,
+    ) -> Self {
+        self.control_plane = Some(control_plane);
+        self
     }
 
     async fn search(&self, query: BotCandidateSearchQuery) -> LegacyBotCandidateSearchCoreResult {
@@ -81,6 +101,7 @@ impl BotCandidateSearchCore {
                 query: normalized_query.to_string(),
                 top_k: query.limit.min(u32::MAX as usize) as u32,
                 min_score: self.recommend_min_score,
+                scope: WorkerRecommendationScope::LegacyDefault,
             })
             .await;
 
@@ -245,6 +266,13 @@ impl BotCandidateSearchCoreService for BotCandidateSearchCore {
         query: BotCandidateSearchQuery,
     ) -> LegacyBotCandidateSearchCoreResult {
         self.search(query).await
+    }
+
+    async fn search_authorized_candidates(
+        &self,
+        query: bcs_service_api::core::AuthorizedCandidateSearchQuery,
+    ) -> ServiceResult<BotCandidateSearchCoreResult> {
+        self.search_authorized(query).await
     }
 }
 

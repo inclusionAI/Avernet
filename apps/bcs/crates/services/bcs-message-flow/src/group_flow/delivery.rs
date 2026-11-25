@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "../message_log_tests/group_tests.rs"]
+mod key_log_tests;
+
 pub(super) async fn frame_for_target(
     flow: &BcsMessageFlow,
     group: &Group,
@@ -193,7 +197,7 @@ fn context_projection_from_meta(meta: Option<&Value>) -> Option<ContextProjectio
 }
 
 pub(crate) fn frame_protocol_version(protocol_version: u32, target: &BotDeliveryTarget) -> u32 {
-    if target.is_http_provider() {
+    if target.is_gateway() {
         protocol_version.max(3)
     } else {
         protocol_version
@@ -217,6 +221,7 @@ pub(super) fn delivery_metric_kind(delivery_type: DeliveryType) -> DeliveryMetri
 pub(super) async fn publish_web_user_message(
     flow: &BcsMessageFlow,
     cmd: &WebSendCommand,
+    operation_id: &str,
 ) -> Vec<FrontendDeliveryResult> {
     let event_json = build_workbench_user_event(flow, cmd).await;
     let group = flow.group.try_get(&cmd.group_id).await.ok().flatten();
@@ -259,6 +264,12 @@ pub(super) async fn publish_web_user_message(
             exclude_conn_id: cmd.sender_conn_id,
             visibility_domain,
             audience,
+            operation_id: Some(operation_id.to_string()),
+            terminal: false,
+            // Operation-level echo frame: it belongs to no single
+            // bot-Run stream (the echo is the sender's own message),
+            // so it carries no stream identity.
+            run_id: None,
         })
         .await;
 
@@ -321,6 +332,12 @@ pub(super) async fn publish_group_callback_event(
             exclude_conn_id: None,
             visibility_domain,
             audience,
+            // A synthesized callback completion is an independent
+            // resource event: authorized per event, never borrowing
+            // an operation's permit.
+            operation_id: None,
+            terminal: false,
+            run_id: None,
         })
         .await;
 
@@ -365,6 +382,13 @@ pub(super) async fn publish_chat_abort_event(
             exclude_conn_id: None,
             visibility_domain,
             audience,
+            // An abort NOTICE is an independent control event
+            // (possibly spanning multiple operations); the runs' own
+            // Aborted terminals still drain through their operation
+            // permits. Authorized per event.
+            operation_id: None,
+            terminal: false,
+            run_id: None,
         })
         .await;
 
@@ -489,6 +513,7 @@ pub(super) fn log_message_received(cmd: &WebSendCommand, mode: MessageLogMode) {
     let content = MessageLogContent::from_text(&cmd.message);
     info!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::MessageReceived.as_str(),
         status = MessageLogStatus::Received.as_str(),
@@ -528,6 +553,7 @@ pub(super) fn log_routing_digest(
 
     info!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::RouteDecided.as_str(),
         status = MessageLogStatus::Routed.as_str(),
@@ -570,6 +596,7 @@ pub(super) fn log_bot_deliver_result(
     if delivered {
         info!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::BotDeliverResult.as_str(),
             status = status.as_str(),
@@ -588,6 +615,7 @@ pub(super) fn log_bot_deliver_result(
     } else {
         warn!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::BotDeliverResult.as_str(),
             status = status.as_str(),

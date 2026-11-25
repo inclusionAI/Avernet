@@ -31,6 +31,10 @@ from agentclaw.community.core.service_bot.service_artifact_lineage_reader_protoc
     ServiceArtifactLineage,
 )
 from agentclaw.community.core.skill_center.draft_content import DraftRevisionRef
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterVersionIdentity,
+    CanonicalCenterVersionRef,
+)
 from agentclaw.community.core.skill_center.materialization_contract import (
     MaterializingSkillVersion,
     PublishedMaterializedSkillVersion,
@@ -219,6 +223,43 @@ def test_exact_package_becomes_published_only_after_all_ready_inputs_exist() -> 
         "risk_tags": [],
     }
     assert "sc_sha256" not in versions.published
+
+
+def test_center_materialization_preserves_nested_documents() -> None:
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr(
+            "opaque/SKILL.md",
+            "---\nname: weather\ndescription: root\n---\n[child](child/SKILL.md)\n",
+        )
+        archive.writestr("opaque/child/SKILL.md", "# Child document\n")
+    package = stream.getvalue()
+    versions = _Versions(_target())
+    store = LocalCanonicalCenterVersionStore()
+    materializer = SkillVersionMaterializer(
+        versions=versions,
+        gateway=_Gateway(package),
+        http=_Http(package),
+        validator=SkillPackageValidator(SkillParser()),
+        store=store,
+    )
+    published = materializer.materialize(
+        SkillVersionMaterializationRequest(
+            env="pre",
+            skill_id=10,
+            skill_version_id=101,
+            scope=SkillCenterReadScope.PUBLIC,
+        )
+    )
+    ref = CanonicalCenterVersionRef(
+        CanonicalCenterVersionIdentity(
+            skill_uuid=published.skill_uuid,
+            sc_version_number=published.sc_version_number,
+        )
+    )
+    files = store.read_version(ref).file_map
+    assert files["child/SKILL.md"] == b"# Child document\n"
+    assert published.name == "weather"
 
 
 def test_public_exact_package_uses_manifest_name_and_ignores_opaque_wrapper() -> None:
@@ -455,7 +496,9 @@ class _RecoveryDrafts:
         raise AssertionError("successful Offline must retain the Draft revision")
 
 
-def test_materializing_a_new_version_never_reactivates_a_terminally_offline_skill() -> None:
+def test_materializing_a_new_version_never_reactivates_a_terminally_offline_skill() -> (
+    None
+):
     db = _RecoveryDatabase()
     skill_uuid = "00000000-0000-4000-8000-000000000010"
     with db.orm_session() as session:
@@ -570,3 +613,43 @@ def test_materializing_a_new_version_never_reactivates_a_terminally_offline_skil
         assert recovered.offline_at is not None
         assert recovered.offline_by == "owner"
         assert session.query(SkillVersion).filter_by(id=101).one().status == "PUBLISHED"
+
+
+def test_exact_preview_validates_package_without_creating_a_version_or_canonical_content():
+    from agentclaw.community.plugin_api.skill_center_gateway import (
+        SkillCenterExactDownloadRequest,
+    )
+    from agentclaw.community.core.skill_center.canonical_center_store import (
+        CanonicalCenterVersionIdentity,
+        CanonicalCenterVersionRef,
+    )
+
+    versions = _Versions(_target())
+    store = LocalCanonicalCenterVersionStore()
+    package = _package()
+    materializer = SkillVersionMaterializer(
+        versions=versions,
+        gateway=_Gateway(package),
+        http=_Http(package),
+        validator=SkillPackageValidator(SkillParser()),
+        store=store,
+    )
+    preview = materializer.preview_exact(
+        SkillCenterExactDownloadRequest(
+            skill_code="public-weather",
+            version_number="1.0.0",
+            scope=SkillCenterReadScope.PUBLIC,
+        )
+    )
+
+    assert preview.package.name == "weather"
+    assert json.loads(preview.metadata_json)["mcp_dependencies"] == []
+    assert versions.published is None
+    assert not store.verify_version(
+        CanonicalCenterVersionRef(
+            CanonicalCenterVersionIdentity(
+                skill_uuid=_target().skill_uuid,
+                sc_version_number="1.0.0",
+            )
+        )
+    )

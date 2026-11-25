@@ -10,17 +10,23 @@
 //! separate resource-authorization rules.
 
 mod connection;
+mod delivery_admission;
 mod file;
 mod group_context_access;
 mod authorization;
+mod avatar;
 mod participant;
 mod message;
+mod projections;
+#[cfg(test)]
+mod tests;
 
 pub use connection::GroupSessionConnectionServiceImpl;
+pub use delivery_admission::{DeliveryAdmissionServiceImpl, ERROR_INTERNAL_READ};
 pub use file::SessionFileApplicationServiceImpl;
 pub use group_context_access::GroupContextAddAccessGuard;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -28,38 +34,38 @@ use bcs_service_api::application::session::{SessionManagementService, SessionUse
 use bcs_service_api::application::system_message::SystemMessageService;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, DeleteResult, HumanPrincipal, IdentityPolicy, Page,
-    Principal,
+    ParticipantSummary, Principal, resolve_authorized_principal,
     message::{ListSessionMessages, SessionMessageService},
     require_authenticated_user, require_human, select_principal,
     session::{
         AddSessionParticipant, CollectSession, CompleteSession, CreateSession,
         CreateSessionOutcome, DeleteSession, DeleteSessionParticipant, GetSession, ListSessions,
-        SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionParticipant,
-        SessionService, SessionStatus as V1SessionStatus, SessionSummary, UncollectSession,
-        UpdateSession, UpdateSessionParticipant,
+        SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionListSort,
+        SessionParticipant, SessionService, SessionStatus as V1SessionStatus, SessionSummary,
+        UncollectSession, UpdateSession, UpdateSessionParticipant,
     },
 };
+use bcs_service_api::core::SessionAuthorizationCoreService;
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::port::repo::SessionRepoPort;
 use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
+use bcs_service_api::types::bot_profile::BotAvatarMap;
 use bcs_service_api::types::{HumanMessageView, MessageViewScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, CallerContext, CollaborationRuntimeError,
     CollaborationRuntimeService, CreateSessionLaunch, FriendCoreService, Group as DomainGroup,
     GroupCoreService, GroupMessage, GroupMessageHistoryService, GroupStrategy, GroupUseCaseError,
     HumanActor, MessageHistoryOptions, Participant, ParticipantMode, ParticipantRole,
-    RegisteredBot, RelationCoreService, RequestedSessionRole, ServiceError, Session,
+    RegisteredBot, RequestedSessionRole, ServiceError, Session,
+    SessionCaller,
     SessionHistoryCommand, SessionKind, SessionLaunchError, SessionLaunchRequest,
     SessionLaunchService, SessionStatus as DomainSessionStatus, StateMachineRunView,
     SystemMessageEvent, backfill_participant_names,
 };
 
-#[derive(Debug, Clone)]
-pub struct SessionServiceConfig {
-    /// Relation environment tag retained for parity with the sibling Group V1
-    /// facade; used by the collaboration-eligibility creator-edge check
-    /// (`ensure_collaboration_eligible`).
-    pub relation_env: String,
-}
+use projections::{
+    map_status_to_domain, project_participant, project_status, project_summary,
+};
 
 /// OpenAPI v1 Session facade.
 ///
@@ -72,13 +78,21 @@ pub struct SessionServiceImpl {
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     friends: Arc<dyn FriendCoreService>,
-    relation: Arc<dyn RelationCoreService>,
     session_repo: Arc<dyn SessionRepoPort>,
     history: Arc<dyn GroupMessageHistoryService>,
     collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
     system_message: Arc<dyn SystemMessageService>,
     participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
-    config: SessionServiceConfig,
+    /// The narrow authority hook (bot-authority plan Task
+    /// 6.3): every Human→Bot control judgment consults it
+    /// live; a missing wiring fails closed.
+    bot_authority: Option<Arc<dyn BotAuthorityPort>>,    /// The strict Session authorization-fact Core
+    /// (bot-authority plan §3, spec §8.3): the
+    /// resource-role legs of Session detail reads
+    /// consume its snapshot — never this
+    /// instance's display fetch. A missing wiring
+    /// fails closed.
+    session_snapshots: Option<Arc<dyn SessionAuthorizationCoreService>>,
 }
 
 impl SessionServiceImpl {
@@ -89,12 +103,10 @@ impl SessionServiceImpl {
         groups: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
         friends: Arc<dyn FriendCoreService>,
-        relation: Arc<dyn RelationCoreService>,
         session_repo: Arc<dyn SessionRepoPort>,
         history: Arc<dyn GroupMessageHistoryService>,
         collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
         system_message: Arc<dyn SystemMessageService>,
-        config: SessionServiceConfig,
     ) -> Self {
         Self {
             launch,
@@ -102,13 +114,109 @@ impl SessionServiceImpl {
             groups,
             registry,
             friends,
-            relation,
             session_repo,
             history,
             collaboration_runtime,
             system_message,
             participant_view_bindings: Arc::new(NoopParticipantViewBindingPort),
-            config,
+            bot_authority: None,
+            session_snapshots: None,
+        }
+    }
+
+    /// Wire the strict Session authorization-snapshot
+    /// Core (spec §8.3).
+    pub fn with_session_authorization_core(
+        mut self,
+        session_snapshots: Arc<dyn SessionAuthorizationCoreService>,
+    ) -> Self {
+        self.session_snapshots = Some(session_snapshots);
+        self
+    }
+
+    /// Wire the authority hook (bot-authority plan Task 6.3).
+    pub fn with_bot_authority_hook(
+        mut self,
+        bot_authority: Arc<dyn BotAuthorityPort>,
+    ) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// The wired authority hook; failing to wire one is a
+    /// composition error and must fail closed (never deny-as-Ok).
+    fn authority(&self) -> Result<&dyn BotAuthorityPort, ApplicationError> {
+        self.bot_authority
+            .as_deref()
+            .ok_or_else(|| {
+                ApplicationError::internal(
+                    "bot authority hook is not wired",
+                )
+            })
+    }
+
+    /// The CURRENT Human→Bot control judgment (rows 4/6/7,
+    /// bot-authority plan Task 6.3): a live `can_manage`
+    /// edge for the verified User id. The historical
+    /// `created_by` fact and the legacy creator relation
+    /// edge no longer authorize anything here.
+    async fn human_controls_bot(
+        &self,
+        user_id: &str,
+        bot_id: &str,
+    ) -> Result<bool, ApplicationError> {
+        self.authority()?
+            .can_manage(user_id, bot_id)
+            .await
+            .map_err(map_authority_error)
+    }
+
+    /// Hybrid identity resolution (rows 4/7): replaces the
+    /// claim-local `HumanOrOwnedBot` selection with
+    /// `resolve_authorized_principal` for the authenticated
+    /// Bot under the live management edge; pure Bot / pure
+    /// Human credentials keep their existing selection.
+    async fn resolve_principal(
+        &self,
+        caller: &AuthenticatedCaller,
+    ) -> Result<Principal, ApplicationError> {
+        match &caller.bot {
+            Some(bot) => {
+                resolve_authorized_principal(
+                    caller,
+                    IdentityPolicy::HumanOrAuthorizedBot {
+                        bot_id: bot.bot_uuid.clone(),
+                    },
+                    self.authority()?,
+                )
+                .await
+            }
+            None => select_principal(caller, IdentityPolicy::HumanOrOwnedBot),
+        }
+    }
+
+    /// Project the authenticated caller of a V1 create onto
+    /// the launch contract's `SessionCaller` (row 4). The
+    /// Bot caller choice for hybrid credentials happens
+    /// HERE, through the LIVE authority edge; the adapter
+    /// keeps protocol adaptation only.
+    async fn launch_caller_from_principal(
+        &self,
+        caller: &AuthenticatedCaller,
+    ) -> Result<SessionCaller, ApplicationError> {
+        match self.resolve_principal(caller).await? {
+            Principal::Bot(bot) => Ok(SessionCaller::Bot {
+                bot_uuid: bot.bot_uuid.clone(),
+            }),
+            Principal::Human(human) => Ok(SessionCaller::Human {
+                actor_id: format!("human_{}", human.subject.id),
+                owner_id: human.subject.id.clone(),
+                display_name: human
+                    .subject
+                    .display_name
+                    .clone()
+                    .or_else(|| human.subject.full_name.clone()),
+            }),
         }
     }
 
@@ -128,11 +236,23 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: CreateSession,
     ) -> Result<CreateSessionOutcome, ApplicationError> {
+        // Row 4 (resolve before the launch): the effective
+        // SessionCaller comes from the LIVE hybrid rule —
+        // `resolve_authorized_principal` for the
+        // authenticated Bot. A hybrid User+Bot credential
+        // becomes the Bot caller ONLY through the CURRENT
+        // management edge; a revoked historical owner is a
+        // 403 here, and a current manager is admitted. Pure
+        // Bot / pure Human credentials keep their existing
+        // selection (the hook is not consulted).
+        let caller = self
+            .launch_caller_from_principal(&command.caller)
+            .await?;
         let outcome = self
             .launch
             .create(CreateSessionLaunch {
                 request: SessionLaunchRequest {
-                    caller: command.caller,
+                    caller,
                     group_id: command.group_id,
                     requested_creator: command.acting_bot_id,
                     title: command.title,
@@ -168,31 +288,120 @@ impl SessionService for SessionServiceImpl {
         self.load_group(&command.group_id).await?;
         let participant_id = Some(view_actor_id.as_str());
         let status = command.status.map(map_status_to_domain);
-        let mut sessions = self
-            .sessions
-            .list_by_group(
-                &command.group_id,
-                status,
-                command.offset,
-                command.limit,
-                None,
-                participant_id,
-            )
-            .await
-            .map_err(map_session_error)?;
-        // Repo ORDER BY already guarantees created_at DESC, session_id ASC
-        // (VSN7M); keep this sort as a no-op safety net for impls that do not
-        // honour the ordered contract.
-        sessions.sort_by(|a, b| {
-            b.created_at
-                .cmp(&a.created_at)
-                .then_with(|| a.id.cmp(&b.id))
-        });
+        // The pre-pagination count of the viewer-scoped candidate set,
+        // reported as the page's `total` metadata. Design D5 (revised): it is
+        // ONLY a count — the `last_activity` path never uses it as a fetch
+        // limit, so a stale value can never truncate genuinely-active
+        // Sessions out of the sorted set.
         let total = self
             .session_repo
             .count_by_group(&command.group_id, status, None, participant_id)
             .await
             .map_err(map_service_error)?;
+        // Design D4/D5: viewer scope resolves FIRST and always — both paths
+        // read only Sessions the View Actor participates in. `last_activity`
+        // needs the key globally, so it reads the lightweight candidate
+        // projection (id + own `created_at`) in ONE snapshot query plus ONE
+        // group-scoped message aggregate, sorts in-app BEFORE pagination, and
+        // hydrates full Session rows only for the final page ids; the default
+        // mode keeps today's repository ordering and pays ONE batched lookup
+        // over the PAGE ids.
+        let (sessions, activity) = match command.sort {
+            SessionListSort::CreatedAt => {
+                let mut sessions = self
+                    .sessions
+                    .list_by_group(
+                        &command.group_id,
+                        status,
+                        command.offset,
+                        command.limit,
+                        None,
+                        participant_id,
+                    )
+                    .await
+                    .map_err(map_session_error)?;
+                // Repo ORDER BY already guarantees created_at DESC, session_id ASC
+                // (VSN7M); keep this sort as a no-op safety net for impls that do not
+                // honour the ordered contract.
+                sessions.sort_by(|a, b| {
+                    b.created_at
+                        .cmp(&a.created_at)
+                        .then_with(|| a.id.cmp(&b.id))
+                });
+                let page_ids = sessions
+                    .iter()
+                    .map(|session| session.id.clone())
+                    .collect::<Vec<_>>();
+                let activity = self.session_activity_keys(&page_ids).await?;
+                (sessions, activity)
+            }
+            SessionListSort::LastActivity => {
+                // D5 (revised): candidate SELECTION is one snapshot query that
+                // takes no limit derived from the COUNT above (a stale total
+                // would otherwise evict the genuinely most-active Session
+                // created before the newest one), reads only the lightweight
+                // (session_id, created_at) projection, and pairs it with ONE
+                // group-scoped message aggregate. The full Session rows load
+                // afterwards through ONE batched read of at most `limit` page
+                // ids — never the whole candidate set.
+                let candidates = self
+                    .session_repo
+                    .list_activity_candidates_by_group(
+                        &command.group_id,
+                        status,
+                        None,
+                        participant_id,
+                    )
+                    .await
+                    .map_err(map_service_error)?;
+                let activity = if candidates.is_empty() {
+                    HashMap::new()
+                } else {
+                    self.group_session_activity(&command.group_id).await?
+                };
+                // This in-app sort is the authoritative order for this mode:
+                // the D1 key with the session's own `created_at` fallback and
+                // `session_id ASC` as the stable tie-break, applied before
+                // pagination.
+                let mut ordered = candidates;
+                ordered.sort_by(|left, right| {
+                    let left_key = activity
+                        .get(&left.session_id)
+                        .copied()
+                        .unwrap_or(left.created_at);
+                    let right_key = activity
+                        .get(&right.session_id)
+                        .copied()
+                        .unwrap_or(right.created_at);
+                    right_key
+                        .cmp(&left_key)
+                        .then_with(|| left.session_id.cmp(&right.session_id))
+                });
+                let page_ids = ordered
+                    .into_iter()
+                    .skip(saturating_usize(command.offset))
+                    .take(saturating_usize(command.limit))
+                    .map(|candidate| candidate.session_id)
+                    .collect::<Vec<_>>();
+                let mut rows = HashMap::new();
+                for session in self
+                    .session_repo
+                    .try_get_many(&page_ids)
+                    .await
+                    .map_err(map_service_error)?
+                {
+                    rows.insert(session.id.clone(), session);
+                }
+                // Reconcile the store's unspecified row order with the
+                // authoritative activity order; a Session deleted between the
+                // candidate and page reads simply drops out of the page.
+                let page = page_ids
+                    .iter()
+                    .filter_map(|session_id| rows.remove(session_id))
+                    .collect::<Vec<_>>();
+                (page, activity)
+            }
+        };
         // Surface per-session collected state for the view actor, but only
         // when the request explicitly names that actor (mirrors the legacy
         // `list_sessions_for_group` gating: collected is only meaningful
@@ -210,10 +419,24 @@ impl SessionService for SessionServiceImpl {
         } else {
             HashSet::new()
         };
+        // Design §5.3: after the final pagination, collect THIS page's own
+        // Session member ids and read their display profiles through ONE
+        // batched query (the core dedupes and chunks at ≤ ceil(U / 256)
+        // batches). The new summary `name` is the Session member snapshot
+        // verbatim, so the list adds no registry name read; read failures
+        // surface as service errors — never a page of null avatars.
+        let avatars = self
+            .avatar_map_for_ids(avatar::session_page_bot_ids(&sessions))
+            .await?;
         let items = sessions
             .iter()
             .map(|s| {
-                let mut summary = project_summary(s);
+                // The same map entry for a given Session under every mode; a
+                // Session with no persisted messages falls back to its own
+                // `created_at` (D1), never `None`.
+                let last_activity_at =
+                    Some(activity.get(&s.id).copied().unwrap_or(s.created_at));
+                let mut summary = project_summary(s, &avatars, last_activity_at);
                 if command.view_bot_id.is_some() {
                     summary.collected = Some(collected_set.contains(&s.id));
                 }
@@ -236,7 +459,7 @@ impl SessionService for SessionServiceImpl {
     }
 
     async fn update(&self, command: UpdateSession) -> Result<SessionDetail, ApplicationError> {
-        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = self.resolve_principal(&command.caller).await?;
         // Only `title` is mutable in phase one; a request carrying no field is
         // rejected (mirrors the sibling Group V1 facade).
         if command.title.is_none() {
@@ -256,7 +479,7 @@ impl SessionService for SessionServiceImpl {
     }
 
     async fn delete(&self, command: DeleteSession) -> Result<DeleteResult, ApplicationError> {
-        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = self.resolve_principal(&command.caller).await?;
         // Idempotent: a missing session yields `deleted: false` rather than a
         // 404 so repeat deletes converge. Non-managers still get 403.
         let session = match self
@@ -282,7 +505,23 @@ impl SessionService for SessionServiceImpl {
                     ));
                 }
             };
-            let management_actor_ids = Self::group_management_actor_ids(&group);
+            // Spec §8.3: management anchors as
+            // snapshot facts, re-read at the
+            // decision — the display copy never
+            // authorizes.
+            let management_actor_ids = self
+                .groups
+                .read_authorization_snapshot(&group.id)
+                .await
+                .map_err(map_service_error)?
+                .map(|snapshot| {
+                    snapshot
+                        .management_actor_ids()
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             management_actor_ids
                 .iter()
                 .any(|actor_id| actor_id == &acting_actor_id)
@@ -611,6 +850,52 @@ impl SessionService for SessionServiceImpl {
     }
 }
 
+// ── recent-activity list keys ─────────────────────────────────────────
+
+impl SessionServiceImpl {
+    /// One batched D1 session-activity lookup for a list call (design
+    /// D4/D5/D6): the max persisted message `created_at` per session id,
+    /// submitted over the PAGE ids; an empty page pays no store read. A
+    /// lookup error fails the request (500) instead of serving a mis-ordered
+    /// or mis-dated page.
+    async fn session_activity_keys(
+        &self,
+        session_ids: &[String],
+    ) -> Result<HashMap<String, u64>, ApplicationError> {
+        if session_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        self.history
+            .last_activity_by_session_ids(session_ids)
+            .await
+            .map_err(|error| {
+                ApplicationError::internal(format!(
+                    "Session message activity lookup failed: {error}"
+                ))
+            })
+    }
+
+    /// ONE group-scoped aggregate of the persisted message activity keys for
+    /// the `last_activity` Session list sort (design D1/D4 revised): the
+    /// message side of the D1 key per Session of this group, under the
+    /// history store's env isolation. Sessions with no persisted message stay
+    /// absent from the map and keep their own `created_at` fallback; a store
+    /// failure fails the request (500, D6), never a silently mis-ordered page.
+    async fn group_session_activity(
+        &self,
+        group_id: &str,
+    ) -> Result<HashMap<String, u64>, ApplicationError> {
+        self.history
+            .last_activity_in_group(group_id)
+            .await
+            .map_err(|error| {
+                ApplicationError::internal(format!(
+                    "Session message activity lookup failed: {error}"
+                ))
+            })
+    }
+}
+
 // ── projection helpers ────────────────────────────────────────────────
 
 fn merge_participant_state_machine_snapshot(
@@ -623,56 +908,11 @@ fn merge_participant_state_machine_snapshot(
     )
 }
 
-fn project_participant(participant: &Participant) -> SessionParticipant {
-    // Vey7i: pass `actor_kind` and the 4-value domain `ParticipantMode`
-    // through verbatim so a Human participant inserted by the legacy
-    // invitation-accept path (`actor_kind: Human, mode: Present`) is surfaced
-    // as-is, not boot-truncated to `Auto`. Client-input Bot participants still
-    // round-trip `Auto`/`Muted` because `build_participant` / `add_participant`
-    // map the V1 input mode into the domain mode before persistence.
-    SessionParticipant {
-        actor_id: participant.bot_uuid.clone(),
-        actor_kind: participant.actor_kind,
-        name: participant.bot_name.clone(),
-        role: participant.role,
-        tags: participant.tags.clone(),
-        mode: participant.effective_mode(),
-        message_view_scope: participant.message_view_scope,
-        joined_at: None,
-    }
-}
-
-fn project_status(status: DomainSessionStatus) -> V1SessionStatus {
-    match status {
-        DomainSessionStatus::Running => V1SessionStatus::Running,
-        DomainSessionStatus::Completed => V1SessionStatus::Completed,
-    }
-}
-
-fn map_status_to_domain(status: V1SessionStatus) -> DomainSessionStatus {
-    match status {
-        V1SessionStatus::Running => DomainSessionStatus::Running,
-        V1SessionStatus::Completed => DomainSessionStatus::Completed,
-    }
-}
-
-fn project_summary(session: &Session) -> SessionSummary {
-    SessionSummary {
-        session_id: session.id.clone(),
-        version: session.group_version.unwrap_or(1),
-        group_id: session.group_id.clone(),
-        status: project_status(session.status),
-        title: session.session_title.clone(),
-        participant_count: Some(session.participants.len()),
-        caller_principal: session.caller_principal.clone(),
-        created_by: session.created_by.clone(),
-        created_at: session.created_at,
-        updated_at: session.updated_at,
-        collected: None,
-    }
-}
-
 // ── error mappers ─────────────────────────────────────────────────────
+
+fn saturating_usize(value: u64) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
 
 fn map_session_error(error: SessionUseCaseError) -> ApplicationError {
     match error {
@@ -682,9 +922,6 @@ fn map_session_error(error: SessionUseCaseError) -> ApplicationError {
         ),
         SessionUseCaseError::InvalidParams(message) => {
             ApplicationError::invalid("invalid_request", message)
-        }
-        SessionUseCaseError::CallbackPending(message) => {
-            ApplicationError::conflict("conflict", message)
         }
         SessionUseCaseError::Conflict(message) => ApplicationError::conflict("conflict", message),
         SessionUseCaseError::Internal(service_error) => map_service_error(service_error),
@@ -709,11 +946,21 @@ fn map_launch_error(error: SessionLaunchError) -> ApplicationError {
             ApplicationError::invalid("invalid_request", message)
         }
         SessionLaunchError::Conflict(message) => ApplicationError::conflict("conflict", message),
-        SessionLaunchError::CallbackPending(message) => {
-            ApplicationError::conflict("conflict", message)
-        }
         SessionLaunchError::Runtime(error) => map_runtime_error(error),
         SessionLaunchError::Internal(error) => map_service_error(error),
+    }
+}
+
+/// Map one authority read to application errors: a strict
+/// deny (`Forbidden`) is 403; every other read failure
+/// propagates as an internal error (spec §3.2: 存储错误
+/// 返回错误 — never a deny-as-false).
+fn map_authority_error(error: ServiceError) -> ApplicationError {
+    match error {
+        ServiceError::Forbidden(message) => ApplicationError::forbidden(message),
+        other => ApplicationError::internal(format!(
+            "bot authority lookup failed: {other}"
+        )),
     }
 }
 
@@ -772,167 +1019,5 @@ fn map_group_use_case_error(error: GroupUseCaseError) -> ApplicationError {
         ),
         GroupUseCaseError::Service(service_error) => map_service_error(service_error),
         other => ApplicationError::internal(other.to_string()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn session_use_case_errors_map_to_stable_v1_codes() {
-        assert_eq!(
-            map_session_error(SessionUseCaseError::NotFound("s1".into())).code(),
-            "session_not_found"
-        );
-        assert_eq!(
-            map_session_error(SessionUseCaseError::InvalidParams("bad".into())).code(),
-            "invalid_request"
-        );
-        assert_eq!(
-            map_session_error(SessionUseCaseError::CallbackPending("pending".into())).code(),
-            "conflict"
-        );
-        assert_eq!(
-            map_session_error(SessionUseCaseError::Conflict("running".into())).code(),
-            "conflict"
-        );
-        assert_eq!(
-            map_session_error(SessionUseCaseError::Internal(
-                ServiceError::SessionNotFound("s2".into())
-            ))
-            .code(),
-            "session_not_found"
-        );
-    }
-
-    #[test]
-    fn service_errors_map_to_stable_v1_codes() {
-        assert_eq!(
-            map_service_error(ServiceError::GroupNotFound("g1".into())).code(),
-            "group_not_found"
-        );
-        assert_eq!(
-            map_service_error(ServiceError::BotNotFound("b1".into())).code(),
-            "bot_not_found"
-        );
-        assert_eq!(
-            map_service_error(ServiceError::ParticipantNotFound("b2".into())).code(),
-            "participant_not_found"
-        );
-        assert_eq!(
-            map_service_error(ServiceError::Conflict("dup".into())).code(),
-            "conflict"
-        );
-        assert_eq!(
-            map_service_error(ServiceError::SessionInvalidParams("x".into())).code(),
-            "invalid_request"
-        );
-    }
-
-    #[test]
-    fn session_history_errors_preserve_authentication_and_authorization_categories() {
-        assert!(matches!(
-            map_group_use_case_error(GroupUseCaseError::Unauthorized("missing".into())),
-            ApplicationError::Unauthenticated
-        ));
-        assert!(matches!(
-            map_group_use_case_error(GroupUseCaseError::Forbidden("denied".into())),
-            ApplicationError::Forbidden(_)
-        ));
-        assert_eq!(
-            map_group_use_case_error(GroupUseCaseError::InvalidHistoryLimit(0)).code(),
-            "invalid_request"
-        );
-        assert_eq!(
-            map_group_use_case_error(GroupUseCaseError::InvalidGroupId("bad".into())).code(),
-            "internal_error"
-        );
-    }
-
-    #[test]
-    fn runtime_errors_map_to_stable_v1_codes() {
-        assert_eq!(
-            map_runtime_error(CollaborationRuntimeError::Unauthenticated).code(),
-            "unauthenticated"
-        );
-        assert_eq!(
-            map_runtime_error(CollaborationRuntimeError::Forbidden("denied".into())).code(),
-            "forbidden"
-        );
-        for error in [
-            CollaborationRuntimeError::InvalidDefinition("invalid definition".into()),
-            CollaborationRuntimeError::InvalidParticipantBinding("invalid binding".into()),
-            CollaborationRuntimeError::InvalidRequest("invalid request".into()),
-        ] {
-            assert_eq!(map_runtime_error(error).code(), "invalid_request");
-        }
-        assert_eq!(
-            map_runtime_error(CollaborationRuntimeError::Conflict("running".into())).code(),
-            "conflict"
-        );
-        assert_eq!(
-            map_runtime_error(CollaborationRuntimeError::JudgeUnavailable(
-                "offline".into()
-            ))
-            .code(),
-            "internal_error"
-        );
-    }
-
-    #[test]
-    fn project_participant_preserves_human_present_mode() {
-        // Vey7i: a legacy invitation-accept inserts a Human participant with
-        // `actor_kind: Human, mode: Present`. The V1 projection must NOT map
-        // that into the Bot-only `Auto`/`Muted` vocabulary; it must pass
-        // `actor_kind` and `effective_mode()` through verbatim so `GET session`
-        // surfaces the real membership.
-        let human = Participant {
-            bot_uuid: "human_staff-1".into(),
-            bot_name: Some("Alice".into()),
-            kind: None,
-            role: ParticipantRole::Consultant,
-            actor_kind: ActorKind::Human,
-            tags: Vec::new(),
-            message_view_scope: MessageViewScope::Full,
-            mode: Some(ParticipantMode::Present),
-        };
-        let projected = project_participant(&human);
-        assert_eq!(projected.actor_id, "human_staff-1");
-        assert_eq!(projected.actor_kind, ActorKind::Human);
-        assert_eq!(projected.role, ParticipantRole::Consultant);
-        assert_eq!(projected.mode, ParticipantMode::Present);
-        assert_eq!(projected.name.as_deref(), Some("Alice"));
-
-        // `mode: None` falls back to the actor-kind default; for a Human that
-        // is `Absent`, and the projection must surface that verbatim too.
-        let absent = Participant {
-            bot_uuid: "human_staff-2".into(),
-            bot_name: None,
-            kind: None,
-            role: ParticipantRole::Observer,
-            actor_kind: ActorKind::Human,
-            tags: Vec::new(),
-            message_view_scope: MessageViewScope::Full,
-            mode: None,
-        };
-        let projected_absent = project_participant(&absent);
-        assert_eq!(projected_absent.actor_kind, ActorKind::Human);
-        assert_eq!(projected_absent.mode, ParticipantMode::Absent);
-
-        // No regression for Bot participants: Auto/Muted pass through as-is.
-        let bot = Participant {
-            bot_uuid: "bot-1".into(),
-            bot_name: None,
-            kind: None,
-            role: ParticipantRole::Driver,
-            actor_kind: ActorKind::Bot,
-            tags: Vec::new(),
-            message_view_scope: MessageViewScope::Full,
-            mode: Some(ParticipantMode::Muted),
-        };
-        let projected_bot = project_participant(&bot);
-        assert_eq!(projected_bot.actor_kind, ActorKind::Bot);
-        assert_eq!(projected_bot.mode, ParticipantMode::Muted);
     }
 }

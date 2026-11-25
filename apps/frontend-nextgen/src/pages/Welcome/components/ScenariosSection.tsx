@@ -76,7 +76,7 @@ function ScenarioFrame({ image, windowTitle }: { image: ScenarioImage; windowTit
   return (
     <figure className="group overflow-hidden rounded-[20px] border border-border bg-muted/60 p-3">
       <div className="overflow-hidden rounded-xl border border-border bg-card">
-        <div className="flex items-center border-b border-border bg-muted px-3 py-2">
+        <div className="flex items-center border-b border-divider bg-muted px-3 py-2">
           <div className="flex gap-1.5" aria-hidden>
             <span className="size-2 rounded-full bg-border" />
             <span className="size-2 rounded-full bg-border" />

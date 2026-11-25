@@ -156,6 +156,10 @@ class NestedStory(Story):
             "owners": [self.args.human], "provider_bot_ref": "nested-loop-e2e-" + uuid.uuid4().hex,
             "domains": ["release"], "skills": ["review"], "scopes": ["local"],
         }, headers={"Authorization": "Bearer " + self.provider["provider_admin_token"]})
+        # Provider-admin publication mints the declared owner's Human
+        # authority edge (trusted delegation), so the story's owner can
+        # publish visibility with the regular human headers — this keeps
+        # the admin-minted edge under live e2e coverage.
         self.request(f"/bots/{segment(self.bot['bot_uuid'])}/visibility", {"visibility": "public"}, method="PUT")
         self.args.driver = self.bot["bot_uuid"]
         self.token = self.bot["bot_runtime_token"]

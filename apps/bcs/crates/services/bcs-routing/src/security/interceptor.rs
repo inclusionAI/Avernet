@@ -86,7 +86,7 @@ impl SecurityInterceptor {
             }
             SecurityVerdict::Deny { code, message } => self.handle_block(code, message),
             SecurityVerdict::Unavailable { reason } => {
-                warn!(reason = %reason, "Security check unavailable, degrading");
+                warn!(log_class = "business_key", event_code = "security.degraded", reason = %reason, "Security check unavailable, degrading");
                 SecurityCheckResult::Degraded { reason }
             }
         }
@@ -96,6 +96,7 @@ impl SecurityInterceptor {
     fn handle_block(&self, error_code: String, message: String) -> SecurityCheckResult {
         if self.dry_run {
             warn!(
+                log_class = "business_key", event_code = "security.dry_run_denied",
                 error_code = %error_code,
                 message = %message,
                 dry_run = true,
@@ -109,6 +110,7 @@ impl SecurityInterceptor {
             }
         } else {
             warn!(
+                log_class = "business_key", event_code = "security.denied",
                 error_code = %error_code,
                 message = %message,
                 dry_run = false,
@@ -147,7 +149,7 @@ impl MessageInterceptor for SecurityInterceptor {
                 }
             }
             SecurityCheckResult::Degraded { reason } => {
-                warn!(reason = %reason, "Security interceptor degraded; continuing outbound delivery");
+                warn!(log_class = "business_key", event_code = "security.degraded", reason = %reason, "Security interceptor degraded; continuing outbound delivery");
                 InterceptorDecision::Pass
             }
             SecurityCheckResult::Block { error_code, message } => {

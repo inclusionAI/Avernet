@@ -14,7 +14,7 @@ imports them so there's exactly one source of truth.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, Protocol, runtime_checkable
 
 from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasNoActiveDevicesError,
@@ -45,7 +45,7 @@ class BaasServiceProtocol(Protocol):
         ...
 
     def resolve_token_outbound_device_id(
-        self, binding: DeviceBindingRecord | None,
+        self, binding: DeviceBindingRecord | None, *, device_uuid: str | None = None,
     ) -> str:
         """Resolve an authorized ACTIVE binding to a validated token append target.
 
@@ -54,6 +54,8 @@ class BaasServiceProtocol(Protocol):
         @template suffix and requiring ARCA-SANDBOX-. No template lookup occurs.
         BaasOutboundTargetError.reason is binding_unavailable,
         unsupported_provider, target_not_found, target_ambiguous or invalid_target.
+        With a device_uuid, require an exact ACTIVE BaaS replica of this binding
+        or matching device_uuid metadata on the ACTIVE direct ARCA binding.
         Query transport errors propagate unchanged.
         """
         ...
@@ -261,9 +263,10 @@ class BaasServiceProtocol(Protocol):
         ...
 
     def update_device_outbound_rule(
-        self, paas_device_id: str, outbound_rule: OutBoundOperationRule
+        self, paas_device_id: str, outbound_rule: OutBoundOperationRule,
+        *, mode: Literal["append", "replace"] = "append",
     ) -> bool:
-        """Update PaaS device outbound header rules."""
+        """Upsert outbound rules; Teclaw global rules explicitly use replace."""
         ...
 
     def update_teclaw_outbound_rule_by_bot_uuid(

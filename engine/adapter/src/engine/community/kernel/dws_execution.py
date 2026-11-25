@@ -1,6 +1,7 @@
 """Durable hosting execution values. No engine wire types or delivery targets."""
 
 from typing import Annotated, Literal
+import unicodedata
 
 from pydantic import Field, model_validator
 
@@ -25,6 +26,24 @@ class GatewayWitness(Value):
         return self
 
 
+class HostingScope(Value):
+    decision: Literal["allow", "ignore", "uncertain"]
+    reason_code: Literal[
+        "inside_rule", "outside_rule", "insufficient_facts", "unavailable"
+    ]
+
+    @model_validator(mode="after")
+    def consistent(self):
+        valid = {
+            "allow": {"inside_rule"},
+            "ignore": {"outside_rule"},
+            "uncertain": {"insufficient_facts", "unavailable"},
+        }
+        if self.reason_code not in valid[self.decision]:
+            raise ValueError("inconsistent scope result")
+        return self
+
+
 class AgentInvocation(Value):
     rpc_id: Identifier
     run_id: Identifier
@@ -36,6 +55,7 @@ class AgentInvocation(Value):
     dialogue_snapshot: DialogueSnapshot | None = None
     dialogue_sync_keys: tuple[str, ...] = ()
     gateway_witness: GatewayWitness | None = None
+    scope: HostingScope | None = None
 
 
 class EngineUpdate(Value):
@@ -74,6 +94,49 @@ class HostingDecision(Value):
         return self
 
 
+class HostingReview(Value):
+    """Bounded internal diagnostics, never a message or delivery authorization."""
+
+    verdict: Literal["approve", "skip_owner_replied", "reject"]
+    reason_code: Literal[
+        "approved",
+        "outside_rule",
+        "owner_replied",
+        "identity_uncertain",
+        "context_insufficient",
+        "unsupported_fact",
+        "off_topic",
+        "other",
+        "unspecified",
+    ]
+    reason: Annotated[str, Field(min_length=1, max_length=240, repr=False)]
+
+    @model_validator(mode="after")
+    def valid_review(self):
+        allowed = {
+            "approve": {"approved", "unspecified"},
+            "skip_owner_replied": {"owner_replied", "unspecified"},
+            "reject": {
+                "outside_rule",
+                "identity_uncertain",
+                "context_insufficient",
+                "unsupported_fact",
+                "off_topic",
+                "other",
+                "unspecified",
+            },
+        }
+        if self.reason_code not in allowed[self.verdict]:
+            raise ValueError("inconsistent review verdict and reason code")
+        if not self.reason.strip() or any(
+            unicodedata.category(c).startswith("C")
+            or unicodedata.category(c) in {"Zl", "Zp"}
+            for c in self.reason
+        ):
+            raise ValueError("review reason must be a short single-line explanation")
+        return self
+
+
 class ExecutionRecord(Value):
     turn_id: Identifier
     invocation: AgentInvocation
@@ -89,3 +152,4 @@ class ExecutionRecord(Value):
     result: EngineUpdate | None = None
     decision: HostingDecision | None = None
     reason: str = ""
+    review: HostingReview | None = Field(default=None, exclude=True, repr=False)

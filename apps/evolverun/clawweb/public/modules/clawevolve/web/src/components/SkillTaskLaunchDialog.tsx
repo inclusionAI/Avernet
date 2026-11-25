@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, type EvolveSkillAsset, type EvolveSkillTaskDefaults } from '../api/client'
+import { TaskReferenceMaterialsField } from './TaskReferenceMaterials'
+import { useTaskReferenceMaterials } from '../hooks/useTaskReferenceMaterials'
 import { createRequestId } from '../utils/request-id'
 
 export type SkillTaskAction = 'diagnose' | 'hardening' | 'optimize'
@@ -30,6 +32,8 @@ export default function SkillTaskLaunchDialog({ asset, action, returnTo, onClose
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
   const [busy, setBusy] = useState(false)
+  const materialsEnabled = action === 'hardening' || action === 'optimize'
+  const referenceMaterials = useTaskReferenceMaterials(materialsEnabled)
 
   useEffect(() => {
     let active = true
@@ -56,7 +60,7 @@ export default function SkillTaskLaunchDialog({ asset, action, returnTo, onClose
 
   const preset = defaults?.[action]
   const unavailableReason = preset?.unavailableReason ?? ''
-  const canLaunch = Boolean(defaults && preset?.goal.trim() && !unavailableReason && !loading && !busy)
+  const canLaunch = Boolean(defaults && preset?.goal.trim() && !unavailableReason && !loading && !busy && !referenceMaterials.blocked)
 
   const confirm = async () => {
     if (!canLaunch || !defaults || !preset || submitting.current) return
@@ -78,6 +82,7 @@ export default function SkillTaskLaunchDialog({ asset, action, returnTo, onClose
         sessionSource: 'local' as const,
         ...dates,
         runtimeMaintenance: false,
+        ...(referenceMaterials.uploadId ? { referenceMaterialsUploadId: referenceMaterials.uploadId } : {}),
       }
       const result = await api.evolve.createTask(action === 'diagnose'
         ? { ...common, taskType: 'diagnose', stageSelection: { diagnose: true, hardening: false, plan: true, optimize: false },
@@ -87,7 +92,8 @@ export default function SkillTaskLaunchDialog({ asset, action, returnTo, onClose
               ...(defaults.botEnv ? { botEnv: defaults.botEnv } : {}),
               targetSkillAssetId: asset.assetId, goal: preset.goal, model: common.model, runtimeMaintenance: false,
               stageSelection: { diagnose: false, hardening: true, plan: false, optimize: false },
-              ...(preset.stageExtensions ? { stageExtensions: preset.stageExtensions } : {}), taskType: 'hardening' }
+              ...(preset.stageExtensions ? { stageExtensions: preset.stageExtensions } : {}),
+              ...(referenceMaterials.uploadId ? { referenceMaterialsUploadId: referenceMaterials.uploadId } : {}), taskType: 'hardening' }
         : { ...common, taskType: 'full', inputMode: 'diagnose_goal', maxRounds: 3,
             stageSelection: { diagnose: true, hardening: false, plan: true, optimize: true },
             ...(preset.stageExtensions ? { stageExtensions: preset.stageExtensions } : {}) }, requestId)
@@ -147,13 +153,14 @@ export default function SkillTaskLaunchDialog({ asset, action, returnTo, onClose
           <p className="mt-2 border-t border-blue-100 pt-2 text-xs leading-5 text-blue-600">本次不会清理历史会话或重启 Gateway。</p>
         </div>
         {unavailableReason && <p role="alert" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">不可启动{actionName[action]}：{unavailableReason}</p>}
+        {materialsEnabled && <div className="mt-3"><TaskReferenceMaterialsField state={referenceMaterials} disabled={busy} /></div>}
         {!preset?.goal.trim() && <p role="alert" className="mt-3 text-sm text-red-700">任务默认目标为空，暂不可启动。</p>}
       </>}
       {error && <div role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}
         {!defaults && <button type="button" className="ml-2 underline" onClick={() => setAttempt((value) => value + 1)}>重试</button>}
       </div>}
       <div className="mt-6 flex flex-wrap justify-end gap-2">
-        <button type="button" disabled={!defaults || busy} onClick={advanced} className="mr-auto text-sm text-blue-600 disabled:opacity-40">自定义 / 高级</button>
+        <button type="button" disabled={!defaults || busy || referenceMaterials.files.length > 0} title={referenceMaterials.files.length ? '请先移除材料再切换到高级表单，或在当前窗口完成任务创建' : undefined} onClick={advanced} className="mr-auto text-sm text-blue-600 disabled:opacity-40">自定义 / 高级</button>
         <button type="button" disabled={busy} onClick={onClose} className="rounded-lg border border-gray-200 px-4 py-2 text-sm disabled:opacity-40">取消</button>
         <button type="button" disabled={!canLaunch} title={unavailableReason || undefined} onClick={() => void confirm()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">{busy ? '正在启动…' : `确认${actionName[action]}`}</button>
       </div>

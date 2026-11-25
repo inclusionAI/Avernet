@@ -177,6 +177,19 @@ def _env_base_url(cfg: OpenApiBotConfig | BcsClientConfig) -> str:
     return _env_select(cfg.base_url, cfg.base_url_pre)
 
 
+def _env_api_key(cfg: OpenApiBotConfig) -> str:
+    """Select the env-resolved Bearer api_key from the ``openapi_bot`` block.
+
+    Asymmetry vs ``_env_base_url``: here the *bare* ``api_key_secret`` holds the
+    non-prod (pre/dev) key and ``api_key_secret_prod`` the prod/gray key (the
+    repo historically shipped one key, the pre one, used across envs). So the
+    env switch is prod → ``api_key_secret_prod``, everything else →
+    ``api_key_secret`` (preserves pre/dev/singlebox behaviour; only prod and
+    gray flip to the prod key). Empty in the selected env → caller fail-closes.
+    """
+    return cfg.api_key_secret_prod if get_current_env() == "prod" else cfg.api_key_secret
+
+
 def _resolve_bcn_provider_identity(bcn_cfg: BcnConfig) -> tuple[str, str]:
     """Env-resolve the BCS provider management identity reused from the bcn block.
 
@@ -225,6 +238,7 @@ class TaskRunnerIntegrationModule(Module):
             base_url=block.get("base_url", ""),
             base_url_pre=block.get("base_url_pre", ""),
             api_key_secret=block.get("api_key_secret", ""),
+            api_key_secret_prod=block.get("api_key_secret_prod", ""),
             api_key_prefix=block.get("api_key_prefix", ""),
         )
 
@@ -296,15 +310,19 @@ class TaskRunnerIntegrationModule(Module):
         self,
         cfg: OpenApiBotConfig,
     ) -> OpenApiBotPort:
-        # api_key_secret is read as the LITERAL Bearer api_key (not a Mist name);
-        # must be a real BaaS Open API key value; empty -> fail-closed None.
-        api_key = cfg.api_key_secret
+        # api_key_secret / api_key_secret_prod are read as the LITERAL Bearer
+        # api_key (not a Mist name); the env-selected one (prod →
+        # api_key_secret_prod, else → api_key_secret) must be a real BaaS Open
+        # API key value; empty in this env -> fail-closed None.
+        api_key = _env_api_key(cfg)
         base_url = _env_base_url(cfg)
         if not base_url or not api_key:
             logger.warning(
                 "[task][community-task] openapi_bot not configured "
-                "(base_url/api_key_secret empty) — single_bot port None (fail-closed)。"
-                "排查: openapi_bot.api_key_secret 是否填了真 BaaS Open API key?"
+                "(base_url/api_key_secret[_prod] empty for this env) — "
+                "single_bot port None (fail-closed)。"
+                "排查: prod/gray 查 openapi_bot.api_key_secret_prod, "
+                "pre/dev 查 openapi_bot.api_key_secret 是否填了真 BaaS Open API key?"
             )
             return None  # type: ignore[return-value]
         keys = ApiKeyProviderImpl(

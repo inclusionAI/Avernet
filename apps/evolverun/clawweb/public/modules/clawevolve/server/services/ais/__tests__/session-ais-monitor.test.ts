@@ -28,6 +28,18 @@ describe("session analysis AIS monitor", () => {
     }));
   });
 
+  it("stops an expired analysis under the recorded submitter, including an administrator retry", async () => {
+    const task = { id: 9, task_id: "SA-3", user_id: "target-owner", created_by: "original-creator", config_json: JSON.stringify({
+      stepId: "SA-3-AIS", aisBase: { snapshotId: 17, packageId: "clawevolve-ais-diagnose", deadlineAt: 100 },
+    }) };
+    const repo = { listActiveSessionAisTasks: vi.fn().mockResolvedValueOnce([task]).mockResolvedValueOnce([]),
+      findStep: vi.fn().mockResolvedValue({ step_id: "SA-3-AIS", status: "running", bot_run_id: "job-3",
+        bot_response_json: JSON.stringify({ submittedBy: "retry-admin" }) }), applySessionAisStatus: vi.fn() } as unknown as EvolveRepository;
+    const ais = { getJobStatusDetail: vi.fn().mockResolvedValue({ status: "running", rawStatus: "running", errorMessage: null }), stopExecution: vi.fn() };
+    await reconcileSessionAis(repo, ais, 200);
+    expect(ais.stopExecution).toHaveBeenCalledWith("job-3", "retry-admin");
+  });
+
   it("does not fail a task when the platform status query is temporarily unavailable", async () => {
     const task = { id: 8, task_id: "SA-2", config_json: JSON.stringify({
       stepId: "SA-2-AIS",

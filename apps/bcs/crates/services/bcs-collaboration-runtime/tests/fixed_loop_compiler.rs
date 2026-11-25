@@ -38,6 +38,45 @@ fn spec_and_cli_fixed_loop_examples_pass_authoring_validation() {
     }
 }
 
+#[test]
+fn cli_nested_fixed_loop_example_compiles_with_scoped_iterations_and_limits() {
+    let cli = include_str!("../../../tools/bcs-cli/bcs-coordination/references/custom-collaboration-schema.md");
+    let yaml = yaml_block(cli.split_once("### Nested fixed Loop example\n").unwrap().1);
+    let command = || ValidateCollaborationDefinitionYamlCommand {
+        definition_yaml: yaml.into(), judge_available: false,
+    };
+    let result = validate_authoring_definition_yaml(command());
+    assert!(result.valid, "{:?}", result.errors);
+    assert!(result.warnings.iter().any(|warning| warning.code == "VALIDATION_ONLY_FEATURE"));
+    let graph = result.graph.unwrap();
+    assert_eq!(graph.nodes.len(), 11);
+    assert_eq!(graph.loops.keys().map(String::as_str).collect::<Vec<_>>(), vec!["outer", "outer/inner"]);
+    let compiled = compile_authoring_definition(result.definition.unwrap(), &FixedLoopLimits::default()).unwrap();
+    let plan = compiled.plan.unwrap();
+    assert_eq!(plan.compiler_version, NESTED_FIXED_LOOP_COMPILER_VERSION);
+    assert!(plan.state_machine.nodes["publish"].final_output);
+    let entries: Vec<_> = plan.node_metadata.values()
+        .filter(|meta| meta.definition_node_id == "refine").collect();
+    assert_eq!(entries.len(), 6);
+    for entry in entries {
+        let path = entry.loop_path.as_ref().unwrap();
+        assert_eq!(path.len(), 2);
+        if path[1].iteration == 1 {
+            assert!(entry.previous_result_node_id.is_none());
+        } else {
+            let previous = &plan.node_metadata[entry.previous_result_node_id.as_ref().unwrap()];
+            let previous_path = previous.loop_path.as_ref().unwrap();
+            assert_eq!(previous_path[0], path[0]);
+            assert_eq!(previous_path[1].iteration, path[1].iteration - 1);
+        }
+    }
+    let limited = validate_authoring_definition_yaml_with_limits(command(),
+        &FixedLoopLimits { max_fixed_loop_depth: 1, ..Default::default() });
+    assert!(!limited.valid);
+    assert!(limited.errors.iter().any(|error|
+        error.path.ends_with("outer.loop.nodes.inner.loop") && error.message.contains("max_fixed_loop_depth")));
+}
+
 fn fixture() -> Value {
     let mut definition: CollaborationDefinition = serde_yaml::from_str(YAML).unwrap();
     definition.id = "fixed-loop-fixture".into();

@@ -6,7 +6,7 @@ import { GITHUB_REPO_URL } from '../constants';
 export function WelcomeFooter() {
   const brand = getCapabilities().getProductBrand().value;
   return (
-    <footer className="sticky bottom-0 z-30 border-t border-border bg-background">
+    <footer className="sticky bottom-0 z-30 border-t border-divider bg-background">
       <div className="mx-auto flex w-full max-w-[1200px] flex-col items-center justify-between gap-4 px-8 py-5 md:flex-row md:items-center">
         <brand.Logo className="h-8 w-auto" />
         <a

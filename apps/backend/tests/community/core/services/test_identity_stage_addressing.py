@@ -46,8 +46,12 @@ def _service(*, bot_type="service", read_return=b"hello"):
         "bot_id": BOT,
         "bot_type": bot_type,
         "owner_id": OWNER,
+        "entity_id": OWNER,
         "active_engine": "openclaw",
     }
+    bot_repo.list_matches_by_legacy_locator.return_value = [
+        bot_repo.get_by_id_and_owner.return_value
+    ]
     publish_repo = MagicMock()
     publish_repo.list_by_source_bot.return_value = [
         SimpleNamespace(

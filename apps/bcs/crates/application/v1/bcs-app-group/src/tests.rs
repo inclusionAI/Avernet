@@ -27,14 +27,6 @@
             "invalid_request",
         );
         assert_code(
-            map_group_error(GroupUseCaseError::ProposalNotFound("proposal-1".into())),
-            "not_found",
-        );
-        assert_code(
-            map_group_error(GroupUseCaseError::ProposalExpired("proposal-2".into())),
-            "not_found",
-        );
-        assert_code(
             map_group_error(GroupUseCaseError::InvalidHistoryLimit(0)),
             "invalid_request",
         );

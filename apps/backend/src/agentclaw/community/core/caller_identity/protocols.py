@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from agentclaw.community.core.caller_identity.contracts import (
+    CallerExpiryCorrectionError as CallerExpiryCorrectionError,
     CallerIamTokenContext,
     CallerIdentityStage,
 )
@@ -27,6 +29,20 @@ class CallerMcpSyncProtocol(Protocol):
         active_mcps: list[dict[str, Any]],
         identity_modes: Mapping[str, object],
     ) -> Mapping[str, Any]: ...
+
+
+@runtime_checkable
+class BcsCallerConfigSyncProtocol(Protocol):
+    """Push the Bot caller-config snapshot to the BCS authoritative sink."""
+
+    def sync_caller_config(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        enabled: bool,
+        source_revision: int,
+    ) -> None: ...
 
 
 @runtime_checkable
@@ -61,6 +77,7 @@ class CallerRuntimeUpdaterProtocol(Protocol):
         binding_id: int | None = None,
         is_test_exchange: bool = False,
         session_key: str | None = None,
+        force_runtime_refresh: bool = False,
     ) -> None: ...
 
 
@@ -111,12 +128,22 @@ class CallerIdentityTokenExchangeProtocol(Protocol):
         is_test_exchange: bool = False,
         session_key: str | None = None,
         caller_token: CallerToken | None = None,
+        force_runtime_refresh: bool = False,
     ) -> None: ...
 
 
 __all__ = [
     "CallerMcpSyncProtocol",
+    "BcsCallerConfigSyncProtocol",
     "CallerIdentityTokenExchangeProtocol",
     "CallerRuntimeUpdaterProtocol",
     "CallerTokenProviderProtocol",
 ]
+
+
+@runtime_checkable
+class CallerExpiryCorrectionServiceProtocol(Protocol):
+    """Correct one existing expiry ledger under an administrative CAS command."""
+    def correct(self, *, actor_id: str, bot_id: str, entity_id: str, caller_user_id: str,
+                binding_id: int, expires_at: datetime, expected_expires_at: datetime | None,
+                reason: str) -> dict: ...

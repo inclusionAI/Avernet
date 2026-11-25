@@ -43,13 +43,9 @@ modules:
       items:
         - POST /api/internal/tc-resource-context
     plugin_api:
-      status: applicable
-      reason: Singlebox selects the local Plugin API implementation while production selects authenticated HTTP delivery.
-      items:
-        - key: TcResourceReadyPublisherPlugin.publish
-          evidence:
-            path: src/agentclaw/community/plugins/local/tc_resource_ready.py
-            symbol: LocalTcResourceReadyPublisher.publish
+      status: not_applicable
+      reason: Automatic TC conversation-file resource-ready publication was retired; the publisher and protocol remain only for compatibility, and no production session-file path invokes them.
+      items: []
     thresholds:
       core_min_percent: 40.0
       router_min_percent: 100.0
@@ -174,7 +170,101 @@ modules:
     router_api: *pending_router_denominator
     plugin_api: *pending_plugin_denominator
     thresholds:
+      # Existing non-regression threshold is unchanged by sync simplification.
       core_min_percent: 53.88
+
+  manager_sync:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/bot_collaborator
+    core_paths:
+      - src/agentclaw/community/core/bot_collaborator/manager_sync/
+    router_api: *pending_router_denominator
+    plugin_api: *pending_plugin_denominator
+    thresholds:
+      # Preserve the existing manager-sync gate. Singlebox uses direct BCS
+      # delivery with the same best-effort implementation as production;
+      # no Redis or alternate coordination mode is required. A passing
+      # coverage result alone does not prove the BCS roster is correct.
+      core_min_percent: 54.03
+
+  ownership_sync:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/bot_ownership_sync
+    core_paths:
+      - src/agentclaw/community/core/bot_management/ownership_sync/
+    router_api:
+      status: applicable
+      reason: Authenticated administrator repair admits current ownership through the production sync runtime; handoff remains upstream.
+      items:
+        - POST /api/bots/owner-handoffs/bcn-repair
+    plugin_api:
+      status: applicable
+      reason: Real direct BCS ownership delivery and its lifecycle release at stack shutdown.
+      items:
+        - key: BcsOwnershipPlugin.replace_ownership
+          evidence:
+            path: src/agentclaw/community/plugins/community/bcs_ownership.py
+            symbol: HttpBcsOwnershipPlugin.replace_ownership
+        - key: BcsOwnershipPlugin.aclose
+          evidence:
+            path: src/agentclaw/community/plugins/community/bcs_ownership.py
+            symbol: HttpBcsOwnershipPlugin.aclose
+    thresholds:
+      # Initial live Backend floor: floor(87 / 132 * 10000) / 100.
+      # Task 10 owner-enabled-live4 Backend report SHA-256:
+      # e8e970a9f3f8127598cf4d5f1e721c1119fafb91f13dc826e893fbc206c84931
+      # Includes repair and error paths; no unit/maintenance-driver coverage.
+      core_min_percent: 65.90
+      router_min_percent: 100.0
+      plugin_min_percent: 100.0
+
+  collaboration_repair:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/collaboration_repair
+    core_paths:
+      # The whole one-shot repair Core package (facts projection + Service API
+      # contract + orchestration) — avatar_from_record/outbound_avatar_from_record
+      # also run inside the real daily edit stories at stack runtime.
+      - src/agentclaw/community/core/bot_management/collaboration_repair/
+    router_api:
+      status: applicable
+      reason: The one owner-scoped repair POST this feature added; legacy queued repair operations are background workflows outside the user-story denominator.
+      items:
+        - POST /openapi/v1/bots/{bot_id}/collaboration/repair
+    plugin_api:
+      status: applicable
+      reason: The request-scoped metadata delivery implementations for the repair route; the shared coverage stack now provisions an ephemeral BCN provider, so the live stories exercise the production community plugin (plugins/community/bcs_collaboration_metadata.py) itself.
+      items:
+        - key: BcsCollaborationMetadataPlugin.exists
+          evidence:
+            path: src/agentclaw/community/plugins/community/bcs_collaboration_metadata.py
+            symbol: BcnCollaborationMetadataAdapter.exists
+        - key: BcsCollaborationMetadataPlugin.update_profile
+          evidence:
+            path: src/agentclaw/community/plugins/community/bcs_collaboration_metadata.py
+            symbol: BcnCollaborationMetadataAdapter.update_profile
+        - key: BcsCollaborationMetadataPlugin.aclose
+          evidence:
+            path: src/agentclaw/community/plugins/community/bcs_collaboration_metadata.py
+            symbol: BcnCollaborationMetadataAdapter.aclose
+    thresholds:
+      # Measured by `singlebox_coverage.sh --module collaboration_repair`
+      # Baseline evidence is recorded in PR #3569.
+      # router 1/1 live route hit by the repair stories. Since the shared
+      # coverage stack provisions an ephemeral BCN provider, the stories
+      # drive the route past the capability gate. The fresh focused run
+      # measured core 71.11% (threshold floored to 70.0 to absorb one-line
+      # run variance) and plugin 100%. The 2026-11-05 scope change removes
+      # caller repair; the complete current Plugin API denominator is
+      # exists/update_profile/aclose. Existing thresholds remain unchanged;
+      # a fresh live run must still satisfy them.
+      core_min_percent: 70.0
+      router_min_percent: 100.0
+      plugin_min_percent: 100.0
+
 
   cron:
     system: backend
@@ -229,6 +319,8 @@ modules:
         - DELETE /api/v1/expert-chats/{bot_id}/{owner_id}/sessions
         - POST /api/v1/expert-chats/caller-connection
         - POST /api/v1/expert-chats/app-caller-connection
+        - GET /api/v1/expert-chats/app-caller-instance/status
+        - GET /openapi/v1/bots/{bot_id}/caller-instance/status
     plugin_api:
       status: not_applicable
       reason: Expert chat uses core protocols (CallerIdentityTokenExchangeProtocol) without production plugin implementations in singlebox.
@@ -310,6 +402,10 @@ modules:
       core_min_percent: 40.86
 
 pending_modules:
+  bot_knowledge:
+    acceptance_targets:
+      - tests/community/acceptance/bot_knowledge
+    reason: The AGENTS.md projection (agents_md_sync.py) added under core/bot_knowledge/ writes the enabled-knowledge section through the device-bound identity seam; the SQL-seeded selection story bots carry no device binding, so those statements stay outside the legacy acceptance path. Pending device-bound acceptance coverage; aligned with the resources pending pattern.
   skill_center:
     acceptance_targets:
       - tests/community/acceptance/skill_center

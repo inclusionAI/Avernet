@@ -37,6 +37,7 @@ from secbaas.community.spi.bot.engine_adapter import extract_session_key_from_pl
 from secbaas.community.spi.bot_service import (
     BotBindingData,
     CallerExecutionCredential,
+    CallerInstanceStatus,
 )
 
 BOT_ID = "test-bot-000001"
@@ -773,7 +774,7 @@ class TestResolveCallerBinding:
         assert info.sandbox_id == "sbx-9"
         assert info.device_provider == "caller"
 
-    async def test_resolves_sandbox_via_agentpaas_credential(self):
+    async def test_resolves_sandbox_via_agentpass_credential(self):
         plugin = MagicMock()
         plugin.get_caller_connection = AsyncMock(return_value="sbx-agent")
         resolver = BotBindingResolver(plugin)
@@ -781,8 +782,8 @@ class TestResolveCallerBinding:
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
             metadata={
                 "user_id": "workno-agent",
-                "caller_token": "agentpaas-token",
-                "type": "agentpaas",
+                "caller_token": "test-token",
+                "type": "agentpass",
             },
         )
         plugin.get_caller_connection.assert_awaited_once_with(
@@ -790,21 +791,101 @@ class TestResolveCallerBinding:
             owner_id=ENTITY_ID,
             user_id="workno-agent",
             credential=CallerExecutionCredential(
-                type="agentpaas",
-                token="agentpaas-token",
+                type="agentpass",
+                token="test-token",
             ),
         )
         assert info.sandbox_id == "sbx-agent"
 
+    async def test_resolves_sandbox_via_dingtalk_credential(self):
+        plugin = MagicMock()
+        plugin.get_caller_connection = AsyncMock(return_value="sbx-dingtalk")
+        resolver = BotBindingResolver(plugin)
+        info = await resolver.resolve_caller_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            metadata={
+                "user_id": "dingtalk-user",
+                "caller_token": "device-token",
+                "type": "dingtalk",
+            },
+        )
+        plugin.get_caller_connection.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            user_id="dingtalk-user",
+            credential=CallerExecutionCredential(
+                type="dingtalk",
+                token="device-token",
+            ),
+        )
+        assert info.sandbox_id == "sbx-dingtalk"
+
     async def test_missing_credential_fails_closed(self):
-        """无 supported credential 时不构造空凭据，也不调用插件。"""
+        """无 user_id 时不构造凭据也不调插件，fail closed。"""
         plugin = MagicMock()
         plugin.get_caller_connection = AsyncMock(return_value="sbx-8")
+        plugin.get_caller_instance_status = AsyncMock()
         resolver = BotBindingResolver(plugin)
         with pytest.raises(PaasError) as exc_info:
             await resolver.resolve_caller_binding(bot_id=BOT_ID, metadata={})
         assert exc_info.value.code == ErrorCode.CONFIG_INVALID
         plugin.get_caller_connection.assert_not_awaited()
+        plugin.get_caller_instance_status.assert_not_awaited()
+
+    async def test_user_id_only_resolves_via_status_then_connection(self):
+        """仅 user_id 无 token：状态 exists+alive 才拉起，connection 不装凭据。"""
+        plugin = MagicMock()
+        plugin.get_caller_instance_status = AsyncMock(
+            return_value=CallerInstanceStatus(exists=True, alive=True)
+        )
+        plugin.get_existing_caller_connection = AsyncMock(return_value="sbx-reuse")
+        resolver = BotBindingResolver(plugin)
+        info = await resolver.resolve_caller_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            metadata={"user_id": "u-7"},
+        )
+        plugin.get_caller_instance_status.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            user_id="u-7",
+        )
+        plugin.get_existing_caller_connection.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            user_id="u-7",
+        )
+        assert info.sandbox_id == "sbx-reuse"
+        assert info.device_provider == "caller"
+
+    async def test_user_id_only_without_registration_fails_not_found(self):
+        """未登记（exists=false）：直接报错，不调 connection（不触发容器创建）。"""
+        plugin = MagicMock()
+        plugin.get_caller_instance_status = AsyncMock(
+            return_value=CallerInstanceStatus(exists=False, alive=False)
+        )
+        plugin.get_existing_caller_connection = AsyncMock(return_value="sbx-x")
+        resolver = BotBindingResolver(plugin)
+        with pytest.raises(PaasError) as exc_info:
+            await resolver.resolve_caller_binding(
+                bot_id=BOT_ID, metadata={"user_id": "u-7"}
+            )
+        assert exc_info.value.code == ErrorCode.NOT_FOUND
+        plugin.get_existing_caller_connection.assert_not_awaited()
+
+    async def test_user_id_only_registered_but_not_alive_fails_not_found(self):
+        """已登记但无存活设备（exists=true, alive=false）：同样报错不拉起。"""
+        plugin = MagicMock()
+        plugin.get_caller_instance_status = AsyncMock(
+            return_value=CallerInstanceStatus(exists=True, alive=False)
+        )
+        plugin.get_existing_caller_connection = AsyncMock(return_value="sbx-x")
+        resolver = BotBindingResolver(plugin)
+        with pytest.raises(PaasError) as exc_info:
+            await resolver.resolve_caller_binding(
+                bot_id=BOT_ID, metadata={"user_id": "u-7"}
+            )
+        assert exc_info.value.code == ErrorCode.NOT_FOUND
+        plugin.get_existing_caller_connection.assert_not_awaited()
 
 
 class TestResolveBindingNormalOnly:
@@ -830,7 +911,11 @@ class TestResolveBindingNormalOnly:
         resolver = BotBindingResolver(plugin)
         info = await resolver.resolve_binding(
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
-            metadata={"caller_token": "iam-value", "type": "iam-token", "user_id": "u-1"},
+            metadata={
+                "caller_token": "iam-value",
+                "type": "iam-token",
+                "user_id": "u-1",
+            },
         )
         assert info is not None
         assert info.device_provider == "teclaw"
@@ -849,18 +934,35 @@ class TestResolveBindingNormalOnly:
 
 
 class TestIsCallerMode:
-    """is_caller_mode 判定：metadata caller 键 + binding 引擎条件。"""
+    """is_caller_mode 判定：user_id（凭据可选）+ binding 引擎条件。"""
 
     def test_missing_binding_info_returns_false(self):
         """binding_info 缺失时无法确认引擎，保守判 False（不拉容器）。"""
         assert (
             is_caller_mode(
-                {"caller_token": "iam-value", "type": "iam-token", "user_id": "u-1"}, None
+                {"caller_token": "iam-value", "type": "iam-token", "user_id": "u-1"},
+                None,
             )
             is False
         )
 
-    def test_agentpaas_credential_enables_caller_mode(self):
+    def test_user_id_without_token_enables_caller_mode(self):
+        """只传 user_id 没有 caller_token 也进入 caller 模式（resolver 先查状态）。"""
+        binding = BotBindingInfo(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            sandbox_id=None,
+            device_id=None,
+            device_provider="baas",
+            binding_id=1,
+            device_props={},
+            bot_type="service",
+            engine_type="openclaw",
+            baas_session_id=None,
+        )
+        assert is_caller_mode({"user_id": "u-7"}, binding) is True
+
+    def test_agentpass_credential_enables_caller_mode(self):
         binding = BotBindingInfo(
             bot_id=BOT_ID,
             entity_id=ENTITY_ID,
@@ -875,8 +977,8 @@ class TestIsCallerMode:
         )
         metadata = {
             "user_id": "workno-agent",
-            "caller_token": "agentpaas-token",
-            "type": "agentpaas",
+            "caller_token": "test-token",
+            "type": "agentpass",
         }
         assert is_caller_mode(metadata, binding) is True
 
@@ -895,15 +997,15 @@ class TestIsCallerMode:
             baas_session_id=None,
         )
         metadata = normalize_caller_identity_metadata(
-            {"user_id": "u-1", "caller_token": "agentpaas-token"}
+            {"user_id": "u-1", "caller_token": "test-token"}
         )
         assert metadata == {
             "user_id": "u-1",
-            "caller_token": "agentpaas-token",
+            "caller_token": "test-token",
         }
         assert is_caller_mode(metadata, binding) is True
 
-    async def test_unsupported_agentpaas_credential_type_fails_closed(self):
+    async def test_unsupported_agentpass_credential_type_fails_closed(self):
         plugin = MagicMock()
         plugin.get_caller_connection = AsyncMock()
         resolver = BotBindingResolver(plugin)
@@ -912,7 +1014,7 @@ class TestIsCallerMode:
                 bot_id=BOT_ID,
                 metadata={
                     "user_id": "u-1",
-                    "caller_token": "agentpaas-token",
+                    "caller_token": "test-token",
                     "type": "unsupported",
                 },
             )
@@ -924,15 +1026,15 @@ class TestStripSensitiveMetadata:
     def test_strips_unified_caller_token(self):
         result = strip_sensitive_metadata(
             {
-                "caller_token": "agentpaas-token",
+                "caller_token": "test-token",
                 "user_id": "u-1",
-                "type": "agentpaas",
+                "type": "agentpass",
                 "foo": "bar",
             }
         )
 
         assert "caller_token" not in result
-        assert result["type"] == "agentpaas"
+        assert result["type"] == "agentpass"
         assert result["user_id"] == "u-1"
         assert result["foo"] == "bar"
 
@@ -966,8 +1068,8 @@ class TestNormalizeCallerIdentityMetadata:
     def test_bcn_canonical_keys_pass_through_unchanged(self):
         metadata = {
             "user_id": "workno-agent",
-            "caller_token": "agentpaas-token",
-            "type": "agentpaas",
+            "caller_token": "test-token",
+            "type": "agentpass",
         }
         assert normalize_caller_identity_metadata(metadata) == metadata
 
@@ -975,8 +1077,8 @@ class TestNormalizeCallerIdentityMetadata:
         result = normalize_caller_identity_metadata(
             {
                 "user_id": "u-1",
-                "caller_execution_token": "agentpaas-token",
-                "caller_execution_token_type": "agentpaas",
+                "caller_execution_token": "test-token",
+                "caller_execution_token_type": "agentpass",
             }
         )
 
@@ -984,7 +1086,8 @@ class TestNormalizeCallerIdentityMetadata:
         assert "type" not in result
         assert result["user_id"] == "u-1"
 
-    def test_user_id_without_credential_stays_non_caller(self):
+    def test_user_id_without_credential_keeps_user_id_only(self):
+        """只有 user_id 时 normalize 不注入凭据键（caller 模式判定见 is_caller_mode）。"""
         result = normalize_caller_identity_metadata({"user_id": "u-1"})
         assert "caller_token" not in result
         assert "type" not in result
@@ -992,18 +1095,18 @@ class TestNormalizeCallerIdentityMetadata:
 
 
 class TestStripSensitiveMetadataLegacy:
-    def test_strips_openapi_and_agentpaas_credential_values(self):
+    def test_strips_openapi_and_agentpass_credential_values(self):
         metadata = {
             "user_id": "u-1",
             "iam_token": "iam-token-value",
-            "caller_token": "agentpaas-token",
-            "caller_token_type": "agentpaas",
+            "caller_token": "test-token",
+            "caller_token_type": "agentpass",
             "foo": "bar",
         }
         result = strip_sensitive_metadata(metadata)
         assert "iam_token" not in result
         assert "caller_token" not in result
-        assert result["caller_token_type"] == "agentpaas"
+        assert result["caller_token_type"] == "agentpass"
         assert result["foo"] == "bar"
 
 

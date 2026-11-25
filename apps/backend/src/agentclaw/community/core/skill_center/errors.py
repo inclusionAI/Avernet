@@ -66,8 +66,12 @@ class LocalSkillInvalidPackageError(Exception):
         "wrapper_name_mismatch": "Skill directory name must match SKILL.md name",
     }
 
-    def __init__(self, reason: str = "invalid_package") -> None:
+    def __init__(
+        self, reason: str = "invalid_package", detail: str | None = None
+    ) -> None:
         super().__init__(reason)
+        self.reason = reason
+        self.detail = detail
         self.public_message = self._PUBLIC_MESSAGES.get(
             reason, self._PUBLIC_MESSAGES["invalid_package"]
         )
@@ -75,6 +79,10 @@ class LocalSkillInvalidPackageError(Exception):
 
 class LocalSkillTooLargeError(Exception):
     """A ZIP package exceeds a published upload limit."""
+
+    def __init__(self, reason: str = "too_large") -> None:
+        self.reason = reason
+        super().__init__(reason)
 
 
 class LocalSkillNotReadyError(Exception):
@@ -95,6 +103,10 @@ class LocalSkillStorageError(Exception):
 
 class LocalSkillRuntimeUnavailableError(LocalSkillStorageError):
     """Runtime delivery failed before its outcome could be confirmed."""
+
+
+class LocalSkillPackageOutcomeUnknownError(LocalSkillRuntimeUnavailableError):
+    """A dispatched package may still affect the target."""
 
 
 class SkillParameterValidationError(Exception):
@@ -125,8 +137,11 @@ class ActiveSkillSetReferenceError(RuntimeError):
     """A Skill became referenced by an active custom SkillSet."""
 
 
-class SkillRuntimeNameConflictError(Exception):
-    """A Direct activation would create an ambiguous runtime entry name."""
+class SkillRuntimeNameConflictError(DomainError):
+    """A Skill would create an ambiguous runtime entry name."""
+
+    def __init__(self) -> None:
+        super().__init__("SKILL_RUNTIME_NAME_CONFLICT")
 
 
 class SkillEngineNotSupportedError(Exception):
@@ -297,7 +312,7 @@ class SkillSetManagedResourceError(DomainError):
     """A Direct command targets a resource managed by an ordinary SkillSet."""
 
 
-class ManifestDesiredStateCommittedError(RuntimeError):
+class ApplyDesiredStateCommittedError(RuntimeError):
     """A Manifest command committed desired state before a later step failed."""
 
 
@@ -316,3 +331,11 @@ class McpEndpointUnavailableError(DomainError):
             "MCP_NO_COMPATIBLE_SECURE_ENDPOINT: 当前 MCP 没有可安全下发到该 Bot "
             "的端点，请检查 MCP Center 的网络和端点配置"
         )
+
+
+class McpProjectionNotDispatchedError(RuntimeError):
+    """Every incomplete MCP device operation failed before being dispatched."""
+
+
+class ArtifactProjectionNotDispatchedError(RuntimeError):
+    """Whole-artifact projection failed before the outbound delivery started."""

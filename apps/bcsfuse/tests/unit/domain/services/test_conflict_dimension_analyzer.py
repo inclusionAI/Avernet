@@ -9,12 +9,12 @@ from __future__ import annotations
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.domain.models.stance_signal import StanceSignal
-from src.domain.models.structured_conflict_analysis import (
+from app.domain.models.stance_signal import StanceSignal
+from app.domain.models.structured_conflict_analysis import (
     PairwiseConflict,
     StructuredConflictAnalysis,
 )
-from src.domain.services.conflict_dimension_analyzer import ConflictDimensionAnalyzer
+from app.domain.services.conflict_dimension_analyzer import ConflictDimensionAnalyzer
 
 
 class TestConflictDimensionAnalyzer:
@@ -44,7 +44,7 @@ class TestConflictDimensionAnalyzer:
 
     def test_analyze_disabled(self):
         """测试 Feature Flag 关闭时返回空分析"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = False
 
             analyzer = ConflictDimensionAnalyzer()
@@ -55,7 +55,7 @@ class TestConflictDimensionAnalyzer:
 
     def test_analyze_empty_signals(self):
         """测试空信号列表"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
             analyzer = ConflictDimensionAnalyzer()
@@ -66,10 +66,10 @@ class TestConflictDimensionAnalyzer:
 
     def test_analyze_conflict_detection(self):
         """测试冲突检测"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象
@@ -96,10 +96,10 @@ class TestConflictDimensionAnalyzer:
 
     def test_analyze_alignment_detection(self):
         """测试对齐检测"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象
@@ -125,10 +125,10 @@ class TestConflictDimensionAnalyzer:
 
     def test_analyze_tension_detection(self):
         """测试张力检测"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象
@@ -154,10 +154,10 @@ class TestConflictDimensionAnalyzer:
 
     def test_analyze_balanced_with_axis(self):
         """测试 balanced 与端点的关系"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象
@@ -204,10 +204,10 @@ class TestPairwiseAnalysisLogic:
 
     def test_high_conflict_severity(self):
         """测试高严重程度冲突"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象
@@ -232,10 +232,10 @@ class TestPairwiseAnalysisLogic:
 
     def test_medium_conflict_severity(self):
         """测试中等严重程度冲突"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象
@@ -260,10 +260,10 @@ class TestPairwiseAnalysisLogic:
 
     def test_low_conflict_severity(self):
         """测试低严重程度冲突"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象
@@ -289,10 +289,10 @@ class TestPairwiseAnalysisLogic:
 
     def test_both_neutral(self):
         """测试双方都是 neutral"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象
@@ -334,10 +334,10 @@ class TestOverallLevels:
 
     def test_overall_conflict_none(self):
         """测试整体冲突程度 - none"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象
@@ -359,10 +359,10 @@ class TestOverallLevels:
 
     def test_overall_conflict_high(self):
         """测试整体冲突程度 - high"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象
@@ -386,10 +386,10 @@ class TestOverallLevels:
 
     def test_overall_alignment_high(self):
         """测试整体对齐程度 - high"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象
@@ -425,10 +425,10 @@ class TestKeyConflictsAndAlignments:
 
     def test_key_conflicts_limit(self):
         """测试关键冲突最多返回 3 个"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象
@@ -454,10 +454,10 @@ class TestKeyConflictsAndAlignments:
 
     def test_key_alignments_limit(self):
         """测试关键对齐最多返回 3 个"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象
@@ -496,10 +496,10 @@ class TestRecommendation:
 
     def test_recommendation_critical_conflict(self):
         """测试严重冲突时的推荐"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象
@@ -523,10 +523,10 @@ class TestRecommendation:
 
     def test_recommendation_high_alignment(self):
         """测试高对齐时的推荐"""
-        with patch("src.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
+        with patch("app.domain.services.conflict_dimension_analyzer.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
-            with patch("src.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
+            with patch("app.domain.services.conflict_dimension_analyzer.get_taxonomy_registry") as mock_registry:
                 mock_reg = MagicMock()
                 mock_reg.get_conflict_dimension.return_value = MagicMock(name="速度与质量")
                 # 确保返回字符串而不是 Mock 对象

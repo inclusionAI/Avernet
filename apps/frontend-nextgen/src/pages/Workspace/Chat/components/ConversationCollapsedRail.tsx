@@ -4,8 +4,8 @@
 // 头像是干净的一列：不留任何贯穿线（首版细轨从半透明头像中间穿过，读成故障线，已撤）。
 // 好友在线信号点已移除(2026-10-21):metadata status 对已删除 Bot 仍残留 ACTIVE,
 // 绿点失真误导;死 Bot 好友关系/元数据同步问题另行立项推动后端修复。
-// 交互与展开态同口径：头像直达打开会话（不强迫展开侧栏）；AgentCoding Bot
-// 走专用 coding 对话；不可聊 Bot 保持降权占位（与分组「泊位」一致）；
+// 交互与展开态同口径：头像直达打开会话（不强迫展开侧栏）；Coding Bot 与普通 Bot
+// 共用同一条会话通道，不再绕行专用 coding 对话；不可聊/不可用 Bot 保持降权占位（与分组「泊位」一致）；
 // +N 溢出 / 空位虚线占位各有语义，均请求展开完整侧栏
 //（2026-10-14 体验修复：底端不再保留公开 Bot 发现入口）。
 import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
@@ -13,13 +13,14 @@ import type { ConversationBotSection, ConversationBotView } from '@/domain/conve
 import { Plus } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
+import { resolveBotUnavailable } from './ConversationBotUnavailableTooltip';
 
 /** 每分组直达头像上限，超出走「+N」溢出收口（点击展开完整侧栏）。 */
 const RAIL_SECTION_MAX_VISIBLE = 5;
 
 export interface ConversationCollapsedRailSection {
   id: ConversationBotSection;
-  /** 分组名（我的 Bot / 团队 Bot / 好友 Bot），仅用于 aria 与提示文案。 */
+  /** 分组名（我管理的 Bot / 我协作的 Bot / 好友 Bot），仅用于 aria 与提示文案。 */
   label: string;
   items: ConversationBotView[];
 }
@@ -33,14 +34,12 @@ export interface ConversationCollapsedRailProps {
   onQuickOpen(view: ConversationBotView): void;
   /** 「+N 溢出 / 空位占位」入口：请求展开完整侧栏。 */
   onExpand(): void;
-  /** AgentCoding Bot 不建普通会话，直达专用 coding 对话页（与 Bot 行为一致）。 */
-  onOpenAgentCodingBot(bot: ConversationBotView['bot']): void;
 }
 
 /** 分组界珠：短轨 + 珠点，把「两组之间」编码为轨道上的一个结。 */
 function SectionKnot() {
   return (
-    <span aria-hidden="true" className="relative my-0.5 flex h-4 w-px justify-center bg-border">
+    <span aria-hidden="true" className="relative my-0.5 flex h-4 w-px justify-center bg-divider">
       <span className="absolute top-1/2 h-1 w-1 -translate-y-1/2 rounded-full bg-muted-foreground/60" />
     </span>
   );
@@ -62,8 +61,13 @@ function BotTile({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
+        {/* size 必须用 icon 的 p-0（2026-11-05 修复）：default 档残留的 px-4 会把 36px
+            按钮的内容盒吃到 4px，Tailwind preflight 的 img{max-width:100%} 再把真实头像
+            img（w-7）钳成 4px 竖线。字母/emoji 回退是带 shrink-0 的 span、Plus 图标是
+            svg，都不在钳制范围内，所以只有真实头像塌成竖线。 */}
         <Button
           variant="ghost"
+          size="icon"
           aria-label={`打开 ${bot.displayName}`}
           aria-current={selected ? 'true' : undefined}
           className="relative h-9 w-9 rounded-full hover:bg-muted"
@@ -91,6 +95,7 @@ function BotTile({
 
 /** 降权占位：不可聊 Bot 不提供直达按钮（cursor 语义与分组泊位一致），仍保留身份提示。 */
 function NonInteractiveTile({ view }: { view: ConversationBotView }) {
+  const { reason } = resolveBotUnavailable(view.bot, view.section);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -107,7 +112,7 @@ function NonInteractiveTile({ view }: { view: ConversationBotView }) {
           />
         </span>
       </TooltipTrigger>
-      <TooltipContent side="right">{view.bot.displayName}</TooltipContent>
+      <TooltipContent side="right">{reason ?? view.bot.displayName}</TooltipContent>
     </Tooltip>
   );
 }
@@ -119,6 +124,7 @@ function EmptyTile({ label, onExpand }: { label: string; onExpand(): void }) {
       <TooltipTrigger asChild>
         <Button
           variant="ghost"
+          size="icon"
           aria-label={`展开侧栏，添加${label}`}
           className="relative h-9 w-9 rounded-full border border-dashed border-border text-muted-foreground hover:bg-muted"
           onClick={onExpand}
@@ -137,7 +143,6 @@ export function ConversationCollapsedRail({
   selectedSection,
   onQuickOpen,
   onExpand,
-  onOpenAgentCodingBot,
 }: ConversationCollapsedRailProps) {
   return (
     <TooltipProvider delayDuration={300}>
@@ -160,17 +165,9 @@ export function ConversationCollapsedRail({
                   visible.map((view) => {
                     const selected =
                       view.bot.botId === selectedBotId && section.id === selectedSection;
-                    // 与 Bot 行 handleToggle 同口径：AgentCoding 直达 coding 对话；不可聊不提供直达。
-                    if (view.bot.isAgentCodingBot) {
-                      return (
-                        <BotTile
-                          key={view.bot.botId}
-                          view={view}
-                          selected={selected}
-                          tooltip={view.bot.displayName}
-                          onClick={() => onOpenAgentCodingBot(view.bot)}
-                        />
-                      );
+                    // 与 Bot 行 handleToggle 同口径：不可用/不可聊 Bot 均不提供直达。
+                    if (resolveBotUnavailable(view.bot, view.section).unavailable) {
+                      return <NonInteractiveTile key={view.bot.botId} view={view} />;
                     }
                     if (!view.bot.chatable) return <NonInteractiveTile key={view.bot.botId} view={view} />;
                     return (
@@ -193,6 +190,7 @@ export function ConversationCollapsedRail({
                     <TooltipTrigger asChild>
                       <Button
                         variant="ghost"
+                        size="icon"
                         aria-label={`展开侧栏，查看${section.label}其余 ${overflow} 个`}
                         className="relative h-7 w-9 rounded-full bg-muted/50 text-[10px] font-normal text-content-soft hover:bg-muted"
                         onClick={onExpand}

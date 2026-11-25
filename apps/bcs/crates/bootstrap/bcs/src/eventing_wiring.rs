@@ -6,7 +6,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bcs_app_group::{GroupProvisioningLifecycle, GroupProvisioningReconciler};
 use bcs_db_api::{DbPlugin, DbSqlFlavor};
-use bcs_event_store::{DbEventStore, EventRecorder, MemoryEventStore};
+use bcs_event_store::{DbEventStore, EventRecorder};
+#[cfg(any(test, feature = "test-utils"))]
+use bcs_event_store::MemoryEventStore;
 use bcs_eventing::{
     CoreEventSubscriptionAuthorizer, EventCatalog, EventDispatcher, EventFanoutWorker,
     EventRetentionWorker, EventRetryPolicy, EventSubscriptionApplicationService,
@@ -83,6 +85,7 @@ pub(crate) async fn build_eventing_runtime(
     sessions: Arc<dyn SessionManagementService>,
     collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
     registry: Arc<dyn BotRegistryCoreService>,
+    bot_authority_env_hook: Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>,
     allow_local_test_endpoints: bool,
 ) -> Result<EventingRuntime> {
     config
@@ -113,7 +116,7 @@ pub(crate) async fn build_eventing_runtime(
     })?);
     let env = crate::env::resolve_env();
     let authorizer: Arc<dyn EventSubscriptionAuthorizer> = Arc::new(
-        CoreEventSubscriptionAuthorizer::new(groups.clone(), registry),
+        CoreEventSubscriptionAuthorizer::new(groups.clone(), registry, bot_authority_env_hook.clone()),
     );
     let service_impl = Arc::new(
         EventSubscriptionApplicationService::new(
@@ -124,7 +127,8 @@ pub(crate) async fn build_eventing_runtime(
             EventSubscriptionPolicy::from(&config.eventing),
             env.clone(),
         )
-        .with_group_provisioning(groups.clone(), config.eventing.event_retention_days),
+        .with_group_provisioning(groups.clone(), config.eventing.event_retention_days)
+        .with_bot_authority_hook(Some(bot_authority_env_hook)),
     );
     let service: Arc<dyn EventSubscriptionService> = service_impl.clone();
     let group_provisioner: Arc<dyn GroupEventSubscriptionProvisioner> = service_impl;

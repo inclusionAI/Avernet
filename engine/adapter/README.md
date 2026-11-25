@@ -15,8 +15,8 @@ builds standalone (the `pyproject.toml` here declares `readme = "README.md"`).
 
 See the full getting-started guide (both engines, config, troubleshooting):
 
-- [`docs/open-source-guide.md`](../../../docs/open-source-guide.md)
-- 中文版：[`docs/open-source-guide.zh-CN.md`](../../../docs/open-source-guide.zh-CN.md)
+- [`docs/quick-start.md`](../../docs/quick-start.md)
+- 中文版：[`docs/quick-start.zh-CN.md`](../../docs/quick-start.zh-CN.md)
 
 Quick start (claude_code, the out-of-the-box engine):
 
@@ -25,6 +25,29 @@ pip install .            # or: uv sync
 # start the vendored gateway (community/claude_code_gateway), then:
 CHAT_ENGINE=claude_code ENGINE_PROFILE=community python start.py --port 20003
 ```
+
+See the [file upload error contract](docs/file-upload-api.md) for the
+read-only filesystem response and compatibility guarantees.
+
+### Chat error compatibility
+
+OpenClaw-compatible OpenClaw/Hermes WebSocket chat errors expose nonempty
+`payload.errorCode` and `payload.errorMessage` strings. Existing codes,
+messages, event names and extension fields are preserved; missing runtime
+codes use `UNAVAILABLE`. OpenClaw failed ACKs keep `error.code` and
+`error.message` and do not emit an additional error event. There is no shared
+error-code enum that clients must recognize. Normal, aborted and final events,
+other engines, and existing retry/termination timing are unchanged.
+
+### Local Skill package publication
+
+An Engine advertising `skills.local_package.parallel_targets.v1` allows
+overlapping `POST /api/skills/local/apply` requests to distinct Skill names in
+the same Bot layout. Publication and rollback operate within each target.
+Callers still serialize writes to a single target and coordinate layout
+changes. The capability does not provide remote fencing for a timed-out
+request. An Engine exposing only `skills.local_package.apply.v1` supports
+whole-package publication without advertising that concurrency contract.
 
 ## Layout
 

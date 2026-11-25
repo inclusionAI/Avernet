@@ -48,6 +48,32 @@ const onCancelDelivery = () =>
 const openList = () => fireEvent.click(screen.getByRole('button', { name: '查看处理列表' }));
 
 describe('GroupChatActiveRuns', () => {
+  it('stops the Manager directly and only exposes its queue when messages are waiting', async () => {
+    const abort = onAbortBot();
+    const cancel = onCancelDelivery();
+    const props = {
+      managerMode: true,
+      messages: messages.slice(0, 1) as never,
+      participants,
+      abortingBotIds: new Set<string>(),
+      onAbortBot: abort,
+      onCancelDelivery: cancel,
+    };
+    const { rerender } = render(<GroupChatActiveRuns {...props} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Manager 处理中');
+    expect(screen.queryByRole('button', { name: '查看处理列表' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /待处理.*条/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '停止 甲 的当前回复' }));
+    expect(abort).toHaveBeenCalledWith('bot-a');
+    rerender(<GroupChatActiveRuns {...props} abortingBotIds={new Set(['bot-a'])} queuedDeliveries={[delivery('a')]} />);
+    expect(screen.getByRole('button', { name: '正在停止 甲 的当前回复' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '待处理 1 条' }));
+    fireEvent.click(await screen.findByRole('button', { name: /取消发往 甲/ }));
+    expect(cancel).toHaveBeenCalledWith('message-a', 'delivery-a');
+    rerender(<GroupChatActiveRuns {...props} />);
+    expect(screen.queryByLabelText('Manager 待处理消息')).not.toBeInTheDocument();
+  });
+
   it('deduplicates streaming records by Bot without counting them as multiple Bots', () => {
     expect(
       collectActiveBotRuns(

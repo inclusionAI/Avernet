@@ -15,7 +15,7 @@ class MCPConfigServiceProtocol(Protocol):
     def get_bot_override(
         self, *, bot_id: str, owner_id: str, server_code: str
     ) -> dict[str, Any] | None:
-        """Return only fields explicitly declared for this owner-qualified Bot."""
+        """Read explicit Bot fields by stable entity_id (legacy parameter owner_id)."""
         ...
 
     def validate_headers_for_mcp(
@@ -23,7 +23,7 @@ class MCPConfigServiceProtocol(Protocol):
     ) -> dict[str, Any]: ...
 
     def validate_scoped_headers(
-        self, *, server_code: str, entries: tuple[tuple[str, str], ...]
+        self, *, server_code: str, entries: tuple[tuple[str, str | None], ...]
     ) -> dict[str, Any]: ...
 
     def validate_bot_override(
@@ -34,7 +34,11 @@ class MCPConfigServiceProtocol(Protocol):
         config: dict[str, Any] | None,
         engine_type: str | None = None,
     ) -> dict[str, Any]:
-        """Validate the effective Center endpoint without persisting it."""
+        """Validate the effective Center endpoint without persisting it.
+
+        A valid result includes ``mcp_data``, the Center detail used for validation,
+        so admission can select that record's deliverable endpoint before writing.
+        """
         ...
 
     def validate_effective_scoped_config(
@@ -45,6 +49,7 @@ class MCPConfigServiceProtocol(Protocol):
         bot_config: dict[str, Any],
         user_config: dict[str, Any],
         engine_type: str | None,
+        allow_custom_url: bool = False,
     ) -> dict[str, Any]:
         """Validate a prospective user/Bot aggregate against Center detail."""
         ...

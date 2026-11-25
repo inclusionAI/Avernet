@@ -12,6 +12,10 @@ from enum import Enum
 from typing import Any
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
+from agentclaw.community.core.task.domain.identity import (
+    is_dispatchable_single_bot_assignee,
+    parse_scoped_bot_identity,
+)
 from agentclaw.community.core.task.domain.models import (
     NodeAction,
     NodeActionEvent,
@@ -19,15 +23,18 @@ from agentclaw.community.core.task.domain.models import (
     RelationType,
     RuntimeInfo,
     Status,
+    TaskExecutionGraph,
     TaskNode,
     TaskNodePatch,
     TaskReportCommand,
     TaskReportEventType,
     TaskReportResult,
     TaskReportStatus,
+    TaskRuntimeProfile,
 )
 from agentclaw.community.core.task.task_context.task_graph_support import (
     _relay_graph_output,
+    _used_executor_ids,
 )
 from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import (
     default_publish_service,
@@ -81,6 +88,131 @@ def _planned_relay_group_formation(value: Any) -> dict[str, Any]:
     return formation.to_dict()
 
 
+def _search_receipt_for_generation(node: TaskNode, relay_token: str) -> list[str]:
+    """Return candidate ids from the current generation's successful search.
+
+    The search endpoint records the authoritative candidate list in the node's
+    action log before Bot-side selection. Keeping the receipt keyed by a token
+    fingerprint prevents a failed search or a previous generation from becoming
+    the source of a successor assignee.
+    """
+
+    fingerprint = hashlib.sha256(relay_token.encode()).hexdigest()
+    for event in reversed(node.run_info.action_log):
+        payload = event.payload
+        if event.action != NodeAction.DISPATCH:
+            continue
+        if payload.get("phase") != "search":
+            continue
+        if payload.get("relay_token_fingerprint") != fingerprint:
+            continue
+        if payload.get("action_result") != "search":
+            raise TaskStateError(
+                "successor PLAN_RESULT requires a successful candidate search"
+            )
+        candidates: list[str] = []
+        for item in payload.get("candidates") or []:
+            if not isinstance(item, dict):
+                continue
+            bot_id = str(item.get("bot_id") or "").strip()
+            if bot_id:
+                candidates.append(bot_id)
+        return candidates
+    raise TaskStateError(
+        "successor PLAN_RESULT requires a current-generation candidate search"
+    )
+
+
+def _searched_runtime_identity(bot_id: str) -> tuple[str, str | None]:
+    """Project a searched external identity to the node's split runtime form.
+
+    Search candidates currently carry the external authoritative identity
+    (``bot_id:owner_id``); Relay runtime state stores ``run_info.assignee`` as the
+    product Bot ID and ``assignee_owner_id`` separately. Compare both parts so
+    the owner scope still cannot be changed by a successor plan.
+    """
+    normalized = str(bot_id or "").strip()
+    scoped = parse_scoped_bot_identity(normalized)
+    if scoped is not None:
+        return scoped
+    return normalized, None
+
+
+def _validate_successor_candidate_origin(
+    node: TaskNode, relay_token: str, successor: TaskNode
+) -> None:
+    candidates = _search_receipt_for_generation(node, relay_token)
+    mode = successor.run_info.run_mode
+    if mode == "bbs":
+        return
+    runtime_identities = {
+        _searched_runtime_identity(candidate)
+        for candidate in candidates
+        if str(candidate or "").strip()
+    }
+    if not runtime_identities:
+        raise TaskStateError(
+            "successor PLAN_RESULT requires at least one searched candidate"
+        )
+    if mode == "single_bot":
+        assignee = str(successor.run_info.assignee or "").strip()
+        owner = str(
+            successor.run_info.extend_props.get("assignee_owner_id") or ""
+        ).strip() or None
+        if (assignee, owner) not in runtime_identities:
+            raise TaskStateError(
+                "successor PLAN_RESULT assignee must come from searched candidates"
+            )
+        return
+    if mode == "coop_group":
+        candidate_ids = {
+            str(candidate).strip()
+            for candidate in candidates
+            if str(candidate or "").strip()
+        }
+        formation = successor.run_info.extend_props.get("pending_group_formation")
+        if not isinstance(formation, dict) or not isinstance(formation.get("bot_ids"), list):
+            return
+        for bot_id in formation["bot_ids"]:
+            if str(bot_id).strip() not in candidate_ids:
+                raise TaskStateError(
+                    "successor PLAN_RESULT group members must come from searched candidates"
+                )
+
+
+def _validate_successor_executor_reuse(
+    graph: TaskExecutionGraph, successor: TaskNode,
+) -> None:
+    """Enforce S5D exclusion from graph facts, independent of optional trace."""
+    runtime = successor.run_info
+    if runtime.run_mode == "single_bot":
+        selected = {
+            (
+                str(runtime.assignee or "").strip(),
+                str(runtime.extend_props.get("assignee_owner_id") or "").strip() or None,
+            )
+        }
+    elif runtime.run_mode == "coop_group":
+        formation = runtime.extend_props["pending_group_formation"]
+        selected = {
+            _searched_runtime_identity(bot_id) for bot_id in formation["bot_ids"]
+        }
+    else:
+        # BBS has no executor until a claim is accepted.
+        return
+    used = {_searched_runtime_identity(bot_id) for bot_id in _used_executor_ids(graph)}
+    # Legacy bare identities cannot prove a different owner. Explicit, distinct
+    # owner scopes remain distinct Bots; missing scope must not bypass exclusion.
+    if any(
+        bot_id == used_bot and (owner is None or used_owner is None or owner == used_owner)
+        for bot_id, owner in selected
+        for used_bot, used_owner in used
+    ):
+        raise TaskStateError(
+            "successor PLAN_RESULT cannot reuse a current or historical executor"
+        )
+
+
 def _json_value(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value
@@ -113,6 +245,10 @@ def _fingerprint(command: TaskReportCommand) -> str:
         ),
         "trace": asdict(command.trace) if command.trace is not None else None,
     }
+    # 终态最终产物参与 event fingerprint。仅在携带时加入键,保持旧无产物报文
+    # 的 fingerprint 兼容,避免发布后历史 event_id 重放被误判冲突。
+    if command.artifact_patch is not None:
+        canonical["artifacts"] = [asdict(item) for item in command.artifact_patch]
     raw = json.dumps(
         _json_value(canonical),
         sort_keys=True,
@@ -186,15 +322,15 @@ def apply_relay_report(
                 raise TaskStateError("relay report conflicts with an accepted event")
             return _result_from_record(previous), None, False
         has_successor = any(edge.src_id == command.node_id for edge in graph.relations)
-        if node.status != Status.RUNNING:
-            raise TaskStateError(
-                "relay report requires a RUNNING origin node "
-                f"(task_id={command.task_id} node_id={command.node_id} "
-                f"status={node.status.value} handed_off={has_successor})"
-            )
         if has_successor:
             raise TaskStateError("relay origin has already handed off a successor")
 
+        # Relay execution is Skill-driven and the Bot report is the latest
+        # authoritative execution fact. An infrastructure/Harness state may be
+        # stale while the Skill is still running or about to report, so it must
+        # not gate report acceptance. A terminal report below still decides the
+        # node's final state.
+        origin_status = node.status
         action_events: list[NodeActionEvent] = []
         # NB: 不再把 trace 注入 action_log payload——trace 的持久载体已改为
         # 上报时逐条独立落 task_trajectory_events 行(mixin._emit_trace_step_rows),
@@ -257,6 +393,7 @@ def apply_relay_report(
                     node,
                     artifact_patch=getattr(patch, "artifact_patch", None),
                     now_ms=now,
+                    derive_text_from_output=False,
                 )
             elif (
                 patch.actual_goal is not None
@@ -300,6 +437,13 @@ def apply_relay_report(
         else:
             if f"{command.node_id}:EXECUTION_RESULT:{attempt}" not in receipts:
                 raise TaskStateError("PLAN_RESULT requires accepted execution first")
+            if (
+                command.event is not None
+                and command.artifact_patch is not None
+            ):
+                raise TaskStateError(
+                    "successor PLAN_RESULT events must not carry artifacts"
+                )
             next_node = command.event
             acceptance = command.task_acceptance_result
             failure = str(command.failure_reason or "").strip()
@@ -317,9 +461,13 @@ def apply_relay_report(
                     raise TaskStateError("task completion requires passing acceptance")
                 node.run_info.progress_reason = command.progress_reason or None
                 node.run_info.end_time = now
+                node.run_info.failure_reason = None
                 node.status = Status.SUCCESS
                 graph.status = Status.DONE
+                graph.extend_props.pop("hung_reason", None)
                 graph.output = _relay_graph_output(graph)
+                if command.final_conclusion is not None:
+                    graph.output["final_conclusion"] = command.final_conclusion
                 graph.extend_props["gaps"] = []
                 graph.extend_props["task_acceptance_result"] = _json_value(
                     asdict(acceptance)
@@ -327,16 +475,21 @@ def apply_relay_report(
                 # 产物发布点 ②(spec §5.1):completion 写点同闭包 capture,重复内容
                 # 由 select-first 查重吸收。
                 default_publish_service().capture_node(
-                    graph, node, artifact_patch=None, now_ms=now
+                    graph,
+                    node,
+                    artifact_patch=command.artifact_patch,
+                    now_ms=now,
+                    derive_text_from_output=False,
                 )
                 record_action(
                     NodeAction.PLAN,
                     {
                         "completed": True,
+                        "final_conclusion": command.final_conclusion,
                         "task_acceptance_result": asdict(acceptance),
                         "progress_reason": command.progress_reason,
                     },
-                    status_from=Status.RUNNING,
+                    status_from=origin_status,
                     status_to=Status.SUCCESS,
                 )
                 record_action(
@@ -344,7 +497,7 @@ def apply_relay_report(
                     {
                         "reason": "task_completed",
                     },
-                    status_from=Status.RUNNING,
+                    status_from=origin_status,
                     status_to=Status.SUCCESS,
                 )
                 result = TaskReportResult(TaskReportStatus.APPLIED, task_completed=True)
@@ -355,14 +508,25 @@ def apply_relay_report(
                 node.run_info.failure_reason = failure
                 graph.status = Status.HUNG
                 graph.extend_props["hung_reason"] = failure
+                graph.output = _relay_graph_output(graph)
+                if command.final_conclusion is not None:
+                    graph.output["final_conclusion"] = command.final_conclusion
+                default_publish_service().capture_node(
+                    graph,
+                    node,
+                    artifact_patch=command.artifact_patch,
+                    now_ms=now,
+                    derive_text_from_output=False,
+                )
                 record_action(
                     NodeAction.PLAN,
                     {
                         "completed": False,
+                        "final_conclusion": command.final_conclusion,
                         "failure_reason": failure,
                         "progress_reason": command.progress_reason,
                     },
-                    status_from=Status.RUNNING,
+                    status_from=origin_status,
                     status_to=Status.HUNG,
                 )
                 record_action(
@@ -371,7 +535,7 @@ def apply_relay_report(
                         "reason": "planning_failed",
                         "failure_reason": failure,
                     },
-                    status_from=Status.RUNNING,
+                    status_from=origin_status,
                     status_to=Status.HUNG,
                 )
                 result = TaskReportResult(TaskReportStatus.APPLIED, task_hung=True)
@@ -388,19 +552,25 @@ def apply_relay_report(
                 mode = next_node.run_info.run_mode
                 assignee = next_node.run_info.assignee
                 config = graph.extend_props.get("execution_config") or {}
-                allowed = (graph.extend_props.get("runtime_profile") or {}).get(
-                    "allowed_run_modes"
-                ) or ["single_bot", "coop_group", "bbs"]
+                allowed = TaskRuntimeProfile.run_modes_from_graph(graph)
                 if mode not in allowed:
-                    raise TaskStateError("planned run mode is not allowed")
+                    raise TaskStateError(f"planned run mode is not allowed: {mode}")
                 if mode == "coop_group" and config.get("intake_session_id"):
                     raise TaskStateError(
                         "Group relay handoff is not supported in the first release"
                     )
                 planned_group_formation: dict[str, Any] | None = None
                 if mode == "single_bot":
-                    if not assignee:
-                        raise TaskStateError("single_bot plan requires a bot assignee")
+                    if not is_dispatchable_single_bot_assignee(assignee):
+                        raise TaskStateError("single_bot plan requires a real bot assignee")
+                    assignee = str(assignee or "").strip()
+                    scoped_assignee = parse_scoped_bot_identity(assignee)
+                    if scoped_assignee is not None:
+                        assignee = scoped_assignee[0]
+                        next_node.run_info.extend_props["assignee_owner_id"] = (
+                            scoped_assignee[1]
+                        )
+                    next_node.run_info.assignee = assignee
                     if (
                         next_node.run_info.extend_props.get("pending_group_formation")
                         is not None
@@ -424,6 +594,10 @@ def apply_relay_report(
                         is not None
                     ):
                         raise TaskStateError("BBS plan cannot carry a group formation")
+                _validate_successor_candidate_origin(
+                    node, command.relay_token, next_node
+                )
+                _validate_successor_executor_reuse(graph, next_node)
                 max_rounds = int(config.get("MAX_LOOP", 3))
                 node.run_info.progress_reason = command.progress_reason or None
                 node.run_info.end_time = now
@@ -439,7 +613,7 @@ def apply_relay_report(
                             "failure_reason": node.run_info.failure_reason,
                             "progress_reason": command.progress_reason,
                         },
-                        status_from=Status.RUNNING,
+                        status_from=origin_status,
                         status_to=Status.HUNG,
                     )
                     record_action(
@@ -447,12 +621,14 @@ def apply_relay_report(
                         {
                             "reason": "relay_round_limit",
                         },
-                        status_from=Status.RUNNING,
+                        status_from=origin_status,
                         status_to=Status.HUNG,
                     )
                     result = TaskReportResult(TaskReportStatus.APPLIED, task_hung=True)
                 else:
                     node.status = Status.DONE
+                    node.run_info.failure_reason = None
+                    graph.extend_props.pop("hung_reason", None)
                     graph.status = Status.RUNNING
                     target_id = f"relay-{uuid.uuid4().hex[:8]}"
                     child = TaskNode(
@@ -497,7 +673,7 @@ def apply_relay_report(
                             "pending_group_formation": planned_group_formation,
                             "progress_reason": command.progress_reason,
                         },
-                        status_from=Status.RUNNING,
+                        status_from=origin_status,
                         status_to=Status.DONE,
                     )
                     record_action(
@@ -506,7 +682,7 @@ def apply_relay_report(
                             "reason": "relay_handoff",
                             "target_node_id": target_id,
                         },
-                        status_from=Status.RUNNING,
+                        status_from=origin_status,
                         status_to=Status.DONE,
                     )
                     result = TaskReportResult(

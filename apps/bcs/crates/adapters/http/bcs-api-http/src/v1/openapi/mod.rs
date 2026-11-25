@@ -1,5 +1,5 @@
 pub(crate) mod dto;
-mod routes;
+pub(crate) mod routes;
 mod session_file_url;
 
 use axum::Router;
@@ -18,13 +18,15 @@ pub fn protected_router() -> Router<ApiState> {
         routes::bot::router()
             .merge(routes::event_subscription::router())
             .merge(routes::group::router())
+            .merge(routes::group_context::router())
             .merge(routes::session::router())
             .merge(routes::invitation::router())
             .merge(routes::invite_code::protected_router())
             .merge(routes::register::router())
             .merge(routes::friendship::router())
             .merge(routes::friend_connection::router())
-            .merge(routes::channel::router()),
+            .merge(routes::channel::router())
+            .merge(routes::worker_task::router()),
     )
 }
 

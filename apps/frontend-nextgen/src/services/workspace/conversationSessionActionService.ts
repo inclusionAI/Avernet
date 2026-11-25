@@ -5,7 +5,18 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { BOT_SESSION_PAGE_SIZE, botSessionService, type ChatBotView } from './botSessionService';
 import type { DomainResult } from './identityService';
 
-export type ConversationSessionAction = { type: 'rename'; title: string } | { type: 'clear' | 'delete' };
+export interface ConversationSessionActionFeatures {
+  share?: true;
+  logs?: true;
+  dima?: true;
+  /** 会话标题输入上限；只由真实宿主声明（Coding Bot 对齐 AIXCoding 路由页 32 字符）。 */
+  titleMaxLength?: number;
+}
+
+export type ConversationSessionAction =
+  | { type: 'rename'; title: string }
+  | { type: 'clear' | 'delete' }
+  | { type: 'share' | 'logs' | 'dima' };
 export interface ConversationSessionActionTarget {
   bot: ChatBotView;
   section: ConversationBotSection;
@@ -35,7 +46,7 @@ export const conversationSessionActionService = {
     const { bot, section, userId, sessionId, action } = target;
     const list = currentList(bot.botId, section);
     const session = list?.items.find((item) => item.sessionId === sessionId);
-    if (!userId || !bot.chatable || bot.isAgentCodingBot || !session || session.botId !== bot.botId) {
+    if (!userId || !bot.chatable || !session || session.botId !== bot.botId) {
       return failure('当前会话不可操作，请重新加载会话列表。');
     }
     if (list?.loading || list?.isLoadingMore) return failure('会话列表加载中，请稍后重试。');

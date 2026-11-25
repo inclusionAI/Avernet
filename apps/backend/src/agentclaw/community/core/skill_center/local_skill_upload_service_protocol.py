@@ -6,6 +6,9 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Optional, Protocol, runtime_checkable
 
 
+from agentclaw.community.core.ports.skill_package_upload_port import LocalSkillPackageWriteResult
+
+
 @runtime_checkable
 class LocalSkillUploadServiceProtocol(Protocol):
     """Create or safely replace one Bot-owned Local Skill from a complete package."""
@@ -13,6 +16,28 @@ class LocalSkillUploadServiceProtocol(Protocol):
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
     ) -> dict[str, Any]: ...
+
+    async def ensure_dst_local_skill_asset(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        source_bot_id: str, source_owner_id: str, name: str,
+    ) -> dict[str, Any]:
+        """Register the dst ``ac_skill`` row for a bot-file-synced Local Skill.
+
+        See
+        :meth:`LocalSkillUploadService.ensure_dst_local_skill_asset` for the
+        authoritative contract. Reverse-looks-up the source bot's
+        ``ac_skill`` row for ``name``/``description``, recomputes the dst
+        ``git_path`` through the same factory the upload road takes, and
+        writes the dst row (create-or-replace same-name owned) under the same
+        edit guard the upload road uses — without calling
+        ``LocalSkillPackageRuntime`` (file-sync already wrote the package).
+        """
+        ...
+
+    async def upload_local_skill_batch(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        packages: Sequence[tuple[str, bytes]],
+    ) -> tuple[LocalSkillPackageWriteResult, ...]: ...
 
     async def upload_local_skill_files(
         self,

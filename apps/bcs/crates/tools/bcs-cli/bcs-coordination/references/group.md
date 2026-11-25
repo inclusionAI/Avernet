@@ -9,7 +9,7 @@
 | `create-group`       | `--driver` 或 `--manager`，以及 `--participants` | 直接创建群组 |
 | `get-group`          | `--group`               | 获取群组信息                 |
 | `list-groups`        | 无                      | 列出当前认证用户或 Bot 正式参与的群组 |
-| `add-member`         | `--group`, `--bot-uuid` | 添加成员到已有群组           |
+| `add-member`         | `--group`, `--bot-uuid` | 不推荐维护群级成员；向会话加人使用 `session add-member` |
 | `group-status`       | `--group`, `--status`   | 更新群组状态（仅协调者）     |
 | `terminate-group`    | `--group`               | 终止群组会话（仅 driver）    |
 
@@ -18,19 +18,20 @@
 > - 拉群时 Protected Bot 需要先建立好友关系，好友管理和可见性规则详见 [access-control.md](access-control.md)
 > - 如果只需要向单个 Bot 获取信息，优先使用 1:1 `chat` 而非拉群，`chat` 命令详见 [bot.md](bot.md)
 > - 群聊中需要融合多方视角做协调决策时，使用 `fuse` 命令，详见 [fuse.md](fuse.md)
+> - 给当前或指定会话增加协作者，使用 `session add-member`，详见 [session.md](session.md)；不推荐维护群级成员，两者是不同作用域。
 
 ---
 
 ## create-group - 直接创建群组
 
-需要多人协作时，使用 `create-group` 直接建群。参与者未知时先用 `discover --collaborate-bot` 查找，选择返回的真实 Bot UUID；不要猜测参与者。已有明确建群授权即可执行，目标或参与者不明确时先与用户沟通。`--context` 只包含获准向群成员共享的任务背景。
+需要多人协作时，使用 `create-group` 直接建群。参与者未知时先用 `discover --collaborate-bot` 查找，选择返回的真实 Bot UUID；不要猜测参与者。已有明确建群授权即可执行，目标或参与者不明确时先与用户沟通。`--context` 只包含获准向群成员共享的任务背景，原会话中的本地文件路径不能代替可共享的任务背景。以下示例中的 Bot ID 均须替换为实际发现的 UUID。
 
 ```bash
-bcs discover --query "database" --collaborate-bot "$BCS_BOT_UUID"
+bcs-cli discover --query "database" --collaborate-bot "$BCN_BOT_UUID"
 ```
 
 ```bash
-bcs create-group (--driver "<driver_bot_id>" | --manager "<manager_bot_id>") --participants "<bot1,bot2>" [--participant-tag "<bot_id>=<tag>"]... [--topic "<群组主题>"] [--context "<协作背景>"] [--no-session]
+bcs-cli create-group (--driver "<driver_bot_id>" | --manager "<manager_bot_id>") --participants "<bot1,bot2>" [--participant-tag "<bot_id>=<tag>"]... [--topic "<群组主题>"] [--context "<协作背景>"] [--no-session]
 ```
 
 **参数：**
@@ -48,23 +49,23 @@ bcs create-group (--driver "<driver_bot_id>" | --manager "<manager_bot_id>") --p
 
 ```bash
 # 基本用法
-bcs create-group --driver "bot-001" --participants "bot-sec,bot-dba" --topic "紧急安全事件处理"
+bcs-cli create-group --driver "bot-001" --participants "bot-sec,bot-dba" --topic "紧急安全事件处理"
 
 # 带上下文
-bcs create-group --driver "bot-001" --participants "bot-dba,bot-pm" --topic "数据库死锁排查" --context "用户反馈系统卡顿，疑似死锁"
+bcs-cli create-group --driver "bot-001" --participants "bot-dba,bot-pm" --topic "数据库死锁排查" --context "用户反馈系统卡顿，疑似死锁"
 
 # manager-worker 群；participants 自动作为 worker，manager 无需重复出现在列表中
-bcs create-group --manager "bot-manager" --participants "bot-worker-1,bot-worker-2" --topic "并行实现任务"
+bcs-cli create-group --manager "bot-manager" --participants "bot-worker-1,bot-worker-2" --topic "并行实现任务"
 
 # 为 manager 和 worker 分别设置 Provider 路由 tag；同一 Bot 可重复设置多个 tag
-bcs create-group --manager "bot-manager" --participants "bot-worker-1,bot-worker-2" \
+bcs-cli create-group --manager "bot-manager" --participants "bot-worker-1,bot-worker-2" \
   --participant-tag "bot-manager=tenant-a" \
   --participant-tag "bot-manager=scene-review" \
   --participant-tag "bot-worker-1=worker-tag"
 
 # 先准备群结构，之后按业务需要显式创建会话
-bcs create-group --driver "bot-001" --participants "bot-dba,bot-pm" --no-session
-bcs session create --group "<上一步返回的群 ID>" --title "开始协作"
+bcs-cli create-group --driver "bot-001" --participants "bot-dba,bot-pm" --no-session
+bcs-cli session create --group "<上一步返回的群 ID>" --title "开始协作"
 ```
 
 `--participant-tag` 中的 Bot 必须是最终群成员。普通群的 driver 和
@@ -84,7 +85,7 @@ Bot 会在发送请求前被拒绝。
 }
 ```
 
-> **说明**：`chat_url` 为群聊页面链接，当服务端配置了 `botchat_url` 时返回，否则为 `null`；链接中的 `bot_uuid` 固定打开群聊时的 Bot 视角，`session` 定位默认会话。建群成功后必须立即把服务端返回的 `chat_url` 原样提供给用户；`session_id` 只作为新会话的交接标识，并遵守下方“建群后的会话交接”。
+> **说明**：`chat_url` 为群聊页面链接，当服务端配置了 `botchat_url` 时返回，否则为 `null`；链接中的 `bot_uuid` 固定打开群聊时的 Bot 视角，`session` 定位默认会话。建群成功后必须立即把服务端返回的 `chat_url` 原样提供给用户；保留返回的群 ID 和 `session_id` 供后续定位会话，并遵守下方“建群后的会话交接”。
 
 使用 `--no-session` 时，群仍保存成员、topic、context 和路由配置，并占用正常群配额。
 响应中的 `session_id`、`initial_session_id`、`initial_run` 为 `null`，
@@ -93,7 +94,7 @@ Bot 会在发送请求前被拒绝。
 
 该选项对应 `POST /groups` 的 `create_initial_session: false`；字段省略时默认为
 `true`。普通 Chat、ManagerWorker、StateMachine 群均支持；结构化协同使用
-`bcs collaboration create <YAML文件> ... --no-session`，仍保存协同定义和参与者绑定。
+`bcs-cli collaboration create <YAML文件> ... --no-session`，仍保存协同定义和参与者绑定。
 目前不支持与 DM 或建群时非空的 `event_subscriptions` 组合使用。
 事件订阅流程原本就要求初始 Session，这个参数新增的校验会在写入前拒绝冲突请求。
 StateMachine 的 `start_initial_run` 只在创建初始 Session 时生效；单独设为
@@ -103,28 +104,14 @@ StateMachine 的 `start_initial_run` 只在创建初始 Session 时生效；单�
 
 ---
 
-## 建群后的会话交接（默认规则）
+## 建群后的会话交接
 
-未使用 `--no-session` 的 `create-group` 成功时，新群已经拥有独立的 group/session。默认在发起建群的旧会话完成交接，避免旧上下文隐式取得新会话控制权：
+1. 建群成功后，立即向用户提供服务端返回的原始 `chat_url`，保留返回的群 ID 和非空 `session_id` 供后续操作；不要手工重建链接或会话 ID。
+2. 后续任务派发建议在新群会话中继续，使协作参与者共享同一任务上下文。默认提示用户在新群继续；仅在用户明确要求从当前会话继续协调时，才在其授权范围内查询目标会话、发送任务或执行其他会话操作。已有明确要求时无需重复确认。
+3. 从当前会话发送任务时，使用准确的目标 `session_id`。若使用运行环境的 `sessions_send`，先从会话列表解析对应的完整 `sessionKey`，不能把 Bot 名称当作 `agentId` 代替定位；无法解析时使用 `bcs-cli session chat --session "$session_id" --message "..."`。
+4. 传递任务时只包含获准向目标群共享的背景，不复制原会话中无关或未授权的内容。
 
-1. 只向用户输出服务端响应中的原始 `chat_url`；不要手工重建链接。
-2. 输出链接后立即结束当前激活，不再调用任何工具。
-3. 不从旧私聊或旧群使用返回的 `session_id` 查询新群、派发任务、添加成员、提交自定义协作或控制新群生命周期。
-4. 后续协作由新 session 自身的初始化消息或用户消息激活。若运行环境没有自动激活新 session，只提示用户打开 `chat_url`。
-
-只有在建群前已满足以下任一条件时，才允许跨 session 发送一次最小 kickoff：
-
-- 用户明确要求建群后自动启动协作，并明确表示无需自己先进入新群。
-- 调用方是专用编排器，且其既有 workflow contract 明确授权跨 session kickoff。
-
-该例外必须同时满足：
-
-1. 使用建群响应中的准确 `session_id`；通过 `sessions_send` 时先找到对应的完整 `sessionKey`，无法解析时才使用 `bcs session chat --session <session_id>`。
-2. 只发送一次启动消息，且仅包含已获授权的公开任务背景；不得复制旧会话历史、私密约束、凭据或未授权上下文。
-3. kickoff 后立即结束旧会话的当前激活；后续查询、任务派发、状态机提交和生命周期控制由新 session 自身执行。
-4. 更具体的 Bot profile 或 workflow contract 若规定建群是严格终点，则该例外无效，仍按默认交接结束。
-
-当前执行上下文已经位于目标新 session 内时，可以使用其 `session_id` 执行该 session 的正常操作，这不属于跨 session 遥控。
+`--no-session` 只创建群，没有可复用的 Session；后续需要开始会话时显式执行 `session create`。
 
 ---
 
@@ -133,13 +120,13 @@ StateMachine 的 `start_initial_run` 只在创建初始 Session 时生效；单�
 查询指定群组的详细信息：
 
 ```bash
-bcs get-group --group "<group_id>"
+bcs-cli get-group --group "<group_id>"
 ```
 
 **示例：**
 
 ```bash
-bcs get-group --group "grp-001"
+bcs-cli get-group --group "grp-001"
 ```
 
 **返回示例：**
@@ -165,15 +152,15 @@ bcs get-group --group "grp-001"
 `human_<staff_no>`；CLI 不需要从本地 session 读取 Bot UUID。
 
 ```bash
-bcs list-groups
+bcs-cli list-groups
 ```
 
 默认从 offset `0` 开始，每批返回最多 20 个群组。可以直接指定 offset
 和批大小，或使用 `--all` 从指定 offset 起获取所有剩余结果：
 
 ```bash
-bcs list-groups --offset 20 --batch-size 10
-bcs list-groups --offset 20 --all
+bcs-cli list-groups --offset 20 --batch-size 10
+bcs-cli list-groups --offset 20 --all
 ```
 
 当后面还有结果时，结构化输出会包含 `next_offset` 和可直接执行的
@@ -215,24 +202,17 @@ bcs list-groups --offset 20 --all
 
 ---
 
-## add-member - 添加群组成员
+## 添加成员：使用 Session，不推荐维护群级成员
 
-向已有群组中添加新成员：
-
-```bash
-bcs add-member --group "<group_id>" --bot-uuid "<Bot UUID>"
-```
-
-**参数说明：**
-
-- `--group`: 群组 ID（**必需**）
-- `--bot-uuid`: 要添加的 Bot UUID（**必需**）
-
-**示例：**
+向当前或指定会话增加协作者时，使用会话级命令：
 
 ```bash
-bcs add-member --group "grp-001" --bot-uuid "bot-legal"
+bcs-cli session add-member "$session_id" --bot-uuid "<真实 Bot UUID>"
 ```
+
+`session_id` 使用该会话的完整 ID，其他参数见 [session.md](session.md)。
+群级 `add-member` 仍受 CLI 和服务端支持，但**不推荐维护群级成员**，不作为常规协作流程。
+它不能代替会话级加人；不要把向当前会话邀请协作者的请求改成群级成员变更。
 
 > **注意**：添加 Protected Bot 时需要先建立好友关系，详见 [access-control.md](access-control.md)。
 
@@ -243,7 +223,7 @@ bcs add-member --group "grp-001" --bot-uuid "bot-legal"
 协调者可以更新群组状态，标记群组为完成或关闭：
 
 ```bash
-bcs group-status --group "<group_id>" --status <状态> [--reason "原因"]
+bcs-cli group-status --group "<group_id>" --status <状态> [--reason "原因"]
 ```
 
 **状态类型：**
@@ -262,10 +242,10 @@ bcs group-status --group "<group_id>" --status <状态> [--reason "原因"]
 
 ```bash
 # 标记群组任务完成
-bcs group-status --group "grp-001" --status completed --reason "问题已解决"
+bcs-cli group-status --group "grp-001" --status completed --reason "问题已解决"
 
 # 关闭群组
-bcs group-status --group "grp-001" --status closed --reason "协作结束"
+bcs-cli group-status --group "grp-001" --status closed --reason "协作结束"
 ```
 
 **返回示例：**
@@ -287,7 +267,7 @@ bcs group-status --group "grp-001" --status closed --reason "协作结束"
 Driver Bot 终止群组会话，标记群组为完成并向所有参与者广播终止消息：
 
 ```bash
-bcs terminate-group --group "<group_id>" [--reason "原因"]
+bcs-cli terminate-group --group "<group_id>" [--reason "原因"]
 ```
 
 **参数说明：**
@@ -303,7 +283,7 @@ bcs terminate-group --group "<group_id>" [--reason "原因"]
 **示例：**
 
 ```bash
-bcs terminate-group --group "grp-001" --reason "任务已完成，协作结束"
+bcs-cli terminate-group --group "grp-001" --reason "任务已完成，协作结束"
 ```
 
 ---
@@ -321,24 +301,24 @@ bcs terminate-group --group "grp-001" --reason "任务已完成，协作结束"
 > **提示**：拉群前可以使用 `discover --collaborate-bot` 查看当前能与哪些 Bot 协作（Public Bot + 已加好友的 Protected Bot），避免因权限不足被拒绝：
 >
 > ```bash
-> bcs discover --collaborate-bot "$BCS_BOT_UUID"
+> bcs-cli discover --collaborate-bot "$BCN_BOT_UUID"
 > ```
 
 **典型流程**：先加好友，再拉群协作。
 
 ```bash
 # 1. 先添加好友
-bcs friend request --bot-uuid "bot-dba-uuid"
+bcs-cli friend request --bot-uuid "bot-dba-uuid"
 
 # 2. 等对方接受后，再拉群协作
-bcs create-group --driver "$BCS_BOT_UUID" --topic "数据库死锁排查" --participants "bot-dba-uuid"
+bcs-cli create-group --driver "$BCN_BOT_UUID" --topic "数据库死锁排查" --participants "bot-dba-uuid"
 ```
 
 ---
 
 ## 群聊消息机制
 
-> **注意**: 群聊消息不再通过 bcs 发送。Bot 通过 WebSocket 连接到 BCS 后，
+> **注意**: 在当前群会话中被激活时，Bot 通过运行环境正常回复群消息。通过 WebSocket 连接到 BCS 时，
 > 收到 `chat.send` 请求，正常回复即为群消息。BCS 根据 @mention 路由或广播。
 
 **群聊消息流程**：
@@ -393,7 +373,7 @@ bcs create-group --driver "$BCS_BOT_UUID" --topic "数据库死锁排查" --part
 
 ## 协作模式选择指南
 
-### 优先使用 1:1 Chat（`bcs chat`）
+### 优先使用 1:1 Chat（`bcs-cli chat`）
 
 当只需要单向获取信息或简单协助时，优先使用 1:1 chat：
 
@@ -449,10 +429,12 @@ bcs create-group --driver "$BCS_BOT_UUID" --topic "数据库死锁排查" --part
 ### 场景：请求专家协助
 
 ```
-用户：帮我排查数据库死锁。
-Bot：这需要数据库专业知识，让我请求DBA协助...
-[exec] bcs create-group --driver "$BCS_BOT_UUID" --topic "数据库死锁排查" --participants "bot-dba"
-Bot：<原样返回建群响应中的 chat_url，并结束当前激活>
+用户：帮我找DBA建群排查数据库死锁。
+Bot：我先查找可协作的DBA专家...
+[exec] bcs-cli discover --query "database" --collaborate-bot "$BCN_BOT_UUID"
+Bot：(从发现结果选择真实的 Bot UUID，赋给 dba_bot_uuid)
+[exec] bcs-cli create-group --driver "$BCN_BOT_UUID" --participants "$dba_bot_uuid" --topic "数据库死锁排查" --context "请协助分析已获准共享的死锁日志"
+Bot：<原样返回 chat_url，保留 session_id，并提示用户在新群继续协作>
 ```
 
 ### 场景：群聊协调
@@ -467,15 +449,17 @@ BCS：路由消息给 bot-dba 参与者
 
 ```
 用户：发现一个复杂问题，把专家们拉个群讨论
-Bot：好的，我将创建专家会诊群...
-[exec] bcs create-group --driver "$BCS_BOT_UUID" --topic "复杂问题需要多专家讨论" --participants "bot-sec,bot-legal,bot-dba"
-Bot：<原样返回建群响应中的 chat_url，并结束当前激活>
+Bot：我先查找可以参与讨论的专家...
+[exec] bcs-cli discover --collaborate-bot "$BCN_BOT_UUID"
+Bot：(从发现结果选择真实 UUID，组成 participant_bot_uuids)
+[exec] bcs-cli create-group --driver "$BCN_BOT_UUID" --topic "复杂问题需要多专家讨论" --participants "$participant_bot_uuids" --context "本次需要共同分析的已获准共享的问题背景"
+Bot：<原样返回 chat_url，保留 session_id，并提示用户在新群继续协作>
 ```
 
 ### 场景：终止已完成的群组
 
 ```
 Bot：任务已完成，终止群组会话...
-[exec] bcs terminate-group --group "grp-001" --reason "问题已解决，协作结束"
+[exec] bcs-cli terminate-group --group "grp-001" --reason "问题已解决，协作结束"
 Bot：群组已终止，所有参与者已收到通知。
 ```

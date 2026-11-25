@@ -12,16 +12,20 @@ use bcs_service_api::application::v1::{
     DeleteGroup, DeleteGroupParticipant, DeleteResult, DirectMessageGroupDetail,
     DirectMessageGroupSummary, GetGroup, GroupDetail, GroupEventSubscriptionProvisioner,
     GroupKindFilter, GroupService, GroupStatus, GroupStrategy as V1GroupStrategy, GroupSummary,
-    GroupVisibility, HumanMentionNotifyMode, HumanPrincipal, IdentityPolicy,
+    GroupListSort, GroupVisibility, HumanMentionNotifyMode, HumanPrincipal, IdentityPolicy,
     InlineGroupEventSubscriptionRequest, ListGroups, ListPublicGroups,
     ManagerWorkerConfiguration, Membership, MembershipFilter,
-    NormalGroupSummary, Page, Participant as V1Participant, PreparedGroupEventSubscriptions,
+    NormalGroupSummary, Page, Participant as V1Participant, ParticipantSummary,
+    PreparedGroupEventSubscriptions,
     Principal,
     StateMachineConfiguration, StateMachineDefinition, StateMachineDefinitionReference,
     StateMachineParticipantBinding, UpdateGroup, UpdateGroupParticipant,
-    require_authenticated_user, require_human, select_principal,
+    require_authenticated_user, require_human, resolve_authorized_principal,
+    select_principal,
 };
 use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
+use bcs_service_api::core::bot_authority::BotAuthorityCoreService;
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
 use bcs_service_api::types::{EventActor, EventActorType, OpeningMessageScope};
 use bcs_service_api::{
@@ -31,7 +35,7 @@ use bcs_service_api::{
     Group as DomainGroup, GroupAddMemberCommand, GroupCoreService, GroupCreateCommand,
     GroupCreateParticipantCommand, GroupDeleteCommand, GroupKind, GroupManagementService,
     GroupMutableFieldsPatch, GroupParticipantView, GroupRemoveMemberCommand, GroupStrategy,
-    GroupUseCaseError, ParticipantMode, RelationCoreService, RoutingMode, RoutingPolicy,
+    GroupMessageHistoryService, GroupUseCaseError, ParticipantMode, RoutingMode, RoutingPolicy,
     RuntimeParticipantBinding, ServiceError, SessionManagementService, StartStateMachineRunCommand,
     generated_group_id,
 };
@@ -39,10 +43,16 @@ use serde_json::Value;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use bcs_service_api::types::bot_profile::BotAvatarMap;
+
 use bcs_service_api::lifecycle::{LifecycleError, ServiceLifecycle};
 
 #[derive(Debug, Clone)]
 pub struct GroupServiceConfig {
+    /// Relation environment tag. The V1 Group facade no longer
+    /// consults the legacy creator relation for authorization
+    /// (bot-authority plan Task 6.3); the tag is kept for
+    /// config parity with the sibling Session facade.
     pub relation_env: String,
 }
 
@@ -52,16 +62,41 @@ pub struct GroupServiceConfig {
 /// delegating existing group creation/deletion side effects to the legacy-
 /// compatible application service. No HTTP type crosses this boundary.
 pub struct GroupServiceImpl {
+    catalog_label_policy: Arc<bcs_service_api::types::catalog_labels::CatalogLabelPolicy>,
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     friends: Arc<dyn FriendCoreService>,
-    relation: Arc<dyn RelationCoreService>,
     sessions: Arc<dyn SessionManagementService>,
     management: Arc<dyn GroupManagementService>,
     participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
     collaboration_runtime: Option<Arc<dyn CollaborationRuntimeService>>,
     event_subscription_provisioner: Option<Arc<dyn GroupEventSubscriptionProvisioner>>,
-    config: GroupServiceConfig,
+    /// The narrow authority hook (bot-authority plan Task 6.3):
+    /// every Human→Bot control judgment consults it live;
+    /// a missing wiring fails closed.
+    bot_authority: Option<Arc<dyn BotAuthorityPort>>,
+    /// The authority Core (ownership view only, driver-owner
+    /// display projection row 9). Optional: projections fall
+    /// back to the historical `created_by` display when no
+    /// authority Core is wired.
+    bot_authority_core: Option<Arc<dyn BotAuthorityCoreService>>,
+    /// Batched conversation-activity source for the V1 list sort
+    /// (design D1/D4). Optional: an unwired facade degrades to
+    /// the `created_at` fallback instead of failing.
+    group_message_history: Option<Arc<dyn GroupMessageHistoryService>>,
+}
+
+/// Map one authority read to application errors: a strict
+/// deny (`Forbidden`) is 403; every other read failure
+/// propagates as an internal error (spec §3.2: 存储错误返回
+/// 错误 — never a deny-as-false).
+pub(crate) fn map_authority_error(error: ServiceError) -> ApplicationError {
+    match error {
+        ServiceError::Forbidden(message) => ApplicationError::forbidden(message),
+        other => ApplicationError::internal(format!(
+            "bot authority lookup failed: {other}"
+        )),
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -358,6 +393,7 @@ impl GroupProvisioningReconciler {
 }
 
 mod authorization;
+mod avatar;
 mod create;
 mod projections;
 mod service;
@@ -367,28 +403,69 @@ mod tests;
 
 
 impl GroupServiceImpl {
+    pub fn with_catalog_label_policy(mut self,policy:Arc<bcs_service_api::types::catalog_labels::CatalogLabelPolicy>)->Self {
+        self.catalog_label_policy=policy;self
+    }
+    fn normalize_catalog_labels(&self,input:Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,kind:GroupKind,strategy:GroupStrategy)
+        ->Result<Option<bcs_service_api::types::catalog_labels::CatalogLabels>,ApplicationError> {
+        let labels=input.map(|input|self.catalog_label_policy.normalize(input).map_err(|error|match error {ServiceError::A2aManagement(error)=>ApplicationError::invalid("invalid_request",format!("{}: {}",error.field,error.reason)),other=>map_service_error(other)})).transpose()?;
+        if labels.as_ref().is_some_and(|labels|!labels.is_empty()) && (kind!=GroupKind::Normal || !matches!(strategy,GroupStrategy::ManagerWorker|GroupStrategy::StateMachine)) {
+            return Err(ApplicationError::invalid("invalid_request","catalog_labels unsupported for this Group"));
+        }
+        Ok(labels)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         groups: Arc<dyn GroupCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
         friends: Arc<dyn FriendCoreService>,
-        relation: Arc<dyn RelationCoreService>,
         sessions: Arc<dyn SessionManagementService>,
         management: Arc<dyn GroupManagementService>,
-        config: GroupServiceConfig,
     ) -> Self {
         Self {
+            catalog_label_policy:Arc::default(),
             groups,
             registry,
             friends,
-            relation,
             sessions,
             management,
             participant_view_bindings: Arc::new(NoopParticipantViewBindingPort),
             collaboration_runtime: None,
             event_subscription_provisioner: None,
-            config,
+            bot_authority: None,
+            bot_authority_core: None,
+            group_message_history: None,
         }
+    }
+
+    /// Wire the batched message activity source for the recent-activity
+    /// list sort (design D5). Unwired facades fall back to `created_at`.
+    pub fn with_group_message_history(
+        mut self,
+        group_message_history: Arc<dyn GroupMessageHistoryService>,
+    ) -> Self {
+        self.group_message_history = Some(group_message_history);
+        self
+    }
+
+    /// Wire the authority hook (bot-authority plan Task 6.3).
+    pub fn with_bot_authority_hook(
+        mut self,
+        bot_authority: Arc<dyn BotAuthorityPort>,
+    ) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// Wire the authority Core (ownership view for the
+    /// driver-owner display projection, row 9).
+    pub fn with_bot_authority_core(
+        mut self,
+        bot_authority_core: Arc<dyn BotAuthorityCoreService>,
+    ) -> Self {
+        self.bot_authority_core = Some(bot_authority_core);
+        self
     }
 
     pub fn with_collaboration_runtime(
@@ -446,6 +523,7 @@ fn project_participant(participant: &bcs_service_api::Participant) -> V1Particip
         actor_id: participant.bot_uuid.clone(),
         actor_kind: participant.actor_kind,
         name: participant.bot_name.clone(),
+        avatar_url: None,
         role: participant.role,
         mode: participant.effective_mode(),
         tags: participant.tags.clone(),
@@ -462,6 +540,7 @@ fn participant_view_to_v1(view: GroupParticipantView) -> V1Participant {
         actor_id: view.bot_uuid,
         actor_kind: view.actor_kind,
         name: view.bot_name,
+        avatar_url: None,
         role: parse_participant_role(&view.role),
         mode: view
             .mode
@@ -624,10 +703,6 @@ fn map_group_error(error: GroupUseCaseError) -> ApplicationError {
         | GroupUseCaseError::InvalidProposal(message) => {
             ApplicationError::invalid("invalid_request", message)
         }
-        GroupUseCaseError::ProposalNotFound(message)
-        | GroupUseCaseError::ProposalExpired(message) => {
-            ApplicationError::not_found("not_found", message)
-        }
         GroupUseCaseError::InvalidHistoryLimit(limit) => {
             ApplicationError::invalid("invalid_request", format!("invalid history limit {limit}"))
         }
@@ -723,3 +798,5 @@ fn map_runtime_and_rollback_error(
         group_cleanup_error.as_deref().unwrap_or("ok"),
     ))
 }
+
+mod update;

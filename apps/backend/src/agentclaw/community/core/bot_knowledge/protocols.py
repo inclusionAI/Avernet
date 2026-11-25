@@ -1,0 +1,53 @@
+"""Service API: current application selection, no grant or publication authority."""
+
+from abc import abstractmethod
+from typing import Protocol, runtime_checkable
+from agentclaw.community.kernel.knowledge import BotKnowledgeScope
+
+
+@runtime_checkable
+class BotKnowledgeServiceProtocol(Protocol):
+    @abstractmethod
+    def set_enabled(
+        self,
+        *,
+        scope: BotKnowledgeScope,
+        actor_id: str,
+        kb_id: str,
+        enabled: bool,
+        expected_revision: int,
+    ) -> dict: ...
+    @abstractmethod
+    def list_bindings(
+        self,
+        *,
+        scope: BotKnowledgeScope,
+        actor_id: str,
+        cursor: int = 0,
+        limit: int = 20,
+    ) -> dict: ...
+    @abstractmethod
+    def list_enabled_current(self, scope: BotKnowledgeScope) -> tuple[str, ...]: ...
+
+
+@runtime_checkable
+class BotKnowledgePublicationSelectionProtocol(Protocol):
+    """Optional version display data; not publication or runtime authority."""
+
+    @abstractmethod
+    def record_build_selection(self, *, publication_id: int) -> bool: ...
+
+    @abstractmethod
+    def get_publication_selection(
+        self, *, scope: BotKnowledgeScope, actor_id: str, publication_id: int,
+    ) -> dict: ...
+
+    @abstractmethod
+    def observe_online_selection(self, *, publication_id: int) -> dict | None:
+        """Optional native deployment identity read before the progress call."""
+        ...
+
+    @abstractmethod
+    def project_online_selection(self, *, publication_id: int, observed: dict) -> bool:
+        """Best effort after actual native online deployment, not admission SUCCESS."""
+        ...

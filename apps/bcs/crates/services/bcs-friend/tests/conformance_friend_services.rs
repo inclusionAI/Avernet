@@ -17,6 +17,9 @@ use bcs_test_support::{
     NoopRelationCoreService,
 };
 
+#[path = "support/friend_application_regressions.rs"]
+mod application_regressions;
+
 #[tokio::test]
 async fn memory_friend_store_passes_core_contract() {
     let repo = Arc::new(MemoryFriendRepo::new());
@@ -445,6 +448,14 @@ impl BotRegistryCoreService for StaticRegistry {
 
     async fn list_bots_by_creator(&self, _created_by: &str) -> Vec<RegisteredBot> {
         Vec::new()
+    }
+
+    async fn list_uninitialized_bots_by_creator(
+        &self,
+        _created_by: &str,
+        _limit: usize,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        Ok(Vec::new())
     }
 
     async fn discover(&self, _query: &str) -> Vec<RegisteredBot> {

@@ -4,6 +4,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from engine.community.kernel.dws_runtime import RolloutUnavailable
+
 
 class BackendManagementVerifier:
     def __init__(
@@ -46,9 +48,10 @@ class BackendManagementVerifier:
             "allowed",
             payload,
             signature,
+            runtime=True,
         )
 
-    async def _check(self, url, field, payload, signature):
+    async def _check(self, url, field, payload, signature, *, runtime=False):
         try:
             async with httpx.AsyncClient(
                 timeout=5.0, follow_redirects=False, transport=self._transport
@@ -59,12 +62,19 @@ class BackendManagementVerifier:
                     json={"payload": payload, "signature": signature},
                 )
             if response.status_code != 200:
+                if runtime and response.status_code not in (401, 403):
+                    raise RolloutUnavailable("rollout_http_unavailable")
                 return False
             result = response.json()
-            return (
+            valid = (
                 isinstance(result, dict)
                 and set(result) == {field}
-                and result[field] is True
+                and type(result[field]) is bool
             )
+            if runtime and not valid:
+                raise RolloutUnavailable("rollout_invalid_response")
+            return valid and result[field] is True
         except (httpx.HTTPError, ValueError):
+            if runtime:
+                raise RolloutUnavailable("rollout_request_failed") from None
             return False

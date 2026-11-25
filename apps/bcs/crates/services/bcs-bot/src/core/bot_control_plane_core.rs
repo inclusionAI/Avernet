@@ -4,9 +4,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
 use bcs_service_api::{
-    ActorKind, BotCandidateReadQuery, BotControlPlaneCandidate, BotControlPlaneCoreService, BotSearchCandidateQuery,
+    ActorKind, BotCandidateReadQuery, BotCandidateReadRecord, BotControlPlaneCandidate,
+    BotControlPlaneCoreService, BotSearchCandidateQuery,
     BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneProvider,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotControlPlaneView, BotTaskModesQuery,
+    ControllableCandidateQuery, ControlledBotCandidate,
     ProviderBotBindingRepoPort, ProviderRepoPort, ServiceResult,
 };
 
@@ -15,9 +17,15 @@ pub struct BotControlPlaneCore {
     providers: Arc<dyn ProviderRepoPort>,
     provider_bindings: Arc<dyn ProviderBotBindingRepoPort>,
     bot_providers: Option<Arc<dyn BotProviderRepoPort>>,
+    catalog_changes: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>,
 }
 
 impl BotControlPlaneCore {
+    pub fn with_catalog_changes(mut self, port: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>) -> Self {
+        self.catalog_changes = port;
+        self
+    }
+
     pub fn new(
         control_plane: Arc<dyn BotControlPlaneRepoPort>,
         providers: Arc<dyn ProviderRepoPort>,
@@ -28,6 +36,7 @@ impl BotControlPlaneCore {
             providers,
             provider_bindings,
             bot_providers: None,
+            catalog_changes: None,
         }
     }
 
@@ -89,6 +98,54 @@ impl BotControlPlaneCore {
 
 #[async_trait]
 impl BotControlPlaneCoreService for BotControlPlaneCore {
+    async fn get_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::BotCallerConfiguration>> {
+        self.control_plane.get_caller_configuration(bot_id, env).await
+    }
+
+    async fn get_caller_configurations(
+        &self,
+        bot_ids: &[String],
+        env: &str,
+    ) -> ServiceResult<Vec<(String, bcs_service_api::port::repo::BotCallerConfiguration)>> {
+        self.control_plane.get_caller_configurations(bot_ids, env).await
+    }
+
+    async fn sync_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        snapshot: bcs_service_api::port::repo::CallerIdentitySnapshot,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::CallerConfigurationSync>> {
+        self.control_plane.sync_caller_configuration(bot_id, env, snapshot).await
+    }
+
+    async fn get_provider_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        provider_id: &str,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::BotCallerConfiguration>> {
+        self.control_plane
+            .get_provider_caller_configuration(bot_id, env, provider_id)
+            .await
+    }
+
+    async fn sync_provider_caller_configuration(
+        &self,
+        bot_id: &str,
+        env: &str,
+        provider_id: &str,
+        snapshot: bcs_service_api::port::repo::CallerIdentitySnapshot,
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::CallerConfigurationSync>> {
+        self.control_plane
+            .sync_provider_caller_configuration(bot_id, env, provider_id, snapshot)
+            .await
+    }
+
     async fn get_record(
         &self,
         bot_id: &str,
@@ -145,6 +202,13 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
         ))
     }
 
+    async fn search_candidate_records(
+        &self,
+        query: BotSearchCandidateQuery,
+    ) -> ServiceResult<(Vec<BotCandidateReadRecord>, u64)> {
+        self.control_plane.search_control_plane_candidates(query).await
+    }
+
     async fn search_candidates(
         &self,
         query: BotSearchCandidateQuery,
@@ -181,6 +245,18 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
         self.hydrate(records).await
     }
 
+    /// Mine-union candidates (spec §8.0): a pure
+    /// forwarding read — persistent-only filtering,
+    /// role dedup and stable order happen in the ONE
+    /// store snapshot; this core adds no pagination and
+    /// no reachability.
+    async fn list_controllable(
+        &self,
+        query: ControllableCandidateQuery,
+    ) -> ServiceResult<Vec<ControlledBotCandidate>> {
+        self.control_plane.list_controllable(query).await
+    }
+
     async fn list_by_task_modes(
         &self,
         query: BotTaskModesQuery,
@@ -198,6 +274,8 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
         env: &str,
         patch: BotControlPlanePatch,
     ) -> ServiceResult<Option<BotControlPlaneView>> {
+        // The repository normalizes effective visibility, strategy and active
+        // scope inside one write; a core pre-read would introduce a TOCTOU race.
         let Some(record) = self
             .control_plane
             .patch_control_plane(bot_id, env, patch)
@@ -205,6 +283,7 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
         else {
             return Ok(None);
         };
+        if let Some(port) = &self.catalog_changes { port.agent_changed(bot_id); }
         Ok(self.hydrate(vec![record]).await?.into_iter().next())
     }
 }

@@ -1,10 +1,12 @@
-// 会话列表 Hook:管理/团队 Bot(origin=mine)与好友 Bot 会话；managedBots 参数包含管理和团队目录。
-// origin=others 由 useManagedBotOthers 负责；列表首拉/分页与写操作互斥。
+// 会话列表 Hook:管理/团队 Bot 的 mine/others 来源窗口，以及好友 Bot 会话。
+// 来源由后端筛选；列表首拉/游标续查与写操作互斥。
 // 缓存态拼装/写复用 ./conversationSessionCache;分页请求生命周期(代次/去重/写回校验)
 // 拆至 ./conversationSessionPageRequest(文件大小阈值,行为不变)。
+import { extractCodingSessionCreatorUserId } from '@/domain/conversation/codingSessionOwnership';
 import type {
   ConversationBotSection,
   ConversationBotView,
+  ConversationOrigin,
   ConversationSessionScope,
 } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
@@ -17,6 +19,7 @@ import {
 } from './conversationSessionPageRequest';
 import { useConversationBotExpansion } from './useConversationBotExpansion';
 import { useConversationFavorites } from './useConversationFavorites';
+import { useConversationSessionArchives } from './useConversationSessionArchives';
 import { useConversationFavoriteScope } from './useConversationFavoriteScope';
 import { useConversationSessionActions } from './useConversationSessionActions';
 import { useConversationSessionCreation } from './useConversationSessionCreation';
@@ -45,7 +48,24 @@ export function useConversationSessions(options: {
     return map;
   }, [managedBots, friendBots]);
   const expandBot = useConversationBotExpansion(userId);
-  const createSession = useConversationSessionCreation(userId, botByBotId);
+  const sessionCreation = useConversationSessionCreation(userId, botByBotId);
+  const focusRestoredSession = useCallback(
+    ({ view, origin, sessionId }: { view: ConversationBotView; origin: ConversationOrigin; sessionId: string }) => {
+      const botId = view.bot.botId;
+      const storeNow = useConversationStore.getState();
+      storeNow.setManagedBotScope(botId, 'all');
+      storeNow.selectConversation({
+        botId,
+        section: view.section,
+        origin,
+        scope: 'all',
+        friendUserId: null,
+        sessionId,
+      });
+    },
+    [],
+  );
+  const archives = useConversationSessionArchives({ userId, managedBots, onRestoredSessionFocus: focusRestoredSession });
   // 请求上下文(代次/在途去重)挂载一份;分页请求主体拆见 ./conversationSessionPageRequest。
   const requestCtxRef = useRef<ConversationSessionRequestContext | null>(null);
   if (!requestCtxRef.current) requestCtxRef.current = createSessionRequestContext(userId);
@@ -61,18 +81,13 @@ export function useConversationSessions(options: {
     },
     [requestCtx],
   );
-  const loadPage = useRef(
-    (view: ConversationBotView, more: boolean): void => loadSessionPage(requestCtx, actions.isPending, view, more),
+  const loadPage = useRef((view: ConversationBotView, more: boolean): void =>
+    loadSessionPage(requestCtx, actions.isPending, view, more),
   ).current;
   const ensureViewLoaded = useRef((view: ConversationBotView): void => {
-    const botId = view.bot.botId;
-    // origin=others 的管理 Bot 会话由 useManagedBotOthers 接管,这里不加载。
-    if (
-      isManagedConversationSection(view.section) &&
-      (useConversationStore.getState().originByManagedBotId[botId] ?? 'mine') !== 'mine'
-    ) {
-      return;
-    }
+    if (isManagedConversationSection(view.section) &&
+        (useConversationStore.getState().effectiveScopeByManagedBotId[view.bot.botId] ?? 'all') === 'archived') return;
+    // mine/others 均消费后端来源窗口；不再按好友目录逐组拉取。
     loadPage(view, false);
   }).current;
   const scopeSignature = useMemo(
@@ -123,45 +138,58 @@ export function useConversationSessions(options: {
     },
     [botByBotId, ensureViewLoaded, expandBot],
   );
-  const selectSession = useCallback((section: ConversationBotSection, botId: string, sessionId: string): void => {
-    const store = useConversationStore.getState();
-    if (!store.expandedBotIds[botId]) store.setExpandedBot(botId, true);
-    const scope = isManagedConversationSection(section) ? store.effectiveScopeByManagedBotId[botId] ?? 'all' : 'all';
-    // 行来源于当前列表缓存;写选中前保留会话快照,过滤重建列表后主会话仍可解析。
-    const managedCache = isManagedConversationSection(section) ? store.sessionsByBotId[botId] : undefined;
-    const session = isManagedConversationSection(section)
-      ? managedCache?.origin === 'mine' && managedCache?.scope === scope
-        ? managedCache.sessions.items.find((item) => item.sessionId === sessionId)
-        : undefined
-      : store.friendBotSessionsByBotId[botId]?.items.find((item) => item.sessionId === sessionId);
-    if (session) {
-      store.setSelectedSessionSnapshot({
-        section,
+  const selectSession = useCallback(
+    (section: ConversationBotSection, botId: string, sessionId: string): void => {
+      const store = useConversationStore.getState();
+      if (!store.expandedBotIds[botId]) store.setExpandedBot(botId, true);
+      const scope = isManagedConversationSection(section) ? store.effectiveScopeByManagedBotId[botId] ?? 'all' : 'all';
+      const view = botByBotId.get(botId);
+      const origin =
+        isManagedConversationSection(section)
+          ? store.originByManagedBotId[botId] ?? 'mine'
+          : 'mine';
+      // 行来源于当前列表缓存;写选中前保留会话快照,过滤重建列表后主会话仍可解析。
+      const managedCache = isManagedConversationSection(section) ? store.sessionsByBotId[botId] : undefined;
+      const session = isManagedConversationSection(section)
+        ? managedCache?.origin === origin && managedCache?.scope === scope
+          ? managedCache.sessions.items.find((item) => item.sessionId === sessionId)
+          : undefined
+        : store.friendBotSessionsByBotId[botId]?.items.find((item) => item.sessionId === sessionId);
+      const friendUserId =
+        origin === 'others' && view?.bot.isAgentCodingBot ? extractCodingSessionCreatorUserId(sessionId) : null;
+      if (session) {
+        store.setSelectedSessionSnapshot({
+          section,
+          botId,
+          origin,
+          scope,
+          friendUserId,
+          session,
+          friend: null,
+        });
+      }
+      store.selectConversation({
         botId,
-        origin: 'mine',
+        section,
+        origin,
         scope,
-        friendUserId: null,
-        session,
-        friend: null,
+        friendUserId,
+        sessionId,
       });
-    }
-    store.selectConversation({
-      botId,
-      section,
-      origin: 'mine',
-      scope,
-      friendUserId: null,
-      sessionId,
-    });
-  }, []);
+    },
+    [botByBotId],
+  );
   const loadMoreSessions = useCallback(
     async (botId: string, section: ConversationBotSection, scope: ConversationSessionScope): Promise<void> => {
       const view = botByBotId.get(botId);
       if (!view || view.section !== section) return;
       // friend 范围由 Store 快照在 loadPage 内读取,入参 scope 仅用于 managed 缓存一致性校验。
       if (isManagedConversationSection(section)) {
-        const cached = useConversationStore.getState().sessionsByBotId[botId];
-        if (!cached || cached.origin !== 'mine' || cached.scope !== scope) return;
+        const store = useConversationStore.getState();
+        if (scope === 'archived') return;
+        const cached = store.sessionsByBotId[botId];
+        const origin = store.originByManagedBotId[botId] ?? 'mine';
+        if (!cached || cached.origin !== origin || cached.scope !== scope) return;
       }
       loadPage(view, true);
     },
@@ -179,12 +207,14 @@ export function useConversationSessions(options: {
   return {
     actions,
     favorites,
+    archives,
     openBotIds: expandedBotIds,
     toggleBot,
     selectMineSession: (botId, sessionId) =>
       selectSession(botByBotId.get(botId)?.section ?? 'managed', botId, sessionId),
     selectFriendBotSession: (botId, sessionId) => selectSession('friend', botId, sessionId),
-    createSession,
+    createSession: sessionCreation.createSession,
+    isCreatingSession: sessionCreation.isCreatingSession,
     retrySessions,
     loadMoreSessions,
   };

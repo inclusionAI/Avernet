@@ -248,6 +248,8 @@ pub(crate) async fn commit_routed_reply(
         .or_else(|| event.bcs_session_id.clone())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ServiceError::InternalError("queue reply Session missing".into()))?;
+    // The reply's own session captured ahead of the downstream moves.
+    let sync_session_id = session_id.clone();
     let provider_bypass_headers = if let Some(row) = &original {
         let context: crate::queued_group::QueuedTransportContext = serde_json::from_value(row.transport_context_json.clone()
             .ok_or_else(|| ServiceError::InternalError("original queue transport missing".into()))?)
@@ -263,6 +265,9 @@ pub(crate) async fn commit_routed_reply(
     // the reconstructed full reply.
     let text = normalized.map(|reply| reply.text.as_str()).unwrap_or(text);
     let command = WebSendCommand {
+        caller_execution: None,
+        caller_ingress: None,
+        speaking_lease: None,
         caller: bcs_service_api::CallerContext::Public,
         group_id: group.id.clone(),
         session_id: Some(session_id.clone()),
@@ -295,11 +300,69 @@ pub(crate) async fn commit_routed_reply(
         let mut projection = serde_json::to_value(projection)?;
         projection["drain_context"] = serde_json::json!(drain);
         if let Some(policy) = &policy { projection["policy_version"] = serde_json::json!(policy.version); }
+        // §7.2/§918 群内受控 A2A (review batch-3 §3.2): a Send-kind BOT
+        // target of this routed reply derives through the SAME trusted
+        // entry the coordination assign uses — when the replying Bot's run
+        // carries a live root lineage, the reply is lineage-bounded
+        // derived work (bounded by the parent's window, own turn budget,
+        // session/group scope) and the four marks route it through the
+        // §5.9 delegate branch; with no lineage (plain groups, bot-self
+        // initiated turns) the lookup is a no-op and the row stays
+        // ordinary. A refusal leaves the target ordinary as well — the
+        // downstream CallerConfigurationDeliveryGate keeps the closed-
+        // world behavior for caller-enabled targets instead of re-
+        // broadcasting an untrusted A2A. Inject targets never derive:
+        // injections never trigger tools/children/runs (§15.38).
+        // A rejected recipient never executes and must not consume the
+        // parent's nonrefundable invocation budget ahead of valid siblings.
+        if rejection.is_none() && target.delivery_type == bcs_domain::DeliveryType::Send
+            && target.bot_uuid != event.bot_id
+        {
+            let invocation = format!("reply:{}:{}", event.run_id, target.bot_uuid);
+            match crate::caller_delegation::prepare_assignment(flow, event, &invocation, &target.bot_uuid).await {
+                Ok(Some(delegation)) => {
+                    let purpose = crate::caller_delegation::target_issuance_purpose(flow, &target.bot_uuid).await;
+                    if let serde_json::Value::Object(map) = &mut projection {
+                        map.insert("caller_required".into(), serde_json::Value::Bool(true));
+                        map.insert(
+                            "caller_task".into(),
+                            serde_json::Value::String(text.to_string()),
+                        );
+                        // Trusted ordinary sender facts of the delegating Bot's
+                        // reply: same wire-contract reason as the human seam —
+                        // the protected send derives the envelope `from` from
+                        // these, never from the protected subject.
+                        map.insert("caller_channel".into(), serde_json::json!({
+                            "actor_id": event.bot_id,
+                            "actor_name": sender_name,
+                        }));
+                        let mut nested = serde_json::Map::new();
+                        nested.insert("parent_run_id".to_string(), serde_json::Value::String(delegation.parent_run_id.clone()));
+                        nested.insert("parent_attempt".to_string(), serde_json::Value::from(delegation.parent_attempt));
+                        nested.insert("parent_bot_id".to_string(), serde_json::Value::String(delegation.parent_bot_id.clone()));
+                        nested.insert("invocation_id".to_string(), serde_json::Value::String(delegation.invocation_id.clone()));
+                        nested.insert("execution_purpose".to_string(), serde_json::Value::String(purpose.to_string()));
+                        map.insert("caller_delegation".into(), serde_json::Value::Object(nested));
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        reply_run_id = %event.run_id,
+                        from_bot_id = %event.bot_id,
+                        target_bot_id = %target.bot_uuid,
+                        error = %error,
+                        "routed-reply derivation refused; the target keeps its ordinary closed-world handling"
+                    );
+                }
+            }
+        }
         targets.push(DeliveryAdmissionTarget { rejection,
             target_bot_id: target.bot_uuid,
             kind: target.delivery_type,
             max_queued: limit,
             semantic_projection_json: projection,
+            run_id: None,
         });
     }
     let target_ids = targets.iter().map(|t| t.target_bot_id.clone()).collect();
@@ -369,14 +432,14 @@ pub(crate) async fn commit_routed_reply(
         let mut committed = false;
         let _timing = crate::reply_timing::Timer::new("final.transition_including_retries");
         for _ in 0..3 {
-            let command = DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(),
+            let command = DeliveryTransitionCommand { caller_dispatch_commit: None, delivery_id: row.delivery_id.clone(),
             expected_state_version: row.state.state_version, event: match event.state {
                 bcs_service_api::ChatEventState::Error => DeliveryLifecycleEvent::Failed,
                 bcs_service_api::ChatEventState::Aborted => DeliveryLifecycleEvent::Aborted,
                 _ => DeliveryLifecycleEvent::Completed,
             },
             now_ms, request_id: None, actor_id: None, reply: Some(reply.clone()), transport_context_json: None,
-            deadline_at_ms: None };
+            deadline_at_ms: None, caller_cancel: None, caller_terminal: None };
             // Keep reply IDs, normalized text and expected version stable. If
             // commit succeeded but its response was lost, CAS conflicts and the
             // existing reread below confirms terminal without inserting twice.
@@ -415,6 +478,129 @@ pub(crate) async fn commit_routed_reply(
     }
     let relayed = fresh && rows.iter().any(|row| !matches!(row.state.status,
         bcs_domain::message_delivery::MessageDeliveryStatus::RejectedCapacity | bcs_domain::message_delivery::MessageDeliveryStatus::Failed));
+    // Bot 共享回复同步 (spec §6.4, L243③): a caller row's committed reply
+    // enters the SAME-BOT containers' shared streams — every live container
+    // of the replying bot, the executing one included, deduplicated by the
+    // reply's canonical message id. Review-V P2-4: a transient failure now
+    // retries a bounded 3 times with the SAME dedup id (the root dispatch
+    // fan-out's discipline — every retry is idempotent) in a detached task;
+    // the container's own next trusted ensure + history replay remains the
+    // final recovery path beyond that. Shared reply publication is
+    // independent of downstream routing success.
+    if fresh {
+        // Review P1.III.1: the trigger is the COMMITTED CANONICAL REPLY'S
+        // OWN shared-stream owner — the Bot that EMITTED the reply (the
+        // session is this reply's session, the content classification the
+        // reply's flow kind). Never the reply's downstream deliveries (a
+        // plain capture-built row never carries the caller mark, so the
+        // old scan never fired), and never the DOWNSTREAM Bot's identity:
+        // the replying Bot's containers are the ones whose shared stream
+        // this reply enters. An ordinary group whose bots never ensured
+        // caller containers simply indexes empty and no-ops here — caller
+        // containers self-select through the live observe refs alone.
+        let Some(observe) = flow.caller_observe.clone() else {
+            return Ok(Some(QueuedReply { target_ids, relayed }));
+        };
+        let bot_id = event.bot_id.clone();
+        // A routed group reply classifies as open chat for the shared
+        // stream (L225): the group conversation is broadcast-visible to
+        // the replying Bot's own containers. `session_id` is the reply
+        // commit's resolved session (the caller-row commit resolution
+        // a few lines above).
+        if !matches!(
+            bcs_domain::shared_stream::shared_kind_for_delivery(DeliveryFlowKind::Group),
+            Some(bcs_domain::shared_stream::SharedContentKind::OpenChat)
+        ) {
+            return Ok(Some(QueuedReply { target_ids, relayed }));
+        }
+        let at_term = observe.current_term();
+        let observe_group_id = group.id.clone();
+        match flow.registry.resolve_delivery_target(&bot_id).await {
+            Ok(target) => {
+                let Some(port) = observe.injector_factory.injector_for(&target) else {
+                    return Ok(Some(QueuedReply { target_ids, relayed }));
+                };
+                let credential = match &target {
+                    bcs_domain::BotDeliveryTarget::HttpProvider { bcs_to_provider_token, .. } => {
+                        bcs_to_provider_token.clone()
+                    }
+                    _ => bcs_domain::RedactedToken::new("observe"),
+                };
+                // Review-V P2-4: bounded redelivery of the SAME shared reply
+                // (the reply's canonical message id dedups every retry) —
+                // detached so a slow transport never stalls the reply commit.
+                let index = observe.index.clone();
+                let session = sync_session_id.clone();
+                let message_id = reply_message_id.clone();
+                let payload = text.to_string();
+                let reply_bot = bot_id.clone();
+                tokio::spawn(async move {
+                    let mut attempts_left = 3u32;
+                    loop {
+                        let qualified = observe.qualified_port(port.clone(), &observe_group_id, &reply_bot, &session, at_term).await;
+                        let result = match qualified {
+                            Ok(Some(qualified)) => crate::observe_sync::fanout_shared_reply(
+                            &index,
+                            qualified.as_ref(),
+                            &credential,
+                            &reply_bot,
+                            &session,
+                            &message_id,
+                            &payload,
+                            chrono::Utc::now().timestamp_millis(),
+                        )
+                        .await,
+                            Ok(None) => return,
+                            Err(error) => Err(error),
+                        };
+                        match result {
+                            Ok(injected) => {
+                                tracing::debug!(
+                                    bot_id = %reply_bot,
+                                    message_id = %message_id,
+                                    injected,
+                                    "observe reply sync: shared reply reached the replying Bot's containers"
+                                );
+                                break;
+                            }
+                            Err(error) => {
+                                let retryable = matches!(
+                                    error,
+                                    bcs_service_api::port::ObserveInjectError::Unavailable { retryable: true }
+                                );
+                                attempts_left = attempts_left.saturating_sub(1);
+                                if retryable && attempts_left > 0 {
+                                    tracing::warn!(
+                                        bot_id = %reply_bot,
+                                        message_id = %message_id,
+                                        %error,
+                                        remaining_attempts = attempts_left,
+                                        "observe reply sync: transient failure; retrying with the same dedup id"
+                                    );
+                                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                                    continue;
+                                }
+                                tracing::warn!(
+                                    bot_id = %reply_bot,
+                                    message_id = %message_id,
+                                    %error,
+                                    "observe reply sync finally failed; the container's sync pauses until its next trusted ensure"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
+            Err(error) => {
+                tracing::warn!(
+                    bot_id = %bot_id,
+                    %error,
+                    "observe reply sync target resolution failed; the reply stays committed"
+                );
+            }
+        }
+    }
     Ok(Some(QueuedReply { target_ids, relayed }))
 }
 
@@ -463,7 +649,7 @@ pub async fn prepare_group_admission(
     sender_name: &str,
     sender_owner: Option<String>,
 ) -> ServiceResult<Option<AdmitMessageDeliveries>> {
-    prepare_group_admission_with_message(flow, group, command, decision, sender_name, sender_owner, None).await
+    prepare_group_admission_with_message(flow, group, command, decision, sender_name, sender_owner, None, &[]).await
 }
 
 pub(crate) async fn prepare_group_admission_with_message(
@@ -474,6 +660,7 @@ pub(crate) async fn prepare_group_admission_with_message(
     sender_name: &str,
     sender_owner: Option<String>,
     canonical_message: Option<(&str, &NewMessage)>,
+    caller_admission_targets: &[String],
 ) -> ServiceResult<Option<AdmitMessageDeliveries>> {
     // State-machine is an independently gated business flow, even when its
     // transport happens to be the group endpoint.
@@ -491,6 +678,20 @@ pub(crate) async fn prepare_group_admission_with_message(
         else if pending_context_carrier(flow, &target.bot_uuid, target.delivery_type, command.session_id.as_deref()).await? {
             let limit = policy.as_ref().map_or(100, |p| p.policy.bot(&target.bot_uuid).max_queued);
             selected.push((target, limit, true));
+        }
+        // Forced managed admission (spec §7.5.1, 2026-11-11 prod incident):
+        // a caller-enabled target is never deliverable on the ordinary
+        // inline transport — CallerConfigurationDeliveryGate refuses it
+        // closed there — so the web_send caller seam MUST own these rows
+        // regardless of the delivery policy's Enforce defaults. Without
+        // this branch a Human's speech toward a caller-enabled bot on a
+        // policy-disabled deployment falls to inline and dies at the
+        // gate with CALLER_EXECUTION_UNAVAILABLE. Limits come from the
+        // policy's per-bot values (mode-independent) with a queue-scale
+        // fallback when no live policy is composed.
+        else if caller_admission_targets.iter().any(|candidate| candidate == &target.bot_uuid) {
+            let limit = policy.as_ref().map_or(20, |p| p.policy.bot(&target.bot_uuid).max_queued);
+            selected.push((target, limit, false));
         }
     }
     if selected.is_empty() {
@@ -525,11 +726,20 @@ pub(crate) async fn prepare_group_admission_with_message(
         let mut projection = serde_json::to_value(projection)?;
         projection["drain_context"] = serde_json::json!(drain);
         if let Some(policy) = &policy { projection["policy_version"] = serde_json::json!(policy.version); }
+        // F1 (spec §8.2 — R6): pre-assign the canonical run identity
+        // BEFORE the durable admission commits, so the sender can
+        // install the run's operation binding and frozen producer
+        // facts before ANY queue worker can execute the row. Only
+        // executable Send targets get one; admission-time rejections
+        // never run and stay unassigned.
+        let run_id = (target.delivery_type == bcs_domain::DeliveryType::Send && rejection.is_none())
+            .then(|| uuid::Uuid::new_v4().to_string());
         targets.push(DeliveryAdmissionTarget { rejection,
             target_bot_id: target.bot_uuid.clone(),
             kind: target.delivery_type,
             max_queued: limit,
             semantic_projection_json: projection,
+            run_id,
         });
     }
     let now_ms = chrono::Utc::now().timestamp_millis();

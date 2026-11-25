@@ -6,6 +6,7 @@ import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import type { BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService } from '@/services/botWorkshop';
+import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -27,6 +28,8 @@ jest.mock('@/services/botWorkshop/agentCodingTemplateService', () => ({
     list: jest.fn(),
   },
   supportsServiceBot: jest.fn(() => false),
+  getBcnCapability: jest.fn(),
+  getServiceBotCapability: jest.fn(),
 }));
 jest.mock('@/services/botWorkshop', () => ({
   botWorkshopService: {
@@ -73,6 +76,24 @@ const { agentCodingTemplateService } = jest.requireMock('@/services/botWorkshop/
 };
 let currentSpaceId: number | undefined;
 let spaceInitialized: boolean;
+
+it('激活中每五秒刷新库存，恢复运行后回到常规刷新间隔', async () => {
+  const timer = jest.spyOn(window, 'setInterval');
+  const bot = mapBotDto({ bot_id: 'recovering', engine: 'openclaw', status: 'REACTIVATING' }).item;
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+  mockedList.mockResolvedValue({ items: [bot], page: 1, pageSize: 20, warnings: [] });
+  const { result, unmount } = renderHook(() => useBotWorkshop());
+  try {
+    await waitFor(() => expect(timer).toHaveBeenCalledWith(expect.any(Function), 5_000));
+    timer.mockClear();
+    mockedList.mockResolvedValue({ items: [{ ...bot, rawStatus: 'ACTIVE', lifecycle: 'running' }], page: 1, pageSize: 20, warnings: [] });
+    await act(async () => { await result.current.retry(); });
+    expect(timer).toHaveBeenCalledWith(expect.any(Function), 30_000);
+  } finally {
+    unmount();
+    timer.mockRestore();
+  }
+});
 
 beforeEach(() => {
   currentSpaceId = 10001;
@@ -180,20 +201,56 @@ it('刷新页面时等待空间初始化完成，只加载一次 Bot 列表', as
   expect(mockedList).toHaveBeenCalledWith(expect.objectContaining({ spaceId: '10001' }));
 });
 
+it('首次加载后不追加 3 秒兜底读取，仅保留 30 秒常规同步', async () => {
+  jest.useFakeTimers();
+  try {
+    mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+    mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+
+    const { unmount } = renderHook(() => useBotWorkshop());
+    await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+
+    mockedList.mockClear();
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(3_000);
+    });
+    expect(mockedList).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(mockedList).toHaveBeenCalledTimes(1);
+    unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 it('列表每 30 秒静默同步状态，不受微前端容器的 visibilityState 影响', async () => {
   jest.useFakeTimers();
-  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
-  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
-  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  try {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+    mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
 
-  const { unmount } = renderHook(() => useBotWorkshop());
-  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+    const { unmount } = renderHook(() => useBotWorkshop());
+    await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
 
-  act(() => jest.advanceTimersByTime(30_000));
-  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(2));
-  unmount();
-  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
-  jest.useRealTimers();
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(mockedList).toHaveBeenCalledTimes(2);
+
+    mockedList.mockClear();
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(30_000);
+    });
+    expect(mockedList).toHaveBeenCalledTimes(1);
+    unmount();
+  } finally {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    jest.useRealTimers();
+  }
 });
 
 it('按全局当前空间加载 Bot，切换空间后自动重新加载', async () => {
@@ -253,7 +310,7 @@ it('点击健康检查时导航到独立健康检查页面', async () => {
   await waitFor(() => expect(history.push).toHaveBeenCalledWith('/bot-workshop/health-check?id=bot-1'));
 });
 
-it('显式协作者可进入任意引擎的 Bot 会话', () => {
+it('后端授予 chat 时无需 edit 也可进入 Bot 会话', () => {
   mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined, userId: 'u2' });
   mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
   useWorkspaceStore.setState({ activeIdentityId: 'u2' });
@@ -273,10 +330,10 @@ it('显式协作者可进入任意引擎的 Bot 会话', () => {
   } as unknown as BotDomain;
 
   expect(result.current.canOpenConversation(collaboratorBot)).toBe(true);
-  expect(result.current.canOpenConversation(spaceMemberBot)).toBe(false);
+  expect(result.current.canOpenConversation(spaceMemberBot)).toBe(true);
 });
 
-it('非协作者不能从工坊进入普通引擎 Bot 会话', () => {
+it('线上服务 Bot 仅有 chat 没有 edit 时仍可对话', () => {
   mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined, userId: 'u2' });
   mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
   useWorkspaceStore.setState({ activeIdentityId: 'u2' });
@@ -285,11 +342,18 @@ it('非协作者不能从工坊进入普通引擎 Bot 会话', () => {
   const openclawSpaceMemberBot = {
     id: 'openclaw-bot',
     ownerId: 'owner-1',
+    serviceMode: 'service',
+    lifecycle: 'running',
     runtime: { isAgentCodingBot: false },
-    actions: ['view', 'chat'],
+    actions: ['view', 'chat', 'restart_publish', 'upgrade', 'offline'],
+    lock: { status: 'other' },
   } as unknown as BotDomain;
 
-  expect(result.current.canOpenConversation(openclawSpaceMemberBot)).toBe(false);
+  expect(result.current.canOpenConversation(openclawSpaceMemberBot)).toBe(true);
+  expect(result.current.canOpenConversation({ ...openclawSpaceMemberBot, actions: ['view', 'edit'] })).toBe(false);
+  expect(result.current.canOpenConversation({
+    ...openclawSpaceMemberBot, disabledActions: { chat: 'activate first' },
+  })).toBe(false);
 });
 
 it('无 Owner 匹配且后端未声明 chat 时不开放会话', () => {
@@ -309,13 +373,91 @@ it('无 Owner 匹配且后端未声明 chat 时不开放会话', () => {
     actions: ['view'],
   } as unknown as BotDomain;
 
-  expect(result.current.canOpenConversation(ownerBot)).toBe(true);
+  expect(result.current.canOpenConversation(ownerBot)).toBe(false);
   expect(result.current.canOpenConversation(restrictedBot)).toBe(false);
 });
 
-it('Coding Bot 点击去使用时跳转到 Coding Chat，并携带当前 Bot ID', () => {
+it('服务化 Coding Bot 草稿无需普通 chat action 即可进入独立 Coding Chat', () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined, userId: 'u2' });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  useWorkspaceStore.setState({ activeIdentityId: 'u2' });
+  const { result } = renderHook(() => useBotWorkshop());
+
+  const base = {
+    serviceMode: 'service' as const,
+    lifecycle: 'draft' as const,
+    runtime: { isAgentCodingBot: true },
+  };
+  const ownerBot = {
+    ...base,
+    id: 'owner-draft-coding',
+    ownerId: 'u2',
+    actions: ['view'],
+  } as unknown as BotDomain;
+  const collaboratorBot = {
+    ...base,
+    id: 'collaborator-draft-coding',
+    ownerId: 'owner-1',
+    actions: ['view', 'edit'],
+  } as unknown as BotDomain;
+  const viewerBot = {
+    ...base,
+    id: 'viewer-draft-coding',
+    ownerId: 'owner-1',
+    actions: ['view'],
+  } as unknown as BotDomain;
+
+  expect(result.current.canOpenConversation(ownerBot)).toBe(true);
+  expect(result.current.canOpenConversation(collaboratorBot)).toBe(true);
+  expect(result.current.canOpenConversation(viewerBot)).toBe(false);
+});
+
+it('服务化 Coding Bot 草稿跳转 AIXCoding 独立路由', () => {
   mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
   mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  const { result } = renderHook(() => useBotWorkshop());
+
+  act(() => {
+    result.current.openConversation({
+      id: 'draft-coding-bot',
+      ownerId: 'owner-1',
+      serviceMode: 'service',
+      lifecycle: 'draft',
+      runtime: { isAgentCodingBot: true },
+    } as unknown as BotDomain);
+  });
+
+  expect(history.push).toHaveBeenCalledWith('/coding/coding-chat?botId=draft-coding-bot&ownerId=owner-1');
+});
+
+it('服务化 Coding Bot 预发跳转 AIXCoding verify 运行时', () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  const { result } = renderHook(() => useBotWorkshop());
+
+  act(() => {
+    result.current.openConversation({
+      id: 'verify-coding-bot',
+      ownerId: 'owner-1',
+      serviceMode: 'service',
+      lifecycle: 'prestable',
+      harnessContext: { entityId: 'e1', botPublishId: '42' },
+      runtime: { isAgentCodingBot: true },
+    } as unknown as BotDomain);
+  });
+
+  expect(history.push).toHaveBeenCalledWith(
+    '/coding/coding-chat?botId=verify-coding-bot&ownerId=owner-1&publishId=42&stage=verify',
+  );
+});
+
+it('Coding Bot 点击去使用时进入统一对话页，并携带 canonical Bot ID', () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  useWorkspaceStore.setState({
+    identities: [{ id: 'human_u1', kind: 'user', displayName: '我', online: true }],
+    activeIdentityId: 'human_u1',
+  });
   const { result } = renderHook(() => useBotWorkshop());
   const bot = {
     id: 'coding-bot:2088',
@@ -329,7 +471,7 @@ it('Coding Bot 点击去使用时跳转到 Coding Chat，并携带当前 Bot ID'
     result.current.openConversation(bot);
   });
 
-  expect(history.push).toHaveBeenCalledWith('/coding/coding-chat?botId=coding-bot');
+  expect(history.push).toHaveBeenCalledWith('/workspace/chat?section=managed&bot=coding-bot%3A2088&origin=mine');
 });
 
 it('点击对话时跳转到用户单聊并展开对应 Bot', () => {

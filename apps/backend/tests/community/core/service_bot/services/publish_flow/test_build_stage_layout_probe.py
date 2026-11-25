@@ -111,7 +111,7 @@ def _runner(producer, *, ext=None):
         dict(ext or {}),
     )
     bot_service = Mock()
-    bot_service.get_bot.return_value = {
+    bot_service.get_bot_by_address.return_value = {
         "bot_id": "b1",
         "owner_id": "u1",
         "entity_id": "u1",
@@ -154,7 +154,7 @@ async def test_filesystem_producer_receives_one_fresh_observation() -> None:
         bot_id="b1", owner_id="u1", scope=ProjectionScope(skills=True)
     )
     probe.probe_bot.assert_awaited_once_with(
-        bot_id="b1", user_id="u1", engine="openclaw"
+        bot_id="b1", user_id="u1", engine="openclaw", for_service_build=True
     )
     observation = producer.requests[0].layout_observation
     assert observation is not None

@@ -5,6 +5,8 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
+from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
+
 
 @runtime_checkable
 class DirectActivationServiceProtocol(Protocol):
@@ -23,7 +25,7 @@ class DirectActivationServiceProtocol(Protocol):
     the apply-relevant surface *without* ``project``, because choosing whether to project
     belongs to the delivery strategy rather than to a materialiser. It is not a
     supertype of this Protocol and this service is not bound to it: the two
-    wrappers in ``bot_config_manifest/apply/activation_delegates.py`` hold a
+    wrappers in ``apply_engine/activation_delegates.py`` hold a
     ``DirectActivationServiceProtocol`` and delegate to it with the ``project``
     value their family requires.
     """
@@ -41,16 +43,15 @@ class DirectActivationServiceProtocol(Protocol):
     ) -> dict[str, Any]: ...
 
     @abstractmethod
-    async def claim_manifest_skill(
+    async def claim_apply_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
         apply_id: str | None, project: bool = True,
     ) -> dict[str, Any]: ...
 
     @abstractmethod
-    async def remove_manifest_skill(
+    async def remove_apply_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
-        apply_id: str | None, remove_inactive_memberships: bool,
-        project: bool = True,
+        apply_id: str | None, project: bool = True,
     ) -> dict[str, Any]: ...
 
     @abstractmethod
@@ -72,14 +73,14 @@ class DirectActivationServiceProtocol(Protocol):
     ) -> dict[str, Any]: ...
 
     @abstractmethod
-    async def claim_manifest_mcp(
-        self, *, server_code: str, config: dict | None, bot_id: str,
+    async def claim_apply_mcp(
+        self, *, server_code: str, config: McpConfigWriteIntent[dict[str, Any]], bot_id: str,
         owner_id: str, actor_id: str, apply_id: str | None,
         project: bool = True,
     ) -> dict[str, Any]: ...
 
     @abstractmethod
-    async def remove_manifest_mcp(
+    async def remove_apply_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
         apply_id: str | None, project: bool = True,
     ) -> dict[str, Any]: ...
@@ -104,20 +105,11 @@ class DirectActivationServiceProtocol(Protocol):
     ) -> dict[str, dict]: ...
 
     @abstractmethod
-    def manifest_direct_mcp_codes(
-        self, *, bot_id: str, owner_id: str, actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]: ...
-
-    @abstractmethod
-    def set_managed_mcp_codes(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        actor_id: str,
-        server_codes: set[str],
-    ) -> set[str]: ...
+    def set_supplied_capabilities(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> tuple[frozenset[str], frozenset[str]]:
+        """The skill runtime names and MCP codes the bot's Sets supply; an apply may claim none of them."""
+        ...
 
     @abstractmethod
     def platform_default_mcp_codes(

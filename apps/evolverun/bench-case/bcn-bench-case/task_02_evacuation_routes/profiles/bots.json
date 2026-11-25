@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "name": "HiddenBench 疏散路线四成员团队",
+  "entry_member": "manager",
+  "port_start": 32001,
+  "port_step": 10,
+  "scopes": "production",
+  "bots": [
+    {
+      "source": "manager",
+      "profile": "manager",
+      "name": "社区负责人 A",
+      "summary": "社区负责人，依据可见资料参与疏散路线讨论。兼任群协调，收集真实回复并正式提交结果。",
+      "domains": "community-planning",
+      "skills": "evidence-discussion,decision-making",
+      "runtime": {
+        "type": "openclaw"
+      }
+    },
+    {
+      "source": "member_b",
+      "profile": "member_b",
+      "name": "社区负责人 B",
+      "summary": "社区负责人，依据可见资料参与疏散路线讨论。通过 BCN 委托链路参与讨论并给出自己的最终选择。",
+      "domains": "community-planning",
+      "skills": "evidence-discussion,decision-making",
+      "runtime": {
+        "type": "openclaw"
+      }
+    },
+    {
+      "source": "member_c",
+      "profile": "member_c",
+      "name": "社区负责人 C",
+      "summary": "社区负责人，依据可见资料参与疏散路线讨论。通过 BCN 委托链路参与讨论并给出自己的最终选择。",
+      "domains": "community-planning",
+      "skills": "evidence-discussion,decision-making",
+      "runtime": {
+        "type": "openclaw"
+      }
+    },
+    {
+      "source": "member_d",
+      "profile": "member_d",
+      "name": "社区负责人 D",
+      "summary": "社区负责人，依据可见资料参与疏散路线讨论。通过 BCN 委托链路参与讨论并给出自己的最终选择。",
+      "domains": "community-planning",
+      "skills": "evidence-discussion,decision-making",
+      "runtime": {
+        "type": "openclaw"
+      }
+    }
+  ]
+}

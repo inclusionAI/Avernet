@@ -1,6 +1,8 @@
+import { isTaskUiOnlyMessage } from '@/domain/groupTasks/projection';
 import { Button } from '@/components/ui';
 import { MessageSelectionToolbar } from '@/components/Workspace/MessageInteractionToolbar';
 import type { GroupView, SessionView } from '@/domain/collaboration';
+import { getDisplayParticipants } from '@/domain/collaboration/participantPresentation';
 import { useHistoryPrependAnchor } from '@/pages/Workspace/hooks/useHistoryPrependAnchor';
 import type { MessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
 import { useStickToBottom } from '@/pages/Workspace/hooks/useStickToBottom';
@@ -40,7 +42,7 @@ interface GroupChatMessageListProps {
 
 /** 群聊消息列表及 Driver/Manager 启动提示。 */
 export function GroupChatMessageList({
-  messages,
+  messages: allMessages,
   group,
   session,
   isRequesting,
@@ -60,6 +62,7 @@ export function GroupChatMessageList({
   onInsertDraft,
   highlightMessageId,
 }: GroupChatMessageListProps) {
+  const messages = useMemo(() => group.kind === 'task_master_slave' ? allMessages.filter((message) => !isTaskUiOnlyMessage(message)) : allMessages, [allMessages, group.kind]);
   const latestUserMessageId = [...messages].reverse().find((message) => message.role === 'user')?.id;
   const hasStreamingMessage = useMemo(
     () => messages.some((message) => message.role === 'assistant' && message.status === 'streaming'),
@@ -136,6 +139,7 @@ export function GroupChatMessageList({
                 isRequesting={isRequesting}
                 group={group}
                 participants={session.participants}
+                displayParticipants={getDisplayParticipants(session)}
                 sessionId={session.sessionId}
                 userAvatarUrl={userAvatarUrl}
                 userIdentityId={userIdentityId}

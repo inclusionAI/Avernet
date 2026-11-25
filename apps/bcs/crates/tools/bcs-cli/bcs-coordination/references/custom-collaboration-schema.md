@@ -11,6 +11,7 @@
 - [Human input node](#human-input-node)
 - [LLM judge node](#llm-judge-node)
 - [Fixed Loop](#fixed-loop)
+  - [Nested fixed Loop example](#nested-fixed-loop-example)
 - [Parallel fan-out and join](#parallel-fan-out-and-join)
 - [Runtime input and artifacts](#runtime-input-and-artifacts)
 - [Validation errors](#validation-errors)
@@ -34,19 +35,19 @@ runtime:
 - Allow only `name`, `metadata`, `participants`, and `runtime` at the top level for this authoring Skill.
 - Never emit top-level `api_version`, `id`, or `version`. The create-group path parses authoring YAML after rejecting top-level `id`/`version`; the domain model then supplies the API version and server-owned definition identity defaults.
 - Reject any other top-level key, including spelling variants such as `apiVersion`, `verion`, or `verions`.
-- Use nested `runtime.state_machine.version: 1` for an ordinary DAG, or `2` for fixed Loops. V2 execution requires the deployment capability described below. This differs from the server-owned top-level version.
+- Use nested `runtime.state_machine.version: 1` for an ordinary DAG, or `2` for fixed Loops. V2 execution availability is reported by the current server as described below. This differs from the server-owned top-level version.
 - Do not put runtime Bot UUIDs in the definition.
 - Let BCS infer `requires`; omit it from authoring YAML.
 - Keep `metadata.description` as a string, `metadata.labels` as a
   string-to-string mapping, and every `extensions` field as a mapping.
 
-`bcs-cli collaboration validate` 通过当前 BCS 实例的 `POST /collaboration/definitions/validate` 接口执行三层校验；`bcs collaborate run` 的一次性运行接口在启动前执行同一套校验：
+`bcs-cli collaboration validate` 通过当前 BCS 实例的 `POST /collaboration/definitions/validate` 接口执行三层校验；`bcs-cli collaborate run` 的一次性运行接口在启动前执行同一套校验：
 
 1. Authoring shape: enforce the 256 KiB request limit, parse one YAML document, reject duplicate or unknown keys, and enforce the group-creation top-level boundary.
 2. Runtime contract: deserialize the definition, reject fields not implemented by the current runtime, and enforce graph, participant and node invariants.
-3. Deployment capability: accept `judge` only when the current BCS instance has an LLM provider configured.
+3. Available capabilities: the current server reports whether features such as `judge` and Loop execution are available.
 
-校验成功时返回 participant slots 和 graph summary，供后续 `bcs-cli collaboration create` 或 `bcs collaborate run` 绑定逻辑角色。
+校验成功时返回 participant slots 和 graph summary，供后续 `bcs-cli collaboration create` 或 `bcs-cli collaborate run` 绑定逻辑角色。
 
 ## Participants
 
@@ -83,22 +84,21 @@ runtime:
 - Ordinary definitions use `version: 1` and `graph_mode: acyclic`; fixed Loops use `version: 2` and `graph_mode: hierarchical`.
 - If projection is present, use only `default_visibility: private` or
   `default_visibility: shared`.
-- Executable nodes use `bot_task` or `human_input`. V2 also allows outer `loop` control nodes, whose bodies contain executable nodes.
+- Executable nodes use `bot_task` or `human_input`. V2 also allows `loop` control nodes at the top level and recursively inside Loop bodies.
 - Do not use `initial_node`, `input_schema`, `variables`, `events`, actions,
   output contracts, or guards; the current runtime rejects them. A `bot_task`
   must not use a runtime actor. Runtime actors are reserved for the separately
   configured IM-targeted HumanInput mode described below.
-- A node may use an LLM `judge` only when the current BCS instance has an LLM
-  provider configured. Ordinary nodes route every Judge outcome through a
-  transition. A Loop result instead partitions outcomes into continue/break lists.
+- A node may use an LLM `judge` when the current server accepts it. Ordinary
+  nodes route every Judge outcome through a transition. A Loop result instead
+  partitions outcomes into continue/break lists.
 - Use one zero-in-degree entry node and one final-output sink.
 - Keep every node reachable from the entry and able to reach the final node.
 
 ## Fixed Loop
 
 `collaboration validate` also accepts `version: 2 + graph_mode: hierarchical` for fixed Loop compilation and preview.
-It returns `VALIDATION_ONLY_FEATURE` when this deployment has the required execution admission disabled. Single-level Loops require `collaboration.loop_execution_enabled = true`; nested Loops additionally require `collaboration.nested_loop_execution_enabled = true`. The nested switch defaults to false and is invalid unless the total Loop switch is enabled. These are new-Run/rerun admission controls: turning the nested switch off does not stop recovery or progression for already admitted Runs. Ordinary workflow recovery starts with the service without a separate switch.
-Do not use a successful preview as evidence that a deployment can execute Loop definitions.
+For an otherwise valid definition, a `VALIDATION_ONLY_FEATURE` warning means the current server accepts validation and preview but does not allow execution. Report the returned diagnostics; do not treat a successful preview as permission to start a Run or remove required Loop/Judge behavior merely to pass validation. Execution requests are checked again by the server.
 
 ```yaml
 name: Repeated discussion
@@ -138,16 +138,17 @@ runtime:
         final_output: true
 ```
 
-- `loop` requires all eight fields shown above; unknown fields are rejected. Body nodes use the ordinary executable-node rules.
+- `loop` requires all eight fields shown above; unknown fields are rejected. Body leaves use the ordinary executable-node rules; child Loops recursively use these Loop rules.
 - `loop.continue_display_name` is optional and labels the logical return edge and expanded continue edges. Exhausted labels belong to `transitions.<exhausted_outcome>.display_name`, not a separate Loop field.
 - `continue_outcomes` must be nonempty; `break_outcomes` must be present but may be `[]`. Without a result Judge, use exactly `[complete]` and `[]`.
 - With a result Judge, continue and break must partition all its outcomes. `exhausted_outcome` is separate and cannot be returned by the Judge.
-- Each break/exhausted transition needs at least one existing outer target. Empty break means run to the limit and then route to exhausted targets, not stop the whole workflow.
+- Each break/exhausted transition needs at least one target in the scope containing this Loop control node: outer `nodes` for a top-level Loop, or the parent Loop's `loop.nodes` for a child Loop. Empty break means run to the limit and then route to exhausted targets, not stop the whole workflow.
 - Body has exactly one entry and one result terminal. Result defines no body transitions; body nodes cannot be final_output. Keep the unique final_output outside the Loop.
 - Loop control nodes allow only `kind`, `display_name`, `loop`, `transitions`, `extensions`; no assignee, instruction, Judge, timeout or final_output fields, including null/false placeholders.
-- A Loop body may contain fixed child Loops up to `collaboration.fixed_loop_limits.max_fixed_loop_depth` (default 4). Every Loop's `entry_node` and `result_node` must still be direct executable leaves, not child Loops. Targets stay local to their current scope; cross-scope targets, arbitrary goto and unbounded loops are unsupported. The `ln-` node ID prefix is reserved in v2; authoring node IDs are at most 128 ASCII bytes.
+- A Loop body may contain fixed child Loops within the depth limit enforced by the current server. Every Loop's `entry_node` and `result_node` must still be direct executable leaves, not child Loops. Targets stay local to their current scope; cross-scope targets, arbitrary goto and unbounded loops are unsupported. The `ln-` node ID prefix is reserved in v2; authoring node IDs are at most 128 ASCII bytes.
 - Multiple sibling Loops are supported in the same outer acyclic graph. An outer transition can target another Loop ID; BCS enters that Loop's entry node. Never target its body node directly. Each Loop has its own iteration count and previous result; the next Loop starts at iteration 1 with no previous result of its own, while the prior Loop's selected output is an ordinary upstream artifact.
-- Server-owned limits come from `collaboration.fixed_loop_limits`. Rejection reports the authoring path before any Run creation.
+- A child Loop restarts at iteration 1 for each new parent iteration. Its entry's `previous_result` refers only to the preceding iteration of that same Loop under the same parent execution path; the first iteration has no previous result. A child break/exhaustion returns to its containing scope; it does not itself break or exhaust the parent Loop.
+- The server validates nesting depth and expanded plan size; do not put server configuration in authoring YAML. Depth counts the outer Loop as 1. Nested iteration counts multiply the expanded leaf count, so passing each individual Loop's iteration limit does not guarantee that the whole plan fits. Rejection reports the authoring path before any Run creation.
 - Preview retains authoring `graph_mode: hierarchical`, adds `execution_graph_mode: acyclic`, per-node `execution` and result-edge `loop_route`. Last-round edge outcome stays `complete`/the actual continue outcome while route kind/logical_outcome shows exhaustion.
 
 Single-level plans keep internal compiler version `bcs.fixed-loop.compiler/v1` and their existing ID/hash contract. Plans whose actual maximum Loop depth is at least two use `bcs.fixed-loop.compiler/v2`; their generated IDs include the complete outer-to-inner `(loop_id, iteration)` path. Public execution metadata and Loop entry context expose that path as `loop_path`, while the legacy `loop_id`, `iteration`, and `max_iterations` fields continue to describe the nearest Loop.
@@ -187,6 +188,85 @@ transitions:
     display_name: 转入重写
     targets: [rewrite]
 ```
+
+### Nested fixed Loop example
+
+This complete example needs no Judge or LLM provider. It runs two outer rounds,
+each with three inner refinement rounds. `prepare` and `assess` are the outer
+Loop's direct entry/result leaves; `refine` is both the inner entry and result.
+Only the outer `publish` node is `final_output`.
+
+```yaml
+name: Nested refinement
+participants:
+  writer:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 2
+    graph_mode: hierarchical
+    nodes:
+      outer:
+        kind: loop
+        display_name: Overall revision
+        loop:
+          mode: fixed
+          max_iterations: 2
+          entry_node: prepare
+          result_node: assess
+          continue_outcomes: [complete]
+          break_outcomes: []
+          exhausted_outcome: exhausted
+          nodes:
+            prepare:
+              kind: bot_task
+              display_name: Prepare revision
+              assignee: {type: bot_binding, binding: writer}
+              instruction: Prepare this revision using the run input and any previous outer result.
+              transitions:
+                complete: {targets: [inner]}
+            inner:
+              kind: loop
+              display_name: Refine draft
+              loop:
+                mode: fixed
+                max_iterations: 3
+                entry_node: refine
+                result_node: refine
+                continue_outcomes: [complete]
+                break_outcomes: []
+                exhausted_outcome: exhausted
+                nodes:
+                  refine:
+                    kind: bot_task
+                    display_name: Refine draft
+                    assignee: {type: bot_binding, binding: writer}
+                    instruction: Start from the upstream brief, or improve the previous inner result.
+              transitions:
+                exhausted: {targets: [assess]}
+            assess:
+              kind: bot_task
+              display_name: Assess revision
+              assignee: {type: bot_binding, binding: writer}
+              instruction: Summarize the refined draft for the next outer round or final publication.
+        transitions:
+          exhausted: {targets: [publish]}
+      publish:
+        kind: bot_task
+        display_name: Publish result
+        assignee: {type: bot_binding, binding: writer}
+        instruction: Deliver the final revision to the user.
+        final_output: true
+```
+
+`inner.transitions.exhausted` targets `assess` in the parent body, not the
+top-level `publish`. Each result leaf omits `transitions`; its enclosing Loop
+owns continuation and exit routing. The bounded plan expands to
+`2 × (1 + 3 × 1 + 1) + 1 = 11` executable nodes. The preview exposes Loop
+descriptor keys `outer` and `outer/inner`, but authoring still targets the local
+ID `inner`, not `outer/inner`. The example has depth 2; use server validation
+to confirm that its depth and expanded size are accepted, and check any capability warnings before execution.
 
 ## Bot task node
 
@@ -284,7 +364,7 @@ nodes:
         targets: [rewrite]
 ```
 
-`judge.type` 只能为 `llm`，`criteria` 和 `outcomes` 不能为空。未配置 LLM provider 的 BCS 实例会返回 `UNAVAILABLE_FEATURE`。
+`judge.type` 只能为 `llm`，`criteria` 和 `outcomes` 不能为空。当前 BCS 不支持 `judge` 时会返回 `UNAVAILABLE_FEATURE`，应向用户说明该能力不可用。
 
 ## Parallel fan-out and join
 
@@ -304,14 +384,14 @@ For a one-shot run in the current session, pass runtime input and every required
 Bot role binding together:
 
 ```bash
-bcs collaborate run workflow.yaml \
+bcs-cli collaborate run workflow.yaml \
   --session "$session_id" \
   --binding "planner=$planner_bot_uuid" \
   --binding "writer=$writer_bot_uuid" \
   --input '{"question":"..."}'
 ```
 
-Call `bcs collaborate permission --session "$session_id"` before writing or
+Call `bcs-cli collaborate permission --session "$session_id"` before writing or
 submitting the YAML. Permission is a server-owned policy and must not be
 inferred from the Bot's apparent group role. The role bindings above are
 transient for that run and do not modify the Group's persisted runtime binding.
@@ -323,7 +403,7 @@ HumanInput has no `--binding` in this frontend flow.
 - `FORBIDDEN_AUTHORING_FIELD`: remove top-level `api_version`, `id`, or `version`; BCS owns those values during group creation.
 - `UNKNOWN_KEY`: remove a misspelled or unsupported field.
 - `INVALID_DEFINITION`: fix unsupported runtime fields, participant bindings, transition targets, graph reachability, entry/final counts, cycles, or invalid node settings according to the message.
-- `UNAVAILABLE_FEATURE`: the definition uses `judge`, but the current BCS instance has no LLM provider configured.
+- `UNAVAILABLE_FEATURE`: the current server cannot provide a capability used by the definition, such as `judge`; report its diagnostic.
 - A run error requiring a Present Human means the session roster has no Human
   participant in Present mode; do not work around it by binding the Human ID as
   a Bot.

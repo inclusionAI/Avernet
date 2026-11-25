@@ -40,6 +40,19 @@ impl ValidatedRequestUrl {
             .as_deref()
             .map(|host| (host, self.resolved_addrs.as_slice()))
     }
+
+    /// Test-only pinned fixture: a URL whose host was "already resolved and
+    /// validated" to the given addresses. Lets downstream crates regression-
+    /// test DNS-rebinding pinning — a connection built from this value must
+    /// land on `addrs` even when the hostname is not resolvable at all.
+    #[doc(hidden)]
+    pub fn pinned_for_tests(raw_url: &str, host: &str, addrs: &[SocketAddr]) -> Self {
+        Self {
+            raw_url: raw_url.to_string(),
+            dns_override_host: Some(host.to_string()),
+            resolved_addrs: addrs.to_vec(),
+        }
+    }
 }
 
 impl OutboundUrlGuard {

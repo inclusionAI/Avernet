@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Spin } from '@/components/ui/Spin';
-import type { BotHealthDimension, BotHealthHistoryItem } from '@/domain/botHealthCheck';
+import type { BotHealthDimension, BotHealthHistoryItem, BotHealthPatch } from '@/domain/botHealthCheck';
 import { ShieldCheck } from 'lucide-react';
 
 interface EnvironmentPanelProps {
@@ -19,6 +19,8 @@ interface EnvironmentPanelProps {
   showHistoryDetails: boolean;
   onViewHistoryDetail: (item: BotHealthHistoryItem) => void;
   onReDiagnose: () => void;
+  onApplyPatch?: (patch: BotHealthPatch) => void | Promise<void>;
+  applyingPatch?: boolean;
 }
 
 export function EnvironmentPanel({
@@ -29,6 +31,8 @@ export function EnvironmentPanel({
   showHistoryDetails,
   onViewHistoryDetail,
   onReDiagnose,
+  onApplyPatch,
+  applyingPatch,
 }: EnvironmentPanelProps) {
   const scanFailed = ['failed', 'error'].includes((dimension.scanStatus ?? '').toLowerCase());
   const dimStyle = DIM_STATUS_STYLES[scanFailed ? 'failed' : dimension.status] ?? {
@@ -99,7 +103,7 @@ export function EnvironmentPanel({
 
       <ExpandableCheckTable dimension={dimension} />
 
-      <OptimizationPanel dimension={dimension} />
+      <OptimizationPanel dimension={dimension} onApplyPatch={onApplyPatch} applyingPatch={applyingPatch} />
 
       <HistoryTable history={history} showDetails={showHistoryDetails} onViewDetail={onViewHistoryDetail} />
     </div>

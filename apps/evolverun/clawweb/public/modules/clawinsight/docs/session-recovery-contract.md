@@ -9,13 +9,25 @@ Self-healing is a ClawInsight business workflow. Every task starts an independen
 - `AgentExecutionService` and the execution monitor serve both Repair and self-healing. Business services keep their own state transitions. Base callbacks use a trusted, injected handler; a fixed execution Step retains its own attachment contract after business stages advance.
 - OCB composes internal dependencies and the existing `DingTalkSender`; business notification content is injected into its shared sender. Public services do not select BaaS versus legacy Arca.
 
+AIS stop requests use `jobId` and the original submission user as `userNumber`, with the configured token. The Step dispatch receipt records `submittedBy`; existing tasks without that receipt retain their original task-level submission identity (recovery target owner, full Repair or analysis creator). The current administrator is not a substitute submission user. Stop failures retain bounded, redacted platform error codes/messages. A successful stop request is not proof of remote termination: lease reconciliation and the existing retry fence still require the old job to be terminal before replacing a recovery execution.
+
 ## State and evidence
 
 Tasks use existing `ce_tasks` and `ce_steps`. Task extension JSON retains current execution identity and bounded state. Business phases use `ce_steps`; phase reports, complete plans, judgments and Owner decisions use the existing object store with immutable digest references. The timeline combines phase reports, tool audit and result-delivery acknowledgments. Full bounded source reads and operation receipts live in the existing tool audit; the timeline and judgments refer to their IDs. The Owner page loads full evidence on demand. Evidence redaction retains diagnostic message text while removing credentials and PII.
 
+Agent bootstrap retains every evidence entry and its original IDs. Repeated successful `trajectory_read` index pages (`read_scope=traces`) with truncated JSON excerpts may replace only that excerpt with a plain-text `same_content_as` reference to the first equivalent evidence entry and the current `recorded_at_ms`. The reference includes its own `tool_call_get` lookup and fits the existing AIS closeout 400-character text budget. Complete short JSON excerpts remain unchanged so the existing closeout fact filter can still compact them without expanding context. Each eligible entry also exposes its own `recorded_at_ms`, including the first. Equality uses the complete audited request and result, excluding only request `clientRequestId`, its derived `requestDigest`, and result `recorded_at_ms`; it also requires the same execution, authorization scope and preceding write. Pagination, coverage, sources, event timestamps and fields beyond the displayed excerpt remain significant. Content/observation reads, writes, failed or incomplete receipts and unaudited legacy evidence are not deduplicated. Full receipts remain available through the existing task-scoped `tool_call_get`; task detail, persistence, result callbacks and evidence validation keep the original evidence. Only the verified bootstrap read opts into retaining already-loaded audit references and comparing bodies, adding no database or remote reads. Ordinary task reads, maintenance batches, heartbeat and mutation hydration do not retain these references or deep-copy them. It does not impose a new total evidence limit or change the existing per-excerpt display limit.
+
+After a message attempt has been accepted or remains uncertain, a recovered observation with unconfirmed delivery stays running until delivery is confirmed or the existing observation deadline is reached. Recovery remains `recovered` while waiting. The service enforces this for initial and approved-plan messages using existing send audits; runner polling does not resend advice or reset deadlines. Observation expiry preserves confirmed recovery, while unknown effects keep the existing `waiting_effect` behavior. AIS execution limits, cancellation and user-continuation/Owner exit rules remain effective. TE AIVision traces can arrive late; absent traces do not prove non-delivery or independent recovery.
+
 Task status and recovery effect are separate. A channel accepting a message is not delivery evidence. Only a marked user message in the original session proves delivery. Agent response and recovery require semantic judgment with stored evidence; environmental write success does not prove recovery.
 
 Original-session matching accepts Engine-added metadata and timestamp prefixes. Bounded reads retain all matching record IDs, including repeated records, so delivery evidence does not conceal lower-layer duplication. The fixed read-only program is compressed for the existing BaaS command limit after runtime-user wrapping.
+
+Live OC/CC and NAS pages continue at the first unreturned record when the byte budget is reached. Successful session-read audits also produce transient `sessionReadCoverage` in bootstrap and `session_read_coverage` in read receipts. These merge the actual provided line intervals per physical session and show gaps only between provided intervals. Display lists are bounded and mark truncation. They do not assert EOF, complete history, model comprehension or absence of user continuation. The projection reuses already-loaded audit calls, is not persisted in task configuration and adds no remote reads or intervention/report gates.
+
+CC session-read receipts may include bounded `url_argument_comparisons` for literal HTTP(S) arguments with credential-bearing query parameters. A match or mismatch compares credential values only when a unique source in the same contiguous turn and a literal tool argument identify the same origin, path and non-credential query parameters. Each finding identifies the tool-call position and, when paired, the source line. An unavailable or absent finding leaves the comparison unknown. The reader derives these facts before redaction without issuing a request. Receipts contain no raw values or fingerprints in the comparison. A comparison does not establish that a request ran, succeeded or that the source URL is valid.
+
+The internal trajectory provider can attach bounded event counts and the latest ingested event metadata to live trace-list summaries. These are optional reading hints, not business results or evidence of complete upload. A failed optional metadata query is explicit and does not discard the trace list. Frozen historical reads omit the live index. Compact worker receipts retain their actual read scope, session ranges, event metadata and content cursors; full redacted page contents stay in the existing local receipt artifact.
 
 Debug performs no actual message or environment mutation. Approval binds one complete plan, rather than individual commands; automatic mode still waits for necessary Owner cooperation. Environment writes pass the existing audit ledger and enforce the current execution and approved plan. Agent-selected conversation messages do not require environmental approval, but remain audited writes with one initial delivery attempt, target validation and no blind replay of unknown outcomes.
 
@@ -25,11 +37,39 @@ Bootstrap publishes `planProtocol.allowedOperations` from the same definition us
 
 Owner waiting and effect waiting have separate deadlines. Owner expiry releases the execution while preserving the business task. A later decision creates a new execution for that task; an in-window decision continues the current execution. Effect waiting resumes the paused phase after reading new records, without resending initial advice. Old execution reports cannot overwrite new execution state.
 
+### Automatic effect resumption
+
+The existing recovery maintenance scan resumes the same task and observation phase.
+The first wait starts the total window; the latest wait starts the next interval.
+A round is available only if the next possible start is strictly before the end
+of the window and the round budget has not been used. If no round can fit, an
+unresolved wait closes with effect `unknown` once in-flight work has settled.
+Execution failures within a round keep the existing execution retry policy.
+
+Enable this per control plane with `ce_app_config.session_recovery_effect_resume_pre`
+or `session_recovery_effect_resume_prod`. The enabled record holds integer
+`concurrency` (1–10), and may set `intervalSeconds`, `windowSeconds` and
+`maxResumes`. Older enabled records default the new fields to 3600, 86400 and 3.
+An absent or disabled record leaves automatic resumption off. A busy environment
+or an interval that has not elapsed does not make a task eligible for offline
+recheck. A reserved or active round occupies its slot until its AIS steps settle.
+
+### Historical effect recheck
+
+The local operator scans the requested creation dates and schedules individual
+read-only executions. It uses the same live resume policy as online maintenance.
+The backend rechecks policy, task ownership, current execution and the latest
+diagnosis result before accepting and before saving a conclusion. The original
+task state, phase, completion reason and creation time are preserved. The AIS
+run can collect evidence but cannot send messages, change the target, trigger
+notifications or enter the normal repair workflow. Only a verified result is
+appended at a higher version through the existing diagnosis outbox.
+
 ## Handbook and Agent assessment
 
-Handbook content has one source: OCB `clawevolve-recovery-handbook/SKILL.md` and its topic directories, including `mcp/handbook.md` and `file-download/handbook.md`. It is packaged into the AIS Agent workspace only, not installed in the target Bot. The public catalog retains references without internal professional content. Each diagnostic category can select several candidate chapters, and several categories can share the same chapter. The Agent reads the applicable content based on the diagnosis and actual failure; a category match is not evidence of a particular cause.
+Handbook content has one source: OCB `clawevolve-recovery-handbook/SKILL.md` and its topic directories, including `common/mcp/handbook.md`, `common/file-download/handbook.md` and scoped `custom/<team_key>/` content. It is packaged into the AIS Agent workspace only, not installed in the target Bot. The public catalog retains references without internal professional content. Each diagnostic category can select several candidate chapters, and several categories can share the same chapter. The Agent reads the applicable content based on the diagnosis and actual failure; a category match is not evidence of a particular cause.
 
-Creation freezes the catalog's `handbookVersion`, category and `chapters` list in the existing task history. Bootstrap reuses this snapshot on resume, without rerouting through the current catalog. Legacy v1 snapshots with a single `chapter` are exposed as a one-element list, or an empty list for null; their saved version and references are preserved, and missing snapshots are not backfilled. An empty candidate list has no generic-retry fallback; the Agent assesses the actual evidence independently. No diagnosis request fields or database schema change.
+Creation freezes the catalog's `handbookVersion`, `teamKey`, category and `chapters` list in the existing task history. Bootstrap reuses this snapshot on resume, without rerouting through the current catalog. Legacy v1 snapshots with a single `chapter` are exposed as a one-element list, or an empty list for null; their saved version and references are preserved, and missing snapshots are not backfilled. An empty candidate list has no generic-retry fallback; the Agent assesses the actual evidence independently. No diagnosis request fields or database schema change. Team mappings and custom routes use the existing `ce_app_config` key `session_recovery_handbooks`; see [team handbook specification](session-recovery-team-handbooks-spec.md) for matching, configuration validation, runtime file scope and rollout compatibility.
 
 There is no direct-intervention mode or category allowlist. Initial assessment cannot modify the environment. The Agent composes the advice; the original Bot receives that text, without being instructed to install or read the handbook. Initial messages use the upstream delivery key; stable tool retries return the saved receipt. Maintenance does not generate advice.
 
@@ -51,9 +91,21 @@ Repair and self-healing use separate Skills and business adapters. Shared contai
 
 Base owns package startup, the outer hard timeout and its three archives. Business wrappers keep their heartbeat, waiting and reporting protocol. Heartbeat and decision polling use 20 seconds. Credentials are removed from Base's archived task input and passed via a private file outside archive roots; business packages must not echo them into outputs.
 
+### Task-level LLM parameters
+
+The generic Base dispatch envelope accepts optional `runtime.llm: { model?: string, max_tokens?: number }`. When present, `max_tokens` must be an integer from 8,192 through 131,072. Omitted fields inherit the Base configuration; the override applies only to that task execution and does not change global configuration.
+
+Session recovery sends `runtime.llm: { max_tokens: 16384 }` for every dispatch, including resumed executions and simulations, regardless of diagnostic category. It leaves `model` unset so the configured Base model remains in use. This reserves a bounded output-token budget while retaining the existing package, workload ticket, callback and business-state contracts.
+
+Before deploying this ClawWeb caller, update the AIS Base snapshot to support `runtime.llm` and upload the rebuilt recovery Skill package containing the consumer validation. Repair/recovery overrides require the Base's complete `llm` configuration (`model`, `base_url`, and inline `api_key`); the package rejects Snapshot-only or environment-key-only defaults instead of silently ignoring task parameters. Credentials remain deployment-owned and are never supplied in `runtime.llm`. Updating the recovery Skill package alone does not provide Base support. No database migration or global model-default change is required.
+
 ## Persistence and delivery contracts
 
+Observation `response` describes the Bot's response to this recovery message, not independent work or a reply to the user. `acted` and `replied` require `delivery=confirmed`, backed by the existing controlled read for the current delivery key; contradictory reports return 422 without changing task state. No message means `response=none`; insufficient attribution evidence means `unknown`. Recovery effect remains independent: an undelivered intervention does not prevent evidence-backed `effect=recovered`. A real user confirmation after the original fault follows the existing `user_continued` handoff even when it is part of the expected business workflow. Merely waiting for that input remains subject to the ordinary fault-recovery criteria.
+
 Creation stores the exact event/delivery identity and request fingerprint in the existing task. Same-key changed requests return 409. Initial and subsequent sends use the existing tool audit claims; an unknown outcome cannot authorize blind replay. Bot message idempotency remains in the tool ledger. Task result delivery uses compact pending references in the existing Task configuration.
+
+During assessment, the initial recovery message can proceed after a release version change if the diagnosis did not pin a version and the resolved runtime matches the frozen target in every other fingerprint field.
 
 Only transitions into `waiting_effect`, `completed`, `failed` or `canceled` create an immutable result snapshot. Owner waiting (including expiry), approvals, notifications, annotations and other phase changes do not generate callbacks. Repeated annotations after task completion do not create another final result.
 
@@ -85,9 +137,16 @@ Group delivery is a backend after-hook for saved recovery-message receipts, comp
 
 Terminal group notices are skipped when the existing task-wide tool audit reports `interventionStatus: none`, including investigation-only completion, failure, cancellation and user handoff before intervention. This decision is independent of the recovery effect: a Bot recovering on its own does not require a group completion notice. Confirmed interventions, uncertain interventions and legacy tasks without a conclusive audit retain terminal notices. Message receipts, plans (including Owner-only cooperation) and execution summaries retain their existing notifications. Skipping a group notice does not change task state, evidence, Owner notifications or upstream result reporting, and does not claim or record a notification delivery.
 
-One application-wide `ce_app_config` row, `session_recovery_notifications`, controls this channel. The existing `enabled` column is the switch. Its JSON value contains the default `webhook`, `timeout_seconds` (integer 1–60, normally 10), and optional `bot_webhooks` entries with `bot_id`, `entity_id` and `webhook`. Each entry must match both the task's exact Bot ID and Owner/entity ID; this keeps different Owners' `default` Bots separate. A match replaces the default webhook for that notification; unmatched Bots retain the default group. The legacy two-field configuration is unchanged. Duplicate target pairs and malformed overrides invalidate the configuration rather than silently sending to a different group. A selected-group failure never falls back to the default group. Missing or disabled configuration means no group notification. An unavailable config table, invalid configuration, timeout or rejected robot response is isolated from task execution. No control-plane environment selector, administrator list or mentions are added. Routing changes only the group destination; trigger points, formatting, notification claims and the independent Owner-notification channel are unchanged. Deploy all backends consuming this configuration before writing overrides: an older strict parser rejects the additional field.
+Group notification enablement and route references live in each Bot's
+`ce_bot_diagnosis_recovery_config.config_json.notifications.group`. Shared
+webhook addresses remain in `ce_app_config.session_recovery_notification_routes`.
+There is no default-group fallback. Missing/invalid settings or a failed lookup
+skip the attempt without affecting task execution. Existing claims, content,
+and delivery audit are unchanged. See [configuration and migration](bot-diagnosis-recovery-config.md).
 
-The notification formatter uses existing plan, action and judgment fields and retains the task link. Message notices show the saved operation purpose and delivery-call state; the complete diagnosis and recovery message remain on the task page. Terminal notices show recorded message purposes and business summaries of audited plan actions, map `judgment.delivery` and `judgment.response` into verification lines, and display `judgment.effect` separately as the recovery conclusion. They do not copy the long `judgment.summary`, list unexecuted plan actions as interventions, or infer recovery from task completion. Failed or canceled tasks additionally retain their ending reason. Only `recovered` receives a fixed green font tag; actual rendering must be checked in the DingTalk client.
+The notification formatter uses existing plan, action and judgment fields and retains the task link. Message notices show the saved operation purpose and delivery-call state; the complete diagnosis and recovery message remain on the task page. Terminal notices show recorded message purposes and business summaries of audited plan actions, map `judgment.delivery` and `judgment.response` into verification lines, and display `judgment.effect` separately as the recovery conclusion. Ordinary terminal notices do not copy the long `judgment.summary`, list unexecuted plan actions as interventions, or infer recovery from task completion. Failed or canceled tasks additionally retain their ending reason. Only `recovered` receives a fixed green font tag; actual rendering must be checked in the DingTalk client.
+
+Owner-handoff result notices explicitly identify the handoff and include the bounded saved handoff explanation so its reason and Owner follow-up remain visible. They retain the independently reported effect and clearly state that self-healing has ended. The source is the matching Owner-handoff termination event, rather than a later notification receipt or execution-release event. Other notification kinds and the existing no-intervention, routing and deduplication guards are unchanged.
 
 The backend owns the Markdown title and bold `【】` section labels. Complete field values are redacted before being parsed with the existing Markdown parser into plain text, excluding fenced commands, HTML and images, and escaped for display. Presentation limits preserve complete Unicode characters and sentences; an oversized single sentence is replaced by a task-page reference, never a partial command or `[TRUNCATED]`. Each value and list is bounded individually so no final byte slice can swallow the recovery conclusion or task link. Agent output contracts, original Markdown and the Owner page remain unchanged.
 
@@ -132,13 +191,25 @@ Pre-dispatch failures are `failed` with `dispatched: false`, and do not block a 
 
 ## Owner notification switch and linked task visibility
 
-Owner DingTalk notifications use the independent `ce_app_config` key
-`session_recovery_owner_notifications`. Its existing `enabled` column controls
-sending; `config_json` is `{}`. Missing or disabled configuration skips Owner
-notifications without recording a successful send. Enable the row to resume
-notifications on subsequent notification events; skipped notifications are not
-replayed. This does not affect group webhooks (`session_recovery_notifications`),
-Agent execution, plan approval, or Owner feedback through the task page.
+Owner DingTalk notification enablement lives in each Bot's
+`ce_bot_diagnosis_recovery_config.config_json.notifications.owner.enabled`.
+Only explicit `true` enables it. Shared templates/callback routes now come from
+`ce_app_config.session_recovery_cards`, selected by CW control-plane environment.
+Only absence of that entire entry permits the configuration boundary to read
+legacy `.card`; disabled/invalid/new-row read failures never fall back. Old Owner
+defaults/overrides apply only to Bots without a new-table record. Permission cards
+require a template and callback route; ordinary handoff cards require a template,
+and Markdown plan notices require neither. All legacy reads/format adaptation
+stay in the read-only adapter behind `bot-configuration.ts`. Each attempt reads current policy;
+missing/invalid settings and read failures skip sending. No skipped notice is
+replayed when enabled later. Ordinary Owner handoff messages are enabled only for an explicit
+`handoff.reason=owner_material_needed`, advertised in `ownerHandoffReasons`.
+Other and legacy handoffs remain silent. This business reason does not add a
+state or a feedback wait; the terminal transition is saved before notification
+and execution fencing rejects duplicate reports. The host may inject an
+original-session URL resolver; the notifier appends that link to existing
+instructions without changing template parameters. Oversized combined text
+points to the full checklist rather than truncating an action or URL. See [configuration and migration](bot-diagnosis-recovery-config.md).
 
 Administrators can list all tasks linked to a diagnosis event, including private
 tasks. Other users still see only their own tasks or tasks explicitly shared by
@@ -149,4 +220,74 @@ the Owner. Task detail and operation authorization remain unchanged.
 
 When a real user continues the original conversation after the fault, the worker reports `kind=blocked`, `reason=user_continued`, the current `phase`, a `summary` and successful controlled-read `evidence_ids`. This explicit reason completes the self-healing task normally with `status=completed` and `completionReason=user_continued`, ending the current execution and clearing wait/retry deadlines. It does not run recovery actions or imply business recovery. Existing effect evidence and task-wide intervention auditing are preserved.
 
-List and callback projections include optional `completion_reason=user_continued`. The monitoring receiver accepts it only for completed tasks, preserves it in existing history JSON and remains compatible with old payloads. UI, notifications and statistics distinguish this normal handoff from failure and from `effect=recovered`. Other blocked reports retain failure semantics; unknown reasons and unsupported read evidence are rejected. Roll out sender/receiver support before the updated worker package. No task-status enum or database schema change is required.
+Bootstrap advertises `blockedReasons: ["insufficient_evidence"]` for evidence-limited closeout. Live non-Debug workers may report this reason only in pre-delivery `assess` or `plan`, with a description of the gap and saved `evidence_ids` (possibly empty). It uses the existing failed-execution transition, preserves any prior business effect, records `failure_code=INSUFFICIENT_EVIDENCE` in the execution event and suppresses that closeout's result notification, including replayed hooks. It does not replace observation or `waiting_effect`, authorize an Owner request, or change task status/result schemas. Deploy the server capability before the worker package.
+
+Both permission requests and ordinary Owner handoffs require a saved controlled scene-read reference backed by a successful operation in the task audit. Failed reads cannot independently justify either path. This checks evidence provenance, not permission semantics: the worker must establish the applicable handbook conditions from the actual inputs, identity, results and current task progress.
+
+List and callback projections include optional `completion_reason=user_continued`. The monitoring receiver accepts it only for completed tasks, preserves it in existing history JSON and remains compatible with old payloads. UI, notifications and statistics distinguish this normal handoff from failure and from `effect=recovered`. Ordinary blocked reports describe inability to continue the recovery workflow, not an unrecovered business task. For live non-Debug tasks, an accepted or unknown initial delivery in `assess` requires an `assessment` result before observation; `observe` and `verify` require an `observation` result with the actual effect. An ordinary blocked report at these boundaries is rejected with HTTP 422 for correction, without changing state, resending guidance, or synthesizing an effect. Known failed delivery, pre-delivery blockers and an unrepairable outcome after plan analysis retain failure semantics. Explicit user continuation, proven target loss and handbook-directed Owner handoff remain available. Unknown reasons and unsupported read evidence are rejected. Deploy result validation before the updated worker package. No task-status enum or database schema change is required.
+
+### Assessment concludes that recovery is unnecessary
+
+During `assess`, successful controlled reads can establish that the original
+task is in a normal business wait or is subject to an explicit business
+exclusion. Report `kind=assessment`, `decision=no_recovery_needed`, the
+decision summary and its evidence IDs. The service requires a complete audit
+confirming no intervention and no accepted or unknown message delivery. It
+completes the assessment with `status=completed` and
+`completion_reason=no_recovery_needed` and releases the execution. The result
+reports `intervention_status=none` and preserves the available business effect.
+An accepted or unknown delivery continues through observation.
+
+### Cron delivery identity
+
+A direct OpenClaw Cron execution key can differ from its persisted conversation key.
+Before an OC Cron message, the controlled sender reads the declared
+`GET /api/cron/running` endpoint. A matching running job rejects delivery with
+`cron_run_running` and `dispatched=false`; unavailable or malformed status rejects
+with `cron_state_unavailable`, without claiming the job has ended. Ordinary
+conversations do not incur this read.
+Before delivery, resolve the indexed job-level key only when it still points to the
+frozen physical Session ID. A separately indexed run key remains usable when its
+identity matches. Missing/replaced entries fail closed; historical transcripts do
+not authorize creating a new conversation. Preserve the original diagnosis key
+and Session ID, and audit the resolved delivery key with the receipt.
+
+Pre-intervention assessment accepts `decision=wait_cron` only for a live non-Debug
+OpenClaw Cron with no existing initial delivery. It keeps `phase=assess` and
+`status=running`, with `cronWait: { startedAt, deadlineAt }` in the existing Task
+JSON. The backend sets a five-minute absolute window once; repeated assessments,
+new evidence and replacement executions cannot extend it. No table, status,
+phase, scheduler or Base configuration is added. The runner reuses its existing
+60-second polling and Agent session, bounds waiting turns, and never infers a
+business conclusion from elapsed time. A new `wait_cron` report after expiry is
+rejected for correction.
+
+The Agent refreshes original-run evidence and the declared Cron status on each
+turn. A current running job does not identify a historical run by itself; an empty
+running list or a transcript EOF does not prove completion. Completion within the
+window returns to the existing assessment choices, clearing `cronWait`; actual
+message delivery retains its normal effect-observation budget. On expiry, the
+Agent refreshes once more and uses the existing `owner_handoff` if the original run
+is still executing or its final result remains unconfirmed. The handoff includes
+the specific job, progress, elapsed observation and Owner follow-up, then ends the
+task. It does not equate the observation limit with Cron failure or force
+`effect=not_recovered`. User continuation and other independently proven handoff
+conditions retain their existing priority. Simulation, Debug, and effect recovery
+after accepted/unknown delivery do not enter this wait.
+
+## Task-level final summary
+
+Worker stage reports accept optional top-level `final_summary`, an Agent-authored Markdown account of the entire task: original goal/blocker, key evidence and reasoning, final solution or actual actions, outcome and outstanding cooperation. It is bounded to 2,000 UTF-16 code units. The Task service accepts it only when the business transition completes/fails the task or pauses observation (`waiting_effect`); intermediate summaries are ignored. It is committed with that transition in existing Task JSON, exposed by task detail, and cleared when paused observation resumes. Simulation message decisions close after the full proposed message; simulation environment decisions close after the complete plan. Neither executes an intervention or sends online notifications/results.
+
+The recovery runner normally receives this field with the last result. Missing/invalid optional prose gets at most one tools-disabled correction in the same Agent session before reporting; the original business result cannot be replaced by the correction. Failure leaves the summary absent and retains all primary artifacts. Existing security rejection of credential-bearing primary output remains unchanged. The service ignores malformed, overlong or credential-bearing optional summary metadata without rejecting a valid business result. Legacy tasks, external cancellation and infrastructure exits may have no summary; consumers show an explicit unavailable state and link to full records, never derive it from `judgment.summary`. The upstream callback schema and statistics are unchanged.
+
+Details expand the persisted summary beneath the overview. Result group notices reuse it (with existing safe formatting), retain independently verified delivery/response/effect and a detail link, and preserve all routing and simulation/no-intervention guards. Pending plans use neutral pending-verification presentation; active observation uses blue; a terminal unrecovered business outcome uses amber. `failed + verify + not_recovered` is presented as processing ended with the original task still blocked; actual execution failures retain a separate red alert. Raw status/effect values do not change. See the [design spec](../../../../../docs/clawweb/specs/clawinsight-session-recovery-final-summary.md).
+
+
+## Recovery before Owner handoff
+
+An evidence-backed, authorized correction, bounded retry or continuation must be pursued while the original task remains blocked. A finished or failed Cron run does not make its session unable to receive recovery guidance. Existing user-continuation, authorization, idempotency and running-OpenClaw-Cron waiting boundaries still apply.
+
+Owner handoff requires a remaining blocker that the available recovery methods cannot safely resolve. Verified recovery completes through ordinary observation; optional optimization advice belongs in the completion summary and existing result notice. Explicit or saved `recovered` effects cannot be terminated as `owner_handoff`, nor silently downgraded to enable it: invalid reports return 422 without state changes or notifications. Older task records remain readable. An accepted/uncertain initial message in assessment must transition into observation before a terminal Owner handoff.
+
+Recovery discovered during planning uses the existing observation report with `phase=plan` and `effect=recovered`; it rejoins `observe`. Pending delivery preserves the last message's original observation deadline. No new task state, report field, configuration or Base change is introduced.

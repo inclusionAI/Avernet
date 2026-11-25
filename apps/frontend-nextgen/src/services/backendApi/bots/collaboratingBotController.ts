@@ -1,11 +1,13 @@
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
 
-/** 团队 Bot 摘要；entity_id 为实体，owner_id 为拥有者用户，不可混用。 */
+/** 团队空间 Bot 摘要；entity_id 为实体，owner_id 为拥有者用户，不可混用。 */
 export interface CollaboratingBotDto {
+  avatar_url?: string | null;
   bot_id: string;
   bot_name: string;
   bot_desc: string;
+  bcn_bot_id?: string;
   entity_id: string;
   owner_id: string;
   engine: string;
@@ -18,11 +20,13 @@ export interface CollaboratingBotDto {
   bot_template_config?: Record<string, unknown> | null;
   engine_properties?: Record<string, unknown> | null;
   space?: { space_id: string; name: string; kind: string } | null;
+  /** Caller 模式标记('caller'):IAM 换签需带 caller_runtime_target(openspec add-iam-caller-runtime-target);缺失视为非 Caller Bot。 */
+  call_type?: string;
   collaboration: { id: number; role: 'admin' | 'member'; joined_at: string };
 }
 
 export function listCollaboratingBots(
-  params: { user_id: string; page: number; page_size: number },
+  params: { user_id: string; page: number; page_size: number; stage?: 'draft' | 'verify' | 'online' },
   signal?: AbortSignal,
 ) {
   return backendRequest<BackendApiEnvelope<{ items: CollaboratingBotDto[]; total: number }>>(

@@ -3,11 +3,12 @@ import type { CommandItem } from '@tc-chat/ui/es/Sender';
 import { Eraser, FileIcon, Zap } from 'lucide-react';
 
 export interface BuildBotSessionCommandItemsParams {
+  canUseFiles: boolean;
   /** 好友 Bot 不开放 skill 命令。 */
   canUseSkills: boolean;
   skillItems: CommandItem[];
-  /** /file 子面板动态拉取(2026-10-21 懒加载):每次唤起都刷新,query 为过滤词(空串=刚唤起)。 */
-  onSearchFiles: (query: string) => Promise<CommandItem[]>;
+  /** 宿主在进入子面板时刷新，SDK 在当前候选中本地过滤。 */
+  fileItems: CommandItem[];
   skillsLoading: boolean;
   filesLoading: boolean;
   onClear: () => void;
@@ -16,9 +17,10 @@ export interface BuildBotSessionCommandItemsParams {
 
 /** /skill（二级技能面板）+ /file（引用会话文件）+ /clear（清空上下文）三个命令项。 */
 export function buildBotSessionCommandItems({
+  canUseFiles,
   canUseSkills,
   skillItems,
-  onSearchFiles,
+  fileItems,
   skillsLoading,
   filesLoading,
   onClear,
@@ -49,7 +51,7 @@ export function buildBotSessionCommandItems({
   };
   return [
     ...(canUseSkills ? [skillCommand] : []),
-    {
+    ...(canUseFiles ? [{
       id: '__file_entry__',
       name: 'file',
       description: '引用本会话已上传的文件',
@@ -62,15 +64,14 @@ export function buildBotSessionCommandItems({
             key: '__session_file__',
             label: '文件',
             icon: <FileIcon className="h-3.5 w-3.5" />,
-            // 懒加载(2026-10-21):子面板唤起时经 onSearch 动态拉取最新清单(静态 items 停用)。
-            onSearch: onSearchFiles,
+            items: fileItems,
             emptyText: filesLoading ? '加载中…' : '暂无可引用文件,请先上传',
           },
         ],
         onSelect: () => {},
         format: () => '',
       },
-    },
+    } satisfies CommandItem] : []),
     {
       id: '__clear__',
       name: 'clear',

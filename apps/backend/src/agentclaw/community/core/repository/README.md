@@ -17,9 +17,22 @@ core/repository/
 └── implementations/  the ORM bodies — each declaring its Protocol(s) as a base
 ```
 
-Repositories are not plugins. Each has exactly one implementation, and the only
-per-profile difference is the `DatabasePlugin` injected into its constructor — one
-layer below, where the swap belongs. See `plugins/README.md` for the test that
+Recycle activation claims take an explicit validator from the dormant domain.
+The repository invokes that policy against the locked Bot row in the same
+transaction as the `RECYCLED` → `REACTIVATING` claim; it does not select engine
+policy or decide personal/Teclaw eligibility. Rollback applies the same domain
+validation under its existing transaction.
+
+Repositories are not plugins. Each has exactly one implementation, and database selection remains the `DatabasePlugin` injected into the constructor.
+`BotRepository.list_catalog_bots_by_owner_bot_pairs` is a bounded (100-pair)
+read without COUNT, equivalent to the existing exact-pair first page including
+newest-first duplicate handling and stage metadata. It does not grant access;
+tenant, environment and deletion predicates remain identical to the paged read.
+`BotCollabLockRepositoryProtocol.acquire` rejects an existing `(lock_key, env)`
+row. Its `steal` operation atomically inserts or replaces that row's holder and
+acquisition timestamps in one transaction. Both Bot and Session force-acquire
+paths use `steal`; they must not release a lock before inserting its replacement.
+Space writers additionally share the narrow transaction extension described below. See `plugins/README.md` for the test that
 puts them here rather than there.
 
 ## Domains
@@ -72,6 +85,29 @@ Collaborator queries use the existing `bot_pk`, including bulk lists. Their
 owner/entity locator and detects ambiguity even when one Bot has no binding.
 Neither repository operation grants caller permissions.
 
+### Metadata locator batching
+
+`BotRepository.list_metadata_locator_candidates` supplies at most two candidates
+per exact request pair in a single ORM SELECT, for at most 100 distinct pairs.
+An ORM-derived request table and window ranking put Owner/entity matches first;
+tenant, environment and soft-deletion scope apply before ranking. `default`
+candidates must match the locator. A private `_metadata_locator_match` boolean
+preserves database comparison semantics; it is not a public response field.
+Only `bot_management.bcn_metadata` consumes this additive repository contract.
+It rejects ambiguous matches and accepts bare-ID fallback only when the stored
+BCN reference exactly matches, as before. Other addressing consumers keep their
+existing queries. Larger internal metadata batches are split into groups of 100.
+
+The paged metadata read still owns COUNT, ordering, pagination and batched
+publication projection. With service Bots present, a batch of up to 100 pairs
+uses four SELECTs rather than one address query per pair plus the final reads.
+No cache, new index, schema or frontend change is required. The unified ORM
+implementation serves both SQLite and MySQL/OceanBase; deploy it with the
+additive repository contract and consumer. Tests compare the old addressing
+algorithm and count actual SQL in
+`tests/community/repository/bot/test_metadata_locators.py`; production latency
+and the target database execution plan still require environment validation.
+
 ## The contract is enforceable
 
 Every Protocol member carries `@abstractmethod` and every implementation declares
@@ -105,11 +141,46 @@ Hence the rule, enforced by the guard: `from __future__ import annotations` plus
 evaluated at runtime uses the typeshed `= ...` idiom with the real default named
 in a comment, rather than an exception to the rule.
 
+## Space persistence effects (internal transaction contract)
+
+`SpacePersistenceEffects` is not a public Service API, remote Plugin API, event
+bus or generic unit of work. Space, maintenance, work-order approval and the
+Skill Space creator receive the same singleton policy from the composition root.
+It only locks the source, records membership, or reserves a new Space identity
+using the **caller-owned Session**. It never commits independently or performs
+network/queue I/O. Permission checks and Skill publication/grant policy stay with
+their existing owners.
+
+`NoKnowledgeSpacePersistenceEffects` is the default: source locking only, no
+knowledge imports, outbox queries, capture UPDATE or identity effects.
+`KnowledgeSpacePersistenceEffects` reuses the original source write guard,
+snapshot admission and retained-ID protection. The lifecycle wrapper validates
+configuration/history after DB bootstrap or before the first library writer;
+constructors perform no I/O. Its producer guard uses the same policy instance,
+so calling synchronization without HTTP lifespan cannot bypass validation.
+
+All members of this internal protocol are abstract, implementations explicitly
+inherit it, and domain imports in the protocol are type-only like other
+repository contracts. Behavioral tests cover missing-table business operations,
+no-op effects without a DB, and real same-transaction capture rollback.
+`test_space_persistence_boundary.py` rejects direct knowledge implementation
+imports in the finite set of legacy writers. There is no new CI exemption.
+
 ## Context Boundary
 
 ```yaml
 purpose: "Every repository contract (protocols/) and implementation (implementations/) in the backend, grouped by domain. Persistence only — no services, no routers, no domain policy."
 provides:
+  - RecycleRepository
+  - BotRecycleRepositoryProtocol
+  - OwnershipSyncReadRepository
+  - SqlOwnershipSyncReadRepository
+  - CollaborationRepairReadRepository
+  - SqlCollaborationRepairReadRepository
+  - SpacePersistenceEffects
+  - SpaceKnowledgeSyncRepository
+  - SpaceKnowledgeSyncRepositoryProtocol
+  - OwnerHandoffRepository
   - BuildIgnoreRepository
   - BuildIgnoreRepositoryProtocol
   - BotCommonConfigRepository
@@ -124,6 +195,7 @@ provides:
   - BotAppGrantRepositoryProtocol
   - UserAppGrantRepositoryProtocol
   - BotCollabLockRepositoryProtocol
+  - ManagerSyncReadRepository
   - SourceCredentialRepositoryProtocol
   - BotCollabLogRepositoryProtocol
   - BotConfigManifestRepositoryProtocol
@@ -162,6 +234,9 @@ provides:
   - SkillEditorRequestRepositoryProtocol
   # task / forum
   - ForumRepositoryProtocol
+  - ForumInteractionRepositoryProtocol
+  - ForumAuthorStatsRepositoryProtocol
+  - ForumPersonalCenterActivityRepositoryProtocol
   - ForumTopicTagRepositoryProtocol
   - ForumTopicTagRepository
   - ForumDigestReportRepositoryProtocol
@@ -216,6 +291,10 @@ provides:
   - TaskTrajectoryRepositoryProtocol
   - TaskDiscoveryLockRepositoryProtocol
   - TaskArtifactRepositoryProtocol
+  - TodoRepositoryProtocol
+  - TodoTemplateRepositoryProtocol
+  - TodoArtifactRepositoryProtocol
+  - TodoArtifactRepository
   # publishing
   - BotPublishRepositoryProtocol
   - PublishOperationRepository    # an ABC, not a Protocol — same role, same surface
@@ -258,8 +337,12 @@ provides:
   - BotCliToolRepository
   - BotStartupScriptRepository
   - CollaboratorRepository
+  - SqlManagerSyncReadRepository
   # task / forum
   - ForumRepository
+  - ForumInteractionRepository
+  - ForumAuthorStatsRepository
+  - ForumPersonalCenterActivityRepository
   - ForumDigestReportRepository
   # task / feedback
   - FeedbackRepository
@@ -314,13 +397,33 @@ provides:
   - TaskTrajectoryRepository
   - TaskDiscoveryLockRepository
   - TaskArtifactRepository
+  - TodoRepository
+  - TodoTemplateRepository
 consumes:
   - DatabasePlugin                # the per-profile session seam, injected into every implementation
   - get_current_env               # environment scoping (utils.env_utils)
   - get_server_host               # ditto
   - get_current_avernet_tenant    # tenant scoping (utils.avernet_tenant)
 internal_dependencies:
+  - agentclaw.community.core.base  # Declarative ORM base for Todo persistence models
+  - agentclaw.community.utils.avernet_tenant_guard  # Tenant column guard for Todo ORM models
+  - agentclaw.community.core.bot_dormant
+  - agentclaw.community.core.mcp.errors  # scoped ownership can change after preflight
+  - agentclaw.community.core.mcp.scoped_config_contract  # sparse Bot Header and URL updates
+  - agentclaw.community.core.mcp.config_comparison  # pure HTTP Header/value equivalence for idempotent Apply claims
+  - agentclaw.community.core.ports.mcp_config  # preserve / clear / replace on an atomic Direct MCP claim
+  - agentclaw.community.kernel.bot_ownership_sync
+  - agentclaw.community.kernel.skill_mapping_identity  # shared runtime mapping identity for admission
+  - agentclaw.community.core.engine_runtime.stage  # stage vocabulary; SQL/runtime selection parity is covered by conformance tests
+  - agentclaw.community.core.engine_runtime.errors
+  - agentclaw.community.core.space_knowledge.capture_guard
+  - agentclaw.community.core.space_knowledge.repository
+  - agentclaw.community.plugin_api.space_knowledge
+  - agentclaw.community.plugin_api.space_membership
+  - agentclaw.community.core.bot_management.owner_handoff
   - agentclaw.community.kernel.build_ignore
+  - agentclaw.community.kernel.collaboration_repair   # RepairFacts/RepairFactsError typed in the collaboration repair fact reader
+  - agentclaw.community.kernel.bot_manager_sync   # SyncKey / SyncFacts / SpaceChange typed in ManagerSyncReadRepositoryProtocol
   - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.plugin_api.database    # DatabasePlugin — the injected session seam
   - agentclaw.community.plugin_api.models
@@ -332,11 +435,11 @@ internal_dependencies:
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_message_feedback  # BotMessageFeedback ORM model + record DTO used by the repository
   - agentclaw.community.core.bot_public
+  - agentclaw.community.core.apply_engine  # the apply row and the CLI-tool record it persists
   - agentclaw.community.core.bot_config_manifest
   - agentclaw.community.core.bot_genome.repository.models  # the five ac_genome_* ORM models and row records
   - agentclaw.community.core.content_store.models  # the ac_manifest_content ORM model and record behind the content store repository
   - agentclaw.community.core.bot_startup_script
-  - agentclaw.community.core.bot_config_manifest
   - agentclaw.community.core.caller_identity
   - agentclaw.community.core.channel
   - agentclaw.community.core.common_config
@@ -362,8 +465,10 @@ internal_dependencies:
   - agentclaw.community.core.user_list
   - agentclaw.community.core.workspace
   - agentclaw.community.log
+  - agentclaw.community.utils.app_utils
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
+  - agentclaw.community.utils.runtime_list_timing
 ```
 
 ### Change impact
@@ -375,3 +480,61 @@ intended cost.
 Moving a repository between domains changes a module path that `corp/ocb` imports.
 `specs/2026-08-05-core-repository-consolidation/path-map.md` is the artifact those
 rewrites are driven from.
+
+Changing the Space persistence constructor affects direct library callers and
+corporate composition roots: pass an explicit policy, never an optional fallback.
+See `core/space_knowledge/README.md` for capture/delivery rollout and rollback.
+
+`ManagerSyncReadRepositoryProtocol` is read-only: the bot collaborator manager
+sync projector sources its facts and key pages from it, and the sync path
+persists nothing — no queue table, no retry log, and no task record.
+
+### Bot MCP configuration addresses
+
+The override read API's legacy `owner_id` argument is an explicit stable Bot
+entity coordinate. Scoped account APIs retain human-owner semantics and resolve
+owned Bot records before accessing their canonical rows. Canonical values win
+in full (including `{}`); missing canonical values may read only a uniquely
+attributable current-owner alias, without changing storage. Commands consume
+that alias atomically on replacement/removal, including deletion after the Bot
+has been soft-deleted. Unknown past-owner rows are not guessed from a Bot ID.
+Owner-handoff finish performs this normalization before switching owner in its
+existing transaction; ordinary reads have no handoff-table dependency.
+
+## Ownership facts v1
+
+`OwnershipSyncReadRepository` and `SqlOwnershipSyncReadRepository` independently
+serve `BotOwnershipSyncService` and `OwnershipSyncRepairService`.
+`read_facts(key: SyncKey) -> OwnershipFacts` reads the live Bot in the exact
+explicit tenant/env/PK scope; `page_keys(*, avernet_tenant: str, env: str,
+after_pk: int, limit: int) -> tuple[SyncKey, ...]` walks ascending PKs with an
+exclusive cursor and at most 100 keys. No collaborator presence, roster bound,
+or Space eligibility read is required. These are read-only v1 contracts, with
+no schema, sync-state, or persistence-write change. Missing/deleted rows and
+SQL failures fail closed rather than supplying a replacement Owner.
+
+## Caller installation transaction
+
+`ExpertChatInstanceRepository.caller_token_refresh` locks the exact scoped
+instance before signing and yields its latest snapshot. Callers recheck due time
+and target identity under that lock, install the credential, then set the state's
+`expires_at`. Unset expiry and exceptional exits leave the ledger unchanged;
+submitted expiry must be aware, future and strictly advance the installed value.
+`caller_token_update` uses the same scope for IAM's existing longer-token check.
+Production transactions use SELECT FOR UPDATE; SQLite tests verify serialized
+transaction behavior and rollback, not production row-lock implementation.
+
+`correct_caller_token_expiry` is the separate administrative ledger correction
+operation. It locks the same exact instance as IAM/ASC, checks current binding and
+serving state and performs compare-and-set against an explicit nullable old UTC
+expiry. It permits earlier/past aware expiry only for authorized correction
+consumers; it never relaxes `caller_token_update` or `caller_token_refresh`.
+
+### Caller initialization recovery
+
+The Caller expiry update/refresh contexts accept an internal
+`force_runtime_refresh=False` option. Initialization recovery may set it to True
+to install a valid, future credential regardless of the old expiry and record
+its actual expiry after successful context exit. The same exact-instance row lock,
+status/binding checks and rollback semantics still apply; ordinary IAM and ASC
+consumers leave the option unset and preserve monotonic installation.

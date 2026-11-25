@@ -12,7 +12,7 @@ from typing import Protocol, runtime_checkable
 
 import pytest
 
-from src.domain.models.execution_packet import (
+from app.domain.models.execution_packet import (
     ExecutionPacket,
     ContextPack,
     ResourcePack,
@@ -20,9 +20,9 @@ from src.domain.models.execution_packet import (
     Guardrails,
     OutputContract,
 )
-from src.domain.models.task_spec import TaskSpec, RiskLevel
-from src.domain.models.plan_draft import PlanDraft, PlanStep
-from src.domain.models.team_spec import TeamSpec, RoleAssignment
+from app.domain.models.task_spec import TaskSpec, RiskLevel
+from app.domain.models.plan_draft import PlanDraft, PlanStep
+from app.domain.models.team_spec import TeamSpec, RoleAssignment
 
 
 # =============================================================================
@@ -104,23 +104,23 @@ class TestOpenClawAdapterProtocol:
 
     def test_protocol_is_runtime_checkable(self):
         """测试 Protocol 是 runtime_checkable"""
-        from src.domain.protocols.openclaw_adapter import OpenClawAdapter
+        from app.domain.protocols.openclaw_adapter import OpenClawAdapter
 
         # runtime_checkable protocols have _is_protocol attribute
         assert hasattr(OpenClawAdapter, "_is_protocol")
 
     def test_protocol_has_adapt_method(self):
         """测试 Protocol 有 adapt 方法"""
-        from src.domain.protocols.openclaw_adapter import OpenClawAdapter
+        from app.domain.protocols.openclaw_adapter import OpenClawAdapter
 
         # 检查 Protocol 有 adapt 方法
         assert hasattr(OpenClawAdapter, "adapt")
 
     def test_protocol_signature(self):
         """测试 Protocol 签名"""
-        from src.domain.protocols.openclaw_adapter import OpenClawAdapter
-        from src.domain.models.openclaw_adapter_input import OpenClawAdapterInput
-        from src.domain.models.openclaw_adapter_result import OpenClawAdapterResult
+        from app.domain.protocols.openclaw_adapter import OpenClawAdapter
+        from app.domain.models.openclaw_adapter_input import OpenClawAdapterInput
+        from app.domain.models.openclaw_adapter_result import OpenClawAdapterResult
         import inspect
 
         # 获取 adapt 方法的签名
@@ -138,9 +138,9 @@ class TestOpenClawAdapterProtocolCompliance:
 
     def test_implementation_compliance(self):
         """测试实现类是否合规"""
-        from src.domain.protocols.openclaw_adapter import OpenClawAdapter
-        from src.domain.models.openclaw_adapter_input import OpenClawAdapterInput
-        from src.domain.models.openclaw_adapter_result import OpenClawAdapterResult
+        from app.domain.protocols.openclaw_adapter import OpenClawAdapter
+        from app.domain.models.openclaw_adapter_input import OpenClawAdapterInput
+        from app.domain.models.openclaw_adapter_result import OpenClawAdapterResult
 
         # 创建一个简单的实现
         class MockAdapter:
@@ -158,9 +158,9 @@ class TestOpenClawAdapterContract:
 
     def test_adapt_returns_result(self, sample_execution_packet: ExecutionPacket):
         """测试 adapt 返回 OpenClawAdapterResult"""
-        from src.domain.protocols.openclaw_adapter import OpenClawAdapter
-        from src.domain.models.openclaw_adapter_input import OpenClawAdapterInput
-        from src.domain.models.openclaw_adapter_result import OpenClawAdapterResult
+        from app.domain.protocols.openclaw_adapter import OpenClawAdapter
+        from app.domain.models.openclaw_adapter_input import OpenClawAdapterInput
+        from app.domain.models.openclaw_adapter_result import OpenClawAdapterResult
 
         # 创建一个简单的实现
         class MockAdapter:
@@ -186,11 +186,11 @@ class TestOpenClawAdapterProtocolSchema:
         """测试 Protocol 模块存在"""
         import importlib
 
-        module = importlib.import_module("src.domain.protocols.openclaw_adapter")
+        module = importlib.import_module("app.domain.protocols.openclaw_adapter")
         assert hasattr(module, "OpenClawAdapter")
 
     def test_protocol_importable(self):
         """测试 Protocol 可导入"""
-        from src.domain.protocols.openclaw_adapter import OpenClawAdapter
+        from app.domain.protocols.openclaw_adapter import OpenClawAdapter
 
         assert OpenClawAdapter is not None

@@ -2375,7 +2375,7 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         Per Decision D-02: Triple-ID prefix query without explicit tenant.
         Per Decision D-03: Log-and-continue error handling.
         Per Decision D-04: Fire-and-forget orphan deletion via asyncio.create_task.
-        Per Decision D-05: State mapping ok->ACTIVE, other->FAILED.
+        Per Decision D-05: State mapping ok->ACTIVE, other->OFFLINE.
 
         Args:
             machine_id: The machine identifier from connection context.

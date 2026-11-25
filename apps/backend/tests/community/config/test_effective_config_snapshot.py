@@ -42,3 +42,15 @@ def test_effective_config_matches_golden(profile: str) -> None:
         f"A corp value was relocated without preserving the merged result. "
         f"If this change is intentional, regenerate the golden."
     )
+
+
+@pytest.mark.parametrize(
+    ("profile", "ownership_enabled"),
+    [("community", False), ("test", False), ("singlebox", True)],
+)
+def test_ownership_sync_effective_config(profile: str, ownership_enabled: bool) -> None:
+    base, overlay = PROFILE_PAIRS[profile]
+    effective = compute_effective_config(base, overlay)
+    assert effective["typed"]["bot_manager_sync"]["ownership_enabled"] is ownership_enabled
+    raw = effective["raw_user_config"].get("bot_manager_sync", {})
+    assert raw.get("ownership_enabled", False) is ownership_enabled

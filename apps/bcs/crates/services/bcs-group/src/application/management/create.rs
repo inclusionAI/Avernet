@@ -33,7 +33,6 @@ impl GroupManagement {
                     .to_string(),
             ));
         }
-        validate_service_spec_callback_urls(&self.outbound_url_guard, cmd.service_spec.as_ref())?;
 
         let originator = cmd
             .originator
@@ -50,7 +49,13 @@ impl GroupManagement {
                 .await?;
         }
 
-        let is_human_originator = originator.starts_with("human_");
+        let human_staff_no = originator.strip_prefix("human_");
+        // Legacy callers may designate another Human as originator. A
+        // friendship only sponsors creation by that authenticated Human.
+        let friend_connect = self.friend_connect.as_ref().filter(|_| {
+            cmd.caller_actor_id.as_deref() == Some(originator.as_str())
+                && cmd.visibility.as_deref().unwrap_or("private") == "private"
+        });
 
         let group_id = cmd
             .group_id
@@ -88,6 +93,7 @@ impl GroupManagement {
         let mut participants = Vec::with_capacity(requested.len());
         let mut participant_ids = Vec::with_capacity(requested.len());
         let mut subscription_targets = Vec::new();
+        let mut friend_candidates = Vec::new();
         for (bot_id, role, tags, message_view_scope) in requested {
             if !seen.insert(bot_id.clone()) {
                 continue;
@@ -98,50 +104,31 @@ impl GroupManagement {
                 self.registry.get(&bot_id).await
             }
             .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
-            if bot.actor_kind == ActorKind::Bot {
-                if self.v1_openapi_create_policy {
-                    // Originator-anchored (aligned with legacy): every Bot
-                    // participant except the originator itself — including the
-                    // driver when it differs from the originator — must be
-                    // reachable from the originator. A Human originator reaches
-                    // a bot via public visibility or ownership (`created_by`);
-                    // a Bot originator reaches it via public visibility or
-                    // friendship.
-                    if bot_id != originator {
-                        if is_human_originator {
-                            let staff_no = originator.trim_start_matches("human_");
-                            if bot.capabilities.visibility != "public"
-                                && bot.created_by.as_deref() != Some(staff_no)
-                            {
-                                return Err(GroupUseCaseError::Forbidden(format!(
-                                    "Bot '{}' is neither public nor owned by human '{}'",
-                                    bot_id, staff_no
-                                )));
-                            }
-                        } else {
-                            self.ensure_v1_reachable(&originator, &bot).await?;
-                        }
-                        if bot.capabilities.visibility == "public" {
-                            subscription_targets.push(bot.clone());
-                        }
-                    }
-                } else if bot_id != originator {
-                    if is_human_originator {
-                        let staff_no = originator.trim_start_matches("human_");
-                        if bot.capabilities.visibility != "public"
-                            && bot.created_by.as_deref() != Some(staff_no)
+            if bot.actor_kind == ActorKind::Bot && bot_id != originator {
+                if let Some(staff_no) = human_staff_no {
+                    // Management sponsorship uses current can_manage, not created_by.
+                    if bot.capabilities.visibility != "public"
+                        && !self.human_controls_bot(staff_no, &bot_id).await?
+                    {
+                        if friend_connect.is_some()
+                            && bot.status != ActorStatus::Hidden
+                            && matches!(bot.capabilities.visibility.as_str(), "protected" | "private")
                         {
+                            friend_candidates.push(bot_id.clone());
+                        } else {
                             return Err(GroupUseCaseError::Forbidden(format!(
-                                "Bot '{}' is neither public nor owned by human '{}'",
+                                "Bot '{}' is neither public nor managed by human '{}'",
                                 bot_id, staff_no
                             )));
                         }
-                    } else {
-                        self.ensure_reachable(&originator, &bot_id).await?;
                     }
-                    if bot.capabilities.visibility == "public" {
-                        subscription_targets.push(bot.clone());
-                    }
+                } else if self.v1_openapi_create_policy {
+                    self.ensure_v1_reachable(&originator, &bot).await?;
+                } else {
+                    self.ensure_reachable(&originator, &bot_id).await?;
+                }
+                if bot.capabilities.visibility == "public" {
+                    subscription_targets.push(bot.clone());
                 }
             }
             let role = participant_role(role.as_deref(), bot_id == cmd.driver_bot_id)?;
@@ -166,6 +153,25 @@ impl GroupManagement {
                 message_view_scope,
             });
             participant_ids.push(bot_id);
+        }
+        if let Some(connect) = friend_connect.filter(|_| !friend_candidates.is_empty()) {
+            self.ensure_member_limit(participant_ids.len())?;
+            // A registered Bot cannot use a Human-shaped ID to borrow the
+            // Human exception. Legacy authenticated Humans can lack a row.
+            if self.registry.try_get(&originator).await?
+                .is_some_and(|actor| actor.actor_kind != ActorKind::Human)
+            {
+                return Err(GroupUseCaseError::Forbidden(
+                    "Only a Human originator may use Human friend admission".into(),
+                ));
+            }
+            let friends = connect.find_human_friend_bots(&originator, &friend_candidates).await?;
+            if let Some(bot_id) = friend_candidates.iter().find(|id| !friends.contains(*id)) {
+                return Err(GroupUseCaseError::Forbidden(format!(
+                    "Human '{}' does not manage or have an active friendship with non-public Bot '{}'",
+                    originator, bot_id
+                )));
+            }
         }
         let requested_strategy = cmd.group_strategy.unwrap_or_default();
         if let Some(opening_message) = &cmd.opening_message {
@@ -216,7 +222,6 @@ impl GroupManagement {
         group.opening_message = cmd.opening_message;
         group.routing_policy = cmd.routing_policy;
         group.group_kind = cmd.group_kind.unwrap_or(GroupKind::Normal);
-        group.service_spec = cmd.service_spec.clone();
         group.group_strategy = requested_strategy;
         if cmd.provisioning {
             group.record_status = "provisioning".to_string();
@@ -242,7 +247,10 @@ impl GroupManagement {
             if group.visibility != "private" { return Err(GroupUseCaseError::Forbidden("same_owner groups must remain private".into())); }
         }
 
-        self.group.upsert(group.clone()).await?;
+        self.group.create_with_catalog_labels(group.clone(),cmd.catalog_labels).await.map_err(|error|match error {
+            ServiceError::Conflict(message)=>GroupUseCaseError::Conflict(message),
+            other=>other.into(),
+        })?;
 
         for target in &subscription_targets {
             self.try_write_subscription_edge(&cmd.driver_bot_id, target)
@@ -405,6 +413,17 @@ impl GroupManagement {
                 )));
             }
         };
+
+        // P3 prewarm intent (spec §7 group-entry): with no trusted subject
+        // for the new members, BCS only records the non-sensitive intent —
+        // group, human count and bot count. No ensure, no container, no
+        // identity; per-message admission establishes per-target identity.
+        tracing::info!(
+            group_id = %group.id,
+            human_members = group.participants.iter().filter(|p| p.actor_kind == ActorKind::Human).count(),
+            bot_members = group.participants.iter().filter(|p| p.is_bot()).count(),
+            "caller prewarm intent recorded (no identity, no ensure)"
+        );
 
         let mut detail = group_to_detail_with_context(group, context_injected);
         detail.latest_running_session_id = initial_session_id;

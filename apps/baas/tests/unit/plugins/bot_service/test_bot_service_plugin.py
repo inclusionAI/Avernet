@@ -38,6 +38,7 @@ from secbaas.community.plugins.bot_service.real._plugin import (
 from secbaas.community.spi.bot_service import (
     BotBindingData,
     CallerExecutionCredential,
+    CallerInstanceStatus,
     LogRelationPayload,
 )
 
@@ -1135,6 +1136,123 @@ class TestStubBotServicePluginGetBinding:
         assert result.device_provider == "stub"
 
 
+# ==================== Tests: Local/Stub caller-instance methods ===============
+
+
+class TestLocalBotServicePluginCallerInstanceMethods:
+    @pytest.mark.asyncio
+    async def test_get_existing_caller_connection_raises_platform_unavailable(self):
+        """LocalBotServicePlugin.get_existing_caller_connection() raises PaasError."""
+        plugin = LocalBotServicePlugin()
+
+        with pytest.raises(PaasError) as exc_info:
+            await plugin.get_existing_caller_connection(
+                bot_id="bot_001", owner_id="owner_001", user_id="u_001"
+            )
+
+        assert exc_info.value.code == ErrorCode.PLATFORM_UNAVAILABLE
+
+    @pytest.mark.asyncio
+    async def test_get_caller_instance_status_raises_platform_unavailable(self):
+        """LocalBotServicePlugin.get_caller_instance_status() raises PaasError."""
+        plugin = LocalBotServicePlugin()
+
+        with pytest.raises(PaasError) as exc_info:
+            await plugin.get_caller_instance_status(
+                bot_id="bot_001", owner_id="owner_001", user_id="u_001"
+            )
+
+        assert exc_info.value.code == ErrorCode.PLATFORM_UNAVAILABLE
+
+
+class TestStubBotServicePluginCallerInstanceMethods:
+    @pytest.mark.asyncio
+    async def test_get_existing_caller_connection_returns_stub_sandbox(self):
+        """Default: deterministic stub-caller-{bot_id} sandbox id."""
+        plugin = StubBotServicePlugin()
+
+        result = await plugin.get_existing_caller_connection(
+            bot_id="bot_001", owner_id="owner_001", user_id="u_001"
+        )
+
+        assert result == "stub-caller-bot_001"
+
+    @pytest.mark.asyncio
+    async def test_get_existing_caller_connection_env_override(self, monkeypatch):
+        monkeypatch.setenv("BAAS_STUB_EXISTING_CALLER_SANDBOX_ID", "sbx-env")
+        plugin = StubBotServicePlugin()
+
+        result = await plugin.get_existing_caller_connection(
+            bot_id="bot_001", owner_id="owner_001", user_id="u_001"
+        )
+
+        assert result == "sbx-env"
+
+    @pytest.mark.asyncio
+    async def test_get_existing_caller_connection_error_env_var(self, monkeypatch):
+        monkeypatch.setenv("BAAS_STUB_CALLER_ERROR", "1")
+        plugin = StubBotServicePlugin()
+
+        with pytest.raises(PaasError) as exc_info:
+            await plugin.get_existing_caller_connection(
+                bot_id="bot_001", owner_id="owner_001", user_id="u_001"
+            )
+
+        assert exc_info.value.code == ErrorCode.PLATFORM_ERROR
+
+    @pytest.mark.asyncio
+    async def test_get_caller_connection_error_env_var(self, monkeypatch):
+        """BAAS_STUB_CALLER_ERROR=1 raises PaasError as documented."""
+        monkeypatch.setenv("BAAS_STUB_CALLER_ERROR", "1")
+        plugin = StubBotServicePlugin()
+
+        with pytest.raises(PaasError) as exc_info:
+            await plugin.get_caller_connection(
+                bot_id="bot_001", owner_id="owner_001", user_id="u_001", credential=None
+            )
+
+        assert exc_info.value.code == ErrorCode.PLATFORM_ERROR
+
+    @pytest.mark.asyncio
+    async def test_get_caller_instance_status_defaults_true_true(self):
+        """Default observation: registered and alive."""
+        plugin = StubBotServicePlugin()
+
+        status = await plugin.get_caller_instance_status(
+            bot_id="bot_001", owner_id="owner_001", user_id="u_001"
+        )
+
+        assert isinstance(status, CallerInstanceStatus)
+        assert status.exists is True
+        assert status.alive is True
+
+    @pytest.mark.asyncio
+    async def test_get_caller_instance_status_env_overrides(self, monkeypatch):
+        """BAAS_STUB_CALLER_INSTANCE_EXISTS/ALIVE=0 force False observations."""
+        monkeypatch.setenv("BAAS_STUB_CALLER_INSTANCE_EXISTS", "0")
+        monkeypatch.setenv("BAAS_STUB_CALLER_INSTANCE_ALIVE", "0")
+        plugin = StubBotServicePlugin()
+
+        status = await plugin.get_caller_instance_status(
+            bot_id="bot_001", owner_id="owner_001", user_id="u_001"
+        )
+
+        assert status.exists is False
+        assert status.alive is False
+
+    @pytest.mark.asyncio
+    async def test_get_caller_instance_status_error_env_var(self, monkeypatch):
+        monkeypatch.setenv("BAAS_STUB_CALLER_STATUS_ERROR", "1")
+        plugin = StubBotServicePlugin()
+
+        with pytest.raises(PaasError) as exc_info:
+            await plugin.get_caller_instance_status(
+                bot_id="bot_001", owner_id="owner_001", user_id="u_001"
+            )
+
+        assert exc_info.value.code == ErrorCode.PLATFORM_ERROR
+
+
 class TestAiohttpBotServicePluginRuntimeEngineSelection:
     """Runtime engine is selected only at the Backend HTTP consumption boundary."""
 
@@ -1344,7 +1462,7 @@ _CALLER_PRINCIPAL_SECRET_NAME = "other_manual_teamclawgw_principal_signing_key"
 _CALLER_PRINCIPAL_KEY = "unit-test-principal-signing-key-0123456789abcdef"
 _CALLER_IAM_TOKEN = "iam-value"
 _CALLER_COOKIE = f"IAM_TOKEN={_CALLER_IAM_TOKEN}"
-_CALLER_AGENTPAAS_TOKEN = "agentpaas-caller-token"
+_CALLER_AGENTPASS_TOKEN = "test-token"
 
 
 class _FakeSecretStore:
@@ -1464,16 +1582,49 @@ class TestAiohttpBotServicePluginGetCallerConnection:
         assert get_args[1]["params"] == {
             "bot_id": "bot_001",
             "is_test_exchange": "false",
+            "token_type": "iam",
         }
         assert get_args[1]["headers"]["Cookie"] == _CALLER_COOKIE
+        assert "token_type" not in get_args[1]["headers"]
 
         await plugin.close()
 
     @pytest.mark.asyncio
-    async def test_agentpaas_success_appends_x_caller_token_rule(self):
-        """AgentPaaS 凭据就绪后 append x-caller-token，不调用 IAM 刷新。"""
+    async def test_dingtalk_success_passes_token_type_as_query_parameter(self):
         mock_post = MagicMock(
-            return_value=_mock_caller_response(_caller_ready_body("sbx-agentpaas"))
+            return_value=_mock_caller_response(_caller_ready_body("sbx-dingtalk"))
+        )
+        mock_get = MagicMock(
+            return_value=_mock_caller_response(
+                {"success": True, "iam_token": "iam-echo"}
+            )
+        )
+        plugin = self._make_plugin(mock_post, mock_get)
+
+        result = await self._call(
+            plugin,
+            CallerExecutionCredential(type="dingtalk", token="device-token"),
+        )
+
+        assert result == "sbx-dingtalk"
+        mock_get.assert_called_once()
+        get_args = mock_get.call_args
+        assert get_args[0][0] == "https://agentclaw.example.com/api/v1/token/iam"
+        assert get_args[1]["params"] == {
+            "bot_id": "bot_001",
+            "is_test_exchange": "false",
+            "token_type": "dingtalk",
+        }
+        assert get_args[1]["headers"]["Cookie"] == "IAM_TOKEN=device-token"
+        assert "token_type" not in get_args[1]["headers"]
+
+        await plugin.close()
+
+    @pytest.mark.asyncio
+    async def test_agentpass_success_appends_x_caller_token_rule(self):
+        """AgentPass 凭据就绪后 append x-caller-token，不调用 IAM 刷新。"""
+        mock_post = MagicMock(
+            return_value=_mock_caller_response(_caller_ready_body("sbx-agentpass"))
         )
         mock_get = MagicMock()
         mock_facade = MagicMock()
@@ -1484,16 +1635,18 @@ class TestAiohttpBotServicePluginGetCallerConnection:
             paas_service_facade=mock_facade,
         )
         credential = CallerExecutionCredential(
-            type="agentpaas",
-            token=_CALLER_AGENTPAAS_TOKEN,
+            type="agentpass",
+            token=_CALLER_AGENTPASS_TOKEN,
         )
 
         result = await self._call(plugin, credential)
 
-        assert result == "sbx-agentpaas"
+        assert result == "sbx-agentpass"
         mock_get.assert_not_called()
+        # append 目标是 target 剥离 ARCA_/:20003 后的 sandbox_id，而非
+        # connection.paas_device_id 字段
         mock_facade.update_outbound_operation_rule.assert_awaited_once_with(
-            paas_device_id="<paas-device-id>",
+            paas_device_id="sbx-agentpass",
             outbound_operation_rule=(
                 mock_facade.update_outbound_operation_rule.await_args.kwargs[
                     "outbound_operation_rule"
@@ -1508,15 +1661,15 @@ class TestAiohttpBotServicePluginGetCallerConnection:
         operation = rule.header_operation_rules[0]
         assert operation.header_name == "x-caller-token"
         assert operation.action == "set"
-        assert operation.value == _CALLER_AGENTPAAS_TOKEN
+        assert operation.value == _CALLER_AGENTPASS_TOKEN
         assert operation.domains == [
             "caller-gateway.example.test",
             "caller-tools.example.test",
         ]
 
     @pytest.mark.asyncio
-    async def test_agentpaas_without_domains_fails_closed_before_provisioning(self):
-        """AgentPaaS credentials require an operator-provided domain allowlist."""
+    async def test_agentpass_without_domains_fails_closed_before_provisioning(self):
+        """AgentPass credentials require an operator-provided domain allowlist."""
         mock_post = MagicMock()
         mock_get = MagicMock()
         mock_facade = MagicMock()
@@ -1531,28 +1684,8 @@ class TestAiohttpBotServicePluginGetCallerConnection:
             await self._call(
                 plugin,
                 CallerExecutionCredential(
-                    type="agentpaas",
-                    token=_CALLER_AGENTPAAS_TOKEN,
-                ),
-            )
-
-        assert exc_info.value.code == ErrorCode.CONFIG_INVALID
-        mock_post.assert_not_called()
-
-        await plugin.close()
-
-    @pytest.mark.asyncio
-    async def test_agentpaas_without_facade_fails_closed_before_provisioning(self):
-        mock_post = MagicMock()
-        mock_get = MagicMock()
-        plugin = self._make_plugin(mock_post, get=mock_get)
-
-        with pytest.raises(PaasError) as exc_info:
-            await self._call(
-                plugin,
-                CallerExecutionCredential(
-                    type="agentpaas",
-                    token=_CALLER_AGENTPAAS_TOKEN,
+                    type="agentpass",
+                    token=_CALLER_AGENTPASS_TOKEN,
                 ),
             )
 
@@ -1833,5 +1966,259 @@ class TestAiohttpBotServicePluginGetCallerConnection:
 
         assert exc_info.value.code == ErrorCode.PLATFORM_UNAVAILABLE
         assert mock_post.call_count >= 2
+
+        await plugin.close()
+
+
+# ==== Tests: AiohttpBotServicePlugin.get_caller_instance_status + no-credential connection ====
+
+
+def _status_body(exists: bool, alive: bool) -> dict:
+    return {
+        "success": True,
+        "message": "获取成功",
+        "error_code": 0,
+        "data": {"exists": exists, "alive": alive},
+    }
+
+
+class TestAiohttpBotServicePluginGetCallerInstanceStatus:
+    """GET /api/v1/expert-chats/app-caller-instance/status (backend contract)."""
+
+    _MODULE = "secbaas.community.plugins.bot_service.real._plugin"
+
+    def _make_plugin(self, get) -> AiohttpBotServicePlugin:
+        session = MagicMock()
+        session.closed = False
+        session.close = AsyncMock()
+        session.get = get
+        plugin = AiohttpBotServicePlugin(
+            base_url="https://agentclaw.example.com",
+            principal_signer=_caller_principal_signer(),
+        )
+        plugin._session = session
+        return plugin
+
+    async def _call(self, plugin):
+        return await plugin.get_caller_instance_status(
+            bot_id="bot_001",
+            owner_id="20881234",
+            user_id="u_001",
+        )
+
+    @pytest.mark.asyncio
+    async def test_success_returns_observation(self):
+        """Ready response returns exists/alive; query params, GET method,
+        and the iss=baas service JWT (no aud) match the contract."""
+        mock_get = MagicMock(
+            return_value=_mock_caller_response(_status_body(True, True))
+        )
+        plugin = self._make_plugin(mock_get)
+
+        status = await self._call(plugin)
+
+        assert status.exists is True
+        assert status.alive is True
+
+        mock_get.assert_called_once()
+        call_args = mock_get.call_args
+        assert call_args[0][0] == (
+            "https://agentclaw.example.com"
+            "/api/v1/expert-chats/app-caller-instance/status"
+        )
+        assert call_args[1]["params"] == {
+            "bot_id": "bot_001",
+            "owner_id": "20881234",
+            "user_id": "u_001",
+        }
+        headers = call_args[1]["headers"]
+        claims = jwt.decode(
+            headers["X-Avernet-Principal"],
+            _CALLER_PRINCIPAL_KEY,
+            algorithms=["HS256"],
+            issuer="baas",
+            options={"require": ["exp", "iat", "iss"]},
+        )
+        assert "aud" not in claims
+        assert "X-Request-ID" in headers
+
+        await plugin.close()
+
+    @pytest.mark.asyncio
+    async def test_not_registered_returns_false_false(self):
+        """exists=false is a successful observation, not an exception."""
+        mock_get = MagicMock(
+            return_value=_mock_caller_response(_status_body(False, False))
+        )
+        plugin = self._make_plugin(mock_get)
+
+        status = await self._call(plugin)
+
+        assert status.exists is False
+        assert status.alive is False
+        assert mock_get.call_count == 1
+
+        await plugin.close()
+
+    @pytest.mark.asyncio
+    async def test_business_403_maps_to_not_found(self):
+        """error_code=403 (source bot missing / domain denial) is a failure,
+        not a successful false/false."""
+        body = {
+            "success": False,
+            "message": "源 Bot 未找到",
+            "error_code": 403,
+            "data": None,
+        }
+        mock_get = MagicMock(return_value=_mock_caller_response(body))
+        plugin = self._make_plugin(mock_get)
+
+        with pytest.raises(PaasError) as exc_info:
+            await self._call(plugin)
+
+        assert exc_info.value.code == ErrorCode.NOT_FOUND
+
+        await plugin.close()
+
+    @pytest.mark.asyncio
+    async def test_business_5999_maps_to_platform_error(self):
+        """error_code=5999 (upstream probe failure) keeps the unknown-result
+        semantics instead of reporting exists=false."""
+        body = {
+            "success": False,
+            "message": "获取 Caller 状态失败，请稍后重试",
+            "error_code": 5999,
+            "data": None,
+        }
+        mock_get = MagicMock(return_value=_mock_caller_response(body))
+        plugin = self._make_plugin(mock_get)
+
+        with pytest.raises(PaasError) as exc_info:
+            await self._call(plugin)
+
+        assert exc_info.value.code == ErrorCode.PLATFORM_ERROR
+
+        await plugin.close()
+
+    @pytest.mark.asyncio
+    async def test_alive_without_exists_violates_invariant(self):
+        """alive=true & exists=false breaks the contract invariant."""
+        mock_get = MagicMock(
+            return_value=_mock_caller_response(_status_body(False, True))
+        )
+        plugin = self._make_plugin(mock_get)
+
+        with pytest.raises(PaasError) as exc_info:
+            await self._call(plugin)
+
+        assert exc_info.value.code == ErrorCode.PLATFORM_ERROR
+
+        await plugin.close()
+
+    @pytest.mark.asyncio
+    async def test_missing_data_fails_closed(self):
+        mock_get = MagicMock(
+            return_value=_mock_caller_response(
+                {"success": True, "message": "ok", "error_code": 0, "data": None}
+            )
+        )
+        plugin = self._make_plugin(mock_get)
+
+        with pytest.raises(PaasError) as exc_info:
+            await self._call(plugin)
+
+        assert exc_info.value.code == ErrorCode.PLATFORM_ERROR
+
+        await plugin.close()
+
+    @pytest.mark.asyncio
+    async def test_non_boolean_fields_fail_closed(self):
+        """exists/alive must be strict booleans — no string coercion."""
+        mock_get = MagicMock(
+            return_value=_mock_caller_response(
+                {
+                    "success": True,
+                    "message": "ok",
+                    "error_code": 0,
+                    "data": {"exists": "true", "alive": "true"},
+                }
+            )
+        )
+        plugin = self._make_plugin(mock_get)
+
+        with pytest.raises(PaasError):
+            await self._call(plugin)
+
+        await plugin.close()
+
+    @pytest.mark.asyncio
+    async def test_transport_error_maps_to_platform_unavailable(self):
+        """Read-only GET has no re-query: transport failure fails immediately."""
+        mock_get = MagicMock(side_effect=aiohttp.ClientError("backend down"))
+        plugin = self._make_plugin(mock_get)
+
+        with pytest.raises(PaasError) as exc_info:
+            await self._call(plugin)
+
+        assert exc_info.value.code == ErrorCode.PLATFORM_UNAVAILABLE
+        assert mock_get.call_count == 1
+
+        await plugin.close()
+
+    @pytest.mark.asyncio
+    async def test_missing_principal_signer_fails_closed(self):
+        plugin = AiohttpBotServicePlugin(base_url="https://agentclaw.example.com")
+
+        with pytest.raises(PaasError) as exc_info:
+            await self._call(plugin)
+
+        assert exc_info.value.code == ErrorCode.CONFIG_INVALID
+
+    @pytest.mark.asyncio
+    async def test_empty_base_url_fails_closed(self):
+        plugin = AiohttpBotServicePlugin(
+            principal_signer=_caller_principal_signer(),
+        )
+
+        with pytest.raises(PaasError) as exc_info:
+            await self._call(plugin)
+
+        assert exc_info.value.code == ErrorCode.CONFIG_INVALID
+
+
+class TestAiohttpBotServicePluginGetExistingCallerConnection:
+    """get_existing_caller_connection: reuse path without credential install."""
+
+    def _make_plugin(self, post, get) -> AiohttpBotServicePlugin:
+        session = MagicMock()
+        session.closed = False
+        session.close = AsyncMock()
+        session.post = post
+        session.get = get
+        plugin = AiohttpBotServicePlugin(
+            base_url="https://agentclaw.example.com",
+            principal_signer=_caller_principal_signer(),
+        )
+        plugin._session = session
+        return plugin
+
+    @pytest.mark.asyncio
+    async def test_success_skips_credential_install(self):
+        """Ready response returns the sandbox_id without any follow-up
+        IAM refresh (GET /api/v1/token/iam) call."""
+        mock_post = MagicMock(
+            return_value=_mock_caller_response(_caller_ready_body("sbx-no-cred"))
+        )
+        mock_get = MagicMock()
+        plugin = self._make_plugin(mock_post, mock_get)
+
+        result = await plugin.get_existing_caller_connection(
+            bot_id="bot_001",
+            owner_id="20881234",
+            user_id="u_001",
+        )
+
+        assert result == "sbx-no-cred"
+        mock_get.assert_not_called()
 
         await plugin.close()

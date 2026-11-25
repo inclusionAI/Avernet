@@ -1,0 +1,29 @@
+[package]
+name = "bcs-app-auth"
+description = "Versioned secure OAuth application orchestration for the BCN V1 API"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[lints]
+workspace = true
+
+# Crate boundary (V1 API auth plan, Task 10): this application crate is
+# transport-neutral orchestration only. Production code here depends ONLY
+# on `service-api` contracts plus the `async-trait` and `time` utilities.
+[dependencies]
+async-trait = { workspace = true }
+bcs-service-api = { workspace = true }
+time = { workspace = true }
+tracing = { workspace = true }
+
+# The same boundary applies to tests: fakes implement the service-api
+# application ports in-process; no adapter or concrete plugin is linked.
+# bcs-test-support is the R25 central-harness home the conformance driver
+# calls; it carries no adapter or plugin link either.
+[dev-dependencies]
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true }
+bcs-test-support = { workspace = true }

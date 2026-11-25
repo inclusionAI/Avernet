@@ -1,3 +1,4 @@
+import { submittedAisUser } from "./ais-task-runner.js";
 import type { AisExecutor } from "../../contracts/ais-executor.js";
 import type { EvolveRepository } from "../../repositories/evolve-repository.js";
 
@@ -29,7 +30,7 @@ export async function reconcileSessionAis(
           } else if (remote.status === "success") {
             reason = "AIS_RESULT_MISSING";
           }
-          if (expired && remote.status === "running") await ais.stopExecution(step.bot_run_id);
+          if (expired && remote.status === "running") await ais.stopExecution(step.bot_run_id, submittedAisUser(step.bot_response_json) ?? task.created_by);
         } catch {
           // A temporary status-query failure is not evidence that the task failed.
         }

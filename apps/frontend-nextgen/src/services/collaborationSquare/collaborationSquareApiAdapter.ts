@@ -1,7 +1,14 @@
+import { getCapabilities } from '@/capabilities';
 import type { MessageViewScope } from '@/domain/collaboration/types';
-import { mapPublicBotCatalogDto, mapPublicGroupCatalogDto } from '@/domain/collaborationSquare/mapper';
+import { mapBcsBotCandidate } from '@/domain/collaborationSquare/bcsBotMapper';
+import {
+  mapBotProfileTransport,
+  mapPublicBotCatalogSummaryToProfile,
+  mapPublicGroupCatalogDto,
+} from '@/domain/collaborationSquare/mapper';
 import { mapBbsTaskItemDto, mapPlazaStatusToBbsStatus } from '@/domain/collaborationSquare/taskMapper';
 import type {
+  BotCandidatePage,
   CollaborationSquarePage,
   CreateSessionResult,
   FriendRequestActor,
@@ -11,6 +18,7 @@ import type {
   OpenBotConversationResult,
   PublicBot,
   PublicBotDiscoveryQuery,
+  PublicBotDiscoveryResult,
   PublicBotProfile,
   PublicBotSearchQuery,
   PublicGroup,
@@ -23,16 +31,25 @@ import type {
 } from '@/domain/collaborationSquare/types';
 import { getPublicBotTargetId } from '@/domain/collaborationSquare/types';
 import { createBotSession } from '@/services/backendApi/bots/privateBotSessionController';
+import { BOT_ENDPOINTS, listBotMetadata, type BotMetadataDto, type BotMetadataQueryItem } from '@/services/backendApi/bots/botController';
 import { listBbsTasks } from '@/services/backendApi/collaboration/bbsTaskController';
-import { createFriendConnectionRequest } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
+import {
+  cancelFriendConnectionRequest,
+  createFriendConnectionRequest,
+} from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 import { getGroup, listPublicGroups } from '@/services/backendApi/collaboration/collaborationGroupController';
-import { discoverPublicBots, searchPublicBots } from '@/services/backendApi/collaboration/publicBotController';
+import { getPublicBotProfile, PublicBotCatalogError } from '@/services/backendApi/collaboration/publicBotController';
 import { createSession as createGroupSessionRequest } from '@/services/backendApi/collaboration/sessionController';
 import { isEnvelopeFailure } from '@/services/backendApi/types';
+import { BackendRequestError } from '@/services/backendApi/httpClient';
+import { listBcsBotCandidates, resolveHumanBcsActorId, searchBcsCandidates } from '@/services/bcs/botCandidatesController';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import {
+  isAceLoginRedirectError,
   isAceLoginResponse,
   mapActionError,
   mapListError,
+  mapProfileError,
   mapSessionRole,
   resolveBotNames,
   splitBotId,
@@ -41,32 +58,44 @@ import {
 import { CollaborationSquareError } from './collaborationSquareError';
 import type { CollaborationSquareGateway } from './collaborationSquareGateway';
 import { listFriendBotRelationships, listPendingFriendBotRelationships } from './friendConnectionRelationships';
+import { filterPublicBotsByMetadata } from './publicBotMetadata';
+import { readPublicBotPage } from './publicBotCursor';
 
 async function enrichRelationships(bots: PublicBot[], actor?: FriendRequestActor, signal?: AbortSignal) {
-  if (!actor) return bots;
-  const { friendIds, applyingIds } = await listFriendBotRelationships(actor, signal);
-  return bots.map((bot) => ({
-    ...bot,
-    relationshipStatus: friendIds.has(getPublicBotTargetId(bot))
-      ? ('friend' as const)
-      : applyingIds.has(getPublicBotTargetId(bot))
-      ? ('applying' as const)
-      : bot.relationshipStatus,
-  }));
+  if (!actor || bots.length === 0) return bots;
+  const { friendIds, applyingIds, pendingRequestIdByTargetId } = await listFriendBotRelationships(actor, signal);
+  return bots.map((bot) => {
+    const targetId = getPublicBotTargetId(bot);
+    const requestId = pendingRequestIdByTargetId.get(targetId);
+    return {
+      ...bot,
+      relationshipStatus: friendIds.has(targetId)
+        ? ('friend' as const)
+        : applyingIds.has(targetId)
+        ? ('applying' as const)
+        : bot.relationshipStatus,
+      // 「申请中」带出当前申请单号（重新申请自救入口取消当前申请时使用）。
+      ...(requestId !== undefined ? { pendingFriendRequestId: requestId } : {}),
+    };
+  });
 }
 
 async function enrichPendingRelationships(bots: PublicBot[], actor?: FriendRequestActor, signal?: AbortSignal) {
   if (!actor || bots.length === 0) return bots;
-  const applyingIds = await listPendingFriendBotRelationships(actor, signal);
-  return bots.map((bot) => ({
-    ...bot,
-    relationshipStatus:
-      bot.isOwnedByLoggedInUser || bot.relationshipStatus === 'friend'
-        ? bot.relationshipStatus
-        : applyingIds.has(getPublicBotTargetId(bot))
-        ? ('applying' as const)
-        : bot.relationshipStatus,
-  }));
+  const pendingRequestIdByTargetId = await listPendingFriendBotRelationships(actor, signal);
+  return bots.map((bot) => {
+    const requestId = pendingRequestIdByTargetId.get(getPublicBotTargetId(bot));
+    return {
+      ...bot,
+      relationshipStatus:
+        bot.isOwnedByLoggedInUser || bot.relationshipStatus === 'friend'
+          ? bot.relationshipStatus
+          : requestId !== undefined
+          ? ('applying' as const)
+          : bot.relationshipStatus,
+      ...(requestId !== undefined ? { pendingFriendRequestId: requestId } : {}),
+    };
+  });
 }
 
 /** 目标 Bot 所有者判断始终使用登录用户；viewer 只决定关系与可见范围。 */
@@ -87,35 +116,119 @@ function resolveEnrichActor(
   return context ? { type: 'human', id: context.userId } : undefined;
 }
 
-/** 接入公开 Bot Search/Discovery、Human→Bot 关系/会话与公开群列表；画像和群写能力保持显式 unsupported。 */
+/** Backend 可选增强的启用决策：部署能力开启且存在可用的登录 Human 身份（metadata 接口校验请求者）。 */
+function isPublicBotBackendEnhancementEnabled(userId: string): boolean {
+  return getCapabilities().getPublicBotBackendEnabled() && Boolean(userId.trim());
+}
+
+const ENHANCEMENT_UNAVAILABLE_TOAST_ID = 'collaboration-square-bot-metadata-unavailable';
+
+/**
+ * metadata 增强不可用（网络/5xx）的一次性用户提示：BCS 结果已保留，只提示增强降级，不重复叠加。
+ * Service 层守「只 enqueue、不直调 toast」：由顶层 useErrorNotifyObserver 按稳定 id=toastKey
+ * 统一投递并去重合并（文案与既有版本完全一致）。
+ */
+function notifyBotEnhancementUnavailable(): void {
+  useErrorNotifyStore.getState().enqueue({
+    toastKey: ENHANCEMENT_UNAVAILABLE_TOAST_ID,
+    message: 'Bot 展示增强暂不可用，已展示基础信息',
+  });
+}
+
+/**
+ * metadata/queries 封装（FetchPublicBotMetadata 契约）：user_id 显式根登录 Human（不可用所选
+ * Bot 身份代替），page_size 覆盖整批身份对；信封失败按传输错误上抛（认证类错误由
+ * filterPublicBotsByMetadata 归类为鉴权路径原样传播）。
+ */
+function fetchPublicBotsMetadata(userId: string, pairs: BotMetadataQueryItem[], signal?: AbortSignal): Promise<BotMetadataDto[]> {
+  const trimmedUserId = userId.trim();
+  if (!trimmedUserId || pairs.length === 0) return Promise.resolve([]);
+  return listBotMetadata({ user_id: trimmedUserId, page_size: pairs.length }, { bots: pairs }, signal).then((response) => {
+    if (isEnvelopeFailure(response)) {
+      throw new BackendRequestError('Bot metadata 响应不是成功信封', {
+        apiPath: BOT_ENDPOINTS.metadataQueries,
+        data: response,
+      });
+    }
+    const items = response.data?.items;
+    if (!Array.isArray(items)) {
+      throw new BackendRequestError('Bot metadata 响应结构无效', {
+        apiPath: BOT_ENDPOINTS.metadataQueries,
+        data: response,
+      });
+    }
+    return items;
+  });
+}
+
+/** BCS candidates 的视角 actor：Bot 视角用所选完整身份，其余从登录 Human user_id 生成 human_<id>。 */
+function resolveBcsCandidateActorId(
+  query: { viewerActorType?: 'human' | 'bot'; viewerActorId?: string },
+  context?: HumanBotActionContext,
+): string {
+  if (query.viewerActorType === 'bot') {
+    const botActor = query.viewerActorId?.trim();
+    if (!botActor) throw new CollaborationSquareError('protocol_error', '当前 Bot 身份不可用，无法查询公开 Bot');
+    return botActor;
+  }
+  const explicitUserId = query.viewerActorType === 'human' ? query.viewerActorId : undefined;
+  const userId = (context?.userId ?? explicitUserId ?? '').trim();
+  if (!userId) throw new CollaborationSquareError('protocol_error', '缺少登录用户身份，无法查询公开 Bot');
+  return resolveHumanBcsActorId(userId);
+}
+
+function isAbortLike(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'AbortError';
+}
+
+/**
+ * Backend 画像增强失败后的兜底策略：鉴权类失败沿既有路径上抛（mapProfileError 已取消协议层
+ * 默认提示），其余失败（404 不在公开目录、5xx、协议异常）回退 BCS 摘要——申请弹窗保持可用。
+ */
+function fallbackBotProfile(fallback: PublicBotProfile, error: unknown): PublicBotProfile {
+  if (isAbortLike(error)) throw error;
+  if (
+    isAceLoginRedirectError(error) ||
+    (error instanceof BackendRequestError && (error.status === 401 || error.status === 403)) ||
+    (error instanceof PublicBotCatalogError && error.code === 'unauthenticated')
+  ) {
+    return mapProfileError(error);
+  }
+  if (error instanceof BackendRequestError && error.toastKey) useErrorNotifyStore.getState().cancel(error.toastKey);
+  return fallback;
+}
+
+/**
+ * 接入 BCS v1 公开候选与语义搜索、可选 Backend 画像/metadata 增强、Human→Bot 关系/会话与
+ * 公开群列表；扫描循环在 publicBotCursor，群写保持显式 unsupported。
+ */
 export class CollaborationSquareApiAdapter implements CollaborationSquareGateway {
   async listBotPage(
     query: PublicBotSearchQuery = {},
     context?: HumanBotActionContext,
     signal?: AbortSignal,
-  ): Promise<CollaborationSquarePage<PublicBot>> {
+  ): Promise<BotCandidatePage> {
     try {
-      const response = await searchPublicBots(
-        {
-          ...(query.search?.trim() ? { search: query.search.trim() } : {}),
-          page: query.page ?? 1,
-          page_size: query.pageSize ?? 20,
-          ...(query.viewerActorType ? { viewer_actor_type: query.viewerActorType } : {}),
-          ...(query.viewerActorId ? { viewer_actor_id: query.viewerActorId } : {}),
-        },
+      const name = query.search?.trim() || undefined;
+      const actorId = resolveBcsCandidateActorId(query, context);
+      const userId = resolveLoggedInUserId(query, context) ?? '';
+      const page = await readPublicBotPage({
+        actorId,
+        userId,
+        offset: query.offset ?? 0,
+        pageSize: query.pageSize ?? 20,
+        backendEnabled: isPublicBotBackendEnhancementEnabled(userId),
+        fetchCandidates: (actor, pageQuery, fetchSignal) =>
+          listBcsBotCandidates(actor, { name, offset: pageQuery.offset, limit: pageQuery.limit }, fetchSignal).then(
+            (envelope) => envelope.data,
+          ),
+        fetchMetadata: fetchPublicBotsMetadata,
         signal,
-      );
-      const viewerUserId = resolveLoggedInUserId(query, context);
-      const bots = response.data.items.flatMap((item) => {
-        const bot = mapPublicBotCatalogDto(item, viewerUserId);
-        return bot ? [bot] : [];
+        onEnhancementUnavailable: notifyBotEnhancementUnavailable,
       });
-      // Search 已返回 bot_uuid/is_friend；仅补读 pending 申请，以保留刷新后的“申请中”状态。
+      // BCS 列表已返回 is_friend；仅补读 sent/pending 申请，保留刷新后的“申请中”状态。
       // 回填 actor 跟随 viewer（对话协作当前角色 tab），缺省为登录人类（协作广场）。
-      return {
-        items: await enrichPendingRelationships(bots, resolveEnrichActor(query, context), signal),
-        total: response.data.total,
-      };
+      return { ...page, items: await enrichPendingRelationships(page.items, resolveEnrichActor(query, context), signal) };
     } catch (error) {
       return mapListError(error, 'Bot');
     }
@@ -133,33 +246,56 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
     query: PublicBotDiscoveryQuery,
     context?: HumanBotActionContext,
     signal?: AbortSignal,
-  ): Promise<PublicBot[]> {
+  ): Promise<PublicBotDiscoveryResult> {
     try {
-      const response = await discoverPublicBots(
-        {
-          keyword: query.keyword.trim(),
-          top_k: query.topK ?? 20,
-          min_score: query.minScore ?? 0.01,
-          ...(query.viewerActorType === 'bot' ? {} : { runtime_state: query.runtimeState ?? 'online' }),
-          ...(query.viewerActorType ? { viewer_actor_type: query.viewerActorType } : {}),
-          ...(query.viewerActorId ? { viewer_actor_id: query.viewerActorId } : {}),
-        },
-        signal,
-      );
-      const viewerUserId = resolveLoggedInUserId(query, context);
+      const keyword = query.keyword.trim();
+      // 空关键词按契约 empty_query 语义本地短路：不发 BCS 搜索、metadata 或关系回填请求。
+      if (!keyword) return { items: [], searchMode: 'empty_query' };
+      const actorId = resolveBcsCandidateActorId(query, context);
+      const response = await searchBcsCandidates(actorId, { q: keyword, purpose: 'discovery' }, signal);
+      const userId = resolveLoggedInUserId(query, context) ?? '';
       const bots = response.data.items.flatMap((item) => {
-        const bot = mapPublicBotCatalogDto(item, viewerUserId);
+        const bot = mapBcsBotCandidate(item, userId);
         return bot ? [bot] : [];
       });
-      return await enrichRelationships(bots, resolveEnrichActor(query, context), signal);
+      // 智能搜索是一次性批次（BCS 搜索容量上限 20）：只过滤本批、不补页；过滤为空也不改写
+      // search_mode、不退回名称匹配或重新搜索。
+      const keptBots = await filterPublicBotsByMetadata({
+        bots,
+        userId,
+        backendEnabled: isPublicBotBackendEnhancementEnabled(userId),
+        fetchMetadata: fetchPublicBotsMetadata,
+        signal,
+        onEnhancementUnavailable: notifyBotEnhancementUnavailable,
+      });
+      // 智能结果的关系回填从 BCS connections 与 pending 完成，不信任 Backend 状态。
+      const items = await enrichRelationships(keptBots, resolveEnrichActor(query, context), signal);
+      return { items, searchMode: response.data.search_mode };
     } catch (error) {
       return mapListError(error, 'Bot');
     }
   }
 
-  async getBotProfile(botId: string): Promise<PublicBotProfile> {
-    void botId;
-    return unsupported('Bot 画像接口尚未接入');
+  async getBotProfile(bot: PublicBot, signal?: AbortSignal): Promise<PublicBotProfile> {
+    // 申请弹窗画像以所点 `PublicBot` 摘要为兜底：Backend 未配置时不读旧 profile 端点；
+    // Backend 启用时画像端点补齐引擎与已公开能力/技能，失败回退 BCS 摘要（404 → 由弹窗内
+    // 按「无已公开能力」版式降级，不再判定 target_invalid）。
+    const fallback = mapPublicBotCatalogSummaryToProfile(bot);
+    if (!getCapabilities().getPublicBotBackendEnabled()) return fallback;
+    try {
+      const profile = mapBotProfileTransport((await getPublicBotProfile(bot.id, signal)).data);
+      // Backend 画像不回写 Catalog 生命周期 status；候选 bcsStatus、shortProfile 等摘要字段原样保留。
+      return {
+        ...profile,
+        ...(bot.description && !profile.description ? { description: bot.description } : {}),
+        ...(bot.shortProfile ? { shortProfile: bot.shortProfile } : {}),
+        ...(bot.friendRequestBotId ? { friendRequestBotId: bot.friendRequestBotId } : {}),
+        ...(bot.isOwnedByLoggedInUser ? { isOwnedByLoggedInUser: true } : {}),
+        ...(bot.bcsStatus ? { bcsStatus: bot.bcsStatus } : {}),
+      };
+    } catch (error) {
+      return fallbackBotProfile(fallback, error);
+    }
   }
 
   async requestBotFriendship(
@@ -190,6 +326,20 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
     }
   }
 
+  /** 取消当前身份的 pending 好友申请（发起方可撤回自己的 pending；「重新申请」自救入口第一步）。 */
+  async cancelBotFriendRequest(requestId: string): Promise<void> {
+    try {
+      const response = await cancelFriendConnectionRequest(requestId);
+      if (isAceLoginResponse(response))
+        throw new CollaborationSquareError('unauthenticated', '登录状态已失效，请重新登录后重试');
+      if (response.code !== 20000)
+        throw new CollaborationSquareError('protocol_error', '取消好友申请接口返回了无法识别的业务码');
+    } catch (error) {
+      // mapActionError 一律重抛映射后的 CollaborationSquareError（never 返回）。
+      mapActionError(error, '取消好友申请');
+    }
+  }
+
   async openBotConversation(
     botId: string,
     context: HumanBotActionContext,
@@ -203,6 +353,13 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
         realBotId,
         {
           user_id: context.userId,
+          // 自有 service Bot 显式 online：后端 POST 缺省 stage=draft 会把会话建进 draft
+          // 运行时，而 /workspace/chat 读取按 online 口径（resolveChatRuntimeStage）→ 必现
+          // 404。好友 Bot（BCN expert 路径自行规范化 stage）与 Personal Bot（聊天页读取
+          // 剥掉 stage 走默认 draft）保持缺省值，不传。
+          ...(options?.isOwnedByLoggedInUser && options?.botType === 'service'
+            ? { stage: 'online' as const }
+            : {}),
           ...(ownerId ? { owner_id: ownerId } : {}),
           // f_user_id 仅好友 Bot 会话需要；目标 Bot 归登录用户所有（自有 Bot）时不得携带。
           ...(options?.isOwnedByLoggedInUser ? {} : { f_user_id: context.userId }),
@@ -270,6 +427,7 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
       const participants = resp.data?.participants ?? [];
       const members = participants.map((p) => ({
         id: p.actor_id,
+        avatarUrl: p.avatar_url,
         displayName: p.name?.trim() || p.actor_id,
         type: (p.actor_kind === 'human' ? 'human' : 'bot') as PublicGroupMember['type'],
         role: p.role,

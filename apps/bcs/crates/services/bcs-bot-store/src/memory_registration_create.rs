@@ -56,6 +56,7 @@ impl MemoryBotRepo {
         created_by: &str,
         token: &str,
     ) -> ServiceResult<bool> {
+        let _write_guard = self.record_write_lock.lock().await;
         // Existing nested lock order is bots -> tokens -> deleted IDs. Retain
         // these guards across persistence and publication so another create or
         // soft-delete cannot pass the absence check before publication finishes.
@@ -163,7 +164,7 @@ fn existing_record(path: &Path, bot_id: &str) -> ServiceResult<bool> {
     }
 }
 
-fn persist_once(path: &Path, record: &PersistedCapabilities) -> ServiceResult<bool> {
+pub(super) fn persist_once(path: &Path, record: &PersistedCapabilities) -> ServiceResult<bool> {
     if existing_record(path, &record.bot_id)? {
         return Ok(false);
     }

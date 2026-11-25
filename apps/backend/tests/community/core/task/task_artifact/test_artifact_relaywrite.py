@@ -27,7 +27,7 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.repository.models import TaskArtifactModel
 from agentclaw.community.core.task.repository.types import TaskInfoRecord
 from agentclaw.community.core.task.task_context.relay_report import apply_relay_report
-from agentclaw.community.core.task.task_context.task_artifact import CodeContent, FileContent, StorageType
+from agentclaw.community.core.task.task_context.task_artifact import CodeContent
 from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import drain_published
 from agentclaw.community.core.task.task_context.task_artifact.report_item import ArtifactReportItem
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
@@ -77,24 +77,6 @@ def _relay_graph_service(db) -> TaskGraphService:
     repo.create_graph(graph, runtime_status=Status.RUNNING)
     service = TaskGraphService(graph_repo=repo)
     return service
-
-
-def _file_item(attempt=0) -> ArtifactReportItem:
-    return ArtifactReportItem(
-        artifact_name=None,
-        artifact_kind="file",
-        session_id="sess-9",
-        task_id=TASK_ID,
-        node_id=NODE_ID,
-        attempt=attempt,
-        content=FileContent(
-            storage_type=StorageType.BOT_WORKSPACE,
-            storage_id="reports/analysis-report.md",
-            file_type="text/markdown",
-            file_name="analysis-report.md",
-            file_id=None,
-        ),
-    )
 
 
 def _code_item(attempt=0) -> ArtifactReportItem:
@@ -155,21 +137,19 @@ def _clean_contextvar():
     drain_published()
 
 
-def test_accepted_execution_with_artifacts_persists_two_rows(db):
+def test_accepted_execution_with_artifacts_persists_one_row(db):
     service = _relay_graph_service(db)
     apply_relay_report(
         service,
-        _execution_command(_accepted_patch([_file_item(), _code_item()])),
+        _execution_command(_accepted_patch([_code_item()])),
     )
     rows = _artifact_rows(db)
     kinds = sorted(r.kind for r in rows)
-    # file + code + output({"result": "evidence"}) 派生 text
-    assert kinds == ["code", "file", "text"]
+    # relay 只落显式非文件 artifacts;output_patch 不再额外派生 text
+    assert kinds == ["code"]
     assert all(r.node_id == NODE_ID for r in rows)
-    # 图未绑定会话:上报 item 采纳其 session_id(§3.3 兜底);派生 text 无上报来源 → None
-    text_row = next(r for r in rows if r.kind == "text")
-    assert text_row.scope_session_id is None
-    assert {r.scope_session_id for r in rows if r.kind != "text"} == {"sess-9"}
+    # 图未绑定会话:上报 item 采纳其 session_id(§3.3 兜底)
+    assert {r.scope_session_id for r in rows} == {"sess-9"}
 
 
 def test_declined_execution_with_artifacts_rejected_wholesale(db):
@@ -180,7 +160,7 @@ def test_declined_execution_with_artifacts_rejected_wholesale(db):
             node_id=NODE_ID,
             execution_decision="DECLINED",
             failure_reason="capability_mismatch",
-            artifact_patch=[_file_item()],
+            artifact_patch=[_code_item()],
         )
     )
     with pytest.raises(TaskStateError):
@@ -191,7 +171,7 @@ def test_declined_execution_with_artifacts_rejected_wholesale(db):
 
 def test_attempt_mismatch_rejects_whole_callback(db):
     service = _relay_graph_service(db)
-    command = _execution_command(_accepted_patch([_file_item(attempt=7)]))
+    command = _execution_command(_accepted_patch([_code_item(attempt=7)]))
     with pytest.raises(Exception):
         apply_relay_report(service, command)
     assert _artifact_rows(db) == []
@@ -199,7 +179,7 @@ def test_attempt_mismatch_rejects_whole_callback(db):
 
 def test_completion_replay_does_not_duplicate(db):
     service = _relay_graph_service(db)
-    apply_relay_report(service, _execution_command(_accepted_patch([_file_item(), _code_item()])))
+    apply_relay_report(service, _execution_command(_accepted_patch([_code_item()])))
     before = {r.artifact_id for r in _artifact_rows(db)}
     # completion 写点 capture 在同一份 fold 后 output 上 → select-first 吸收
     apply_relay_report(
@@ -218,13 +198,10 @@ def test_completion_replay_does_not_duplicate(db):
     assert after == before
 
 
-def test_event_without_artifacts_unchanged(db):
-    """无 artifacts 的 relay 报文:行为与改前一致,仅 output 派生 text 一条(Review Focus #4)。"""
+def test_event_without_artifacts_records_nothing(db):
+    """无 artifacts 的 relay 报文只落图状态,output_patch 不再派生 text 台账。"""
 
     service = _relay_graph_service(db)
     result = apply_relay_report(service, _execution_command(_accepted_patch()))
     assert result.status.value == "APPLIED"
-    rows = _artifact_rows(db)
-    assert len(rows) == 1
-    assert rows[0].kind == "text"
-    assert rows[0].content.text == "evidence"
+    assert _artifact_rows(db) == []

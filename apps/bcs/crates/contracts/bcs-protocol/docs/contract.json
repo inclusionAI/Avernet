@@ -5,10 +5,8 @@
     "bcs_assign_task": [
       "target_bot",
       "message",
-      "response_mode?"
-    ],
-    "bcs_send_task_message": [
-      "message"
+      "response_mode?",
+      "timeout_s?"
     ],
     "bcs_task_complete": [
       "summary"
@@ -30,5 +28,28 @@
     "intent_id_pattern": "^bcs_intent_[0-9a-f]{32}$",
     "arguments_in_echo": false,
     "resolver_api_version": 1
+  },
+  "model_tools": {
+    "bcs_assign_task": [
+      "target_bot",
+      "message",
+      "response_mode?",
+      "timeout_s?"
+    ],
+    "bcs_task_status": [
+      "task_refs"
+    ],
+    "bcs_cancel_task": [
+      "task_ref",
+      "reason"
+    ]
+  },
+  "compatibility_only_tools": [
+    "bcs_send_task_message"
+  ],
+  "compatibility_wire_tools": {
+    "bcs_send_task_message": [
+      "message"
+    ]
   }
 }

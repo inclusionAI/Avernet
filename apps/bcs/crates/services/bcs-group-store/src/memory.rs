@@ -13,11 +13,12 @@ use bcs_event_store::MemoryEventStore;
 use bcs_service_api::port::repo::{
     CommitGroupEventfulMutation, FinalizeGroupProvisioning, GroupEventfulMutation, GroupRepoPort,
 };
+use bcs_service_api::types::authorization_snapshot::GroupAuthorizationSnapshot;
 use bcs_service_api::types::MessageViewScope;
 use bcs_service_api::{
     Group as DomainGroup, GroupHumanNotifyPolicy, GroupKind, GroupMessage,
     GroupMutableFieldsPatch, GroupStatus, GroupStrategy, HumanMentionNotifyMode, Participant,
-    ParticipantMode, ServiceError, ServiceResult, ServiceSpec, generated_group_id,
+    ParticipantMode, ServiceError, ServiceResult, generated_group_id,
 };
 use bcs_service_api::{GroupMetricCount, GroupMetricsSnapshotPort};
 
@@ -25,6 +26,9 @@ use bcs_service_api::{GroupMetricCount, GroupMetricsSnapshotPort};
 #[derive(Debug, Default)]
 pub struct MemoryGroupRepo {
     groups: RwLock<HashMap<String, DomainGroup>>,
+    // Writes and snapshot reads both lock groups before templates.
+    catalog_labels: RwLock<HashMap<String,bcs_service_api::types::catalog_labels::CatalogLabels>>,
+    card_templates: RwLock<HashMap<String, serde_json::Value>>,
     message_counts: RwLock<HashMap<String, usize>>,
     event_store: Option<Arc<MemoryEventStore>>,
     event_env: Option<String>,
@@ -85,6 +89,31 @@ impl GroupMetricsSnapshotPort for MemoryGroupRepo {
 
 #[async_trait]
 impl GroupRepoPort for MemoryGroupRepo {
+    async fn read_detail_snapshot(&self, id: &str) -> ServiceResult<Option<bcs_service_api::types::GroupMutationSnapshot>> {
+        // Keep the same groups-before-labels lock order as atomic writers.
+        let groups = self.groups.read().await;
+        let labels = self.catalog_labels.read().await;
+        Ok(groups.get(id).map(|group| bcs_service_api::types::GroupMutationSnapshot {
+            group: group.clone(), catalog_labels: labels.get(id).cloned().unwrap_or_default(),
+        }))
+    }
+
+    async fn read_card_snapshot(&self, id: &str) -> ServiceResult<Option<bcs_service_api::types::GroupCardSnapshot>> {
+        let groups = self.groups.read().await;
+        let Some(group) = groups.get(id) else { return Ok(None); };
+        let cards = self.card_templates.read().await;
+        let card_template = cards.get(id).cloned().map(|card|
+            super::card_template::project_stored_template(card, id, group.label.as_deref(), group.context.as_deref())
+        ).transpose()?;
+        Ok(Some(bcs_service_api::types::GroupCardSnapshot {
+            version: group.version,
+            catalog_labels:self.catalog_labels.read().await.get(id).cloned().unwrap_or_default(),
+            group_id: group.id.clone(), group_kind: group.group_kind,
+            group_strategy: group.group_strategy, visibility: group.visibility.clone(),
+            record_status: group.record_status.clone(), card_template,
+        }))
+    }
+
     async fn has_public_group_with_members(&self, actor_ids: &[String]) -> ServiceResult<bool> {
         let ids = actor_ids.iter().collect::<std::collections::HashSet<_>>();
         Ok(self.groups.read().await.values().any(|g| g.visibility == "public" && g.record_status != "deleted"
@@ -136,6 +165,13 @@ impl GroupRepoPort for MemoryGroupRepo {
         &self,
         command: CommitGroupEventfulMutation,
     ) -> ServiceResult<DomainGroup> {
+        Ok(self.commit_eventful_mutation_with_snapshot(command).await?.group)
+    }
+
+    async fn commit_eventful_mutation_with_snapshot(
+        &self,
+        command: CommitGroupEventfulMutation,
+    ) -> ServiceResult<bcs_service_api::types::GroupMutationSnapshot> {
         let mut groups = self.groups.write().await;
         let current = groups
             .get(&command.group_id)
@@ -147,6 +183,9 @@ impl GroupRepoPort for MemoryGroupRepo {
                 command.group_id, command.expected_version, current.version
             )));
         }
+        if let GroupEventfulMutation::PatchMutableFields(patch)=&command.mutation {
+            super::validate_catalog_labels(&current,patch.catalog_labels.as_ref())?;
+        }
         let deleting = matches!(&command.mutation, GroupEventfulMutation::Delete);
         if deleting && command.event.is_some() {
             return Err(ServiceError::InvalidOperation {
@@ -157,6 +196,7 @@ impl GroupRepoPort for MemoryGroupRepo {
         let mut candidate = current;
         apply_memory_group_mutation(&mut candidate, &command.mutation, command.mutated_at_ms)?;
 
+        let mut cards = self.card_templates.write().await;
         if let Some(event) = command.event.as_ref() {
             let event_store =
                 self.event_store
@@ -204,13 +244,42 @@ impl GroupRepoPort for MemoryGroupRepo {
         } else {
             groups.insert(command.group_id.clone(), candidate.clone());
         }
-        Ok(candidate)
+        if deleting {
+            cards.remove(&command.group_id);
+            self.catalog_labels.write().await.remove(&command.group_id);
+        } else if matches!(&command.mutation, GroupEventfulMutation::PatchMutableFields(patch) if patch.label.is_some() || patch.context.is_some() || patch.catalog_labels.is_some()) {
+            super::card_template::update_memory_template(&mut cards, &candidate);
+        }
+        if let GroupEventfulMutation::PatchMutableFields(patch)=&command.mutation {
+            if let Some(labels)=&patch.catalog_labels { self.catalog_labels.write().await.insert(command.group_id.clone(),labels.clone()); }
+        }
+        let catalog_labels = self.catalog_labels.read().await
+            .get(&command.group_id).cloned().unwrap_or_default();
+        Ok(bcs_service_api::types::GroupMutationSnapshot { group: candidate, catalog_labels })
     }
 
     async fn upsert(&self, group: DomainGroup) -> ServiceResult<()> {
+        self.upsert_with_catalog_labels(group,None).await
+    }
+    async fn upsert_with_catalog_labels(&self,group:DomainGroup,labels:Option<bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
+        super::validate_catalog_labels(&group,labels.as_ref())?;
         let mut groups = self.groups.write().await;
+        let mut cards = self.card_templates.write().await;
+        super::card_template::update_memory_template(&mut cards, &group);
+        if let Some(labels)=labels { self.catalog_labels.write().await.insert(group.id.clone(),labels); }
         debug!(group_id = %group.id, "Group upserted");
         groups.insert(group.id.clone(), group);
+        Ok(())
+    }
+
+    async fn create_with_catalog_labels(&self,group:DomainGroup,labels:Option<bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
+        super::validate_catalog_labels(&group,labels.as_ref())?;
+        let mut groups=self.groups.write().await;
+        if groups.contains_key(&group.id) {return Err(ServiceError::Conflict("Group identity already exists".into()));}
+        let mut cards=self.card_templates.write().await;
+        super::card_template::update_memory_template(&mut cards,&group);
+        if let Some(labels)=labels {self.catalog_labels.write().await.insert(group.id.clone(),labels);}
+        groups.insert(group.id.clone(),group);
         Ok(())
     }
 
@@ -223,11 +292,18 @@ impl GroupRepoPort for MemoryGroupRepo {
         let group = groups
             .get_mut(id)
             .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
+        let mut cards = self.card_templates.write().await;
+        super::validate_catalog_labels(group,patch.catalog_labels.as_ref())?;
+        let updates_card = patch.label.is_some() || patch.context.is_some() || patch.catalog_labels.is_some();
+        if let Some(labels)=patch.catalog_labels { self.catalog_labels.write().await.insert(id.into(),labels); }
         if let Some(label) = patch.label {
             group.label = Some(label);
         }
         if let Some(context) = patch.context {
             group.context = Some(context);
+        }
+        if updates_card {
+            super::card_template::update_memory_template(&mut cards, group);
         }
         if let Some(opening_message) = patch.opening_message {
             group.opening_message = opening_message;
@@ -408,7 +484,9 @@ impl GroupRepoPort for MemoryGroupRepo {
             .get_mut(id)
             .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
 
+        let mut cards = self.card_templates.write().await;
         group.label = label;
+        super::card_template::update_memory_template(&mut cards, group);
         group.updated_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -430,25 +508,11 @@ impl GroupRepoPort for MemoryGroupRepo {
         Ok(())
     }
 
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        service_spec: Option<ServiceSpec>,
-    ) -> ServiceResult<()> {
-        let mut groups = self.groups.write().await;
-        let group = groups
-            .get_mut(id)
-            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
-        group.service_spec = service_spec;
-        group.updated_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        Ok(())
-    }
-
     async fn delete(&self, id: &str) -> ServiceResult<Option<DomainGroup>> {
         let mut groups = self.groups.write().await;
+        let mut cards = self.card_templates.write().await;
+        cards.remove(id);
+        self.catalog_labels.write().await.remove(id);
         Ok(groups.remove(id))
     }
 
@@ -672,6 +736,19 @@ impl GroupRepoPort for MemoryGroupRepo {
         }))
     }
 
+    async fn read_authorization_snapshot(
+        &self,
+        group_id: &str,
+    ) -> ServiceResult<Option<GroupAuthorizationSnapshot>> {
+        // Memory projects from the CURRENT state, so a second store
+        // instance always observes the just-committed value.
+        let groups = self.groups.read().await;
+        let env = bcs_config::resolve_env_str();
+        Ok(groups
+            .get(group_id)
+            .map(|group| super::authorization_snapshot::memory_snapshot(env, group)))
+    }
+
     async fn message_count(&self, id: &str) -> ServiceResult<usize> {
         let counts = self.message_counts.read().await;
         Ok(counts.get(id).copied().unwrap_or(0))
@@ -702,3 +779,7 @@ use mutation::apply_memory_group_mutation;
 #[cfg(test)]
 #[path = "memory_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "memory_card_tests.rs"]
+mod card_tests;

@@ -1,5 +1,10 @@
 # `agentclaw.community.plugin_api`
 
+For current authority, layering, DI and verification, start at the
+[Backend development guide](../../../../README.md). Protocol details and the
+machine-checked Context Boundary below refine this outbound capability surface.
+
+
 Plugin Protocol declarations (the kernel's outbound interface to swappable capabilities).
 
 ## Context Boundary
@@ -7,16 +12,25 @@ Plugin Protocol declarations (the kernel's outbound interface to swappable capab
 ```yaml
 purpose: "Plugin Protocol declarations (the kernel's outbound interface to swappable capabilities)."
 provides:
+  - BcsOwnershipPlugin
+  - BcsOwnershipError
+  - BcsCollaborationMetadataPlugin
   - "Plugin Protocol classes, including the independent SkillCenterGateway and TcResourceReadyPublisherPlugin"
   - "LocalSkillSecurityProviderProtocol V1"
   - "Plugin marker"
   - "@plugin_impl decorator + Mode/Flavor enums"
   - "IMPL_REGISTRY"
+  - "BcsManagersPlugin + BcsManagersError — full-replace delivery of a Bot's BCS manager set"
+  - "ServiceBotEvalPlugin + ServiceBotEvalContext / ServiceBotEvalFile — service-Bot certification gate"
 consumes:
   []
 internal_dependencies:
+  - agentclaw.community.kernel.bot_ownership_sync
+  - agentclaw.community.kernel.knowledge
   - agentclaw.community.kernel.file_count
   - agentclaw.community.kernel.publish_ignore
+  - agentclaw.community.kernel.bot_manager_sync    # manager sync delivery DTOs
+  - agentclaw.community.kernel.collaboration_repair    # metadata delivery snapshots + MetadataDeliveryError (kernel-owned error family)
   - agentclaw.community.core.base
   - agentclaw.community.core.service_bot.services.baas_service  # BAAS dataclass (BotWsConnectionInfoResponse) typed in BaasServiceProtocol
   - agentclaw.community.core.service_bot.types                  # PublishStage enum, default value in BaasServiceProtocol signatures
@@ -29,6 +43,21 @@ internal_dependencies:
 ### Change impact
 
 Changing a Plugin Protocol signature breaks every local + prod impl + the contract-test suite (Rule 25). `SkillCenterGateway` is separate from the legacy `SkillCenterClient`: its typed request objects carry no endpoint or credential configuration; Team catalogue and publish-submission operations require a request-level Team ID, while publish-status lookup follows SC's globally unique `skill_code` contract. Its adapters do not own publication retries or domain state. Version/download reads require an explicit `PUBLIC` or `TEAM` consumer trust scope; the scope and Team ID are preflight context and are not invented SC wire arguments. Public Reference reads omit Team only after the consumer verifies public visibility. Adding a new Protocol requires updating BOUNDARY_SIGNIFICANT_MODULES if it joins a new module, and adding paired impls (Rule 20).
+
+`ServiceBotEvalPlugin` is the transport-independent seam for service-Bot
+certification. It receives a server-derived `ServiceBotEvalContext` and uploads
+already read into memory (`ServiceBotEvalFile`), and returns the gate decision,
+certification view or pollable submission state as plain mappings. Community and
+local profiles bind deterministic skip implementations that allow the release
+trigger; an enterprise composition supplies the real evaluator instead of
+importing private providers or tables into community. Its Rule 25 conformance
+test drives an upper-layer consumer through the `world` fixture.
+
+Passport create, metadata-update, and credential-reissue operations may carry
+the optional TeamClaw `bot_type`. Enterprise adapters use it together with the
+existing owner work number to synchronize Agent Portal ownership metadata;
+community implementations may ignore it. Omitting it preserves the previous
+wire behavior.
 
 `PassportPlugin.reissue_agent_credentials` separates the stable AgentPass
 address (`entity_id`) from the principal that receives ALC/AAC/AEC authority
@@ -131,6 +160,20 @@ implementation selects the existing Claude Code Engine source layout. The
 factory's existing locator/device-I/O adapters remain responsible for address
 translation, including enterprise host addresses and Teclaw namespaces.
 
+`BcsManagersPlugin` is the outbound transport boundary for manager projection.
+`replace_managers` sends one full `ManagerSnapshot` under an explicit deadline;
+failures expose `BcsManagersError(kind, code)` without raw response bodies.
+Missing targets use `REJECTED` with the kernel's `BOT_NOT_FOUND_CODE` instead
+of an HTTP-shaped code. Background sync still treats this as a permanent
+rejection; request-scoped repair stops remaining writes and reports
+`collaboration_bot_not_found`. The HTTP plugin and consumer conformance suites
+pin this mapping.
+NOT_SENT and UNKNOWN are eligible for the consumer's bounded best-effort retry;
+REJECTED ends the round. UNKNOWN does not prove whether BCS applied the write.
+There is no coordination plugin or persistent block. Consumer conformance lives
+in `tests/community/contracts/test_bcs_managers.py`, exercising the real
+`BotManagerSyncService` through the `world` fixture and asserting plugin calls.
+
 
 ## Token scope V2 and staff-directory errors
 
@@ -145,3 +188,50 @@ DeptLookupError is owned by plugin_api.staff_dept, matching the StaffDeptPlugin
 contract. The old HTTP errors module re-exports the same class identity for
 compatibility; core consumers do not import HTTP exceptions. No-department still
 returns StaffDeptInfo with null fields, and infrastructure failure remains distinct.
+
+## Ownership delivery Plugin API v1
+
+`BcsOwnershipPlugin.replace_ownership(snapshot: OwnershipSnapshot, *,
+timeout_seconds: float) -> OwnershipChange` is async and sends once. Async
+`aclose() -> None` releases owned resources on the shared delivery loop.
+`BcsOwnershipError(kind, code)` exposes only `NOT_SENT`, `UNKNOWN`, or `REJECTED`
+delivery classifications and stable codes; Core owns retries and interprets
+confirmation against the snapshot. A missing-Bot 200 no-op is not alignment.
+
+The v1 consumer is `BotOwnershipSyncService`; implementations are
+`HttpBcsOwnershipPlugin` in `plugins/community/bcs_ownership.py` and
+`RecordingBcsOwnershipPlugin` in `plugins/local/bcs_ownership.py`. The
+`tests/community/contracts/test_bcs_ownership.py` consumer suite obtains the
+service through `world`, checks success/failure and actual plugin calls; no
+protocol waiver is required. Existing `BcsManagersPlugin` remains managers-only.
+
+## Collaboration metadata delivery Plugin API v2 (2026-11-05)
+
+`BcsCollaborationMetadataPlugin` (in `bcs_collaboration_metadata.py`) is the
+collaboration repair feature's outbound port to BCS's Bot metadata:
+`exists(bcs_bot_id) -> bool` probes remote presence, `update_profile(snapshot)`
+sends one `ProfileSnapshot` (an explicit `""` avatar clear is a valid payload),
+and `aclose()` releases delivery resources on the shared
+loop. Every method performs one bounded attempt under `timeout_seconds`; any
+unconfirmed outcome raises the kernel-owned `MetadataDeliveryError(kind, code)`
+with the NOT_SENT/UNKNOWN/REJECTED classification, and no raw response body
+escapes the transport implementation. Core owns component ordering, retries
+and interpretation; implementations register nothing and never initialize
+ownership.
+
+V2 removes caller configuration repair; the normal caller configuration APIs
+are unchanged. Empty/blank summaries retain BCS Keep semantics but a valid
+onboard acknowledgement is successful profile delivery, not an unknown result.
+
+For IAM-triggered outbound token plugins, the orchestrator authenticates the
+requester separately from the Bot owner and the rollout-list entity. The optional
+`caller_runtime_target` selects the stage service binding or the requester's
+independent instance. The optional `device_uuid` identifies an active replica
+within the selected binding. The target resolver verifies authority and
+membership before converting either selector to a physical injection target.
+OpenAPI supplies the verified gateway human principal, including for a friend
+session. The public principal takes precedence over a delegated query user ID.
+The legacy IAM route uses its authentication plugin. Device identifiers are
+opaque and compared verbatim; an explicitly empty selector cannot choose a
+default device. The Bot entity determines the existing rollout scope.
+The Caller refresh runs before selector validation and retains its own result.

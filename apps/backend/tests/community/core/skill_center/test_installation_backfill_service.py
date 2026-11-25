@@ -25,7 +25,7 @@ _BOT = {
 
 _EXPECTED_FLUSH = {
     "bot_id": "bot-1",
-    "owner_id": "owner",
+    "owner_id": "entity-1",
     "env": "pre",
     "engine_type": "openclaw",
     "default_engine_types": ("openclaw",),

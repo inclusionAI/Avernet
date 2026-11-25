@@ -1,7 +1,8 @@
 /** @jest-environment jsdom */
 import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
-import { createBotChatProvider } from '@/services/workspace/botChatProvider';
+import { createBotChatProvider, isAicodingConnectionEngine } from '@/services/workspace/botChatProvider';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
+import { useConversationStore } from '@/stores/conversationStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -21,6 +22,7 @@ const mockUseChatCalls: any[] = [];
 const mockUseChatBridgeCalls: any[] = [];
 let mockChat: any;
 let mockProvider: any;
+let publishConnectionRuntime: (() => void) | undefined;
 
 jest.mock('@tc-chat/adapters', () => ({
   useChat: (opts: unknown) => {
@@ -37,6 +39,7 @@ jest.mock('sonner');
 jest.mock('@/services/bcs/libraryCdnInjector');
 
 const mockedFactory = createBotChatProvider as unknown as jest.Mock;
+const mockedIsAicodingConnectionEngine = isAicodingConnectionEngine as unknown as jest.Mock;
 const mockedToastError = toast.error as jest.Mock;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const cdnModule: any = require('@/services/bcs/libraryCdnInjector');
@@ -45,9 +48,15 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockUseChatCalls.length = 0;
   mockUseChatBridgeCalls.length = 0;
+  publishConnectionRuntime = undefined;
   cdnModule.queryAndRegisterBotLibraryCdn.mockResolvedValue(1);
+  mockedIsAicodingConnectionEngine.mockImplementation((engine?: string | null) => {
+    const normalized = engine?.trim().toLowerCase().replace(/[\s_-]/g, '') || '';
+    return normalized === 'aicoding' || normalized === 'applicationcoding';
+  });
   useWorkspaceStore.getState().resetWorkspace();
   useWorkspaceStore.setState({ activeIdentityId: 'human-1' });
+  useConversationStore.setState({ instanceSelectionByBotId: {} });
   const fn = () => jest.fn<any>();
   mockProvider = {
     loadHistory: fn().mockResolvedValue([]),
@@ -62,6 +71,11 @@ beforeEach(() => {
     abort: fn(),
     subscribeToSupportState: jest.fn<any>(() => jest.fn<any>()),
     subscribeToConnectionStatus: jest.fn<any>(() => jest.fn<any>()),
+    connectionRuntime: { resolved: false, engine: null },
+    subscribeToConnectionRuntime: jest.fn<any>((listener: () => void) => {
+      publishConnectionRuntime = listener;
+      return jest.fn();
+    }),
   };
   mockedFactory.mockReturnValue(mockProvider);
   mockChat = {
@@ -80,11 +94,74 @@ it('仅当 bot 与 session 齐全时创建 provider', () => {
   expect(mockedFactory).toHaveBeenCalledWith({ bot, userId: 'human-1', sessionId: 's1' });
 });
 
+it('service Bot 会把已选实例范围传给 provider', () => {
+  const serviceBot = {
+    ...bot,
+    botType: 'service',
+    engine: 'openclaw',
+    runtimeStage: 'online' as const,
+  };
+  useConversationStore.setState({ instanceSelectionByBotId: { [serviceBot.botId]: 'device-1' } });
+  renderHook(() => useBotChat(serviceBot, session));
+  expect(mockedFactory).toHaveBeenCalledWith({
+    bot: serviceBot,
+    userId: 'human-1',
+    sessionId: 's1',
+    range: { deviceUuid: 'device-1', stage: 'online' },
+  });
+});
+
 it('切换 session 触发 connect + loadHistory', async () => {
   mockProvider.loadHistory.mockResolvedValue([{ id: 'm1' }]);
   renderHook(() => useBotChat(bot, session));
   await waitFor(() => expect(mockProvider.connect).toHaveBeenCalled());
   await waitFor(() => expect(mockProvider.loadHistory).toHaveBeenCalled());
+});
+
+it('历史返回即可就绪，不等待慢连接；连接失败不撤销历史就绪', async () => {
+  let failConnect!: (error: Error) => void;
+  mockProvider.connect.mockImplementation(() => new Promise<void>((_resolve, reject) => { failConnect = reject; }));
+  const history = [{ id: 'history', role: 'assistant', content: '已保存内容' }];
+  mockProvider.loadHistory.mockResolvedValue(history);
+  const { result } = renderHook(() => useBotChat(bot, session));
+  await waitFor(() => expect(result.current.historyReady).toBe(true));
+  expect(mockChat.setMessages).toHaveBeenCalledWith(history);
+  expect(result.current.connectionStatus).toBe('connecting');
+  await act(async () => failConnect(new Error('连接失败')));
+  expect(result.current.historyReady).toBe(true);
+  expect(result.current.connectionStatus).toBe('error');
+});
+
+it('切换会话后旧历史晚到不会覆盖新消息或标记新会话就绪', async () => {
+  let finishOld!: (messages: unknown[]) => void;
+  let finishNew!: (messages: unknown[]) => void;
+  const oldProvider = { ...mockProvider, loadHistory: jest.fn(() => new Promise<unknown[]>((resolve) => { finishOld = resolve; })) };
+  const newProvider = { ...mockProvider, loadHistory: jest.fn(() => new Promise<unknown[]>((resolve) => { finishNew = resolve; })) };
+  mockedFactory.mockReset().mockReturnValueOnce(oldProvider).mockReturnValueOnce(newProvider);
+  const { result, rerender } = renderHook(({ selected }) => useBotChat(bot, selected), { initialProps: { selected: session } });
+  rerender({ selected: { ...session, sessionId: 's2' } });
+  await act(async () => finishOld([{ id: 'old' }]));
+  expect(result.current.historyReady).toBe(false);
+  expect(mockChat.setMessages).not.toHaveBeenCalledWith([{ id: 'old' }]);
+  await act(async () => finishNew([{ id: 'new' }]));
+  expect(result.current.historyReady).toBe(true);
+  expect(mockChat.setMessages).toHaveBeenCalledWith([{ id: 'new' }]);
+});
+
+it('手动重载未完成时切换会话，旧重载结果不覆盖新会话', async () => {
+  let finishReload!: (messages: unknown[]) => void;
+  const oldProvider = { ...mockProvider, loadHistory: jest.fn().mockResolvedValue([]) };
+  const nextProvider = { ...mockProvider, loadHistory: jest.fn().mockResolvedValue([]) };
+  mockedFactory.mockReset().mockReturnValueOnce(oldProvider).mockReturnValueOnce(nextProvider);
+  const { result, rerender } = renderHook(({ selected }) => useBotChat(bot, selected), { initialProps: { selected: session } });
+  await waitFor(() => expect(result.current.historyReady).toBe(true));
+  oldProvider.loadHistory.mockImplementationOnce(() => new Promise<unknown[]>((resolve) => { finishReload = resolve; }));
+  let pending!: Promise<void>;
+  act(() => { pending = result.current.reloadHistory(); });
+  rerender({ selected: { ...session, sessionId: 's2' } });
+  await waitFor(() => expect(nextProvider.loadHistory).toHaveBeenCalledTimes(1));
+  await act(async () => { finishReload([{ id: 'stale-reload' }]); await pending; });
+  expect(mockChat.setMessages).not.toHaveBeenCalledWith([{ id: 'stale-reload' }]);
 });
 
 it('同一 sessionId 切换运行环境时断开旧连接并重新拉取历史', async () => {
@@ -246,6 +323,35 @@ it('允许业务页面注入 Bot 副屏 CDN 加载器', async () => {
   const loadBotLibraryCdn = jest.fn<(botId: string) => Promise<number>>().mockResolvedValue(1);
   renderHook(() => useBotChat(bot, session, undefined, loadBotLibraryCdn));
   await waitFor(() => expect(loadBotLibraryCdn).toHaveBeenCalledWith('b:1'));
+  expect(cdnModule.queryAndRegisterBotLibraryCdn).not.toHaveBeenCalled();
+});
+
+it('好友 Bot 在 connection runtime 未决时不加载副屏 CDN，普通 CC 结果返回后再加载', async () => {
+  const friendBot = { ...bot, isFriendBot: true };
+  const { result } = renderHook(() => useBotChat(friendBot, session));
+
+  expect(result.current.connectionRuntime).toEqual({ resolved: false, engine: null });
+  expect(cdnModule.queryAndRegisterBotLibraryCdn).not.toHaveBeenCalled();
+
+  act(() => {
+    mockProvider.connectionRuntime = { resolved: true, engine: 'claude_code' };
+    publishConnectionRuntime?.();
+  });
+
+  await waitFor(() => expect(result.current.connectionRuntime.engine).toBe('claude_code'));
+  await waitFor(() => expect(cdnModule.queryAndRegisterBotLibraryCdn).toHaveBeenCalledWith('b:1'));
+});
+
+it('好友 Coding Bot 的 connection runtime 确认后仍不加载副屏 CDN', async () => {
+  const friendBot = { ...bot, isFriendBot: true };
+  const { result } = renderHook(() => useBotChat(friendBot, session));
+
+  act(() => {
+    mockProvider.connectionRuntime = { resolved: true, engine: 'aicoding' };
+    publishConnectionRuntime?.();
+  });
+
+  await waitFor(() => expect(result.current.connectionRuntime.engine).toBe('aicoding'));
   expect(cdnModule.queryAndRegisterBotLibraryCdn).not.toHaveBeenCalled();
 });
 

@@ -1,5 +1,14 @@
 # `/openapi/v1` Public API + Tenant Isolation — Team Handoff
 
+Bot public-risk operations use the full `bot_id:entity_id` path identity. They
+reuse the declaration-driven explicit ADMIN check and the existing addressed-Bot
+application grant. An app-only caller names its delegating `user_id`; its live
+Bot grant and that user's current collaborator permission are both checked.
+The delegating user remains the risk application's operator and approval actor.
+The request-cached Bot context is shared by authorization and the handler;
+asynchronous input/permission revalidation still runs before publication and on
+approval callbacks.
+
 **English** | [简体中文](README.zh-CN.md)
 
 Bot classification for group creation: `GET /openapi/v1/bots/{bot_id}/classification`
@@ -1213,8 +1222,8 @@ literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
-all  approvals  authorized  authorized-apps  catalog  ceiling  check-name  collaborations  connection  engine  identity
-loadtest  local  logs  market  metadata  mcp  models  resources  routines  sessions  skills  spaces
+all  approvals  authorized  authorized-apps  catalog  ceiling  check-name  copy  collaborations  connection  engine  identity
+loadtest  local  logs  market  metadata  mcp  models  resources  routines  service-envs  sessions  skills  spaces
 source-credentials  with-manifest  work-order-notifications  work-orders
 ```
 
@@ -1343,12 +1352,13 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}` | Update bot (engine immutable) | `Envelope[Bot]` |
 | PUT | `/openapi/v1/bots/{bot_id}/space` | Change the Bot's owning Business Space | `Envelope[BotSpaceAssignment]` |
 | DELETE | `/openapi/v1/bots/{bot_id}` | Delete bot | `Envelope[Deleted]` |
-| POST | `/openapi/v1/bots/{bot_id}/restart` | Restart (re-provision device) | `Envelope[Bot]` |
-| POST | `/openapi/v1/bots/{bot_id}/recycle` | Release an ACTIVE personal managed-cloud Bot and enter RECYCLED | `200 Envelope[BotRecycleResult]` |
+| POST | `/openapi/v1/bots/{bot_id}/restart` | Restart (re-provision device); AICoding progress in `ext.aicoding.restart` | `200 Envelope[Bot]`, not completion |
+| POST | `/openapi/v1/bots/{bot_id}/recycle` | Recycle an ACTIVE personal managed-cloud Bot asynchronously | All supported engines: `202 Envelope[BotRecycleResult]`; already RECYCLED: `200` |
+| GET | `/openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}` | Read the current/latest recycle operation without advancing it | `200 Envelope[BotRecycleOperation]` |
 | POST | `/openapi/v1/bots/{bot_id}/activate` | Start reactivation of a RECYCLED personal managed-cloud Bot | `202 Envelope[BotActivateResult]`, or `200` when already ACTIVE |
 | POST | `/openapi/v1/bots/{bot_id}/auth-status` | Poll Passport auth (attributes echoed in the body); completes creation when ISSUED — a write, hence a POST | `Envelope[BotAuthStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/auth-status` | Retiring spelling of the poll (attributes in the query string); deprecated — use the POST | `Envelope[BotAuthStatus]` |
-| GET | `/openapi/v1/bots/{bot_id}/status` | Runtime / device readiness | `Envelope[BotStatus]` |
+| GET | `/openapi/v1/bots/{bot_id}/status` | Runtime readiness and available `ext.aicoding.restart` progress | `200 Envelope[BotStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/passport` | Get the bot's Agent Passport | `Envelope[Passport]` |
 | GET | `/openapi/v1/bots/{bot_id}/engine/config` | Read engine config (free-form JSON) | `Envelope[dict]` |
 | PUT | `/openapi/v1/bots/{bot_id}/engine/config` | Write engine config (free-form JSON) | `Envelope[dict]` |
@@ -1356,15 +1366,142 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}/startup-script` | Set/replace it; takes effect next start | `Envelope[StartupScript]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/startup-script` | Clear it | `Envelope[Deleted]` |
 | GET | `/openapi/v1/bots/{bot_id}/config-manifest` | Read the bot's configuration manifest (empty when it has none) | `Envelope[ConfigManifest]` |
-| PUT | `/openapi/v1/bots/{bot_id}/config-manifest` | Set/replace it; all-or-nothing, `422` lists every violation | `Envelope[ConfigManifest]` |
+| PUT | `/openapi/v1/bots/{bot_id}/config-manifest` | Set/replace it, or preview the submitted document with `?dry_run=true` | `Envelope[ConfigManifest]` or `Envelope[ConfigManifestApply]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/config-manifest` | Clear it | `Envelope[Deleted]` |
 | GET | `/openapi/v1/bots/{bot_id}/config-manifest/capabilities` | Which manifest constructs this bot accepts | `Envelope[ConfigManifestCapabilities]` |
 
-Dormant lifecycle operations and the status poll take optional `owner_id`
-(defaulting to the caller) because `bot_id` is not globally unique. They use
-the shared addressed-Bot authorization mechanism, but require OWNER permission;
-ADMIN and MEMBER collaborators cannot recycle or activate the Bot. Teclaw,
-desktop and service Bots are outside this lifecycle.
+`PUT …/config-manifest?dry_run=true` accepts the same `{"document":"<full YAML>"}`
+body and validates its byte limit, schema and engine support like an ordinary
+PUT. It returns HTTP 200 with the full `ConfigManifestApply` plan, including
+entry outcomes, category removals and source resolutions. `trigger` is
+`dry_run` and `apply_id` is empty. With `dry_run=false` or the parameter omitted,
+HTTP 200 still returns `ConfigManifest` and the save starts an Apply as before.
+Generated clients should handle both success payloads for this operation.
+
+The preview uses the PUT's ADMIN authorization and does not take the bot's
+draft edit lock or the Apply lock. It compiles the submitted bytes even when the
+stored manifest changes, and observes available sources and bot state during
+the request. The result is advisory and can differ from a later Apply if those
+inputs change. `POST …/config-manifest/apply?dry_run=true` continues to preview
+the stored document with the POST's authorization and edit-lock requirements.
+
+Preview leaves the stored manifest and Apply history untouched. It stops after
+planning, before publishing a first-time Public Skill, changing installations or
+exclusions from the declaration, or delivering container changes. Sources may
+still be fetched and cached, with acquisition receipts that can inform later
+source resolution. The capability snapshot reads MCP installations and SkillSet
+membership without reconciliation.
+
+Dormant lifecycle operations and their operation query accept optional `entity_id`
+(the addressed Bot's Owner, defaulting to the caller). `owner_id` remains a
+deprecated alias; conflicting values produce 422. They use addressed-Bot
+OWNER authorization: ADMIN/MEMBER collaborators cannot recycle, query its
+operation, or activate. Missing/inaccessible Bots and mismatched operation IDs
+are hidden as 404. Teclaw, desktop and service Bots are outside this lifecycle.
+
+#### Container restart and readiness
+
+`POST /openapi/v1/bots/{bot_id}/restart` has no body and still returns **HTTP
+200**, not 202. For supported bound AICoding (`aicoding` / `claude_code`) Bots,
+backup and container replacement normally run in a durable background operation;
+HTTP 200 is not a completion or readiness guarantee. Other engines and the
+no-old-binding / existing-start recovery paths retain their original behavior,
+so not every response carries an operation handle. Container restart applies
+changed startup scripts and is distinct from engine-process `/engine/restart`
+and desktop `/local/restart`.
+
+Read `data.ext.aicoding.restart` on the returned Bot or poll the existing
+`GET .../status`. It exposes `operation_id`, `status` (RUNNING / SUCCEEDED /
+FAILED), `phase`, `message`, and optional `warning`. Phases are QUEUED,
+BACKING_UP, RESTARTING, WAITING_READY, SUCCEEDED and FAILED; a failure may retain
+its failing phase. `warning.code=backup_failed_continue` means a confirmed
+backup failure was allowed through. Repeated active submissions reuse the
+operation. Bot `status` / `is_ready` and operation status answer different
+questions: ACTIVE does not prove restart completion.
+
+Restart uses the same confirmed-fastdisk backup policy described below:
+`aicoding/fastdisk_fail_block` must be enabled boolean true to block. A blocking
+backup failure stops before destruction and fails only the operation, not Bot
+runtime status. Non-fastdisk or an unsuccessful initial probe skips the helper;
+a validated `partial_success` receipt allows continuation. Desktop/Teclaw,
+incompatible states and unresolved recycling return 409.
+
+#### Asynchronous recycle and reactivation
+
+`POST .../recycle` has no body. Fastdisk coding, non-fastdisk coding and non-coding
+personal managed-cloud Bots all use the same `bot.recycle` task and return HTTP
+202 with `bot_id`, `owner_id`, current Bot `status`, `changed`, `operation_id`
+and `phase`. It does not wait for backup or call container destruction in the
+HTTP request. `changed=true` means a new operation was admitted, **not that the
+Bot is already recycled**. A repeated submission returns the same in-progress
+handle with `changed=false`. A fully recycled Bot without an unresolved
+operation still returns 200 / `status=RECYCLED` / `changed=false`, with no new
+backup, release or audit. Incompatible state or a busy lifecycle returns 409;
+a disabled worker or unconfirmed durable admission returns 503.
+
+For all three types, poll the same dedicated `GET .../recycle-operations/{operation_id}`.
+A missing or replaced operation handle answers 404. Its data contains
+`bot_id`, `owner_id`, `operation_id`, `bot_status`, `phase`, nullable
+`error_code`, `message`, and `warning` (safe code/message only). HTTP 200 means
+the operation was read successfully, including when its phase is FAILED. GET
+never triggers work, repair, retries, release or compensation. It exposes only
+the current/latest handle stored in `Bot.ext.recycle`; after another operation
+replaces it, the previous handle returns 404. Activation retains the last
+recycle result. This is independent of the existing Bot `/status` response.
+
+```text
+QUEUED -> BACKING_UP -> RELEASING -> SUCCEEDED
+                |             |
+              FAILED    NEEDS_CONFIRMATION
+```
+
+Only AICoding (`aicoding` / `claude_code`) runs the existing read-only fastdisk
+probe in the worker. Non-coding Bots skip backup probing, configuration and the
+helper entirely. Non-fastdisk coding skips the helper and failure-switch read.
+Confirmed fastdisk coding reuses its restart strategy and `fastdisk_fail_block`
+policy, read once per operation. With blocking enabled, a failed/expired required
+backup ends the **operation** as FAILED: Bot remains ACTIVE, with its old
+binding and Passport unchanged. It does not set Bot.status or startup markers
+to FAILED. With blocking disabled, existing best-effort behavior remains and a
+confirmed degraded backup is surfaced as a warning. Other engines share the
+same lifecycle state machine, with a no-op backup precondition. Redelivery preserves the backup operation
+ID, first-start budget and already-confirmed fastdisk targets.
+
+Resource release is submitted only after the durable RELEASING fence, followed
+by provider confirmation. Acceptance, a DB-only RELEASED binding, an arbitrary
+404 or an empty inventory is not enough. An ambiguous release is observed, not
+blindly resubmitted. If release/finalization cannot be confirmed, the operation
+ends as NEEDS_CONFIRMATION and blocks new recycle/activate/restart/delete/stop
+requests until an operator verifies the result. There is no new manual-confirm
+or cancel API in this change.
+
+After confirmed release, Passport freeze is best effort; a failure is a warning.
+One transaction releases the binding, sets Bot.status=RECYCLED, finishes the
+journal, and inserts one audit (`source=openapi`, `run_id=operation_id`). Retries
+never repeat a confirmed destruction or successful audit. No recycle DingTalk
+notification is enqueued by this path.
+
+The existing `POST .../activate` remains asynchronous, with the same response
+shape. Pending recycle / NEEDS_CONFIRMATION returns 409 **before** ACTIVE
+idempotency. Historical RECYCLED Bots remain restorable. A row-locked
+RECYCLED -> REACTIVATING claim prevents duplicate activation; rollback cannot
+overwrite a new binding. Activation does not introduce a new queue or status
+endpoint. Backup data restoration still uses the existing provisioning path.
+
+Timing is deliberately separated: confirmed fastdisk backup uses the shared
+restart strategy's 1500s worker budget;
+release/finalization observation is bounded to 600s, polling at 3s; the task
+queue deadline is 24h. These are worker budgets, **not HTTP timeouts or hard
+cancellation** of an in-flight SDK call/container backup script.
+
+Deployment must enable the existing task worker and keep all worker versions
+compatible with `bot.recycle` before opening asynchronous submission. During a
+rolling upgrade, gate the recycle POST at ingress until every worker has the
+handler, then enable the endpoint and updated Gateway schema together. Clients
+must treat 202 as admission and poll for SUCCEEDED, rather than assuming a
+successful POST has already released resources. No new table/DDL or backup
+policy flag is introduced. Real provider release/data restoration needs a
+staging acceptance test; mock/SQLite tests do not prove container recovery.
 
 #### Space-scoped Bot quota
 
@@ -1819,10 +1956,20 @@ a verified principal, is owner/Bot scoped, and uses the standard `Envelope` /
 | DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Recoverably delete one Inactive Local Skill | `Envelope[Deleted]` |
 | GET | `/openapi/v1/bots/skills/{skill_id}/readme` | Read visible shared or Local documentation without selecting a Bot | `Envelope[SkillContent]` |
 
-`413101` is documented only on raw ZIP upload. The stable Local Skill business
+`413101` applies to both raw ZIP and directory upload. The stable Local Skill business
 subcodes are `400101`, `404000`, `409101`–`409104`, `413101`, `502101`, and
 `502102`; existing public categories retain their `xxx000` codes. Generated
-OpenAPI remains derived from the Backend Router and DTOs.
+OpenAPI remains derived from the Backend Router and DTOs. Local package errors
+may carry a stable `data.reason`; clients must tolerate absent or unknown reasons
+and must not parse `message`. Package reasons are `invalid_package`, `invalid_zip`,
+`unreadable_archive`, `unsafe_file_path`, `duplicate_file_path`, `missing_skill_file`,
+`multiple_skill_files`, `invalid_wrapper`, `wrapper_name_mismatch`, `invalid_encoding`,
+and `invalid_metadata`. Manifest reasons are `MISSING_FRONTMATTER`, `INVALID_FRONTMATTER`,
+`INVALID_ENCODING`, `MISSING_NAME`, `MISSING_DESCRIPTION`, `INVALID_NAME_TYPE`,
+`INVALID_DESCRIPTION_TYPE`, `EMPTY_NAME`, `EMPTY_DESCRIPTION`, `NAME_TOO_LONG`,
+`DESCRIPTION_TOO_LONG`, `INVALID_NAME`, and `RESERVED_NAME`. Limit reasons are
+`too_large`, `file_too_large`, `too_many_files`, `expanded_too_large`, and
+`compressed_too_large`. Raw file content and parser exceptions are not returned.
 
 **Release gate — do not mark Track B complete yet.** The cleanup-work table DDL
 from #725 must be applied and verified before application rollout, and the real
@@ -1833,13 +1980,15 @@ and Bot containers. See the [English runbook and rollback procedure](skills-trac
 Scheduled/triggered agent tasks (the former "cron"); trigger is a nested object.
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/{bot_id}/routines` | List (`bot_id`, `status`, paged) | `Envelope[Page[Routine]]` |
+| GET | `/openapi/v1/bots/{bot_id}/routines` | List (`bot_id`, `status`, paged) | `Envelope[RoutinePage]` |
 | POST | `/openapi/v1/bots/{bot_id}/routines` | Create | `201 Envelope[Routine]` |
 | GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Get | `Envelope[Routine]` |
-| PATCH | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Update (partial) | `Envelope[Routine]` |
+| PATCH | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Update (partial) | `Envelope[Routine or RoutineOperationBatch]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Delete | `Envelope[Deleted]` |
-| POST | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/run` | Run now | `Envelope[RoutineRun]` |
-| GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs` | Execution history (paged) | `Envelope[Page[RoutineRun]]` |
+| POST | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/run` | Run now | `Envelope[RoutineRun or RoutineOperationBatch]` |
+| GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs` | Execution history (paged) | `Envelope[RoutineRunPage]` |
+
+Runtime targets: see [the routines target contract](engine-surface.md#routines-runtime-targets) for body/query placement, stage defaults, Caller authorization, per-instance identity and partial failures.
 
 ### 🟩 lucas-xzp · P2 — identity (3 endpoints) · `openapi_v1/identity/router.py`
 Read/write a bot's identity markdown files (RULES, SOUL, …), `file_type` is an

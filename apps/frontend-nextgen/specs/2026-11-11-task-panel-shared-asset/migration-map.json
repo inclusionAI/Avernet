@@ -1,0 +1,176 @@
+[
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/messageWindowLocate.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/messageWindowLocate.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/contract.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/contract.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/text.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/text.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/MarkdownCell.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/MarkdownCell.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/sanitizeHtml.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/rich-content/sanitizeHtml.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/DagView.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/DagView.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/SafeHtml.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/rich-content/SafeHtml.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/GroupDrillDown.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/GroupDrillDown.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/taskPanelMapper.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/taskPanelMapper.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/groupDisplay.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/groupDisplay.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/theme.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/theme.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/artifactTime.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/artifactTime.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/artifactDescriptor.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/artifactDescriptor.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/types.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/types.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/tokens.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/tokens.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/TaskPanelFetcher.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/TaskPanelFetcher.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/icons.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/icons.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/TaskPanel.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/TaskPanel.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/TaskInfoTab.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/TaskInfoTab.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/statusDerivation.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/statusDerivation.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/outputEnvelope.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/outputEnvelope.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/sessionResolution.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/sessionResolution.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/fixture.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/fixture.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/TruncatedText.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/TruncatedText.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/testdata/artifactFixtures.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/testdata/artifactFixtures.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskInfoSection.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskInfoSection.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/v2/ArtifactsSection.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/v2/ArtifactsSection.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskNodePanelV2.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskNodePanelV2.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/v2/taskPanelNav.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/v2/taskPanelNav.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskSwitcherControl.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskSwitcherControl.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskSwitcherBar.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskSwitcherBar.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/v2/NodeListViewV2.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/v2/NodeListViewV2.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskOverviewV2.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskOverviewV2.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/v2/DagViewV2.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/v2/DagViewV2.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskPanelV2.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskPanelV2.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskArtifactPreviewDrawer.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskArtifactPreviewDrawer.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskOutputSection.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskOutputSection.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskPanelV2.css",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskPanelV2.css"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskArtifactsList.tsx",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskArtifactsList.tsx"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/hooks/useGroupMemberNames.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/hooks/useGroupMemberNames.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/hooks/useTaskArtifactPreview.ts",
+    "to": "apps/frontend-nextgen/assets/task-panel/src/panel/hooks/useTaskArtifactPreview.ts"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/index.ts",
+    "to": "apps/frontend-nextgen/src/services/tasks/panel/registerTaskPanel.ts",
+    "role": "SDK-only registration; no compatibility barrel or task implementation"
+  },
+  {
+    "from": "apps/frontend-nextgen/src/assets/TaskPanel/TaskPanelAdapter.tsx",
+    "to": "apps/frontend-nextgen/src/components/Workspace/TaskPanelAdapter.tsx",
+    "role": "SDK-only host adapter, outside the deleted asset directory"
+  }
+]

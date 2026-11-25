@@ -20,7 +20,7 @@ impl MySqlGroupStore {
             "SELECT \
                 gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
                 gp2.bot_uuid AS p_bot_uuid, gp2.role AS p_role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
-                gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
+                gs.service_group_uuid, gs.service_mode, gs.version, gs.record_status, \
                 {} AS created_ts, {} AS updated_ts, \
                 gp2.actor_kind AS p_actor_kind, gp2.mode AS p_mode, gp2.tags_json AS p_tags_json, gp2.message_view_scope AS p_message_view_scope, \
                 gs.group_kind AS g_group_kind, gs.dm_pair_key AS g_dm_pair_key, gs.group_strategy, gs.visibility, gs.human_mention_notify_mode \
@@ -94,13 +94,6 @@ impl MySqlGroupStore {
                     db_get_column_opt(row, "service_group_uuid").ok().flatten();
                 let service_mode: Option<String> =
                     db_get_column_opt(row, "service_mode").ok().flatten();
-                let service_spec_json: Option<String> =
-                    db_get_column_opt(row, "service_spec").ok().flatten();
-                let service_spec: Option<bcs_service_api::ServiceSpec> =
-                    match service_spec_json.as_deref() {
-                        Some(s) if !s.is_empty() => serde_json::from_str(s).ok(),
-                        _ => None,
-                    };
                 let version: i32 = db_get_column_opt::<i64>(row, "version")
                     .ok()
                     .flatten()
@@ -142,7 +135,7 @@ impl MySqlGroupStore {
                     group_kind: Self::parse_group_kind(group_kind_str.as_deref()),
                     dm_pair_key,
                     group_strategy,
-                    service_spec,
+
                     version,
                     record_status,
                     visibility,
@@ -247,7 +240,7 @@ impl MySqlGroupStore {
             "SELECT \
                 gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
                 gp2.bot_uuid AS p_bot_uuid, gp2.role AS p_role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
-                gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
+                gs.service_group_uuid, gs.service_mode, gs.version, gs.record_status, \
                 {} AS created_ts, {} AS updated_ts, \
                 gp2.actor_kind AS p_actor_kind, gp2.mode AS p_mode, gp2.tags_json AS p_tags_json, gp2.message_view_scope AS p_message_view_scope, \
                 gs.group_kind AS g_group_kind, gs.dm_pair_key AS g_dm_pair_key, gs.group_strategy, gs.visibility, gs.human_mention_notify_mode \
@@ -317,13 +310,6 @@ impl MySqlGroupStore {
                     db_get_column_opt(row, "service_group_uuid").ok().flatten();
                 let service_mode: Option<String> =
                     db_get_column_opt(row, "service_mode").ok().flatten();
-                let service_spec_json: Option<String> =
-                    db_get_column_opt(row, "service_spec").ok().flatten();
-                let service_spec: Option<bcs_service_api::ServiceSpec> =
-                    match service_spec_json.as_deref() {
-                        Some(s) if !s.is_empty() => serde_json::from_str(s).ok(),
-                        _ => None,
-                    };
                 let version: i32 = db_get_column_opt::<i64>(row, "version")
                     .ok()
                     .flatten()
@@ -365,7 +351,7 @@ impl MySqlGroupStore {
                     group_kind: Self::parse_group_kind(group_kind_str.as_deref()),
                     dm_pair_key,
                     group_strategy,
-                    service_spec,
+
                     version,
                     record_status,
                     visibility,
@@ -440,11 +426,11 @@ impl MySqlGroupStore {
         let participant_paginated_sql = format!(
             "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
                     gp2.bot_uuid, gp2.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
-                    gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
+                    gs.service_group_uuid, gs.service_mode, gs.version, gs.record_status, \
                     gs.created_ts, gs.updated_ts, \
                     gp2.actor_kind, gp2.mode, gp2.tags_json, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility, gs.human_mention_notify_mode \
              FROM (SELECT DISTINCT g.group_id, g.label, g.status, g.driver_bot, g.originator, g.routing_policy_json, g.context, g.opening_message_json, \
-                          g.service_group_uuid, g.service_mode, g.service_spec, g.version, g.record_status, \
+                          g.service_group_uuid, g.service_mode, g.version, g.record_status, \
                           {} AS created_ts, {} AS updated_ts, \
                           g.group_kind, g.dm_pair_key, g.group_strategy, g.visibility, g.human_mention_notify_mode \
                    FROM bcs_groups g \
@@ -508,13 +494,6 @@ impl MySqlGroupStore {
                     db_get_column_opt(row, "service_group_uuid").ok().flatten();
                 let service_mode: Option<String> =
                     db_get_column_opt(row, "service_mode").ok().flatten();
-                let service_spec_json: Option<String> =
-                    db_get_column_opt(row, "service_spec").ok().flatten();
-                let service_spec: Option<bcs_service_api::ServiceSpec> =
-                    match service_spec_json.as_deref() {
-                        Some(s) if !s.is_empty() => serde_json::from_str(s).ok(),
-                        _ => None,
-                    };
                 let version: i32 = db_get_column_opt::<i64>(row, "version")
                     .ok()
                     .flatten()
@@ -556,7 +535,7 @@ impl MySqlGroupStore {
                     group_kind: Self::parse_group_kind(group_kind_str.as_deref()),
                     dm_pair_key,
                     group_strategy,
-                    service_spec,
+
                     version,
                     record_status,
                     visibility,

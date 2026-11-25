@@ -43,7 +43,8 @@ KEY = "user_id_bypass"
 #: The normalized environments in which the list must be empty.
 PROTECTED_ENVS = frozenset({"pre", "prod"})
 
-_ALLOWED_KEYS = frozenset({KEY})
+#: ``bot_access_check`` shares the block; its own module validates it.
+_ALLOWED_KEYS = frozenset({KEY, "bot_access_check"})
 
 
 def _block() -> dict[str, Any]:

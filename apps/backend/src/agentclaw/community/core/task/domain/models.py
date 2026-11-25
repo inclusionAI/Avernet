@@ -172,7 +172,7 @@ class TaskInfo:
     task_spec: TaskSpec
     source_type: str  # "bot" | "coop_group"
     owner_bot_id: str  # owning bot id
-    owner_user_id: str = ""  # owning user id, kept separate from owner_bot_id
+    owner_user_id: str = ""  # task initiator/visitor, distinct from the entry Bot owner
     execution_config: dict[str, Any] = field(
         default_factory=dict
     )  # 指定 bot/workflow yaml/MAX_DEPTH 等
@@ -218,6 +218,22 @@ class TaskRuntimeProfile:
             ),
             allowed_run_modes=normalized or cls.allowed_run_modes,
         )
+
+    @classmethod
+    def run_modes_from_graph(cls, graph: Any) -> tuple[str, ...]:
+        """Return the frozen successor-mode policy stored on a runtime graph."""
+        extend_props = getattr(graph, "extend_props", None) or {}
+        if not isinstance(extend_props, dict):
+            return cls.allowed_run_modes
+        profile = extend_props.get("runtime_profile") or {}
+        if not isinstance(profile, dict):
+            return cls.allowed_run_modes
+        modes = profile.get("allowed_run_modes")
+        if not isinstance(modes, (list, tuple)) or not modes:
+            return cls.allowed_run_modes
+        return tuple(
+            dict.fromkeys(str(mode).strip() for mode in modes if str(mode).strip())
+        ) or cls.allowed_run_modes
 
     def to_dict(self) -> dict[str, Any]:
         profile = {
@@ -268,6 +284,9 @@ class TaskContext:
     gaps: list[str]
     task_id: str | None = None
     node_id: str | None = None
+    # Current node execution attempt. S1 projects this value from the authoritative
+    # ``harness_retries`` snapshot so artifact reports can align with the server.
+    attempt: int = 0
     root_task_spec: TaskSpec | None = None
     current_task_spec: TaskSpec | None = None
     # Runtime-only S3 outputs. S1 projects them as empty on a fresh attempt
@@ -276,6 +295,9 @@ class TaskContext:
     capability_failure_reason: str | None = None
     accepted_execution_patch: TaskNodePatch | None = None
     accepted_plan_report: TaskReportResult | None = None
+    # S5D must exclude every executor already used on this relay chain, even
+    # when the repeat is not consecutive.
+    used_executor_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -546,6 +568,14 @@ class TaskReportCommand:
     failure_reason: str | None = None
     task_acceptance_result: AcceptanceResult | None = None
     trace: TaskReportTrace | None = None
+    # 终态 PLAN_RESULT(event=null) 的最终产物列表。EXECUTION_RESULT 的节点产物
+    # 仍放在 TaskNodePatch.artifact_patch;这个命令级字段只用于最后一棒任务收口。
+    # 元素类型为 task_context/task_artifact/report_item.ArtifactReportItem,
+    # domain 包不 import task_context(层向纪律),注解按裸 list 保留。
+    artifact_patch: list | None = None
+    # 终态任务级结论文本。它写入 TaskExecutionGraph.output["final_conclusion"],
+    # 只用于轨迹归因与效果分析,不是产物,也不进入 task_artifact 台账。
+    final_conclusion: str | None = None
 
 
 @dataclass(frozen=True)
@@ -613,6 +643,17 @@ class NodeOpResult:
     prev_status: Status | None = None
     new_status: Status | None = None
     error: str | None = None
+
+
+@dataclass
+class TaskStopResult:
+    """Task-level manual stop result."""
+
+    task_id: str
+    status: Status
+    stopped_nodes: list[str]
+    reason: str = "manual_stop"
+    operator: str = ""
 
 
 @dataclass

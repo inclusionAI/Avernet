@@ -50,12 +50,17 @@ Here, both sides can import it and neither owns it.
 
 - `activation_port.py` — `ActivationPort`: per-bot skill and MCP activation
   writes, without the projection choice.
+- `mcp_config.py` — `McpConfigWriteIntent`: the shared
+  configuration actions a Direct MCP claim can preserve, clear or replace.
 - `skill_package_upload_port.py` — `SkillPackageUploadPort`: installing one
   local skill package, without the directory-upload route's method.
 - `identity_file_port.py` — `IdentityFilePort`: listing, reading and writing a
   bot's identity files — three of `IdentityService`'s fifteen public methods.
+- `resource_rows_port.py` — `ResourceRowsPort`: replacing a bot's resource rows
+  under the resources root — one of `ResourceService`'s many.
 - `resource_file_port.py` — `ResourceFilePort`: uploading, deleting and probing
-  a bot's workspace files — three of `ResourceFileService`'s seven.
+  a bot's workspace files, and listing or clearing the resources root
+  (`data/`) — five of `ResourceFileService`'s methods.
 
 The `cli_tools` ports (`arca_port`, `delivery_port`) stay where they are. That
 category already splits by family one level down — `CliToolDeliveryPort` with
@@ -93,18 +98,32 @@ rather than binding the service raw:
 | `ResourceFilePort` | `ResourceFileService`, 7 public methods | 3 |
 | `SkillPackageUploadPort` | `LocalSkillUploadServiceProtocol`, 3 | 2 |
 | `ActivationPort` | `DirectActivationServiceProtocol`, 6 + `project` | 6, no `project` |
+| `SharedSkillPort` | `SkillQueryServiceProtocol`, the skill reads | 2: a Center skill by name, a repo skill by path |
 
 ## Context Boundary
+
+`McpConfigWriteIntent[T]` is the single in-process write-intent contract, not a
+persisted domain entity. `T` is a typed `McpOverride` in Desired State and a
+validated mapping at the persistence port; the configuration value never owns
+command behavior. A claim clears the Bot override with `None` or replaces it
+with a value. Manifest and Genome both compile absent configuration to clear.
+These in-process actions add no YAML or Genome fields.
 
 ```yaml
 purpose: Outbound ports — the narrow contracts core states for what it calls out to, owned by the caller and published where both caller and implementer can reach them.
 provides:
   - ActivationPort
+  - McpConfigWriteIntent
   - SkillPackageUploadPort
+  - RuntimeBindingTarget
   - IdentityFilePort
   - ResourceFilePort
+  - SharedSkillPort  # and SharedSkillNotFound, SharedSkillAmbiguous; implemented by core.skill_center SkillQueryService
+  - BotFileSyncPort  # and BotFileSyncTarget, BotFileSyncResult; the BOT_FILE_SYNC materialiser hands a copy's source bot, literal path and excludes here — never the content store
 consumes: []
 consumed_by:
   - "core/bot_config_manifest (apply) — the `mcp` and `skills` materialisers write through these ports; the four implementations are apply/activation_delegates.py, apply/skill_package_upload.py and managed_files/ports.py"
+  - "core/apply_engine (skills materialiser) — SharedSkillPort turns a desired Center or repository skill into the skill id it claims Direct"
+  - "core/apply_engine (BOT_FILE_SYNC materialiser) — lifts the destination bot's coords into a BotFileSyncTarget and calls BotFileSyncPort.sync; the noop stand-in is apply/materialisers/bot_file_sync_noop.py"
 internal_dependencies: []
 ```

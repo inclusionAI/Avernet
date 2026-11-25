@@ -190,25 +190,21 @@ export class WorkflowDeployHistoryRepository {
     return this.db.transaction(async (tx) => {
       // Row-level lock for MySQL/ZDAS; SQLite serializes writes automatically.
       const lockClause = tx.dbType === "mysql" || tx.dbType === "zdas" ? "FOR UPDATE" : "";
+      // Serialize activation with journal finalization using the same workflow row.
+      if (lockClause) await tx.query(`SELECT workflow_id FROM workflow_specs WHERE workflow_id = ? ${lockClause}`, [workflowId]);
 
-      // Verify target version exists (and lock matching rows)
-      const targetRows = await tx.query<{ count: number }>(
-        `SELECT COUNT(*) as count FROM workflow_deploy_history WHERE workflow_id = ? AND version = ? ${lockClause}`,
+      // Select the same latest deployment deterministically, then update by
+      // primary key. This works without SQLite's optional UPDATE LIMIT feature.
+      const targets = await tx.query<{ id: number }>(
+        `SELECT id FROM workflow_deploy_history WHERE workflow_id = ? AND version = ? ORDER BY deploy_number DESC, id DESC LIMIT 1 ${lockClause}`,
         [workflowId, version],
       );
-      if (!targetRows[0] || targetRows[0].count === 0) {
-        return false;
-      }
-
-      // Clear existing active flag, then set target (latest deploy of the version)
-      await tx.exec(
-        `UPDATE workflow_deploy_history SET is_active = 0 WHERE workflow_id = ? AND is_active = 1`,
-        [workflowId],
-      );
-      await tx.exec(
-        `UPDATE workflow_deploy_history SET is_active = 1 WHERE workflow_id = ? AND version = ? ORDER BY deploy_number DESC LIMIT 1`,
-        [workflowId, version],
-      );
+      if (!targets.length) return false;
+      await tx.exec('UPDATE workflow_deploy_history SET is_active = 0 WHERE workflow_id = ? AND is_active = 1', [workflowId]);
+      const remaining = await tx.query<{ n: number }>('SELECT COUNT(*) AS n FROM workflow_deploy_history WHERE workflow_id = ? AND is_active = 1', [workflowId]);
+      if (Number(remaining[0]?.n) !== 0) throw new Error('Deployment deactivation failed');
+      const activated = await tx.exec('UPDATE workflow_deploy_history SET is_active = 1 WHERE id = ? AND workflow_id = ?', [targets[0].id, workflowId]);
+      if (activated.affectedRows !== 1) throw new Error('Deployment activation failed');
       return true;
     });
   }

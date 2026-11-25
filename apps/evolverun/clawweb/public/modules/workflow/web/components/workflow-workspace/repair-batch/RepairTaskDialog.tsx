@@ -17,9 +17,10 @@ function feedbackItems(detail: RepairTaskDetail) {
   return [...new Map([...rows].sort((a,b)=>a.revision-b.revision).flatMap(row=>row.input.items.map(item=>[item.itemId,item] as const))).values()]
 }
 
-export default function RepairTaskDialog({ workflowId, taskId, includeHistorical, canEdit, onClose, onChanged, onNextRound, onPreviousRound }: {
+export default function RepairTaskDialog({ workflowId, taskId, includeHistorical, canEdit, onClose, onChanged, onNextRound, onPreviousRound, onWorkflowMismatch }: {
   workflowId: string; taskId: string; includeHistorical: boolean; canEdit: boolean;
   onClose: () => void; onChanged: () => void; onNextRound?: (publishedRevision: number) => void; onPreviousRound?: () => void;
+  onWorkflowMismatch?: () => void;
 }) {
   const [detail, setDetail] = useState<RepairTaskDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -47,6 +48,8 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
   const requestPayloadKey = useRef('')
   const requestSequence = useRef(0)
   const activeTask = useRef<{ taskId: string; active: boolean } | null>(null)
+  const workflowMismatch = useRef(onWorkflowMismatch)
+  workflowMismatch.current = onWorkflowMismatch
   const feedbackHasTarget = !!detail?.latestAttempt.input.items[0]?.context?.targetSnapshot
   const feedbackHistory = feedbackHasTarget || includeHistorical
 
@@ -60,7 +63,11 @@ export default function RepairTaskDialog({ workflowId, taskId, includeHistorical
     const read = historyPage === 1 ? repairBatches.task(taskId) : repairBatches.task(taskId, historyPage)
     read.then(result => {
       if (!current) return
-      if (result.workflowId !== workflowId || result.taskId !== taskId) { activeTask.current = { taskId, active: false }; setTaskError('此任务不属于当前工作流'); return }
+      if (result.workflowId !== workflowId || result.taskId !== taskId) {
+        activeTask.current = { taskId, active: false }; setTaskError('此任务不属于当前工作流')
+        if (result.workflowId !== workflowId) workflowMismatch.current?.()
+        return
+      }
       setDetail(result)
       const active = ['drafting', 'publishing'].includes(result.latestAttempt.phase) || !!result.automaticProgress && result.automaticProgress.completedBatches < result.automaticProgress.totalBatches && ['review', 'no_change'].includes(result.latestAttempt.phase)
       activeTask.current = { taskId, active }

@@ -2,9 +2,25 @@
 
 ## Provides
 
+- Fuse v2 Card search adaptation and event-triggered Agent/Group publication,
+  with a coalesced identity queue and bounded retries. Agent Cards carry both
+  committed visibility labels, including private values; public active normal
+  Manager–Worker/State Machine Groups with stored templates carry the bot
+  visibility label. Group Cards use the store-owned template snapshot, retaining
+  skills/interfaces/extensions and adding only the catalog Group ID and labels.
+  Missing templates, Chat/DM and private Groups are unpublished; read failures
+  retry instead of being treated as deletion. See [catalog contract](../../../docs/bcsfuse-catalog.md).
+  Bootstrap supplies the control-plane repo and
+  environment for current-state reads. No startup or master-acquisition scan.
+
 - Local `FusionCoreService` implementation for loading bot context files and producing a fallback fusion response.
 - BCSFuse-backed `FusionCoreService` implementation using the transport-only external client.
 - BCSFuse-backed `WorkerProfileCoreService` implementation and worker sync helpers.
+- Recall-scope translation for worker recommendation: the Core passes a typed
+  `WorkerRecommendationScope`; this crate maps `LegacyDefault` to no outbound
+  `filters` (provider default preserved) and `AllVisibilities` to the controlled
+  `filters.availability = [public, protected, private]`. The fusion layer never
+  decides viewer authorization; it only translates the scope the Core chose.
 - Bot context file loading for `IDENTITY.md`, `SOUL.md`, `RULES.md`, and `MEMORY.md`.
 - Optional LLM-client abstraction used by the local fusion engine.
 
@@ -36,7 +52,7 @@
 
 ## Runtime ownership
 
-The crate owns local context loading and local fallback fusion behavior. It does not own group membership, proposal confirmation, transport sessions, or provider selection.
+The crate owns local context loading and local fallback fusion behavior. It does not own group membership, transport sessions, or provider selection.
 
 ## Parking status
 
@@ -46,3 +62,13 @@ Promoted from `mix/` in Phase 3. `LocalFusionService` is the offline fallback; `
 
 - `cargo test --package bcs-fusion --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-fusion --all-targets --manifest-path src/bcs/Cargo.toml`
+
+## Configured catalog labels
+
+The [BCS label contract](../../../docs/catalog-labels.md) owns dictionary,
+omission, atomic persistence, refresh fencing and complete-publication semantics.
+Service API 7.0.0 adds typed metadata and explicit preserve/replace commands;
+external Rust consumers rebuild together. Labels are not raw Card or authorization
+state. Bootstrap loads the independent policy file once; no environment overlay
+or request can extend it. See the change validation record for actual test and
+release evidence; local code is not a published or deployed revision.

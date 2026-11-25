@@ -39,7 +39,7 @@ function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement
 }
 
 function Td({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn('border-t border-border px-4 py-3 align-top text-xs', className)} {...props} />;
+  return <td className={cn('border-t border-divider px-4 py-3 align-top text-xs', className)} {...props} />;
 }
 
 export function RoutineTaskTab({
@@ -177,6 +177,7 @@ export function RoutineTaskTab({
                           size="sm"
                           leftIcon={<Play className="size-4" />}
                           disabled={triggerDisabled}
+                          aria-label={triggerDisabled ? '立即触发：任务已停用，请先启用任务' : undefined}
                         >
                           立即触发
                         </Button>
@@ -185,7 +186,7 @@ export function RoutineTaskTab({
                     return (
                       <tr
                         key={makeRoutineKey(item.botId, item.id, item.runtimeStage)}
-                        className="border-b border-border text-xs transition-colors hover:bg-muted/50"
+                        className="border-b border-divider text-xs transition-colors hover:bg-muted/50"
                       >
                         <Td className="max-w-[24rem]">
                           <div className="space-y-1">
@@ -249,14 +250,10 @@ export function RoutineTaskTab({
                               查看实例
                             </Button>
                             {triggerDisabled ? (
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <span className="inline-flex">{triggerDialog}</span>
-                                  </TooltipTrigger>
-                                  <TooltipContent>定时任务未启用，不能立即触发</TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
+                              <span className="inline-flex items-center gap-2">
+                                <span className="text-xs text-muted-foreground">请先启用任务</span>
+                                {triggerDialog}
+                              </span>
                             ) : (
                               triggerDialog
                             )}

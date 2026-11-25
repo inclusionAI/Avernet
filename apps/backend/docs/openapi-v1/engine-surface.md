@@ -122,7 +122,59 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 | PUT | `…/{bot_id}/sessions/{session_id}/favorite` | `PUT /api/session-favorites/{encoded_session_id}` | idempotently favorite → `Envelope[SessionFavorite]` |
 | DELETE | `…/{bot_id}/sessions/{session_id}/favorite` | `DELETE /api/session-favorites/{encoded_session_id}` | idempotently unfavorite → `Envelope[SessionFavorite]` |
 
+### Friend session files
+
+Non-TeClaw friend Bots support the same session-file lifecycle as an owner or
+explicit member collaborator: upload intent, upload completion, materialization
+status, listing, content reads, and deletion. This is not an operator grant.
+Each friend request rechecks the live BCN friendship and Backend-owned session;
+upload and deletion additionally require
+`caller_runtime_target=caller_instance`, so they cannot target the Bot owner's
+service runtime. Existing upload clients may omit `f_user_id`: Backend attempts
+operator authorization first and only then falls back to the authenticated
+user's strictly owned friend session. Failures remain masked as 404.
+
 Two things about this group are not the shape a reader would assume:
+
+**Opt-in source filtering:** `GET /bots/{bot_id}/sessions?source=mine|others`
+uses bounded cursor windows instead of the legacy page-number contract.
+`user_id` remains the authenticated caller; `owner_id` locates the Bot's real
+owner. Both Owner and authorized collaborators may use either source. This does
+not expand their existing runtime-instance or message-read authorization.
+
+- Omit `source` to preserve all existing behavior, including owner-only
+  `all_but_others` forwarding and the legacy `total/items` response shape.
+- With `source`, keep `page=1` and set `page_size` (1–100). Continue with
+  `source_cursor=<previous data.next_cursor>` and identical caller/Bot/stage,
+  `device_uuid`, `agent_id`, `session_key` and page size.
+- The source response adds `source`, `has_more`, `next_cursor`, `scan_limited`.
+  Its `total` counts matching records returned so far, not all matching records.
+  A short or empty `items` **does not mean the end**; use `has_more`. There is no
+  arbitrary filtered page jump or exact total without an expensive full scan.
+- For `mine`, verified OpenClaw and AICoding/Claude Code implementations receive
+  `user_id=<authenticated caller>` plus `source=all_but_others`, for both Owner
+  and collaborator. Backend makes one native-filtered window read, with no
+  secondary creator filtering. Cursor offsets are filtered offsets in this mode.
+  This preserves the engine's existing Owner semantics, including retention of
+  some unknown/channel keys; it is not a strict human-creator audit.
+- `others`, and `mine` on engines without verified native support, use Backend
+  fallback filtering. Backend filters at most
+  two offset windows per request, each at most `page_size+1`, with a three-second
+  await budget. A sparse window can be resumed without scanning again from zero.
+  At candidate depth 2000, continuation returns 422 with an explicit depth-limit
+  message; this must be shown as a limit, not "no more sessions". Slow reads
+  return 504 rather than an invented successful empty page.
+- Fallback scanning uses historical session-key creator formats; engine `user_id` is not a
+  creator field. Unknown/synthetic creator keys remain in `mine` for compatibility,
+  never `others`. Numeric user IDs compare without leading zeros. This is not
+  a strict "human created" audit. Offset pagination is not snapshot-consistent
+  under concurrent additions/deletions. Cursors carry positions, not authority.
+- Invalid source/cursor, cursor-scope changes, `page!=1`, or mixing source with
+  `f_user_id` returns 422. Friend reads, favorites, messages and deprecated
+  component-first selectors are unchanged. Separate Caller instances are not
+  searched or enumerated by this filter.
+
+Example: `GET /openapi/v1/bots/example/sessions?owner_id=owner&user_id=reader&stage=online&source=others&page_size=20`.
 
 - **`total` is a lower bound, not a count.** All three paged routes answer with
   `SessionPage` / `MessagePage` — `Page` subclasses whose `total` says *at least
@@ -634,3 +686,58 @@ does not add it (rule C2)._
    with no `total`.
 5. **Timeouts** — `DeviceAdapterTransport.invoke()` takes a per-call timeout; the
    public surface needs one documented deadline per group.
+
+## Routines runtime targets
+
+The seven `/openapi/v1/bots/{bot_id}/routines` operations reuse the existing
+Cron relay. `runtime_stage` is `draft`, `verify`, or `online`; it does not select
+a Backend deployment environment. Create accepts `runtime_stage`, `device_uuid`,
+and `operator_id` **in the JSON body**. All six other operations accept them
+**in the query string**. `user_id` and `entity_id` (retiring alias `owner_id`)
+remain query parameters under existing authentication, grant, role and edit-lock checks.
+
+```json
+{
+  "name": "daily-brief",
+  "trigger": {"type": "schedule", "cron": "0 9 * * *"},
+  "command": "Summarize yesterday's work",
+  "runtime_stage": "online",
+  "device_uuid": "existing-device-uuid",
+  "operator_id": "authorized-caller"
+}
+```
+
+Subsequent requests retain that same target tuple, for example:
+`GET /openapi/v1/bots/<bot-id>/routines/<routine-id>?user_id=<acting-user>&entity_id=<owner>&runtime_stage=online&device_uuid=<device-uuid>&operator_id=<caller>`.
+PATCH still takes the existing partial routine body, such as `{"enabled":false}`.
+Routing fields never enter the engine job payload.
+
+| Operation | Omitted stage | Explicit selectors / published-stage behavior |
+| --- | --- | --- |
+| List | Aggregate available stages and the current authorized user's existing online Caller instances | Explicit draft retains the previous draft-only scope; instance/Caller selectors require an explicit stage |
+| Create | Existing draft creation | Any explicit stage selects one existing runtime; multiple replicas require UUID |
+| Detail / PATCH / DELETE / run | draft | UUID or Caller selects one runtime; stage-only published PATCH permits enabled changes and may broadcast; run may broadcast; stage-only published DELETE remains forbidden |
+| Runs | Validate selectors first, then draft | Only operator triggers Caller-targeted resolution; UUID-only published requests retain device filtering; draft plus UUID without operator remains invalid |
+
+`operator_id` selects a Caller and never grants permission. Selecting someone
+else's Caller additionally requires Bot ADMIN. Human authorization uses the
+verified principal; app-only calls keep their existing granted acting-user
+context. Missing Caller bindings are never created and failures never fall back
+to another runtime. POST schema/type errors remain 422; invalid query targets,
+cross-field combinations and domain targets use their existing 400/403/404/409/504 statuses.
+
+Routine and run views retain trusted `device_uuid`/`operator_id` and runtime
+context. Keep rows by `(owner_id, bot_id, runtime_stage, device_uuid, operator_id,
+routine_id)`; identical IDs on different devices are distinct. Nullable target
+fields mean unreported metadata, not a guessed device. List and history pages
+add `failed_targets`; history totals describe the records actually fetched,
+ordered newest first with stable ties. Deprecated addresses keep their original
+contract and do not gain target selectors.
+
+Stage-only PATCH/run broadcasts add a `RoutineOperationBatch` response branch
+with `results`, `succeeded`, `failed`, and `failed_targets`. Successful run
+acknowledgements describe triggering, with null execution timestamps; consult
+history for execution results. Relay failure always produces the standard error
+Envelope with `data=null`, including partially executed broadcasts; no automatic
+retry is performed. Successful reads with empty data and failed targets preserve
+both the success status and the failure metadata.

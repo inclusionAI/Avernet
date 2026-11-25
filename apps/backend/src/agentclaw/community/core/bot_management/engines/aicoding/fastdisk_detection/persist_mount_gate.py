@@ -5,7 +5,7 @@ import re
 import sys
 
 
-def check_mounts(storage, home, marker, mountinfo):
+def check_mounts(storage, home, marker, mountinfo, *, live_mounts_only=False):
     targets = set()
     with open(mountinfo, encoding='utf-8') as stream:
         for line in stream:
@@ -26,6 +26,10 @@ def check_mounts(storage, home, marker, mountinfo):
             raise ValueError('mount source mismatch: ' + name)
     if all(mounted):
         return 'run'
+    if live_mounts_only:
+        if any(mounted):
+            raise ValueError('partial fastdisk bind mounts')
+        return 'skip_no_fastdisk'
     if any(mounted) or os.path.lexists(marker):
         raise ValueError('partial mounts or ready marker conflicts with live mounts')
     fastdisk_pending = False

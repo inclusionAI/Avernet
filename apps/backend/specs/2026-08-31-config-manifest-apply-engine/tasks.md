@@ -105,7 +105,7 @@ than something to work around:
   `.../core/bot_config_manifest/README.md`,
   `src/backend/tests/community/core/bot_config_manifest/test_manifest_schema.py`
 - **Done when:**
-  - [x] `CATEGORY_ENTRY_KEYS[ManifestCategory.MCP]` is `{"server_code"}`.
+  - [x] `CATEGORY_ENTRY_KEYS[Category.MCP]` is `{"server_code"}`.
   - [x] `validate_mcp_entry` drops its `config` branch; `config` is refused by
         the existing `unknown_field` path, exactly as retired `entrypoints` is.
   - [x] A named test pins the refusal, mirroring
@@ -189,7 +189,7 @@ than something to work around:
   - [x] `ApplyStatus` is tallied **after** every decision is made.
   - [x] The lock is taken once around the whole call and released in a
         `finally`, `dry_run` included; a held lock raises
-        `ManifestApplyInProgressError`.
+        `ApplyInProgressError`.
   - [x] **Nothing is written to the bot record on any path** — no status, no
         activation, no readiness gate — and no code branches on whether this is
         a first boot.
@@ -306,7 +306,7 @@ than something to work around:
         manifest's own `GET` already sets.
   - [x] A bot with **no stored manifest** applies nothing and reports nothing
         applied, without erroring.
-  - [x] `ManifestApplyInProgressError` maps to 409 in both the status map and
+  - [x] `ApplyInProgressError` maps to 409 in both the status map and
         the biz-code map; a failed entry or an aborted category is a **200 with
         a report**, never an error status.
   - [x] Routes carry no domain policy: they resolve the bot, call the service,

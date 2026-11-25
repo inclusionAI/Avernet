@@ -31,6 +31,7 @@ from agentclaw.community.core.bot_management.engines.registry import prepare_ins
 
 import asyncio
 import traceback
+from time import monotonic
 from typing import Any, Dict, Optional
 
 from injector import inject
@@ -62,6 +63,7 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
     BaasServiceError,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import BaasNoActiveDevicesError
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
     service_publish_extra_envs,
@@ -180,6 +182,58 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
     # ------------------------------------------------------------------
     # Public entry
     # ------------------------------------------------------------------
+    async def get_caller_instance_status(
+        self, *, user_id: str, bot_id: str, owner_id: str,
+    ) -> Dict[str, bool]:
+        """Observe an allocated Caller without entering its lifecycle flow."""
+        bot = await asyncio.to_thread(self._find_chat_bot, bot_id, owner_id)
+        if bot is None:
+            raise self._caller_permission_error("bot_not_found")
+        instance = await asyncio.to_thread(
+            self._instance_repo.get_instance, user_id, bot_id, str(bot["owner_id"]),
+        )
+        ext = instance.get("ext") if instance else None
+        bot_uuid = ext.get("bot_uuid") if isinstance(ext, dict) else None
+        if not isinstance(bot_uuid, str) or not bot_uuid.strip():
+            return {"exists": False, "alive": False}
+        engine_type = bot.get("active_engine") or "openclaw"
+        started = monotonic()
+        context = {
+            "system": "baas", "direction": "outbound", "operation": "caller_instance_status",
+            "method": "GET", "route": "/api/v1/bots/{bot_uuid}",
+            "bot_id": bot_id, "owner_id": str(bot["owner_id"]), "user_id": user_id,
+            "bot_uuid": bot_uuid, "engine_type": engine_type, "health_check": True,
+            "tenant": get_current_avernet_tenant(), "env": get_current_env(),
+        }
+        logger.info("event=caller_instance_status.provider.request context=%s", context)
+        try:
+            observation = await asyncio.to_thread(
+                self._baas.get_bot, bot_uuid, health_check=True, engine_type=engine_type,
+                log_response=False,
+            )
+            devices = observation.get("devices") or []
+            health = [
+                {"status": device.get("status"), "health": device.get("health")}
+                for device in devices
+            ]
+            alive = observation.get("status") != "RELEASED" and any(
+                device["status"] == "ACTIVE" and device["health"] == "true"
+                for device in health
+            )
+        except Exception as error:
+            logger.warning(
+                "event=caller_instance_status.provider.failed context=%s error_type=%s duration_ms=%s",
+                context, type(error).__name__, round((monotonic() - started) * 1000, 2),
+            )
+            raise
+        logger.info(
+            "event=caller_instance_status.provider.success context=%s status=%s devices=%s "
+            "exists=true alive=%s duration_ms=%s",
+            context, observation.get("status"), health, alive,
+            round((monotonic() - started) * 1000, 2),
+        )
+        return {"exists": True, "alive": alive}
+
     async def get_application_caller_connection(
         self,
         *,
@@ -248,6 +302,12 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
         error = ChatPermissionError("无权限执行此操作")
         error.reason = reason
         return error
+
+    def get_existing_caller_instance(
+        self, user_id: str, bot_id: str, owner_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Read the exact subject's instance without creating or upgrading it."""
+        return self._instance_repo.get_instance(user_id, bot_id, owner_id)
 
     async def get_caller_connection(
         self,
@@ -424,6 +484,7 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                             owner_id=owner_id,
                             publish_id=service_bot_publish_id,
                             binding_id=binding_id,
+                            force_runtime_refresh=True,
                         )
                     else:
                         logger.warning(
@@ -475,7 +536,12 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
         except Exception as e:
             # Record exception traceback to ext and update instance
             error_traceback = traceback.format_exc()
-            logger.error(
+            log_failure = (
+                logger.warning
+                if isinstance(e, ConnectionError) and e.caller_device_unavailable
+                else logger.error
+            )
+            log_failure(
                 "[ExpertChatInstance] get_caller_connection failed: bot=%s owner=%s user=%s: %s\n%s",
                 bot_id, owner_id, user_id, e, error_traceback,
             )
@@ -509,25 +575,22 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
     ) -> tuple[Any, Optional[str]]:
         """Resolve the owner success publish order + migration_path.
 
-        Same source as ``BaasService.get_bind_id(SUCCESS)``: the latest
-        success publish order under ``(publish_bot_id=bot_id, owner_id,
-        env)``. ``migration_path`` rides on that publish order's ``ext``
+        Same exact source-PK/environment and newest-first order as the online
+        runtime selector. ``migration_path`` rides on that publish order's ``ext``
         (written by build, read by verify/online/release — see
         ``publish_flow_service.py``); the instance never holds it.
 
-        No source-bot back-lookup: the publish order + ``bot_id`` carry
-        everything the baas payload needs (``bot_name``/``owner_id``/
-        ``version`` from the record; the rest is baas-side resolved).
+        A newer draft or another owner's same-named Bot cannot change the
+        artifact reproduced by a friend Caller instance.
         """
         env = get_current_env()
         address = BotAddressResolver(self._bot_repo).resolve(
             bot_id=bot_id, legacy_owner_id=owner_id
         )
-        publish_record = self._publish_repo.get_by_publish_bot_id(
-            publish_bot_id=bot_id,
-            owner_id=address.entity_id,
-            env=env,
-            publish_status=PublishStatus.SUCCESS.value,
+        records = self._publish_repo.list_by_source_bot(address.bot_pk, env)
+        publish_record = next(
+            (record for record in records if record.status == PublishStatus.SUCCESS.value),
+            None,
         )
         if publish_record is None:
             logger.warning(
@@ -729,7 +792,9 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                 device_affinity=user_id,
             )
         except BaasServiceError as e:
-            logger.error(
+            device_unavailable = isinstance(e, BaasNoActiveDevicesError)
+            log_failure = logger.warning if device_unavailable else logger.error
+            log_failure(
                 "[ExpertChatInstance] get_ws_info_by_bot_uuid failed: bot=%s "
                 "bot_uuid=%s: %s",
                 bot_id, bot_uuid, e,
@@ -738,6 +803,7 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                 f"Failed to get ws info: {e}",
                 error_code="5001",
                 original_error=str(e),
+                caller_device_unavailable=device_unavailable,
             ) from e
         except Exception as e:
             logger.error(
@@ -774,6 +840,7 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
         owner_id: str,
         publish_id: int,
         binding_id: Optional[int] = None,
+        force_runtime_refresh: bool = False,
     ) -> None:
         """Exchange and install Caller credential for the container.
 
@@ -787,7 +854,13 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
             owner_id: The bot owner's ID.
             publish_id: The service bot publish record ID.
             binding_id: The device binding ID (optional).
+            force_runtime_refresh: Reinstall after provisioning even if expiry is not later.
         """
+        exchange_kwargs = {"force_runtime_refresh": True} if force_runtime_refresh else {}
+        logger.info(
+            "[ExpertChatInstance] Caller identity exchange requested: bot=%s owner=%s user=%s binding_id=%s force_runtime_refresh=%s",
+            bot_id, owner_id, user_id, binding_id, force_runtime_refresh,
+        )
         try:
             await asyncio.to_thread(
                 self._caller_identity.exchange_caller_identity,
@@ -802,14 +875,15 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                 entity_id=owner_id,
                 binding_id=binding_id,
                 is_test_exchange=False,
+                **exchange_kwargs,
             )
             logger.info(
-                "[ExpertChatInstance] Caller identity exchange succeeded: bot=%s owner=%s user=%s",
-                bot_id, owner_id, user_id,
+                "[ExpertChatInstance] Caller identity exchange succeeded: bot=%s owner=%s user=%s binding_id=%s force_runtime_refresh=%s",
+                bot_id, owner_id, user_id, binding_id, force_runtime_refresh,
             )
         except Exception as e:
             # Log error but do not interrupt container startup
             logger.error(
-                "[ExpertChatInstance] Caller identity exchange failed: bot=%s owner=%s user=%s error=%s",
-                bot_id, owner_id, user_id, e,
+                "[ExpertChatInstance] Caller identity exchange failed: bot=%s owner=%s user=%s binding_id=%s force_runtime_refresh=%s error_type=%s",
+                bot_id, owner_id, user_id, binding_id, force_runtime_refresh, type(e).__name__,
             )

@@ -18,6 +18,7 @@ from agentclaw.community.core.resources.service import (
     DirectoryTooLargeError,
     ResourceNotFoundError,
 )
+from agentclaw.community.core.ports.resource_file_port import ListingFailed, WorkspaceEntry
 from agentclaw.community.core.services import resource_file_service
 from agentclaw.community.core.services.resource_file_service import (
     ResourceFileService,
@@ -77,6 +78,73 @@ async def test_list_addresses_workspace_namespace_and_builds_rel_path():
     assert kwargs["namespace"] == "workspace"
     assert items[0]["path"] == "sub/a.txt"
     assert items[0]["size"] == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["arca", "local", "baas", "teclaw"])
+@pytest.mark.parametrize("request_path", ["", "sub"])
+async def test_absolute_path_prefers_explicit_provider_path(provider, request_path):
+    entry = {
+        "name": "a.txt", "is_dir": False, "size": 3,
+        "size_human": "3 B", "modified_at": "2026-11-08T00:00:00Z",
+        "path": "/workspace/a.txt", "absolute_path": "/data/bot/workspace/a.txt",
+    }
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(return_value=[entry])
+    svc, _ = _svc(provider=provider, device_fs=device_fs)
+
+    items = await svc.list_dir(**_COORDS, path=request_path)
+
+    assert items == [{
+        "name": "a.txt", "path": f"{request_path}/a.txt" if request_path else "a.txt",
+        "absolute_path": "/data/bot/workspace/a.txt", "is_dir": False,
+        "readonly": False, "size": 3, "size_human": "3 B",
+        "modified_at": "2026-11-08T00:00:00Z",
+    }]
+    device_fs.list_dir.assert_awaited_once_with(
+        f"workspace/{request_path}" if request_path else "workspace"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("explicit", [{}, {"absolute_path": None}, {"absolute_path": ""}])
+@pytest.mark.parametrize("legacy", [
+    {"path": "/workspace/sub/a.txt"}, {}, {"path": None}, {"path": ""},
+])
+@pytest.mark.parametrize("request_path", ["", "sub"])
+async def test_absolute_path_preserves_fallbacks(explicit, legacy, request_path):
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(return_value=[
+        {"name": "a.txt", "is_dir": False, **explicit, **legacy},
+    ])
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+
+    items = await svc.list_dir(**_COORDS, path=request_path)
+
+    relative = f"{request_path}/a.txt" if request_path else "a.txt"
+    assert items[0]["absolute_path"] == (legacy.get("path") or f"workspace/{relative}")
+    assert items[0]["path"] == relative
+
+
+@pytest.mark.asyncio
+async def test_list_logs_projection_context_without_provider_payload(monkeypatch):
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(return_value=[{
+        "name": "a.txt", "absolute_path": "/data/bot/workspace/a.txt",
+        "token": "provider-secret-must-not-be-logged",
+    }])
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+    logger = MagicMock()
+    monkeypatch.setattr(resource_file_service, "logger", logger)
+
+    items = await svc.list_dir(**_COORDS, path="sub")
+
+    assert items[0]["absolute_path"] == "/data/bot/workspace/a.txt"
+    logger.debug.assert_called_once_with(
+        "[ResourceFileService.list_dir] bot_id=%s path=%s item_count=%d",
+        "bot-1", "sub", 1,
+    )
+    assert "provider-secret-must-not-be-logged" not in str(logger.mock_calls)
 
 
 @pytest.mark.asyncio
@@ -241,6 +309,51 @@ async def test_delete_routes_a_directory_through_delete_tree():
     assert await svc.delete(**_COORDS, path="sub/docs") is True
     device_fs.delete_tree.assert_awaited_once_with("workspace/sub/docs")
     device_fs.delete_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_legacy_delete_reports_identified_directory_failure(monkeypatch):
+    from fastapi import HTTPException
+    from agentclaw.community.adapters.http.resources import file_router
+
+    device_fs = _fs_listing({"name": "docs", "is_dir": True})
+    device_fs.delete_tree.return_value = False
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+    monkeypatch.setattr(file_router, "_resolve_params", lambda *a, **kw: ("u1", "bot-1", "openclaw"))
+
+    with pytest.raises(HTTPException) as caught:
+        await file_router.delete_file.__wrapped__(
+            path="sub/docs", bot_id="bot-1", engine_type="openclaw",
+            owner_id="u1", ctx=MagicMock(), bot_repo=MagicMock(), file_svc=svc,
+        )
+    assert caught.value.status_code == 502
+    assert caught.value.detail == "Delete storage failed"
+    device_fs.list_dir.assert_awaited_once_with("workspace/sub")
+    device_fs.delete_tree.assert_awaited_once_with("workspace/sub/docs")
+    device_fs.delete_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_directory_failure_retains_bool_for_default_callers():
+    device_fs = _fs_listing({"name": "docs", "is_dir": True})
+    device_fs.delete_tree.return_value = False
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    assert await svc.delete(**_COORDS, path="sub/docs") is False
+    device_fs.delete_tree.assert_awaited_once_with("workspace/sub/docs")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entries", [None, [], [{"name": "docs"}]])
+async def test_legacy_diagnostic_option_preserves_unknown_file_failure(entries):
+    device_fs = _fs_listing()
+    device_fs.list_dir.return_value = entries
+    device_fs.delete_file.return_value = False
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    assert await svc.delete(**_COORDS, path="sub/docs", report_directory_failure=True) is False
+    device_fs.delete_file.assert_awaited_once_with("workspace/sub/docs")
+    device_fs.delete_tree.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -746,3 +859,118 @@ async def test_walk_aborts_on_a_read_error():
 
     with pytest.raises(RuntimeError):
         await _collect(svc, "")
+
+
+# ── the apply engine's listing and directory delete ─────────────────────────
+
+
+def _workspace(listing: dict[str, list[dict]]):
+    """A device filesystem whose ``list_dir`` answers from ``listing`` (``None`` for anything else)."""
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(side_effect=lambda logical, recursive=False: listing.get(logical))
+    device_fs.delete_tree = AsyncMock(return_value=True)
+    device_fs.delete_file = AsyncMock(return_value=True)
+    return device_fs
+
+
+_ROOT = [
+    {"name": "kb", "is_dir": True, "relative_path": "kb"},
+    {"name": "data", "is_dir": True, "relative_path": "data"},
+    {"name": "faq.md", "is_dir": False, "relative_path": "faq.md"},
+    {"name": "SOUL.md", "is_dir": False, "relative_path": "SOUL.md"},
+    {"name": "skills", "is_dir": True, "relative_path": "skills"},
+    {"name": ".git", "is_dir": True, "relative_path": ".git"},
+]
+
+
+@pytest.mark.asyncio
+async def test_list_entries_lists_one_level_of_the_root_with_no_policy_of_its_own():
+    """Every root entry, the protected ones included: which entries a resources apply leaves alone is the
+    apply engine's rule, not the port's. One query, not recursive."""
+    device_fs = _workspace({"workspace": _ROOT})
+    svc, _ = _svc(provider="baas", device_fs=device_fs)
+    assert await svc.list_entries(**_COORDS) == (
+        WorkspaceEntry(".git", True),
+        WorkspaceEntry("SOUL.md", False),
+        WorkspaceEntry("data", True),
+        WorkspaceEntry("faq.md", False),
+        WorkspaceEntry("kb", True),
+        WorkspaceEntry("skills", True),
+    )
+    device_fs.list_dir.assert_awaited_once_with("workspace", recursive=False)
+
+
+@pytest.mark.asyncio
+async def test_list_entries_recursive_is_one_query_and_reads_relative_path_or_teclaws_path():
+    """The engine's own recursive listing, one call. arca / baas / local name an entry by ``relative_path``
+    (relative to the listed directory); teclaw carries no ``relative_path``, so its ``path`` under the
+    workspace namespace is read; ``name`` is the last resort."""
+    device_fs = _workspace(
+        {
+            "workspace/data": [
+                {"name": "kb", "is_dir": True, "relative_path": "kb"},
+                {"name": "a.txt", "is_dir": False, "relative_path": "kb/a.txt"},
+                {"name": "x.csv", "is_dir": False, "path": "/workspace/data/x.csv"},
+                {"name": "y.csv", "is_dir": False},
+            ]
+        }
+    )
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+    assert await svc.list_entries(**_COORDS, prefix="data/", recursive=True) == (
+        WorkspaceEntry("data/kb", True),
+        WorkspaceEntry("data/kb/a.txt", False),
+        WorkspaceEntry("data/x.csv", False),
+        WorkspaceEntry("data/y.csv", False),
+    )
+    device_fs.list_dir.assert_awaited_once_with("workspace/data", recursive=True)
+
+
+@pytest.mark.asyncio
+async def test_list_entries_reads_an_unsaid_is_dir_as_a_file_with_a_warning(caplog):
+    device_fs = _workspace({"workspace": [{"name": "kb"}]})
+    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
+    with caplog.at_level("WARNING"):
+        assert await svc.list_entries(**_COORDS) == (WorkspaceEntry("kb", False),)
+    assert any("does not say is_dir" in rec.getMessage() for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_list_entries_raises_rather_than_answer_short():
+    """The apply engine clears and rewrites on the strength of this listing: a directory that does not list
+    (teclaw's ``None`` for absent and failed alike) and an entry that names nothing both raise."""
+    svc, _ = _svc(provider="teclaw", device_fs=_workspace({}))
+    with pytest.raises(ListingFailed, match="workspace .* could not be listed"):
+        await svc.list_entries(**_COORDS)
+    with pytest.raises(ListingFailed, match="kb .* could not be listed"):
+        await svc.list_entries(**_COORDS, prefix="kb")
+    svc, _ = _svc(provider="teclaw", device_fs=_workspace({"workspace": [{"is_dir": False}]}))
+    with pytest.raises(ListingFailed, match="listed an entry without a name"):
+        await svc.list_entries(**_COORDS)
+
+
+@pytest.mark.asyncio
+async def test_list_entries_addresses_a_service_bot_stage_like_the_console_listing(monkeypatch):
+    """``publish_id`` / ``device_uuid`` go to the same context resolution ``list_dir`` uses."""
+    device_fs = _workspace({"workspace": []})
+    svc, _ = _svc(provider="baas", device_fs=device_fs)
+    seen: list[dict] = []
+    original = svc._resolve_ctx
+
+    def spy(**kwargs):
+        seen.append(kwargs)
+        return original(bot_id=kwargs["bot_id"], entity_id=kwargs["entity_id"])
+
+    monkeypatch.setattr(svc, "_resolve_ctx", spy)
+    assert await svc.list_entries(**_COORDS, publish_id="p1", device_uuid="d1") == ()
+    assert seen[0]["publish_id"] == "p1" and seen[0]["device_uuid"] == "d1"
+
+
+@pytest.mark.asyncio
+async def test_delete_dir_is_the_engines_tree_delete_with_no_probe():
+    device_fs = _workspace({})
+    svc, _ = _svc(provider="baas", device_fs=device_fs)
+    assert await svc.delete_dir(**_COORDS, path="data/kb/") is True
+    device_fs.delete_tree.assert_awaited_once_with("workspace/data/kb")
+    device_fs.list_dir.assert_not_awaited()
+    device_fs.delete_tree = AsyncMock(return_value=False)
+    assert await svc.delete_dir(**_COORDS, path="data") is False

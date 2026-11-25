@@ -94,7 +94,7 @@ class HostingDatabase:
             if db.execute("PRAGMA journal_mode").fetchone()[0] != "delete":
                 raise ValueError("DWS state requires DELETE journal mode")
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, 3, 4, 5, 6):
+            if version not in (0, 1, 2, 3, 4, 5, 6, 7):
                 raise ValueError("unsupported DWS state schema version")
             application_id = db.execute("PRAGMA application_id").fetchone()[0]
             if version == 0:
@@ -141,6 +141,9 @@ class HostingDatabase:
                 for statement in RUNTIME_SCHEMA:
                     db.execute(statement)
                 db.execute("PRAGMA user_version = 6")
+            if version < 7:
+                db.execute("ALTER TABLE executions ADD COLUMN review_json TEXT")
+                db.execute("PRAGMA user_version = 7")
 
     @staticmethod
     def _check_private(path: Path, *, directory: bool) -> None:

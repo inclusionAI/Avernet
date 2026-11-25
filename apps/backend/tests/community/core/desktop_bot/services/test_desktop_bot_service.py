@@ -242,6 +242,29 @@ class TestListDevices:
 
 
 class TestCreate:
+    def test_oversized_avatar_is_rejected_before_desktop_creation_effects(self):
+        from agentclaw.community.core.bot_management.avatar import AvatarTooLargeError
+
+        service, mocks = _make_service_with_mocks()
+        with pytest.raises(AvatarTooLargeError):
+            service.apply_passport_before_create(
+                bot={"bot_name": "bot"}, user_id="u", machine_id="m",
+                avatar_url="a" * 25000,
+            )
+        mocks["passport"].apply_agent_passport.assert_not_called()
+        with pytest.raises(AvatarTooLargeError):
+            service.create_after_authorization(
+                bot={"bot_id": "b", "avatar_url": "a" * 25000},
+                user_id="u", machine_id="m",
+            )
+        mocks["passport"].query_agent_passport.assert_not_called()
+        with pytest.raises(AvatarTooLargeError):
+            service.create_after_authorization(
+                bot={"bot_id": "b", "avatar_url": "valid"},
+                user_id="u", machine_id="m", migration_path="/" + "x" * 65000,
+            )
+        mocks["passport"].query_agent_passport.assert_not_called()
+
     def test_create_returns_authorization_when_no_agent_code(self):
         service, mocks = _make_service_with_mocks()
         mocks["passport"].apply_agent_passport.return_value = {
@@ -2834,7 +2857,13 @@ def test_desktop_create_registers_bcn_after_final_ext_write(engine, mode, caplog
         user_id="u001", machine_id="m-002",
     )
     assert result["bot_id"] == "desk-bcn"
-    expected = dict(teamclaw_bot_uuid="desk-bcn", owner_workno="u001", name="Desktop", summary="desk description")
+    expected = dict(
+        teamclaw_bot_uuid="desk-bcn",
+        owner_workno="u001",
+        name="Desktop",
+        summary="desk description",
+        avatar_url="",
+    )
     if mode:
         expected["connection_mode"] = mode
     registrar._bcn_service.register_provider_bot.assert_called_once_with(**expected)
@@ -2909,7 +2938,13 @@ def test_desktop_restart_refreshes_bcn_mode_even_when_already_registered(engine,
     mocks["baas"].restart_bot.return_value = {"publish_id": 5}
     result = service.restart(bot_id="desk-restart", user_id="u001")
     assert result["status"] == "PENDING"
-    expected = dict(teamclaw_bot_uuid="desk-restart", owner_workno="u001", name="desk-restart", summary="")
+    expected = dict(
+        teamclaw_bot_uuid="desk-restart",
+        owner_workno="u001",
+        name="desk-restart",
+        summary="",
+        avatar_url="",
+    )
     if mode:
         expected["connection_mode"] = mode
     registrar._bcn_service.register_provider_bot.assert_called_once_with(**expected)

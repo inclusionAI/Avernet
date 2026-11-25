@@ -301,7 +301,10 @@ class TestCreateBotValidation:
         # 不应抛出 BotLimitExceededError
         svc._check_bot_count_limit("u1")
         svc._repository.count_by_owner.assert_called_once_with(
-            "u1", exclude_bot_type="desktop", exclude_active_engine="teclaw"
+            "u1",
+            exclude_bot_type="desktop",
+            exclude_active_engine="teclaw",
+            exclude_identity_inheriting=True,
         )
 
     def test_preflight_uses_count_limit(self):

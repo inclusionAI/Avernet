@@ -92,6 +92,28 @@ class _WorkOrderCreationRepository:
             raise WorkOrderNoReviewerError("no work-order recipient")
 
         with self._db.transactional_orm_session() as db:
+            if event_category is NotificationCategory.APPROVAL and biz_type in {
+                "BOT_COLLABORATOR",
+                "BOT_FRIEND",
+            }:
+                from agentclaw.community.plugin_api.models import BotModel
+                from agentclaw.community.core.bot_management.owner_handoff.guard import (
+                    assert_bot_mutable,
+                )
+
+                query = db.query(BotModel).filter(
+                    BotModel.env == env, BotModel.is_delete == 0
+                )
+                if biz_type == "BOT_COLLABORATOR":
+                    query = query.filter(BotModel.bot_id == biz_id)
+                else:
+                    query = query.filter(
+                        BotModel.owner_id.in_(
+                            set(approver_user_ids + recipient_user_ids)
+                        )
+                    )
+                for bot in query.with_for_update().all():
+                    assert_bot_mutable({"ext": bot.ext})
             if (
                 event_category is NotificationCategory.APPROVAL
                 and approval_mode is WorkOrderApprovalMode.AUTO

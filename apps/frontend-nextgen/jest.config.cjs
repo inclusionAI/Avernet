@@ -7,6 +7,10 @@ const transform = {
 };
 
 const moduleNameMapper = {
+  '^react$': '<rootDir>/node_modules/react',
+  '^react-dom$': '<rootDir>/node_modules/react-dom',
+  '^react-dom/(.*)$': '<rootDir>/node_modules/react-dom/$1',
+  '^@task-panel-test/(.*)$': '<rootDir>/assets/task-panel/src/$1',
   // 位图资源（品牌 logo 等）jest 桩：必须放在 `^@/` 之前，让 .png import 在路径改写前先行命中，
   // 否则先经 `@/` 解析到真实 png 文件后不会再二次映射，导致 PNG 被当 JS 解析。src/typings.d.ts 只管类型。
   '\\.(png|jpe?g|gif|webp|avif)$': '<rootDir>/test/mocks/fileMock.js',
@@ -17,6 +21,14 @@ const moduleNameMapper = {
   // （package.json main），故测试环境重定向到 lib/ 用真实实现：既省掉全量转译整个 UI 库的开销，
   // 也绕开 es/ 里的 .css/.less 副作用导入（lib/ 无此问题）。
   '^@tc-chat/ui/es/(.*)$': '<rootDir>/node_modules/@tc-chat/ui/lib/$1',
+  // @avernet/a2a-chat-client：file: 依赖经 node_modules 解析会被 transformIgnorePatterns
+  // 默认忽略（不转译包内 .ts 源码）——mapper 直指包源（唯一解析路径，防双注册：
+  // 宿主只许包名顶/子两级 import，hostDir 钉板 grep 深引）。
+  '^@avernet/a2a-chat-client$': '<rootDir>/../../packages/a2a-chat-client/src/index.ts',
+  '^@avernet/a2a-chat-client/testing$': '<rootDir>/../../packages/a2a-chat-client/src/testing.ts',
+  // @tc-chat/* 的 dist 引用了 @babel/runtime 的 esm helpers（同样是未转译 ESM）。
+  // @babel/runtime 在 helpers/ 下发了等价 CJS 版本，重定向过去即可，无需再转译一遍 runtime。
+  '^@babel/runtime/helpers/esm/(.*)$': '<rootDir>/node_modules/@babel/runtime/helpers/$1',
   '^react-syntax-highlighter/dist/esm/styles/prism$':
     '<rootDir>/node_modules/react-syntax-highlighter/dist/cjs/styles/prism/index.js',
 };
@@ -29,8 +41,12 @@ const moduleNameMapper = {
 // avatar generator. Transform these package namespaces; the rest of
 // node_modules stays ignored. tnpm resolves scoped packages through physical
 // `_@scope_name@` directories, so include both normal and physical layouts.
+// @ant-design/x-markdown 携嵌套 marked@16（main 直指 lib/marked.esm.js，ESM-only）：CJS
+// 引用链 Parser.js require('marked') 落到该 ESM 文件，须转译才能在 node 环境加载。regex 按
+// 每个 /node_modules/ 段重试，嵌套路径上 x-markdown 段与 marked 段都要豁免，缺一仍不会转译。
+// 当前树根 marked@15 是 CJS（main=marked.cjs）故豁免暂不生效，升级后自动接住。
 const transformIgnorePatterns = [
-  '/node_modules/(?!@tc-chat/|_@tc-chat_|@ant-design/colors/|_@ant-design_colors@|@dicebear/|_@dicebear_|@babel/runtime/|_@babel_runtime@)',
+  '/node_modules/(?!@tc-chat/|_@tc-chat_|@ant-design/colors/|_@ant-design_colors@|@ant-design/x-markdown|_@ant-design_x-markdown@|marked/|_marked@|@dicebear/|_@dicebear_|@babel/runtime/|_@babel_runtime@)',
   '\\.pnp\\.[^\\\\/]+$',
 ];
 
@@ -55,6 +71,7 @@ module.exports = {
       transform,
       moduleNameMapper,
       transformIgnorePatterns,
+      setupFiles: ['<rootDir>/test/mocks/resizeObserverMock.js'],
       testTimeout: 30000,
     },
   ],

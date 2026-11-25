@@ -5,10 +5,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.domain.models.worker import Worker
-from src.domain.models.worker_profile_content import WorkerProfileContent
-from src.infra.public.stores.mysql_worker_registry_store import MySQLWorkerRegistryStore
-from src.infra.public.stores.mysql_worker_profile_content_store import (
+from app.domain.models.worker import Worker
+from app.domain.models.worker_profile_content import WorkerProfileContent
+from app.infra.public.stores.mysql_worker_registry_store import MySQLWorkerRegistryStore
+from app.infra.public.stores.mysql_worker_profile_content_store import (
     MySQLWorkerProfileContentStore,
 )
 

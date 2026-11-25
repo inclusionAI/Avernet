@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.models.mcp import BotMCPConfig
 from agentclaw.community.core.repository.implementations.bot.bot_mcp_config import (
     BotMCPConfigRepository,
@@ -19,6 +20,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 class _Database:
     def __init__(self) -> None:
         engine = create_engine("sqlite:///:memory:")
+        BotModel.__table__.create(engine)
         BotMCPConfig.__table__.create(engine)
         self._sessions = sessionmaker(bind=engine)
 

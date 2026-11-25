@@ -780,7 +780,7 @@ prepare_bcs_coverage_bin() {
             local build_tmp="$BCS_DIR/target/tmp"
             mkdir -p "$build_tmp"
             export LLVM_PROFILE_FILE="$build_tmp/build-%m-%p.profraw"
-            cargo build --workspace
+            cargo build --workspace --features bcs/a2a-http-e2e
         ) || { log_error "coverage build failed"; exit 1; }
     else
         log_info "Reusing cached instrumented bcs: $cov_bin"

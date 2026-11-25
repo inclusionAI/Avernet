@@ -4,6 +4,7 @@ import io
 import os
 import threading
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,57 @@ def test_publish_creates_complete_package(tmp_path: Path) -> None:
     assert (
         tmp_path / "skills-local/weather/scripts/run.py"
     ).read_bytes() == b"print('sunny')\n"
+
+
+def test_distinct_targets_publish_at_the_same_time(tmp_path: Path, monkeypatch) -> None:
+    targets = [tmp_path / "skills-local" / name for name in ("search", "weather")]
+    both_publishing = threading.Barrier(len(targets))
+    replace = os.replace
+
+    def synchronized_publish(source, destination):
+        if destination in targets:
+            both_publishing.wait(timeout=3)
+        return replace(source, destination)
+
+    monkeypatch.setattr(local_package_module.os, "replace", synchronized_publish)
+    publisher = LocalSkillPackagePublisher()
+
+    def publish(target: Path):
+        name = target.name
+        package = _package({
+            "SKILL.md": f"---\nname: {name}\ndescription: {name}\n---\n".encode(),
+            "content.txt": name.encode(),
+        })
+        return publisher.publish(skill_name=name, package=package, target=target)
+
+    with ThreadPoolExecutor(max_workers=len(targets)) as executor:
+        results = tuple(executor.map(publish, targets))
+
+    assert all(result.action is LocalSkillPackageAction.CREATED for result in results)
+    assert [(target / "content.txt").read_text() for target in targets] == ["search", "weather"]
+
+
+def test_publish_preserves_nested_capability_documents(tmp_path: Path) -> None:
+    target = tmp_path / "skills-local" / "weather"
+    files = {
+        "SKILL.md": (
+            b"---\nname: weather\ndescription: forecast\n---\n"
+            b"[Query](capability/query/SKILL.md)\n"
+        ),
+        "capability/query/SKILL.md": b"# Query\nRead scripts/run.py\n",
+        "capability/query/scripts/run.py": b"raise RuntimeError('not executed')\n",
+    }
+
+    result = LocalSkillPackagePublisher().publish(
+        skill_name="weather", package=_package(files), target=target
+    )
+
+    assert result.action is LocalSkillPackageAction.CREATED
+    assert {
+        path.relative_to(target).as_posix(): path.read_bytes()
+        for path in target.rglob("*")
+        if path.is_file()
+    } == files
 
 
 def test_publish_accepts_backend_canonical_legacy_manifest(tmp_path: Path) -> None:

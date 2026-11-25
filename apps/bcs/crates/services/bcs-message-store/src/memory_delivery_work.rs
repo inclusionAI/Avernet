@@ -33,23 +33,27 @@ pub(super) async fn work_batch(
 fn control_batch(all: &[PersistedMessageDelivery], now_ms: i64, limit: usize) -> Vec<PersistedMessageDelivery> {
     let mut result = Vec::new();
     let mut pages = Vec::new();
-    for category in 0..4 {
+    let categories = 5;
+    for category in 0..categories {
         let mut rows: Vec<_> = all.iter().filter(|row| match category {
             0 => row.state.status == Status::Dispatching && row.run_deadline_at_ms.is_some_and(|t| t <= now_ms),
             1 => row.state.status == Status::Running && row.run_deadline_at_ms.is_some_and(|t| t <= now_ms),
             2 => row.state.status == Status::Cancelling && row.abort_request_id.is_none(),
-            _ => row.state.status == Status::Cancelling && row.abort_request_id.is_some()
+            3 => row.state.status == Status::Cancelling && row.abort_request_id.is_some()
                 && row.cancel_deadline_at_ms.is_some_and(|t| t <= now_ms),
+            // Uncertain sends whose execution budget lapsed: surfaced for the
+            // runtime's cancel-intent arbitration (never a stopped release).
+            _ => row.state.status == Status::Unknown && row.run_deadline_at_ms.is_some_and(|t| t <= now_ms),
         }).cloned().collect();
         rows.sort_by(|a, b| {
             let deadline = |row: &PersistedMessageDelivery| match category {
-                0 | 1 => row.run_deadline_at_ms,
+                0 | 1 | 4 => row.run_deadline_at_ms,
                 2 => None,
                 _ => row.cancel_deadline_at_ms,
             };
             (deadline(a), &a.delivery_id).cmp(&(deadline(b), &b.delivery_id))
         });
-        let quota = (limit / 4 + usize::from(category < limit % 4))
+        let quota = (limit / categories + usize::from(category < limit % categories))
             .max(1).min(limit - result.len()).min(rows.len());
         result.extend(rows.drain(..quota));
         pages.push(rows);

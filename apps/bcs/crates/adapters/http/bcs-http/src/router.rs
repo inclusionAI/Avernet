@@ -44,6 +44,8 @@ fn channel_http_method_router(method: ChannelHttpMethod) -> MethodRouter<HttpApp
 fn build_api_routes() -> Router<HttpAppState> {
     Router::new()
         .merge(routes::collaboration_drafts::router())
+        .route("/tasks/status", post(routes::task_handle::status))
+        .route("/tasks/cancel", post(routes::task_handle::cancel))
         .route("/manifest", get(routes::manifest::get_manifest))
         .route(
             "/assets/{bundle_name}/{file_name}",
@@ -65,6 +67,16 @@ fn build_api_routes() -> Router<HttpAppState> {
             get(routes::bots::get_bot).delete(routes::bots::leave_bot),
         )
         .route("/providers", post(routes::providers::register_provider))
+        .route("/bots/{id}/agent-card", get(routes::bot_agent_card::get))
+        .route("/a2a/providers/{provider_name}/bots", post(routes::a2a_names::register))
+        .route("/a2a/providers/{provider_name}/bots/{provider_bot_ref}/chat-async", post(routes::a2a_names::chat))
+        .route("/a2a/agents", axum::routing::any(routes::a2a_management::handle))
+        .route("/a2a/agents/{bot_id}/agent-card", axum::routing::any(routes::a2a_management::handle))
+        .route("/a2a/agents/{bot_id}/agent-card:refresh", axum::routing::any(routes::a2a_management::handle))
+        .route("/a2a/chat/runs/{run_id}", get(routes::a2a_names::get_run))
+        .route("/a2a/chat/runs/{run_id}/cancel", post(routes::a2a_names::cancel_run))
+        .route("/providers/{provider_id}/bots/{bot_uuid}/a2a", get(routes::a2a_bots::get).put(routes::a2a_bots::configure))
+        .route("/providers/{provider_id}/bots/{bot_uuid}/a2a/card:refresh", post(routes::a2a_bots::refresh))
         .route("/providers/by-slug/{slug}", get(routes::providers::get_provider_by_slug))
         .route("/api/v1/collaboration/providers/by-slug/{slug}", get(routes::providers::get_provider_by_slug))
         .route(
@@ -145,6 +157,11 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/providers/{provider_id}/bots/{bot_uuid}",
             delete(routes::providers::delete_provider_bot)
                 .patch(routes::providers::patch_provider_bot),
+        )
+        .route(
+            "/providers/{provider_id}/bots/{provider_bot_ref}/caller",
+            get(routes::providers::get_provider_bot_caller_config)
+                .patch(routes::providers::patch_provider_bot_caller_config),
         )
         .route(
             "/providers/{provider_id}/bots/{bot_uuid}/attributes",
@@ -248,16 +265,16 @@ fn build_api_routes() -> Router<HttpAppState> {
             "/collaboration/definitions/validate",
             post(routes::collaboration_definitions::validate_collaboration_definition_yaml),
         )
+        .route("/groupcontext/shared-info", post(routes::group_context::shared_info))
+        .route("/groupcontext/list-preset", post(routes::group_context::list_preset))
+        .route("/groupcontext/manage/list-preset", post(routes::group_context::list_managed_presets))
+        .route("/groupcontext/manage/add-preset", post(routes::group_context::add_preset))
+        .route("/groupcontext/manage/update-preset", post(routes::group_context::update_preset))
+        .route("/groupcontext/manage/delete-preset", post(routes::group_context::delete_preset))
         .route("/groupcontext/add", post(routes::group_context::add))
         .route("/groupcontext/update", post(routes::group_context::update))
         .route("/groupcontext/list", post(routes::group_context::list))
         .route("/groupcontext/get", post(routes::group_context::get))
-        .route("/groups/request", post(routes::group_requests::group_request))
-        .route(
-            "/groups/{token}/confirm",
-            get(routes::group_requests::confirm_group_page)
-                .post(routes::group_requests::confirm_group),
-        )
         .route(
             "/groups/{id}/members",
             post(routes::groups::add_group_member),

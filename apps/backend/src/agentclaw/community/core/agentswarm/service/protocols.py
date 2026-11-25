@@ -8,10 +8,11 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, runtime_checkable
 
 from agentclaw.community.core.agentswarm.domain.models import (
-    AgentKind, AgentSpec, AgentStatus, GuardKind, ProviderKind, RequestMetadata, Run,
+    AgentKind, AgentSpec, AgentStatus, GuardKind, ProviderKind,
+    RequestMetadata, Run,
     RunOptions, RunPage, RunStatus,
 )
 
@@ -26,6 +27,106 @@ class SubmitRunRequest:
     idempotency_key: str | None = None
     owner_id: str = ""
     run_options: RunOptions = field(default_factory=RunOptions)
+    identity_bot_id: str | None = None
+    """The Bot whose passport identity this run's Bot agents inherit.
+
+    ``None`` keeps the ordinary flow, where each Bot agent applies for its own
+    passport and may park at the human authorization gate.
+    """
+
+
+@dataclass(frozen=True)
+class BotAuthorizationDescriptor:
+    """The pending human-authorization gate for one agent's bot.
+
+    The shared-contract shape — the host adapter's status result and the
+    run surfaces serialize the same five fields: ``state`` is the parked
+    BotState value (``AWAITING_AUTHORIZATION``), ``iframe_url`` /
+    ``redirect_url`` the passport application's consent surfaces as
+    submitted (empty when the payload has none), ``deadline`` the
+    authorization window's end as the ISO-8601 spelling the creation-job
+    payload itself carries. ``application_id`` is the passport
+    application's identifier as the facade's status answer names it
+    (empty when the answer carries none) — a consumer can route a human
+    to the decision surface from the run read alone, with no direct
+    listing against the passport facade. The creation payload is the
+    only durable copy of the URL/window facts — this descriptor is a
+    read-side join, never a second stored one. Present exactly while
+    the application is actually PENDING inside its window (the live
+    status answer decides, never a cached provisioning-state write);
+    auto-issued, approved, rejected, expired and terminal bots surface
+    none.
+    """
+    state: str
+    iframe_url: str
+    redirect_url: str
+    deadline: str
+    application_id: str
+
+
+@dataclass(frozen=True)
+class IdentitySourceRefusal:
+    """Why a named Bot cannot serve as a run's identity source.
+
+    ``code`` is one of the three refusal reasons a caller can act on
+    differently: :data:`IDENTITY_SOURCE_NOT_OWNED` (name a Bot of your own),
+    :data:`IDENTITY_SOURCE_NO_PASSPORT` (issue a passport, or name another
+    Bot), :data:`IDENTITY_SOURCE_UNVERIFIED` (the passport could not be
+    resolved; retry). Every code carries a populated ``message``; a code
+    answered with an empty one reads as the generic invalid-source
+    refusal, so a seam in another tree can still raise ``code`` alone.
+    """
+
+    code: str
+    message: str = ""
+
+
+#: The Bot is absent from the caller's rows -- it does not exist, or it
+#: belongs to someone else (the two are deliberately indistinguishable).
+IDENTITY_SOURCE_NOT_OWNED: Final = "not_owned"
+#: Neither the Bot's cached passport nor the provider establishes an issued
+#: agent credential, so the Bot genuinely holds no usable identity.
+IDENTITY_SOURCE_NO_PASSPORT: Final = "no_passport"
+#: The passport could not be resolved (provider failure, no seam bound).
+#: Never means "has no passport" -- that is ``no_passport``.
+IDENTITY_SOURCE_UNVERIFIED: Final = "unverified"
+
+
+@runtime_checkable
+class BotAuthorizationSource(Protocol):
+    """Read-only seam over a bot's durable creation job (manifest seam).
+
+    The service composes run surfaces from ``ac_agent_swarm_*`` rows only;
+    the authorization URLs and window live in the creation-job payload the
+    host platform persists, so the composition asks this seam — never the
+    task queue directly (D17/D35 agentswarm isolation: the swarm's core
+    module imports neither ``core.bot_management`` nor ``core.task_queue``).
+    Declared with the module's own ``BotAuthorizationDescriptor`` return
+    type; the concrete adapter bound by the DI root derives the same
+    descriptor the host adapter reports, so there is exactly one
+    source of truth and zero copied state.
+    """
+
+    @abstractmethod
+    def identity_source(
+        self, *, owner_id: str, bot_id: str,
+    ) -> str | IdentitySourceRefusal:
+        """The agent code of a Bot that may serve as an identity source.
+
+        An :class:`IdentitySourceRefusal` when it may not, naming which of
+        the three cases applied: the Bot is absent or not owned by
+        ``owner_id``, it holds no issued passport, or its passport could not
+        be resolved. The service uses this to refuse a submit before any
+        agent row is written, without importing the bot repository itself
+        (D17/D35).
+        """
+
+    @abstractmethod
+    def authorization(self, *, owner_id: str, bot_id: str) -> BotAuthorizationDescriptor | None:
+        """The gate descriptor for a (owner, bot) creation, or ``None`` when
+        no durable creation payload exists for it. Must not raise on
+        infrastructure errors — callers degrade, never fail the read."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -54,6 +155,25 @@ class GuardEventSummary:
 
 
 @dataclass(frozen=True)
+class AgentAuthorizationState:
+    """One bot-kind agent's current provisioning-gate snapshot (poll payload).
+
+    The per-poll read behind the SSE gate-delta stream: every agent row that
+    carries a bot state, with the ``authorization`` descriptor attached for
+    those parked at the human gate. Keyed by ``agent_id``; per-bot by
+    construction, so a mixed run snapshots each bot independently.
+    """
+    agent_id: str
+    name: str
+    status: str
+    kind: str
+    spawn_round: int
+    bot_id: str | None
+    bot_state: str
+    authorization: BotAuthorizationDescriptor | None = None
+
+
+@dataclass(frozen=True)
 class RunEvents:
     """Incremental durable progress: rows after the cursors plus run status."""
     agents: tuple[AgentEvent, ...]
@@ -61,6 +181,7 @@ class RunEvents:
     guards: tuple[GuardEventSummary, ...]
     run_status: RunStatus
     terminal: RunStatus | None
+    agent_authorizations: tuple[AgentAuthorizationState, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -121,6 +242,7 @@ class AgentDetailItem:
     result: AgentResultDetail | None
     attempt_ledger: tuple[AgentAttemptDetail, ...]
     messages: tuple[AgentMessageDetail, ...]
+    authorization: BotAuthorizationDescriptor | None = None
 
 
 @dataclass(frozen=True)
@@ -179,6 +301,42 @@ class AgentSwarmRunNotFoundError(Exception):
 
 class AgentSwarmConfigError(Exception):
     """Fail-clear submit refusal: the LLM config is missing/empty (400-class)."""
+
+
+class IdentitySourceRequired(Exception):
+    """A submit named no identity source (400-class).
+
+    Every agentswarm Bot agent runs under an existing Bot's passport
+    identity, so a submit without one cannot be served at all — there is no
+    approval-gated path. Refused before any row is written.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "agentswarm submit requires identity_bot_id: name the Bot whose "
+            "passport identity this run's Bot agents inherit"
+        )
+
+
+class IdentitySourceInvalid(Exception):
+    """A named identity source cannot supply identity (422-class).
+
+    ``reason`` is one of :data:`IDENTITY_SOURCE_NOT_OWNED`,
+    :data:`IDENTITY_SOURCE_NO_PASSPORT`, :data:`IDENTITY_SOURCE_UNVERIFIED`
+    and ``message`` says what the caller should do about it -- the three
+    cases need different actions, so the text differs per case. Distinct
+    from :class:`IdentitySourceRequired`, which is about the field being
+    absent rather than wrong.
+    """
+
+    def __init__(self, bot_id: str, reason: str, *, message: str = "") -> None:
+        self.bot_id = bot_id
+        self.reason = reason
+        self.message = message
+        # The generic text names the id; a per-case caller (the HTTP adapter)
+        # supplies the actionable wording from ``reason`` when none came with
+        # the refusal.
+        super().__init__(message or f"identity source {bot_id!r} is not usable")
 
 
 class TenantRunLimitExceeded(Exception):
@@ -279,7 +437,8 @@ class AgentSwarmServiceProtocol(Protocol):
 
     @abstractmethod
     def list_runs(self, tenant: str, status: RunStatus | None = None,
-                  *, page: int = 1, page_size: int = 20) -> RunPage: ...
+                  *, page: int = 1, page_size: int = 20,
+                  owner_id: str | None = None) -> RunPage: ...
 
     @abstractmethod
     def run_events(self, run_id: str, tenant: str, after_agent_id: int = 0,

@@ -15,7 +15,7 @@ secret store) and ``need_poll`` responses are re-queried with bounded
 backoff.
 
 Once the instance is ready, GET /api/v1/token/iam is called once with the
-caller's cookie to refresh the Caller execution credentials.
+caller's cookie to refresh IAM or DingTalk Caller execution credentials.
 
 Reference: RFC 0002 atomic commit 1
 """
@@ -26,7 +26,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 import aiohttp
 from pydantic import ValidationError
@@ -48,6 +48,7 @@ from secbaas.community.spi.bot_service import (
     BotServicePlugin,
     CallerConnectionData,
     CallerExecutionCredential,
+    CallerInstanceStatus,
     IamTokenData,
     LogRelationPayload,
     Result,
@@ -73,7 +74,7 @@ _BINDING_RETRY_DELAY_SECONDS = 0.1
 _CALLER_POLL_INITIAL_DELAY_SECONDS = 1.0
 _CALLER_POLL_BACKOFF_FACTOR = 1.5
 _CALLER_POLL_MAX_DELAY_SECONDS = 5.0
-_CALLER_POLL_DEADLINE_SECONDS = 180.0
+_CALLER_POLL_DEADLINE_SECONDS = 1800.0
 
 
 def resolve_claude_code_engine(active_engine: str, template_type: str | None) -> str:
@@ -460,6 +461,24 @@ class AiohttpBotServicePlugin(BotServicePlugin):
 
     # ─────────────────── get_caller_connection (error-propagating) ───────────────────
 
+    def _check_caller_connection_config(self) -> CallerPrincipalSigner:
+        """caller-connection 系列入口共用的部署配置校验（fail fast）。
+
+        返回就绪的 principal 签发器，供轮询循环每次请求现签。
+        """
+        if not self._base_url:
+            raise PaasError(
+                ErrorCode.CONFIG_INVALID,
+                "caller-connection requires a non-empty bot_service base_url",
+            )
+        if self._principal_signer is None:
+            raise PaasError(
+                ErrorCode.CONFIG_INVALID,
+                "caller-connection requires a principal signer "
+                "(shared signing key + app identity)",
+            )
+        return self._principal_signer
+
     async def get_caller_connection(
         self,
         *,
@@ -468,30 +487,18 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         user_id: str,
         credential: CallerExecutionCredential,
     ) -> str:
-        """POST /api/v1/expert-chats/app-caller-connection (self-minted Principal).
+        """POST /api/v1/expert-chats/app-caller-connection：拉起并安装调用方凭据。
 
-        All parameters go
-        in the URL query; a short-TTL app-principal JWT is minted by the
-        injected ``CallerPrincipalSigner`` for every attempt and placed in
-        ``X-Avernet-Principal``; ``force_upgrade`` stays ``false`` on every
-        request so polling never re-triggers the upgrade path. ``need_poll``
-        responses are re-queried with an increasing delay until
-        ``_CALLER_POLL_DEADLINE_SECONDS``. Transport failures get the same
-        bounded re-query (a timed-out request may still have triggered the
-        upgrade server-side); PaasError from HTTP status or envelope checks
-        still fails fast.
+        轮询/重试语义见 :meth:`_poll_caller_connection_ready`。实例就绪后按凭据
+        类型单次安装 Caller 运行时身份（:meth:`_install_caller_runtime_identity`，
+        失败不重试）：
 
-        Once the instance is ready, the credential-specific runtime update
-        runs exactly once and is never retried on failure:
-
-        - ``iam-token``: GET /api/v1/token/iam with the IAM-token cookie;
-        - ``agentpaas``: append an outbound ``x-caller-token`` rule
+        - ``iam-token``: GET /api/v1/token/iam?token_type=iam with the IAM-token cookie;
+        - ``dingtalk``: GET /api/v1/token/iam with ``token_type=dingtalk``;
+        - ``agentpass``: append an outbound ``x-caller-token`` rule
           to the ready sandbox through the BaaS PaasServiceFacade. The operator
           must provide the immutable domain allowlist in deployment config;
           request data cannot enlarge it.
-
-        Returns ``connection.target`` — the ready instance's sandbox
-        id — for use as the caller binding's connection target.
 
         Args:
             bot_id: Bot identifier (bare, without the entity suffix).
@@ -506,40 +513,110 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         Raises:
             PaasError: On transport failure, HTTP error, envelope failure,
                 the instance not becoming ready within the poll deadline, or
-                the credential refresh failing.
+                the credential install failing.
         """
-        if not self._base_url:
-            raise PaasError(
-                ErrorCode.CONFIG_INVALID,
-                "caller-connection requires a non-empty bot_service base_url",
-            )
-        if self._principal_signer is None:
-            raise PaasError(
-                ErrorCode.CONFIG_INVALID,
-                "caller-connection requires a principal signer "
-                "(shared signing key + app identity)",
-            )
+        self._check_caller_connection_config()
         if not credential.token:
             raise PaasError(
                 ErrorCode.CONFIG_INVALID,
                 "caller-connection requires a non-empty execution credential",
             )
-        if not (credential.is_iam_token or credential.is_agentpaas):
+        if not (
+            credential.is_iam_token or credential.is_agentpass or credential.is_dingtalk
+        ):
             raise PaasError(
                 ErrorCode.CONFIG_INVALID,
-                f"caller-connection received an unsupported credential type: {credential.type}",
+                "caller-connection received an unsupported credential "
+                f"type: {credential.type}",
             )
-        if credential.is_agentpaas and self._paas_service_facade is None:
+        if credential.is_agentpass and not self._caller_token_domains:
             raise PaasError(
                 ErrorCode.CONFIG_INVALID,
-                "AgentPaaS caller credential requires a PaasServiceFacade",
+                "AgentPass caller credential requires configured caller domains",
             )
-        if credential.is_agentpaas and not self._caller_token_domains:
-            raise PaasError(
-                ErrorCode.CONFIG_INVALID,
-                "AgentPaaS caller credential requires configured caller domains",
-            )
+        sandbox_id = await self._poll_caller_connection_ready(
+            bot_id=bot_id, owner_id=owner_id, user_id=user_id
+        )
+        # 沙箱已就绪：按凭据类型单次安装 Caller 运行时身份，失败不重试。
+        await self._install_caller_runtime_identity(
+            bot_id=bot_id,
+            credential=credential,
+            sandbox_id=sandbox_id,
+        )
+        logger.info(
+            "[bot-service] caller-connection ready: bot_id=%s owner_id=%s "
+            "user_id=%s credential_type=%s sandbox_id=%s",
+            bot_id,
+            owner_id,
+            user_id,
+            credential.type,
+            sandbox_id,
+        )
+        return sandbox_id
 
+    async def get_existing_caller_connection(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+    ) -> str:
+        """复用已就绪的 caller 实例：只拉起，不安装任何运行时凭据。
+
+        供 resolver 的 user_id-only 分支调用——调用前已通过
+        app-caller-instance/status 确认该用户实例已登记且存活，实例的执行
+        凭据在先前带 token 创建时已安装，这里只取 connection.target。
+        轮询/重试语义见 :meth:`_poll_caller_connection_ready`。
+
+        Args:
+            bot_id: Bot identifier (bare, without the entity suffix).
+            owner_id: Owner entity identifier.
+            user_id: Caller user identifier.
+
+        Returns:
+            The ready instance's sandbox_id (``connection.target``).
+
+        Raises:
+            PaasError: On transport failure, HTTP error, envelope failure, or
+                the instance not becoming ready within the poll deadline.
+        """
+        self._check_caller_connection_config()
+        sandbox_id = await self._poll_caller_connection_ready(
+            bot_id=bot_id, owner_id=owner_id, user_id=user_id
+        )
+        logger.info(
+            "[bot-service] caller-connection ready: bot_id=%s owner_id=%s "
+            "user_id=%s credential_type=none sandbox_id=%s",
+            bot_id,
+            owner_id,
+            user_id,
+            sandbox_id,
+        )
+        return sandbox_id
+
+    async def _poll_caller_connection_ready(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+    ) -> str:
+        """POST /api/v1/expert-chats/app-caller-connection 轮询直到实例就绪。
+
+        All parameters go in the URL query; a short-TTL app-principal JWT is
+        minted by the injected ``CallerPrincipalSigner`` for every attempt and
+        placed in ``X-Avernet-Principal``; ``force_upgrade`` stays ``false`` on
+        every request so polling never re-triggers the upgrade path.
+        ``need_poll`` responses are re-queried with an increasing delay until
+        ``_CALLER_POLL_DEADLINE_SECONDS``. Transport failures get the same
+        bounded re-query (a timed-out request may still have triggered the
+        upgrade server-side); PaasError from HTTP status or envelope checks
+        still fails fast.
+
+        Returns:
+            The ready instance's sandbox_id (``connection.target``).
+        """
+        signer = self._check_caller_connection_config()
         url = f"{self._base_url.rstrip('/')}/api/v1/expert-chats/app-caller-connection"
         params = {
             "bot_id": bot_id,
@@ -555,7 +632,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
 
         while True:
             request_id = str(uuid.uuid4())
-            principal = self._principal_signer.mint()
+            principal = signer.mint()
             headers = {
                 "Accept": "application/json",
                 "X-Avernet-Principal": principal,
@@ -595,40 +672,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                     raise _validation_error_to_paas(e) from e
                 caller_data = self._check_caller_envelope(result)
                 if not caller_data.need_poll:
-                    connection = caller_data.connection
-                    if connection is None:
-                        raise PaasError(
-                            ErrorCode.PLATFORM_ERROR,
-                            "caller-connection response has no connection "
-                            f"(request_id={request_id})",
-                        )
-                    sandbox_id = self._extract_caller_sandbox_id(
-                        caller_data, request_id
-                    )
-                    # 沙箱已就绪：按凭据类型单次安装 Caller 运行时身份，失败不重试。
-                    if credential.is_iam_token:
-                        await self._refresh_caller_iam_token(
-                            bot_id=bot_id,
-                            cookie=f"IAM_TOKEN={credential.token}",
-                        )
-                    else:
-                        paas_device_id = self._extract_caller_paas_device_id(
-                            caller_data, request_id
-                        )
-                        await self._append_agentpaas_caller_token(
-                            credential=credential,
-                            paas_device_id=paas_device_id,
-                        )
-                    logger.info(
-                        "[bot-service] caller-connection ready: request_id=%s "
-                        "bot_id=%s owner_id=%s user_id=%s credential_type=%s",
-                        request_id,
-                        bot_id,
-                        owner_id,
-                        user_id,
-                        credential.type,
-                    )
-                    return sandbox_id
+                    return self._extract_caller_sandbox_id(caller_data, request_id)
                 instance_status = (
                     caller_data.instance.status if caller_data.instance else None
                 )
@@ -661,6 +705,124 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                 delay * _CALLER_POLL_BACKOFF_FACTOR,
                 _CALLER_POLL_MAX_DELAY_SECONDS,
             )
+
+    async def _install_caller_runtime_identity(
+        self,
+        *,
+        bot_id: str,
+        credential: CallerExecutionCredential,
+        sandbox_id: str,
+    ) -> None:
+        """实例就绪后按凭据类型单次安装 Caller 运行时身份，失败不重试。
+
+        - ``iam-token`` / ``dingtalk``: GET /api/v1/token/iam（Cookie 走原始
+          token，``token_type`` 显式传递）；
+        - ``agentpass``: 通过 BaaS outbound-rule append 安装 ``x-caller-token``。
+        """
+        if credential.is_iam_token:
+            await self._refresh_caller_token(
+                bot_id=bot_id,
+                cookie=f"IAM_TOKEN={credential.token}",
+                token_type="iam",
+            )
+        elif credential.is_dingtalk:
+            await self._refresh_caller_token(
+                bot_id=bot_id,
+                cookie=f"IAM_TOKEN={credential.token}",
+                token_type="dingtalk",
+            )
+        else:
+            await self._append_agentpass_caller_token(
+                credential=credential,
+                paas_device_id=sandbox_id,
+            )
+
+    # ─────────────── get_caller_instance_status (read-only, error-propagating) ───────────────
+
+    async def get_caller_instance_status(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+    ) -> CallerInstanceStatus:
+        """GET /api/v1/expert-chats/app-caller-instance/status (self-minted Principal).
+
+        只读观察：不创建、不恢复、不重启实例，不换签、不改账本/binding/到期时间。
+        服务身份走 ``X-Avernet-Principal``（iss=``baas`` 的 BaaS 服务 JWT，与
+        app-caller-connection 复用同一把共享签名密钥）。单次请求（无轮询/重试），
+        超时由会话的 ``timeout`` 有界约束。
+
+        业务信封契约（普通 ``/api/v1`` ApiResponse，非 OpenAPI Envelope）：
+        ``success=false`` + ``error_code=403``（源 Bot 未找到/领域拒绝）映射
+        NOT_FOUND——注意这不是 "Caller 不存在"（不存在通过 ``exists=false``
+        表达）；其他业务失败（如 5999 上游探活异常）映射 PLATFORM_ERROR，
+        保留 "结果未知" 语义。``data`` 缺失、``exists``/``alive`` 非严格布尔、
+        或违反 ``alive → exists`` 契约不变量均按契约破坏快速失败。
+
+        Args:
+            bot_id: Bot 标识（bare，不含 entity 后缀）。
+            owner_id: 容器归属实体。
+            user_id: 需要查询独立 Caller 实例的用户 ID。
+
+        Returns:
+            CallerInstanceStatus(exists, alive)。
+
+        Raises:
+            PaasError: On transport failure, HTTP error, envelope failure,
+                or contract violation.
+        """
+        if not self._base_url:
+            raise PaasError(
+                ErrorCode.CONFIG_INVALID,
+                "caller-instance status requires a non-empty bot_service base_url",
+            )
+        if self._principal_signer is None:
+            raise PaasError(
+                ErrorCode.CONFIG_INVALID,
+                "caller-instance status requires a principal signer "
+                "(shared signing key + app identity)",
+            )
+        url = (
+            f"{self._base_url.rstrip('/')}"
+            "/api/v1/expert-chats/app-caller-instance/status"
+        )
+        params = {
+            "bot_id": bot_id,
+            "owner_id": owner_id,
+            "user_id": user_id,
+        }
+        request_id = str(uuid.uuid4())
+        headers = {
+            "Accept": "application/json",
+            "X-Avernet-Principal": self._principal_signer.mint_status(),
+            "X-Request-ID": request_id,
+        }
+        get_http_header_plugin().inject_header(headers)
+        try:
+            session = await self._get_session()
+            async with session.get(url, params=params, headers=headers) as resp:
+                await _raise_for_http_error(resp)
+                raw = await resp.json()
+                logger.info(
+                    "[bot-service] caller-instance status request_id=%s "
+                    "status=%d response_type=%s",
+                    request_id,
+                    resp.status,
+                    type(raw).__name__,
+                )
+        except (TimeoutError, aiohttp.ClientError, ValueError) as e:
+            raise PaasError(
+                ErrorCode.PLATFORM_UNAVAILABLE,
+                "caller-instance status request failed: "
+                f"bot_id={bot_id}, owner_id={owner_id}, user_id={user_id}",
+            ) from e
+        try:
+            result = Result[CallerInstanceStatus].model_validate(raw)
+        except ValidationError as e:
+            # 200 但形状不符 = 契约破坏，快速失败
+            raise _validation_error_to_paas(e) from e
+        return self._check_status_envelope(result, request_id=request_id)
 
     # ───────────────────────── 生命周期 ─────────────────────────
 
@@ -723,21 +885,46 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         return result.data
 
     @staticmethod
-    def _extract_caller_paas_device_id(
-        data: CallerConnectionData, request_id: str
-    ) -> str:
-        """Extract the PaaS device ID required by the outbound-rule append API."""
-        connection = data.connection
-        paas_device_id = connection.paas_device_id if connection is not None else None
-        if not paas_device_id:
+    def _check_status_envelope(
+        result: Result[CallerInstanceStatus],
+        *,
+        request_id: str,
+    ) -> CallerInstanceStatus:
+        """校验 app-caller-instance/status 信封（普通 ApiResponse 契约）。
+
+        业务失败 403（源 Bot 未找到/领域拒绝）映射 NOT_FOUND；其余业务失败
+        （如 5999 上游探活异常）映射 PLATFORM_ERROR——两者都不能被调用方
+        误读成 ``exists=false``。``alive=true 且 exists=false`` 违反接口
+        不变量，按响应合同异常处理。
+        """
+        if not result.success:
+            message = result.message or "API returned failure without message"
+            if result.error_code == 403:
+                raise PaasError(
+                    ErrorCode.NOT_FOUND,
+                    f"caller-instance status rejected (code=403): {message}",
+                )
             raise PaasError(
                 ErrorCode.PLATFORM_ERROR,
-                "caller-connection response missing connection.paas_device_id "
+                "caller-instance status API error "
+                f"(code={result.error_code}): {message}",
+            )
+        data = result.data
+        if data is None:
+            raise PaasError(
+                ErrorCode.PLATFORM_ERROR,
+                "caller-instance status response missing data payload "
                 f"(request_id={request_id})",
             )
-        return paas_device_id
+        if data.alive and not data.exists:
+            raise PaasError(
+                ErrorCode.PLATFORM_ERROR,
+                "caller-instance status violates contract invariant "
+                f"(exists=false, alive=true) (request_id={request_id})",
+            )
+        return data
 
-    async def _append_agentpaas_caller_token(
+    async def _append_agentpass_caller_token(
         self,
         *,
         credential: CallerExecutionCredential,
@@ -767,8 +954,8 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                 mode=OutBoundOperationRuleUpdatedMode.APPEND,
             )
         except Exception as e:
-            logger.warning(
-                "[bot-service] AgentPaaS caller outbound-rule append failed: "
+            logger.error(
+                "[bot-service] AgentPass caller outbound-rule append failed: "
                 "paas_device_id=%s credential_type=%s error_type=%s",
                 paas_device_id,
                 credential.type,
@@ -776,15 +963,15 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             )
             raise PaasError(
                 ErrorCode.PLATFORM_ERROR,
-                "AgentPaaS caller outbound-rule append failed",
+                "AgentPass caller outbound-rule append failed",
             ) from e
         if not updated:
             raise PaasError(
                 ErrorCode.PLATFORM_ERROR,
-                "AgentPaaS caller outbound-rule append returned failure",
+                "AgentPass caller outbound-rule append returned failure",
             )
         logger.info(
-            "[bot-service] AgentPaaS caller outbound-rule appended: "
+            "[bot-service] AgentPass caller outbound-rule appended: "
             "paas_device_id=%s credential_type=%s domains=%d",
             paas_device_id,
             credential.type,
@@ -812,18 +999,25 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             )
         return sandbox_id.removeprefix("ARCA_").removesuffix(":20003")
 
-    async def _refresh_caller_iam_token(self, *, bot_id: str, cookie: str) -> None:
+    async def _refresh_caller_token(
+        self,
+        *,
+        bot_id: str,
+        cookie: str,
+        token_type: Literal["iam", "dingtalk"] = "iam",
+    ) -> None:
         """GET /api/v1/token/iam — sandbox 就绪后单次刷新 Caller 执行凭据。
 
-        契约：凭据交换与运行时更新是服务端
-        副作用，响应只回显原始 IAM_TOKEN——回显值不消费也不入日志；该路由身份
-        走请求 Cookie（建议完整登录态），不接受 app Principal。带 bot_id 的请求
-        有副作用，故单次执行、失败不重试（重试会重复触发交换）。
+        契约：凭据交换与运行时更新是服务端副作用，响应只回显原始 IAM_TOKEN——
+        回显值不消费也不入日志；该路由身份走请求 Cookie（建议完整登录态），不接受
+        app Principal。带 bot_id 的请求有副作用，故单次执行、失败不重试（重试会
+        重复触发交换）。凭据类型始终通过 query 参数 ``token_type`` 显式传递。
         """
         url = f"{self._base_url.rstrip('/')}/api/v1/token/iam"
         params = {
             "bot_id": bot_id,
             "is_test_exchange": "false",
+            "token_type": token_type,
         }
         request_id = str(uuid.uuid4())
         headers = {

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::avatar::AvatarField;
 use crate::{BindingChannels, Skill, deserialize_skills};
 
 /// Request to onboard (register detailed bot info after streaming connection).
@@ -51,6 +52,12 @@ pub struct AdminOnboardRequest {
     /// Deprecated hidden flag retained for old clients; ignored by handlers.
     #[serde(default)]
     pub hidden: Option<bool>,
+    /// Bot avatar URL for the record's dedicated avatar field. Omission
+    /// keeps the stored avatar; an explicit value replaces it and the
+    /// empty string clears it. Explicit `null` and non-string values fail
+    /// deserialization (bot-avatar plan Task 5).
+    #[serde(default, skip_serializing_if = "AvatarField::is_omitted")]
+    pub avatar_url: AvatarField,
 }
 
 /// Response from bot onboard.

@@ -41,7 +41,12 @@ impl ManagedMessageDeliveryService for FailingDelivery {
     async fn unfinished(&self) -> Result<Vec<PersistedMessageDelivery>, ManagedDeliveryError> { self.inner.unfinished().await }
     async fn update_wait_reasons(&self, waiting: Vec<(String, DeliveryWaitReason)>, now: i64) -> Result<(), ManagedDeliveryError> { self.check("wait_reason")?; self.inner.update_wait_reasons(waiting, now).await }
     async fn accept_run(&self, request: &str, bot: &str, alias: Option<&str>, now: i64) -> Result<Option<PersistedMessageDelivery>, ManagedDeliveryError> { self.inner.accept_run(request, bot, alias, now).await }
-    async fn admit(&self, cmd: AdmitMessageDeliveries) -> Result<DeliveryAdmissionResult, ManagedDeliveryError> { self.inner.admit(cmd).await }
+    async fn admit(&self, cmd: AdmitMessageDeliveries) -> Result<DeliveryAdmissionResult, ManagedDeliveryError> {
+        self.check("admit")?;
+        let result = self.inner.admit(cmd).await?;
+        self.check("admit_after_commit")?;
+        Ok(result)
+    }
     async fn snapshot(&self, session: Option<&str>) -> Result<Vec<PersistedMessageDelivery>, ManagedDeliveryError> { self.inner.snapshot(session).await }
     async fn recover(&self, now: i64) -> Result<(), ManagedDeliveryError> { self.check("recover")?; self.inner.recover(now).await }
     async fn transition(&self, command: DeliveryTransitionCommand) -> Result<PersistedMessageDelivery, ManagedDeliveryError> {

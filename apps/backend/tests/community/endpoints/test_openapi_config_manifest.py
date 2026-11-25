@@ -11,6 +11,9 @@ from __future__ import annotations
 import time
 
 import jwt
+import pytest
+import yaml
+from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.core.repository.protocols.bot import (
@@ -426,6 +429,77 @@ def get_config_manifest_capabilities_ok():
     """The read path's half of "one function, two entry points"."""
 
 
+@pytest.mark.parametrize("engine", ["openclaw", "deepseek_harness"])
+def test_capabilities_publish_skill_reference_verdicts(app_with_testing_modules, world, engine):
+    """Reference support survives the response independently of transport support."""
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    _insert_bot(world, bot_id=_BOT_ID, engine=engine)
+    client = TestClient(app_with_testing_modules)
+    response = client.get(
+        f"/openapi/v1/bots/{_BOT_ID}/config-manifest/capabilities",
+        params=_QUERY,
+        headers=_HEADERS,
+    )
+    assert response.status_code == 200, response.json()
+    data = response.json()["data"]
+    assert [row["reference"] for row in data["skill_references"]] == [
+        "package", "repo_path", "skill_uuid", "skill_code",
+    ]
+    assert data["skill_references"][:2] == [
+        {"reference": "package", "supported": True, "reason": ""},
+        {"reference": "repo_path", "supported": True, "reason": ""},
+    ]
+    center_supported = engine != "deepseek_harness"
+    assert data["skill_references"][2:] == [
+        {
+            "reference": reference,
+            "supported": center_supported,
+            "reason": "" if center_supported else "deepseek_harness does not deliver Center skills",
+        }
+        for reference in ("skill_uuid", "skill_code")
+    ]
+    categories = {row["name"] for row in data["constructs"] if row["kind"] == "category"}
+    assert "capabilities" in categories
+    assert not {"skills", "mcp"} & categories
+    assert {row["category"] for row in data["source_matrix"]} == categories
+    assert any(
+        row["category"] == "capabilities" and row["protocol"] == "git" and row["supported"]
+        for row in data["source_matrix"]
+    )
+
+
+@pytest.mark.parametrize("reference,value", [
+    ("skill_uuid", "12345678-1234-5678-1234-567812345678"),
+    ("skill_code", "public-review"),
+])
+@pytest.mark.parametrize("in_set", [False, True], ids=["direct", "set"])
+def test_center_reference_refusals_match_discovery_for_direct_and_sets(
+    app_with_testing_modules, world, reference, value, in_set
+):
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    _insert_bot(world, bot_id=_BOT_ID, engine="deepseek_harness")
+    client = TestClient(app_with_testing_modules)
+    path = f"/openapi/v1/bots/{_BOT_ID}/config-manifest"
+    data = client.get(f"{path}/capabilities", params=_QUERY, headers=_HEADERS).json()["data"]
+    verdict = next(row for row in data["skill_references"] if row["reference"] == reference)
+    assert verdict["supported"] is False
+    skill = {"name": "review", "origin": "center", reference: value}
+    target = (
+        {"skill_sets": [{"name": "reviewers", "is_active": True, "skills": [skill], "mcp": []}]}
+        if in_set else {"skills": [skill]}
+    )
+    response = client.put(
+        path, params=_QUERY, headers=_HEADERS,
+        json={"document": yaml.safe_dump({"schema_version": 1, "manifest": {"capabilities": target}})},
+    )
+    assert response.status_code == 422, response.json()
+    violations = response.json()["data"]["violations"]
+    assert any(
+        row["code"] == "unsupported_skill_reference" and row["message"] == verdict["reason"]
+        for row in violations
+    ), violations
+
+
 @endpoint_test(
     method="GET",
     path="/openapi/v1/bots/{bot_id}/config-manifest/capabilities",
@@ -487,8 +561,8 @@ def put_config_manifest_as_member_is_refused():
 from agentclaw.community.adapters.http.openapi_v1.bots.config_manifest_support import (  # noqa: E402
     SCRIPT_DELIVERY_NOTE,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (  # noqa: E402
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (  # noqa: E402
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import (  # noqa: E402
     BotConfigManifestApplyLockRepositoryProtocol,
@@ -521,7 +595,7 @@ def _the_apply_is_running_and_readable(response, world) -> None:
     path="/openapi/v1/bots/{bot_id}/config-manifest",
     scenario="starts_an_apply_and_notes_the_script",
     input=CaseInput(
-        path_params={"bot_id": _BOT_ID}, query_params=_QUERY, headers=_HEADERS,
+        path_params={"bot_id": _BOT_ID}, query_params={**_QUERY, "dry_run": "false"}, headers=_HEADERS,
         json_body={"document": _DOCUMENT},
     ),
     seed=_seed_bot,
@@ -603,7 +677,7 @@ def put_config_manifest_on_a_pending_arca_bot():
 
 def _seed_pending_teclaw_platform_managed(world) -> None:
     """A PENDING teclaw bot, with the apply service's strategy switched on."""
-    from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    from agentclaw.community.core.apply_engine.delivery import (
         DeliveryStrategyFactory,
         EngineFamily,
         PlatformPorts,
@@ -611,14 +685,14 @@ def _seed_pending_teclaw_platform_managed(world) -> None:
         TeclawPlatformDelivery,
         family_from_engine_test,
     )
-    from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
-        BotConfigManifestApplyService,
+    from agentclaw.community.core.apply_engine.run.service import (
+        ApplyRunService,
     )
 
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
     _insert_bot(world, bot_id=_TECLAW_BOT_ID, engine="teclaw", status="PENDING")
     applies = bind_overrides(
-        world, BotConfigManifestApplyServiceProtocol, {}, also_bind=(BotConfigManifestApplyService,)
+        world, ApplyRunServiceProtocol, {}, also_bind=(ApplyRunService,)
     )
     # The deployment's mode is read at boot and this container's is DEVICE, so
     # standing in for a platform-managed deployment means rebuilding the seam

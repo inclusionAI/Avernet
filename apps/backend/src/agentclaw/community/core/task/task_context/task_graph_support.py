@@ -18,6 +18,7 @@ from agentclaw.community.core.task.domain.errors import (
     TaskNotFoundError,
     TaskStateError,
 )
+from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.domain.models import (
     DoneOutput,
     NodeOpResult,
@@ -37,12 +38,54 @@ from agentclaw.community.core.task.domain.models import (
     TaskSummary,
 )
 from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
+from agentclaw.community.core.task.task_context.task_artifact.artifact_publish import (
+    graph_node_attempt,
+)
+from agentclaw.community.core.task.domain.identity import (
+    resolve_scoped_entry_bot_identity as resolve_entry_bot_identity,
+)
 
 DEFAULT_MAX_DEPTH = 2
 DEFAULT_MAX_LOOP = 3
 DEFAULT_MAX_PLAN_ROUND = 3
 DEFAULT_BBS_MAX_DEPTH = 3
 MAX_GRAPH_VERSION_RETRIES = 3
+
+
+def _used_executor_ids(graph: TaskExecutionGraph) -> list[str]:
+    """Project reserved/executed Bot identities, never collaboration group IDs.
+
+    Dynamic group membership comes from the persisted formation. A single Bot
+    may run through a manager-only group without changing its Bot assignee;
+    ``actual_run_mode`` preserves that identity projection. BBS uses its claim.
+    """
+    used_ids: set[str] = set()
+    for node in graph.tasks:
+        runtime = node.run_info
+        props = runtime.extend_props
+        mode = str(runtime.run_mode or "").strip()
+        if mode == "coop_group":
+            formation = props.get("pending_group_formation")
+            if isinstance(formation, dict):
+                used_ids.update(
+                    str(bot_id).strip()
+                    for bot_id in formation.get("bot_ids", [])
+                    if str(bot_id).strip()
+                )
+            # The fallback retains a Bot assignee, unlike a true dynamic group.
+            mode = str(props.get("actual_run_mode") or "").strip()
+        if mode == "single_bot":
+            assignee = runtime.assignee
+        elif mode == "bbs":
+            assignee = props.get("bbs_owner") or runtime.assignee
+        else:
+            continue
+        candidate = compose_bot_identity(
+            str(assignee or "").strip(), props.get("assignee_owner_id"),
+        )
+        if candidate and candidate not in {"NOT_DECIDED"}:
+            used_ids.add(candidate)
+    return sorted(used_ids)
 
 
 def get_node(graph: TaskExecutionGraph, node_id: str) -> TaskNode | None:
@@ -114,6 +157,9 @@ def _build_initial_graph(self, task_info: TaskInfo) -> TaskExecutionGraph:
     if relay_mode:
         root_extend_props["relay_root"] = True
         root_extend_props["relay_token"] = uuid.uuid4().hex
+    entry_bot_id, entry_bot_owner_id = resolve_entry_bot_identity(
+        task_info.owner_bot_id, task_info.owner_user_id
+    )
     root = TaskNode(
         node_id=task_id,
         task_id=task_id,
@@ -121,9 +167,16 @@ def _build_initial_graph(self, task_info: TaskInfo) -> TaskExecutionGraph:
         task_spec=task_info.task_spec,
         run_info=RuntimeInfo(
             run_mode="single_bot" if relay_mode else None,
-            assignee=task_info.owner_bot_id if relay_mode else None,
+            assignee=entry_bot_id if relay_mode else None,
             start_time=started_at,
-            extend_props=root_extend_props,
+            extend_props={
+                **root_extend_props,
+                **(
+                    {"assignee_owner_id": entry_bot_owner_id}
+                    if relay_mode and entry_bot_owner_id
+                    else {}
+                ),
+            },
         ),
         node_run_graph=None,  # type: ignore[arg-type]
     )
@@ -163,12 +216,33 @@ def initialize_intake_graph(
         target = task_info.execution_config.get("initial_target") or {}
         root = graph.tasks[0]
         if graph.is_relay:
+            target_type = str(target.get("target_type") or "").upper()
             root.run_info.run_mode = (
-                "coop_group" if target.get("target_type") == "GROUP" else "single_bot"
+                "coop_group" if target_type == "GROUP" else "single_bot"
             )
-            root.run_info.assignee = str(
-                target.get("target_id") or task_info.owner_bot_id
-            )
+            if target_type == "GROUP":
+                root.run_info.assignee = str(
+                    target.get("target_id") or task_info.owner_bot_id
+                )
+                root.run_info.extend_props.pop("assignee_owner_id", None)
+            else:
+                target_bot_id, target_owner_id = resolve_entry_bot_identity(
+                    str(
+                        target.get("target_id")
+                        or root.run_info.assignee
+                        or task_info.owner_bot_id
+                        or ""
+                    ),
+                    root.run_info.extend_props.get("assignee_owner_id")
+                    or task_info.owner_user_id,
+                )
+                root.run_info.assignee = target_bot_id
+                if target_owner_id:
+                    root.run_info.extend_props["assignee_owner_id"] = target_owner_id
+                else:
+                    root.run_info.extend_props.pop("assignee_owner_id", None)
+        else:
+            root.run_info.extend_props.pop("assignee_owner_id", None)
         version = self._graph_repo.create_intake_graph(task_info, graph, session_id)
         self._graph_versions[task_id] = version
         self._graphs[task_id] = graph
@@ -531,6 +605,10 @@ def claim_bbs_owner(
     """Claim centralized root BBS or a Relay target BBS node atomically."""
     with self._lock_for(task_id):
         graph = self._require_graph(task_id)
+        if "bbs" not in TaskRuntimeProfile.run_modes_from_graph(graph):
+            raise TaskStateError(
+                f"claim_bbs_owner: BBS run mode is not allowed by runtime profile task={task_id}"
+            )
         if not graph.extend_props.get("bbs_mode"):
             raise TaskStateError(f"claim_bbs_owner: task={task_id} 非 bbs_mode 任务")
         target_id = node_id or task_id
@@ -739,6 +817,8 @@ def get_node_context(self, task_id: str, node_id: str) -> TaskContext:
             gaps=[],
             task_id=task_id,
             node_id=node_id,
+            used_executor_ids=_used_executor_ids(graph),
+            attempt=graph_node_attempt(current),
             root_task_spec=root.task_spec,
             current_task_spec=current.task_spec,
             actual_goal=runtime.actual_goal if decision == "ACCEPTED" else None,
@@ -756,3 +836,62 @@ def _accepted_plan_report(graph: TaskExecutionGraph, node_id: str):
     )
 
     return accepted_plan_report(graph, node_id)
+
+
+def attach_bbs_node(
+    service, task_id: str, parent_node_id: str, task_spec: TaskSpec, bot_id: str
+) -> TaskNode:
+    """BBS 接力步④:在 parent 下新建 run_mode=bbs scoped 子节点 + 翻 PENDING→RUNNING(create+start 合一)。
+
+    前置:调用者须为当前 ``bbs_owner``(root.run_info.extend_props['bbs_owner'] == bot_id,否则 TaskStateError);
+    parent 须满足 add 触发条件(根 PLANNING 等);深度闸 ``bbs_relay_count >= BBS_MAX_DEPTH`` →
+    图级 HUNG(``hung_reason=bbs_relay_exhausted``)+ TaskStateError。
+    实现:add_task_nodes(挂 parent 下,parent→PLANNING)→ update_task_node_info(PENDING→RUNNING)
+    → update_task_graph_info(bbs_relay_count++);返回新建节点(add_task_nodes 挂入为同一引用,
+    update_task_node_info 原地翻 RUNNING,故返回节点 status=RUNNING)。
+    """
+    with service._lock_for(task_id):
+        graph = service._require_graph(task_id)
+        root = next((n for n in graph.tasks if n.node_id == task_id), None)
+        if root is None or root.run_info.extend_props.get("bbs_owner") != bot_id:
+            raise TaskStateError(f"attach_bbs_node: 非claim持有者 task={task_id}")
+        relay_count = int(graph.extend_props.get("bbs_relay_count", 0))
+        if relay_count >= service._execution_config(task_id)["BBS_MAX_DEPTH"]:
+            service.update_task_graph_info(
+                task_id,
+                TaskGraphPatch(
+                    status=Status.HUNG,
+                    extend_props_patch={"hung_reason": "bbs_relay_exhausted"},
+                ),
+            )
+            raise TaskStateError(
+                f"attach_bbs_node: BBS relay 深度达上限 task={task_id}"
+            )
+        node_id = f"bbs-{uuid.uuid4().hex[:8]}"
+        claim_at = root.run_info.extend_props.get("bbs_claim_at") or int(
+            time.time() * 1000
+        )
+        node = TaskNode(
+            node_id=node_id,
+            task_id=task_id,
+            status=Status.PENDING,
+            task_spec=task_spec,
+            run_info=RuntimeInfo(
+                run_mode="bbs",
+                assignee=bot_id,
+                start_time=int(claim_at),
+                extend_props={"bbs_claim_at": int(claim_at)},
+            ),
+            node_run_graph=graph,
+        )
+        service.add_task_nodes(
+            [node], parent_node_id=parent_node_id, mark_parent_planning=False
+        )  # BBS 挂载只建 scoped 节点,根在 SUCCESS 回投后再→PLANNING
+        service.update_task_node_info(
+            TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.RUNNING)
+        )  # create+start:PENDING→RUNNING 是 _DIRECT_TRANSITIONS 合法翻
+        service.update_task_graph_info(
+            task_id,
+            TaskGraphPatch(extend_props_patch={"bbs_relay_count": relay_count + 1}),
+        )
+        return node

@@ -159,7 +159,7 @@ class TestRuntimeLocalLifecycle(unittest.TestCase):
     def _create_app(cls):
         """Create FastAPI app for testing."""
         try:
-            from src.bootstrap.opensource_app import create_opensource_app
+            from app.bootstrap.opensource_app import create_opensource_app
 
             cls.app = create_opensource_app(mode="runtime")
             cls.client = TestClient(cls.app)
@@ -404,7 +404,7 @@ class TestRuntimeLocalLifecycle(unittest.TestCase):
 
     def test_14_diagnostics_masking(self):
         """Test that diagnostics mask all secret-like values."""
-        from src.bootstrap.oss_diagnostics import (
+        from app.bootstrap.oss_diagnostics import (
             safe_provider_diagnostics,
             validate_no_secrets_in_dict,
         )

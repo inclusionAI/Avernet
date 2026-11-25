@@ -23,15 +23,15 @@ use bcs_protocol::http::friends::{
     RevokeFriendResponse, StatusResponse, envelope,
 };
 use bcs_service_api::application::{ConnectStatus, RequestDirection};
-use bcs_service_api::RequestAuthHeaders;
+use bcs_service_api::{RequestAuthHeaders, ServiceError};
 
 use crate::error::HttpAdapterError;
 use crate::{headers::extract_bearer_token, state::HttpAppState};
 
-use super::{bots::bot_use_case_error_to_http, caller::caller_actor_id_from_headers};
+use super::{caller::caller_actor_id_from_headers};
 
 
-fn request_auth_headers(headers: &HeaderMap) -> RequestAuthHeaders {
+pub(crate) fn request_auth_headers(headers: &HeaderMap) -> RequestAuthHeaders {
     let authorization = extract_bearer_token(headers).map(|token| format!("Bearer {token}"));
     let cookie = headers
         .get(axum::http::header::COOKIE)
@@ -96,7 +96,7 @@ pub async fn accept_friend_request(
     uri: Uri,
     Path(id): Path<String>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
+    let caller = resolve_request_decider(&state, &headers, &uri, &id).await?;
     let edge_ids = state
         .connect
         .approve(&id, &caller, Some(request_auth_headers(&headers)))
@@ -112,7 +112,7 @@ pub async fn reject_friend_request(
     Path(id): Path<String>,
     body: Option<Json<DecisionBody>>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
+    let caller = resolve_request_decider(&state, &headers, &uri, &id).await?;
     // Body is optional: bcs-cli POSTs reject with no body / no content-type.
     let reason = body.and_then(|Json(b)| b.reason);
     state.connect.reject(&id, &caller, reason).await?;
@@ -223,6 +223,20 @@ pub async fn list_friends_by_actor(
     Ok(Json(envelope(&FriendListResponse { items, total })))
 }
 
+/// Authenticate before lookup, then authorize against the persisted receiver.
+/// This must precede the lifecycle call, including its idempotent return paths.
+async fn resolve_request_decider(
+    state: &HttpAppState,
+    headers: &HeaderMap,
+    uri: &Uri,
+    request_id: &str,
+) -> Result<String, HttpAdapterError> {
+    let caller = resolve_caller(state, headers, uri, None, None).await?;
+    let request = state.connect.get_request(request_id).await?;
+    authorize_actor(state, &caller, &request.to_id, !request.to_id.starts_with("human_")).await?;
+    Ok(request.to_id)
+}
+
 /// Resolve the caller actor id from request context for friend-connections endpoints.
 ///
 /// friend-connections security model (stricter than old `/friends/*`):
@@ -234,9 +248,14 @@ pub async fn list_friends_by_actor(
 ///    This closes the unauthenticated-self-declaration hole that the old
 ///    `/friends/*` Strategy-A fallback allowed.
 ///
-/// Ownership rule: a human bearer may only act as a bot they own
-/// (`bot_query.list_bots_by_creator(staff_no)`), and a bot bearer may only act
-/// as itself. Any other `from_actor` is rejected with 403.
+/// Control rule (bot-authority plan Task 6.5, spec
+/// §8 好友代操作): a human bearer may only act as a
+/// BOT it CURRENTLY CONTROLS through the live
+/// authority hook; the historical
+/// `list_bots_by_creator` probe is gone (no owner
+/// suffix, no `created_by: None` auto-claim). A
+/// failing authority read is an internal error,
+/// never a deny-as-403.
 async fn resolve_caller(
     state: &HttpAppState,
     headers: &HeaderMap,
@@ -261,20 +280,38 @@ async fn resolve_caller(
         _ => actor_id.to_string(),
     };
 
+    authorize_actor(state, &bearer, &canonical, actor_kind == Some("bot")).await?;
+    Ok(canonical)
+}
+
+/// Share the live act-as check between creation and request decisions.
+async fn authorize_actor(
+    state: &HttpAppState,
+    bearer: &str,
+    canonical: &str,
+    is_bot: bool,
+) -> Result<(), HttpAdapterError> {
     if canonical == bearer {
-        return Ok(canonical);
+        return Ok(());
     }
 
-    if matches!(actor_kind, Some("bot")) && bearer.starts_with("human_") {
-        let staff_no = bearer.strip_prefix("human_").unwrap_or(&bearer);
-        let owned_bots = state
+    if is_bot && bearer.starts_with("human_") {
+        let staff_no = bearer.strip_prefix("human_").unwrap_or(bearer);
+        match state
             .services
-            .bot_query
-            .list_bots_by_creator(staff_no)
+            .bot_authority_hook
+            .can_manage(staff_no, canonical)
             .await
-            .map_err(bot_use_case_error_to_http)?;
-        if owned_bots.iter().any(|bot| bot.bot_uuid == canonical) {
-            return Ok(canonical);
+        {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+            Err(error) => {
+                return Err(HttpAdapterError::Service(
+                    ServiceError::InternalError(format!(
+                        "bot authority lookup failed: {error}"
+                    )),
+                ));
+            }
         }
     }
 

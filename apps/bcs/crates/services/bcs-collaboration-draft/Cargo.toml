@@ -12,12 +12,9 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
-base64.workspace = true
 bcs-service-api.workspace = true
 chrono.workspace = true
 hex.workspace = true
-subtle.workspace = true
-rand.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 uuid.workspace = true

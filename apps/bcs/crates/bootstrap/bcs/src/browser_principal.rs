@@ -1,0 +1,46 @@
+//! Projects the existing BCS browser login chain into the Human V1 contract.
+//! Used only by /collaboration/user, never as a fallback for Gateway verification.
+use std::sync::Arc;
+use async_trait::async_trait;
+use axum::http::HeaderMap;
+use bcs_api_http::{CredentialKind, PrincipalVerifier, PrincipalVerificationError, VerifiedRequestIdentity};
+use bcs_auth_api::AuthPluginChain;
+use bcs_service_api::application::v1::{AuthenticatedCaller, AuthenticatedUserIdentity};
+
+/// The pinned source name for the legacy native Human browser chain,
+/// fixed by this wrapper (never from request headers or cookies).
+pub(crate) const LEGACY_BROWSER_SOURCE_NAME: &str = "legacy-browser";
+
+pub(crate) struct BrowserPrincipalVerifier(pub Arc<AuthPluginChain>);
+
+#[async_trait]
+impl PrincipalVerifier for BrowserPrincipalVerifier {
+    async fn verify(&self, headers: &HeaderMap) -> Result<VerifiedRequestIdentity, PrincipalVerificationError> {
+        // This cookie-only surface must not turn Bot/session credentials into their owner.
+        for header in ["authorization", "actor", "x-bcs-bot-token", "x-avernet-bot-token",
+            "x-avernet-principal"] {
+            if headers.contains_key(header) {
+                return Err(PrincipalVerificationError::Invalid("Human browser login required".into()));
+            }
+        }
+        let principal = self.0.authenticate(headers).await
+            .map_err(|_| PrincipalVerificationError::Invalid("Browser authentication failed".into()))?
+            .principal.ok_or(PrincipalVerificationError::Missing)?;
+        if principal.bot_uuid.is_some() || principal.external_bot_id.is_some() || principal.owner_id.is_some() {
+            return Err(PrincipalVerificationError::Invalid("Human browser login required".into()));
+        }
+        let id = principal.user_id.filter(|id| !id.trim().is_empty())
+            .ok_or(PrincipalVerificationError::Missing)?;
+        let caller = AuthenticatedCaller { tenant: None, user: Some(AuthenticatedUserIdentity {
+            username: id.clone(), id, display_name: principal.user_name, full_name: None,
+        }), bot: None, app: None, access_key: None };
+        // This adapter exists solely for the legacy native Human router,
+        // which keeps its own browser_boundary write protection (spec §7.4):
+        // the marker is never registered in the new ordered chain.
+        Ok(VerifiedRequestIdentity::pin(
+            caller,
+            LEGACY_BROWSER_SOURCE_NAME,
+            CredentialKind::LegacyBrowserBoundary,
+        ))
+    }
+}

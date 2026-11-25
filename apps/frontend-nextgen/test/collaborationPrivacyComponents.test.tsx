@@ -63,19 +63,21 @@ describe('collaboration privacy accessible UI', () => {
       'utf8',
     );
     const hookSource = readFileSync(path.join(process.cwd(), 'src/hooks/useCollaborationPrivacy.ts'), 'utf8');
+    // 动作编排拆至子 Hook 后,notify/文案契约由主 Hook + 子 Hook 共同履行。
+    const actionsSource = readFileSync(path.join(process.cwd(), 'src/hooks/useCollaborationPrivacyActions.ts'), 'utf8');
     const helperSource = readFileSync(path.join(process.cwd(), 'src/hooks/collaborationPrivacyHelpers.ts'), 'utf8');
 
     expect(dialogSource).not.toContain('PageMessage');
     // 错误/成功经统一 notify 入口（全局上方居中、错误 6s、可关），页面 Hook 不单独设置位置。
     expect(hookSource).not.toContain("position: 'top-center'");
     expect(hookSource).toContain("from '@/components/ui/notify'");
-    expect(hookSource).toContain('notifyError');
-    expect(hookSource).toContain('notifySuccess');
+    expect(hookSource + actionsSource).toContain('notifyError');
+    expect(hookSource + actionsSource).toContain('notifySuccess');
     expect(hookSource).toContain('publicationSuccessMessage(config)');
     expect(helperSource).toContain('Bot 可见性已更新为不可见，当前立即生效');
     expect(helperSource).toContain('可见性变更申请已提交，当前可见性保持不变');
-    expect(hookSource).toContain('好友审批策略已更新为“无需审批”');
-    expect(hookSource).toContain('好友审批策略已更新为“全部审批”');
+    expect(actionsSource).toContain('好友审批策略已更新为“无需审批”');
+    expect(actionsSource).toContain('好友审批策略已更新为“全部审批”');
     expect(helperSource).toContain("config.scope === 'none'");
     expect(hookSource).not.toContain('setFeedback');
     expect(hookSource).not.toContain('Mock 审批');
@@ -144,7 +146,10 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).not.toContain('bg-gray-');
     expect(html).not.toContain('animate-pulse');
     expect(html).toContain('>Bot UUID<');
-    expect(html).toContain('title="20260825_mbu0ey8f:900004"');
+    // unify-tooltip-antd：截断 UUID 的完整值由统一 Tooltip 承载（个 hover 打开），
+    // 原生 title= 已按 spec 治理规则迁移移除；关闭态不渲染 Portal 内气泡属预期。
+    expect(html).not.toContain('title="20260825_mbu0ey8f:900004"');
+    expect(html).toContain('>20260825_mbu0ey8f:900004</code>');
     expect(html).not.toContain('Bot ID：20260825_mbu0ey8f:900004');
     expect(html).toContain('aria-label="复制 产品协作助手 的 Bot UUID"');
     expect(html).toContain('参与协作群聊');
@@ -158,7 +163,7 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).toContain('text-xs font-semibold tracking-wide text-muted-foreground');
     expect(html).toContain('mb-3 flex items-center');
     expect(html).not.toContain('border-b border-border pb-2');
-    expect(html).toContain('divide-y divide-border');
+    expect(html).toContain('divide-y divide-divider');
 
     const collaborationPrivacyHelpersSource = readFileSync(
       path.join(process.cwd(), 'src/hooks/collaborationPrivacyHelpers.ts'),
@@ -274,6 +279,59 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).toContain('待审批');
     expect(html).not.toContain('查看审批进度');
     expect(html).not.toContain('/admin/work-orders');
+  });
+
+  test('审批中在途行提供刷新状态入口，未提供回调时不渲染', () => {
+    const approvingStatus = {
+      kind: 'approving' as const,
+      detailUrl: null,
+      onViewApprovalProgress: jest.fn(),
+    };
+    const html = renderToStaticMarkup(
+      <RelationCard
+        audience="user"
+        config={{ scope: 'all', organizationPaths: [] }}
+        riskStatus={{ ...approvingStatus, onRefreshStatus: jest.fn(), refreshingStatus: false }}
+        onEdit={jest.fn()}
+        onViewScope={jest.fn()}
+      />,
+    );
+    expect(html).toContain('审批中');
+    expect(html).toContain('查看审批进度');
+    expect(html).toContain('刷新状态');
+
+    // 未提供刷新回调（宿主未接 hook）时不渲染。
+    const withoutCallback = renderToStaticMarkup(
+      <RelationCard
+        audience="user"
+        config={{ scope: 'all', organizationPaths: [] }}
+        riskStatus={approvingStatus}
+        onEdit={jest.fn()}
+        onViewScope={jest.fn()}
+      />,
+    );
+    expect(withoutCallback).toContain('审批中');
+    expect(withoutCallback).not.toContain('刷新状态');
+
+    // 风险动线审批期后端把同一申请投影进 BCS friend_ext（pendingPublications），
+    // 刷新入口不因 pending 隐藏——角标/外链仍按 pending 优先，避免双徽标。
+    const withPending = renderToStaticMarkup(
+      <RelationCard
+        audience="user"
+        config={{ scope: 'all', organizationPaths: [] }}
+        pending={{
+          id: 'MOCK-WO-24081802',
+          audience: 'user',
+          target: { scope: 'all', organizationPaths: [] },
+          submittedAt: '2026-08-18T09:30:00.000Z',
+        }}
+        riskStatus={{ ...approvingStatus, onRefreshStatus: jest.fn() }}
+        onEdit={jest.fn()}
+        onViewScope={jest.fn()}
+      />,
+    );
+    expect(withPending).toContain('待审批');
+    expect(withPending).toContain('刷新状态');
   });
 
   test('组织级联支持可变层级且父级和中间层级均可选择', () => {
@@ -425,6 +483,144 @@ describe('collaboration privacy accessible UI', () => {
     expect(tooltipSource).toContain('ControlStateTooltip');
     expect(relationSource).not.toContain('Tooltip');
     expect(requestSource).not.toContain('Tooltip');
+  });
+
+  test('检测失败提示条提供手动刷新入口且与旧记录同步提示一致', () => {
+    const failedRecord = {
+      risk_check_id: 'rk-1',
+      phase: 'CHECKING',
+      security_status: 'REJECT',
+      detail_url: 'https://example.test/risk/rk-1',
+      auto_poll_paused: true,
+      auto_poll_until: null,
+      next_action_at: null,
+      target: { public_scope: 'user', visibility: 'PUBLIC', view_depts: [] },
+      error_reason: null,
+      invalidation_reason: null,
+      approval_puid: null,
+    };
+    const html = renderWithPortals(
+      <PublicationEditor
+        open
+        audience="user"
+        initialConfig={{ scope: 'all', organizationPaths: [] }}
+        risk={{
+          uiState: { kind: 'failed', record: failedRecord },
+          record: failedRecord,
+          isCreating: false,
+          refreshCurrent: jest.fn(),
+          isRefreshing: false,
+        }}
+        onSearch={jest.fn()}
+        onClose={jest.fn()}
+        onSubmit={jest.fn()}
+      />,
+    );
+
+    expect(html).toContain('Bot公开风险前置检测失败');
+    expect(html).toContain('刷新状态');
+    expect(html).toContain('工单结论如有更新，可刷新状态同步，无需重新发起。');
+  });
+
+  test('未提供刷新回调时失败提示条不渲染刷新按钮', () => {
+    const failedRecord = {
+      risk_check_id: 'rk-1',
+      phase: 'CHECKING',
+      security_status: 'REJECT',
+      detail_url: null,
+      auto_poll_paused: true,
+      auto_poll_until: null,
+      next_action_at: null,
+      target: { public_scope: 'user', visibility: 'PUBLIC', view_depts: [] },
+      error_reason: null,
+      invalidation_reason: null,
+      approval_puid: null,
+    };
+    const html = renderWithPortals(
+      <PublicationEditor
+        open
+        audience="user"
+        initialConfig={{ scope: 'all', organizationPaths: [] }}
+        risk={{ uiState: { kind: 'failed', record: failedRecord }, record: failedRecord, isCreating: false }}
+        onSearch={jest.fn()}
+        onClose={jest.fn()}
+        onSubmit={jest.fn()}
+      />,
+    );
+
+    expect(html).toContain('Bot公开风险前置检测失败');
+    expect(html).not.toContain('刷新状态');
+  });
+
+  test('检测进行中提示条提供手动刷新入口（可穿透后端暂停轮询态）', () => {
+    // 检测超时（5 分钟）后端仅暂停自动轮询、状态停留「检测中」无终态：
+    // 提示条须提供「刷新状态」入口，让用户主动同步最新结论。
+    const checkingRecord = {
+      risk_check_id: 'rk-9',
+      phase: 'CHECKING',
+      security_status: 'DETECTING',
+      detail_url: 'https://example.test/risk/rk-9',
+      auto_poll_paused: true,
+      auto_poll_until: null,
+      next_action_at: null,
+      target: { public_scope: 'user', visibility: 'PUBLIC', view_depts: [] },
+      error_reason: null,
+      invalidation_reason: null,
+      approval_puid: null,
+    };
+    const html = renderWithPortals(
+      <PublicationEditor
+        open
+        audience="user"
+        initialConfig={{ scope: 'all', organizationPaths: [] }}
+        risk={{
+          uiState: { kind: 'checking', record: checkingRecord },
+          record: checkingRecord,
+          isCreating: false,
+          refreshCurrent: jest.fn(),
+          isRefreshing: false,
+        }}
+        onSearch={jest.fn()}
+        onClose={jest.fn()}
+        onSubmit={jest.fn()}
+      />,
+    );
+
+    expect(html).toContain('Bot公开风险前置检测进行中');
+    expect(html).toContain('查看检测工单');
+    expect(html).toContain('刷新状态');
+    expect(html).toContain('若长时间停留在检测中，可手动刷新同步最新结论。');
+  });
+
+  test('在途提示条未提供刷新回调时不渲染刷新按钮', () => {
+    const checkingRecord = {
+      risk_check_id: 'rk-10',
+      phase: 'CHECKING',
+      security_status: 'DETECTING',
+      detail_url: null,
+      auto_poll_paused: true,
+      auto_poll_until: null,
+      next_action_at: null,
+      target: { public_scope: 'user', visibility: 'PUBLIC', view_depts: [] },
+      error_reason: null,
+      invalidation_reason: null,
+      approval_puid: null,
+    };
+    const html = renderWithPortals(
+      <PublicationEditor
+        open
+        audience="user"
+        initialConfig={{ scope: 'all', organizationPaths: [] }}
+        risk={{ uiState: { kind: 'checking', record: checkingRecord }, record: checkingRecord, isCreating: false }}
+        onSearch={jest.fn()}
+        onClose={jest.fn()}
+        onSubmit={jest.fn()}
+      />,
+    );
+
+    expect(html).toContain('Bot公开风险前置检测进行中');
+    expect(html).toContain('检测工单号：rk-10');
+    expect(html).not.toContain('刷新状态');
   });
 
   test('Bot 可见性和好友审批编辑器使用单选组语义', () => {

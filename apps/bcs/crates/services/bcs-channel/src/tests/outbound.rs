@@ -3,6 +3,8 @@ use super::*;
 #[test]
 fn channel_meta_uses_inbound_channel_type_as_source() {
     let msg = InboundMessage {
+        caller_ingress: None,
+        execution_token: None,
         channel_type: "test-im".to_string(),
         account_ref: "robot_1".to_string(),
         im_conversation_id: "conv_meta".to_string(),
@@ -70,6 +72,7 @@ async fn try_outbound_filters_visibility_and_sets_render_hint() -> TestResult {
 
     let mut msg = outbound("group_1:00000001", ParticipantRole::Worker, false);
     msg.source_im_message_id = Some("source-msg-1".to_string());
+    msg.caller_dispatch = true;
     harness.service.try_outbound(msg).await?;
     let events = harness.delivery.events.lock().await;
     assert_eq!(events.len(), 1);
@@ -79,6 +82,7 @@ async fn try_outbound_filters_visibility_and_sets_render_hint() -> TestResult {
         Some("source-msg-1")
     );
     assert!(events[0].render_sender_label);
+    assert!(events[0].caller_dispatch);
     drop(events);
 
     harness

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::group::{DeleteResult, Page};
+use super::group::{DeleteResult, Page, ParticipantSummary};
 use super::{ApplicationError, AuthenticatedCaller};
 use crate::StateMachineRunView;
 
@@ -22,6 +22,11 @@ pub struct SessionParticipant {
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Bot display avatar URL, or null when the participant has none. Human
+    /// participants resolve null and retained members of soft-deleted Bots
+    /// keep their stored face (design §5.2/§5.3).
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub role: ParticipantRole,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
@@ -55,6 +60,19 @@ pub struct SessionSummary {
     /// gating (collected is meaningful only relative to a named viewer).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collected: Option<bool>,
+    /// Lightweight summaries of every current Session member in stored order,
+    /// including session-only dynamic members: `name` is THIS Session's own
+    /// member snapshot verbatim (null allowed, never backfilled for the list)
+    /// and `avatar_url` is the current Bot display avatar (design §5.2).
+    #[serde(default)]
+    pub participants: Vec<ParticipantSummary>,
+    /// D1 activity key for this session, epoch ms: the max persisted message
+    /// `created_at` in the session, falling back to the session's own
+    /// `created_at` when it has no persisted messages. Absent on the wire means
+    /// `None` (older payloads stay readable) and the caller falls back to
+    /// `created_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,7 +134,16 @@ pub struct CreateSessionOutcome {
 
 #[derive(Debug, Clone)]
 pub struct CreateSession {
-    pub caller: SessionCaller,
+    /// The raw authenticated caller. The application
+    /// resolves the effective `SessionCaller` with the
+    /// LIVE Human→Bot hybrid rule
+    /// (`resolve_authorized_principal`): a hybrid
+    /// User+Bot credential becomes the Bot caller only
+    /// through the CURRENT management edge, so a
+    /// revoked historical owner cannot launch behind a
+    /// Bot and a current manager is not rejected
+    /// (bot-authority plan Task 6.3).
+    pub caller: AuthenticatedCaller,
     pub group_id: String,
     pub title: Option<String>,
     pub kind: Option<SessionKind>,
@@ -131,6 +158,24 @@ pub struct CreateSession {
     pub context_delivery: Option<DeliveryType>,
 }
 
+/// Ordering for the V1 session list (design D1/D3).
+///
+/// `CreatedAt` is the historical `created_at DESC, session_id ASC` order and
+/// the default. `LastActivity` orders by the D1 activity key
+/// (`last_activity_at DESC, session_id ASC`), falling back to the session's
+/// `created_at` when it has no persisted messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionListSort {
+    CreatedAt,
+    LastActivity,
+}
+
+impl Default for SessionListSort {
+    fn default() -> Self {
+        Self::CreatedAt
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ListSessions {
     pub caller: AuthenticatedCaller,
@@ -139,6 +184,7 @@ pub struct ListSessions {
     pub offset: u64,
     pub limit: u64,
     pub status: Option<SessionStatus>,
+    pub sort: SessionListSort,
 }
 
 #[derive(Debug, Clone)]
@@ -258,4 +304,43 @@ pub trait SessionService: Send + Sync {
         &self,
         command: DeleteSessionParticipant,
     ) -> Result<DeleteResult, ApplicationError>;
+}
+
+/// `last_activity_at` wire contract for the session list summary (design D1/D4):
+/// absent → `None` (backward compatible with pre-field payloads), present →
+/// round-trips as epoch ms, and `None` is omitted instead of serialized null.
+#[cfg(test)]
+mod session_list_activity_serde_tests {
+    use super::SessionSummary;
+    use serde_json::{json, Value};
+
+    fn session_json() -> Value {
+        json!({
+            "session_id": "s-1",
+            "version": 1,
+            "group_id": "g-1",
+            "status": "running",
+            "created_at": 1_700_000_000_000_u64,
+            "updated_at": 1_700_000_000_000_u64
+        })
+    }
+
+    #[test]
+    fn session_summary_without_last_activity_at_defaults_to_none() {
+        let summary: SessionSummary =
+            serde_json::from_value(session_json()).expect("deserialize");
+        assert_eq!(summary.last_activity_at, None);
+        let serialized = serde_json::to_value(&summary).expect("serialize");
+        assert_eq!(serialized.get("last_activity_at"), None);
+    }
+
+    #[test]
+    fn session_summary_last_activity_at_round_trips() {
+        let mut value = session_json();
+        value["last_activity_at"] = json!(789_u64);
+        let summary: SessionSummary = serde_json::from_value(value).expect("deserialize");
+        assert_eq!(summary.last_activity_at, Some(789_u64));
+        let serialized = serde_json::to_value(&summary).expect("serialize");
+        assert_eq!(serialized["last_activity_at"], json!(789_u64));
+    }
 }

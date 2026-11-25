@@ -449,9 +449,6 @@ story_cli_operator_runs_sessions_and_services() {
     assert_json_eq "CLI session completion returns completed" "$BCS_CLI_STDOUT" "status" "completed"
     assert_json_eq "CLI session completion keeps its output" "$BCS_CLI_STDOUT" "output.summary" "approved by CLI"
 
-    api_patch "/groups/${group_id}/settings" '{"service_spec":{"max_concurrency":2}}'
-    require_status "CLI service fixture enables group invocation" "200" || return
-
     _cli_story_run "release pipeline invokes the group service" PM service invoke \
         --group "$group_id" --input '{"commit":"cli123"}' \
         --meta '{"source":"cli-story"}' --caller-id "cli-release-pipeline" \
@@ -556,17 +553,159 @@ story_cli_operator_validates_channel_management() {
     require_status "CLI channel lookup group is cleaned up" "200" || return
 }
 
-# User story: An operator writes and reads Group Context through bcs-cli.
-#
-# Flow:
-#   Create a CLI-managed group -> add a group-scoped context entry -> read it
-#   directly -> update the active value -> list group-level entries -> clean up.
-#
-# Critical assertions:
-#   - The four public group-context CLI leaves are exercised against BCS HTTP
-#     routes, keeping CLI and adapter endpoint coverage complete.
-#   - Add/update return the stable ok status.
-#   - Get/list expose the active entry after mutation.
+_cli_story_exercise_context_presets() {
+    local group_id="$1" session_id="$2"
+    local query="groupId=$(urlencode "$group_id")"
+    local session_query="$query&sessionId=$(urlencode "$session_id")"
+
+    api_post "/groupcontext/manage/list-preset?$query" '{}'
+    require_status "driver Bot owner lists presets for management" "200" || return
+    assert_json_eq "Human management response exposes edit capability" "$RESPONSE" "can_manage" "true"
+    bot_post "/groupcontext/manage/list-preset?$query" PM '{}'
+    require_status "Bot cannot list presets through the Human management API" "403" || return
+    bot_post "/groupcontext/manage/add-preset?$query" PM '{"name":"Timeline"}'
+    require_status "Bot credentials cannot manage preset definitions" "403" || return
+    api_post "/groupcontext/manage/add-preset?$query" '{"name":"Timeline","description":"Incident timeline"}'
+    require_status "driver Bot owner defines a context preset" "200" || return
+    api_post "/groupcontext/manage/add-preset?$query" '{"name":"Timeline"}'
+    require_status "duplicate preset name is rejected" "409" || return
+    assert_contains "duplicate preset error asks the owner to rename" "$RESPONSE" "请重命名后重试"
+    bot_post "/groupcontext/list-preset?$query" PM '{}'
+    require_status "Bot can discover preset definitions through the runtime API" "200" || return
+    assert_eq "runtime response omits Human edit capability" "$(_cli_json_has_path "$RESPONSE" can_manage)" "0"
+
+    _cli_story_run "group member discovers the preset through CLI" PM group-context list-preset \
+        --group-id "$group_id" || return
+    assert_eq "preset discovery includes its description" \
+        "$(_cli_json_array_has_object "$BCS_CLI_STDOUT" presets name Timeline description "Incident timeline")" "1"
+
+    bot_post "/groupcontext/list-preset?$query" CEO '{}'
+    require_status "Bot outside the group cannot discover its presets" "403" || return
+    assert_contains "discovery denial prompts for a Session ID" "$RESPONSE" "--session-id"
+    bot_post "/groupcontext/list-preset?$session_query" CEO '{}'
+    require_status "Session ID alone does not authorize a nonmember" "403" || return
+
+    _cli_story_run "driver adds the guest only to the Session" PM session add-member "$session_id" \
+        --bot-uuid "$BOT_CEO_UUID" --role consultant || return
+    _cli_story_run "Session-only guest discovers presets using its Session ID" CEO group-context list-preset \
+        --group-id "$group_id" --session-id "$session_id" || return
+    assert_eq "Session guest discovers the same preset" \
+        "$(_cli_json_array_has_object "$BCS_CLI_STDOUT" presets name Timeline)" "1"
+
+    bot_post "/groupcontext/add?$session_query" PM \
+        '{"name":"timeline","scope_level":"session","content":"Wrong spelling","visible_to":{"userIds":[]},"preset":true}'
+    require_status "preset selection is case-sensitive" "400" || return
+    bot_post "/groupcontext/add?$session_query" PM \
+        '{"name":"Timeline","scope_level":"session","content":"Missing preset flag","visible_to":{"userIds":[]}}'
+    require_status "reserved preset name requires explicit selection" "400" || return
+
+    _cli_story_run "Session guest adds context using the preset" CEO group-context add \
+        --group-id "$group_id" --session-id "$session_id" --scope-level session \
+        --name Timeline --content "Incident began at 09:00" --preset || return
+    assert_json_eq "preset context add succeeds" "$BCS_CLI_STDOUT" "status" "ok"
+
+    api_post "/groupcontext/manage/update-preset?$query" '{"name":"Timeline","new_name":"IncidentTimeline","description":"Updated timeline"}'
+    require_status "driver Bot owner renames the preset" "200" || return
+    _cli_story_run "group member discovers the renamed preset" PM group-context list-preset \
+        --group-id "$group_id" || return
+    assert_eq "discovery returns the updated preset name and description" \
+        "$(_cli_json_array_has_object "$BCS_CLI_STDOUT" presets name IncidentTimeline description "Updated timeline")" "1"
+
+    api_post "/groupcontext/manage/delete-preset?$query" '{"name":"IncidentTimeline"}'
+    require_status "driver Bot owner deletes the preset definition" "200" || return
+    api_post "/groupcontext/manage/delete-preset?$query" '{"name":"IncidentTimeline"}'
+    require_status "deleting an unknown preset reports not found" "404" || return
+    _cli_story_run "Session guest reads the existing context after preset deletion" CEO group-context get \
+        --session-id "$session_id" --scope-level session --name Timeline || return
+    assert_eq "deleting a preset preserves context content and original name" \
+        "$(_cli_json_array_has_object "$BCS_CLI_STDOUT" items name Timeline content "Incident began at 09:00")" "1"
+}
+
+# A Human compares the collaboration session view with the group management view.
+_cli_story_exercise_shared_info() {
+    local group_id="$1" session_id="$2" name="$3" round_id="$4" updated="$5"
+    local query="groupId=$(urlencode "$group_id")"
+    local session_query="$query&sessionId=$(urlencode "$session_id")"
+
+    api_post "/groupcontext/shared-info?$session_query" '{}'
+    require_status "Human reads the shared info of a Session through managed Bots" "200" || return
+    assert_eq "Human sees the latest Group context" \
+        "$(_cli_json_array_has_object "$RESPONSE" items scope_level group content "$updated")" "1"
+    assert_eq "Human sees the Session context" \
+        "$(_cli_json_array_has_object "$RESPONSE" items scope_level session scope "$session_id")" "1"
+    assert_eq "Human sees the Round context" \
+        "$(_cli_json_array_has_object "$RESPONSE" items scope_level round scope "$round_id")" "1"
+
+    api_post "/groupcontext/shared-info?$session_query&view_bot_id=$(urlencode "$BOT_PM_UUID")" '{}'
+    require_status "Human opens shared info as the managed Session Bot" "200" || return
+    assert_eq "Bot view exposes the context readable by that Bot" \
+        "$(_cli_json_array_has_object "$RESPONSE" items name "$name" scope_level group)" "1"
+
+    bot_post "/groupcontext/shared-info?$session_query" CEO '{}'
+    require_status "Session-only Bot can open shared info" "200" || return
+    assert_eq "Session-only Bot cannot read a Group entry restricted to the driver" \
+        "$(_cli_json_array_has_object "$RESPONSE" items name "$name" scope_level group)" "0"
+    assert_eq "Session-only Bot can read the public Session entry" \
+        "$(_cli_json_array_has_object "$RESPONSE" items name Timeline scope_level session)" "1"
+
+    api_post "/groupcontext/shared-info?$query" '{}'
+    require_status "Human opens group management shared info" "200" || return
+    assert_json_eq "Group-only Human view excludes entries restricted to a managed Bot" "$RESPONSE" "items" "[]"
+}
+
+# Exercise the browser-facing contract against the same Group and Session.
+_cli_story_exercise_context_openapi() {
+    local group_id="$1" session_id="$2" round_id="$3" updated="$4"
+    local prefix="/openapi/v1/collaboration/groupcontext"
+    local query="groupId=$(urlencode "$group_id")"
+    local session_query="$query&sessionId=$(urlencode "$session_id")"
+    local signing_key="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+    local principal
+    principal=$(python3 "${SCRIPT_DIR}/group_session_ws_probe.py" principal \
+        --user-id "$BCS_MOCK_USER_ID" --username "$BCS_MOCK_USER_NICK_NAME" \
+        --tenant bcs-e2e --signing-key "$signing_key")
+    assert_not_empty "Group Context OpenAPI fixture has a Gateway Principal" "$principal"
+    [[ -n "$principal" ]] || return 1
+    local principal_header="X-Avernet-Principal: $principal"
+
+    api_request_headers POST "$prefix/shared-info?$session_query&view_bot_id=$(urlencode "$BOT_PM_UUID")" '{}' "$principal_header"
+    require_status "Human reads OpenAPI shared info as the driver Bot" "200" || return
+    assert_eq "OpenAPI shared info includes the latest Group context" \
+        "$(_cli_json_array_has_object "$RESPONSE" data.items scope_level group content "$updated")" "1"
+    assert_eq "OpenAPI shared info includes the Session context" \
+        "$(_cli_json_array_has_object "$RESPONSE" data.items scope_level session scope "$session_id")" "1"
+    assert_eq "OpenAPI shared info includes the Round context" \
+        "$(_cli_json_array_has_object "$RESPONSE" data.items scope_level round scope "$round_id")" "1"
+
+    api_request_headers POST "$prefix/manage/add-preset?$query" '{"name":"BrowserTimeline","description":"Browser timeline"}' "$principal_header"
+    require_status "Human adds a preset through OpenAPI" "200" || return
+    api_request_headers POST "$prefix/manage/add-preset?$query" '{"name":"BrowserTimeline"}' "$principal_header"
+    require_status "OpenAPI rejects a duplicate preset" "409" || return
+
+    api_request_headers POST "$prefix/list-preset?$session_query" '{}' "$principal_header"
+    require_status "Human lists presets through OpenAPI" "200" || return
+    assert_eq "OpenAPI preset list includes the created preset" \
+        "$(_cli_json_array_has_object "$RESPONSE" data.presets name BrowserTimeline description "Browser timeline")" "1"
+
+    api_request_headers POST "$prefix/manage/update-preset?$query" \
+        '{"name":"BrowserTimeline","new_name":"BrowserPlan","description":"Updated browser timeline"}' "$principal_header"
+    require_status "Human updates a preset through OpenAPI" "200" || return
+    api_request_headers POST "$prefix/manage/list-preset?$query" '{}' "$principal_header"
+    require_status "Human lists managed presets through OpenAPI" "200" || return
+    assert_json_eq "OpenAPI management list confirms the Human can manage presets" "$RESPONSE" data.can_manage true
+    assert_eq "OpenAPI management list includes the renamed preset" \
+        "$(_cli_json_array_has_object "$RESPONSE" data.presets name BrowserPlan description "Updated browser timeline")" "1"
+
+    api_request_headers POST "$prefix/manage/delete-preset?$query" '{"name":"BrowserPlan"}' "$principal_header"
+    require_status "Human deletes a preset through OpenAPI" "200" || return
+    api_request_headers POST "$prefix/manage/list-preset?$query" '{}' "$principal_header"
+    require_status "Human lists managed presets after deletion" "200" || return
+    assert_json_eq "OpenAPI management list no longer returns the deleted preset" "$RESPONSE" data.presets '[]'
+}
+
+# User story: The driver Bot owner manages Preset definitions, and Bots
+# discover and use them from Group and Session membership.
+# The same workspace exercises ordinary Group Context at each scope.
 story_cli_operator_manages_group_context() {
     info "Story: an operator manages Group Context through bcs-cli"
     local group_id session_id round_id ctx_name content updated session_content round_content list_has_item get_has_content get_has_updated
@@ -668,6 +807,21 @@ story_cli_operator_manages_group_context() {
     }
     get_has_updated=$(_cli_json_array_has_object "$BCS_CLI_STDOUT" "items" "name" "$ctx_name" "content" "$updated")
     assert_eq "CLI group-context get returns the updated content" "$get_has_updated" "1"
+
+    _cli_story_exercise_context_presets "$group_id" "$session_id" || {
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    }
+
+    _cli_story_exercise_shared_info "$group_id" "$session_id" "$ctx_name" "$round_id" "$updated" || {
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    }
+
+    _cli_story_exercise_context_openapi "$group_id" "$session_id" "$round_id" "$updated" || {
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    }
 
     api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
     require_status "CLI group-context group is cleaned up" "200" || return

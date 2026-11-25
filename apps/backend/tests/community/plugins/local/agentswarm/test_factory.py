@@ -207,17 +207,17 @@ class TestPerAttemptThreading:
         assert hasattr(bot_sub, "executor_id")
         assert hasattr(bot_sub, "executor_name")
         assert llm_sub.executor_id
-        assert llm_sub.executor_name.startswith("s1-")
+        assert llm_sub.executor_name.startswith("s1_")
 
     def test_llm_kind_exposes_the_bare_per_attempt_digest(self):
         factory = DefaultSubagentFactory(StubLLMProvider())
         run = _mk_run()
         sub = factory.create(_LLM_SPEC, run, dm.AgentId("agent-s1"), 2)
         digest16 = dm.spawn_digest("run-42", "agent-s1", 2, 16)
-        digest8 = dm.spawn_digest("run-42", "agent-s1", 2, 8)
+        digest12 = dm.spawn_digest("run-42", "agent-s1", 2, 12)
         assert sub.executor_id == digest16
         assert not sub.executor_id.startswith("agent_swarm_")
-        assert sub.executor_name == f"s1-{digest8}"
+        assert sub.executor_name == f"s1_{digest12}"
 
 
 class _DeletionPlatform:
@@ -655,3 +655,48 @@ class TestBlankIntentMaterializationGrace:
         assert platform.deleted == [derived]
         (row,) = self._rows(db)
         assert row["binding_state"] == "DESTROYED"
+
+class TestLegacyBeltScope:
+    """The belt addresses only ids this agent can be shown to own."""
+
+    def _factory(self, db, platform):
+        return DefaultSubagentFactory(
+            llm=None, platform=platform,
+            attempt_repo=AgentAttemptRepository(db),
+        )
+
+    def test_an_unrelated_runs_identity_is_never_addressed(self):
+        from agentclaw.community.plugins.community.agentswarm.host import (
+            bot_id_for, spawn_idempotency_key,
+        )
+
+        db = _sqlite_db()
+        _seed_run_and_claim(db, "run-sweep")
+        platform = _DeletionPlatform()
+        agents = [_mk_sweep_agent("scout", "agent-1", bot_id=None)]
+        destroyed = self._factory(db, platform).destroy_run_agents_bots(
+            _mk_run("run-sweep"), agents)
+
+        own = bot_id_for("run-sweep", "agent-1")
+        assert destroyed == [own]
+        # Neither another run's persona nor a per-attempt id this sweep has no
+        # evidence for is touched.
+        assert bot_id_for("run-other", "agent-1") not in platform.deleted
+        assert bot_id_for("run-sweep", "agent-1", 1) not in platform.deleted
+        assert spawn_idempotency_key("run-sweep", "agent-1", 1) not in platform.deleted
+
+    def test_ledger_intent_row_is_addressed_by_its_own_attempt_id(self):
+        from agentclaw.community.plugins.community.agentswarm.host import (
+            bot_id_for,
+        )
+
+        db = _sqlite_db()
+        epoch = _seed_run_and_claim(db, "run-sweep")
+        # A write-ahead intent row (blank executor id) for attempt 3.
+        assert _journal(db, "run-sweep", "agent-1", epoch, 3,
+                        dm.AgentKind.BOT.value, "", "scout")
+        platform = _DeletionPlatform()
+        self._factory(db, platform).destroy_run_agents_bots(
+            _mk_run("run-sweep"), [])
+
+        assert bot_id_for("run-sweep", "agent-1", 3) in platform.deleted

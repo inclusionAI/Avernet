@@ -4,6 +4,7 @@ import { isEnvelopeFailure } from '../types';
 
 /** TeamClaw Gateway bot-catalog 的公开 Bot 普通搜索 DTO。 */
 export interface PublicBotCatalogDto {
+  avatar_url?: string | null;
   bot_id: string;
   bot_uuid?: string;
   bot_type: string;
@@ -15,8 +16,15 @@ export interface PublicBotCatalogDto {
   status: string;
   /** Search 返回的当前 Human→Bot 好友关系；缺失时由 Domain 安全降级为 none。 */
   is_friend?: boolean;
+  /** BCS 当前在线状态；独立于 Backend 生命周期 status（如 ACTIVE）。 */
+  is_online?: boolean;
+  actor_kind?: 'bot' | 'human';
   friend_ext?: Record<string, unknown>;
   friend_check_in_strategy?: 'OPEN' | 'APPROVAL' | 'DEPT_FREE';
+  /** Bot→Bot 协作可见性（BCS visibility，public/protected/private）；缺失时按未知处理。 */
+  visibility?: string;
+  /** 人类用户可见性（BCS user_visibility，public/protected/private）；缺失时按未知处理。 */
+  user_visibility?: string;
 }
 
 /** 公开 Bot 普通搜索的 Gateway query。 */
@@ -142,4 +150,77 @@ export async function discoverPublicBots(
     signal,
   });
   return validateCatalogResponse<PublicBotDiscoveryDto>(response);
+}
+
+/** Bot 画像（bot-catalog profile）能力条目 DTO：capability_id + display_name。 */
+export interface PublicBotCapabilityDto {
+  capability_id: string;
+  display_name: string;
+}
+
+/** Bot 画像（bot-catalog profile）技能条目 DTO：skill_id + display_name。 */
+export interface PublicBotSkillDto {
+  skill_id: string;
+  display_name: string;
+}
+
+/** 好友申请弹窗消费的公开 Bot 画像 DTO（后端 `PublicBotProfile` 契约）。 */
+export interface PublicBotProfileDto {
+  bot_id: string;
+  bot_uuid?: string | null;
+  bot_name: string;
+  owner_name?: string | null;
+  description?: string | null;
+  engine_name?: string | null;
+  capabilities: PublicBotCapabilityDto[];
+  /** 已公开技能清单；旧 envelope / BCS-only 画像可能缺省，Mapper 统一回退空列表。 */
+  skills?: PublicBotSkillDto[];
+  // 线上 envelope 允许携带未知扩展键；未知键不进 Mapper 投影。
+  [key: string]: unknown;
+}
+
+export interface PublicBotProfileResponse {
+  code: 200000;
+  message?: string;
+  data: PublicBotProfileDto;
+  request_id?: string;
+}
+
+export const PUBLIC_BOT_PROFILE_ENDPOINT = '/openapi/v1/bots/catalog/profile';
+
+function validateProfileResponse(value: unknown): PublicBotProfileResponse {
+  if (isAceLoginResponse(value)) {
+    throw new PublicBotCatalogError('unauthenticated', 'Bot Catalog request requires authentication');
+  }
+  if (!isRecord(value) || isEnvelopeFailure(value)) {
+    throw new PublicBotCatalogError('protocol_error', 'Unexpected Bot Catalog business response');
+  }
+  if (
+    !isRecord(value.data) ||
+    typeof value.data.bot_id !== 'string' ||
+    typeof value.data.bot_name !== 'string' ||
+    !Array.isArray(value.data.capabilities)
+  ) {
+    throw new PublicBotCatalogError('protocol_error', 'Invalid Bot Catalog profile response');
+  }
+  return value as unknown as PublicBotProfileResponse;
+}
+
+/**
+ * 公开 Bot 画像（bot-catalog profile）：好友申请弹窗的名称/Owner/引擎/已公开能力来源。
+ * 404（不在公开目录）由上层映射为 target_invalid，与其他公开资源口径一致。
+ */
+export async function getPublicBotProfile(
+  botId: string,
+  signal?: AbortSignal,
+): Promise<PublicBotProfileResponse> {
+  const response = await backendRequest<unknown>(
+    `${PUBLIC_BOT_PROFILE_ENDPOINT}/${encodeURIComponent(botId)}`,
+    {
+      method: 'GET',
+      injectUserId: false,
+      signal,
+    },
+  );
+  return validateProfileResponse(response);
 }

@@ -46,9 +46,6 @@ class CommunityIdentityModule(Module):
         from agentclaw.community.plugins.community.auth_relationship import (
             CommunityAuthRelationshipPlugin,
         )
-        from agentclaw.community.plugins.community.passport import (
-            SelfIssuedPassportPlugin,
-        )
         from agentclaw.community.plugins.community.token_exchange import (
             PassthroughTokenExchangePlugin,
         )
@@ -56,9 +53,6 @@ class CommunityIdentityModule(Module):
         # ``OidcAuthPlugin.__init__`` is ``@inject``-decorated and now takes
         # ``BcsAuthConfig`` (provided above), so ``bind`` can construct it.
         binder.bind(AuthPlugin, to=OidcAuthPlugin, scope=singleton)
-        binder.bind(
-            PassportPlugin, to=SelfIssuedPassportPlugin, scope=singleton
-        )
         binder.bind(
             AuthRelationshipPlugin,
             to=CommunityAuthRelationshipPlugin,
@@ -69,3 +63,38 @@ class CommunityIdentityModule(Module):
             to=PassthroughTokenExchangePlugin,
             scope=singleton,
         )
+        self._bind_passport_column(binder)
+
+    def _bind_passport_column(self, binder: Binder) -> None:
+        """Pick the passport by mode.
+
+        The mode and its ``consent_base_url`` are strict-parsed here, once, at
+        composition time — an invalid value fails the boot rather than a
+        later request. Under ``manual_consent`` the bound plugin is the HTTP
+        client for the simulator's mock-services AgentPass service, and this
+        process holds no consent surface of its own at all: the application
+        registry, the consent page, and the approve/reject decisions all
+        belong to the mock service reached at ``consent_base_url``.
+        """
+        from agentclaw.community.di.community_identity_config import (
+            CommunityPassportMode,
+            community_identity_from_block,
+        )
+        from agentclaw.community.di.modules.config_module import _block
+
+        config = community_identity_from_block(_block("community_identity"))
+        if config.passport_mode is CommunityPassportMode.MANUAL_CONSENT:
+            from agentclaw.community.plugins.community.passport_consent import (
+                ManualConsentPassportPlugin,
+            )
+
+            manual = ManualConsentPassportPlugin(
+                consent_base_url=config.consent_base_url
+            )
+            binder.bind(PassportPlugin, to=manual, scope=singleton)
+            return
+        from agentclaw.community.plugins.community.passport import (
+            SelfIssuedPassportPlugin,
+        )
+
+        binder.bind(PassportPlugin, to=SelfIssuedPassportPlugin, scope=singleton)

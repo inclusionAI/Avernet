@@ -9,7 +9,8 @@ import uuid
 
 from agentclaw.community.core.agentswarm.config.settings import AgentSwarmConfig
 from agentclaw.community.core.agentswarm.domain.models import (
-    EpochMillis, Run, RunId, RunPage, RunStatus, TenantId,
+    Agent, AgentKind, AgentStatus, BotState, EpochMillis, Run, RunId,
+    RunPage, RunStatus, TenantId,
 )
 from agentclaw.community.core.agentswarm.repository.agent import AgentRepository
 from agentclaw.community.core.agentswarm.repository.agent_attempt import (
@@ -24,14 +25,37 @@ from agentclaw.community.core.agentswarm.repository.agent_result import AgentRes
 from agentclaw.community.core.agentswarm.service.protocols import (
     AgentSwarmConfigError, AgentSwarmRunNotFoundError,
     AgentSwarmRunNotPurgeableError, AgentSwarmServiceProtocol,
-    AgentSwarmSyncTimeoutError, AgentDetailItem, AgentEvent,
-    AgentMessageDetail, AgentResultDetail, AgentAttemptDetail,
+    AgentSwarmSyncTimeoutError, AgentAuthorizationState, AgentDetailItem,
+    AgentEvent, AgentMessageDetail, AgentResultDetail, AgentAttemptDetail,
+    BotAuthorizationDescriptor, BotAuthorizationSource,
     GlobalRunLimitExceeded, GuardEventDetailItem, GuardEventSummary,
+    AgentKind,
+    IdentitySourceInvalid, IdentitySourceRefusal, IdentitySourceRequired,
+    IDENTITY_SOURCE_UNVERIFIED,
     QueueDepthExceeded, RoundDetailItem, RoundEvent, RunDetail, RunEvents,
     SubmitRunRequest, TenantRunLimitExceeded,
 )
 
 logger = get_logger("agentswarm")
+
+# Agents whose own lifecycle is over: a terminal agent's gate can no longer
+# be acted on by a human, so it is never read from the authorization source.
+_TERMINAL_AGENT_STATUSES = frozenset({
+    AgentStatus.COMPLETED, AgentStatus.FAILED, AgentStatus.KILLED,
+})
+
+
+def _unresolvable_authorization(agent: Agent) -> BotAuthorizationDescriptor:
+    """The parked gate for a row whose creation payload cannot answer.
+
+    Presence is keyed off the durable park state, so the descriptor still
+    surfaces — with the wire module's empty-spelling for payload facts the
+    seam could not serve — never a fabricated URL or deadline for it.
+    """
+    return BotAuthorizationDescriptor(
+        state=BotState.AWAITING_AUTHORIZATION.value,
+        iframe_url="", redirect_url="", deadline="", application_id="",
+    )
 
 class AgentSwarmService(AgentSwarmServiceProtocol):
 
@@ -41,7 +65,8 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
                  result_repo: AgentResultRepository,
                  config: AgentSwarmConfig,
                  attempt_repo: AgentAttemptRepository | None = None,
-) -> None:
+                 authorization_source: BotAuthorizationSource | None = None,
+    ) -> None:
         self._run_repo = run_repo
         self._dispatch_repo = dispatch_repo
         self._agent_repo = agent_repo
@@ -50,6 +75,7 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         self._guard_repo = guard_repo
         self._result_repo = result_repo
         self._attempt_repo = attempt_repo
+        self._authorization_source = authorization_source
         self._config = config
         slice_max = config.orchestration.slice_max_seconds
         # Float deadline with a one-poll-cycle floor: int() truncated a
@@ -58,7 +84,48 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         # the wait to zero.
         self._deadline: float = max(float(slice_max or 3600.0), 1.0)
 
+    def _require_identity_source(self, req: SubmitRunRequest) -> None:
+        """Refuse a submit that names no usable identity source.
+
+        Only runs that provision Bots need one: an ``llm`` agent completes
+        in-process and never holds a passport, so a pure-llm run carries no
+        identity requirement -- and a source it happens to name is ignored
+        rather than validated. Checked before any row is written: a refused
+        submit must leave no run behind.
+        """
+        if not any(a.kind is AgentKind.BOT for a in req.agents):
+            return
+        source_id = (req.identity_bot_id or "").strip()
+        if not source_id:
+            raise IdentitySourceRequired()
+        resolver = self._authorization_source
+        if resolver is None:
+            # No seam bound: this composition cannot verify the source, so the
+            # named id is taken as given. Refusing here would make every
+            # service test that does not care about identity fail on wiring
+            # it never exercised.
+            return
+        answer = resolver.identity_source(
+            owner_id=(req.owner_id or "").strip(), bot_id=source_id,
+        )
+        if isinstance(answer, IdentitySourceRefusal):
+            raise IdentitySourceInvalid(
+                source_id, answer.code, message=answer.message,
+            )
+        if not isinstance(answer, str) or not answer.strip():
+            # Neither an agent code nor a reason: the seam answered something
+            # the contract does not define, so the source is unverified rather
+            # than silently accepted.
+            raise IdentitySourceInvalid(
+                source_id, IDENTITY_SOURCE_UNVERIFIED,
+                message=(
+                    f"identity source {source_id!r} could not be verified: the "
+                    "authorization seam returned no agent code"
+                ),
+            )
+
     async def submit_async(self, req: SubmitRunRequest) -> str:
+        self._require_identity_source(req)
         self._require_llm_config()
         if req.idempotency_key:
             existing = self._run_repo.get_by_idempotency(
@@ -110,7 +177,8 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             self._dispatch_repo.enqueue(
                 run_id=RunId(run_id),
                 tenant=TenantId(req.tenant),
-                deadline_seconds=self._deadline,
+                deadline_seconds=req.run_options.resolved_slice_max(
+                    self._deadline),
             )
         except Exception as exc:
             # Orphan-run compensation: the run row THIS call just created
@@ -155,6 +223,16 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         ):
             await asyncio.sleep(1.0)
             run = self.get_run(run_id, req.tenant)
+        # The loop's last read happens *inside* the body, after its sleep. A
+        # wait that expired during that sleep therefore exits with the
+        # pre-sleep ``run`` still in hand — possibly RUNNING, possibly a row
+        # that was deleted in the meantime. Re-read once at expiry so the
+        # verdict below is current: without this, a run deleted during the
+        # final second is returned as live instead of raised as gone.
+        if time.monotonic() >= deadline and (
+            run is None or run.status is RunStatus.RUNNING
+        ):
+            run = self.get_run(run_id, req.tenant)
         if run is None:
             # The wait expired without a terminal state and the run row
             # is gone (deleted/purged mid-wait): never fabricate a Run —
@@ -169,9 +247,10 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         return self._run_repo.get(RunId(run_id), TenantId(tenant))
 
     def list_runs(self, tenant: str, status: RunStatus | None = None,
-                  *, page: int = 1, page_size: int = 20) -> RunPage:
+                  *, page: int = 1, page_size: int = 20,
+                  owner_id: str | None = None) -> RunPage:
         return self._run_repo.list_page(
-            TenantId(tenant), status, page, page_size,
+            TenantId(tenant), status, page, page_size, owner_id=owner_id,
         )
 
     async def cancel(self, run_id: str, tenant: str) -> str:
@@ -189,13 +268,28 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         run = self._run_repo.get(rid, tid)
         if run is None:
             raise AgentSwarmRunNotFoundError(run_id)
+        agent_rows = self._agent_repo.list_by_run_with_rows(rid, tid)
         agents = tuple(
             AgentEvent(
                 agent_id=a.agent_id, name=a.name, status=a.status, kind=a.kind,
                 spawn_round=a.spawn_round, row_cursor=row,
             )
-            for row, a in self._agent_repo.list_by_run_with_rows(rid, tid)
+            for row, a in agent_rows
             if row > after_agent_id
+        )
+        agent_authorizations = tuple(
+            AgentAuthorizationState(
+                agent_id=str(a.agent_id),
+                name=a.name,
+                status=a.status.value,
+                kind=a.kind.value,
+                spawn_round=int(a.spawn_round),
+                bot_id=str(a.bot_id) if a.bot_id is not None else None,
+                bot_state=a.bot_state.value,
+                authorization=self._authorization_for(a, run),
+            )
+            for _, a in agent_rows
+            if a.bot_state is not None
         )
         rounds = tuple(
             RoundEvent(
@@ -214,6 +308,7 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         return RunEvents(
             agents=agents, rounds=rounds, guards=guards,
             run_status=run.status, terminal=terminal,
+            agent_authorizations=agent_authorizations,
         )
 
     def get_run_detail(self, run_id: str, tenant: str) -> RunDetail | None:
@@ -303,6 +398,7 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
                 result=result,
                 attempt_ledger=tuple(ledger_by_agent.get(str(agent.agent_id), ())),
                 messages=messages,
+                authorization=self._authorization_for(agent, run),
             ))
 
         rounds = tuple(
@@ -359,6 +455,66 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             raise AgentSwarmConfigError(
                 "agentswarm llm config missing: base_url/api_key required"
             )
+
+    def _authorization_for(
+        self, agent: Agent, run: Run,
+    ) -> BotAuthorizationDescriptor | None:
+        """The pending gate as the authorization source answers it.
+
+        Presence keys off the live application's status, not the agent
+        row's cached ``bot_state`` write: multiple bot agents spawn in
+        parallel and every application goes PENDING at once, but the
+        provisioning pool reaches — and parks — each agent's row
+        sequentially, so a later agent's window can already be running
+        (or lapse) while its row still carries a stale or absent state.
+        Every non-terminal bot-kind agent is therefore read through the
+        source, whose answer distinguishes PENDING (descriptor) from
+        issued/approved/rejected/expired (no gate). The row's parked
+        write stays authoritative only for the degraded spellings: a
+        durably parked agent surfaces the gate — with the wire module's
+        empty facts — even when the source cannot answer for it.
+        """
+        if agent.kind is not AgentKind.BOT:
+            # The gate is a bot-provisioning fact; llm-kind agents never
+            # carry a passport application, so they never touch the source.
+            return None
+        if agent.status in _TERMINAL_AGENT_STATUSES:
+            # A terminal agent's provisioning outcome is settled; its
+            # detail response stays exactly as before this change.
+            return None
+        parked = agent.bot_state is BotState.AWAITING_AUTHORIZATION
+        if not parked and agent.bot_state is BotState.READY:
+            # The Bot is already up, so whatever the creation job still
+            # carries is history, not a decision a human can make. Reporting
+            # it would tell a reader to approve a running Bot — with no
+            # application left to decide.
+            #
+            # Only READY is excluded. A bare ``PROVISIONING`` row is the
+            # normal state of an agent still setting up, which the source
+            # must still be allowed to describe as pending.
+            return None
+        if (
+            self._authorization_source is None
+            or not (run.owner_id or "").strip()
+            or agent.bot_id is None
+        ):
+            return _unresolvable_authorization(agent) if parked else None
+        try:
+            descriptor = self._authorization_source.authorization(
+                owner_id=run.owner_id, bot_id=str(agent.bot_id),
+            )
+        except Exception:
+            logger.warning(
+                "[agentswarm][service] authorization payload lookup failed "
+                "for agent=%s bot=%s (parked state surfaces without URLs)",
+                agent.agent_id, agent.bot_id,
+            )
+            return _unresolvable_authorization(agent) if parked else None
+        if descriptor is None:
+            # Not actually pending (or not answerable): only a durably
+            # parked row still surfaces the empty-spelling gate.
+            return _unresolvable_authorization(agent) if parked else None
+        return descriptor
 
     def purge_run(self, run_id: str, tenant: str) -> dict[str, int] | None:
         rid, tid = RunId(run_id), TenantId(tenant)

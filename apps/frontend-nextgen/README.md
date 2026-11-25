@@ -27,6 +27,266 @@ npm run check:open-core
 npm run ci
 ```
 
+## Group and Session invitation links
+
+The [invitation landing hook](src/pages/Workspace/hooks/useInviteAccept.ts) first
+calls the authenticated, read-only [BCS invitation preflight](../bcs/api-contracts/v1/openapi/invitations.yaml).
+BCS determines whether the signed-in Human is already a participant of the exact
+Group or Session. Existing members navigate directly using the returned target
+and parent Group IDs and explicitly select the authenticated Human identity, not
+the previously active Bot. Invitation identity resolution only observes existing
+auth/capability/identity-store state; it never starts a mine/identity-loading
+request, which can create Human actors. A late global authentication result
+resumes navigation. While identity initialization is pending, the landing page shows
+a loading state rather than an error; unresolved initialization times out after ten
+seconds. The invitation history entry is replaced. Other users
+still explicitly confirm joining and select a message visibility scope.
+
+Preflight never accepts an invitation or infers membership from public visibility,
+Bot management or successful detail access. Expired links remain invalid.
+Authentication failures are distinct from invalid invitations; transient preflight
+failures offer retry rather than an unchecked confirmation. The request renders
+errors inline while leaving shared login/authentication gates enabled. A selected
+Group absent from the current sidebar page/filter is resolved by ID through the
+existing selected-Group detail fallback, including Session-only membership; list
+absence alone never changes the participation filter or discards the requested Session.
+
+Both already-joined and newly accepted invitations support these optional URL
+query parameters. The verified token target, not the editable path segment or
+query, supplies the resource IDs and determines the allowed views.
+
+| Invitation URL path | `view` values | Result |
+| --- | --- | --- |
+| `/workspace/invite/groups/{token}` | `group`, `full` | `group` opens `/workspace/collaboration/group` for the invited Group. |
+| `/workspace/invite/sessions/{token}` | `session`, `group`, `full` | `session` opens `/workspace/collaboration/session` without the session list. `group` opens the parent Group and initially selects the invited Session. Neither view changes membership in the parent Group. |
+
+`view=full` or an omitted, unknown, or unsupported `view` keeps the original
+`/workspace/collaboration` destination and target selection. If the verified
+target lacks the IDs required to open a focused page, the invitation uses that
+same full-workspace fallback. On focused pages, `showReturn=false` hides the
+**Return to full collaboration** button; `showReturn=true`, an omitted value, or
+an unknown value leaves it visible. The full workspace has no such return bar.
+For example, `/workspace/invite/sessions/{token}?view=session&showReturn=false`
+opens the invited Session with no session list or return bar.
+
+An explicit Session deep link issues one sidebar-location request after route
+identity hydration. Once the target Group and Session details are verified,
+location clears obstructing sidebar filters, displays an out-of-list target,
+expands the sidebar and scrolls to the Session. Once the selected Group detail
+is available, its classification is confirmed by a matching entry from the
+selected View Actor's paginated Group lists: the public target-independent Group
+detail does not itself report `membership`. Location aligns the participation
+filter with that explicit list value (`direct` or `session_only`) while preserving
+the selected Session. List absence is never treated as evidence for the opposite
+category. Classification-query failures offer a retry rather than guessing. List
+readiness is scoped to both identity and participation filter, so a previous
+category's Groups are not shown under a newly selected category during reload.
+This display-only operation never joins the parent Group, changes actual Group
+membership, or modifies paging/history state. It
+survives transient detail reloads while the Store selection is unchanged; user
+selection, newer filters or dismissal cancel even a still-pending request. A
+settled target-verification failure removes the cached overlay. Internal Store-to-URL projections do
+not replay location or remount the workspace. A canonical `human_` target waits
+for the matching real Human in the identity list instead of falling back to a
+Bot or placeholder identity. If route initialization cannot finish within ten
+seconds, the page offers explicit refresh and return actions instead of loading
+indefinitely under a missing identity.
+
+Regression coverage is in [invitationService.test.ts](test/services/workspace/invitationService.test.ts),
+[useInviteAccept.preview.test.ts](test/pages/Workspace/hooks/useInviteAccept.preview.test.ts),
+[useInviteAccept.readonlyIdentity.test.ts](test/pages/Workspace/hooks/useInviteAccept.readonlyIdentity.test.ts)
+and [InviteAcceptPanel.test.tsx](test/pages/Workspace/InviteAcceptPanel.test.tsx).
+The [focused-page tests](test/pages/Workspace/FocusedCollaboration.test.tsx)
+cover the return bar and preservation of its option when changing Sessions.
+Sidebar and route regressions are covered by
+[invitationSidebarNavigation.test.tsx](test/pages/Workspace/invitationSidebarNavigation.test.tsx),
+[useWorkspacePage.deepLinkLocation.test.tsx](test/pages/Workspace/hooks/useWorkspacePage.deepLinkLocation.test.tsx)
+and [useGroupSessionLocation.deepLink.test.tsx](test/pages/Workspace/hooks/useGroupSessionLocation.deepLink.test.tsx).
+
+## Other-initiated conversation labels
+
+The read-only “他人发起” list identifies human initiators only from explicit
+`user:<id>:` prefixes or trailing `:user:<id>` / `:direct:<id>` segments of
+Session IDs. Synthetic member-task and BCS-CLI owner segments are not human
+creator evidence. Unknown IDs never fall back to the Bot owner or current viewer.
+Each row shows a user avatar/icon and name, falling back to the explicit user ID
+or “用户”. History user messages show the matched name/avatar, or “用户” when
+no name is available; Bot messages keep the Bot's identity. Legacy friend-based
+history retains its explicitly resolved friend name. Viewing remains read-only.
+
+Names use the existing human batch-query API asynchronously, independently of
+session/history loading. Batches contain at most 50 unique humans; in-flight
+lookups are shared. Viewer-scoped memory caching is bounded to 500 entries with
+a five-minute name TTL (30 seconds for missing/failed lookups). Late responses
+cannot label a newly selected session or another viewer. No Backend permission,
+session filtering, runtime-stage or chat-send behavior changes.
+
+Regression coverage: [profile service](test/services/workspace/sessionInitiatorService.test.ts),
+[hook and list](test/pages/Workspace/Chat/hooks/useSessionInitiators.test.tsx), and
+[read-only history](test/pages/Workspace/components/ReadOnlyConversationPanel.test.tsx).
+
+## Discovery public Bots
+
+The [public Bot cursor](src/services/collaborationSquare/publicBotCursor.ts)
+requests BCS candidates with `limit=20`. This is independent of the UI's 24-item
+batch: filtering and lookahead may require multiple requests, and the next page
+resumes from the original BCS offset without dropping the lookahead item.
+
+The “我的 Bot” badge compares the signed-in user's ID with the candidate's
+`owner_user_id`, not `bot.created_by`. Older services may omit `owner_user_id`;
+the frontend then leaves ownership unconfirmed. When Backend enhancement is
+enabled and a matching metadata record supplies a nonblank `owner_id`, that ID
+takes precedence, including when it clears a candidate's ownership flag. Missing
+metadata or an unavailable enhancement service preserves the candidate-based
+judgment; authentication failures still propagate. Owner names are independent
+of this check. The shared mapping also applies to discovery search results.
+
+Regression coverage lives in
+[`bcsBotMapper.test.ts`](test/domain/collaborationSquare/bcsBotMapper.test.ts),
+[`publicBotMetadata.test.ts`](test/services/collaborationSquare/publicBotMetadata.test.ts)
+and [`publicBotCursor.test.ts`](test/services/collaborationSquare/publicBotCursor.test.ts).
+
+## Discovery public groups
+
+The [public group card](src/components/CollaborationSquare/GroupCard/index.tsx)
+shows the driver Bot, not the Owner user (the public directory does not return
+that user). The member dialog still uses Owner information from group details.
+[Member loading](src/services/collaborationSquare/collaborationSquareApiAdapter.ts)
+preserves each participant's `avatar_url`. The
+[member dialog](src/components/CollaborationSquare/GroupMembersModal/index.tsx)
+uses that avatar when present; Bots without one use the shared
+[Bot avatar resolver](src/domain/botAvatar.ts), seeded by participant `actor_id`,
+to match Bot management. Human members without an avatar retain their initial.
+Regression coverage lives in
+[`GroupMemberAvatar.test.tsx`](test/components/CollaborationSquare/GroupMemberAvatar.test.tsx)
+and [`GroupOwnerDisplay.test.tsx`](test/components/CollaborationSquare/GroupOwnerDisplay.test.tsx).
+
+## Legacy friend-user deep links
+
+New managed/collaborating Bot source lists use the flat source-window flow below.
+Existing `friend=` deep links retain the managed Bot friend-group flow:
+friend users load under the Bot's composite actor ID, and session/message reads
+retain the owner context, normalized friend ID, pagination and runtime stage.
+Other-user browsing is read-only; it does not enable session writes, a composer
+or a realtime chat connection. Backend authorization still applies.
+
+Managed and collaborating Bot other-user directories batch-query
+`POST /openapi/v1/collaboration/bots/query` with `human_<userId>` identities after
+relation pagination and deduplication. Nonblank Human `name` values replace
+numeric labels without changing user IDs or directory order. Missing names or
+lookup failures preserve existing relation names, falling back to the user ID.
+No employee-directory or legacy-frontend dependency is used.
+
+The other-user directory excludes the signed-in viewer by normalized Human ID,
+not by name or Bot ownership. Both fresh responses and reused directory caches
+apply this exclusion. A self-only friend result is an empty other-user list;
+stale expanded self groups do not trigger other-user session reads.
+
+Other-user group rows follow the compact sidebar density: 13px regular names,
+24px circular neutral user icons, 40px rows and 8px avatar/name spacing. Loading
+skeletons mirror the same geometry; hierarchical indentation and read-only
+session interactions are unchanged.
+
+Regression coverage lives in
+[`managedBotConversationService.test.ts`](test/services/workspace/managedBotConversationService.test.ts),
+[`teamBotSessionRequests.test.ts`](test/services/workspace/teamBotSessionRequests.test.ts),
+[`ConversationSidebarSessionFilters.test.tsx`](test/pages/Workspace/Chat/components/ConversationSidebarSessionFilters.test.tsx),
+[`ConversationFriendGroup.test.tsx`](test/pages/Workspace/Chat/components/ConversationFriendGroup.test.tsx),
+[`useManagedBotOthers.test.tsx`](test/pages/Workspace/Chat/hooks/useManagedBotOthers.test.tsx)
+and the managed/team read-only cases in
+[`ConversationPage.test.tsx`](test/pages/Workspace/Chat/ConversationPage.test.tsx).
+
+## Group session file preview
+
+The group file panel previews text files through a sandboxed iframe at the
+existing `show=true` content URL. A backend may redirect that URL to a
+presigned storage address, so reading it with browser JavaScript would require
+CORS on the final storage response. Direct browser navigation renders
+`text/markdown`, `text/plain`, and other inline text responses without a
+cross-origin body read. The iframe grants no scripts, same-origin permissions,
+popups, or downloads; users can still download from the panel toolbar. Server
+`Content-Type`, `Content-Disposition`, and framing policy determine whether a
+particular response renders inline. Group Markdown displays as raw browser
+text and JSON is not reformatted; no client-side size limit is applied.
+
+The shared [file preview classifier](src/services/workspace/filePreview.ts)
+recognizes common documentation, configuration, source-code, log, structured
+text, and conventional extensionless files by name or explicit text MIME
+(including JSON/XML suffixes). Preview recognition does not change the upload
+allowlist. The Bot preview still renders supplied text through the existing
+Markdown/plain-text UI; image, video, PDF and HTML paths are unchanged.
+Regression tests cover
+[format classification](test/services/workspace/sessionFilePreviewKind.test.ts),
+[group URL state](test/pages/Workspace/hooks/useSessionFilePreview.test.tsx), and
+[shared preview rendering](test/pages/Workspace/components/GroupChatPane/SessionFilesPreviewPane.test.tsx).
+
+## Task Escort read-only workspace
+
+**任务护航** is a separate management entry immediately above **智能进化**.
+It reads real workflow, execution, issue, repair, experience and management
+resources without changing the existing Evolution pages. Task Escort domain
+requests are GET-only; write actions stay unsupported, and read failures never
+fall back to demo data. Fixture modules are not reachable from the formal page.
+See the [approved feature scope and validation handoff](specs/2026-11-18-task-escort-readonly/spec.md)
+and its [file ownership manifest](specs/2026-11-18-task-escort-readonly/ownership-manifest.json).
+## Conversation session origins
+
+The conversation sidebar uses Backend `sessions?source=mine|others` for managed
+and collaborating Bots. Both sources render flat lists ordered by the loaded
+sessions' modified time descending (creation time is the fallback). Later
+windows are merged, deduplicated by session ID and sorted again; this is not a
+global sort over sessions that have not been loaded.
+
+Source queries keep `page=1`, send the authenticated Human as `user_id`, the
+real Bot owner as `owner_id`, and preserve runtime stage, instance and session-key
+filters. Continuation uses `next_cursor`, never the cumulative `total` or the
+number of returned items. A short/empty scan window with `has_more=true` exposes
+“继续加载” rather than a false empty state; no automatic unbounded scan runs in
+the browser. Filter revisions and user generations reject stale responses.
+
+Others remain read-only: history uses the current operator, not `f_user_id` or an
+impersonated Owner. Favorites and friend Bots retain their separate existing
+flows; old `friend=` deep links retain the legacy friend view. Coding Bot
+visibility policy remains applied without reclassifying Backend source results.
+Deploy Backend source-window support before this frontend: missing/mismatched
+source metadata produces an explicit unsupported error instead of presenting an
+unfiltered list as “mine”. See the [Backend contract](../backend/docs/openapi-v1/engine-surface.md).
+## Lab tasks
+
+The [Lab task list](src/pages/Lab/Tasks/index.tsx) searches displayed task titles within
+its currently loaded page, not Bot names or all pages. Existing status and Owner
+Bot filters remain available. “创建时间” shows `gmt_create`; “更新时间” shows
+`gmt_modified` (the last record modification, not task completion). Missing times
+display a dash. Lab rows do not claim execution duration from these timestamps;
+the default MyTask presentation remains unchanged. Regression coverage lives in
+[`Tasks.test.tsx`](test/pages/Lab/Tasks.test.tsx).
+
+## Notification center detail classification
+
+Approval details loaded through `workOrderService.getDetail` retain the approval
+identity even when the detail response omits `item_type` or `event_type`, or its
+event is not yet in the display catalogue. Notification details loaded through
+`notificationService.getDetail` retain their recipient-notification identity,
+even when they carry an originating approval event. Classification does not depend
+on approval status, read state or the user's current approval permission.
+Approval-result notifications display the category label “审批类”, rather than
+“审批通知”; this presentation choice does not turn a notification into an
+approvable work order or change its read state.
+The [shared category tag](src/components/Admin/WorkOrderCategoryTag.tsx) is used
+by list rows and detail drawers in every view, including pending and processed.
+Approval work orders and approval-result notifications display “审批类”; other
+notifications display “通知类”. All category tags use the same neutral semantic
+colors, independent of event type, read state or processing status. Approval
+status/action colors are unchanged. The shared event catalogue still recognizes
+Skill editor requests for domain metadata.
+
+Regression coverage lives in
+[workOrderService.api.test.ts](test/services/admin/workOrderService.api.test.ts),
+[notificationService.test.ts](test/services/admin/notificationService.test.ts),
+[workOrderMeta.test.ts](test/domain/admin/workOrderMeta.test.ts) and
+[WorkOrderDetailDrawer.test.tsx](test/components/Admin/WorkOrderDetailDrawer.test.tsx) and
+[WorkOrderCategoryTag.test.tsx](test/components/Admin/WorkOrderCategoryTag.test.tsx).
+
 ## Source synchronization
 
 `OPEN_CORE_MANIFEST.json` records the TeamClaw source commit. Changes originating in this public directory must be taken back into the TeamClaw Open Core baseline before the next export.
@@ -83,3 +343,71 @@ its platform archives/installer pass release gates; then update all pinned links
 Closing the registration guide reloads the external Bot list and reachability.
 OpenClaw setup separates Bot type selection from terminal installation versus
 sending onboarding instructions to the Bot.
+
+## Evolution pages
+
+The [evolution pages](src/pages/EvolutionFactory/index.tsx) keep the existing
+space-scoped API and task controls. Task filters expose only supported category
+and status values. Missing scores remain unassessed; missing deltas are not
+replaced by zero. Bot avatars use the shared deterministic fallback when the
+version data has no custom avatar. The version Bot column shows its current
+space-directory name above the Bot ID, not the owner ID. Names are matched by
+owner and Bot ID across directory pages; unavailable names fall back to the Bot
+ID without blocking version display. Version search also matches these names.
+The version list exposes the source task as
+its own column (name when returned, otherwise task ID), linking to task details.
+Version-source filters use `initial`, `round`, and `snapshot`; Review results
+remain table content, not a filter. Task targets show the directory Bot name
+followed by the object type `(Bot)`, with the real Bot ID as the name fallback.
+Text search also matches the returned source task name. Version generation time
+(`createdAt`) and raw `reviewStatus` / `specVersion` are visible table columns;
+missing values display a dash rather than inferred time or review results.
+
+[Domain details](src/pages/EvolutionFactory/DomainDetail.tsx) separate owner,
+Domain ID, description and template count; long titles and metadata retain
+full text on hover and keyboard focus. Missing detail counts use the loaded
+template list length, not a fabricated count. Associated runs reserve space
+for decimal scores and keep numeric text inside its own table cell.
+
+[Domain templates](src/pages/EvolutionFactory/DomainTemplates.tsx) paginate the
+returned template list, keep draft selections across pages, and preserve
+read-only and published-template restrictions. The diagnosis form uses three equal columns for model and case counts, with
+a full-width focus field. Exact-Session mode keeps the case-count controls
+visible but disabled because those values do not participate in that request.
+Task details use a centered content column; task-specific versions remain available in the expandable
+section below the execution information. Artifact cards still open the full
+output from the selected real step, rather than synthetic report content.
+
+Presentation and interaction regression coverage lives in
+[`test/evolution`](test/evolution), including template pagination, task actions,
+score display and output inspection. Run `npm test -- --runInBand test/evolution`
+in a configured frontend workspace.
+
+## TaskEscort sidebar
+
+The [TaskEscort navigation](src/pages/TaskEscort/Navigation.tsx) uses 14px labels,
+12px group headings, 20px icons and 44px rows. On desktop its right edge is a
+focusable separator: drag right to grow, use Left/Right for 10px steps, or
+Home/End for the 220–360px bounds (264px default). Width is stored locally under
+`task-escort.sidebar-width`; unavailable storage leaves resizing usable. The
+editor retains its 72px compact rail and mobile retains horizontal navigation
+without a resize handle. No global selection styles are changed during dragging.
+Regression coverage: [sidebar.test.tsx](test/taskEscortWorkspace/sidebar.test.tsx).
+
+## AgentCoding after-create actions
+
+AgentCoding template creation keeps the open-claw-compatible after-create
+contract: only the architectural Bot onboarding action is emitted. A template may
+declare `afterCreate` or `after_create`, and when the template exposes an
+`architect_name` field the frontend adds the fixed `update_architect_bot_ext`
+action automatically. The action sends
+
+```http
+PATCH /api/public/bots/{bot_id}/ext
+```
+
+with `arch_domain` and `is_domain_bot: true` after direct creation or
+authorization succeeds. An empty submitted architecture-domain value is ignored.
+Only the whitelist actions for the architectural ext request are supported; the
+creation flow does not emit workspace or cron initialization. Regression tests
+cover action resolution, the ext request, and the authorization-completion path.

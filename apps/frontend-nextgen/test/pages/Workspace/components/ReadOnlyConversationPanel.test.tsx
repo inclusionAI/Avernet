@@ -6,6 +6,12 @@ import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
+import { useSessionInitiators } from '@/pages/Workspace/Chat/hooks/useSessionInitiators';
+
+jest.mock('@/pages/Workspace/Chat/hooks/useSessionInitiators', () => {
+  const { jest: mockJest } = require('@jest/globals');
+  return { useSessionInitiators: mockJest.fn(() => () => undefined) };
+});
 
 jest.mock('@tc-chat/ui/es/Bubble', () => ({
   Bubble: ({ blocks }: { blocks?: Array<{ content?: string }> }) => (
@@ -36,6 +42,7 @@ jest.mock('@tc-chat/ui/es/SystemNotice', () => ({
 }));
 
 beforeEach(() => {
+  jest.mocked(useSessionInitiators).mockReturnValue(() => undefined);
   Object.defineProperty(globalThis, 'ResizeObserver', {
     configurable: true,
     value: class ResizeObserverMock {
@@ -110,7 +117,30 @@ describe('ReadOnlyConversationPanel', () => {
 
   it('shows an empty selection state before a Session is selected', () => {
     render(<ReadOnlyConversationPanel {...baseProps} friend={null} session={null} messages={[]} />);
-    expect(screen.getByText('请选择一个好友用户会话')).toBeInTheDocument();
+    expect(screen.getByText('请选择一个他人发起的会话')).toBeInTheDocument();
+  });
+
+  it('renders flat operator history without requiring a friend profile', () => {
+    render(<ReadOnlyConversationPanel {...baseProps} friend={null} />);
+    expect(screen.getByText('Bot 回复')).toBeInTheDocument();
+    expect(screen.getByText('用户')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/发送消息/)).not.toBeInTheDocument();
+  });
+
+  it('labels user messages with the matched initiator while preserving the Bot and read-only mode', () => {
+    jest.mocked(useSessionInitiators).mockReturnValue(() => ({ userId: '123', displayName: '张三', avatarUrl: '/human.png' }));
+    render(<ReadOnlyConversationPanel {...baseProps} friend={null} />);
+    expect(screen.getByText('张三')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '张三' })).toHaveAttribute('src', '/human.png');
+    expect(screen.getByText('皮皮虾')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/发送消息/)).not.toBeInTheDocument();
+  });
+
+  it('uses 用户 rather than an ID or unrelated friend name when no profile matches', () => {
+    jest.mocked(useSessionInitiators).mockReturnValue(() => ({ userId: '123' }));
+    render(<ReadOnlyConversationPanel {...baseProps} />);
+    expect(screen.getByText('用户')).toBeInTheDocument();
+    expect(screen.queryByText('风太')).not.toBeInTheDocument();
   });
 
   it('shows a retry action when initial history fails', () => {

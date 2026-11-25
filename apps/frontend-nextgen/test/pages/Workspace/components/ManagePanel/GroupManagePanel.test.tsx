@@ -4,6 +4,7 @@
 import type { GroupUpdatePatch, GroupView, IdentityView } from '@/domain/collaboration';
 import { GroupManagePanel, type GroupManagePanelProps } from '@/pages/Workspace/components/ManagePanel/GroupManagePanel';
 import { ResizableWorkspaceSidebar } from '@/pages/Workspace/components/ResizableWorkspaceSidebar';
+import { listPresets } from '@/services/workspace/groupContextService';
 import type { PolicyResult } from '@/services/workspace/groupService';
 import { expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
@@ -57,6 +58,35 @@ const panelProps = (overrides: Partial<GroupManagePanelProps> = {}): GroupManage
 });
 
 const trigger = () => screen.getByRole('combobox', { name: '@Human 通知来源' });
+
+it.each([
+  ['1 天', 86400],
+  ['7 天', 604800],
+  ['30 天', 2592000],
+])('分享协作群卡片定位在操作按钮，选择 %s 后才生成链接', async (expiryLabel, seconds) => {
+  const user = userEvent.setup();
+  const props = panelProps();
+  render(
+    <ResizableWorkspaceSidebar ariaLabel="群管理面板" side="right" onDismiss={props.onClose}>
+      <GroupManagePanel {...props} />
+    </ResizableWorkspaceSidebar>,
+  );
+  const shareButton = screen.getByRole('button', { name: /分享协作群/ });
+  const measureAnchor = jest.spyOn(shareButton, 'getBoundingClientRect');
+
+  await user.click(shareButton);
+  expect(screen.getByRole('button', { name: '生成链接' })).toBeVisible();
+  // 没有真实锚点时 Radix 无法定位，内容会一直停在屏幕外的初始位置。
+  await waitFor(() => expect(measureAnchor).toHaveBeenCalled());
+  expect(props.onShare).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole('button', { name: expiryLabel }));
+  await user.click(screen.getByRole('button', { name: '生成链接' }));
+  await waitFor(() => expect(props.onShare).toHaveBeenCalledWith(seconds));
+  expect(props.onShare).toHaveBeenCalledTimes(1);
+  expect(screen.getByLabelText('邀请链接')).toHaveTextContent('http://example.com/g1');
+  expect(props.onClose).not.toHaveBeenCalled();
+});
 
 it('基础信息卡渲染「@Human 通知来源」标签与三个选项，当前值受控自群详情', async () => {
   const user = userEvent.setup();
@@ -207,4 +237,26 @@ it('右侧面板内 @Human 下拉在 Portal 弹出层交互不触发外部点击
   // 关闭下拉后点击面板外仍照常收起。
   fireEvent.pointerDown(document.body);
   expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+jest.mock('@/services/workspace/groupContextService');
+
+it.each([true, false])('uses the signed-in user’s preset permissions in Bot view (%s)', async (canManage) => {
+  const list = jest.mocked(listPresets);
+  list.mockClear();
+  list.mockResolvedValue({ presets: [{ name: 'Timeline', description: 'Milestones' }], can_manage: canManage });
+
+  render(<GroupManagePanel {...panelProps({
+    activeIdentity: { ...identity, id: 'bot-1', kind: 'bot' },
+    sessionId: 'session-1',
+    authenticatedUserId: 'me',
+  })} />);
+  fireEvent.click(screen.getByRole('tab', { name: '群规则' }));
+
+  expect(await screen.findByText('Timeline')).toBeVisible();
+  expect(list).toHaveBeenCalledWith(
+    { groupId: 'g1', sessionId: undefined, view_bot_id: undefined },
+    expect.anything(),
+  );
+  expect(screen.queryAllByRole('button', { name: '编辑' })).toHaveLength(Number(canManage));
 });

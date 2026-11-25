@@ -9,12 +9,21 @@ from injector import inject
 from sqlalchemy import exists, func, or_
 from sqlalchemy.exc import IntegrityError
 
+from agentclaw.community.core.models.skill import Skill
+from agentclaw.community.core.models.space_skill import SkillSpaceBinding
+from agentclaw.community.core.repository.protocols.space_persistence_effects import (
+    SpacePersistenceEffects,
+)
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
 from agentclaw.community.core.spaces.errors import (
+    PersonalSpaceDeletionError,
+    SpaceAccessDeniedError,
     SpaceAlreadyExistsError,
     SpaceMemberAlreadyExistsError,
+    SpaceNotEmptyError,
     SpaceNotFoundError,
 )
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.spaces.models import (
     PersonalSpaceLookupRecord,
     SpaceJoinStatus,
@@ -38,8 +47,9 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 
 class SpaceRepository(SpaceRepositoryProtocol):
     @inject
-    def __init__(self, db: DatabasePlugin) -> None:
+    def __init__(self, db: DatabasePlugin, effects: SpacePersistenceEffects) -> None:
         self._db = db
+        self._effects = effects
         self._Space = SpaceModel
         self._Member = SpaceMemberModel
         self._WorkOrder = WorkOrderModel
@@ -105,6 +115,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
                 )
                 db.add(space)
                 db.flush()
+                self._effects.reserve_identity(db, space)
                 db.add(
                     self._Member(
                         space_id=space.id,
@@ -188,6 +199,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
             )
             db.add(space)
             db.flush()
+            self._effects.reserve_identity(db, space)
             db.add(
                 self._Member(
                     space_id=space.id,
@@ -503,10 +515,7 @@ class SpaceRepository(SpaceRepositoryProtocol):
             with self._db.transactional_orm_session() as db:
                 # Share the parent lock with maintenance deletion. Re-check in
                 # this transaction, not only in the calling permission service.
-                parent = db.query(self._Space.id).filter(
-                    self._Space.id == space_id, self._Space.env == env,
-                    self._Space.deleted_at.is_(None),
-                ).with_for_update().one_or_none()
+                parent = self._effects.lock_space(db, space_id=space_id, environment=env)
                 if parent is None:
                     raise SpaceNotFoundError(f"space {space_id} not found")
                 row = self._Member(
@@ -520,12 +529,16 @@ class SpaceRepository(SpaceRepositoryProtocol):
                 db.add(row)
                 db.flush()
                 db.refresh(row)
+                self._effects.record_membership(db, parent)
                 return row.to_record()
         except IntegrityError as exc:
             raise SpaceMemberAlreadyExistsError("space member already exists") from exc
 
     def delete_member(self, *, space_id: int, user_id: str, env: str) -> bool:
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
+            parent = self._effects.lock_space(db, space_id=space_id, environment=env)
+            if parent is None:
+                return False
             deleted = (
                 db.query(self._Member)
                 .filter(
@@ -536,12 +549,17 @@ class SpaceRepository(SpaceRepositoryProtocol):
                 )
                 .delete(synchronize_session=False)
             )
+            if deleted:
+                self._effects.record_membership(db, parent)
             return deleted > 0
 
     def update_member_role(
         self, *, space_id: int, user_id: str, role: SpaceRole, env: str
     ):
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
+            parent = self._effects.lock_space(db, space_id=space_id, environment=env)
+            if parent is None:
+                return None
             row = (
                 db.query(self._Member)
                 .filter(
@@ -558,4 +576,62 @@ class SpaceRepository(SpaceRepositoryProtocol):
             row.gmt_modified = func.now()
             db.flush()
             db.refresh(row)
+            self._effects.record_membership(db, parent)
             return row.to_record()
+
+    def delete_team_space(self, *, space_id: int, actor_id: str, env: str) -> None:
+        """Soft-delete a Team Space after in-transaction final-state re-checks.
+
+        The authorization policy is not re-decided here; the transaction only
+        re-validates the committed final state it locks, mirroring the
+        existing member-write pattern ("re-check in this transaction, not
+        only in the calling permission service") so it judges the state that
+        actually commits, not a snapshot taken before the lock.
+        """
+        with self._db.transactional_orm_session() as db:
+            parent = self._effects.lock_space(db, space_id=space_id, environment=env)
+            if parent is None:
+                raise SpaceNotFoundError(f"space {space_id} not found")
+            if parent.space_type != SpaceType.TEAM.value:
+                raise PersonalSpaceDeletionError("personal space cannot be deleted")
+            member = (
+                db.query(self._Member)
+                .filter(
+                    self._Member.space_id == space_id,
+                    self._Member.user_id == actor_id,
+                    self._Member.env == env,
+                    self._Member.status == "ACTIVE",
+                )
+                .one_or_none()
+            )
+            # Historical ADMINISTRATOR rows are canonical ADMIN members; compare
+            # through the model normalization instead of the raw column value.
+            if member is None or member.to_record().role != SpaceRole.ADMIN:
+                raise SpaceAccessDeniedError("space owner role required")
+            bot_ownership = (
+                db.query(BotModel.id)
+                .filter(
+                    BotModel.space_id == space_id,
+                    BotModel.env == env,
+                    BotModel.is_delete == 0,
+                )
+                .first()
+            )
+            if bot_ownership is not None:
+                raise SpaceNotEmptyError(f"space {space_id} still owns bots")
+            skill_ownership = (
+                db.query(SkillSpaceBinding.id)
+                .join(Skill, Skill.id == SkillSpaceBinding.skill_id)
+                .filter(
+                    SkillSpaceBinding.space_id == space_id,
+                    SkillSpaceBinding.env == env,
+                    Skill.env == env,
+                )
+                .first()
+            )
+            if skill_ownership is not None:
+                raise SpaceNotEmptyError(f"space {space_id} still owns skills")
+            parent.deleted_at = func.now()
+            parent.deleted_by = actor_id
+            db.flush()
+            self._effects.record_membership(db, parent, disabled=True)

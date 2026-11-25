@@ -51,7 +51,7 @@ export function FuseChatPanel({ group, session, sessionId, viewerName, open, onO
   return (
     <Modal open={open} onOpenChange={onOpenChange}>
       <ModalContent size="md" showClose={false} className="p-0">
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex items-center justify-between border-b border-divider px-4 py-3">
           <ModalHeader>
             <ModalTitle>融合模式</ModalTitle>
             <p className="text-xs text-muted-foreground">选择协作群内公开画像的 Bot，融合回答当前问题</p>
@@ -59,7 +59,7 @@ export function FuseChatPanel({ group, session, sessionId, viewerName, open, onO
         </div>
 
         {/* 融合 Bot 选择 */}
-        <div className="border-b border-border px-4 py-3">
+        <div className="border-b border-divider px-4 py-3">
           {isLoadingFusionBots ? (
             <p className="text-xs text-muted-foreground">加载中…</p>
           ) : availableBots.length === 0 ? (
@@ -126,7 +126,7 @@ export function FuseChatPanel({ group, session, sessionId, viewerName, open, onO
         </div>
 
         {/* 输入区 */}
-        <div className="flex gap-2 border-t border-border p-3 sm:p-4">
+        <div className="flex gap-2 border-t border-divider p-3 sm:p-4">
           <Input
             className="min-w-0 flex-1 rounded-2xl"
             value={input}

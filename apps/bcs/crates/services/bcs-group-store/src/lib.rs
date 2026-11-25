@@ -37,10 +37,13 @@ use bcs_service_api::{
     ParticipantKind, ParticipantMode, ParticipantRole, RoutingPolicy, ServiceError, ServiceResult,
 };
 
+pub mod authorization_snapshot;
 pub mod memory;
 
 pub use bcs_service_api::port::repo::GroupRepoPort;
 pub use memory::{GroupBuilder, MemoryGroupRepo};
+mod card_template;
+mod card_snapshot;
 mod store_dm;
 mod store_eventful;
 mod store_finds;
@@ -172,7 +175,7 @@ fn apply_db_group_mutation_candidate(
 ) -> ServiceResult<()> {
     let changed = match mutation {
         GroupEventfulMutation::PatchMutableFields(patch) => {
-            let mut changed = false;
+            let mut changed = patch.catalog_labels.is_some();
             if let Some(label) = &patch.label
                 && group.label.as_ref() != Some(label)
             {
@@ -300,18 +303,6 @@ fn apply_db_group_mutation_candidate(
                 false
             } else {
                 group.routing_policy = Some(policy.clone());
-                true
-            }
-        }
-        GroupEventfulMutation::UpdateServiceSpec(service_spec) => {
-            let current = serde_json::to_value(&group.service_spec)
-                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-            let requested = serde_json::to_value(service_spec)
-                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
-            if current == requested {
-                false
-            } else {
-                group.service_spec = service_spec.clone();
                 true
             }
         }
@@ -468,4 +459,12 @@ impl GroupMetricsSnapshotPort for MySqlGroupStore {
 
         Ok(counts)
     }
+}
+
+fn validate_catalog_labels(group:&Group,labels:Option<&bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
+    if labels.is_some_and(|labels|!labels.is_empty()) && (group.group_kind!=bcs_service_api::GroupKind::Normal
+        || !matches!(group.group_strategy,GroupStrategy::ManagerWorker|GroupStrategy::StateMachine)) {
+        return Err(ServiceError::InvalidOperation {message:"catalog_labels unsupported for this Group".into(),request_id:None});
+    }
+    Ok(())
 }

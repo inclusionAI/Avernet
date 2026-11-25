@@ -7,6 +7,7 @@ import type { WorkOrder } from '@/domain/admin/models';
 import { formatAbsoluteTime } from '@/utils/format';
 import { ExternalLink } from 'lucide-react';
 import { Tag } from '../Tag';
+import { WorkOrderCategoryTag } from '../WorkOrderCategoryTag';
 import { JsonBlock } from './JsonBlock';
 
 export interface WorkOrderDetailDrawerProps {
@@ -33,7 +34,7 @@ export function WorkOrderDetailDrawer({
           {detail && (
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <Tag tone={detail.typeTone}>{detail.typeLabel}</Tag>
+                <WorkOrderCategoryTag workOrder={detail} />
                 {detail.isRead && <Tag>已查看</Tag>}
               </div>
               <span className="text-xs text-muted-foreground">
@@ -62,6 +63,17 @@ export function WorkOrderDetailDrawer({
                   <a href={detail.sessionUrl} target="_blank" rel="noopener noreferrer">
                     <ExternalLink aria-hidden className="size-3.5" />
                     打开会话
+                  </a>
+                </Button>
+              </div>
+            ) : null}
+            {/* bot-public-risk-check：BOT_PUBLIC_RISK 通知的检测工单外链按钮（spec「通知详情外链按钮」）。 */}
+            {detail?.detailUrl ? (
+              <div className="mt-3">
+                <Button asChild variant="outline" size="sm">
+                  <a href={detail.detailUrl} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink aria-hidden className="size-3.5" />
+                    查看检测工单
                   </a>
                 </Button>
               </div>
@@ -106,7 +118,7 @@ export function WorkOrderDetailDrawer({
             )}
           </>
         )}
-        <div className="mt-6 flex items-center justify-end gap-2 border-t border-border pt-4">
+        <div className="mt-6 flex items-center justify-end gap-2 border-t border-divider pt-4">
           <Button size="sm" variant="ghost" onClick={onClose}>
             关闭
           </Button>

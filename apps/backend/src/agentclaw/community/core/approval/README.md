@@ -13,6 +13,8 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.bot_public
   - agentclaw.community.log
+  - agentclaw.community.utils.avernet_tenant
+  - agentclaw.community.utils.env_utils
 ```
 
 ### Change impact

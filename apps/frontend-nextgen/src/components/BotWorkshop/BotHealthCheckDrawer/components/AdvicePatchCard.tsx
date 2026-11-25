@@ -14,7 +14,7 @@ export function AdvicePatchCard({ patch, ordinal }: AdvicePatchCardProps) {
   const content = patch.advise?.advise_content ?? '';
 
   return (
-    <Card className="rounded-xl border-[var(--color-border)]">
+    <Card className="rounded-xl border-divider">
       <CardContent className="space-y-3 p-4">
         <div className="text-sm font-semibold text-[var(--color-fg)]">
           {ordinal}. {patch.name}

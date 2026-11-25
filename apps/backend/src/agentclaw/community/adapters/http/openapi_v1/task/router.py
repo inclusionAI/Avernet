@@ -12,27 +12,44 @@ GET  /openapi/v1/collaboration/tasks/bbs/list   — 列 BBS 接力任务(分页;
 由 `@envelope_errors` + `ENVELOPE_ERRORS` 映射为统一 `ErrorEnvelope`——router 不手写
 `HTTPException` 处理领域错误。仅对纯输入校验(非法 status 过滤)用 `HTTPException` 走中央 handler,
 同样产出 `ErrorEnvelope`。对齐 api/task/task_service.py Protocol。
+
+The task list, dashboard and session lookup offload synchronous services,
+including display enrichment and artifacts, to keep the event loop responsive.
 """
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
+from starlette.concurrency import run_in_threadpool
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
+from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    USER_SCOPED_403,
+    Envelope,
+    Page,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
+from agentclaw.community.adapters.http.openapi_v1.principal import refuse_app_only_caller
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
     page as page_envelope,
 )
+from agentclaw.community.adapters.http.openapi_v1.task.schemas_bot_grant_reconciliation import (
+    BotGrantReconciliationAcceptedDTO,
+    BotGrantReconciliationRequestDTO,
+)
 from agentclaw.community.adapters.http.task.trajectory_html import render_trajectory_html
 from agentclaw.community.adapters.http.task.schemas_artifact import (
     group_artifacts_by_node,
+)
+from agentclaw.community.adapters.http.task.schemas_execute_diagnostics import task_info_request_params_to_dict
+from agentclaw.community.adapters.http.task.task_config_router import (
+    TaskConfigMatchRequest,
 )
 from agentclaw.community.adapters.http.task.schemas import (
     BbsTaskItemDTO,
@@ -52,6 +69,16 @@ from agentclaw.community.adapters.http.task.schemas import (
     task_info_request_from_dto,
     trajectory_to_dto,
 )
+from agentclaw.community.adapters.http.task.schemas_task_session import (
+    BySessionDTO,
+    by_session_refs_to_dto,
+)
+from agentclaw.community.api.task.bot_grant_reconciliation_service import (
+    BotGrantReconciliationServiceProtocol,
+)
+from agentclaw.community.api.task.task_artifact_service import (
+    TaskArtifactApiServiceProtocol,
+)
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantServiceProtocol,
 )
@@ -62,9 +89,15 @@ from agentclaw.community.core.repository.protocols.task import (
 from agentclaw.community.api.task.task_context_service import (
     TaskContextServiceProtocol,
 )
+from agentclaw.community.api.task.task_config_service import (
+    TaskConfigServiceProtocol,
+)
 from agentclaw.community.core.task.domain.models import Status
 from agentclaw.community.di import Injected
+from agentclaw.community.log import get_logger
+from agentclaw.community.utils import env_utils
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
+
 
 def _validate_status_filter(status: str | None) -> None:
     """校验 status query(逗号分隔的运行时态枚举),任一 token 非法 → 400。"""
@@ -87,6 +120,8 @@ def _validate_single_status(status: str | None) -> str | None:
     return v
 
 
+logger = get_logger()
+
 router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"], route_class=PublicAPIRoute)
 
 # Handler-level principal dependency: `test_public_routes_require_principal` walks each
@@ -108,6 +143,10 @@ async def execute_task(
     """提交执行任务。task_id 服务端生成;持久化 task_info(PENDING)→ initialize_graph → on_execute 首帧。
 
     幂等:同 task_id 已建图(GraphAlreadyInitializedError)→ @envelope_errors 映射 409。"""
+    logger.info(
+        "[task_execute_openapi] request params=%s",
+        task_info_request_params_to_dict(body),
+    )
     del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
     task_request = task_info_request_from_dto(body)
     result = await service.execute(task_request)
@@ -127,26 +166,54 @@ async def get_task_dashboard(
         bool, Query(description="是否返回各节点动作级历史快照(诊断用,默认关)")
     ] = False,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-    artifact_repo: TaskArtifactRepositoryProtocol = Injected(TaskArtifactRepositoryProtocol),  # noqa: B008
+    artifact_service: TaskArtifactApiServiceProtocol = Injected(TaskArtifactApiServiceProtocol),  # noqa: B008
 ) -> Envelope[TaskExecutionGraphDTO]:
-    """任务执行详情可视化(整图或按 node_id 子树投影),只读。
+    """任务执行详情可视化(整图或按 node_id 子树投影)。
 
     include_action_log=true 时返回各节点动作级历史快照(PLAN/DISPATCH/EXECUTE/VERIFY/RESET/
     TRANSITION 全量 payload),默认关(诊断页开)。任务/节点不存在 → TaskNotFoundError/NodeNotFoundError
     → @envelope_errors 映射 404。"""
     del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
     if include_action_log:
-        graph = service.get_task_dashboard(task_id, node_id, include_action_log=True)
+        graph = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+            service.get_task_dashboard, task_id, node_id, include_action_log=True
+        )
     else:
-        graph = service.get_task_dashboard(task_id, node_id)
+        graph = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+            service.get_task_dashboard, task_id, node_id
+        )
+    # 产物清单纯读库(2026-10-27):不再先去 BCS 查 session_file 回填,直接收 DB 行。
+    artifact_rows = await run_in_threadpool(artifact_service.list_artifacts, graph.task_id)
     return envelope(
         graph_to_dto(
             graph,
             include_action_log=include_action_log,
-            artifacts_by_node=group_artifacts_by_node(artifact_repo.list_by_task(task_id)),
+            artifacts_by_node=group_artifacts_by_node(artifact_rows),
         ),
         request,
     )
+
+
+@router.get("/by_session", response_model=Envelope[BySessionDTO])
+@envelope_errors
+async def get_task_by_session(
+    session_id: Annotated[
+        str,
+        Query(description="The chat session id to resolve; sessions without visible tasks return an empty list"),
+    ],
+    request: Request,
+    principal: PrincipalDep,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> Envelope[BySessionDTO]:
+    """Resolve a chat session to its ordered relay task nodes.
+
+    A session with no visible task is a normal lookup miss, not an HTTP error;
+    it returns the empty list envelope so clients and access logs do not treat
+    ordinary session emptiness as a failed dependency.
+    """
+    del principal
+    refs = await run_in_threadpool(service.get_task_nodes_by_session, session_id)
+    return envelope(by_session_refs_to_dto(session_id, refs), request)
 
 
 @router.get("/trajectory", response_model=Envelope[TaskTrajectoryDTO])
@@ -247,9 +314,12 @@ async def list_tasks(
             detail="page and page_size must be both provided or both omitted",
         )
     if page_size is None:
-        items = service.list_tasks(status, owner_user_id=user_id)
+        items = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
+            service.list_tasks, status, owner_user_id=user_id
+        )
         return envelope([task_info_record_to_dto(item) for item in items], request)
-    items, total = service.list_tasks_page(
+    items, total = await run_in_threadpool(
+        service.list_tasks_page,
         status, owner_user_id=user_id, page=page or 1, page_size=page_size
     )
     return page_envelope(
@@ -297,6 +367,39 @@ async def list_bbs_tasks(
         [bbs_task_overview_to_dto(r) for r in records],
         request,
     )
+
+
+@router.post(
+    "/bot-grants/reconcile",
+    response_model=Envelope[BotGrantReconciliationAcceptedDTO],
+    status_code=status.HTTP_202_ACCEPTED,
+    responses=USER_SCOPED_403,
+    dependencies=[Depends(refuse_app_only_caller)],
+)
+@envelope_errors
+async def reconcile_owned_bot_grants(
+    body: BotGrantReconciliationRequestDTO,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    principal: PrincipalDep,
+    service: BotGrantReconciliationServiceProtocol = Injected(
+        BotGrantReconciliationServiceProtocol
+    ),  # noqa: B008
+) -> Envelope[BotGrantReconciliationAcceptedDTO]:
+    """Schedule best-effort secbaas grant convergence for the caller's Bots.
+
+    The verified Human principal is the only owner source. Cookie and Referer
+    remain in this process solely for the short-lived background call; failures
+    never alter the login or Bot-creation response that initiated compensation.
+    """
+    background_tasks.add_task(
+        service.reconcile,
+        owner_id=principal.user_id,
+        cookie=request.headers.get("cookie", ""),
+        referer=request.headers.get("referer", ""),
+        bot_id=body.bot_id,
+    )
+    return envelope(BotGrantReconciliationAcceptedDTO(accepted=True), request)
 
 
 @router.post("/grant", response_model=Envelope[TaskGrantResultDTO])
@@ -350,3 +453,28 @@ async def revoke_task_claim(
         ),
         request,
     )
+
+
+@router.post("/config/match", response_model=Envelope[dict])
+@envelope_errors
+async def match_task_config_public(
+    body: TaskConfigMatchRequest,
+    request: Request,
+    principal: PrincipalDep,
+    service: TaskConfigServiceProtocol = Injected(TaskConfigServiceProtocol),  # noqa: B008
+) -> Envelope[dict]:
+    """Public typed-config match probe (spec 2026-11-02). Returns whether
+    value matches the stored row for config_name under that row's config_type,
+    replying matched only and never the stored config value itself. env is
+    resolved server-side from the deployment context and is never a request
+    parameter, so pre and prod stay isolated. admission is OPEN and
+    authorization is NoCheck: match does not address a bot resource, so any
+    authenticated principal may read."""
+    del principal  # 鉴权经 PrincipalDep(require_principal);identity 不在此处使用。
+    env = env_utils.get_current_env()
+    matched = service.match(
+        config_name=body.config_name,
+        value=body.value,
+        env=env,
+    )
+    return envelope({"matched": matched}, request)

@@ -20,9 +20,7 @@ use bcs_service_api::types::{
 use bcs_service_api::{Participant, ParticipantMode, ParticipantRole, ServiceError, SessionKind};
 use bcs_session_store::{MemorySessionRepo, MySqlSessionStore};
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 
 #[path = "support/session_completion_recovery.rs"]
 mod session_completion_recovery;
@@ -787,4 +785,375 @@ async fn sqlite_remove_participant_with_event_db_failure_maps_to_internal_error(
         }
         other => panic!("expected InternalError, got {other:?}"),
     }
+}
+
+/// Delegates to a real backend while counting `query` round trips, so the
+/// chunked activity aggregate's round-trip count is asserted instead of
+/// assumed (the message-store activity tests use the same recording shape).
+struct CountingQueryDb {
+    inner: Arc<dyn DbPlugin>,
+    queries: AtomicUsize,
+}
+
+/// SQLite-backed recorder for the D5-revised read-shape assertions: every
+/// `query` the store issues is captured with its parameter count so the
+/// tests can prove the candidate read carries no LIMIT and the page-row
+/// fetch chunks at the bind bound.
+struct RecordingQueryDb {
+    inner: Arc<dyn DbPlugin>,
+    statements: std::sync::Mutex<Vec<String>>,
+    param_counts: std::sync::Mutex<Vec<usize>>,
+}
+
+impl RecordingQueryDb {
+    fn new(inner: Arc<dyn DbPlugin>) -> Self {
+        Self {
+            inner,
+            statements: std::sync::Mutex::new(Vec::new()),
+            param_counts: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn recordings(&self) -> (Vec<String>, Vec<usize>) {
+        (
+            self.statements.lock().expect("recording lock").clone(),
+            self.param_counts.lock().expect("recording lock").clone(),
+        )
+    }
+}
+
+#[async_trait]
+impl DbPlugin for RecordingQueryDb {
+    async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        let sql = statement.sql().to_string();
+        let params = statement.params().len();
+        self.statements.lock().expect("recording lock").push(sql);
+        self.param_counts.lock().expect("recording lock").push(params);
+        self.inner.query(statement).await
+    }
+
+    async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
+        self.inner.execute(statement).await
+    }
+
+    async fn transaction(
+        &self,
+        steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        self.inner.transaction(steps).await
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        self.inner.health_check().await
+    }
+}
+
+
+impl CountingQueryDb {
+    fn new(inner: Arc<dyn DbPlugin>) -> Self {
+        Self {
+            inner,
+            queries: AtomicUsize::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl DbPlugin for CountingQueryDb {
+    async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        self.queries.fetch_add(1, Ordering::SeqCst);
+        self.inner.query(statement).await
+    }
+
+    async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
+        self.inner.execute(statement).await
+    }
+
+    async fn transaction(
+        &self,
+        steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        self.inner.transaction(steps).await
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        self.inner.health_check().await
+    }
+}
+
+/// Pin a session row's stored `gmt_create` (epoch seconds) so the activity
+/// aggregate can be asserted on exact values instead of the second-granularity
+/// insert timestamp.
+async fn set_session_gmt_create(
+    db: &Arc<dyn DbPlugin>,
+    env: &str,
+    session_id: &str,
+    epoch_secs: i64,
+) {
+    let result = db
+        .execute(DbStatement::with_params(
+            "UPDATE bcs_group_sessions SET gmt_create = datetime(?, 'unixepoch') \
+             WHERE env = ? AND session_id = ?",
+            vec![
+                DbValue::I64(epoch_secs),
+                DbValue::from(env),
+                DbValue::from(session_id),
+            ],
+        ))
+        .await
+        .expect("set session gmt_create");
+    assert_eq!(
+        result.affected_rows, 1,
+        "gmt_create update must match the seeded session row"
+    );
+}
+
+/// Empty candidate set: the group list can paginate to nothing, so an empty id
+/// list must answer without issuing an (invalid) `IN ()` query.
+#[tokio::test]
+async fn mysql_max_created_at_by_group_ids_is_empty_without_querying() {
+    let repo = MySqlSessionStore::sqlite(Arc::new(AlwaysFailDb), "dev".to_string());
+
+    assert!(
+        repo.max_created_at_by_group_ids(&[])
+            .await
+            .expect("empty id list must not query")
+            .is_empty()
+    );
+}
+
+/// Per-group activity is `MAX(gmt_create)` in epoch ms, matching the epoch-ms
+/// `Session.created_at` the same store projects for the newest session.
+#[tokio::test]
+async fn sqlite_max_created_at_by_group_ids_returns_per_group_maximum() {
+    let db = sqlite_db().await;
+    let repo = MySqlSessionStore::sqlite(db.clone(), "dev".to_string());
+
+    let mut newest = String::new();
+    for (group_id, epoch_secs) in [
+        ("act-g-a", 1_700_000_001_i64),
+        ("act-g-a", 1_700_000_005),
+        ("act-g-a", 1_700_000_003),
+        ("act-g-b", 1_700_000_002),
+        ("act-g-b", 1_700_000_007),
+    ] {
+        let session = repo
+            .create(group_id, NewSessionParams::default())
+            .await
+            .expect("create session");
+        set_session_gmt_create(&db, "dev", &session.id, epoch_secs).await;
+        if epoch_secs == 1_700_000_005 {
+            newest = session.id;
+        }
+    }
+
+    let created = repo
+        .max_created_at_by_group_ids(&[
+            "act-g-a".to_string(),
+            "act-g-b".to_string(),
+            "act-g-missing".to_string(),
+        ])
+        .await
+        .expect("group activity key");
+
+    assert_eq!(created.len(), 2, "groups without sessions stay absent");
+    assert_eq!(created.get("act-g-a"), Some(&1_700_000_005_000));
+    assert_eq!(created.get("act-g-b"), Some(&1_700_000_007_000));
+
+    let projected = repo.get(&newest).await.expect("stored session");
+    assert_eq!(
+        created.get("act-g-a"),
+        Some(&projected.created_at),
+        "activity key must use the Session projection's epoch-ms conversion"
+    );
+}
+
+/// A hard-deleted session stops contributing (design D1, Review Focus #7 store
+/// half): the group key drops to the remaining session, then the group leaves
+/// the map entirely once its last session is deleted through the store.
+#[tokio::test]
+async fn sqlite_max_created_at_by_group_ids_drops_hard_deleted_sessions() {
+    let db = sqlite_db().await;
+    let repo = MySqlSessionStore::sqlite(db.clone(), "dev".to_string());
+
+    let older = repo
+        .create("act-del-g", NewSessionParams::default())
+        .await
+        .expect("create older session");
+    set_session_gmt_create(&db, "dev", &older.id, 1_700_000_100).await;
+    let newest = repo
+        .create("act-del-g", NewSessionParams::default())
+        .await
+        .expect("create newest session");
+    set_session_gmt_create(&db, "dev", &newest.id, 1_700_000_900).await;
+
+    let before = repo
+        .max_created_at_by_group_ids(&["act-del-g".to_string()])
+        .await
+        .expect("group activity key");
+    assert_eq!(before.get("act-del-g"), Some(&1_700_000_900_000));
+
+    assert!(repo.delete(&newest.id).await.expect("delete newest session"));
+    let after_newest = repo
+        .max_created_at_by_group_ids(&["act-del-g".to_string()])
+        .await
+        .expect("group activity key");
+    assert_eq!(after_newest.get("act-del-g"), Some(&1_700_000_100_000));
+
+    assert!(repo.delete(&older.id).await.expect("delete remaining session"));
+    assert!(
+        repo.max_created_at_by_group_ids(&["act-del-g".to_string()])
+            .await
+            .expect("group activity key")
+            .is_empty(),
+        "a group with no persisted sessions is absent from the map"
+    );
+}
+
+/// More candidate groups than one bind chunk (200): every id is answered and
+/// the lookup costs exactly two aggregate round trips.
+#[tokio::test]
+async fn sqlite_max_created_at_by_group_ids_batches_past_one_chunk() {
+    let db = sqlite_db().await;
+    let counting = Arc::new(CountingQueryDb::new(db.clone()));
+    let repo = MySqlSessionStore::sqlite(counting.clone(), "dev".to_string());
+
+    let group_ids: Vec<String> = (0..250).map(|index| format!("act-chunk-{index:03}")).collect();
+    for (index, group_id) in group_ids.iter().enumerate() {
+        let session = repo
+            .create(group_id, NewSessionParams::default())
+            .await
+            .expect("create session");
+        set_session_gmt_create(&db, "dev", &session.id, 1_700_000_000 + index as i64).await;
+    }
+
+    counting.queries.store(0, Ordering::SeqCst);
+    let created = repo
+        .max_created_at_by_group_ids(&group_ids)
+        .await
+        .expect("group activity key");
+
+    assert_eq!(
+        counting.queries.load(Ordering::SeqCst),
+        2,
+        "250 ids are two 200-id chunk round trips"
+    );
+    assert_eq!(created.len(), 250);
+    assert_eq!(created.get("act-chunk-000"), Some(&1_700_000_000_000));
+    assert_eq!(created.get("act-chunk-249"), Some(&1_700_000_249_000));
+}
+
+/// D5 revision: the candidate read returns the FULL matching set in ONE
+/// round trip whose SQL carries no LIMIT / OFFSET / ORDER BY and selects
+/// only the two sort columns — a stale COUNT result can never truncate the
+/// recent-activity sort set, and no full Session row is hydrated for it.
+#[tokio::test]
+async fn sqlite_activity_candidates_full_set_in_one_unlimited_query() {
+    let db = sqlite_db().await;
+    let recording = Arc::new(RecordingQueryDb::new(db));
+    let repo = MySqlSessionStore::sqlite(recording.clone(), "dev".to_string());
+
+    let mut ids = Vec::new();
+    for _ in 0..205_u32 {
+        let session = repo
+            .create("act-cand-g", NewSessionParams::default())
+            .await
+            .expect("create session");
+        ids.push(session.id);
+    }
+
+    assert_eq!(
+        recording.recordings().0.len(),
+        0,
+        "create() writes must not show up as queries"
+    );
+
+    let candidates = repo
+        .list_activity_candidates_by_group("act-cand-g", None, None, None)
+        .await
+        .expect("activity candidates");
+
+    assert_eq!(candidates.len(), 205, "the whole set, no COUNT-derived truncation");
+    let candidate_ids: std::collections::HashSet<&str> =
+        candidates.iter().map(|candidate| candidate.session_id.as_str()).collect();
+    assert_eq!(candidate_ids.len(), ids.len());
+    for id in &ids {
+        assert!(candidate_ids.contains(id.as_str()), "missing candidate {id}");
+    }
+
+    let (statements, _) = recording.recordings();
+    assert_eq!(statements.len(), 1, "exactly one candidate round trip");
+    let sql = statements[0].to_uppercase();
+    assert!(!sql.contains("LIMIT"), "candidate query must carry no LIMIT: {sql}");
+    assert!(!sql.contains("OFFSET"), "candidate query must carry no OFFSET: {sql}");
+    assert!(!sql.contains("ORDER BY"), "no ORDER BY for the caller to redo: {sql}");
+    assert!(
+        !sql.contains("INPUT") && !sql.contains("OUTPUT") && !sql.contains("META"),
+        "the lightweight projection must not select full-row columns: {sql}"
+    );
+}
+
+/// The batched page-row fetch chunks at the store's 200-bind bound and returns
+/// only the requested rows; a vanished id is absent, never an error.
+#[tokio::test]
+async fn sqlite_try_get_many_chunks_beyond_the_bind_bound() {
+    let db = sqlite_db().await;
+    let recording = Arc::new(RecordingQueryDb::new(db));
+    let repo = MySqlSessionStore::sqlite(recording.clone(), "dev".to_string());
+
+    let mut ids = Vec::new();
+    for _ in 0..205_u32 {
+        let session = repo
+            .create("act-batch-g", NewSessionParams::default())
+            .await
+            .expect("create session");
+        ids.push(session.id);
+    }
+    ids.push("act-batch-g:ffffffff".to_string());
+
+    let sessions = repo.try_get_many(&ids).await.expect("batched page rows");
+
+    assert_eq!(sessions.len(), 205, "missing ids are absent, never an error");
+    let (statements, param_counts) = recording.recordings();
+    assert_eq!(statements.len(), 2, "ceil(206 / 200) round trips");
+    assert_eq!(param_counts, vec![201, 7], "env + at most 200 ids per chunk");
+    for sql in &statements {
+        assert!(sql.contains("session_id IN"), "chunked id fetch: {sql}");
+    }
+}
+
+/// Store-owned env isolation (design D1/D5): the same group id in another env
+/// never contributes, even when its session is much newer.
+#[tokio::test]
+async fn sqlite_max_created_at_by_group_ids_never_counts_another_environment() {
+    let db = sqlite_db().await;
+    let dev = MySqlSessionStore::sqlite(db.clone(), "dev".to_string());
+    let prod = MySqlSessionStore::sqlite(db.clone(), "prod".to_string());
+
+    let dev_session = dev
+        .create("act-shared-g", NewSessionParams::default())
+        .await
+        .expect("create dev session");
+    set_session_gmt_create(&db, "dev", &dev_session.id, 1_700_000_100).await;
+    let prod_session = prod
+        .create("act-shared-g", NewSessionParams::default())
+        .await
+        .expect("create prod session");
+    set_session_gmt_create(&db, "prod", &prod_session.id, 1_700_000_900).await;
+    let prod_only = prod
+        .create("act-prod-only-g", NewSessionParams::default())
+        .await
+        .expect("create prod-only session");
+    set_session_gmt_create(&db, "prod", &prod_only.id, 1_700_000_900).await;
+
+    let created = dev
+        .max_created_at_by_group_ids(&[
+            "act-shared-g".to_string(),
+            "act-prod-only-g".to_string(),
+        ])
+        .await
+        .expect("group activity key");
+
+    assert_eq!(created.len(), 1);
+    assert_eq!(created.get("act-shared-g"), Some(&1_700_000_100_000));
 }

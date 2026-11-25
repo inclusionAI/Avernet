@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 from unittest.mock import Mock
 
-from src.domain.models.fusion_result import Perspective
-from src.domain.models.worker_context_digest import WorkerContextDigest
-from src.domain.models.worker_profile import WorkerProfile
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+from app.domain.models.fusion_result import Perspective
+from app.domain.models.worker_context_digest import WorkerContextDigest
+from app.domain.models.worker_profile import WorkerProfile
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
 
 
 from tests.unit.application.test_g5_expert_enhancer_impl import (
@@ -25,7 +25,7 @@ class TestG5ExpertEnhancerImplRicherContextPack:
     @pytest.fixture
     def enhancer(self):
         """创建 enhancer 实例"""
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
         return G5ExpertEnhancerImpl(
             gateway=Mock(),
             retrieval_service=Mock(),
@@ -35,7 +35,7 @@ class TestG5ExpertEnhancerImplRicherContextPack:
 
     def test_build_context_pack_selects_most_relevant_highlights(self, enhancer):
         """测试 context pack 选择最相关的 highlights"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         fragments = [
             ContextFragment(
@@ -52,7 +52,7 @@ class TestG5ExpertEnhancerImplRicherContextPack:
             ),
         ]
 
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
         skills = [
             SkillProfile(
                 name="Security",
@@ -76,7 +76,7 @@ class TestG5ExpertEnhancerImplRicherContextPack:
 
     def test_build_context_pack_selects_most_relevant_skills(self, enhancer):
         """测试 context pack 选择最相关的 skills"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         skills = [
             SkillProfile(
@@ -108,8 +108,8 @@ class TestG5ExpertEnhancerImplRicherContextPack:
 
     def test_build_context_pack_preserves_profile_key(self, enhancer):
         """测试 context pack 保留 profile_key"""
-        from src.domain.models.worker_context_digest import WorkerContextDigest
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.worker_context_digest import WorkerContextDigest
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         digest = WorkerContextDigest(
             profile_key="staff_001:default",
@@ -132,12 +132,12 @@ class TestG5ExpertEnhancerImplRicherContextPack:
     def test_enhance_uses_richer_context_in_prompt_building(self):
         """测试 enhance 使用更丰富的 context 构建 prompt"""
         from unittest.mock import Mock, patch, MagicMock
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
-        from src.domain.models.skill_profile import SkillProfile
-        from src.domain.models.worker_profile import ProfileType, WorkerProfile
-        from src.domain.models.worker_context_digest import WorkerContextDigest
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.skill_profile import SkillProfile
+        from app.domain.models.worker_profile import ProfileType, WorkerProfile
+        from app.domain.models.worker_context_digest import WorkerContextDigest
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         # 创建有丰富内容的 profile
         profile = WorkerProfile(
@@ -237,7 +237,7 @@ class TestG5ExpertEnhancerImplFallbackStillWorks:
             structured_data=None,
         )
 
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
         enhancer = G5ExpertEnhancerImpl(
             gateway=gateway,
             retrieval_service=retrieval,
@@ -266,7 +266,7 @@ class TestG5ExpertEnhancerImplFallbackStillWorks:
         preparation.prepare.return_value = sample_digest
         gateway.generate.side_effect = Exception("LLM error")
 
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
         enhancer = G5ExpertEnhancerImpl(
             gateway=gateway,
             retrieval_service=retrieval,
@@ -295,7 +295,7 @@ class TestG5SparseContextPreflight:
     @pytest.fixture
     def enhancer(self):
         """创建 enhancer 实例"""
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
         return G5ExpertEnhancerImpl(
             gateway=Mock(),
             retrieval_service=Mock(),
@@ -306,7 +306,7 @@ class TestG5SparseContextPreflight:
     @pytest.fixture
     def empty_profile(self):
         """创建空的 profile（无 fragments, 无 skills）"""
-        from src.domain.models.worker_profile import ProfileType
+        from app.domain.models.worker_profile import ProfileType
         return WorkerProfile(
             staff_id="001",
             profile_id="default",
@@ -319,8 +319,8 @@ class TestG5SparseContextPreflight:
     @pytest.fixture
     def sparse_profile_with_placeholder(self):
         """创建带 placeholder 的 profile"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
-        from src.domain.models.worker_profile import ProfileType
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.worker_profile import ProfileType
         return WorkerProfile(
             staff_id="002",
             profile_id="default",
@@ -340,9 +340,9 @@ class TestG5SparseContextPreflight:
     @pytest.fixture
     def rich_profile(self):
         """创建有丰富内容的 profile"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
-        from src.domain.models.skill_profile import SkillProfile
-        from src.domain.models.worker_profile import ProfileType
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.skill_profile import SkillProfile
+        from app.domain.models.worker_profile import ProfileType
         return WorkerProfile(
             staff_id="003",
             profile_id="default",
@@ -381,7 +381,7 @@ class TestG5SparseContextPreflight:
     @pytest.fixture
     def rich_digest(self):
         """创建有内容的 digest"""
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         fragment = ContextFragment(
             kind=ContextKind.AGENT,
@@ -406,7 +406,7 @@ class TestG5SparseContextPreflight:
 
     def test_sparse_context_empty_profile_should_skip(self, enhancer, empty_profile, empty_digest):
         """测试空 profile 应触发 sparse context 跳过"""
-        from src.application.services.g5_expert_enhancer_impl import _should_skip_llm_for_sparse_context
+        from app.application.services.g5_expert_enhancer_impl import _should_skip_llm_for_sparse_context
 
         should_skip, reason = _should_skip_llm_for_sparse_context(empty_profile, empty_digest)
 
@@ -415,7 +415,7 @@ class TestG5SparseContextPreflight:
 
     def test_sparse_context_placeholder_summary_should_skip(self, enhancer, sparse_profile_with_placeholder):
         """测试 placeholder summary 应触发 sparse context 跳过"""
-        from src.application.services.g5_expert_enhancer_impl import _should_skip_llm_for_sparse_context
+        from app.application.services.g5_expert_enhancer_impl import _should_skip_llm_for_sparse_context
 
         digest = WorkerContextDigest(
             profile_key="staff_002:default",
@@ -433,7 +433,7 @@ class TestG5SparseContextPreflight:
 
     def test_rich_context_should_not_skip(self, enhancer, rich_profile, rich_digest):
         """测试丰富 context 不应触发跳过"""
-        from src.application.services.g5_expert_enhancer_impl import _should_skip_llm_for_sparse_context
+        from app.application.services.g5_expert_enhancer_impl import _should_skip_llm_for_sparse_context
 
         should_skip, reason = _should_skip_llm_for_sparse_context(rich_profile, rich_digest)
 
@@ -441,7 +441,7 @@ class TestG5SparseContextPreflight:
 
     def test_sparse_context_perspective_structure(self, enhancer, empty_profile):
         """测试 sparse context perspective 结构"""
-        from src.application.services.g5_expert_enhancer_impl import _build_sparse_context_perspective
+        from app.application.services.g5_expert_enhancer_impl import _build_sparse_context_perspective
 
         perspective = _build_sparse_context_perspective(
             profile=empty_profile,
@@ -466,7 +466,7 @@ class TestG5SparseContextPreflight:
         ])
         preparation.prepare.return_value = empty_digest
 
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
         enhancer = G5ExpertEnhancerImpl(
             gateway=gateway,
             retrieval_service=retrieval,
@@ -497,7 +497,7 @@ class TestG5StrictParticipantsWithSparseContext:
         # 配置 mock - retrieval 返回空
         retrieval.retrieve.return_value = Mock(results=[])
 
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
         enhancer = G5ExpertEnhancerImpl(
             gateway=gateway,
             retrieval_service=retrieval,
@@ -536,7 +536,7 @@ class TestG5PreflightLogging:
 
         caplog.set_level(logging.INFO)
 
-        from src.domain.models.worker_profile import ProfileType
+        from app.domain.models.worker_profile import ProfileType
 
         empty_profile = WorkerProfile(
             staff_id="001",
@@ -561,7 +561,7 @@ class TestG5PreflightLogging:
             context_summary="",
         )
 
-        from src.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
+        from app.application.services.g5_expert_enhancer_impl import G5ExpertEnhancerImpl
         enhancer = G5ExpertEnhancerImpl(
             gateway=gateway,
             retrieval_service=retrieval,

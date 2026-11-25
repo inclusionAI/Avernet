@@ -2,7 +2,9 @@ import { getCapabilities } from '@/capabilities';
 import { Empty } from '@/components/ui';
 import { ChatMessageSkeleton } from '@/components/Workspace/ChatPanel/ChatMessageSkeleton';
 import { ChatPanelHeader } from '@/components/Workspace/ChatPanel/ChatPanelHeader';
+import './ChatPanel.css';
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
+import { usePersistentChatLayoutPanelHost } from '@/components/Workspace/PersistentChatLayoutPanelHost';
 import { SidePanelCollapseButton } from '@/components/Workspace/SidePanelCollapseButton';
 import { TaskLinkedSession } from '@/components/Workspace/TaskLinkedSession';
 import { MessageEditBar, MessageQuoteBar } from '@/components/Workspace/MessageInteractionToolbar';
@@ -34,6 +36,7 @@ export function ChatPanel({
   messages,
   isRequesting,
   isLoadingMessages,
+  historyReady,
   connectionStatus,
   retryCount,
   supportState,
@@ -48,6 +51,8 @@ export function ChatPanel({
   modelSelector,
   fileChip,
   command,
+  composerHeader,
+  composerPlaceholder,
   fileToolbar,
   senderRef,
   mode,
@@ -61,11 +66,14 @@ export function ChatPanel({
   onManageFiles,
   headerActions,
   highlightMessageId,
+  sidePaneEnabled = true,
   sidePaneOpen,
   onToggleSidePane,
   onSidePaneIsOpenChange,
 }: ChatPanelProps) {
-  const linkedSession = useTaskSidePanelStore((state) => state.linkedSession);
+  const persistentPanelHost = usePersistentChatLayoutPanelHost();
+  const storedLinkedSession = useTaskSidePanelStore((state) => state.linkedSession);
+  const linkedSession = sidePaneEnabled ? storedLinkedSession : null;
   const closeLinkedSession = useTaskSidePanelStore((state) => state.closeLinkedSession);
   const messageInteractions = useMessageInteractions({
     sessionId: target?.id,
@@ -75,7 +83,7 @@ export function ChatPanel({
   });
   // 消息区两态强制（Spec AC-3/AC-7，预览反馈第五轮）：空消息一律骨架屏，确认后的真空会话
   // 才显示空态；demo 模式不接入（保持演示空态）。
-  const messageAreaSkeleton = useMessageAreaSkeleton({ messages, status: connectionStatus });
+  const messageAreaSkeleton = useMessageAreaSkeleton({ messages, status: connectionStatus, historyReady });
   const { editingMessageId, editMessage, cancelEdit, finishEdit } = useMessageEdit({
     sessionId: target?.id,
     isRequesting,
@@ -176,7 +184,7 @@ export function ChatPanel({
   return (
     // relative 供副屏右上「收起」悬浮钮绝对定位（SidePanelCollapseButton）。
     <section className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-      <ChatLayout className="min-h-0 flex-1">
+      <ChatLayout className="workspace-chat-panel-layout min-h-0 flex-1">
         {linkedSession ? (
           <TaskLinkedSession
             target={linkedSession}
@@ -196,15 +204,14 @@ export function ChatPanel({
           actions={headerActions}
         />
 
-        {/* 消息区两态强制：空消息区一律骨架屏，空态文案仅对确认后的真空会话渲染；demo 保持原空态。
-            骨架为真实群聊解剖的回声(系统 pill/长短气泡/图片附件)，吸收历史装载缝隙。 */}
+        {/* 单聊 HTTP 历史就绪即展示；未提供独立就绪信号的场景保留原骨架策略。 */}
         {resolvedMode !== 'demo' && messageAreaSkeleton ? (
           <ChatMessageSkeleton />
         ) : (
           <ChatMessageList
             messages={messages}
             isRequesting={isRequesting}
-            isLoadingMessages={isLoadingMessages}
+            isLoadingMessages={!historyReady && isLoadingMessages}
             interactions={messageInteractions}
             onStop={onStop}
             onEditMessage={editMessage}
@@ -245,9 +252,10 @@ export function ChatPanel({
             loading={isRequesting}
             disabled={target.status !== 'available' || !isInteractive || isRequesting}
             submitType="enter"
-            placeholder="可使用 /file 引用文件、/link 引用链接、/skill 调用能力"
+            placeholder={composerPlaceholder ?? '可使用 /file 引用文件、/skill 调用能力'}
             fileChip={fileChip}
             command={command}
+            slots={{ header: composerHeader }}
             toolbar={{
               left:
                 taskComposer || modelSelector || connectionCopy.detail || fileToolbar ? (
@@ -273,15 +281,20 @@ export function ChatPanel({
           </>
         )}
 
-        <ChatLayoutPanelSlot
-          ref={panelRef}
-          onAction={onPanelAction}
-          bridge={chatBridge}
-          onOpenStateChange={onSidePaneIsOpenChange}
-        />
+        {sidePaneEnabled ? (
+          <ChatLayoutPanelSlot
+            ref={panelRef}
+            onAction={onPanelAction}
+            bridge={chatBridge}
+            dismissOnOutside={false}
+            onOpenStateChange={onSidePaneIsOpenChange}
+          />
+        ) : null}
       </ChatLayout>
       {/* 副屏右上「收起」钮：真实开合态开时悬于副屏 TopBar 右侧，点按关闭。 */}
-      {sidePaneOpen && onToggleSidePane ? <SidePanelCollapseButton onClick={onToggleSidePane} /> : null}
+      {sidePaneEnabled && !persistentPanelHost && sidePaneOpen && onToggleSidePane ? (
+        <SidePanelCollapseButton onClick={onToggleSidePane} />
+      ) : null}
     </section>
   );
 }

@@ -12,8 +12,8 @@ set -euo pipefail
 #                script propagates the non-zero exit -> push is rejected.
 #                Requires 100% pass to proceed. Surfaces failures quickly.
 #   without --fast-fail (bcs-test.aci.yml): runs all tests (--no-fail-fast),
-#                script exits 0 (does not block); the pass rate is delegated
-#                to a downstream ACI checkRule (e.g. casePassRate >= 90).
+#                assertion failures with complete reports are delegated to
+#                the downstream gate; coverage runs without reports fail here.
 #
 # Dispatched by scripts/ci/pre_push.sh BCS branch (passes --fast-fail).
 # The bcs-test.aci.yml CI job calls this with --coverage (without --fast-fail,
@@ -22,6 +22,8 @@ set -euo pipefail
 #   bash apps/bcs/scripts/ci_test.sh --fast-fail          # gate at 100%, fail fast
 #   bash apps/bcs/scripts/ci_test.sh --coverage            # run all + coverage, no gating
 #
+# --coverage --reuse-build additionally exports nextest metadata for CI MySQL
+# contracts, with the same unit-only JUnit/Cobertura reports as --coverage.
 # Enabled by default; set OCB_PRE_PUSH_ENABLE_BCS=0 to skip temporarily.
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +32,7 @@ bcs_dir="$(cd "$script_dir/.." && pwd)"
 base=""
 head="HEAD"
 coverage=0
+reuse_build=0
 fast_fail=0
 
 while [[ "$#" -gt 0 ]]; do
@@ -44,6 +47,10 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --coverage)
       coverage=1
+      shift
+      ;;
+    --reuse-build)
+      reuse_build=1
       shift
       ;;
     --report-only)
@@ -67,6 +74,10 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 cd "$bcs_dir"
+if [[ "$reuse_build" -eq 1 && "$coverage" -ne 1 ]]; then
+  echo "--reuse-build requires --coverage" >&2
+  exit 2
+fi
 
 echo "========== BCS pre-push gate =========="
 echo "bcs_dir: $bcs_dir"
@@ -123,8 +134,8 @@ fi
 #
 # --fast-fail (default for pre-push): nextest stops on first failure (no --no-fail-fast),
 #   script propagates the non-zero exit -> push rejected. Fast feedback, saves CI time.
-# Without --fast-fail (CI coverage): add --no-fail-fast to run all tests, exit 0 (no block),
-#   pass rate delegated to downstream ACI checkRule.
+# Without --fast-fail (CI coverage): run all tests and delegate the pass rate to
+#   the downstream gate only when both JUnit and coverage reports are present.
 #
 # --coverage: uses cargo llvm-cov nextest to compile once and emit both junit
 # (via [profile.ci.junit]) and cobertura (--cobertura --output-path), per bcs-test.aci.yml.
@@ -138,6 +149,7 @@ fi
 
 if [[ "$coverage" -eq 1 ]]; then
   mkdir -p ./testresult
+  rm -f ./testresult/{junit.xml,cobertura.xml}
   # Copy the committed .config/nextest.toml to a temp file and append [profile.ci.junit]
   # there. Using a temp file (instead of mutating the repo file) avoids git seeing a dirty
   # working tree; trap cleans up on exit. --config-file takes an absolute path (nextest
@@ -153,9 +165,14 @@ if [[ "$coverage" -eq 1 ]]; then
   export CARGO_INCREMENTAL=0
   echo "--- running cargo llvm-cov nextest (single-pass + coverage) ---"
   set +e
-  cargo llvm-cov nextest --config-file "$tmp_nextest" --profile ci --retries 0 ${nextest_fail_args[@]+"${nextest_fail_args[@]}"} \
-    --cobertura --output-path ./testresult/cobertura.xml
-  status=$?
+  if [[ "$reuse_build" -eq 1 ]]; then
+    bash "$script_dir/ci/reusable_coverage.sh" "$tmp_nextest" ${nextest_fail_args[@]+"${nextest_fail_args[@]}"}
+    status=$?
+  else
+    cargo llvm-cov nextest --config-file "$tmp_nextest" --profile ci --retries 0 ${nextest_fail_args[@]+"${nextest_fail_args[@]}"} \
+      --cobertura --output-path ./testresult/cobertura.xml
+    status=$?
+  fi
   set -e
 else
   echo "--- running cargo nextest (single-pass, 100% required) ---"
@@ -166,6 +183,11 @@ else
 fi
 
 echo "========== BCS pre-push gate finished (status=$status) =========="
+if [[ "$coverage" -eq 1 && "$status" -ne 0 ]] \
+  && [[ ! -s ./testresult/junit.xml || ! -s ./testresult/cobertura.xml ]]; then
+  echo "BCS coverage run failed before producing complete reports; stopping with status=$status." >&2
+  exit "$status"
+fi
 if [[ "$fast_fail" -eq 0 ]]; then
   # Non-fast-fail (CI coverage scenario): do not block. Test results are still written
   # to junit/cobertura (if --coverage); the pass rate is delegated to a downstream

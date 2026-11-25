@@ -90,10 +90,10 @@ class TaskArtifactRepository(TaskArtifactRepositoryProtocol):
             return record
 
     def list_by_task(
-        self, task_id: str, *, limit: int = 200
+        self, task_id: str, *, limit: int | None = 200
     ) -> list[TaskArtifactRecord]:
         with self._db.orm_session() as db:
-            rows = (
+            query = (
                 db.query(self._model)
                 .filter(self._model.task_id == task_id)
                 .order_by(
@@ -101,9 +101,10 @@ class TaskArtifactRepository(TaskArtifactRepositoryProtocol):
                     self._model.gmt_create.desc(),
                     self._model.id.desc(),
                 )
-                .limit(limit)
-                .all()
             )
+            if limit is not None:
+                query = query.limit(limit)
+            rows = query.all()
             return [r.to_record() for r in rows]
 
     def list_by_task_node(
@@ -122,3 +123,12 @@ class TaskArtifactRepository(TaskArtifactRepositoryProtocol):
                 .all()
             )
             return [r.to_record() for r in rows]
+
+    def get_by_artifact_id(self, artifact_id: str) -> TaskArtifactRecord | None:
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self._model)
+                .filter(self._model.artifact_id == artifact_id)
+                .first()
+            )
+            return row.to_record() if row is not None else None

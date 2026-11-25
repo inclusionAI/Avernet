@@ -1,3 +1,7 @@
+#[path = "bot_query.rs"]
+mod query;
+#[path = "bot_cards.rs"]
+mod cards;
 #[path = "bot_runtime.rs"]
 mod runtime;
 #[path = "bot_helpers.rs"]
@@ -8,6 +12,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bcs_service_api::port::bot_authority::BotAuthorityPort;
 use bcs_service_api::{
     application::v1::{FriendCheckInStrategy, UserVisibility},
     ActorKind, ActorStatus, BotCapabilities, BotConnectCommand, BotConnectParams, BotConnectResult,
@@ -34,6 +39,7 @@ use crate::core::BotCore;
 /// Bot query and management application service backed by the registry port.
 #[derive(Clone)]
 pub struct Bot {
+    a2a_queries: Option<Arc<dyn bcs_service_api::core::a2a_bot::A2aBotCoreService>>,
     registry: Arc<dyn BotRegistryCoreService>,
     friend: Arc<dyn FriendCoreService>,
     edge_grants: Option<Arc<dyn bcs_service_api::port::repo::EdgeGrantRepoPort>>,
@@ -43,6 +49,17 @@ pub struct Bot {
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     connection_control: Option<Arc<dyn BotConnectionControlPort>>,
     organization: Option<Arc<dyn OrganizationCoreService>>,
+    /// The narrow authority hook (bot-authority plan
+    /// Task 6.3): the Human 删除/配置/状态 control
+    /// judgments consult it live; a missing wiring
+    /// fails closed.
+    bot_authority: Option<Arc<dyn BotAuthorityPort>>,
+    /// Migration-window compat (spec §10.2a): `/bots/my`
+    /// also surfaces live physical Bots whose stored
+    /// `created_by` byte-matches the caller while their
+    /// ownership is still uninitialized. Strict posture
+    /// pins it off (default).
+    legacy_created_by_fallback: bool,
     uplink: bcs_config_api::UplinkConfig,
 }
 
@@ -73,6 +90,7 @@ impl Bot {
         friend: Arc<dyn FriendCoreService>,
     ) -> Self {
         Self {
+            a2a_queries: None,
             registry,
             friend,
             edge_grants: None,
@@ -82,9 +100,96 @@ impl Bot {
             user_directory: None,
             connection_control: None,
             organization: None,
+            bot_authority: None,
+            legacy_created_by_fallback: false,
             uplink: Default::default(),
         }
     }
+
+    pub fn with_a2a_queries(mut self, queries: Arc<dyn bcs_service_api::core::a2a_bot::A2aBotCoreService>) -> Self {
+        self.a2a_queries = Some(queries); self
+    }
+
+    /// Wire the §10.2a compat posture the composition
+    /// root resolved for this process: ON only inside
+    /// the declared migration window, OFF (default)
+    /// everywhere else. `/bots/my` consults it per call.
+    pub fn with_legacy_created_by_fallback(
+        mut self,
+        enabled: bool,
+    ) -> Self {
+        self.legacy_created_by_fallback = enabled;
+        self
+    }
+
+    /// Wire the authority hook (bot-authority plan
+    /// Task 6.3); 删除/配置/状态 judgments consult it.
+    pub fn with_bot_authority(
+        mut self,
+        bot_authority: Arc<dyn BotAuthorityPort>,
+    ) -> Self {
+        self.bot_authority = Some(bot_authority);
+        self
+    }
+
+    /// The wired authority hook; failing to wire one is
+    /// a composition error and must fail closed (never
+    /// deny-as-Ok).
+    fn authority(
+        &self,
+    ) -> Result<&dyn BotAuthorityPort, BotUseCaseError> {
+        self.bot_authority.as_deref().ok_or_else(|| {
+            BotUseCaseError::Service(ServiceError::InternalError(
+                "bot authority hook is not wired".to_string(),
+            ))
+        })
+    }
+
+    /// 删除/配置/状态 control judgment (bot-authority plan
+    /// Task 6.3, spec §8): these are Bot BUSINESS operations
+    /// ("Bot 配置、状态、删除 … 使用当前角色"), so the gate
+    /// admits the CURRENT ROLE — owner OR manager
+    /// (`require_manage`, spec §1 goal 1: manager 获得
+    /// 相同的 Bot 业务操作权限); the historical
+    /// `created_by` (and the unowned-bot legacy) no longer
+    /// authorize (spec §3.3: 旧创建者在失去 manager 后不再
+    /// 有特权). Only the ownership-transfer commands stay
+    /// owner-exclusive. `caller_actor_id` may be the Bot
+    /// itself (its own runtime contract) or a Human actor id.
+    async fn authorize_current_role(
+        &self,
+        caller_actor_id: Option<&str>,
+        bot: &RegisteredBot,
+    ) -> Result<(), BotUseCaseError> {
+        let Some(caller_actor_id) = caller_actor_id else {
+            return Err(BotUseCaseError::Unauthorized(format!(
+                "caller identity is required to modify bot '{}'",
+                bot.bot_uuid
+            )));
+        };
+        if caller_actor_id == bot.bot_uuid {
+            return Ok(());
+        }
+        let staff_no = caller_actor_id
+            .strip_prefix("human_")
+            .unwrap_or(caller_actor_id);
+        match self
+            .authority()?
+            .require_manage(staff_no, &bot.bot_uuid)
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(ServiceError::Forbidden(message)) => {
+                Err(BotUseCaseError::Forbidden(message))
+            }
+            Err(other) => Err(BotUseCaseError::Service(
+                ServiceError::InternalError(format!(
+                    "bot authority lookup failed: {other}"
+                )),
+            )),
+        }
+    }
+
 
     /// Inject deployment authorization; profile selection is never persisted per Bot.
     pub fn with_uplink_config(mut self, uplink: bcs_config_api::UplinkConfig) -> Self {
@@ -278,317 +383,6 @@ impl FriendCoreService for EmptyFriendCoreService {
 }
 
 #[async_trait]
-impl BotQueryService for Bot {
-    async fn list_bots(&self, command: BotListCommand) -> Result<BotListResult, BotUseCaseError> {
-        let filtered: Vec<RegisteredBot> = self
-            .registry
-            .list_active()
-            .await
-            .into_iter()
-            .filter(|bot| is_in_list_bots_scope(bot, command.onboarded))
-            .collect();
-        let total = filtered.len() as u64;
-        let offset = to_usize(command.offset);
-        let limit = to_usize(command.limit);
-        let bots = filtered
-            .into_iter()
-            .skip(offset)
-            .take(limit)
-            .map(bot_to_list_entry)
-            .collect();
-
-        Ok(BotListResult {
-            bots,
-            offset: command.offset,
-            limit: command.limit,
-            total,
-        })
-    }
-
-    async fn get_bot(&self, command: BotDetailCommand) -> Result<BotDetailResult, BotUseCaseError> {
-        let bot = self
-            .registry
-            .get(&command.bot_id)
-            .await
-            .ok_or_else(|| ServiceError::BotNotFound(command.bot_id.clone()))?;
-        authorize_visibility_read(command.caller_actor_id.as_deref(), &bot)?;
-
-        Ok(self.bot_to_detail(bot).await)
-    }
-
-    async fn list_bots_by_creator(
-        &self,
-        staff_no: &str,
-    ) -> Result<Vec<BotListEntry>, BotUseCaseError> {
-        let bots: Vec<BotListEntry> = self
-            .registry
-            .list_bots_by_creator(staff_no)
-            .await
-            .into_iter()
-            .map(bot_to_list_entry)
-            .collect();
-        Ok(bots)
-    }
-
-    async fn get_visibility(
-        &self,
-        command: BotVisibilityQueryCommand,
-    ) -> Result<BotVisibilityQueryResult, BotUseCaseError> {
-        let bot = self
-            .registry
-            .get(&command.bot_id)
-            .await
-            .ok_or_else(|| ServiceError::BotNotFound(command.bot_id.clone()))?;
-
-        authorize_visibility_read(command.caller_actor_id.as_deref(), &bot)?;
-
-        Ok(BotVisibilityQueryResult {
-            bot_uuid: command.bot_id,
-            visibility: normalized_visibility(&bot.capabilities.visibility).to_string(),
-        })
-    }
-
-    async fn list_bots_paged(
-        &self,
-        command: BotPagedListCommand,
-    ) -> Result<BotPagedListResult, BotUseCaseError> {
-        let filtered: Vec<RegisteredBot> = self
-            .registry
-            .list_active()
-            .await
-            .into_iter()
-            .filter(|bot| match &command.user_id {
-                Some(user_id) => bot
-                    .bot_uuid
-                    .rsplit_once(':')
-                    .map(|(_, suffix)| suffix == user_id.as_str())
-                    .unwrap_or(false),
-                None => true,
-            })
-            .collect();
-        self.bot_page_from_registered(filtered, command.offset, command.limit)
-            .await
-    }
-
-    async fn list_my_bots(
-        &self,
-        command: bcs_service_api::MyBotsCommand,
-    ) -> Result<BotPagedListResult, BotUseCaseError> {
-        let bots = self.registry.list_bots_by_creator(&command.staff_no).await;
-        self.my_bot_page_from_registered(
-            bots,
-            command.offset,
-            command.limit,
-            command.active_only,
-        )
-            .await
-    }
-
-    async fn query_bots_by_ids(
-        &self,
-        command: BotQueryByIdsCommand,
-    ) -> Result<BotQueryByIdsResult, BotUseCaseError> {
-        let started = std::time::Instant::now();
-        let input_count = command.bot_ids.len();
-        let unique_count = command.bot_ids.iter().collect::<std::collections::HashSet<_>>().len();
-        let bots = bcs_observability::observe_value("bots.query.batch_load", self
-            .registry
-            .get_by_ids(&command.bot_ids)).await
-            .into_iter()
-            .filter(|bot| bot.capabilities.name.is_some())
-            .collect::<Vec<_>>();
-        let load_ms = started.elapsed().as_secs_f64() * 1000.0;
-        let enrich_started = std::time::Instant::now();
-        let mut entries = Vec::with_capacity(bots.len());
-        for bot in bots {
-            entries.push(bcs_observability::observe_value("bots.query.status_enrich", self.bot_to_query_entry(bot)).await);
-        }
-        tracing::info!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), input_count, unique_count, returned_count = entries.len(), load_ms, enrich_ms = enrich_started.elapsed().as_secs_f64() * 1000.0, duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bots.query.summary");
-        Ok(BotQueryByIdsResult { bots: entries })
-    }
-
-    async fn search_bots(
-        &self,
-        command: SearchBotsCommand,
-    ) -> Result<BotSearchResult, BotUseCaseError> {
-        let control_plane = self.control_plane.as_ref().ok_or_else(|| {
-            BotUseCaseError::Service(ServiceError::InvalidOperation {
-                message: "Bot is missing BotControlPlaneCoreService wiring; search_bots requires .with_control_plane(...)".to_string(),
-                request_id: None,
-            })
-        })?;
-        self.search_bots_via_control_plane(control_plane.as_ref(), command).await
-    }
-}
-
-impl Bot {
-    async fn search_bots_via_control_plane(
-        &self,
-        control_plane: &dyn BotControlPlaneCoreService,
-        command: SearchBotsCommand,
-    ) -> Result<BotSearchResult, BotUseCaseError> {
-        let viewer_actor_id = command.viewer_actor_id.as_deref();
-        let friend_ids = if let Some(viewer_actor_id) = viewer_actor_id {
-            if let Some(edge_grants) = self.edge_grants.as_ref() {
-                edge_grants
-                    .list_friends(viewer_actor_id, &bcs_config::resolve_env_str())
-                    .await
-                    .into_iter()
-                    .collect::<HashSet<_>>()
-            } else {
-                self.friend
-                    .list_friends(viewer_actor_id)
-                    .await
-                    .into_iter()
-                    .collect::<HashSet<_>>()
-            }
-        } else {
-            HashSet::new()
-        };
-        let friendship = command.friendship.unwrap_or(BotSearchFriendshipFilter::All);
-        if !matches!(friendship, BotSearchFriendshipFilter::All) && viewer_actor_id.is_none() {
-            return Err(ServiceError::InvalidOperation {
-                message: "friendship filter requires viewer_actor_id".to_string(),
-                request_id: None,
-            }
-            .into());
-        }
-
-        let query = BotSearchCandidateQuery {
-            acting_bot_id: command.requester_actor_id.clone().unwrap_or_default(),
-            env: bcs_config::resolve_env_str(),
-            visibility: bcs_service_api::BotCandidateVisibility::Discovery,
-            friend_ids,
-            bot_uuids: command.bot_uuids.clone(),
-            name: command.q.clone(),
-            q: command.q.clone(),
-            visibility_filter: command.visibility.clone(),
-            user_visibility: command.user_visibility.clone(),
-            status: command.status,
-            friendship: Some(friendship),
-            tc_bot: command.tc_bot,
-            offset: command.offset,
-            limit: command.limit,
-        };
-        let (candidates, total) = control_plane.search_candidates(query).await?;
-        let candidate_bot_ids = candidates
-            .iter()
-            .map(|candidate| candidate.bot.record.bot_id.clone())
-            .collect::<Vec<_>>();
-        let active_bot_ids = self
-            .registry
-            .list_runtime_active_bot_ids(&candidate_bot_ids)
-            .await
-            .into_iter()
-            .collect::<HashSet<_>>();
-
-        let mut items = Vec::with_capacity(candidates.len());
-        for candidate in candidates {
-            let record = candidate.bot.record;
-            let capabilities = bot_capabilities_from_record(&record);
-            let bot_uuid = record.bot_id;
-            let dynamic_status = if record.status == ActorStatus::Online
-                && active_bot_ids.contains(&bot_uuid)
-            {
-                DynamicStatusResponse {
-                    status: "active".to_string(),
-                }
-            } else {
-                DynamicStatusResponse {
-                    status: "offline".to_string(),
-                }
-            };
-            items.push(BotQueryEntry {
-                bot_uuid,
-                capabilities,
-                visibility: record.visibility,
-                status: record.status,
-                actor_kind: record.kind,
-                env: Some(record.env),
-                dynamic_status,
-                created_by: record.created_by,
-                user_visibility: user_visibility_to_wire(record.user_visibility).to_string(),
-                friend_ext: record.friend_ext,
-                friend_check_in_strategy: friend_check_in_strategy_to_wire(
-                    record.friend_check_in_strategy,
-                )
-                .to_string(),
-                is_friend: viewer_actor_id.map(|_| candidate.is_friend),
-            });
-        }
-
-        Ok(BotSearchResult { items, total })
-    }
-
-
-}
-
-#[async_trait]
-impl BotDiscoveryService for Bot {
-    async fn discover_bots(
-        &self,
-        command: BotDiscoveryCommand,
-    ) -> Result<BotDiscoveryResult, BotUseCaseError> {
-        if command.role.is_some() && command.organization_code.is_none() {
-            return Err(ServiceError::InvalidOperation {
-                message: "role_requires_organization_code".to_string(),
-                request_id: None,
-            }
-            .into());
-        }
-        if command.organization_code.is_some() {
-            let code = command.organization_code.clone().unwrap_or_default();
-            return self.discover_organization_bots(&code, command).await;
-        }
-
-        let bots = self.discover_candidates(&command).await;
-
-        if let Some(collaborate_bot) = command.collaborate_bot.as_deref() {
-            let collaborate_bot_is_private = self
-                .registry
-                .get(collaborate_bot)
-                .await
-                .map(|bot| !is_discover_visible(&bot.capabilities.visibility))
-                .unwrap_or(false);
-            if collaborate_bot_is_private {
-                return Ok(BotDiscoveryResult {
-                    bots: Vec::new(),
-                    count: 0,
-                });
-            }
-        }
-
-        let friend_uuids = if let Some(collaborate_bot) = command.collaborate_bot.as_deref() {
-            Some(self.friend.list_friends(collaborate_bot).await)
-        } else {
-            None
-        };
-
-        let entries = bots
-            .into_iter()
-            .filter(|candidate| {
-                command.requester_bot_id.as_deref() != Some(candidate.bot.bot_uuid.as_str())
-            })
-            .filter(|candidate| matches_discovery_selector(&candidate.bot, &command))
-            .filter_map(|candidate| discover_entry(candidate, &command, friend_uuids.as_ref()))
-            .collect::<Vec<_>>();
-        let mut entries_with_agent_code = Vec::with_capacity(entries.len());
-        for mut entry in entries {
-            entry.agent_code = self
-                .registry
-                .get_agent_credentials(&entry.bot_uuid)
-                .await
-                .and_then(|credentials| credentials.agent_code);
-            entries_with_agent_code.push(entry);
-        }
-        Ok(BotDiscoveryResult {
-            count: entries_with_agent_code.len(),
-            bots: entries_with_agent_code,
-        })
-    }
-}
-
-#[async_trait]
 impl BotManagementService for Bot {
     async fn connect_bot(
         &self,
@@ -622,7 +416,10 @@ impl BotManagementService for Bot {
             status,
         } = command;
         match self.registry.get(&bot_id).await {
-            Some(bot) => authorize_bot_management(caller_actor_id.as_deref(), &bot)?,
+            Some(bot) => {
+                self.authorize_current_role(caller_actor_id.as_deref(), &bot)
+                    .await?
+            }
             None if caller_actor_id.as_deref() == Some(bot_id.as_str()) => {}
             None => return Err(ServiceError::BotNotFound(bot_id).into()),
         }
@@ -655,7 +452,8 @@ impl BotManagementService for Bot {
             .get(&bot_id)
             .await
             .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
-        authorize_bot_management(caller_actor_id.as_deref(), &bot)?;
+        self.authorize_current_role(caller_actor_id.as_deref(), &bot)
+            .await?;
 
         self.registry
             .update_visibility(&bot_id, &visibility)
@@ -673,12 +471,12 @@ impl BotManagementService for Bot {
         })?;
         let staff_no = caller.strip_prefix("human_").ok_or_else(|| {
             BotUseCaseError::Forbidden(
-                "owner delete requires a human owner identity".to_string(),
+                "bot delete requires a human identity".to_string(),
             )
         })?;
         if command.human_actor_id.as_deref() != Some(caller) {
             return Err(BotUseCaseError::Forbidden(
-                "owner delete requires matching human identity".to_string(),
+                "bot delete requires matching human identity".to_string(),
             ));
         }
 
@@ -687,9 +485,34 @@ impl BotManagementService for Bot {
             .get(&command.bot_id)
             .await
             .ok_or_else(|| ServiceError::BotNotFound(command.bot_id.clone()))?;
-        authorize_human_creator_required(staff_no, &bot)?;
+        // 删除 (spec §8: "Bot 配置、状态、删除、onboard |
+        // 使用当前角色"): a BUSINESS operation, so the gate
+        // admits the current OWNER OR MANAGER (`require_manage`
+        // — spec §1 goal 1); the historical `created_by`
+        // (spec §3.3) and the ownership-transfer commands
+        // change nothing here. `bot` also feeds the INTRINSIC
+        // TC-origin classification below.
+        match self
+            .authority()?
+            .require_manage(staff_no, &command.bot_id)
+            .await
+        {
+            Ok(()) => {}
+            Err(ServiceError::Forbidden(message)) => {
+                return Err(BotUseCaseError::Forbidden(message));
+            }
+            Err(other) => {
+                return Err(BotUseCaseError::Service(ServiceError::InternalError(
+                    format!("bot authority lookup failed: {other}"),
+                )));
+            }
+        }
 
-        if is_owner_suffixed_bot_id_for_staff(&command.bot_id, staff_no) {
+        // F5: the TC-origin guard classifies from the BOT's OWN
+        // persisted `created_by` — never the requester's staff id.
+        // A manager (or a new owner after transfer) must not be
+        // able to retire a TC-origin Bot through this endpoint.
+        if is_legacy_tc_origin_bot(&bot) {
             return Err(BotUseCaseError::Forbidden(
                 "TC bot must be deleted from TC".to_string(),
             ));
@@ -701,7 +524,23 @@ impl BotManagementService for Bot {
             ));
         }
 
-        let left = self.registry.soft_delete(&command.bot_id).await;
+        // Ordinary Bot retirement (bot-authority spec
+        // §7.1): ONE atomic store command — the Bot
+        // tombstone, the owner/manager edge revocation,
+        // the pending-transfer closure (fixed system
+        // marker) and the `retire` audit carrying the
+        // REAL initiating Human. Never an ordinary
+        // delete chained behind anything.
+        let mutation = bcs_service_api::types::bot_authority::AuthorityMutation {
+            mutation_id: format!("retire_{}", uuid::Uuid::new_v4().simple()),
+            actor: bcs_service_api::types::bot_authority::AuthorityActor::Human {
+                user_id: staff_no.to_string(),
+            },
+        };
+        let left = self
+            .registry
+            .retire_with_authority(&command.bot_id, mutation)
+            .await?;
         Ok(BotLeaveResult {
             left,
             bot_uuid: command.bot_id,

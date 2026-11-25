@@ -10,6 +10,7 @@ Actor:
   required:
     - actor_id
     - actor_kind
+    - avatar_url
   properties:
     actor_id:
       type: string
@@ -17,6 +18,12 @@ Actor:
       $ref: "#/ActorKind"
     name:
       type: string
+    avatar_url:
+      type: string
+      nullable: true
+      description: >-
+        Current Bot display avatar URL, or null when the Bot has none. Human
+        actors always resolve null.
 
 # ---- Bot control-plane resources ------------------------------------------
 
@@ -137,6 +144,7 @@ PhysicalBot:
     - bot_id
     - kind
     - name
+    - avatar_url
     - visibility
     - status
     - env
@@ -159,6 +167,10 @@ PhysicalBot:
     name:
       type: string
       minLength: 1
+    avatar_url:
+      type: string
+      nullable: true
+      description: Current Bot display avatar URL, or null when unset.
     visibility:
       $ref: "#/BotVisibility"
     status:
@@ -172,6 +184,17 @@ PhysicalBot:
       minLength: 1
       description: >-
         Immutable creator staff_no. Omitted when a legacy row has no creator.
+    access_relation:
+      type: string
+      enum:
+        - owner
+        - manager
+      description: >-
+        Sampled authority relation of the calling Human on this row
+        (bot-authority spec §8 mine row). Present only on the mine
+        (`GET /bots/mine`) projection; every other projection omits
+        the field, and the sampled value is never an authorization
+        result.
     descriptor:
       $ref: "#/BotDescriptor"
     reachability:
@@ -216,6 +239,7 @@ HumanBot:
     - bot_id
     - kind
     - name
+    - avatar_url
     - visibility
     - status
     - env
@@ -234,6 +258,10 @@ HumanBot:
     name:
       type: string
       minLength: 1
+    avatar_url:
+      type: string
+      nullable: true
+      description: Always null; Human avatars are not stored in BCS.
     visibility:
       $ref: "#/BotVisibility"
     status:
@@ -247,6 +275,15 @@ HumanBot:
       minLength: 1
       description: >-
         Immutable creator staff_no. Omitted when a legacy row has no creator.
+    access_relation:
+      type: string
+      const: self
+      description: >-
+        Relation of the calling Human's OWN Human self row (bot-authority
+        spec §8 mine row: "Human 自身条目保持 self 语义"), always `self` —
+        a Human→Human owner edge never exists. Present only on the mine
+        (`GET /bots/mine`) projection; every other projection omits the
+        field.
     user_visibility:
       $ref: "#/UserVisibility"
     friend_ext:
@@ -291,7 +328,15 @@ BotCandidate:
       $ref: "#/PhysicalBot"
     is_friend:
       type: boolean
-      description: Whether the acting physical Bot has an accepted Friendship.
+      description: Whether the acting Actor has an accepted Friendship with this Bot.
+    owner_user_id:
+      type: string
+      minLength: 1
+      description: >-
+        Owner user id read from the Bot's approved owner authority edge
+        on the same page. Present as display metadata only, never an
+        authorization result; omitted when the candidate row cannot
+        project an owner (e.g. an uninitialized legacy Bot).
 
 BotCandidateSearchItem:
   type: object
@@ -496,6 +541,7 @@ Participant:
     - role
     - mode
     - message_view_scope
+    - avatar_url
   properties:
     actor_id:
       type: string
@@ -503,6 +549,13 @@ Participant:
       $ref: "#/ActorKind"
     name:
       type: string
+    avatar_url:
+      type: string
+      nullable: true
+      description: >-
+        Current Bot display avatar URL, or null when the participant has none.
+        Human participants resolve null; a retained member of a soft-deleted
+        Bot keeps its stored face.
     role:
       type: string
       enum:
@@ -524,6 +577,35 @@ Participant:
         - absent
     message_view_scope:
       $ref: "#/MessageViewScope"
+
+ParticipantSummary:
+  type: object
+  additionalProperties: false
+  required:
+    - actor_id
+    - actor_kind
+    - name
+    - avatar_url
+  description: >-
+    Lightweight participant row of the V1 list summaries: identity plus the
+    two nullable display fields. `name` is the owning Group/Session membership
+    snapshot verbatim (may be null, never backfilled from the registry); the
+    detail-only control fields role, mode, message_view_scope and tags are
+    intentionally absent.
+  properties:
+    actor_id:
+      type: string
+    actor_kind:
+      $ref: "#/ActorKind"
+    name:
+      type: string
+      nullable: true
+    avatar_url:
+      type: string
+      nullable: true
+      description: >-
+        Current Bot display avatar URL, or null when the participant has none.
+        Human participants resolve null.
 
 DeliveryPolicy:
   type: object
@@ -580,6 +662,7 @@ NormalGroupSummary:
     - participant_count
     - driver_bot_uuid
     - strategy
+    - participants
     - human_mention_notify_mode
     - created_at
     - updated_at
@@ -613,6 +696,14 @@ NormalGroupSummary:
         - chat
         - manager_worker
         - state_machine
+    participants:
+      type: array
+      description: >-
+        Lightweight summaries of every stored Group member in stored order.
+        Names are membership snapshots (may be null); avatars come from one
+        batched display-profile read per result page.
+      items:
+        $ref: "#/ParticipantSummary"
     human_mention_notify_mode:
       $ref: "#/HumanMentionNotifyMode"
     created_at:
@@ -621,6 +712,17 @@ NormalGroupSummary:
     updated_at:
       type: integer
       minimum: 0
+    last_activity_at:
+      type: integer
+      minimum: 0
+      description: >-
+        Conversation activity key in epoch milliseconds: the newest persisted
+        message or Session creation across the Group's Sessions, falling back
+        to `created_at` when the Group has no activity rows. Populated on
+        `GET /openapi/v1/collaboration/groups` under every `sort` mode.
+        Absent (never null) on the public discovery catalog
+        (`GET /openapi/v1/collaboration/public-groups`), which does not
+        compute it.
 DirectMessageGroupSummary:
   type: object
   additionalProperties: false
@@ -633,6 +735,7 @@ DirectMessageGroupSummary:
     - membership
     - originator_actor_id
     - participant_count
+    - participants
     - human_mention_notify_mode
     - created_at
     - updated_at
@@ -659,6 +762,16 @@ DirectMessageGroupSummary:
       const: 2
     peer_actor:
       $ref: "#/Actor"
+    participants:
+      type: array
+      minItems: 2
+      maxItems: 2
+      description: >-
+        Lightweight summaries of the two stored DM members in stored order.
+        Names are membership snapshots (may be null); avatars come from one
+        batched display-profile read per result page.
+      items:
+        $ref: "#/ParticipantSummary"
     human_mention_notify_mode:
       $ref: "#/HumanMentionNotifyMode"
     created_at:
@@ -667,6 +780,17 @@ DirectMessageGroupSummary:
     updated_at:
       type: integer
       minimum: 0
+    last_activity_at:
+      type: integer
+      minimum: 0
+      description: >-
+        Conversation activity key in epoch milliseconds: the newest persisted
+        message or Session creation across the Group's Sessions, falling back
+        to `created_at` when the Group has no activity rows. Populated on
+        `GET /openapi/v1/collaboration/groups` under every `sort` mode.
+        Absent (never null) on the public discovery catalog
+        (`GET /openapi/v1/collaboration/public-groups`), which does not
+        compute it.
 GroupSummary:
   oneOf:
     - $ref: "#/NormalGroupSummary"
@@ -802,6 +926,7 @@ CollaborationGroupDetail:
   type: object
   additionalProperties: false
   required:
+    - catalog_labels
     - group_id
     - version
     - kind
@@ -815,6 +940,8 @@ CollaborationGroupDetail:
     - created_at
     - updated_at
   properties:
+    catalog_labels:
+      $ref: "#/CatalogLabels"
     group_id:
       type: string
     version:
@@ -867,6 +994,7 @@ DirectMessageGroupDetail:
   type: object
   additionalProperties: false
   required:
+    - catalog_labels
     - group_id
     - version
     - kind
@@ -878,6 +1006,8 @@ DirectMessageGroupDetail:
     - created_at
     - updated_at
   properties:
+    catalog_labels:
+      $ref: "#/CatalogLabels"
     group_id:
       type: string
     version:
@@ -1120,6 +1250,7 @@ SessionParticipant:
     - role
     - mode
     - message_view_scope
+    - avatar_url
   properties:
     actor_id:
       type: string
@@ -1127,6 +1258,13 @@ SessionParticipant:
       $ref: "#/ActorKind"
     name:
       type: string
+    avatar_url:
+      type: string
+      nullable: true
+      description: >-
+        Current Bot display avatar URL, or null when the participant has none.
+        Human participants resolve null; a retained member of a soft-deleted
+        Bot keeps its stored face.
     role:
       type: string
       enum:
@@ -1151,6 +1289,7 @@ SessionSummary:
     - version
     - group_id
     - status
+    - participants
     - created_at
     - updated_at
   properties:
@@ -1167,6 +1306,16 @@ SessionSummary:
     participant_count:
       type: integer
       minimum: 0
+    participants:
+      type: array
+      description: >-
+        Lightweight summaries of every current Session member in stored order,
+        including session-only dynamic members: `name` is this Session's own
+        membership snapshot verbatim (may be null) and `avatar_url` is the
+        current Bot avatar (null when absent or for Human actors). No
+        detail-only control fields are included.
+      items:
+        $ref: "#/ParticipantSummary"
     created_at:
       type: integer
       minimum: 0
@@ -1179,6 +1328,18 @@ SessionSummary:
         Whether the view actor (the `view_bot_id` resolved by the request) has
         collected this session. Surfaced only when `view_bot_id` is explicitly
         supplied; absent otherwise.
+    last_activity_at:
+      type: integer
+      minimum: 0
+      description: >-
+        Conversation activity key in epoch milliseconds: the newest persisted
+        message in the Session, falling back to the Session's `created_at` when
+        it has no persisted messages. On
+        `GET /openapi/v1/collaboration/groups/{group_id}/sessions` items it is
+        always present (integer milliseconds) under every `sort` mode,
+        including that `created_at` fallback case (never null); omitted only
+        where the value is not computed. Session detail is unaffected: it gains
+        no field.
 
 SessionDetail:
   type: object
@@ -1683,6 +1844,44 @@ Invitation:
     created_at:
       type: integer
       minimum: 0
+
+InvitationPreview:
+  type: object
+  additionalProperties: false
+  description: >-
+    Read-only target metadata and direct membership of the authenticated User's
+    Human actor. Bot control, public visibility and parent Group membership do
+    not count as membership. No actor creation or acceptance occurs.
+  required:
+    - target_type
+    - target_id
+    - group_id
+    - already_joined
+  properties:
+    target_type:
+      $ref: "#/InvitationTargetType"
+    target_id:
+      type: string
+    group_id:
+      type: string
+      description: Target Group ID, or the parent Group ID for a Session target.
+    already_joined:
+      type: boolean
+
+InvitationPreviewEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/InvitationPreview"
+    request_id:
+      type: string
 
 InvitationAcceptResult:
   type: object
@@ -2314,3 +2513,30 @@ FriendRequestDecisionEnvelope:
       $ref: "#/FriendRequest"
     request_id:
       type: string
+
+
+CatalogLabelsInput:
+  type: object
+  description: >-
+    Whole-object replacement using the standalone catalog-labels.toml dictionary.
+    Outer null is rejected; known-key null/empty arrays remove keys. Values are
+    exact configured strings, de-duplicated before configured multiplicity checks.
+    Unknown keys (even null/[]) and unknown values reject the entire request.
+  additionalProperties:
+    oneOf:
+      - type: array
+        items:
+          type: string
+          minLength: 1
+      - type: "null"
+
+CatalogLabels:
+  type: object
+  description: Normalized catalog management metadata, separate from raw Card JSON.
+  additionalProperties:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: string
+      minLength: 1

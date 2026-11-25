@@ -1,3 +1,5 @@
+import { PersistentChatLayoutPanelProvider } from '@/components/Workspace/PersistentChatLayoutPanelHost';
+import { useBotGrantReconciliation } from '@/hooks/useBotGrantReconciliation';
 import { useExternalAuthBoot } from '@/hooks/useExternalAuthGuard';
 import { useInviteCodeGateBoot } from '@/hooks/useInviteCodeGate';
 import { AppShell } from '@/shell/AppShell';
@@ -9,9 +11,13 @@ export default function AppLayout() {
   // 全系统邀请码门禁主动 boot（仅 oauth-provider + inviteCodeGate enabled）：登录态确认后查 /me，未绑则弹门禁。
   // 与登录 boot 无竞态（登录先于门禁，本 boot 等 authenticated 才触发）。见 add-invite-code-gate design 决策 1。
   useInviteCodeGateBoot();
+  // 登录态 ready 后静默补偿当前 Human 拥有的 Bot 授权；失败不影响登录或页面。
+  useBotGrantReconciliation();
   return (
-    <AppShell>
-      <Outlet />
-    </AppShell>
+    <PersistentChatLayoutPanelProvider>
+      <AppShell>
+        <Outlet />
+      </AppShell>
+    </PersistentChatLayoutPanelProvider>
   );
 }

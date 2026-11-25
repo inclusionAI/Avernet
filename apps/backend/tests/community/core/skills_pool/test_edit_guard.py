@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import Mock
 import logging
 
 import pytest
@@ -93,9 +95,13 @@ class _RollbackAfterAcquireCache(_Cache):
         return token
 
 
+def _guard(**kwargs) -> SkillsPoolEditGuard:
+    return SkillsPoolEditGuard(**kwargs)
+
+
 def test_rollback_lease_excludes_new_local_edits() -> None:
     layouts = _Layouts()
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_Cache(),
         layout_repository=layouts,
         participation_resolver=_Participation(),
@@ -109,8 +115,30 @@ def test_rollback_lease_excludes_new_local_edits() -> None:
     assert guard.release(rollback_lease)
 
 
+def test_non_pool_edit_excludes_mutations_from_another_worker() -> None:
+    cache = _Cache()
+    layouts = _Layouts()
+    participation = _Participation(participates=False, label="legacy_layout_state")
+    first_worker = _guard(
+        cache=cache, layout_repository=layouts, participation_resolver=participation
+    )
+    second_worker = _guard(
+        cache=cache, layout_repository=layouts, participation_resolver=participation
+    )
+
+    lease = first_worker.acquire_for_edit(scope=SCOPE)
+    try:
+        with pytest.raises(SkillsPoolEditBusyError):
+            second_worker.acquire_for_edit(scope=SCOPE)
+        assert second_worker.acquire_for_rollback(scope=SCOPE) is None
+    finally:
+        assert first_worker.release(lease)
+
+
+
+
 def test_lock_identity_includes_entity_for_reused_bot_ids() -> None:
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_Cache(),
         layout_repository=_Layouts(),
         participation_resolver=_Participation(),
@@ -127,7 +155,7 @@ def test_lock_identity_includes_entity_for_reused_bot_ids() -> None:
 
 @pytest.mark.asyncio
 async def test_waiting_edit_acquires_lock_after_ordinary_edit_releases() -> None:
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_Cache(),
         layout_repository=_Layouts(),
         participation_resolver=_Participation(),
@@ -152,7 +180,7 @@ def test_rollback_phase_rejects_edit_even_after_lock_becomes_available() -> None
         target_layout=SkillLayout.LEGACY,
         phase=SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING,
     )
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_Cache(),
         layout_repository=layouts,
         participation_resolver=_Participation(),
@@ -165,7 +193,7 @@ def test_rollback_phase_rejects_edit_even_after_lock_becomes_available() -> None
 def test_lock_contention_rechecks_for_a_rollback_before_reporting_busy() -> None:
     layouts = _Layouts()
     cache = _Cache()
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=cache,
         layout_repository=layouts,
         participation_resolver=_Participation(),
@@ -184,7 +212,7 @@ def test_lock_contention_rechecks_for_a_rollback_before_reporting_busy() -> None
 def test_rollback_starting_after_lock_acquisition_releases_edit_lease() -> None:
     layouts = _Layouts()
     cache = _RollbackAfterAcquireCache(layouts)
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=cache,
         layout_repository=layouts,
         participation_resolver=_Participation(),
@@ -194,35 +222,6 @@ def test_rollback_starting_after_lock_acquisition_releases_edit_lease() -> None:
         guard.acquire_for_edit(scope=SCOPE)
 
     assert cache.held == {}
-
-
-def test_legacy_bot_bypasses_an_abandoned_pool_edit_lock() -> None:
-    cache = _Cache()
-    layouts = _Layouts()
-    layouts.state = replace(
-        layouts.state,
-        active_layout=SkillLayout.LEGACY,
-        target_layout=None,
-        phase=SkillLayoutPhase.LEGACY_ACTIVE,
-        persisted=False,
-    )
-    guard = SkillsPoolEditGuard(
-        cache=cache,
-        layout_repository=layouts,
-        participation_resolver=_Participation(
-            participates=False, label="legacy_layout_state"
-        ),
-    )
-    # A Legacy Bot never owns Pool rollback, so it must not wait for a generic
-    # lock left by an earlier, wrongly-participating worker.
-    abandoned = cache.acquire_lock(guard._key(scope=SCOPE))
-    assert abandoned is not None
-
-    lease = guard.acquire_for_edit(scope=SCOPE)
-
-    assert lease.token is None
-    assert guard.release(lease) is True
-    assert cache.held
 
 
 @pytest.mark.asyncio
@@ -235,7 +234,7 @@ async def test_legacy_bot_still_serializes_ordinary_edits() -> None:
         phase=SkillLayoutPhase.LEGACY_ACTIVE,
         persisted=False,
     )
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_Cache(),
         layout_repository=layouts,
         participation_resolver=_Participation(
@@ -252,12 +251,12 @@ async def test_legacy_bot_still_serializes_ordinary_edits() -> None:
 
     assert guard.release(first)
     second = await waiting
-    assert second.token is None
+    assert second.token is not None
     assert guard.release(second)
 
 
 def test_cache_outage_is_not_reported_as_lock_contention() -> None:
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_UnavailableCache(),
         layout_repository=_Layouts(),
         participation_resolver=_Participation(),
@@ -269,7 +268,7 @@ def test_cache_outage_is_not_reported_as_lock_contention() -> None:
 
 def test_lock_lifecycle_logs_key_ttl_token_fingerprint_and_duration(caplog) -> None:
     caplog.set_level(logging.INFO)
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_Cache(),
         layout_repository=_Layouts(),
         participation_resolver=_Participation(),
@@ -293,7 +292,7 @@ def test_lock_lifecycle_logs_key_ttl_token_fingerprint_and_duration(caplog) -> N
 
 @pytest.mark.asyncio
 async def test_wait_does_not_retry_a_cache_outage_as_ordinary_contention() -> None:
-    guard = SkillsPoolEditGuard(
+    guard = _guard(
         cache=_UnavailableCache(),
         layout_repository=_Layouts(),
         participation_resolver=_Participation(),

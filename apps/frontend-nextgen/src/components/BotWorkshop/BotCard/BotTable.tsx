@@ -23,11 +23,15 @@ const BotTable: React.FC<BotTableProps> = ({
   onOpenContainers,
   canViewContainers,
   containerUserId,
+  currentUserId,
   onEngineVersionUpdated,
   onHealthCheck,
   onChangeSpace,
   onAuthorize,
-  onManagePublication,
+  onPublicationChanged,
+  onPublicationGateBlocked,
+  onOpenEvaluation,
+  onOpenEvalHistory,
   onAction,
   onClaimLock,
   onReleaseLock,
@@ -37,6 +41,9 @@ const BotTable: React.FC<BotTableProps> = ({
   getCollaborationMode,
   getGeneralConfigAvailability,
   onGeneralConfig,
+  getCopyAvailability,
+  onCopy,
+  onRetryCopy,
 }) => {
   const showOwner = bots.some((bot) => bot.spaceKind === 'team');
   const [expandedProgressIds, setExpandedProgressIds] = React.useState<Set<string>>(() => new Set());
@@ -65,6 +72,7 @@ const BotTable: React.FC<BotTableProps> = ({
     engineVersionStates: engineVersions.states,
     engineVersionUpdateAvailability: engineVersions.updateAvailability,
     containerUserId,
+    currentUserId,
     onView,
     onEdit,
     onConversation,
@@ -77,7 +85,10 @@ const BotTable: React.FC<BotTableProps> = ({
     onHealthCheck,
     onChangeSpace,
     onAuthorize,
-    onManagePublication,
+    onPublicationChanged,
+    onPublicationGateBlocked,
+    onOpenEvaluation,
+    onOpenEvalHistory,
     onAction,
     onClaimLock,
     onReleaseLock,
@@ -87,6 +98,9 @@ const BotTable: React.FC<BotTableProps> = ({
     getCollaborationMode,
     getGeneralConfigAvailability,
     onGeneralConfig,
+    getCopyAvailability,
+    onCopy,
+    onRetryCopy,
     onOpenEngineInfo: engineVersions.openInfo,
     onUpdateEngineVersion: engineVersions.openUpdate,
   });
@@ -131,7 +145,7 @@ const BotTable: React.FC<BotTableProps> = ({
           ) : null
         }
         ariaLabel={ariaLabel}
-        minWidth={showOwner ? 'min-w-[1212px]' : 'min-w-[1132px]'}
+        minWidth={showOwner ? 'min-w-[1168px]' : 'min-w-[1088px]'}
       />
       {engineVersions.dialogs}
     </>

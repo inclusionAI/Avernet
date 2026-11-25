@@ -1,7 +1,7 @@
 //! Bot Coordination Service (BCS) for Multi-Bot Collaboration
 //!
 //! This crate provides:
-//! - **BCS Server**: Bot registry, proposal generation, group management
+//! - **BCS Server**: Bot registry, group management
 //! - **WebSocket Support**: Bot connections via WebSocket protocol
 //! - **DingTalk Integration**: DingTalk channel support
 //!
@@ -18,7 +18,6 @@
 //! │                                                             │
 //! │  Services:                                                  │
 //! │  • Bot registry (bot_uuid → bot with TTL)                   │
-//! │  • Proposal generation (HTTP request → proposal)            │
 //! │  • Group management (Agent/Fusion modes)                    │
 //! │  • Context fusion (reads files, single LLM call)            │
 //! │  • Message routing (to driver or @mentioned bot)            │
@@ -61,7 +60,6 @@ pub use bcs_protocol::{
     ChatEventState,
     ChatSendParams,
     ChatSendResponse,
-    ConfirmProposalResponse,
     Conflict as WireConflict,
     ConflictPosition as WireConflictPosition,
     ContentBlock,
@@ -77,8 +75,6 @@ pub use bcs_protocol::{
     MessageContent,
     ParticipantInfo,
     ParticipantPerspective as WireParticipantPerspective,
-    ProposalContext,
-    ProposalResponse,
     RequestFrame,
     ResponseFrame,
     ResponseMode as WireResponseMode,
@@ -109,8 +105,8 @@ pub use bcs_service_api::{
     ChatEventRouting, ContextConflict as Conflict, ContextConflictPosition as ConflictPosition,
     ContextFusionRequest as FusionRequest, ContextFusionResponse as FusionResponse,
     ContextParticipantPerspective as ParticipantPerspective, DynamicStatusResponse,
-    FusionCoreService, Group, GroupChatProposal, GroupCoreService, GroupMessage, GroupMessageType,
-    Participant, ParticipantKind, ParticipantRole, ProposalCoreService, RegisteredBot,
+    FusionCoreService, Group, GroupCoreService, GroupMessage, GroupMessageType,
+    Participant, ParticipantKind, ParticipantRole, RegisteredBot,
     ResponseMode, RouteAndSendResult as ServiceRouteAndSendResult, RouteSelectorWire,
     RoutingCoreService, RoutingDecision as ServiceRoutingDecision,
     RoutingTarget as ServiceRoutingTarget, ServiceError, ServiceResult, Skill,
@@ -119,19 +115,24 @@ pub use bcs_service_api::{
 
 // Re-export implementations
 pub use bcs_bot::BotCore;
-pub use bcs_fusion::LocalFusionService;
+pub use bcs_fusion::{LocalFusionService, CardChangeQueue};
 pub use bcs_group::GroupStore;
 pub use bcs_group_store::GroupBuilder;
-pub use bcs_proposal::{ProposalBuilder, ProposalStore};
 pub use bcs_routing::MessageRouter;
 
 // Server modules
+pub mod api_auth_registry;
+pub mod api_auth_wiring;
+pub mod api_auth_ports;
 pub mod auth_wiring;
+pub mod bot_authority_wiring;
 mod bot_ws_admission_config;
+mod api_auth_config_values;
+mod api_auth_provider_configs;
 mod config;
 mod collaboration_drafts;
 mod config_loader;
-pub mod callback_recovery_scanner;
+
 mod env;
 mod error;
 mod eventing_wiring;
@@ -140,7 +141,9 @@ mod friend_connect_notification;
 pub use friend_auth_sync::HttpFriendAuthSyncPort;
 pub mod http_adapter;
 pub mod agent_identity;
-mod identity_wiring;
+pub mod identity_wiring;
+pub mod identity_session_wiring;
+mod caller_identity_wiring;
 pub mod lifecycle;
 mod ws_leadership;
 pub mod metrics;
@@ -150,11 +153,13 @@ mod delivery_metrics;
 pub mod plugins;
 pub mod server;
 mod principal_state;
+mod browser_principal;
+mod compat_auth_principal;
 pub mod state_machine_timeout_scanner;
 pub mod state_machine_progression_scanner;
 mod recovery_backoff;
 mod telemetry;
-pub mod timeout_scanner;
+
 pub mod token_expiry_scanner;
 
 pub mod leader_election {
@@ -168,7 +173,7 @@ pub mod logging;
 
 // Re-exports
 pub use config::{
-    AuthSdkConfig, BcsConfig, CacheConfig, DatabaseConfig, DatabaseType, DingTalkAccountConfig,
+    AuthSdkConfig, BcsConfig, BotAuthorityConfig, CacheConfig, DatabaseConfig, DatabaseType, DingTalkAccountConfig,
     GatewayPrincipalConfig, InviteConfig, LlmConfig, LlmProviderType,
     LoggingConfig, MessageHistoryConfig, MetricsConfig, MetricsMode, RedisCacheConfig,
     SecurityGatewayProviderConfig, StructuredOutputMode, TelemetryConfig, UserDirectoryConfig,
@@ -202,7 +207,14 @@ pub async fn run_with_config(mut config: BcsConfig) -> Result<()> {
     run_with_resolved_config(config).await
 }
 
-pub async fn run_with_resolved_config(mut config: BcsConfig) -> Result<()> {
+pub async fn run_with_resolved_config(config: BcsConfig) -> Result<()> {
+    run_with_resolved_config_and_extensions(config, BcsServerExtensions::default()).await
+}
+
+/// Embedding hosts may share catalog notifications with independently assembled adapters.
+pub async fn run_with_resolved_config_and_extensions(
+    mut config: BcsConfig, extensions: BcsServerExtensions,
+) -> Result<()> {
     config
         .validate_api_keys()
         .map_err(BcsError::InvalidConfig)?;
@@ -248,7 +260,8 @@ pub async fn run_with_resolved_config(mut config: BcsConfig) -> Result<()> {
         None
     };
     let group_logger = config.group_logger.take();
-    let server = BcsServer::new_with_storage(config).await?;
+    let infrastructure = InfrastructurePlugins::from_config(&config).await?;
+    let server = BcsServer::new_with_infrastructure(config, infrastructure, extensions).await?;
 
     if let Some(logger_cfg) = group_logger {
         if logger_cfg.enabled {

@@ -19,9 +19,6 @@ from agentclaw.community.adapters.http.session_resources.schemas import (
 from agentclaw.community.api.session_resource_service import (
     SessionResourceServiceProtocol,
 )
-from agentclaw.community.api.tc_resource_ready_observer import (
-    TcResourceReadyObserverProtocol,
-)
 from agentclaw.community.core.session_resources.baas_client import (
     SessionFileUpstreamUnavailableError,
 )
@@ -36,6 +33,7 @@ def _resource(record: SessionResourceRecord) -> dict:
     return {
         "resource_id": record.resource_id,
         "display_name": record.display_name,
+        "creator_name": record.creator_name,
         "status": record.status.value,
         "engine_type": record.engine_type,
         "size_bytes": record.size_bytes,
@@ -95,6 +93,7 @@ async def create_upload_intents(
         for item in body.files:
             intent = service.create_upload_intent(
                 owner_id=user.staffId,
+                creator_name=user.nickName,
                 bot_id=body.bot_id,
                 session_key=body.session_key,
                 scope_type=body.scope_type,
@@ -129,7 +128,6 @@ async def upload_complete(
     body: UploadCompleteRequest,
     user: AuthenticatedUser = Depends(get_current_user),
     service: SessionResourceServiceProtocol = Injected(SessionResourceServiceProtocol),
-    observer: TcResourceReadyObserverProtocol = Injected(TcResourceReadyObserverProtocol),
 ) -> dict:
     try:
         record = service.complete_upload(
@@ -141,7 +139,6 @@ async def upload_complete(
         )
     except ValueError as exc:
         raise _domain_error(exc) from exc
-    observer.notify_in_background(record)
     return _resource(record)
 
 
@@ -152,7 +149,6 @@ async def materialize_status(
     session_key: str,
     user: AuthenticatedUser = Depends(get_current_user),
     service: SessionResourceServiceProtocol = Injected(SessionResourceServiceProtocol),
-    observer: TcResourceReadyObserverProtocol = Injected(TcResourceReadyObserverProtocol),
 ) -> dict:
     try:
         record = service.get_status(
@@ -163,7 +159,6 @@ async def materialize_status(
         )
     except ValueError as exc:
         raise _domain_error(exc) from exc
-    observer.notify_in_background(record)
     return _resource(record)
 
 
@@ -296,7 +291,6 @@ async def materialized_callback(
         alias="x-materialization-task-id",
     ),
     service: SessionResourceServiceProtocol = Injected(SessionResourceServiceProtocol),
-    observer: TcResourceReadyObserverProtocol = Injected(TcResourceReadyObserverProtocol),
 ) -> dict:
     # COSEC: the 128-bit task id is an unguessable single-task capability;
     # constant-time compare prevents a callback from probing valid prefixes.
@@ -331,6 +325,4 @@ async def materialized_callback(
         )
     except ValueError as exc:
         raise _domain_error(exc) from exc
-    if result is not None:
-        observer.notify_in_background(result)
     return {"applied": result is not None, "status": result.status.value if result else None}

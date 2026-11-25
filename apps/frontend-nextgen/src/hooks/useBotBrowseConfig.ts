@@ -33,7 +33,8 @@ function errorMessage(error: unknown, fallback: string) {
  * 组合「当前用户拥有的 Bot 列表」+「BBS 逛社区订阅」。
  * - Bot 列表：useOwnedBots（GET /openapi/v1/bots，与我的任务同源；Bot 身份下为空）。
  * - 订阅：botConfigService.listSubscriptions（/openapi/v1/collaboration/tasks/bbs/browse-subscriptions，按 owner 列已开 Bot）。
- * 行派生自两者交集；note/开关变更后局部更新 subs，避免整列表重拉。
+ * 行派生自两者交集；note/开关变更后局部更新 subs，避免整列表重拉。新订阅返回 202，
+ * 开关先做本地乐观展示；后台装配失败不落库，刷新后回到关闭状态。
  */
 export function useBotBrowseConfig(): UseBotBrowseConfigResult {
   const { identity } = useHumanIdentity();
@@ -105,7 +106,7 @@ export function useBotBrowseConfig(): UseBotBrowseConfigResult {
           const created = await botConfigService.enableSubscription(botId, ownerUserId, existing?.note ?? '');
           setSubs((prev) => [...prev.filter((sub) => sub.botId !== botId), created]);
         } else {
-          await botConfigService.disableSubscription(botId);
+          await botConfigService.disableSubscription(botId, ownerUserId);
           setSubs((prev) => prev.filter((sub) => sub.botId !== botId));
         }
       } catch (err) {

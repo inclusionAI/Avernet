@@ -1,37 +1,144 @@
-//! Run channel manager for tracking run_id -> client channel mappings.
+//! Run channel manager for tracking run_id -> client sink mappings.
+//!
+//! Run sinks are explicit (bot-authority plan Task 7):
+//! `register_internal` keeps the existing internal service String
+//! consumer channel; `register_workbench` attaches the protected
+//! Workbench sink (typed frames + the owning connection instance).
+//! Run aliases always resolve to the SAME registered sink instance,
+//! so an alias can never serve another Human's connection under the
+//! same run string; the session fallback remains Internal-only for
+//! public output (spec §7.2: public Workbench 输出不借 last-run 许可).
+//!
+//! Workbench frames are authorized at the ENQUEUE boundary against
+//! the operation's frozen per-connection permit
+//! ([`super::output_permits`]) — never per frame at the writer, and
+//! never retroactively revoked mid-operation (spec §8.2).
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use opentelemetry::trace::SpanContext;
-use bcs_domain::{HumanMessageView, MessageAudience, MessageVisibilityDomain};
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, info, warn};
 
+use bcs_domain::{MessageAudience, MessageVisibilityDomain};
+
+use super::connection_retirement::SlowConnectionRetirement;
+use super::output_permits::OutputPermitStore;
+use super::protected_delivery::{OutboundFrame, RunClientSink, TERMINAL_ENQUEUE_BUDGET};
+
 #[derive(Debug, Clone)]
 pub struct ClientChannel {
-    pub tx: mpsc::Sender<String>,
+    pub tx: RunClientSink,
     pub registered_at: Instant,
     pub source: Option<String>,
     pub user_id: Option<String>,
     pub trace_parent: Option<SpanContext>,
-    pub human_view: Option<HumanMessageView>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
+enum EnqueueJob {
+    Internal {
+        tx: mpsc::Sender<String>,
+        source: Option<String>,
+        event: String,
+    },
+    Workbench {
+        tx: mpsc::Sender<OutboundFrame>,
+        source: Option<String>,
+        connection_instance_id: u64,
+        event: String,
+    },
+}
+
+#[derive(Debug)]
 pub struct RunChannelManager {
     channels: RwLock<HashMap<String, ClientChannel>>,
     session_runs: RwLock<HashMap<String, Vec<String>>>,
     run_sessions: RwLock<HashMap<String, String>>,
     run_aliases: RwLock<HashMap<String, String>>,
+    /// The operation permit store consulted at the Workbench enqueue
+    /// boundary. Shared with the fanout registry and the output
+    /// admission port; a standalone manager (unit fixtures) owns an
+    /// empty store, so an unbound run simply admits no Workbench
+    /// frame while Internal sinks keep flowing.
+    output_permits: Arc<OutputPermitStore>,
+    /// Slow-consumer retirement hook (spec §9): a terminal frame
+    /// lost past the bounded backpressure budget retires the
+    /// saturated connection as an observable transport failure.
+    /// Standalone fixtures leave it unwired; composition installs
+    /// the Workbench registry.
+    connection_retirement: Option<Arc<dyn SlowConnectionRetirement>>,
+    /// Terminal frames lost past the bounded budget on this lane.
+    terminal_frames_lost: AtomicU64,
+}
+
+impl Default for RunChannelManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RunChannelManager {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            channels: RwLock::new(HashMap::new()),
+            session_runs: RwLock::new(HashMap::new()),
+            run_sessions: RwLock::new(HashMap::new()),
+            run_aliases: RwLock::new(HashMap::new()),
+            output_permits: Arc::new(OutputPermitStore::new()),
+            connection_retirement: None,
+            terminal_frames_lost: AtomicU64::new(0),
+        }
     }
 
-    pub async fn register(
+    /// Share the composition-wide permit store.
+    pub fn with_output_permits(self, permits: Arc<OutputPermitStore>) -> Self {
+        Self {
+            output_permits: permits,
+            ..self
+        }
+    }
+
+    /// Install the composition's slow-consumer retirement hook.
+    pub fn with_connection_retirement(
+        self,
+        retirement: Arc<dyn SlowConnectionRetirement>,
+    ) -> Self {
+        Self {
+            connection_retirement: Some(retirement),
+            ..self
+        }
+    }
+
+    /// Terminal frames lost past the bounded backpressure budget
+    /// (each one retired its connection).
+    pub fn terminal_frames_lost(&self) -> u64 {
+        self.terminal_frames_lost.load(Ordering::Relaxed)
+    }
+
+    /// Retire one saturated connection through the composition hook
+    /// (no-op for standalone fixtures without a registry behind them).
+    async fn retire_connection(&self, connection_instance_id: u64) {
+        if let Some(retirement) = self.connection_retirement.as_ref() {
+            retirement
+                .retire(connection_instance_id, "terminal frame lost past the backpressure budget")
+                .await;
+        }
+    }
+
+    /// The shared operation permit store (enqueue-boundary checks
+    /// and test fixtures install through the same handle).
+    pub fn output_permits(&self) -> Arc<OutputPermitStore> {
+        self.output_permits.clone()
+    }
+
+    /// Explicit Internal sink registration: the internal service
+    /// String port (existing `ChatRunEventPort` consumers). Never
+    /// used by a public writer.
+    pub async fn register_internal(
         &self,
         run_id: String,
         bcs_group_id: String,
@@ -39,32 +146,19 @@ impl RunChannelManager {
         source: Option<String>,
         user_id: Option<String>,
     ) {
-        self.register_with_trace_parent(run_id, bcs_group_id, tx, source, user_id, None)
-            .await;
-    }
-
-    pub async fn register_with_view(
-        &self,
-        run_id: String,
-        bcs_group_id: String,
-        tx: mpsc::Sender<String>,
-        source: Option<String>,
-        user_id: Option<String>,
-        human_view: Option<HumanMessageView>,
-    ) {
-        self.register_with_trace_parent_and_view(
+        self.register_sink(
             run_id,
             bcs_group_id,
-            tx,
+            RunClientSink::Internal { tx },
             source,
             user_id,
             None,
-            human_view,
         )
         .await;
     }
 
-    pub async fn register_with_trace_parent(
+    /// Explicit Internal sink registration with run trace context.
+    pub async fn register_internal_with_trace_parent(
         &self,
         run_id: String,
         bcs_group_id: String,
@@ -73,28 +167,61 @@ impl RunChannelManager {
         user_id: Option<String>,
         trace_parent: Option<SpanContext>,
     ) {
-        self.register_with_trace_parent_and_view(
+        self.register_sink(
             run_id,
             bcs_group_id,
-            tx,
+            RunClientSink::Internal { tx },
             source,
             user_id,
             trace_parent,
-            None,
         )
         .await;
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn register_with_trace_parent_and_view(
+    /// Explicit protected Workbench sink registration: typed
+    /// `OutboundFrame`s flow through a bounded per-connection queue
+    /// and are authorized at the ENQUEUE boundary against the
+    /// operation's frozen permit for THIS connection instance
+    /// (bot-authority spec §8.2/§8.3 — 已准入输出不追溯). The Run is
+    /// bound to the operation that admitted it in the SAME
+    /// registration, so an immediate callback frame never finds an
+    /// unbound Run.
+    pub async fn register_workbench(
         &self,
         run_id: String,
         bcs_group_id: String,
-        tx: mpsc::Sender<String>,
+        tx: mpsc::Sender<OutboundFrame>,
+        connection_instance_id: u64,
+        operation_id: &str,
         source: Option<String>,
         user_id: Option<String>,
         trace_parent: Option<SpanContext>,
-        human_view: Option<HumanMessageView>,
+    ) {
+        self.output_permits
+            .bind_run(&run_id, operation_id)
+            .await;
+        self.register_sink(
+            run_id,
+            bcs_group_id,
+            RunClientSink::Workbench {
+                tx,
+                connection_instance_id,
+            },
+            source,
+            user_id,
+            trace_parent,
+        )
+        .await;
+    }
+
+    async fn register_sink(
+        &self,
+        run_id: String,
+        bcs_group_id: String,
+        tx: RunClientSink,
+        source: Option<String>,
+        user_id: Option<String>,
+        trace_parent: Option<SpanContext>,
     ) {
         let trace_parent = trace_parent.filter(SpanContext::is_valid);
         let channel = ClientChannel {
@@ -103,7 +230,6 @@ impl RunChannelManager {
             source,
             user_id,
             trace_parent,
-            human_view,
         };
 
         self.channels.write().await.insert(run_id.clone(), channel);
@@ -122,61 +248,200 @@ impl RunChannelManager {
     }
 
     pub async fn send_event(&self, run_id: &str, event: String) -> bool {
-        self.send_visible_event(run_id, event, MessageVisibilityDomain::Chat, None)
+        self.send_visible_event(run_id, event, MessageVisibilityDomain::Chat, None, false)
             .await
     }
 
+    /// Deliver one event to a run sink. Internal sinks keep their
+    /// existing unfiltered String contract; Workbench sinks are
+    /// authorized at the ENQUEUE boundary against the frozen
+    /// per-connection permit of the operation this Run is bound to
+    /// (spec §8.2: 已准入输出不追溯) — a mid-operation revocation
+    /// changes nothing here, a frame without a permit is refused,
+    /// and the socket writer just sends.
     pub async fn send_visible_event(
         &self,
         run_id: &str,
         event: String,
         visibility_domain: MessageVisibilityDomain,
         audience: Option<&MessageAudience>,
+        terminal: bool,
     ) -> bool {
         let resolved_run_id = self.resolve_run_id(run_id).await;
-        let channels = bcs_observability::observe_value("ws.run_channels.read_lock", self.channels.read()).await;
-
-        if let Some(channel) = channels.get(&resolved_run_id) {
-            if channel
-                .human_view
-                .as_ref()
-                .is_some_and(|view| !view.allows_artifact(visibility_domain, audience))
-            {
+        // Lock discipline: the read lock is ONLY used to resolve the
+        // sink — the channels guard is dropped BEFORE any permit or
+        // enqueue await, so a slow Workbench writer can never stall
+        // register/unregister on ANY run.
+        let job = {
+            let channels = bcs_observability::observe_value("ws.run_channels.read_lock", self.channels.read()).await;
+            let Some(channel) = channels.get(&resolved_run_id) else {
+                debug!(
+                    run_id = %run_id,
+                    resolved_run_id = %resolved_run_id,
+                    "No client channel found for run_id"
+                );
+                // The channels guard drops on leaving the block.
                 return false;
+            };
+            match &channel.tx {
+                RunClientSink::Internal { tx } => EnqueueJob::Internal {
+                    tx: tx.clone(),
+                    source: channel.source.clone(),
+                    event,
+                },
+                RunClientSink::Workbench {
+                    tx,
+                    connection_instance_id,
+                } => EnqueueJob::Workbench {
+                    tx: tx.clone(),
+                    source: channel.source.clone(),
+                    connection_instance_id: *connection_instance_id,
+                    event,
+                },
             }
-            match bcs_observability::observe_result(
-                "ws.run_channels.enqueue",
-                channel.tx.send(event),
-            )
-            .await
-            {
-                Ok(()) => {
+        };
+        match job {
+            EnqueueJob::Internal { tx, source, event } => {
+                match bcs_observability::observe_result(
+                    "ws.run_channels.enqueue",
+                    tx.send(event),
+                )
+                .await
+                {
+                    Ok(()) => {
+                        debug!(
+                            run_id = %run_id,
+                            resolved_run_id = %resolved_run_id,
+                            source = ?source,
+                            "Event forwarded to client"
+                        );
+                        true
+                    }
+                    Err(err) => {
+                        warn!(
+                            request_id = %bcs_observability::CurrentRequestId,
+                            run_id = %run_id,
+                            resolved_run_id = %resolved_run_id,
+                            error = %err,
+                            "Failed to send event to client channel"
+                        );
+                        false
+                    }
+                }
+            }
+            EnqueueJob::Workbench {
+                tx,
+                source,
+                connection_instance_id,
+                event,
+            } => {
+                let visibility = super::protected_delivery::visibility(
+                    visibility_domain,
+                    audience,
+                );
+                let Some(operation_id) =
+                    self.output_permits.operation_of_run(&resolved_run_id).await
+                else {
                     debug!(
                         run_id = %run_id,
                         resolved_run_id = %resolved_run_id,
-                        source = ?channel.source,
-                        "Event forwarded to client"
+                        "Run is not bound to an admitted operation; Workbench frame refused"
                     );
-                    true
-                }
-                Err(err) => {
-                    warn!(
-                        request_id = %bcs_observability::CurrentRequestId,
+                    return false;
+                };
+                if !self
+                    .output_permits
+                    .check_frame(
+                        &operation_id,
+                        connection_instance_id,
+                        &visibility,
+                        Some(&resolved_run_id),
+                    )
+                    .await
+                {
+                    debug!(
                         run_id = %run_id,
                         resolved_run_id = %resolved_run_id,
-                        error = %err,
-                        "Failed to send event to client channel"
+                        connection_instance_id,
+                        "Workbench run frame has no permit for this connection"
                     );
-                    false
+                    return false;
+                }
+                if terminal {
+                    // Run terminal ≠ operation complete: only THIS
+                    // stream closes; the operation stays open for its
+                    // sibling runs until every registered stream is
+                    // terminal (spec §8.2).
+                    self.output_permits
+                        .mark_run_terminal(&operation_id, &resolved_run_id)
+                        .await;
+                }
+                let frame = if terminal {
+                    OutboundFrame::Terminal { payload: event }
+                } else {
+                    OutboundFrame::Data { payload: event }
+                };
+                // Terminal frames take the bounded backpressure
+                // budget; a terminal still lost past the budget
+                // retires the saturated connection as an explicit
+                // transport failure (spec §9 — never a silent
+                // final-less stream). Data frames keep the blocking
+                // enqueue contract of this lane.
+                let enqueued = if terminal {
+                    match tx.try_send(frame) {
+                        Ok(()) => Ok(()),
+                        Err(mpsc::error::TrySendError::Closed(_)) => Err(()),
+                        Err(mpsc::error::TrySendError::Full(frame)) => {
+                            match tokio::time::timeout(TERMINAL_ENQUEUE_BUDGET, tx.send(frame))
+                                .await
+                            {
+                                Ok(Ok(())) => Ok(()),
+                                Ok(Err(_)) => Err(()),
+                                Err(_) => {
+                                    self.terminal_frames_lost.fetch_add(1, Ordering::Relaxed);
+                                    warn!(
+                                        request_id = %bcs_observability::CurrentRequestId,
+                                        run_id = %run_id,
+                                        resolved_run_id = %resolved_run_id,
+                                        connection_instance_id,
+                                        "TERMINAL run frame lost past the backpressure budget; \
+                                         retiring the saturated connection as a transport failure"
+                                    );
+                                    self.retire_connection(connection_instance_id).await;
+                                    Err(())
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    bcs_observability::observe_result(
+                        "ws.run_channels.enqueue",
+                        tx.send(frame),
+                    )
+                    .await
+                    .map_err(|_| ())
+                };
+                match enqueued {
+                    Ok(()) => {
+                        debug!(
+                            run_id = %run_id,
+                            resolved_run_id = %resolved_run_id,
+                            source = ?source,
+                            "Permitted frame queued for the workbench writer"
+                        );
+                        true
+                    }
+                    Err(()) => {
+                        warn!(
+                            request_id = %bcs_observability::CurrentRequestId,
+                            run_id = %run_id,
+                            resolved_run_id = %resolved_run_id,
+                            "Failed to enqueue protected frame"
+                        );
+                        false
+                    }
                 }
             }
-        } else {
-            debug!(
-                run_id = %run_id,
-                resolved_run_id = %resolved_run_id,
-                "No client channel found for run_id"
-            );
-            false
         }
     }
 
@@ -186,16 +451,24 @@ impl RunChannelManager {
             event,
             MessageVisibilityDomain::Chat,
             None,
+            false,
         )
         .await
     }
 
+    /// Session-targeted fallback. The "latest Run of the session"
+    /// shortcut now serves ONLY Internal sinks (spec §7.2: public
+    /// Workbench 输出不得借该 Session 最后一个 Run 的许可) — a
+    /// Workbench sink reached through this path would deliver an
+    /// event whose producer never named THIS Run under another
+    /// connection's permit lineage, so it is refused with a log.
     pub async fn send_visible_event_by_session(
         &self,
         bcs_group_id: &str,
         event: String,
         visibility_domain: MessageVisibilityDomain,
         audience: Option<&MessageAudience>,
+        terminal: bool,
     ) -> bool {
         let session_runs = self.session_runs.read().await;
 
@@ -203,9 +476,21 @@ impl RunChannelManager {
             if let Some(run_id) = run_ids.last() {
                 let run_id = run_id.clone();
                 drop(session_runs);
+                if matches!(
+                    self.sink_of(&run_id).await,
+                    Some(RunClientSink::Workbench { .. })
+                ) {
+                    warn!(
+                        request_id = %bcs_observability::CurrentRequestId,
+                        bcs_group_id = %bcs_group_id,
+                        run_id = %run_id,
+                        "session fallback refused for a public Workbench sink: no canonical Run binding"
+                    );
+                    return false;
+                }
                 debug!(bcs_group_id = %bcs_group_id, run_id = %run_id, "Sending event by session fallback");
                 return self
-                    .send_visible_event(&run_id, event, visibility_domain, audience)
+                    .send_visible_event(&run_id, event, visibility_domain, audience, terminal)
                     .await;
             }
         }
@@ -252,6 +537,10 @@ impl RunChannelManager {
             for run_id in &run_ids_to_remove {
                 run_sessions.remove(run_id);
             }
+        }
+
+        for run_id in &run_ids_to_remove {
+            self.output_permits.unbind_run(run_id).await;
         }
 
         if let Some(channel) = removed {
@@ -311,6 +600,16 @@ impl RunChannelManager {
     pub async fn is_registered(&self, run_id: &str) -> bool {
         let resolved_run_id = self.resolve_run_id(run_id).await;
         self.channels.read().await.contains_key(&resolved_run_id)
+    }
+
+    /// The sink registered under `run_id` (alias-resolved).
+    pub async fn sink_of(&self, run_id: &str) -> Option<RunClientSink> {
+        let resolved_run_id = self.resolve_run_id(run_id).await;
+        self.channels
+            .read()
+            .await
+            .get(&resolved_run_id)
+            .map(|channel| channel.tx.clone())
     }
 
     pub async fn trace_parent(&self, run_id: &str) -> Option<SpanContext> {
@@ -439,141 +738,4 @@ impl RunChannelManager {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
-
-    fn test_span_context() -> SpanContext {
-        SpanContext::new(
-            TraceId::from_hex("0af7651916cd43dd8448eb211c80319c").unwrap(),
-            SpanId::from_hex("b7ad6b7169203331").unwrap(),
-            TraceFlags::SAMPLED,
-            false,
-            TraceState::default(),
-        )
-    }
-
-    #[tokio::test]
-    async fn register_and_send_event() {
-        let manager = RunChannelManager::new();
-        let (tx, mut rx) = mpsc::channel(16);
-
-        manager
-            .register(
-                "run-1".to_string(),
-                "grp-001".to_string(),
-                tx,
-                Some("webui".to_string()),
-                Some("user-123".to_string()),
-            )
-            .await;
-
-        assert!(manager.is_registered("run-1").await);
-
-        let sent = manager.send_event("run-1", "test-event".to_string()).await;
-        assert!(sent);
-
-        let event = rx.recv().await;
-        assert_eq!(event, Some("test-event".to_string()));
-
-        let runs = manager.get_session_runs("grp-001").await;
-        assert_eq!(runs, vec!["run-1"]);
-
-        manager.unregister("run-1").await;
-        assert!(!manager.is_registered("run-1").await);
-    }
-
-    #[tokio::test]
-    async fn send_to_unregistered_run_fails() {
-        let manager = RunChannelManager::new();
-
-        let sent = manager.send_event("unknown-run", "test".to_string()).await;
-        assert!(!sent);
-    }
-
-    #[tokio::test]
-    async fn alias_forwards_event_and_preserves_session_key() {
-        let manager = RunChannelManager::new();
-        let (tx, mut rx) = mpsc::channel(16);
-
-        manager
-            .register(
-                "outer-run".to_string(),
-                "grp-001:abcdef12".to_string(),
-                tx,
-                Some("webui".to_string()),
-                Some("user-123".to_string()),
-            )
-            .await;
-
-        assert!(
-            manager
-                .register_alias("sub-run".to_string(), "outer-run".to_string())
-                .await
-        );
-        assert!(manager.is_registered("sub-run").await);
-        assert_eq!(
-            manager.session_for_run("sub-run").await.as_deref(),
-            Some("grp-001:abcdef12")
-        );
-
-        let sent = manager.send_event("sub-run", "test-event".to_string()).await;
-        assert!(sent);
-        assert_eq!(rx.recv().await, Some("test-event".to_string()));
-
-        let runs = manager.get_session_runs("grp-001:abcdef12").await;
-        assert_eq!(runs, vec!["outer-run", "sub-run"]);
-
-        manager.unregister("sub-run").await;
-        assert!(!manager.is_registered("outer-run").await);
-        assert!(!manager.is_registered("sub-run").await);
-        assert!(manager.get_session_runs("grp-001:abcdef12").await.is_empty());
-    }
-
-    #[tokio::test]
-    async fn trace_parent_lookup_resolves_alias_and_cleans_up_with_channel() {
-        let manager = RunChannelManager::new();
-        let (tx, _rx) = mpsc::channel(16);
-        let trace_parent = test_span_context();
-
-        manager
-            .register_with_trace_parent(
-                "outer-run".to_string(),
-                "grp-001".to_string(),
-                tx,
-                Some("http-chat-async".to_string()),
-                None,
-                Some(trace_parent.clone()),
-            )
-            .await;
-        assert!(
-            manager
-                .register_alias("inner-run".to_string(), "outer-run".to_string())
-                .await
-        );
-
-        assert_eq!(manager.trace_parent("inner-run").await, Some(trace_parent));
-        manager.unregister("inner-run").await;
-        assert_eq!(manager.trace_parent("outer-run").await, None);
-        assert_eq!(manager.trace_parent("inner-run").await, None);
-    }
-
-    #[tokio::test]
-    async fn invalid_trace_parent_is_not_retained() {
-        let manager = RunChannelManager::new();
-        let (tx, _rx) = mpsc::channel(1);
-
-        manager
-            .register_with_trace_parent(
-                "run-invalid".to_string(),
-                "group-1".to_string(),
-                tx,
-                Some("http-chat-async".to_string()),
-                None,
-                Some(SpanContext::empty_context()),
-            )
-            .await;
-
-        assert_eq!(manager.trace_parent("run-invalid").await, None);
-    }
-}
+mod tests;

@@ -201,6 +201,9 @@ impl SystemMessageService for RecordingSystemMessage {
 struct Fixture {
     service: SessionLaunchApplication,
     bots: Arc<BotCore>,
+    /// The authority chain backing the launch
+    /// control legs (row 17).
+    authority: Arc<bcs_test_support::LazySeedAuthorityHook>,
     groups: Arc<GroupCore>,
     sessions: Arc<SessionManagementServiceImpl>,
     session_repo: Arc<MemorySessionRepo>,
@@ -220,16 +223,19 @@ impl Fixture {
         ));
         let runtime = Arc::new(RecordingRuntime::default());
         let system_message = Arc::new(RecordingSystemMessage::default());
+        let authority = bcs_test_support::lazy_authority_chain().hook;
         let service = SessionLaunchApplication::new(
             bots.clone(),
             groups.clone(),
             sessions.clone(),
             runtime.clone(),
             system_message.clone(),
-        );
+        )
+        .with_bot_authority_hook(authority.clone());
         Self {
             service,
             bots,
+            authority,
             groups,
             sessions,
             session_repo,
@@ -254,6 +260,9 @@ impl Fixture {
             .save_created_by(bot_id, owner, true)
             .await
             .expect("store owner");
+        // Row 17: the CURRENT owner edge replaces
+        // the historical `created_by`.
+        self.authority.seed_owner(bot_id, owner);
     }
 
     async fn add_group(&self, group: Group) {
@@ -862,11 +871,6 @@ async fn reactivate_replaces_input_and_preserves_other_session_fields() {
         .complete_if_running(&created.session.id, None, None)
         .await
         .expect("complete");
-    fixture
-        .session_repo
-        .update_callback_status(&created.session.id, "success")
-        .await
-        .expect("complete callback");
 
     let new_input = serde_json::json!({"new": true});
     let outcome = fixture
@@ -928,11 +932,6 @@ async fn reactivate_does_not_add_explicit_private_human_creator() {
         .complete_if_running(&created.session.id, None, None)
         .await
         .expect("complete");
-    fixture
-        .session_repo
-        .update_callback_status(&created.session.id, "success")
-        .await
-        .expect("complete callback");
 
     let outcome = fixture
         .service

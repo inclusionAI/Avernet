@@ -3,6 +3,8 @@
 Provides session query Open API endpoints.
 """
 
+from typing import Literal
+
 from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -21,6 +23,7 @@ from secbaas.community.adapters.web.routers.open_api.model import (
     SessionMessagesResponseData,
     SessionQueryResponse,
     SessionQueryResponseData,
+    SessionRuntimeStatusResponse,
 )
 from secbaas.community.api.api_gateway import APIKeyRecord
 from secbaas.community.api.bot_runtime import (
@@ -197,6 +200,51 @@ async def list_sessions(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"code": 50001, "message": f"Internal server error: {str(e)}"},
         )
+
+
+@router.get(
+    "/sessions/runtime/status",
+    response_model=SessionRuntimeStatusResponse,
+    summary="Query session runtime activity",
+)
+@inject
+async def get_session_runtime_status(
+    session_id: str = Query(min_length=1),
+    bot_id: str | None = Query(default=None),
+    lifecycle_stage: Literal["online", "verify", "draft", "all"] = Query(
+        default="online"
+    ),
+    api_key_record: APIKeyRecord = Depends(validate_api_key),
+    context: BotChatContext = Depends(get_bot_chat_context),
+    bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
+) -> SessionRuntimeStatusResponse:
+    _check_app_type(api_key_record)
+    if bot_id:
+        resolved_bot_id = bot_id
+    elif api_key_record.app_type == "bot":
+        resolved_bot_id = resolve_bot_id_from_api_key(api_key_record)
+    else:
+        raise HTTPException(status_code=400, detail="bot_id is required")
+    if api_key_record.app_type != "bot":
+        resolved_bot_id = validate_policy(api_key_record, resolved_bot_id)
+    else:
+        # A Bot key may only query its own Bot, even when bot_id is explicit.
+        if resolved_bot_id != resolve_bot_id_from_api_key(api_key_record):
+            raise HTTPException(status_code=403, detail="Bot access denied")
+    try:
+        observation = await bot_runner.get_session_runtime_status(
+            bot_id=resolved_bot_id,
+            session_id=session_id,
+            context=context,
+            metadata={"bot_options": {"lifecycle_stage": lifecycle_stage}},
+        )
+        return SessionRuntimeStatusResponse(code=0, message="success", data=observation)
+    except (BotNotFoundError, BotBindingNotFoundError, SessionNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail="Bot or session not found") from exc
+    except BotServiceError as exc:
+        raise HTTPException(
+            status_code=503, detail="Runtime observation unavailable"
+        ) from exc
 
 
 @router.get(
@@ -486,3 +534,62 @@ async def get_session_messages(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"code": 50001, "message": f"Internal server error: {str(e)}"},
         )
+
+
+@router.get(
+    "/sessions/messages/query",
+    response_model=SessionMessagesResponse,
+    summary="Query session messages by query parameters",
+    description=(
+        "Query a session's message list using a Bearer Token-authenticated API Key. "
+        "The session ID is passed as a query parameter instead of a path parameter, "
+        "so session IDs containing characters that cannot appear in a URL path "
+        "segment (such as '/', URL-encoded as %2F) are supported."
+    ),
+    responses={
+        200: {"description": "Query successful"},
+        401: {"description": "Authentication failed"},
+        403: {"description": "Access denied"},
+        404: {"description": "Session not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+@inject
+async def query_session_messages(
+    session_id: str = Query(
+        description=(
+            "Session ID. Passed as a query parameter, so it may contain characters "
+            "like '/' that are not allowed in path segments."
+        )
+    ),
+    limit: int = Query(
+        default=1000, ge=1, le=1000, description="Maximum number of messages to return"
+    ),
+    bot_id: str | None = Query(
+        default=None,
+        description="Bot ID, format: bot_id or default:staff_no. If omitted, resolved from the API Key.",
+    ),
+    lifecycle_stage: str = Query(
+        default="online",
+        description="Bot lifecycle stage. Options: online, verify, draft, all",
+    ),
+    api_key_record: APIKeyRecord = Depends(validate_api_key),
+    context: BotChatContext = Depends(get_bot_chat_context),
+    bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
+) -> SessionMessagesResponse:
+    """Query session messages with session_id as a query parameter.
+
+    Variant of /sessions/{session_id}/messages for session IDs that contain
+    percent-encoded characters invalid in a path segment: the ASGI server
+    percent-decodes the whole request path before routing, so a %2F inside a
+    path parameter becomes a real segment separator and misses that route.
+    """
+    return await get_session_messages(
+        session_id=session_id,
+        limit=limit,
+        bot_id=bot_id,
+        lifecycle_stage=lifecycle_stage,
+        api_key_record=api_key_record,
+        context=context,
+        bot_runner=bot_runner,
+    )

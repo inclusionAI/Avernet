@@ -6,7 +6,9 @@ import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.models.mcp import BotMCPConfig, UserMCPConfig
+from agentclaw.community.core.mcp.errors import McpConfigValueError
 from agentclaw.community.core.repository.implementations.bot.bot_mcp_config import (
     BotMCPConfigRepository,
 )
@@ -24,8 +26,13 @@ class _Database:
     def __init__(self) -> None:
         self.engine = create_engine("sqlite:///:memory:")
         UserMCPConfig.__table__.create(self.engine)
+        BotModel.__table__.create(self.engine)
         BotMCPConfig.__table__.create(self.engine)
         self._sessions = sessionmaker(bind=self.engine)
+        with self.transactional_orm_session() as session:
+            for bot_id in ("bot-x", "bot-y"):
+                session.add(BotModel(bot_id=bot_id, entity_id="owner", entity_type="staff",
+                                     creator_id="owner", owner_id="owner", env=get_current_env()))
 
     @contextmanager
     def transactional_orm_session(self):
@@ -205,6 +212,8 @@ def test_replace_is_tenant_scoped_for_both_user_and_bot_rows() -> None:
     db = _Database()
     for tenant in ("tenant-a", "tenant-b"):
         with avernet_tenant_scope(tenant), db.transactional_orm_session() as session:
+            session.add(BotModel(bot_id="bot-x", entity_id="owner", entity_type="staff",
+                                 creator_id="owner", owner_id="owner", env=get_current_env()))
             session.add_all(
                 [
                     UserMCPConfig(
@@ -253,3 +262,133 @@ def test_empty_header_value_is_stored_as_an_explicit_rule() -> None:
     )
     assert user["extra_config"]["headers"] == {"B": ""}
     assert bot["headers"] == {"A": ""}
+
+
+def test_patch_bot_merges_overrides_without_touching_other_fields() -> None:
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        bot = session.query(BotModel).filter_by(bot_id="bot-x").one()
+        bot_pk = bot.id
+        session.add(BotMCPConfig(
+            owner_id="owner", bot_id="bot-x", server_code="weather",
+            env=get_current_env(),
+            config='{"headers":{"X-Region":"old","Keep":"yes"},"url":"https://example.invalid/mcp","endpoint_env":"PRE"}',
+        ))
+
+    repo = ScopedMCPConfigRepository(db)
+    address = dict(bot_pk=bot_pk, bot_id="bot-x", entity_id="owner",
+                   current_owner_id="owner", server_code="weather")
+    patch = dict(headers={"x-region": None, "Empty": ""})
+    saved, changed = repo.patch_bot(**address, patch=patch)
+    assert changed
+    assert saved == {
+        "headers": {"Keep": "yes", "Empty": ""},
+        "url": "https://example.invalid/mcp",
+        "endpoint_env": "PRE",
+    }
+    assert repo.patch_bot(**address, patch=patch) == (saved, False)
+    assert repo.patch_bot(**address, patch={"url": None}) == (
+        {"headers": {"Keep": "yes", "Empty": ""}, "endpoint_env": "PRE"}, True
+    )
+
+
+def test_patch_only_creates_a_row_for_an_effective_override() -> None:
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        bot_pk = session.query(BotModel).filter_by(bot_id="bot-x").one().id
+    repo = ScopedMCPConfigRepository(db)
+    address = dict(bot_pk=bot_pk, bot_id="bot-x", entity_id="owner",
+                   current_owner_id="owner", server_code="weather")
+    assert repo.patch_bot(**address, patch={"url": None, "headers": {}}) == ({}, False)
+    with db.orm_session() as session:
+        assert session.query(BotMCPConfig).count() == 0
+
+    patch = {"url": "https://bot.example.invalid/mcp"}
+    assert repo.patch_bot(**address, patch=patch) == (patch, True)
+    assert repo.patch_bot(**address, patch=patch) == (patch, False)
+    with db.orm_session() as session:
+        assert session.query(BotMCPConfig).one().bot_id == "bot-x"
+
+
+def test_patch_storage_failure_does_not_expose_bound_connection_settings() -> None:
+    from traceback import format_exception
+
+    from sqlalchemy.exc import StatementError
+
+    db = _Database()
+    with db.orm_session() as session:
+        bot_pk = session.query(BotModel).filter_by(bot_id="bot-x").one().id
+
+    @event.listens_for(db.engine, "before_cursor_execute")
+    def refuse_write(_conn, _cursor, statement, parameters, _context, _executemany):
+        if statement.startswith("INSERT INTO ac_bot_mcp_config"):
+            raise StatementError("synthetic write failure", statement, parameters, None)
+
+    url = "https://bot.example.invalid/mcp?example=private"
+    with pytest.raises(RuntimeError, match="Bot MCP config persistence failed") as exc:
+        ScopedMCPConfigRepository(db).patch_bot(
+            bot_pk=bot_pk, bot_id="bot-x", entity_id="owner", current_owner_id="owner",
+            server_code="weather", patch={"url": url, "headers": {"X-Sample": "sensitive-fixture"}},
+        )
+    logged = "".join(format_exception(exc.value))
+    assert url not in logged
+    assert "sensitive-fixture" not in logged
+    with db.orm_session() as session:
+        assert session.query(BotMCPConfig).count() == 0
+
+
+def test_patch_refuses_the_same_bot_identity_under_another_tenant() -> None:
+    db = _Database()
+    with db.orm_session() as session:
+        bot_pk = session.query(BotModel).filter_by(bot_id="bot-x").one().id
+    with avernet_tenant_scope("test-other"):
+        with pytest.raises(McpConfigValueError, match="Bot address changed"):
+            ScopedMCPConfigRepository(db).patch_bot(
+                bot_pk=bot_pk, bot_id="bot-x", entity_id="owner", current_owner_id="owner",
+                server_code="weather", patch={"headers": {"X-Sample": "override"}},
+            )
+    with db.orm_session() as session:
+        assert session.query(BotMCPConfig).count() == 0
+
+
+@pytest.mark.parametrize("supply", ["direct", "skill", "center-version"])
+def test_bulk_override_selects_consumers_from_committed_supply(supply):
+    from agentclaw.community.core.base import Base
+    from agentclaw.community.core.models.mcp import BotMCPInstallation
+    from agentclaw.community.core.models.skill import BotSkillInstallation, Skill
+    from agentclaw.community.core.models.space_skill import SkillVersion
+    db = _Database()
+    Base.metadata.create_all(db.engine)
+    # The preflight observed no consumers. Supply is committed before the
+    # bulk config transaction takes the Bot lock and inspects installations.
+    with db.transactional_orm_session() as session:
+        if supply == "direct":
+            session.add(BotMCPInstallation(
+                bot_id="bot-x", owner_id="owner", env=get_current_env(), server_code="weather",
+            ))
+        else:
+            from_center = supply == "center-version"
+            skill = Skill(
+                name="uses-weather", env=get_current_env(),
+                git_path="center://uses-weather" if from_center else "git://uses-weather",
+                mcp_dependencies='[]' if from_center else '["weather"]',
+            )
+            session.add(skill)
+            session.flush()
+            if from_center:
+                session.add(SkillVersion(
+                    env=get_current_env(), skill_id=skill.id, version_ordinal=1,
+                    status="PUBLISHED", sc_version_number="1.0.0", name="uses-weather",
+                    metadata_json='{"mcp_dependencies":["weather"]}', created_by="owner",
+                ))
+            session.add(BotSkillInstallation(
+                bot_id="bot-x", owner_id="owner", env=get_current_env(), skill_id=skill.id,
+            ))
+
+    selected = ScopedMCPConfigRepository(db).replace(
+        user_id="owner", server_code="weather", headers={"X-Region": "east"},
+        bot_headers={}, owned_bot_ids={"bot-x", "bot-y"},
+        endpoint_env="PROD", transport_protocol=None, select_consumers=True,
+    )
+
+    assert selected == {"bot-x": "owner"}

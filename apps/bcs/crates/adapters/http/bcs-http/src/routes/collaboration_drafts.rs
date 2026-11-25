@@ -12,8 +12,6 @@ use bcs_service_api::application::collaboration_draft::*;
 use serde::Deserialize;
 use std::sync::Arc;
 
-const READ_TOKEN: &str = "x-bcs-draft-read-token";
-
 pub fn router() -> Router<HttpAppState> {
     Router::new()
         .route(
@@ -80,10 +78,6 @@ fn service(state: &HttpAppState) -> Result<Arc<dyn CollaborationDraftService>, R
 }
 
 async fn owner(state: &HttpAppState, headers: &HeaderMap) -> Result<String, Response> {
-    // A read capability is never upgraded by ambient Bot/browser credentials.
-    if headers.contains_key(READ_TOKEN) {
-        return Err(failure(DraftError::Forbidden));
-    }
     match state.bot_uuid_from_headers(headers).await {
         Ok(Some(id)) => Ok(id),
         _ => Err((
@@ -92,19 +86,6 @@ async fn owner(state: &HttpAppState, headers: &HeaderMap) -> Result<String, Resp
         )
             .into_response()),
     }
-}
-
-async fn access(state: &HttpAppState, headers: &HeaderMap) -> Result<DraftAccess, Response> {
-    if let Some(token) = headers.get(READ_TOKEN) {
-        if headers.get_all(READ_TOKEN).iter().count() != 1 {
-            return Err(failure(DraftError::Unavailable));
-        }
-        let token = token
-            .to_str()
-            .map_err(|_| failure(DraftError::Unavailable))?;
-        return Ok(DraftAccess::ReadToken(token.into()));
-    }
-    Ok(DraftAccess::Owner(owner(state, headers).await?))
 }
 
 #[derive(Deserialize)]
@@ -182,12 +163,10 @@ async fn metadata(
 async fn read(
     State(s): State<HttpAppState>,
     Path((id, revision)): Path<(String, u64)>,
-    h: HeaderMap,
 ) -> Result<Response, Response> {
-    let access = access(&s, &h).await?;
     Ok(Json(
         service(&s)?
-            .read(access, &id, revision)
+            .read(&id, revision)
             .await
             .map_err(failure)?,
     )
@@ -196,16 +175,14 @@ async fn read(
 async fn validate(
     State(s): State<HttpAppState>,
     Path((id, revision)): Path<(String, u64)>,
-    h: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Response, Response> {
     if !body.is_empty() {
         return Err(failure(DraftError::Invalid));
     }
-    let access = access(&s, &h).await?;
     Ok(Json(
         service(&s)?
-            .validate(access, &id, revision)
+            .validate(&id, revision)
             .await
             .map_err(failure)?,
     )
@@ -217,13 +194,15 @@ async fn reference(
     h: HeaderMap,
 ) -> Result<Response, Response> {
     let owner = owner(&s, &h).await?;
-    Ok(Json(
-        service(&s)?
-            .reference(&owner, &id, revision)
-            .await
-            .map_err(failure)?,
-    )
-    .into_response())
+    let reference = service(&s)?.reference(&owner, &id, revision).await.map_err(failure)?;
+    // Deployed CLI versions require a canonical base64url value decoding to 32 bytes.
+    // This constant is only a wire-format placeholder: never stored or authenticated.
+    Ok(Json(serde_json::json!({
+        "schemaVersion": reference.schema_version,
+        "draftId": reference.draft_id,
+        "revision": reference.revision,
+        "readToken": "A".repeat(43),
+    })).into_response())
 }
 async fn revoke(
     State(s): State<HttpAppState>,

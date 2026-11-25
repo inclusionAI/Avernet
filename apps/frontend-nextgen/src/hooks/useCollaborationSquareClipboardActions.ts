@@ -13,9 +13,9 @@ export function useCollaborationSquareClipboardActions() {
     }
   }, []);
   const share = useCallback(
-    (resource: SquareResource, id: string, searchHint?: string) => {
+    (resource: SquareResource, id: string, searchHint?: string, audience?: 'user' | 'bot') => {
       const origin = typeof window === 'undefined' ? '' : window.location.origin;
-      void copyText(getCollaborationSquareShareUrl(origin, resource, id, searchHint), '分享链接已复制');
+      void copyText(getCollaborationSquareShareUrl(origin, resource, id, searchHint, audience), '分享链接已复制');
     },
     [copyText],
   );

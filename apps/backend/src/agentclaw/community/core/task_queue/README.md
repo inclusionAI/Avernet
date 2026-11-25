@@ -298,6 +298,18 @@ retired `TIMED_OUT` — distinct from `FAILED` (a real failure / explicit `Fail`
 cap: a raising handler keeps retrying (capped exponential backoff) until the
 deadline.
 
+**Give-up hook.** A handler may also define `on_give_up(task)`
+(`services/registry.py`, `GivesUp`). The worker calls it with the terminal
+record whenever the queue gives up on one of that type's tasks: the claim scan
+retired it past its deadline (`claim_batch_reporting_retired` reports the rows
+the scan retired), a `Reschedule`/`Retry` would have landed past the deadline,
+or the handler returned `Fail`. Never after success. It runs on the worker that
+made the transition, after it; a raise is logged and swallowed, since the task
+is already terminal. Use it when a task's work owns state elsewhere that no run
+will now finish — the apply task (`core/apply_engine/apply_task.py`) finishes
+its apply report, releases the apply lock and publishes the outcome. A handler
+without it behaves exactly as before.
+
 ## Status
 
 The BaaS and Teclaw lifecycle components register production handlers during

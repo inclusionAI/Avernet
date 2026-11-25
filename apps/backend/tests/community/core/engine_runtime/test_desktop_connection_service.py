@@ -14,7 +14,7 @@ from agentclaw.community.core.engine_runtime.desktop_connection import (
 )
 def test_desktop_direct_bypasses_cloud_provider_and_gateway(engine, path):
     bots = Mock()
-    bots.get_bot.return_value = {
+    bots.get_bot_by_address.return_value = {
         "bot_id": "bot-1",
         "owner_id": "owner-1",
         "bot_type": "desktop",

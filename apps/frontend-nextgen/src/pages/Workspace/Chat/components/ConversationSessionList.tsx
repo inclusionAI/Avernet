@@ -1,12 +1,17 @@
+import { sessionInitiatorId, type SessionInitiator } from '@/domain/conversation/sessionInitiator';
 import type { ConversationSessionListState } from '@/domain/conversation/types';
+import { Points } from '@/tracking/points';
+import { TrackExpo } from '@/tracking/TrackExpo';
+import { Tracert } from '@/utils/tracert';
 import { ListErrorState } from '../../components/ListErrorState';
 import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
+import { useSessionInitiators } from '../hooks/useSessionInitiators';
 import { ConversationLoadMore } from './ConversationLoadMore';
 import { ConversationSessionRow } from './ConversationSessionRow';
 import { ConversationSessionRowsSkeleton } from './ConversationSkeletons';
 
 /** 我发起 / 好友 Bot 的交互式 Session 列表(选中 / 加载更多均来自 Hook 模型)。 */
-export function ConversationSessionList(props: {
+interface ConversationSessionListProps {
   actions?: ConversationSessionListActions;
   sessions: ConversationSessionListState | undefined;
   selectedSessionId: string | null;
@@ -14,9 +19,30 @@ export function ConversationSessionList(props: {
   onLoadMore(): void;
   onToggleFavorite?(sessionId: string): void;
   isFavoritePending(sessionId: string): boolean;
+  /** Bot 正在回复中的会话 id(#2990 还原):透传行组件渲染 loading 指示。 */
+  replyingSessionId?: string | null;
+  emptyTitle?: string;
+  showCreateHint?: boolean;
+  showInitiator?: boolean;
+}
+
+function ConversationSessionListContent(props: ConversationSessionListProps & {
+  initiatorFor?: (sessionId: string) => SessionInitiator | undefined;
 }) {
-  const { actions, sessions, selectedSessionId, onSelectSession, onLoadMore, onToggleFavorite, isFavoritePending } =
-    props;
+  const {
+    actions,
+    sessions,
+    selectedSessionId,
+    onSelectSession,
+    onLoadMore,
+    onToggleFavorite,
+    isFavoritePending,
+    replyingSessionId,
+    emptyTitle = '还没有会话',
+    showCreateHint = true,
+    showInitiator = false,
+    initiatorFor,
+  } = props;
   // 未加载 ≠ 空列表:无缓存、或首拉在途(loading 且尚无 items)都只给行骨架,
   // 不闪「暂无会话」;已在途刷量(loading 但保留旧 items)继续展示旧行。
   if (!sessions || (sessions.loading && sessions.items.length === 0)) {
@@ -31,48 +57,85 @@ export function ConversationSessionList(props: {
     // 指向行尾「+」入口(列表装配层不增建会话回调,入口即引导,不造死胡同 CTA)。
     return (
       <div className="mx-4 my-2 flex flex-col items-center gap-1 rounded-lg bg-muted/40 px-3 py-3 text-center">
-        <p className="text-xs font-normal text-content-soft">还没有会话</p>
-        <p className="max-w-[180px] text-[11px] font-normal leading-4 text-content-hint">
-          点击 Bot 行尾的「＋」按钮，创建第一个会话
-        </p>
+        <TrackExpo point={Points.workspaceChat.emptyGuideExpo} />
+        <p className="text-xs font-normal text-content-soft">{emptyTitle}</p>
+        {showCreateHint && (
+          <p className="max-w-[180px] text-[11px] font-normal leading-4 text-content-hint">
+            点击 Bot 行尾的「＋」按钮，创建第一个会话
+          </p>
+        )}
       </div>
     );
   }
   return (
     <>
+      {sessions.items.length === 0 && sessions.hasMore && (
+        <p className="px-4 py-2 text-xs text-muted-foreground">当前范围尚未找到匹配会话，可继续加载</p>
+      )}
       <div>
-        {sessions.items.map((session) => (
-          <ConversationSessionRow
-            key={session.sessionId}
-            session={session}
-            selected={selectedSessionId === session.sessionId}
-            onSelect={() => onSelectSession(session.sessionId)}
-            onToggleFavorite={onToggleFavorite ? () => onToggleFavorite(session.sessionId) : undefined}
-            favoritePending={isFavoritePending(session.sessionId)}
-            actions={
-              actions
-                ? {
-                    run: (action) => actions.run(session.sessionId, action),
-                    pending:
-                      actions.pending ||
-                      Boolean(sessions.loading || sessions.isLoadingMore) ||
-                      isFavoritePending(session.sessionId),
-                  }
-                : undefined
-            }
-          />
-        ))}
+        {sessions.items.map((session) => {
+          const selected = selectedSessionId === session.sessionId;
+          return (
+            <ConversationSessionRow
+              key={session.sessionId}
+              session={session}
+              selected={selected}
+              showInitiator={showInitiator}
+              readOnly={showInitiator}
+              initiator={initiatorFor?.(session.sessionId)}
+              onSelect={() => {
+                Tracert.click(Points.workspaceChat.switchSession, { bot_id: session.botId });
+                onSelectSession(session.sessionId);
+              }}
+              onToggleFavorite={onToggleFavorite ? () => onToggleFavorite(session.sessionId) : undefined}
+              favoritePending={isFavoritePending(session.sessionId)}
+              replyingSessionId={replyingSessionId}
+              actions={
+                actions
+                  ? {
+                      run: (action) => {
+                        // AIXCoding 路由页的日志行为会先切到目标会话再打开 Harness；
+                        // TeamClaw 保持相同次序，避免外层舞台与日志目标会话不一致。
+                        if (action.type === 'logs' && !selected) {
+                          Tracert.click(Points.workspaceChat.switchSession, { bot_id: session.botId });
+                          onSelectSession(session.sessionId);
+                        }
+                        return actions.run(session.sessionId, action);
+                      },
+                      pending:
+                        actions.pending ||
+                        Boolean(sessions.loading || sessions.isLoadingMore) ||
+                        isFavoritePending(session.sessionId),
+                      features: actions.features,
+                    }
+                  : undefined
+              }
+            />
+          );
+        })}
       </div>
       {sessions.hasMore && (
         <ConversationLoadMore
           loading={sessions.isLoadingMore}
-          disabled={
-            actions?.pending || sessions.items.some((session) => isFavoritePending(session.sessionId))
-          }
+          disabled={actions?.pending || sessions.items.some((session) => isFavoritePending(session.sessionId))}
           onClick={() => onLoadMore()}
         />
       )}
       {sessions.loadMoreError && <ListErrorState message={sessions.loadMoreError} onRetry={onLoadMore} />}
     </>
+  );
+}
+
+function InitiatorSessionList(props: ConversationSessionListProps) {
+  const initiatorFor = useSessionInitiators(props.sessions?.items.map((item) => item.sessionId) ?? []);
+  return <ConversationSessionListContent {...props} initiatorFor={initiatorFor} />;
+}
+
+export function ConversationSessionList(props: ConversationSessionListProps) {
+  // Normal mine/collab lists and opaque sessions need no identity/name subscription.
+  return props.showInitiator && props.sessions?.items.some((item) => sessionInitiatorId(item.sessionId)) ? (
+    <InitiatorSessionList {...props} />
+  ) : (
+    <ConversationSessionListContent {...props} />
   );
 }

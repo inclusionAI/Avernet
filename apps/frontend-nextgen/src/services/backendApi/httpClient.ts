@@ -1,4 +1,7 @@
+import { resolveApiUrl } from './apiBaseUrl';
+import { readLimitedResponse, ResponseTooLargeError } from './readLimitedResponse';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
+import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useIdentityStore } from '@/stores/identityStore';
 import { useLoginRedirectStore } from '@/stores/loginRedirectStore';
 import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
@@ -15,10 +18,21 @@ export interface BackendRequestOptions {
   rawBody?: BodyInit;
   headers?: Record<string, string>;
   retryOnTransient?: boolean;
+  /** Caller renders this request failure inline; auth gates still run normally. */
+  suppressErrorNotification?: boolean;
   responseType?: 'json' | 'blob' | 'text';
   injectUserId?: boolean;
+  /**
+   * Opt-in bounded consumption for inline text previews; ordinary requests are unchanged.
+   * Caller-facing data keeps responseType semantics; JSON auth/error envelopes are still
+   * parsed for inspection, and HTTP status handling (e.g. 401 login prompt) wins over the
+   * size limit. Combining with responseType 'blob' is rejected.
+   */
+  maxResponseBytes?: number;
   /** 操作语义标签(如 create-skill),参与 toastKey 去重键组成,保证同接口跨操作的独立失败不被误合并。 */
   operation?: string;
+  /** Optional user-facing message for this request's server failures. */
+  serverErrorMessage?: string;
   signal?: AbortSignal;
   /** 旧版 AgentCoding /api/** 接口的特殊后端；新版 /api/** 不设置此项。 */
   target?: 'default' | 'legacy-agentclaw';
@@ -32,10 +46,12 @@ export class BackendRequestError extends Error {
   toastKey?: string;
   /** 协议层默认提示是否已投递;Hook 守卫 helper(safeReportError)据此跳过自有 toast 防重复。 */
   alreadyHandled?: boolean;
+  /** 认证或邀请码门禁正在处理，此请求的错误提示必须静默。 */
+  silent?: boolean;
 
   constructor(
     message: string,
-    options: { status?: number; data?: unknown; apiPath: string; toastKey?: string; alreadyHandled?: boolean },
+    options: { status?: number; data?: unknown; apiPath: string; toastKey?: string; alreadyHandled?: boolean; silent?: boolean },
   ) {
     super(message);
     this.name = 'BackendRequestError';
@@ -44,6 +60,7 @@ export class BackendRequestError extends Error {
     this.apiPath = options.apiPath;
     this.toastKey = options.toastKey;
     this.alreadyHandled = options.alreadyHandled;
+    this.silent = options.silent;
   }
 }
 
@@ -55,7 +72,7 @@ export class BackendRequestError extends Error {
 export class AceLoginRedirectError extends Error {
   loginUrl?: string;
   constructor(loginUrl?: string) {
-    super('登录态失效，正在跳转登录…');
+    super('登录态已失效，请在弹出窗口完成重新登录。');
     this.name = 'AceLoginRedirectError';
     this.loginUrl = loginUrl;
   }
@@ -63,15 +80,19 @@ export class AceLoginRedirectError extends Error {
 
 /**
  * 由探测点(httpClient 内部 + raw-fetch 旁路:sessionService/groupExecuteService/副屏面板)统一调用,
- * 登记单飞登录跳转信号。纯触发器——副作用(toast + 当前标签页跳转)由顶层观察者
- * useGatewayLoginRedirect 在 Hook 层消费 store 的 pendingLogin 完成(守 Service 禁 toast/DOM)。
+ * 登记「等待重登」单飞信号。纯触发器——副作用(登录提示 Modal / window.open / 轮询恢复感知)由
+ * 全局 GatewayReauthModal 在组件层消费 store 的 pendingLogin 完成(守 Service 禁 toast/DOM,
+ * ace-gateway-popup-reauth D2)。
+ *
+ * `fromEpoch`:请求发出时捕获的认证代次;与当前代次不一致的晚到拦截体(发起于重登成功之前、
+ * 响应到达于其后)不登记,避免恢复后 Modal 被旧信号闪回(D5)。
  *
  * 收口在此而非让各旁路各自 import store:src/assets/** 副屏资产目录按 lint 规则禁止 import stores,
  * 只允许 import services,故把触发器收口在 service 层的 httpClient,旁路统一经此调用。
  */
-export function triggerAceLoginRedirect(loginUrl?: string): void {
+export function triggerAceLoginRedirect(loginUrl?: string, fromEpoch?: number): void {
   if (!loginUrl) return;
-  useLoginRedirectStore.getState().requestRedirect(loginUrl);
+  useLoginRedirectStore.getState().requestRedirect(loginUrl, fromEpoch);
 }
 
 /**
@@ -79,8 +100,8 @@ export function triggerAceLoginRedirect(loginUrl?: string): void {
  * 由 `httpClient` ACE 体探测（oauth 模式分支）/ raw-fetch 旁路 / `useExternalAuthGuard` 主动 401 调用，
  * 副作用（弹 `ExternalLoginPromptModal`）在 Hook/组件层消费 `pendingLogin{mode:'prompt'}`（守分层）。
  */
-export function triggerLoginPrompt(): void {
-  useLoginRedirectStore.getState().requestPrompt();
+export function triggerLoginPrompt(fromEpoch?: number): void {
+  useLoginRedirectStore.getState().requestPrompt(fromEpoch);
 }
 
 /**
@@ -149,10 +170,18 @@ async function readResponseData(
  */
 
 async function executeBackendRequest<T>(url: string, options: BackendRequestOptions): Promise<T> {
+  // 有界预览读取（opt-in）只支持文本形态：blob 无法有界解码，显式拒绝组合（fail-fast，不发请求）。
+  if (options.maxResponseBytes !== undefined && options.responseType === 'blob') {
+    throw new Error('maxResponseBytes 仅支持文本预览，不支持与 responseType: "blob" 组合使用');
+  }
   const resolvedUrl = resolveBackendUrl(url);
   const finalParams =
     options.injectUserId === false ? options.params : injectUserId(resolvedUrl, options.params, options.data);
-  const requestUrl = withQuery(resolvedUrl, finalParams);
+  // 变体接缝在 user_id 注入之后应用:injectUserId 的 isApiRequestUrl 前缀判定基于原始相对
+  // URL,不得被内部 Overlay 的绝对地址改写干扰(缺省恒等,Open Core 行为不变)。
+  const requestUrl = resolveApiUrl(withQuery(resolvedUrl, finalParams));
+  // 捕获请求发出时的认证代次：响应侧用它识别“晚到的上一代认证请求 401”（见 requestPrompt 防线）。
+  const requestAuthEpoch = useExternalAuthStore.getState().authEpoch;
   const response = await fetch(requestUrl, {
     method: options.method ?? 'GET',
     headers: {
@@ -164,79 +193,123 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
     signal: options.signal,
   });
 
-  const responseData = await readResponseData(response, options.responseType);
+  let responseData: unknown;
+  // 信封识别视图：鉴权/错误信封策略（ACE 登录体、未登录/门禁信封、错误文案提取）消费的解析
+  // 形态，与返回给调用方的数据分离——受限读取下调用方按 responseType 语义取原始文本。
+  let inspectData: unknown;
+  if (options.maxResponseBytes === undefined) {
+    responseData = await readResponseData(response, options.responseType);
+    inspectData = responseData;
+  } else {
+    let previewText: string | undefined;
+    try {
+      previewText = await readLimitedResponse(response, options.maxResponseBytes);
+    } catch (error) {
+      // 预览大小限制不覆盖 HTTP 语义：失败响应（如 oauth 策略下 401 需登记登录弹窗）仍进入
+      // 下方统一登录/错误处置，超限降级为仅按状态处置；2xx 预览体超限才把「内容过大」抛给调用方。
+      if (response.ok || !(error instanceof ResponseTooLargeError)) throw error;
+      responseData = undefined;
+      inspectData = undefined;
+    }
+    if (previewText !== undefined) {
+      const isJson = (response.headers.get('content-type') ?? '').includes('application/json');
+      let parsed: unknown = undefined;
+      if (isJson) {
+        try {
+          parsed = JSON.parse(previewText);
+        } catch (error) {
+          // 默认 JSON 语义与未受限路径的 response.json() 一致（解析失败照常上抛）；
+          // 调用方显式要原始文本时不因解析失败破坏预览，识别视图退化为原始文本。
+          if (options.responseType !== 'text') throw error;
+        }
+      }
+      inspectData = parsed !== undefined ? parsed : previewText;
+      responseData = options.responseType === 'text' ? previewText : inspectData;
+    }
+  }
 
   if (!response.ok) {
-    // 未登录处置决策(见 authFailurePolicy):外部 oauth 策略下,未登录失败(HTTP 401 / 信封未登录体)
-    // 已在策略内单飞登记弹窗信号 → 静默上抛 AceLoginRedirectError 阻止 stale 渲染,不逐条报错
-    // (spec: 会话过期/未登录场景统一导向登录弹窗);已确认未登录后的其余失败也静默,登录前的接口
-    // 错误提示是噪音。两者均仍抛错,调用方可感知失败。ace-gateway 维持既有 BackendRequestError 路径。
-    const authDisposition = resolveAuthFailureDisposition({ status: response.status, data: responseData });
+    // 未登录处置决策(见 authFailurePolicy):两登录策略下,未登录失败(HTTP 401 / 信封未登录体)
+    // 已在策略内按策略单飞登记登录信号 → 静默上抛 AceLoginRedirectError 阻止 stale 渲染,不逐条报错
+    // (spec: 会话过期/未登录场景统一导向登录引导——oauth 弹 ExternalLoginPromptModal、ace 弹
+    // GatewayReauthModal 等待重登);oauth 已确认未登录后的其余失败也静默,登录前的接口错误提示是噪音。
+    // 两者均仍抛错,调用方可感知失败。
+    const authDisposition = resolveAuthFailureDisposition({
+      status: response.status,
+      data: inspectData,
+      fromEpoch: requestAuthEpoch,
+    });
     if (authDisposition === 'login-prompt-silent') {
       throw new AceLoginRedirectError();
     }
     const apiPath = formatApiPath(requestUrl);
-    const message = extractFriendlyErrorMessage({ response: { status: response.status, data: responseData } });
+    const message = response.status >= 500 && options.serverErrorMessage
+      ? options.serverErrorMessage
+      : extractFriendlyErrorMessage({ response: { status: response.status, data: inspectData } });
     const operation = options.operation;
     const toastKey = buildToastKey({ apiPath, operation, message });
     // 邀请码门禁拦截（oauth-provider 策略下 `error_code='invite_code_required'` 403）：单飞登记门禁弹窗信号 +
     // 静默上抛（不投默认 toast，未绑定用户的业务 403 不逐条轰炸；未登录 UX 唯一出口是 InviteCodeBindingModal）。
     // 识别键严格限定专属 error_code，不吞通用 forbidden/真实权限拒绝 403（见 inviteGateFailurePolicy）。
-    if (resolveInviteGateDisposition({ status: response.status, data: responseData }) === 'gate-prompt-silent') {
+    if (resolveInviteGateDisposition({ status: response.status, data: inspectData }) === 'gate-prompt-silent') {
       throw new BackendRequestError(message, {
         status: response.status,
-        data: responseData,
+        data: inspectData,
         apiPath,
         toastKey,
         alreadyHandled: true,
+        silent: true,
       });
     }
     // 默认提示投递(由顶层观察者 useErrorNotifyObserver 兜底发起):Service 层只 enqueue 上抛,不直接 toast,
     // 守 `src/services` 禁 toast/DOM。Hook 可在 catch 中 cancel(toastKey) 静默,或经 safeReportError 跳过重复。
     // 未登录(`silent`)时跳过投递,仅保留 alreadyHandled 标记供下游 safeReportError 亦不再补发。
-    if (authDisposition !== 'silent') {
+    if (authDisposition !== 'silent' && !options.suppressErrorNotification) {
       useErrorNotifyStore.getState().enqueue({ toastKey, message, apiPath, operation });
     }
     throw new BackendRequestError(message, {
       status: response.status,
-      data: responseData,
+      data: inspectData,
       apiPath,
       toastKey,
       alreadyHandled: true,
+      silent: authDisposition === 'silent',
     });
   }
 
-  // 网关级 ACE 登录拦截体(HTTP 2xx + 登录 body):登记单飞跳转信号 + 抛 AceLoginRedirectError,
-  // 避免把登录体当作成功数据返回给无校验的调用方继续渲染。toast + window.location 由顶层观察者
-  // useGatewayLoginRedirect 消费 store 的 pendingLogin 完成（redirect 模式；prompt 模式由 ExternalLoginPromptModal 消费）。
-  if (isAceLoginResponse(responseData)) {
-    const loginUrl = extractLoginUrl(responseData);
+  // 网关级 ACE 登录拦截体(HTTP 2xx + 登录 body):登记单飞「等待重登」信号 + 抛 AceLoginRedirectError,
+  // 避免把登录体当作成功数据返回给无校验的调用方继续渲染。处置由全局 GatewayReauthModal 消费
+  // store 的 pendingLogin 完成(redirect=等待重登;prompt 模式由 ExternalLoginPromptModal 消费)。
+  if (isAceLoginResponse(inspectData)) {
+    const loginUrl = extractLoginUrl(inspectData);
     // loginStrategy 分支：外部(oauth-provider)→弹窗信号(不携带 ACE pubLogin url，由 /auth/url 取 provider)；
-    // 内部(ace-gateway)现状→硬跳转。两者都抛 AceLoginRedirectError 阻止 stale 渲染。
+    // 内部(ace-gateway)→等待重登弹窗信号(携带 pubLogin url)。两者都抛 AceLoginRedirectError 阻止 stale 渲染。
     if (useLoginStrategyStore.getState().loginStrategy === 'oauth-provider') {
-      triggerLoginPrompt();
+      triggerLoginPrompt(requestAuthEpoch);
       // 外部模式不携带 ACE pubLogin url（provider url 由 /auth/url 取）；仍抛错阻止 stale 渲染。
       throw new AceLoginRedirectError();
     }
-    triggerAceLoginRedirect(loginUrl);
+    triggerAceLoginRedirect(loginUrl, requestAuthEpoch);
     throw new AceLoginRedirectError(loginUrl);
   }
 
   // 网关误包形态(HTTP 2xx 但信封 code 落未登录段,如 40100/401000):与 !response.ok 的未登录路径
-  // 同处置——登记弹窗信号(单飞)+ 静默上抛,避免误包体被无校验调用方当成功数据渲染或逐条报错。
-  if (resolveAuthFailureDisposition({ data: responseData }) === 'login-prompt-silent') {
+  // 同处置——登记单飞登录信号(策略分/oauth 弹窗或 ace 等待重登)+ 静默上抛,避免误包体被无校验
+  // 调用方当成功数据渲染或逐条报错。
+  if (resolveAuthFailureDisposition({ data: inspectData, fromEpoch: requestAuthEpoch }) === 'login-prompt-silent') {
     throw new AceLoginRedirectError();
   }
 
   // 网关误包形态(HTTP 2xx 但信封含 `error_code='invite_code_required'` 门禁体):与 !response.ok 的门禁路径
   // 同处置——单飞登记门禁弹窗信号 + 静默上抛（不投默认 toast），避免误包体被无校验调用方当成功数据渲染。
-  if (resolveInviteGateDisposition({ data: responseData }) === 'gate-prompt-silent') {
+  if (resolveInviteGateDisposition({ data: inspectData }) === 'gate-prompt-silent') {
     const apiPath = formatApiPath(requestUrl);
     throw new BackendRequestError('邀请码门禁拦截', {
       status: response.status,
-      data: responseData,
+      data: inspectData,
       apiPath,
       alreadyHandled: true,
+      silent: true,
     });
   }
 

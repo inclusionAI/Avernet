@@ -60,9 +60,6 @@ from agentclaw.community.core.workspace.skill_layout import (
 )
 
 
-from agentclaw.community.core.skill_center.services.runtime_projections.skill_projection_guard import SkillProjectionGuard
-
-
 class SkillRuntimeDelivery:
     """Deliver one resolved Skill plan without exposing layout compatibility.
 
@@ -80,9 +77,7 @@ class SkillRuntimeDelivery:
         pool_layouts: SkillsPoolLayoutRepositoryProtocol,
         device_contexts: DeviceContextResolver,
         center_content: CenterContentDistribution,
-        guard: SkillProjectionGuard,
     ) -> None:
-        self._guard = guard
         self._pool_runtime = pool_runtime
         self._pool_layouts = pool_layouts
         self._device_contexts = device_contexts
@@ -95,19 +90,7 @@ class SkillRuntimeDelivery:
         retired_mappings: Sequence[PoolSkillMapping] = (),
         service_factory: RuntimeServiceFactoryBoundary,
     ) -> RuntimeProjectionResult:
-        """Validate freshness under a shared lease, then deliver the full plan."""
-        return await self._guard.deliver(
-            plan=plan,
-            send=lambda: self._deliver_locked(
-                plan=plan, retired_mappings=retired_mappings, service_factory=service_factory,
-            ),
-        )
-
-    async def _deliver_locked(
-        self, *, plan: ResolvedSkillPlan,
-        retired_mappings: Sequence[PoolSkillMapping],
-        service_factory: RuntimeServiceFactoryBoundary,
-    ) -> RuntimeProjectionResult:
+        """Deliver the resolved plan without a Backend cache lease."""
         mappings = list(plan.projection.skill_mappings)
         retired = list(retired_mappings)
         bot = plan.bot
@@ -239,6 +222,7 @@ class SkillRuntimeDelivery:
             return RuntimeProjectionResult.pending(
                 code="SKILL_RUNTIME_UNAVAILABLE",
                 reason="Skill 运行环境当前不可连接，能力状态已保存但尚未同步",
+                delivery_uncertain=True,
             )
         return RuntimeProjectionResult.converged(
             components={"skills": RuntimeProjectionStatus.CONVERGED}
@@ -377,6 +361,20 @@ class SkillRuntimeDelivery:
             status=status,
             components={"skills": status},
             issues=tuple(issues),
+            delivery_uncertain=SkillRuntimeDelivery._mapping_delivery_uncertain(applied),
+        )
+
+    @staticmethod
+    def _mapping_delivery_uncertain(applied: MappingApplyResult) -> bool:
+        reason = applied.evidence.get("reason")
+        error_type = applied.evidence.get("error_type")
+        return (
+            reason in {
+                "runtime_mapping_apply_outcome_unknown", "invalid_runtime_response",
+                "invalid_runtime_status",
+            }
+            or error_type == "HTTP_408"
+            or isinstance(error_type, str) and error_type.startswith("HTTP_5")
         )
 
     @staticmethod

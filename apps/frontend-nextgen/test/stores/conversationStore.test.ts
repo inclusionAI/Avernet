@@ -268,6 +268,59 @@ describe('conversationStore', () => {
     expect(useConversationStore.getState().friendBotSessionsByBotId['friend-bot:1'].page).toBe(2);
   });
 
+  it('invalidateBotSessionList drops the Bot caches and bumps the filter revision for a clean reload', () => {
+    const store = useConversationStore.getState();
+    store.setManagedBotCache('bot-a:1', managedView('bot-a:1'));
+    store.setFriendBotSessions('friend-bot:2', sessionList());
+    // 相邻 Bot 的缓存与代次保持不动。
+    store.setManagedBotCache('bot-b:3', managedView('bot-b:3'));
+    const otherRevisionBefore = useConversationStore.getState().sessionFilterRevisionByBotId['bot-b:3'] ?? 0;
+
+    useConversationStore.getState().invalidateBotSessionList('bot-a:1');
+    useConversationStore.getState().invalidateBotSessionList('friend-bot:2');
+
+    const s = useConversationStore.getState();
+    // managed/others 好友分组缓存与好友列表缓存一并失效,列表 Hook 重拉时不可命中旧缓存。
+    expect(s.sessionsByBotId['bot-a:1']).toBeUndefined();
+    expect(s.friendBotSessionsByBotId['friend-bot:2']).toBeUndefined();
+    // 过滤代次 +1:在途旧响应写回校验丢弃,scopeSignature 变化触发已展开 Bot 重拉。
+    expect(s.sessionFilterRevisionByBotId['bot-a:1']).toBe(1);
+    expect(s.sessionFilterRevisionByBotId['friend-bot:2']).toBe(1);
+    expect(s.sessionsByBotId['bot-b:3']).toBeDefined();
+    expect(s.sessionFilterRevisionByBotId['bot-b:3'] ?? 0).toBe(otherRevisionBefore);
+  });
+
+  it('removeFriendBotState clears the Bot local state without touching others or selection', () => {
+    const store = useConversationStore.getState();
+    store.setExpandedBot('friend-bot:1', true);
+    store.setFriendBotScope('friend-bot:1', 'favorite');
+    store.setSessionKeyFilter('friend-bot:1', 'sk-1');
+    store.setFriendBotSessions('friend-bot:1', sessionList({ page: 2, total: 12 }));
+    // 相邻好友 Bot 与其本地状态保持不动。
+    store.setExpandedBot('friend-bot:2', true);
+    store.setFriendBotSessions('friend-bot:2', sessionList());
+    store.selectConversation({
+      botId: 'friend-bot:2',
+      section: 'friend',
+      origin: 'mine',
+      scope: 'all',
+      friendUserId: null,
+      sessionId: 's2',
+    });
+
+    useConversationStore.getState().removeFriendBotState('friend-bot:1');
+
+    const s = useConversationStore.getState();
+    expect(s.friendBotSessionsByBotId['friend-bot:1']).toBeUndefined();
+    expect(s.scopeByFriendBotId['friend-bot:1']).toBeUndefined();
+    expect(s.sessionKeyByBotId['friend-bot:1']).toBeUndefined();
+    expect(s.expandedBotIds['friend-bot:1']).toBeUndefined();
+    expect(s.friendBotSessionsByBotId['friend-bot:2']).toBeDefined();
+    expect(s.expandedBotIds['friend-bot:2']).toBe(true);
+    // 主会话选中不在清理切片内处理(移除动线按当前选中判定后单独清空)。
+    expect(s.selectedBotId).toBe('friend-bot:2');
+  });
+
   it('selectConversation records the full main-stage selection', () => {
     const store = useConversationStore.getState();
     store.selectConversation({
@@ -374,6 +427,29 @@ describe('conversationStore selectedSessionSnapshot', () => {
     store.setSelectedSessionSnapshot(snapshotOf());
     store.selectConversation({ ...identity, botId: null, section: null, sessionId: null });
     expect(useConversationStore.getState().selectedSessionSnapshot).toBeNull();
+  });
+
+  it('已归档范围只改变左栏列表,不卸载已打开的主会话', () => {
+    const store = useConversationStore.getState();
+    store.setSelectedSessionSnapshot(snapshotOf());
+    store.selectConversation(identity);
+
+    store.setManagedBotScope('bot-a:1', 'archived');
+    let state = useConversationStore.getState();
+    expect(state.selectedScope).toBe('archived');
+    expect(state.effectiveScopeByManagedBotId['bot-a:1']).toBe('archived');
+    expect(state.selectedSessionId).toBe('s1');
+    expect(state.selectedSessionSnapshot).toMatchObject({ scope: 'archived', session: { sessionId: 's1' } });
+
+    store.setManagedBotScope('bot-a:1', 'all');
+    state = useConversationStore.getState();
+    expect(state.selectedScope).toBe('all');
+    expect(state.selectedSessionId).toBe('s1');
+    expect(state.selectedSessionSnapshot).toMatchObject({ scope: 'all', session: { sessionId: 's1' } });
+
+    // favorite 仍是强过滤语义:不属于该范围的已打开会话要关闭。
+    store.setManagedBotScope('bot-a:1', 'favorite');
+    expect(useConversationStore.getState().selectedSessionId).toBeNull();
   });
 
   it('reset 清空快照', () => {

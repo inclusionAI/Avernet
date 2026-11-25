@@ -28,6 +28,33 @@ const buildWorkOrder = (overrides: Record<string, unknown> = {}) =>
   }).item;
 
 describe('WorkOrderDetailDrawer 审批类补充字段', () => {
+  it('审批结果显示审批类标签，但仍保留通知已读语义', () => {
+    const detail = buildWorkOrder({
+      item_type: 'NOTICE',
+      notification_category: 'APPROVAL',
+      event_type: 'SPACE_JOIN_REVIEWED',
+      is_read: true,
+    });
+    render(<WorkOrderDetailDrawer open loading={false} detail={detail} onClose={noop} onNextUnread={noop} />);
+    expect(screen.getByText('审批类')).toBeInTheDocument();
+    expect(screen.queryByText('审批通知')).not.toBeInTheDocument();
+    expect(screen.getByText('此通知已标记为已读')).toBeInTheDocument();
+    expect(screen.queryByText('申请理由')).not.toBeInTheDocument();
+  });
+
+  it('Skill 审批详情显示编辑权限标签和审批字段，而非通知提示', () => {
+    const detail = buildWorkOrder({
+      item_type: undefined,
+      event_type: 'SKILL_COLLABORATOR_APPLIED',
+      review_remark: '同意申请',
+    });
+    render(<WorkOrderDetailDrawer open loading={false} detail={detail} onClose={noop} onNextUnread={noop} />);
+    expect(screen.getByText('审批类')).toHaveClass('bg-muted', 'text-muted-foreground');
+    expect(screen.getByText('申请理由')).toBeInTheDocument();
+    expect(screen.getByText('同意申请')).toBeInTheDocument();
+    expect(screen.queryByText(/此通知/)).not.toBeInTheDocument();
+  });
+
   it('渲染 content + 申请理由 / 审批意见 / 审批人（行内截断看不到的字段）', () => {
     render(
       <WorkOrderDetailDrawer

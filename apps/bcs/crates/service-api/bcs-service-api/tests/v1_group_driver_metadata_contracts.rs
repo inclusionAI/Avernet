@@ -6,7 +6,7 @@ fn legacy_summary() -> Value {
         "kind": "normal", "group_id": "group", "version": 1,
         "status": "active", "visibility": "public", "membership": "none",
         "originator_actor_id": "human_reader", "participant_count": 1,
-        "driver_bot_uuid": "driver", "strategy": "chat",
+        "driver_bot_uuid": "driver", "strategy": "chat", "participants": [],
         "human_mention_notify_mode": "all", "created_at": 1, "updated_at": 2
     })
 }
@@ -36,6 +36,7 @@ fn old_detail_deserializes_and_emits_explicit_null_owner_fields() {
     let value = serde_json::to_value(detail).expect("serialize detail");
     assert_eq!(value.get("driver_bot_owner"), Some(&Value::Null));
     assert_eq!(value.get("driver_bot_owner_name"), Some(&Value::Null));
+    assert_eq!(value["catalog_labels"],json!({}));
 }
 
 #[test]
@@ -46,6 +47,7 @@ fn summary_and_detail_round_trip_populated_metadata() {
     assert_eq!(serde_json::to_value(typed).expect("summary value"), summary);
 
     let mut detail = legacy_detail();
+    detail["catalog_labels"] = json!({});
     detail["driver_bot_owner"] = json!("human_owner");
     detail["driver_bot_owner_name"] = json!("Owner Name");
     let typed: GroupDetail = serde_json::from_value(detail.clone()).expect("detail");

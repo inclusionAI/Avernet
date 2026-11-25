@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.structured_risk_assessment import (
+from app.domain.models.structured_risk_assessment import (
     RiskFactor,
     BlockingCondition,
     ExpertEvidence,
     ScenarioPriorRisk,
     StructuredRiskAssessment,
 )
-from src.domain.models.expert_risk_assessment import RiskLevel
+from app.domain.models.expert_risk_assessment import RiskLevel
 
 
 # =============================================================================

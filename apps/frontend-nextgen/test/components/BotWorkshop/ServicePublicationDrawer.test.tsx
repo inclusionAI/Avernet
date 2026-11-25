@@ -52,9 +52,11 @@ test('在发布与阶段推进中展示并确认升级服务 Bot 版本', async 
     kind: 'service',
     engine: 'openclaw',
     display_state: 'service_online',
+    owner_entity_id: 'owner-1',
   }).item;
 
   render(<ServicePublicationDrawer bot={bot} onClose={jest.fn()} />);
+  expect(mockedPublications).toHaveBeenCalledWith('bot-1', 'owner-1');
   fireEvent.click(screen.getByRole('button', { name: '升级' }));
   fireEvent.click(screen.getByRole('button', { name: '确认升级' }));
 

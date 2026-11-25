@@ -1,5 +1,8 @@
 """``AcliPort`` over the engine adapter's ``/api/cli/acli/*`` endpoints.
 
+teclaw serves the same endpoints under its own API prefix,
+``/api/v1/cli/acli/*``; the runtime's engine picks the prefix.
+
 Built like ``ArcaCliToolPort``: resolve the runtime's device, call the engine
 over :class:`DeviceAdapterTransport`, and shape every failure the same way.
 The envelope is read as well as the status: an operation that ended in
@@ -44,6 +47,10 @@ class RuntimeContextPort(Protocol):
 
     def resolve(self, *, bot_id: str, owner_id: str, stage: str) -> Any: ...
 
+
+_ACLI_PREFIX = "/api/cli/acli"
+#: The prefix per engine that does not serve the adapter's.
+_ENGINE_PREFIXES = {"teclaw": "/api/v1/cli/acli"}
 
 INSTALL_PATH = "/api/cli/acli/install"
 UNINSTALL_PATH = "/api/cli/acli/uninstall"
@@ -134,6 +141,7 @@ class ArcaAcliPort(AcliPort):
         ``route_known`` is for reading back an operation the engine accepted:
         the endpoints exist there, so a ``404`` came from the hop and may pass.
         """
+        path = _engine_path(runtime.engine, path)
         try:
             # Resolution can block on network I/O (BaaS connection info), so it
             # runs off the event loop, as the engine relay's does.
@@ -203,6 +211,14 @@ class ArcaAcliPort(AcliPort):
         if not isinstance(response, Mapping):
             raise AcliPortError("engine_unreachable", "the engine answered with no envelope")
         return response
+
+
+def _engine_path(engine: str, path: str) -> str:
+    """``path`` (an adapter ``/api/cli/acli/*`` path) as ``engine`` serves it."""
+    prefix = _ENGINE_PREFIXES.get(engine)
+    if prefix is None:
+        return path
+    return prefix + path.removeprefix(_ACLI_PREFIX)
 
 
 def _envelope_in(error: Exception) -> Mapping[str, Any] | None:

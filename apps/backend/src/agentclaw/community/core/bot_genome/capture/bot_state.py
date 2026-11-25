@@ -4,16 +4,19 @@ Each category is read through the same service the Manifest materialisers
 and the compose collector read through, so capture sees what apply sees:
 
 - persona: ``IdentityFilePort`` (``list_bot_files`` / ``read_identity_file``);
-- skills: ``BotCapabilityStateReaderProtocol.active_skill_assets``, classified
+- skills: ``BotCapabilityStateReaderProtocol.active_skill_assets`` less the
+  runtime names the bot's skill sets supply (a revision, like an apply,
+  speaks only for Direct skills), classified
   by locator prefix as the skill set service records them (``local://`` files
-  via the factory's package storage, ``center://`` by pinned version,
+  via the factory's package storage, ``center://`` by name,
   ``git://<path>`` as a shared-repository skill);
 - resources: the bot's ``ac_resource`` file rows (what the compose collector
   lists), at ``data/<row path>`` in the workspace, bytes through
   ``ResourceFileService.read_file``; files Manifest apply wrote outside those
   rows are not captured (noted for RSI-04, which fixes the resources road);
-- MCP: ``DirectActivationServiceProtocol.list_installed_mcps`` minus the
-  platform defaults, the bot override from ``MCPConfigServiceProtocol``;
+- MCP: ``DirectActivationServiceProtocol.list_installed_mcps`` minus what the
+  bot's skill sets supply (``set_supplied_capabilities``, the platform defaults
+  included), the bot override from ``MCPConfigServiceProtocol``;
 - script: ``BotStartupScriptServiceProtocol.get_body`` with the ``${BOT_*}``
   substitution apply performs.
 
@@ -64,8 +67,6 @@ if TYPE_CHECKING:  # the module reaches the device dispatcher at import time
 __all__ = ["PlatformBotStateReader"]
 
 LOCAL_PREFIX = "local://"
-#: Where ``ac_resource`` file rows live, workspace-relative (``ResourceService.data_dir``).
-RESOURCE_DATA_DIR = "data/"
 CENTER_PREFIX = "center://"
 REPO_PREFIX = "git://"
 
@@ -119,7 +120,12 @@ class PlatformBotStateReader(BotStateReader):
 
     async def skills(self, bot: BotRef) -> tuple[CapturedSkill, ...]:
         captured: list[CapturedSkill] = []
+        supplied, _codes = self._activation.set_supplied_capabilities(
+            bot_id=bot.bot_id, owner_id=bot.owner_id, actor_id=bot.owner_id
+        )
         for asset in self._capabilities.active_skill_assets(bot_id=bot.bot_id, owner_id=bot.owner_id):
+            if asset.name in supplied:
+                continue  # a skill set's, not the bot's own: outside the revision as it is outside an apply
             locator = str(asset.git_path or "")
             if locator.startswith(LOCAL_PREFIX):
                 _, storage = self._skill_factory.local_skill_package_storage_for_locator(
@@ -140,7 +146,7 @@ class PlatformBotStateReader(BotStateReader):
                     )
                 )
             elif locator.startswith(CENTER_PREFIX):
-                captured.append(CapturedSkill(asset.name, SkillOrigin.CENTER, center_version=asset.sc_version_number))
+                captured.append(CapturedSkill(asset.name, SkillOrigin.CENTER))
             elif locator.startswith(REPO_PREFIX):
                 captured.append(CapturedSkill(asset.name, SkillOrigin.REPO, repo_path=locator[len(REPO_PREFIX) :]))
             else:
@@ -155,16 +161,9 @@ class PlatformBotStateReader(BotStateReader):
         for resource in service.list_resources(user_id=bot.owner_id):
             if not resource.path or resource.is_directory:
                 continue  # URL, link and node resources are not workspace files; a folder row has no bytes
-            # A row's path is relative to the bot's data directory (``workspace/data``, the compose
-            # collector's join); the workspace-relative path apply writes and a revision names has it in front.
-            path = RESOURCE_DATA_DIR + resource.path.lstrip("/")
-            data = await self._resource_files.read_file(
-                entity_type=bot.entity_type,
-                entity_id=bot.entity_id,
-                bot_id=bot.bot_id,
-                engine_type=bot.engine_type,
-                path=path,
-            )
+            # A row's path is workspace-relative, as the Open API records it and the apply writes it.
+            path = resource.path.lstrip("/")
+            data = await self._read_resource(bot, path)
             if data is None:
                 raise CaptureRefused(
                     [
@@ -178,14 +177,22 @@ class PlatformBotStateReader(BotStateReader):
             captured.append(CapturedResource(path, (CapturedFile(path.rsplit("/", 1)[-1], data),)))
         return tuple(captured)
 
+    async def _read_resource(self, bot: BotRef, path: str) -> bytes | None:
+        return await self._resource_files.read_file(
+            entity_type=bot.entity_type,
+            entity_id=bot.entity_id,
+            bot_id=bot.bot_id,
+            engine_type=bot.engine_type,
+            path=path,
+        )
+
     async def mcp_servers(self, bot: BotRef) -> tuple[CapturedMcpServer, ...]:
         who = dict(bot_id=bot.bot_id, owner_id=bot.owner_id, actor_id=bot.owner_id)
-        codes = set(self._activation.list_installed_mcps(**who)) - set(
-            self._activation.platform_default_mcp_codes(**who)
-        )
+        _names, supplied = self._activation.set_supplied_capabilities(**who)
+        codes = set(self._activation.list_installed_mcps(**who)) - set(supplied)
         servers = []
         for code in sorted(codes):
-            override = self._mcp_config.get_bot_override(bot_id=bot.bot_id, owner_id=bot.owner_id, server_code=code)
+            override = self._mcp_config.get_bot_override(bot_id=bot.bot_id, owner_id=bot.entity_id, server_code=code)
             servers.append(CapturedMcpServer(code, dict(override) if override else None))
         return tuple(servers)
 

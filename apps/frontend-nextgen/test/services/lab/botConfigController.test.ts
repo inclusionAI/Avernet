@@ -58,11 +58,12 @@ describe('botConfigController (公开 task 域 §4)', () => {
     );
   });
 
-  it('delete 路径 /openapi/v1/collaboration/tasks/bots/{id}/bbs/browse-subscription 且无 owner query（§3.2：仅 bot_id 路径）', async () => {
-    await deleteBrowseSubscription('b1');
-    const call = mockedRequest.mock.calls[0];
-    expect(call[0]).toBe('/openapi/v1/collaboration/tasks/bots/b1/bbs/browse-subscription');
-    expect(call[1]).toEqual({ method: 'DELETE', signal: undefined });
-    expect(call[1]).not.toHaveProperty('params');
+  it('delete 路径 /openapi/v1/collaboration/tasks/bots/{id}/bbs/browse-subscription 且 owner_user_id 走 query（共享 Bot）', async () => {
+    await deleteBrowseSubscription('default', 'u1');
+    expect(mockedRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/bots/default/bbs/browse-subscription', {
+      method: 'DELETE',
+      params: { owner_user_id: 'u1' },
+      signal: undefined,
+    });
   });
 });

@@ -15,6 +15,14 @@ export interface WorkspaceRouteState {
   membership?: WorkspaceRouteMembership;
 }
 
+/** 已完成路由回填的显式会话入口；详情验证完成后只执行一次侧栏 UI 定位。 */
+export interface WorkspaceSessionLocationRequest {
+  request: number;
+  identityId: string;
+  groupId: string;
+  sessionId: string;
+}
+
 export interface WorkspaceRouteProjection {
   currentIdentityId?: string | null;
   groupId?: string | null;
@@ -54,4 +62,17 @@ export function serializeWorkspaceRoute(route: WorkspaceRouteProjection): string
   if (route.sessionId) params.set('session', route.sessionId);
   if (route.membership) params.set('membership', route.membership);
   return params.toString();
+}
+
+// 路由契约 owned 参数;Store → URL 投影不得吞掉契约外参数(如聚焦页 showReturn=false)。
+const ROUTE_PARAM_KEYS = ['current', 'bot', 'group', 'session', 'membership'];
+
+/** 序列化投影并保留 search 中不属于路由契约的参数。 */
+export function serializeWorkspaceRoutePreserving(search: string, route: WorkspaceRouteProjection): string {
+  const extras = new URLSearchParams(search);
+  for (const key of ROUTE_PARAM_KEYS) extras.delete(key);
+  const projected = serializeWorkspaceRoute(route);
+  const extra = extras.toString();
+  if (!extra) return projected;
+  return projected ? `${projected}&${extra}` : extra;
 }

@@ -17,8 +17,13 @@ they pick up the swapped repositories transparently.
 
 from __future__ import annotations
 
+from agentclaw.community.core.caller_identity.scheduled_refresh import ScheduledCallerRefreshProtocol
+
+from agentclaw.community.core.apply_engine.compiler import StateCompilers
+from agentclaw.community.core.apply_engine.completion import StateCompletionHandlers
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
+from agentclaw.community.core.bot_management.creation_source import validate_creation_source
 from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
 from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
 
@@ -60,6 +65,9 @@ from agentclaw.community.core.bot_collaborator.services.credentials_admins_write
 from agentclaw.community.core.bot_management.render_screen.services.render_screen_service import (
     RenderScreenService,
 )
+from agentclaw.community.core.bot_management.render_screen.backfill import (
+    RenderScreenOwnerScopeBackfill,
+)
 from agentclaw.community.core.repository.protocols.bot import (
     BotConfigManifestRepositoryProtocol,
     BotRestartLockRepositoryProtocol,
@@ -82,8 +90,8 @@ from agentclaw.community.api.bot_config_manifest_service import (
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_service import (
     BotConfigManifestService,
 )
-from agentclaw.community.api.bot_config_manifest_apply_service import (
-    BotConfigManifestApplyServiceProtocol,
+from agentclaw.community.api.apply_run_service import (
+    ApplyRunServiceProtocol,
 )
 from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.core.mcp.mcp_config_service_protocol import (
@@ -93,7 +101,7 @@ from agentclaw.community.core.mcp.services.config_service import MCPConfigServic
 from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
     DirectActivationServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
+from agentclaw.community.core.apply_engine.apply_task import (
     ApplyTaskLifecycle,
 )
 from agentclaw.community.core.bot_management.create_flow import (
@@ -108,13 +116,10 @@ from agentclaw.community.core.bot_config_manifest.create_job import (
 from agentclaw.community.core.bot_config_manifest.creation import (
     BotCreationManifestSeam,
 )
-from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
-    BotConfigManifestApplyService,
+from agentclaw.community.core.apply_engine.run.service import (
+    ApplyRunService,
 )
-from agentclaw.community.core.bot_config_manifest.cli_tools.service import CliToolPurger
-from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
-    GitSourceClient,
-)
+from agentclaw.community.core.apply_engine.cli_tools.service import CliToolPurger
 from agentclaw.community.core.bot_management.manifest_seam import ManifestCreationSeam
 from agentclaw.community.core.bot_management.addressing import (
     BotAddressResolver,
@@ -214,10 +219,10 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
 )
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
-from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+from agentclaw.community.core.apply_engine.delivery import (
     DeliveryStrategyFactory,
 )
-from agentclaw.community.core.bot_config_manifest.managed_files import ManagedFilesStore
+from agentclaw.community.core.apply_engine.managed_files import ManagedFilesStore
 from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
@@ -243,6 +248,9 @@ from agentclaw.community.core.repository.implementations.bot.source_credential i
     SourceCredentialRepository,
 )
 
+from agentclaw.community.core.skill_center.capability_projection_reconcile import (
+    CapabilityProjectionReconcileProtocol,
+)
 from agentclaw.community.core.repository.implementations.bot.config_manifest_apply import (
     BotConfigManifestApplyLockRepository,
     BotConfigManifestApplyRepository,
@@ -301,6 +309,8 @@ class BotManagementModule(Module):
         # ``BcnService`` is built by the ``bcn_service`` provider below — it needs
         # the bcn-qualified HttpClient injected.
         binder.bind(RenderScreenService, to=RenderScreenService, scope=singleton)
+        # Lifecycle 参与方:startup 阶段归位协作者 scope 漂移的 render screen 记录(经 bindings 自动发现并调度)。
+        binder.bind(RenderScreenOwnerScopeBackfill, to=RenderScreenOwnerScopeBackfill, scope=singleton)
         # BotRepository: single unified ORM impl — runs on prod
         # OceanBase and SQLite via the injected DatabasePlugin.
         # RenderScreenRepository was already unified earlier.
@@ -385,7 +395,7 @@ class BotManagementModule(Module):
             to=BotConfigManifestApplyLockRepository,
             scope=singleton,
         )
-        # ``BotConfigManifestApplyService`` is built by the provider below rather
+        # ``ApplyRunService`` is built by the provider below rather
         # than auto-constructed: its task-queue dependency is a lazy callable, and
         # the queue module imports the DI container at module scope, so the
         # annotation the injector would have to resolve cannot be imported here.
@@ -505,6 +515,7 @@ class BotManagementModule(Module):
         self,
         repository: BotRepository,
         restart_backup_dependencies: RestartBackupDependencies,
+        scheduled_caller_refresh: ScheduledCallerRefreshProtocol,
         allocation_config: cfg.DeviceAllocationConfig,
         workspace_hosting_config: cfg.WorkspaceHostingConfig,
         device_binding_repo: DeviceBindingRepository,
@@ -553,6 +564,7 @@ class BotManagementModule(Module):
             bot_publish_service_provider=bot_publish_service_provider,
             device_service_provider=device_service_provider,
             restart_backup_dependencies=restart_backup_dependencies,
+            scheduled_caller_refresh=scheduled_caller_refresh,
             # Lazy for symmetry with the providers above, not for a cycle:
             # BotAppGrantService reaches only repositories. Resolved on demand
             # so bot deletion is the only thing that pays for it.
@@ -744,36 +756,32 @@ class BotManagementModule(Module):
         manifest_service: BotConfigManifestServiceProtocol,
         apply_repository: BotConfigManifestApplyRepositoryProtocol,
         lock_repository: BotConfigManifestApplyLockRepositoryProtocol,
-        git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], TaskQueueService],
         bot_repository: BotRepository,
         delivery_strategies: DeliveryStrategyFactory,
-    ) -> BotConfigManifestApplyService:
-        """The apply lifecycle, over a delivery seam it does not assemble.
-
-        The ten lazy service providers this used to thread through — the write
-        targets every materialiser calls — are gone from here and from the
-        service: they were only ever the ARCA port bundle's ingredients, and a
-        bundle is a wiring decision. ``manifest_fetch_module`` builds both
-        bundles and both strategies beside the store one of them writes to, and
-        hands over the finished seam.
-        """
-        return BotConfigManifestApplyService(
+        compilers: StateCompilers,
+        completion_handlers: StateCompletionHandlers,
+        capability_projection: CapabilityProjectionReconcileProtocol,
+    ) -> ApplyRunService:
+        """Assemble Apply from its delivery, compiler, and completion bindings."""
+        return ApplyRunService(
             manifest_service,
             apply_repository,
             lock_repository,
-            git_client_provider,
             task_queue_provider,
             bot_repository,
             delivery_strategies=delivery_strategies,
+            compilers=compilers,
+            completion_handlers=completion_handlers,
+            capability_projection=capability_projection,
         )
 
     @singleton
     @provider
     @inject
     def bot_config_manifest_apply_service_protocol(
-        self, service: BotConfigManifestApplyService
-    ) -> BotConfigManifestApplyServiceProtocol:
+        self, service: ApplyRunService
+    ) -> ApplyRunServiceProtocol:
         """The Protocol every adapter injects, delegated to the one instance."""
         return service
 
@@ -784,7 +792,7 @@ class BotManagementModule(Module):
         self,
         injector: Injector,
         manifest_service: BotConfigManifestServiceProtocol,
-        apply_service: BotConfigManifestApplyService,
+        apply_service: ApplyRunService,
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         task_queue_provider: Callable[[], TaskQueueService],
         create_with_manifest_config: cfg.BotCreateWithManifestConfig,
@@ -797,6 +805,7 @@ class BotManagementModule(Module):
         imports ``creation`` for the triggers), behind the same lazy queue provider.
         """
         return BotCreationManifestSeam(
+            validate_creation_spec=validate_creation_source,
             manifest_service=manifest_service,
             apply_service=apply_service,
             script_service_provider=script_service_provider,
@@ -839,9 +848,10 @@ class BotManagementModule(Module):
             )
 
         return BotCreateWithManifestHandler(
+            validate_creation_spec=validate_creation_source,
             manifest_seam_provider=lambda: injector.get(ManifestCreationSeam),
             apply_service_provider=lambda: injector.get(
-                BotConfigManifestApplyService
+                ApplyRunService
             ),
             bot_repository_provider=lambda: bot_repository,
             complete_authorization=_complete,
@@ -853,7 +863,7 @@ class BotManagementModule(Module):
             auth_relationship_provider=lambda: auth_rel_plugin,
             # W8: the strategy decides the order a creation runs in.
             creation_sequence=lambda engine: injector.get(
-                BotConfigManifestApplyService
+                ApplyRunService
             ).delivery_for_engine(engine).creation_sequence,
             # A creation that gives up before a bot exists withdraws the grant
             # the submitting application was given at submission.
@@ -888,7 +898,7 @@ class BotManagementModule(Module):
         """
         return ApplyTaskLifecycle(
             registry=registry,
-            apply_service_provider=lambda: injector.get(BotConfigManifestApplyService),
+            apply_service_provider=lambda: injector.get(ApplyRunService),
         )
 
     @singleton

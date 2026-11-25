@@ -22,7 +22,7 @@ import jwt
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryProtocol
 from agentclaw.community.core.bot_genome.canonical import revision_id, sha256_digest
-from agentclaw.community.core.bot_genome.models import ApplyResult, BotRef, Provenance, ProvenanceKind, RevisionStatus
+from agentclaw.community.core.bot_genome.models import BotRef, Provenance, ProvenanceKind, RevisionStatus
 from agentclaw.community.core.bot_genome.patch_models import GenomePatch
 from agentclaw.community.core.bot_genome.promotion.applier import RevisionApplier
 from agentclaw.community.core.bot_genome.registry import DEFAULT_POLICY
@@ -209,29 +209,53 @@ def _seed_promotion_row(world) -> str:
             ref="active",
             revision_id=_R1_ID,
             from_revision_id=None,
-            document_digest=_SOUL_DIGEST,
-            document_json="{}",
             actor_kind="user",
             actor_id=_OWNER,
             reason="seed",
             status="applied",
-            apply_kind="pending",
-            apply_reference="apply_1",
-            apply_detail="started",
+            apply_id="ap_seed",
+            apply_detail="apply ap_seed: applied",
             created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            settled_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
     )
     return bot_id
 
 
 def _seed_deliverable(world) -> str:
-    """A captured bot whose delivery seam accepts, so a promotion can succeed before RSI-04."""
+    """A captured bot whose delivery seam accepts; the apply it would start is not run here."""
     bot_id = _seed_captured(world)
 
-    async def _start(self, bot, compiled, *, actor, reason):
-        return ApplyResult(kind="fake", reference="apply_1", detail="started")
+    def _start(self, bot, *, promotion_id, principal_id, audit_actor):
+        return "ap_endpoint"
 
-    bind_overrides(world, RevisionApplier, {"preflight": lambda self, bot, compiled: None, "start": _start})
+    bind_overrides(world, RevisionApplier, {"preflight": lambda self, bot, state: None, "start": _start})
+    return bot_id
+
+
+def _seed_refusing(world) -> str:
+    """A captured bot whose delivery seam refuses it before anything is written."""
+    from agentclaw.community.core.bot_genome.errors import NotAppliable, Reason
+
+    bot_id = _seed_captured(world)
+
+    def _preflight(self, bot, state):
+        raise NotAppliable([Reason("not_appliable", "revision", "this bot cannot take it")])
+
+    bind_overrides(world, RevisionApplier, {"preflight": _preflight})
+    return bot_id
+
+
+def _seed_busy(world) -> str:
+    """A captured bot another apply is running on: the delivery cannot take its lock."""
+    from agentclaw.community.core.bot_genome.errors import ApplyBusy
+
+    bot_id = _seed_captured(world)
+
+    def _start(self, bot, *, promotion_id, principal_id, audit_actor):
+        raise ApplyBusy("another apply is running")
+
+    bind_overrides(world, RevisionApplier, {"preflight": lambda self, bot, state: None, "start": _start})
     return bot_id
 
 
@@ -538,7 +562,7 @@ def put_content_unknown_bot():
 @endpoint_test(
     method="POST",
     path=f"{_GENOME}/promotions",
-    scenario="moves_active_and_starts_delivery",
+    scenario="files_the_promotion_and_starts_its_delivery",
     input=_params(json_body={"revision": "r1", "expected_revision": None, "reason": "ship it"}),
     seed=_seed_deliverable,
     expect=ExpectSuccess(
@@ -548,8 +572,9 @@ def put_content_unknown_bot():
                 "ref": "active",
                 "revision": _R1_ID,
                 "from_revision": None,
-                "status": "applied",
-                "apply_reference": "apply_1",
+                "status": "applying",
+                "apply_id": "ap_endpoint",
+                "settled_at": None,
             }
         },
     ),
@@ -561,9 +586,9 @@ def promote_ok():
 @endpoint_test(
     method="POST",
     path=f"{_GENOME}/promotions",
-    scenario="refused_at_the_delivery_seam_before_any_ref_moves",
+    scenario="refused_at_the_delivery_seam_before_anything_is_written",
     input=_params(json_body={"revision": "r1", "expected_revision": None, "reason": "ship it"}),
-    seed=_seed_captured,
+    seed=_seed_refusing,
     expect=ExpectError(status=422, json_contains={"data": {"reasons": [{"code": "not_appliable"}]}}),
 )
 def promote_not_appliable():
@@ -571,9 +596,21 @@ def promote_not_appliable():
 
 
 @endpoint_test(
+    method="POST",
+    path=f"{_GENOME}/promotions",
+    scenario="another_apply_is_running",
+    input=_params(json_body={"revision": "r1", "expected_revision": None, "reason": "ship it"}),
+    seed=_seed_busy,
+    expect=ExpectError(status=409, json_contains={"code": 409109}),
+)
+def promote_apply_in_progress():
+    pass
+
+
+@endpoint_test(
     method="GET",
     path=f"{_GENOME}/promotions",
-    scenario="lists_without_documents",
+    scenario="lists_the_bots_promotions",
     input=_params(),
     seed=_seed_promotion_row,
     expect=ExpectSuccess(
@@ -581,7 +618,7 @@ def promote_not_appliable():
         json_contains={
             "data": {
                 "total": 1,
-                "items": [{"id": _PROMOTION_ID, "revision": _R1_ID, "status": "applied", "document": None}],
+                "items": [{"id": _PROMOTION_ID, "revision": _R1_ID, "status": "applied"}],
             }
         },
     ),
@@ -605,10 +642,12 @@ def list_promotions_unknown_bot():
 @endpoint_test(
     method="GET",
     path=f"{_GENOME}/promotions/{{promotion_id}}",
-    scenario="with_its_document",
+    scenario="by_id",
     input=_params(promotion_id=_PROMOTION_ID),
     seed=_seed_promotion_row,
-    expect=ExpectSuccess(status=200, json_contains={"data": {"id": _PROMOTION_ID, "document": {}}}),
+    expect=ExpectSuccess(
+        status=200, json_contains={"data": {"id": _PROMOTION_ID, "apply_detail": "apply ap_seed: applied"}}
+    ),
 )
 def get_promotion_ok():
     pass

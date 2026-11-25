@@ -9,6 +9,8 @@ export type CommandRunOptions = {
   timeoutMs: number;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  /** Cooperative cancellation; unsupported remote runners must not claim termination. */
+  signal?: AbortSignal;
 };
 
 export type CommandRunner = (options: CommandRunOptions) => Promise<CommandRunResult>;

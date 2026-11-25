@@ -15,7 +15,10 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillStorageError,
     SkillAssetInUseError,
 )
-from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
+from agentclaw.community.core.skill_center.factories import (
+    LocalSkillPackageStorage,
+    SkillServiceFactory,
+)
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
 )
@@ -61,6 +64,7 @@ class _Skills:
         self.active_during_delete = active_during_delete
         self.delete_error = delete_error
         self.deleted = False
+
 
     def get_by_id(self, skill_id):
         if skill_id != "9" or self.deleted:
@@ -214,12 +218,49 @@ def _service(
         _Factory(files),
         guard,
         lambda: SimpleNamespace(
-            resolve_for_bot=lambda *_args: SimpleNamespace(provider=provider)
+            resolve_for_bot=lambda *_args: SimpleNamespace(provider=provider, binding_id=1, device_id=None)
         ),
         lambda: security_hook or SimpleNamespace(record_deletion=lambda **_kwargs: None),
         security_enabled,
     )
     return service, files, skills, guard
+
+
+@pytest.mark.asyncio
+async def test_legacy_openclaw_delete_resolves_engine_locator_through_real_factory(
+    test_injector, tmp_path,
+):
+    service, files, skills, guard = _service(provider="arca")
+    original_get = skills.get_by_id
+
+    def historical_get(skill_id):
+        skill = original_get(skill_id)
+        if skill:
+            skill["git_path"] = (
+                "local:///home/admin/.openclaw/workspace/skills/skills-local/one"
+            )
+        return skill
+
+    skills.get_by_id = historical_get
+    current_root = tmp_path / "owner" / "bot" / "skills-local"
+    files.files = {
+        str(current_root / "one" / "SKILL.md"): b"name: one\n",
+        str(current_root / "other" / "SKILL.md"): b"name: other\n",
+    }
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: None
+    factory._path_factory.get_bot_skills_local_dir = lambda *_args, **_kwargs: current_root
+    device_calls = []
+    factory._device_fs_dispatcher.for_bot = lambda *args: device_calls.append(args) or files
+    service._skill_service_factory = factory
+
+    await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")
+
+    assert skills.deleted is True
+    assert files.delete_calls == [str(current_root / "one")]
+    assert files.files == {str(current_root / "other" / "SKILL.md"): b"name: other\n"}
+    assert device_calls == [("bot", "owner")]
+    assert guard.events[-1] == "release"
 
 
 @pytest.mark.asyncio
@@ -488,3 +529,21 @@ async def test_lock_rereads_active_state_before_any_package_mutation():
         )
 
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
+
+
+@pytest.mark.asyncio
+async def test_manual_delete_rejects_a_different_binding_at_dispatch():
+    from agentclaw.community.core.devices.services.device_context import verify_runtime_binding
+
+    service, files, skills, _ = _service()
+
+    def select_rebound_storage(**kwargs):
+        verify_runtime_binding(
+            bot_id=kwargs["bot_id"], user_id=kwargs["owner_id"],
+            binding_id=2, device_id="next-device",
+        )
+        pytest.fail("Manual deletion reached a different Runtime")
+
+    service._skill_service_factory.local_skill_package_storage_for_locator = select_rebound_storage
+    with pytest.raises(LocalSkillStorageError):
+        await service.delete_local_skill(skill_id="9", owner_id="owner", user_id="owner")

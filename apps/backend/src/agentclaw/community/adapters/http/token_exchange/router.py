@@ -2,6 +2,7 @@
 
 import time
 import uuid
+from typing import Literal
 
 from agentclaw.community.log import get_logger
 
@@ -104,21 +105,31 @@ async def get_iam_token(
     service: CallerIamTokenServiceProtocol = Injected(CallerIamTokenServiceProtocol),
     session_key: str | None = Query(default=None),
     legacy_session_key: str | None = Query(default=None, alias="sessionKey"),
+    token_type: Literal["iam", "dingtalk"] = "iam",
+    f_user_id: str | None = Query(default=None, description="Own friend-chat subject; requires an owned session_key."),
+    device_uuid: str | None = Query(default=None, description="Optional JIT replica UUID; empty is equivalent to omission."),
 ) -> Response:
     # Query defaults are also used by direct adapter tests; only strings are data.
     session_key = session_key if isinstance(session_key, str) else (
         legacy_session_key if isinstance(legacy_session_key, str) else None
     )
+    f_user_id = f_user_id if isinstance(f_user_id, str) and f_user_id else None
+    device_uuid = device_uuid if isinstance(device_uuid, str) else None
     fields = {"system": "backend", "direction": "inbound", "operation": "caller_iam",
               "operation_id": uuid.uuid4().hex, "method": "GET", "route": "/api/v1/token/iam",
               "request_id": request.headers.get("x-request-id"), "bot_id": bot_id,
               "stage": stage.value, "publish_id": publish_id, "entity_id": entity_id,
               "is_test_exchange": is_test_exchange,
-              "session_key": session_key}
+              "session_key": session_key, "token_type": token_type,
+              "f_user_id": f_user_id, "device_uuid": device_uuid}
     started_at = time.monotonic()
     logger.info("caller_iam_request_received fields=%s", fields)
     try:
         session_kwargs = {"session_key": session_key} if session_key is not None else {}
+        if f_user_id is not None and token_type == "iam":
+            session_kwargs["friend_user_id"] = f_user_id
+        if token_type == "dingtalk":
+            session_kwargs["token_type"] = "dingtalk"
         result = await service.get_iam_token(
             iam_token=request.cookies.get("IAM_TOKEN") or "",
             auth_request=_auth_request(request),

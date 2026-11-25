@@ -1,0 +1,668 @@
+"""The typed desired state: the apply engine's only input.
+
+A ``DesiredState`` says, per construct, what a bot should hold. A construct
+is either *declared* (a ``Declaration`` with zero or more entries) or *not
+declared* (``None``): a declared-empty construct empties its area, an
+undeclared one is untouched and unreported — the distinction the Manifest's
+``declared_entries`` draws, carried into the type.
+
+Every file is **stored content**, named by its digest in the content store:
+a compiler has filed the bytes before it emits, and the engine never fetches.
+A directory (a skill package, a directory resource) is one ``acm-tree-v1``
+blob. Closed sets are enums; entries are objects; ``engine_config.config`` is
+the one mapping, because its keys are undecided (G-4, #2858).
+
+Invariants that today live in the Manifest grammar are checked here on
+construction: digest form, tree paths end with ``/`` and file paths do not,
+resource paths are workspace-relative and name no protected entry, identities are unique within
+a declaration. They are raised, not reported: a compiler that emits a
+malformed state has a bug, which is not something an apply report should
+carry.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+from enum import StrEnum
+from types import MappingProxyType
+from typing import Any, ClassVar, Collection, Generic, Mapping, Protocol, Sequence, TypeVar
+
+from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
+from agentclaw.community.core.apply_engine.constructs import Construct, Category, Section
+from agentclaw.community.core.apply_engine.paths import resource_path_refusal
+from agentclaw.community.core.content_store import DIGEST_RE
+from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
+
+__all__ = [
+    "CenterSkill",
+    "CenterSkillByName",
+    "CenterSkillRef",
+    "CenterSkillByCode",
+    "DesiredSkillSet",
+    "DefaultSkillSetRef",
+    "DesiredCapabilities",
+    "CapabilityDeclaration",
+    "Declaration",
+    "DesiredBotConfig",
+    "DesiredBotFileSync",
+    "DesiredCliTool",
+    "DesiredEngineConfig",
+    "DesiredIdentityFile",
+    "DesiredMcpServer",
+    "DesiredResource",
+    "DesiredResourceFile",
+    "DesiredResourceTree",
+    "DesiredScript",
+    "DesiredSkill",
+    "DesiredState",
+    "EntryFailure",
+    "LocalSkillPackage",
+    "BotSyncedLocalSkill",
+    "McpEndpointEnv",
+    "McpHeader",
+    "McpOverride",
+    "McpTransport",
+    "RepoSkillPath",
+    "SkillOrigin",
+    "ContentRef",
+    "UnpackKind",
+]
+
+#: The one directory under the bot's workspace that holds its resources.
+#: Declared resource paths sit under it; converging resources clears it and
+
+def _require(condition: bool, message: str) -> None:
+    if not condition:
+        raise ValueError(message)
+
+
+@dataclass(frozen=True)
+class ContentRef:
+    """A reference to bytes in the content store: their address, not the bytes.
+
+    ``digest`` is ``sha256:<64 hex>``, the store's content address. A
+    materialiser reads the bytes back through ``ContentReader`` at apply time;
+    the state itself carries only the reference, which is what makes it small,
+    comparable and free of fetching. Example::
+
+        ContentRef("sha256:3f9a…")   # the stored SOUL.md, filed by a compiler
+    """
+
+    digest: str
+
+    def __post_init__(self) -> None:
+        _require(bool(DIGEST_RE.match(self.digest)), f"not a content digest: {self.digest!r}")
+
+
+@dataclass(frozen=True)
+class EntryFailure:
+    """An entry the compiler could not compile, with the reason an apply report shows.
+
+    It sits on the construct's declaration beside the entries that did
+    compile, so one bad entry fails its category without hiding the rest.
+    ``identity`` is the entry's key as the report names it — not the
+    construct — e.g. ``"SOUL.md"`` for an identity file, ``"data/kb/"`` for a
+    resource, ``"quality-check"`` for a skill, ``"gh"`` for an MCP server,
+    ``"script"`` for the script::
+
+        EntryFailure("data/kb/", "the git tree contains nothing under subpath 'kb/'")
+    """
+
+    identity: str
+    reason: str
+
+
+class HasIdentity(Protocol):
+    """What every desired entry exposes: ``identity``, the key the report and the materialiser address it by.
+
+    The key is the construct's natural one, not a generated id: an identity
+    file's ``type`` (``"SOUL.md"``), a resource's ``path`` (``"data/faq.csv"``),
+    a skill's ``name``, an MCP server's ``server_code``, a CLI tool's ``name``;
+    the script and the engine config, being single, use their construct's name.
+    """
+
+    @property
+    def identity(self) -> str: ...
+
+
+E = TypeVar("E", bound=HasIdentity)
+
+
+@dataclass(frozen=True)
+class Declaration(Generic[E]):
+    """What one construct declares: its entries, and the entries that failed to compile.
+
+    ``Declaration(entries=())`` with no failures is "declared empty" and
+    empties the area. Any failure aborts the construct the way a materialiser
+    ``resolve`` failure does: the named entries fail, their neighbours are
+    skipped, the area is untouched.
+    """
+
+    entries: tuple[E, ...]
+    failures: tuple[EntryFailure, ...] = ()
+
+    def __post_init__(self) -> None:
+        seen: set[str] = set()
+        for entry in self.entries:
+            _require(entry.identity not in seen, f"duplicate entry {entry.identity!r} in one declaration")
+            seen.add(entry.identity)
+
+    @property
+    def identities(self) -> tuple[str, ...]:
+        return tuple(entry.identity for entry in self.entries)
+
+
+@dataclass(frozen=True)
+class DesiredScript:
+    """The startup script's body, after the compiler's placeholder substitution."""
+
+    body: str
+    #: A bot has one script, so its report key is the construct's own name, ``"script"``: a class-level
+    #: constant rather than a field, since no instance could have a different one.
+    identity: ClassVar[str] = Section.SCRIPT.value
+
+
+@dataclass(frozen=True)
+class DesiredIdentityFile:
+    """One identity file (persona file) by its engine-legal type, e.g. ``SOUL.md``."""
+
+    #: The file's type, which is also its file name: ``"SOUL.md"``, ``"RULES.md"``, ``"CLAUDE.md"`` …
+    type: str
+    #: The file's bytes, in the content store.
+    content: ContentRef
+    #: Fetch provenance a compiler may attach for the report (e.g. "ref moved; kept last"); never affects the write.
+    note: str | None = None
+
+    def __post_init__(self) -> None:
+        _require(bool(self.type), "an identity file needs a type")
+
+    @property
+    def identity(self) -> str:
+        return self.type
+
+
+class SkillOrigin(StrEnum):
+    LOCAL = "local"
+    CENTER = "center"
+    REPO = "repo"
+
+
+@dataclass(frozen=True)
+class LocalSkillPackage:
+    """A bot-owned skill: the ``acm-tree-v1`` blob of its files, ``SKILL.md`` inside."""
+
+    tree: ContentRef
+
+
+@dataclass(frozen=True)
+class BotSyncedLocalSkill:
+    """A local skill whose package arrives via bot file-sync (``from: from_bot``).
+
+    A ``protocol: bot`` source's package is not fetched through the content
+    store — a separate ``BOT_FILE_SYNC`` declaration converges the source
+    bot's workspace onto this one, and that sync writes the package into the
+    dst ``skills-local`` directory the way a manual upload would. The
+    materialiser therefore does not fetch, does not upload, and does not read
+    the package bytes: it reverse-looks-up the source bot's ``ac_skill`` row
+    for ``name``/``description``/``digest`` and recomputes the dst workspace
+    path through the same ``SkillServiceFactory`` call the upload road takes,
+    then registers the dst ``ac_skill`` row referencing the already-written
+    package.
+    """
+
+    #: The source bot whose own local skill row supplies the description and
+    #: names the package the file-sync layer is converging onto this bot.
+    source_bot_id: str
+    #: The source bot's owner. A ``bot_id`` is not globally unique (the reserved
+    #: ``default`` bot has a row per account), so the reverse-lookup reads the
+    #: source row by ``(bot_id, owner_id)`` and not by ``bot_id`` alone.
+    source_owner_id: str
+
+
+@dataclass(frozen=True)
+class CenterSkillByName:
+    """Deprecated compatibility form for Genome mutation's name-based references.
+
+    Retained until Genome adopts explicit UUID/code references; remove this
+    form as part of that migration. The bot tracks the published Center version
+    (ADR 0002).
+    """
+
+
+@dataclass(frozen=True)
+class CenterSkillRef:
+    """An existing Center asset, selected by its stable UUID."""
+
+    skill_uuid: str
+
+
+@dataclass(frozen=True)
+class CenterSkillByCode:
+    """A public Center asset, prepared only during an actual Apply write."""
+
+    skill_code: str
+
+
+CenterSkill = CenterSkillRef | CenterSkillByCode
+
+
+@dataclass(frozen=True)
+class RepoSkillPath:
+    """A shared-repository skill, by its path in the repository."""
+
+    path: str
+
+    def __post_init__(self) -> None:
+        _require(bool(self.path), "a shared-repository skill needs a path")
+
+
+@dataclass(frozen=True)
+class DesiredSkill:
+    name: str
+    source: LocalSkillPackage | CenterSkillByName | CenterSkill | RepoSkillPath | BotSyncedLocalSkill
+    note: str | None = None
+
+    def __post_init__(self) -> None:
+        _require(bool(self.name), "a skill needs a name")
+
+    @property
+    def identity(self) -> str:
+        return self.name
+
+    @property
+    def origin(self) -> SkillOrigin:
+        if isinstance(self.source, (LocalSkillPackage, BotSyncedLocalSkill)):
+            return SkillOrigin.LOCAL
+        if isinstance(self.source, (CenterSkillByName, CenterSkillRef, CenterSkillByCode)):
+            return SkillOrigin.CENTER
+        return SkillOrigin.REPO
+
+
+def _check_resource_path(path: str, *, tree: bool) -> None:
+    refusal = resource_path_refusal(path, what="resource path")
+    _require(refusal is None, refusal[1] if refusal else "")
+    # The workspace root is the resources root; what may not be a resource is the protected set
+    # (``core/workspace/protected_entries``: identity files, the skills trees, the engine's state and
+    # configuration, dotfiles), which other constructs or the engine own.
+    protected = protected_entry_refusal(path)
+    _require(protected is None, protected or "")
+    if tree:
+        _require(path.endswith("/"), f"directory resource path {path!r} must end with '/'")
+    else:
+        _require(not path.endswith("/"), f"file resource path {path!r} must not end with '/'")
+
+
+@dataclass(frozen=True)
+class DesiredResourceFile:
+    """One workspace file under the resources root, e.g. ``DesiredResourceFile("data/faq.csv", ContentRef(…))``."""
+
+    #: Workspace-relative, root included, no trailing slash: ``"data/faq.csv"``, ``"data/kb/returns.md"``.
+    path: str
+    #: The file's bytes, in the content store.
+    content: ContentRef
+    #: Fetch provenance for the report; never affects the write.
+    note: str | None = None
+
+    def __post_init__(self) -> None:
+        _check_resource_path(self.path, tree=False)
+
+    @property
+    def identity(self) -> str:
+        return self.path
+
+
+@dataclass(frozen=True)
+class DesiredResourceTree:
+    """One directory under the resources root, e.g. ``DesiredResourceTree("data/kb/", ContentRef(…))``.
+
+    The materialiser writes every file of the tree under ``path``; the
+    directory owns its subtree, so no other entry may sit under it.
+    """
+
+    #: Workspace-relative, root included, trailing slash: ``"data/kb/"``.
+    path: str
+    #: The directory's files as one stored ``acm-tree-v1`` blob (``canonical_tree_bytes``): paths and bytes.
+    tree: ContentRef
+    #: Fetch provenance for the report; never affects the write.
+    note: str | None = None
+
+    def __post_init__(self) -> None:
+        _check_resource_path(self.path, tree=True)
+
+    @property
+    def identity(self) -> str:
+        return self.path
+
+
+DesiredResource = DesiredResourceFile | DesiredResourceTree
+
+
+@dataclass(frozen=True)
+class DesiredBotFileSync:
+    """A bot-to-bot workspace sync: one source bot's tree onto this bot's root.
+
+    Lives on the ``BOT_FILE_SYNC`` section, never on ``resources``: a
+    ``protocol: bot`` entry written under ``manifest.resources`` is
+    reclassified here by the compiler, because it converges through a per-engine
+    sync strategy rather than the content-store fetch→write chain every
+    ``DesiredResource`` rides. There is no ``ContentRef`` here — the sync builds
+    source/target workspace paths and moves bytes directly, never filing them in
+    the store, so this entry carries the addressing the sync needs and nothing
+    else.
+
+    ``path`` is the literal constant the copy serializer writes (``workspace/``);
+    a per-engine ``BotFileSyncPort`` resolves that to real host paths at sync
+    time. ``excludes`` is the same literal-relative-path list the operation
+    ledger carries, copied here so the materialiser reads one source of truth.
+    """
+
+    #: The source bot whose workspace is synced onto this one.
+    source_bot_id: str
+    #: The source bot's owner. A ``bot_id`` is not globally unique (the reserved
+    #: ``default`` bot has a row per account, and a shared / template id can
+    #: collide across owners), so the sync reads the source row by
+    #: ``(bot_id, owner_id)`` rather than by ``bot_id`` alone — a wrong owner
+    #: would converge the wrong account's workspace. Carried off the manifest's
+    #: ``protocol: bot`` source ``owner_id`` field.
+    source_owner_id: str
+    #: Workspace-relative root, trailing slash (a directory tree). A literal
+    #: constant the copy serializer writes; the sync resolves the host paths.
+    path: str
+    #: Literal relative paths the sync excludes (``normalize_build_ignore_path``
+    #: governance). Empty when the caller declared none.
+    excludes: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _check_resource_path(self.path, tree=True)
+
+    @property
+    def identity(self) -> str:
+        return self.path
+
+
+class McpTransport(StrEnum):
+    SSE = "SSE"
+    STREAMABLE_HTTP = "STREAMABLE_HTTP"
+
+
+class McpEndpointEnv(StrEnum):
+    PROD = "PROD"
+    PRE = "PRE"
+
+
+@dataclass(frozen=True)
+class McpHeader:
+    name: str
+    value: str
+
+    def __post_init__(self) -> None:
+        _require(bool(self.name), "an MCP header needs a name")
+
+
+@dataclass(frozen=True)
+class McpOverride:
+    """A bot's override of an MCP server's registered configuration.
+
+    Every member is optional **by design**: a bot overrides only what its
+    document says, and the rest stays the server's registered configuration.
+    So ``None`` on a member means "not overridden" and is a valid, common
+    value — not a missing input — which is why none of them is required.
+    """
+
+    #: ``None`` = the server's registered URL stays; a string replaces it.
+    url: str | None = None
+    #: ``None`` = headers not overridden; ``()`` = overridden to none (clears persisted headers).
+    headers: tuple[McpHeader, ...] | None = None
+    #: ``None`` = the registered endpoint environment stays.
+    endpoint_env: McpEndpointEnv | None = None
+    #: ``None`` = the registered transport stays.
+    transport: McpTransport | None = None
+
+    def __post_init__(self) -> None:
+        names = [header.name.lower() for header in self.headers or ()]
+        _require(len(names) == len(set(names)), "MCP header names are case-insensitive and must be unique")
+
+    def as_config(self) -> dict[str, Any]:
+        """The mapping the MCP ports take today (``url``, ``headers``, ``endpoint_env``, ``transport_protocol``)."""
+        config: dict[str, Any] = {}
+        if self.url is not None:
+            config["url"] = self.url
+        if self.headers is not None:
+            config["headers"] = {header.name: header.value for header in self.headers}
+        if self.endpoint_env is not None:
+            config["endpoint_env"] = self.endpoint_env.value
+        if self.transport is not None:
+            config["transport_protocol"] = self.transport.value
+        return config
+
+    @classmethod
+    def from_config(cls, config: Mapping[str, Any]) -> McpOverride:
+        """The typed override of a validated config mapping; unknown members are a compiler bug."""
+        unknown = set(config) - {"url", "headers", "endpoint_env", "transport_protocol"}
+        _require(not unknown, f"unknown MCP override members: {sorted(unknown)}")
+        headers = config.get("headers")
+        return cls(
+            url=config.get("url"),
+            headers=None if headers is None else tuple(McpHeader(str(n), str(v)) for n, v in headers.items()),
+            endpoint_env=McpEndpointEnv(config["endpoint_env"]) if "endpoint_env" in config else None,
+            transport=McpTransport(config["transport_protocol"]) if "transport_protocol" in config else None,
+        )
+
+
+@dataclass(frozen=True)
+class DesiredMcpServer:
+    server_code: str
+    # None is a complete-state declaration of no override (Genome); a
+    # Manifest may instead leave this independent configuration untouched.
+    override: McpConfigWriteIntent[McpOverride] = None
+
+    def __post_init__(self) -> None:
+        _require(bool(self.server_code), "an MCP server needs a server_code")
+
+    @property
+    def identity(self) -> str:
+        return self.server_code
+
+
+class UnpackKind(StrEnum):
+    ZIP = "zip"
+    TAR_GZ = "tar.gz"
+
+
+@dataclass(frozen=True)
+class DesiredCliTool:
+    """One command-line tool: its fetched bytes, and how the install shapes them.
+
+    ``pin`` is the declared digest when the document pinned one (OSS); ``None``
+    over git, where today's convergence key is deliberately absent so the tool
+    is re-installed on every apply. ``content`` is the fetched bytes either
+    way.
+    """
+
+    name: str
+    content: ContentRef
+    pin: str | None = None
+    subpath: str | None = None
+    unpack: UnpackKind | None = None
+    version: str | None = None
+    note: str | None = None
+    #: How the document named the source, echoed on the platform's row for audit; empty when it declared none.
+    declared_address: str = ""
+
+    def __post_init__(self) -> None:
+        _require(bool(self.name), "a CLI tool needs a name")
+        if self.pin is not None:
+            _require(bool(DIGEST_RE.match(self.pin)), f"not a content digest: {self.pin!r}")
+
+    @property
+    def identity(self) -> str:
+        return self.name
+
+
+@dataclass(frozen=True)
+class DesiredEngineConfig:
+    """The ``engine_config`` mapping; no materialiser applies it yet (G-4, #2858)."""
+
+    config: Mapping[str, Any]
+    identity: ClassVar[str] = Category.ENGINE_CONFIG.value
+
+    def __post_init__(self) -> None:
+        # A private, read-only copy: the frozen promise holds for the mapping too (it is not hashable).
+        object.__setattr__(self, "config", MappingProxyType(dict(self.config)))
+
+
+@dataclass(frozen=True)
+class DesiredSkillSet:
+    name: str
+    is_active: bool
+    skills: tuple[DesiredSkill, ...]
+    mcp: tuple[str, ...]
+    description: str | None = None
+
+    def __post_init__(self) -> None:
+        _require(bool(self.name) and self.name != "default", "a regular SkillSet needs a non-reserved name")
+        Declaration(self.skills)
+        _require(len(set(self.mcp)) == len(self.mcp), "duplicate MCP member in one SkillSet")
+
+    @property
+    def identity(self) -> str:
+        return self.name
+
+
+@dataclass(frozen=True)
+class DefaultSkillSetRef:
+    identity: ClassVar[str] = "default"
+
+
+@dataclass(frozen=True)
+class DesiredCapabilities:
+    skills: Declaration[DesiredSkill] | None = None
+    skill_sets: Declaration[DesiredSkillSet | DefaultSkillSetRef] | None = None
+    mcp: Declaration[DesiredMcpServer] | None = None
+    identity: ClassVar[str] = "capabilities"
+
+    def children(self) -> tuple[tuple[str, Declaration[Any] | None], ...]:
+        return (("skills", self.skills), ("skill_sets", self.skill_sets), ("mcp", self.mcp))
+
+
+@dataclass(frozen=True)
+class CapabilityDeclaration(Declaration[DesiredCapabilities]):
+    """One execution entry with the existing per-child report view."""
+
+    @classmethod
+    def from_target(cls, target: DesiredCapabilities) -> CapabilityDeclaration | None:
+        if all(child is None for _, child in target.children()):
+            return None
+        return cls((target,), cls._failures(target))
+
+    @staticmethod
+    def _failures(target: DesiredCapabilities) -> tuple[EntryFailure, ...]:
+        return tuple(
+            EntryFailure(f"{prefix}/{failure.identity}", failure.reason)
+            for prefix, child in target.children() if child is not None
+            for failure in child.failures
+        )
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        _require(len(self.entries) == 1, "capabilities needs exactly one aggregate entry")
+        target = self.entries[0]
+        _require(isinstance(target, DesiredCapabilities), "capabilities needs a DesiredCapabilities target")
+        _require(any(child is not None for _, child in target.children()), "capabilities has no participating scope")
+        _require(self.failures == self._failures(target), "capability failures must match child declarations")
+
+    @property
+    def identities(self) -> tuple[str, ...]:
+        return tuple(
+            f"{prefix}/{identity}"
+            for prefix, child in self.entries[0].children() if child is not None
+            for identity in child.identities
+        )
+
+
+@dataclass(frozen=True)
+class DesiredBotConfig:
+    """The ``bot_config`` mapping: per-kind configuration the bot carries.
+
+    A mapping-valued Category like ``DesiredEngineConfig`` — one entry holds the
+    whole ``bot_config`` mapping, keyed by sync kind (``render_screen``,
+    a future ``task_nav``, …) with each value that kind's entry list. The
+    ``BotConfigMaterialiser`` resolves the whole mapping, dispatching each kind
+    to a registered handler; the entry itself is untyped here (``Any``) because
+    each kind's entry shape is the handler's own, not the engine's — the same
+    reason the orchestration never inspects ``value``.
+    """
+
+    config: Mapping[str, Sequence[Any]]
+    identity: ClassVar[str] = Category.BOT_CONFIG.value
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "config", MappingProxyType({k: tuple(v) for k, v in self.config.items()}))
+
+
+@dataclass(frozen=True)
+class DesiredState:
+    """What a bot should hold, per construct; ``None`` = not declared."""
+
+    script: Declaration[DesiredScript] | None = None
+    identity: Declaration[DesiredIdentityFile] | None = None
+    resources: Declaration[DesiredResource] | None = None
+    skills: Declaration[DesiredSkill] | None = None
+    mcp: Declaration[DesiredMcpServer] | None = None
+    engine_config: Declaration[DesiredEngineConfig] | None = None
+    cli_tools: Declaration[DesiredCliTool] | None = None
+    capabilities: Declaration[DesiredCapabilities] | None = None
+    bot_file_sync: Declaration[DesiredBotFileSync] | None = None
+    bot_config: Declaration[DesiredBotConfig] | None = None
+
+    EMPTY: ClassVar[DesiredState]
+
+    def __post_init__(self) -> None:
+        if self.skills is not None or self.mcp is not None:
+            _require(self.capabilities is None, "cannot mix capabilities with legacy skills/mcp input")
+            object.__setattr__(self, "capabilities", CapabilityDeclaration.from_target(
+                DesiredCapabilities(skills=self.skills, mcp=self.mcp)
+            ))
+            object.__setattr__(self, "skills", None)
+            object.__setattr__(self, "mcp", None)
+        if self.capabilities is not None:
+            _require(isinstance(self.capabilities, CapabilityDeclaration), "capabilities needs CapabilityDeclaration")
+        if self.resources is not None:
+            _check_resource_layout(self.resources.entries)
+
+    def declaration(self, construct: Construct) -> Declaration[Any] | None:
+        """The declaration for one construct, or ``None`` when the state does not declare it."""
+        return getattr(self, _FIELD_BY_CONSTRUCT[construct])
+
+    @property
+    def declared(self) -> tuple[Construct, ...]:
+        return tuple(c for c, name in _FIELD_BY_CONSTRUCT.items() if getattr(self, name) is not None)
+
+    def only(self, constructs: Collection[Construct]) -> DesiredState:
+        """This state with every construct outside ``constructs`` undeclared — a creation half's view."""
+        return replace(
+            self, **{name: None for construct, name in _FIELD_BY_CONSTRUCT.items() if construct not in constructs}
+        )
+
+
+def _check_resource_layout(entries: tuple[DesiredResource, ...]) -> None:
+    """A directory entry owns its whole subtree, so nothing else may sit under it or share its name."""
+    trees = [entry.path for entry in entries if isinstance(entry, DesiredResourceTree)]
+    for entry in entries:
+        for tree in trees:
+            if entry.path != tree and (entry.path.startswith(tree) or entry.path + "/" == tree):
+                raise ValueError(f"resource path {entry.path!r} is nested under directory entry {tree!r}")
+
+
+_FIELD_BY_CONSTRUCT: dict[Construct, str] = {
+    Section.SCRIPT: "script",
+    Category.IDENTITY: "identity",
+    Category.RESOURCES: "resources",
+    Category.CAPABILITIES: "capabilities",
+    Category.ENGINE_CONFIG: "engine_config",
+    Category.CLI_TOOLS: "cli_tools",
+    Section.BOT_FILE_SYNC: "bot_file_sync",
+    Category.BOT_CONFIG: "bot_config",
+}
+
+DesiredState.EMPTY = DesiredState()

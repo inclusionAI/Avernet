@@ -64,7 +64,7 @@ async fn session_state_machine_contract_defaults_to_fail_closed() {
             participant_bindings: BTreeMap::new(),
             opening_message: None,
             input: Value::Null,
-            judge_available: false,
+            judge_available: false, caller_association: None,
         })
         .await
         .expect_err("an unconfigured implementation must not start a run");

@@ -29,6 +29,7 @@ from secbaas.community.adapters.web.routers.open_api.model import (
     MessageResultResponseData,
     StreamMessageRequest,
 )
+from secbaas.community.adapters.web.session_id import extract_response_session_id
 from secbaas.community.api.api_gateway import ResourceKeyRepository
 from secbaas.community.api.bot_runtime import (
     BotChatContext,
@@ -330,12 +331,9 @@ async def get_message_result(
             extra=extra,
         )
 
-    if message_info.metadata and "session_id" in message_info.metadata:
-        session_id = message_info.metadata.get("session_id")
-    elif message_info.result_extra and "session_id" in message_info.result_extra:
-        session_id = message_info.result_extra.get("session_id")
-    else:
-        session_id = ""
+    session_id = extract_response_session_id(
+        message_info.metadata, message_info.result_extra
+    )
 
     logger.info(
         f"get_message_result success: message_id={message_id}, status={message_info.status}"

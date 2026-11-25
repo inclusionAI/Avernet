@@ -95,6 +95,7 @@ DeliveryStatusView:
       type: string
       enum:
         - delivery_provider_headers_unsupported
+        - delivery_target_unavailable
     delivery_id:
       type: string
       minLength: 1

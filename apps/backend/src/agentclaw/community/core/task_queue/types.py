@@ -184,3 +184,10 @@ class Fail:
 
 #: A handler returns one of these to drive the task's next transition.
 TaskOutcome = Union[Complete, Reschedule, Retry, Fail]
+
+
+class ClaimOutcome(NamedTuple):
+    """One claim scan: the rows this worker won, and the rows the scan retired ``TIMED_OUT`` on the way."""
+
+    won: list[TaskRecord]
+    retired: list[TaskRecord]

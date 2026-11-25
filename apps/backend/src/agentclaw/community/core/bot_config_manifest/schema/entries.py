@@ -15,10 +15,14 @@ two copies of one grammar drift, and the document is the one users read.
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 from urllib.parse import urlsplit
 
-from agentclaw.community.core.bot_config_manifest.capabilities import (
-    ManifestCategory,
+from agentclaw.community.core.workspace.protected_entries import protected_entry_refusal
+from agentclaw.community.core.apply_engine.paths import resource_path_refusal
+from agentclaw.community.core.apply_engine.identity_types import RESERVED_IDENTITY_FILES, legal_identity_types
+from agentclaw.community.core.apply_engine.capabilities import (
+    Category,
 )
 from agentclaw.community.core.bot_config_manifest.schema._support import (
     Context,
@@ -34,19 +38,17 @@ from agentclaw.community.core.bot_config_manifest.schema.sources import (
     SourceDecl,
     parse_source,
 )
-from agentclaw.community.core.bot_config_manifest.support_matrix import (
+from agentclaw.community.core.apply_engine.support_matrix import (
     ARCHIVE_FIELDS,
     SourceKind,
     archive_field_refusal,
     digest_required,
     refusal_for,
 )
-
-#: Engine-generated runtime state. Apply never writes them and never removes
-#: them (work-items §3.2), so a document declaring one would be accepted and
-#: then never converge. Refused at write time instead, which is what keeps
-#: "accepted" and "appliable" the same set.
-RESERVED_IDENTITY_FILES: frozenset[str] = frozenset({"MEMORY.md", "IDENTITY.md"})
+from agentclaw.community.kernel.build_ignore import (
+    BuildIgnoreError,
+    normalize_build_ignore_path,
+)
 
 #: ``skip`` is gone. Under per-entry diffing it meant "leave this one alone";
 #: under category overwrite (work-items §3.2) it would mean "delete this one" —
@@ -59,7 +61,7 @@ VALID_UNPACK: frozenset[str] = frozenset({"zip", "tar.gz"})
 
 #: Which (category, protocol) combinations this build accepts is no longer
 #: written here at all: it is
-#: :data:`~agentclaw.community.core.bot_config_manifest.support_matrix.MATRIX`,
+#: :data:`~agentclaw.community.core.apply_engine.support_matrix.MATRIX`,
 #: one table that this validator and the capabilities endpoint both read. The
 #: per-category narrowing that used to live at this spot was the defect, not the
 #: rule — it could not be enumerated, published, or tested cell by cell.
@@ -75,14 +77,14 @@ _COMMON_SOURCE_KEYS: frozenset[str] = frozenset(
 #: Every key a category's entry may carry. Closed: an unknown key is refused
 #: rather than ignored, because an ignored key is a caller believing they
 #: configured something.
-CATEGORY_ENTRY_KEYS: dict[ManifestCategory, frozenset[str]] = {
-    ManifestCategory.RESOURCES: _COMMON_SOURCE_KEYS
-    | {"path", "unpack", "strip_components"},
-    ManifestCategory.SKILLS: _COMMON_SOURCE_KEYS | {"name", "unpack"},
-    ManifestCategory.IDENTITY: _COMMON_SOURCE_KEYS | {"type"},
-    ManifestCategory.CLI_TOOLS: _COMMON_SOURCE_KEYS | {"name", "version", "unpack"},
+CATEGORY_ENTRY_KEYS: dict[Category, frozenset[str]] = {
+    Category.RESOURCES: _COMMON_SOURCE_KEYS
+    | {"path", "unpack", "strip_components", "excludes"},
+    Category.SKILLS: _COMMON_SOURCE_KEYS | {"name", "unpack", "origin"},
+    Category.IDENTITY: _COMMON_SOURCE_KEYS | {"type"},
+    Category.CLI_TOOLS: _COMMON_SOURCE_KEYS | {"name", "version", "unpack"},
     # A registry reference with an optional Bot-scoped connection override.
-    ManifestCategory.MCP: frozenset({"server_code", "config"}),
+    Category.MCP: frozenset({"server_code", "config"}),
 }
 
 _MCP_CONFIG_KEYS = frozenset({"url", "headers", "endpoint_env", "transport_protocol"})
@@ -95,28 +97,8 @@ _MAX_MCP_HEADER_VALUE_CHARS = 2000
 _SOURCE_SELECTORS = ("from", "source", "content")
 
 
-def legal_identity_types(engine_type: str) -> frozenset[str]:
-    """The identity files this engine accepts.
-
-    Imported lazily, and that is not style: ``core/services/identity.py`` pulls
-    in the device dispatcher and a DI module at import time, so a module-level
-    import would drag the injector into a pure validator and close a cycle. The
-    constants stay defined there — one definition, per that module's own
-    docstring — and ``harness/services/bot_profile.py`` reaches them the same
-    way for the same reason.
-    """
-    from agentclaw.community.core.services.identity import (
-        CLAUDE_CODE_IDENTITY_FILES,
-        VALID_IDENTITY_FILES,
-    )
-
-    if engine_type == "claude_code":
-        return frozenset(CLAUDE_CODE_IDENTITY_FILES)
-    return frozenset(VALID_IDENTITY_FILES)
-
-
 def check_entry_keys(
-    ctx: Context, location: str, entry: dict[str, Any], category: ManifestCategory
+    ctx: Context, location: str, entry: dict[str, Any], category: Category
 ) -> None:
     """Refuse any key the category does not define."""
     allowed = CATEGORY_ENTRY_KEYS[category]
@@ -139,7 +121,7 @@ def resolve_source(
     ctx: Context,
     location: str,
     entry: dict[str, Any],
-    category: ManifestCategory,
+    category: Category,
 ) -> SourceDecl | None:
     """Settle which source an entry uses, and refuse the illegal combinations.
 
@@ -178,7 +160,7 @@ def resolve_source(
       has none, and a git ref's commit SHA *is* its digest (§2.2), so writing
       one there is a second, weaker pin that can disagree with the first.
     * **the (category, protocol) cell must be open.** Asked of
-      :data:`~agentclaw.community.core.bot_config_manifest.support_matrix.MATRIX`
+      :data:`~agentclaw.community.core.apply_engine.support_matrix.MATRIX`
       — the same table ``GET …/capabilities`` publishes — so a refusal here and
       the answer a caller reads before writing are the same string, and the
       combination is refused at ``PUT`` rather than at apply.
@@ -557,7 +539,7 @@ def validate_mcp_entry(ctx: Context, location: str, entry: dict[str, Any]) -> No
     bot type alone so that W13 can run it before a bot record exists. A registry
     lookup would need a tenant-scoped service that leg does not have.
     """
-    check_entry_keys(ctx, location, entry, ManifestCategory.MCP)
+    check_entry_keys(ctx, location, entry, Category.MCP)
     server_code = entry.get("server_code")
     if not isinstance(server_code, str) or not server_code:
         ctx.add(
@@ -677,11 +659,26 @@ def validate_resource_entry(
     ctx: Context, location: str, entry: dict[str, Any]
 ) -> str | None:
     """A workspace resource. Returns its ``path`` when the path is usable."""
-    check_entry_keys(ctx, location, entry, ManifestCategory.RESOURCES)
+    check_entry_keys(ctx, location, entry, Category.RESOURCES)
     path = entry.get("path")
-    usable = check_relative_path(ctx, f"{location}.path", path, what="path")
+    # The engine writes this path, so it asks the engine's own rule (the
+    # shared relative-path rule plus normalisation): what passes here never
+    # fails the desired-state model the compiler builds from it.
+    refusal = resource_path_refusal(path, what="path")
+    usable = refusal is None
+    if refusal is not None:
+        ctx.add(f"{location}.path", refusal[0], refusal[1])
+    protected = protected_entry_refusal(str(path)) if usable else None
+    if protected is not None:
+        # The workspace root is the resources root: converging resources
+        # clears it and writes the declared entries back. The protected
+        # entries (``core/workspace/protected_entries``) belong to other
+        # constructs or to the engine, so a path naming one is refused here
+        # rather than written and never converged.
+        ctx.add(f"{location}.path", "resources_protected_entry", protected)
+        usable = False
     is_directory = isinstance(path, str) and path.endswith("/")
-    source = resolve_source(ctx, location, entry, ManifestCategory.RESOURCES)
+    source = resolve_source(ctx, location, entry, Category.RESOURCES)
     # Git carries directory structure natively, so a tree needs no packaging
     # (schema §2.2); only an object store does, because one HTTPS GET fetches
     # one object and a tree has to travel inside it.
@@ -706,15 +703,96 @@ def validate_resource_entry(
             "over 'protocol: git' the tree arrives as a tree and no 'unpack' "
             "is needed",
         )
+    _check_resource_excludes(ctx, location, entry, source=source, is_directory=is_directory)
     return path if usable and isinstance(path, str) else None
 
 
+def _check_resource_excludes(
+    ctx: Context,
+    location: str,
+    entry: dict[str, Any],
+    *,
+    source: SourceDecl | None,
+    is_directory: bool,
+) -> None:
+    """``excludes`` — literal relative paths, valid only on a bot-source tree.
+
+    ``excludes`` is bot copy's file-sync filter: the manifest's single source
+    of truth for which workspace entries the sync skips. It rides the
+    ``protocol: bot`` source because that is the only protocol that moves a
+    workspace tree wholesale; a git/oss/content source addresses one object
+    or tree exactly, so an excludes list there would configure nothing — and a
+    field that looks like it configures something and does nothing is what
+    this whole module exists to remove, so it is refused elsewhere rather than
+    ignored.
+
+    Each rule is a literal relative path (the same vocabulary
+    ``normalize_build_ignore_path`` governs for builds: not a glob, not
+    gitignore syntax, no trailing ``/``) and is reported under the same code
+    the build ignore path uses, so a caller hits one vocabulary across both.
+    """
+    if "excludes" not in entry:
+        return
+    if source is None or source.protocol is not SourceKind.BOT:
+        ctx.add(
+            f"{location}.excludes",
+            "excludes_not_valid_for_source",
+            "'excludes' filters a workspace sync and is valid only on a "
+            "'protocol: bot' resource entry; a git/oss/content source addresses "
+            "its content exactly, so there is nothing to exclude",
+        )
+        return
+    if not is_directory:
+        ctx.add(
+            f"{location}.excludes",
+            "excludes_on_file_entry",
+            "'excludes' applies to a directory entry; a single-file 'protocol: "
+            "bot' entry is its own object and has no members to exclude — declare "
+            "the file's path exactly instead",
+        )
+        return
+    excludes = entry["excludes"]
+    if not isinstance(excludes, list) or not excludes:
+        ctx.add(
+            f"{location}.excludes",
+            "invalid_excludes",
+            "'excludes' must be a non-empty list of relative paths",
+        )
+        return
+    for index, rule in enumerate(excludes):
+        if not isinstance(rule, str):
+            ctx.add(
+                f"{location}.excludes[{index}]",
+                "invalid_excludes",
+                "an excludes rule must be a relative path string",
+            )
+            continue
+        try:
+            normalize_build_ignore_path(rule)
+        except BuildIgnoreError:
+            # Reuse the build-ignore code so a caller sees one vocabulary;
+            # the message names the field as an excludes rule rather than a
+            # build-ignore path, since the user-facing noun is different.
+            ctx.add(
+                f"{location}.excludes[{index}]",
+                "invalid_ignore_path",
+                f"excludes rule {rule!r} is not a literal relative path — no "
+                "globs, no gitignore syntax, no leading '/' or './', no trailing '/'",
+            )
+
+
 def validate_skill_entry(ctx: Context, location: str, entry: dict[str, Any]) -> str | None:
-    """A local skill. Returns its ``name`` when the name is usable."""
-    check_entry_keys(ctx, location, entry, ManifestCategory.SKILLS)
+    """A Local package or stable shared reference; return the usable runtime name."""
+    origin = entry.get("origin", "local")
     name = entry.get("name")
+    if origin != "local":
+        return _validate_shared_skill(ctx, location, entry, origin)
+    verdict = ctx.capabilities.skill_reference("package")
+    if not verdict.supported:
+        ctx.add(location, "unsupported_skill_reference", verdict.reason)
+    check_entry_keys(ctx, location, entry, Category.SKILLS)
     usable = check_name(ctx, f"{location}.name", name, what="a skill name")
-    source = resolve_source(ctx, location, entry, ManifestCategory.SKILLS)
+    source = resolve_source(ctx, location, entry, Category.SKILLS)
     check_unpack(ctx, location, entry, source=source, archive_expected=True)
     # A skills entry over ``oss`` always unpacks — a skill IS a package — so
     # ``subpath`` always has an archive to select within.
@@ -734,7 +812,7 @@ def validate_identity_entry(
     ctx: Context, location: str, entry: dict[str, Any], *, engine_type: str
 ) -> None:
     """An identity file, checked against this engine's own legal set."""
-    check_entry_keys(ctx, location, entry, ManifestCategory.IDENTITY)
+    check_entry_keys(ctx, location, entry, Category.IDENTITY)
     file_type = entry.get("type")
     legal = legal_identity_types(engine_type)
     if not isinstance(file_type, str) or file_type not in legal:
@@ -755,7 +833,7 @@ def validate_identity_entry(
             "writes it and never removes it, so a manifest declaring it could "
             "never converge",
         )
-    source = resolve_source(ctx, location, entry, ManifestCategory.IDENTITY)
+    source = resolve_source(ctx, location, entry, Category.IDENTITY)
     # An identity file is one text body and is never an archive, so on ``oss``
     # there is nothing a ``subpath`` could select within.
     check_source_subpath(
@@ -777,10 +855,10 @@ def validate_cli_tool_entry(
     implemented here either. What remains is the ordinary source machinery plus
     the two rules below.
     """
-    check_entry_keys(ctx, location, entry, ManifestCategory.CLI_TOOLS)
+    check_entry_keys(ctx, location, entry, Category.CLI_TOOLS)
     name = entry.get("name")
     name_ok = check_name(ctx, f"{location}.name", name, what="a tool name")
-    source = resolve_source(ctx, location, entry, ManifestCategory.CLI_TOOLS)
+    source = resolve_source(ctx, location, entry, Category.CLI_TOOLS)
     check_unpack(
         ctx, location, entry, source=source, archive_expected="unpack" in entry
     )
@@ -799,3 +877,40 @@ def validate_cli_tool_entry(
     # protocol, reaching a git source by name and writing one inline are the
     # same thing, because they are.
     return name if name_ok and isinstance(name, str) else None
+
+
+def _validate_shared_skill(ctx: Context, location: str, entry: dict[str, Any], origin: Any) -> str | None:
+    name = entry.get("name")
+    usable = check_name(ctx, f"{location}.name", name, what="a skill name")
+    if origin == "repo":
+        reference = "repo_path"
+    elif origin == "center":
+        choices = [key for key in ("skill_uuid", "skill_code") if key in entry]
+        if len(choices) != 1:
+            ctx.add(location, "invalid_skill_reference", "center requires exactly one of skill_uuid or skill_code")
+        reference = choices[0] if choices else "skill_uuid"
+    else:
+        ctx.add(f"{location}.origin", "invalid_origin", "origin must be local, repo or center")
+        return name if usable else None
+    allowed = {"name", "origin", reference}
+    for key in entry.keys() - allowed:
+        if key != "apply_once":
+            ctx.add(f"{location}.{key}", "unknown_field", f"unknown field {key!r} for {origin} skill")
+    verdict = ctx.capabilities.skill_reference(reference)
+    if not verdict.supported:
+        ctx.add(location, "unsupported_skill_reference", verdict.reason)
+    value = entry.get(reference)
+    if reference == "repo_path":
+        refusal = resource_path_refusal(value, what="repo_path")
+        if refusal:
+            ctx.add(f"{location}.{reference}", refusal[0], refusal[1])
+    elif reference == "skill_uuid":
+        try:
+            if not isinstance(value, str):
+                raise ValueError("not a string")
+            UUID(value)
+        except ValueError:
+            ctx.add(f"{location}.{reference}", "invalid_skill_reference", "skill_uuid must be a UUID")
+    elif not isinstance(value, str) or not value.strip() or value != value.strip():
+        ctx.add(f"{location}.{reference}", "invalid_skill_reference", "skill_code must be a non-empty identifier")
+    return name if usable and isinstance(name, str) else None

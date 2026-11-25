@@ -17,7 +17,7 @@ baas_session_id 通过 binding_info.baas_session_id 传递。
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -37,6 +37,7 @@ from secbaas.community.api.bot_runtime import (
     NoDevicesFoundError,
     SessionInfo,
     SessionNotFoundError,
+    SessionRuntimeStatus,
     WsConnectionInfo,
 )
 from secbaas.community.api.sse import StreamChunk
@@ -404,7 +405,12 @@ class BaasBotService(BotService):
             if default_tag:
                 headers["X-Agentclaw-Default-Tag"] = str(default_tag)
 
-        client = await self._client_pool.get(pool_key, conn_info.ws_url, headers)
+        client = await self._client_pool.get(
+            pool_key,
+            conn_info.ws_url,
+            headers,
+            token_minter=self._token_minter_for(binding_info, session_id, context),
+        )
 
         try:
             auth_token = context.build_auth_token() if context else None
@@ -501,7 +507,12 @@ class BaasBotService(BotService):
             if default_tag:
                 headers["X-Agentclaw-Default-Tag"] = str(default_tag)
 
-        client = await self._client_pool.get(pool_key, conn_info.ws_url, headers)
+        client = await self._client_pool.get(
+            pool_key,
+            conn_info.ws_url,
+            headers,
+            token_minter=self._token_minter_for(binding_info, session_id, context),
+        )
 
         auth_token = context.build_auth_token() if context else None
         app_id = context.app_id if context else None
@@ -586,7 +597,12 @@ class BaasBotService(BotService):
         pool_key = conn_info.target
         headers = {"x-proxypass-token": conn_info.token}
 
-        client = await self._client_pool.get(pool_key, conn_info.ws_url, headers)
+        client = await self._client_pool.get(
+            pool_key,
+            conn_info.ws_url,
+            headers,
+            token_minter=self._token_minter_for(binding_info, session_id, context),
+        )
 
         try:
             auth_token = context.build_auth_token() if context else None
@@ -666,6 +682,32 @@ class BaasBotService(BotService):
                 f"Failed to get messages: {safe_client_msg(e)}"
             ) from e
 
+    async def get_session_runtime_status(
+        self,
+        *,
+        session_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+    ) -> SessionRuntimeStatus:
+        """Observe an existing run without creating a session or sending a message."""
+        if binding_info.engine_type != "openclaw":
+            return SessionRuntimeStatus(
+                session_id=session_id,
+                found=False,
+                reason="UNSUPPORTED_ENGINE",
+            )
+        try:
+            conn_info = await self._resolve_ws_connection_for_binding(
+                binding_info,
+                session_id=session_id,
+                context=context,
+            )
+            client = self._create_session_client(conn_info, binding_info.engine_type)
+            async with client:
+                return await client.get_session_runtime_status(session_id)
+        except Exception as exc:
+            raise BotServiceError("Runtime observation request failed") from exc
+
     async def get_session(
         self,
         *,
@@ -691,7 +733,7 @@ class BaasBotService(BotService):
         """
         try:
             conn_info = await self._resolve_ws_connection_for_binding(
-                binding_info, context
+                binding_info, session_id=session_id, context=context
             )
         except Exception as e:
             logger.warning("Failed to resolve WS connection: %s", e)
@@ -815,7 +857,11 @@ class BaasBotService(BotService):
 
         try:
             client = await self._client_pool.get(
-                pool_key, conn_info.ws_url, headers, session_key=session_id
+                pool_key,
+                conn_info.ws_url,
+                headers,
+                session_key=session_id,
+                token_minter=self._token_minter_for(binding_info, session_id, context),
             )
 
             # 注意：chat.abort 的 run_id 是引擎侧 run 标识，与 baas_bot_run.run_id
@@ -903,6 +949,28 @@ class BaasBotService(BotService):
             tenant=tenant,
             device_affinity=session_consistency_key,
         )
+
+    def _token_minter_for(
+        self,
+        binding_info: BotBindingInfo,
+        session_id: str | None = None,
+        context: BotChatContext | None = None,
+    ) -> Callable[[], Awaitable[str]]:
+        """后台交互答复派发的按需续签闭包（评审 P2）。
+
+        绑定本服务真实的签发入口（_resolve_ws_connection_for_binding 的
+        resolve→token 管线）——不做任何池 key 形态解析；失败由调用方回退
+        last-known token。直连/无代理凭证场景 resolve 返回空串，客户端
+        空值守卫保持既有值。
+        """
+
+        async def _remint() -> str:
+            fresh = await self._resolve_ws_connection_for_binding(
+                binding_info, session_id, context
+            )
+            return fresh.token
+
+        return _remint
 
     async def _resolve_ws_connection_for_binding(
         self,

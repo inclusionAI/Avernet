@@ -11,6 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+bcs-network-tracing.workspace = true
 bcs-observability = { workspace = true }
 async-trait     = { workspace = true }
 bcs-domain      = { workspace = true }
@@ -29,7 +30,9 @@ opentelemetry-http = { workspace = true }
 uuid            = { workspace = true }
 
 [dev-dependencies]
+tokio              = { workspace = true, features = ["test-util"] }
 axum               = { workspace = true }
 tower              = { workspace = true, features = ["util"] }
 tracing-subscriber = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
 opentelemetry_sdk  = { workspace = true, features = ["testing"] }

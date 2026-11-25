@@ -63,6 +63,11 @@ class CallerMcpSyncError(InternalError):
         super().__init__("CALLER_MCP_SYNC_FAILED")
 
 
+class CallerBcsSyncError(InternalError):
+    def __init__(self) -> None:
+        super().__init__("CALLER_BCS_SYNC_FAILED")
+
+
 class CallerCliSyncError(InternalError):
     def __init__(self) -> None:
         super().__init__("CALLER_CLI_SYNC_FAILED")
@@ -111,6 +116,7 @@ class CliCallTypeUpdateResult:
 
 @dataclass(frozen=True, slots=True)
 class CallerIamTokenContext:
+    entity_id: str
     bot_id: str
     owner_id: str | None
     stage: CallerIdentityStage
@@ -118,6 +124,7 @@ class CallerIamTokenContext:
     bot_call_type: McpCallType
     should_exchange_caller_token: bool
     binding_id: int | None = None
+    shared_teclaw_runtime: bool = False
 
 
 @dataclass(frozen=True)
@@ -141,6 +148,7 @@ class CallerContext:
 
 __all__ = [
     "CALLER_IDENTITY_CAPABILITY",
+    "CallerBcsSyncError",
     "CallerCallTypeInvalidError",
     "CallerCliNotFoundError",
     "CallerCliSyncError",
@@ -170,3 +178,10 @@ class CallerIdentityLockMismatchError(RuntimeError):
 
 class CallerIdentityEngineChangedError(RuntimeError):
     """The Bot active engine changed while updating its MCP identity."""
+
+
+class CallerExpiryCorrectionError(Exception):
+    """Safe machine-readable reason an administrative expiry correction was refused."""
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)

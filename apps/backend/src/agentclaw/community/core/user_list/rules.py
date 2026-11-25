@@ -27,6 +27,15 @@ def department_path_candidates(raw_path: str) -> tuple[str, ...]:
     return tuple("/".join(parts[:index]) for index in range(1, len(parts) + 1))
 
 
+def department_name_candidates(raw_name: str) -> tuple[str, ...]:
+    """Return complete root-to-department name prefixes, never suffixes."""
+    name = raw_name.strip()
+    parts = name.split("-")
+    if not name or len(name) > 1024 or "*" in name or any(not part.strip() for part in parts):
+        raise ValueError("Invalid department name")
+    return tuple("-".join(parts[:index]) for index in range(1, len(parts) + 1))
+
+
 def validate_membership(entity_id: str, subject_type: str, bot_type: str) -> str:
     if subject_type not in SUBJECT_TYPES or bot_type not in RULE_BOT_TYPES:
         raise ValueError("Invalid membership subject or Bot type")

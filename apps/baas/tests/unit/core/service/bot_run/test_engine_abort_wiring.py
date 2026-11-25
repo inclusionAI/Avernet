@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
 
@@ -17,10 +17,7 @@ from secbaas.community.api.bot_runtime import (
     BotChatContext,
     WsConnectionInfo,
 )
-from secbaas.community.core.service.bot_run._async_chat_client import (
-    AsyncChatClient,
-    NotConnectedError,
-)
+from secbaas.community.core.service.bot_run._async_chat_client import NotConnectedError
 from secbaas.community.core.service.bot_run._baas_service import (
     BaasBotService,
     BaasBotServiceConfig,
@@ -34,6 +31,7 @@ from secbaas.community.core.service.bot_run._engine_adapter_registry import (
 )
 from secbaas.community.plugins.eval_env.stub import NoopEvalConsistencyCheck
 from secbaas.community.spi.secret import SecretStorePlugin
+from tests.utils.chat_transport import make_chat_client
 
 
 @pytest.fixture
@@ -63,15 +61,15 @@ def _conn_info() -> WsConnectionInfo:
 
 async def test_async_chat_client_chat_abort_delegates_to_ws_client():
     """AsyncChatClient.chat_abort delegates to BotWebSocketClient.chat_abort."""
-    client = AsyncChatClient(uri="wss://example.com/ws")
-    client._client = MagicMock()
-    client._client.connected = True
-    client._client.chat_abort = AsyncMock(return_value={"ok": True})
+    client = make_chat_client(uri="wss://example.com/ws")
+    client._chat_transport._client = MagicMock()
+    client._chat_transport._client.connected = True
+    client._chat_transport._client.chat_abort = AsyncMock(return_value={"ok": True})
 
     result = await client.chat_abort(session_key="sess-1", run_id="run-1")
 
     assert result == {"ok": True}
-    client._client.chat_abort.assert_awaited_once_with(
+    client._chat_transport._client.chat_abort.assert_awaited_once_with(
         session_key="sess-1",
         run_id="run-1",
     )
@@ -79,7 +77,7 @@ async def test_async_chat_client_chat_abort_delegates_to_ws_client():
 
 async def test_async_chat_client_chat_abort_raises_when_not_connected():
     """AsyncChatClient.chat_abort raises NotConnectedError when not connected."""
-    client = AsyncChatClient(uri="wss://example.com/ws")
+    client = make_chat_client(uri="wss://example.com/ws")
 
     with pytest.raises(NotConnectedError, match="Not connected"):
         await client.chat_abort(session_key="sess-1")
@@ -115,6 +113,7 @@ async def test_baas_bot_service_abort_sends_chat_abort(binding_info: BotBindingI
         "wss://proxy/proxypass/target/api/openclaw/ws",
         {"x-proxypass-token": "token-1"},
         session_key="sess-1",
+        token_minter=ANY,
     )
     ws_client.chat_abort.assert_awaited_once_with(
         session_key="sess-1",
@@ -248,6 +247,7 @@ async def test_claw_bot_service_abort_sends_chat_abort(binding_info: BotBindingI
         "wss://proxy/proxypass/ARCA_sandbox-1:20003/api/openclaw/ws",
         {"x-proxypass-token": "test-token"},
         session_key="sess-1",
+        token_minter=ANY,
     )
     ws_client.chat_abort.assert_awaited_once_with(
         session_key="sess-1",

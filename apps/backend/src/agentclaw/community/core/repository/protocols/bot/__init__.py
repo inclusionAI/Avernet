@@ -26,6 +26,9 @@ from agentclaw.community.core.repository.protocols.bot.config_manifest_apply imp
 from agentclaw.community.core.repository.protocols.bot.friend import (
     BotFriendRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.bot.manager_sync import (
+    ManagerSyncReadRepository,
+)
 from agentclaw.community.core.repository.protocols.bot.genome import (
     GenomePatchRepositoryProtocol,
     GenomePromotionRepositoryProtocol,
@@ -59,7 +62,10 @@ from agentclaw.community.core.repository.protocols.bot.user_app_grant import (
     UserAppGrantRepositoryProtocol,
 )
 
+from .recycle import BotRecycleRepositoryProtocol
+
 __all__ = [
+    "BotRecycleRepositoryProtocol",
     "BotAppGrantRepositoryProtocol",
     "BotConfigManifestApplyLockRepositoryProtocol",
     "BotConfigManifestApplyRepositoryProtocol",
@@ -79,6 +85,7 @@ __all__ = [
     "GenomePromotionRepositoryProtocol",
     "GenomeRefRepositoryProtocol",
     "GenomeRevisionRepositoryProtocol",
+    "ManagerSyncReadRepository",
     "ContentStoreRepositoryProtocol",
     "RenderScreenRepository",
     "SourceCredentialRepositoryProtocol",

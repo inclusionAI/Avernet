@@ -3,10 +3,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_fuse_client::{FuseClient, RecommendWorkersRequest};
+use bcs_fuse_client::{FuseClient, RecommendWorkerFilters, RecommendWorkersRequest};
 use bcs_service_api::core::{
     WorkerProfile, WorkerProfileCoreService, WorkerRecommendCommand, WorkerRecommendResult,
-    WorkerRecommendation,
+    WorkerRecommendation, WorkerRecommendationScope,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
 
@@ -27,12 +27,22 @@ impl WorkerProfileCoreService for FuseWorkerProfileService {
         &self,
         command: WorkerRecommendCommand,
     ) -> ServiceResult<WorkerRecommendResult> {
+        let filters = match command.scope {
+            WorkerRecommendationScope::LegacyDefault => None,
+            WorkerRecommendationScope::AllVisibilities => Some(RecommendWorkerFilters {
+                availability: ["public", "protected", "private"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+            }),
+        };
         let (response, raw_response) = self
             .client
             .recommend_workers(RecommendWorkersRequest {
                 question: command.query,
                 top_k: command.top_k,
                 min_score: command.min_score,
+                filters,
             })
             .await
             .map_err(|error| {

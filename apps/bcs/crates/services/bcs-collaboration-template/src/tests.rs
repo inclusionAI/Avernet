@@ -44,6 +44,60 @@ fn write_template(
 }
 
 #[tokio::test]
+async fn coverage_template_repo_surfaces_registry_io_and_cached_file_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fs::write(root.join("registry.yaml"), "templates: [broken").unwrap();
+    let repo = FileCollaborationTemplateRepo::new(root);
+    assert!(matches!(repo.list_entries().await, Err(ServiceError::InternalError(message)) if message.contains("registry") && message.contains("invalid")));
+    fs::remove_file(root.join("registry.yaml")).unwrap();
+    fs::create_dir(root.join("registry.yaml")).unwrap();
+    assert!(matches!(repo.list_entries().await, Err(ServiceError::IoError(_))));
+    fs::remove_dir(root.join("registry.yaml")).unwrap();
+    write_template(root, "en-US", "valid", MINIMAL_TEMPLATE_YAML).unwrap();
+    fs::write(root.join("ignored.txt"), "ignored").unwrap();
+    fs::create_dir(root.join("invalid_language!")).unwrap();
+    fs::create_dir(root.join("en-US/nested.yaml")).unwrap();
+    fs::write(root.join("en-US/bad!.yaml"), MINIMAL_TEMPLATE_YAML).unwrap();
+    fs::write(root.join("en-US/ignored.txt"), "ignored").unwrap();
+    assert_eq!(repo.list_entries().await.unwrap().iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["valid"]);
+    assert_eq!(repo.available_languages("missing").await.unwrap(), Vec::<String>::new());
+    fs::remove_file(root.join("en-US/valid.yaml")).unwrap();
+    assert!(matches!(repo.get_raw_yaml("valid", "en-US").await, Err(ServiceError::IoError(_))));
+    assert!(repo.get_raw_yaml("missing", "en-US").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn coverage_template_cache_poison_and_blocking_panic_become_service_errors() {
+    let repo = FileCollaborationTemplateRepo::new("unused");
+    let cache = repo.index_cache.clone();
+    assert!(std::thread::spawn(move || { let _guard = cache.write().unwrap(); panic!("poison fixture"); }).join().is_err());
+    assert!(matches!(repo.supported_languages().await, Err(ServiceError::InternalError(message)) if message.contains("cache poisoned")));
+    let failed = spawn_blocking_service::<(), _>(|| panic!("blocking fixture failure")).await;
+    assert!(matches!(failed, Err(ServiceError::InternalError(message)) if message.contains("blocking task failed")));
+}
+
+#[tokio::test]
+async fn coverage_template_language_negotiation_and_input_errors_are_explicit() {
+    let dir = tempfile::tempdir().unwrap();
+    write_template(dir.path(), "en-US", "valid", MINIMAL_TEMPLATE_YAML).unwrap();
+    let service = CollaborationTemplateServiceImpl::new(Arc::new(FileCollaborationTemplateRepo::new(dir.path())), "en-US");
+    let invalid_tags = service.list_templates(ListCollaborationTemplatesQuery { tags: vec!["bad/tag".into()], ..Default::default() }).await;
+    assert!(matches!(invalid_tags, Err(CollaborationTemplateError::InvalidTags(tag)) if tag == "bad/tag"));
+    let invalid_lang = service.list_templates(ListCollaborationTemplatesQuery { requested_language: Some("../en".into()), ..Default::default() }).await;
+    assert!(matches!(invalid_lang, Err(CollaborationTemplateError::InvalidLanguage(lang)) if lang == "../en"));
+    let listed = service.list_templates(ListCollaborationTemplatesQuery {
+        accept_language: Some(" , *, invalid!, fr;q=0.3, en-US;q=0.9, de;q=NaN, es;q=bad".into()), ..Default::default()
+    }).await.unwrap();
+    assert_eq!(listed.templates.len(), 1);
+    assert_eq!(listed.templates[0].name, "Good Template");
+    let missing = service.load_definition("absent", "en-US").await.unwrap_err();
+    assert!(matches!(missing, CollaborationTemplateError::LanguageNotAvailable { id, requested } if id == "absent" && requested == "en-US"));
+    fs::remove_file(dir.path().join("en-US/valid.yaml")).unwrap();
+    assert!(matches!(service.load_definition("valid", "en-US").await, Err(CollaborationTemplateError::Io(_))));
+}
+
+#[tokio::test]
 async fn lists_default_language_templates_by_priority() -> Result<(), Box<dyn std::error::Error>>
 {
     let repo = Arc::new(FileCollaborationTemplateRepo::new(seed_template_dir()));

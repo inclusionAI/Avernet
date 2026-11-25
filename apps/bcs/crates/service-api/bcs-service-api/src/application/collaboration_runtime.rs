@@ -175,6 +175,11 @@ pub struct StartStateMachineRunCommand {
     pub input: Value,
     pub caller_id: Option<String>,
     pub authenticated_human: Option<AuthenticatedHumanCaller>,
+    /// §15.83 S2: the trusted instance-association template (Human-triggered
+    /// caller-aware runs only). The runtime stamps the created run's id
+    /// into `workflow_run_id` before registering; absent = Bot-only
+    /// caller-closed.
+    pub caller_association: Option<crate::port::OrchestrationInstanceAssociation>,
 }
 
 #[derive(Debug, Clone)]
@@ -207,6 +212,13 @@ pub struct StartSessionStateMachineRunCommand {
     pub opening_message: Option<OpeningMessage>,
     pub input: Value,
     pub judge_available: bool,
+    /// §15.83 S2 (spec §8.5): present ONLY when the submission carries a
+    /// trusted Human caller chain (the adapter resolved it from the same
+    /// strict chain + lease the protected web send uses). The instance's
+    /// delegation-only association is born at submission and bounds every
+    /// node; a Bot-only submission leaves this None and the run executes
+    /// caller-closed (the transport gate keeps every node's wire).
+    pub caller_association: Option<crate::port::OrchestrationInstanceAssociation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -248,6 +260,12 @@ pub struct HandleSessionHumanInputCommand {
     pub caller_actor_id: String,
     pub content: String,
     pub source: HumanResponseSource,
+    /// §15.83 S2 human-input rearm (spec 2026-10-22): the WS connection's
+    /// trusted Human ingress captured at upgrade. Present only on
+    /// human-authenticated scopes; runtime-only memory material, never
+    /// serialized. The runtime re-arms the run's instance association
+    /// window with it after a node consumes the response.
+    pub caller_ingress: Option<crate::application::caller_identity::AuthenticatedHumanCallerIngress>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -956,5 +974,15 @@ pub trait CollaborationRuntimeService: Send + Sync {
         Err(CollaborationRuntimeError::InvalidRequest(
             "State-machine Session recovery is not configured".into(),
         ))
+    }
+
+    /// True when this composition mounted the caller orchestration wiring
+    /// (instance registrar and/or protected node dispatch port). Routes
+    /// may offer OPPORTUNISTIC caller associations only when this is
+    /// true: an association template built in an unwired composition is
+    /// rejected wholesale by the §15.90 no-registrar guard, so gate every
+    /// non-explicit producer on this report.
+    fn caller_orchestration_wired(&self) -> bool {
+        false
     }
 }

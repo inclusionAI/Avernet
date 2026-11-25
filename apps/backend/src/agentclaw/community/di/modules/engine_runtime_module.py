@@ -1,6 +1,6 @@
 """EngineRuntimeModule — production singleton for the engine-runtime relay.
 
-``EngineRuntimeRelay.__init__`` carries ``@inject`` and takes ``BotService``,
+``EngineRuntimeRelay.__init__`` carries ``@inject`` and takes ``RuntimeBotLookup``,
 ``DeviceContextResolver``, ``DeviceAdapterTransport`` and
 ``BotPublishRepositoryProtocol`` (a service bot's published runtime binding),
 so a ``configure`` self-binding plus the Protocol alias is all that is needed.
@@ -34,6 +34,8 @@ from agentclaw.community.core.engine_runtime.desktop_connection import (
     DesktopConnectionServiceProtocol,
 )
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
+from agentclaw.community.api.session_source_listing import SessionSourceListingProtocol
+from agentclaw.community.core.engine_runtime.session_listing import SessionSourceListingService
 from agentclaw.community.core.engine_runtime.session_key import (
     TECLAW_ENGINE_TYPE,
     Base64SessionKeyCodec,
@@ -50,10 +52,20 @@ from agentclaw.community.core.repository.protocols.devices import (
 from agentclaw.community.core.repository.protocols.publishing import (
     BotPublishRepositoryProtocol,
 )
+from agentclaw.community.core.engine_runtime.bot_lookup import RuntimeBotLookup
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
+)
+from agentclaw.community.core.devices.services.device_service import DeviceService
+from agentclaw.community.core.devices.services.a2a_issuance_gray import A2aIssuanceGate
+from agentclaw.community.core.system_config import ConfigRepositoryProtocol
 from agentclaw.community.core.runtime_binding.service import (
     RuntimeBindingResolutionService,
 )
+from agentclaw.community.core.runtime_binding.container_locator import RuntimeContainerLocator
+from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.di.modules.config_module import read_user_config
+from agentclaw.community.di.config import GatewayEndpoint
 from injector import Binder, Module, inject, provider, singleton
 
 
@@ -62,8 +74,34 @@ class EngineRuntimeModule(Module):
 
     def configure(self, binder: Binder) -> None:
         binder.bind(EngineRuntimeRelay, to=EngineRuntimeRelay, scope=singleton)
-        binder.bind(
-            EngineConnectionService, to=EngineConnectionService, scope=singleton
+        binder.bind(SessionSourceListingProtocol, to=SessionSourceListingService, scope=singleton)
+
+    @singleton
+    @provider
+    @inject
+    def engine_connection_service(
+        self,
+        bot_service: RuntimeBotLookup,
+        binding_repository: DeviceBindingRepository,
+        device_service: DeviceService,
+        gateway: GatewayEndpoint,
+        collaborators: CollaboratorServiceProtocol,
+        publish_repo: BotPublishRepositoryProtocol,
+        desktop_connections: DesktopConnectionServiceProtocol,
+        config_repository: ConfigRepositoryProtocol,
+    ) -> EngineConnectionService:
+        """组合根显式构造：desktop 分支不过设备服务，A2A 灰度门必须
+        由本服务直接持有（连线=repo，判定单键见 a2a_issuance_gray），
+        否则 desktop 用户整体绕开用户级灰度。"""
+        return EngineConnectionService(
+            bot_service=bot_service,
+            binding_repository=binding_repository,
+            device_service=device_service,
+            gateway=gateway,
+            collaborators=collaborators,
+            publish_repo=publish_repo,
+            desktop_connections=desktop_connections,
+            a2a_issuance_gate=A2aIssuanceGate(config_repository),
         )
 
     @singleton
@@ -96,6 +134,18 @@ class EngineRuntimeModule(Module):
             publish_repository=publish_repository,
             binding_repository=binding_repository,
             caller_instance_repository=caller_instance_repository,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def runtime_container_locator(
+        self, bots: BotRepository, runtime_bindings: RuntimeBindingResolutionService,
+        binding_repository: DeviceBindingRepository, baas_service: BaasService,
+    ) -> RuntimeContainerLocator:
+        return RuntimeContainerLocator(
+            bots=bots, runtime_bindings=runtime_bindings,
+            binding_repository=binding_repository, baas_service=baas_service,
         )
 
     @singleton

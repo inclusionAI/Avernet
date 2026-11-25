@@ -7,6 +7,7 @@
  */
 import { extendCapabilities } from '@/capabilities';
 import { WorkspaceIdentitySelector } from '@/components/Workspace/IdentitySelector';
+import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import { botRegistrationService, resolveBcsEndpoint } from '@/services/workspace/botRegistrationService';
 import type { Identity } from '@/services/workspace/workspaceModel';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
@@ -132,7 +133,7 @@ describe('WorkspaceIdentitySelector 布局形态与 hover 提示', () => {
     expect(popoverContent).not.toHaveClass('w-[320px]');
     const collaborationOption = await screen.findByRole('button', { name: /协作 Bot/ });
     expect(collaborationOption).toBeInTheDocument();
-    expect(screen.getByLabelText('协作 Bot')).toHaveStyle({ width: '32px', height: '32px' });
+    expect(screen.getByRole('img', { name: '协作 Bot' })).toHaveStyle({ width: '32px', height: '32px' });
     expect(screen.getByText('协作 Bot')).toHaveClass('text-xs');
 
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -423,7 +424,7 @@ describe('WorkspaceIdentitySelector 布局形态与 hover 提示', () => {
         '当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。',
       ),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText('协作 Bot')).toHaveStyle({ width: '24px', height: '24px' });
+    expect(screen.getByRole('img', { name: '协作 Bot' })).toHaveStyle({ width: '24px', height: '24px' });
     expect(screen.getByText('协作 Bot')).toHaveClass('text-xs');
     expect(screen.queryByText('个人 Bot')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '当前协作身份：协作 Bot' })).toHaveClass(
@@ -443,7 +444,7 @@ describe('WorkspaceIdentitySelector 布局形态与 hover 提示', () => {
     expect(screen.queryByLabelText('协作身份说明')).not.toBeInTheDocument();
   });
 
-  it('折叠态为 Bot 使用较小的身份首字圆形入口，切换身份后关闭 hover 提示', async () => {
+  it('折叠态为 Bot 展示图片头像入口，切换身份后关闭 hover 提示', async () => {
     const onChange = jest.fn();
     const view = render(
       <WorkspaceIdentitySelector
@@ -459,7 +460,7 @@ describe('WorkspaceIdentitySelector 布局形态与 hover 提示', () => {
     expect(screen.queryByText('个人 Bot')).not.toBeInTheDocument();
 
     const trigger = screen.getByRole('button', { name: '当前协作身份：协作 Bot' });
-    expect(trigger).toHaveTextContent('协');
+    expect(screen.getByRole('img', { name: '协作 Bot' })).toHaveAttribute('src', generateBotAvatar('bot-online'));
     expect(trigger).toHaveClass('h-8', 'w-8', 'rounded-full');
 
     fireEvent.pointerMove(trigger);
@@ -537,9 +538,41 @@ describe('WorkspaceIdentitySelector 布局形态与 hover 提示', () => {
     expect(popoverContent).toHaveClass('w-[var(--radix-popover-trigger-width)]');
     expect(popoverContent).not.toHaveClass('w-[320px]');
     const botOption = await screen.findByRole('button', { name: /协作 Bot/ });
-    expect(screen.getByLabelText('协作 Bot')).toHaveStyle({ width: '32px', height: '32px' });
+    expect(screen.getByRole('img', { name: '协作 Bot' })).toHaveStyle({ width: '32px', height: '32px' });
     fireEvent.click(botOption);
     await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'false'));
+  });
+
+  it.each(['default', 'sidebar', 'collapsed', 'collaboration', 'sidebarChip', 'inline'] as const)(
+    '%s trigger displays the Bot source',
+    (layout) => {
+      render(
+        <WorkspaceIdentitySelector
+          layout={layout}
+          identities={[{ id: 'b1', kind: 'bot', name: 'Alpha', avatar: '/b1.png' }]}
+          activeId="b1"
+          onChange={jest.fn()}
+        />,
+      );
+      expect(screen.getByRole('img', { name: 'Alpha' })).toHaveAttribute('src', '/b1.png');
+    },
+  );
+
+  it('普通弹层候选项展示 Bot 图片', async () => {
+    render(
+      <WorkspaceIdentitySelector
+        identities={[
+          { id: 'human_900004', name: '示例用户', kind: 'user', avatar: '风' },
+          { id: 'b1', name: 'Alpha', kind: 'bot', avatar: '/b1.png' },
+        ]}
+        activeId="human_900004"
+        onChange={jest.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '当前协作身份：示例用户' }));
+    const option = await screen.findByRole('button', { name: /Alpha/ });
+    expect(option.querySelector('img')).toHaveAttribute('src', '/b1.png');
   });
 });
 
@@ -572,7 +605,8 @@ it('inline Bot 触发按钮展示引擎名称', () => {
   render(<WorkspaceIdentitySelector identities={identities} activeId="bot-online" onChange={jest.fn()} layout="inline" />);
   const trigger = screen.getByRole('button', { name: '当前协作身份：协作 Bot' });
   expect(trigger).toHaveTextContent('OpenClaw');
-  expect(screen.getByText('OpenClaw')).toHaveClass('rounded-md', 'bg-muted', 'text-foreground');
+  // dmore artboard-002 页头身份触发器：引擎为 10px 软底小标签。
+  expect(screen.getByText('OpenClaw')).toHaveClass('rounded-[4px]', 'bg-foreground/10', 'text-muted-foreground');
   expect(screen.queryByText('当前协作身份')).not.toBeInTheDocument();
 });
 
@@ -582,6 +616,6 @@ it('inline 用户触发按钮展示蓝色用户标签', () => {
   const trigger = screen.getByRole('button', { name: '当前协作身份：示例用户' });
   const label = screen.getByText('用户');
   expect(trigger).toContainElement(label);
-  expect(label).toHaveClass('rounded-md', 'bg-primary/10', 'text-primary');
+  expect(label).toHaveClass('rounded-[4px]', 'bg-primary/10', 'text-primary');
   expect(trigger).not.toHaveTextContent('引擎类型暂无');
 });

@@ -79,3 +79,41 @@ it("cuts historical pages at the original node even after index rotation and sub
   await expect(reader.read({ ...bounded, cutoff: { messageId: 'missing', atMs: 10000 } })).rejects.toMatchObject({ code: 'original_session_unavailable' });
   await expect(reader.read({ ...bounded, cutoff: { messageId: 'fault', atMs: 8000 } })).rejects.toMatchObject({ code: 'original_session_unavailable' });
 });
+
+it("resolves a direct Cron execution to the indexed original conversation before delivery", async () => {
+  const base = "agent:main:cron:daily";
+  await writeFile(join(directory, "sessions.json"), JSON.stringify({ [base]: { sessionId: id }, [key]: { sessionId: "wrong-alias" } }));
+  const before = await readFile(join(directory, "sessions.json"), "utf8");
+  expect(await reader.read({ ...input, requireIndex: true })).toMatchObject({ session_key: base, session_id: id });
+  expect(await readFile(join(directory, "sessions.json"), "utf8")).toBe(before);
+});
+it("retains a genuinely indexed run key when no matching job-level conversation exists", async () => {
+  await writeFile(join(directory, "sessions.json"), JSON.stringify({ [key]: { sessionId: id } }));
+  expect(await reader.read({ ...input, requireIndex: true })).toMatchObject({ session_key: key, session_id: id });
+});
+it("does not strip a nested subagent key or redirect it to a Cron conversation", async () => {
+  await writeFile(join(directory, "sessions.json"), JSON.stringify({ "agent:main:cron:daily": { sessionId: id } }));
+  await expect(reader.read({ ...input, sessionKey: key + ":subagent:worker", expectedSessionId: id, requireIndex: true }))
+    .rejects.toMatchObject({ code: "original_session_unavailable" });
+});
+
+it("redacts OC tool URLs in session history without reporting a comparison", async () => {
+  const original = "a".repeat(83) + "X" + "b".repeat(108), copied = original.replace("X", "");
+  const url = (value: string) => {
+    const link = new URL("https://example.invalid/download");
+    link.searchParams.set("signature", value);
+    return link.href;
+  };
+  await writeFile(join(directory, `${id}.jsonl`), [
+    { type: "session", id },
+    { type: "message", message: { role: "user", content: `Please read [the report](${url(original)})` } },
+    { type: "message", message: { role: "assistant", content: [
+      { type: "toolCall", name: "exec", arguments: { command: `curl -fsS '${url(copied)}' -o report` } },
+    ] } },
+  ].map(value => JSON.stringify(value)).join("\n") + "\n");
+
+  const result = await reader.read(input);
+  expect(result).not.toHaveProperty("url_argument_comparisons");
+  expect(JSON.stringify(result)).not.toContain(original);
+  expect(JSON.stringify(result)).not.toContain(copied);
+});

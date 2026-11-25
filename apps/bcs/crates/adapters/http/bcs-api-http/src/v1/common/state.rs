@@ -5,24 +5,41 @@ use bcs_service_api::application::v1::{
     AuthService as ApplicationAuthService, BotService, CollaborationDefinitionService, CollaborationTemplateService, EventSubscriptionService, FriendConnectionService, FriendshipService, GroupService, InvitationService, InviteCodeService, RegisterService,
     SessionFileApplicationService, SessionMessageService, SessionService,
 };
+use bcs_service_api::application::v1::bot_authority::BotAuthorityService;
 use bcs_service_api::application::channel::ChannelService;
 use bcs_service_api::application::CollaborationRuntimeService;
 
 use crate::v1::openapi::SessionFileUrlProjector;
 
-use super::{InviteCodeGateState, PrincipalVerifier};
+use super::{InviteCodeGateState, PrincipalVerifier, TrustedBrowserOrigins};
 
 pub trait PrincipalVerificationState: Clone + Send + Sync + 'static {
     fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier>;
+
+    /// Trusted browser origins for the per-actual-source CSRF gate
+    /// (spec §7.4). Composed by bootstrap whenever any cookie-kind source
+    /// is registered; `None` fails closed for cookie-authenticated unsafe
+    /// writes. Defaulted for narrow test/local states that never register
+    /// a cookie source.
+    fn trusted_browser_origins(&self) -> Option<&TrustedBrowserOrigins> {
+        None
+    }
 }
 
 #[derive(Clone)]
 pub struct ApiState {
+    pub a2a_service: Option<Arc<dyn bcs_service_api::application::v1::a2a::A2aService>>,
+    pub worker_task_service: Option<Arc<dyn bcs_service_api::application::TaskHandleService>>,
     pub bot_self_service: Option<Arc<dyn bcs_service_api::application::v1::BotSelfService>>,
     pub auth_service: Option<Arc<dyn ApplicationAuthService>>,
     pub auth_public_base_url: String,
+    /// Optional compatibility selection for GET /auth/user only. None uses
+    /// the ordinary V1 verifier. This is selected before verification,
+    /// never retried after a credential fails.
+    pub auth_user_verifier: Option<Arc<dyn PrincipalVerifier>>,
     pub bot_service: Option<Arc<dyn BotService>>,
     pub event_subscription_service: Option<Arc<dyn EventSubscriptionService>>,
+    pub group_context: Option<Arc<dyn bcs_service_api::application::v1::GroupContextApplicationService>>,
     pub group_service: Arc<dyn GroupService>,
     pub session_service: Arc<dyn SessionService>,
     pub message_service: Arc<dyn SessionMessageService>,
@@ -39,9 +56,21 @@ pub struct ApiState {
     pub collaboration_template_service: Option<Arc<dyn CollaborationTemplateService>>,
     pub collaboration_definition_service: Option<Arc<dyn CollaborationDefinitionService>>,
     pub collaboration_runtime_service: Option<Arc<dyn CollaborationRuntimeService>>,
+    pub collaboration_drafts: Option<Arc<dyn bcs_service_api::application::collaboration_draft::CollaborationDraftService>>,
+    /// The unified `/api/v1/collaboration/` authority
+    /// facade (manager set + ownership transfers,
+    /// spec §5/§6). Fail-closed (handlers return
+    /// `internal` if None) until the composition root
+    /// mounts it.
+    pub bot_authority_service: Option<Arc<dyn BotAuthorityService>>,
     pub manifest: ManifestConfig,
     pub manifest_env: String,
     pub principal_verifier: Arc<dyn PrincipalVerifier>,
+    /// Trusted browser origins for the per-actual-source CSRF gate. Set by
+    /// the composition root (Task 12 assembles real cookie sources and
+    /// passes the `trusted_browser_origins` of `[api.auth]` through the
+    /// `TrustedBrowserOrigins` constructor).
+    pub trusted_browser_origins: Option<TrustedBrowserOrigins>,
 }
 
 impl ApiState {
@@ -55,11 +84,15 @@ impl ApiState {
         principal_verifier: Arc<dyn PrincipalVerifier>,
     ) -> Self {
         Self {
+            a2a_service: None,
+            worker_task_service: None,
             bot_self_service: None,
             auth_service: None,
+            auth_user_verifier: None,
             auth_public_base_url: "http://127.0.0.1/openapi/v1/auth".to_string(),
             bot_service: None,
             event_subscription_service: None,
+            group_context: None,
             group_service,
             session_service,
             message_service,
@@ -76,10 +109,25 @@ impl ApiState {
             collaboration_template_service: None,
             collaboration_definition_service: None,
             collaboration_runtime_service: None,
+            collaboration_drafts: None,
+            bot_authority_service: None,
             manifest: ManifestConfig::default(),
             manifest_env: "local".to_string(),
             principal_verifier,
+            trusted_browser_origins: None,
         }
+    }
+
+    pub fn with_a2a_service(mut self, service: Arc<dyn bcs_service_api::application::v1::a2a::A2aService>) -> Self {
+        self.a2a_service = Some(service);
+        self
+    }
+
+    /// Attach the trusted browser origins used by the per-actual-source
+    /// CSRF gate for cookie-authenticated unsafe writes.
+    pub fn with_trusted_browser_origins(mut self, origins: TrustedBrowserOrigins) -> Self {
+        self.trusted_browser_origins = Some(origins);
+        self
     }
 
     pub fn with_auth_service(
@@ -196,6 +244,19 @@ impl ApiState {
         self
     }
 
+    /// Add the unified authority facade that serves the
+    /// `/api/v1/collaboration/` manager/ownership-transfer
+    /// surface (spec §5/§6). The application performs the
+    /// Human/App admission per action; this state only
+    /// carries the service.
+    pub fn with_bot_authority_service(
+        mut self,
+        service: Arc<dyn BotAuthorityService>,
+    ) -> Self {
+        self.bot_authority_service = Some(service);
+        self
+    }
+
     /// Provide the bundle manifest config served by the public v1
     /// `/api/v1/collaboration/manifest` route.
     pub fn with_manifest_config(mut self, env: String, manifest: ManifestConfig) -> Self {
@@ -218,5 +279,9 @@ impl InviteCodeGateState for ApiState {
 impl PrincipalVerificationState for ApiState {
     fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier> {
         &self.principal_verifier
+    }
+
+    fn trusted_browser_origins(&self) -> Option<&TrustedBrowserOrigins> {
+        self.trusted_browser_origins.as_ref()
     }
 }

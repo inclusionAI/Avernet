@@ -1,3 +1,6 @@
+import { getFileExt } from './filePreview';
+export { formatFileSize, getFileExt, prettifyJsonText, getPreviewKind, SESSION_FILE_TEXT_PREVIEW_MAX_BYTES, PREVIEW_IMAGE_EXT, PREVIEW_VIDEO_EXT, PREVIEW_TEXT_EXT } from './filePreview';
+export type { SessionFilePreviewKind } from './filePreview';
 import { isSameHumanIdentity, type AuthenticatedUserName } from '@/domain/userIdentity';
 import type { SessionFileActorKind } from '@/services/backendApi/collaboration/sessionFileController';
 
@@ -60,32 +63,62 @@ export const SESSION_FILE_ALLOWED_EXT = [
 export const SESSION_FILE_MAX_BATCH = 20;
 
 /** 文本自绘预览的字节上限：超限截断并提示下载查看全文（防大文件卡顿）。 */
-export const SESSION_FILE_TEXT_PREVIEW_MAX_BYTES = 512 * 1024;
+// Preview byte budget is owned by the shared asset.
 
 /** 单文件超过此值走分片上传（与网关 prepare multipart 目标一致）。 */
 export const SESSION_FILE_MULTIPART_THRESHOLD = 8 * 1024 * 1024;
 
 /** 文件大小格式化。 */
-export function formatFileSize(bytes: number): string {
-  if (!bytes || bytes <= 0) return '--';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let index = 0;
-  let size = bytes;
-  while (size >= 1024 && index < units.length - 1) {
-    size /= 1024;
-    index++;
-  }
-  return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+// formatFileSize is provided by the shared task asset.
+
+
+/**
+ * 创建者信息 → 文件行元数据「来源合段」（2026-11-09 契约，纯字符串拼装）。
+ *
+ * - `creator_type='bot'` → 「Bot 生成」；`'user'` → 「用户上传」；`creator_name` 非空时
+ *   追加「 · {名}」（创建时快照名，按普通文本渲染，不参与权限判断）。
+ * - `creator_name` null/空串/纯空白 → 只显来源标签（不显名、无占位符）。
+ * - `creator_type` null/缺失/未知值 → 返回 null：调用方整段不渲染，不据资源 ID/
+ *   文件名/登录用户猜测来源（旧引擎存量数据是常态非异常）；引擎将来新增枚举
+ *   与 null 合流，不猜测展示。
+ * - 文案与老前端（oc-web）add-session-file-creator-fields 逐字对齐——灰度切流下
+ *   同一文件在两套 UI 展示一致。
+ */
+export function describeSessionFileCreator(
+  creatorType: string | null | undefined,
+  creatorName: string | null | undefined,
+): string | null {
+  if (creatorType !== 'bot' && creatorType !== 'user') return null;
+  const label = creatorType === 'bot' ? 'Bot 生成' : '用户上传';
+  const name = (creatorName ?? '').trim();
+  return name ? `${label} · ${name}` : label;
+}
+
+/**
+ * 创建时间 ISO 串 → 查看端本地时区 `YYYY-MM-DD HH:mm:ss`。
+ *
+ * 后端 `created_at` 是 ISO 8601 UTC 锚（2026-11-09 契约，可能带微秒精度，秒级截断展示）。
+ * 曾用 UTC 分量（getUTC*）逐字展示，2026-11-12 用户反馈「展示的时间需要加上 8 小时」——
+ * 时间应显示为查看端本地时间（北京时间即 UTC+8，如 11:16:19Z 显示成 19:16:19），
+ * 与后端原值逐字一致反而让用户误判时点，故改用本地分量（getFullYear 等）——与老前端
+ * formatSessionUploadTime 同语义（东八区查看端显示 +8 小时后的本地时间）。
+ *
+ * null / undefined / 空串 / 非法日期 → null：legacy 文件缺 created_at 时调用方
+ * 整段不渲染（不显示 `--`/`—` 占位、不回退其它时间字段）。
+ */
+export function formatSessionUploadTime(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 /** 取扩展名（小写，支持 .tar.gz 多段后缀）。 */
-export function getFileExt(name: string): string {
-  if (!name) return '';
-  const lower = name.toLowerCase();
-  if (/\.tar\.gz$/.test(lower)) return 'tar.gz';
-  const idx = lower.lastIndexOf('.');
-  return idx >= 0 ? lower.slice(idx + 1) : '';
-}
+// getFileExt is provided by the shared task asset.
+
 
 /** 是否在白名单内。 */
 export function isAllowedFileExt(name: string): boolean {
@@ -240,69 +273,9 @@ export function resolveOwnerDisplayName(
   return rawId;
 }
 
-export type SessionFilePreviewKind = 'image' | 'video' | 'pdf' | 'html' | 'text' | 'other';
-
-export const PREVIEW_IMAGE_EXT = ['png', 'jpg', 'jpeg', 'gif', 'svg'] as const;
-
-/** 视频类（内嵌播放器；上传白名单不含视频，仅预览来自其他渠道的文件）。 */
-export const PREVIEW_VIDEO_EXT = ['mp4', 'webm', 'mov'] as const;
-
-export const PREVIEW_TEXT_EXT = [
-  'txt',
-  'md',
-  'json',
-  'csv',
-  'tsv',
-  'yaml',
-  'yml',
-  'log',
-  'ini',
-  'toml',
-  'conf',
-  'env',
-  'xml',
-  'js',
-  'jsx',
-  'ts',
-  'tsx',
-  'vue',
-  'mjs',
-  'cjs',
-  'py',
-  'java',
-  'go',
-  'rs',
-  'c',
-  'cpp',
-  'h',
-  'cs',
-  'rb',
-  'php',
-  'sh',
-  'bash',
-  'zsh',
-  'sql',
-  'bat',
-  'ps1',
-] as const;
-
 /** JSON 美化：合法 JSON 缩进重排便于阅读；非法（含截断半截）原样返回不抛错。 */
-export function prettifyJsonText(text: string): string {
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2);
-  } catch {
-    return text;
-  }
-}
+// prettifyJsonText is provided by the shared task asset.
+
 
 /** 判断文件是否支持站内预览：图片 / 视频 / PDF / 网页 / 文本类支持，其余提示下载后查看。 */
-export function getPreviewKind(name: string, mimeType?: string): SessionFilePreviewKind {
-  const ext = getFileExt(name);
-  const mime = (mimeType || '').toLowerCase();
-  if ((PREVIEW_IMAGE_EXT as readonly string[]).includes(ext) || mime.startsWith('image/')) return 'image';
-  if ((PREVIEW_VIDEO_EXT as readonly string[]).includes(ext) || mime.startsWith('video/')) return 'video';
-  if (ext === 'pdf' || mime === 'application/pdf') return 'pdf';
-  if (ext === 'html' || mime === 'text/html') return 'html';
-  if ((PREVIEW_TEXT_EXT as readonly string[]).includes(ext) || mime.startsWith('text/')) return 'text';
-  return 'other';
-}
+// getPreviewKind is provided by the shared task asset.

@@ -31,7 +31,7 @@ export function ResourcePreviewDrawer({
   return (
     <Drawer open={Boolean(preview)} onOpenChange={(open) => !open && onClose()}>
       <DrawerContent side="right" size="lg">
-        <DrawerHeader className="border-b border-border pb-4">
+        <DrawerHeader className="border-b border-divider pb-4">
           <DrawerTitle className="truncate text-base font-semibold">{fileName}</DrawerTitle>
           <DrawerDescription className="break-all text-xs text-muted-foreground">/{preview?.path}</DrawerDescription>
         </DrawerHeader>
@@ -46,7 +46,7 @@ export function ResourcePreviewDrawer({
             {preview.result.content}
           </pre>
         ) : null}
-        <DrawerFooter className="border-t border-border pt-4">
+        <DrawerFooter className="border-t border-divider pt-4">
           <Button variant="outline" onClick={onClose}>
             关闭
           </Button>

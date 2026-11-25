@@ -11,7 +11,7 @@ Tests for WorkerConfig model and store-level batch_get_configs
 
 import pytest
 
-from src.domain.models.worker import (
+from app.domain.models.worker import (
     Worker,
     WorkerType,
     WorkerIdentity,
@@ -33,18 +33,18 @@ class TestWorkerConfigModel:
 
     def test_default_fusion_enable_is_false(self):
         """默认 fusion_enable=False，需显式开启融合"""
-        from src.domain.models.worker_config import WorkerConfig
+        from app.domain.models.worker_config import WorkerConfig
         config = WorkerConfig()
         assert config.fusion_enable is False
 
     def test_explicit_fusion_enable_true(self):
-        from src.domain.models.worker_config import WorkerConfig
+        from app.domain.models.worker_config import WorkerConfig
         config = WorkerConfig(fusion_enable=True)
         assert config.fusion_enable is True
 
     def test_extra_fields_round_trip_and_known_fields_validate(self):
         """Provider 配置扩展保留，已知字段仍然校验类型。"""
-        from src.domain.models.worker_config import WorkerConfig
+        from app.domain.models.worker_config import WorkerConfig
         from pydantic import ValidationError
         config = WorkerConfig(fusion_enable=True, provider_options={"mode": "local"})
         restored = WorkerConfig.model_validate(config.model_dump())
@@ -55,7 +55,7 @@ class TestWorkerConfigModel:
             WorkerConfig(fusion_enable="invalid")
 
     def test_model_dump_round_trip(self):
-        from src.domain.models.worker_config import WorkerConfig
+        from app.domain.models.worker_config import WorkerConfig
         config = WorkerConfig(fusion_enable=True)
         data = config.model_dump()
         assert data == {"fusion_enable": True}
@@ -85,7 +85,7 @@ class TestWorkerConfigIntegration:
 
     def test_worker_explicit_config(self):
         """Worker 可显式设置 config"""
-        from src.domain.models.worker_config import WorkerConfig
+        from app.domain.models.worker_config import WorkerConfig
         worker = Worker(
             id="wrk_test",
             type=WorkerType.BOT,
@@ -121,12 +121,12 @@ class TestBatchGetConfigs:
 
     @pytest.fixture
     def store(self):
-        from src.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
+        from app.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
         return InMemoryWorkerRegistryStore()
 
     def test_batch_get_configs_mixed(self, store):
         """批量查询：部分开启、部分关闭、部分不存在"""
-        from src.domain.models.worker_config import WorkerConfig
+        from app.domain.models.worker_config import WorkerConfig
         worker_a = Worker(
             id="wrk_a",
             type=WorkerType.BOT,
@@ -176,12 +176,12 @@ class TestWorkerConfigStoreRoundTrip:
 
     @pytest.fixture
     def store(self):
-        from src.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
+        from app.infra.adapters.sqlite_worker_registry_store import SQLiteWorkerRegistryStore
         return SQLiteWorkerRegistryStore(":memory:")
 
     def test_create_and_read_worker_with_config(self, store):
         """创建带 config 的 Worker，读回值一致"""
-        from src.domain.models.worker_config import WorkerConfig
+        from app.domain.models.worker_config import WorkerConfig
         worker = Worker(
             id="wrk_fuse_test",
             type=WorkerType.BOT,
@@ -213,7 +213,7 @@ class TestWorkerConfigStoreRoundTrip:
 
     def test_update_config_and_read(self, store):
         """更新 config 后读回值一致"""
-        from src.domain.models.worker_config import WorkerConfig
+        from app.domain.models.worker_config import WorkerConfig
         worker = Worker(
             id="wrk_update_config",
             type=WorkerType.BOT,
@@ -243,10 +243,10 @@ class TestParticipantAvailabilityIgnoreFusionEnable:
 
     @pytest.fixture
     def checker(self):
-        from src.application.services.participant_availability_checker import ParticipantAvailabilityChecker
-        from src.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
-        from src.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
-        from src.infra.adapters.in_memory_worker_profile_binding_store import InMemoryWorkerProfileBindingStore
+        from app.application.services.participant_availability_checker import ParticipantAvailabilityChecker
+        from app.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
+        from app.infra.adapters.in_memory_worker_runtime_state_store import InMemoryWorkerRuntimeStateStore
+        from app.infra.adapters.in_memory_worker_profile_binding_store import InMemoryWorkerProfileBindingStore
 
         registry_store = InMemoryWorkerRegistryStore()
         runtime_state_store = InMemoryWorkerRuntimeStateStore()
@@ -264,8 +264,8 @@ class TestParticipantAvailabilityIgnoreFusionEnable:
 
     def test_fusion_disable_but_online_still_available(self, checker):
         """fusion_enable=False 但 online 的 worker，availability 仍为 True"""
-        from src.domain.models.worker_config import WorkerConfig
-        from src.domain.models.worker_runtime_state import WorkerRuntimeState
+        from app.domain.models.worker_config import WorkerConfig
+        from app.domain.models.worker_runtime_state import WorkerRuntimeState
 
         registry_store = checker._registry_store
         worker = Worker(
@@ -285,8 +285,8 @@ class TestParticipantAvailabilityIgnoreFusionEnable:
 
     def test_fusion_enable_online_available(self, checker):
         """fusion_enable=True 且 online 的 worker，availability 为 True"""
-        from src.domain.models.worker_config import WorkerConfig
-        from src.domain.models.worker_runtime_state import WorkerRuntimeState
+        from app.domain.models.worker_config import WorkerConfig
+        from app.domain.models.worker_runtime_state import WorkerRuntimeState
 
         registry_store = checker._registry_store
         worker = Worker(

@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/Button';
+import { RoutineRunConversation } from '@/components/ScheduledTasks/RoutineRunConversation';
 import {
   Drawer,
   DrawerContent,
@@ -52,6 +53,7 @@ function InfoCell({
 }
 
 export interface MyTaskRoutineDrawerProps {
+  botType?: string;
   selectedRoutine: ScheduledRoutineRecord | null;
   selectedRoutineKey: string | null;
   onCloseRoutine: () => void;
@@ -62,6 +64,7 @@ export interface MyTaskRoutineDrawerProps {
 }
 
 export function MyTaskRoutineDrawer({
+  botType,
   selectedRoutine,
   selectedRoutineKey,
   onCloseRoutine,
@@ -77,7 +80,7 @@ export function MyTaskRoutineDrawer({
   return (
     <Drawer open={Boolean(selectedRoutineKey)} onOpenChange={(open) => !open && onCloseRoutine()}>
       <DrawerContent side="right" size="lg" className="bg-background text-foreground">
-        <DrawerHeader className="mb-5 border-b border-border pb-4">
+        <DrawerHeader className="mb-5 border-b border-divider pb-4">
           <div className="flex items-start justify-between gap-3 pr-8">
             <div>
               <DrawerTitle className="text-lg font-semibold tracking-tight text-foreground">
@@ -136,9 +139,9 @@ export function MyTaskRoutineDrawer({
               ) : (
                 <div className="space-y-3">
                   {selectedRoutineRuns.length > 0 ? (
-                    selectedRoutineRuns.map((item) => (
+                    selectedRoutineRuns.map((item, index) => (
                       <div
-                        key={item.id}
+                        key={`${selectedRoutineKey}-${item.conversation?.runtime_stage}-${item.conversation?.device_uuid}-${item.conversation?.operator_id}-${item.id}-${index}`}
                         className="rounded-lg border border-border bg-card p-4 shadow-sm transition-shadow hover:shadow"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -169,6 +172,7 @@ export function MyTaskRoutineDrawer({
                             {item.errorMessage}
                           </p>
                         ) : null}
+                        {item.conversation && <div className="mt-3 flex justify-end"><RoutineRunConversation run={item.conversation} botType={botType} /></div>}
                       </div>
                     ))
                   ) : (
@@ -181,7 +185,7 @@ export function MyTaskRoutineDrawer({
         ) : (
           <Empty title="未找到定时任务" description="请从定时任务列表重新打开实例抽屉。" />
         )}
-        <DrawerFooter className="justify-end border-t border-border pt-4">
+        <DrawerFooter className="justify-end border-t border-divider pt-4">
           <Button variant="outline" onClick={onCloseRoutine}>
             关闭
           </Button>

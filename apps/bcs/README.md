@@ -1,5 +1,38 @@
 # BCS — Bot Coordination Service
 
+### App knowledge framework
+
+- [App knowledge standard](docs/agents/knowledge-standard.md) and [templates](docs/agents/templates/README.md).
+- [App architecture](docs/arch/README.md) and [app decisions](docs/adr/README.md).
+- [Existing knowledge catalog](docs/agents/existing-knowledge.md): existing docs, domain context and historical designs.
+- [Flows](docs/flows/README.md), [diagnostics](docs/diagnostics/README.md), and [change specs](specs/README.md).
+
+
+## Knowledge navigation
+
+Public BCS owns coordination contracts, services, adapters and reusable plugins; OCB supplies the enterprise composition and internal providers.
+
+- [Local rules](AGENTS.md)
+- [API contracts](api-contracts/README.md)
+- [Configured catalog labels](docs/catalog-labels.md): policy, Agent/Group omission, persistence, full publication and compatibility gates.
+- [Distributed coordination contracts](crates/service-api/bcs-service-api/src/port/repo/distributed/README.md) — portable contracts and provider status
+- [Retained membership amendment](specs/2026-11-20-retained-membership-lease/spec.md) — CAS termination, client clocks and 30-day storage retention
+- [Runtime store plugin API](crates/plugin-api/bcs-store-api/README.md) — capability contracts and provider harnesses
+- [Distributed Worker runtime](crates/services/bcs-dist-worker/README.md) — generic processor, ownership, isolation and bounded recovery
+- [Dispatch supervision](crates/services/bcs-dist-worker/src/supervisor/README.md) — durable remote obligations independent of Task termination
+- [Reliable distributed Inbox](crates/services/bcs-dist-store/src/inbox/README.md) — durable admission, consumption, scheduling and independent repair/discovery
+- [Distributed immutable archive](crates/services/bcs-dist-store/src/archive/README.md) — public Result/Blob persistence and committed-effect evidence
+- [Committed TaskFeed](crates/services/bcs-dist-store/src/task_feed/README.md) — output replay, snapshot publication and logical retention
+- [Distributed output projection](crates/services/bcs-dist-projection/README.md) — pure display transform, frozen quotas and replay accounting
+- [Distributed A2A output adapter](crates/adapters/output/bcs-dist-a2a-output/README.md) — Worker-side protocol formatting over neutral committed output
+- [Session deletion protocol](docs/session-delete-protocol.md)
+- [Flow navigation](docs/flows/README.md)
+- [Diagnostic navigation](docs/diagnostics/README.md)
+
+- [Change specs](specs/README.md)
+
+Existing documents remain at their current paths. Check each document's status, target revision and source before treating it as a current contract.
+
 BCS is the **collaboration plane** of the Avernet workbench. It enables bots
 from any source to register, discover each other, form group chats, and
 coordinate through structured routing and context fusion.
@@ -62,6 +95,9 @@ reach into adapters.
 - **Delivery adapters** (`adapters/http`, `adapters/ws`, `tools/bcs-cli`) own
   their protocol definitions. They call service-api only — never reach into
   services or plugins directly.
+- **Output adapters** (`adapters/output`) implement the pure `port::dist_output`
+  formatter over neutral Worker data. The Worker-side read facade receives them
+  through injection; they do not call core services or repository ports.
 - **Service API** (`application` = inbound use cases, `core` = domain logic,
   `port` = outbound interfaces) is the contract boundary. Inter-component
   behavior is defined here.
@@ -108,16 +144,19 @@ crates/
 │   ├── bcs-proposal/       # Group proposal generation
 │   ├── bcs-proposal-store/ # Proposal persistence
 │   ├── bcs-judge/          # LLM-based coordination decisions
-│   ├── bcs-callback/       # Bot callback management
 │   ├── bcs-jwt/            # JWT token generation
 │   ├── bcs-secret/         # Secret/token management
 │   ├── bcs-user-identity/  # User identity and auth
 │   ├── bcs-config/         # Runtime configuration service
 │   ├── bcs-route-security/ # Routing security and access control
 │   ├── bcs-system-message/ # System notification messages
-│   └── bcs-leader-election/ # Leader election for distributed mode
+│   ├── bcs-leader-election/ # Leader election for distributed mode
+│   ├── bcs-dist-store/     # Distributed executor plane: shared key layout, versions, admission
+│   ├── bcs-dist-connector/ # Distributed Connector engine: rules, claim loop, per-call actors
+│   └── bcs-dist-connector-store/ # Connector store providers: dispatch claim, held dispatch, command feed
 ├── plugin-api/
 │   ├── bcs-auth-api/       # Authentication interface
+│   ├── bcs-store-api/      # Runtime state and ordered-log capabilities
 │   ├── bcs-cache-api/      # Cache interface
 │   ├── bcs-db-api/         # Database interface
 │   ├── bcs-llm-api/        # LLM interface
@@ -150,8 +189,17 @@ crates/
 
 ### Prerequisites
 
-- **Rust** 1.80+ (`rustup` recommended)
+- **Rust** 1.94.0, selected by the repository's [`rust-toolchain.toml`](../../rust-toolchain.toml) (`rustup` required)
 - **cargo-nextest** for running tests: `cargo install cargo-nextest`
+
+Run `bash scripts/setup_dev_env.sh` from this directory to install the pinned
+toolchain and test tools without changing your global Rust default. Public CI,
+Singlebox, Bridge releases, and Rust builder images use the same compiler
+version. Verify the active compiler with `rustc -Vv`: it must report
+`release: 1.94.0` and commit `4a4ef493e3a1488c6e321570238084b38948f6db`.
+The workspace's `rust-version` remains its minimum supported Rust version;
+it does not select the compiler. Compiler upgrades must update these build
+entries together and rerun coverage gates with the new toolchain.
 
 ### Build and Run
 
@@ -200,6 +248,9 @@ cargo test --workspace
 ```
 
 ### Run a Single Integration Test
+
+For live Singlebox coverage scenarios and companion fixtures, see the
+[E2E story guide](scripts/e2e-test/README.md).
 
 ```bash
 # Run only group-related contract tests

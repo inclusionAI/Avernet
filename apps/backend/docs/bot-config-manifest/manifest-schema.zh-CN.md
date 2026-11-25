@@ -29,9 +29,11 @@ sources:                       # 命名源（可选，§2.3）：一处声明、
     auth: corp-git-content
 
 manifest:                      # 声明式部分，所有引擎
-  mcp: [ … ]                   # §3.1
+  capabilities:
+    skills: [ … ]              # §3.3；Direct Skills
+    skill_sets: [ … ]          # §3.3.1；普通集与 Default
+    mcp: [ … ]                 # §3.1；Direct MCP
   resources: [ … ]             # §3.2（含文件与目录两种条目形态）
-  skills: [ … ]                # §3.3
   engine_config: { … }         # §3.4
   identity: [ … ]              # §3.5
   cli_tools: [ … ]             # §3.7，命令行工具（W9 已交付；始终平台托管）
@@ -42,27 +44,34 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
     …
 ```
 
-三段均可缺省。**收敛策略是类目级覆盖**——让清单生效 = 把每个**被声明的
-类别**覆盖到恰好等于声明：
+三段均可缺省。有效的 v1 文档完整声明 Bot 支持的类目。Apply 按类目覆盖：
 
 | 写法 | 含义 | apply 做什么 |
 | --- | --- | --- |
-| 类别缺席 | 「不表态」 | **完全不碰**该类别 |
+| 支持的类别缺席 | 空集合（顶层 script 等价于 null） | 清空该类目的管理范围 |
 | 类别存在且非空 | 「这个类别应当恰好是这些」 | 把该类别的**区域**覆盖成声明的样子，区域内其余条目被移除 |
 | 类别存在但为空（`skills: []`） | 「这个集合是空的」——空集合**也是**声明 | **移除该区域内的全部条目** |
 | `DELETE` 整份文档 | 没有任何类别被声明 | **什么都不删**：此前落成的实体原样留在 bot 上 |
 
-后两行不矛盾，是同一条规则的两端：`[]` 是声明，缺席不是声明。
+仅写 `schema_version: 1` 也是有效文档，应用时清空适用类目。无文档记录时跳过类目物化。
+
+`manifest.capabilities` 是 Skills、SkillSet/Default 与 MCP 的唯一执行类别。
+旧平铺 `manifest.skills` / `manifest.skill_sets` / `manifest.mcp` 继续可读；
+出现 `capabilities` 后禁止同时出现任何旧位置的键（即使为 `[]`）。
+`capabilities: null`、子列表 `null` 均非法；`capabilities: {}` 等价于三个空列表。
+GET 保留提交原文，文档摘要先绑定原文，编译时才在内存中归一。
+能力内任一编译或解析失败阻止整组能力写入；写入开始后的错误可能部分提交，
+不提供共享资产、集合关系与 Runtime 的统一事务。其他执行类别保持原边界。
 
 **「区域」逐类别定义，不是全局的**——搞错这一点，一条本意是收敛 skill 列表
 的规则就会删掉 bot 的工作目录：
 
 | 类别 | 被覆盖的区域 |
 | --- | --- |
-| `skills` | **active skill set**：它等于声明，未列出的 skill 被移除 |
+| `skills` | 受管理的 Direct 安装和未被 Set 引用的 Bot 本地技能包 |
 | `identity` | **identity 文件集合**，减去保留名单（§3.5） |
-| `resources` | **仅被声明的 `path` 子树**；声明的 `path` 之外一律不碰——workspace 是 bot 的工作区，不是清单的 |
-| `mcp` | **已启用的 server 集合** |
+| `resources` | workspace 中的非保护根条目，设备路径上的普通目录递归清理 |
+| `mcp` | 受管理的 Direct 安装和 Bot override，保留现有 Set、平台默认及 Skill 依赖供应规则 |
 | `engine_config` | **被声明的顶层键**（逐键覆盖，§3.4） |
 | `cli_tools` | 这个 bot **由平台安装**的工具集合（`ac_bot_cli_tool` 里的行；镜像自带命令不在内）。移除是按表算的，不看引擎的清单 |
 
@@ -553,8 +562,12 @@ mcp:
   State 事务中写入 `ac_bot_mcp_installation` 和 `ac_bot_mcp_config`，随后按既有
   best-effort 语义投影到设备。
 - 配置逐字段优先级为 `Manifest Bot override > user config > Center/default`。
-  只有 Manifest 显式字段写入 Bot override；删除 MCP、`mcp: []` 或从条目移除
-  `config` 时，同步删除对应 override。省略整个 `mcp` 类别仍是 no-op。
+  父 MCP 条目仍在时，省略 `config` 或显式写 `config: {}` 均清除完整 override；非空 `config` 完整替换 override，未声明的旧覆盖字段恢复继承。
+  删除管理范围内的 MCP 父条目或声明 `mcp: []`，同步删除对应 override；
+  省略整个 `mcp` 类别等价于 `mcp: []`。当前 Set 供应不在 Manifest 管理范围内：
+  active 普通集、扣除 exclusion 的 Default 和对应平台默认项被省略时不变；
+  显式声明这些项目会在任何类别写入前拒绝整个 Apply。
+- 存量 v1 文档在下次 Apply 时采用终态语义。需要保留的类目内容及 MCP 覆盖配置应显式声明。
 
 账号级 MCP 配置仍通过既有公开端点管理，并作为未被 Bot override 覆盖字段的默认值：
 
@@ -609,6 +622,16 @@ resources:
 **共同规则**：
 - `path` 是 workspace 相对的**逻辑路径**，不是引擎物理路径；寻址语义与
   现有 resources API 一致，物理位置由各引擎照现状决定。
+- **资源根目录就是 workspace 根目录**（与资源 Open API 一致：不传路径即为根），
+  **`path` 不得命名受保护条目**：身份文件（`SOUL.md` 等）、`skills/`、
+  `skills-pool/`、引擎的 `state/`、`conf/`、`<engine>_conf/`、以及任何点文件
+  ——清单集中在 `core/workspace/protected_entries.py`，归其他 construct 或引擎
+  所有。资源根目录整体归 apply 引擎所有：每次声明了 `resources` 的 apply 都先
+  清空 workspace 下所有未受保护的条目、再写入声明的全部内容，所以上一份文档
+  声明而这一份省略的路径，以及 Bot 运行期自己写进 workspace 的文件，都会被
+  删除（#2162）；dry run 的 report 用 `removals` 列出将被清除的路径。受保护
+  条目一概不碰。命名了受保护条目的 `path` 在 PUT 时拒绝
+  （`resources_protected_entry`）。
 - 校验：白名单字符、禁止路径穿越（`../`、绝对路径）。
 
 **目录条目语义**（HTTP 没有目录语义，归档是把树运过来的约定形态）：
@@ -619,7 +642,8 @@ resources:
   口径是**每个 apply 点整体替换**；「读并哈希已部署的子树再比对」是可选优化，
   只有当读这棵树比重写它更便宜时才值得做。
 - **目录级声明获胜**：`path` 下整棵树归 manifest 管辖——源中不存在的
-  文件在 apply 时被清除（含手工添加的）。目录之外不碰。
+  文件在 apply 时被清除（含手工添加的）。这是上面「资源根目录整体归 apply
+  引擎所有」这条规则的推论：清空的是整个 workspace（受保护条目除外），不止目录条目。
 - **替换只原子到传输层允许的程度**：平台侧解包到临时位置（保证一次失败的
   取源或一个坏归档永远到不了 bot），但下发只有 `delete_tree` + 逐文件写
   ——设备文件系统契约里没有 rename/move。所以 `path` 下的树存在一个真实的
@@ -638,9 +662,9 @@ resources:
 - 目录条目的另一传输形态是 **git 源**（§2.2，免打包，业务内容在 git 上
   时优先）；索引文件、对象存储前缀列 v2 候选（design §9）。
 
-### 3.3 `skills` — local skills
+### 3.3 `capabilities.skills` — Direct Skills
 
-两种来源形态并存：
+Local 包的两种来源形态并存：
 
 ```yaml
 skills:
@@ -669,8 +693,50 @@ skills:
   限制（一个 identity 文件本身就是一段文本）。
 - teclaw：物化进 bot-data store 后以 `SkillRef(scope="user")` 进 artifact，
   与今天手工 upload 的 skill 走完全相同的路。
-- v2 预留来源：`source: center://<skill_uuid>@<version>`（skill center 引用，
-  不经 fetch，直接引 store）。
+- `origin` 省略或为 `local` 时继续使用上述包获取字段。
+- `origin: repo` 仅接受 `name`、`origin`、`repo_path`。`repo_path` 是规范化的
+  已同步共享仓库内路径，不是 Git URL；不复制成 Local 包。
+- `origin: center` 仅接受 `name`、`origin`，及二选一的 `skill_uuid` 或
+  `skill_code`。前者引用已有可见 UUID；后者精确引用公开市场 code，必要时在
+  resolve 预览精确包、真实 write 准备共享资产。Center 继续 Track Latest。
+- 所有分支的 `name` 必填且必须等于 Runtime Name；每个来源分支字段闭集。
+  普通集的 Skill 成员复用完全相同的语法与支持判断。
+
+### 3.3.1 `capabilities.skill_sets` — 普通集与 Default
+
+```yaml
+manifest:
+  capabilities:
+    skills:
+      - {name: review, origin: repo, repo_path: engineering/review}
+    skill_sets:
+      - {name: default}
+      - name: engineering
+        is_active: true
+        description: 工程工具
+        skills:
+          - {name: research, origin: center, skill_code: public-research}
+        mcp:
+          - {server_code: mcp.docs}
+    mcp: []
+```
+
+普通集条目必填 `name`、`is_active`、`skills`、`mcp`，列表可以为空，不能为
+`null`；可选 `description` 省略时清空描述。集内 MCP 仅允许 `server_code`，
+配置只由 Direct MCP 条目的 `config` 管理。inactive 集保留成员但停止供应。
+普通集按 Bot scope 与名称收敛，重复 Apply 复用 ID，省略的普通集被删除。
+
+精确小写 `default` 是保留名，每份声明最多一次，该条目只允许 `name`。
+包含 Default 引用时清除当前适用成员排除；省略引用时排除当前适用成员。
+Default 成员及适用的平台默认 MCP 即使操作者没有个人调用权限，也作为有效供应安装和投影；
+这不授予调用权限，运行时调用仍由既有鉴权链判定。普通集显式 MCP 和 Direct MCP
+仍须通过操作者权限校验。Default 的目录、配置、投递资格和权限服务异常仍会阻断。
+省略整个 `skill_sets` 与 `skill_sets: []` 等价：清空计划范围普通集，排除
+当前 Default 成员。Genome 旧输入的集合范围保持不参与。
+
+最多声明 50 个普通集；Direct 与所有普通集成员合计最多 50 条 Skill 和
+50 条显式 MCP，inactive 成员也计数，Default 引用与派生依赖不计数。
+嵌套 Local 包共用同一次编译的源解析与获取预算，不按集重开账本。
 
 ### 3.4 `engine_config` — 引擎配置
 
@@ -712,11 +778,11 @@ identity:
   AGENTS/USER/TOOLS/HEARTBEAT/BOOTSTRAP/KNOWLEDGE/CLAUDE/GREETING/README
   .md）；**claude_code 引擎仅允许 `CLAUDE.md`**。写入时按 bot 当前引擎
   校验并明确报错，而不是 apply 时静默跳过。
-- **保留名单：`MEMORY.md` 与 `IDENTITY.md` 声明即拒。**这两个是引擎生成的
-  运行期状态，apply **永不写入、也永不移除**它们——它们是类目覆盖（§1）
-  唯一的例外。两者都在 `VALID_IDENTITY_FILES` 里，所以上一条会放行，必须
-  在 `PUT` 时单独拒绝：否则用户会得到一份「被接受、却永远收敛不了」的文档。
-  名单**有限且可枚举**，正因如此它才是两个引擎系都能同意并检查的契约。
+- **`MEMORY.md` 声明即拒，且永不因替换而删除。**它仍为引擎运行期记忆。
+- **`IDENTITY.md` 在目标引擎原有白名单内可显式创建/覆盖。**显式空内容沿原空写
+  语义，与其他可配置身份文件一致。省略整个 identity 类目等价于 `identity: []`，清空
+  可管理集合；非空列表完整替换，未列出的 IDENTITY.md 同样移除。
+  此能力不扩大 Claude Code 白名单，不修改 MEMORY、权限或 stage 隔离。
 - 其余引擎可能写入的文件（运行期会被引擎更新的那些）技术上可声明，但声明
   获胜语义会在每个 apply 点重置它们——SOUL.md、RULES.md 等人设/规则文件
   才是本类目的主场景。
@@ -736,6 +802,7 @@ script:
   **体内无密**（下发链路日志可见）、退出码不影响平台就绪判定。
 - **生效时机**：`PUT` 之后**立即下发、下次启动时执行**。它是唯一效果被延后
   的类别——其余类别 `PUT` 后立即生效、且不需要重启。
+- **省略 `script` 等价于 `script: null`**，Apply 删除 Bot 的启动脚本记录。
 - ⚠️ **第一期：`script` 不得依赖同一份清单声明的任何内容。**脚本被烤进启动
   命令，而 `identity` / `resources` / `skills` 在容器**起来之后**才下发，所以
   **首启时脚本跑在它们之前**。这**反转了 design §3.4** 的顺序承诺（「脚本
@@ -868,7 +935,7 @@ cli_tools:
 | 项 | 建议上限 |
 | --- | --- |
 | 配置清单文档总大小 | 64 KiB（script 部分另按现状 24 KiB） |
-| 每类别条目数 | 50 |
+| 每类别条目数 | 50；能力内 Skill / 显式 MCP 各共享 50，普通集最多 50 |
 | `content` 内联单条 | 64 KiB |
 | `source` URL 单条 | 2048 字符（与 provenance 列宽一致；PUT 时拒绝——长度是准入可见的，不是取完后才该知道的） |
 | fetch 单条目 | skills zip 100 MiB；resources 文件 100 MiB；identity 1 MiB；cli_tools 单工具 200 MiB |
@@ -924,9 +991,8 @@ capabilities 端点发布的理由是**同一个字符串对象**，且有一个
 | --- | --- | --- | --- |
 | `identity` | ✅ | ✅ | ✅ |
 | `resources` | ✅ | ✅ | ✅ |
-| `skills` | ❌ 不是包 | ✅（强制 `digest`） | ✅ |
+| `capabilities` 中的 Local Skill 包 | ❌ 不是包 | ✅（强制 `digest`） | ✅ |
 | `cli_tools` | ❌ 不是可执行文件 | ✅（强制 `digest`） | ✅（**不需要** `digest`） |
-| `mcp` | —— 注册表引用，无来源轴 | | |
 | `engine_config` | —— 没有物化器，整个类别被拒 | | |
 
 **写客户端的人：能力表是唯一的事实来源**——先
@@ -935,3 +1001,24 @@ capabilities 端点发布的理由是**同一个字符串对象**，且有一个
 `constructs` 数组，还带一个 `source_matrix`：**每个（类别，协议）组合一行**，
 这是扁平的 `constructs` 结构上表达不了的问题——而表达不了，正是本轮五个缺陷
 的共同根源。
+
+
+能力发现的 `constructs` 与 `source_matrix` 只遍历当前执行类别，Skills/MCP
+历史枚举仅保留解码。`source_matrix` 说明 Local 包传输；共享 Repo 引用支持
+不能从 Git 传输支持推断。`skill_references` 单独列出 `package`、`repo_path`、
+`skill_uuid`、`skill_code` 的 `supported` / `reason`，PUT、创建校验与 compiler
+复用同一判断。DeepSeek Harness 当前仅支持 Local/Repo，Center 引用会明确拒绝。
+
+
+能力发现响应片段（支持与否以实际 Bot/engine 为准）：
+
+```json
+{
+  "skill_references": [
+    {"reference": "package", "supported": true, "reason": ""},
+    {"reference": "repo_path", "supported": true, "reason": ""},
+    {"reference": "skill_uuid", "supported": true, "reason": ""},
+    {"reference": "skill_code", "supported": true, "reason": ""}
+  ]
+}
+```

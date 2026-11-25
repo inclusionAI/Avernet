@@ -2,6 +2,29 @@
 
 Device / engine domain — engine binding, health probing, readiness, sandbox provisioning, OSS↔NAS migration.
 
+Connection authorization resolves the Bot linked to a binding first and uses
+its current `owner_id`. A published binding's `device_props.bolt_id` plus its
+immutable `entity_id` resolves the same Bot after handoff. Historical bindings
+with no linked Bot retain their standalone entity-owner rule. Lookup failures
+deny access; the retained entity never grants former-Owner access to a linked
+private Bot. Public visibility and existing collaborator checks remain in place.
+
+For BaaS file writes, the device filesystem exposes `DeviceFileSystemReadOnlyError`
+only when the Engine upload response contains its explicit read-only marker. Other
+403 responses, older Engine 500 responses, and transport failures remain errors
+without being classified as read-only. This does not promise atomic writes or
+change the permissions of the underlying filesystem.
+
+## Staff template overrides
+
+Staff template overrides (`system/personal_bot_test_template_whitelist`) match
+both the owner and the resolved BaaS engine bucket. A mapping contains
+`engine`, `staff_ids` and `template_uuid`; omitting `engine` means **OpenClaw
+only**, for both legacy single records and entries in `mappings`. Unmatched
+engines retain normal template selection, including explicit template UIDs.
+Different UUIDs for the same owner and bucket are ambiguous and fall back.
+This lookup does not broaden eligibility for ARCA-to-BaaS restart migration.
+
 ## Context Boundary
 
 ```yaml
@@ -23,6 +46,8 @@ consumes:
   - "DeviceAccessor (models only)"
   - "Layout initialization confirmation implementation"
 internal_dependencies:
+  - agentclaw.community.core.ports.runtime_binding
+  - agentclaw.community.core.access    # configured super-admin scope for instance restart
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
@@ -89,3 +114,19 @@ an expired worker cannot overwrite its replacement's state. Current checkpoints
 renew the lease without changing Bot state. A delayed LLM result must pass a
 claim checkpoint before bounded downstream sync; a superseded result is dropped.
 Legacy/manual calls without a claim retain the existing BotService write path.
+
+### Single-instance restart authorization
+
+Restart accepts the resolved Bot's current Owner, configured `admin.super_admin`, or an explicit
+Bot collaborator (MEMBER or ADMIN). Resolve the Bot by the binding-owned
+`device_props.bolt_id` and `entity_id`; the draft Bot binding is not the runtime
+binding. Public visibility and space-derived grants do not authorize this
+mutation. Missing authorization dependencies fail closed. BaaS receives the
+actual caller identity. Binding provider, environment and ACTIVE checks apply
+to every role before any restart request.
+
+The binding's entity remains a resource locator after handoff. Bootstrap resolves
+the Bot before querying Passport with that immutable entity, including when the
+compatibility request names the current Owner. Only unlinked historical bindings
+retain standalone entity ownership; a linked Bot's former Owner gains no grant
+from the retained binding identity.

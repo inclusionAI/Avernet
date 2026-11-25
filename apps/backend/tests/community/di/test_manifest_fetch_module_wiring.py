@@ -51,13 +51,13 @@ def test_the_entry_fetcher_reads_the_oss_road_through_the_one_object_store(
     the injector binds is the one the funnel reads through, so a test that
     substitutes the store on the injector substitutes it for every apply.
     """
-    from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+    from agentclaw.community.core.bot_config_manifest.sources.source_resolver import (
         DeclaredSourceResolver,
     )
     from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
         AliyunObjectStore,
     )
-    from agentclaw.community.core.bot_config_manifest.support_matrix import (
+    from agentclaw.community.core.apply_engine.support_matrix import (
         SourceKind,
     )
 
@@ -66,3 +66,21 @@ def test_the_entry_fetcher_reads_the_oss_road_through_the_one_object_store(
     assert isinstance(store, AliyunObjectStore)
     resolver = test_injector.get(DeclaredSourceResolver)
     assert resolver._fetchers[SourceKind.OSS]._objects is store
+
+
+def test_the_manifest_compiler_is_the_compiler_maps_manifest_row(test_injector) -> None:
+    """The run service looks its compiler up by reference type; the Manifest
+    row is contributed here, beside the fetch pipeline it compiles through,
+    over the same resolver and content store singletons."""
+    from agentclaw.community.core.apply_engine.compiler import StateCompilers
+    from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
+    from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
+    from agentclaw.community.core.bot_config_manifest.compiler import ManifestCompiler
+    from agentclaw.community.core.content_store.service_protocol import ContentStoreProtocol
+
+    compilers = test_injector.get(StateCompilers)
+    compiler = compilers[MANIFEST_STATE.kind]
+    assert isinstance(compiler, ManifestCompiler)
+    assert compiler is test_injector.get(ManifestCompiler)
+    assert compiler._resolver is test_injector.get(DeclaredSourceResolver)
+    assert compiler._content is test_injector.get(ContentStoreProtocol)

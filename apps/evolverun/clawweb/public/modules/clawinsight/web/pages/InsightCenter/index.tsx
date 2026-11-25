@@ -9,12 +9,13 @@ import FailureTasks from "./FailureTasks";
 import ImprovementItems from "./ImprovementItems";
 import InsightOverview from "./InsightOverview";
 import { InsightIcon } from "./InsightUi";
-import MonitoringPanel from "./monitoring/MonitoringPanel";
+import MonitoringWorkspace from "./monitoring/MonitoringWorkspace";
 import { MonitoringIcon } from "./monitoring/MonitoringIcon";
 import "./monitoring/monitoring.css";
 import { useInsightViewport } from "./useInsightViewport";
 
 type InsightTab = "todo" | "evidence" | "overview" | "admin";
+type MonitoringTab = "diagnosis" | "recovery";
 type BotOption = { botId: string; botName: string; ownerUserId?: string };
 
 type TabConfig = {
@@ -45,17 +46,26 @@ function parseImprovementId(value: string | null): number | undefined {
   return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }
 
-export default function InsightCenter() {
+export default function InsightCenter({ monitoringPracticeUrl }: { monitoringPracticeUrl?: string } = {}) {
   const viewportRef = useInsightViewport();
   const [params, setParams] = useSearchParams();
   const { user } = useClientUser();
   const canViewMonitoring = Boolean(user?.userId);
   const recoveryTaskId = params.get("recoveryTaskId");
   const monitoring = params.get("module") === "monitoring" && canViewMonitoring;
-  const select = (value: boolean) => {
+  const monitoringTab = params.get("monitoringTab") === "recovery" ? "recovery" : "diagnosis";
+  const activeSubtab = recoveryTaskId ? "recovery" : monitoringTab;
+  const openMonitoring = (tab: MonitoringTab) => {
     const next = new URLSearchParams(params);
-    if (value) next.set("module", "monitoring");
-    else next.delete("module");
+    next.set("module", "monitoring");
+    next.set("monitoringTab", tab);
+    next.delete("recoveryTaskId");
+    setParams(next);
+  };
+  const openGovernance = () => {
+    if (!monitoring) return;
+    const next = new URLSearchParams(params);
+    next.delete("module");
     setParams(next);
   };
   return <div ref={viewportRef} className="insight-shell">
@@ -63,12 +73,18 @@ export default function InsightCenter() {
       <div className="insight-sidebar-inner">
         <div className="insight-workspace-title"><span className="insight-workspace-icon"><MonitoringIcon name="grid" /></span>效果中心</div>
         <nav aria-label="效果中心功能" className="insight-side-nav">
-          {[{ active: !monitoring, label: "Agent 治理", value: false, icon: "chart" as const }, ...(canViewMonitoring ? [{ active: monitoring, label: "Agent 监控自愈", value: true, icon: "pulse" as const }] : [])].map(item =>
-            <button key={item.label} type="button" aria-current={item.active ? "page" : undefined} onClick={() => select(item.value)} className={item.active ? "active" : ""}><MonitoringIcon name={item.icon} />{item.label}</button>)}
+          <button type="button" aria-current={!monitoring ? "page" : undefined} onClick={openGovernance} className={!monitoring ? "active" : ""}><MonitoringIcon name="chart" />Agent 治理</button>
+          {canViewMonitoring && <div className="insight-nav-group">
+            <button type="button" aria-expanded={monitoring} onClick={() => { if (!monitoring) openMonitoring("diagnosis"); }} className={monitoring ? "active" : ""}><MonitoringIcon name="pulse" />诊断自愈</button>
+            {monitoring && <div role="group" aria-label="诊断自愈子导航" className="insight-subnav">
+              <button type="button" aria-current={activeSubtab === "diagnosis" ? "page" : undefined} onClick={() => openMonitoring("diagnosis")}>诊断</button>
+              <button type="button" aria-current={activeSubtab === "recovery" ? "page" : undefined} onClick={() => openMonitoring("recovery")}>自愈</button>
+            </div>}
+          </div>}
         </nav>
       </div>
     </aside>
-    <div className="insight-content" role="region" aria-label="效果中心内容" tabIndex={0}>{monitoring && recoveryTaskId ? <SessionRecoveryDetail taskId={recoveryTaskId} onBack={() => { const next = new URLSearchParams(params); next.delete("recoveryTaskId"); setParams(next); }} /> : monitoring ? <MonitoringPanel key={`${user?.userId}:${user?.isClawInsightAdmin}`} isAdmin={user?.isClawInsightAdmin === true} /> : <GovernanceCenter />}</div>
+    <div className="insight-content" role="region" aria-label="效果中心内容" tabIndex={0}>{monitoring && recoveryTaskId ? <SessionRecoveryDetail taskId={recoveryTaskId} onBack={() => openMonitoring(monitoringTab)} /> : monitoring ? <MonitoringWorkspace key={`${user?.userId}:${user?.isClawInsightAdmin}`} tab={monitoringTab} isAdmin={user?.isClawInsightAdmin === true} practiceUrl={monitoringPracticeUrl} /> : <GovernanceCenter />}</div>
   </div>;
 }
 

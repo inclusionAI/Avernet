@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from agentclaw.community.core.bot_management.avatar import validate_avatar_storage
 from agentclaw.community.core.desktop_bot.errors import DesktopBotServiceError
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -137,6 +138,7 @@ class DesktopCreationLifecycle:
             avatar_url = bot.get("avatar_url")
             if avatar_url:
                 initial_ext["avatar_url"] = avatar_url
+                validate_avatar_storage(initial_ext)
             self._bot_repo.insert_with_initial_skill_layout(
                 {
                     "bot_id": bot_id,

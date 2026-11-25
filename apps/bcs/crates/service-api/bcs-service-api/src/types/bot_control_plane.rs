@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use bcs_domain::{ActorKind, ActorStatus, Skill};
 
 use crate::application::v1::{BotInternalAttributes, FriendCheckInStrategy, UserVisibility};
+use crate::types::bot_authority::BotAccessRelation;
 use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +55,9 @@ pub struct BotCandidateReadQuery {
     pub acting_bot_id: String,
     pub env: String,
     pub visibility: BotCandidateVisibility,
+    /// Viewer perspective used to pick the visibility dimension: a Human
+    /// viewer filters on `user_visibility`, a Bot viewer on `visibility`.
+    pub viewer_kind: ActorKind,
     pub friend_ids: HashSet<String>,
     pub name: Option<String>,
     pub offset: u64,
@@ -65,6 +69,9 @@ pub struct BotSearchCandidateQuery {
     pub acting_bot_id: String,
     pub env: String,
     pub visibility: BotCandidateVisibility,
+    /// Viewer perspective for the purpose-based visibility branch. `None`
+    /// keeps the legacy Bot-oriented control-plane filter.
+    pub viewer_kind: Option<ActorKind>,
     pub friend_ids: HashSet<String>,
     pub bot_uuids: Option<Vec<String>>,
     pub name: Option<String>,
@@ -74,6 +81,10 @@ pub struct BotSearchCandidateQuery {
     pub status: Option<ActorStatus>,
     pub friendship: Option<BotSearchFriendshipFilter>,
     pub tc_bot: Option<bool>,
+    /// When true, free-text matching covers only the Bot display name, as the
+    /// V1 name fallback requires; the legacy control plane keeps matching
+    /// summaries and Bot IDs.
+    pub name_only: bool,
     pub offset: u64,
     pub limit: u64,
 }
@@ -91,6 +102,52 @@ pub struct BotControlPlaneOwnedQuery {
     pub kind: Option<ActorKind>,
     pub name: Option<String>,
     pub status: Option<ActorStatus>,
+}
+
+/// Query for the `list_controllable` candidate read of the mine
+/// union (bot-authority spec §8.0 / plan §3 frozen contract).
+///
+/// `user_id` is the RAW User ID (the `created_by` convention of
+/// this layer; the store matches `human_<user_id>` on the
+/// authority edges). Only persistent conditions are applied:
+/// one store snapshot returns the env/kind/name/status-filtered,
+/// role-deduped (`owner|manager` union, owner wins), stably
+/// sorted candidates INCLUDING the legal Human self entry.
+///
+/// There is deliberately NO reachability, offset or limit here:
+/// candidate filtering and pagination are the application's §8.0
+/// dynamic-algorithm concern, not a store concern.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControllableCandidateQuery {
+    pub user_id: String,
+    pub env: String,
+    pub kind: Option<ActorKind>,
+    pub name: Option<String>,
+    pub status: Option<ActorStatus>,
+    /// Migration-window compat (spec §10.2a): when enabled the
+    /// candidate read also covers live physical Bots whose stored
+    /// `created_by` byte-matches `user_id` and whose
+    /// `ownership_version = 0` (uninitialized legacy rows the
+    /// lazy sweep has not minted edges for yet). Strict
+    /// post-migration posture turns this off so only the current
+    /// edge state feeds the page.
+    pub include_legacy_creator: bool,
+}
+
+/// One lightweight mine candidate: identity, bot kind, persisted
+/// status and the access relation carried by the authority edges
+/// (the Human self entry projects the Owner display tag without
+/// any Human→Human owner edge existing; spec §8.0 point 3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ControlledBotCandidate {
+    pub id: String,
+    pub kind: ActorKind,
+    pub status: ActorStatus,
+    pub access_relation: BotAccessRelation,
+    /// The source row's persisted creation time in
+    /// epoch milliseconds (`gmt_create`): the mine
+    /// page's `created_at`-descending order key.
+    pub created_at: u64,
 }
 
 /// How to combine `task_claim_mode` / `task_dream_mode` filters in a task-mode roster query.

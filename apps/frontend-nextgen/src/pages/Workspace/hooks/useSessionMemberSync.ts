@@ -2,6 +2,7 @@ import type { ParticipantMode, SessionView } from '@/domain/collaboration';
 import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { DomainError } from '@/services/workspace/identityService';
 import { sessionService } from '@/services/workspace/sessionService';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { replaceSessionInMap } from './sessionMapPatch';
@@ -48,57 +49,60 @@ export function useSessionMemberSync(
   participantsCount: number,
   sessionMap: Record<string, SessionView[]>,
 ): UseSessionMemberSyncResult {
+  const activeIdentityId = useWorkspaceStore((s) => s.activeIdentityId);
+  const selected = Object.values(sessionMap).flat().find((s) => s.sessionId === selectedSessionId);
+  const detailLoaded =
+    selected?.participantDetailsLoaded ?? ((selected?.participants.length ?? participantsCount) > 0);
+  const selectedSummaries = selected?.participantSummaries;
   const pendingDetailRef = useRef<SessionView | null>(null);
 
   const applyDetail = useCallback(
     (detail: SessionView) => {
-      if (detail.participants.length === 0) return;
       applyMapUpdate((cur) => {
-        const next = { ...cur };
-        const list = next[detail.groupId] ? [...next[detail.groupId]] : [];
+        const list = [...(cur[detail.groupId] ?? [])];
         const idx = list.findIndex((s) => s.sessionId === detail.sessionId);
-        if (idx >= 0) {
-          const existing = list[idx];
-          if (existing.participants.length > 0) return cur;
-          list[idx] = { ...existing, participants: detail.participants };
-        } else {
-          list.push(detail);
-        }
-        next[detail.groupId] = list;
-        return next;
+        const existing = list[idx];
+        if (existing && (existing.participantDetailsLoaded ?? existing.participants.length > 0)) return cur;
+        const updated = existing
+          ? {
+              ...existing,
+              participants: detail.participants,
+              participantSummaries: detail.participantSummaries,
+              participantDetailsLoaded: true,
+            }
+          : { ...detail, participantDetailsLoaded: true };
+        if (idx >= 0) list[idx] = updated;
+        else list.push(updated);
+        return { ...cur, [detail.groupId]: list };
       });
     },
     [applyMapUpdate],
   );
 
-  // 选中会话变化或 participants 归零时拉详情。
-  // participantsCount 作为依赖：身份切换后列表刷新 participants 归零，effect 重新触发。
+  // 选中会话变化、身份切换或列表摘要刷新时拉详情。
+  // 已标记加载（含明确空详情）则不再补拉，避免无限重拉。
   useEffect(() => {
     pendingDetailRef.current = null;
-    if (!selectedSessionId) {
-      return;
-    }
-    // 已知退出/删除的会话不再补齐详情（当前角色已非参与者，请求必然失败报错）；
-    // 陈旧选中兜底会直接把选中轮换到有效会话。
-    if (isSessionKnownGone(selectedSessionId)) {
-      return;
-    }
+    if (!selectedSessionId || detailLoaded || isSessionKnownGone(selectedSessionId)) return;
     let cancelled = false;
     sessionService.getSessionDetail(selectedSessionId).then((res) => {
-      if (cancelled || !res.ok) return;
+      if (cancelled || !res.ok || useWorkspaceStore.getState().activeIdentityId !== activeIdentityId) return;
       pendingDetailRef.current = res.data;
       applyDetail(res.data);
     });
     return () => {
       cancelled = true;
     };
-  }, [selectedSessionId, participantsCount, applyDetail]);
+  }, [selectedSessionId, activeIdentityId, detailLoaded, selectedSummaries, applyDetail]);
 
   useEffect(() => {
+    if (detailLoaded) {
+      pendingDetailRef.current = null;
+      return;
+    }
     const detail = pendingDetailRef.current;
-    if (!detail || detail.sessionId !== selectedSessionId) return;
-    applyDetail(detail);
-  }, [applyDetail, selectedSessionId, sessionMap]);
+    if (detail?.sessionId === selectedSessionId) applyDetail(detail);
+  }, [applyDetail, selectedSessionId, detailLoaded, sessionMap]);
 
   const updateMemberMode = useCallback(
     async (

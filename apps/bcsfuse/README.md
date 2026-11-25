@@ -1,15 +1,43 @@
 # BCSFuse - Open Source Runtime Candidate
 
+### App knowledge framework
+
+- [App knowledge standard](docs/agents/knowledge-standard.md) and [templates](docs/agents/templates/README.md).
+- [App architecture](docs/arch/README.md) and [app decisions](docs/adr/README.md).
+- [Existing knowledge catalog](docs/agents/existing-knowledge.md): existing docs, domain context and historical designs.
+- [Flows](docs/flows/README.md), [diagnostics](docs/diagnostics/README.md), and [change specs](specs/README.md).
+
+
+## Knowledge navigation
+
+Public BCSFuse owns the shared search core, provider contracts and TC application; OCB owns its enterprise adapters and assembly.
+
+- [Existing document index](docs/README.md)
+- [Search architecture and boundaries](docs/architecture/search-core-boundary.md)
+- [Provider contracts](packages/search-core/docs/provider-contracts.md)
+- [Flow navigation](docs/flows/README.md)
+- [Diagnostic navigation](docs/diagnostics/README.md)
+
+- [Change specs](specs/README.md)
+
+Existing documents remain at their current paths. Check each document's status, target revision and source before treating it as a current contract.
+
 ## Project Overview
 
 BCSFuse is a collaboration control plane for AI worker management, providing task understanding, retrieval, team composition, and OpenClaw integration. This is the open-source runtime candidate designed for public release.
 
 **IMPORTANT:**
 - This OSS candidate must not use internal DRM/Layotto/Sofa/ZDAS dependencies
-- Do not commit runtime data, logs, SQLite/Faiss/Qdrant storage, or real secrets
-- Original internal `bcsfuse` remains protected and will not be affected
+- Do not commit runtime data, logs, SQLite/Qdrant storage, or real secrets
+- Enterprise hosts compose the public TC application with their own providers
+
+Documentation starts at the [BCSFuse document index](docs/README.md).
+The shared Card API is available as a library; TC does not enable it automatically.
 
 ## Quick Start
+
+For the `app` / `search_core` package layout, current extraction scope and
+public/enterprise boundaries, see [search architecture](docs/architecture/search-core-boundary.md).
 
 ### Installation
 
@@ -17,29 +45,32 @@ BCSFuse is a collaboration control plane for AI worker management, providing tas
 # Using uv (recommended)
 uv sync
 
-# Or using pip
-pip install -e .
+# Or using pip, from apps/bcsfuse in a complete repository checkout
+pip install -e packages/search-core -e .
 ```
 
 ### Start Server
 
+Start [Qdrant Server 1.20 or later](docs/qdrant-modes.md) before running any mode.
+
 ```bash
-# Runtime mode (requires MySQL)
+# Runtime mode (requires MySQL and Qdrant Server)
 export BCSFUSE_AUTH_TOKEN="your-token-here"
 export BCSFUSE_PROVIDER_MODE="runtime"
+export QDRANT_URL="http://127.0.0.1:6333"
 python main.py
 
-# Dev mode (SQLite + Faiss)
+# Dev mode (SQLite + Qdrant Server)
 export BCSFUSE_AUTH_TOKEN="your-token-here"
 export BCSFUSE_PROVIDER_MODE="dev"
 python main.py
 
-# Dev smoke mode (offline, no external services)
+# Dev smoke mode (SQLite and Qdrant, no external model credentials)
 export BCSFUSE_AUTH_TOKEN="dev-smoke-token"
 export BCSFUSE_PROVIDER_MODE="dev_smoke"
 python main.py
 
-# Test mode (in-memory, ephemeral)
+# Test mode (temporary SQLite and Qdrant Server)
 export BCSFUSE_AUTH_TOKEN="test-token"
 export BCSFUSE_PROVIDER_MODE="test"
 python main.py
@@ -62,10 +93,10 @@ curl -H "Authorization: Bearer your-token-here" http://localhost:8765/providers
 
 | Mode | Database | Vector Store | HTTP Providers | Auth | Use Case |
 |------|----------|--------------|----------------|------|----------|
-| `runtime` | MySQL | QdrantLocal | Real HTTP | Required | Production deployment |
-| `dev` | SQLite | FaissSQLite | Real HTTP | Required | Local development |
-| `dev_smoke` | SQLite | FaissSQLite | Fake/Noop | Required | Offline testing |
-| `test` | InMemory | InMemory | Fake/Noop | Required | CI/CD testing |
+| `runtime` | MySQL | Qdrant Server | Real HTTP | Required | Production deployment |
+| `dev` | SQLite | Qdrant Server | Real HTTP | Required | Local development |
+| `dev_smoke` | SQLite | Qdrant Server | Fake/Noop | Required | Offline testing |
+| `test` | Temporary SQLite | Qdrant Server | Fake/Noop | Required | CI/CD testing |
 
 ## Authentication
 
@@ -133,8 +164,9 @@ export MYSQL_DATABASE="bcsfuse_oss"
 export MYSQL_USER="bcsfuse"
 export MYSQL_PASSWORD="<YOUR_PASSWORD_HERE>"
 
-# Qdrant Local
-export QDRANT_LOCAL_PATH="/var/lib/bcsfuse/qdrant"
+# Qdrant Server (separate process)
+export QDRANT_MODE="server"
+export QDRANT_URL="http://127.0.0.1:6333"
 export QDRANT_COLLECTION_NAME="worker_profiles"
 
 # Server
@@ -149,9 +181,7 @@ export BCSFUSE_PROVIDER_MODE="runtime"
 
 ```bash
 # SQLite (for dev mode, defaults used if not set)
-export BCSFUSE_DATABASE_SQLITE_PATH="/tmp/bcsfuse_dev.db"
-export BCSFUSE_FAISS_INDEX_PATH="/tmp/bcsfuse_faiss.index"
-export BCSFUSE_FAISS_SQLITE_PATH="/tmp/bcsfuse_faiss.db"
+export WORKER_REGISTRY_SQLITE_DB_PATH="/tmp/bcsfuse_dev.db"
 
 # Embedding Provider (optional)
 export EMBEDDING_BASE_URL="http://your-embedding-service:19998"
@@ -162,7 +192,7 @@ export EMBEDDING_DIMENSION="1024"
 # Reranker Provider (optional)
 export RERANKER_BASE_URL="http://your-reranker-service:19998"
 export RERANKER_API_KEY="your-reranker-key-here"
-export RERANKER_MODEL="rerank-1"
+export RERANKER_MODEL="Qwen3-Reranker-4B"
 
 # LLM Provider (optional)
 export LLM_BASE_URL="http://your-llm-service:19998"
@@ -171,6 +201,33 @@ export LLM_ENABLED="true"
 export LLM_FAST_MODEL="claude-3-5-sonnet-20241022"
 export LLM_REASONING_MODEL="claude-3-5-sonnet-20241022"
 ```
+
+### Reranker Inputs
+
+When reranking is enabled, the built-in default model is `Qwen3-Reranker-4B`.
+An explicit request model takes precedence over `RERANKER_MODEL`, which takes
+precedence over the built-in default. BGE remains available through either
+override. Disabling reranking still bypasses the model.
+
+The reranker receives the Bot name and valid profile text. Default capabilities,
+skill sets, generated worker IDs, retrieval scores, and empty configuration
+placeholders are excluded. The selected model determines the HTTP input format:
+
+- `bge-reranker-v2-m3`: send the original query and documents without adding
+  `Passage:` prefixes, trailing newlines, or a chat template.
+- `Qwen3-Reranker-4B`: format the query with the system prefix and
+  `<Instruct>`, `<Query>`, and `<Document>` fields; append the assistant suffix
+  and empty think block to each document. Use the official default instruction,
+  `Given a web search query, retrieve relevant passages that answer the query`.
+
+Preserve document whitespace. This adapter targets a `/rerank` endpoint that
+accepts client-formatted Qwen inputs; an SDK that already adds the model template
+must not wrap those inputs again. Model scores are returned without local
+normalization. Thresholds need evaluation for each model and instruction;
+scores are not calibrated probabilities of a Bot solving a task.
+
+References: [BAAI BGE usage](https://huggingface.co/BAAI/bge-reranker-v2-m3#usage)
+and [Qwen usage](https://huggingface.co/Qwen/Qwen3-Reranker-4B#usage).
 
 ## Runtime Storage
 
@@ -190,39 +247,17 @@ provider is an error; fusion must not fall back to a separate SQLite profile sto
 -- - worker_profiles_raw (raw profile storage)
 ```
 
-### QdrantLocal (Runtime Mode)
+### Qdrant Server
 
-Vector storage uses Qdrant in embedded mode:
+TC uses Qdrant Server for dense and keyword retrieval. Direct startup defaults to
+`http://127.0.0.1:6333`. Set `QDRANT_URL` to use another endpoint. gRPC is
+preferred by default (`QDRANT_GRPC_PORT=6334`). The public Compose file starts
+a Qdrant container. See [Qdrant deployment modes](docs/qdrant-modes.md).
 
-```bash
-# Data directory
-export QDRANT_LOCAL_PATH="/var/lib/bcsfuse/qdrant"
+### SQLite (Dev and Test)
 
-# Collection name
-export QDRANT_COLLECTION_NAME="worker_profiles"
-```
-
-### SQLite (Dev Mode)
-
-For development, BCSFuse can use SQLite with Faiss:
-
-```bash
-# SQLite database
-export BCSFUSE_DATABASE_SQLITE_PATH="/tmp/bcsfuse_dev.db"
-
-# Faiss index
-export BCSFUSE_FAISS_INDEX_PATH="/tmp/bcsfuse_faiss.index"
-export BCSFUSE_FAISS_SQLITE_PATH="/tmp/bcsfuse_faiss.db"
-```
-
-### InMemory (Test Mode)
-
-For testing, everything is in-memory:
-
-```bash
-export BCSFUSE_PROVIDER_MODE="test"
-# No additional storage configuration needed
-```
+Set `WORKER_REGISTRY_SQLITE_DB_PATH` to choose the database. The test and
+dev-smoke modes use a temporary database when no path is set.
 
 ## Testing
 
@@ -337,12 +372,12 @@ grep -R -n -I -E 'Bearer [A-Za-z0-9._-]{12,}|AUTH_TOKEN=.*[^_A-Z]|PASSWORD=.*[^_
 **Use system temp directories:**
 - Qdrant: `/tmp/bcsfuse_qdrant/` or `/var/lib/bcsfuse/qdrant_storage/`
 - SQLite: `/tmp/bcsfuse_dev.db` or `/var/lib/bcsfuse/bcsfuse.db`
-- Faiss: `/tmp/bcsfuse_faiss.index` or `/var/lib/bcsfuse/faiss.index`
+- Qdrant: `/tmp/bcsfuse_qdrant` or `/var/lib/bcsfuse/qdrant`
 
 **WRONG (do NOT use):**
 - Qdrant: `./qdrant_storage/` (in source directory)
 - SQLite: `./data/bcsfuse.db` (in source directory)
-- Faiss: `./faiss.index` (in source directory)
+- Qdrant: `./qdrant_storage` (in source directory)
 
 ### Cleanup Runtime Artifacts
 
@@ -364,7 +399,6 @@ rm -rf /var/folders/*/T/bcsfuse_*
 - `httpx-sse>=0.4.0` - SSE support
 - `requests` - HTTP library
 - `numpy==1.26.4` - Numerical computing
-- `faiss-cpu==1.8.0` - Vector similarity search
 - `qdrant-client>=1.12.0` - Vector database client
 - `mysql-connector-python>=8.0.0` - MySQL driver
 - `apscheduler>=3.10.0` - Task scheduling
@@ -398,8 +432,8 @@ rm -rf /var/folders/*/T/bcsfuse_*
    - OSS candidate only includes Python components
 
 5. **Provider Mode `dev_smoke` vs `test`**
-   - `dev_smoke`: Uses SQLite + Faiss + Fake providers (persistent)
-   - `test`: Uses InMemory + Fake providers (ephemeral)
+   - Both modes use Qdrant Server and fake model providers. Set
+     `WORKER_REGISTRY_SQLITE_DB_PATH` to keep the SQLite database across runs.
 
 ## Public Candidate Status
 
@@ -442,3 +476,15 @@ For issues and feature requests, please use the GitHub issue tracker.
 **Document Version:** 1.0
 **Last Updated:** 2026-06-23
 **Status:** OSS Public Candidate
+
+### Local vector store migration
+
+Local TC uses SQLite for durable records and Qdrant Server for both dense and
+keyword retrieval. Startup restores the index from the saved Docs. FAISS
+snapshots and Python Local index files require re-syncing the source Workers
+when the SQLite catalog has no Docs. Qdrant applies payload filters before top-k,
+so indexed test records need the requested runtime state and visibility fields.
+
+### 独立 Card 搜索示例
+
+SQLite + Qdrant Server 的 Card 写入、检索、更新和删除示例见 [独立启动指南](packages/search-core/docs/local-catalog.md)。

@@ -555,7 +555,16 @@ describe('issue and optimization flow', () => {
     await userEvent.click(await screen.findByRole('checkbox', { name: '选择 将超时阈值调整为 90 秒' }))
     await userEvent.click(screen.getByRole('button', { name: '下一页建议' }))
     expect(await screen.findByRole('checkbox', { name: '选择 新来源建议' })).not.toBeChecked()
-    expect(screen.getByRole('button', { name: '生成优化草稿（1）' })).toBeEnabled()
+    // The page can render before its changed digest finishes refreshing permissions and task state.
+    await waitFor(() => expect(screen.getByRole('button', { name: '生成优化草稿（1）' })).toBeEnabled())
+    expect(repairApi.selection).toHaveBeenCalledWith('wf-1', ['item-1'], false)
+    expect(await screen.findByRole('checkbox', { name: '选择 新来源建议' })).not.toBeChecked()
+    await userEvent.click(screen.getByRole('button', { name: '生成优化草稿（1）' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '生成 Pack 草稿' })).toBeEnabled())
+    await userEvent.click(screen.getByRole('button', { name: '生成 Pack 草稿' }))
+    await waitFor(() => expect(repairApi.create).toHaveBeenCalledWith(expect.objectContaining({
+      workflowId: 'wf-1', itemIds: ['item-1'], inputDigest: 'new-digest',
+    })))
   })
 
 

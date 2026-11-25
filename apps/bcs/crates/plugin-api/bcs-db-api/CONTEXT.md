@@ -5,6 +5,9 @@
 - Infrastructure database plugin contract for BCS services.
 - Shared DB error types and async trait boundary.
 - A driver-level SQL execution surface for local and remote implementations.
+- SQL migration statement splitting preserves quoted and commented semicolons;
+  callers still own dialect selection and SQL validity. Custom delimiters and
+  stored routines are outside this helper's supported migration syntax.
 - `ExecuteChecked` transaction steps require an exact affected-row count before
   commit; mismatch returns `DbError::ConditionFailed` and rolls back every step.
   Existing Execute semantics are unchanged. Plugins must implement the new enum

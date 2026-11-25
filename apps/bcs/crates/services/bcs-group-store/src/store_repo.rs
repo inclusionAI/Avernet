@@ -6,15 +6,48 @@
 //! those inherent methods; inherent candidates win method resolution, so these
 //! one-line bodies do not recurse into themselves.
 use super::*;
+use bcs_service_api::types::authorization_snapshot::GroupAuthorizationSnapshot;
 
 #[async_trait]
 impl GroupRepoPort for MySqlGroupStore {
+    async fn read_card_snapshot(&self, id: &str) -> ServiceResult<Option<bcs_service_api::types::GroupCardSnapshot>> {
+        self.read_card_snapshot_sql(id).await
+    }
+
+    async fn read_detail_snapshot(&self, id: &str) -> ServiceResult<Option<bcs_service_api::types::GroupMutationSnapshot>> {
+        // No display-cache fallback: otherwise a remote writer could leave this
+        // process indefinitely pairing stale metadata with current labels.
+        for _ in 0..3 {
+            let Some(group) = self.load_group_from_mysql(id).await? else { return Ok(None); };
+            let Some(card) = self.read_card_snapshot_sql(id).await? else { return Ok(None); };
+            if group.version == card.version {
+                return Ok(Some(bcs_service_api::types::GroupMutationSnapshot {
+                    group, catalog_labels: card.catalog_labels,
+                }));
+            }
+        }
+        Err(ServiceError::Conflict("Group changed during detail snapshot read".into()))
+    }
+
+    async fn upsert_with_catalog_labels(&self,group:Group,labels:Option<bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
+        self.upsert_sql(group,labels,false).await
+    }
+    async fn create_with_catalog_labels(&self,group:Group,labels:Option<bcs_service_api::types::catalog_labels::CatalogLabels>)->ServiceResult<()> {
+        self.upsert_sql(group,labels,true).await
+    }
     async fn upsert(&self, group: Group) -> ServiceResult<()> {
-        self.upsert_sql(group).await
+        self.upsert_sql(group,None,false).await
     }
 
     async fn finalize_provisioning(&self, command: FinalizeGroupProvisioning) -> ServiceResult<()> {
         self.finalize_provisioning_sql(command).await
+    }
+
+    async fn commit_eventful_mutation_with_snapshot(
+        &self,
+        command: CommitGroupEventfulMutation,
+    ) -> ServiceResult<bcs_service_api::types::GroupMutationSnapshot> {
+        self.commit_eventful_mutation_snapshot_sql(command, true).await
     }
 
     async fn commit_eventful_mutation(
@@ -47,6 +80,14 @@ impl GroupRepoPort for MySqlGroupStore {
         group_id: &str,
     ) -> ServiceResult<Option<GroupHumanNotifyPolicy>> {
         self.read_human_notify_policy_sql(group_id).await
+    }
+
+    async fn read_authorization_snapshot(
+        &self,
+        group_id: &str,
+    ) -> ServiceResult<Option<GroupAuthorizationSnapshot>> {
+        // Strict master-source read; no cache fallback.
+        self.read_authorization_snapshot_sql(group_id).await
     }
 
     async fn try_get(&self, id: &str) -> ServiceResult<Option<Group>> {
@@ -116,14 +157,6 @@ impl GroupRepoPort for MySqlGroupStore {
 
     async fn update_status(&self, id: &str, status: GroupStatus) -> ServiceResult<()> {
         self.update_status_sql(id, status).await
-    }
-
-    async fn update_service_spec(
-        &self,
-        id: &str,
-        service_spec: Option<bcs_service_api::ServiceSpec>,
-    ) -> ServiceResult<()> {
-        self.update_service_spec_sql(id, service_spec).await
     }
 
     async fn delete(&self, id: &str) -> ServiceResult<Option<Group>> {

@@ -28,8 +28,15 @@ pub fn message_delivery_core_service_contract_tests<T: MessageDeliveryCoreServic
     let started = service.transition(queued, 1, Event::StartSend)?;
     assert_eq!(started.state.status, Status::Dispatching);
     assert!(started.state.may_have_been_sent);
+    let deadline_change = service.transition(started.state, 2, Event::RunDeadlineAdjusted)?;
+    assert_eq!(deadline_change.state.status, Status::Dispatching);
+    assert_eq!(deadline_change.state.state_version, 3);
+    assert!(deadline_change.changed && !deadline_change.release_active && !deadline_change.request_abort);
+    assert_eq!(deadline_change.context_action,DeliveryContextAction::Keep);
+    assert!(service.transition(queued,1,Event::RunDeadlineAdjusted).is_err());
     let unknown = service.transition(started.state, 2, Event::Recover)?;
     assert_eq!(unknown.state.status, Status::Unknown);
+    assert!(service.transition(unknown.state,3,Event::RunDeadlineAdjusted).is_err());
     assert!(!unknown.release_active);
     assert!(
         service

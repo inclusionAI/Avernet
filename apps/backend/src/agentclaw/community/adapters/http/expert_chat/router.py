@@ -24,8 +24,11 @@ import traceback
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from agentclaw.community.adapters.http.org.dependencies import require_baas_caller
+from agentclaw.community.adapters.http.org.dependencies import (
+    require_baas_caller, require_baas_caller_status,
+)
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+from agentclaw.community.utils.env_utils import get_current_env
 
 from agentclaw.community.adapters.http.expert_chat.schemas import (
     AddChatBotRequest,
@@ -39,6 +42,7 @@ from agentclaw.community.api.expert_chat_instance_service import (
     ExpertChatInstanceServiceProtocol,
 )
 from agentclaw.community.core.access.admin_scopes import super_admin
+from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
 from agentclaw.community.di import Injected
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError,
@@ -187,8 +191,20 @@ async def get_chat_session(
         logger.warning(f"[expert_chats.get_chat_session] Bot not published: {e}")
         return ApiResponse(success=False, message=str(e), error_code=4001)
 
+    except EngineStageNotLiveError:
+        logger.warning(
+            "[expert_chats.get_chat_session] Online publication unavailable: bot=%s owner=%s",
+            bot_id, owner_id,
+        )
+        return ApiResponse(success=False, message="Bot未发布或发布版本不可用", error_code=4001)
+
+    except ChatPermissionError as e:
+        logger.warning("[expert_chats.get_chat_session] Permission denied: %s", e)
+        return ApiResponse(success=False, message=str(e), error_code=403)
+
     except ConnectionError as e:
-        logger.error(f"[expert_chats.get_chat_session] Connection error: {e.original_error}")
+        log_failure = logger.warning if e.caller_device_unavailable else logger.error
+        log_failure(f"[expert_chats.get_chat_session] Connection error: {e.original_error}")
         error_code = int(e.error_code) if e.error_code else 5001
         return ApiResponse(success=False, message=str(e), error_code=error_code)
 
@@ -396,6 +412,14 @@ async def connect_chat_session(
         return ApiResponse(
             success=False, message=str(error), error_code=4001
         )
+    except EngineStageNotLiveError:
+        logger.warning(
+            "[expert_chats.connect_chat_session] Online publication unavailable: bot=%s owner=%s",
+            bot_id, owner_id,
+        )
+        return ApiResponse(
+            success=False, message="Bot未发布或发布版本不可用", error_code=4001
+        )
     except ChatPermissionError as error:
         return ApiResponse(
             success=False, message=str(error), error_code=403
@@ -563,7 +587,12 @@ async def get_caller_connection_for_other(
         )
     except Exception as error:
         duration_ms = (time.perf_counter() - started_at) * 1000
-        logger.error(
+        log_failure = (
+            logger.warning
+            if isinstance(error, ConnectionError) and error.caller_device_unavailable
+            else logger.error
+        )
+        log_failure(
             "event=expert_chat.caller_connection.failed direction=inbound "
             "operation=caller_connection method=POST "
             "route=/api/v1/expert-chats/caller-connection operator_id=%s "
@@ -652,5 +681,54 @@ async def get_caller_connection_for_application(
     logger.info(
         "event=expert_chat.app_caller_connection.%s context=%s response=%s",
         event, context, _application_log_value(response.model_dump()),
+    )
+    return response
+
+
+@router.get("/app-caller-instance/status", response_model=ApiResponse, dependencies=[Depends(require_baas_caller_status)])
+async def get_caller_instance_status_for_application(
+    request: Request,
+    bot_id: str = Query(..., min_length=1, description="Source Bot ID"),
+    owner_id: str = Query(..., min_length=1, description="Source Bot owner ID"),
+    user_id: str = Query(..., min_length=1, description="Target Caller user ID"),
+    instance_service: ExpertChatInstanceServiceProtocol = Injected(
+        ExpertChatInstanceServiceProtocol
+    ),
+):
+    """Observe Caller allocation and health for a verified BaaS service.
+
+    This service-scoped read needs no user delegation or chat membership and
+    never enters the Caller lifecycle. The public OpenAPI retains its policy.
+    """
+    started_at = time.perf_counter()
+    context = {
+        "system": "backend", "direction": "inbound",
+        "operation": "app_caller_instance_status", "method": "GET",
+        "route": request.url.path, "request_id": request.headers.get("x-request-id"),
+        "tenant": get_current_avernet_tenant(), "env": get_current_env(),
+        "bot_id": bot_id, "owner_id": owner_id, "user_id": user_id,
+    }
+    logger.info("event=expert_chat.app_caller_instance_status.request context=%s", context)
+    try:
+        # COSEC: the verified BaaS service may query the named Caller directly;
+        # tenant/environment still come from trusted server context, not claims.
+        result = await instance_service.get_caller_instance_status(
+            bot_id=bot_id, owner_id=owner_id, user_id=user_id,
+        )
+        response = ApiResponse(success=True, message="获取成功", error_code=0, data=result)
+        event = "success"
+    except ChatPermissionError as error:
+        context["reason"] = getattr(error, "reason", "permission_denied")
+        context["exception_type"] = type(error).__name__
+        response = ApiResponse(success=False, message="无权限执行此操作", error_code=403, data=None)
+        event = "denied"
+    except Exception as error:
+        context["exception_type"] = type(error).__name__
+        response = ApiResponse(success=False, message="获取 Caller 状态失败，请稍后重试", error_code=5999)
+        event = "failed"
+    context.update(status=200, duration_ms=round((time.perf_counter() - started_at) * 1000, 1))
+    logger.info(
+        "event=expert_chat.app_caller_instance_status.%s context=%s response=%s",
+        event, context, response.model_dump(),
     )
     return response

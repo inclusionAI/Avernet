@@ -107,14 +107,14 @@ const TaskEscortDetailView: React.FC<DetailViewProps> = ({
   return (
     <div className="flex flex-col">
       {/* Back */}
-      <div className="border-b border-[var(--color-border)] px-3 py-2">
+      <div className="border-b border-divider px-3 py-2">
         <Button variant="ghost" size="sm" leftIcon={<ArrowLeft className="h-3 w-3" />} onClick={onBack}>
           返回工作流列表
         </Button>
       </div>
 
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2">
+      <div className="flex items-center justify-between border-b border-divider px-3 py-2">
         <div>
           <div className="text-sm font-semibold">{workflowTitle}</div>
           <div className="mt-0.5 font-mono text-[10px] text-[var(--color-muted)]">{workflowId}</div>
@@ -135,7 +135,7 @@ const TaskEscortDetailView: React.FC<DetailViewProps> = ({
 
       {/* Stats */}
       {flowRuns.length > 0 && (
-        <div className="grid grid-cols-3 gap-2 border-b border-[var(--color-border)] px-3 py-2">
+        <div className="grid grid-cols-3 gap-2 border-b border-divider px-3 py-2">
           <TaskEscortStatCard
             label="成功率"
             value={stats.total > 0 ? `${Math.round((stats.succeeded / stats.total) * 100)}%` : '—'}
@@ -214,7 +214,7 @@ const TaskEscortDetailView: React.FC<DetailViewProps> = ({
 
                 {/* Expanded detail */}
                 {expandedRunId === run.flow_id && (
-                  <div className="border-t border-[var(--color-border)] bg-[var(--color-panel-muted)] px-3 py-2">
+                  <div className="border-t border-divider bg-[var(--color-panel-muted)] px-3 py-2">
                     {/* Tab toggle */}
                     <div className="mb-2 flex gap-1">
                       <Button

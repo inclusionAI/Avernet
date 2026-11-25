@@ -42,6 +42,26 @@ def _artifact(content, *, scope: ArtifactScope, kind: ArtifactKind | None = None
 # ---------------------------------------------------------------- 构造校验
 
 
+class TestFinalArtifactFlag:
+    @pytest.mark.parametrize("value", ["true", "false"])
+    def test_string_flag_accepted(self, value):
+        content = TextContent(text="分析完成", is_final_artifact=value)
+        assert content.is_final_artifact == value
+
+    @pytest.mark.parametrize("value", [True, False, 1, "1", "TRUE", "yes", None])
+    def test_non_contract_string_fails_loud(self, value):
+        with pytest.raises(TaskArtifactContentError):
+            TextContent(text="分析完成", is_final_artifact=value)
+
+    def test_missing_defaults_to_false(self):
+        content = TextContent(text="分析完成")
+        assert content.is_final_artifact == "false"
+
+    def test_legacy_content_json_defaults_to_false(self):
+        content = content_from_json('{"kind":"text","text":"分析完成"}')
+        assert content.is_final_artifact == "false"
+
+
 class TestFileContentValidation:
     def test_bot_workspace_requires_storage_id(self):
         with pytest.raises(TaskArtifactContentError):
@@ -112,6 +132,72 @@ class TestFileContentValidation:
             file_id=None,
         )
         assert content.storage_id == "reports/analysis-report.md"
+
+
+class TestObjectFileContentValidation:
+    """OBJECT_FILE 分支:对象 key 寻址,结构校验 fail-loud(前缀域校验归服务层)。"""
+
+    @staticmethod
+    def _content(storage_id: str, file_id: str | None = None) -> FileContent:
+        return FileContent(
+            storage_type=StorageType.OBJECT_FILE,
+            storage_id=storage_id,
+            file_type="application/pdf",
+            file_name="analysis-report.pdf",
+            file_id=file_id,
+        )
+
+    def test_object_file_accepted_with_stable_key(self):
+        content = self._content("task-artifacts/t-1/" + "9f86d081884c7d659a2feaa0c55ad015" * 2 + ".pdf")
+        assert content.file_id is None
+
+    def test_object_file_rejects_file_id(self):
+        with pytest.raises(TaskArtifactContentError):
+            self._content("task-artifacts/t-1/abc.pdf", file_id="f-1")
+
+    def test_object_file_rejects_absolute_key(self):
+        with pytest.raises(TaskArtifactContentError):
+            self._content("/task-artifacts/t-1/abc.pdf")
+
+    def test_object_file_rejects_tilde_key(self):
+        with pytest.raises(TaskArtifactContentError):
+            self._content("~/task-artifacts/t-1/abc.pdf")
+
+    def test_object_file_rejects_backslash_key(self):
+        with pytest.raises(TaskArtifactContentError):
+            self._content("task-artifacts\\t-1\\abc.pdf")
+
+    @pytest.mark.parametrize(
+        "key",
+        ["task-artifacts//t-1/abc.pdf", "task-artifacts/./t-1/abc.pdf", "task-artifacts/.."],
+        ids=["empty-segment", "dot-segment", "parent-escape"],
+    )
+    def test_object_file_rejects_illegal_segments(self, key):
+        with pytest.raises(TaskArtifactContentError):
+            self._content(key)
+
+    def test_object_file_rejects_control_characters(self):
+        with pytest.raises(TaskArtifactContentError):
+            self._content("task-artifacts/t-1/ab\x01c.pdf")
+
+    def test_object_file_rejects_overlong_key(self):
+        with pytest.raises(TaskArtifactContentError):
+            self._content("a" * 513)
+
+    def test_object_file_storage_type_coercion_from_json(self):
+        content = content_from_json(
+            '{"kind":"file","storage_type":"object_file","storage_id":"task-artifacts/t-1/abc.pdf",'
+            '"file_type":"application/pdf","file_name":"abc.pdf","file_id":null}'
+        )
+        assert isinstance(content, FileContent)
+        assert content.storage_type is StorageType.OBJECT_FILE
+
+    def test_object_file_unknown_storage_type_fails_loud(self):
+        with pytest.raises(TaskArtifactContentError):
+            content_from_json(
+                '{"kind":"file","storage_type":"bogus","storage_id":"x","file_type":"t",'
+                '"file_name":"x.pdf","file_id":null}'
+            )
 
 
 class TestUrlLinkContentValidation:
@@ -200,6 +286,13 @@ class TestContentSerialization:
                 file_name="report.pdf",
                 file_id="f-987",
             ),
+            FileContent(
+                storage_type=StorageType.OBJECT_FILE,
+                storage_id="task-artifacts/t-1/9f86d081884c7d659a2feaa0c55ad015.pdf",
+                file_type="application/pdf",
+                file_name="report.pdf",
+                file_id=None,
+            ),
             UrlLinkContent(url="https://example.com/doc", type="dima需求"),
             CodeContent(
                 code_base_name="avernet",
@@ -209,13 +302,13 @@ class TestContentSerialization:
             ),
         ]
 
-    @pytest.mark.parametrize("case", _cases("ignored"), ids=["text", "file_ws", "file_sf", "url", "code"])
+    @pytest.mark.parametrize("case", _cases("ignored"), ids=["text", "file_ws", "file_sf", "file_of", "url", "code"])
     def test_roundtrip_equality(self, case):
         assert content_from_json(content_to_json(case)) == case
 
     def test_json_is_kind_tagged_canonical(self):
         payload = content_to_json(TextContent(text="hi"))
-        assert payload == '{"kind":"text","text":"hi"}'
+        assert payload == '{"is_final_artifact":"false","kind":"text","text":"hi"}'
 
     def test_json_has_no_newlines(self):
         payload = content_to_json(
@@ -236,6 +329,13 @@ class TestContentHash:
     def test_stable_for_same_content(self):
         a = TextContent(text="done")
         assert artifact_content_hash(a) == artifact_content_hash(TextContent(text="done"))
+
+    def test_final_artifact_flag_participates_in_hash(self):
+        base = TextContent(text="done")
+        final = TextContent(text="done", is_final_artifact="true")
+        explicit_false = TextContent(text="done", is_final_artifact="false")
+        assert artifact_content_hash(base) == artifact_content_hash(explicit_false)
+        assert artifact_content_hash(base) != artifact_content_hash(final)
 
     def test_insensitive_to_field_order(self):
         direct = FileContent(

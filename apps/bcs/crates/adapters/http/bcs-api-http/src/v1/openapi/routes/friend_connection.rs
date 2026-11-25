@@ -23,7 +23,7 @@ use crate::v1::openapi::dto::friend_connection::{
 /// Mirrors `extract_bearer_token`/`request_auth_headers` in the legacy
 /// `bcs-http` adapter; duplicated here because `bcs-api-http` does not
 /// depend on `bcs-http`.
-fn request_auth_headers(headers: &HeaderMap) -> RequestAuthHeaders {
+pub(crate) fn request_auth_headers(headers: &HeaderMap) -> RequestAuthHeaders {
     let authorization = extract_bearer_token(headers).map(|token| format!("Bearer {token}"));
     let cookie = headers
         .get(axum::http::header::COOKIE)

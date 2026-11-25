@@ -61,7 +61,7 @@ export function useParticipantBinding(isTaskDag: boolean): UseParticipantBinding
   const missingRequiredCount = (isTaskDag ? yamlValidation.participantDefinitions : []).filter(
     (d) => d.required && !participantBindings[d.key],
   ).length;
-  const canSubmitTaskDag = !isTaskDag || (yamlValidation.isValidated && missingRequiredCount === 0);
+  const canSubmitTaskDag = !isTaskDag || (yamlValidation.canExecute && missingRequiredCount === 0);
 
   return {
     yamlValidation,

@@ -1,4 +1,5 @@
 use super::*;
+use tracing::debug;
 
 pub(super) struct CoordinationEchoDispatch {
     task_id: Option<String>,
@@ -51,6 +52,26 @@ pub(super) async fn maybe_handle_coordination_echo(
         );
         return Ok(None);
     };
+    claim_and_dispatch(flow, cmd, call, tool_call_id.to_string()).await
+}
+
+
+/// Shared claim→dispatch core for every coordination intake channel (the
+/// WS agent-event echo and the chat-final scan below): one place enforcing
+/// the v2 claim ledger semantics — run-context liveness/match, claim-once,
+/// post-claim run revalidation — before handing the resolved arguments to
+/// the protocol dispatch. Behavior is byte-identical to the former inline
+/// tail of `maybe_handle_coordination_echo`.
+async fn claim_and_dispatch(
+    flow: &BcsMessageFlow,
+    cmd: &BotEventCommand,
+    call: CoordinationCall,
+    tool_call_id: String,
+) -> ServiceResult<Option<CoordinationEchoDispatch>> {
+    // The original tail expects `tool_call_id` as a &str bound; reuse the
+    // verbatim body with a shadowed &str so the extracted code stays
+    // byte-level identical inside.
+    let tool_call_id = &tool_call_id[..];
     if let Some(intent_id) = call.intent_id.as_deref() {
         let port = flow.coordination_intents.as_ref()
             .ok_or_else(|| ServiceError::InternalError("coordination_store_unavailable".into()))?;
@@ -69,7 +90,17 @@ pub(super) async fn maybe_handle_coordination_echo(
         let lease = match port.resolve_and_claim(intent_id, &call.tool, &identity, context.deadline_ms).await? {
             CoordinationClaim::Acquired(lease) => lease,
             CoordinationClaim::Duplicate(Some(result)) if result.status == CoordinationStatus::Applied => return Ok(None),
-            CoordinationClaim::Duplicate(_) => return Err(ServiceError::Conflict("coordination_previous_outcome_unknown_or_failed".into())),
+            CoordinationClaim::Duplicate(Some(result)) if result.status == CoordinationStatus::Failed => return Ok(None),
+            CoordinationClaim::Duplicate(_) => {
+                if call.tool == TOOL_ASSIGN_TASK {
+                    crate::task_rejection::notice(flow, &TaskDispatchCommand {
+                        caller_delegation: None,
+                        driver_bot_id:cmd.bot_id.clone(), group_id:cmd.group_id.clone(), target_bot_id:String::new(), target_bot_name:None,
+                        payload:serde_json::json!({"assignment_intent_id":call.intent_id, "bcs_session_id":cmd.bcs_session_id}),
+                    }, None).await?;
+                }
+                return Err(ServiceError::Conflict("coordination_previous_outcome_unknown_or_failed".into()));
+            },
         };
         let active = match &flow.bot_run_context {
             Some(runs) => runs.get_context(&cmd.run_id).await,
@@ -86,10 +117,12 @@ pub(super) async fn maybe_handle_coordination_echo(
         }
         let mut resolved = call.clone();
         resolved.arguments = lease.arguments;
-        let dispatched = dispatch_coordination_call(flow, cmd, &resolved).await;
+        let dispatched = dispatch_coordination_call(flow, cmd, &resolved, Some(&tool_call_id)).await;
         let result = match &dispatched {
             Ok(Some(outcome)) => CoordinationResult { status: CoordinationStatus::Applied,
                 task_id: outcome.task_id.clone(), error_code: None },
+            Err(error) if crate::task_rejection::is_rejected(error) => CoordinationResult {
+                status: CoordinationStatus::Failed, task_id: None, error_code: Some("task_dispatch_rejected".into()) },
             _ => CoordinationResult { status: CoordinationStatus::Unknown,
                 task_id: None, error_code: Some("coordination_execution_not_confirmed".into()) },
         };
@@ -116,13 +149,138 @@ pub(super) async fn maybe_handle_coordination_echo(
         return Ok(None);
     }
 
-    dispatch_coordination_call(flow, cmd, &call).await
+    dispatch_coordination_call(flow, cmd, &call, Some(&tool_call_id)).await
 }
 
+
+
+/// Chat-final claim channel for provider manager bots, which have no
+/// agent-event tool_call_end echo (their harness sends back only
+/// `chat.event` finals). The sanctioned ecosystem contract already makes
+/// managers echo the full raw MCP output in their group reply ("…回传完整
+/// 原始输出…否则 BCS 无法识别 MCP 调用结果"), so the terminal final's text
+/// carries the v2 stored-receipt frame; this scan turns that reply into
+/// the claim trigger the deferred protocol always prescribed.
+/// SCOPE — additive, caller-only:
+///
+/// - G1 gate: the claim only runs when the session has a live
+///   owner-to-caller identity capture (the human spoke in this session),
+///   so groups without one keep the exact pre-feature behavior (a stored
+///   intent stays a silent orphan);
+/// - group-strategy discipline stays in the task engine:
+///   `ensure_task_dispatch_allowed` only admits manager_worker /
+///   master_slave groups (existing gate);
+/// - failures are best-effort and silent at debug level: the carrier is
+///   LLM-mediated text — a missing/unknown/expired/mismatched frame is
+///   noise, not a protocol violation. The WS echo path (which has
+///   stronger provenance) keeps its group-treatment notify; this channel
+///   never emits one.
+pub(super) async fn maybe_handle_coordination_chat_final(
+    flow: &BcsMessageFlow,
+    cmd: &BotEventCommand,
+    final_text: &str,
+) -> ServiceResult<Option<CoordinationEchoDispatch>> {
+    // Hot-path gates first, cheapest to most expensive: only terminal
+    // group chat finals with the coordination magic in the reply text.
+    if cmd.group_id.is_empty()
+        || cmd.bcs_session_id.as_deref().unwrap_or_default().is_empty()
+        || !is_terminal_chat_event(cmd)
+    {
+        return Ok(None);
+    }
+    if !final_text.contains(bcs_protocol::ws::coordination::MAGIC_KEY) {
+        return Ok(None);
+    }
+    // G1: only when the session holds the live owner identity capture —
+    // absent state keeps the stored intent silent (the exact legacy shape).
+    let Some(relay) = flow.caller_relay.as_ref() else {
+        return Ok(None);
+    };
+    let now = now_ms() as i64;
+    if !relay.ledger.has_live_capture(
+        &bcs_config::resolve_env_str(),
+        cmd.bcs_session_id.as_deref().unwrap_or_default(),
+        now as i64,
+    ) {
+        debug!(
+            bot_id = %cmd.bot_id,
+            group_id = %cmd.group_id,
+            run_id = %cmd.run_id,
+            "chat-final coordination frame skipped: no live owner capture for the session"
+        );
+        return Ok(None);
+    }
+    let Some(call) = CoordinationCall::from_stdout(final_text) else {
+        debug!(
+            bot_id = %cmd.bot_id,
+            group_id = %cmd.group_id,
+            run_id = %cmd.run_id,
+            "chat-final text carried the coordination magic but no parseable frame"
+        );
+        return Ok(None);
+    };
+    let Some(intent_id) = call.intent_id.as_deref().filter(|id| !id.is_empty()) else {
+        // v1 frames carry inline arguments with no stored intent: the
+        // chat-final carrier has no provenance for a direct dispatch, so
+        // skip rather than guess.
+        debug!(
+            bot_id = %cmd.bot_id,
+            group_id = %cmd.group_id,
+            run_id = %cmd.run_id,
+            "chat-final coordination frame skipped: v1 frame without intent_id"
+        );
+        return Ok(None);
+    };
+    // Tool-surface allowlist: the frame's self-declared tool must be one of
+    // the coordination commands, and the bot's coordination surface must
+    // permit the echo. Manager bots calling through mcporter are the
+    // legacy surface, which tolerates (and historically relies on)
+    // name-free carriers.
+    if !coordination_tool_name_allowed(flow, cmd, &Value::Null, &call).await {
+        debug!(
+            bot_id = %cmd.bot_id,
+            group_id = %cmd.group_id,
+            run_id = %cmd.run_id,
+            tool = %call.tool,
+            "chat-final coordination frame skipped: tool surface not allowed for the bot"
+        );
+        return Ok(None);
+    }
+    // The chat text is a carrier WITHOUT a per-call tool identity — the
+    // claim record uses the intent itself as the instance key. claim-once
+    // on the intent (InsertOnly) is the real anti-replay bound; this
+    // synthesized id exists for audit/dedup bookkeeping parity.
+    let tool_call_id = format!("chat-final:{intent_id}");
+    match claim_and_dispatch(flow, cmd, call, tool_call_id).await {
+        Ok(dispatch) => Ok(dispatch),
+        Err(error) => {
+            // The carrier is LLM text: any claim-phase failure (unknown
+            // intent, expired, run gap/mismatch) is expected noise, never
+            // a group-side alarm. A post-claim dispatch failure still
+            // surfaces through its own task-flow warnings.
+            debug!(
+                bot_id = %cmd.bot_id,
+                group_id = %cmd.group_id,
+                run_id = %cmd.run_id,
+                error = %error,
+                "chat-final coordination claim did not complete"
+            );
+            Ok(None)
+        }
+    }
+}
+
+fn is_terminal_chat_event(cmd: &BotEventCommand) -> bool {
+    matches!(cmd.event_type.as_str(), "chat" | "chat.event")
+        && (cmd.state == ChatEventState::Final || cmd.state == ChatEventState::Error)
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn dispatch_coordination_call(
     flow: &BcsMessageFlow,
     cmd: &BotEventCommand,
     call: &CoordinationCall,
+    tool_call_id: Option<&str>,
 ) -> ServiceResult<Option<CoordinationEchoDispatch>> {
     match call.tool.as_str() {
         TOOL_ASSIGN_TASK => {
@@ -146,12 +304,19 @@ pub(super) async fn dispatch_coordination_call(
                 "message": message,
                 "assignment_intent_id": call.intent_id,
             });
+            if let Some(timeout) = call.arguments.get("timeout_s") { payload["timeout_s"] = timeout.clone(); }
             if let Some(response_mode) = coordination_argument_str(call, "response_mode") {
                 payload["response_mode"] = Value::String(response_mode.to_string());
             }
             if let Some(session_id) = cmd.bcs_session_id.as_deref() {
                 payload["bcs_session_id"] = Value::String(session_id.to_string());
             }
+            // Identity inheritance consults the existing execution facts. No
+            // child registration follows admission: the delivery projection
+            // persists the non-secret parent/invocation association atomically.
+            let delegation = crate::caller_delegation::prepare_assignment(
+                flow, cmd, tool_call_id.unwrap_or_default(), target_bot_id,
+            ).await?;
             match crate::task_flow::handle_task_dispatch(
                 flow,
                 TaskDispatchCommand {
@@ -160,15 +325,18 @@ pub(super) async fn dispatch_coordination_call(
                     target_bot_id: target_bot_id.to_string(),
                     target_bot_name: None,
                     payload,
+                    caller_delegation: delegation.clone(),
                 },
             )
             .await
             {
-                Ok(outcome) => Ok(Some(CoordinationEchoDispatch {
-                    task_id: Some(outcome.task_id),
-                    bot_deliveries: outcome.bot_deliveries,
-                    frontend_deliveries: outcome.frontend_deliveries,
-                })),
+                Ok(outcome) => {
+                    Ok(Some(CoordinationEchoDispatch {
+                        task_id: Some(outcome.task_id),
+                        bot_deliveries: outcome.bot_deliveries,
+                        frontend_deliveries: outcome.frontend_deliveries,
+                    }))
+                }
                 Err(error) => {
                     warn!(
                         bot_id = %cmd.bot_id,
@@ -177,6 +345,14 @@ pub(super) async fn dispatch_coordination_call(
                         error = %error,
                         "Failed to dispatch bcs_assign_task coordination echo"
                     );
+                    if call.v == 2 && !crate::task_rejection::is_rejected(&error) {
+                        crate::task_rejection::notice(flow, &TaskDispatchCommand {
+                            caller_delegation: None,
+                            driver_bot_id:cmd.bot_id.clone(), group_id:cmd.group_id.clone(),
+                            target_bot_id:target_bot_id.into(), target_bot_name:None,
+                            payload:serde_json::json!({"assignment_intent_id":call.intent_id, "bcs_session_id":cmd.bcs_session_id}),
+                        }, None).await?;
+                    }
                     if call.v == 2 { Err(error) } else { Ok(None) }
                 }
             }

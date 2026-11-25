@@ -3,7 +3,7 @@
 用于发布流程的请求和响应模型定义。
 """
 from typing import Any, Dict, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 
 class PublishFlowRequest(BaseModel):
@@ -43,6 +43,15 @@ class PublishFlowResult(BaseModel):
     device_binding_id: Optional[int] = Field(default=None, description="设备绑定记录 ID")
     data: Optional[Dict[str, Any]] = Field(default=None, description="附加数据")
     target_publish_id: Optional[int] = Field(default=None, description="回滚目标发布单 ID（仅回滚操作）")
+    @model_serializer(mode='wrap')
+    def _serialize(self, handler):
+        data = handler(self)
+        if not self.ext:
+            data.pop('ext', None)
+        return data
+
+    ext: Dict[str, Any] = Field(default_factory=dict, description="Engine-owned response extensions")
+    success: bool = Field(default=True, exclude=True, description="Whether the operation is successful")
     approval: Optional[Dict[str, Any]] = Field(
         default=None,
         description="审批信息，包含 puid、action、operator_id、status、owner_id、approval_url、created_at、processed_at"

@@ -95,7 +95,7 @@ def test_clone_does_not_apply_a_global_timeout(tmp_path):
     svc._repo_url = "ssh://git@example.test/aiworkbench.git"
 
     with patch(
-        "agentclaw.community.core.skill_center.services.git_sync.subprocess.run",
+        "agentclaw.community.core.skill_center.services.git_sync_storage.subprocess.run",
         return_value=MagicMock(returncode=0),
     ) as run:
         svc._sync_clone_bare_repo()
@@ -113,10 +113,10 @@ def test_oss_fallback_does_not_extract_over_partial_repo(tmp_path):
 
     with (
         patch(
-            "agentclaw.community.core.skill_center.services.git_sync.requests.get",
+            "agentclaw.community.core.skill_center.services.git_sync_storage.requests.get",
         ) as download,
         patch(
-            "agentclaw.community.core.skill_center.services.git_sync.subprocess.run"
+            "agentclaw.community.core.skill_center.services.git_sync_storage.subprocess.run"
         ) as tar,
     ):
         with pytest.raises(RuntimeError, match="refusing to overwrite"):

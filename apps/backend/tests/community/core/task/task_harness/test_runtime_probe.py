@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import unittest
 
+import pytest
 from agentclaw.community.core.task.task_harness.runtime_probe import (
     TaskRuntimeLivenessProbe,
+)
+from agentclaw.community.core.task.task_runner.client.ports import (
+    BotSessionRuntimeStatus,
 )
 
 
@@ -13,8 +17,16 @@ class _FakeBot:
         self.messages = []
         self.session_bot_ids = []
         self.session_stages = []
+        self.run_ids = []
+        self.runtime = dict(found=True, run_id="engine-run", state="running", started_at=1000, last_event_seq=0)
+
+    async def get_session_runtime_status(self, session_id, *, bot_id=None, lifecycle_stage=None):
+        self.session_bot_ids.append(bot_id)
+        self.session_stages.append(lifecycle_stage)
+        return BotSessionRuntimeStatus(session_id=session_id, **self.runtime)
 
     async def get_run(self, run_id):
+        self.run_ids.append(run_id)
         return dict(self.run)
 
     async def get_session_messages(
@@ -30,18 +42,34 @@ class _FakeBcs:
         self.group = {
             "status": "running",
             "version": 1,
+            "driver_bot_id": "bot-bcs-uuid",
             "session": {"status": "running", "version": 1},
         }
+        self.message_calls = []
 
     async def get_group(self, group_id):
         return dict(self.group)
 
     async def get_session_messages(self, session_id, limit=20, since_msg_id=None,
                                    caller_bearer=None):
+        self.message_calls.append(
+            {
+                "session_id": session_id,
+                "limit": limit,
+                "since_msg_id": since_msg_id,
+                "caller_bearer": caller_bearer,
+            }
+        )
         return []
 
     async def get_state_machine_run(self, run_id):
         raise RuntimeError("no run")
+
+
+class _FakeBotTokens:
+    def get_token(self, bot_uuid):
+        assert bot_uuid == "bot-bcs-uuid"
+        return "bearer-token"
 
 
 class _Node:
@@ -74,7 +102,7 @@ class _Node:
 
 
 class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
-    async def test_single_bot_active_progress_uses_message_cursor(self):
+    async def test_single_bot_activity_uses_events_not_visible_messages(self):
         bot = _FakeBot()
         probe = TaskRuntimeLivenessProbe(bot=bot)
         node = _Node(run_id="r1", session_id="s1")
@@ -83,14 +111,25 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.state, "active")
         self.assertFalse(first.progressed)
 
-        bot.messages = [{"id": "m1"}]
+        bot.messages = [{"id": "m1", "role": "assistant", "content": ""}]
         second = await probe.probe(node, previous_cursor=first.heartbeat_cursor)
         self.assertEqual(second.state, "active")
-        self.assertTrue(second.progressed)
+        self.assertFalse(second.progressed)
 
+        bot.messages = [
+            {"id": "m2", "content": "continue task-loop", "updated_at": "2026-11-11T01:00:00Z"}
+        ]
+        bot.runtime["last_event_seq"] = 1
         third = await probe.probe(node, previous_cursor=second.heartbeat_cursor)
         self.assertEqual(third.state, "active")
-        self.assertFalse(third.progressed)
+        self.assertTrue(third.progressed)
+
+        bot.messages = [
+            {"id": "m2", "content": "continue task-loop", "updated_at": "2026-11-11T02:00:00Z"}
+        ]
+        fourth = await probe.probe(node, previous_cursor=third.heartbeat_cursor)
+        self.assertEqual(fourth.state, "active")
+        self.assertFalse(fourth.progressed)
 
     async def test_single_bot_terminal_failure_is_reported(self):
         bot = _FakeBot()
@@ -100,6 +139,57 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
         result = await probe.probe(_Node(run_id="r1"))
         self.assertEqual(result.state, "terminal_failed")
         self.assertEqual(result.status, "failed")
+
+    async def test_session_activity_request_failure_is_unknown(self):
+        class _TimeoutSessionBot(_FakeBot):
+            async def get_session_runtime_status(self, session_id, *, bot_id=None, lifecycle_stage=None):
+                raise TimeoutError("request timeout")
+
+        probe = TaskRuntimeLivenessProbe(bot=_TimeoutSessionBot())
+        result = await probe.probe(_Node(session_id="s1"))
+
+        self.assertEqual(result.state, "activity_unknown")
+        self.assertEqual(result.source, "openapi_bot.runtime")
+        self.assertIn("TimeoutError", result.error or "")
+        self.assertEqual(result.detail["reason"], "activity_query_failed")
+
+    async def test_run_request_failure_is_probe_unavailable(self):
+        class _TimeoutRunBot(_FakeBot):
+            async def get_run(self, run_id):
+                raise TimeoutError("request timeout")
+
+        probe = TaskRuntimeLivenessProbe(bot=_TimeoutRunBot())
+        result = await probe.probe(_Node(run_id="r1"))
+
+        self.assertEqual(result.state, "probe_unavailable")
+        self.assertEqual(result.source, "openapi_bot.run")
+        self.assertIn("TimeoutError", result.error or "")
+        self.assertEqual(result.detail["reason"], "probe_request_failed")
+        self.assertEqual(result.detail["run_id"], "r1")
+
+    async def test_single_bot_uses_latest_harness_resume_run(self):
+        bot = _FakeBot()
+        probe = TaskRuntimeLivenessProbe(bot=bot)
+        node = _Node(run_id="stale-run")
+        node.run_info.extend_props["relay_harness_resume_run_id"] = "resume-run"
+
+        result = await probe.probe(node)
+
+        self.assertEqual(bot.run_ids, ["resume-run"])
+        self.assertEqual(result.state, "active")
+        self.assertEqual(result.detail["run_id"], "resume-run")
+
+    async def test_engine_timeout_and_abort_map_to_terminal_failed(self):
+        for status in ("TIMEOUT", "ABORTED"):
+            with self.subTest(status=status):
+                bot = _FakeBot()
+                bot.run = {"status": status}
+                probe = TaskRuntimeLivenessProbe(bot=bot)
+
+                result = await probe.probe(_Node(run_id="r1"))
+
+                self.assertEqual(result.state, "terminal_failed")
+                self.assertEqual(result.status, status.lower())
 
     async def test_session_probe_passes_composite_bot_id(self):
         bot = _FakeBot()
@@ -142,10 +232,8 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
         result = await probe.probe(node)
 
         self.assertEqual(bot.session_stages, ["draft"])
-        self.assertEqual(result.detail, {
-            "session_id": "s1",
-            "lifecycle_stage": "draft",
-        })
+        self.assertEqual(result.detail["lifecycle_stage"], "draft")
+        self.assertEqual(result.detail["engine_run_id"], "engine-run")
 
     async def test_run_heartbeat_uses_persisted_lifecycle_stage(self):
         bot = _FakeBot()
@@ -166,6 +254,35 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(bot.session_stages, [None])
 
+    async def test_group_message_probe_uses_driver_bot_bearer(self):
+        bcs = _FakeBcs()
+        probe = TaskRuntimeLivenessProbe(bcs=bcs, bot_tokens=_FakeBotTokens())
+
+        result = await probe.probe(
+            _Node(group_id="g1", session_id="s1", assignee="g1")
+        )
+
+        self.assertEqual(result.state, "active")
+        self.assertEqual(
+            bcs.message_calls,
+            [
+                {
+                    "session_id": "s1",
+                    "limit": 20,
+                    "since_msg_id": None,
+                    "caller_bearer": "bearer-token",
+                }
+            ],
+        )
+
+    async def test_group_message_probe_falls_back_to_hmac_without_tokens(self):
+        bcs = _FakeBcs()
+        probe = TaskRuntimeLivenessProbe(bcs=bcs)
+
+        await probe.probe(_Node(group_id="g1", session_id="s1"))
+
+        self.assertIsNone(bcs.message_calls[0]["caller_bearer"])
+
     async def test_group_terminal_success_is_reported(self):
         bcs = _FakeBcs()
         bcs.group["session"] = {"status": "completed", "version": 3}
@@ -173,6 +290,20 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
 
         result = await probe.probe(_Node(group_id="g1", session_id="s1"))
         self.assertEqual(result.state, "terminal_success")
+
+    async def test_group_request_failure_is_probe_unavailable(self):
+        class _TimeoutBcs(_FakeBcs):
+            async def get_group(self, group_id):
+                raise TimeoutError("request timeout")
+
+        probe = TaskRuntimeLivenessProbe(bcs=_TimeoutBcs())
+        result = await probe.probe(_Node(group_id="g1", run_id="r1"))
+
+        self.assertEqual(result.state, "probe_unavailable")
+        self.assertEqual(result.source, "bcs")
+        self.assertEqual(result.detail["reason"], "probe_request_failed")
+        self.assertEqual(result.detail["group_id"], "g1")
+        self.assertEqual(result.detail["run_id"], "r1")
 
     async def test_missing_handle_and_port_are_unknown(self):
         probe = TaskRuntimeLivenessProbe()
@@ -182,5 +313,71 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
         )
 
 
+    async def test_session_only_empty_message_is_not_progress(self):
+        bot = _FakeBot()
+        bot.messages = [{"id": "m1", "role": "assistant", "content": ""}]
+        probe = TaskRuntimeLivenessProbe(bot=bot)
+        node = _Node(session_id="s1")
+
+        first = await probe.probe(node)
+        self.assertFalse(first.progressed)
+        bot.messages.append(
+            {"id": "m2", "role": "assistant", "content": "", "updated_at": "2026-11-11T01:00:00Z"}
+        )
+        second = await probe.probe(node, previous_cursor=first.heartbeat_cursor)
+        self.assertFalse(second.progressed)
+
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.asyncio
+async def test_run_version_only_does_not_reset_activity_clock():
+    bot = _FakeBot()
+    probe = TaskRuntimeLivenessProbe(bot=bot)
+    node = _Node(run_id="r1", session_id="s1")
+    first = await probe.probe(node)
+    bot.run["version"] = 999
+    second = await probe.probe(node, previous_cursor=first.heartbeat_cursor)
+    assert second.state == "active"
+    assert not second.progressed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["run_id", "started_at", "rollback"])
+async def test_runtime_generation_change_rebaselines_without_false_progress(change):
+    bot = _FakeBot()
+    bot.runtime["last_event_seq"] = 5
+    probe = TaskRuntimeLivenessProbe(bot=bot)
+    node = _Node(session_id="s1")
+    first = await probe.probe(node)
+    assert first.baseline_reset
+    if change == "run_id":
+        bot.runtime["run_id"] = "next-run"
+        bot.runtime["last_event_seq"] = 10
+    elif change == "started_at":
+        bot.runtime["started_at"] += 100
+    else:
+        bot.runtime["last_event_seq"] = 1
+    result = await probe.probe(node, previous_cursor=first.heartbeat_cursor)
+    assert result.baseline_reset
+    assert not result.progressed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["NO_ACTIVE_RUN", "AMBIGUOUS_RUN", "UNSUPPORTED_ENGINE"])
+async def test_missing_activity_is_not_terminal_or_permission_to_resume(reason):
+    bot = _FakeBot()
+    bot.runtime = dict(found=False, reason=reason)
+    result = await TaskRuntimeLivenessProbe(bot=bot).probe(_Node(session_id="s1"))
+    assert result.state == "activity_unknown"
+    assert not result.progressed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state,expected", [("final", "terminal_success"), ("error", "terminal_failed"), ("aborted", "terminal_failed")])
+async def test_engine_runtime_terminal_is_classified(state, expected):
+    bot = _FakeBot()
+    bot.runtime["state"] = state
+    result = await TaskRuntimeLivenessProbe(bot=bot).probe(_Node(session_id="s1"))
+    assert result.state == expected

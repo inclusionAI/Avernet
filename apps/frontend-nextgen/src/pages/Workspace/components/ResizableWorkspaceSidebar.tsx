@@ -4,14 +4,29 @@ import { cn } from '@/utils/cn';
 import { ChevronLeft, ChevronRight, GripVertical } from 'lucide-react';
 import type { KeyboardEvent, ReactNode, PointerEvent as ReactPointerEvent } from 'react';
 import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react';
+import {
+  WORKSPACE_SIDEBAR_COLLAPSED_WIDTH,
+  WORKSPACE_SIDEBAR_DEFAULT_WIDTH,
+  WORKSPACE_SIDEBAR_STORAGE_KEY,
+  WORKSPACE_SIDEBAR_MAX_WIDTH,
+  WORKSPACE_SIDEBAR_MIN_WIDTH,
+  clampWidth,
+  dynamicMaxWidth,
+  persistCollapsed,
+  persistWidth,
+  readStoredCollapsed,
+  readStoredWidth,
+} from './workspaceSidebarSizing';
 
-export const WORKSPACE_SIDEBAR_MIN_WIDTH = 280;
-export const WORKSPACE_SIDEBAR_DEFAULT_WIDTH = 320;
-export const WORKSPACE_SIDEBAR_MAX_WIDTH = 480;
-export const WORKSPACE_SIDEBAR_MAX_RATIO = 0.45;
-export const WORKSPACE_SIDEBAR_COLLAPSED_WIDTH = 56;
-export const WORKSPACE_SIDEBAR_STORAGE_KEY = 'teamclaw:workspace-sidebar-width';
-export const WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY = 'teamclaw:workspace-sidebar-collapsed';
+// 惯例出口保持不变：既有测试/消费方仍从本组件文件引侧栏尺寸常量。
+export {
+  WORKSPACE_SIDEBAR_COLLAPSED_WIDTH,
+  WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY,
+  WORKSPACE_SIDEBAR_DEFAULT_WIDTH,
+  WORKSPACE_SIDEBAR_MAX_WIDTH,
+  WORKSPACE_SIDEBAR_MIN_WIDTH,
+  WORKSPACE_SIDEBAR_STORAGE_KEY,
+} from './workspaceSidebarSizing';
 
 interface ResizableWorkspaceSidebarProps extends Omit<React.HTMLAttributes<HTMLElement>, 'children' | 'className'> {
   children: ReactNode;
@@ -21,60 +36,18 @@ interface ResizableWorkspaceSidebarProps extends Omit<React.HTMLAttributes<HTMLE
   collapsedContent?: ReactNode | ((expand: () => void) => ReactNode);
   /** 挂载边缘：left=左侧栏（默认，手柄右缘、拖右变宽、含折叠态）；right=右侧副屏（手柄左缘、拖左变宽、方向语义反转、无折叠态、小屏不隐藏）。 */
   side?: 'left' | 'right';
+  /** 右侧副屏的展开/收起（chat-header-panels）：false 时宽度收 0、内容退出可交互，
+   * 面板保持挂载，经 width/opacity 过渡形成与 SDK 副屏同构的展开收起效果；左侧常驻列表不启用。 */
+  open?: boolean;
   /** 独立宽度组（默认为对话协作左栏常量）；右侧副屏按需传入。 */
   minWidth?: number;
   maxWidth?: number;
   defaultWidth?: number;
   /** 宽度持久化 key（默认为左栏 key）；不同面板传独立 key 避免互相覆盖。 */
   storageKey?: string;
+  /** 定位请求递增时展开侧栏，不改动所选会话。 */
+  expandRequest?: number;
   onDismiss?: () => void; // 右侧临时面板点击外部关闭；左侧常驻列表不启用。
-}
-
-function clampWidth(width: number, minWidth: number, maxWidth: number): number {
-  return Math.min(Math.max(Math.round(width), minWidth), maxWidth);
-}
-
-function readStoredWidth(key: string, defaultWidth: number, minWidth: number, maxWidth: number): number {
-  if (typeof window === 'undefined') return defaultWidth;
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (raw === null) return defaultWidth;
-    const stored = Number(raw);
-    if (!Number.isFinite(stored)) return defaultWidth;
-    return Math.min(Math.max(Math.round(stored), minWidth), maxWidth);
-  } catch {
-    return defaultWidth;
-  }
-}
-
-function persistWidth(key: string, width: number): void {
-  try {
-    window.localStorage.setItem(key, String(Math.round(width)));
-  } catch {
-    // 浏览器禁用存储时仍保留当前会话内调宽能力。
-  }
-}
-
-function readStoredCollapsed(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.localStorage.getItem(WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-function persistCollapsed(collapsed: boolean): void {
-  try {
-    window.localStorage.setItem(WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY, String(collapsed));
-  } catch {
-    // 浏览器禁用存储时仍保留当前会话内收起能力。
-  }
-}
-
-function dynamicMaxWidth(containerWidth: number, minWidth: number, maxWidth: number): number {
-  if (containerWidth <= 0) return maxWidth;
-  return Math.max(minWidth, Math.min(maxWidth, Math.floor(containerWidth * WORKSPACE_SIDEBAR_MAX_RATIO)));
 }
 
 export function ResizableWorkspaceSidebar({
@@ -83,30 +56,41 @@ export function ResizableWorkspaceSidebar({
   className,
   collapsedContent,
   side = 'left',
+  open: openProp,
   minWidth: minWidthProp,
   maxWidth: maxWidthProp,
   defaultWidth: defaultWidthProp,
   storageKey: storageKeyProp,
+  expandRequest,
   onDismiss,
   ...rest
 }: ResizableWorkspaceSidebarProps) {
   const isRight = side === 'right';
+  const open = openProp ?? true;
   const minW = minWidthProp ?? WORKSPACE_SIDEBAR_MIN_WIDTH;
   const maxW = maxWidthProp ?? WORKSPACE_SIDEBAR_MAX_WIDTH;
   const defaultW = defaultWidthProp ?? WORKSPACE_SIDEBAR_DEFAULT_WIDTH;
   const storageK = storageKeyProp ?? WORKSPACE_SIDEBAR_STORAGE_KEY;
   const sidebarRef = useRef<HTMLElement | null>(null);
   const containsTarget = useCallback((target: Node) => sidebarRef.current?.contains(target) ?? false, []);
-  useWorkspacePanelDismiss(isRight, containsTarget, onDismiss);
+  useWorkspacePanelDismiss(isRight && open, containsTarget, onDismiss);
   const contentId = `workspace-sidebar-content-${useId().replace(/:/g, '')}`;
   const [preferredWidth, setPreferredWidth] = useState(() => readStoredWidth(storageK, defaultW, minW, maxW));
   const [collapsed, setCollapsed] = useState(() => (isRight ? false : readStoredCollapsed()));
+  useLayoutEffect(() => {
+    if (!expandRequest || isRight) return;
+    setCollapsed(false);
+    persistCollapsed(false);
+  }, [expandRequest, isRight]);
   const preferredWidthRef = useRef(preferredWidth);
   const dragStartRef = useRef<{ clientX: number; width: number } | null>(null);
   const [maxWidth, setMaxWidth] = useState(maxW);
   const [dragging, setDragging] = useState(false);
   const width = clampWidth(preferredWidth, minW, maxWidth);
-  const renderedWidth = collapsed ? WORKSPACE_SIDEBAR_COLLAPSED_WIDTH : width;
+  // 收起态（右侧 open=false）宽度取 0，等价 SDK PanelArea 的 width:0/flex-basis:0；
+  // 左侧折叠态宽度独立（收起条 56px）。
+  const renderedWidth = !open ? 0 : collapsed ? WORKSPACE_SIDEBAR_COLLAPSED_WIDTH : width;
+  const contentHidden = collapsed || !open;
 
   const updatePreferredWidth = useCallback((nextWidth: number) => {
     preferredWidthRef.current = nextWidth;
@@ -211,19 +195,22 @@ export function ResizableWorkspaceSidebar({
       data-collapsed={collapsed}
       {...rest}
       className={cn(
-        'relative shrink-0 flex-col overflow-visible border-border transition-[width] duration-300 ease-in-out',
-        // 左侧栏沿用既有视觉（右缘分割线 + muted 底 + lg 以下隐藏）；右侧副屏左缘分割线、全屏段显示、底色随 className
-        isRight ? 'flex border-l' : 'hidden border-r bg-muted/20 lg:flex',
+        'relative shrink-0 flex-col overflow-visible transition-[width,opacity] duration-300 ease-in-out',
+        // 左侧栏右缘分割线按稿 lighten（1px #EEE ≈ border-border/60，与导航侧 0.5px 区分层级）+ muted 底 + lg 以下隐藏；
+        // 右侧副屏左缘分割线维持全强度 token、全屏段显示、底色随 className
+        isRight ? 'flex border-l border-divider' : 'hidden border-r border-divider/60 bg-muted/20 lg:flex',
+        // 右侧收起态：宽度已由 renderedWidth 取 0，透明 + 禁交互避免 0 宽残留 1px 分割线
+        !open && 'border-l-0 opacity-0 pointer-events-none',
         dragging && 'transition-none',
         className,
       )}
     >
       <div
         id={contentId}
-        aria-hidden={collapsed}
+        aria-hidden={contentHidden}
         className={cn(
           'flex min-h-0 flex-1 flex-col overflow-hidden transition-opacity duration-200',
-          collapsed && 'pointer-events-none invisible opacity-0',
+          contentHidden && 'pointer-events-none invisible opacity-0',
         )}
       >
         {children}
@@ -262,7 +249,7 @@ export function ResizableWorkspaceSidebar({
         </TooltipProvider>
       )}
 
-      {!collapsed && (
+      {!contentHidden && (
         <div
           role="separator"
           aria-label={isRight ? `调整${ariaLabel}宽度` : '调整对话协作左栏宽度'}

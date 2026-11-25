@@ -23,6 +23,7 @@ from secbaas.community.adapters.web.routers.open_api.model import (
     RunResultResponse,
     RunResultResponseData,
 )
+from secbaas.community.adapters.web.session_id import extract_response_session_id
 from secbaas.community.api.api_gateway import APIKeyRecord
 from secbaas.community.api.bot_runtime import (
     BotBindingNotFoundError,
@@ -213,12 +214,9 @@ async def get_run_result(
                 extra=extra,
             )
 
-        if run_info.metadata and "session_id" in run_info.metadata:
-            session_id = run_info.metadata.get("session_id")
-        elif run_info.result_extra and "session_id" in run_info.result_extra:
-            session_id = run_info.result_extra.get("session_id")
-        else:
-            session_id = ""
+        session_id = extract_response_session_id(
+            run_info.metadata, run_info.result_extra
+        )
 
         logger.info(
             f"get_run_result success: run_id={run_id}, status={run_info.status}"

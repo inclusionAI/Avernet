@@ -1,6 +1,6 @@
 use bcs_service_api::core::{
     BotRegistryCoreService, FriendCoreService, FriendRequestCoreService, FusionCoreService,
-    GroupCoreService, ProposalCoreService, RelationCoreService, RoutingCoreService,
+    GroupCoreService, RelationCoreService, RoutingCoreService,
 };
 
 fn _assert_core_trait_names_resolve() {
@@ -10,7 +10,6 @@ fn _assert_core_trait_names_resolve() {
     _check::<dyn GroupCoreService>();
     _check::<dyn RoutingCoreService>();
     _check::<dyn FusionCoreService>();
-    _check::<dyn ProposalCoreService>();
     _check::<dyn FriendCoreService>();
     _check::<dyn FriendRequestCoreService>();
     _check::<dyn RelationCoreService>();

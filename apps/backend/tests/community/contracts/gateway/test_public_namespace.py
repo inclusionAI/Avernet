@@ -17,7 +17,11 @@ from fastapi import FastAPI
 #: Extending this tuple is a contract change: it must land together with the
 #: matching gateway domain + route_security entries, never alone.
 _DECLARED_PREFIXES = (
+    "/openapi/v1/service-envs",
     "/openapi/v1/bots",
+    # Governed expert catalogue — declared together with the experts backend
+    # domain and tenant-authenticated route_security entries.
+    "/openapi/v1/experts",
     # The verified caller's own identity — the one operation whose answer is
     # the user. Declared with its gateway domain + route_security entries.
     "/openapi/v1/org",
@@ -43,6 +47,13 @@ _DECLARED_PREFIXES = (
     # out of the broad collaboration→bcs namespace). Declared with its gateway
     # domain + route_security entry.
     "/openapi/v1/collaboration/tasks",
+    # BBS context collaboration protocol P1 (spec §6.1/§14.1): the Collet
+    # three-API surface under the singular `task` prefix, served by the
+    # backend via the `collaboration-task-context-collab` domain (carved out
+    # of the broad collaboration→bcs namespace, same as collaboration-tasks
+    # above). route_security inherits the /openapi/v1/collaboration/** rule;
+    # the backend enforces the gateway-signed principal itself.
+    "/openapi/v1/collaboration/task/context_collab",
     # Tenant source credentials (W3, #1471) ride the `bots` domain — a
     # literal group under /openapi/v1/bots, forward-verified by the same
     # entry, with its own app-required route_security rule (the group no
@@ -76,3 +87,19 @@ def test_no_internal_routes_leak_into_public_namespace(
 
 def test_public_surface_is_present(app_with_testing_modules: FastAPI) -> None:
     assert _public_paths(app_with_testing_modules), "no /openapi/v1 routes mounted"
+
+
+def test_service_env_domain_is_declared_in_gateway_configuration():
+    """The namespace declaration must correspond to routing and caller policy."""
+    from pathlib import Path
+
+    import yaml
+
+    config_path = Path(__file__).resolve().parents[5] / "gateway/configs/application.yaml"
+    config = yaml.safe_load(config_path.read_text())["user_config"]
+    domain = config["upstreams"]["domains"]["service-envs"]
+    assert domain["server"] == "backend"
+    assert domain["schema"]["path"] == "schemas/bots.openapi.json"
+    assert config["route_security"]["/openapi/v1/service-envs/**"] == {
+        "user": "optional", "app": "optional", "bot": "optional",
+    }

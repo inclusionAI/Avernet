@@ -24,24 +24,29 @@ uuid = { workspace = true }
 chrono = "0.4"
 
 # Error types
-thiserror = { workspace = true }
 
 # JSON comparison (callback_config equality)
 serde_json = { workspace = true }
 
 # Workspace crates
-bcs-route-security = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-group-store = { workspace = true }
+bcs-domain      = { workspace = true }
+bcs-config      = { workspace = true }
 
 [dev-dependencies]
+bcs-db-migrations = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-bot = { workspace = true }
+bcs-db-api = { workspace = true }
+bcs-db-local = { workspace = true }
 bcs-event-store = { workspace = true }
 bcs-friend = { workspace = true }
 bcs-relation = { workspace = true }
 bcs-session = { workspace = true }
 bcs-session-store = { workspace = true }
 bcs-test-support = { workspace = true }
+hex = { workspace = true }
+sha2 = { workspace = true }
 tempfile   = { workspace = true }
 tokio-test = "0.4"

@@ -23,6 +23,9 @@ from agentclaw.community.core.task.domain.models import (
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
 from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, bind_overrides, endpoint_test
+from agentclaw.community.api.task.bot_grant_reconciliation_service import (
+    BotGrantReconciliationServiceProtocol,
+)
 from agentclaw.community.api.task.task_grant_service import (
     GRANTED,
     REVOKED,
@@ -30,8 +33,13 @@ from agentclaw.community.api.task.task_grant_service import (
     RevokeResult,
     TaskClaimGrantServiceProtocol,
 )
+from agentclaw.community.core.errors import NotFound
+from agentclaw.community.core.task.forum.browsing import BbsBrowseLoopRunner
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
-from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
+from agentclaw.community.core.task.repository.types import (
+    BbsTaskOverviewRecord,
+    TaskNodeSessionRef,
+)
 
 _BASE = "/openapi/v1/collaboration/tasks"
 _CALLER = "public-task-owner"
@@ -129,6 +137,99 @@ def execute_unauthenticated():
     pass
 
 
+def _seed_task_session(world) -> None:
+    def get_task_nodes_by_session(_self, session_id: str):
+        assert session_id == "public-task-session"
+        return [
+            TaskNodeSessionRef(
+                task_id="public-task-dashboard",
+                node_id="public-task-node",
+                owner_user_id="public-task-owner",
+            ),
+        ]
+
+    bind_overrides(
+        world,
+        TaskServiceProtocol,
+        {"get_task_nodes_by_session": get_task_nodes_by_session},
+    )
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/by_session",
+    scenario="authenticated_existing_session",
+    seed=lambda w: (_boot_verifier(w), _seed_task_session(w)),
+    input=CaseInput(
+        headers=_headers(),
+        query_params={"session_id": "public-task-session"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "session_id": "public-task-session",
+                "items": [
+                    {
+                        "task_id": "public-task-dashboard",
+                        "owner_user_id": "public-task-owner",
+                        "node_id": "public-task-node",
+                    }
+                ],
+                "total": 1,
+            },
+        },
+    ),
+)
+def by_session_authenticated():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/by_session",
+    scenario="unauthenticated",
+    seed=_boot_verifier,
+    input=CaseInput(query_params={"session_id": "public-task-session"}),
+    expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
+)
+def by_session_unauthenticated():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/by_session",
+    scenario="empty_session",
+    seed=lambda w: (
+        _boot_verifier(w),
+        bind_overrides(
+            w,
+            TaskServiceProtocol,
+            {"get_task_nodes_by_session": lambda _self, _session_id: []},
+        ),
+    ),
+    input=CaseInput(
+        headers=_headers(),
+        query_params={"session_id": "missing-task-session"},
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "session_id": "missing-task-session",
+                "items": [],
+                "total": 0,
+            },
+        },
+    ),
+)
+def by_session_empty():
+    pass
+
+
 @endpoint_test(
     method="GET",
     path=f"{_BASE}/dashboard",
@@ -177,6 +278,87 @@ def list_authenticated():
     expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
 )
 def list_unauthenticated():
+    pass
+
+
+# ── Owned-Bot grant reconciliation (best-effort Human self-service) ───────────
+
+
+def _seed_bot_grant_reconciliation(world, expected_bot_id: str | None) -> None:
+    async def reconcile(
+        _self, *, owner_id, cookie, referer, bot_id=None
+    ):
+        assert owner_id == _CALLER
+        assert cookie == "session=human-cookie"
+        assert referer == "https://frontend.example.test/bots"
+        assert bot_id == expected_bot_id
+
+    bind_overrides(
+        world,
+        BotGrantReconciliationServiceProtocol,
+        {"reconcile": reconcile},
+    )
+
+
+def _reconciliation_headers() -> dict[str, str]:
+    return {
+        **_headers(),
+        "Cookie": "session=human-cookie",
+        "Referer": "https://frontend.example.test/bots",
+    }
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/bot-grants/reconcile",
+    scenario="authenticated_all_owned_bots",
+    seed=lambda w: (
+        _boot_verifier(w),
+        _seed_bot_grant_reconciliation(w, None),
+    ),
+    input=CaseInput(headers=_reconciliation_headers(), json_body={}),
+    expect=ExpectSuccess(
+        status=202,
+        json_contains={"code": 200000, "data": {"accepted": True}},
+    ),
+)
+def reconcile_all_owned_bots():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/bot-grants/reconcile",
+    scenario="authenticated_single_owned_bot",
+    seed=lambda w: (
+        _boot_verifier(w),
+        _seed_bot_grant_reconciliation(w, "bot-1"),
+    ),
+    input=CaseInput(
+        headers=_reconciliation_headers(),
+        json_body={"bot_id": "bot-1"},
+    ),
+    expect=ExpectSuccess(
+        status=202,
+        json_contains={"code": 200000, "data": {"accepted": True}},
+    ),
+)
+def reconcile_single_owned_bot():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/bot-grants/reconcile",
+    scenario="unauthenticated",
+    seed=_boot_verifier,
+    input=CaseInput(json_body={}),
+    expect=ExpectError(
+        status=401,
+        json_contains={"code": 401000, "message": "Unauthorized"},
+    ),
+)
+def reconcile_owned_bots_unauthenticated():
     pass
 
 
@@ -332,4 +514,73 @@ def bbs_list_invalid_status():
     expect=ExpectError(status=400),
 )
 def bbs_list_multi_value_status():
+    pass
+
+
+# ── BBS Browse-Loop manual skill-install repair trigger (public /openapi face) ──
+_SKILL_INSTALL_RESULT = {
+    "run_id": "run_skill_install",
+    "session_id": "sess_skill_install",
+    "mode": "openclaw",
+    "status": "submitted",
+    "action": "install_skills",
+}
+
+
+def _seed_bbs_skill_install_runner(world) -> None:
+    async def trigger_install_bbs_skills(_self, *, bot_id, owner_user_id):
+        return _SKILL_INSTALL_RESULT
+
+    bind_overrides(
+        world,
+        BbsBrowseLoopRunner,
+        {"trigger_install_bbs_skills": trigger_install_bbs_skills},
+    )
+
+
+def _seed_bbs_skill_install_not_found(world) -> None:
+    async def trigger_install_bbs_skills(_self, *, bot_id, owner_user_id):
+        raise NotFound("subscription not found")
+
+    bind_overrides(
+        world,
+        BbsBrowseLoopRunner,
+        {"trigger_install_bbs_skills": trigger_install_bbs_skills},
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/bots/{{bot_id}}/bbs/skills/install",
+    scenario="happy_ok",
+    seed=lambda w: (
+        _boot_verifier(w),
+        _seed_bbs_skill_install_runner(w),
+    ),
+    input=CaseInput(
+        path_params={"bot_id": "bot-install"}, query_params={"owner_user_id": "111111"}, headers=_headers(), json_body={}
+    ),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"code": 200000, "data": _SKILL_INSTALL_RESULT},
+    ),
+)
+def bbs_skill_install_public_happy():
+    pass
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE}/bots/{{bot_id}}/bbs/skills/install",
+    scenario="err_subscription_not_found",
+    seed=lambda w: (
+        _boot_verifier(w),
+        _seed_bbs_skill_install_not_found(w),
+    ),
+    input=CaseInput(
+        path_params={"bot_id": "bot-install"}, query_params={"owner_user_id": "111111"}, headers=_headers(), json_body={}
+    ),
+    expect=ExpectError(status=404),
+)
+def bbs_skill_install_public_error():
     pass

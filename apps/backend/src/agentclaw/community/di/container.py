@@ -15,8 +15,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from injector import Injector, Module
-
 from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterStoreConfig,
 )
@@ -27,28 +25,33 @@ from agentclaw.community.di.config import (
     McpRuntimeCredentialsConfig,
     TaskQueueConfig,
 )
-
 from agentclaw.community.di.modules.access_module import AccessModule
+from agentclaw.community.di.modules.acli_clis_module import AcliClisModule
 from agentclaw.community.di.modules.agentswarm import AgentSwarmModule
 from agentclaw.community.di.modules.aicoding_module import AICodingModule
+from agentclaw.community.di.modules.apply_engine_module import (
+    ApplyEngineModule,
+)
 from agentclaw.community.di.modules.bbs_config_module import BbsConfigModule
 from agentclaw.community.di.modules.bbs_digest_module import BbsDigestModule
 from agentclaw.community.di.modules.bot_app_grant_module import BotAppGrantModule
 from agentclaw.community.di.modules.bot_chat_open_module import BotChatOpenModule
 from agentclaw.community.di.modules.bot_collaborator_module import BotCollaboratorModule
 from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
+from agentclaw.community.di.modules.bot_extension_module import BotExtensionModule
 from agentclaw.community.di.modules.bot_friend_auth_module import BotFriendAuthModule
-from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
 from agentclaw.community.di.modules.bot_genome_module import BotGenomeModule
+from agentclaw.community.di.modules.bot_copy_module import BotCopyModule
+from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
+from agentclaw.community.di.modules.bot_knowledge_module import BotKnowledgeModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
-from agentclaw.community.di.modules.manifest_delivery_module import (
-    ManifestDeliveryModule,
+from agentclaw.community.di.modules.bot_message_feedback_module import (
+    BotMessageFeedbackModule,
 )
-from agentclaw.community.di.modules.manifest_fetch_module import ManifestFetchModule
+from agentclaw.community.di.modules.bot_overview_module import BotOverviewModule
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
+from agentclaw.community.di.modules.bot_public_risk_module import BotPublicRiskModule
 from agentclaw.community.di.modules.bot_quota_module import BotQuotaModule
-from agentclaw.community.di.modules.task_module import TaskModule
-from agentclaw.community.di.modules.acli_clis_module import AcliClisModule
 from agentclaw.community.di.modules.caller_identity_module import CallerIdentityModule
 from agentclaw.community.di.modules.channel_module import ChannelModule
 from agentclaw.community.di.modules.common_config_module import CommonConfigModule
@@ -60,17 +63,18 @@ from agentclaw.community.di.modules.desktop_skill_recovery_config_module import 
     DesktopSkillRecoveryConfigModule,
 )
 from agentclaw.community.di.modules.devices_module import DevicesModule
+from agentclaw.community.di.modules.digital_employee_module import DigitalEmployeeModule
 from agentclaw.community.di.modules.economy_governance_module import (
     EconomyGovernanceModule,
 )
-from agentclaw.community.di.modules.engine_version_module import EngineVersionModule
 from agentclaw.community.di.modules.engine_config_module import EngineConfigModule
 from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
-from agentclaw.community.di.modules.expert_chat_module import ExpertChatModule
+from agentclaw.community.di.modules.engine_version_module import EngineVersionModule
 from agentclaw.community.di.modules.execution_identity_module import (
     ExecutionIdentityModule,
 )
-from agentclaw.community.di.modules.digital_employee_module import DigitalEmployeeModule
+from agentclaw.community.di.modules.expert_chat_module import ExpertChatModule
+from agentclaw.community.di.modules.expert_market_module import ExpertMarketModule
 from agentclaw.community.di.modules.grt_chat_module import GrtChatModule
 from agentclaw.community.di.modules.harness_module import HarnessModule
 from agentclaw.community.di.modules.http_client_module import HttpClientModule
@@ -78,50 +82,80 @@ from agentclaw.community.di.modules.identity_module import IdentityModule
 from agentclaw.community.di.modules.installation_read_config_module import (
     InstallationReadConfigModule,
 )
+from agentclaw.community.di.modules.knowledge_management_module import (
+    KnowledgeManagementModule,
+)
+from agentclaw.community.di.modules.manifest_fetch_module import ManifestFetchModule
+from agentclaw.community.di.modules.mcp_module import McpModule
 from agentclaw.community.di.modules.mcp_runtime_credentials_config_module import (
     McpRuntimeCredentialsConfigModule,
 )
-from agentclaw.community.di.modules.mcp_module import McpModule
+from agentclaw.community.di.modules.openapi_bot_access_check_config_module import (
+    OpenApiBotAccessCheckConfigModule,
+)
 from agentclaw.community.di.modules.openapi_user_id_bypass_config_module import (
     OpenApiUserIdBypassConfigModule,
 )
-from agentclaw.community.di.openapi_user_id_bypass_config import (
-    OpenApiUserIdBypassConfig,
+from agentclaw.community.di.modules.bot_manager_sync_module import (
+    BotManagerSyncModule,
 )
-from agentclaw.community.di.modules.bot_message_feedback_module import (
-    BotMessageFeedbackModule,
+from agentclaw.community.di.bot_manager_sync_config import ManagerSyncConfig
+from agentclaw.community.di.modules.bot_ownership_sync_module import BotOwnershipSyncModule
+from agentclaw.community.di.modules.collaboration_repair_module import (
+    CollaborationRepairModule,
 )
+from agentclaw.community.di.modules.owner_handoff_module import OwnerHandoffModule
 from agentclaw.community.di.modules.quality_module import QualityModule
+from agentclaw.community.di.modules.resources_module import ResourcesModule
 from agentclaw.community.di.modules.runtime_projection_recovery_module import (
     RuntimeProjectionRecoveryModule,
 )
-from agentclaw.community.di.modules.resources_module import ResourcesModule
 from agentclaw.community.di.modules.service_bot_module import ServiceBotModule
 from agentclaw.community.di.modules.session_resources_module import (
     SessionResourcesModule,
 )
-from agentclaw.community.di.modules.tc_file_upload_integration_module import (
-    TcFileUploadIntegrationModule,
-)
-from agentclaw.community.di.modules.skill_center_module import SkillCenterModule
 from agentclaw.community.di.modules.skill_center_group4_module import (
     SkillCenterGroup4Module,
 )
+from agentclaw.community.di.modules.skill_center_module import SkillCenterModule
 from agentclaw.community.di.modules.skill_version_module import SkillVersionModule
 from agentclaw.community.di.modules.skills_pool_module import SkillsPoolModule
+from agentclaw.community.di.modules.space_knowledge_module import SpaceKnowledgeModule
 from agentclaw.community.di.modules.spaces_module import SpacesModule
 from agentclaw.community.di.modules.system_config_module import SystemConfigModule
+from agentclaw.community.di.modules.task_artifact_config_module import (
+    TaskArtifactConfigModule,
+)
 from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
+from agentclaw.community.di.modules.task_module import TaskModule
+from agentclaw.community.di.modules.task_config_module import TaskConfigModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
 from agentclaw.community.di.modules.task_trajectory_config_module import (
     TaskTrajectoryConfigModule,
 )
+from agentclaw.community.di.modules.clawweb_config_module import (
+    ClawwebConfigModule,
+)
+from agentclaw.community.di.modules.tc_file_upload_integration_module import (
+    TcFileUploadIntegrationModule,
+)
 from agentclaw.community.di.modules.user_list_module import UserListModule
 from agentclaw.community.di.modules.work_orders_module import WorkOrdersModule
+from agentclaw.community.di.openapi_bot_access_check_config import (
+    OpenApiBotAccessCheckConfig,
+)
+from agentclaw.community.di.openapi_user_id_bypass_config import (
+    OpenApiUserIdBypassConfig,
+)
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.di.profile_modules import modules_for
+from agentclaw.community.di.todo_config import TodoSchedulerConfig
+from agentclaw.community.di.space_knowledge_capture_config import (
+    SpaceKnowledgeCaptureConfig,
+)
 from agentclaw.community.log import get_logger
+from injector import Injector, Module
 
 logger = get_logger()
 
@@ -171,11 +205,23 @@ def build_injector(
         # (bot_id + tc_bot timeout). Sits in its own module to keep
         # ConfigModule at zero headroom under the 1000-line cap.
         TaskTrajectoryConfigModule(),
+        # Clawweb host config (the ``task_nav`` clone target): read the
+        # ``clawweb`` user_config block → ClawwebConfig.base_url the
+        # clawweb-qualified HttpClient binds. Own module for the same headroom
+        # reason as TaskTrajectoryConfigModule (config_module at zero headroom).
+        ClawwebConfigModule(),
+        # Task-artifact OBJECT_FILE object-store config (task module's own
+        # ``task_artifact_storage`` block). Own module for the same headroom
+        # reason as TaskTrajectoryConfigModule.
+        TaskArtifactConfigModule(),
         # Public-API ``user_id`` bypass list (``openapi`` user_config block).
         # Own module for the same headroom reason; its provider refuses a
         # malformed block anywhere and a non-empty list in pre/prod, and is
         # resolved unconditionally below so that refusal fails the boot.
         OpenApiUserIdBypassConfigModule(),
+        # Transitional Bot access check allowlist (``openapi.bot_access_check``);
+        # resolved eagerly below so a malformed block fails the boot.
+        OpenApiBotAccessCheckConfigModule(),
         InstallationReadConfigModule(),
         SkillCenterModule(),
         SkillCenterGroup4Module(),
@@ -186,20 +232,27 @@ def build_injector(
         SystemConfigModule(),
         CommonConfigModule(),
         BotManagementModule(),
+        BotCopyModule(),
         ExecutionIdentityModule(),
+        OwnerHandoffModule(),
         DigitalEmployeeModule(),
         AgentSwarmModule(),
         BotQuotaModule(),
+        BotExtensionModule(),
         ManifestFetchModule(),
         # The content store binds after the module that parses its blob root
         # (cfg.BotConfigManifestConfig) and before its two consumers.
         ContentStoreModule(),
-        ManifestDeliveryModule(),
+        ApplyEngineModule(),
         BotGenomeModule(),
         BotInventoryModule(),
         SkillsPoolModule(),
         BotPublicModule(),
+        BotOverviewModule(),
+        BotPublicRiskModule(),
+        ExpertMarketModule(),
         TaskModule(),
+        TaskConfigModule(),
         DevicesModule(),
         McpModule(),
         BotMessageFeedbackModule(),
@@ -217,10 +270,22 @@ def build_injector(
         SessionResourcesModule(),
         TcFileUploadIntegrationModule(local=profile is not DeployProfile.CORP),
         SpacesModule(),
+        BotKnowledgeModule(profile),
+        KnowledgeManagementModule(profile),
+        SpaceKnowledgeModule(),
         WorkOrdersModule(),
         BotFriendAuthModule(),
         HarnessModule(),
         BotCollaboratorModule(),
+        # Backend→BCS manager sync (default off): a strict config parse,
+        # a stack of (un)available plugins, the bounded dispatcher and
+        # its loop-owning lifecycle. Disabled binds zero resources.
+        BotManagerSyncModule(),
+        BotOwnershipSyncModule(),
+        # Request-scoped collaboration repair (same default-off config block):
+        # a factory that refuses before any write and builds its delivery
+        # plugins on each request's own loop. Disabled binds zero resources.
+        CollaborationRepairModule(),
         BotAppGrantModule(),
         BotChatOpenModule(),
         CallerIdentityModule(),
@@ -266,7 +331,16 @@ def build_injector(
     # surfaced inside `discover_lifecycle_participants` would silently drop the
     # TaskWorker binding — an app that boots clean and never runs a queued task.
     # Resolving it here makes a bad owner name fail the boot on every profile.
+    from agentclaw.community.core.bot_management.owner_handoff.contracts import (
+        OwnerHandoffPolicy,
+    )
+
+    _app_injector.get(OwnerHandoffPolicy)
     _app_injector.get(TaskQueueConfig)
+    # Todo scheduler config is strict; resolve it outside lifecycle discovery,
+    # whose compatibility behavior intentionally skips raising providers.
+    _app_injector.get(TodoSchedulerConfig)
+    _app_injector.get(SpaceKnowledgeCaptureConfig)
     _app_injector.get(CanonicalCenterStoreConfig)
     _app_injector.get(DraftContentStoreConfig)
     _app_injector.get(DesktopSkillRecoveryConfig)
@@ -279,6 +353,12 @@ def build_injector(
     # read a raising provider as "no bypass"). Resolving it here makes the
     # refusal a failed boot on every profile, pre/prod included.
     _app_injector.get(OpenApiUserIdBypassConfig)
+    _app_injector.get(OpenApiBotAccessCheckConfig)
+    # Manager-sync config: the strict parser refuses an unknown key, a
+    # mistyped value, or an enabled block with missing fields — and that
+    # refusal must be a failed boot on every profile (a disabled block is
+    # the default and resolves cleanly, so this costs one dict read).
+    _app_injector.get(ManagerSyncConfig)
 
     return _app_injector
 
@@ -301,8 +381,8 @@ def eager_check_critical_bindings(injector: Injector) -> None:
     some prod-only deps (e.g. the ZDAS handle + the corp-registered critical
     config bindings) aren't expected to resolve cleanly under SQLite.
     """
-    from agentclaw.community.di.modules_bootstrap import get_eager_check_keys
     from agentclaw.community.api.bot_chat_service import OpenBotChatServiceProtocol
+    from agentclaw.community.di.modules_bootstrap import get_eager_check_keys
     from agentclaw.community.plugin_api.auth import AuthPlugin
     from agentclaw.community.plugin_api.database import DatabasePlugin
 

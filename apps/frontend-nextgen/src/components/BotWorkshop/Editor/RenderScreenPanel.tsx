@@ -40,10 +40,10 @@ export function RenderScreenPanel({
   };
   return (
     <div className="flex min-h-full flex-col bg-card">
-      <div className="flex items-center justify-between gap-4 border-b border-border px-7 py-5">
-        <div>
-          <h2 className="m-0 text-lg font-semibold tracking-tight">副屏组件库</h2>
-          <p className="m-0 mt-1 text-sm text-muted-foreground">维护当前 Bot 可加载的 UMD CDN 映射。</p>
+      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-divider bg-card px-8 lg:px-10">
+        <div className="min-w-0">
+          <h2 className="m-0 truncate text-sm font-semibold">副屏组件库</h2>
+          <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">维护当前 Bot 可加载的 UMD CDN 映射。</p>
         </div>
         <Button size="sm" disabled={!editable} leftIcon={<Plus className="size-4" />} onClick={() => start()}>
           新增副屏
@@ -70,7 +70,9 @@ export function RenderScreenPanel({
               </Button>
               <Button
                 disabled={!editable || !name.trim() || !/^https?:\/\//.test(cdnUrl.trim())}
-                onClick={() => void save()}
+                // 失败提示已由协议层(act → safeReportError)完成;吞掉 act 的重抛,避免
+                // `void save()` 产生 Uncaught (in promise),rejection 使 close() 不执行、表单保留。
+                onClick={() => void save().catch(() => undefined)}
               >
                 保存
               </Button>

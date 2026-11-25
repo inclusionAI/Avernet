@@ -26,20 +26,30 @@ export const routes = [
       { path: '/workspace/collaboration/group', component: '@/pages/Workspace/Collaboration/Focused' },
       { path: '/workspace/collaboration/session', component: '@/pages/Workspace/Collaboration/Focused' },
       { path: '/work/my-task', component: '@/pages/MyTask' },
+      // Agent Compute：面向 agentswarm 网关的计算任务配置与运行观察页。
+      { path: '/agent-compute', component: '@/pages/AgentCompute' },
       { path: '/workspace/invite/:type/:token', component: '@/pages/Workspace/InviteAcceptPanel' },
       // BCN 协作会话外链落地页：判定参与方式后 replace 至 /workspace 协作群深链。
       { path: '/workspace/bcn/chat/detail', component: '@/pages/Workspace/BcnChatDetail' },
+      // 老版分享链接路径兜底（/private-chat/chat?id=bot_id:owner_id）：老域名重定向在
+      // 运维层完成域名/路径转换；组件运行时把 query 原样透传至 /workspace/chat，
+      // 交由对话页解析链路（route.ts id 别名 + Guard）接管。
+      { path: '/private-chat/chat', component: '@/pages/LegacyPrivateChatRedirect' },
       { path: '/collaboration-square', redirect: '/collaboration-square/bots' },
+      { path: '/collaboration-square/experts', component: '@/pages/CollaborationSquare/Experts' },
       { path: '/collaboration-square/bots', component: '@/pages/CollaborationSquare/Bots' },
       { path: '/collaboration-square/groups', component: '@/pages/CollaborationSquare/Groups' },
       // 社区已从「发现」迁移到独立的「实验室」一级导航（/lab）：旧深链保留重定向，不 404。
       { path: '/collaboration-square/community', redirect: '/lab/community' },
       { path: '/collaboration-square/tasks', redirect: '/lab/community' },
-      // 实验室落地页 = 功能卡网格（社区/任务…），点对应卡片进入能力页。
+      // 实验室落地页 = 功能卡网格（社区/待办/任务…），点对应卡片进入能力页。
       { path: '/lab', component: '@/pages/Lab' },
-      { path: '/lab/tasks', component: '@/pages/Lab/Tasks' },
       { path: '/lab/community', component: '@/pages/Lab/Community' },
+      { path: '/lab/todos/:todoId', component: '@/pages/Lab/Todos/TodoDetailPage' },
+      { path: '/lab/todos', component: '@/pages/Lab/Todos' },
+      { path: '/lab/tasks', component: '@/pages/Lab/Tasks' },
       { path: '/evolution-factory', component: '@/pages/EvolutionFactory' },
+      { path: '/evolution-factory/task-escort', component: '@/pages/TaskEscort' },
       { path: '/evolution-factory/new', component: '@/pages/EvolutionFactory/CreateTask' },
       { path: '/evolution-factory/tasks/:taskId', component: '@/pages/EvolutionFactory/TaskDetail' },
       { path: '/evolution-factory/domains/:ownerUserId/:domainId', component: '@/pages/EvolutionFactory/DomainDetail' },
@@ -47,8 +57,11 @@ export const routes = [
       { path: '/bot-workshop', component: '@/pages/BotWorkshop' },
       { path: '/bot-workshop/logs', component: '@/pages/BotWorkshop/Logs' },
       { path: '/bot-workshop/task-instances', component: '@/pages/BotWorkshop/TaskInstances' },
+      { path: '/bot-workshop/scheduled-tasks', component: '@/pages/BotWorkshop/ScheduledTasks' },
+      { path: '/bot-workshop/scheduled-tasks/detail', component: '@/pages/BotWorkshop/ScheduledTasks' },
       { path: '/bot-workshop/detail', component: '@/pages/BotWorkshop/Detail' },
       { path: '/bot-workshop/health-check', component: '@/pages/BotWorkshop/HealthCheck' },
+      { path: '/bot-workshop/evaluation/:botId/versions/:botVersion', component: '@/pages/BotWorkshop/Evaluation' },
       // split-admin-space-ticket-pages：管理后台单页拆分，空间管理/通知中心为独立路由，均不占导航位
       //（入口 = 空间切换弹层设置 icon / 通知弹层「查看全部」）。
       { path: '/space-admin', component: '@/pages/SpaceAdmin' },
@@ -70,6 +83,8 @@ export const routes = [
     path: '/design-system',
     component: './Demo/DesignSystem',
   },
+  // 独立聊天演示：不挂 AppLayout，与真实任务护航工作台和其数据源隔离。
+  { path: '/demo/task-escort', component: '@/pages/Demo/TaskEscort' },
   // Open 形态对外欢迎页:顶层独立路由(同 /design-system 范式,AppLayout 外,不进工作台 Shell/侧栏)。
   // internal overlay 声明 '/welcome' 覆盖项物理取消本条 + stale 深链兜底(见 routes.internal.ts)。
   { path: '/welcome', component: '@/pages/Welcome' },

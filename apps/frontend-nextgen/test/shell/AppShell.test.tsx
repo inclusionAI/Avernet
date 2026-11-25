@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
+import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
@@ -51,6 +52,7 @@ jest.mock('@/shell/AppSidebar', () => ({
 const { AppShell } = require('@/shell/AppShell') as typeof import('@/shell/AppShell');
 
 beforeEach(() => {
+  useTaskConversationNavigationStore.getState().resetAll();
   useWorkspaceStore.getState().reset();
   useExternalAuthStore.getState().reset();
   window.localStorage.clear();
@@ -158,3 +160,24 @@ it.each([
     expect(view.getByTestId('app-sidebar')).toBeInTheDocument();
   },
 );
+
+it('路由离开任务导航目标时通知持久副屏释放旧任务面板，进入目标路由不触发', async () => {
+  mockPathname = '/workspace/chat';
+  window.history.pushState({}, '', '/workspace/chat?bot=b1&session=s1');
+  const view = render(<AppShell>工作内容</AppShell>);
+
+  const store = useTaskConversationNavigationStore.getState();
+  const navigationId = store.beginNavigation('t1', '/workspace/collaboration', 's2');
+  act(() => store.markRouteCommitted(navigationId));
+  expect(useTaskConversationNavigationStore.getState().staleRouteReleaseSignal).toBe(0);
+
+  mockPathname = '/workspace/collaboration';
+  window.history.pushState({}, '', '/workspace/collaboration?group=g2&session=s2');
+  act(() => view.rerender(<AppShell>协作群内容</AppShell>));
+  expect(useTaskConversationNavigationStore.getState().staleRouteReleaseSignal).toBe(0);
+
+  mockPathname = '/work/my-task';
+  window.history.pushState({}, '', '/work/my-task');
+  act(() => view.rerender(<AppShell>任务列表</AppShell>));
+  await waitFor(() => expect(useTaskConversationNavigationStore.getState().staleRouteReleaseSignal).toBe(1));
+});

@@ -1,0 +1,203 @@
+{
+  "date": "2026-10-31",
+  "status": "passed_with_documented_scope_limits",
+  "scope": "Inline and URL AgentCard registration; three Bot Card columns; derived route and Provider credentials; bounded process-local refresh",
+  "source_sha256": {
+    "apps/bcs/crates/service-api/bcs-service-api/src/types/a2a_bot.rs": "0b2acaf1f8d78ab1eca96a3fb6e82fbbed1b85bfabd5d6f62e8ffaca6cd2dff1",
+    "apps/bcs/crates/contracts/bcs-domain/src/a2a.rs": "03f38b2e7230de1709bc6a004ae79477821220ba4788a1dc90a87db82de05c60",
+    "apps/bcs/crates/services/bcs-bot-store/src/a2a.rs": "aed264eca70041ee6810281550cd553d0b125126b9f35fefbddfe1503734f87c",
+    "apps/bcs/crates/services/bcs-bot/src/core/bot_delivery.rs": "7086da0fd749114b1c8a189fabec10f1f288202c2d0335d92a94e2488609a4f8",
+    "apps/bcs/crates/application/bcs-app-a2a-bot/src/lib.rs": "b1fbc4da00dc48e69e48cd9b15c4f8df309f0913554154b32cac30905386d071",
+    "apps/bcs/crates/application/bcs-app-a2a-bot/src/registration.rs": "bca1ef579a12b5b8635b2dbdd6f420a6186b38040bf48b5fefba7ede2e724a2e",
+    "apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/register.rs": "c7b07a8a255a2582a1bfb4d880b95d2e1ae4b873eb8768130e1373a718e9ee1f",
+    "apps/bcs/migrations/mysql/038_a2a_task_bindings.sql": "c280932ea0a64659fdcef06f472413acf59b7909a320d84e018e3df15001235c",
+    "apps/bcs/migrations/sqlite/039_a2a_task_bindings.sql": "b103ab0e725ac64e313a47794d87f984287a654a33d5ac0f00bf815edc8d5c3e",
+    "apps/bcs/crates/bootstrap/bcs/src/server/server_infrastructure.rs": "e5ba2748669ba679b75a85ad4a890589a04e107db572304773476f7e016f6339",
+    "apps/bcs/crates/external-clients/bcs-a2a-http/src/card_fetch.rs": "a0b7e09edd6dc7ea54f143f196f53595fc7b6c86ce1c7c9b47d8e8bb928a8952",
+    "apps/bcs/crates/application/v1/bcs-app-register/src/lib.rs": "b43d1085895f3690f709042dd4d38e1bee39238e198499e88e761f65e2d5e0dd",
+    "apps/bcs/crates/adapters/http/bcs-http/src/routes/register.rs": "d28f5c6af6e80e7d93851e97889fcdac404e679c8c1bb83ed73281245808524f",
+    "apps/bcs/crates/adapters/http/bcs-http/src/routes/providers/registration.rs": "e95242e30f1dc7b571fd7f1d58010364463d05723da6a3542dcca71e15a87ddb",
+    "apps/bcs/crates/contracts/bcs-protocol/src/http/provider.rs": "525cb1d44e474b00d5136989fb8cd553c3c18432d12d8d4d90a14f842d618202",
+    "apps/bcs/crates/services/bcs-bot-store/tests/a2a_mysql.rs": "3b12d95354b2615e259fb003525c6fdbd347785a82d12c33928809f5a8ba504c",
+    "apps/bcs/crates/services/bcs-bot-store/tests/conformance_a2a_storage.rs": "c5c04f1056b333e59b3c44e77d6a4f544dce8ab0c0386a25f45bf716eebcc5a9"
+  },
+  "results": [
+    {
+      "command": "cargo test -p bcs-a2a-http --test conformance_card_fetch -p bcs-bot --test provider_webhook --test a2a_discovery",
+      "exit_code": 0,
+      "tests": 19,
+      "suites": 3,
+      "log": "/tmp/avernet-card-slim-client-core-tests.log",
+      "coverage": "inline and URL SDK declaration validation; no Card GET or probe for inline; pure selector parity; full Card discovery; derived current HTTP/gRPC route and Provider authority"
+    },
+    {
+      "command": "cargo test -p bcs-api-http --test register_routes",
+      "exit_code": 0,
+      "tests": 11,
+      "suites": 1,
+      "log": "/tmp/avernet-card-slim-openapi-tests.log",
+      "coverage": "versioned HTTP inline Card body; omitted A2A name; mixed-source rejection; legacy registration compatibility"
+    },
+    {
+      "command": "cargo test -p bcs-http --test a2a_card_routes",
+      "exit_code": 0,
+      "tests": 6,
+      "suites": 1,
+      "log": "/tmp/avernet-card-slim-http-final.log",
+      "coverage": "Provider-admin and scoped inline Card HTTP dispatch without name; exclusive sources; Card administration authorization"
+    },
+    {
+      "command": "cargo test -p bcs-app-a2a-bot --tests",
+      "exit_code": 0,
+      "tests": 21,
+      "suites": 3,
+      "log": "/tmp/avernet-card-slim-management-final.log",
+      "coverage": "11 configuration/refresh tests including bounded failure pages, write error propagation, inline source and stale URL race; 10 Provider-admin registration/alias/atomicity tests"
+    },
+    {
+      "command": "cargo test -p bcs --lib migrations::",
+      "exit_code": 0,
+      "tests": 43,
+      "suites": 1,
+      "log": "/tmp/avernet-card-slim-migrations-final.log",
+      "coverage": "complete current SQLite migration chain, three A2A Bot columns, audit/Task schemas, checksum and idempotence checks; bootstrap compiles"
+    },
+    {
+      "command": "BCS_TEST_MYSQL_URL=<isolated-empty-schema> cargo test -p bcs-bot-store --test a2a_mysql -- --ignored",
+      "exit_code": 0,
+      "tests": 1,
+      "suites": 1,
+      "log": "/tmp/avernet-card-slim-mysql-final.log",
+      "coverage": "real MySQL 8.4 full 001–038 chain; exactly three Bot A2A columns; projected interfaces decoded as UTF-8; URL-to-inline NULL source and scan exclusion; shared Card/Task/many-run contracts, auditing and write rollback"
+    },
+    {
+      "command": "cargo test -p bcs-bot-store --test conformance_a2a_storage -p bcs-http --test authority_registration_routes",
+      "exit_code": 0,
+      "tests": 16,
+      "suites": 2,
+      "log": "/tmp/avernet-card-slim-extra-final.log",
+      "coverage": "9 storage max-batch/failure/query-count tests; 7 legacy HTTP registration/token-version/rollback compatibility tests"
+    },
+    {
+      "command": "cargo test --manifest-path apps/bcs/Cargo.toml -p bcs-app-a2a-bot -p bcs-app-register -p bcs-bot-store --tests",
+      "exit_code": 0,
+      "tests": 361,
+      "suites": 34,
+      "ignored": 6,
+      "log": "/tmp/avernet-card-slim-app-store-tests.log",
+      "coverage": "application, scoped registration and Bot-store regression; later added cases are covered by management-final/extra-final and the MySQL-specific correction by mysql-final"
+    },
+    {
+      "command": "cargo test -p bcs-a2a-http --tests",
+      "exit_code": 0,
+      "tests": 69,
+      "suites": 12,
+      "ignored": 0,
+      "log": "/tmp/avernet-card-slim-client-all.log",
+      "coverage": "complete A2A client integration/unit regression: Card, HTTP/SSE/gRPC, projection, text/tools and Structured Input"
+    }
+  ],
+  "checks": {
+    "store_boundaries": "passed R10",
+    "port_purity": "passed LINT-2",
+    "forbidden_symbols": "passed",
+    "import_rules": "fails identically on HEAD and current tree; no new output lines",
+    "source_file_size": "all added/modified sources at most 1000 physical lines",
+    "frozen_mysql_037_sqlite_038": "unchanged from index",
+    "openapi_yaml_syntax": "passed with Ruby YAML.safe_load (system Python has no PyYAML)",
+    "repository_query_bounds": "passed: one data SELECT per refresh page (max 16) / availability batch (max 256), over-limit rejection and failure propagation",
+    "final_hygiene": "/tmp/avernet-card-slim-final-hygiene.json; 207 changed/added sources checked, maximum 1000 lines; frozen migrations unchanged; external temporary review mode 0600",
+    "isolated_mysql": "real 8.4 test instance shut down after passing; schema independently confirmed exactly agent_card/agent_card_url/agent_card_revision and NULL inline source"
+  },
+  "limits": [
+    "No full workspace or live Harness E2E rerun. Trial services not redeployed.",
+    "DDL intentionally drops experimental test metadata; no lossless migration of disposable old data.",
+    "No performance benchmark; bounded query assertions and real database conformance are the intended verification."
+  ],
+  "progress": {
+    "app-store-tests": {
+      "completed_command": true,
+      "completed_suites": 34,
+      "passed": 361,
+      "failed": 0,
+      "ignored": 6,
+      "log": "/tmp/avernet-card-slim-app-store-tests.log"
+    },
+    "client-core-tests": {
+      "completed_command": true,
+      "completed_suites": 3,
+      "passed": 19,
+      "failed": 0,
+      "ignored": 0,
+      "log": "/tmp/avernet-card-slim-client-core-tests.log"
+    },
+    "management-final": {
+      "completed_command": true,
+      "completed_suites": 3,
+      "passed": 21,
+      "failed": 0,
+      "ignored": 0,
+      "log": "/tmp/avernet-card-slim-management-final.log"
+    },
+    "http-final": {
+      "completed_command": true,
+      "completed_suites": 1,
+      "passed": 6,
+      "failed": 0,
+      "ignored": 0,
+      "log": "/tmp/avernet-card-slim-http-final.log"
+    },
+    "openapi-tests": {
+      "completed_command": true,
+      "completed_suites": 1,
+      "passed": 11,
+      "failed": 0,
+      "ignored": 0,
+      "log": "/tmp/avernet-card-slim-openapi-tests.log"
+    },
+    "migrations-final": {
+      "completed_command": true,
+      "completed_suites": 1,
+      "passed": 43,
+      "failed": 0,
+      "ignored": 0,
+      "log": "/tmp/avernet-card-slim-migrations-final.log"
+    },
+    "client-all": {
+      "completed_command": true,
+      "completed_suites": 12,
+      "passed": 69,
+      "failed": 0,
+      "ignored": 0,
+      "log": "/tmp/avernet-card-slim-client-all.log"
+    },
+    "extra-final": {
+      "completed_command": true,
+      "completed_suites": 2,
+      "passed": 16,
+      "failed": 0,
+      "ignored": 0,
+      "log": "/tmp/avernet-card-slim-extra-final.log"
+    },
+    "mysql-final": {
+      "completed_command": true,
+      "completed_suites": 1,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "log": "/tmp/avernet-card-slim-mysql-final.log"
+    }
+  },
+  "historical_attempts": [
+    "Earlier HTTP translation compile errors in unrelated Provider name fields were corrected before the five passing Card route tests.",
+    "The first bootstrap migration test attempt failed compilation because the route-policy builder was also applied to BotControlPlaneCore. The redundant call was removed; the separate migrations-final run is still pending.",
+    "Optional parallel test-name discovery was stopped after it did not clearly reduce startup delay. It did not execute test bodies and is not counted as validation. Actual Cargo tests were preserved.",
+    "The added query-count test wrapper lacked the required DbPlugin::transaction delegation. It was added; the failed build was interrupted after its compilation error and extra-final is the replacement run. Actual functional test runs were not interrupted.",
+    "First real MySQL run applied the complete 001–038 chain and verified the three-column Bot schema, but failed availability decoding because CASE/JSON_EXTRACT returned a binary column. MySQL projection now explicitly casts to utf8mb4 text; metadata confirmed text collation/no binary flags. mysql-final retries on a separate empty schema and also checks nullable inline source persistence."
+  ],
+  "count_note": "Per-command counts overlap and must not be summed as unique tests. The broad application/store run began before the final MySQL-only projection correction and new cases; those changes have their separate passing focused runs. Test-name discovery is not counted.",
+  "progress_observed_at": "2026-10-31T12:45:21.712330+00:00",
+  "completed_at": "2026-10-31T12:45:21.712330+00:00",
+  "default_ignored_note": "Six external-DB cases are ignored by the broad default run. The A2A MySQL case was separately executed and passed on a fresh schema; the other five external-DB cases were not run.",
+  "publication_note": "Historical pre-rebase evidence only. Current PR consolidates uncommitted A2A migrations into MySQL/SQLite 039 after upstream 038; see ../2026-10-28-bcs-a2a-grpc/pr-validation.json for merged-head evidence."
+}

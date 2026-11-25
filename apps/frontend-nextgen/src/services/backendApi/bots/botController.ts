@@ -13,8 +13,46 @@ import type {
 export type BotDto = BackendUnknownRecord;
 export type MutateBotRequest = BackendUnknownRecord;
 
+/**
+ * `POST /openapi/v1/bots/copy` 请求体(后端 `BotCopyRequest` `extra="forbid"`)。
+ * `request_detail` 承载未来 copy 参数(当前仅 `excludes`);**禁止**在顶层塞
+ * `avatar_url`/`excludes` —— 后端会 422。
+ */
+export interface BotCopyRequestBody {
+  source_bot_id: string;
+  bot_name: string;
+  bot_desc?: string;
+  request_detail?: { excludes?: string[]; [key: string]: unknown };
+}
+
+/**
+ * `POST /openapi/v1/bots/copy` 响应体(后端 `BotCopyResponse`)。
+ * - `success` —— 复制已提交,dst bot 由 create_job 异步创建;响应只携带 bot_id,
+ *   **不含 BotDto**。
+ * - `auth_required` —— 内网 AgentPass 授权闸 pending,携带 iframe/redirect_url。
+ */
+export interface BotCopyResponseDto {
+  type: 'success' | 'auth_required';
+  operation_id: string;
+  bot_id: string;
+  iframe_url?: string;
+  redirect_url?: string;
+}
+
+/** `POST /openapi/v1/bots/copy/{bot_id}/retry` 响应的 result 枚举(后端 `RetryResult`)。 */
+export type BotCopyRetryResult = 're_enqueued' | 'still_running' | 'terminal';
+
+/** `POST /openapi/v1/bots/copy/{bot_id}/retry` 响应体(后端 `RetryResponse`)。 */
+export interface BotCopyRetryResponseDto {
+  operation_id: string;
+  result: BotCopyRetryResult;
+}
+
 /** GET /openapi/v1/bots 单条返回结构。 */
 export interface OwnedBotDto {
+  entity_id?: string;
+  bcn_bot_id?: string;
+  avatar_url?: string | null;
   bot_id: string;
   bot_name: string;
   bot_desc?: string;
@@ -33,6 +71,8 @@ export interface OwnedBotDto {
   disabled_actions?: Record<string, string>;
   space_id?: string | number;
   space_name?: string;
+  /** Caller 模式标记('caller'):IAM 换签需带 caller_runtime_target(openspec add-iam-caller-runtime-target);缺失视为非 Caller Bot。 */
+  call_type?: string;
   /** 归属空间(2026-10-21 对齐线上实际返回的嵌套形态;bots 接口实测 space_id/name/kind)。 */
   space?: { space_id: string; name: string; kind: string } | null;
 }
@@ -48,8 +88,10 @@ export interface BotMetadataQueryBody {
   bots: BotMetadataQueryItem[];
 }
 
-/** GET /openapi/v1/bots/metadata/queries 单条返回结构。 */
+/** POST /openapi/v1/bots/metadata/queries 单条返回结构。 */
 export interface BotMetadataDto {
+  bcn_bot_id?: string;
+  avatar_url?: string | null;
   bot_id: string;
   owner_id: string;
   bot_name: string;
@@ -58,6 +100,12 @@ export interface BotMetadataDto {
   template_type?: string;
   template_name?: string;
   bot_type?: string;
+  /** Owner 展示名；用于公开 Bot 卡片 ownerName 回填，未匹配到记录的候选保持「未公开」。 */
+  owner_name?: string;
+  /** 服务 Bot 是否有可用的 online 发布；非服务 Bot 为 null。 */
+  online_available?: boolean | null;
+  /** Caller 模式标记('caller'):IAM 换签需带 caller_runtime_target(openspec add-iam-caller-runtime-target);缺失视为非 Caller Bot。 */
+  call_type?: string;
   status?: string;
 }
 
@@ -105,6 +153,8 @@ export const BOT_ENDPOINTS = {
   restartLocal: (bot_id: string) => `/openapi/v1/bots/${bot_id}/local/restart`,
   space: (bot_id: string) => `/openapi/v1/bots/${bot_id}/space`,
   authStatus: (bot_id: string) => `/openapi/v1/bots/${bot_id}/auth-status`,
+  copy: '/openapi/v1/bots/copy',
+  copyRetry: (bot_id: string) => `/openapi/v1/bots/copy/${bot_id}/retry`,
 };
 
 export function changeBotSpace(bot_id: string, space_id: number, user_id?: string) {
@@ -133,12 +183,13 @@ export function listBots(params?: BackendUnknownRecord, signal?: AbortSignal) {
   });
 }
 
-/** 按 bot_id + owner_id 批量查询好友 Bot 元数据（返回顺序不保证，消费方需按 id 映射）。 */
-export function listBotMetadata(params: BackendUnknownRecord, body: BotMetadataQueryBody) {
+/** 按 bot_id + owner_id 批量查询好友 Bot 元数据（返回顺序不保证，消费方需按 id 映射）。AbortSignal 可选透传。 */
+export function listBotMetadata(params: BackendUnknownRecord, body: BotMetadataQueryBody, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<BotMetadataDto>>>(BOT_ENDPOINTS.metadataQueries, {
     method: 'POST',
     params: userScopedParams(params),
     data: body,
+    signal,
   });
 }
 
@@ -148,6 +199,24 @@ export function createBot(body: MutateBotRequest) {
     method: 'POST',
     params: userScopedParams(),
     data: body,
+  });
+}
+
+// 复制 Bot();响应为 type 判别(success=已提交异步创建 / auth_required=AgentPass 闸),
+// 不再是 BotDto。请求体必须严格匹配 BotCopyRequestBody(extra=forbid,禁止 avatar_url 顶层透传)。
+export function copyBot(body: BotCopyRequestBody) {
+  return backendRequest<BackendApiEnvelope<BotCopyResponseDto>>(BOT_ENDPOINTS.copy, {
+    method: 'POST',
+    params: userScopedParams(),
+    data: body,
+  });
+}
+
+// 重试复制(dst bot_id);后端按 cas_retry 60s 节流,CONVERGED 直接 terminal 拒绝。
+export function retryCopyBot(bot_id: string) {
+  return backendRequest<BackendApiEnvelope<BotCopyRetryResponseDto>>(BOT_ENDPOINTS.copyRetry(bot_id), {
+    method: 'POST',
+    params: userScopedParams(),
   });
 }
 
@@ -186,9 +255,18 @@ export function deleteBot(bot_id: string) {
 
 // 重启 Bot。
 export function restartBot(bot_id: string, target?: BotEngineRuntimeRequestOptions) {
+  const body = target?.extraConfigs
+    ? {
+        // Legacy AICoding callers put the operator in the JSON body as well as
+        // the OpenAPI query identity. Keep that wire shape for template confirmations.
+        ...(target.userId ? { user_id: target.userId } : {}),
+        extra_configs: target.extraConfigs,
+      }
+    : undefined;
   return backendRequest<BackendApiEnvelope<BotDto>>(BOT_ENDPOINTS.restart(bot_id), {
     method: 'POST',
     params: target ? userScopedParams({ user_id: target.userId, entity_id: target.ownerId }) : userScopedParams(),
+    data: body,
     signal: target?.signal,
   });
 }
@@ -210,7 +288,7 @@ function engineRuntimeParams(target?: BotEngineRuntimeRequestOptions): BackendUn
   return userScopedParams({
     user_id: target.userId,
     ...(target.ownerId ? { entity_id: target.ownerId } : {}),
-    stage: target.stage ?? 'draft',
+    // Engine inspection/restart only supports draft; omit it and use the Backend default.
     ...(target.deviceUuid ? { device_uuid: target.deviceUuid } : {}),
   });
 }

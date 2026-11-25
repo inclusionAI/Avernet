@@ -8,6 +8,8 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
@@ -2529,6 +2531,7 @@ def build_task_handler(
         claim_service=StickyClaimService(layouts),
         layout_repository=layouts,
         reconcile_service=build_service(layouts, runtime),
+        edit_guard=MagicMock(),
         quarantine_repository=NoQuarantineRepository(),
     )
 
@@ -2721,6 +2724,7 @@ def test_stale_signal_uses_current_resolved_binding_for_real_mutations() -> None
         claim_service=StickyClaimService(layouts),
         layout_repository=layouts,
         reconcile_service=reconcile,
+        edit_guard=MagicMock(),
         quarantine_repository=NoQuarantineRepository(),
     )
     payload = build_skills_pool_reconcile_payload(

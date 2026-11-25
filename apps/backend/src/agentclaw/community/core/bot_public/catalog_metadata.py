@@ -86,3 +86,16 @@ class BotCatalogMetadataServiceProtocol(Protocol):
 
 class BotCatalogSearchUnavailableError(Exception):
     """The BCS-backed catalog metadata source is unavailable."""
+
+
+class BotCatalogProfileNotFoundError(Exception):
+    """The requested Bot is not in the caller-visible public catalog.
+
+    Lives in this contract module (not the service package) so HTTP adapters
+    may import it to map 404s without reaching into ``core/<m>/services/``.
+    """
+
+    def __init__(self, bot_uuid: str, message: str = "Public bot profile not found"):
+        self.bot_uuid = bot_uuid
+        self.message = f"{message}: bot_uuid={bot_uuid}"
+        super().__init__(self.message)

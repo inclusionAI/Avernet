@@ -1,12 +1,14 @@
 """Corrupt durable rows must not be acknowledged by rebuild or replay."""
 
+from tests.qdrant_support import server_options
+
 import pickle
 
 import pytest
-from src.infra.public.vectorstores.qdrant_mysql_vector_store import (
+from app.infra.public.vectorstores.qdrant_mysql_vector_store import (
     QdrantMySQLVectorStore,
 )
-from src.infra.vectorstore_backends.mysql_vector_persistence_backend import (
+from app.infra.vectorstore_backends.mysql_vector_persistence_backend import (
     MySQLVectorPersistenceBackend,
 )
 
@@ -63,7 +65,10 @@ def test_failed_decode_keeps_sync_checkpoint_and_retries_complete_batch(
     backend._conn = connection
     backend._schema_initialized = True
     store = QdrantMySQLVectorStore(
-        dimension=2, qdrant_path=str(tmp_path / "vectors"), persistence_backend=backend
+        **server_options(str(tmp_path / "vectors")),
+        dimension=2,
+        qdrant_path=str(tmp_path / "vectors"),
+        persistence_backend=backend,
     )
     store._last_sync_time = 100.0
     try:

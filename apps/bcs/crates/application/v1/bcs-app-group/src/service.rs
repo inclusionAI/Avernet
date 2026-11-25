@@ -98,22 +98,61 @@ impl GroupService for GroupServiceImpl {
         // V1 contract (`api-contracts/v1/openapi/groups.yaml`) declares
         // `created_at DESC, group_id ASC`. Legacy HTTP endpoints keep
         // `updated_at` sort, so we use a dedicated comparator here.
-        groups.sort_by(|(left, _), (right, _)| {
-            DomainGroup::cmp_by_created_at_desc_group_id_asc(left, right)
-        });
+        // Design D4/D5: `last_activity` needs the key globally, so it pays
+        // the batched activity reads over the whole filtered set BEFORE
+        // sorting; every other mode sorts and paginates first and pays them
+        // over the page only.
+        let activity_sort = command.sort == GroupListSort::LastActivity;
+        let mut activity = if activity_sort {
+            let filtered_ids = groups
+                .iter()
+                .map(|(group, _)| group.id.clone())
+                .collect::<Vec<_>>();
+            self.group_activity_keys(&filtered_ids).await?
+        } else {
+            HashMap::new()
+        };
+        match command.sort {
+            GroupListSort::CreatedAt => groups.sort_by(|(left, _), (right, _)| {
+                DomainGroup::cmp_by_created_at_desc_group_id_asc(left, right)
+            }),
+            GroupListSort::LastActivity => groups.sort_by(|(left, _), (right, _)| {
+                let left_activity = activity.get(&left.id).copied().unwrap_or(left.created_at);
+                let right_activity = activity
+                    .get(&right.id)
+                    .copied()
+                    .unwrap_or(right.created_at);
+                right_activity
+                    .cmp(&left_activity)
+                    .then_with(|| left.id.cmp(&right.id))
+            }),
+        }
         let total = groups.len() as u64;
         let page = groups
             .into_iter()
             .skip(saturating_usize(command.offset))
             .take(saturating_usize(command.limit))
             .collect::<Vec<_>>();
+        if !activity_sort {
+            let page_ids = page
+                .iter()
+                .map(|(group, _)| group.id.clone())
+                .collect::<Vec<_>>();
+            activity = self.group_activity_keys(&page_ids).await?;
+        }
         let mut items = Vec::with_capacity(page.len());
         for (group, membership) in page {
+            let last_activity_at =
+                Some(activity.get(&group.id).copied().unwrap_or(group.created_at));
             items.push(
-                self.project_summary(group, &view_actor_id, membership)
+                self.project_summary(group, &view_actor_id, membership, last_activity_at)
                     .await?,
             );
         }
+        // Design §5.3: the only new read for the page is ONE batched
+        // display-profile query over its visible participant ids.
+        let avatars = self.avatar_map_for_ids(avatar::summary_page_bot_ids(&items)).await?;
+        avatar::apply_group_avatars(&mut items, &avatars);
         Ok(Page {
             items,
             total,
@@ -171,8 +210,13 @@ impl GroupService for GroupServiceImpl {
             .collect::<Vec<_>>();
         let mut items = Vec::with_capacity(page.len());
         for group in page {
-            items.push(self.project_summary(group, "", Membership::None).await?);
+            items.push(self.project_summary(group, "", Membership::None, None).await?);
         }
+        // Design §5.2/§5.3: the public catalog reuses the same summary shape
+        // and the same single batched avatar read over the rows it projects;
+        // the Group's own member rows remain the disclosure boundary.
+        let avatars = self.avatar_map_for_ids(avatar::summary_page_bot_ids(&items)).await?;
+        avatar::apply_group_avatars(&mut items, &avatars);
         Ok(Page {
             items,
             total,
@@ -201,7 +245,7 @@ impl GroupService for GroupServiceImpl {
         command: CreateGroup,
         event_subscriptions: Vec<InlineGroupEventSubscriptionRequest>,
     ) -> Result<CreateGroupOutcome, ApplicationError> {
-        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = self.resolve_principal(&command.caller).await?;
         let Some(provisioner) = self.event_subscription_provisioner.as_ref().cloned() else {
             if event_subscriptions.is_empty() {
                 return self.create_without_eventing(command, principal).await;
@@ -222,6 +266,10 @@ impl GroupService for GroupServiceImpl {
             CreateGroupSpec::Collaboration(_) => GroupKind::Normal,
             CreateGroupSpec::DirectMessage(_) => GroupKind::Dm,
         };
+        match &group {
+            CreateGroupSpec::Collaboration(request)=>{self.normalize_catalog_labels(request.catalog_labels.clone(),GroupKind::Normal,map_create_collaboration(request.collaboration.clone()).0)?;},
+            CreateGroupSpec::DirectMessage(request)=>{self.normalize_catalog_labels(request.catalog_labels.clone(),GroupKind::Dm,GroupStrategy::Chat)?;},
+        }
         let group_id = generated_group_id(group_kind);
         let prepared = provisioner
             .prepare(&caller, &group_id, event_subscriptions)
@@ -396,125 +444,18 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn get(&self, query: GetGroup) -> Result<GroupDetail, ApplicationError> {
-        let group = self
+        let snapshot = self
             .load_group_detail_for_caller(&query.caller, &query.group_id)
             .await?;
-        self.project_detail(group).await
+        self.project_detail_with_labels(snapshot.group, None, snapshot.catalog_labels).await
     }
 
-    async fn update(&self, command: UpdateGroup) -> Result<GroupDetail, ApplicationError> {
-        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
-        let mutation_actor = event_actor_for_principal(&principal);
-        if command.patch.is_empty() {
-            return Err(ApplicationError::invalid(
-                "invalid_request",
-                "at least one mutable field is required",
-            ));
-        }
-        let mut group = self
-            .load_manageable_group(&principal, &command.group_id)
-            .await?;
-        if group.group_kind == GroupKind::Dm && command.patch.opening_message.is_some() {
-            return Err(ApplicationError::invalid(
-                "invalid_opening_message",
-                "opening_message is not supported for DM Groups",
-            ));
-        }
-        if group.group_kind == GroupKind::Dm
-            && (command.patch.delivery_policy.is_some()
-                || command.patch.visibility == Some(GroupVisibility::Public))
-        {
-            return Err(ApplicationError::invalid(
-                "invalid_request",
-                "DM Groups do not expose delivery policy or public visibility",
-            ));
-        }
-        if command.patch.delivery_policy.is_some()
-            && group.group_strategy != GroupStrategy::Chat
-        {
-            return Err(ApplicationError::invalid(
-                "invalid_request",
-                "delivery_policy may be updated only for Chat Groups",
-            ));
-        }
-        if let Some(opening_message) = &command.patch.opening_message {
-            if let Some(opening_message) = opening_message {
-                opening_message
-                    .validate_for(opening_message_scope(group.group_strategy))
-                    .map_err(|error| {
-                    ApplicationError::invalid("invalid_opening_message", error.to_string())
-                })?;
-            }
-        }
-        let patch = command.patch;
-        let mut persistence_patch = GroupMutableFieldsPatch::default();
-        if let Some(name) = patch.name {
-            group.label = Some(name.clone());
-            persistence_patch.label = Some(name);
-        }
-        if let Some(context) = patch.context {
-            group.context = Some(context.clone());
-            persistence_patch.context = Some(context);
-        }
-        if let Some(opening_message) = patch.opening_message {
-            group.opening_message = opening_message.clone();
-            persistence_patch.opening_message = Some(opening_message);
-        }
-        if let Some(visibility) = patch.visibility {
-            if visibility == GroupVisibility::Public {
-                for participant in &group.participants {
-                    if participant.actor_kind != ActorKind::Bot {
-                        continue;
-                    }
-                    let bot = self.load_bot(&participant.bot_uuid).await?;
-                    if bot.capabilities.visibility != "public" {
-                        return Err(ApplicationError::conflict(
-                            "non_public_participant",
-                            "All Bot participants must be public before Group visibility is public",
-                        ));
-                    }
-                }
-            }
-            group.visibility = visibility_name(visibility).to_string();
-            persistence_patch.visibility = Some(group.visibility.clone());
-        }
-        if let Some(delivery_policy) = patch.delivery_policy {
-            let policy = group
-                .routing_policy
-                .get_or_insert_with(RoutingPolicy::default);
-            policy.default_bot_final_delivery =
-                persist_delivery(delivery_policy.bot_final_delivery);
-            persistence_patch.default_bot_final_delivery = Some(policy.default_bot_final_delivery);
-        }
-        if let Some(mode) = patch.human_mention_notify_mode {
-            group.human_mention_notify_mode = mode;
-            persistence_patch.human_mention_notify_mode = Some(mode);
-        }
-        let state_machine_projection = if group.group_strategy == GroupStrategy::StateMachine {
-            Some(
-                self.load_state_machine_configuration(&command.group_id)
-                    .await?,
-            )
-        } else {
-            None
-        };
-        let persisted = self
-            .groups
-            .mutate(GroupMutationCommand {
-                group_id: command.group_id.clone(),
-                actor: mutation_actor,
-                correlation_id: None,
-                trace_id: None,
-                mutation: GroupMutationKind::PatchMutableFields(persistence_patch),
-            })
-            .await
-            .map_err(map_service_error)?;
-        self.project_detail_with_state_machine(persisted, state_machine_projection)
-            .await
+    async fn update(&self,command:UpdateGroup)->Result<GroupDetail,ApplicationError> {
+        self.update_impl(command).await
     }
 
     async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
-        let principal = select_principal(&command.caller, IdentityPolicy::HumanOrOwnedBot)?;
+        let principal = self.resolve_principal(&command.caller).await?;
         let Some(group) = self
             .groups
             .try_get(&command.group_id)
@@ -565,7 +506,22 @@ impl GroupService for GroupServiceImpl {
                     ));
                 }
             };
-            let management_actor_ids = Self::group_management_actor_ids(&group);
+            // Spec §8.3: the management anchors are
+            // snapshot facts, re-read at the
+            // decision — not the display copy.
+            let management_actor_ids = self
+                .groups
+                .read_authorization_snapshot(&group.id)
+                .await
+                .map_err(map_service_error)?
+                .map(|snapshot| {
+                    snapshot
+                        .management_actor_ids()
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             if !management_actor_ids
                 .iter()
                 .any(|actor_id| actor_id == &acting_actor_id)
@@ -680,12 +636,17 @@ impl GroupService for GroupServiceImpl {
                         .try_get(&manage_actor_id)
                         .await
                         .map_err(map_service_error)?;
-                    manage_actor
-                        .filter(|actor| {
-                            actor.actor_kind == ActorKind::Bot
-                                && actor.created_by.as_deref() == Some(human.subject.id.as_str())
-                        })
-                        .map(|_| human_actor_id)
+                    // Row 10 participant-add leg: the Human may add
+                    // members THROUGH a Bot it currently controls
+                    // (live `can_manage`), never through the
+                    // historical `created_by`.
+                    let manages = manage_actor
+                        .as_ref()
+                        .is_some_and(|actor| actor.actor_kind == ActorKind::Bot)
+                        && self
+                            .human_controls_bot(&human.subject.id, &manage_actor_id)
+                            .await?;
+                    manages.then_some(human_actor_id)
                 }
             }
             Principal::Bot(_) => None,
@@ -701,7 +662,11 @@ impl GroupService for GroupServiceImpl {
             })
             .await
             .map_err(map_group_error)?;
-        Ok(participant_view_to_v1(result.member))
+        // Design §5.1: the shared Participant response model carries the
+        // current avatar — one display-profile read for the returned actor.
+        let mut participant = participant_view_to_v1(result.member);
+        self.fill_participant_avatar(&mut participant).await?;
+        Ok(participant)
     }
 
     async fn update_participant(
@@ -815,7 +780,7 @@ impl GroupService for GroupServiceImpl {
             group = update_result?;
             release_result?;
         }
-        group
+        let mut participant = group
             .participants
             .iter()
             .find(|p| p.bot_uuid == command.actor_id)
@@ -825,7 +790,11 @@ impl GroupService for GroupServiceImpl {
                     "participant_not_found",
                     format!("Participant '{}' not found", command.actor_id),
                 )
-            })
+            })?;
+        // Design §5.1: the shared Participant response model carries the
+        // current avatar — one display-profile read for the returned actor.
+        self.fill_participant_avatar(&mut participant).await?;
+        Ok(participant)
     }
 
     async fn delete_participant(
@@ -870,5 +839,47 @@ impl GroupService for GroupServiceImpl {
             }
             Err(error) => Err(map_group_error(error)),
         }
+    }
+}
+
+impl GroupServiceImpl {
+    /// Batched D1 activity keys for one list call (design D4/D5): the
+    /// message-side max per group merged with the max session `created_at`
+    /// per group using `max()`. An unwired history service contributes an
+    /// empty message map, so ids without a session row keep their caller-side
+    /// `created_at` fallback; a lookup error on either side fails the whole
+    /// request (D6) instead of serving a mis-dated or mis-ordered page.
+    async fn group_activity_keys(
+        &self,
+        group_ids: &[String],
+    ) -> Result<HashMap<String, u64>, ApplicationError> {
+        if group_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let mut activity = match self.group_message_history.as_deref() {
+            Some(history) => history
+                .last_activity_by_group_ids(group_ids)
+                .await
+                .map_err(|error| {
+                    ApplicationError::internal(format!(
+                        "Group message activity lookup failed: {error}"
+                    ))
+                })?,
+            None => HashMap::new(),
+        };
+        let session_created_at = self
+            .sessions
+            .max_created_at_by_group_ids(group_ids)
+            .await
+            .map_err(|error| {
+                ApplicationError::internal(format!(
+                    "Group session activity lookup failed: {error}"
+                ))
+            })?;
+        for (group_id, created_at) in session_created_at {
+            let entry = activity.entry(group_id).or_insert(created_at);
+            *entry = (*entry).max(created_at);
+        }
+        Ok(activity)
     }
 }

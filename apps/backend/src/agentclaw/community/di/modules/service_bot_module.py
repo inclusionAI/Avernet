@@ -57,6 +57,9 @@ from agentclaw.community.api.publish_approval import PublishApprovalServiceProto
 from agentclaw.community.api.service_publication_facade import (
     ServicePublicationFacadeProtocol,
 )
+from agentclaw.community.api.service_bot_eval import (
+    ServiceBotEvalServiceProtocol,
+)
 from agentclaw.community.api.service_edit_lock_service import (
     ServiceEditLockServiceProtocol,
 )
@@ -68,6 +71,7 @@ from agentclaw.community.api.collaborator_lock_service import (
 )
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
+from agentclaw.community.api.task_processor_service import TaskProcessorProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -75,6 +79,7 @@ from agentclaw.community.core.bot_management.services.template_service import Te
 from agentclaw.community.core.channel.services.engine_overrides_reader import (
     ChannelEngineOverridesReader,
 )
+from agentclaw.community.api.bot_knowledge_service import BotKnowledgePublicationSelectionProtocol
 from agentclaw.community.core.common_config import CommonConfigService, CommonWhiteListService
 from agentclaw.community.core.config_compose.protocols import (
     ComposeManagedFilesReader,
@@ -97,6 +102,8 @@ from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion 
 )
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
+from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_MASA_AGENT_EVAL
+from agentclaw.community.plugin_api.service_bot_eval import ServiceBotEvalPlugin
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
 from agentclaw.community.api.bot_capability_state_reader import (
@@ -155,6 +162,9 @@ from agentclaw.community.core.service_bot.services.publish_approval_service impo
 from agentclaw.community.core.service_bot.services.service_publication_facade import (
     ServicePublicationFacade,
 )
+from agentclaw.community.core.service_bot.services.service_bot_eval_service import (
+    ServiceBotEvalService,
+)
 from agentclaw.community.core.service_bot.services.service_edit_lock_service import (
     ServiceEditLockService,
 )
@@ -165,7 +175,7 @@ from agentclaw.community.core.workspace.engines import create_engine_sandbox_reg
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
 )
-from agentclaw.community.core.bot_config_manifest.cli_tools.store import CliToolStore
+from agentclaw.community.core.apply_engine.cli_tools.store import CliToolStore
 from agentclaw.community.core.repository.protocols.bot.cli_tool import (
     BotCliToolRepositoryProtocol,
 )
@@ -180,7 +190,7 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.bot_config import StoreRef
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_BAAS, QUALIFIER_GENERAL
+from agentclaw.community.plugin_api.http_client import QUALIFIER_BAAS, QUALIFIER_GENERAL
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.plugin_api.outbound_rules import OutboundRuleProvider
@@ -497,6 +507,7 @@ class ServiceBotModule(Module):
         task_queue_service: TaskQueueService,
         bot_process_registry: BotProcessRegistry,
         common_config_service: CommonConfigService,
+        passport_plugin: PassportPlugin,
     ) -> BotPublishService:
         """Construct ``BotPublishService``.
 
@@ -517,6 +528,7 @@ class ServiceBotModule(Module):
             task_queue_service=task_queue_service,
             bot_process_registry=bot_process_registry,
             common_config_service=common_config_service,
+            passport_plugin=passport_plugin,
             publish_flow_service_provider=lambda: injector.get(PublishFlowService),
         )
 
@@ -754,6 +766,7 @@ class ServiceBotModule(Module):
             flow=flow,
             task_queue_service=task_queue_service,
             approval_service_provider=lambda: injector.get(PublishApprovalService),
+            selection_provider=lambda: injector.get(BotKnowledgePublicationSelectionProtocol),
         )
 
     @singleton
@@ -828,6 +841,30 @@ class ServiceBotModule(Module):
     @singleton
     @provider
     @inject
+    def service_bot_eval_service(
+        self,
+        bot_repo: BotRepository,
+        publish_repo: BotPublishRepositoryProtocol,
+        collaborator_service: CollaboratorServiceProtocol,
+        eval_gate: ServiceBotEvalPlugin,
+        quality_tasks: QualityTaskServiceProtocol,
+        task_processor: TaskProcessorProtocol,
+        masa_eval_http: Annotated[HttpClient, QUALIFIER_MASA_AGENT_EVAL],
+    ) -> ServiceBotEvalService:
+        """Bind evaluation release context and permissions to the selected plugin."""
+        return ServiceBotEvalService(
+            bot_repo=bot_repo,
+            publish_repo=publish_repo,
+            collaborator_service=collaborator_service,
+            plugin=eval_gate,
+            quality_tasks=quality_tasks,
+            task_processor=task_processor,
+            masa_eval_http=masa_eval_http,
+        )
+
+    @singleton
+    @provider
+    @inject
     def service_publication_facade(
         self,
         bot_repo: BotRepository,
@@ -839,6 +876,7 @@ class ServiceBotModule(Module):
         lock_service: CollaboratorLockServiceProtocol,
         bot_service: BotService,
         device_service: DeviceServiceProtocol,
+        eval_gate: ServiceBotEvalPlugin,
     ) -> ServicePublicationFacade:
         """Construct the public publication facade from existing domain services."""
         return ServicePublicationFacade(
@@ -851,7 +889,16 @@ class ServiceBotModule(Module):
             lock_service=lock_service,
             bot_service=bot_service,
             device_service=device_service,
+            eval_gate=eval_gate,
         )
+
+    @singleton
+    @provider
+    @inject
+    def _service_bot_eval_service_protocol(
+        self, service: ServiceBotEvalService
+    ) -> ServiceBotEvalServiceProtocol:
+        return service
 
     @singleton
     @provider

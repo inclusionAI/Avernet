@@ -6,6 +6,7 @@ from .admission_genome_routes import GENOME_ADMISSION
 from .admission_task_routes import (
     TASK_BBS_ADMISSION,
     TASK_PUBLIC_ADMISSION,
+    TASK_TODO_ADMISSION,
 )
 
 _SPACE_SKILL_BASE = "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"
@@ -26,6 +27,29 @@ _SPACE_SKILL_PUBLICATION = f"{_SPACE_SKILL_BASE}/publications"
 #: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
 #: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+    ("PATCH", "/openapi/v1/bots/{bot_id}/caller-instances/{caller_user_id}/token-expiry"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress"): AdmissionMode.OPEN,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish",
+    ): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/simple-cert/precheck"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/simple-cert/submissions"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/eval/submissions/{submission_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/history"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/simple-cert/sync"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/sample-sets"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/tasks"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/tasks/current"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments/current"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("DELETE", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments/current"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/standard-eval/results",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/engine-version"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # Minimal classification requires a verified human, but no Bot grant.
     ("GET", "/openapi/v1/bots/{bot_id}/classification"): AdmissionMode.REFUSED,
@@ -42,6 +66,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/bots/{bot_id}/links/{resource_id}",
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/collaboration/repair",
+    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    (
         "GET",
         "/openapi/v1/bots/{bot_id}/local/start-progress",
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
@@ -52,6 +80,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.OPEN,
     # Tenant-wide lookup returns display fields, never ownership or runtime internals.
     ("POST", "/openapi/v1/bots/metadata/queries"): AdmissionMode.OPEN,
+    # Transitional app-only lookup; its handler enforces the configured app allowlist.
+    ("GET", "/openapi/v1/bots/{bot_id}/access"): AdmissionMode.OPEN,
+    # Non-user Bot overview; the gateway requires no user credential for it.
+    ("GET", "/openapi/v1/bots/{bot_id}/overview"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): AdmissionMode.REFUSED,
     # The item routes resolve the addressed owner from the asset and perform
     # the grant check against that exact Bot/owner pair in their handler.
@@ -125,6 +157,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/{bot_id}/recycle",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/data-init",
@@ -265,6 +298,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/bots/{bot_id}/mcps",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/caller-instance/status"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/caller-context",
@@ -295,6 +329,14 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/cli-operations/{operation_id}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/mcps/{server_code}/config",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "PUT",
+        "/openapi/v1/bots/{bot_id}/mcps/{server_code}/config",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
@@ -527,6 +569,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
+        "/openapi/v1/bots/{bot_id}/engine/default-model",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
         "/openapi/v1/bots/{bot_id}/engine/status",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
@@ -699,7 +745,12 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # New-version bcs publish-to-users: auth baseline only, no grant check; authz deferred.
     # Served at the external contract path the gateway verbatim-forwards here.
     ("POST", "/openapi/v1/collaboration/bots/{bot_uuid}/public"): AdmissionMode.OPEN,
+    ("POST", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/current"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/{risk_check_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/{risk_check_id}/refresh"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     **TASK_PUBLIC_ADMISSION,
+    **TASK_TODO_ADMISSION,
     # Department directory search — a tenant-wide catalogue read, not a user's.
     # ── Source credentials (W3, #1471) — OPEN, application-operated ─────────
     # These are machine operations, and the *edge* is what makes them so:
@@ -716,6 +767,9 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/source-credentials"): AdmissionMode.OPEN,
     ("DELETE", "/openapi/v1/bots/source-credentials/{name}"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/org/dept"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/experts"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/experts/categories"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/experts/{expert_id}"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/skills"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/market/clis"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/market/mcp-servers"): AdmissionMode.OPEN,
@@ -723,6 +777,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/market/skill-center/sync"): AdmissionMode.USER_GATED,
     ("GET", "/openapi/v1/bots/catalog/search"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/catalog/discover"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/catalog/profile/{bot_uuid}"): AdmissionMode.OPEN,
     # ── Space and work-order APIs ───────────────────────────────────────────
     # Read and self-service operations resolve an application-only caller to
     # its delegating user and continue enforcing live Space membership or
@@ -732,6 +787,9 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/spaces/personal/initialize"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/spaces/create"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.USER_GATED,
+    # Space deletion is a human-only write; the route's _REFUSES_APP_ONLY
+    # dependency enforces REFUSED, and the Space service owns the policy.
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}"): AdmissionMode.REFUSED,
     # The caller must arrive on behalf of a real user.  The handler then
     # resolves that user as the actor and SpaceAccessService enforces the
     # concrete space membership; this is deliberately not OPEN or

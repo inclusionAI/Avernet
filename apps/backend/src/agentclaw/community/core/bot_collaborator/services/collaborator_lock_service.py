@@ -269,18 +269,9 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
             bot_id=bot_id, legacy_owner_id=owner_id
         ).entity_id)
 
-        # 释放旧锁（如果存在）
         existing = self._lock_repo.get_by_key(lock_key)
         previous_holder = existing.holder_user_id if existing else None
-        if existing:
-            self._lock_repo.release(lock_key)
-            logger.info(
-                "[steal_lock] Released previous lock: bot_id=%s, owner_id=%s, previous_holder=%s, new_holder=%s",
-                bot_id, owner_id, previous_holder, user_id
-            )
-
-        # 获取新锁
-        lock = self._lock_repo.acquire(lock_key, user_id)
+        lock = self._lock_repo.steal(lock_key, user_id)
         logger.info(
             "[steal_lock] Stolen lock: bot_id=%s, owner_id=%s, user=%s, previous_holder=%s",
             bot_id, owner_id, user_id, previous_holder
@@ -438,15 +429,13 @@ class CollaboratorLockService(CollaboratorLockServiceProtocol):
         session_id: str,
         user_id: str,
     ) -> BotCollabLockRecord:
-        """抢夺会话锁。强制释放旧锁后获取新锁。"""
+        """原子抢夺会话锁，替换当前持锁者。"""
         lock_key = self._make_session_lock_key(bot_id, self._resolve_address(
             bot_id=bot_id, legacy_owner_id=owner_id
         ).entity_id, session_id)
         existing = self._lock_repo.get_by_key(lock_key)
         previous_holder = existing.holder_user_id if existing else None
-        if existing:
-            self._lock_repo.release(lock_key)
-        lock = self._lock_repo.acquire(lock_key, user_id)
+        lock = self._lock_repo.steal(lock_key, user_id)
         logger.info(
             "[steal_session_lock] Stolen: bot_id=%s, session_id=%s, user=%s, previous_holder=%s",
             bot_id, session_id, user_id, previous_holder,

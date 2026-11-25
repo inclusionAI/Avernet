@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -139,7 +140,7 @@ async def test_noop_pipeline_has_no_results() -> None:
 
 
 @pytest.mark.asyncio
-async def test_caller_runs_before_plugins_and_keeps_result_on_plugin_failure() -> None:
+async def test_caller_keeps_result_on_plugin_failure() -> None:
     events: list[str] = []
     caller = MagicMock()
     caller.get_iam_token = AsyncMock(
@@ -157,6 +158,9 @@ async def test_caller_runs_before_plugins_and_keeps_result_on_plugin_failure() -
     }
     orchestrator = TokenExchangeOrchestrator(
         caller_service=caller,
+        auth_plugin=SimpleNamespace(resolve_user_from_request=AsyncMock(
+            return_value=SimpleNamespace(staffId="user-1"),
+        )),
         token_pipeline=TokenPluginPipeline(
             plugins=(plugin,), outbound_appender=_Appender()
         ),
@@ -174,7 +178,45 @@ async def test_caller_runs_before_plugins_and_keeps_result_on_plugin_failure() -
     )
 
     assert result.iam_token == "original"
-    assert events[0] == "caller"
+    assert "caller" in events
+    caller_kwargs = caller.get_iam_token.await_args.kwargs
+    assert "session_key" not in caller_kwargs
+    assert "friend_user_id" not in caller_kwargs
+
+
+@pytest.mark.asyncio
+async def test_friend_identity_context_is_forwarded_to_caller_service() -> None:
+    caller = MagicMock()
+    caller.get_iam_token = AsyncMock(
+        return_value=CallerIamTokenOutcome(iam_token="original")
+    )
+    orchestrator = TokenExchangeOrchestrator(
+        caller_service=caller,
+        auth_plugin=SimpleNamespace(resolve_user_from_request=AsyncMock(
+            return_value=SimpleNamespace(staffId="user-1"),
+        )),
+        token_pipeline=NoopTokenPluginPipeline(),
+        bot_repository=MagicMock(),
+    )
+
+    result = await orchestrator.get_iam_token(
+        iam_token="iam",
+        auth_request=AuthRequestContext(
+            cookies={}, headers={}, query_params={}, base_url="http://test"
+        ),
+        bot_id="bot-1",
+        stage=CallerIdentityStage.ONLINE,
+        publish_id=None,
+        entity_id="owner-1",
+        is_test_exchange=False,
+        session_key="friend-session",
+        friend_user_id="friend-1",
+    )
+
+    assert result.iam_token == "original"
+    caller_kwargs = caller.get_iam_token.await_args.kwargs
+    assert caller_kwargs["session_key"] == "friend-session"
+    assert caller_kwargs["friend_user_id"] == "friend-1"
 
 
 @pytest.mark.asyncio
@@ -187,6 +229,9 @@ async def test_context_build_failure_does_not_change_caller_result() -> None:
     bot_repo.get_by_id_and_entity.side_effect = RuntimeError("db unavailable")
     orchestrator = TokenExchangeOrchestrator(
         caller_service=caller,
+        auth_plugin=SimpleNamespace(resolve_user_from_request=AsyncMock(
+            return_value=SimpleNamespace(staffId="user-1"),
+        )),
         token_pipeline=TokenPluginPipeline(plugins=(), outbound_appender=_Appender()),
         bot_repository=bot_repo,
     )
@@ -218,6 +263,9 @@ async def test_caller_exception_is_rethrown_after_independent_pipeline_run() -> 
     }
     orchestrator = TokenExchangeOrchestrator(
         caller_service=caller,
+        auth_plugin=SimpleNamespace(resolve_user_from_request=AsyncMock(
+            return_value=SimpleNamespace(staffId="user-1"),
+        )),
         token_pipeline=pipeline,
         bot_repository=bot_repo,
     )
@@ -254,6 +302,9 @@ async def test_unexpected_pipeline_exception_keeps_caller_result() -> None:
     }
     orchestrator = TokenExchangeOrchestrator(
         caller_service=caller,
+        auth_plugin=SimpleNamespace(resolve_user_from_request=AsyncMock(
+            return_value=SimpleNamespace(staffId="user-1"),
+        )),
         token_pipeline=pipeline,
         bot_repository=bot_repo,
     )
@@ -298,6 +349,9 @@ async def test_unavailable_context_skips_pipeline(
     bot_repo.get_by_id_and_entity.return_value = bot_record
     orchestrator = TokenExchangeOrchestrator(
         caller_service=caller,
+        auth_plugin=SimpleNamespace(resolve_user_from_request=AsyncMock(
+            return_value=SimpleNamespace(staffId="user-1"),
+        )),
         token_pipeline=pipeline,
         bot_repository=bot_repo,
     )
@@ -347,3 +401,34 @@ async def test_sync_match_does_not_block_event_loop():
         release.set()
     results = await task
     assert results[0].status == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_prepare_inventory_leaves_event_loop_available():
+    import asyncio
+    import threading
+
+    loop = asyncio.get_running_loop()
+    loop_thread = threading.get_ident()
+    entered = asyncio.Event()
+    release = threading.Event()
+    plugin = _Plugin([])
+    prepare = plugin.prepare_exchange_token_request
+
+    def prepare_with_inventory(context):
+        loop.call_soon_threadsafe(entered.set)
+        assert threading.get_ident() != loop_thread
+        release.wait()
+        return prepare(context)
+
+    plugin.prepare_exchange_token_request = prepare_with_inventory
+    task = asyncio.create_task(TokenPluginPipeline(
+        plugins=(plugin,), outbound_appender=_Appender(),
+    ).run(_context()))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=10)
+        assert not task.done()
+    finally:
+        release.set()
+        results = await task
+    assert results[0].status == "succeeded"

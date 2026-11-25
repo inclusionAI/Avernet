@@ -74,6 +74,7 @@ CREATE TABLE `ac_genome_ref` (
   `moved_actor`    varchar(1100) NOT NULL,
   `run_id`         varchar(64)   DEFAULT NULL,
   `reason`         varchar(1024) DEFAULT NULL,
+  `labels`         varchar(256)  NOT NULL DEFAULT '[]' COMMENT 'JSON list of strings; today only "partial", on active or previous',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_bot_ref` (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `name`) GLOBAL
 ) AUTO_INCREMENT_MODE = 'ORDER' DEFAULT CHARSET = utf8mb4
@@ -116,11 +117,12 @@ CREATE TABLE `ac_genome_patch` (
 ) AUTO_INCREMENT_MODE = 'ORDER' DEFAULT CHARSET = utf8mb4
   COMMENT = 'Bot Genome patches, content-addressed';
 
--- One row per promotion: which ref moved to which revision, who asked and
--- why, the compiled document handed to delivery (canonical JSON) and its
--- digest, and the delivery seam's answer. `apply_reference` is the applier's
--- handle (a Manifest apply id once RSI-04 binds direct delivery), the join
--- "which revision does this bot run" makes from the bot's last apply.
+-- One row per promotion: which revision it delivers and which ref it moves
+-- once the delivery ends, who asked and why, and how the delivery went
+-- (pending → applying → applied / applied_partial / apply_failed). The
+-- revision is the record of what was delivered, so the row carries no copy
+-- of it; whether the bot still holds `active` is observed by reading the
+-- bot, never joined from here.
 CREATE TABLE `ac_genome_promotion` (
   `id`               bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'Primary key',
   `env`              varchar(20)   NOT NULL COMMENT '环境标识: prod/pre/dev',
@@ -131,23 +133,20 @@ CREATE TABLE `ac_genome_promotion` (
   `ref`              varchar(16)   NOT NULL COMMENT 'active/canary',
   `revision_id`      char(71)      NOT NULL,
   `from_revision_id` char(71)      DEFAULT NULL COMMENT 'where the ref pointed before',
-  `document_digest`  char(71)      NOT NULL COMMENT 'sha256 of JCS(compiled document)',
-  `document_json`    mediumtext    NOT NULL COMMENT 'the compiled document handed to delivery, canonical JSON',
   `going_back`       tinyint(1)    NOT NULL COMMENT 'the target had been promoted before',
   `actor_kind`       varchar(16)   NOT NULL COMMENT 'user/strategy_run',
   `actor_id`         varchar(1100) NOT NULL,
   `actor_run_id`     varchar(64)   DEFAULT NULL COMMENT 'the evolution run, for strategy_run',
   `reason`           varchar(1024) NOT NULL,
-  `status`           varchar(16)   NOT NULL COMMENT 'applying/applied/apply_failed',
-  `apply_kind`       varchar(16)   NOT NULL COMMENT 'the applier that took it (pending/direct/…)',
-  `apply_reference`  varchar(64)   DEFAULT NULL COMMENT 'the applier''s handle (an apply id)',
-  `apply_detail`     varchar(1024) NOT NULL DEFAULT '' COMMENT 'the applier''s last word',
+  `status`           varchar(16)   NOT NULL COMMENT 'pending/applying/applied/applied_partial/apply_failed',
+  `apply_id`         varchar(32)   DEFAULT NULL COMMENT 'the apply run delivering it, once started',
+  `apply_detail`     varchar(1024) NOT NULL DEFAULT '' COMMENT 'one line on how the delivery went',
   `created_at`       datetime      NOT NULL,
+  `settled_at`       datetime      DEFAULT NULL COMMENT 'when the delivery ended and the promotion took its final status',
   `gmt_create`       timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified`     timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_genome_promotion` (`avernet_tenant`, `promotion_id`) GLOBAL,
-  KEY `idx_genome_promotion_bot_apply`   (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `apply_reference`) GLOBAL,
   KEY `idx_genome_promotion_bot_created` (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `created_at`) GLOBAL
 ) AUTO_INCREMENT_MODE = 'ORDER' DEFAULT CHARSET = utf8mb4
-  COMMENT = 'Bot Genome promotions, with the compiled document handed to delivery';
+  COMMENT = 'Bot Genome promotions: the delivery a promotion started and the refs it moved';

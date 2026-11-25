@@ -19,14 +19,49 @@ TASK_PUBLIC_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/collaboration/tasks/list"): NoCheck(
         "a task, not a bot; filters records by the named user"
     ),
+    ("GET", "/openapi/v1/collaboration/tasks/by_session"): NoCheck(
+        "a task, not a bot; read-only relay task, node, and owner by chat session id"
+    ),
     ("GET", "/openapi/v1/collaboration/tasks/bbs/list"): NoCheck(
         "a task, not a bot; paged read of BBS relay tasks"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bot-grants/reconcile",
+    ): NoCheck(
+        "Human self-service compensation; the verified principal fixes the owner and the service loads only that owner's live Bots"
     ),
     ("POST", "/openapi/v1/collaboration/tasks/grant"): NoCheck(
         "a stateless relay to secbaas; the human Cookie/Referer authorizes the grant, not a bot permission"
     ),
     ("POST", "/openapi/v1/collaboration/tasks/revoke"): NoCheck(
         "a stateless relay to secbaas; the human Cookie/Referer authorizes the revoke, not a bot permission"
+    ),
+    # task_config match: a typed config probe, not a bot resource — any
+    # authenticated principal may read (returns only a bool, never the stored
+    # value). Mirrors execute/dashboard/list NoCheck; admission is OPEN.
+    ("POST", "/openapi/v1/collaboration/tasks/config/match"): NoCheck(
+        "a config match probe, not a bot; read-only, returns only matched: bool"
+    ),
+    # ── Context collab public surface (create / append event / status; spec §6.1
+    # ── openapi twin). A collab context is not a bot, so the bot-level `Check`
+    # does not apply; the operator is the L2 accountability subject the gateway
+    # already authenticated (delivery binds it and refuses a forged actor_ref),
+    # and P1 attaches no space-level Check.
+    ("POST", "/openapi/v1/collaboration/task/context_collab"): NoCheck(
+        "a collab context, not a bot; the submitter is the gateway-authenticated L2 principal, no space-level Check in P1"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/task/context_collab/{collab_context_id}/events",
+    ): NoCheck(
+        "a collab event, not a bot; the actor resolves to the gateway-authenticated principal and delivery refuses a forged actor_ref"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/task/context_collab/{collab_context_id}",
+    ): NoCheck(
+        "a collab context read, not a bot; visibility filtering happens in the service projection"
     ),
 }
 
@@ -42,11 +77,27 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"): NoCheck(
         "tenant-wide BBS reply read; no addressed bot"
     ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/location",
+    ): NoCheck("tenant-wide BBS reply location read; no addressed bot"),
     ("POST", "/openapi/v1/collaboration/tasks/bbs/topics"): NoCheck(
         "public BBS write; author declared in the body, no addressed bot"
     ),
     ("POST", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts"): NoCheck(
         "public BBS reply write; author declared in the body, no addressed bot"
+    ),
+    ("PUT", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}"): NoCheck(
+        "public BBS Topic edit; service verifies the declared author and OPEN status"
+    ),
+    ("DELETE", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}"): NoCheck(
+        "public BBS Topic delete; service verifies the declared author and refuses LOCKED Topics"
+    ),
+    (
+        "PUT",
+        "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/posts/{post_id}/helpful",
+    ): NoCheck(
+        "public HELP reply marker; author declared in the body, handler verifies the stored Topic author"
     ),
     ("POST", "/openapi/v1/collaboration/tasks/bbs/topics/{topic_id}/close"): NoCheck(
         "public BBS Topic close; author declared in the body, handler verifies the stored author"
@@ -62,7 +113,7 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "DELETE",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription",
     ): NoCheck(
-        "public BBS browse-subscription cancel; bot_id path-only, no addressed-owner grant on the wire"
+        "public BBS browse-subscription cancel; bot_id path plus explicit owner_user_id query, no addressed-owner grant on the wire"
     ),
     ("GET", "/openapi/v1/collaboration/tasks/bbs/browse-subscriptions"): NoCheck(
         "per-user BBS Browse-Loop subscription list scoped to the caller own work-no; no addressed bot"
@@ -71,27 +122,62 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "GET",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription",
     ): NoCheck(
-        "public per-Bot subscription read; owner is not assumed from the principal, no addressed owner on the wire"
+        "public per-owner Bot subscription read; owner declared as an explicit owner_user_id query, no addressed-owner grant on the wire"
     ),
     ("GET", "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/feed"): NoCheck(
         "public per-Bot Browse-Loop feed read; no addressed owner on the wire"
     ),
     (
         "POST",
+        "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/skills/install",
+    ): NoCheck(
+        "public BBS skill-install trigger; owner declared as an explicit owner_user_id query, no addressed-owner grant on the wire"
+    ),
+    (
+        "POST",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-framework",
-    ): NoCheck("public A-mode one-shot Browse trigger; no addressed owner on the wire"),
+    ): NoCheck(
+        "public A-mode one-shot Browse trigger; owner declared as an explicit owner_user_id query, no addressed-owner grant on the wire"
+    ),
     (
         "POST",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/trigger-self",
-    ): NoCheck("public B-mode one-shot Browse trigger; no addressed owner on the wire"),
+    ): NoCheck(
+        "public B-mode one-shot Browse trigger; owner declared as an explicit owner_user_id query, no addressed-owner grant on the wire"
+    ),
     (
         "POST",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-register",
-    ): NoCheck("public B-mode cron-register trigger; no addressed owner on the wire"),
+    ): NoCheck(
+        "public B-mode cron-register trigger; owner declared as an explicit owner_user_id query, no addressed-owner grant on the wire"
+    ),
     (
         "POST",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-loop/cron-remove",
-    ): NoCheck("public B-mode cron-remove trigger; no addressed owner on the wire"),
+    ): NoCheck(
+        "public B-mode cron-remove trigger; owner declared as an explicit owner_user_id query, no addressed-owner grant on the wire"
+    ),
+    ("POST", "/openapi/v1/collaboration/tasks/bbs/interactions"): NoCheck(
+        "public BBS interaction write; actor declared in the body, no addressed bot"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/interactions/summary",
+    ): NoCheck(
+        "tenant-wide BBS summary read; explicitly requested dimensions, no addressed bot"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bbs/interactions/summary/batch",
+    ): NoCheck(
+        "tenant-wide BBS summary batch read; requested dimensions, no addressed bot"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bbs/personal-center/activities",
+    ): NoCheck(
+        "the caller's own BBS activity projection; handler binds owner_user_id to the verified human principal"
+    ),
     ("POST", "/openapi/v1/collaboration/tasks/bbs/browse-reports"): NoCheck(
         "public BBS browse-run outcome report; bot_id declared in the body, no addressed bot"
     ),
@@ -104,5 +190,130 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("GET", "/openapi/v1/collaboration/tasks/trajectory"): NoCheck(
         "a task, not a bot; read-only task trajectory by task_id (do_analysis=true triggers a deployment-configured analysis bot, not a caller-chosen bot)"
+    ),
+}
+
+
+#: Human self-service Todo workbench; Space and Bot scope are service-enforced.
+TASK_TODO_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-template-capabilities",
+    ): NoCheck(
+        "read-only platform Todo template capabilities; no addressed bot"
+    ),
+    ("POST", "/openapi/v1/collaboration/tasks/todo-templates"): NoCheck(
+        "Todo template creation is Space Admin-enforced in the service; no addressed bot"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/todo-templates"): NoCheck(
+        "Todo template listing is Space Member-enforced in the service; no addressed bot"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}",
+    ): NoCheck(
+        "Todo template reads are Space Member-enforced in the service; no addressed bot"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}",
+    ): NoCheck(
+        "Todo template version reads are Space Member-enforced in the service; no addressed bot"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions",
+    ): NoCheck(
+        "Todo template draft creation is Space Admin-enforced in the service; no addressed bot"
+    ),
+    (
+        "PUT",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}",
+    ): NoCheck(
+        "Todo template draft updates are Space Admin-enforced in the service; no addressed bot"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}/validate",
+    ): NoCheck(
+        "Todo template validation is Space Member-enforced in the service; no addressed bot"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/versions/{version_id}/publish",
+    ): NoCheck(
+        "Todo template publication is Space Admin-enforced in the service; no addressed bot"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/archive",
+    ): NoCheck(
+        "Todo template archival is Space Admin-enforced in the service; no addressed bot"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todo-templates/{template_id}/activate",
+    ): NoCheck(
+        "Todo template activation is Space Admin-enforced in the service; no addressed bot"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/todos"): NoCheck(
+        "Todo list is Space-scoped and service-enforced; no addressed bot"
+    ),
+    ("POST", "/openapi/v1/collaboration/tasks/todos"): NoCheck(
+        "Todo creation validates Space membership and Bot eligibility in the service"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/todos/sources/dima/projects"): NoCheck(
+        "Human self-service source read is bound to the verified principal"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/{project_id}/work-items",
+    ): NoCheck("Human self-service Dima project read; no addressed bot"),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/{project_id}/work-items/{work_item_id}",
+    ): NoCheck("Human self-service Dima item read; no addressed bot"),
+    ("POST", "/openapi/v1/collaboration/tasks/todos/from-template"): NoCheck(
+        "Templated Todo creation validates Space membership and template bindings in the service"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}"): NoCheck(
+        "Todo detail derives the human actor and verifies the Todo Space in the service"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/stages"): NoCheck(
+        "stage timeline inherits the Todo Space membership check"
+    ),
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/run"): NoCheck(
+        "Todo start inherits Todo Space membership; B collaboration state is service-enforced"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/events"): NoCheck(
+        "event projection inherits the Todo Space membership check"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions"): NoCheck(
+        "interaction history inherits the Todo Space membership check"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts"): NoCheck(
+        "artifact list inherits the Todo Space membership check"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts/{artifact_id}/content",
+    ): NoCheck("artifact content inherits the Todo Space membership check"),
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions"): NoCheck(
+        "human interaction inherits Todo Space and pending-acceptance checks"
+    ),
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance"): NoCheck(
+        "human acceptance inherits Todo Space and pending-acceptance checks"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/stages/{stage_instance_id}/complete",
+    ): NoCheck(
+        "Human stage completion is authenticated and stage-owner/admin enforced by the Todo service"
+    ),
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/resume"): NoCheck(
+        "Todo resume is authenticated and creator/admin enforced by the Todo service"
+    ),
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/cancel"): NoCheck(
+        "Todo cancellation is authenticated and creator/admin enforced by the Todo service"
     ),
 }

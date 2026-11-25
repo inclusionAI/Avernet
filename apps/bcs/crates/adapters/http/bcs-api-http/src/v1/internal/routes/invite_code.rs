@@ -21,7 +21,7 @@ fn service<'a>(state: &'a ApiState, request_id: &'a RequestId) -> Result<&'a dyn
 
 async fn init_invite_codes(
     State(state): State<ApiState>,
-    Extension(_caller): Extension<AuthenticatedCaller>,
+    Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
     Json(body): Json<InitInviteCodesRequest>,
 ) -> Result<Response, ErrorResponse> {
@@ -29,7 +29,7 @@ async fn init_invite_codes(
         return Err(invalid_request(&request_id, "count must be greater than 0"));
     }
     let result = service(&state, &request_id)?
-        .init_invite_codes(InitInviteCodes { count: body.count })
+        .init_invite_codes(InitInviteCodes { caller, count: body.count })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((

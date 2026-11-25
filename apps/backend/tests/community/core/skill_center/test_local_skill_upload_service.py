@@ -11,6 +11,8 @@ import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
+from unittest.mock import Mock
+
 import pytest
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillEditBusyError,
@@ -19,6 +21,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillLayoutRollbackError,
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
+    LocalSkillRuntimeUnavailableError,
     LocalSkillStorageError,
 )
 from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
@@ -423,6 +426,9 @@ class _Guard:
         await self._lock.acquire()
         return object()
 
+    def refresh(self, _lease):
+        assert self._lock.locked()
+
     def release(self, _lease):
         self._lock.release()
         return True
@@ -667,7 +673,7 @@ class _DeviceResolver:
         self.provider = provider
 
     def resolve_for_bot(self, _bot_id, _owner_id):
-        return SimpleNamespace(provider=self.provider)
+        return SimpleNamespace(provider=self.provider, binding_id=1, device_id=None)
 
 
 class _LegacyPackageRuntime:
@@ -734,6 +740,7 @@ def _service(
     package_runtime=None,
     security_observer=None,
     security_observation_enabled=True,
+    local_skill_parallelism=1,
 ):
     return LocalSkillUploadService(
         repo or _Repo(),
@@ -747,6 +754,7 @@ def _service(
         package_runtime or _LegacyPackageRuntime(),
         lambda: security_observer or _CapturedSecurityObserver(),
         security_observation_enabled,
+        local_skill_parallelism=local_skill_parallelism,
     )
 
 
@@ -2087,14 +2095,11 @@ async def test_restore_replacement_requires_backup_after_canonical_publish():
         await service._restore_replacement(
             skill=skill,
             old_metadata={},
-            owner_id="owner",
-            bot_id="bot",
             staged=_Storage(filesystem, "/private/staged"),
             canonical=_Storage(filesystem, "/private/canonical"),
             backup=None,
             canonical_published=True,
             switched=False,
-            runtime_sync_attempted=False,
         )
 
 
@@ -2666,3 +2671,59 @@ async def test_a_local_skill_replacement_never_touches_the_mcp_half():
     )
     assert scope.claimed_mcp == frozenset()
     assert scope.released_mcp == frozenset()
+
+
+@pytest.mark.asyncio
+async def test_directory_upload_preserves_path_rejection_reason():
+    service = _service(_Filesystem())
+    with pytest.raises(LocalSkillInvalidPackageError) as caught:
+        await service.upload_local_skill_files(
+            bot_id="bot", owner_id="owner", actor_id="owner",
+            files=[("../SKILL.md", b"invalid")],
+        )
+    assert caught.value.reason == "unsafe_file_path"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("as_directory", [True, False])
+async def test_upload_preserves_size_limit_reason(monkeypatch, as_directory):
+    from agentclaw.community.core.skill_center import skill_package as package_module
+    from agentclaw.community.core.skill_center.errors import LocalSkillTooLargeError
+
+    service = _service(_Filesystem())
+    if as_directory:
+        monkeypatch.setattr(package_module, "MAX_FILE_BYTES", 2)
+        call = service.upload_local_skill_files(
+            bot_id="bot", owner_id="owner", actor_id="owner",
+            files=[("SKILL.md", b"large")],
+        )
+        expected = "file_too_large"
+    else:
+        monkeypatch.setattr(package_module, "MAX_COMPRESSED_BYTES", 2)
+        call = service.upload_local_skill(
+            bot_id="bot", owner_id="owner", actor_id="owner",
+            package=_zip({"SKILL.md": _skill_md()}),
+        )
+        expected = "compressed_too_large"
+    with pytest.raises(LocalSkillTooLargeError) as caught:
+        await call
+    assert caught.value.reason == expected
+
+
+@pytest.mark.asyncio
+async def test_manual_upload_rejects_a_different_binding_at_dispatch():
+    from agentclaw.community.core.devices.services.device_context import verify_runtime_binding
+
+    class ReboundRuntime(_LegacyPackageRuntime):
+        async def apply(self, **kwargs):
+            verify_runtime_binding(
+                bot_id=kwargs["bot_id"], user_id=kwargs["owner_id"],
+                binding_id=2, device_id="next-device",
+            )
+            pytest.fail("Manual upload reached a different Runtime")
+
+    service = _service(_Filesystem(), package_runtime=ReboundRuntime())
+    with pytest.raises(LocalSkillRuntimeUnavailableError):
+        await service.upload_local_skill(
+            bot_id="bot", owner_id="owner", actor_id="owner", package=_zip({"SKILL.md": _skill_md()}),
+        )

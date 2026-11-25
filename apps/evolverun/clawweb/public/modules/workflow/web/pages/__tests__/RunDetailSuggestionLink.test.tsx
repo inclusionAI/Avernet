@@ -75,6 +75,7 @@ vi.mock('../../api/hooks', () => ({
 }))
 
 vi.mock('../../components/RunSummaryHeader', () => ({ default: () => <div>运行摘要</div> }))
+vi.mock('../../components/SubworkflowLinks', () => ({ default: () => null, UnattributedSubworkflowLinks: () => null, SubworkflowProvider: ({ children }: { children: React.ReactNode }) => children }))
 vi.mock('../../components/NodeExecutionList', () => ({ default: () => <div>节点列表</div> }))
 vi.mock('../../components/RunDagView', () => ({ default: () => <div>DAG</div> }))
 vi.mock('../../components/ErrorState', () => ({ default: ({ message }: { message: string }) => <div>{message}</div> }))

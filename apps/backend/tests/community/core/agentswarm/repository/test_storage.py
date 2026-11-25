@@ -106,10 +106,11 @@ def _now_ms():
     return int(time.time() * 1000)
 
 
-def _mk_run(run_id=None, tenant=TENANT_A) -> dm.Run:
+def _mk_run(run_id=None, tenant=TENANT_A, owner_id: str = "") -> dm.Run:
     return dm.Run(
         run_id=dm.RunId(run_id or uuid.uuid4().hex),
         tenant=tenant,
+        owner_id=owner_id,
         goal="test goal",
         agent_catalog=(
             dm.AgentSpec(name="r1", role="research"),
@@ -273,6 +274,53 @@ class TestRunRepository:
         fetched = run_repo.get_by_idempotency("idem-env-1", TENANT_A)
         assert fetched is not None and fetched.run_id == run.run_id
 
+    def test_get_scopes_to_current_env(self, run_repo, monkeypatch):
+        # env keeps the lookup from reading another deployment's run.
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        run = _mk_run()
+        run_repo.create(run)
+        assert run_repo.get(run.run_id, TENANT_A) is not None
+
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        assert run_repo.get(run.run_id, TENANT_A) is None
+
+    def test_list_page_scopes_to_current_env(self, run_repo, monkeypatch):
+        # Preview listed production's runs before env scoping.
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        run_repo.create(_mk_run())
+
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        page = run_repo.list_page(TENANT_A)
+        assert page.total == 0 and page.items == ()
+
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        page = run_repo.list_page(TENANT_A)
+        assert page.total == 1
+
+    def test_active_counts_scope_to_current_env(self, run_repo, monkeypatch):
+        # Admission is per deployment.
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        run = _mk_run()
+        run_repo.create(run)
+        assert run_repo.count_active_runs(TENANT_A) == 1
+        assert run_repo.count_active_runs_global() == 1
+
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        assert run_repo.count_active_runs(TENANT_A) == 0
+        assert run_repo.count_active_runs_global() == 0
+
+    def test_purge_run_scopes_to_current_env(self, run_repo, monkeypatch):
+        # Cleanup in one deployment must never delete another's row.
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        run = _mk_run()
+        run_repo.create(run)
+
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        assert run_repo.purge_run(run.run_id, TENANT_A) == 0
+
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        assert run_repo.purge_run(run.run_id, TENANT_A) == 1
+
     def test_idempotency_double_create_converges_to_survivor(self, run_repo):
         # uk_run_idem is the duplicate-submit join invariant; a racing
         # submit that loses the double-INSERT inside the
@@ -387,6 +435,27 @@ class TestRunRepository:
         active_page = run_repo.list_page(TENANT_A, status=dm.RunStatus.RUNNING, page=1, page_size=10)
         assert active_page.total == 3
         assert all(r.status == dm.RunStatus.RUNNING for r in active_page.items)
+
+    def test_list_page_scopes_to_one_owner(self, run_repo):
+        # A tenant is a group: listing by tenant alone would show one member
+        # another member's prompts.
+        run_repo.create(_mk_run(owner_id="staff-1"))
+        run_repo.create(_mk_run(owner_id="staff-1"))
+        run_repo.create(_mk_run(owner_id="staff-2"))
+
+        mine = run_repo.list_page(TENANT_A, page=1, page_size=10, owner_id="staff-1")
+        assert mine.total == 2
+        assert all(r.owner_id == "staff-1" for r in mine.items)
+
+        theirs = run_repo.list_page(TENANT_A, page=1, page_size=10, owner_id="staff-2")
+        assert theirs.total == 1
+
+    def test_owner_filter_is_optional_for_internal_callers(self, run_repo):
+        # The reaper and other service-plane readers still need a tenant-wide
+        # view, so an omitted owner must not narrow anything.
+        run_repo.create(_mk_run(owner_id="staff-1"))
+        run_repo.create(_mk_run(owner_id="staff-2"))
+        assert run_repo.list_page(TENANT_A, page=1, page_size=10).total == 2
 
     def test_list_page_tenant_isolated(self, run_repo):
         run_repo.create(_mk_run(tenant=TENANT_A))

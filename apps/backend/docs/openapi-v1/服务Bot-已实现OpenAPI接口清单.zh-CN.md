@@ -47,7 +47,9 @@
 
 - 团队空间成员可见性依赖业务空间生产 Adapter，未接入时保持拒绝优先。
 - Flow、Channel、Skill Set 和文件使用统一 Bot 能力，不在服务生命周期模块重复建设。
-- 容器实例、评测和独立协作者 CRUD 不属于本期已实现范围。
+- 容器实例和独立协作者 CRUD 不属于本期已实现范围。服务 Bot 统一评测已由独立的
+  bot-first 接口 `/openapi/v1/bots/{bot_id}/eval/...` 提供（不在本文生命周期清单内），
+  语义与权限见 [service_bot README](../../src/agentclaw/community/core/service_bot/README.md)。
 
 ## 兼容性
 

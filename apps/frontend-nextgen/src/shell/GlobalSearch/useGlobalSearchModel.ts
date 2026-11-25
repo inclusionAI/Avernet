@@ -1,10 +1,11 @@
 // 全局搜索数据模型（设计稿 artboard-016「Dialog」搜索弹窗的三路数据装配）。
 // 数据源全部复用既有 service，不新增后端接口：
-// - Bot：botSessionService.listOwnedBotsWithMeta（我的 Bot，1 请求，客户端过滤）；
+// - Bot：botSessionService.listOwnedBotsWithMeta（我的 Bot，1 请求，客户端过滤；不可用 Bot 与对话页同口径剔除）；
 // - 对话：逐 Bot listSessions（每 Bot 1 请求、page_size 50，弹窗打开后并行拉取一次并缓存）；
 // - 协作群：groupService.loadGroups（服务端 q 模糊匹配，输入防抖触发）。
 // 空关键词 = 「最近」视角（原样返回最近 50 项），对齐设计稿无输入时的 Suggestions 列表。
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
+import { resolveBotUnavailable } from '@/domain/conversation/botAvailability';
 import type { IdentityView } from '@/domain/collaboration';
 import type { GroupView } from '@/domain/collaboration';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
@@ -83,7 +84,10 @@ export function useGlobalSearchModel(open: boolean) {
     setBotsLoading(true);
     void botSessionService.listOwnedBotsWithMeta(userId).then((res) => {
       if (cancelled) return;
-      setBots(res.ok ? res.data.bots : []);
+      // 与对话页目录同一口径过滤下线/回收等不可用 Bot(dima 2026111800120735610):
+      // 搜索结果不可出现进了即报「bot 不存在」的行,且不对其发起逐 Bot 会话请求。
+      const enterable = res.ok ? res.data.bots.filter((b) => !resolveBotUnavailable(b, 'managed').unavailable) : [];
+      setBots(enterable);
       setBotsLoading(false);
     });
     return () => {

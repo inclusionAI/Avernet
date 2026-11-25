@@ -397,3 +397,31 @@ The implementation is delivered in two PRs:
    compatibility validation.
 
 No tcauthmng change and no runtime feature flag are required.
+
+## 16. Next-generation Bot management recovery UI
+
+The frontend consumes the inventory correction in Avernet PR #3282:
+personal managed-cloud `RECYCLED` Bots appear as dormant even without
+`ext.dormant`, and only the Owner receives `activate`.
+
+- Render `RECYCLED` as 已回收 and `REACTIVATING` as 激活中. Raw recovery
+  states take precedence over stale personal-cloud display states.
+- Offer 激活 Bot in the management menu only for supported dormant personal
+  cloud Bots with the backend action grant. Do not infer authority from an
+  edit grant, collaboration role or edit lock.
+- Confirm activation, then call the existing public activate operation with
+  explicit logged-in `user_id` and addressed `owner_id`.
+- Accept both HTTP 202 REACTIVATING and idempotent HTTP 200 ACTIVE responses.
+  Immediately reflect the returned state, suppress duplicate submissions,
+  and refresh inventory. While REACTIVATING appears in the visible list,
+  refresh inventory every five seconds rather than every thirty seconds.
+  Fresh inventory remains authoritative, including rollback to RECYCLED.
+- Disable editor/chat entry during activation. A rejected request preserves
+  the recovery entry for retry; it must not claim activation succeeded.
+- Do not add a manual recycle button: the legacy user-facing list provides
+  recovery, while dormant resource reclamation remains platform-governed.
+  Service, desktop and Teclaw activation behavior is not expanded.
+
+This is a frontend migration of the existing contract, not a backend API,
+permission, persistence or deployment change. Controller HTTP tests and
+frontend state/permission/confirmation regression tests cover this boundary.

@@ -47,7 +47,12 @@ pub(crate) async fn publish(
         // GenericNotification uses the existing history and visibility policy.
         let mut notices = Vec::new();
         if !offline_names.is_empty() { notices.push(format!("Bot {} 已离线", offline_names.join("、"))); }
-        if delivery_failed { notices.push(DELIVERY_FAILED_NOTICE.to_string()); }
+        if delivery_failed {
+            let message = if row.semantic_projection_json.get("caller_execution").is_some_and(|v| !v.is_null()) {
+                "调用者模式消息投递失败，身份凭证可能已过期，请重新发送消息。"
+            } else { DELIVERY_FAILED_NOTICE };
+            notices.push(message.to_string());
+        }
         for message in notices {
             system_message.notify(&group.id, SystemMessageEvent::GenericNotification {
                 group_id: group.id.clone(), message,
@@ -73,6 +78,10 @@ pub(crate) async fn publish(
         delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
         run_fallback: None, exclude_conn_id: None, visibility_domain,
         audience: (visibility_domain != MessageVisibilityDomain::Chat).then_some(MessageAudience::Public),
+        // A content-free delivery-failure notice is an independent
+        // resource event: authorized per event against current facts.
+        operation_id: None, terminal: false,
+        run_id: None,
     }).await?;
     Ok(())
 }

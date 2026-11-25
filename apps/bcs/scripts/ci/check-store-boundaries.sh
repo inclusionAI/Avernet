@@ -15,7 +15,7 @@ targets=(
   "crates/services/bcs-group/src"
   "crates/services/bcs-friend/src"
   "crates/services/bcs-relation/src"
-  "crates/services/bcs-proposal/src"
+  "crates/services/bcs-dist-connector/src"
 )
 
 # Prevalidate: every expected target tree must exist. A missing tree is a
@@ -30,7 +30,7 @@ done
 # rg exit codes: 0 = match found, 1 = no match, >1 = scan error.
 # Run from BCS_ROOT so the relative target paths never depend on the caller's cwd.
 set +e
-rg_output=$(cd "$BCS_ROOT" && rg -n 'DbPlugin|CachePlugin' "${targets[@]}" 2>&1)
+rg_output=$(cd "$BCS_ROOT" && rg -n 'DbPlugin|CachePlugin|StorePlugin|bcs_store_api' "${targets[@]}" 2>&1)
 rg_rc=$?
 set -e
 
@@ -42,9 +42,9 @@ fi
 
 if [[ $rg_rc -eq 0 ]]; then
   echo "$rg_output"
-  echo "FAIL [R10]: service crates import or name DbPlugin/CachePlugin directly"
+  echo "FAIL [R10]: service crates import or name DB/cache/runtime-store plugins directly"
   echo "          Move storage plugin usage into the matching crates/services/*-store crate."
   exit 1
 fi
 
-echo "PASS [R10]: service crates do not reference DbPlugin/CachePlugin directly"
+echo "PASS [R10]: service crates do not reference DB/cache/runtime-store plugins directly"

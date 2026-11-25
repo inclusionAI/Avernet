@@ -15,7 +15,8 @@ from typing import Any
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
     Context, Goal, RuntimeInfo, Status, TaskCallbackData, TaskGraphPatch, TaskNode,
-    TaskNodePatch, TaskSpec, task_spec_instruction, task_spec_title,
+    TaskNodePatch, TaskRuntimeProfile, TaskSpec, task_spec_instruction,
+    task_spec_title,
 )
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
     format_task_node_business_instruction,
@@ -624,7 +625,21 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                  skill_name: str = _BBS_SKILL_NAME,
                  on_bbs_report=None, group_executor=None,
                  target_node_id: str | None = None, task_context_service=None) -> None:
-    """Run the BBS flow and record uncaught notify errors in task trajectory."""
+    """Run the BBS flow only when the frozen task profile allows BBS."""
+    allowed_run_modes = TaskRuntimeProfile.run_modes_from_graph(execution_graph)
+    if "bbs" not in allowed_run_modes:
+        _emit_bbs_trajectory(
+            task_context_service,
+            execution_graph,
+            target_node_id,
+            "bbs_disabled",
+            details={"allowed_run_modes": list(allowed_run_modes)},
+            error_type="policy_error",
+            error_msg="bbs run mode is not allowed by frozen runtime profile",
+        )
+        raise TaskStateError(
+            f"bbs run mode is not allowed: task={execution_graph.task_id}"
+        )
     try:
         await _notify_impl(
             execution_graph=execution_graph,
@@ -874,6 +889,9 @@ def _relay_task_inputs(
             for acceptance in node.task_spec.goal.acceptances
         ],
         "upstream_outputs": upstream,
+        "allowed_run_modes": list(
+            TaskRuntimeProfile.run_modes_from_graph(node.node_run_graph)
+        ),
         "relay_blackboard": {
             "snapshot": snapshot,
             "bbs_claim_title": title,
@@ -904,6 +922,7 @@ def _relay_task_msg(
         relay_execution=True,
         relay_blackboard=inputs["relay_blackboard"],
         relay_token=node.run_info.extend_props.get("relay_token"),
+        allowed_run_modes=inputs.get("allowed_run_modes"),
     )
 
 

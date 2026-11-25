@@ -1,25 +1,27 @@
-/** Consumer contract only. This mock represents the OTHER developer's future parser.
- * Real-parser rejection in this checkout is covered separately; this is NOT live integration.
+/** Producer handoff contract with a mocked parser; not integration evidence.
+ * Latest real-parser normalization and durable task creation are covered in
+ * session-recovery-trigger.test.ts and routes/__tests__/monitoring.test.ts.
  */
 import { beforeEach, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DIAGNOSIS_V3_VERSION } from "../contracts.js";
+import { DIAGNOSIS_V4_VERSION } from "../contracts.js";
 import { parseDiagnosis } from "../validation.js";
 import { createMonitoringRecoveryTrigger } from "../session-recovery-trigger.js";
 import { SessionRecoveryError } from "../../repair/session-recovery/errors.js";
 import { runtimeIdentity } from "./runtime-identity-fixture.js";
 
 const boundary = vi.hoisted(() => ({ parse: vi.fn((input: unknown) => input) }));
-vi.mock("../../repair/session-recovery/validation.js", () => ({ parseRequest: boundary.parse }));
+vi.mock("../../repair/session-recovery/validation.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../../repair/session-recovery/validation.js")>(),
+  parseRequest: boundary.parse,
+}));
 const original = JSON.parse(readFileSync(join(process.cwd(), "server/fixtures/monitoring/alert.json"), "utf8"));
-const event = parseDiagnosis({ ...original, botId: "default", engine: "OC", env: "prod", handlerName: "NOT_COMPLETED",
-  schemaVersion: DIAGNOSIS_V3_VERSION, runtimeIdentity }, original.eventId);
+const event = parseDiagnosis({ ...original, botId: "default", engine: "OC", env: "prod", handlerName: "NOT_COMPLETED", humanIntervention: false,
+  schemaVersion: DIAGNOSIS_V4_VERSION, runtimeIdentity }, original.eventId);
 function setup() {
   const service = { create: vi.fn().mockResolvedValue({ status: "accepted" }) };
-  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({
-    allowed_bots: [{ bot_id: event.botId, entity_id: event.entityId, env: event.env }],
-  }) }) };
+  const config = { find: vi.fn().mockResolvedValue({ botId: event.botId, entityId: event.entityId, env: event.env, diagnosisEnabled: true, recoveryEnabled: true, configJson: '{}', version: 1 }) };
   return { service, trigger: createMonitoringRecoveryTrigger({ service, config }) };
 }
 beforeEach(() => { vi.restoreAllMocks(); boundary.parse.mockClear(); });

@@ -183,7 +183,7 @@ def skipped_dual_domain_upload_result(
 
 
 def upload_bench_domains(
-    *, plan: dict[str, Any], manifest: dict[str, Any], task_id: str, step_id: str = ""
+    *, plan: dict[str, Any], manifest: dict[str, Any], task_id: str, step_id: str = "", owner_id: str = ""
 ) -> dict[str, Any]:
     packages = {
         split: BenchSplitPackage.from_manifest(manifest, split) for split in _SPLITS
@@ -220,7 +220,9 @@ def upload_bench_domains(
             reason="train/test template package preflight failed",
         )
 
-    user_id, user_meta = resolve_runtime_user_id(layout=plan.get("agent_context") or {})
+    user_id, user_meta = resolve_runtime_user_id(
+        explicit_user_id=owner_id, layout=plan.get("agent_context") or {}
+    )
     if not user_id:
         domains = {
             split: {

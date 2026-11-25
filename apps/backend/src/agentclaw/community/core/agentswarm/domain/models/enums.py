@@ -30,6 +30,7 @@ class AgentKind(StrEnum):
 
 class BotState(StrEnum):
     PROVISIONING = "PROVISIONING"
+    AWAITING_AUTHORIZATION = "AWAITING_AUTHORIZATION"
     READY = "READY"
     AUTHORIZATION_REJECTED = "AUTHORIZATION_REJECTED"
     AUTHORIZATION_EXPIRED = "AUTHORIZATION_EXPIRED"
@@ -51,6 +52,7 @@ class GuardKind(StrEnum):
     DEDUPE_REJECT = "dedupe_reject"
     DEPTH_EXCEEDED = "depth_exceeded"
     WIDTH_EXCEEDED = "width_exceeded"
+    NAME_UNRESOLVED = "name_unresolved"
     TIMEOUT = "timeout"
     KILL = "kill"
     STUCK = "stuck"
@@ -129,6 +131,15 @@ class ProviderKind(StrEnum):
         except ValueError:
             return cls.DEFAULT
 
+#: The single source of truth for the agentswarm submit wire caps.
+#: RunOptionsDTO imports these for its Field bounds and RunOptions.resolved_*
+#: re-clamps stale metadata with the same values — one definition, so the
+#: two layers can never drift apart again (the 64-vs-256 class of bug).
+WIRE_MAX_TURNS_CAP = 999
+WIRE_MAX_TOTAL_AGENTS_CAP = 256
+WIRE_BOT_CHAT_TIMEOUT_CAP = 3600.0
+
+
 @dataclass(frozen=True)
 class RunOptions:
     """Per-run operational parameters — the run's own execution contract.
@@ -140,6 +151,8 @@ class RunOptions:
     model_name: str | None = None
     slice_max_seconds: float | None = None
     per_attempt_timeout_seconds: float | None = None
+    setup_timeout_seconds: float | None = None
+    bot_chat_timeout_seconds: float | None = None
     max_turns: int | None = None
     max_total_agents: int | None = None
     max_width: int | None = None
@@ -153,6 +166,8 @@ class RunOptions:
             model_name=dto.model_name,
             slice_max_seconds=dto.slice_max_seconds,
             per_attempt_timeout_seconds=dto.per_attempt_timeout_seconds,
+            setup_timeout_seconds=dto.setup_timeout_seconds,
+            bot_chat_timeout_seconds=getattr(dto, "bot_chat_timeout_seconds", None),
             max_turns=dto.max_turns,
             max_total_agents=dto.max_total_agents,
             max_width=dto.max_width,
@@ -179,6 +194,8 @@ class RunOptions:
             model_name=ext.get(f"{prefix}.model_name"),
             slice_max_seconds=val("slice_max_seconds", float),
             per_attempt_timeout_seconds=val("per_attempt_timeout_seconds", float),
+            setup_timeout_seconds=val("setup_timeout_seconds", float),
+            bot_chat_timeout_seconds=val("bot_chat_timeout_seconds", float),
             max_turns=val("max_turns", int),
             max_total_agents=val("max_total_agents", int),
             max_width=val("max_width", int),
@@ -190,6 +207,8 @@ class RunOptions:
             "model_name": self.model_name,
             "slice_max_seconds": self.slice_max_seconds,
             "per_attempt_timeout_seconds": self.per_attempt_timeout_seconds,
+            "setup_timeout_seconds": self.setup_timeout_seconds,
+            "bot_chat_timeout_seconds": self.bot_chat_timeout_seconds,
             "max_turns": self.max_turns,
             "max_total_agents": self.max_total_agents,
             "max_width": self.max_width,
@@ -197,3 +216,65 @@ class RunOptions:
         }.items():
             if v is not None:
                 md.extend[f"agentswarm.options.{key}"] = str(v)
+
+    def resolved_setup_timeout(self, config_value: float,
+                               ceiling: float) -> float:
+        """Effective provisioning budget (spawn + authorization + READY).
+
+        The deployment's ``orchestration.setup_timeout`` is the fallback;
+        an explicitly requested value wins up to ``ceiling`` — the slice
+        room the deployment configuration leaves (``slice_max_seconds``
+        minus ``per_attempt_timeout``), so a caller can lengthen slow-env
+        provisioning from the request alone (no redeploy) but can never
+        push one agent's setup past what a single slice can hold."""
+        if self.setup_timeout_seconds is None:
+            return float(config_value)
+        return max(1.0, min(float(self.setup_timeout_seconds), float(ceiling)))
+
+    def resolved_per_attempt_timeout(self, config_value: float) -> float:
+        """Effective one-attempt task budget: tighten-only. The deployment's
+        ``orchestration.per_attempt_timeout`` is both fallback and cap — a
+        per-run value can never outgrow the slice room its setup budget
+        already occupies."""
+        if self.per_attempt_timeout_seconds is None:
+            return float(config_value)
+        return max(1.0, min(float(self.per_attempt_timeout_seconds),
+                           float(config_value)))
+
+    def resolved_slice_max(self, config_value: float) -> float:
+        """Effective slice budget: tighten-only. The deployment's
+        ``orchestration.slice_max_seconds`` stays the ceiling so one run
+        cannot stretch the scheduling quantum past fleet norms."""
+        if self.slice_max_seconds is None:
+            return float(config_value)
+        return max(1.0, min(float(self.slice_max_seconds), float(config_value)))
+
+    # The caps live at module level (WIRE_MAX_* below): annotated
+    # class attributes would become dataclass fields.
+
+    def resolved_max_turns(self, config_value: int) -> int:
+        """Effective orchestrator turn budget: the request replaces the
+        deployment default (clamped). Wait/deferred decisions stay free,
+        so a widened budget only matters when real decisions actually
+        churn — e.g. spawns blocked behind human-authorization parks."""
+        if self.max_turns is None:
+            return int(config_value)
+        return max(1, min(int(self.max_turns), WIRE_MAX_TURNS_CAP))
+
+    def resolved_max_total_agents(self, config_value: int) -> int:
+        """Effective spawn ceiling: the request replaces the deployment
+        default (clamped)."""
+        if self.max_total_agents is None:
+            return int(config_value)
+        return max(1, min(int(self.max_total_agents),
+                           WIRE_MAX_TOTAL_AGENTS_CAP))
+
+    def resolved_bot_chat_timeout(self, config_value: float) -> float:
+        """Effective engine-chat deadline: the request replaces the
+        deployment default within the wire cap. The runtime per-attempt
+        wait_for caps any remaining overflow — a run may give its chats
+        more room than the pod default, bounded only by slice math."""
+        if self.bot_chat_timeout_seconds is None:
+            return float(config_value)
+        return max(1.0, min(float(self.bot_chat_timeout_seconds),
+                            WIRE_BOT_CHAT_TIMEOUT_CAP))

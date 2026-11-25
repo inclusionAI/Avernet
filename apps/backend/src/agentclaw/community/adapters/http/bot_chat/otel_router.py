@@ -47,7 +47,6 @@ def _write_otlp_request_log(
         observation_count=observation_count,
         trace_ids=trace_ids or [],
         payload_digest=_payload_digest(payload),
-        payload=payload,
         error=error,
     )
 

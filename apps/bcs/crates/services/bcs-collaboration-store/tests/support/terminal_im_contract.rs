@@ -42,7 +42,6 @@ pub(super) async fn terminal_im_contract(store: &dyn StateMachineRunRepoPort, se
         progress = next;
         let mut next = progress.clone(); next.deliveries[0] = Delivery::Delivered { provider_message_ref: Some("original-ref".into()) };
         if case == "new-activation" {
-            sessions.update_callback_status(&session.id, "not_applicable").await.unwrap();
             sessions.reactivate(&session.id, None).await.unwrap();
             assert!(!store.update_terminal_im_progress(&claim, progress.clone(), next, 180).await.unwrap());
             assert!(store.supersede_terminal_im(r).await.unwrap());

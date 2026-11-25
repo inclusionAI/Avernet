@@ -3,6 +3,7 @@
 Abstracts the notification of MCP list changes to external passport/auth
 systems (e.g. tcauthmng).
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -19,6 +20,7 @@ _CLI_IDENTITY_MODES = {"owner", "caller"}
 
 class PassportError(Exception):
     """Passport service call exception."""
+
     pass
 
 
@@ -84,7 +86,9 @@ class PassportResourceScope(TypedDict, total=False):
     skill_items: list[SkillScopeItem]
 
 
-def unpack_skill_scope(resource_scope: PassportResourceScope | None) -> list[SkillScopeItem] | None:
+def unpack_skill_scope(
+    resource_scope: PassportResourceScope | None,
+) -> list[SkillScopeItem] | None:
     """Validate an explicitly supplied complete Skill replacement."""
     if resource_scope is None or "skill_items" not in resource_scope:
         return None
@@ -99,10 +103,19 @@ def unpack_skill_scope(resource_scope: PassportResourceScope | None) -> list[Ski
         code = item.get("skill_code")
         if not isinstance(code, str) or not code.strip() or code in seen:
             raise ValueError("Skill scope item code is invalid or duplicated")
-        if any(not isinstance(item.get(field), str) for field in ("skill_name", "skill_desc")):
+        if any(
+            not isinstance(item.get(field), str)
+            for field in ("skill_name", "skill_desc")
+        ):
             raise ValueError("Skill scope item name and description must be strings")
         seen.add(code)
-        result.append({"skill_code": code, "skill_name": item["skill_name"], "skill_desc": item["skill_desc"]})
+        result.append(
+            {
+                "skill_code": code,
+                "skill_name": item["skill_name"],
+                "skill_desc": item["skill_desc"],
+            }
+        )
     return result
 
 
@@ -137,7 +150,9 @@ def _normalize_cli_items(
         if "identity_mode" not in raw_item and not allow_missing_identity_mode:
             raise ValueError("CLI scope item identity mode is required")
         raw_identity = raw_item.get("identity_mode", "owner")
-        identity_mode = str(getattr(raw_identity, "value", raw_identity)).strip().lower()
+        identity_mode = (
+            str(getattr(raw_identity, "value", raw_identity)).strip().lower()
+        )
         if identity_mode not in _CLI_IDENTITY_MODES:
             raise ValueError("CLI identity mode must be owner or caller")
         cli_name = raw_item.get("cli_name")
@@ -147,12 +162,14 @@ def _normalize_cli_items(
         if cli_desc is not None and not isinstance(cli_desc, str):
             raise ValueError("CLI scope item description is invalid")
         seen_codes.add(cli_code)
-        normalized.append({
-            "cli_code": cli_code,
-            "cli_name": cli_name,
-            "cli_desc": cli_desc,
-            "identity_mode": identity_mode,
-        })
+        normalized.append(
+            {
+                "cli_code": cli_code,
+                "cli_name": cli_name,
+                "cli_desc": cli_desc,
+                "identity_mode": identity_mode,
+            }
+        )
     return normalized
 
 
@@ -187,17 +204,13 @@ def unpack_resource_scope(
             allow_missing_identity_mode=False,
         )
     except KeyError as e:
-        raise ValueError(
-            "resource_scope must include mcp_codes and cli_items"
-        ) from e
+        raise ValueError("resource_scope must include mcp_codes and cli_items") from e
     if "mcp_items" in resource_scope:
         return resource_scope["mcp_items"], cli_items
     try:
         mcp_codes = resource_scope["mcp_codes"]
     except KeyError as e:
-        raise ValueError(
-            "resource_scope must include mcp_codes and cli_items"
-        ) from e
+        raise ValueError("resource_scope must include mcp_codes and cli_items") from e
     if mcp_codes:
         raise ValueError(
             "resource_scope granting MCPs must include mcp_items: bare "
@@ -222,6 +235,7 @@ class PassportPlugin(Plugin, Protocol):
         access_mode: str | None = None,
         admins: list[str] | None = None,
         resource_scope: PassportResourceScope | None = None,
+        bot_type: str | None = None,
     ) -> None:
         """Notify passport of metadata/admin updates or a complete MCP+CLI resource scope.
 
@@ -256,6 +270,7 @@ class PassportPlugin(Plugin, Protocol):
         cli_items: list[CliItem] | None = None,
         *,
         target_env: str | None = None,
+        bot_type: str | None = None,
     ) -> dict[str, Any] | None:
         """Apply for an agent passport (first time)."""
         ...
@@ -274,6 +289,7 @@ class PassportPlugin(Plugin, Protocol):
         workspace_path: str | None = None,
         admins: list[str] | None = None,
         cli_items: list[CliItem] | None = None,
+        bot_type: str | None = None,
     ) -> dict[str, Any] | None:
         """Apply for an agent passport (non-first time)."""
         ...
@@ -289,6 +305,9 @@ class PassportPlugin(Plugin, Protocol):
         bot_desc: str | None = None,
         engine_type: str | None = None,
         target_env: str | None = None,
+        handoff_operation_id: str | None = None,
+        expected_credential_id: str | None = None,
+        bot_type: str | None = None,
     ) -> dict[str, Any] | None:
         """Mint a parallel ALC/AAC/AEC set for a different executor.
 
@@ -296,6 +315,42 @@ class PassportPlugin(Plugin, Protocol):
         ``entity_id`` keeps the existing AgentPass record address stable; only
         ``execution_workno`` changes the principal that executes the Bot.
         Implementations must preserve the current Passport resource manifest.
+        """
+        ...
+
+    def query_handoff_passport(
+        self, *, bot_id: str, owner_workno: str, entity_id: str,
+    ) -> dict[str, Any] | None:
+        """Handoff-only metadata, permitting expired but not deleted history.
+
+        Never a usable credential or an authentication result. None means no
+        recoverable history or no remote capability; ordinary queries stay strict.
+        """
+        ...
+
+    def owner_handoff_supported(
+        self, *, bot_id: str, owner_workno: str, entity_id: str
+    ) -> bool:
+        """Negotiate protocol v1 correlation, generation fencing and retirement.
+
+        False means do not initiate handoff; no mutation may have occurred.
+        """
+        ...
+
+    def retire_agent_credentials(
+        self,
+        *,
+        bot_id: str,
+        owner_workno: str,
+        entity_id: str,
+        keep_credential_id: str,
+        handoff_operation_id: str,
+    ) -> None:
+        """Retire old generations only; preserve selected authorized generation.
+
+        Must verify operation/current generation, revoke old identity credentials
+        and token caches, and acknowledge durable success or raise. Safe to replay
+        after an uncertain outcome. Never destroy the entire Bot passport.
         """
         ...
 
@@ -333,7 +388,14 @@ class PassportPlugin(Plugin, Protocol):
         target_env: str | None = None,
         entity_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Query the full agent passport details."""
+        """Query the full agent passport details.
+
+        Optional ``handoff_ancestor_credential_ids`` is provider-verified normal
+        renewal provenance, newest ancestor first (at most 64). Every link must
+        preserve the Agent, entity, Owner, executor and handoff operation. Missing
+        or invalid history yields no proof; matching personnel alone is never
+        sufficient. Old providers may omit this additive field.
+        """
         ...
 
     def freeze_agent_passport(

@@ -75,6 +75,9 @@ export function buildGroupWsUrl({
  * - 部署态：根据公开的 `TEAMCLAW_DEV_ENV` 构建变量选取 PRE/PROD 网关，不依赖宿主域名规则。
  */
 export function resolveGroupGatewayOrigin(hostname?: string): string | undefined {
+  // Dev servers may use an SSO-compatible custom hostname; all dev traffic
+  // must still use the same-origin proxy (including WebSocket Upgrade).
+  if (process.env.NODE_ENV === 'development') return undefined;
   const host = hostname ?? (typeof window !== 'undefined' ? window.location.hostname : '');
   // 本地开发：dev-server proxy（ws:true）处理 WebSocket Upgrade，保持同源
   if (!host || host === 'localhost' || host === '127.0.0.1') return undefined;
@@ -120,6 +123,18 @@ export function isDeliveryUpdatedFrame(message: unknown): boolean {
   );
 }
 
+/** Old servers omit task; malformed projections never block chat or delivery rendering. */
+export function parseTaskDeliveryView(value: unknown): import('@/domain/collaboration/types').TaskDeliveryView | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const task = value as Record<string, unknown>;
+  if (!['task_ref', 'summary', 'manager_id', 'worker_id', 'worker_name'].every((key) => typeof task[key] === 'string') ||
+      !task.task_ref || !task.worker_id ||
+      !['queued_at', 'last_activity_at'].every((key) => typeof task[key] === 'number' && Number.isFinite(task[key])) ||
+      !['started_at', 'finished_at'].every((key) => task[key] === null || (typeof task[key] === 'number' && Number.isFinite(task[key]))) ||
+      typeof task.timed_out !== 'boolean') return undefined;
+  return task as unknown as import('@/domain/collaboration/types').TaskDeliveryView;
+}
+
 /**
  * 从 message.delivery.updated 事件帧中安全提取 DeliveryStatusView 载荷。
  * 帧形为 { method/event/type: 'message.delivery.updated', params/payload: DeliveryStatusView }。
@@ -142,6 +157,7 @@ export function parseDeliveryStatusView(
     return null;
   }
   return {
+    task: parseTaskDeliveryView(payload.task),
     delivery_id: payload.delivery_id,
     message_id: payload.message_id,
     target_bot_id: payload.target_bot_id,
@@ -154,4 +170,31 @@ export function parseDeliveryStatusView(
     admission_error: typeof payload.admission_error === 'string' ? payload.admission_error : null,
     content_preview: typeof payload.content_preview === 'string' ? payload.content_preview : null,
   };
+}
+
+/**
+ * chat.send 提交侧已知拒绝话术 → 用户可见文案(单一来源)。
+ * BCS 只有消息提交 seam 会产出这些 message;Provider 的兜底广播判定与
+ * useChatSendErrorToasts 的 toast 话术映射共用此表。
+ */
+export const CHAT_SEND_REJECTION_REASONS: Array<[RegExp, string]> = [
+  [/speaking lease required/, '需先获取发言权才能在 Caller 群发言'],
+  [/speaking lease rejected/, '发言权已失效或被抢占，请重新获取后发送'],
+  [/caller identity missing/, '登录身份缺失，请刷新页面重新连接后再发送'],
+  [/caller target requires human speech/, '该会话仅支持真人 Caller 发言'],
+  [/participant absent/i, '当前身份未加入会话，请先加入后再发言'],
+];
+
+/**
+ * 失败应答是否携带已知 chat.send 提交侧拒绝话术。
+ * 在途请求 id 精确匹配的兜底：这些特征只可能来自消息提交流(补丁时序或
+ * 帧路径丢掉 id 追踪时仍可见)，未知失败话术不在此列、不得误报。
+ */
+export function isChatSendRejectionFrame(message: unknown): boolean {
+  if (!message || typeof message !== 'object') return false;
+  const frame = message as Record<string, unknown>;
+  if (frame.type !== 'res' || frame.ok !== false) return false;
+  const text = (frame.error as { message?: unknown } | undefined)?.message;
+  if (typeof text !== 'string') return false;
+  return CHAT_SEND_REJECTION_REASONS.some(([pattern]) => pattern.test(text));
 }

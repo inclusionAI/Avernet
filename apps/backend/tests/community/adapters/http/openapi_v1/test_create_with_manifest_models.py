@@ -73,11 +73,20 @@ def test_create_body_is_the_ordinary_one_plus_the_manifest() -> None:
     inherited = set(BotCreate.model_fields)
     fields = set(models.BotCreateWithManifest.model_fields)
 
-    assert fields == inherited | {"config_manifest"}
+    # One declared addition beyond the manifest: an identity-inheriting Bot is
+    # created through this surface and has no ordinary-create equivalent, so
+    # the field is listed here rather than silently inherited.
+    assert fields == inherited | {"config_manifest", "identity_bot_id"}
     assert issubclass(models.BotCreateWithManifest, BotCreate)
     # `extra="forbid"` is inherited too: a typo'd creation attribute is refused
     # here exactly as it is on the ordinary create.
     assert models.BotCreateWithManifest.model_config.get("extra") == "forbid"
+
+
+def test_identity_inheriting_defaults_to_the_ordinary_path() -> None:
+    """Omitting the field must mean today's behaviour, not "inherit nothing"."""
+    spec = models.BotCreateWithManifest.model_fields["identity_bot_id"]
+    assert spec.default is None
 
 
 def test_the_submit_response_has_no_state_field() -> None:

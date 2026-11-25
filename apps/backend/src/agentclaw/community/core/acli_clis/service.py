@@ -74,6 +74,7 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
     resolve_operable_permission_level,
 )
+from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
 from agentclaw.community.core.caller_identity.contracts import (
     CallerIdentityPermissionError,
     CallerLockEpochError,
@@ -103,8 +104,9 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-#: Engines whose containers ship acli and the ``/api/cli/acli/*`` endpoints.
-ACLI_ENGINES = frozenset({"openclaw", "claude_code"})
+#: Engines whose containers ship acli and its endpoints (``/api/cli/acli/*``;
+#: teclaw serves them under ``/api/v1/cli/acli/*``).
+ACLI_ENGINES = frozenset({"openclaw", "claude_code", "teclaw"})
 SERVICE_BOT_TYPE = "service"
 #: How long a sync call waits for its operation (D2), and how often it looks.
 SYNC_WAIT_SECONDS = 30.0
@@ -450,7 +452,7 @@ class AcliCliService(AcliCliServiceProtocol):
             bot_pk=int(bot["id"]), bot_id=runtime.bot_id, entity_id=entity_id,
             owner_id=runtime.owner_id, stage=runtime.stage, actor_id=actor_id,
             enqueued_at=time.time(), identity_mode=identity_mode, cli_desc=cli_desc,
-            target_operation_id=target_operation_id,
+            target_operation_id=target_operation_id, engine=runtime.engine,
         )
 
     # ── shared checks ────────────────────────────────────────────────────
@@ -463,6 +465,7 @@ class AcliCliService(AcliCliServiceProtocol):
         return AcliRuntime(
             bot_id=str(bot["bot_id"]), owner_id=str(bot["owner_id"]),
             stage=PublishStage(stage) if stage is not None else PublishStage.DRAFT,
+            engine=str(bot.get("active_engine") or ""),
         )
 
     def _readable_bot(self, bot_id: str, entity_id: str, actor_id: str) -> Mapping[str, Any]:
@@ -502,7 +505,7 @@ class AcliCliService(AcliCliServiceProtocol):
         if not lock_epoch_matches(
             self._locks,
             bot_id=bot_id,
-            owner_id=str(bot["owner_id"]),
+            owner_id=stable_resource_owner_id(bot),
             actor_id=actor_id,
             lock_epoch=lock_epoch,
         ):

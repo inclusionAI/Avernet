@@ -3,17 +3,17 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
-import { Input } from '@/components/ui/Input';
-import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Switch } from '@/components/ui/Switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotCapabilitySet, BotEditorSkill } from '@/domain/botEditor';
 import type { CapabilityDetailTarget } from '@/services/botWorkshop/botCapabilityDetailService';
 import { ChevronDown, ChevronRight, Loader2, Plus, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useCapabilitySetExpansion } from '@/hooks/useCapabilitySetExpansion';
 import { CapabilityDetailDrawer } from './CapabilityDetailDrawer';
 import { CapabilityMembers } from './CapabilityMembers';
 import { CapabilityPickerModal } from './CapabilityPickerModal';
+import { CreateCapabilitySetModal } from './CreateCapabilitySetModal';
 import type { CapabilityPicker, CapabilitySetManagerProps } from './capabilitySetManagerTypes';
 export type { CapabilitySetManagerProps } from './capabilitySetManagerTypes';
 
@@ -26,6 +26,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
     workshopSkills,
     marketMcps,
     editable,
+    compact,
     onCreate,
     onDelete,
     onActive,
@@ -35,9 +36,8 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
     onUploadSkillFolder,
     onLoadCandidates,
   } = props;
-  const [expanded, setExpanded] = useState<string[]>(sets[0] ? [sets[0].id] : []);
+  const expansion = useCapabilitySetExpansion(sets, props.botId, props.authenticatedUserId, props.ownerId);
   const [createOpen, setCreateOpen] = useState(false);
-  const [name, setName] = useState('');
   const [picker, setPicker] = useState<CapabilityPicker>();
   const [pickerSuspendedForDetail, setPickerSuspendedForDetail] = useState(false);
   const [detailTarget, setDetailTarget] = useState<CapabilityDetailTarget>();
@@ -56,20 +56,13 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
     const url = getCapabilities().getBotSkillPickerDetailUrl(skill).value;
     if (url) window.open(url, '_blank', 'noopener,noreferrer');
   };
-  useEffect(() => {
-    if (sets[0]) setExpanded((current) => (current.length ? current : [sets[0].id]));
-  }, [sets]);
-  const create = async () => {
-    await onCreate(name.trim());
-    setName('');
-    setCreateOpen(false);
-  };
+
   return (
     <div className="flex min-h-full flex-col bg-background">
-      <div className="flex items-center justify-between border-b border-border bg-card px-8 py-5 lg:px-10">
-        <div>
-          <h2 className="m-0 text-base font-semibold">能力集管理</h2>
-          <p className="m-0 mt-1 text-sm text-muted-foreground">按能力集组织 Bot 引用的 Skill、MCP 与 CLI。</p>
+      <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-divider bg-card px-8 lg:px-10">
+        <div className="min-w-0">
+          <h2 className="m-0 truncate text-sm font-semibold">能力集管理</h2>
+          <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">按能力集组织 Bot 引用的 Skill、MCP 与 CLI。</p>
         </div>
         <Button
           variant="outline"
@@ -83,26 +76,32 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
       </div>
       <div className="app-scrollbar flex-1 overflow-y-auto">
         {sets.length ? (
-          <div className="w-full space-y-3 px-5 py-4 lg:px-6">
+          // 稿面(artboard-047/061/062):能力集容器不带边框底色、与 header 同列对齐(px-8 lg:px-10)，
+          // 仅靠组间距分组；标题行左侧零内边距，使能力集标题与「能力集管理」文字严格左对齐。
+          <div className="w-full space-y-4 px-8 py-5 lg:px-10">
             {sets.map((set) => {
-              const open = expanded.includes(set.id);
+              const open = expansion.isExpanded(set);
               const displayName = set.isDefault ? '默认能力集' : set.name;
               return (
-                <section key={set.id} className="overflow-hidden rounded-lg border border-border bg-card">
-                  <div className="group flex min-h-16 items-center gap-2 px-5 py-2">
+                <section key={set.id}>
+                  <div className="group flex items-center gap-2">
                     <Button
                       variant="ghost"
-                      className="h-auto min-w-0 flex-1 justify-start px-1 py-1 text-left"
-                      leftIcon={open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-                      onClick={() =>
-                        setExpanded((current) => (open ? current.filter((id) => id !== set.id) : [...current, set.id]))
-                      }
+                      aria-expanded={open}
+                      className="h-auto min-w-0 flex-1 items-start justify-start px-0 py-0 text-left"
+                      onClick={() => expansion.toggle(set)}
                     >
                       <span className="min-w-0">
                         <span className="flex items-center gap-2">
                           <span className="truncate text-sm font-semibold">{displayName}</span>
                           {!set.active ? <Badge>已禁用</Badge> : null}
                           {set.isDefault ? <Badge tone="primary">系统默认</Badge> : null}
+                          {/* 展开收起图标跟在标题右侧(稿面 12×12 箭标)，不再占据行首。 */}
+                          {open ? (
+                            <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+                          ) : (
+                            <ChevronRight className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+                          )}
                         </span>
                         <span className="mt-1 block text-xs font-normal text-muted-foreground">
                           {set.skills.length} Skill · {set.mcps.length} MCP · {set.clis.length} CLI
@@ -157,11 +156,11 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                     ) : null}
                   </div>
                   {open ? (
-                    <div className="space-y-5 border-t border-border bg-background px-5 py-5">
+                    <div className="mt-5 space-y-5">
                       <CapabilityMembers
                         kind="skill"
                         items={set.skills}
-                        compact={props.compact}
+                        compact={compact}
                         onDetail={props.botId ? (id, name) => setDetailTarget({ kind: 'skill', id, name }) : undefined}
                         editable={editable}
                         onAdd={set.isDefault ? undefined : () => openPicker(set, 'skill')}
@@ -170,7 +169,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                       <CapabilityMembers
                         kind="mcp"
                         items={set.mcps}
-                        compact={props.compact}
+                        compact={compact}
                         onDetail={props.botId ? (id, name) => setDetailTarget({ kind: 'mcp', id, name }) : undefined}
                         editable={editable}
                         identities={props.mcpCallTypes}
@@ -182,7 +181,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                         onRemove={(id) => onMcp(set.id, id, false)}
                       />
                       {set.clis.length ? (
-                        <CapabilityMembers kind="cli" items={set.clis} compact={props.compact} editable={false} />
+                        <CapabilityMembers kind="cli" items={set.clis} compact={compact} editable={false} />
                       ) : null}
                     </div>
                   ) : null}
@@ -204,29 +203,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
           setPickerSuspendedForDetail(false);
         }}
       />
-      <Modal open={createOpen} onOpenChange={setCreateOpen}>
-        <ModalContent>
-          <ModalHeader>
-            <ModalTitle>新建能力集</ModalTitle>
-            <ModalDescription>创建后默认为启用状态。</ModalDescription>
-          </ModalHeader>
-          <Input
-            autoFocus
-            value={name}
-            maxLength={100}
-            placeholder="输入能力集名称"
-            onChange={(event) => setName(event.target.value)}
-          />
-          <ModalFooter>
-            <Button variant="secondary" onClick={() => setCreateOpen(false)}>
-              取消
-            </Button>
-            <Button disabled={!name.trim()} onClick={() => void create()}>
-              创建
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+      <CreateCapabilitySetModal open={createOpen} onOpenChange={setCreateOpen} onCreate={onCreate} />
       {picker ? (
         <CapabilityPickerModal
           kind={picker.kind}

@@ -265,7 +265,10 @@ _RUNTIME_CONFIG = RuntimeConfig.detect()
 _INJECTOR = build_injector(config=_RUNTIME_CONFIG)
 attach_injector(app, _INJECTOR)
 
+from engine.community.api.engine.default_model import router as default_model_router
+
 app.include_router(engine_router)
+app.include_router(default_model_router)
 app.include_router(session_router)
 app.include_router(session_favorites_router)
 app.include_router(dws_hosting_router)
@@ -295,6 +298,8 @@ app.include_router(openclaw_http_router)
 app.include_router(ws_router)
 from engine.community.api.transport.a2a.router import router as a2a_router  # noqa: E402
 app.include_router(a2a_router)
+from engine.community.api.session.runtime_status import router as runtime_status_router  # noqa: E402
+app.include_router(runtime_status_router)
 # Router surface is profile-invariant and OSS-scoped. The base
 # SharedRoutersModule contributes only the OpenClaw/Claude Code delivery surface
 # for every profile; community/corp differences must be expressed behind router

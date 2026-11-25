@@ -19,6 +19,7 @@ from collections import deque
 import pytest
 
 from agentclaw.community.core.agentswarm.domain.models import (
+    AgentKind,
     AgentId,
     AgentSpec, AgentStatus, EpochMillis, ProviderKind, RequestMetadata,
     Run, RunId, RunStatus, SubagentResult, TaskEnvelope, TenantId,
@@ -695,6 +696,52 @@ class TestSpecResolution:
             )
 
         asyncio.run(main())
+
+    def test_unknown_spawn_inherits_unanimous_catalog_kind(self):
+        # A decision name that misses the catalog must not silently change
+        # the run's composition: with a unanimous bot catalog, the
+        # fallback spec is bot-kind (engine/bot_type/identity inherited)
+        # so the spawn provisions a bot subagent, not an llm one.
+        async def main():
+            factory = FakeFactory(scripts={"*": [("ok", _ok_result()),
+                                                 ("ok", _ok_result())]})
+            run = _mk_run(catalog=[AgentSpec(
+                name="scout", role="surveys", kind=AgentKind.BOT,
+            )] * 2)
+            rt = SubagentRuntime(factory=factory)
+            await rt.start()
+            try:
+                env = _mk_envelope(name="auditor_for_x", objective="o-x")
+                await rt.spawn(run, env)
+                await rt.wait_for_completions()
+            finally:
+                await rt.stop()
+
+            created = factory.created_specs[0]
+            assert created.kind is AgentKind.BOT
+
+        asyncio.run(main())
+
+    def test_prefix_spawn_name_inherits_catalog_spec(self):
+        catalog_spec = AgentSpec(name="coder", role="writes code")
+        run = _mk_run(catalog=[catalog_spec])
+        env = _mk_envelope(name="coder_rust")
+
+        assert SubagentRuntime._find_spec(run, env) is catalog_spec
+
+    def test_exact_name_match_wins_over_prefix(self):
+        exact_spec = AgentSpec(name="coder_rust", role="rust specialist")
+        prefix_spec = AgentSpec(name="coder", role="writes code")
+        run = _mk_run(catalog=[prefix_spec, exact_spec])
+        env = _mk_envelope(name="coder_rust")
+
+        assert SubagentRuntime._find_spec(run, env) is exact_spec
+
+    def test_no_match_returns_none(self):
+        run = _mk_run()
+        env = _mk_envelope(name="ghost")
+
+        assert SubagentRuntime._find_spec(run, env) is None
 
 
 class TestTokenUsagePropagation:

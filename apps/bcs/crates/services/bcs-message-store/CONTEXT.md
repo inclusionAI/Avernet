@@ -147,3 +147,33 @@ bcs_group_sessions. Batches cannot mix the two sequence sources. Memory composit
 shares `bcs-session-store::registry::MemorySessionRegistry` with the Session writer;
 this concrete store dependency is limited to atomic in-memory transaction composition.
 Delivery recovery supports at most eight IDs in a single lookup.
+
+## Task-handle lookup
+
+Task dispatch, server rejection and unresolved intent markers use three additive task-only indexes
+(SQLite 038/MySQL 038). `TaskPrefixes` combines <=20 normalized selectors in one
+bound-parameter query; each index/selector yields <=2 distinct identities before
+fetching one latest row each. A single task's duplicate deliveries do not create
+ambiguity. No canonical bodies are loaded. Confirmed terminal retention is 24h;
+uncertain Worker expiry is not stop proof. Rejection retention uses notice
+creation time, not the delivery outcome. Persisted Result intents suppress obsolete
+unknown markers without becoming cancellable task identities. Up to 256 known
+legacy intents are bound once through a CTE and excluded before the candidate
+limit; over-budget lookups fail closed. Memory uses one snapshot per batch.
+A maximum 20-selector batch with 256 suppressions uses 696 bound parameters;
+output is bounded but matching index-range scan cost is data dependent.
+
+## Cancelled queued-message history
+
+Display queries hide a source only if at least one delivery is Cancelled and all
+of its deliveries are proven unsent terminal outcomes. Potentially sent, active,
+uncertain, or still-queued siblings keep the message visible. No-delivery legacy
+messages remain visible. Canonical ID lookup and stored content are unchanged.
+SQL applies one env/Session/source-indexed aggregate before pagination in the
+existing history SELECT, with no extra DB round trips; it must not scan the
+cross-message status index. Memory aggregates target states once per Session.
+Memory/SQLite conformance covers refresh, partial cancellation, send uncertainty,
+legacy rows, pagination, query count, index selection, and storage errors.
+Returned history rows are bounded by LIMIT; candidate/target scan work remains
+data-dependent for long cancellation-dense ranges. SQLite verifies source-index
+selection; remote MySQL/OceanBase execution plans need deployment verification.

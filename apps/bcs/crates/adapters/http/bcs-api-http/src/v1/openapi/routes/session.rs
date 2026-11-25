@@ -60,7 +60,7 @@ async fn create_session(
     let Path(group_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let command = body
-        .into_command(&caller, group_id)
+        .into_command(caller, group_id)
         .map_err(|error| application_error_response(&request_id, error))?;
     let result = state
         .session_service
@@ -88,6 +88,7 @@ async fn list_sessions(
 ) -> Result<Response, ErrorResponse> {
     let Path(group_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let sort = query.sort_filter();
     let result = state
         .session_service
         .list(ListSessions {
@@ -97,6 +98,7 @@ async fn list_sessions(
             offset: query.offset,
             limit: query.limit,
             status: query.status,
+            sort,
         })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;

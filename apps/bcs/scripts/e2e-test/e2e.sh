@@ -82,12 +82,29 @@ source "$SCRIPT_DIR/cli.sh"
 source "$SCRIPT_DIR/actor.sh"
 source "$SCRIPT_DIR/register.sh"
 source "$SCRIPT_DIR/stories.sh"
+source "$SCRIPT_DIR/authority.sh"
 source "$SCRIPT_DIR/provider_scope_story.sh"
+source "$SCRIPT_DIR/provider_managers_story.sh"
+source "$SCRIPT_DIR/a2a_story.sh"
 source "$SCRIPT_DIR/cli-stories.sh"
+source "$SCRIPT_DIR/cli_error_paths_story.sh"
 source "$SCRIPT_DIR/collaboration_draft_story.sh"
 source "$SCRIPT_DIR/fixed_loop_story.sh"
+source "$SCRIPT_DIR/run_node_lifecycle_story.sh"
+source "$SCRIPT_DIR/caller_identity_story.sh"
 source "$SCRIPT_DIR/session_files.sh"
 source "$SCRIPT_DIR/session_owner_story.sh"
+source "$SCRIPT_DIR/session_management_edges_story.sh"
+source "$SCRIPT_DIR/recent_activity_sort_story.sh"
+source "$SCRIPT_DIR/invitation_story.sh"
+source "$SCRIPT_DIR/queued_message_cancellation_story.sh"
+source "$SCRIPT_DIR/queued_target_failure_story.sh"
+source "$SCRIPT_DIR/task_handle_story.sh"
+source "$SCRIPT_DIR/service_policy_story.sh"
+source "$SCRIPT_DIR/group_card_story.sh"
+source "$SCRIPT_DIR/fuse_cards_story.sh"
+source "$SCRIPT_DIR/delivery_fault_isolation_story.sh"
+source "$SCRIPT_DIR/caller_config_storage_story.sh"
 source "$SCRIPT_DIR/edge_permission.sh"
 
 # Both registration paths share parent identity while each child keeps its own
@@ -101,6 +118,21 @@ story_provider_operator_manages_subbots() {
 }
 
 E2E_TESTS_STORIES+=("story_provider_operator_manages_subbots")
+
+# Keep isolated Worker coverage in the BCS story phase, so both split and
+# standalone coverage runs finish this producer before aggregating profiles.
+if [[ "${BCS_E2E_WORKER_COVERAGE:-0}" == 1 ]]; then
+    story_gateway_worker_coverage() {
+        local result=0
+        PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+            -s "$SCRIPT_DIR/../ci/tests" -p test_worker_e2e.py || result=$?
+        assert_eq "Worker coverage harness regressions" "$result" "0"
+        result=0
+        bash "$SCRIPT_DIR/../worker_e2e_coverage.sh" || result=$?
+        assert_eq "Gateway and Worker live-process coverage" "$result" "0"
+    }
+    E2E_TESTS_STORIES+=("story_gateway_worker_coverage")
+fi
 
 # ============================================================================
 # Collect All Tests (Bash 3.2 compatible — no associative arrays)

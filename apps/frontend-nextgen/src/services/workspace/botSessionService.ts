@@ -1,8 +1,12 @@
+import { resolveBotAvatarUrl } from '@/domain/botAvatar';
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
+import type { BotModelBadge } from '@/capabilities';
 import type { IdentityView } from '@/domain/collaboration';
 import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
 import type { BotLifecycle } from '@/domain/botWorkshop';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
+import { AceLoginRedirectError, BackendRequestError } from '@/services/backendApi/httpClient';
+import { extractFriendlyErrorMessage } from '@/utils/requestErrorHandler';
 import {
   listBots as listOwnedBotsApi,
   type OwnedBotDto,
@@ -22,6 +26,7 @@ import {
   type BotMessageDto,
   type BotModelDto,
 } from '@/services/backendApi/bots/privateBotSessionController';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import type { ChatMessage } from '@tc-chat/core';
 import type { BotIamTokenStage } from '../backendApi/privateChat/iamTokenController';
 import { mapBotActionPermissions } from './botActionPermissionMapper';
@@ -45,6 +50,8 @@ export interface ChatBotView {
   actions?: string[];
   disabledActions?: Record<string, string>;
   botType?: string;
+  /** 服务 Bot 是否有可用的 online 发布；旧接口缺省不触发禁用。 */
+  onlineAvailable?: boolean | null;
   /** Inventory-backed lifecycle for service engine checks; request stage is not lifecycle proof. */
   serviceLifecycle?: BotLifecycle;
   isAgentCodingBot?: boolean;
@@ -52,12 +59,19 @@ export interface ChatBotView {
   templateName?: string;
   spaceId?: string;
   spaceName?: string;
-  /** 服务 Bot 的运行阶段；个人 Bot 和好友会话仅使用 draft。 */
+  /** 归属空间类型（后端 space.kind）；缺失时由 spaceId 与个人空间比对兜底。 */
+  spaceKind?: 'personal' | 'team';
+  /** 会话运行阶段；对话页目录中的服务 Bot 使用 online，个人 Bot 使用 draft；调试页可显式选择阶段。 */
   runtimeStage?: BotIamTokenStage;
   /** 标记来自当前用户好友关系，而非当前用户管理的 Bot。 */
   isFriendBot?: boolean;
-  /** 团队 Bot 写接口必须显式携带实体 owner，不能由登录用户推断。 */
+  /** 团队空间 Bot 写接口必须显式携带实体 owner，不能由登录用户推断。 */
   isTeamBot?: boolean;
+  /** 目录 DTO 的 call_type 透传(历史兼容):新版 openapi_v1 目录接口族不下发该字段,
+   *  IAM/文件链 Caller 判据已运行时化(GET /caller-context 聚合 bot_call_type,见
+   *  botChatProvider.resolveCallerRuntimeTarget / useBotSessionFilesFeature);不要再以
+   *  此字段作判据——恒 undefined,判据死参数事故的根因。 */
+  callType?: string;
 }
 
 export interface BotChatSessionView {
@@ -74,6 +88,9 @@ export interface BotChatSessionView {
 export interface BotSessionPageView {
   items: BotChatSessionView[];
   total: number;
+  hasMore?: boolean;
+  nextCursor?: string | null;
+  scanLimited?: boolean;
 }
 
 export const BOT_SESSION_PAGE_SIZE = 10;
@@ -89,6 +106,8 @@ export interface BotModelView {
   modelId: string;
   name: string;
   provider: string;
+  /** 运营展示徽标（capability 注入，如「推荐」）；缺省不渲染。 */
+  badge?: BotModelBadge;
 }
 
 const COMPOUND_ID_RE = /^.+:.+$/;
@@ -109,19 +128,42 @@ export function resolveUserId(userId: string): string {
 
 /** 连接和会话请求共用运行环境，避免 Token 与实际实例选址不一致。 */
 export function resolveChatRuntimeStage(bot: ChatBotView): BotIamTokenStage {
+  if (bot.botType === 'service' && (bot.isTeamBot || bot.isFriendBot)) return 'online';
   if (bot.isFriendBot || bot.botType === 'personal') return 'draft';
   return bot.runtimeStage ?? (bot.botType === 'service' ? 'online' : 'draft');
 }
 
-/** 所有单聊请求补运行环境；好友补 f_user_id，团队补实体 owner。 */
+/** 支持“按实例取数”的 Bot：服务 Bot、非好友、非 TEClaw。 */
+export function supportsConversationInstanceScope(bot: ChatBotView): boolean {
+  return (
+    bot.botType?.toLowerCase() === 'service' &&
+    !bot.isFriendBot &&
+    bot.engine?.toLowerCase() !== 'teclaw'
+  );
+}
+
+/** 由已选实例构造会话请求范围（device_uuid + 对应 runtime stage）。 */
+export function buildConversationSessionRequestRange(
+  bot: ChatBotView,
+  deviceUuid: string,
+): ConversationSessionRequestRange {
+  return { deviceUuid, stage: resolveChatRuntimeStage(bot) };
+}
+
+/** 服务 Bot 请求才显式指定阶段；非服务 Bot 依赖后端默认环境，并移除旧筛选条件中的 stage。 */
 export function withFriendBotRequestParams<T extends { user_id: string; owner_id?: string; stage?: BotIamTokenStage }>(
   bot: ChatBotView,
   userId: string,
   params: T,
-): T & { stage: BotIamTokenStage; f_user_id?: string } {
+): Omit<T, 'stage'> & { stage?: BotIamTokenStage; f_user_id?: string } {
+  const { stage: requestedStage, ...baseParams } = params;
+  const stage =
+    bot.isFriendBot || bot.isTeamBot || bot.runtimeStage === 'online'
+      ? resolveChatRuntimeStage(bot)
+      : requestedStage ?? resolveChatRuntimeStage(bot);
   return {
-    ...params,
-    stage: bot.isFriendBot || bot.botType === 'personal' ? 'draft' : params.stage ?? resolveChatRuntimeStage(bot),
+    ...baseParams,
+    ...(bot.botType === 'service' ? { stage } : {}),
     ...((bot.isFriendBot || bot.isTeamBot) && bot.ownerId ? { owner_id: bot.ownerId } : {}),
     ...(bot.isFriendBot ? { f_user_id: resolveUserId(userId) } : {}),
   };
@@ -142,7 +184,7 @@ export function listChatBots(identityViews: IdentityView[]): ChatBotView[] {
         realBotId,
         ownerId,
         displayName: i.displayName,
-        avatarUrl: i.avatarUrl,
+        avatarUrl: resolveBotAvatarUrl(i.avatarUrl, realBotId),
         online: i.online,
         reachability: i.reachability,
         chatable: COMPOUND_ID_RE.test(i.id),
@@ -160,6 +202,32 @@ export interface BotSessionSummaryView {
   model?: string;
 }
 
+/** 被锚定剥除信任的最短尾巴长度：短于它的「本会话标识」宁可漏剥也不参与判据。 */
+const ANCHORED_SUFFIX_MIN_LENGTH = 8;
+
+/**
+ * 从 session id 提取其 uuid 段，解析语义对齐后端 adapter `_session_label_suffix`
+ * （create 写引擎 label 的后缀正是这个裸 uuid）。已知形态：
+ * - `session:<uuid>:user:<id>`（裸引擎 key）
+ * - `agent:<provider>:session:<uuid>:user:<id>`（canonical 完整 AID）
+ * 未知形态返回 null——宁漏剥不误剥（漏剥后续由后端出站剥除兜底）。
+ */
+export function extractSessionUuidFromSessionId(
+  sessionId?: string | null,
+): string | null {
+  if (!sessionId) return null;
+  const parts = sessionId.split(':');
+  // session:<uuid>:user:<id>
+  if (parts.length >= 4 && parts[0] === 'session' && parts[2] === 'user') {
+    return parts[1] || null;
+  }
+  // agent:<provider>:session:<uuid>:user:<id>
+  if (parts.length >= 5 && parts[0] === 'agent' && parts[2] === 'session') {
+    return parts[3] || null;
+  }
+  return null;
+}
+
 export function mapBotSessionSummary(s: {
   session_id: string;
   title: string;
@@ -168,14 +236,29 @@ export function mapBotSessionSummary(s: {
   gmt_create: string;
   model?: string;
 }): BotSessionSummaryView {
-  // 后端返回的 title 有时拼接了 `_${session_id}` 后缀（更新标题后尤其明显），
-  // 这里剥离掉该后缀，仅展示用户可见的标题；为空时回退为「新会话」（与 open-claw 一致）。
+  // 后端 adapter 写引擎 label 时可能拼两种后缀（同一写点不同入参）：
+  // - create：`标题_<本会话裸uuid>`；
+  // - update：`标题_<完整 session_id>`（更新标题后尤其明显）。
+  // 剥除判据全部锚定本会话自身标识（精确 endsWith），禁止无差别正则——
+  // 人类标题自带的下划线尾巴（如 `技能回放-ODPS_APPROVAL-100008`）不得误剥；
+  // 解析不到已知形态的 uuid 时宁可漏剥。为空时回退为「新会话」（与 open-claw 一致）。
   const rawTitle = s.title ?? '';
   const sessionIdSuffix = `_${s.session_id}`;
-  const trimmedTitle =
+  let trimmedTitle =
     rawTitle && rawTitle.endsWith(sessionIdSuffix)
       ? rawTitle.slice(0, -sessionIdSuffix.length).trim()
       : rawTitle.trim();
+  const sid = extractSessionUuidFromSessionId(s.session_id);
+  if (
+    sid &&
+    sid.length >= ANCHORED_SUFFIX_MIN_LENGTH &&
+    trimmedTitle &&
+    trimmedTitle.endsWith(`_${sid}`)
+  ) {
+    trimmedTitle = trimmedTitle
+      .slice(0, trimmedTitle.length - sid.length - 1)
+      .trim();
+  }
   return {
     sessionId: s.session_id,
     title: trimmedTitle || '新会话',
@@ -232,9 +315,16 @@ function readTemplateName(dto: OwnedBotDto, templateType?: string): string | und
   return undefined;
 }
 
+/** 归一后端 space.kind（大小写/命名差异）到前端空间类型；缺失返回 undefined 由调用侧兜底。 */
+function normalizeSpaceKind(kind: string | undefined): 'personal' | 'team' | undefined {
+  if (!kind) return undefined;
+  return kind.toUpperCase() === 'TEAM' ? 'team' : 'personal';
+}
+
 function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
-  const botId = dto.bot_id.includes(':') || !dto.owner_entity_id ? dto.bot_id : `${dto.bot_id}:${dto.owner_entity_id}`;
-  const { realBotId, ownerId } = splitBotId(botId);
+  const botId = dto.bcn_bot_id || (dto.bot_id.includes(':') || !dto.owner_entity_id ? dto.bot_id : `${dto.bot_id}:${dto.owner_entity_id}`);
+  const { realBotId, ownerId: legacyLocator } = splitBotId(botId);
+  const ownerId = dto.entity_id || legacyLocator;
   const templateType = readTemplateType(dto);
   const templateName = readTemplateName(dto, templateType);
   const permissions = mapBotActionPermissions(dto.actions, dto.disabled_actions);
@@ -249,7 +339,9 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     botId,
     realBotId,
     ownerId,
+    engineOwnerId: dto.owner_entity_id,
     displayName: dto.bot_name || dto.bot_id,
+    avatarUrl: resolveBotAvatarUrl(dto.avatar_url, dto.bot_id),
     online: dto.status === 'ACTIVE' || dto.status === 'online',
     status: dto.status,
     reachability: 'reachable',
@@ -257,12 +349,15 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     engine: dto.engine_type ?? dto.engine,
     ...permissions,
     botType: dto.bot_type,
-    runtimeStage: 'draft',
+    runtimeStage: dto.bot_type === 'service' ? 'online' : 'draft',
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,
+    // Caller 模式标记透传(openspec add-iam-caller-runtime-target);缺失保持 undefined。
+    callType: dto.call_type,
     spaceId: dto.space?.space_id,
     spaceName: dto.space?.name,
+    spaceKind: normalizeSpaceKind(dto.space?.kind),
   };
 }
 
@@ -270,7 +365,7 @@ async function fetchOwnedBots(
   userId: string,
 ): Promise<DomainResult<{ bots: ChatBotView[]; hasAgentCodingBots: boolean }>> {
   try {
-    const resp = await listOwnedBotsApi({ user_id: resolveUserId(userId), page: 1, page_size: 100 });
+    const resp = await listOwnedBotsApi({ user_id: resolveUserId(userId), page: 1, page_size: 100, stage: 'online' });
     // 对话页的「已管理 Bot」目录保留全部可用 Bot。AgentCoding Bot 的行点击
     // 由对话页直接进入 coding-chat；普通 CC 仍由运行时分类保留，不误判。
     const owned = resp.data?.items ?? [];
@@ -342,35 +437,59 @@ export const botSessionService = {
     bot: ChatBotView,
     userId: string,
     title: string = '新会话',
+    options?: { friendlyErrors?: boolean },
   ): Promise<DomainResult<BotChatSessionView>> {
     try {
       const params = withFriendBotRequestParams(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
       });
-      const resp = await createBotSession(bot.realBotId, params, { title });
+      const resp = options?.friendlyErrors
+        ? await createBotSession(bot.realBotId, params, { title }, undefined, '创建会话失败，请稍后重试')
+        : await createBotSession(bot.realBotId, params, { title });
       const s = resp.data;
       if (!s) throw new Error('创建会话失败');
       return { ok: true, data: toSessionView(s, bot.botId) };
     } catch (e) {
-      return { ok: false, error: toDomainError(e) };
+      if (!options?.friendlyErrors) return { ok: false, error: toDomainError(e) };
+      return {
+        ok: false,
+        error: {
+          code: 'BOT_SESSION_FAILED',
+          friendlyMessage: e instanceof BackendRequestError ? e.message : extractFriendlyErrorMessage(e),
+          canRetry: true,
+          alreadyHandled: e instanceof AceLoginRedirectError ||
+            (e instanceof BackendRequestError && Boolean(e.alreadyHandled || e.silent)),
+        },
+      };
     }
   },
   async getSessionDetail(
     bot: ChatBotView,
     userId: string,
     sessionId: string,
+    range?: ConversationSessionRequestRange,
+    options?: { silentNotFound?: boolean },
   ): Promise<DomainResult<BotChatSessionView>> {
     try {
       const params = withFriendBotRequestParams(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
+        ...(range ? {
+          device_uuid: range.deviceUuid,
+          ...(range.stage ? { stage: range.stage } : {}),
+        } : {}),
       });
       const resp = await getBotSession(bot.realBotId, sessionId, params);
       const s = resp.data;
       if (!s) throw new Error('查询会话详情失败');
       return { ok: true, data: toSessionView(s, bot.botId) };
     } catch (e) {
+      // An instance lookup miss is expected; ordinary detail requests retain default notifications.
+      if (options?.silentNotFound && range?.deviceUuid && e instanceof BackendRequestError && e.status === 404) {
+        if (e.toastKey) useErrorNotifyStore.getState().cancel(e.toastKey);
+        return { ok: false, error: { code: 'NOT_FOUND', friendlyMessage: '目标会话未找到', canRetry: true } };
+      }
       return { ok: false, error: toDomainError(e) };
     }
   },
@@ -464,6 +583,7 @@ export const botSessionService = {
     sessionId: string,
     page = 1,
     pageSize = BOT_MESSAGE_PAGE_SIZE,
+    range?: ConversationSessionRequestRange,
   ): Promise<BotMessagePageView> {
     const resp = await listBotSessionMessages(
       bot.realBotId,
@@ -473,6 +593,10 @@ export const botSessionService = {
         owner_id: bot.ownerId,
         page,
         page_size: pageSize,
+        ...(range ? {
+          device_uuid: range.deviceUuid,
+          ...(range.stage ? { stage: range.stage } : {}),
+        } : {}),
       }),
     );
     const items = (resp.data?.items ?? []) as BotMessageDto[];

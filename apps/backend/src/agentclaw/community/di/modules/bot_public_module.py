@@ -32,6 +32,17 @@ from agentclaw.community.core.bot_management.services.bcn_service import BcnServ
 from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.services.bot_discover_service import BotDiscoverService
 from agentclaw.community.core.bot_public.services.bot_public_service import BotPublicService
+from agentclaw.community.core.bot_public_risk.repository_protocol import RiskRepository
+from agentclaw.community.core.bot_public_risk.application import RiskApplication, RiskInputBuilder
+from agentclaw.community.core.bot_public_risk.input_builder import RiskInputBuilder as CurrentRiskInputBuilder
+from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
+from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
+from agentclaw.community.core.repository.protocols.local_skill_security_observation import LocalSkillSecurityObservationRepositoryProtocol
+from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilityStateReaderProtocol
+from agentclaw.community.core.bot_public_risk.tasks import RiskTasks
+from agentclaw.community.api.bot_public_risk_service import BotPublicRiskServiceProtocol, BotPublicRiskQueryProtocol
+from agentclaw.community.core.bot_public_risk.query import RiskQuery
+from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
 from agentclaw.community.core.bot_public.services.bot_catalog_metadata_service import (
     BcsBotCatalogMetadataService,
 )
@@ -131,6 +142,8 @@ class BotPublicModule(Module):
         device_sync_dispatcher: DeviceSyncDispatcher,
         bcsfuse_config: cfg.BcsFuseConfig,
         catalog_metadata_service: BotCatalogMetadataServiceProtocol,
+        risk_repository: RiskRepository,
+        risk_approval_guard: RiskApprovalGuard,
     ) -> BotPublicService:
         # Explicit provider (not ``binder.bind``): BotPublicService types
         # ``skill_set_service_factory`` under TYPE_CHECKING to avoid a
@@ -150,6 +163,8 @@ class BotPublicModule(Module):
             device_sync_dispatcher=device_sync_dispatcher,
             bcsfuse_config=bcsfuse_config,
             catalog_metadata_service=catalog_metadata_service,
+            risk_repository=risk_repository,
+            risk_approval_guard=risk_approval_guard,
         )
 
     @singleton
@@ -163,3 +178,35 @@ class BotPublicModule(Module):
     @inject
     def _bot_discover_service_protocol(self, svc: BotDiscoverService) -> BotDiscoverServiceProtocol:
         return svc
+
+    @singleton
+    @provider
+    @inject
+    def public_risk_application(
+        self, repository: RiskRepository, tasks: RiskTasks,
+        inputs: RiskInputBuilder,
+    ) -> BotPublicRiskServiceProtocol:
+        return RiskApplication(repository, tasks, inputs)
+
+    @singleton
+    @provider
+    @inject
+    def public_risk_query(
+        self, repository: RiskRepository,
+    ) -> BotPublicRiskQueryProtocol:
+        return RiskQuery(repository)
+
+    @singleton
+    @provider
+    @inject
+    def public_risk_inputs(
+        self,
+        capabilities: BotCapabilityStateReaderProtocol,
+        mcps: BotMCPProvider,
+        identities: CallerIdentityRepositoryProtocol,
+        observations: LocalSkillSecurityObservationRepositoryProtocol,
+        passport: PassportPlugin,
+    ) -> RiskInputBuilder:
+        return CurrentRiskInputBuilder(
+            capabilities, mcps, identities, observations, passport
+        )

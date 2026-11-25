@@ -6,7 +6,7 @@
 // 重建完整点路径 exportName（如 `bcsPanel.StateMachineRunView`）。
 
 /** UMD 数据平铺时需剔除的保留键，避免覆盖回调/框架字段（对齐引擎 CDNMount RESERVED_KEYS）。 */
-export const RESERVED_DATA_KEYS = ['onAction', 'onInteraction', 'eventEmitter', 'tab', 'params', 'payload'];
+export const RESERVED_DATA_KEYS = ['onAction', 'onInteraction', 'onOpenCreateGroup', 'eventEmitter', 'tab', 'params', 'payload'];
 
 /**
  * 从副屏 tab params（= resolveBusinessEntry finalPayload 或命令式 openTab params）重建 UMD 导出点路径。

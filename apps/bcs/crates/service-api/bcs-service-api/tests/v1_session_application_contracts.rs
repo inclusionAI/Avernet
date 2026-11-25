@@ -4,8 +4,8 @@ use bcs_service_api::application::v1::{
     AuthenticatedUserIdentity, CollectSession, CompleteSession, CreateSession,
     CreateSessionOutcome, DeleteResult, DeleteSession, DeleteSessionParticipant, GetSession,
     ListSessionMessages, ListSessions, MessageViewScope, Page, ParticipantMode,
-    SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionMessageService,
-    SessionParticipant, SessionCaller, SessionService, SessionStatus, UncollectSession,
+    SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionListSort,
+    SessionMessageService, SessionParticipant, SessionService, SessionStatus, UncollectSession,
     UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::types::{AttachmentType, MessageAttachment};
@@ -123,11 +123,11 @@ fn session_service_is_object_safe() {
 fn session_commands_carry_caller_and_no_raw_credentials() {
     let caller = human_caller();
     let create = CreateSession {
-        caller: SessionCaller::Human {
-            actor_id: "human_staff-1".into(),
-            owner_id: "staff-1".into(),
-            display_name: None,
-        },
+        // The create command carries the RAW
+        // authenticated caller; the effective
+        // SessionCaller is the application's live
+        // resolution.
+        caller: caller.clone(),
         group_id: "g1".into(),
         title: Some("plan".into()),
         kind: None,
@@ -145,6 +145,7 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
         offset: 0,
         limit: 25,
         status: Some(SessionStatus::Running),
+        sort: SessionListSort::CreatedAt,
     };
     let get = GetSession {
         caller: caller.clone(),
@@ -304,6 +305,7 @@ fn session_participant_serializes_bot_and_human_actors() {
         actor_id: "bot-1".into(),
         actor_kind: ActorKind::Bot,
         name: Some("Zhang San".into()),
+        avatar_url: None,
         role: bcs_service_api::application::v1::ParticipantRole::Driver,
         tags: vec!["tenant-a".into()],
         mode: ParticipantMode::Auto,
@@ -317,11 +319,15 @@ fn session_participant_serializes_bot_and_human_actors() {
     assert_eq!(bot_json["tags"], serde_json::json!(["tenant-a"]));
     assert_eq!(bot_json["mode"], "auto");
     assert_eq!(bot_json["joined_at"], 42);
+    // Bot display avatar column (bot-avatar plan design §5.1): always
+    // serialized, null when the participant has none.
+    assert_eq!(bot_json["avatar_url"], serde_json::Value::Null);
 
     let human = SessionParticipant {
         actor_id: "human_staff-1".into(),
         actor_kind: ActorKind::Human,
         name: Some("Alice".into()),
+        avatar_url: None,
         role: bcs_service_api::application::v1::ParticipantRole::Consultant,
         tags: Vec::new(),
         mode: ParticipantMode::Present,
@@ -333,6 +339,7 @@ fn session_participant_serializes_bot_and_human_actors() {
     assert_eq!(human_json["actor_kind"], "human");
     assert_eq!(human_json["role"], "consultant");
     assert_eq!(human_json["mode"], "present");
+    assert_eq!(human_json["avatar_url"], serde_json::Value::Null);
     assert!(human_json.get("joined_at").is_none());
 }
 

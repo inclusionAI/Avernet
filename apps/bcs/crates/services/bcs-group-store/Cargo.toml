@@ -9,6 +9,7 @@ version = { workspace = true }
 
 [dependencies]
 async-trait = { workspace = true }
+bcs-config = { workspace = true }
 bcs-db-api = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-event-store = { workspace = true }
@@ -17,9 +18,12 @@ chrono = "0.4"
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-uuid = { workspace = true }
 
 [dev-dependencies]
+bcs-db-migrations = { workspace = true }
+bcs-config-api  = { workspace = true }
+bcs-db-mysql    = { workspace = true }
+mysql_async     = { workspace = true }
 bcs-db-local = { workspace = true }
 bcs-test-support = { workspace = true }
 hex = { workspace = true }

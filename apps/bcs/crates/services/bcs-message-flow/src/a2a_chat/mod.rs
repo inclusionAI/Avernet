@@ -2,6 +2,8 @@ pub mod event_parser;
 pub mod run_store;
 mod queued;
 mod queued_runtime;
+mod frame;
+use frame::build_chat_send_frame;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,6 +61,10 @@ pub struct A2aChat {
     /// the production chain via `with_interceptors`.
     interceptors: Arc<bcs_service_api::interceptor::InterceptorChain>,
     organization: Option<Arc<dyn OrganizationCoreService>>,
+    /// Narrow bot-authority hook for the Human→Bot
+    /// control judgment (bot-authority plan Task 6.5);
+    /// unwired instances fail closed at that judgment.
+    bot_authority: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>>,
 }
 
 impl A2aChat {
@@ -102,7 +108,17 @@ impl A2aChat {
             session_management: None, queue_owner: Arc::new(std::sync::OnceLock::new()),
             interceptors: Arc::new(bcs_service_api::interceptor::InterceptorChain::new()),
             organization: None,
+            bot_authority: None,
         }
+    }
+
+    /// Wire the narrow bot-authority hook (Task 6.5).
+    pub fn with_bot_authority_hook(
+        mut self,
+        hook: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>>,
+    ) -> Self {
+        self.bot_authority = hook;
+        self
     }
 
     /// Attach the production outbound interceptor chain (security, audit, ...).
@@ -285,8 +301,14 @@ impl A2aChatRunService for A2aChat {
         &self,
         cmd: AsyncA2aChatCommand,
     ) -> ServiceResult<AsyncA2aChatAccepted> {
+        dispatch::validate_message(&cmd.message)?;
         let (response_tx, response_rx) = mpsc::channel::<String>(64);
-        let queued = self.queue_enabled(&cmd.target_bot_id).await;
+        let queued = cmd.a2a_test_user.is_none() && self.queue_enabled(&cmd.target_bot_id).await;
+        if let Some(selection) = &cmd.a2a_test_user {
+            if !matches!(&cmd.caller, CallerContext::Bot(actor) if actor.bot_uuid == selection.caller_bot_id) {
+                return Err(ServiceError::Forbidden("A2A test user selection denied".into()));
+            }
+        }
         if !queued {
         bcs_observability::observe_value("chat.channel.register", self.chat_run_events
             .register(
@@ -302,6 +324,7 @@ impl A2aChatRunService for A2aChat {
         let expires_at_ms = now_ms().saturating_add(cmd.timeout_ms);
         let chat_result = bcs_observability::observe_result("chat.prepare_and_deliver", self
             .chat_with_queue_mode(A2aChatCommand {
+                a2a_test_user: cmd.a2a_test_user,
                 caller: cmd.caller,
                 target_bot_id: cmd.target_bot_id.clone(),
                 message: cmd.message,
@@ -336,9 +359,9 @@ impl A2aChatRunService for A2aChat {
             let service = self.clone();
             let run_id = cmd.run_id.clone();
             let timeout_ms = cmd.timeout_ms;
-            tokio::spawn(bcs_observability::in_current_context(async move {
+            tokio::spawn(bcs_tracing_api::in_current_log_context(bcs_observability::in_current_context(async move {
                 service.drain_async_run(run_id, response_rx, timeout_ms).await;
-            }));
+            })));
         }
 
         let delivery = if managed {
@@ -665,6 +688,13 @@ impl A2aChat {
         }
     }
 
+    /// Human→Bot control judgment for acting AS the
+    /// source Bot (spec §8 / bot-authority plan Task 6.5).
+    /// The legacy `created_by` comparison — including its
+    /// `created_by: None → allow` auto-claim — is replaced
+    /// by the live management edge: a Bot without an
+    /// authorized manager controls nothing, and a failing
+    /// authority read is an internal error, never a deny.
     async fn ensure_source_owner(
         &self,
         from_bot_id: &str,
@@ -673,18 +703,18 @@ impl A2aChat {
         let Some(staff_id) = authenticated_staff_id.filter(|id| !id.is_empty()) else {
             return Ok(());
         };
-        let created_by = self
-            .registry
-            .get(from_bot_id)
-            .await
-            .and_then(|bot| bot.created_by);
-        if created_by.as_deref().is_some_and(|owner| owner != staff_id) {
-            Err(ServiceError::Unauthorized(format!(
-                "User {} is not the creator of bot {}",
+        let authority = self.bot_authority.as_deref().ok_or_else(|| {
+            ServiceError::InternalError("bot authority hook is not wired".into())
+        })?;
+        match authority.can_manage(staff_id, from_bot_id).await {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(ServiceError::Unauthorized(format!(
+                "User {} does not control bot {}",
                 staff_id, from_bot_id
-            )))
-        } else {
-            Ok(())
+            ))),
+            Err(error) => Err(ServiceError::InternalError(format!(
+                "bot authority lookup failed: {error}"
+            ))),
         }
     }
 
@@ -854,85 +884,6 @@ fn run_status(record: &ChatRunRecord, cancelled: Option<bool>) -> A2aRunStatus {
     }
 }
 
-fn build_chat_send_frame(
-    run_id: &str,
-    session_key: &str,
-    target_bot_id: &str,
-    from_bot_id: &str,
-    from_bot_name: &str,
-    from_actor_id: &str,
-    message: &str,
-    tags: &[String],
-    caller_wait_mode: Option<&str>,
-) -> ServiceResult<BcsFrame> {
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let params = ChatSendParams {
-        session_key: session_key.to_string(),
-        bcs_group_id: session_key.to_string(),
-        message: MessageContent {
-            role: "user".to_string(),
-            content: vec![ContentBlock::text(message)],
-            timestamp,
-        },
-        channel: ChannelInfo {
-            source: ChannelSource::Api,
-            user_id: Some(from_bot_name.to_string()),
-            actor_id: Some(from_bot_id.to_string()),
-            actor_name: Some(from_bot_name.to_string()),
-            thread_id: None,
-            identity_forwarding: None,
-        },
-        session_context: GroupContext {
-            session_id: session_key.to_string(),
-            participants: vec![target_bot_id.to_string()],
-            recipient: Some(target_bot_id.to_string()),
-            recipient_name: None,
-            recipient_role: None,
-            delivery_type: Some("send".to_string()),
-            originator: from_actor_id.to_string(),
-            from: from_actor_id.to_string(),
-            from_bot_id: Some(from_bot_id.to_string()),
-            from_bot_owner: None,
-            you_are_mentioned: true,
-            is_sender: false,
-            mentions: vec![target_bot_id.to_string()],
-            response_directive: None,
-            message: message.to_string(),
-            routing_mode: None,
-            group_type: None,
-        },
-        // Downstream execution has its own budget and must not inherit the
-        // caller's local polling deadline or the BCS run lifecycle deadline.
-        timeout_ms: Some(A2A_DOWNSTREAM_EXECUTION_TIMEOUT_MS),
-        idempotency_key: None,
-        // V3 keeps the execution session separate from the compatibility
-        // `bcs_group_id` field. Direct chats do not have a real group, but
-        // their resolved session key is still the trusted run scope that the
-        // plugin must echo on uplink events.
-        bcs_session_id: Some(session_key.to_string()),
-        tags: tags.to_vec(),
-        attachments: Vec::new(),
-    };
-    let mut params = serde_json::to_value(params)?;
-    if let Some(wait_mode) = caller_wait_mode.map(str::trim).filter(|mode| !mode.is_empty()) {
-        if let Some(obj) = params.as_object_mut() {
-            obj.insert(
-                "extensions".to_string(),
-                serde_json::json!({
-                    "caller_wait_mode": wait_mode,
-                }),
-            );
-        }
-    }
-    Ok(BcsFrame::Request(RequestFrame::new(
-        run_id.to_string(),
-        "chat.send",
-        Some(params),
-    )))
-}
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -942,49 +893,7 @@ fn now_ms() -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn direct_chat_failure_reason_maps_legacy_bot_error_text() {
-        assert_eq!(
-            direct_chat_failure_reason("Timeout waiting for bot response"),
-            DirectChatRunReason::Timeout
-        );
-        assert_eq!(
-            direct_chat_failure_reason("Agent response timed out before completion."),
-            DirectChatRunReason::Timeout
-        );
-        assert_eq!(
-            direct_chat_failure_reason("executor safety-net: time out"),
-            DirectChatRunReason::Timeout
-        );
-        assert_eq!(
-            direct_chat_failure_reason("target bot is not connected"),
-            DirectChatRunReason::BotNotConnected
-        );
-        assert_eq!(
-            direct_chat_failure_reason("blocked:policy"),
-            DirectChatRunReason::Blocked
-        );
-        assert_eq!(
-            direct_chat_failure_reason("unexpected model error"),
-            DirectChatRunReason::InternalError
-        );
-        assert_eq!(
-            direct_chat_service_error_reason(&ServiceError::InternalError(
-                "provider response header timeout after 5000ms".to_string()
-            )),
-            DirectChatRunReason::Timeout
-        );
-        assert_eq!(
-            direct_chat_service_error_reason(&ServiceError::InternalError(
-                "provider request failed: operation timed out".to_string()
-            )),
-            DirectChatRunReason::Timeout
-        );
-    }
-}
+mod tests;
 
 #[path = "dispatch.rs"]
 mod dispatch;

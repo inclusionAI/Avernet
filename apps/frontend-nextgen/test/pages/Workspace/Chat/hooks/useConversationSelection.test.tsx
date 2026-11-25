@@ -178,7 +178,7 @@ describe('useConversationSelection 入向(URL → Store)', () => {
     expect(store.selectedSessionId).toBe('s1');
   });
 
-  it('origin=others 缺 friend:剔除 sessionId,投影不回写残缺组合(AC-13)', () => {
+  it('origin=others 平铺会话无需 friend，保留 sessionId', () => {
     const { result } = renderHook(() =>
       useConversationSelection({ managedBots: [managedView], friendBots: [], hydrated: true }),
     );
@@ -195,7 +195,7 @@ describe('useConversationSelection 入向(URL → Store)', () => {
     const store = useConversationStore.getState();
     expect(store.selectedBotId).toBe('bot-a:1');
     expect(store.selectedOrigin).toBe('others');
-    expect(store.selectedSessionId).toBeNull();
+    expect(store.selectedSessionId).toBe('s9');
     // 投影保持 origin=others 且无 session= 串。
     expect(result.current.selection).toEqual({
       botId: 'bot-a:1',
@@ -203,10 +203,10 @@ describe('useConversationSelection 入向(URL → Store)', () => {
       origin: 'others',
       scope: undefined,
       friendUserId: undefined,
-      sessionId: undefined,
+      sessionId: 's9',
     });
     expect(serializeConversationRoute(result.current.selection)).toBe(
-      `section=managed&bot=${encodeURIComponent('bot-a:1')}&origin=others`,
+      `section=managed&bot=${encodeURIComponent('bot-a:1')}&origin=others&session=s9`,
     );
   });
 });
@@ -577,7 +577,7 @@ it('URL selections and readonly session selections expand only their target Bot'
   expect(useConversationStore.getState().expandedBotIds).toEqual({ [managedBot.botId]: true });
 });
 
-describe('团队 Bot 路由和只读选择', () => {
+describe('我协作的 Bot 路由和只读选择', () => {
   const teamView: ConversationBotView = { bot: managedBot, section: 'team' };
   it('无 section 深链解析 team，保留 session；只读选中与 URL 不降级 managed', () => {
     const { result } = renderHook(() =>
@@ -716,5 +716,80 @@ describe('无显式写点的选中由选择 Hook 中央认领快照', () => {
     act(() => seedStore({ sessionsByBotId: {} }));
     expect(result.current.readonly.session?.sessionId).toBe('os1');
     expect(result.current.readonly.friend).toEqual({ userId: 'f9', displayName: '小明' });
+  });
+});
+
+describe('Coding Bot 会话归属按 sessionId 解析', () => {
+  const codingBot: ChatBotView = {
+    ...managedBot,
+    botId: 'coding-bot:2088',
+    realBotId: 'coding-bot',
+    ownerId: '2088',
+    isAgentCodingBot: true,
+  };
+  const codingView: ConversationBotView = { bot: codingBot, section: 'team' };
+  const rowOf = (sessionId: string) => ({
+    sessionId,
+    botId: codingBot.botId,
+    title: sessionId,
+    messageCount: 0,
+    gmtCreate: '',
+    gmtModified: '',
+  });
+
+  it('深链中的创建者与当前用户相同（含数字前导零）时覆盖错误 origin 为 mine', () => {
+    const { result } = renderHook(() =>
+      useConversationSelection({ userId: '101', managedBots: [codingView], friendBots: [], hydrated: true }),
+    );
+    const sessionId = 'user:000101:session:mine:agent:coding-bot';
+
+    act(() =>
+      result.current.onRouteSelection({
+        section: 'team',
+        botId: codingBot.botId,
+        origin: 'others',
+        friendUserId: '999',
+        sessionId,
+      }),
+    );
+
+    const store = useConversationStore.getState();
+    expect(store.selectedOrigin).toBe('mine');
+    expect(store.selectedFriendUserId).toBeNull();
+    expect(store.selectedSessionId).toBe(sessionId);
+  });
+
+  it('深链中的创建者不同时切到 others，并把 Coding 会话解析为交互舞台', () => {
+    const sessionId = 'user:202:session:shared:agent:coding-bot';
+    seedStore({
+      sessionsByBotId: {
+        [codingBot.botId]: {
+          botId: codingBot.botId,
+          origin: 'others',
+          scope: 'all',
+          sessions: { ...emptyList, items: [rowOf(sessionId)] },
+          friendDirectory: { items: [], loading: false, error: null },
+          friendGroups: {},
+        },
+      },
+    });
+    const { result } = renderHook(() =>
+      useConversationSelection({ userId: '101', managedBots: [codingView], friendBots: [], hydrated: true }),
+    );
+
+    act(() =>
+      result.current.onRouteSelection({
+        section: 'team',
+        botId: codingBot.botId,
+        origin: 'mine',
+        sessionId,
+      }),
+    );
+
+    const store = useConversationStore.getState();
+    expect(store.selectedOrigin).toBe('others');
+    expect(store.selectedFriendUserId).toBe('202');
+    expect(result.current.interactive.session?.sessionId).toBe(sessionId);
+    expect(result.current.readonly.session).toBeNull();
   });
 });

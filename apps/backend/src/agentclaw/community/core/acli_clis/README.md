@@ -40,7 +40,7 @@ consumes:
   - "core.caller_identity guard — bot lookup and the edit-lock check shared with the identity switch"
   - "BotRepository, BotCollabLockRepositoryProtocol, CallerIdentityRepositoryProtocol (core.repository)"
   - "CollaboratorServiceProtocol (core.bot_collaborator) — who may read a bot's CLIs"
-  - "DeviceAdapterTransport (plugin_api) — the hop to the engine's /api/cli/acli/* endpoints"
+  - "DeviceAdapterTransport (plugin_api) — the hop to the engine's /api/cli/acli/* endpoints (teclaw: /api/v1/cli/acli/*)"
   - "TaskQueueService, HandlerRegistry, TaskQueueRepositoryProtocol (core.task_queue, core.repository) — the operations run as tasks"
   - "DatabasePlugin (plugin_api) — the ac_acli_operation rows"
   - "HttpClient (plugin_api) — the general client, for the market's search API"
@@ -52,6 +52,7 @@ internal_dependencies:
   - agentclaw.community.core.acli_clis
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_collaborator
+  - agentclaw.community.core.bot_management.addressing # stable entity locator for the shared edit lock
   - agentclaw.community.core.caller_identity
   - agentclaw.community.core.errors
   - agentclaw.community.core.mcp
@@ -63,3 +64,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api
   - agentclaw.community.utils
 ```
+
+CLI writes resolve the Bot before checking its current Owner and stable
+`bot_id:entity_id` edit lock. Owner handoff changes the authorized person, not
+the lock address; an existing lock held by somebody else must still block writes.

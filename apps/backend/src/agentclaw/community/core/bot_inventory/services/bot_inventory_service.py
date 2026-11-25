@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agentclaw.community.core.bot_management.expert_origin import expert_name_from_ext
+
 import json
 from dataclasses import replace
 from typing import Any, Mapping
@@ -164,14 +166,10 @@ class BotInventoryService(BotInventoryServiceProtocol):
                     bot_ids=bot_ids,
                 )
             )
-        cards.sort(
-            key=lambda c: (
-                c.deploy_mode.value,
-                c.bot_name,
-                c.bot_id,
-                -(c.publication_version or 0),
-            )
-        )
+        # Stable sorts keep a Bot's publication cards in lifecycle display
+        # order and give equally old Bots a repeatable order across pages.
+        cards.sort(key=lambda c: (c.bot_id, c.owner_entity_id, c.deploy_mode.value))
+        cards.sort(key=lambda c: c.bot_created_at, reverse=True)
         total = len(cards)
         start = (page - 1) * page_size
         page_cards = cards[start : start + page_size]
@@ -507,6 +505,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
                 owner_id=owner_id,
                 current_space=current_space,
             ),
+            expert_name=expert_name_from_ext(ext),
             avatar_url=_optional_str(ext.get("avatar_url") or row.get("avatar_url")),
             machine_id=_optional_str(ext.get("machine_id") or row.get("machine_id")),
             mount_path=_optional_str(ext.get("mount_path") or row.get("mount_path")),
@@ -525,6 +524,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
                 lifecycle_card.internal_status if lifecycle_card else None
             ),
             template_type=_optional_str(row.get("template_type")),
+            bot_created_at=row.get("gmt_create") or "",
         )
 
     @staticmethod
@@ -555,6 +555,19 @@ class BotInventoryService(BotInventoryServiceProtocol):
                     action is BotAction.UPGRADE and level < PermissionLevel.ADMIN
                 )
             )
+            # VIEW is the inventory/basic-information face shared with ordinary
+            # Space members.  VIEW_CONFIG is deliberately narrower: it tells
+            # clients that this caller has an explicit collaborator row and may
+            # open the Bot configuration surface in read-only mode.  Keep it
+            # independent from EDIT because an online service publication has
+            # no lifecycle edit action, while its explicit collaborators still
+            # retain MEMBER-level reads on the underlying Bot configuration.
+            if (
+                explicit
+                and level < PermissionLevel.OWNER
+                and BotAction.VIEW_CONFIG not in allowed
+            ):
+                allowed = (*allowed, BotAction.VIEW_CONFIG)
             if BotAction.DELETE in actions:
                 disabled.setdefault(
                     BotAction.DELETE.value, "Bot Owner permission required"

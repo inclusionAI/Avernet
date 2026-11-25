@@ -21,6 +21,8 @@ import httpx
 from agentclaw.community.core.task.task_runner.client.ports import (
     ApiKeyProvider,
     BotSendResult,
+    BotSessionRuntimeStatus,
+    OpenApiBotError,
     OpenApiBotPort,
 )
 
@@ -41,7 +43,7 @@ def _resp_summary(resp) -> str:
         return "<unreadable>"
 
 
-class OpenApiError(Exception):
+class OpenApiError(OpenApiBotError):
     pass
 
 
@@ -205,7 +207,7 @@ class OpenApiBotAdapter(
     def api_key_prefix(self) -> str:
         """secbaas allowed-bots URL 路径段:显式 api_key_prefix 优先,否则回退 api_key 前 8 位。
 
-        grant/revoke 与派发 claim_on JOIN 用同一前缀口径(单一公共 api-key,服务端持有)。"""
+        grant/revoke 使用同一公共 api-key 前缀口径(api-key 由服务端持有)。"""
         return self._k.api_key_prefix or self._k.api_key[:_DEFAULT_KEY_PREFIX_LEN]
 
     async def grant(self, *, bcs_bot_id: str, cookie: str, referer: str) -> None:
@@ -275,23 +277,39 @@ class OpenApiBotAdapter(
             self._k.base_url,
             len(message or ""),
         )
-        async with self._client_for_current_loop() as client:
-            r = await client.post(
-                "/openapi/v1/messages",
-                json={
-                    "bot_id": bot_id, "message": message, "metadata": metadata,
-                    **({"message_id": message_id} if message_id else {}),
-                },
-                headers=self._headers(),
-            )
+        try:
+            async with self._client_for_current_loop() as client:
+                r = await client.post(
+                    "/openapi/v1/messages",
+                    json={
+                        "bot_id": bot_id,
+                        "message": message,
+                        "metadata": metadata,
+                        **({"message_id": message_id} if message_id else {}),
+                    },
+                    headers=self._headers(),
+                )
+        except httpx.HTTPError as exc:
+            raise OpenApiError("send_message transport failed") from exc
         logger.info(
             "[task][openapi_bot] <<< send_message status=%s body=%s",
             r.status_code,
             _resp_summary(r),
         )
         _map_status(r)
-        payload = r.json()
-        data = payload.get("data") or {}
+        try:
+            payload = r.json()
+        except ValueError as exc:
+            raise OpenApiError("send_message response is not valid JSON") from exc
+        if not isinstance(payload, dict):
+            raise OpenApiError("send_message response must be a JSON object")
+        raw_data = payload.get("data")
+        if raw_data is None:
+            data: dict[str, Any] = {}
+        elif isinstance(raw_data, dict):
+            data = raw_data
+        else:
+            raise OpenApiError("send_message response data must be a JSON object")
         message_id = data.get("message_id")
         code = payload.get("code")
         # 业务信封校验:HTTP 200 但 code!=0 或无 message_id(如 ACE 登录门/未授权),若不拦截会 run_id=None,
@@ -328,6 +346,28 @@ class OpenApiBotAdapter(
         if code is not None and code != 0:
             raise OpenApiError(f"get_run 业务失败 code={code} payload={payload}")
         return payload.get("data") or {}
+
+    async def get_session_runtime_status(
+        self, session_id: str, *, bot_id: str | None = None,
+        lifecycle_stage: str | None = None,
+    ) -> BotSessionRuntimeStatus:
+        params: dict[str, str] = {"session_id": session_id}
+        if bot_id:
+            params["bot_id"] = bot_id
+        if lifecycle_stage:
+            params["lifecycle_stage"] = lifecycle_stage
+        async with self._client_for_current_loop() as client:
+            response = await client.get(
+                "/openapi/v1/sessions/runtime/status", params=params, headers=self._headers(),
+            )
+        _map_status(response)
+        payload = response.json()
+        if payload.get("code") != 0:
+            raise OpenApiError("Runtime observation query rejected")
+        observation = BotSessionRuntimeStatus.model_validate(payload.get("data"))
+        if observation.session_id != session_id:
+            raise OpenApiError("Runtime observation session mismatch")
+        return observation
 
     async def get_session_messages(
         self, session_id: str, *, limit: int = 50, bot_id: str | None = None,

@@ -1,21 +1,24 @@
 import { useCallback, useState } from 'react'
 import type { FlowRun } from '@avernet/clawweb-shared/web/types'
 import StatusBadge from '@avernet/workflow/web/components/StatusBadge'
+import RunMarkers from './RunMarkers'
 import { useDeleteFlowRun, useRerunFlowRun, useAbortFlowRun } from '@avernet/clawweb-shared/web/api/hooks'
+import type { RunRuntimeMetadata } from '../../shared/run-runtime-metadata'
 
 interface RunSummaryHeaderProps {
-  run: FlowRun
+  run: FlowRun & Partial<RunRuntimeMetadata>
   nodeCount: number
   succeededCount?: number
   failedCount?: number
   onAutoHeal?: (run: FlowRun) => void
   onApproval?: () => void
   pendingApprovalCount?: number
+  readOnly?: boolean
 }
 
 import { formatTime, formatDuration } from '@avernet/workflow/web/utils/time'
 
-export default function RunSummaryHeader({ run, nodeCount, succeededCount, failedCount, onAutoHeal, onApproval, pendingApprovalCount = 0 }: RunSummaryHeaderProps) {
+export default function RunSummaryHeader({ run, nodeCount, succeededCount, failedCount, onAutoHeal, onApproval, pendingApprovalCount = 0, readOnly = false }: RunSummaryHeaderProps) {
   const succeeded = succeededCount ?? run.succeeded_count
   const failed = failedCount ?? run.failed_count
   const succeededPct = nodeCount > 0 ? Math.round((succeeded / nodeCount) * 100) : 0
@@ -82,7 +85,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
         </div>
         <div className="flex items-center gap-2">
           <StatusBadge status={run.status} className="text-sm" />
-          {canRerun && (
+          {!readOnly && canRerun && (
             <button
               type="button"
               onClick={handleRerun}
@@ -93,7 +96,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
               {rerunMutation.isPending ? '⏳' : '🔄 重跑'}
             </button>
           )}
-          {isAbortable && (
+          {!readOnly && isAbortable && (
             confirmingAbort ? (
               <span className="inline-flex items-center gap-1">
                 <button
@@ -124,7 +127,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
               </button>
             )
           )}
-          {isAutoHealable && (
+          {!readOnly && isAutoHealable && (
             <button
               type="button"
               onClick={handleAutoHeal}
@@ -134,7 +137,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
               🩹 修复
             </button>
           )}
-          {run.status === 'waiting' && pendingApprovalCount > 0 && onApproval && (
+          {!readOnly && run.status === 'waiting' && pendingApprovalCount > 0 && onApproval && (
             <button
               type="button"
               onClick={onApproval}
@@ -147,7 +150,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
               )}
             </button>
           )}
-          {confirming ? (
+          {!readOnly && (confirming ? (
             <span className="inline-flex items-center gap-1">
               <button
                 type="button"
@@ -174,7 +177,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
             >
               🗑 删除
             </button>
-          )}
+          ))}
         </div>
       </div>
 
@@ -184,8 +187,12 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
         <Stat label="创建者" value={run.user_id || run.triggered_by || '—'} mono={!!(run.user_id || run.triggered_by)} />
         <Stat label="发起 Bot" value={(run.origin_bot_id || '—') + (run.plugin_version ? ` / ${run.plugin_version}` : '')} mono={!!(run.origin_bot_id || run.plugin_version)} />
         <Stat label="运行引擎" value={run.engine || '—'} mono={!!run.engine} />
-        <Stat label="耗时" value={formatDuration(run.total_duration_ms)} />
+        <RunMarkers run={run} variant="details" />
+        <Stat label="耗时" value={formatDuration(run.total_duration_ms)} className="lg:col-start-1" />
         <Stat label="开始时间" value={formatTime(run.started_at)} />
+        <Stat label="device_id" value={run.device_id ?? ''} mono className="break-all" />
+        <Stat label="BOT_TYPE" value={run.bot_type ?? ''} className="break-all" />
+        <Stat label="STAGE" value={run.stage ?? ''} className="break-all" />
       </dl>
 
       {/* Node progress bar */}
@@ -221,9 +228,9 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
   )
 }
 
-function Stat({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Stat({ label, value, mono, className }: { label: string; value: string; mono?: boolean; className?: string }) {
   return (
-    <div>
+    <div className={className}>
       <dt className="text-gray-400 text-xs">{label}</dt>
       <dd className={`mt-0.5 text-sm font-medium text-gray-900 ${mono ? 'font-mono' : ''}`}>
         {value}

@@ -40,6 +40,26 @@ pub struct Invitation {
     pub created_at: u64,
 }
 
+/// Read-only invitation target metadata and direct authenticated Human membership.
+///
+/// `already_joined` never includes access through managed Bots or a parent Group.
+/// Preview performs no actor creation, acceptance, membership or scope writes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InvitationPreview {
+    pub target_type: InvitationTargetType,
+    pub target_id: String,
+    /// Target Group itself, or the parent Group of a Session target.
+    pub group_id: String,
+    pub already_joined: bool,
+}
+
+/// Verify a non-expired, typed token and inspect current membership without joining.
+#[derive(Debug, Clone)]
+pub struct PreviewInvitation {
+    pub caller: AuthenticatedCaller,
+    pub token: String,
+}
+
 /// Result of accepting an invitation.
 ///
 /// `joined` indicates the acceptor joined on this call. `already_joined` is
@@ -93,6 +113,11 @@ pub struct AcceptInvitation {
 /// object-safe so an `Arc<dyn InvitationService>` can be shared across routes.
 #[async_trait]
 pub trait InvitationService: Send + Sync {
+    async fn preview_invitation(
+        &self,
+        query: PreviewInvitation,
+    ) -> Result<InvitationPreview, ApplicationError>;
+
     async fn create_group_invitation(
         &self,
         command: CreateGroupInvitation,

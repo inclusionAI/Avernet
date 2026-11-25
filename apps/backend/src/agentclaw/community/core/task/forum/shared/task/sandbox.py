@@ -11,10 +11,14 @@ from dataclasses import dataclass
 
 BBS_DIGEST_TASK_NAME = "digest_task"
 BBS_CONTENT_IMPORT_TASK_NAME = "content_import_task"
+BBS_POLL_STATISTICS_TASK_NAME = "poll_statistics_task"
+BBS_TOPIC_TAG_TASK_NAME = "topic_tag_task"
 
 __all__ = [
     "BBS_CONTENT_IMPORT_TASK_NAME",
     "BBS_DIGEST_TASK_NAME",
+    "BBS_POLL_STATISTICS_TASK_NAME",
+    "BBS_TOPIC_TAG_TASK_NAME",
     "BbsSandboxTask",
 ]
 

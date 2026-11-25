@@ -9,6 +9,7 @@ export function RoutineExecutionEnvironment({
   loading,
   error,
   allowDefaultModel,
+  showDivider = true,
   onChange,
 }: {
   form: BotEditorRoutineInput;
@@ -16,10 +17,12 @@ export function RoutineExecutionEnvironment({
   loading: boolean;
   error: string;
   allowDefaultModel: boolean;
+  /** 编辑器面板靠分割线隔离节；弹窗内用眉题分节，不需要再画一条线。 */
+  showDivider?: boolean;
   onChange: (next: BotEditorRoutineInput) => void;
 }) {
   return (
-    <div className="border-t border-border pt-4">
+    <div className={showDivider ? 'border-t border-divider pt-4' : ''}>
       <p className="m-0 mb-3 text-sm font-medium text-foreground">执行环境</p>
       <div className="grid gap-4 sm:grid-cols-3">
         <label className="block text-sm">

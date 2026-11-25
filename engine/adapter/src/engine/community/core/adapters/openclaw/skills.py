@@ -241,6 +241,7 @@ class OpenClawSkillsAdapter(SkillsService):
             {
                 "engine": request.engine,
                 "layout_contract_version": request.layout_contract_version,
+                **({"for_service_build": True} if request.for_service_build else {}),
             }
         )
         return PoolLayoutProbeResult(
