@@ -20,14 +20,11 @@ class DefaultCandidates:
     def _load(self, request):
         selected, after = [], ""
         while len(selected) < request.limit:
-            page = self.repository.page(after, 100)
+            page = self.repository.page_states(after, 100)
             if not page:
                 break
-            ids = [key for key, _ in page]
-            cards = self.repository.get_many_cards(ids)
-            for key in ids:
-                card = cards.get(key)
-                if card is None or card.deleted:
+            for key, _, deleted in page:
+                if deleted:
                     continue
                 if not self.catalog.eligible(key, request.filters):
                     continue
