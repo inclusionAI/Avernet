@@ -126,26 +126,12 @@ class SqliteOrmPlugin(DataSourcePlugin):
                 if str(col.type).upper() == "BIGINT":
                     col.type = Integer()
 
-        try:
-            Base.metadata.create_all(self._sync_engine, tables=baas_tables)
-        except Exception as _exc:  # pragma: no cover - multi-worker cold-start race
-            # sofapy boots several workers that create the schema concurrently; two
-            # can pass checkfirst for the same table and one hits "already exists"
-            # (MySQL/MariaDB 1050; SQLite analogous). The table exists, so succeed.
-            if "already exists" in str(_exc).lower() or "1050" in str(_exc):
-                logger.warning(
-                    "SqliteOrmPlugin: table already exists during concurrent "
-                    "create_all (multi-worker race) — treating as success: %s",
-                    _exc,
-                )
-            else:
-                raise
-
-        # create_all does not upgrade persistent SQLite files. Hold a write
-        # transaction across inspection and ALTER so two workers cannot add
-        # the same column concurrently.
+        # Serialize bootstrap as well as inspection and ALTER. A worker must
+        # not observe a half-created schema or race another worker to add a
+        # column to an existing database (create_all does not add columns).
         with self._sync_session_lock, self._sync_engine.begin() as connection:
             connection.exec_driver_sql("BEGIN IMMEDIATE")
+            Base.metadata.create_all(connection, tables=baas_tables)
             columns = connection.exec_driver_sql("PRAGMA table_info(baas_bot_run)")
             if not any(row[1] == "error_code" for row in columns.all()):
                 connection.exec_driver_sql(
