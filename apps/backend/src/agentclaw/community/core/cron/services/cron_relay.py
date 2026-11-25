@@ -35,7 +35,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.core.devices.services.device_service import DeviceService
-from agentclaw.community.core.cron.errors import CronRelayError
+from agentclaw.community.core.cron.errors import CronApiTimeoutError, CronRelayError
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.cron.services.cron_runtime_targets import (
@@ -244,16 +244,33 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
             bot_id_val = target.bot_id
 
             if isinstance(result, Exception):
-                logger.error(
-                    "[list_all_crons] Failed to fetch crons for "
-                    "bot=%s stage=%s: %s",
-                    bot_id_val,
-                    target.runtime_stage,
-                    result,
-                )
-                failed_targets.append(
-                    self._failed_target(target, "cron_api_failed", str(result))
-                )
+                # 与 _fetch_runtime_target_crons 的读超时分类保持一致：
+                # 超时是预期的部分失败形态，记录为 cron_api_timeout 的
+                # WARNING，而不是通用的 ERROR + cron_api_failed。
+                if isinstance(result, CronApiTimeoutError):
+                    logger.warning(
+                        "[list_all_crons] Adapter request timed out for "
+                        "bot=%s stage=%s: %s",
+                        bot_id_val,
+                        target.runtime_stage,
+                        result,
+                    )
+                    failed_targets.append(
+                        self._failed_target(
+                            target, "cron_api_timeout", str(result)
+                        )
+                    )
+                else:
+                    logger.error(
+                        "[list_all_crons] Failed to fetch crons for "
+                        "bot=%s stage=%s: %s",
+                        bot_id_val,
+                        target.runtime_stage,
+                        result,
+                    )
+                    failed_targets.append(
+                        self._failed_target(target, "cron_api_failed", str(result))
+                    )
                 continue
 
             if result.get("success"):
