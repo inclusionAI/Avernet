@@ -261,7 +261,11 @@ impl DbA2aBotStore {
         // Fence even an unconditional replacement against a concurrent Card write.
         // Caller retries the local CAS only.
         let expected=Some(expected.unwrap_or_else(||previous.as_ref().map_or(0,|v|v.revision)));
-        let visibility_assignment=if let Some(value)=visibility {format!("visibility='{}',",value.as_str())} else {String::new()};
+        // A2aBotRecord carries the complete management snapshot. Persist its
+        // visibility even on compare_and_set: legacy `bcs_bots` rows default to
+        // public, but the first Card attachment must commit the API's default
+        // protected visibility. The override path keeps its explicit value.
+        let visibility_assignment=format!("visibility='{}',",visibility.unwrap_or(record.visibility).as_str());
         let (bot_info_assignment,bot_info_values)=crate::bot_info_json_set(card_bot_info_updates(&name,&record.agent_card)?)?;
         let mut params=vec![name.into()];
         params.extend(bot_info_values);

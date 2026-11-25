@@ -8,7 +8,7 @@ use serde_json::json;
 
 async fn database() -> Arc<LocalSqliteDbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
-    db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_info TEXT DEFAULT '{}', bot_uuid TEXT NOT NULL, env TEXT NOT NULL, name TEXT, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, visibility TEXT NOT NULL DEFAULT 'protected', status TEXT NOT NULL DEFAULT 'online', user_visibility TEXT NOT NULL DEFAULT 'protected', agent_code TEXT NULL, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
+    db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_info TEXT DEFAULT '{}', bot_uuid TEXT NOT NULL, env TEXT NOT NULL, name TEXT, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, visibility TEXT NOT NULL DEFAULT 'public', status TEXT NOT NULL DEFAULT 'online', user_visibility TEXT NOT NULL DEFAULT 'protected', agent_code TEXT NULL, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
     db.execute(DbStatement::new("INSERT INTO bcs_bots (bot_uuid,env,provider_id,provider_bot_ref,connection_mode,is_deleted) VALUES ('bot', 'test', 'provider', 'remote', 'gateway', 0), ('bot', 'other', 'provider', 'remote', 'gateway', 0), ('plugin', 'test', 'provider', 'plugin', 'plugin', 0)")).await.unwrap();
     for sql in bcs_db_api::split_sql_statements(&[include_str!("../../../../migrations/sqlite/039_bot_a2a.sql"),"ALTER TABLE bcs_bots ADD COLUMN catalog_labels TEXT NULL;"].concat()).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
