@@ -36,15 +36,25 @@
 
 | 决策点 | 已选设计方向与尚待确认的参数 | 最晚冻结点；不通过时怎么办 |
 | --- | --- | --- |
-| 权威写者、受理/完成的原子边界 | 由 Worker 的 `ckpt:<sid>` 精确版本 CAS 裁决受理和终态，不另加 Session 锁；#4245 的 input 文档只恢复原请求，不能裁决不同输入争用。 | **T1，阻塞 T2/T7 并行实现共享写入。** 记录实际 key/表、CAS/事务范围、栅栏及丢响应读回证据；不能用内存锁或分布式多键事务假设代替。 |
+| 权威写者、受理/完成的原子边界 | 由 Worker 的 `ckpt:<sid>` 精确版本 CAS 裁决受理和终态，不另加 Session 锁；#4245 的 input 文档只恢复原请求，不能裁决不同输入争用。 | **T1，前置合同必须先明确；按范围调整可在门禁复核期间继续功能开发。** 记录实际 key/表、CAS/事务范围、栅栏及丢响应读回证据；不能用内存锁或分布式多键事务假设代替。 |
 | 重试等价性、线协议与查询预算 | 严格入口用 `(tenant, principal, group, messageId)`；完整规范化输入、显式 context、有效配置和扩展入指纹。建议采用 #3979 HTTP+JSON 与 #4190 的有界读取；不改变 JSON-RPC。 | T1/D0 冻结重试样例、分页与历史投影预算及其内部事件表示；T8 冻结等待时长、错误和扩展并验证预算。未冻结不发布 Card。 |
 | 首批工作流及 Bot 恢复能力 | 建议 BotTask 无环图、唯一最终节点，串行/扇出汇合；排除 Judge、Loop、HumanInput。送达未知时仅允许有持久去重保证且仍在其有效窗口内按原身份重发；只有查询能力不允许重发。 | T5/T6：决定拒绝发布该类 Bot 还是允许挂起并核实。Judge 如必需，应另立有恢复证据的扩展，不插进本批 reducer。 |
 | 历史、Artifact、请求墓碑及 Blob 保留 | 分开保存期限；固定历史读边界、裁剪标识；在引用解除前不能回收。#4190 的 8 MiB 是候选的**公开响应/单帧**预算，不是所有 Worker 的正文配额。 | T3/T4 定裁剪与过期合同；T9 前定期限、容量、未知停止告警、核实与人工恢复依据。无依据不解锁；无保留政策不启用自动删除。 |
 | 群开放、认证和撤销后的访问 | 只从可信认证链取 scope；显式发布；Card 只声明已实现能力。当前授权与冻结的工作流版本分别检查。 | T1/D0 冻结、T8 验证 Card、send、历史读取、订阅和 cancel 的权限矩阵（含既有订阅撤权）。没有明确授权就不开放对应入口。 |
 
-## 两项不能用测试替身代交的依赖
+## 交付范围与执行授权（2026-11-25 调整）
 
-**P：跨进程持久协调 provider（外部交付，阻塞 T2 的 provider GREEN、T7 故障验收和 T9）。** 交付责任在部署侧存储 provider，不在 HTTP 或 SQL 归档实现。当前基线的 Document/Stream 实现是测试模型或包装器；SQLite/MySQL 能保存归档不证明其已满足协调合同。接入方须交付可由两个独立进程连接同一隔离 namespace 的具体插件和启动配置，列出版本、能力（document exact-version CAS、`PersistentJsonMerge`、`AtomicJson`、Stream append/读回及 `StreamGroups`、KV、ZSet、membership 与 #4245 的 `RetainedLease`）及保留策略。`StrictLease` 或到期删键不等价于 `RetainedLease`：终止记录须按固定版本合同保留，使 membership 能区分 `Dead` 与缺记录的 `Unknown`；仍有 Dispatch/接管义务引用时不得清掉死亡证明。验证 holder 终止、provider 重启后仍读到 `Terminated` 并判定 `Dead`，未知/缺失记录不得被当成可接管证明。用 Worker controller 与 Connector claim 并发更新同一 Dispatch：CAS 冲突可重试，双方已确认字段不得相互覆盖；验证 consumer-group pending 消息的 reclaim、ACK 后不再交付及服务重启读回。缺任一必需能力时联合角色启动应失败。对该实现执行 `bcs-store-api` 对应合同、`bcs-dist-store` 受理/协调 harness；同一套实例验证旧 owner 提交被拒、丢响应按身份读回、持久服务重启不丢已确认状态。T9 的 `validation.md` 必须记录运行命令、provider 版本和故障结果；缺交付就标 blocked，不用每进程内存或仅 SQL 归档补位。
+按用户决定，将 **Group as an Agent 功能实现**与 **存储 provider 实现/认证**分开交付。本计划负责 T1～T8、W，以及 T9 的配置接缝、验收程序和功能装配；不负责开发或认证具体协调/DB provider。P 的实现、部署配置、存储服务重启/HA、时钟与保留保障、容量认证由独立 provider 工作流交付。内部实现不得复制进公开仓库。
+
+- **现在允许继续功能实现**：复用 `7c4d97a648` 的修复与验证，从 T2～T5/W 的功能缺口核对推进到 T6/T7，再到 T8/T9 装配；先落实每个任务实际消费的前置合同，不要求等 P 认证。D0 门禁复核并行推进；这项开发授权不表示 D0 已冻结或 Stage 2 已完成。
+- **功能完成**：真实业务实现、集中合同、故障注入、受影响测试与适用代码门禁通过。协调存储可注入合同级测试后端，SQLite 可验证 SQL 行为；测试报告必须标明后端，不将业务组件替身当作已经实现的功能。
+- **真实后端验收**：同一业务实现对已选 provider 跑合同和集成场景；真实 MySQL 升级/repo 验收仍需完成，环境缺失时列为待验收，不阻塞不依赖该环境的编码，也不称 MySQL 已通过。
+- **部署放行**：D0 复核、具体后端认证、真实跨进程故障矩阵和安全/容量门槛全部满足，另行授权。缺能力仍启动失败，禁止在运行时以 Model 或内存实现自动降级。
+- 本节及下方阶段表优先于任务中旧的 P 阻塞措辞：这些阻塞改指对应的真实后端验收/部署，而非功能开发。实际协议矛盾、未知停止、无权威证明等正确性问题仍阻塞依赖它的功能，不得借拆分范围延期掩盖。
+
+## 依赖合同（实现与验收分轨）
+
+**P：跨进程持久协调 provider（独立交付；阻塞真实后端验收和部署，不阻塞本计划功能开发）。** 交付责任在部署侧存储 provider，不在 HTTP 或 SQL 归档实现。当前基线的 Document/Stream 实现是测试模型或包装器；SQLite/MySQL 能保存归档不证明其已满足协调合同。接入方须交付可由两个独立进程连接同一隔离 namespace 的具体插件和启动配置，列出版本、能力（document exact-version CAS、`PersistentJsonMerge`、Stream append/读回及 `StreamGroups`、KV、ZSet、membership 与 #4245 的 `RetainedLease`；完整 `AtomicJson` 仅在实际消费者需要其操作时要求，不能把 DocumentCas/PersistentJsonMerge 等同于完整 AtomicJson）及保留策略。`StrictLease` 或到期删键不等价于 `RetainedLease`：终止记录须按固定版本合同保留，使 membership 能区分 `Dead` 与缺记录的 `Unknown`；仍有 Dispatch/接管义务引用时不得清掉死亡证明。验证 holder 终止、provider 重启后仍读到 `Terminated` 并判定 `Dead`，未知/缺失记录不得被当成可接管证明。用 Worker controller 与 Connector claim 并发更新同一 Dispatch：CAS 冲突可重试，双方已确认字段不得相互覆盖；验证 consumer-group pending 消息的 reclaim、ACK 后不再交付及服务重启读回。缺任一必需能力时联合角色启动应失败。对该实现执行 `bcs-store-api` 对应合同、`bcs-dist-store` 受理/协调 harness；同一套实例验证旧 owner 提交被拒、丢响应按身份读回、持久服务重启不丢已确认状态。T9 的 `validation.md` 必须记录运行命令、provider 版本和故障结果；缺交付就标 blocked，不用每进程内存或仅 SQL 归档补位。
 
 **W：不可变工作流修订目录（本计划交付，T5 校验后、T7/T9 真实重启前）。**
 
@@ -54,17 +64,17 @@
 
 ## 分阶段执行与放行门槛
 
-Stage 表达交付顺序，T1～T9 保留为下文的实现任务编号；两者不重复计算完成度。当前正在进行 **2026-11-25 修复复核：D0 冻结结论暂停，Stage 2 已有实现但未完成退出验收；不放行 Stage 3**。已有模型、正向原型和测试继续复用，不从零重写，也不把候选接口视作冻结合同。每次推进在 [validation.md](validation.md) 记录具体版本、命令、通过/失败/跳过项及证据层级。
+Stage 表达交付顺序，T1～T9 保留为下文的实现任务编号；两者不重复计算完成度。当前状态为 **D0 冻结结论仍待复核，Stage 2 已有实现；按本次范围调整允许继续后续功能开发，阶段完成与真实后端验收分别记录**。已有模型、正向原型和测试继续复用，不从零重写，也不把候选接口视作冻结合同。每次推进在 [validation.md](validation.md) 记录具体版本、命令、通过/失败/跳过项及证据层级。
 
 | Stage | 目标与任务映射 | 进入条件 | 退出条件 |
 | --- | --- | --- | --- |
 | **1：完成 T1，验证并冻结 D0** | S1.1～S1.5，见下文；对应 T1 及合同决策 | 当前即可继续 | 五项全部完成，冻结记录可追溯，无未裁决的协议缺口 |
-| **2：基础持久化与纯执行** | T2、T3、T4、T5、W；P 的 provider 交付并行推进 | Stage 1 完成 | 各任务实现及集中合同通过；双方言迁移、W 修订恢复通过；T2 provider GREEN 必须有 P |
-| **3：下游执行与 Worker 闭环** | T6、T7 | Stage 2 完成；配套联合版本可构建，P 能支持真实角色 | 完整结果交付、停止屏障、隔离核实、独立 Feed 和跨轮恢复通过；不是只有模型 GREEN |
-| **4：公开协议与访问边界** | T8 | Stage 3 完成后进行真实读写集成 | HTTP/Card/Get/List/SSE/cancel 合同与授权负测通过，旧 RPC 回归通过 |
-| **5：装配、跨进程故障与上线评估** | T9，复核 P/W 及各阶段交付 | Stage 2～4 通过，真实依赖和配置齐备 | Singlebox 独立进程故障矩阵与容量/恢复验收通过，验证记录明确可用范围；部署另行授权 |
+| **2：基础持久化与纯执行** | T2、T3、T4、T5、W；不含 P 开发 | 所消费的 T1 合同明确；D0 复核可并行 | 业务实现、集中合同、可运行迁移与 W 修订恢复通过；真实 MySQL/P 验收另列，不冒充通过 |
+| **3：下游执行与 Worker 闭环** | T6、T7 | 所依赖的 Stage 2 功能合同可用，配套版本可构建；不等待 P 认证 | 真实业务组件的完整结果交付、停止屏障、隔离核实、独立 Feed 和跨轮恢复测试通过；后端类型明确，真实 provider 故障验收另列 |
+| **4：公开协议与访问边界** | T8 | 所需 Stage 3 业务链可用 | HTTP/Card/Get/List/SSE/cancel 与授权负测、旧 RPC 回归通过；未验收部署保持关闭 |
+| **5：装配与验收交接** | T9 的配置、验收程序与功能装配；消费独立 P 交付 | Stage 2～4 功能合同可用 | 功能装配与可复用验收程序交付；真实 Singlebox 跨进程/后端重启/容量结果单独记账，缺 P 标待验收；部署另行授权 |
 
-**并行规则：** Stage 1 未退出前，只继续合同与验证原型，不放行 T2/T7 的生产共享写入。Stage 1 退出后，Stage 2 的 T3/T5 可并行，T2/T4 先对齐联合合同，W 在 T5 校验后交付。T8 的纯协议/替身测试可在 Stage 2～3 预先开展，但其真实集成和 Stage 4 退出必须等待 Stage 3。P 的准备可提前进行，不能用准备工作或替身测试宣称 provider 已交付。
+**并行规则：** D0 剩余门禁复核与功能实现并行；T3/T5 可并行，T2/T4 对齐联合合同，W 复用 T5 校验。T6/T7 只消费已明确且有测试的前置合同；遇到协议缺口先修合同及测试。T8 纯协议测试可提前开展，完整功能集成等待所需业务链。P 独立推进，缺 P 不阻塞编码，但对应真实验收和部署始终保持 blocked。
 
 ### Stage 1：五项冻结工作包
 
@@ -132,7 +142,7 @@ Stage 表达交付顺序，T1～T9 保留为下文的实现任务编号；两者
 
 ### 后续 Stage 的具体交付
 
-- **Stage 2（T2/T3/T4/T5/W）：** 将 Stage 1 协议落到真实 repo、双方言持久化、冻结历史输入、工作流修订及纯 Runner。P 并行交付；缺 P 时可以完成明确标记的本地实现，但 T2 provider GREEN 和整个 Stage 2 退出均保持 blocked。不可把原型 fixture 当作 W 或生产存储。
+- **Stage 2（T2/T3/T4/T5/W）：** 将 Stage 1 协议落到真实 repo、双方言持久化、冻结历史输入、工作流修订及纯 Runner。P 独立交付；缺 P 不阻塞本阶段功能完成，但 T2 provider GREEN 与实际后端验收单独保持 blocked。不可把原型 fixture 当作 W 或生产存储。
 - **Stage 3（T6/T7）：** 接通真实下游、Connector/Inbox/Runner、结果归档、统一停止屏障、核实队列、Supervisor、独立 Feed 及目录回收。执行实际 A/B 双轮和各故障窗口；同时验证 Stage 1 的合同没有被实现弱化。
 - **Stage 4（T8）：** 将已验证能力映射到公开 HTTP+JSON/Card/SSE，完成来源隔离、当前授权、快照分页与旧 RPC 回归。仅在全部相应能力已实现时声明 Card，不因阶段编号扩大公开范围。
 - **Stage 5（T9）：** 使用真实 P/W 和独立进程验证死亡接管、provider 重启、停止未知、目录持续容量与 Feed 持续故障；记录未开放能力和告警/恢复方案。任何上线动作仍需单独授权。
@@ -157,7 +167,7 @@ Stage 表达交付顺序，T1～T9 保留为下文的实现任务编号；两者
 
 ### T1：冻结跨进程合同，不先写 HTTP handler
 
-**执行状态（2026-11-25）：D0 原冻结结论暂停，修复与门禁重新核定中。** 已有 wire、正向协议原型、候选 repo/Runner 接口及审查修复证据见 [T1 验证记录](validation.md)。候选接口已进入工作树不代表已冻结；剩余工作按 S1.1～S1.5 收口。旧 `resolve_commit` 的反例只是基线能力探查，不是必须改变旧 API 的冻结门槛。模型通过不等于真实 provider/联合版本通过，Stage 1 退出前不放行 T2/T7。
+**执行状态（2026-11-25）：D0 原冻结结论暂停，修复与门禁重新核定中。** 已有 wire、正向协议原型、候选 repo/Runner 接口及审查修复证据见 [T1 验证记录](validation.md)。候选接口已进入工作树不代表已冻结；剩余工作按 S1.1～S1.5 收口。旧 `resolve_commit` 的反例只是基线能力探查，不是必须改变旧 API 的冻结门槛。模型通过不等于真实 provider/联合版本验收通过；后续功能开发按“交付范围与执行授权”推进，不据此恢复 D0 冻结。
 
 **文件：** 新增 `crates/contracts/bcs-dist-model/src/group_round.rs`、`crates/service-api/bcs-service-api/src/port/repo/distributed/group_round.rs`、`crates/test-support/bcs-test-support/src/contract/distributed/group_round.rs`、`crates/contracts/bcs-dist-model/tests/group_round_wire.rs`；修改各模块导出、`src/core/dist_runner.rs`（Service API）、相应 Cargo.toml 和 `Cargo.lock`。
 
@@ -225,7 +235,7 @@ Stage 表达交付顺序，T1～T9 保留为下文的实现任务编号；两者
 - [ ] 写 `downstream_accept_then_drop_reply` 和 `same_bot_distinct_node_conversations`：可控 Bot 接单后丢回复；不可查且未协商持久去重时 `assert_eq!(send_attempts, 1)`，不假报停止；同 Bot 两节点不能复用导致串读的远端会话。明确 BCS 提供的历史和远端续聊谁负责上下文，禁止两份历史重复拼接。
 - [ ] RED：创建新目标后运行 `cargo test -p bcs-dist-connector --test group_node_delivery`，让缺失的节点隔离、派发前复核或未决上报断言失败；已有通用重发/查询用例不是此处的 RED。
 - [ ] 在已合入的 `uncertain_start`（`Resend` / `AskAgent` / `Unresolved`）与明确未送达信号上验证四类证据，不重写发送器。已拒绝的重复发送不能反证原调用未送达；查询暂时 NotFound 不证明远端已停止。`src/delayed.rs` 的 D2（未决上报）、D3（死 holder 的重投）和 D8（drain 交接）仍是延迟合同：D2 接到持久监督义务。ACK 后死 holder 的恢复由 T7/T9 强制装配 #4245 Worker Supervisor 完成，不依赖 Connector 自身 D3；D8 主动 drain 可单独保持关闭。
-- [ ] 在首次网络 I/O 前持久化 `SendProof`（目标去重域、保证截止时间、操作、请求 ID、规范化正文及发送配置摘要）。在 `session.rs` 能力合同及 `rules.rs` 中使严格来源不能仅凭 `idempotent_start/input` 重发。`takeover_rechecks_dedupe_window_and_domain`：窗口内同域同语义且授权仍有效才可依赖去重重发；过期、时间不确定、同 credential ref 解析到异域、有效配置改变均不增加发送次数。`shared_binding_distinct_grants`：研究节点被撤销新数据委托、评审节点仍能按独立授权查询/取消自己的原 Task，不能交换节点或操作。
+- [ ] 在首次网络 I/O 前持久化 `SendProof`（目标去重域、保证截止时间、操作、请求 ID、规范化正文及发送配置摘要）。在 `bcs-dist-model/src/session.rs` 的 `DownstreamCapabilities` 能力合同及 `rules.rs` 中使严格来源不能仅凭 `idempotent_start/input` 重发。`takeover_rechecks_dedupe_window_and_domain`：窗口内同域同语义且授权仍有效才可依赖去重重发；过期、时间不确定、同 credential ref 解析到异域、有效配置改变均不增加发送次数。`shared_binding_distinct_grants`：研究节点被撤销新数据委托、评审节点仍能按独立授权查询/取消自己的原 Task，不能交换节点或操作。
 - [ ] 在 `call.rs` 流消费、`send.rs` query 及 adapter cancel 映射之前，核对首次 accepted 所绑定的目标域、远端 task/context、当前操作与本地 did/attempt。`wrong_remote_ref_is_not_stop_evidence` 分别送入另一任务的查询结果、终态流帧、取消回执；不保存为 A 的结果或停止事实，T7 仍拒绝释放 A。
 - [ ] `normal_stream_final_requires_complete_result` 与 `lost_artifact_tail_recovers_by_get`：T5 发布校验要求每个产出节点能按已确认身份取回完整终态快照（含全部有序 Artifact/Parts）。修改 `bcs-a2a-http/src/dist_agent/events.rs`、Connector `report.rs`/`send.rs`/`call.rs`：正常流的 `Completed` 状态仅提供经身份核验的停止事实，不能立即落成产物 `Final` 或结束结果恢复。正常完成和断流接管统一从完整 GetTask 校验清单、顺序、内容摘要及 T1 入站预算，持久固定结果后才首次 `admit_connector(Final)`；不把部分 Delta 与快照拼接，也不依赖后续 Final 覆盖首次内容。分别测试不断流的 Delta → 无产物 Completed、半段 Delta 后杀 Connector、完整结果固定后报告回包丢失；真实 Inbox 中只出现同身份同摘要的完整 Final，Runner 收到全部 Part。仅支持 Delta 或只回状态的目标不发布；已发布目标违约时不接受空/残缺产物，恢复期限耗尽报告有界结果不完整失败，并保留已证实的停止事实按统一屏障收尾。
 - [ ] T6 对按请求查询能力分 profile 验收：当前真实 A2A adapter 的 `ByRequest` 返回 `Unsupported`，不得把 GetTask 或假 port 的能力当作生产支持。需要该恢复能力的目标须交付经协商的 request-id 查询扩展及 adapter（实现在 `bcs-a2a-http`，不在 Worker 拼 URL），绑定目标域、原操作/请求身份和当前 query 授权，并记录协议/adapter 版本。用真实 HTTP adapter 加可控扩展服务验证索引迟到后找到原 Task，再读取并校验停止证据；NotFound 仍保持未知。标准 A2A profile 无该扩展且启动回包丢失时，应保留核实义务和告警，始终不重发、不构造 Task ID、不伪造停止；T9 分别记录两种 profile，缺扩展交付就标对应恢复验收 blocked。
@@ -277,4 +287,4 @@ Stage 表达交付顺序，T1～T9 保留为下文的实现任务编号；两者
 
 ## 执行边界
 
-本文不批准 Runtime PR、协议默认值上线、数据迁移执行或部署。任务中的未勾选命令和断言是**待完成验收**；已执行的阶段性证据以 `validation.md` 为准。本次重组只修改计划，不新增运行时验证结果。先完成 Stage 1 的 S1.1～S1.5 并冻结 D0，再按 Stage 2～5 推进；允许的并行仅限阶段表所列范围。T2/T4 须先与在审分支协调，T7 和真实 E2E 不绕过 P/W 或联合版本依赖。
+本文不批准 Runtime PR、协议默认值上线、数据迁移执行或部署。任务中的未勾选命令和断言是**待完成验收**；已执行的阶段性证据以 `validation.md` 为准。本次重组只修改计划，不新增运行时验证结果。先核对所消费合同和功能前置条件，再按 Stage 2～5 推进；D0 门禁复核与独立 P 认证并行，未通过不宣称冻结或部署就绪。允许的并行仅限阶段表所列范围。T2/T4 须先与在审分支协调，T7 和真实 E2E 不绕过 P/W 或联合版本依赖。

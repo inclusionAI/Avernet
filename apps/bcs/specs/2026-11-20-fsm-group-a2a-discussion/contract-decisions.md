@@ -1,6 +1,6 @@
 # FSM 群 A2A：D0 合同决策（2026-11-24）
 
-状态（2026-11-25 复核）：**D0 冻结结论暂停、待修复后门禁重新确认；Stage 2 已有实现，但退出验收未完成，P 未交付，不放行 Stage 3。** 历史 S1.5 冻结记录保留用于追溯，不覆盖文末复核裁决。本文细化[讨论稿](spec.md)，验证工作归入[实施计划](plan.md)的 T1～T9，门禁证据见[验证记录](validation.md)。以下记录和字段是设计，不是 `dev` 已交付的 API。[#4245 固定版本的受理说明](https://github.com/inclusionAI/Avernet/blob/c7187edcc99354f017f2e1a9bfcb3d6e88c15b96/apps/bcs/crates/services/bcs-dist-store/src/inbox/README.md)区分 input 文档、schedule、checkpoint 和 Inbox；现行 input 级 CAS 本身不能裁决不同 input 争用同一 Sid。
+状态（2026-11-25 范围调整）：**D0 冻结结论仍待复核；provider 开发/认证独立交付，允许按 plan 的前置合同继续 Group as an Agent 功能实现。功能完成、真实后端验收、部署放行分别核定。** 本次授权调整优先于下文历史“不放行 Stage 3”结论，不把未跑验收变成通过。 历史 S1.5 冻结记录保留用于追溯，不覆盖文末复核裁决。本文细化[讨论稿](spec.md)，验证工作归入[实施计划](plan.md)的 T1～T9，门禁证据见[验证记录](validation.md)。以下记录和字段是设计，不是 `dev` 已交付的 API。[#4245 固定版本的受理说明](https://github.com/inclusionAI/Avernet/blob/c7187edcc99354f017f2e1a9bfcb3d6e88c15b96/apps/bcs/crates/services/bcs-dist-store/src/inbox/README.md)区分 input 文档、schedule、checkpoint 和 Inbox；现行 input 级 CAS 本身不能裁决不同 input 争用同一 Sid。
 
 ## 1. 受理：在 `ckpt:<sid>` 上安装一轮，而非另加 Session 锁
 
