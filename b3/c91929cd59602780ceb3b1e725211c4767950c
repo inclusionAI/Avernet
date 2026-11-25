@@ -1,0 +1,25 @@
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_ee7faec72ec072::t_c244fbf998a8e1 163-167
+apps/bcsfuse/packages/search-core/src/search_core/application/card_metadata.py
+  s_ee7faec72ec072::t_cf7672c80f9c68 25-28,38,49,53,55,58-65,73,80,82-84,100,120,143,146-151,155-160,164,166,169,172,175,182,186,189,193
+apps/bcsfuse/packages/search-core/src/search_core/application/default_candidates.py
+  s_ee7faec72ec072::t_98cb95576eabdf 115,131-133
+apps/bcsfuse/packages/search-core/tests/test_filtered_index_fallback.py
+  s_ee7faec72ec072::t_35062a069b5ff0 39-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b3c91929cd59602780ceb3b1e725211c4767950c",
+  "prompts": {},
+  "sessions": {
+    "s_ee7faec72ec072": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bb4-0877-7ef3-abef-b714be896d7a",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
