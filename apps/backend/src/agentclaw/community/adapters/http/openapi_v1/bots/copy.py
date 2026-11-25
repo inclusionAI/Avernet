@@ -482,7 +482,20 @@ def submit_copy(
 
     dst_bot_id = generate_bot_id(owner_id, bot_repo)
 
-    current_space = space_context.resolve_current(owner_id=owner_id, header_space_id=None)
+    # Copy is same-space only: the dst lands in the source's business space, not
+    # the caller's personal default. Routing ``source.space_id`` through
+    # ``resolve_current`` (the same resolver the plain create route uses for its
+    # ``body.space_id``) gives both the membership enforcement and the quota
+    # scope split for free — a team ``space_id`` resolves to a team scope (the
+    # caller must be a member, else ``_require_member_space`` raises), and a
+    # NULL/``personal:<owner>`` value resolves to the caller's personal space.
+    # The resolved ``space_id`` then flows into the quota preflight below and the
+    # durable creation spec, so ``create_job``'s downstream ``create_bot`` →
+    # ``guard_add`` re-evaluates quota in the *same* scope, never silently
+    # re-routing a team copy back to the owner's personal ceiling.
+    current_space = space_context.resolve_current(
+        owner_id=owner_id, header_space_id=source.get("space_id")
+    )
     space_id = getattr(current_space, "numeric_id", None)
 
     # Pre-flight platform validation (quota / reserved-engine / name) before
@@ -740,8 +753,16 @@ def retry_copy(
     # bot fields; PUBLIC + CLOUD mirror the public OpenAPI surface. Copy is
     # openclaw-only, so a missing engine on a still-partial dst falls back to
     # openclaw rather than a None BotCreateSpec.engine_type would reject.
+    # ``header_space_id`` is the dst's recorded space_id (not None) so a retry of
+    # a copy-into-team-space preserves the team scope/space_kind — falling back
+    # to None here would re-resolve the owner's personal space and re-route the
+    # downstream ``create_bot`` → ``guard_add`` quota check away from the
+    # original target. A missing/NULL dst space_id keeps the personal fallback
+    # (matches submit_copy's personal branch).
+    dst_space_id = dst.get("space_id")
     retry_space = space_context.resolve_current(
-        owner_id=row.dst_owner_id, header_space_id=None
+        owner_id=row.dst_owner_id,
+        header_space_id=str(dst_space_id) if dst_space_id is not None else None,
     )
     payload_spec: dict[str, Any] = {
         **creation_spec_to_payload(
