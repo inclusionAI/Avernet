@@ -1,0 +1,52 @@
+apps/evolverun/taskguard/README.md
+  h_bb3ca6fb13c5df 19
+apps/evolverun/taskguard/docs/timeout-hotfix.md
+  h_bb3ca6fb13c5df 1-111
+apps/evolverun/taskguard/src/controller.ts
+  h_bb3ca6fb13c5df 4,29,64-68,523-556,563-567,579-582,689,691-696,715,762,764-767,770-773,782,790,817-830,837-842,888,914,937-948,951,955-957,966,973-974,978-986,993,996-998,1013,1019,1029-1031,1208-1209,1705-1709,1711,1748-1754,1818,1821,1839,1876,1887-1889,1976-1979,1982,1999,2208-2217,2221,2229-2231,2275,2295,2312,2314,2319,2326,2334-2337,2349,2363,2371-2373,2378-2380,2391,2395-2396,2422,2681-2683,2685-2689,2691-2692,2694-2696,2698-2704,2706-2711,2713-2745,2747-2762,2799-2800,3224-3225,3227,3264,3402-3403,3508-3509,3524,3616,4022,4060-4063,4071,4074,4099-4100,4694-4699,4900-4910,4920-4921,4923,4926,4975-4985,4997,13152,13167-13169,13171,13655
+apps/evolverun/taskguard/src/executors/embedded-agent.ts
+  h_bb3ca6fb13c5df 41,529-538,540-546,652,663,674,716,860,891,940-942,967,971-972,977-978,980-981,985-986,988-989,1026-1028,1089-1090,1092,1094,1114,1144,1174,1458-1459
+apps/evolverun/taskguard/src/executors/execution-deadline.ts
+  h_bb3ca6fb13c5df 1-154
+apps/evolverun/taskguard/src/executors/llm-semaphore.ts
+  h_bb3ca6fb13c5df 13,29-30,35-43,46-48,98,118,161,165,181-182,200,210-215,228,234
+apps/evolverun/taskguard/src/index.ts
+  h_bb3ca6fb13c5df 25,1096,1112,1132,1262,1291,1303,1310,1353,1360,1369,1377,1379,1628,1633,1635,1645,1658,1664,1700,1708
+apps/evolverun/taskguard/src/platform/controller-fanout-runtime.ts
+  h_bb3ca6fb13c5df 175-176,180-182
+apps/evolverun/taskguard/src/runtime/owned-flow-timeout.ts
+  h_bb3ca6fb13c5df 1-37
+apps/evolverun/taskguard/src/types.ts
+  h_bb3ca6fb13c5df 1567-1572,1722-1726,1728-1729
+apps/evolverun/taskguard/tests/controller/async-lifecycle.test.ts
+  h_bb3ca6fb13c5df 1-171
+apps/evolverun/taskguard/tests/controller/completion-isolation.test.ts
+  h_bb3ca6fb13c5df 1-191
+apps/evolverun/taskguard/tests/controller/fixtures.ts
+  h_bb3ca6fb13c5df 1-154
+apps/evolverun/taskguard/tests/controller/owned-flow-timeout.test.ts
+  h_bb3ca6fb13c5df 1-194
+apps/evolverun/taskguard/tests/controller/subworkflow-policy.test.ts
+  h_bb3ca6fb13c5df 1-49
+apps/evolverun/taskguard/tests/dispatch/execution-signal.test.ts
+  h_bb3ca6fb13c5df 1-108
+apps/evolverun/taskguard/tests/executors/embedded-agent.test.ts
+  h_bb3ca6fb13c5df 1-415
+apps/evolverun/taskguard/tests/executors/execution-deadline.test.ts
+  h_bb3ca6fb13c5df 1-335
+apps/evolverun/taskguard/tests/executors/llm-semaphore.test.ts
+  h_bb3ca6fb13c5df 1-90
+apps/evolverun/taskguard/tests/fanout-runtime-safety.test.ts
+  h_bb3ca6fb13c5df 402-419
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "97f319f0297b609b4eb4ae629a8b3eb4f20af042",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChat.ts
+  s_55be12b5688e7b::t_7611c112814c7c 21
+  s_55be12b5688e7b::t_c1acb2e88c2a6c 10,13
+  s_55be12b5688e7b::t_b3e1c7c9a3670c 137-144
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChatSendActions.ts
+  s_55be12b5688e7b::t_4b3e0847f06a70 23,25
+  s_55be12b5688e7b::t_502f1bf2b36937 4
+  s_55be12b5688e7b::t_f033251a6189dd 1-3,5-22,24,26-85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3f397722bb2a4210b43049e530bca3b9c43bc2d9",
+  "prompts": {},
+  "sessions": {
+    "s_55be12b5688e7b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0b6561bd-e69f-49c0-b632-ee95017d8090",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
