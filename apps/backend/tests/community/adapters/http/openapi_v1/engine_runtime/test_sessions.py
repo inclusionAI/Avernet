@@ -948,6 +948,80 @@ def test_missing_session_payload_is_404_not_500(client, relay):
 # ── BCN-authorized friend compatibility branch ─────────────────────────────
 
 
+def test_owner_caller_sessions_use_the_authenticated_subject_instance(
+    client, relay, friendships, expert
+):
+    relay.set_bot_type("service")
+    relay.set_call_type("caller")
+    expert.sessions = {"items": [expert.session], "total": 1}
+
+    data = ok(client.get(
+        _base(), params={"owner_id": OWNER, "f_user_id": OWNER, "stage": "online"},
+    ))
+
+    assert data["items"][0]["session_id"] == "friend-session"
+    assert relay.calls == []
+    assert friendships.calls == []
+    assert [call[0] for call in expert.calls] == ["add_chat_bot", "list_chat_sessions"]
+
+
+def test_collaborator_caller_sessions_use_the_authenticated_subject_instance(
+    make_client, relay, friendships, expert
+):
+    caller = "collaborator"
+    relay.set_bot_type("service")
+    relay.set_call_type("caller")
+    relay.add_operator(caller)
+    expert.sessions = {"items": [expert.session], "total": 1}
+    client = make_client(router, caller=caller)
+
+    response = client.get(
+        _base(), params={"owner_id": OWNER, "f_user_id": caller, "stage": "online"},
+    )
+
+    assert response.status_code == 200, response.json()
+    assert relay.calls == []
+    assert friendships.calls == []
+    add_call = next(call for call in expert.calls if call[0] == "add_chat_bot")
+    assert add_call[1] == (caller, BOT, OWNER)
+
+
+def test_owner_mode_self_subject_preserves_the_shared_runtime(
+    client, relay, friendships, expert
+):
+    relay.set_bot_type("service")
+    relay.results = [EngineResult(data=[ENGINE_SESSION])]
+
+    data = ok(client.get(
+        _base(), params={"owner_id": OWNER, "f_user_id": OWNER, "stage": "online"},
+    ))
+
+    assert data["items"][0]["session_id"] == SESSION_ID
+    assert relay.paths == ["/api/sessions"]
+    assert friendships.calls == []
+    assert expert.calls == []
+
+
+def test_owner_mode_collaborator_self_subject_filters_the_shared_runtime(
+    make_client, relay, friendships, expert
+):
+    caller = "collaborator"
+    relay.set_bot_type("service")
+    relay.add_operator(caller)
+    relay.results = [EngineResult(data=[ENGINE_SESSION])]
+    client = make_client(router, caller=caller)
+
+    response = client.get(
+        _base(), params={"owner_id": OWNER, "f_user_id": caller, "stage": "online"},
+    )
+
+    assert response.status_code == 200, response.json()
+    assert relay.calls[-1]["params"]["user_id"] == caller
+    assert relay.calls[-1]["params"]["source"] == "all_but_others"
+    assert friendships.calls == []
+    assert expert.calls == []
+
+
 def test_friend_sessions_reuse_expert_chat_without_owner_runtime_relay(
     make_client, relay, friendships, expert
 ):

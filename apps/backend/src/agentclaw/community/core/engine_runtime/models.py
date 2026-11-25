@@ -56,6 +56,10 @@ class BotFacts:
     #: were once "the caller's id" now need the owner the bot was actually
     #: resolved against.
     owner_id: str
+    #: Conversation identity mode.  Session adapters use this trusted projection
+    #: to decide whether an explicit session subject selects an independent
+    #: Caller runtime or keeps the existing shared service runtime.
+    call_type: str = "owner"
 
     @classmethod
     def from_record(
@@ -96,6 +100,7 @@ class BotFacts:
             bot_type=str(record.get("bot_type") or ""),
             active_engine=str(record.get("active_engine") or ""),
             owner_id=str(record.get("owner_id") or owner_id),
+            call_type=str(record.get("call_type") or "owner"),
         )
 
 

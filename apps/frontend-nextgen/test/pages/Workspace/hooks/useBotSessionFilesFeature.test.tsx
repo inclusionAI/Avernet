@@ -63,7 +63,9 @@ it('托管 Bot 的 / 命令保留 skill 入口', () => {
 
   const items = result.current.command.categories[0]?.items ?? [];
   expect(items.map((item) => item.name)).toContain('skill');
-  expect(mockedUseBotSessionFiles).toHaveBeenLastCalledWith('bot', 'session-1', 'human_900003', '2088', undefined, undefined, undefined);
+  expect(mockedUseBotSessionFiles).toHaveBeenLastCalledWith(
+    'bot', 'session-1', 'human_900003', '2088', 'human_900003', undefined, undefined,
+  );
 });
 
 it('好友 Bot 的 / 命令不展示 skill 入口', () => {
@@ -178,7 +180,7 @@ it.each([
     'session-1',
     'human_900003',
     '2088',
-    target.isFriendBot ? 'human_900003' : undefined,
+    'human_900003',
     stage ?? undefined,
     undefined,
   ]);
@@ -187,8 +189,8 @@ it.each([
     'session-1',
     'human_900003',
     '2088',
-    // 好友身份(2026-11-19 需求追加):好友 Bot 上传链携带 f_user_id,非好友缺省不携带
-    target.isFriendBot ? 'human_900003' : undefined,
+    // 对话模块统一携带当前会话主体，后端再区分 Caller 独立实例或共享运行时。
+    'human_900003',
     stage ?? undefined,
     undefined,
   ]);
@@ -212,8 +214,10 @@ it('团队服务 Bot 资源面板将 online 阶段传递给预览 Hook', () => {
   render(<Fixture />);
   fireEvent.click(screen.getByText('Open files'));
   expect(useBotSessionFilePreview).toHaveBeenLastCalledWith(null, expect.objectContaining({ stage: 'online' }));
-  // 非好友形态:预览链不带好友身份。
-  expect(useBotSessionFilePreview).toHaveBeenLastCalledWith(null, expect.not.objectContaining({ friendUserId: 'viewer' }));
+  expect(useBotSessionFilePreview).toHaveBeenLastCalledWith(
+    null,
+    expect.objectContaining({ friendUserId: 'viewer', stage: 'online', userId: 'viewer' }),
+  );
 });
 
 it('好友 Bot 资源面板将好友身份传递给预览 Hook(2026-11-19 需求追加:预览内容链携带 f_user_id)', () => {
@@ -241,7 +245,14 @@ it('好友 Bot 资源面板将好友身份传递给预览 Hook(2026-11-19 需求
 
 it.each(['draft', 'verify', 'online'] as const)('debug stage override %s applies to file list, uploads and preview', (stage) => {
   function Fixture() {
-    const files = useBotSessionFilesFeature({ ...bot, botType: 'service', runtimeStage: stage }, session, 'viewer', jest.fn(), stage);
+    const files = useBotSessionFilesFeature(
+      { ...bot, botType: 'service', runtimeStage: stage },
+      session,
+      'viewer',
+      jest.fn(),
+      stage,
+      { subjectScoped: false },
+    );
     return <><button type="button" onClick={files.openFileDrawer}>Open debug files</button>{files.featureNode}</>;
   }
   render(<Fixture />);

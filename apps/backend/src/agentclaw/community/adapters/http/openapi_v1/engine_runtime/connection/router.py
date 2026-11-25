@@ -30,7 +30,9 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.friend_chat import (
     FriendUserIdQuery,
-    authorize_friend_chat,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.backend import (
+    resolve_session_backend,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     DeviceUuidQuery,
@@ -46,6 +48,7 @@ from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
 )
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.api.human_bot_friendship_service import (
     HumanBotFriendshipServiceProtocol,
 )
@@ -168,26 +171,25 @@ async def get_connection(
         HumanBotFriendshipServiceProtocol
     ),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     gateway: GatewayEndpoint = Injected(GatewayEndpoint),
 ) -> Envelope[DesktopConnection | Connection | FriendConnection]:
     """Get usable socket connections for a bot."""
-    if f_user_id is not None and device_uuid is not None:
-        raise EngineResourceNotFoundError("instance selection is unavailable for friend chat")
-    if f_user_id is not None:
-        if not session_id:
-            raise EngineResourceNotFoundError(
-                "friend connection requires a session_id"
-            )
-        await authorize_friend_chat(
-            request=request,
-            bot_id=bot_id,
-            caller_id=user_id,
-            owner_id=owner_id,
-            friend_user_id=f_user_id,
-            friendships=friendships,
-            expert=expert,
-            stage=stage.value,
+    if f_user_id is not None and not session_id:
+        # Reject an incomplete subject-scoped request before authorization can
+        # create the user's idempotent ExpertChat membership projection.
+        raise EngineResourceNotFoundError(
+            "subject connection requires a session_id"
         )
+    subject_facts = None
+    if f_user_id is not None:
+        subject_facts = await resolve_session_backend(
+            relay=relay, friendships=friendships, expert=expert, request=request,
+            bot_id=bot_id, user_id=user_id, owner_id=owner_id,
+            friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
+        )
+    if f_user_id is not None and subject_facts is None:
+        assert session_id is not None
         try:
             result = await expert.connect_chat_session(
                 user_id=f_user_id,

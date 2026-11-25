@@ -1,12 +1,14 @@
-"""Owned-session authorization shared by friend-chat file operations."""
+"""Owned-session authorization shared by subject-scoped file operations."""
+
+import asyncio
 
 from dataclasses import dataclass
 
 from fastapi import Request
 
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.friend_chat import authorize_friend_chat
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import resolve_operable_bot
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.backend import resolve_session_backend
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
 from agentclaw.community.api.human_bot_friendship_service import HumanBotFriendshipServiceProtocol
@@ -36,15 +38,16 @@ async def authorize_file_list(
     relay: EngineRuntimeRelayProtocol, friendships: HumanBotFriendshipServiceProtocol,
     expert: ExpertChatServiceProtocol,
 ) -> str:
-    if friend_user_id is None:
-        await resolve_operable_bot(
-            relay, bot_id, caller_id=user_id, owner_id=owner_id,
-            stage=stage.value, surface="sessions",
-        )
+    facts = await resolve_session_backend(
+        relay=relay, friendships=friendships, expert=expert, request=request,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id,
+        friend_user_id=friend_user_id, stage=stage,
+    )
+    if facts is not None:
         return stage.value
-    resolved_stage = await authorize_friend_chat(
-        request=request, bot_id=bot_id, caller_id=user_id, owner_id=owner_id,
-        friend_user_id=friend_user_id, friendships=friendships, expert=expert, stage=stage.value,
+    assert friend_user_id is not None
+    resolved_stage = await asyncio.to_thread(
+        expert.resolve_chat_stage, bot_id, owner_id, stage.value,
     )
     try:
         # The subject's independent Caller container or shared-runtime session
@@ -86,10 +89,16 @@ async def authorize_file_operation(
                 raise
             friend_user_id = user_id
 
-    resolved_stage = await authorize_friend_chat(
-        request=request, bot_id=bot_id, caller_id=user_id, owner_id=owner_id,
-        friend_user_id=friend_user_id, friendships=friendships, expert=expert,
-        stage=stage.value,
+    facts = await resolve_session_backend(
+        relay=relay, friendships=friendships, expert=expert, request=request,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id,
+        friend_user_id=friend_user_id, stage=stage, device_uuid=None,
+    )
+    if facts is not None:
+        return SessionFileAccess(facts=facts, stage=stage.value)
+    assert friend_user_id is not None
+    resolved_stage = await asyncio.to_thread(
+        expert.resolve_chat_stage, bot_id, owner_id, stage.value,
     )
     try:
         await expert.get_owned_chat_session(
