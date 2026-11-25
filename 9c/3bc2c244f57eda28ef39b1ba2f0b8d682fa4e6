@@ -1,0 +1,16 @@
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/run-execution-record-authorization.test.ts
+  h_bb3ca6fb13c5df 18
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/run-execution-record.test.ts
+  h_bb3ca6fb13c5df 15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9c3bc2c244f57eda28ef39b1ba2f0b8d682fa4e6",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
