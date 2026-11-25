@@ -2,7 +2,10 @@
 // deriveRiskUiState 与老前端（open-claw riskFlowState）同构；phase 为后端开放字符串，
 // 未知值按保守锁定兜底（行编辑禁用 + 通用文案），绝不因未知值解锁。
 
-import type { BotPublicRiskCheckRecord } from '@/services/backendApi/collaboration/collaborationBotPublicRiskController';
+import type {
+  BotPublicRiskCheckRecord,
+  CreateBotPublicRiskRequest,
+} from '@/services/backendApi/collaboration/collaborationBotPublicRiskController';
 import type { ViewDept } from '@/services/backendApi/collaboration/collaborationPublicationController';
 import { publicConfigsEqual } from './policies';
 import type { PublicConfig, PublicScope } from './types';
@@ -41,6 +44,17 @@ export function deriveRiskUiState(record: BotPublicRiskRecordLike | null): BotPu
   if (record.phase === 'APPROVING') return { kind: 'approving', record };
   if (record.security_status === 'PASS' || record.phase === 'ADVANCING') return { kind: 'advancing', record };
   return { kind: 'checking', record };
+}
+
+/** 重试沿用失败申请的对用户公开目标及组织范围。 */
+export function getRiskRetryIntent(
+  state: BotPublicRiskUiState,
+): Pick<CreateBotPublicRiskRequest, 'visibility' | 'view_depts'> | null {
+  if (state.kind !== 'failed' && state.kind !== 'attention') return null;
+  const target = state.record.target;
+  const visibility = target?.visibility.toLowerCase();
+  if (target?.public_scope !== 'user' || (visibility !== 'public' && visibility !== 'protected')) return null;
+  return { visibility, view_depts: target.view_depts };
 }
 
 /** 失败标题、恢复操作和行级简短状态使用同一映射。 */

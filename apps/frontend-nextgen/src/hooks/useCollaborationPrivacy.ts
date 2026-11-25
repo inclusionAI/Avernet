@@ -1,5 +1,9 @@
 import { notifySuccess } from '@/components/ui/notify';
-import { resolvePublishChannel, toBotPublicRiskVisibility } from '@/domain/collaborationPrivacy/botPublicRisk';
+import {
+  getRiskRetryIntent,
+  resolvePublishChannel,
+  toBotPublicRiskVisibility,
+} from '@/domain/collaborationPrivacy/botPublicRisk';
 import {
   matchesBotIdentity,
   resolveFixedBotLoadScope,
@@ -166,20 +170,11 @@ export function useCollaborationPrivacy({
     },
     [risk.create, risk.isRefreshing],
   );
-  const target = risk.currentRecord?.target;
-  const retryVisibility = target?.visibility.toLowerCase();
-  const recoveringRisk = risk.uiState.kind === 'failed' || risk.uiState.kind === 'attention';
+  const retryIntent = getRiskRetryIntent(risk.uiState);
+  const blockedRiskApprovalPuid = retryIntent ? risk.currentRecord?.approval_puid : null;
   const retryCurrent =
-    riskEnabled &&
-    publicationEditor?.audience === 'user' &&
-    target?.public_scope === 'user' &&
-    (retryVisibility === 'public' || retryVisibility === 'protected') &&
-    recoveringRisk
-      ? () =>
-          createUserRisk(publicationEditor.botId, {
-            visibility: retryVisibility,
-            view_depts: target.view_depts,
-          })
+    riskEnabled && publicationEditor?.audience === 'user' && retryIntent
+      ? () => createUserRisk(publicationEditor.botId, retryIntent)
       : undefined;
   const submitPublication = useCallback(
     async (config: PublicConfig, deptEntries?: Array<{ deptNo: string; deptName: string }>) => {
@@ -200,18 +195,17 @@ export function useCollaborationPrivacy({
         deptEntries,
         isExternalBot,
       });
-      const blockedRiskApprovalPuid = isUserPublication && recoveringRisk ? risk.currentRecord?.approval_puid : null;
       const succeeded = await runBotAction(
         `${bot.id}:publication:${publicationEditor.audience}`,
         () =>
           collaborationPrivacyService.submitPublication(
-            blockedRiskApprovalPuid ? { ...command, blockedRiskApprovalPuid } : command,
+            isUserPublication && blockedRiskApprovalPuid ? { ...command, blockedRiskApprovalPuid } : command,
           ),
         isExternalBot ? externalPublicationSaveMessage : publicationSuccessMessage(config),
       );
       if (succeeded) setPublicationEditor(null);
     },
-    [isExternalBot, publicationEditor, createUserRisk, recoveringRisk, risk.currentRecord, runBotAction, store.overview],
+    [isExternalBot, publicationEditor, createUserRisk, blockedRiskApprovalPuid, runBotAction, store.overview],
   );
 
   return {
