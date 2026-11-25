@@ -413,6 +413,18 @@ impl ConnectorEngine {
             poke.clone(),
         );
         let wake = self.inner.clone();
+        // Checked under the `actors` lock, in the same critical section as
+        // the insert: `drain` sets `draining` before it collects the actors
+        // under this lock, so either it sees this actor and stops it, or
+        // this sees `draining` and starts nothing. A claim or resume that
+        // wins after the drain began therefore never runs here; its call
+        // stays held and is taken over once this instance is `Dead`, like
+        // the actors `drain` stops.
+        let mut actors = lock(&self.inner.actors);
+        if self.inner.draining.load(Ordering::SeqCst) {
+            tracing::info!(did = %did.0, "draining; the call is left held for another Connector");
+            return;
+        }
         // The `wake` is sent inside the task, after `run` returned: it tells a
         // main loop waiting at capacity, or a drain, that an actor ended. A
         // task that is aborted or panics never reaches it; those waiters time
@@ -427,11 +439,12 @@ impl ConnectorEngine {
             poke,
             task,
         };
+        actors.insert(did.clone(), actor);
+        drop(actors);
         // Whatever resume was still owed for this call is settled by this actor.
         // (`retain` keeps the entries for which the test is true, i.e. it
         // drops this call's orphan entries.)
         lock(&self.inner.orphans).retain(|(orphan, _)| orphan != &did);
-        lock(&self.inner.actors).insert(did, actor);
     }
 
     /// Forgets finished actors; one that died without finishing its run is
@@ -656,18 +669,17 @@ impl DistRuntimeControlPort for ConnectorEngine {
     ///
     /// At the end, every actor still running is aborted and awaited, so no
     /// call of this process keeps talking to its agent or session after
-    /// this returns. Then, if the main loop has stopped, the registration is
-    /// retired: other processes see this instance `Dead` at once, and the
-    /// Worker's supervisor re-posts the hints of the calls it still holds, so
-    /// another Connector takes them over at the next holder epoch. Their
-    /// dispatches stay held (and in the held index) until then.
+    /// this returns. No new actor starts once draining (`spawn` refuses), so
+    /// this also holds for a claim or resume still in flight. Then the
+    /// registration is retired: other processes see this instance `Dead` at
+    /// once, and the Worker's supervisor re-posts the hints of the calls it
+    /// still holds, so another Connector takes them over at the next holder
+    /// epoch. Their dispatches stay held (and in the held index) until then.
     ///
     /// Result: `Drained` when nothing was left and the main loop has stopped;
     /// otherwise `DeadlineReached { remaining }` with the actors stopped plus
     /// orphans (`remaining` can be 0 when only the main loop had not stopped
-    /// yet; the registration is then not retired, because that loop may
-    /// still start an actor, and it expires on its own once nothing renews
-    /// it).
+    /// yet, for example while it waits on a claim).
     async fn drain(&self, grace: Duration) -> Result<DrainOutcome, RuntimeError> {
         let inner = &self.inner;
         inner.draining.store(true, Ordering::SeqCst);
@@ -703,11 +715,10 @@ impl DistRuntimeControlPort for ConnectorEngine {
         // agent calls or inbox writes.
         // One drain at a time from here (see `stopping`).
         let _stopping = inner.stopping.lock().await;
-        // Read before the actors are collected: only the main loop starts
-        // actors, so once it has stopped the set collected below is complete
-        // and retiring is safe. Read later, a claim finishing meanwhile could
-        // start an actor that is neither stopped nor counted.
-        let looping = inner.looping.load(Ordering::SeqCst);
+        // The set collected below is complete: `draining` is already set,
+        // and `spawn` starts no actor once it is (it checks under the same
+        // lock). So retiring after stopping them is safe even if the main
+        // loop is still inside a claim; that claim's call is left held.
         let leftover: Vec<JoinHandle<()>> = lock(&inner.actors)
             .drain()
             .map(|(_, actor)| actor.task)
@@ -723,10 +734,8 @@ impl DistRuntimeControlPort for ConnectorEngine {
             let _ = task.await;
         }
         let remaining = stopped + lock(&inner.orphans).len();
-        if !looping {
-            self.retire().await;
-        }
-        if remaining == 0 && !looping {
+        self.retire().await;
+        if remaining == 0 && !inner.looping.load(Ordering::SeqCst) {
             return Ok(DrainOutcome::Drained);
         }
         Ok(DrainOutcome::DeadlineReached {

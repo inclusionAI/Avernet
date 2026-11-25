@@ -369,7 +369,7 @@ impl DispatchQueuePort for GatedQueue {
 }
 
 #[tokio::test]
-async fn a_drain_whose_deadline_passes_during_a_claim_does_not_retire() {
+async fn a_claim_that_wins_after_the_drain_began_starts_no_actor() {
     let mut rig = Rig::new().await;
     let leases = Arc::new(Leases { lose_after: usize::MAX, ..Leases::default() });
     rig.membership = leases.clone();
@@ -385,21 +385,21 @@ async fn a_drain_whose_deadline_passes_during_a_claim_does_not_retire() {
     until("registered", || async { leases.calls.lock().unwrap().iter().any(|c| c.starts_with("register")) }).await;
     settle().await;
 
-    // The main loop is held inside the claim past the deadline: it may still
-    // start an actor, so the registration must not be retired.
+    // The main loop is held inside the claim past the deadline. Draining
+    // already refuses new actors, so the drain can retire at once.
     let outcome = engine.drain(Duration::from_millis(60)).await.unwrap();
     assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 0 });
-    assert!(!leases.calls.lock().unwrap().iter().any(|c| c.starts_with("retire")));
-
-    // The claim then wins and starts an actor; a later drain stops it first
-    // and only then retires.
-    gated.gate.add_permits(1);
-    until("accepted", || async { rig.phase().await == "accepted" }).await;
-    assert!(task.await.unwrap().is_ok());
-    let outcome = engine.drain(Duration::from_millis(60)).await.unwrap();
-    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 });
-    assert_eq!(engine.snapshot().await.unwrap().active_work, 0);
     assert!(leases.calls.lock().unwrap().contains(&"retire conn-03".to_owned()));
+
+    // The claim then wins, but no actor starts: the call stays held by this
+    // (now dead) instance for another Connector to take over.
+    gated.gate.add_permits(1);
+    until("claimed", || async { rig.phase().await == "claimed" }).await;
+    assert!(task.await.unwrap().is_ok());
+    settle().await;
+    assert_eq!(engine.snapshot().await.unwrap().active_work, 0);
+    assert_eq!(rig.agent.count("start"), 0, "nothing is sent for a call claimed while draining");
+    assert_eq!(rig.doc().await["execution"]["holder"]["instance"]["node"], "conn-03");
 }
 
 #[tokio::test]
