@@ -65,8 +65,9 @@ class TaskInfoRepositoryProtocol(Protocol):
         status: Optional[Sequence["Status"]] = None,
         *,
         owner_user_id: Optional[str] = None,
+        keyword: Optional[str] = None,
     ) -> list["TaskInfoRecord"]:
-        """Return newest-first records, optionally filtered by a set of statuses and owner."""
+        """Return newest-first records, optionally filtered by statuses, owner, and keyword."""
         ...
 
     @abstractmethod
@@ -75,12 +76,14 @@ class TaskInfoRepositoryProtocol(Protocol):
         status: Optional[Sequence["Status"]] = None,
         *,
         owner_user_id: Optional[str] = None,
+        keyword: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list["TaskInfoRecord"], int]:
         """Return one newest-first page (1-based, ``page_size`` items) plus total count.
 
-        ``status`` 接受一组运行时态(Status 枚举)：空/None 不过滤，非空按 SQL IN 过滤。"""
+        ``status`` accepts a set of runtime states: an empty/None set means no
+        filter. ``keyword`` is normalized and applied before count/pagination."""
         ...
 
     @abstractmethod

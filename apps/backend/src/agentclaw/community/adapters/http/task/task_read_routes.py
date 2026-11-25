@@ -135,6 +135,10 @@ async def list_tasks_internal(
         str | None,
         Query(description="可选 status 过滤:运行时态枚举,逗号分隔多值(如 PLANNING,RUNNING);非法值 → 400"),
     ] = None,
+    keyword: Annotated[
+        str | None,
+        Query(description="可选关键字过滤:task_id/source_type/owner_bot_id/context.title/metadata.title"),
+    ] = None,
     page: Annotated[
         int | None, Query(ge=1, description="分页页码(1-based);不传则不分页,返回全量(列表契约不变)。")
     ] = None,
@@ -147,6 +151,8 @@ async def list_tasks_internal(
     """列持久化 task_info 记录(内部副本;按更新时间降序),按查询参数 user_id 过滤。
 
     user_id 是直接的筛选条件,不要求与认证主体一致,也不执行 owner 作用域校验。
+    keyword 空白时不过滤;非空时服务端按大小写不敏感 substring 匹配
+    task_id/source_type/owner_bot_id/context.title/metadata.title,分页前完成过滤。
     分页为可选入参(向后兼容):page/page_size 均不传时 data 为列表(历史契约);
     两者同时传入时 data 为 Page(total, items)(1-based,page_size 最大 100);
     仅传其一视为入参错误(400)。非法 status → 400。"""
@@ -159,12 +165,19 @@ async def list_tasks_internal(
         )
     if page_size is None:
         items = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
-            service.list_tasks, status, owner_user_id=user_id
+            service.list_tasks,
+            status,
+            owner_user_id=user_id,
+            keyword=keyword,
         )
         return envelope([task_info_record_to_dto(item) for item in items], request)
     items, total = await run_in_threadpool(
         service.list_tasks_page,
-        status, owner_user_id=user_id, page=page or 1, page_size=page_size
+        status,
+        owner_user_id=user_id,
+        page=page or 1,
+        page_size=page_size,
+        keyword=keyword,
     )
     return page_envelope(
         total,
