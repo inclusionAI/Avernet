@@ -237,9 +237,21 @@ nodes:
           - publish
 ```
 
-- A frontend `human_input` node has no `assignee` and no `notification`.
-  Any Present Human participant in the run session may respond from the
-  Workbench.
+- A frontend `human_input` node has no `notification`. Without an
+  `assignee`, any Present Human participant in the run session may respond
+  from the Workbench.
+- To pin a frontend node to one Present Human, set
+  `assignee: { type: runtime_actor, actor: <human actor id> }` without
+  `notification`. Only that Human then sees the node in pending lists and
+  history prompts, and only that Human may respond.
+- Two HumanInput nodes may wait at the same time only when both are pinned
+  to different runtime actors. Otherwise order them with explicit
+  dependencies.
+- Pinning does not hide a completed node's output: node detail and run views
+  keep the run-level access rule, and Participant session history keeps its
+  existing projection. A product that must withhold outputs until a later
+  node completes (for example ballots until the tally) filters them in its
+  own panel.
 - A Human is not a logical Bot participant. Do not add an `owner` participant
   slot for this node, do not pass `--binding owner=human_001`, and never bind a
   `human_*` actor ID to a `bot_task`.

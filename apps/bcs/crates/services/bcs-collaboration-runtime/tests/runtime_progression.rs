@@ -118,3 +118,6 @@ mod opening;
 
 #[path = "runtime_progression/graph_and_judge.rs"]
 mod graph_and_judge;
+
+#[path = "runtime_progression/multi_human_votes.rs"]
+mod multi_human_votes;
