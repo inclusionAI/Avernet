@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, ContextManager, Mapping, Protocol
+from typing import TYPE_CHECKING, Any, Callable, ContextManager, Mapping, Protocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.skill_center.skill_set_apply import (
@@ -27,6 +27,15 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     capability compensation preserve Bot MCP overrides. Explicit Direct MCP
     uninstall, configuration replacement and Bot deletion own their cleanup.
     """
+
+    @abstractmethod
+    def commit_capability_mutation(
+        self, *, bot_id: str, entity_id: str,
+        mutation: Callable[[], DesiredStateMutation],
+        require_bot: bool,
+    ) -> DesiredStateMutation:
+        """Commit a capability command under the Bot mutation fence."""
+        ...
 
     @abstractmethod
     def read_apply_snapshot(self, *, scope: BotCapabilityScope, platform_default_codes: frozenset[str]) -> SkillSetApplySnapshot:

@@ -56,6 +56,10 @@ class BotFacts:
     #: were once "the caller's id" now need the owner the bot was actually
     #: resolved against.
     owner_id: str
+    #: Conversation identity mode.  Session adapters use this trusted projection
+    #: to decide whether an explicit session subject selects an independent
+    #: Caller runtime or keeps the existing shared service runtime.
+    call_type: str = "owner"
 
     @classmethod
     def from_record(
@@ -96,6 +100,7 @@ class BotFacts:
             bot_type=str(record.get("bot_type") or ""),
             active_engine=str(record.get("active_engine") or ""),
             owner_id=str(record.get("owner_id") or owner_id),
+            call_type=str(record.get("call_type") or "owner"),
         )
 
 
@@ -108,13 +113,13 @@ class SocketInfo:
     kinds that carry a credential, that credential travels inside the URL,
     because a browser's WebSocket handshake can carry one nowhere else, and
     publishing it a second time alongside would leave a caller guessing which
-    one the socket honours. The ``a2a`` kind is the credential-less exception:
-    an HTTP base URL for the engine's A2A face, addressed browser-direct by
-    its issuer.
+    one the socket honours. The ``a2a`` kind is an HTTP base URL; optional
+    ``headers`` authenticate its card and RPC paths, not the WebSocket.
     """
 
     kind: str
     url: str
+    headers: dict[str, str] = field(default_factory=dict, repr=False)
 
 
 @dataclass(frozen=True)
@@ -128,8 +133,8 @@ class ConnectionResult:
     ``expires_at`` is an ISO 8601 UTC instant bounding when a socket here can be
     *opened*, not how long one stays open. The credential is checked once, at
     the handshake, so a socket already open outlives it. A caller re-fetches
-    before connecting or reconnecting; a caller that polls on a timer to keep a
-    live socket alive has misread it.
+    before connecting or reconnecting. Credentialed A2A uses the same expiry
+    and must refresh before each new HTTP request after that deadline.
 
     Mandatory: without it a caller cannot tell a credential that has aged out
     from a device that is refusing, and would retry the socket instead of

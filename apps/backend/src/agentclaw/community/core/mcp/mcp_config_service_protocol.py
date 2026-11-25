@@ -23,7 +23,7 @@ class MCPConfigServiceProtocol(Protocol):
     ) -> dict[str, Any]: ...
 
     def validate_scoped_headers(
-        self, *, server_code: str, entries: tuple[tuple[str, str], ...]
+        self, *, server_code: str, entries: tuple[tuple[str, str | None], ...]
     ) -> dict[str, Any]: ...
 
     def validate_bot_override(
@@ -49,6 +49,7 @@ class MCPConfigServiceProtocol(Protocol):
         bot_config: dict[str, Any],
         user_config: dict[str, Any],
         engine_type: str | None,
+        allow_custom_url: bool = False,
     ) -> dict[str, Any]:
         """Validate a prospective user/Bot aggregate against Center detail."""
         ...

@@ -536,3 +536,34 @@ def test_get_session_messages_http_errors_mapped():
         _run(_adapter(lambda req: httpx.Response(404)).get_session_messages(_SID))
     with pytest.raises(OpenApiServerError):
         _run(_adapter(lambda req: httpx.Response(500)).get_session_messages(_SID))
+
+
+@pytest.mark.parametrize("stage", ["draft", "online"])
+def test_runtime_status_query_uses_baas_only_and_preserves_stage(stage):
+    def handler(request):
+        assert request.method == "GET"
+        assert request.url.path == "/openapi/v1/sessions/runtime/status"
+        assert request.url.params["session_id"] == "agent:main:session:s/user:u"
+        assert request.url.params["bot_id"] == "b:u"
+        assert request.url.params["lifecycle_stage"] == stage
+        assert request.headers["Authorization"] == "Bearer ak1234567890"
+        return httpx.Response(200, json={"code": 0, "data": {
+            "session_id": request.url.params["session_id"], "found": True,
+            "run_id": "engine-run", "state": "running", "started_at": 1000,
+            "last_event_seq": 7,
+        }})
+    result = _run(_adapter(handler).get_session_runtime_status(
+        "agent:main:session:s/user:u", bot_id="b:u", lifecycle_stage=stage,
+    ))
+    assert result.last_event_seq == 7
+
+
+@pytest.mark.parametrize("data", [
+    {"session_id": "wrong", "found": False, "reason": "NO_ACTIVE_RUN"},
+    {"session_id": "s", "found": True},
+    {"session_id": "s", "found": True, "run_id": "r", "state": "running", "started_at": 1, "last_event_seq": True},
+])
+def test_runtime_status_rejects_malformed_or_wrong_session(data):
+    adapter = _adapter(lambda request: httpx.Response(200, json={"code": 0, "data": data}))
+    with pytest.raises((OpenApiError, ValueError)):
+        _run(adapter.get_session_runtime_status("s"))

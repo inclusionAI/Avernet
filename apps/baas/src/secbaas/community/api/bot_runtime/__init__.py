@@ -46,6 +46,7 @@ from ._protocols import (
     BotRunner,
     BotWssDispatcher,
 )
+from ._session_runtime_status import SessionRuntimeStatus
 from ._ws_connection_info import WsConnectionInfo
 
 __all__ = [
@@ -71,6 +72,7 @@ __all__ = [
     "MessageDeliverRequest",
     "MessageInfo",
     "SessionInfo",
+    "SessionRuntimeStatus",
     "WsConnectionInfo",
     "HttpConnectionInfo",
     # Protocols

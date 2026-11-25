@@ -929,3 +929,39 @@ class TestTokenMinterForSandbox:
         assert target_used.call_args.kwargs["target"] == svc._get_path_target(
             "ARCA-SANDBOX-x@0"
         )
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_reads_explicit_sandbox_only(service, arca_binding):
+    from secbaas.community.api.bot_runtime import SessionRuntimeStatus
+
+    expected = SessionRuntimeStatus(
+        session_id=SESSION_ID, found=False, reason="NO_ACTIVE_RUN"
+    )
+    client = AsyncMock()
+    client.get_session_runtime_status.return_value = expected
+    client.__aenter__.return_value = client
+    with patch.object(
+        service, "_create_session_client", return_value=client
+    ) as create_client:
+        result = await service.get_session_runtime_status(
+            session_id=SESSION_ID,
+            binding_info=arca_binding,
+        )
+    assert result == expected
+    create_client.assert_called_once_with(SANDBOX_ID)
+    client.get_session_runtime_status.assert_awaited_once_with(SESSION_ID)
+    client.create_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_without_sandbox_fails_without_connecting(
+    service, baas_binding
+):
+    with patch.object(service, "_create_session_client") as create_client:
+        with pytest.raises(BotServiceError, match="observation request failed"):
+            await service.get_session_runtime_status(
+                session_id=SESSION_ID,
+                binding_info=baas_binding,
+            )
+        create_client.assert_not_called()

@@ -18,11 +18,13 @@ from search_core.api.services import RetrievalService, StagedRetrievalService
 from search_core.application.cache import CachedEmbedding, CachedRetrieval, SearchCaches
 from search_core.application.card_metadata import CardMetadataRetrieval
 from search_core.application.catalog_retrieval import CatalogRetrieval
-from search_core.application.default_candidates import DefaultCandidates
+from search_core.application.default_candidates import (
+    DefaultCandidates,
+    FilteredIndexFallback,
+)
 from search_core.application.emergency import (
     EmergencyControl,
     EmergencyPolicy,
-    RetrievalSwitches,
 )
 from search_core.bootstrap.http import create_search_app
 from search_core.catalog.updates import CardUpdates
@@ -79,6 +81,7 @@ def create_catalog_search_app(
     updates_factory=CardUpdates,
     metadata_factory=CardMetadataRetrieval,
     default_candidates_reader=None,
+    filtered_candidate_reader=None,
     http_app_factory=create_search_app,
     allow_document_mapping=False,
 ):
@@ -225,7 +228,7 @@ def create_catalog_search_app(
                 retrieval,
                 result_cache,
                 caches,
-                namespace=tuple(policy.retrieval.model_dump().values()),
+                namespace=tuple(policy.retrieval.pipeline_switches().values()),
             )
         return metadata_factory(
             retrieval, repository, metadata_cache, caches, metadata_execution
@@ -236,7 +239,7 @@ def create_catalog_search_app(
         # request handling only selects a prebuilt pipeline, never creates clients.
         cache_views = caches.configure(policy.cache)
         variants = {}
-        limits = tuple(policy.retrieval.model_dump().values())
+        limits = tuple(policy.retrieval.pipeline_switches().values())
         for switches in product((False, True), repeat=3):
             keyword, vector, rerank = switches
             if any(value and not allowed for value, allowed in zip(switches, limits)):
@@ -245,10 +248,12 @@ def create_catalog_search_app(
                 continue
             variant_policy = policy.model_copy(
                 update={
-                    "retrieval": RetrievalSwitches(
-                        keyword_enabled=keyword,
-                        vector_enabled=vector,
-                        rerank_enabled=rerank,
+                    "retrieval": policy.retrieval.model_copy(
+                        update={
+                            "keyword_enabled": keyword,
+                            "vector_enabled": vector,
+                            "rerank_enabled": rerank,
+                        }
                     )
                 }
             )
@@ -271,6 +276,14 @@ def create_catalog_search_app(
         build_retrieval,
         build_variants=build_variants,
     )
+    fallback = None
+    if filtered_candidate_reader is not None:
+        fallback = FilteredIndexFallback(
+            filtered_candidate_reader,
+            calls["default_candidates"],
+            updates,
+            emergency.snapshot,
+        )
     retrieval = CatalogRetrieval(emergency, updates)
     app = http_app_factory(
         retrieval,
@@ -281,6 +294,7 @@ def create_catalog_search_app(
         max_inflight_requests=settings.max_inflight_requests,
         emergency=emergency,
         operations=("search", "recommend"),
+        empty_search_fallback=fallback,
     )
     app.state.catalog_updates = updates
     app.state.search_emergency = emergency

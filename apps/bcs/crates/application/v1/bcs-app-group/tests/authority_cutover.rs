@@ -329,7 +329,7 @@ async fn create_sponsors_controlled_bot_without_friendship() {
     let build = |name: &str| CreateGroup {
         caller: human_caller(name),
         group: CreateGroupSpec::Collaboration(
-            CreateCollaborationGroup {
+            CreateCollaborationGroup { catalog_labels:Default::default(),
                 originator: None,
                 name: Some("priv".into()),
                 human_mention_notify_mode: Default::default(),

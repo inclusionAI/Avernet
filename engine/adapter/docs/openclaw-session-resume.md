@@ -43,3 +43,21 @@ older adapters can reject the method. Fall back to history and normal sends,
 never automatically repeat the prompt. Uncertain transport failures must not
 trigger a second concurrent recovery subscription. Recovery remains process
 local; absence of a cache record does not prove the engine is idle.
+
+## Read-only HTTP runtime status
+
+`GET /api/sessions/runtime/status?session_id=...` exposes the same run registry
+as `chat.status` behind the authenticated device/proxy HTTP boundary. It checks
+`chat.history(limit=1)` access with the configured MCP identity header before
+reading the registry; it does not attach, replay, resume or create a session.
+
+The existing `success/data` envelope contains `session_id`, `found`, `run_id`,
+`state`, `started_at` (Unix ms), `last_event_seq` (the existing `lastResumeSeq`),
+and `reason`. Missing observations use `NO_ACTIVE_RUN`, `AMBIGUOUS_RUN` or
+`UNSUPPORTED_ENGINE`; no recovery ticket or event body is exposed. Existing
+selection and terminal TTL rules apply. Event-sequence growth indicates runtime
+activity, not business progress; a quiet tool call may emit no new events.
+
+SecBaaS owns Bot authorization, lifecycle and service-Bot affinity routing.
+Deploy Engine, then SecBaaS, then Backend. A missing observation does not prove
+execution failure and must not by itself trigger Harness recovery.

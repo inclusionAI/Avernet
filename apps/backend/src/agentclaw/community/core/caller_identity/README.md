@@ -249,3 +249,15 @@ The response includes instance id, binding and previous/new UTC expiry. The
 `caller_expiry_correction_requested/succeeded/failed` HTTP events and
 `caller_expiry_corrected` audit event record safe actor/target/expiry coordinates;
 credentials, request headers and raw infrastructure exception messages are omitted.
+
+### Legacy IAM friend selection
+
+`GET /api/v1/token/iam` accepts optional `f_user_id` and `device_uuid` query
+parameters. An absent or empty `f_user_id` preserves the original Caller refresh
+path. A friend selector is forwarded directly to the existing Caller service;
+Caller authentication, subject equality, current binding and session validation
+remain in their existing domains. The orchestrator adds no friendship directory
+query, expert-session preflight or stage rewrite. OpenAPI retains its own access
+checks. `sessionKey` remains an alias for `session_key`. `device_uuid` is carried
+in the request snapshot solely for JIT replica selection; empty values mean
+omission. DingTalk keeps its existing credential and target-selection contract.

@@ -148,7 +148,7 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         .with_allowed_switch_provider_ids(config.allowed_switch_provider_ids.clone())
         .with_provider_stream_gray_list(state.provider_stream_gray_list.clone())
         .with_provider_bypass_header_names(provider_bypass_header_names)
-        .with_a2a_test_user_admission(config.a2a_test_user.as_ref().and_then(bcs_a2a_http::delivery::test_user_admission))
+        .with_a2a_test_user_admission(config.a2a_test_user.clone())
         .with_judge_enabled(config.llm.is_enabled())
         .with_channel_http_ingress(state.channel_http_ingress.clone())
         .with_auth_chain(state.auth_chain.clone(), state.auth_config.clone())

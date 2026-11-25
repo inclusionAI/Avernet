@@ -268,6 +268,28 @@ describe('conversationStore', () => {
     expect(useConversationStore.getState().friendBotSessionsByBotId['friend-bot:1'].page).toBe(2);
   });
 
+  it('invalidateBotSessionList drops the Bot caches and bumps the filter revision for a clean reload', () => {
+    const store = useConversationStore.getState();
+    store.setManagedBotCache('bot-a:1', managedView('bot-a:1'));
+    store.setFriendBotSessions('friend-bot:2', sessionList());
+    // 相邻 Bot 的缓存与代次保持不动。
+    store.setManagedBotCache('bot-b:3', managedView('bot-b:3'));
+    const otherRevisionBefore = useConversationStore.getState().sessionFilterRevisionByBotId['bot-b:3'] ?? 0;
+
+    useConversationStore.getState().invalidateBotSessionList('bot-a:1');
+    useConversationStore.getState().invalidateBotSessionList('friend-bot:2');
+
+    const s = useConversationStore.getState();
+    // managed/others 好友分组缓存与好友列表缓存一并失效,列表 Hook 重拉时不可命中旧缓存。
+    expect(s.sessionsByBotId['bot-a:1']).toBeUndefined();
+    expect(s.friendBotSessionsByBotId['friend-bot:2']).toBeUndefined();
+    // 过滤代次 +1:在途旧响应写回校验丢弃,scopeSignature 变化触发已展开 Bot 重拉。
+    expect(s.sessionFilterRevisionByBotId['bot-a:1']).toBe(1);
+    expect(s.sessionFilterRevisionByBotId['friend-bot:2']).toBe(1);
+    expect(s.sessionsByBotId['bot-b:3']).toBeDefined();
+    expect(s.sessionFilterRevisionByBotId['bot-b:3'] ?? 0).toBe(otherRevisionBefore);
+  });
+
   it('removeFriendBotState clears the Bot local state without touching others or selection', () => {
     const store = useConversationStore.getState();
     store.setExpandedBot('friend-bot:1', true);

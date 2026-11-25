@@ -34,7 +34,64 @@ of resolving to an inherited ``...`` stub that silently returns ``None``.
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
+
+from .runtime_binding import RuntimeBindingTarget
+
+
+class PackagePublication(StrEnum):
+    PUBLISHED = "PUBLISHED"
+    FAILED = "FAILED"
+    UNKNOWN = "UNKNOWN"
+    NOT_DISPATCHED = "NOT_DISPATCHED"
+
+
+class PackageMetadata(StrEnum):
+    COMMITTED = "COMMITTED"
+    FAILED = "FAILED"
+    UNKNOWN = "UNKNOWN"
+    NOT_ATTEMPTED = "NOT_ATTEMPTED"
+
+
+@dataclass(frozen=True, slots=True)
+class LocalSkillPackageReceipt:
+    """Facts about a package publication, independent of activation."""
+
+    name: str
+    content_digest: str | None
+    publication: PackagePublication
+    metadata: PackageMetadata
+
+    def as_dict(self) -> dict[str, str | None]:
+        return {
+            "name": self.name,
+            "content_digest": self.content_digest,
+            "publication": self.publication.value,
+            "metadata": self.metadata.value,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> LocalSkillPackageReceipt:
+        name, digest = data["name"], data.get("content_digest")
+        if not isinstance(name, str) or (
+            digest is not None and not isinstance(digest, str)
+        ):
+            raise ValueError("Invalid Local Skill package receipt")
+        return cls(
+            name, digest, PackagePublication(data["publication"]),
+            PackageMetadata(data["metadata"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LocalSkillPackageWriteResult:
+    receipt: LocalSkillPackageReceipt
+    upload: dict[str, Any] | None = None
+    # The actual Runtime that acknowledged this publication and metadata write.
+    target: RuntimeBindingTarget | None = None
 
 
 @runtime_checkable
@@ -74,4 +131,20 @@ class SkillPackageUploadPort(Protocol):
         """
         ...
 
-__all__ = ["SkillPackageUploadPort"]
+@runtime_checkable
+class BatchSkillPackageUploadPort(SkillPackageUploadPort, Protocol):
+    """Batch publication available to an existing device-backed Bot Apply."""
+
+    @abstractmethod
+    async def upload_local_skill_batch(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        packages: Sequence[tuple[str, bytes]],
+    ) -> tuple[LocalSkillPackageWriteResult, ...]:
+        """Collect a receipt for every named package without replaying failures."""
+        ...
+
+
+__all__ = [
+    "BatchSkillPackageUploadPort", "LocalSkillPackageReceipt", "LocalSkillPackageWriteResult",
+    "PackageMetadata", "PackagePublication", "SkillPackageUploadPort",
+]

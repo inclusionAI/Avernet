@@ -108,7 +108,7 @@ fn v1_participant(actor_id: &str, avatar: Option<&str>) -> Participant {
 }
 
 fn avatar_group_detail() -> GroupDetail {
-    GroupDetail::Collaboration(CollaborationGroupDetail {
+    GroupDetail::Collaboration(CollaborationGroupDetail { catalog_labels:Default::default(),
         group_id: "group-1".into(),
         version: 1,
         name: Some("Avatar Regression".into()),
@@ -212,7 +212,7 @@ fn legacy_participant_view(bot_uuid: &str) -> GroupParticipantView {
 }
 
 fn legacy_group_detail() -> GroupDetailResult {
-    GroupDetailResult {
+    GroupDetailResult { catalog_labels:Default::default(),
         group_id: "group-1".into(),
         label: Some("Legacy".into()),
         status: bcs_service_api::GroupStatus::Active,

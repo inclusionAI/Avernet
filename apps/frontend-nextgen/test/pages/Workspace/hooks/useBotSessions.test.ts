@@ -113,23 +113,36 @@ it('首发自动重命名按 session 幂等，标题非新会话或 messageCount
   expect(svc.updateSessionTitle).toHaveBeenCalledTimes(1);
 });
 
-it('首发自动重命名失败返回 false，且同一会话不在后续发送中重试', async () => {
+// OpenSpec fix-session-title-auto-rename §session-first-message-title：
+// 幂等语义改为「成功才入集」——失败不入集，下次发送仍可重试；
+// 成功后同一进程生命周期内不再重复发起。
+it('首发自动重命名失败返回 false，但下次发送可重试；成功后同进程不再重复', async () => {
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-  svc.updateSessionTitle.mockResolvedValueOnce({
-    ok: false,
-    error: { code: 'FAILED', friendlyMessage: '更新失败', canRetry: true },
-  });
+  svc.updateSessionTitle
+    .mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'FAILED', friendlyMessage: '更新失败', canRetry: true },
+    })
+    .mockResolvedValueOnce({ ok: true, data: { sessionId: 's1', title: '第二条' } });
   const { result } = renderHook(() => useBotSessions([bot], ['b:1'], 'human-1'));
   await waitFor(() => expect(result.current.sessionsByBotId['b:1']).toHaveLength(2));
 
   let renamed = true;
+  let retried = false;
+  let afterSuccess = true;
   await act(async () => {
+    // 第一次：失败，不进幂等集
     renamed = await result.current.renameSessionOnFirstMessage(bot, { ...s1, title: '新会话' }, '第一条');
-    await result.current.renameSessionOnFirstMessage(bot, { ...s1, title: '新会话' }, '第二条');
+    // 第二次：可重试，成功
+    retried = await result.current.renameSessionOnFirstMessage(bot, { ...s1, title: '新会话' }, '第二条');
+    // 第三次：幂等集命中，跳过
+    afterSuccess = await result.current.renameSessionOnFirstMessage(bot, { ...s1, title: '新会话' }, '第三条');
   });
 
   expect(renamed).toBe(false);
-  expect(svc.updateSessionTitle).toHaveBeenCalledTimes(1);
+  expect(retried).toBe(true);
+  expect(afterSuccess).toBe(false);
+  expect(svc.updateSessionTitle).toHaveBeenCalledTimes(2);
   expect(warn).toHaveBeenCalledWith('[useBotSessionTitleActions] 首条消息自动重命名失败:', '更新失败');
   warn.mockRestore();
 });
@@ -406,7 +419,7 @@ it('展开「好友 Bot」分类下的 bot：按 isFriendBot 调用会话列表�
   useWorkspaceStore.getState().setView('chat');
   const { result } = renderHook(() => useBotSessions([friendBot], ['botfriend:999'], 'human_900003', false));
   // 懒加载必须以好友 bot 实体（isFriendBot=true、realBotId 拆分）与当前用户 id 调用 listSessionsPage；
-  // 服务层 withFriendBotRequestParams 据此在 GET /openapi/v1/bots/{realBotId}/sessions 上附带 f_user_id。
+  // 服务层 withConversationSubjectParams 据此在 GET /openapi/v1/bots/{realBotId}/sessions 上附带 f_user_id。
   await waitFor(() => expect(svc.listSessionsPage).toHaveBeenCalledWith(friendBot, 'human_900003', 1, 10));
   const [calledBot] = svc.listSessionsPage.mock.calls[0];
   expect(calledBot.isFriendBot).toBe(true);

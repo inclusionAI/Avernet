@@ -13,6 +13,7 @@ import {
 import { CollaborationSquareError, collaborationSquareBotService } from '@/services/collaborationSquare';
 import { getCollaborationBotConversationUrl } from '@/utils/collaborationSquare';
 import { safeReportError } from '@/utils/errorToast';
+import { useConversationStore } from '@/stores/conversationStore';
 import { history } from '@umijs/max';
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import {
@@ -120,8 +121,13 @@ export function useCollaborationSquareFriendActions({
         void runScopedFriendAction(bot.id, busyKey, async (isCurrent) => {
           const result = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext, {
             isOwnedByLoggedInUser: Boolean(bot.isOwnedByLoggedInUser),
+            // 自有 service Bot 建聊需 stage=online（metadata 回填的 bot_type），见 adapter。
+            botType: bot.botType,
           });
           if (!isCurrent()) return;
+          // 会话在列表外新建:失效该 Bot 的会话列表缓存,避免已展开 Bot 的缓存命中短路
+          // 让 /workspace/chat 侧栏看不到新会话。
+          useConversationStore.getState().invalidateBotSessionList(bot.id);
           history.push(getCollaborationBotConversationUrl(bot.id, result.sessionId));
         });
         return;
@@ -144,6 +150,7 @@ export function useCollaborationSquareFriendActions({
             try {
               const conversation = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext);
               if (!isCurrent()) return;
+              useConversationStore.getState().invalidateBotSessionList(bot.id);
               history.push(getCollaborationBotConversationUrl(bot.id, conversation.sessionId));
             } catch {
               if (isCurrent()) notifyError('已成为好友，但暂未进入对话');
@@ -193,6 +200,7 @@ export function useCollaborationSquareFriendActions({
             try {
               const conversation = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext);
               if (!isCurrent()) return;
+              useConversationStore.getState().invalidateBotSessionList(bot.id);
               history.push(getCollaborationBotConversationUrl(bot.id, conversation.sessionId));
             } catch {
               if (isCurrent()) notifyError('已成为好友，但暂未进入对话');

@@ -12,10 +12,12 @@
 //   收藏按 2026-10-10 平齐化终审维持星标直操作;不并入菜单翻转。
 // - 稿注记「hover到更多icon/click更多icon」:PR 454 恢复的操作(编辑标题/清除上下文/删除会话)
 //   由 hover「…」菜单承接,置于星标左侧;稿二级行无消息条数/时间列,故 withMeta=false。
-// - 长标题让位:星标(right 28..56px)/「…」(right 64..92px)绝对定位于行上、与文字 runway 重叠,
-//   文字右界随图标可见性收缩(静默 24px / 星标常驻 60px / hover·聚焦·触屏·菜单开启 96px),
-//   让位只走 pr 不动 mr 热区,pl 恒定保证标题起点不随状态跳动。
+// - 右侧操作槽固定:星标(right 28..56px)/「…」(right 64..92px)绝对定位于行上、与文字 runway 重叠,
+//   hover/聚焦/触屏/菜单开启不改变标题可用宽度,只切换时间与图标可见性;
+//   无常驻星标行保留完整操作档(行右界 96px),常驻星标行再预留时间槽(行右界 112px);
+//   时间在非 hover 态绝对显示于原右缘或星标左侧,再整体淡出,pl 恒定保证标题起点与宽度不随状态跳动。
 // 行高 32 / 节奏 36(pitch)由列表容器承载,右余部无消息条数列(稿二级行无该元素)。
+import { OverflowTooltip } from '@/components/OverflowTooltip';
 import { Badge, Button, IconButton } from '@/components/ui';
 import type { SessionInitiator } from '@/domain/conversation/sessionInitiator';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
@@ -42,6 +44,8 @@ export interface ConversationSessionRowProps {
   replyingSessionId?: string | null;
   /** 恢复的单聊会话操作(编辑标题/清除上下文/删除会话);只读行不传。 */
   actions?: ConversationSessionRowActions;
+  /** AgentCoding 属性行开启:标题真实溢出时延迟悬浮展示全量标题。 */
+  showFullTitleTooltip?: boolean;
 }
 
 export const ConversationSessionRow = React.memo(function ConversationSessionRow({
@@ -55,12 +59,15 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
   favoritePending = false,
   replyingSessionId,
   actions,
+  showFullTitleTooltip = false,
 }: ConversationSessionRowProps) {
   const favorite = session.favorite === true;
   const timeText = formatRelativeTime(session.gmtModified);
   // Browse-only Coding Bot 会隐藏已有 Session 的 mutation 入口（actions 和收藏回调都不传）。
   // 此时 hover 没有右侧图标需要让位，标题热区和相对时间必须保持原位，避免时间先左移再消失。
   const hasHoverActions = Boolean(actions) || Boolean(onToggleFavorite);
+  // 原契约：已收藏或当前选中的星标常驻；这类行需要给时间留出“星标左侧”的原位。
+  const hasResidentStar = favorite || selected;
   return (
     <div className="group/row relative flex min-h-8 items-center">
       {/* 行背景胶囊:hover 与选中同几何(inset-x-2 全宽 rx6),选中 = bg-selected,
@@ -95,35 +102,50 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
           // 标题左缘对齐一级名称：16px 外距 + 36px 头像槽 + 8px 间隔 = 52px margin + 8px padding。
           // 仅界定点击范围,hover 背景已移交全宽胶囊。
           favorite ? 'ml-[52px] mr-2' : 'ml-[52px] mr-4',
-          // 长标题让位(星标/「…」与标题互叠,两者都看不清):文字右界 = mr + pr,须按图标可见性
-          // 提前截断。让位只压缩文字(pr 不动热区 mr、不动胶囊几何),pl-2 恒定 → 标题起点不随状态跳动:
-          // - 静默态(未收藏且未选中)图标全隐 → 基础 pr-2,右界 24px(同原 px-2);
-          // - 星标常驻(收藏行 / 选中行) → 让至星标左界,右界 60px(收藏 mr-2→pr-52,非收藏 mr-4→pr-44);
-          // - hover/键盘聚焦/触屏,以及「…」菜单打开期间(trigger 钉住 data-state=open,鼠标离行仍可见)
-          //   → 让至「…」左界,右界 96px(收藏 mr-2→pr-88,非收藏 mr-4→pr-80)。
-          // 只读行无任何图标,维持基础内边距。
+          // 固定右侧操作区：标题右边界在 hover 进出时保持不变，
+          // 可见性只由时间/图标/收藏切换承担。
+          // 常驻星标行额外预留时间槽（约 16px），保证“星标左侧的时间”不压标题；
+          // 无常驻星标时只保留 hover 操作档，时间仍可回到原右缘。
           !readOnly &&
             hasHoverActions && [
-              favorite && 'pr-[52px]',
-              !favorite && selected && 'pr-[44px]',
-              'group-hover/row:pr-[80px] group-focus-within/row:pr-[80px] [@media(hover:none)]:pr-[80px] group-has-[[data-state=open]]/row:pr-[80px]',
-              favorite &&
-                'group-hover/row:pr-[88px] group-focus-within/row:pr-[88px] [@media(hover:none)]:pr-[88px] group-has-[[data-state=open]]/row:pr-[88px]',
+              favorite
+                ? 'pr-[104px]'
+                : hasResidentStar
+                  ? 'pr-[88px]'
+                  : 'pr-[80px]',
             ],
         )}
       >
-        <span
-          className={cn(
-            'min-w-0 flex-1 truncate text-[13px] font-normal leading-[18px] text-content-strong',
-            // 选中行标题点亮 #09090B（2026-11-02 稿 = text-foreground，twMerge 后发覆盖）：
-            // 与 6% 灰阶选中胶囊共同构成选中锚点，不加粗维持稿「选中不加黑加粗」的克制。
-            selected && 'text-foreground',
-            showInitiator && 'flex flex-col items-start gap-1',
-          )}
-        >
-          {showInitiator ? <span className="w-full truncate">{session.title}</span> : session.title}
-          {showInitiator && <ConversationInitiatorBadge initiator={initiator} />}
-        </span>
+        {(() => {
+          // AgentCoding-only display helper: ordinary rows keep the plain title node.
+          const titleElement = showInitiator ? (
+            <span className="w-full truncate">{session.title}</span>
+          ) : (
+            session.title
+          );
+          const codingTitleElement = (
+            <span className={cn('block truncate', showInitiator && 'w-full')}>{session.title}</span>
+          );
+          const titleNode = showFullTitleTooltip ? (
+            <OverflowTooltip delayDuration={350}>{codingTitleElement}</OverflowTooltip>
+          ) : (
+            titleElement
+          );
+          return (
+            <span
+              className={cn(
+                'min-w-0 flex-1 truncate text-[13px] font-normal leading-[18px] text-content-strong',
+                // 选中行标题点亮 #09090B（2026-11-02 稿 = text-foreground，twMerge 后发覆盖）：
+                // 与 6% 灰阶选中胶囊共同构成选中锚点，不加粗维持稿「选中不加黑加粗」的克制。
+                selected && 'text-foreground',
+                showInitiator && 'flex flex-col items-start gap-1',
+              )}
+            >
+              {titleNode}
+              {showInitiator && <ConversationInitiatorBadge initiator={initiator} />}
+            </span>
+          );
+        })()}
         {/* 相对时间(gmtModified 首次启用,2026-10-22 体验精修):静默态可见的右缘轻提示,
             让「最近聊过什么」一眼可辨;hover/键盘聚焦/触屏/「…」菜单打开期隐藏,把右缘
             让给操作图标(与星标显隐同一组触发条件,方向相反)。aria-hidden:时间是次级装饰性
@@ -133,10 +155,16 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
           <span
             aria-hidden="true"
             className={cn(
-              'ml-1 shrink-0 text-[11px] font-normal leading-none text-content-hint',
-              !readOnly &&
-                hasHoverActions &&
-                'transition-opacity group-hover/row:opacity-0 group-focus-within/row:opacity-0 [@media(hover:none)]:opacity-0 group-has-[[data-state=open]]/row:opacity-0',
+              // 交互行时间不进入标题布局流：标题只根据固定 pr 决定右界。
+              // 无常驻星标时回到right-2 原右缘；已收藏/选中时锚到星标左侧 8px
+              // （结合行 mr，非收藏/收藏统一落在行右侧 60px），避免与常驻星标互叠。
+              // hover/聚焦/触屏/菜单开启期仅淡出，不挤压标题或造成左右跳动。
+              !readOnly && hasHoverActions
+                ? `pointer-events-none absolute ${
+                    hasResidentStar ? (favorite ? 'right-[52px]' : 'right-[44px]') : 'right-2'
+                  } top-1/2 -translate-y-1/2 whitespace-nowrap opacity-100 transition-opacity duration-150 ease-out group-hover/row:opacity-0 group-focus-within/row:opacity-0 [@media(hover:none)]:opacity-0 group-has-[[data-state=open]]/row:opacity-0`
+                : 'ml-1 shrink-0',
+              'text-[11px] font-normal leading-none text-content-hint',
             )}
           >
             {timeText}

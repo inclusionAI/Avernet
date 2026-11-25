@@ -135,3 +135,5 @@ pub mod a2a_auth;
 pub mod a2a_names;
 pub mod a2a_management;
 mod a2a_json;
+
+pub mod catalog_labels;

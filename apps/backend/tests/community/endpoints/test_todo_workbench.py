@@ -14,6 +14,9 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_
 from agentclaw.community.api.task.todo_artifact_service import (
     TodoArtifactServiceProtocol,
 )
+from agentclaw.community.api.task.todo_source_service import (
+    TodoSourceServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
@@ -40,6 +43,11 @@ from agentclaw.community.core.task.todos.models import (
     TodoPage,
     TodoRecord,
     TodoStatus,
+)
+from agentclaw.community.core.task.todos.source_models import (
+    TodoSourceDraft,
+    TodoSourceProject,
+    TodoSourceWorkItem,
 )
 from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationContextRequest,
@@ -212,6 +220,35 @@ class _FixedTodoArtifacts:
         )
 
 
+class _FixedTodoSources:
+    def list_projects(self, **_kwargs: Any) -> tuple[TodoSourceProject, ...]:
+        return (TodoSourceProject(id="dima-project-1", name="Todo Project"),)
+
+    def list_work_items(self, **kwargs: Any) -> tuple[TodoSourceWorkItem, ...]:
+        return (
+            TodoSourceWorkItem(
+                id="dima-task-1",
+                project_id=kwargs["project_id"],
+                category="task",
+                title="Import this Dima task",
+                status="处理中",
+                updated_at="2026-11-21T08:00:00Z",
+            ),
+        )
+
+    def load_work_item_draft(self, **kwargs: Any) -> TodoSourceDraft:
+        return TodoSourceDraft(
+            source_type="dima",
+            project_id=kwargs["project_id"],
+            work_item_id=kwargs["work_item_id"],
+            category="task",
+            title="Import this Dima task",
+            description="Full Dima work-item detail",
+            source_url="https://dima.example.invalid/work-items/dima-task-1",
+            source_updated_at="2026-11-21T08:00:00Z",
+        )
+
+
 def _bind_artifact_world(world) -> None:
     _enable_public_auth(world)
     world.injector.binder.bind(
@@ -221,9 +258,18 @@ def _bind_artifact_world(world) -> None:
     )
 
 
+def _bind_source_world(world) -> None:
+    _enable_public_auth(world)
+    world.injector.binder.bind(
+        TodoSourceServiceProtocol,
+        to=_FixedTodoSources(),
+        scope=singleton,
+    )
+
+
 def _todo(
     *,
-    status: TodoStatus = TodoStatus.PENDING,
+    status: TodoStatus = TodoStatus.NOT_STARTED,
     context_id: str | None = None,
     todo_id: str = "todo_1",
 ) -> TodoRecord:
@@ -250,7 +296,7 @@ class _InMemoryTodos:
         self.todo = _todo(
             todo_id="todo_created",
             context_id=None,
-            status=TodoStatus.PENDING,
+            status=TodoStatus.NOT_STARTED,
         )
         self.todo = replace(
             self.todo,
@@ -290,7 +336,7 @@ class _InMemoryTodos:
         return (self.todo,)[: kwargs["limit"]]
 
     def bind_context_if_pending(self, **kwargs: Any) -> TodoRecord:
-        if self.todo.status is not TodoStatus.PENDING or self.todo.collab_context_id:
+        if self.todo.status is not TodoStatus.NOT_STARTED or self.todo.collab_context_id:
             raise TodoStateConflictError("Todo is not available for context binding")
         self.todo = replace(
             self.todo,
@@ -319,7 +365,7 @@ class _InMemoryTodos:
 def _bind_todo_world(
     world,
     *,
-    status: TodoStatus = TodoStatus.PENDING,
+    status: TodoStatus = TodoStatus.NOT_STARTED,
     context_id: str | None = None,
     seed_context: bool = False,
     seed_interaction: str | None = None,
@@ -421,7 +467,7 @@ def list_todos_forbidden():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/collaboration/tasks/todos",
-    scenario="create_pending",
+    scenario="create_not_started",
     input=CaseInput(
         query_params={"user_id": _USER_ID},
         headers=_principal_headers(),
@@ -438,7 +484,7 @@ def list_todos_forbidden():
     ),
 )
 def create_todo_ok():
-    """A Space member creates a pending Todo for an eligible Bot."""
+    """A Space member creates a not-started Todo for an eligible Bot."""
 
 
 @endpoint_test(
@@ -464,8 +510,149 @@ def create_todo_validation_failed():
 
 @endpoint_test(
     method="GET",
+    path="/openapi/v1/collaboration/tasks/todos/sources/dima/projects",
+    scenario="list_visible_projects",
+    input=CaseInput(
+        query_params=QUERY,
+        headers=_principal_headers(),
+    ),
+    seed=_bind_source_world,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": [{"id": "dima-project-1", "name": "Todo Project"}],
+        },
+    ),
+)
+def list_dima_projects_ok():
+    """The authenticated Human can list their visible Dima projects."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/collaboration/tasks/todos/sources/dima/projects",
+    scenario="wrong_user",
+    input=CaseInput(
+        query_params={"user_id": "someone-else"},
+        headers=_principal_headers(),
+    ),
+    seed=_bind_source_world,
+    expect=ExpectError(status=403),
+)
+def list_dima_projects_forbidden():
+    """Dima projects cannot be read through another Human's identity."""
+
+
+@endpoint_test(
+    method="GET",
+    path=(
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/"
+        "{project_id}/work-items"
+    ),
+    scenario="list_project_work_items",
+    input=CaseInput(
+        path_params={"project_id": "dima-project-1"},
+        query_params={**QUERY, "query": "Import"},
+        headers=_principal_headers(),
+    ),
+    seed=_bind_source_world,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": [
+                {
+                    "id": "dima-task-1",
+                    "project_id": "dima-project-1",
+                    "category": "task",
+                }
+            ],
+        },
+    ),
+)
+def list_dima_work_items_ok():
+    """The authenticated Human can search selectable Dima work items."""
+
+
+@endpoint_test(
+    method="GET",
+    path=(
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/"
+        "{project_id}/work-items"
+    ),
+    scenario="wrong_user",
+    input=CaseInput(
+        path_params={"project_id": "dima-project-1"},
+        query_params={"user_id": "someone-else"},
+        headers=_principal_headers(),
+    ),
+    seed=_bind_source_world,
+    expect=ExpectError(status=403),
+)
+def list_dima_work_items_forbidden():
+    """Dima work items cannot be searched through another Human's identity."""
+
+
+@endpoint_test(
+    method="GET",
+    path=(
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/"
+        "{project_id}/work-items/{work_item_id}"
+    ),
+    scenario="load_editable_draft",
+    input=CaseInput(
+        path_params={
+            "project_id": "dima-project-1",
+            "work_item_id": "dima-task-1",
+        },
+        query_params=QUERY,
+        headers=_principal_headers(),
+    ),
+    seed=_bind_source_world,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "source_type": "dima",
+                "project_id": "dima-project-1",
+                "work_item_id": "dima-task-1",
+                "title": "Import this Dima task",
+            },
+        },
+    ),
+)
+def get_dima_work_item_draft_ok():
+    """One selected Dima item becomes editable Todo fields."""
+
+
+@endpoint_test(
+    method="GET",
+    path=(
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/"
+        "{project_id}/work-items/{work_item_id}"
+    ),
+    scenario="wrong_user",
+    input=CaseInput(
+        path_params={
+            "project_id": "dima-project-1",
+            "work_item_id": "dima-task-1",
+        },
+        query_params={"user_id": "someone-else"},
+        headers=_principal_headers(),
+    ),
+    seed=_bind_source_world,
+    expect=ExpectError(status=403),
+)
+def get_dima_work_item_draft_forbidden():
+    """Dima detail cannot be loaded through another Human's identity."""
+
+
+@endpoint_test(
+    method="GET",
     path="/openapi/v1/collaboration/tasks/todos/{todo_id}",
-    scenario="get_pending",
+    scenario="get_not_started",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
         query_params={"user_id": _USER_ID},
@@ -474,11 +661,11 @@ def create_todo_validation_failed():
     seed=lambda world: _bind_todo_world(world),
     expect=ExpectSuccess(
         status=200,
-        json_contains={"code": 200000, "data": {"status": "pending"}},
+        json_contains={"code": 200000, "data": {"status": "not_started"}},
     ),
 )
 def get_todo_ok():
-    """The owner reads a pending Todo."""
+    """The owner reads a not-started Todo."""
 
 
 @endpoint_test(
@@ -500,7 +687,7 @@ def get_todo_not_found():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/collaboration/tasks/todos/{todo_id}/run",
-    scenario="dispatch_pending",
+    scenario="dispatch_not_started",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
         query_params={"user_id": _USER_ID},

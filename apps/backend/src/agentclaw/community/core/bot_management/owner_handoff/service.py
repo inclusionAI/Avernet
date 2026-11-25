@@ -24,6 +24,10 @@ from agentclaw.community.core.bot_management.owner_handoff.contracts import (
     OwnerHandoffRepositoryProtocol,
 )
 from agentclaw.community.core.bot_management.owner_handoff.preflight import OwnerHandoffPreflight
+from agentclaw.community.core.bot_management.owner_handoff.owner_identity import (
+    directory_work_no,
+    owner_user_id,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.spaces.errors import SpaceNotFoundError
 from agentclaw.community.core.spaces.models import SpaceType
@@ -110,6 +114,7 @@ class OwnerHandoffService:
             or request_key != request_key.strip()
         ):
             raise HandoffError("INVALID_REQUEST_KEY")
+        new_owner_id = owner_user_id(new_owner_id)
         prior = self._repo.find_by_request(
             bot_pk=bot_pk, actor_id=actor_id, new_owner_id=new_owner_id,
             request_key=request_key,
@@ -125,12 +130,13 @@ class OwnerHandoffService:
             raise HandoffError("OWNER_REQUIRED")
         if bot.get("bot_type") != "service" or bot["bot_id"] == "default":
             raise HandoffError("SERVICE_BOT_REQUIRED")
-        if not bot.get("entity_id") or new_owner_id == bot["owner_id"]:
+        if not bot.get("entity_id") or new_owner_id == owner_user_id(bot["owner_id"]):
             raise HandoffError("INVALID_OWNER_HANDOFF")
         # A directory record is identity validation, NOT proof of employment status.
-        profile = self._staff.get_user_by_work_no(work_no=new_owner_id)
+        lookup_work_no = directory_work_no(new_owner_id)
+        profile = self._staff.get_user_by_work_no(work_no=lookup_work_no)
         name = profile.display_name or profile.full_name or profile.username
-        if profile.work_no != new_owner_id or not name:
+        if profile.work_no != lookup_work_no or not name:
             raise HandoffError("NEW_OWNER_NOT_FOUND")
         self._preflight.check(bot)
         self._prepare_personal_space(bot, actor_id, new_owner_id)

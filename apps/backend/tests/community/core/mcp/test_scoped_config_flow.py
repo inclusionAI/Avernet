@@ -72,8 +72,9 @@ def test_read_returns_explicit_groups_without_copying_inherited_values() -> None
     )
 
 
+@pytest.mark.parametrize("supply_removed_before_commit", [False, True])
 def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
-    monkeypatch,
+    monkeypatch, supply_removed_before_commit,
 ) -> None:
     engine = create_engine("sqlite:///:memory:")
     UserMCPConfig.__table__.create(engine)
@@ -149,9 +150,18 @@ def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
     })
     monkeypatch.setattr(
         "agentclaw.community.core.mcp.services._defaults.get_default_mcp_servers",
-        lambda _engine: [],
+        lambda *_args, **_kwargs: [],
     )
 
+    command_repo = ScopedMCPConfigRepository(db)
+    projection = None
+    if supply_removed_before_commit:
+        # The preflight reader retains its earlier answer, while the
+        # persisted view used by the command no longer supplies the MCP.
+        from agentclaw.community.core.base import Base
+
+        Base.metadata.create_all(engine)
+        projection = MagicMock(defer_enabled=False)
     result = asyncio.run(write_scoped_config(
         user_id="owner", server_code="mcp.weather", endpoint_env="PROD",
         transport_protocol="SSE",
@@ -164,8 +174,9 @@ def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
             URLRule(url="https://bot.example.test/mcp", bots=("bot-x",)),
         ),
         config_service=config, bot_config_repo=bot_config_repo, bot_repo=bots,
-        command_repo=ScopedMCPConfigRepository(db), market_service=market,
+        command_repo=command_repo, market_service=market,
         sync_service=sync, capability_reader=capability,
+        capability_projection=projection,
     ))
 
     override = bot_config_repo.get_by_bot_and_server_code(
@@ -181,10 +192,68 @@ def test_write_persists_scoped_rules_and_keeps_offline_projection_best_effort(
         URLRule(url="https://global.example.test/mcp", bots=()),
         URLRule(url="https://bot.example.test/mcp", bots=("bot-x",)),
     )
-    assert result.sync_summary["offline"] == 1
+    if supply_removed_before_commit:
+        assert result.sync_results == ()
+        sync.sync_mcp_detail_to_all_bots.assert_not_awaited()
+        projection.project_competing_change.assert_not_called()
+    else:
+        assert result.sync_summary["offline"] == 1
     assert UserMCPConfigRepository(db).get_by_user_and_server_code(
         "owner", "mcp.weather"
     )["api_key"] == "existing-secret"
+
+
+@pytest.mark.asyncio
+async def test_bulk_config_keeps_bounded_projection_fanout_with_bot_leases():
+    ids = [f"bot-{number}" for number in range(6)]
+    bots = MagicMock()
+    bots.list_live_bot_ids_by_owner.return_value = ids
+    bots.get_by_id_and_owner.return_value = {"active_engine": "openclaw"}
+    configs = MagicMock()
+    configs.list_by_owner_and_server_code.return_value = {}
+    effective = MagicMock()
+    effective.effective_mcp_server_codes.return_value = {"mcp.weather"}
+    market = MagicMock()
+    market.get_mcp_detail.return_value = {
+        "serverCode": "mcp.weather", "runMode": "REMOTE",
+        "endpoints": [{"env": "PROD", "networkType": "OFFICE", "transportProtocol": "SSE"}],
+    }
+    commands = MagicMock()
+    commands.replace.return_value = {bot_id: f"entity-{bot_id}" for bot_id in ids}
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    active = set()
+
+    async def send(*, target_bot_ids, **_kwargs):
+        (bot_id,) = target_bot_ids
+        active.add(bot_id)
+        if len(active) == 5:
+            entered.set()
+        await release.wait()
+        active.remove(bot_id)
+        return {"sync_results": [{"bot_id": bot_id, "synced": True}]}
+
+    leased = []
+
+    async def project(*, bot_id, entity_id, legacy, **_kwargs):
+        leased.append((bot_id, entity_id))
+        return await legacy()
+
+    task = asyncio.create_task(write_scoped_config(
+        user_id="owner", server_code="mcp.weather", endpoint_env="PROD",
+        transport_protocol="SSE", params=(), config_service=MagicMock(),
+        bot_config_repo=configs, bot_repo=bots, command_repo=commands,
+        market_service=market, sync_service=MagicMock(sync_mcp_detail_to_all_bots=send),
+        capability_reader=effective, capability_projection=MagicMock(project_competing_change=project),
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=3)
+        assert active == set(ids[:5])
+    finally:
+        release.set()
+    result = await task
+    assert leased == [(bot_id, f"entity-{bot_id}") for bot_id in ids]
+    assert result.sync_summary["synced_count"] == len(ids)
 
 
 @pytest.mark.parametrize(

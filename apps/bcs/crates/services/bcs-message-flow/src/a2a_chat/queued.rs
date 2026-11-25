@@ -20,14 +20,6 @@ pub(crate) struct DirectProjection {
     pub expires_at_ms: u64,
     pub provider_route_headers: Vec<(String, String)>,
     pub policy_version: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub a2a_test_user: Option<bcs_service_api::a2a_test_user::A2aTestUserSelection>,
-}
-
-pub(super) fn supports_test_user_selection(target: &bcs_domain::BotDeliveryTarget) -> bool {
-    use bcs_service_api::types::a2a::{A2aBinding, A2aUpdateMode};
-    matches!(target, bcs_domain::BotDeliveryTarget::A2a { interface, .. }
-        if interface.binding == A2aBinding::JsonRpc && interface.update_mode == A2aUpdateMode::Stream)
 }
 
 pub(crate) fn invalid(message: &str) -> ServiceError { ServiceError::InternalError(message.into()) }
@@ -72,23 +64,16 @@ impl A2aChat {
         let message_id = uuid::Uuid::new_v4().to_string();
         let now = now_ms();
         let target = self.registry.resolve_delivery_target(&cmd.target_bot_id).await?;
-        if let Some(selection) = &cmd.a2a_test_user {
-            if selection.caller_bot_id != from || !supports_test_user_selection(&target) {
-                return Err(ServiceError::Forbidden("A2A test user selection denied".into()));
-            }
-        }
         let headers: Vec<_> = cmd.provider_bypass_headers.iter().filter(|(name, _)| target.is_http_provider()
             || flow.queue_persistable_headers.iter().any(|allowed| allowed.eq_ignore_ascii_case(name))).cloned().collect();
         let snapshot = bcs_config_api::queued_provider_headers::snapshot(&headers, &flow.queue_persistable_headers);
         let rejection = snapshot.as_ref().err().map(|_| bcs_service_api::port::repo::message_delivery::DeliveryAdmissionRejection::ProviderHeadersUnsupported);
         let projection = DirectProjection {
-            // Older workers refuse version 2 instead of dropping the test selection.
-            version: if cmd.a2a_test_user.is_some() { 2 } else { 1 },
+            version: 1,
             from_bot_id: from.into(), from_actor_id: cmd.from_actor_id.clone().unwrap_or_else(|| from.into()),
             sender_name: self.sender_display_name(from).await, target_tags: cmd.tags.clone(),
             caller_wait_mode: cmd.caller_wait_mode.clone(), organization_code: cmd.organization_code.clone(),
             client: cmd.client.clone(), expires_at_ms: expires, provider_route_headers: snapshot.unwrap_or_default(), policy_version: policy.version,
-            a2a_test_user: cmd.a2a_test_user.clone(),
         };
         let mut record = ChatRunRecord::new(run.into(), cmd.target_bot_id.clone(), from.into(), session.into(), now, expires,
             cmd.client.clone(), cmd.response_mode, ChatRunCompletionPolicy::WaitForFinal);

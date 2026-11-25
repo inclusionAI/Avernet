@@ -1,5 +1,5 @@
 version: 1
-manifest_version: "2026-08-31.1"
+manifest_version: "2026-11-24.1"
 install_root: "/home/admin/.agentclaw/cli"
 managed_bin_dir: "/home/admin/.agentclaw/bin"
 
@@ -17,7 +17,7 @@ profiles:
     match:
       engine_type: claude_code
       exclude_template_types: [normalCC]
-    default_cli_codes: [dataphin, deepinsight-cli]
+    default_cli_codes: [dataphin, deepinsight-cli, AntCR]
 
 installers:
   acli:
@@ -45,3 +45,12 @@ catalog:
       installer: acli
       argv: [install, di]
     probe_argv: [di, --version]
+  AntCR:
+    cli_name: AntCR
+    cli_desc: AntCR 代码评审命令行工具
+    executable: antcr
+    default_identity_mode: owner
+    install:
+      installer: acli
+      argv: [install, antcr]
+    probe_argv: [antcr, --version]

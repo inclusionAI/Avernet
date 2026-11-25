@@ -16,8 +16,10 @@ surface silently serving unchecked operations.
 
 from __future__ import annotations
 
+import ast
 import importlib
 import inspect
+from types import SimpleNamespace
 from typing import Annotated
 
 import pytest
@@ -254,6 +256,39 @@ def test_every_nocheck_row_carries_a_reason():
     assert missing == []
 
 
+def _enforcement_source(module):
+    source = inspect.getsource(module)
+    delegated = []
+    called_names = {
+        node.func.id for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    for name in called_names:
+        helper = getattr(module, name, None)
+        if (
+            inspect.isfunction(helper)
+            and helper.__module__ != module.__name__
+            and helper.__module__.startswith("agentclaw.community.")
+        ):
+            delegated.append(inspect.getsource(helper))
+    return "\n".join([source, *delegated])
+
+
+@pytest.mark.parametrize("invoked", [False, True])
+def test_enforcement_source_follows_called_helpers_not_unused_imports(monkeypatch, invoked):
+    def helper():
+        pass
+
+    helper.__module__ = "agentclaw.community.example"
+    module = SimpleNamespace(__name__="agentclaw.community.example_router", check=helper)
+    sources = {
+        id(module): "def endpoint():\n    check()" if invoked else "def endpoint():\n    return None",
+        id(helper): "def check():\n    return has_bot_access()",
+    }
+    monkeypatch.setattr(inspect, "getsource", lambda value: sources[id(value)])
+    assert ("has_bot_access" in _enforcement_source(module)) is invoked
+
+
 def test_every_service_checked_row_cites_a_real_enforcer():
     """The citation must resolve, and that module must really check something.
 
@@ -275,7 +310,7 @@ def test_every_service_checked_row_cites_a_real_enforcer():
         except ImportError:
             unverifiable.append(f"{key}: cannot import {module_path}")
             continue
-        source = inspect.getsource(module)
+        source = _enforcement_source(module)
         if not any(
             marker in source
             for marker in (
@@ -581,6 +616,7 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/upgrade"),
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/{publication_id}/upgrade"),
         ("PATCH", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/config"),
         ("PATCH", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"),
         ("POST", "/openapi/v1/bots/{bot_id}/clis"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/clis/{cli_code}"),

@@ -24,7 +24,7 @@ from tests.community.framework import (
 
 _OWNER = "desktop-metadata-owner"
 _BOT_ID = "desktop-metadata-bot"
-_RESOURCE_ID = "desktop-link-1"
+_RESOURCE_ID = "101"
 _KEY = "desktop-metadata-signing-key-at-least-32-bytes"
 _AVATAR_PATH = "/openapi/v1/bots/{bot_id}/avatar"
 _LINKS_PATH = "/openapi/v1/bots/{bot_id}/links"

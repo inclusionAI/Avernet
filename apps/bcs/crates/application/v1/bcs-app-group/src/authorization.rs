@@ -520,7 +520,7 @@ impl GroupServiceImpl {
         &self,
         caller: &bcs_service_api::application::v1::AuthenticatedCaller,
         group_id: &str,
-    ) -> Result<DomainGroup, ApplicationError> {
+    ) -> Result<bcs_service_api::types::GroupMutationSnapshot, ApplicationError> {
         let principal = self.resolve_principal(caller).await?;
         let group = self
             .groups
@@ -533,6 +533,8 @@ impl GroupServiceImpl {
                     format!("Group '{group_id}' was not found"),
                 )
             })?;
+        let snapshot = self.detail_snapshot(group).await?;
+        let group = &snapshot.group;
         if group.record_status != "active" {
             return Err(ApplicationError::not_found(
                 "group_not_found",
@@ -540,13 +542,13 @@ impl GroupServiceImpl {
             ));
         }
         if group.visibility != visibility_name(GroupVisibility::Public)
-            && !self.can_read_group_detail(&principal, &group).await?
+            && !self.can_read_group_detail(&principal, group).await?
         {
             return Err(ApplicationError::forbidden(
                 "The selected Principal has no readable relation to this Group",
             ));
         }
-        Ok(group)
+        Ok(snapshot)
     }
 
     pub(crate) async fn load_manageable_group(

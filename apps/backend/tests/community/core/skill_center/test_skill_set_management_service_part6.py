@@ -433,6 +433,7 @@ async def test_projector_exposes_skill_and_complete_plan_shapes_at_the_engine_se
         EngineRuntimeProjection,
         ResolvedCapabilityPlan,
         ResolvedSkillPlan,
+        RuntimeProjectionResult,
     )
     from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
         EngineRuntimeProjectionRegistry,
@@ -446,8 +447,9 @@ async def test_projector_exposes_skill_and_complete_plan_shapes_at_the_engine_se
 
         async def apply(
             self, *, plan, scope, retired_mappings=(), service_factory
-        ) -> None:
+        ) -> RuntimeProjectionResult:
             plans.append(plan)
+            return RuntimeProjectionResult.converged()
 
     projection = _RecordingProjection()
     runtime = BotRuntimeProjector(

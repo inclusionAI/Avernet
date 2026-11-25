@@ -37,6 +37,7 @@ from secbaas.community.api.bot_runtime import (
     NoDevicesFoundError,
     SessionInfo,
     SessionNotFoundError,
+    SessionRuntimeStatus,
     WsConnectionInfo,
 )
 from secbaas.community.api.sse import StreamChunk
@@ -680,6 +681,32 @@ class BaasBotService(BotService):
             raise BotServiceError(
                 f"Failed to get messages: {safe_client_msg(e)}"
             ) from e
+
+    async def get_session_runtime_status(
+        self,
+        *,
+        session_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+    ) -> SessionRuntimeStatus:
+        """Observe an existing run without creating a session or sending a message."""
+        if binding_info.engine_type != "openclaw":
+            return SessionRuntimeStatus(
+                session_id=session_id,
+                found=False,
+                reason="UNSUPPORTED_ENGINE",
+            )
+        try:
+            conn_info = await self._resolve_ws_connection_for_binding(
+                binding_info,
+                session_id=session_id,
+                context=context,
+            )
+            client = self._create_session_client(conn_info, binding_info.engine_type)
+            async with client:
+                return await client.get_session_runtime_status(session_id)
+        except Exception as exc:
+            raise BotServiceError("Runtime observation request failed") from exc
 
     async def get_session(
         self,

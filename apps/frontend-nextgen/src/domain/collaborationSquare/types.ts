@@ -163,6 +163,12 @@ export interface PublicBot {
    * 分享链接据此携带 audience 参数，深链落地时用于提前匹配浏览身份。
    */
   audience?: 'user' | 'bot';
+  /**
+   * Bot 运行类型（metadata/queries 记录的 bot_type；仅认识 'service' | 'personal'，
+   * 未知/无 metadata 记录保持 undefined）。自有 service Bot 建聊需带 stage=online
+   * 与聊天页读取口径对齐，见 openBotConversation。
+   */
+  botType?: 'service' | 'personal';
 }
 
 /** Return the stable identity used to isolate friend-request state for a public Bot card. */
@@ -293,6 +299,8 @@ export interface OpenBotConversationResult {
 /** 打开 Bot 单聊的附加选项：目标 Bot 归登录用户所有时不传 f_user_id（仅好友 Bot 传）。 */
 export interface OpenBotConversationOptions {
   isOwnedByLoggedInUser?: boolean;
+  /** 目标 Bot 运行类型（PublicBot.botType）：自有 service Bot 需以 stage=online 建聊。 */
+  botType?: 'service' | 'personal';
 }
 
 /** 创建公开协作群会话的表单入参（OpenAPI POST /groups/{group_id}/sessions body）。 */

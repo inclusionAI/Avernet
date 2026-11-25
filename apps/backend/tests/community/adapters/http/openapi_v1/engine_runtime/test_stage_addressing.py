@@ -137,8 +137,11 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/status"),
     ("post", "/openapi/v1/bots/{bot_id}/activate"),
     ("post", "/openapi/v1/bots/{bot_id}/recycle"),
+    ("get", "/openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}"),
     ("get", "/openapi/v1/bots/{bot_id}/caller-context"),
     ("patch", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"),
+    ("get", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/config"),
+    ("put", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/config"),
     ("patch", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"),
     ("get", "/openapi/v1/bots/{bot_id}/clis"),
     ("post", "/openapi/v1/bots/{bot_id}/clis"),
@@ -408,6 +411,9 @@ def test_the_connection_build_receives_the_named_stage(relay):
     from agentclaw.community.api.engine_connection_service import (
         EngineConnectionServiceProtocol,
     )
+    from agentclaw.community.api.engine_runtime_service import (
+        EngineRuntimeRelayProtocol,
+    )
     from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
     from agentclaw.community.api.human_bot_friendship_service import (
         HumanBotFriendshipServiceProtocol,
@@ -423,6 +429,7 @@ def test_the_connection_build_receives_the_named_stage(relay):
     class _M(Module):
         def configure(self, binder):
             binder.bind(EngineConnectionServiceProtocol, to=connections)
+            binder.bind(EngineRuntimeRelayProtocol, to=relay)
             binder.bind(HumanBotFriendshipServiceProtocol, to=FakeFriendships())
             binder.bind(ExpertChatServiceProtocol, to=FakeExpertChat())
 

@@ -14,7 +14,7 @@ import {
   GroupSpeakingLeaseService,
   type SpeakingLeaseSnapshot,
 } from '@/services/workspace/groupSpeakingLeaseService';
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 class FakeTransport {
   readonly frames: Array<Record<string, unknown>> = [];
@@ -34,9 +34,14 @@ class FakeTransport {
   }
 }
 
-function makeService(transport: FakeTransport, humanActorId = 'human_1') {
+function makeService(
+  transport: FakeTransport,
+  humanActorId = 'human_1',
+  sessionId?: string,
+) {
   return new GroupSpeakingLeaseService({
     groupId: 'group-1',
+    sessionId,
     humanActorId,
     send: (frame) => transport.send(frame as Record<string, unknown>),
     isConnected: () => transport.connected,
@@ -62,6 +67,12 @@ beforeEach(() => {
   service = makeService(transport);
   snapshots = [];
   service.subscribe((snapshot) => snapshots.push(snapshot));
+});
+
+// 每例结束收敛连接周期：停轮询/到期定时器并立结在途请求，
+// 避免遗留的 setInterval 轮询 handle 使 jest 进程无法退出（CI 挂死）。
+afterEach(() => {
+  service.resetConnection();
 });
 
 describe('domain pure helpers', () => {
@@ -297,5 +308,70 @@ describe('GroupSpeakingLeaseService', () => {
     });
     service.resetConnection();
     await expect(pending).rejects.toThrow('lease_disconnected');
+  });
+});
+
+describe('会话作用域(sessionId)透传', () => {
+  it('配置 sessionId 时 acquire/current/release 帧都携带会话作用域声明', async () => {
+    const scoped = makeService(transport, 'human_1', 'group-1:s1');
+    transport.respondWith((frame) =>
+      scoped.handleFrame({
+        type: 'res',
+        id: frame.id as string,
+        ok: true,
+        payload: grantedPayload('human_1'),
+      }),
+    );
+    await expect(scoped.acquire()).resolves.toBe(true);
+    expect(transport.frames[0]).toMatchObject({
+      method: 'lease.acquire',
+      params: { groupId: 'group-1', sessionId: 'group-1:s1' },
+    });
+
+    transport.respondWith((frame) =>
+      scoped.handleFrame({
+        type: 'res',
+        id: frame.id as string,
+        ok: true,
+        payload: grantedPayload('human_1'),
+      }),
+    );
+    await scoped.refresh();
+    expect(transport.frames.at(-1)).toMatchObject({
+      method: 'lease.current',
+      params: { groupId: 'group-1', sessionId: 'group-1:s1' },
+    });
+
+    transport.respondWith((frame) =>
+      scoped.handleFrame({
+        type: 'res',
+        id: frame.id as string,
+        ok: true,
+        payload: { status: 'released' },
+      }),
+    );
+    await scoped.release();
+    expect(transport.frames.at(-1)).toMatchObject({
+      method: 'lease.release',
+      params: {
+        groupId: 'group-1',
+        sessionId: 'group-1:s1',
+        leaseId: 'lease-2',
+        leaseEpoch: 7,
+      },
+    });
+  });
+
+  it('未配置 sessionId 时帧不带该字段（群作用域语义回退）', async () => {
+    transport.respondWith((frame) =>
+      service.handleFrame({
+        type: 'res',
+        id: frame.id as string,
+        ok: true,
+        payload: grantedPayload('human_1'),
+      }),
+    );
+    await expect(service.acquire()).resolves.toBe(true);
+    expect(transport.frames[0].params).toEqual({ groupId: 'group-1' });
   });
 });

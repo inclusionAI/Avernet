@@ -179,6 +179,13 @@ class TodoScheduler(LifecycleBase):
         return await self._execution.dispatch_pending(todo_id=todo.todo_id)
 
     async def _reconcile_acceptance(self, todo: TodoRecord) -> TodoRecord:
+        # ``PENDING_ACCEPTANCE`` is a compatibility alias for the persisted
+        # ``pending_action`` value. Templated Todos use that same product state
+        # for planned Human stages and blocked Bot stages, but they must wait
+        # for an explicit stage action rather than entering the legacy
+        # acceptance-repair path.
+        if todo.template_id:
+            return todo
         return await self._execution.reconcile_pending_acceptance(
             todo_id=todo.todo_id
         )

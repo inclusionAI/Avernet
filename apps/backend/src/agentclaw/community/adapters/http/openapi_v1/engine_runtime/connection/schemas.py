@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal
 
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import SocketKind
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Socket(BaseModel):
@@ -30,9 +30,21 @@ class Socket(BaseModel):
         "move any part of it into a header; a browser cannot set headers on a "
         "WebSocket handshake, which is why everything needed is in the URL. "
         "The a2a kind is the exception in shape, not in the rule: it is an "
-        "HTTP base URL with no credential, and the two A2A paths "
+        "HTTP base URL with optional authentication headers, and the two A2A paths "
         "(/.well-known/agent-card.json and /rpc) hang beneath it as given."
     )
+    headers: dict[str, str] = Field(
+        default_factory=dict, repr=False, exclude_if=lambda value: not value,
+        description="A2A-only HTTP headers for the card and RPC paths under url. "
+        "Never forward to redirects or other URLs; refresh connection before "
+        "expires_at. These do not replace per-request IAM authentication.",
+    )
+
+    @model_validator(mode="after")
+    def headers_only_for_a2a(self) -> Socket:
+        if self.headers and self.kind != SocketKind.A2A:
+            raise ValueError("HTTP headers are only supported for A2A")
+        return self
 
 
 class Connection(BaseModel):
@@ -63,7 +75,8 @@ class Connection(BaseModel):
         "past this instant, because the credential is checked once at connect "
         "time. Request this endpoint again before connecting or reconnecting — "
         "not on a timer to keep a live socket alive. An expired credential "
-        "fails the handshake rather than reporting why."
+        "fails the handshake rather than reporting why. For A2A HTTP headers, "
+        "refresh before issuing a new HTTP request after this deadline."
     )
     sockets: list[Socket] = Field(
         description="Exactly the sockets this bot offers. A kind absent from "

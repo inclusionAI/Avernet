@@ -4,6 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceConnectionUnavailableError,
+    DeviceNotBoundError,
+    DeviceOfflineError,
+)
+from agentclaw.community.core.skill_center.errors import (
+    ArtifactProjectionNotDispatchedError,
+    SkillSetRuntimeReconcileError,
+)
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     EngineRuntimeProjection,
     ProjectionScope,
@@ -66,7 +75,7 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
         scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping] = (),
         service_factory: RuntimeServiceFactoryBoundary,
-    ) -> None:
+    ) -> RuntimeProjectionResult:
         """Deliver once, or not at all.
 
         The scope is read for one bit only — did this mutation change
@@ -140,19 +149,39 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
                 entity_type=plan.bot.get("entity_type") or "staff",
             )
         )
-        if not await service.project_whole_artifact(
-            desired_skills=self._desired_skills(plan.projection),
-            effective_mcps=effective_mcps,
-        ):
+        try:
+            delivered = await service.project_whole_artifact(
+                desired_skills=self._desired_skills(plan.projection),
+                effective_mcps=effective_mcps,
+            )
+        except (DeviceNotBoundError, DeviceOfflineError, DeviceConnectionUnavailableError):
+            return RuntimeProjectionResult.pending(
+                code="ARTIFACT_RUNTIME_UNAVAILABLE",
+                reason="Bot 运行环境当前不可连接，能力状态已保存但尚未同步",
+            )
+        except ArtifactProjectionNotDispatchedError:
+            return RuntimeProjectionResult.pending(
+                code="ARTIFACT_PROJECTION_NOT_DISPATCHED",
+                reason="Bot 运行配置准备失败，等待重试",
+            )
+        except SkillSetRuntimeReconcileError:
+            delivered = False
+        if not delivered:
             return RuntimeProjectionResult.pending(
                 code="ARTIFACT_APPLY_FAILED",
                 reason="Bot 运行配置未完成同步",
+                delivery_uncertain=True,
             )
-        return RuntimeProjectionResult.converged(
+        return RuntimeProjectionResult(
+            status=RuntimeProjectionStatus.CONVERGED,
             components={
                 "skills": RuntimeProjectionStatus.CONVERGED,
                 "mcp": RuntimeProjectionStatus.CONVERGED,
-            }
+            },
+            delivered_mcp_codes=(
+                frozenset(plan.projection.mcp_server_codes)
+                if isinstance(plan, ResolvedCapabilityPlan) else frozenset()
+            ),
         )
 
     @staticmethod

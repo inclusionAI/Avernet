@@ -15,6 +15,7 @@ targets=(
   "crates/services/bcs-group/src"
   "crates/services/bcs-friend/src"
   "crates/services/bcs-relation/src"
+  "crates/services/bcs-dist-connector/src"
 )
 
 # Prevalidate: every expected target tree must exist. A missing tree is a

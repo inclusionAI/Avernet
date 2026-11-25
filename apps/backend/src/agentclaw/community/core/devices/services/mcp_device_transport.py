@@ -77,9 +77,9 @@ def _request_with_transient_retry(
         except HttpClientRequestError as error:
             if delay_seconds is None:
                 raise Exception(
-                    f"{operation} MCP failed after {attempt} attempts: {error}"
-                ) from error
-            error_detail = f"request_error={error}"
+                    f"{operation} MCP failed after {attempt} attempts: {type(error).__name__}"
+                ) from None
+            error_detail = f"request_error={type(error).__name__}"
         else:
             response_error = Exception(
                 f"{operation} failed: {response.status_code}, {response.text}"
@@ -88,17 +88,14 @@ def _request_with_transient_retry(
                 return response
             if response.status_code not in _RETRYABLE_MCP_STATUS_CODES:
                 return response
-            if delay_seconds is None:
-                raise Exception(
-                    f"{operation} MCP failed after {attempt} attempts: "
-                    f"{response_error}"
-                ) from response_error
             reason = (
                 "NO_ACTIVE_DEVICES"
                 if "NO_ACTIVE_DEVICES" in response.text
                 else f"HTTP_{response.status_code}"
             )
-            error_detail = f"reason={reason} response={response.text}"
+            if delay_seconds is None:
+                raise Exception(f"{operation} MCP failed after {attempt} attempts: {reason}")
+            error_detail = f"reason={reason}"
 
         logger.warning(
             "[mcp_transport] transient MCP delivery failure; retrying "
@@ -201,11 +198,11 @@ def push_single_mcp(
         return True
 
     except HttpClientRequestError as e:
-        logger.exception("[mcp_transport] Failed to sync single MCP: %s", e)
+        logger.error("[mcp_transport] Failed to sync single MCP: %s", type(e).__name__)
         sc = mcp_data.get("server_code") or mcp_data.get("serverCode")
-        raise Exception(f"Network error syncing {sc}: {e}") from e
+        raise Exception(f"Network error syncing {sc}") from None
     except Exception as e:
-        logger.exception("[mcp_transport] Unexpected error during sync single: %s", e)
+        logger.error("[mcp_transport] Unexpected error during sync single: %s", type(e).__name__)
         raise
 
 
@@ -233,7 +230,10 @@ def _create_mcp(transport: Any, config: DeviceMCPConfig):
     )
     if response.status_code in [200, 201]:
         return
-    raise Exception(f"Create failed: {response.status_code}, {response.text}")
+    error = Exception(f"Create failed: {response.status_code}, {response.text}")
+    if is_already_exists_error(error):
+        raise Exception(f"Create failed: {response.status_code}, MCP server already exists")
+    raise Exception(f"Create failed: {response.status_code}")
 
 
 def _update_mcp(transport: Any, config: DeviceMCPConfig):
@@ -246,7 +246,7 @@ def _update_mcp(transport: Any, config: DeviceMCPConfig):
     )
     if response.status_code in [200, 201]:
         return
-    raise Exception(f"Update failed: {response.status_code}, {response.text}")
+    raise Exception(f"Update failed: {response.status_code}")
 
 
 def _delete_mcp(transport: Any, server_code: str):

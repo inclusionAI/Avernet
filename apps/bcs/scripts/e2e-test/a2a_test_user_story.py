@@ -19,7 +19,6 @@ from caller_execution_story import free_port
 from provider_scope_story import Story
 
 
-ALIAS = "coverage-fixture"
 HEADER = "x-e2e-agent-user"
 
 
@@ -53,6 +52,7 @@ def peer_tls(root):
 @contextmanager
 def bcs_server(binary, story, root, config, env):
     path = root / "bcs-config-pre.json"
+    (root / "catalog-labels.toml").write_bytes((Path(__file__).resolve().parents[2] / "configs/catalog-labels.toml").read_bytes())
     path.write_text(json.dumps(config))
     log_path = root / "server.log"
     with log_path.open("w") as log:
@@ -85,7 +85,7 @@ def bcs_server(binary, story, root, config, env):
 
 
 def run_story(binary, root):
-    user_value = uuid.uuid4().hex
+    user_value = str(uuid.uuid4().int % 10**16)
     observed = []
     empty_roots = root / "empty-roots"
     empty_roots.mkdir()
@@ -95,7 +95,7 @@ def run_story(binary, root):
         observed.append((method, len(values), values == [user_value]))
 
     peer = Peer("JSONRPC", observe_rpc=observe)
-    peer.expect_identity = False  # This isolated server has no application-identity plugin.
+    peer.expect_identity = True
     peer.server.socket = peer_tls(root).wrap_socket(peer.server.socket, server_side=True)
     endpoint = peer.base.replace("http://", "https://", 1) + "/a2a"
     peer.card["supportedInterfaces"][0]["url"] = endpoint
@@ -115,11 +115,10 @@ def run_story(binary, root):
     config["collaboration"]["templates"]["base_dir"] = str(root / "templates")
     env = dict(os.environ, SERVER_ENV="pre", BCS_DEBUG="false",
                SSL_CERT_FILE=str(root / "ca.pem"), SSL_CERT_DIR=str(empty_roots),
-               A2A_E2E_SIGNING_KEY=uuid.uuid4().hex, A2A_E2E_BCN_GROUP_SESSION_WS_JWT=uuid.uuid4().hex,
-               A2A_E2E_FIXTURE_USER=user_value)
+               A2A_E2E_SIGNING_KEY=uuid.uuid4().hex, A2A_E2E_BCN_GROUP_SESSION_WS_JWT=uuid.uuid4().hex)
     prefix = "/a2a/providers/coverage-provider/bots"
     chat_path = prefix + "/target/chat-async"
-    body = {"message": "A2A question fixture", "test_user_ref": ALIAS}
+    body = {"message": "A2A question fixture", "user_id": user_value}
 
     def register(ref, admin):
         card = copy.deepcopy(peer.card)
@@ -153,11 +152,11 @@ def run_story(binary, root):
             token = caller["bot_runtime_token"]
             story.request("POST", chat_path, body, token=token, status=403)
 
+        config["a2a_http_identity"] = {"plugin": "e2e-loopback-identity"}
         config["a2a_test_user"] = {
-            "accept_new": True, "alias": ALIAS, "binding_ref": "coverage-v1",
             "caller_bot_id": caller["bot_id"], "provider_id": provider["provider_id"],
             "target_bot_id": target["bot_id"], "interface_url": endpoint,
-            "header_name": HEADER, "user_id_secret": "fixture-user",
+            "header_name": HEADER,
         }
         with bcs_server(binary, story, root, config, env):
             policy_path = "/admin/message-delivery/policy"
@@ -172,8 +171,8 @@ def run_story(binary, root):
             other = target["bot_runtime_token"]
             story.request("POST", chat_path, body, token=other, status=403)
             story.request("POST", prefix + "/caller/chat-async", body, token=token, status=403)
-            story.request("POST", chat_path, dict(body, test_user_ref="bad alias"), token=token, status=400)
-            story.request("POST", chat_path, dict(body, test_user_ref="other-alias"), token=token, status=400)
+            story.request("POST", chat_path, dict(body, user_id="bad id"), token=token, status=400)
+            story.request("POST", chat_path, dict(body, user_id=""), token=token, status=400)
             story.request("POST", chat_path, dict(body, session_id="ordinary-session"), token=token, status=400)
             assert not observed, "An invalid fixture selection contacted the peer"
             with peer.lock:
@@ -197,8 +196,7 @@ def run_story(binary, root):
             control = f"/providers/{provider['provider_id']}/bots/{target['bot_id']}/a2a"
             story.request("PUT", control, {"agent_card": updated_card}, token=admin)
             previous_calls = len(observed)
-            rejected = story.request("POST", chat_path, body, token=token, status=202)
-            assert terminal(rejected, token)["state"] == "failed"
+            story.request("POST", chat_path, body, token=token, status=403)
             assert len(observed) == previous_calls, "The changed endpoint received a request"
     finally:
         peer.close()

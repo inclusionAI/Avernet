@@ -69,6 +69,13 @@ pub trait GroupRepoPort: Send + Sync {
         Err(ServiceError::InternalError("Group Card snapshot reads are not configured".into()))
     }
 
+    /// Read uncached metadata/participants and labels from one effective Group
+    /// version. Concurrent version changes are retried at most three times;
+    /// exhausted races and storage failures are errors, never mixed details.
+    async fn read_detail_snapshot(&self, _id: &str) -> ServiceResult<Option<crate::types::GroupMutationSnapshot>> {
+        Err(ServiceError::InternalError("Group detail snapshots are not configured".into()))
+    }
+
     /// Process-local membership projection for Provider policy tightening.
     /// Persistent Provider stores enforce the equivalent condition atomically
     /// in their metadata UPDATE instead of issuing a separate Group read.
@@ -76,6 +83,17 @@ pub trait GroupRepoPort: Send + Sync {
         Err(ServiceError::InternalError("public group membership lookup is not configured".into()))
     }
 
+    /// Atomic Group/template/labels write. Legacy upserts preserve labels.
+    async fn upsert_with_catalog_labels(&self, group: Group, labels: Option<crate::types::catalog_labels::CatalogLabels>) -> ServiceResult<()> {
+        if labels.is_some() { return Err(ServiceError::InternalError("catalog-label Group write unavailable".into())); }
+        self.upsert(group).await
+    }
+    /// Create-only admission: reject an existing identity atomically, without
+    /// replacing its management anchors, type, participants or catalog labels.
+    /// Implementations must not emulate this using an exists check plus upsert.
+    async fn create_with_catalog_labels(&self, _group: Group, _labels: Option<crate::types::catalog_labels::CatalogLabels>) -> ServiceResult<()> {
+        Err(ServiceError::InternalError("atomic Group creation unavailable".into()))
+    }
     async fn upsert(&self, group: Group) -> ServiceResult<()>;
     /// Atomically make a provisioning Group available, activate its pending
     /// inline subscriptions, and append the ordered creation Events.
@@ -86,6 +104,15 @@ pub trait GroupRepoPort: Send + Sync {
             request_id: None,
         })
     }
+    /// Capture labels within the mutation transaction/lock, including preserved
+    /// labels when the PATCH omits them. Never implement as commit then read.
+    async fn commit_eventful_mutation_with_snapshot(
+        &self,
+        _command: CommitGroupEventfulMutation,
+    ) -> ServiceResult<crate::types::GroupMutationSnapshot> {
+        Err(ServiceError::InternalError("Group mutation snapshots are not configured".into()))
+    }
+
     /// Apply one already-authorized Group mutation with optimistic versioning.
     /// The returned Group is the committed post-mutation state; for Delete it
     /// is the terminal snapshot that was removed from normal reads.

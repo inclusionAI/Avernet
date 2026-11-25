@@ -191,3 +191,18 @@ provider continuation, including on a short or empty page.
 Omitting the mode retains the existing q/source/offset/limit request unchanged.
 Global name and URL search stays on that full-catalog path, not on a partially
 loaded page. No import, synchronization, deletion or scheduler behavior changes.
+
+### Unified source catalog
+
+`GET /api/knowledge/spaces/{space_id}/knowledge-bases/{kb_id}/data-sources`
+accepts `offset >= 0` (default 0) and `1 <= limit <= 100` (default 20).
+After the existing login and space membership gates, `data_sources` forwards
+one GET to the configured provider's fixed KB-scoped `/data-sources` path with
+the prepared session. Native provider KB authorization remains authoritative.
+The response is passed through unchanged: `{total, offset, limit, next_offset,
+items}`. A document item has `kind=document` and nested `document`; a whole-book
+item has `kind=yuque_book` and nested `book`. IDs are provider-owned opaque strings.
+The provider owns ordering, filtering, totals and progress. The BFF does not merge
+pages, enrich items, retry via legacy lists, or schedule work. Existing `/sources`
+and `/yuque/book-imports` contracts are unchanged. Deploy provider support before
+clients switch to this additive endpoint.

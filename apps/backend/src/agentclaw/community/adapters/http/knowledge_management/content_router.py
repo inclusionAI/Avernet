@@ -37,6 +37,15 @@ router = APIRouter(
 )
 
 
+@router.get("/data-sources")
+async def data_sources(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    ctx=Depends(context),
+):
+    return await ctx.call("data_sources", offset=offset, limit=limit)
+
+
 @router.get("/sources")
 async def sources(
     exclude_book_documents: bool = Query(False),

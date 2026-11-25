@@ -11,6 +11,7 @@ import { HelpMenu } from './HelpMenu';
 import type { NavigationItem } from './navigation';
 import { LegacyVersionSwitch } from './LegacyVersionSwitch';
 import { SidebarNavList } from './SidebarNavList';
+import { SidebarUserFooter } from './SidebarUserFooter';
 
 interface AppSidebarProps {
   activePath: string;
@@ -107,10 +108,8 @@ export function AppSidebar({
 
       <SidebarNavList activePath={activePath} items={items} onNavigate={onNavigate} collapsed={collapsed} />
 
-      {/* 底部用户行（SVG 稿）：32px 圆头像 + 14px 姓名 #09090B + 右侧「更多」浮层，
-          行与导航区之间无分隔线（稿为纯留白过渡）。
-          「返回旧版」常驻入口（灰度切流，capability 门控）置用户行上方：Open Core
-          （无旧版形态）判定 capability null，组件渲染 null，布局零变化。 */}
+      {/* 底部用户行：展开态经 SidebarUserFooter 与 <lg 抽屉共用同一用户区（详见该组件）；
+          行与导航区之间无分隔线（稿为纯留白过渡）。 */}
       {collapsed ? (
         <div className="flex flex-col items-center gap-1 bg-background/70 px-2 pb-3 pt-2">
           <LegacyVersionSwitch collapsed />
@@ -119,16 +118,7 @@ export function AppSidebar({
           <HelpMenu variant="more" />
         </div>
       ) : (
-        <div className="mt-auto space-y-0.5 bg-background/70 px-2 pb-3 pt-2">
-          <LegacyVersionSwitch />
-          <div className="flex items-center gap-1">
-            <AccountBadge currentUser={currentUser} />
-            <span className="ml-auto flex shrink-0 items-center">
-              {GuideEntry ? <GuideEntry /> : null}
-              <HelpMenu variant="more" />
-            </span>
-          </div>
-        </div>
+        <SidebarUserFooter currentUser={currentUser} />
       )}
     </>
   );

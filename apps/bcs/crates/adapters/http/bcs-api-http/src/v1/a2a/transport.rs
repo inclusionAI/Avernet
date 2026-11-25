@@ -47,14 +47,18 @@ pub(super) fn body<T: DeserializeOwned>(
     let value = parse_card_json(bytes).map_err(|_| {
         ApplicationError::invalid("invalid_request", "Invalid or duplicate JSON fields")
     })?;
-    if ["agent_card_url", "agent_card", "summary"]
+    if ["agent_card_url", "agent_card", "summary", "catalog_labels"]
         .iter()
         .any(|key| value.get(key).is_some_and(|v| v.is_null()))
     {
         return Err(ApplicationError::invalid(
             "invalid_request",
-            "Explicit null is not allowed for Card source or summary",
+            "Explicit null is not allowed for Card source, summary or catalog_labels",
         ));
+    }
+    if let Some(labels)=value.get("catalog_labels") {
+        serde_json::from_value::<bcs_service_api::types::catalog_labels::CatalogLabelsInput>(labels.clone())
+            .map_err(|_|ApplicationError::invalid("invalid_request","catalog_labels must be an object of nullable string arrays"))?;
     }
     serde_json::from_value(value)
         .map_err(|_| ApplicationError::invalid("invalid_request", "Invalid request fields"))

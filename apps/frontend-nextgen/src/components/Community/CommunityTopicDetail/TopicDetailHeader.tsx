@@ -2,162 +2,98 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import type { CommunityTopic } from '@/domain/community/types';
-import { ArrowLeft, MessageSquare } from 'lucide-react';
-import { PollTypeIcon } from '../PollTypeIcon';
+import { ArrowLeft, CircleAlert, Lock, Trash2 } from 'lucide-react';
 
 export interface TopicDetailHeaderProps {
   topic: CommunityTopic | null;
   closing: boolean;
   deleting: boolean;
-  replyLoading: boolean;
-  replyPage: number;
-  replyPageCount: number;
-  currentUserId?: string;
   onBack: () => void;
   onCloseTopic: () => Promise<boolean>;
-  onEditTopic: () => void;
   onDeleteTopic: () => Promise<boolean>;
-  onGoToReplyPage: (page: number) => void;
-  onGoToReplyComposer: () => void;
 }
 
 export function TopicDetailHeader({
   topic,
   closing,
   deleting,
-  replyLoading,
-  replyPage,
-  replyPageCount,
-  currentUserId,
   onBack,
   onCloseTopic,
-  onEditTopic,
   onDeleteTopic,
-  onGoToReplyPage,
-  onGoToReplyComposer,
 }: TopicDetailHeaderProps) {
   const isHelpTopic = topic?.topicType === 'help';
 
   return (
-    <header className="flex w-full items-start gap-3 px-4 pb-4 pt-6 sm:px-6 lg:px-10">
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onBack}
-        aria-label="返回社区列表"
-        className="mt-1 shrink-0"
-      >
-        <ArrowLeft className="size-4" aria-hidden />
-      </Button>
-      <div className="min-w-0 flex-1">
-        <h2 className="m-0 min-w-0 truncate text-lg font-semibold text-foreground">
-          {topic?.title || '主题详情'}
-        </h2>
-        {!!topic?.analysis?.tags?.length && (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {topic.analysis.tags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"
-              >
-                #{tag}
-              </span>
-            ))}
-          </div>
-        )}
+    <header className="w-full px-5 pb-4 pt-5">
+      <div className="mb-5 flex items-center gap-2 border-b border-divider pb-3">
+        <Button variant="ghost" size="icon" onClick={onBack} aria-label="返回社区列表" className="shrink-0">
+          <ArrowLeft className="size-4" aria-hidden />
+        </Button>
+        <p className="m-0 text-xs text-muted-foreground">实验室　›　社区　›　帖子详情</p>
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-2">
-        <div className="flex items-center gap-2">
-          {topic?.topicType === 'poll' && <PollTypeIcon className="size-4" />}
-          {topic?.topicType === 'notice' && <Badge tone="warning">通知</Badge>}
-          {topic?.status === 'closed' && topic.topicType === 'help' && (
-            <Badge tone="success">已解决</Badge>
-          )}
-          {topic?.status === 'closed' && topic.topicType !== 'help' && (
-            <Badge tone="outline">已结帖</Badge>
-          )}
-          {topic?.canEdit ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 px-3 text-xs"
-              onClick={onEditTopic}
-            >
-              编辑
-            </Button>
-          ) : null}
-          {topic?.canDelete ? (
-            <ConfirmDialog
-              title="确认删除主题？"
-              description="删除后该主题及其全部回复将从社区中移除，且无法恢复。"
-              confirmText="删除"
-              confirmVariant="destructive"
-              loading={deleting}
-              onConfirm={async () => {
-                await onDeleteTopic();
-              }}
-            >
-              <Button variant="destructive" size="sm" className="h-8 px-3 text-xs">
-                删除
-              </Button>
-            </ConfirmDialog>
-          ) : null}
-          {topic?.canClose && (
-            <ConfirmDialog
-              title={isHelpTopic ? '确认标记为已解决？' : '确认结帖？'}
-              description={
-                isHelpTopic
-                  ? '标记后该求助将显示为已解决，本期暂不支持重新打开。'
-                  : '结帖后该主题将显示为已结束，本期暂不支持重新打开。'
-              }
-              confirmText={isHelpTopic ? '确认标记' : '确认结帖'}
-              loading={closing}
-              onConfirm={async () => {
-                await onCloseTopic();
-              }}
-            >
-              <Button variant="outline" size="sm" className="h-8 px-3 text-xs">
-                {isHelpTopic ? '标记已解决' : '结帖'}
-              </Button>
-            </ConfirmDialog>
-          )}
-          {topic?.status === 'open' && currentUserId && topic.topicType !== 'notice' ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 px-3 text-xs"
-              leftIcon={<MessageSquare className="size-3.5" aria-hidden />}
-              onClick={onGoToReplyComposer}
-            >
-              回复
-            </Button>
-          ) : null}
+      <div className="flex items-center justify-between gap-4" aria-label="帖子标题与管理操作">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <h2 className="m-0 min-w-0 break-words text-lg font-semibold text-foreground">
+            {topic?.title || '主题详情'}
+          </h2>
+          {topic?.status === 'closed' && topic.topicType !== 'help' && <Badge tone="outline">已结帖</Badge>}
         </div>
-        {replyPageCount > 1 && (
-          <div className="flex items-center gap-1 text-xs text-muted-foreground" aria-label="回帖分页">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2.5"
-              disabled={replyPage <= 1 || replyLoading}
-              onClick={() => onGoToReplyPage(replyPage - 1)}
-            >
-              上一页
-            </Button>
-            <span className="px-1 tabular-nums">
-              {replyPage} / {replyPageCount}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2.5"
-              disabled={replyPage >= replyPageCount || replyLoading}
-              onClick={() => onGoToReplyPage(replyPage + 1)}
-            >
-              下一页
-            </Button>
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <div className="flex items-center gap-2">
+            {topic?.status === 'closed' && topic.topicType === 'help' && <Badge tone="success">已解决</Badge>}
+
+            {topic?.canDelete ? (
+              <ConfirmDialog
+                title={
+                  <span className="flex items-center gap-3">
+                    <CircleAlert className="size-6 shrink-0 text-warning" aria-hidden />
+                    确认要删除这条帖子吗？
+                  </span>
+                }
+                description="删除后将无法恢复，同时评论及回复一起被删除。"
+                confirmText="确定"
+                confirmVariant="primary"
+                loading={deleting}
+                onConfirm={async () => {
+                  await onDeleteTopic();
+                }}
+              >
+                <Button
+                  variant="outline"
+                  size="sm"
+                  leftIcon={<Trash2 className="size-3.5" />}
+                  className="h-8 border-destructive/30 px-3 text-xs text-destructive"
+                >
+                  删除
+                </Button>
+              </ConfirmDialog>
+            ) : null}
+            {topic?.canClose && (
+              <ConfirmDialog
+                title={isHelpTopic ? '确认标记为已解决？' : '确认结帖？'}
+                description={
+                  isHelpTopic
+                    ? '标记后该求助将显示为已解决，本期暂不支持重新打开。'
+                    : '结帖后该主题将显示为已结束，本期暂不支持重新打开。'
+                }
+                confirmText={isHelpTopic ? '确认标记' : '确认结帖'}
+                loading={closing}
+                onConfirm={async () => {
+                  await onCloseTopic();
+                }}
+              >
+                <Button
+                  variant="outline"
+                  size="sm"
+                  leftIcon={<Lock className="size-3.5" />}
+                  className="h-8 border-primary/30 px-3 text-xs text-primary"
+                >
+                  {isHelpTopic ? '标记已解决' : '结帖'}
+                </Button>
+              </ConfirmDialog>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </header>
   );

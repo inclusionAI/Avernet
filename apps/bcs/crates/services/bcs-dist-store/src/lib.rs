@@ -9,9 +9,11 @@
 //! - [`identity`]: stable digests for ids and content.
 //! - [`codec`]: stored shapes of `admit`, `inbox`, `wake`, `spec`, `task` and `ev`.
 //! - [`inbox`]: the `InboxProducerPort` provider (admission write order).
+//! - [`command`]: command-stream partitions shared by the Worker and Connectors.
 
 pub mod capability;
 pub mod codec;
+pub mod command;
 pub mod error;
 pub mod identity;
 pub mod inbox;

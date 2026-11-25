@@ -3,6 +3,7 @@
 // 主 Bot 按钮仍可切换展开状态，两者共享同一个 onToggle。
 import { ConversationBotItem } from '@/pages/Workspace/Chat/components/ConversationBotItem';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
+import { firstPageOf } from '@/pages/Workspace/Chat/hooks/conversationSessionCache';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
@@ -244,6 +245,99 @@ describe('ConversationBotItem 右侧操作组收起按钮', () => {
     // 整行只剩主按钮，无会话操作组。
     expect(container.querySelectorAll('button').length).toBe(1);
     expect(screen.queryByRole('button', { name: '收起会话列表' })).not.toBeInTheDocument();
+  });
+});
+
+describe('ConversationBotItem AgentCoding 会话操作', () => {
+  it.each([
+    ['mine', 'mine-session', false],
+    ['others', 'bcs-cli:other-session', true],
+    ['collab', 'collab-session:agent:member-task', true],
+  ] as const)('AgentCoding %s 列表同时提供更多操作和收藏入口', (origin, sessionId, flatSharedSessions) => {
+    render(
+      <ConversationBotItem
+        bot={{ ...bot, isAgentCodingBot: true }}
+        section="managed"
+        expanded
+        selectedSessionId={null}
+        botSelected={false}
+        origin={origin}
+        scope="all"
+        sessionKey=""
+        sessions={firstPageOf(
+          [
+            {
+              sessionId,
+              botId: bot.botId,
+              title: 'Coding 会话',
+              messageCount: 1,
+              gmtCreate: '',
+              gmtModified: '',
+              favorite: true,
+            },
+          ],
+          1,
+        )}
+        flatCodingSharedSessions={flatSharedSessions}
+        onToggle={noop}
+        onOriginChange={noop}
+        onScopeChange={noop}
+        onSearchSession={noop}
+        onCreateSession={noop}
+        onSelectSession={noop}
+        onLoadMore={noop}
+        onToggleFavorite={noop}
+        isFavoritePending={() => false}
+        sessionActions={{ run: jest.fn().mockResolvedValue(true), pending: false }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '会话更多操作' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '取消收藏' })).toBeInTheDocument();
+    expect(screen.queryByText('只读')).not.toBeInTheDocument();
+  });
+
+  it('普通 Bot 他人发起列表仍拒绝三点操作和收藏', () => {
+    render(
+      <ConversationBotItem
+        bot={{ ...bot }}
+        section="managed"
+        expanded
+        selectedSessionId={null}
+        botSelected={false}
+        origin="others"
+        scope="all"
+        sessionKey=""
+        sessions={firstPageOf(
+          [
+            {
+              sessionId: 'bcs-cli:other-session',
+              botId: bot.botId,
+              title: '普通 Bot 会话',
+              messageCount: 1,
+              gmtCreate: '',
+              gmtModified: '',
+              favorite: true,
+            },
+          ],
+          1,
+        )}
+        flatCodingSharedSessions
+        onToggle={noop}
+        onOriginChange={noop}
+        onScopeChange={noop}
+        onSearchSession={noop}
+        onCreateSession={noop}
+        onSelectSession={noop}
+        onLoadMore={noop}
+        onToggleFavorite={noop}
+        isFavoritePending={() => false}
+        sessionActions={{ run: jest.fn().mockResolvedValue(true), pending: false }}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: '会话更多操作' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '取消收藏' })).not.toBeInTheDocument();
+    expect(screen.getByText('只读')).toBeInTheDocument();
   });
 });
 
@@ -705,7 +799,7 @@ describe('ConversationBotItem 非运行中好友服务 Bot', () => {
     expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '搜索会话' })).not.toBeInTheDocument();
     fireEvent.pointerMove(row, { pointerType: 'mouse' });
-    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('非运行中服务 Bot'));
+    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('该服务 Bot 尚未处于正式运行状态'));
   });
 
   it.each([

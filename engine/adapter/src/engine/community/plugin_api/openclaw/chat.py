@@ -10,7 +10,7 @@ returns a raw dict (`{success, error, payload}`) — the adapter builds
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from engine.community.kernel.frames import ErrorShape, EventFrame, ResponseFrame
@@ -25,6 +25,21 @@ class OpenClawChatAck:
     error: ErrorShape | None = None
 
     def response(self, request_id: str) -> ResponseFrame:
+        error = self.error
+        if not self.ok:
+            error = error or ErrorShape("UNKNOWN", "Unknown error")
+            code = error.code
+            code = (
+                str(code) if isinstance(code, (str, int)) and str(code).strip()
+                else "UNKNOWN"
+            )
+            message = (
+                error.message
+                if isinstance(error.message, str) and error.message.strip()
+                else "Unknown error"
+            )
+            if code != error.code or message != error.message:
+                error = replace(error, code=code, message=message)
         status = self.payload.get("status")
         cached = None
         if self.ok:
@@ -36,7 +51,7 @@ class OpenClawChatAck:
             id=request_id,
             ok=self.ok,
             payload={**self.payload, "accepted": self.ok, "cached": cached},
-            error=self.error,
+            error=error,
         )
 
 

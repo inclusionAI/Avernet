@@ -163,7 +163,7 @@ impl BcsServer {
             );
         let (a2a_bot_management, a2a_card_queries, a2a_cards) = super::a2a_wiring::build_card_management(
             db_plugin.clone(), db_flavor, provider_repos.bot_providers.clone(),
-            provider_core.clone(), bot_registry.clone(), bot_repo.clone(), outbound_url_guard.clone(), config.a2a_grpc.as_ref(),
+            provider_core.clone(), bot_registry.clone(), bot_repo.clone(), config.catalog_label_policy.clone(), outbound_url_guard.clone(), config.a2a_grpc.as_ref(),
             card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>),
         )?;
         register_late_lifecycles(&lifecycle, fuse_client.as_ref(), card_changes.clone(),

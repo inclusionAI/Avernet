@@ -76,6 +76,16 @@ class CompleteTodoRequest(BaseModel):
         max_length=256,
         description="Deprecated and ignored; the Backend derives Context from the execution.",
     )
+    summary: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=4000,
+        description="Optional completion summary recorded with the task.completed event.",
+    )
+    result: dict[str, object] = Field(
+        default_factory=dict,
+        description="Optional structured completion content owned by the executing Skill.",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -176,6 +186,8 @@ async def complete_todo_execution(
         todo_id=todo_id,
         todo_execution_id=body.todo_execution_id,
         execution_token=execution_token,
+        summary=body.summary,
+        result=body.result,
     )
     return envelope(
         CompleteTodoResponse(

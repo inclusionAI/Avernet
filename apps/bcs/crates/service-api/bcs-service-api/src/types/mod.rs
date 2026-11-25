@@ -29,12 +29,22 @@ pub use event::*;
 /// preserving interfaces, skills and extensions; reads never persist a backfill.
 #[derive(Debug, Clone)]
 pub struct GroupCardSnapshot {
+    pub version: i32,
+    pub catalog_labels: catalog_labels::CatalogLabels,
     pub group_id: String,
     pub group_kind: GroupKind,
     pub group_strategy: GroupStrategy,
     pub visibility: String,
     pub record_status: String,
     pub card_template: Option<serde_json::Value>,
+}
+
+/// Group metadata and labels belonging to the same persisted Group version.
+/// Callers must not re-read labels after receiving this snapshot.
+#[derive(Debug, Clone)]
+pub struct GroupMutationSnapshot {
+    pub group: Group,
+    pub catalog_labels: catalog_labels::CatalogLabels,
 }
 
 /// Mutable fields exposed by the BCN OpenAPI v1 Group PATCH operation.
@@ -44,6 +54,8 @@ pub struct GroupCardSnapshot {
 /// participants, routing extensions, or other state changed concurrently.
 #[derive(Debug, Clone, Default)]
 pub struct GroupMutableFieldsPatch {
+    /// None preserves; Some replaces the entire normalized collection.
+    pub catalog_labels: Option<catalog_labels::CatalogLabels>,
     pub label: Option<String>,
     pub context: Option<String>,
     /// Outer `None` leaves the field unchanged; `Some(None)` restores the default.
@@ -72,3 +84,5 @@ pub mod a2a_bot;
 pub mod a2a_card_projection;
 
 pub mod run_budget;
+
+pub mod catalog_labels;

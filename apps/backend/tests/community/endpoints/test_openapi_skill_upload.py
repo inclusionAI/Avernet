@@ -19,6 +19,7 @@ from agentclaw.community.api.local_skill_upload_service import (
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
+from agentclaw.community.core.devices.services.device_context import DeviceContext
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.factories import (
     LocalSkillPackageStorage,
@@ -38,6 +39,7 @@ from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
+from tests.community.factories.devices import make_active_local_device
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -48,6 +50,7 @@ from tests.community.framework import (
 
 _OWNER = "upload-owner"
 _BOT_ID = "raw-upload-bot"
+_DEVICE_ID = "raw-upload-device"
 _TENANT = "raw-upload-tenant"
 _KEY = "raw-upload-framework-signing-key-at-least-32-bytes"
 
@@ -168,8 +171,14 @@ class _RuntimeFactory:
 
 
 class _DeviceContextResolverStub:
-    def resolve_for_bot(self, _bot_id, _owner_id):
-        return type("DeviceContextStub", (), {"provider": "local"})()
+    def __init__(self, binding_id: int) -> None:
+        self._binding_id = binding_id
+
+    def resolve_for_bot(self, bot_id: str, owner_id: str) -> DeviceContext:
+        return DeviceContext(
+            provider="local", conn_info={}, binding_id=self._binding_id, bot_id=bot_id,
+            user_id=owner_id, device_id=_DEVICE_ID,
+        )
 
 
 class _LegacyPackageRuntime:
@@ -245,6 +254,7 @@ def _seed_uploadable_bot(world) -> None:
     world.injector.binder.bind(SkillServiceFactory, to=storage_factory, scope=None)
     world.injector.binder.bind(_StorageFactory, to=storage_factory, scope=None)
     with avernet_tenant_scope(_TENANT):
+        binding_id = make_active_local_device(world, owner_id=_OWNER, device_id=_DEVICE_ID)
         world.get(BotRepository).insert(
             {
                 "bot_id": _BOT_ID,
@@ -256,6 +266,8 @@ def _seed_uploadable_bot(world) -> None:
                 "creator_id": _OWNER,
                 "status": "ACTIVE",
                 "active_engine": "openclaw",
+                "binding_id": binding_id,
+                "device_id": _DEVICE_ID,
             }
         )
         world.get(SkillSetRepository).create(
@@ -293,7 +305,7 @@ def _seed_uploadable_bot(world) -> None:
             world.get(CollaboratorServiceProtocol),
             storage_factory,
             world.get(SkillsPoolEditGuard),
-            lambda: _DeviceContextResolverStub(),
+            lambda: _DeviceContextResolverStub(binding_id),
             _RuntimeFactory(),
             SkillPackageValidator(SkillParser()),
             _LegacyPackageRuntime(),

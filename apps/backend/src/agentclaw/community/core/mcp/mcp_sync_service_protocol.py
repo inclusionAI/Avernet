@@ -6,6 +6,9 @@ from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
 
+MCP_CONFIG_FANOUT_LIMIT = 5
+
+
 @runtime_checkable
 class MCPSyncServiceProtocol(Protocol):
     """Service API for syncing MCP details to bot devices.

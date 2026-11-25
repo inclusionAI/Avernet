@@ -33,7 +33,8 @@ impl MySqlGroupStore {
     }
 
     /// Create or update a session.
-    pub(crate) async fn upsert_sql(&self, group: Group) -> ServiceResult<()> {
+    pub(crate) async fn upsert_sql(&self, group: Group, labels: Option<bcs_service_api::types::catalog_labels::CatalogLabels>, create_only:bool) -> ServiceResult<()> {
+        validate_catalog_labels(&group,labels.as_ref())?;
         let group_id = group.id.clone();
         let env = self.env.clone();
         let _start = std::time::Instant::now();
@@ -99,7 +100,7 @@ impl MySqlGroupStore {
         let g_visibility = group.visibility.clone();
         let g_notify_mode_str = Self::human_mention_notify_mode_to_str(group.human_mention_notify_mode);
 
-        let upsert_clause = self.flavor.on_conflict_update(
+        let upsert_clause = if create_only {String::new()} else {self.flavor.on_conflict_update(
             &["group_id", "env"],
             &[
                 "label",
@@ -116,7 +117,7 @@ impl MySqlGroupStore {
                 "human_mention_notify_mode",
             ],
             &[("gmt_modified", self.flavor.now())],
-        );
+        )};
         let upsert_sql = format!(
             "INSERT INTO bcs_groups (group_id, label, status, driver_bot, originator, env, routing_policy_json, context, opening_message_json, group_kind, dm_pair_key, group_strategy, service_group_uuid, service_mode, version, record_status, visibility, human_mention_notify_mode, gmt_create, gmt_modified) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {now}, {now}) \
@@ -185,6 +186,7 @@ impl MySqlGroupStore {
         }
 
         steps.push(self.card_template_upsert_step(&group_id)?);
+        if let Some(labels)=&labels { steps.push(self.catalog_labels_step(&group_id,labels)?); }
         if let Some(guard) = guard_step {
             // Bind the first group_id INSERT value to the assertion row. An
             // empty assertion fails before the write and rolls back the txn.
@@ -198,6 +200,9 @@ impl MySqlGroupStore {
         self.db.plugin().transaction(steps).await.map_err(|e| {
             if provider_scope_guard::public_scope_denied(&e, guard_step) {
                 return ServiceError::Forbidden("same_owner groups must remain private".into());
+            }
+            if create_only && e.is_duplicate_key() {
+                return ServiceError::Conflict("Group identity already exists".into());
             }
             warn!(group_id = %group_id, error = %e, "upsert transaction failed");
             ServiceError::InternalError(e.to_string())
@@ -240,7 +245,11 @@ impl MySqlGroupStore {
             }
         };
 
-        let updates_card = patch.label.is_some() || patch.context.is_some();
+        if let Some(labels)=&patch.catalog_labels {
+            let current=self.try_get(id).await?.ok_or_else(||ServiceError::GroupNotFound(id.into()))?;
+            validate_catalog_labels(&current,Some(labels))?;
+        }
+        let updates_card = patch.label.is_some() || patch.context.is_some() || patch.catalog_labels.is_some();
         let mut assignments = Vec::new();
         let mut params = Vec::new();
         if let Some(label) = patch.label {
@@ -279,7 +288,7 @@ impl MySqlGroupStore {
                 guard_routing_policy = true;
             }
         }
-        if assignments.is_empty() {
+        if assignments.is_empty() && patch.catalog_labels.is_none() {
             if routing_policy_snapshot.is_some() {
                 self.cache.write().await.remove(id);
             }
@@ -309,9 +318,9 @@ impl MySqlGroupStore {
             } else {
                 DbTransactionStep::Execute(statement)
             };
-            match self.db.plugin().transaction(vec![
-                write, self.card_template_upsert_step(id)?,
-            ]).await {
+            let mut steps=vec![write,self.card_template_upsert_step(id)?];
+            if let Some(labels)=&patch.catalog_labels { steps.push(self.catalog_labels_step(id,labels)?); }
+            match self.db.plugin().transaction(steps).await {
                 Ok(results) => match results.first() {
                     Some(DbTransactionStepResult::Executed(result)) => result.affected_rows,
                     _ => return Err(ServiceError::InternalError("Missing Group patch result".into())),

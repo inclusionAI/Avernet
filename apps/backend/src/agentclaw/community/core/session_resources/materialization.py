@@ -83,6 +83,7 @@ class SessionResourceMaterializeHandler:
                     record.binding_id,
                     record.owner_id,
                     bot_id=record.bot_id,
+                    **({"device_uuid": record.device_uuid} if record.device_uuid else {}),
                 )
             session_id = None
             if record.transfer_api_version is TransferApiVersion.SESSION_V2:

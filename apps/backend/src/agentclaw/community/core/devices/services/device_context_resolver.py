@@ -25,6 +25,7 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceContext,
     DeviceNotBoundError,
     UnknownProviderError,
+    verify_runtime_binding,
 )
 
 
@@ -80,6 +81,9 @@ class DeviceContextResolver:
             raise DeviceNotBoundError(
                 f"DeviceContextResolver: no active binding for bot={bot_id}"
             )
+        verify_runtime_binding(
+            bot_id=bot_id, user_id=user_id, binding_id=binding.id, device_id=binding.device_id,
+        )
 
         provider = binding.device_provider
         if provider not in self._builders:
@@ -100,6 +104,7 @@ class DeviceContextResolver:
             provider=provider,
             conn_info=conn_info,
             binding_id=binding.id,
+            device_id=binding.device_id,
             bot_id=bot_id,
             user_id=user_id,
             bot_type=bot_type,
@@ -137,6 +142,9 @@ class DeviceContextResolver:
             raise DeviceNotBoundError(
                 f"DeviceContextResolver: binding_id={binding_id} not found"
             )
+        verify_runtime_binding(
+            bot_id=bot_id, user_id=operator_id, binding_id=binding.id, device_id=binding.device_id,
+        )
 
         provider = binding.device_provider
         if provider not in self._builders:
@@ -156,6 +164,7 @@ class DeviceContextResolver:
             provider=provider,
             conn_info=conn_info,
             binding_id=binding.id,
+            device_id=binding.device_id,
             bot_id=bot_id,
             user_id=operator_id,
             bot_type=bot_type,
@@ -180,6 +189,9 @@ class DeviceContextResolver:
             raise DeviceNotBoundError(
                 f"DeviceContextResolver: binding_id={binding_id} not found"
             )
+        verify_runtime_binding(
+            bot_id=bot_id, user_id=operator_id, binding_id=binding.id, device_id=binding.device_id,
+        )
 
         provider = binding.device_provider
         if provider not in self._builders:
@@ -228,6 +240,7 @@ class DeviceContextResolver:
             provider=provider,
             conn_info=self._normalize_schema(conn_info, provider),
             binding_id=binding.id,
+            device_id=binding.device_id,
             bot_id=bot_id,
             user_id=operator_id,
             bot_type=bot_type,

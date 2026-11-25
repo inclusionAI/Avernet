@@ -39,6 +39,7 @@ fn openapi_request(visibility: GroupVisibility) -> CreateGroup {
             access_key: None,
         },
         group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+            catalog_labels: None,
             human_mention_notify_mode: Default::default(),
             name: Some("Friend group".into()),
             context: None,
@@ -67,6 +68,7 @@ fn core_request(strategy: GroupStrategy) -> GroupCreateCommand {
         _ => ("driver", "consultant"),
     };
     GroupCreateCommand {
+        catalog_labels: None,
         group_id: None,
         caller_actor_id: Some(HUMAN.into()),
         driver_bot_id: LEAD.into(),

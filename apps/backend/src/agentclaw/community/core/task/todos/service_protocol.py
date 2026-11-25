@@ -9,10 +9,13 @@ from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
     TodoAcceptanceTarget,
     TodoEventRecord,
+    TodoInteractionMention,
     TodoPage,
     TodoRecord,
     TodoStatus,
 )
+from agentclaw.community.core.task.todos.source_models import TodoSourceInput
+from agentclaw.community.core.task.todos.stage_models import TodoStageRecord
 
 
 @runtime_checkable
@@ -45,6 +48,7 @@ class TodoServiceProtocol(Protocol):
         title: str,
         description: str,
         bot_id: str,
+        source: TodoSourceInput | None = None,
         env: str | None = None,
     ) -> TodoRecord: ...
 
@@ -52,6 +56,11 @@ class TodoServiceProtocol(Protocol):
     async def start_todo(
         self, *, todo_id: str, actor_id: str, env: str | None = None
     ) -> TodoRecord: ...
+
+    @abstractmethod
+    def list_stages(
+        self, *, todo_id: str, actor_id: str, env: str | None = None
+    ) -> tuple[TodoStageRecord, ...]: ...
 
     @abstractmethod
     def list_events(
@@ -71,6 +80,8 @@ class TodoServiceProtocol(Protocol):
         actor_id: str,
         author_name: str | None,
         message: str,
+        reply_to_event_id: str | None = None,
+        mentions: tuple[TodoInteractionMention, ...] = (),
         env: str | None = None,
     ) -> TodoEventRecord: ...
 

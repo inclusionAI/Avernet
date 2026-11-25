@@ -39,7 +39,6 @@ from agentclaw.community.api.caller_credential import (
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.auth import AuthRequestContext
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.friend_chat import FriendUserIdQuery
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.file_access import authorize_file_list
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
@@ -105,8 +104,18 @@ async def get_bot_iam_token(
             "explicit friend IAM request; defaults to the acting user."
         ),
     ),
-    f_user_id: FriendUserIdQuery = None,
-    session_id: str | None = Query(default=None, min_length=1, description="Required with f_user_id: an owned friend session identifier."),
+    f_user_id: str | None = Query(
+        default=None,
+        description=(
+            "Conversation subject. A self subject selects its Caller runtime "
+            "when applicable; an empty value preserves the operator runtime."
+        ),
+    ),
+    session_id: str | None = Query(
+        default=None,
+        min_length=1,
+        description="Required with f_user_id: a session owned by that subject.",
+    ),
     session_key: str | None = Query(
         default=None,
         min_length=1,
@@ -126,11 +135,6 @@ async def get_bot_iam_token(
         default=None,
         description="Entity identifier used to resolve the Bot unambiguously.",
     ),
-    # The orchestrator reads these raw values from the request snapshot after Caller refresh.
-    caller_runtime_target: str | None = Query(
-        default=None,
-        description="JIT runtime selection: service uses the stage binding; caller_instance uses the authenticated caller's instance.",
-    ),
     device_uuid: str | None = Query(
         default=None,
         description="Opaque device identifier for exact JIT replica selection within the authorized runtime binding.",
@@ -143,6 +147,7 @@ async def get_bot_iam_token(
 ) -> Envelope[IamToken]:
     """Return the IAM token and prepare Caller identity when the Bot requires it."""
     normalized_entity_id = (entity_id or "").strip() or None
+    f_user_id = f_user_id or None
     friend_kwargs = {}
     if f_user_id is not None:
         owner_id = owner_id or user_id

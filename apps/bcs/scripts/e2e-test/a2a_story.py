@@ -312,7 +312,8 @@ class A2aStory(Story):
         prefix = "/providers/" + provider["provider_id"] + "/bots"
         registered = self.request("POST", self.a2a_prefix + "/agents", {"provider_bot_ref": "story-" + uuid.uuid4().hex, "owners": [self.owner],
             "agent_card_url": self.peer.base + "/agent-card.json"}, token=admin, status=201)
-        assert set(registered) == {"provider_name", "provider_bot_ref", "agent_name", "bot_id", "agent_card_url", "agent_card"}
+        assert set(registered) == {"provider_name", "provider_bot_ref", "agent_name", "bot_id", "agent_card_url", "agent_card", "catalog_labels"}
+        assert registered["catalog_labels"] == {}
         assert registered["agent_name"] == self.peer.card["name"]
         bot_id = registered["bot_id"]
         bindings = self.request("GET", prefix, token=admin)
@@ -353,6 +354,16 @@ class A2aStory(Story):
         assert record["revision"] == revision + 1
         self.request("PUT", control, {"agent_card": inline, "expected_revision": revision}, token=admin, status=409)
         self.request("POST", control + "/card:refresh", {}, token=admin, status=400)
+        # Label-only configure on the provider-id control path: replace with a
+        # configured dictionary value, read back, reject unknown keys, clear.
+        labeled = self.request("PUT", control, {"catalog_labels": {"lifecycle": ["trial"]}}, token=admin)
+        assert labeled["catalog_labels"] == {"lifecycle": ["trial"]}
+        assert labeled["revision"] > revision
+        assert self.request("GET", control, token=admin)["catalog_labels"] == {"lifecycle": ["trial"]}
+        self.request("PUT", control, {"catalog_labels": {"lifecycle": ["bogus"]}}, token=admin, status=400)
+        assert self.request("GET", control, token=admin)["catalog_labels"] == {"lifecycle": ["trial"]}
+        cleared = self.request("PUT", control, {"catalog_labels": {}}, token=admin)
+        assert cleared["catalog_labels"] == {}
         assert self.request("GET", "/bots/" + bot_id + "/agent-card")["description"] == "Inline replacement"
         with self.peer.lock:
             reads = self.peer.card_reads
@@ -450,6 +461,8 @@ class A2aStory(Story):
                 time.sleep(0.1)
             else:
                 raise AssertionError("A2A output did not reach visible history: " + mode)
+        # A session that later steps (e.g. a transport-down probe) can send to.
+        self.stream_session = session
         self.queued_rounds(session)
         self.message_context_rounds(group)
         assert len(self.peer.requests) == 13, "Recovery must not resubmit a message"

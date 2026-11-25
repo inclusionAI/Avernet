@@ -17,9 +17,12 @@ export type MutateBotRequest = BackendUnknownRecord;
  * `POST /openapi/v1/bots/copy` 请求体(后端 `BotCopyRequest` `extra="forbid"`)。
  * `request_detail` 承载未来 copy 参数(当前仅 `excludes`);**禁止**在顶层塞
  * `avatar_url`/`excludes` —— 后端会 422。
+ * `source_owner_id` 定位源 bot 行:`bot_id` 非全局唯一(共享 bot_id 如 `default`
+ * 每用户一行),后端按 `bot_id + owner_id + env` 精确定位,避免回取他行。
  */
 export interface BotCopyRequestBody {
   source_bot_id: string;
+  source_owner_id: string;
   bot_name: string;
   bot_desc?: string;
   request_detail?: { excludes?: string[]; [key: string]: unknown };
@@ -71,7 +74,7 @@ export interface OwnedBotDto {
   disabled_actions?: Record<string, string>;
   space_id?: string | number;
   space_name?: string;
-  /** Caller 模式标记('caller'):IAM 换签需带 caller_runtime_target(openspec add-iam-caller-runtime-target);缺失视为非 Caller Bot。 */
+  /** Caller 模式标记('caller'),遗留目录字段:新版目录接口不再下发,前端不再消费;保留仅为类型兼容。 */
   call_type?: string;
   /** 归属空间(2026-10-21 对齐线上实际返回的嵌套形态;bots 接口实测 space_id/name/kind)。 */
   space?: { space_id: string; name: string; kind: string } | null;
@@ -104,7 +107,7 @@ export interface BotMetadataDto {
   owner_name?: string;
   /** 服务 Bot 是否有可用的 online 发布；非服务 Bot 为 null。 */
   online_available?: boolean | null;
-  /** Caller 模式标记('caller'):IAM 换签需带 caller_runtime_target(openspec add-iam-caller-runtime-target);缺失视为非 Caller Bot。 */
+  /** Caller 模式标记('caller'),遗留目录字段:新版目录接口不再下发,前端不再消费;保留仅为类型兼容。 */
   call_type?: string;
   status?: string;
 }

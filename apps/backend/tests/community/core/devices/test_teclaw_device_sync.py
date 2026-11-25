@@ -403,6 +403,7 @@ def test_request_error_maps_to_a_failure_dict():
 
     assert result["success"] is False
     assert result["message"].startswith("请求失败")
+    assert result.get("dispatched") is not False
 
 
 def test_compose_failure_is_contained_in_the_result_dict():
@@ -413,6 +414,7 @@ def test_compose_failure_is_contained_in_the_result_dict():
 
     assert result["success"] is False
     assert "投递失败" in result["message"]
+    assert result["dispatched"] is False
     m["http_client"].post.assert_not_called()
 
 
@@ -421,3 +423,59 @@ def test_mcp_methods_return_false_on_failure():
     m["http_client"].post.side_effect = httpx.ConnectError("no route")
 
     assert service.sync_remove_mcp("s1") is False
+
+
+def test_failed_http_info_lookup_is_confirmed_before_post():
+    service, m = _make_service()
+    m["baas"].get_http_info.side_effect = RuntimeError("binding route temporarily unavailable")
+
+    result = service.sync_symlinks([])
+
+    assert result["success"] is False
+    assert result["dispatched"] is False
+    m["http_client"].post.assert_not_called()
+    m["recorder"].record_draft_artifact.assert_not_called()
+
+
+def test_overridden_delivery_is_called_and_keeps_opaque_failures_uncertain():
+    service, m = _make_service()
+    delivered = []
+
+    def custom_delivery(artifact):
+        delivered.append(artifact)
+        raise RuntimeError("custom transport did not return a receipt")
+
+    service._deliver = custom_delivery
+    result = service.sync_symlinks([])
+
+    assert len(delivered) == 1
+    assert delivered[0].engine_ext["stage"] == "draft"
+    assert result == {
+        "success": False,
+        "message": "投递失败: custom transport did not return a receipt",
+    }
+    m["http_client"].post.assert_not_called()
+    m["recorder"].record_draft_artifact.assert_not_called()
+
+
+def test_manifest_delivery_receipt_names_only_the_servers_in_sent_artifact():
+    @dataclass(frozen=True)
+    class ArtifactWithMcps(_Artifact):
+        def to_dict(self):
+            return {"engine_ext": self.engine_ext, "mcp": {"servers": [
+                {"server_code": "weather"}, {"server_code": "calendar"},
+            ]}}
+
+    service, collaborators = _make_service()
+    collaborators["composer"].compose.return_value = ArtifactWithMcps()
+    receipt = service.deliver_manifest_apply_with_receipt()
+    assert receipt.delivered_mcp_codes == frozenset({"weather", "calendar"})
+    assert receipt.note is None
+
+
+def test_manifest_receipt_requires_a_well_formed_delivered_artifact():
+    service, collaborators = _make_service()
+    assert service.deliver_manifest_apply_with_receipt().status == "unknown"
+    collaborators["http_client"].post.side_effect = RuntimeError("offline")
+    receipt = service.deliver_manifest_apply_with_receipt()
+    assert receipt.status == "failed" and receipt.delivered_mcp_codes is None

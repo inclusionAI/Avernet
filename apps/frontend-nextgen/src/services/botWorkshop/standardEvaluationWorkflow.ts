@@ -1,8 +1,8 @@
 import {
   standardEvaluationService,
+  type StandardEnvironment,
   type StandardEvaluationGoalType,
   type StandardEvaluationSetItem,
-  type StandardEnvironment,
   type StandardQualityTask,
 } from './standardEvaluationService';
 
@@ -13,7 +13,7 @@ export type StandardEvaluationStepKey =
   | 'evaluation_report'
   | 'save_evaluation_result';
 
-export type StandardEvaluationStepStatus = 'pending' | 'running' | 'done' | 'failed';
+export type StandardEvaluationStepStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
 
 export interface StandardEvaluationStep {
   key: StandardEvaluationStepKey;
@@ -31,7 +31,11 @@ export const STANDARD_EVALUATION_STEPS: StandardEvaluationStep[] = [
   { key: 'confirm_sample_set', title: '确认评测样本集', description: '展示并确认用户已选定的 MASA 评测样本集。' },
   { key: 'execute_evaluation', title: '评测执行', description: 'TeamClaw 后端驱动 MASA 标准评测并同步任务进展。' },
   { key: 'evaluation_report', title: '评测报告', description: '展示本次 MASA 评测报告。' },
-  { key: 'save_evaluation_result', title: '评测结果保存', description: '统一写入门禁结论，并在完成后由后端回收 Eval 区环境。' },
+  {
+    key: 'save_evaluation_result',
+    title: '评测结果保存',
+    description: '统一写入门禁结论，并在完成后由后端回收 Eval 区环境。',
+  },
 ];
 
 export const TERMINAL_TASK_STATUSES = new Set(['success', 'failed']);
@@ -202,8 +206,7 @@ export async function settleStandardEvaluationTask({
 }): Promise<StandardQualityTask> {
   const task = await waitForEvaluationTaskSettled({
     initialTask,
-    getTask: () =>
-      standardEvaluationService.getStandardEvaluationCurrentTask({ botId, botVersion, ownerId }),
+    getTask: () => standardEvaluationService.getStandardEvaluationCurrentTask({ botId, botVersion, ownerId }),
     isAlive,
     onTaskUpdate,
   });
@@ -253,9 +256,7 @@ export interface StandardEvaluationStartInput {
   onTaskUpdate: (task: StandardQualityTask) => void;
 }
 
-export async function startStandardEvaluationTask(
-  input: StandardEvaluationStartInput,
-): Promise<StandardQualityTask> {
+export async function startStandardEvaluationTask(input: StandardEvaluationStartInput): Promise<StandardQualityTask> {
   if (!input.selectedSampleSet) throw new Error('请选择评测样本集');
   input.onStepUpdate('create_environment', 'running');
   await waitForStandardEnvironmentReady({
@@ -289,6 +290,9 @@ export async function startStandardEvaluationTask(
     // 未落终态：任务仍由服务端驱动，页面可用性或快照异常不应被包装成“超时失败”。
     throw new Error(getEvaluationTaskError(task) || '评测仍在后台执行，可稍后在评测记录中查看结果');
   }
+
+  // 编排与门禁保存已完成。`task.status` 是评测质量结论，留给前端按“完成但未通过”
+  // 展示，避免被误判为编排节点失败。
   return task;
 }
 
@@ -335,9 +339,7 @@ async function runEvaluationAndRelease(
   if (saveStatus !== 'DONE') {
     throw new Error(getEvaluationTaskError(settledTask) || '评测仍在后台执行，可稍后在评测记录中查看结果');
   }
-  if (settledTask.status !== 'success') {
-    throw new Error(getEvaluationTaskError(settledTask) || '评测未通过，已按 BLOCKED 保存门禁结果');
-  }
+  // 与 startStandardEvaluationTask 保持同一语义：编排完成但评测结果未通过。
   input.onStepUpdate(runningStep, 'done');
   return settledTask;
 }

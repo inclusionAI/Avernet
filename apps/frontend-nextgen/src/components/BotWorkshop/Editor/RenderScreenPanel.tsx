@@ -70,7 +70,9 @@ export function RenderScreenPanel({
               </Button>
               <Button
                 disabled={!editable || !name.trim() || !/^https?:\/\//.test(cdnUrl.trim())}
-                onClick={() => void save()}
+                // 失败提示已由协议层(act → safeReportError)完成;吞掉 act 的重抛,避免
+                // `void save()` 产生 Uncaught (in promise),rejection 使 close() 不执行、表单保留。
+                onClick={() => void save().catch(() => undefined)}
               >
                 保存
               </Button>

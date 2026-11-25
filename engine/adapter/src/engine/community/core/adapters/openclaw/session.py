@@ -62,12 +62,75 @@ def _session_label_suffix(value: object) -> str:
             return uuid.uuid4().hex
 
         parts = text.split(":")
-        if len(parts) >= 4 and parts[0] == "session" and parts[2] == "user" and parts[1]:
+        if (
+            len(parts) >= 4
+            and parts[0] == "session"
+            and parts[2] == "user"
+            and parts[1]
+        ):
             return parts[1]
 
         return text
     except Exception:
         return uuid.uuid4().hex
+
+
+def _session_key_uuid(key: object) -> str:
+    """Extract the session uuid segment from a session key, mirroring the
+    shapes `_session_label_suffix` recognises (bare ``session:<uuid>:user:<id>``
+    keys plus the canonical ``agent:<provider>:session:<uuid>:user:<id>`` AID).
+
+    Unknown shapes return an empty string so the anchored strip simply skips
+    them (never over-strip).
+    """
+    text = str(key or "").strip()
+    if not text:
+        return ""
+    parts = text.split(":")
+    # session:<uuid>:user:<id>
+    if len(parts) >= 4 and parts[0] == "session" and parts[2] == "user":
+        return parts[1]
+    # agent:<provider>:session:<uuid>:user:<id>
+    if len(parts) >= 5 and parts[0] == "agent" and parts[2] == "session":
+        return parts[3]
+    return ""
+
+
+def _clean_title(title: object, session_identity: object) -> object:
+    """Strip the adapter's own label suffix from an outbound title value.
+
+    ``create``/``update`` write ``title_<suffix>`` into the engine label as a
+    session correlation token — the stored label must stay verbatim (several
+    engines identify ``sessions.list`` rows by label).  Outbound DTOs instead
+    must not leak that internal suffix.  Criteria are anchored to THIS
+    session's own identity via exact endswith so human titles with underscore
+    tails are never touched:
+
+    1. ``title`` ends with ``_<session_identity>``  → strip (update form);
+    2. ``title`` ends with ``_<own uuid>``          → strip (create form);
+    3. otherwise return the title untouched — including the DSH fallback
+       where the label equals the session key exactly.
+    Stripping down to empty returns ``None`` so callers fall back through the
+    existing ``or session_key`` chains unchanged.
+    """
+    if not isinstance(title, str) or not title:
+        return title
+    identity = str(session_identity or "").strip()
+    # update form: ``<title>_<full session id>``
+    if identity and title.endswith(f"_{identity}"):
+        stripped = title[: -(len(identity) + 1)]
+        return stripped or None
+    # create form: ``<title>_<bare session uuid>`` — anchored to a uuid-shaped
+    # own id; very short custom ids skip the criterion entirely (never
+    # over-strip, real create ids are uuid4-shaped).
+    self_uuid = _session_key_uuid(identity)
+    if (
+        len(self_uuid) >= 8
+        and title.endswith(f"_{self_uuid}")
+    ):
+        stripped = title[: -(len(self_uuid) + 1)]
+        return stripped or None
+    return title
 
 
 def _parse_datetime(value: object) -> datetime | None:
@@ -171,7 +234,13 @@ def _to_session(data: dict[str, Any], index: int = 0) -> Session:
         key=key,
         agent_id=None,
         user_id="default",
-        title=data.get("label") or data.get("displayName") or key,
+        # 出站读边界（fix-session-title-auto-rename D1）：引擎 label 里的
+        # `_<后缀>` 关联令牌仅内部使用，出站 DTO 剥净；剥空/缺失沿 or key 回退。
+        title=(
+            _clean_title(data.get("label"), key)
+            or _clean_title(data.get("displayName"), key)
+            or key
+        ),
         status="active",
         created_at=created_at,
         updated_at=updated_at,
@@ -352,7 +421,7 @@ class OpenClawSessionAdapter(SessionService):
             key=session_key,
             agent_id=request.agent_id,
             user_id=request.user_id,
-            title=patch_params.get("label") or session_key,
+            title=_clean_title(patch_params.get("label"), session_key) or session_key,
             status="active",
             created_at=now,
             updated_at=now,
@@ -459,6 +528,7 @@ class OpenClawSessionAdapter(SessionService):
             model=request.model,
             token=token,
         )
+        # 出站剥除经 _to_session 收口（出站读边界三出口之一）。
         return _to_session(raw)
 
     async def reset(

@@ -58,6 +58,23 @@ per scoped Bot. Get/retry expose only non-secret journal facts to the actor,
 previous/new Owner or an administrator. Status access grants no Bot resource
 permission. Only queued, unclaimed operations can cancel.
 
+### Employee-number compatibility
+
+For the internal `teamclaw` tenant, one-to-six-digit ASCII employee IDs accept
+leading-zero aliases at the new-Owner input boundary. For example `012345` and
+`12345` identify the same handoff target. New journals, Bot ownership, default
+execution identity and Space membership use the unpadded internal ID. Only the
+staff-directory lookup uses the six-digit form; its returned work number must
+exactly match that lookup and include a name. Missing/mismatched profiles still
+fail closed. This conversion never applies to `entity_id`, Bot keys, actors,
+independent execution bindings, other tenants, opaque IDs or longer numeric IDs.
+
+Idempotent target comparisons accept either spelling without another directory
+call, including when the directory is unavailable. Existing journal rows are
+returned unchanged, not rewritten or reissued. Previously accepted tasks with
+padded identities are not migrated by this change. Space membership and actor
+authorization checks remain enforced; a missing membership is not synthesized.
+
 QUEUED → REISSUING → WAITING_AUTHORIZATION → UPDATING_RUNTIME →
 RETIRING_OLD_CREDENTIALS → COMMITTING_OWNER → SUCCEEDED.
 

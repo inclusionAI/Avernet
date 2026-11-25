@@ -5,11 +5,13 @@ Each case must fail before serving HTTP and report the expected field/category.
 """
 import copy
 import json
+from pathlib import Path
 import subprocess
 
 
 def reject(env, config, root, expected, overrides=None, raw=None, suffix='json'):
     path = root / ('invalid.' + suffix)
+    (root / 'catalog-labels.toml').write_bytes((Path(__file__).resolve().parents[3] / 'configs/catalog-labels.toml').read_bytes())
     path.write_text(raw if raw is not None else json.dumps(config))
     child_env = env.env()
     for key, value in (overrides or {}).items():

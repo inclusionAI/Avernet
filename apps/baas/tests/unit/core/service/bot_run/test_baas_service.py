@@ -3656,3 +3656,51 @@ class TestSessionPendingDispatch:
                     session_pending=True,
                 )
         mat.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "session_id", ["agent:main:session:a:user:u", "session:a:user:u"]
+)
+async def test_runtime_status_uses_same_normalized_affinity_and_proxy(
+    service, wss_resolver, session_id
+):
+    from secbaas.community.api.bot_runtime import SessionRuntimeStatus
+
+    observation = SessionRuntimeStatus(
+        session_id=session_id,
+        found=True,
+        run_id="r",
+        state="running",
+        started_at=1,
+        last_event_seq=2,
+    )
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.get_session_runtime_status.return_value = observation
+    binding = _make_binding_info(engine_type="openclaw")
+    with patch.object(service, "_create_session_client", return_value=client) as create:
+        result = await service.get_session_runtime_status(
+            session_id=session_id,
+            binding_info=binding,
+            context=_make_context(tenant=TENANT),
+        )
+    assert result == observation
+    args = wss_resolver.dispatch_bot_ws_conn_info.await_args.kwargs
+    assert args["device_affinity"] == "session:a:user:u"
+    assert args["path"] == "/api/openclaw/ws"
+    assert create.call_args.args[0].target == TARGET
+    client.get_session_runtime_status.assert_awaited_once_with(session_id)
+    client.create_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_unsupported_engine_does_not_connect(
+    service, wss_resolver
+):
+    result = await service.get_session_runtime_status(
+        session_id="s",
+        binding_info=_make_binding_info(engine_type="claude_code"),
+    )
+    assert result.reason == "UNSUPPORTED_ENGINE"
+    wss_resolver.dispatch_bot_ws_conn_info.assert_not_called()

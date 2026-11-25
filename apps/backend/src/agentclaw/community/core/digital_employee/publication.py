@@ -185,20 +185,21 @@ class DigitalEmployeePublicationService:
         bot, binding = self._binding(record)
         if not binding:
             return
-        self.require_approved(publish_id)
-        capabilities = record.ext["digital_employee_snapshot"]["capabilities"]
-        self._passport.update_passport(
-            bot_id=bot["bot_id"], user_id=bot["owner_id"],
-            resource_scope={
-                "mcp_codes": [item["mcpServerCode"] for item in capabilities["mcps"]],
-                "mcp_items": [{"mcp_code": item["mcpServerCode"], "mcp_name": item.get("name", ""),
-                               "identity_mode": item["identityMode"].lower()}
-                              for item in capabilities["mcps"]],
-                "cli_items": [{"cli_code": item["cliCode"], "cli_name": item.get("name", ""),
-                               "identity_mode": item["identityMode"].lower()}
-                              for item in capabilities["clis"]],
-                "skill_items": [{"skill_code": item["skillId"], "skill_name": item["name"],
-                                 "skill_desc": item.get("description", "")}
-                                for item in capabilities["skills"]],
-            },
-        )
+        with self._bots.serialize_passport_scope(bot):
+            self.require_approved(publish_id)
+            capabilities = record.ext["digital_employee_snapshot"]["capabilities"]
+            self._passport.update_passport(
+                bot_id=bot["bot_id"], user_id=bot["owner_id"],
+                resource_scope={
+                    "mcp_codes": [item["mcpServerCode"] for item in capabilities["mcps"]],
+                    "mcp_items": [{"mcp_code": item["mcpServerCode"], "mcp_name": item.get("name", ""),
+                                   "identity_mode": item["identityMode"].lower()}
+                                  for item in capabilities["mcps"]],
+                    "cli_items": [{"cli_code": item["cliCode"], "cli_name": item.get("name", ""),
+                                   "identity_mode": item["identityMode"].lower()}
+                                  for item in capabilities["clis"]],
+                    "skill_items": [{"skill_code": item["skillId"], "skill_name": item["name"],
+                                     "skill_desc": item.get("description", "")}
+                                    for item in capabilities["skills"]],
+                },
+            )

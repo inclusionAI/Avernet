@@ -17,6 +17,14 @@ from typing import Any
 
 from agentclaw.community.core.apply_engine.compiler import LEGACY_STATE, StateRef
 from agentclaw.community.core.apply_engine.constructs import ApplyConstruct
+from agentclaw.community.core.ports.skill_package_upload_port import LocalSkillPackageReceipt
+from agentclaw.community.core.skill_center.capability_projection_reconcile import (
+    PROJECTION_RETRY_FIELD,
+    CapabilityProjectionRetry,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    RuntimeProjectionResult,
+)
 
 #: What a construct is, for the purposes of applying it: one of the six
 #: categories under ``manifest``, or the top-level ``script`` section.
@@ -320,6 +328,7 @@ class CategoryResult:
     #: ``partially_written`` flag, this means an earlier durable step is known
     #: to have committed (for example deactivation before Local package delete).
     confirmed_partial: bool = False
+    local_skill_packages: tuple[LocalSkillPackageReceipt, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         """The wire shape for one category's summary. Note that the entries are
@@ -333,12 +342,17 @@ class CategoryResult:
                 "removed": [],
             }
         """
-        return {
+        payload = {
             "category": self.construct.value,
             "aborted": self.aborted,
             "partially_written": self.partially_written,
             "removed": list(self.removals),
         }
+        if self.local_skill_packages:
+            payload["local_skill_packages"] = [
+                receipt.as_dict() for receipt in self.local_skill_packages
+            ]
+        return payload
 
 
 class SourceMode(StrEnum):
@@ -502,6 +516,10 @@ class ApplyReport:
     #: compiler's refusal of the whole reference in the worker
     #: (``CompileRefused``: a FAILED report with no categories and the reason).
     notes: tuple[str, ...] = field(default=())
+    runtime_projection: RuntimeProjectionResult | None = None
+    #: Stored report correlation. The HTTP report exposes only the observation.
+    runtime_projection_revision: str | None = None
+    capability_projection_retry: CapabilityProjectionRetry | None = None
 
     @property
     def entries(self) -> tuple[EntryResult, ...]:
@@ -541,7 +559,7 @@ class ApplyReport:
         structurally unable to emit a credential value: a secret cannot ride
         along inside a dict nobody inspected, because no dict is copied through.
         """
-        return {
+        payload = {
             "apply_id": self.apply_id,
             "bot_id": self.bot_id,
             "trigger": self.trigger,
@@ -556,6 +574,18 @@ class ApplyReport:
             "entries": [entry.as_dict() for entry in self.entries],
             "notes": list(self.notes),
         }
+        if self.runtime_projection is not None:
+            payload["runtime_projection"] = self.runtime_projection.to_dict()
+        if self.runtime_projection_revision is not None:
+            payload["runtime_projection_revision"] = self.runtime_projection_revision
+        return payload
+
+    def as_stored_payload(self) -> dict[str, Any]:
+        payload = self.as_payload()
+        if self.runtime_projection is not None and self.runtime_projection_revision is None:
+            retry = self.capability_projection_retry
+            payload[PROJECTION_RETRY_FIELD] = retry.to_payload() if retry is not None else None
+        return payload
 
 
 #: The entity-key fields an entry may name itself by, in the order they are

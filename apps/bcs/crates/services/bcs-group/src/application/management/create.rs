@@ -247,7 +247,10 @@ impl GroupManagement {
             if group.visibility != "private" { return Err(GroupUseCaseError::Forbidden("same_owner groups must remain private".into())); }
         }
 
-        self.group.upsert(group.clone()).await?;
+        self.group.create_with_catalog_labels(group.clone(),cmd.catalog_labels).await.map_err(|error|match error {
+            ServiceError::Conflict(message)=>GroupUseCaseError::Conflict(message),
+            other=>other.into(),
+        })?;
 
         for target in &subscription_targets {
             self.try_write_subscription_edge(&cmd.driver_bot_id, target)

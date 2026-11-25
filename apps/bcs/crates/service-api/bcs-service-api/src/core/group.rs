@@ -168,7 +168,25 @@ pub trait GroupCoreService: Send + Sync {
         Err(super::ServiceError::InternalError("Group Card snapshot reads are not configured".into()))
     }
 
+    /// Read uncached metadata/participants and labels from one effective Group
+    /// version. Concurrent version changes are retried at most three times;
+    /// exhausted races and storage failures are errors, never mixed details.
+    async fn read_detail_snapshot(&self, _id: &str) -> ServiceResult<Option<crate::types::GroupMutationSnapshot>> {
+        Err(crate::ServiceError::InternalError("Group detail snapshots are not configured".into()))
+    }
+
     /// Create or update a group.
+    /// Atomic Group/template/labels write. Legacy upserts preserve labels.
+    async fn upsert_with_catalog_labels(&self, group: Group, labels: Option<crate::types::catalog_labels::CatalogLabels>) -> ServiceResult<()> {
+        if labels.is_some() { return Err(crate::ServiceError::InternalError("catalog-label Group write unavailable".into())); }
+        self.upsert(group).await
+    }
+    /// Create-only admission: reject an existing identity atomically, without
+    /// replacing its management anchors, type, participants or catalog labels.
+    /// Implementations must not emulate this using an exists check plus upsert.
+    async fn create_with_catalog_labels(&self, _group: Group, _labels: Option<crate::types::catalog_labels::CatalogLabels>) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError("atomic Group creation unavailable".into()))
+    }
     async fn upsert(&self, group: Group) -> ServiceResult<()>;
 
     async fn finalize_provisioning(
@@ -180,6 +198,13 @@ pub trait GroupCoreService: Send + Sync {
             message: "Group provisioning finalization is not configured".to_string(),
             request_id: None,
         })
+    }
+
+    /// Apply a PATCH and return labels captured by the same commit boundary.
+    /// An unchanged PATCH returns a version-checked read snapshot, without a write.
+    /// The default fails closed rather than mixing a mutation with a later read.
+    async fn mutate_with_snapshot(&self, _command: GroupMutationCommand) -> ServiceResult<crate::types::GroupMutationSnapshot> {
+        Err(super::ServiceError::InternalError("Group mutation snapshots are not configured".into()))
     }
 
     /// Apply one Group lifecycle mutation and its public Event in the same

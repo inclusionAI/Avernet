@@ -25,7 +25,7 @@ export function resolveBotUnavailable(
 ): { reason: string | null; unavailable: boolean } {
   const reason =
     section === 'friend' && bot.botType === 'service' && bot.onlineAvailable === false
-      ? '非运行中服务 Bot'
+      ? '该服务 Bot 尚未处于正式运行状态'
       : bot.status
         ? BOT_UNAVAILABLE_REASONS[bot.status.toUpperCase()] ?? null
         : null;

@@ -31,6 +31,7 @@ pub struct RegisterTokenScope {
 /// Command for registering a bot with a register token.
 #[derive(Debug, Clone)]
 pub struct RegisterBot {
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
     pub token: String,
     pub bot_name: String,
     pub mode: Option<ProviderRegistrationMode>,

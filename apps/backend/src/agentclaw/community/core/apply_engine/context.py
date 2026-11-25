@@ -19,6 +19,9 @@ from typing import Any, Optional
 from agentclaw.community.core.apply_engine.capabilities import (
     Capabilities,
 )
+from agentclaw.community.core.skill_center.capability_projection_reconcile import (
+    CapabilityWriteScope,
+)
 
 
 @dataclass
@@ -26,6 +29,8 @@ class CapabilityApplyState:
     """The one cross-category fact Skills hands to the later MCP wave."""
 
     final_skill_dependency_codes: frozenset[str] | None = None
+    manifest_mcp_candidates: dict[str, frozenset[str]] = field(default_factory=dict)
+    delivered_mcp_codes: set[str] = field(default_factory=set)
 
 @dataclass(frozen=True)
 class ApplyContext:
@@ -119,6 +124,13 @@ class ApplyContext:
     #: per fetch and rides the materialiser's call instead.
     apply_id: Optional[str] = None
     capability_state: CapabilityApplyState = field(default_factory=CapabilityApplyState)
+    capability_write_scope: CapabilityWriteScope | None = None
+    #: Verified subject whose personal MCP permission may be queried, if any.
+    permission_subject: str | None = None
+
+    @property
+    def defer_capability_projection(self) -> bool:
+        return self.capability_write_scope is not None
 
 
 __all__ = ["ApplyContext", "CapabilityApplyState"]

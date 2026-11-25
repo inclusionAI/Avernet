@@ -9,3 +9,8 @@ The engine remains independent of application and HTTP types. Requests received
 while draining can still confirm an existing handoff; new acceptance decisions
 belong to the engine's admission gate. A successful notification does not imply
 that any session has been subscribed or its outbox completed.
+
+## Connector
+
+`ConnectorRuntimeFacade` implements `DistConnectorRuntimeService` (health and
+drain) over the Connector engine's `DistRuntimeControlPort`.

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from enum import StrEnum
-from typing import Optional, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol, runtime_checkable
 
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RegisteredSkillAsset,
@@ -46,6 +46,12 @@ class RuntimeProjectionIssue:
     logical_location: str | None = None
     suggested_action: str | None = None
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "RuntimeProjectionIssue":
+        values = {item.name: data[item.name] for item in fields(cls) if item.name in data}
+        values["status"] = RuntimeProjectionStatus(data["status"])
+        return cls(**values)
+
     def to_dict(self) -> dict[str, object]:
         values: dict[str, object] = {
             "resource_type": self.resource_type,
@@ -78,6 +84,27 @@ class RuntimeProjectionResult:
     components: dict[str, RuntimeProjectionStatus] = field(default_factory=dict)
     issues: tuple[RuntimeProjectionIssue, ...] = ()
     reason: str | None = None
+    delivery_uncertain: bool = False
+    # Internal authorization receipt, outside public serialization.
+    passport_updated: bool | None = field(default=None, compare=False, repr=False)
+    passport_mcp_codes: frozenset[str] | None = field(default=None, compare=False, repr=False)
+    # Per-invocation confirmed device writes; not a persisted delivery snapshot.
+    delivered_mcp_codes: frozenset[str] = field(default_factory=frozenset, compare=False, repr=False)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "RuntimeProjectionResult":
+        return cls(
+            status=RuntimeProjectionStatus(data["status"]),
+            components={
+                name: RuntimeProjectionStatus(status)
+                for name, status in data.get("components", {}).items()
+            },
+            issues=tuple(
+                RuntimeProjectionIssue.from_dict(issue)
+                for issue in data.get("issues", ())
+            ),
+            reason=data.get("reason"),
+        )
 
     @classmethod
     def converged(cls, *, components: dict[str, RuntimeProjectionStatus] | None = None) -> "RuntimeProjectionResult":
@@ -97,6 +124,7 @@ class RuntimeProjectionResult:
         code: str,
         reason: str,
         suggested_action: str | None = None,
+        delivery_uncertain: bool = False,
     ) -> "RuntimeProjectionResult":
         return cls(
             status=RuntimeProjectionStatus.PENDING,
@@ -110,6 +138,7 @@ class RuntimeProjectionResult:
                     suggested_action=suggested_action,
                 ),
             ),
+            delivery_uncertain=delivery_uncertain,
         )
 
     @classmethod
@@ -119,10 +148,15 @@ class RuntimeProjectionResult:
         components: dict[str, RuntimeProjectionStatus] = {}
         issues: list[RuntimeProjectionIssue] = []
         statuses: list[RuntimeProjectionStatus] = []
+        passport_updated = None
+        delivered_mcp_codes: set[str] = set()
         for result in results:
+            if result.passport_updated is not None:
+                passport_updated = result.passport_updated
             components.update(result.components)
             issues.extend(result.issues)
             statuses.append(result.status)
+            delivered_mcp_codes.update(result.delivered_mcp_codes)
         if RuntimeProjectionStatus.DEGRADED in statuses:
             status = RuntimeProjectionStatus.DEGRADED
         elif RuntimeProjectionStatus.PENDING in statuses:
@@ -131,7 +165,14 @@ class RuntimeProjectionResult:
             status = RuntimeProjectionStatus.CONVERGED
         else:
             status = RuntimeProjectionStatus.SKIPPED
-        return cls(status=status, components=components, issues=tuple(issues))
+        return cls(
+            status=status,
+            components=components,
+            issues=tuple(issues),
+            delivery_uncertain=any(result.delivery_uncertain for result in results),
+            passport_updated=passport_updated,
+            delivered_mcp_codes=frozenset(delivered_mcp_codes),
+        )
 
     def to_dict(self) -> dict[str, object]:
         pending_count = sum(
@@ -198,7 +239,11 @@ class CapabilityRuntimeBoundary(Protocol):
         released: frozenset[str],
         declared: set[str],
     ) -> bool:
-        """Apply one MCP projection: deliver, withdraw, and declare the set."""
+        """Apply one MCP projection: deliver, withdraw, and declare the set.
+
+        Raise McpProjectionNotDispatchedError when every incomplete operation
+        failed before dispatch. False means a dispatch did not confirm delivery.
+        """
         ...
 
     async def project_whole_artifact(
@@ -211,7 +256,8 @@ class CapabilityRuntimeBoundary(Protocol):
 
         No filesystem mapping is built before this call. Exact Center identity
         reaches the artifact composer as data, so a whole-artifact engine never
-        guesses a path or trips over the legacy symlink adapter.
+        guesses a path or trips over the legacy symlink adapter. A confirmed
+        pre-delivery failure raises ArtifactProjectionNotDispatchedError.
         """
         ...
 
@@ -388,11 +434,8 @@ class ProjectionScope:
     released_mcp: frozenset[str] = frozenset()
     #: Treat *every* projected MCP code as claimed, ignoring ``claimed_mcp``.
     #:
-    #: Exactly one listener sets this: ``SkillSymlinkListener``, via either a
-    #: first ``DeviceActivatedEvent`` or a post-restart
-    #: ``RuntimeProjectionRequestedEvent``. It is the one place where "just
-    #: re-declare the allow-list" is not enough, because a newly active or
-    #: restarted container must converge from its current runtime contents.
+    #: Set by the device lifecycle and when an Apply must resend a full configuration. Re-declaring the allow-list is insufficient when the current
+    #: Runtime may not have the configuration behind it.
     #: Every mutation-triggered path names its own delta instead.
     #:
     #: It is load-bearing, not a convenience: ``report_device_alive``
@@ -411,9 +454,15 @@ class ProjectionScope:
     #: that on their own. An MCP-only reconcile — ``ProjectionScope(mcp=True,
     #: claim_all_mcp=True)`` — is a real and used shape.
     #:
-    #: It never deletes: ``released_mcp`` is not consulted when this is set,
-    #: so a reconcile can only ever add configuration to a device.
+    #: Explicit releases are applied only for codes absent from the final set.
+    #: A lifecycle baseline supplies no explicit releases by default.
     claim_all_mcp: bool = False
+    #: A separate platform authorization update remains due after a device receipt.
+    passport: bool = False
+
+    @property
+    def requires_device_delivery(self) -> bool:
+        return self.skills or self.mcp
 
     @classmethod
     def everything(cls) -> "ProjectionScope":

@@ -77,7 +77,11 @@ it.each<[string, BotLifecycle, BotRuntimeStage | undefined, BotRuntimeStage]>([
     expect.objectContaining({ sessionId: 'debug-session' }), undefined, expect.any(Function), 'viewer');
   expect(useBotSessionFilesFeature).toHaveBeenLastCalledWith(
     expect.objectContaining({ runtimeStage: expected, ownerId: 'owner' }),
-    expect.objectContaining({ sessionId: 'debug-session' }), 'viewer', expect.any(Function), expected,
+    expect.objectContaining({ sessionId: 'debug-session' }),
+    'viewer',
+    expect.any(Function),
+    expected,
+    { subjectScoped: false },
   );
 });
 
@@ -96,4 +100,26 @@ it('编辑模式与线上路由组合不触发调试输入禁用', async () => {
   render(<Page />);
   expect(await screen.findByTestId('composer')).toBeInTheDocument();
   expect(mockComposerDisabled).toBe(false);
+});
+
+it('查看模式下预发(prestable)不显示锁定横幅,配置面板可浏览不整页禁用', async () => {
+  mockLifecycle = 'prestable';
+  mockSearch = '?id=bot&type=view&runtime_stage=verify';
+  render(<Page />);
+  expect(await screen.findByTestId('composer')).toBeInTheDocument();
+  expect(screen.queryByText('试运行验证中，配置已锁定；请在右侧对话区验证 Bot。')).not.toBeInTheDocument();
+  const fieldset = document.querySelector('fieldset');
+  expect(fieldset).not.toBeNull();
+  expect((fieldset as HTMLFieldSetElement).disabled).toBe(false);
+  expect(fieldset?.className).not.toContain('pointer-events-none');
+});
+
+it('编辑模式下预发(prestable)仍显示锁定横幅并整页禁用', async () => {
+  mockLifecycle = 'prestable';
+  mockSearch = '?id=bot&type=edit&runtime_stage=verify';
+  render(<Page />);
+  expect(await screen.findByText('试运行验证中，配置已锁定；请在右侧对话区验证 Bot。')).toBeInTheDocument();
+  const fieldset = document.querySelector('fieldset') as HTMLFieldSetElement;
+  expect(fieldset.disabled).toBe(true);
+  expect(fieldset.className).toContain('pointer-events-none');
 });

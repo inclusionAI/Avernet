@@ -19,7 +19,7 @@ from agentclaw.community.adapters.http.devices.schemas import (
     Env,
 )
 from agentclaw.community.core.devices.models import DeviceConnectionInfo
-from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord, public_device_props
 
 
 def _normalize_device_props(props: dict[str, Any]) -> dict[str, Any]:
@@ -51,7 +51,7 @@ def record_to_response(record: DeviceBindingRecord | Any) -> DeviceBindingRespon
         device_id=record.device_id,
         device_provider=record.device_provider,
         env=Env.from_string(record.env),
-        device_props=_normalize_device_props(record.device_props),
+        device_props=_normalize_device_props(public_device_props(record.device_props)),
         status=DeviceBindingStatus(record.status),
         last_alive_at=record.last_alive_at,
     )

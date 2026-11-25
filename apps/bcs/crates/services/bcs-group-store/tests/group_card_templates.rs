@@ -69,7 +69,9 @@ async fn lifecycle(db: Arc<dyn DbPlugin>, flavor: DbSqlFlavor) {
         let mut g = group(id, strategy);
         g.visibility = visibility.into();
         g.record_status = status.into();
-        repo.upsert(g).await.unwrap();
+        let labels=serde_json::from_value(json!({"stage":["trial"]})).unwrap();
+        repo.upsert_with_catalog_labels(g,Some(labels)).await.unwrap();
+        assert_eq!(repo.read_card_snapshot(id).await.unwrap().unwrap().catalog_labels.as_map()["stage"],["trial"]);
         let saved = card(db.as_ref(), ENV, id).await.unwrap();
         assert_template(&saved, "协作群", if strategy == GroupStrategy::ManagerWorker { "manager_worker" } else { "state_machine" });
         assert_eq!(saved["supportedInterfaces"][0]["url"], format!("local://groups/{id}"));
@@ -267,7 +269,7 @@ async fn sqlite_group_cards_lifecycle_and_rollback() {
 async fn mysql_group_cards_full_chain_lifecycle_and_rollback() {
     let database = mysql_chain::MysqlConformanceDb::open_empty().await;
     let versions = database.apply_full_migration_chain().await;
-    assert_eq!(versions.last(), Some(&41));
+    assert_eq!(versions.last(), Some(&48));
     lifecycle(database.plugin.clone(), DbSqlFlavor::Mysql).await;
     failures_and_cost(database.plugin.clone(), DbSqlFlavor::Mysql).await;
     database.close().await;

@@ -105,6 +105,10 @@ class LocalSkillRuntimeUnavailableError(LocalSkillStorageError):
     """Runtime delivery failed before its outcome could be confirmed."""
 
 
+class LocalSkillPackageOutcomeUnknownError(LocalSkillRuntimeUnavailableError):
+    """A dispatched package may still affect the target."""
+
+
 class SkillParameterValidationError(Exception):
     """The full Bot-level parameter object violates SKILL.md config."""
 
@@ -327,3 +331,11 @@ class McpEndpointUnavailableError(DomainError):
             "MCP_NO_COMPATIBLE_SECURE_ENDPOINT: 当前 MCP 没有可安全下发到该 Bot "
             "的端点，请检查 MCP Center 的网络和端点配置"
         )
+
+
+class McpProjectionNotDispatchedError(RuntimeError):
+    """Every incomplete MCP device operation failed before being dispatched."""
+
+
+class ArtifactProjectionNotDispatchedError(RuntimeError):
+    """Whole-artifact projection failed before the outbound delivery started."""

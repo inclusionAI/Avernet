@@ -25,11 +25,12 @@ pub(super) fn identity_failure(error: &A2AError) -> Option<&'static str> {
 pub(super) struct HttpClient {
     pub(super) transport: ClientWithDefaults<reqwest::Client>,
     identity: Option<(Arc<dyn OutboundAppIdentity>, String)>,
+    require_identity: bool,
 }
 
 impl HttpClient {
     pub(super) fn new(transport: ClientWithDefaults<reqwest::Client>) -> Self {
-        Self { transport, identity: None }
+        Self { transport, identity: None, require_identity: false }
     }
 
     pub(super) fn with_identity(
@@ -38,6 +39,11 @@ impl HttpClient {
         provider_id: String,
     ) -> Self {
         self.identity = Some((policy, provider_id));
+        self
+    }
+
+    pub(super) fn require_identity(mut self) -> Self {
+        self.require_identity = true;
         self
     }
 
@@ -56,11 +62,19 @@ impl HttpClient {
                     _ => CREDENTIAL_UNAVAILABLE,
                 })
             })?;
-            if let Some(credential) = credential {
-                apply(&mut request, credential)?;
+            match credential {
+                Some(credential) => apply(&mut request, credential)?,
+                None if self.require_identity => return Err(A2AError::internal(CREDENTIAL_UNAVAILABLE)),
+                None => {}
             }
+        } else if self.require_identity {
+            return Err(A2AError::internal(CREDENTIAL_UNAVAILABLE));
         }
-        self.transport.execute_traced(request).await.map_err(|_| A2AError::internal(connection_error))
+        // Keeps whether a connection was established at all (see `transport_error`).
+        self.transport
+            .execute_traced(request)
+            .await
+            .map_err(|error| crate::transport_error::send_failure(&error, connection_error))
     }
 }
 

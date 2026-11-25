@@ -21,6 +21,10 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agentclaw.community.adapters.http.openapi_v1.schemas_runtime_projection import (
+    RuntimeProjectionResult,
+)
+
 
 class ConfigManifestApplyAccepted(BaseModel):
     """The 202 body: a handle, and the state the apply starts in.
@@ -109,6 +113,24 @@ class ConfigManifestApplySource(BaseModel):
     )
 
 
+class ConfigManifestLocalSkillPackage(BaseModel):
+    """A package publication observation, independent of installation."""
+
+    name: str = Field(description="Name of the Local Skill package target.")
+    content_digest: str | None = Field(
+        default=None,
+        description="Canonical package content digest, when validation computed it.",
+    )
+    publication: Literal["PUBLISHED", "FAILED", "UNKNOWN", "NOT_DISPATCHED"] = Field(
+        description="PUBLISHED for a confirmed Runtime write, FAILED for a confirmed "
+        "failure, UNKNOWN for an unconfirmed outcome, or NOT_DISPATCHED.",
+    )
+    metadata: Literal["COMMITTED", "FAILED", "UNKNOWN", "NOT_ATTEMPTED"] = Field(
+        description="COMMITTED for committed Backend metadata, FAILED for a confirmed "
+        "failure, UNKNOWN for an unconfirmed outcome, or NOT_ATTEMPTED.",
+    )
+
+
 class ConfigManifestApplyCategory(BaseModel):
     """One category's summary, including what overwriting it removed."""
 
@@ -132,6 +154,12 @@ class ConfigManifestApplyCategory(BaseModel):
         "longer declared, so overwriting removed them. Reported separately from "
         "`entries` because a removal has no declared entry. Current capabilities "
         "use the same `skills/`, `skill_sets/` and `mcp/` prefixes as entries.",
+    )
+    local_skill_packages: list[ConfigManifestLocalSkillPackage] = Field(
+        default_factory=list,
+        exclude_if=lambda receipts: not receipts,
+        description="Per-package Runtime publication and Backend metadata when this "
+        "Apply used a Local Skill publication batch.",
     )
 
 
@@ -218,8 +246,12 @@ class ConfigManifestApply(BaseModel):
     )
     notes: list[str] = Field(
         default_factory=list,
-        description="Apply-level notes that belong to no entry. Today only the "
-        "delivery strategy's closing step writes one: on teclaw, a whole-artifact "
-        "redeliver that failed after every category was written is recorded here "
-        "rather than failing the apply. Empty on ARCA.",
+        description="Apply-level notes, including delivery feedback from "
+        "TeClaw's platform-managed artifact closure.",
+    )
+    runtime_projection: RuntimeProjectionResult | None = Field(
+        default=None,
+        exclude_if=lambda result: result is None,
+        description="Capability Runtime synchronization, independent of the Apply write result. "
+        "Omitted for historical reports, previews, and Apply paths without a capability observation.",
     )

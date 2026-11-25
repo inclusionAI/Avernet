@@ -45,6 +45,15 @@ export const useConversationStore = create<ConversationState>((set) => ({
         ...revisionPatch(state, botId),
       };
     }),
+  // 外部建聊(协作广场「立即开始对话」等)在跳转前调用:会话在列表外新建,已展开 Bot
+  // 的列表缓存若不失效,loadSessionPage 的缓存命中短路会让侧栏看不到新会话。与搜索/
+  // 实例切换同语义:清缓存(managed/others 好友分组一并)+ 过滤代次 +1,在途旧响应经
+  // revision 写回校验自动丢弃。
+  invalidateBotSessionList: (botId) =>
+    set((state) => ({
+      ...invalidateListCaches(state, botId),
+      ...revisionPatch(state, botId),
+    })),
   setBotInstanceSelection: (botId, instanceUuid) =>
     set((state) => instanceSelectionSet(state, botId, instanceUuid.trim())),
   setFriendBotScope: (botId, scope) =>

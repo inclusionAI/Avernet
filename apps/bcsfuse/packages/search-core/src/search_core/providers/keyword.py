@@ -171,6 +171,36 @@ class QdrantKeywordIndex:
                 wait=True,
             )
 
+    @staticmethod
+    def _filter_conditions(filters):
+        return [
+            models.FieldCondition(
+                key=key,
+                match=models.MatchAny(any=value)
+                if isinstance(value, list)
+                else models.MatchValue(value=value),
+            )
+            for key, value in (filters or {}).items()
+        ]
+
+    def filtered_source_ids(self, filters, limit, **options):
+        self._ensure_client()
+        points, _ = self._client.scroll(
+            self.collection_name,
+            scroll_filter=models.Filter(must=self._filter_conditions(filters)),
+            limit=limit,
+            with_payload=["source_id"],
+            with_vectors=False,
+            **options,
+        )
+        return list(
+            dict.fromkeys(
+                point.payload["source_id"]
+                for point in points
+                if point.payload and point.payload.get("source_id")
+            )
+        )
+
     def search(
         self,
         query: str,
@@ -182,15 +212,7 @@ class QdrantKeywordIndex:
         if not query.strip() or top_k <= 0:
             return []
         self._ensure_client()
-        conditions = [
-            models.FieldCondition(
-                key=key,
-                match=models.MatchAny(any=value)
-                if isinstance(value, list)
-                else models.MatchValue(value=value),
-            )
-            for key, value in (filters or {}).items()
-        ]
+        conditions = self._filter_conditions(filters)
         exact = []
         if self._exact_match_field is not None:
             # Exact IDs are retrieved separately, still subject to every caller filter.

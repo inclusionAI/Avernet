@@ -77,6 +77,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from collections.abc import Callable
 from injector import inject
 from sqlalchemy import or_, func
 
@@ -489,15 +490,38 @@ class DeviceRepository(
                 synchronize_session=False,
             )
 
+    def mutate_device_property(
+        self, *, binding_id: int, device_id: str, key: str,
+        mutate: Callable[[Any], Any],
+    ) -> None:
+        with self._db.orm_session() as db:
+            begin_guarded_transaction(db, purpose="Device property mutation")
+            binding = (
+                db.query(EntityDeviceBinding)
+                .filter_by(id=binding_id, device_id=device_id)
+                .with_for_update()
+                .one_or_none()
+            )
+            if binding is None:
+                return
+            props = load_device_props(binding.device_props)
+            previous = props.get(key)
+            updated = mutate(previous)
+            if updated != previous:
+                props[key] = updated
+                binding.device_props = json.dumps(props, ensure_ascii=False)
+
     def update_device_props(
         self, *, binding_id: int, props: dict[str, Any]
     ) -> None:
         # Read-merge-write so other device_props keys (callback_token,
         # sandbox_id, adapter_port, ...) survive. Binding gone → silent no-op.
         with self._db.orm_session() as db:
+            begin_guarded_transaction(db, purpose="Device property merge")
             row = (
                 db.query(EntityDeviceBinding.device_props)
                 .filter(EntityDeviceBinding.id == binding_id)
+                .with_for_update()
                 .first()
             )
             if row is None:

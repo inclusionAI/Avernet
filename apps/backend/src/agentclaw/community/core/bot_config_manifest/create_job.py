@@ -148,6 +148,7 @@ def build_create_job_payload(
     window_seconds: int,
     submitted_at: Optional[str] = None,
     creation_sequence: Optional[str] = None,
+    permission_subject: str | None = None,
 ) -> dict[str, Any]:
     """Everything the job needs, because nothing else will be available.
 
@@ -172,6 +173,7 @@ def build_create_job_payload(
         "bot_id": bot_id,
         "entity_id": entity_id,
         "user_id": user_id,
+        "permission_subject": permission_subject,
         "tenant": tenant,
         "env": env,
         "document_owner": document_owner,
@@ -217,6 +219,7 @@ def enqueue_create_job(
     redirect_url: Optional[str],
     window_seconds: int,
     creation_sequence: Optional[str] = None,
+    permission_subject: str | None = None,
 ) -> None:
     """Hand a submitted creation to the queue. Everything after this is the job's.
 
@@ -240,6 +243,7 @@ def enqueue_create_job(
     task_queue.enqueue(
         CREATE_JOB_TASK_TYPE,
         build_create_job_payload(
+            permission_subject=permission_subject,
             bot_id=bot_id,
             entity_id=entity_id,
             user_id=user_id,
@@ -652,8 +656,10 @@ class BotCreateWithManifestHandler:
         # Letting either propagate makes the worker retry until the queue's
         # deadline and retire the task ``TIMED_OUT``, which is the slowest
         # possible way to reach a worse answer.
+        subject = payload.get("permission_subject")
         try:
             self._applies_provider().start_apply(
+                permission_subject=subject if isinstance(subject, str) and subject else None,
                 entity_id=entity_id,
                 bot_id=bot_id,
                 bot=bot,

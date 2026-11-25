@@ -11,6 +11,7 @@ from agentclaw.community.core.base import Base
 
 # Register Todo ORM models before metadata creation.
 import agentclaw.community.core.repository.implementations.task.todos.models  # noqa: F401
+import agentclaw.community.core.repository.implementations.task.todos.template_models  # noqa: F401
 
 
 class InMemorySqliteDB:

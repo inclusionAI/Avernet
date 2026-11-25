@@ -9,6 +9,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agentclaw.community.core.devices.services.device_filesystem_resolver import (
     DefaultDeviceFileSystemResolver,
 )
@@ -189,3 +191,51 @@ def test_baas_branch_default_device_uuid_none_when_conn_info_missing():
             r(ctx, lambda p: p)
 
     assert captured["kwargs"].get("device_uuid") is None
+
+
+@pytest.mark.parametrize("active", ["rebound", "unknown", "unreadable"])
+def test_pinned_local_filesystem_never_switches_binding_or_guesses_a_local_path(active):
+    from agentclaw.community.core.devices.services.device_context import (
+        DeviceContext,
+        RuntimeBindingChangedError,
+        RuntimeBindingTarget,
+        expect_runtime_binding,
+    )
+
+    next_binding = _binding({"adapter_port": 20017}, bid=100, device_id="next-device")
+    next_binding.device_provider = "local"
+    resolver = _resolver(bot={"binding_id": 100}, binding=next_binding)
+    lookup = resolver._binding_repo.get_active_by_bot_and_owner
+    if active == "unreadable":
+        lookup.side_effect = OSError("binding lookup unavailable")
+    else:
+        lookup.return_value = next_binding if active == "rebound" else None
+    ctx = DeviceContext(
+        provider="local", conn_info={}, binding_id=99,
+        bot_id="bot-1", user_id="u-1", device_id="dev-uuid",
+    )
+    expected = RuntimeBindingTarget("bot-1", "u-1", "staff_u1", 99, "dev-uuid")
+    with expect_runtime_binding(expected), pytest.raises(RuntimeBindingChangedError):
+        resolver(ctx, lambda p: p)
+
+
+def test_pinned_local_filesystem_keeps_confirmed_unmanaged_local_binding():
+    from agentclaw.community.core.devices.services.device_context import (
+        DeviceContext,
+        RuntimeBindingTarget,
+        expect_runtime_binding,
+    )
+
+    binding = _binding({})
+    binding.device_provider = "local"
+    resolver = _resolver()
+    resolver._binding_repo.get_active_by_bot_and_owner.return_value = binding
+    ctx = DeviceContext(
+        provider="local", conn_info={}, binding_id=99,
+        bot_id="bot-1", user_id="u-1", device_id="dev-uuid",
+    )
+    expected = RuntimeBindingTarget("bot-1", "u-1", "staff_u1", 99, "dev-uuid")
+    with expect_runtime_binding(expected):
+        fs = resolver(ctx, lambda p: p)
+    assert not fs._is_baas_mode
+    resolver._binding_repo.get_active_by_bot_and_owner.assert_called_once_with("bot-1", "u-1")

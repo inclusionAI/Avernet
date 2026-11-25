@@ -12,6 +12,7 @@ from typing import Any, cast
 
 import aiohttp
 
+from secbaas.community.api.bot_runtime import SessionRuntimeStatus
 from secbaas.community.http_header import get_http_header_plugin
 from secbaas.community.logger import get_logger
 
@@ -77,6 +78,17 @@ class AsyncSessionClient:
         self.timeout = timeout
         self.engine = engine
         self._session: aiohttp.ClientSession | None = None
+
+    async def get_session_runtime_status(self, session_id: str) -> SessionRuntimeStatus:
+        response = await self._request(
+            "GET",
+            "/api/sessions/runtime/status",
+            params={"session_id": session_id},
+        )
+        observation = SessionRuntimeStatus.model_validate(response.get("data"))
+        if observation.session_id != session_id:
+            raise ValueError("Runtime observation session mismatch")
+        return observation
 
     async def list_sessions(
         self,

@@ -198,7 +198,7 @@ def _redact_content(content: str) -> str:
     return redacted
 
 
-def _added_lines(diff: str) -> list[tuple[str, int, str]]:
+def _added_lines(diff: str, *, include_context: bool = False) -> list[tuple[str, int, str]]:
     path = ""
     new_line = 0
     added: list[tuple[str, int, str]] = []
@@ -219,6 +219,8 @@ def _added_lines(diff: str) -> list[tuple[str, int, str]]:
             added.append((path, new_line, raw_line[1:]))
             new_line += 1
         elif raw_line.startswith(" "):
+            if include_context:
+                added.append((path, new_line, raw_line[1:]))
             new_line += 1
     return added
 
@@ -226,7 +228,7 @@ def _added_lines(diff: str) -> list[tuple[str, int, str]]:
 def _python_assignment_expression(
     added: list[tuple[str, int, str]], index: int, assignment: re.Match[str],
 ) -> str:
-    """Reconstruct an expression only from consecutive added source lines."""
+    """Reconstruct an expression from consecutive new-side diff lines."""
     path, line, content = added[index]
     previous = content[:assignment.start()].rstrip()
     if previous.endswith(("(", ",")) and "(" in previous:
@@ -329,6 +331,8 @@ def _python_reference_is_safe(
             return safe(value.left) and safe(value.right)
         if isinstance(value, ast.BoolOp):
             return all(safe(item) for item in value.values)
+        if isinstance(value, ast.IfExp):
+            return safe(value.test) and safe(value.body) and safe(value.orelse)
         if isinstance(value, ast.JoinedStr):
             return all(safe(item) for item in value.values)
         if isinstance(value, ast.FormattedValue):
@@ -344,6 +348,12 @@ def _python_reference_is_safe(
                     and isinstance(args[0].value, str)
                     and PYTHON_FIELD_NAME_RE.fullmatch(args[0].value)):
                 args = args[1:]
+            elif (isinstance(value.func, ast.Name) and value.func.id == "getattr"
+                    and len(args) in (2, 3) and isinstance(args[1], ast.Constant)
+                    and isinstance(args[1].value, str)
+                    and PYTHON_FIELD_NAME_RE.fullmatch(args[1].value)):
+                # Attribute labels are references, but defaults still carry values.
+                args = [args[0], *args[2:]]
             return (safe(value.func) and all(safe(arg) for arg in args)
                     and all(safe(arg.value) for arg in value.keywords))
         if isinstance(value, ast.Dict):
@@ -376,6 +386,16 @@ def _python_reference_is_safe(
             return False
         offset = len(content) - len(content.lstrip())
         column = len(content[offset:assignment.start()].encode("utf-8"))
+        for item in ast.walk(enclosing_value):
+            if not isinstance(item, ast.Dict):
+                continue
+            for key, value in zip(item.keys, item.values):
+                if (isinstance(key, ast.Constant) and isinstance(key.value, str)
+                        and PYTHON_FIELD_NAME_RE.fullmatch(key.value)
+                        and key.lineno == key.end_lineno == 1
+                        and key.col_offset <= column <= key.end_col_offset
+                        and safe(value)):
+                    return True
         return any(
             isinstance(item, ast.JoinedStr)
             and item.lineno == item.end_lineno == 1
@@ -461,7 +481,9 @@ def _rust_assignment(content: str, assignment: re.Match[str]) -> tuple[bool, boo
 def _findings(diff: str) -> list[Finding]:
     findings: list[Finding] = []
     added = _added_lines(diff)
-    for index, (path, line, content) in enumerate(added):
+    source = _added_lines(diff, include_context=True)
+    source_indexes = {(path, line): index for index, (path, line, _) in enumerate(source)}
+    for path, line, content in added:
         for rule, pattern in (("private key", PRIVATE_KEY_RE), *KNOWN_SECRET_RES):
             if pattern.search(content):
                 findings.append(Finding(path, line, rule, _redact_content(content)))
@@ -477,7 +499,7 @@ def _findings(diff: str) -> list[Finding]:
                     value = assignment.group("quoted") or assignment.group("bare") or ""
                     if path.endswith(".py"):
                         expression = (
-                            _python_assignment_expression(added, index, assignment)
+                            _python_assignment_expression(source, source_indexes[path, line], assignment)
                             if assignment.group("quoted") is None else value
                         )
                         if _python_reference_is_safe(content, assignment, expression):
@@ -521,7 +543,7 @@ def _git_diff(base: str, head: str) -> str:
             "diff",
             "--no-ext-diff",
             "--no-color",
-            "--unified=0",
+            "--unified=3",
             "--diff-filter=ACMRTUXB",
             base,
             head,

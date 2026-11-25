@@ -489,7 +489,7 @@ fn purge_expired(runs: &mut HashMap<String, AdminInvocationRun>) {
 #[derive(Clone)]
 pub struct HttpAppState {
     pub services: Services,
-    pub a2a_test_user_admission: Option<Arc<bcs_config_api::a2a_test_user::A2aTestUserAdmission>>,
+    pub a2a_test_user_admission: Option<Arc<bcs_config_api::a2a_test_user::A2aTestUserConfig>>,
     pub group_application: Option<Arc<dyn GroupService>>,
     pub session_application: Option<Arc<dyn SessionService>>,
     pub session_file_application: Option<Arc<dyn SessionFileApplicationService>>,
@@ -769,7 +769,7 @@ impl HttpAppState {
         self
     }
 
-    pub fn with_a2a_test_user_admission(mut self, admission: Option<bcs_config_api::a2a_test_user::A2aTestUserAdmission>) -> Self {
+    pub fn with_a2a_test_user_admission(mut self, admission: Option<bcs_config_api::a2a_test_user::A2aTestUserConfig>) -> Self {
         self.a2a_test_user_admission = admission.map(Arc::new);
         self
     }

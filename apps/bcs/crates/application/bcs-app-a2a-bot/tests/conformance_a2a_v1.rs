@@ -22,7 +22,7 @@ struct Management {
     mutations: AtomicUsize,
 }
 fn card() -> ManagedA2aCard {
-    ManagedA2aCard {
+    ManagedA2aCard { catalog_labels:Default::default(),
         provider_bot_ref: "remote".into(),
         provider_name: "orders".into(),
         agent_name: "Agent".into(),
@@ -81,7 +81,7 @@ impl A2aBotManagementService for Management {
         assert_eq!(cmd.provider_name, "orders");
         assert_eq!(cmd.provider_admin_token, "admin");
         Ok(NamedA2aRegistration {
-            card: NamedA2aCard {
+            card: NamedA2aCard { catalog_labels:Default::default(),
                 provider_bot_ref: cmd.provider_bot_ref,
                 bot_id: "target".into(),
                 provider_name: cmd.provider_name,
@@ -113,7 +113,7 @@ fn fixture() -> (A2aApiService, Arc<Management>) {
 #[tokio::test]
 async fn conformance_card_use_cases_preserve_sources_visibility_and_machine_errors() {
     let (service, management) = fixture();
-    let create = || RegisterA2aAgent {
+    let create = || RegisterA2aAgent { catalog_labels:Default::default(),
         token: "admin".into(),
         provider_bot_ref: "remote".into(),
         owners: None,
@@ -134,7 +134,7 @@ async fn conformance_card_use_cases_preserve_sources_visibility_and_machine_erro
         "target"
     );
     service
-        .update(UpdateA2aAgent {
+        .update(UpdateA2aAgent { catalog_labels:Default::default(),
             token: "admin".into(),
             bot_id: "target".into(),
             source: A2aCardInput::default(),
@@ -143,7 +143,7 @@ async fn conformance_card_use_cases_preserve_sources_visibility_and_machine_erro
         .await
         .unwrap();
     service
-        .register_named(RegisterNamedA2aAgent {
+        .register_named(RegisterNamedA2aAgent { catalog_labels:Default::default(),
             token: "admin".into(),
             provider_name: "orders".into(),
             provider_bot_ref: "remote".into(),

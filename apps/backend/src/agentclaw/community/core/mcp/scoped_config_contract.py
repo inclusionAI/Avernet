@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, TypedDict, runtime_checkable
+
+from agentclaw.community.core.bot_management.addressing import ResolvedBotContext
 
 
 @dataclass(frozen=True)
@@ -30,9 +32,22 @@ class ScopedMCPConfig:
     sync_summary: dict[str, int] | None = None
 
 
+class BotMCPConfigPatch(TypedDict, total=False):
+    headers: dict[str, str | None]
+    url: str | None
+
+
+@dataclass(frozen=True)
+class BotMCPConfigUpdate:
+    config: dict[str, Any]
+    changed: bool
+    projection_status: Literal["CONVERGED", "SKIPPED", "DEGRADED"]
+    projection_reason: str | None = None
+
+
 @runtime_checkable
 class MCPScopedConfigServiceProtocol(Protocol):
-    """Read and replace a user's scoped MCP connection rules."""
+    """Read and replace account rules or patch one Bot's MCP connection overrides."""
 
     def read(self, *, user_id: str, server_code: str) -> ScopedMCPConfig: ...
 
@@ -46,3 +61,11 @@ class MCPScopedConfigServiceProtocol(Protocol):
         params: tuple[HeaderGroup, ...],
         url_rules: tuple[URLRule, ...] | None = None,
     ) -> ScopedMCPConfig: ...
+
+    def read_bot(
+        self, *, bot: ResolvedBotContext, server_code: str
+    ) -> dict[str, Any]: ...
+
+    async def patch_bot(
+        self, *, bot: ResolvedBotContext, server_code: str, patch: BotMCPConfigPatch
+    ) -> BotMCPConfigUpdate: ...

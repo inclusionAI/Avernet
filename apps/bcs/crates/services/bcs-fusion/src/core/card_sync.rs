@@ -124,7 +124,7 @@ pub fn group_card(group: GroupCardSnapshot) -> Result<Option<CardWriteRequest>, 
         .insert("groupId".into(), json!(group.group_id));
     Ok(Some(CardWriteRequest {
         resource_type: CardResourceType::Group,
-        labels: [("visibility".into(), vec![group.visibility.clone()])].into(),
+        labels: {let mut labels=group.catalog_labels.as_map().clone();labels.insert("visibility".into(),vec![group.visibility.clone()]);labels},
         card,
     }))
 }
@@ -161,10 +161,15 @@ async fn publish(
         Resource::Agent(id) => {
             let bot = bots.get_control_plane(id, env).await.map_err(|e| e.to_string())?;
             let card = match (bot.as_ref(), cards) {
-                (Some(_), Some(cards)) => cards.get(id).await.map_err(|e| e.to_string())?.map(|record| record.agent_card),
+                (Some(_), Some(cards)) => cards.get(id).await.map_err(|e| e.to_string())?,
                 (Some(_), None) | (None, _) => None,
             };
-            let published = bot.as_ref().map_or(Ok(None), |bot| agent_card(bot, card.as_ref()))?;
+            let mut published = bot.as_ref().map_or(Ok(None), |bot| agent_card(bot, card.as_ref().map(|record|&record.agent_card)))?;
+            if let (Some(payload),Some(record))=(&mut published,&card) {
+                let mut labels=record.catalog_labels.as_map().clone();
+                labels.extend(payload.labels.clone());
+                payload.labels=labels;
+            }
             (id, published)
         }
         Resource::Group(id) => (id, groups.read_card_snapshot(id).await.map_err(|e| e.to_string())?
@@ -259,7 +264,7 @@ mod tests {
         let template = json!({"name": "Stored name", "description": "Stored goal", "skills": [{"id":"group.execute"}],
             "supportedInterfaces": [{"url":"local://groups/group", "protocolBinding":"LOCAL"}],
             "capabilities":{"extensions":[{"params":{"groupKind":"manager_worker"}}]}, "opaque":{"keep":[1,2]}});
-        let mut group = GroupCardSnapshot {
+        let mut group = GroupCardSnapshot { version: 0, catalog_labels:Default::default(),
             group_id: "group".into(), group_kind: GroupKind::Normal, group_strategy: GroupStrategy::ManagerWorker,
             visibility: "private".into(), record_status: "active".into(), card_template: Some(template.clone()),
         };

@@ -154,14 +154,7 @@ class TokenExchangeOrchestrator:
     ) -> TokenExchangeContext | None:
         if not bot_id or not entity_id:
             return None
-        runtime_target = auth_request.query_params.get("caller_runtime_target")
-        device_uuid = auth_request.query_params.get("device_uuid")
-        if runtime_target not in (None, "service", "caller_instance"):
-            logger.warning("token_plugin_context_skipped bot_id=%s reason=invalid_runtime_target", bot_id)
-            return None
-        if device_uuid == "":
-            logger.warning("token_plugin_context_skipped bot_id=%s reason=invalid_device_uuid", bot_id)
-            return None
+        device_uuid = auth_request.query_params.get("device_uuid") or None
         bot = await asyncio.to_thread(
             self._bot_repository.get_by_id_and_entity, bot_id, entity_id,
         )
@@ -186,6 +179,7 @@ class TokenExchangeOrchestrator:
                 bot_id,
             )
             return None
+        friend_user_id = friend_user_id or None
         if friend_user_id is not None and friend_user_id != actor_user_id:
             logger.warning(
                 "token_plugin_actor_unavailable bot_id=%s reason=friend_subject_mismatch",
@@ -209,7 +203,7 @@ class TokenExchangeOrchestrator:
             binding_id=None,
             request_id=None,
             actor_user_id=actor_user_id,
-            caller_runtime_target=runtime_target,
+            friend_user_id=friend_user_id,
             device_uuid=device_uuid,
         )
 

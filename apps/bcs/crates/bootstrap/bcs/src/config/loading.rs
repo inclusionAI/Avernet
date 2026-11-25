@@ -142,6 +142,7 @@ impl BcsConfig {
         validate_loaded_config_for_environment(&config, result.environment)
             .map_err(|err| err.to_string())?;
         config.validate_run_store_selectors()?;
+        config.catalog_label_policy=super::catalog_labels::load(&result.config_dir)?;
         Ok(config)
     }
 
@@ -191,6 +192,7 @@ impl BcsConfig {
                 {
                     panic!("Invalid BCS configuration: {}", e);
                 }
+                config.catalog_label_policy=super::catalog_labels::load(&result.config_dir).unwrap_or_else(|e|panic!("Invalid catalog policy: {e}"));
                 config
             }
             Err(e) => {
@@ -340,6 +342,7 @@ impl BcsConfig {
             &config,
             crate::config_loader::Environment::resolve(),
         )?;
+        config.catalog_label_policy=super::catalog_labels::load(path.parent().unwrap_or_else(||Path::new(".")))?;
         Ok(config)
     }
 

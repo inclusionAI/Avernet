@@ -18,10 +18,26 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from agentclaw.community.core.agentswarm.domain.models import BotState
 from agentclaw.community.plugins.community.agentswarm.bot_authorization import (
     ManifestBotAuthorizationSource,
 )
+
+
+@pytest.fixture(autouse=True)
+def fixed_authorization_clock(monkeypatch):
+    """Keep the pending and expired payloads relative to a stable clock."""
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 20, 9, 11, 20, tzinfo=tz)
+
+    monkeypatch.setattr(
+        "agentclaw.community.plugins.community.agentswarm.bot_authorization.datetime",
+        FixedDateTime,
+    )
 
 
 class FakeSeam:
@@ -77,11 +93,12 @@ def _source(
 class TestPendingAuthorization:
 
     def test_serves_the_payload_facts_in_the_shared_descriptor_shape(self):
+        submitted_at = datetime.now().replace(microsecond=0)
         source = _source({
             "agent_swarm_a1": _job({
                 "iframe_url": "https://tcauthmng.example/consent?app=p1",
                 "redirect_url": "https://tcauthmng.example/done-p1",
-                "submitted_at": "2026-11-20T09:10:20",
+                "submitted_at": submitted_at.isoformat(),
                 "window_seconds": 600,
             }),
         }, answers={"agent_swarm_a1": _pending("sim-passport-aa11")})
@@ -100,7 +117,7 @@ class TestPendingAuthorization:
         # The horizon is the payload's own spelling: submitted_at plus
         # the frozen window, not a re-derived clock.
         assert descriptor.deadline == (
-            datetime.fromisoformat("2026-11-20T09:10:20")
+            submitted_at
             + timedelta(seconds=600)
         ).isoformat()
         assert descriptor.application_id == "sim-passport-aa11"

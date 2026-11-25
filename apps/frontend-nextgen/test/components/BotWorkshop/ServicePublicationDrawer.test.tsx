@@ -89,7 +89,7 @@ test('发布与阶段推进不混入重启发布和删除', () => {
   });
   const bot = mapBotDto({ bot_id: 'bot-2', bot_name: 'Service Bot', engine: 'openclaw', bot_type: 'service' }).item;
   render(<ServicePublicationDrawer bot={bot} onClose={jest.fn()} />);
-  expect(screen.getByRole('button', { name: '发布上线' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '提交正式运行' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '重启发布' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '删除草稿' })).not.toBeInTheDocument();
 });

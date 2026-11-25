@@ -64,6 +64,16 @@ class RemoteKnowledgeContentService(KnowledgeContentServiceProtocol):
             headers=access.credentials,
         )
 
+    async def data_sources(
+        self, *, kb_id: str, access: ContentAccess, offset: int, limit: int
+    ):
+        return await self.client.call(
+            "GET",
+            self.path(kb_id, "/data-sources"),
+            headers=access.credentials,
+            params={"offset": offset, "limit": limit},
+        )
+
     async def sources(
         self,
         *,

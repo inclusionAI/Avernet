@@ -30,6 +30,7 @@ fail() {
 }
 
 write_local_template() {
+    cp "${ROOT}/apps/bcs/configs/catalog-labels.toml" "${BCS_DIR}/configs/catalog-labels.toml"
     cat > "${BCS_DIR}/configs/bcs-config-local.toml" <<'EOF'
 bind = "127.0.0.1"
 port = 21000
@@ -84,6 +85,9 @@ test_local_llm_stays_disabled_without_env_config() {
     reset_case "default"
 
     prepare_bcs_runtime_config
+    [ ! -L "${BCS_CONFIG_DIR}/catalog-labels.toml" ] || fail "policy must be an independent regular file"
+    cmp -s "${BCS_DIR}/configs/catalog-labels.toml" "${BCS_CONFIG_DIR}/catalog-labels.toml" || fail "policy bytes must not depend on environment overlay"
+    assert_contains "${BCS_CONFIG_DIR}/catalog-labels.toml" 'allow_multiple = false'
 
     assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'type = "none"'
     assert_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'type = "none"'

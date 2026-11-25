@@ -83,8 +83,12 @@ jest.mock('@/services/todos/todoService', () => ({
   addTodoInteraction: jest.fn(),
   loadTodoEvents: jest.fn(),
   loadTodoArtifacts: jest.fn(),
+  loadTodoMentionBots: jest.fn(),
   downloadTodoArtifactContent: jest.fn(),
   startTodoRun: jest.fn(),
+  loadTodoSourceProjects: jest.fn(),
+  loadTodoSourceWorkItems: jest.fn(),
+  loadTodoSourceDraft: jest.fn(),
 }));
 
 jest.mock('@/components/ui/notify', () => ({ notifySuccess: jest.fn() }));
@@ -172,6 +176,8 @@ beforeEach(() => {
     pageSize: 10,
   });
   mockedService.addTodo.mockResolvedValue(createdTodo);
+  mockedService.loadTodoSourceProjects.mockResolvedValue([]);
+  mockedService.loadTodoSourceWorkItems.mockResolvedValue([]);
 });
 
 describe('LabTodosPage（待办卡片工作台）', () => {
@@ -180,8 +186,7 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     render(<LabTodosPage />);
 
     const heading = screen.getByRole('heading', { name: '待办' });
-    const description = screen.getByText(/当前空间的 Bot 待办/)
-      .closest('p') as HTMLElement;
+    const description = screen.getByText(/当前空间的 Bot 待办/).closest('p') as HTMLElement;
     expect(heading).toBeInTheDocument();
     expect(heading).toHaveClass('text-[20px]', 'font-semibold', 'leading-[30px]');
     expect(description).toBeInTheDocument();
@@ -336,6 +341,85 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     expect(mockedService.startTodoRun).not.toHaveBeenCalled();
   });
 
+  it('从 Dima 工作项导入可编辑内容并携带稳定来源身份', async () => {
+    mockedService.loadTodoSourceProjects.mockResolvedValue([{ id: 'P1', name: '支付项目' }]);
+    mockedService.loadTodoSourceWorkItems.mockResolvedValue([
+      {
+        id: '2026112000000000001',
+        projectId: 'P1',
+        category: 'req',
+        title: '优化支付体验',
+        status: '处理中',
+      },
+    ]);
+    mockedService.loadTodoSourceDraft.mockResolvedValue({
+      sourceType: 'dima',
+      projectId: 'P1',
+      workItemId: '2026112000000000001',
+      category: 'req',
+      title: '优化支付体验',
+      description: '来源：Dima REQ 2026112000000000001\n\n原始需求描述',
+      sourceUrl: 'https://dima.example/items/2026112000000000001',
+      sourceUpdatedAt: '2026-11-20T12:00:00Z',
+    });
+
+    render(<LabTodosPage />);
+    await screen.findByText('编写实施方案');
+    fireEvent.click(screen.getByRole('button', { name: '发起待办' }));
+    const dialog = await screen.findByRole('dialog');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Dima 导入' }));
+    await waitFor(() => expect(mockedService.loadTodoSourceProjects).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(within(dialog).getByRole('combobox', { name: 'Dima 项目' }));
+    fireEvent.click(await screen.findByRole('option', { name: '支付项目' }));
+    await waitFor(() => expect(mockedService.loadTodoSourceWorkItems).toHaveBeenCalledWith('P1'));
+
+    fireEvent.click(within(dialog).getByRole('combobox', { name: 'Dima 工作项' }));
+    fireEvent.click(await screen.findByRole('option', { name: '[需求] 优化支付体验' }));
+    await waitFor(() => expect(mockedService.loadTodoSourceDraft).toHaveBeenCalledWith('P1', '2026112000000000001'));
+    expect(within(dialog).getByRole('textbox', { name: '标题' })).toHaveValue('优化支付体验');
+
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '标题' }), {
+      target: { value: '优化支付体验（待办）' },
+    });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '描述' }), {
+      target: { value: '整理后的执行要求' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建待办' }));
+
+    await waitFor(() =>
+      expect(mockedService.addTodo).toHaveBeenCalledWith({
+        spaceId: 10,
+        title: '优化支付体验（待办）',
+        description: '整理后的执行要求',
+        botId: 'bot-owned:u-1',
+        source: {
+          type: 'dima',
+          containerId: 'P1',
+          itemId: '2026112000000000001',
+          url: 'https://dima.example/items/2026112000000000001',
+          updatedAt: '2026-11-20T12:00:00Z',
+        },
+      }),
+    );
+    expect(mockedService.startTodoRun).not.toHaveBeenCalled();
+  });
+
+  it('Dima 来源失败时展示可恢复错误且不创建待办', async () => {
+    mockedService.loadTodoSourceProjects.mockRejectedValue(new Error('provider detail'));
+
+    render(<LabTodosPage />);
+    await screen.findByText('编写实施方案');
+    fireEvent.click(screen.getByRole('button', { name: '发起待办' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Dima 导入' }));
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Dima 项目加载失败，请重试。');
+    expect(within(dialog).getByRole('button', { name: '重试' })).toBeInTheDocument();
+    expect(mockedService.addTodo).not.toHaveBeenCalled();
+  });
+
   it('按紧凑卡片和状态分组展示，不显示表格查看操作', async () => {
     render(<LabTodosPage />);
 
@@ -348,26 +432,33 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     expect(acceptanceCard).toHaveClass('rounded-xl', 'shadow-sm');
     expect(cardButton).toHaveClass('h-auto', 'rounded-xl', 'p-4');
     expect(cardButton.className).not.toContain('min-h-[218px]');
-    expect(cardGrid).toHaveClass(
-      'gap-[10px]',
-      '[grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr))]',
+    expect(cardGrid).toHaveClass('gap-[10px]', '[grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr))]');
+    expect(within(acceptanceCard).getByText('编写实施方案', { selector: 'span' })).toHaveClass(
+      'truncate',
+      'text-sm',
+      'font-medium',
     );
-    expect(within(acceptanceCard).getByText('编写实施方案', { selector: 'span' })).toHaveClass('truncate', 'text-sm', 'font-medium');
-    expect(within(acceptanceCard).getByText('整理需求并输出实施方案')).toHaveClass('line-clamp-2', 'text-xs', 'leading-[18px]');
+    expect(within(acceptanceCard).getByText('整理需求并输出实施方案')).toHaveClass(
+      'line-clamp-2',
+      'text-xs',
+      'leading-[18px]',
+    );
     expect(within(board).getByRole('button', { name: /^待处理 \(0\)$/ })).toHaveTextContent('0');
     expect(within(board).getByRole('button', { name: /^进行中 \(1\)$/ })).toHaveTextContent('1');
     expect(within(board).getByRole('button', { name: /^待验收 \(1\)$/ })).toHaveTextContent('1');
     expect(
-      within(within(board).getByRole('button', { name: /^待处理 \(0\)$/ }).closest('section') as HTMLElement).queryByRole(
-        'article',
-        { name: '编写实施方案' },
-      ),
+      within(
+        within(board)
+          .getByRole('button', { name: /^待处理 \(0\)$/ })
+          .closest('section') as HTMLElement,
+      ).queryByRole('article', { name: '编写实施方案' }),
     ).not.toBeInTheDocument();
     expect(
-      within(within(board).getByRole('button', { name: /^待验收 \(1\)$/ }).closest('section') as HTMLElement).getByRole(
-        'article',
-        { name: '编写实施方案' },
-      ),
+      within(
+        within(board)
+          .getByRole('button', { name: /^待验收 \(1\)$/ })
+          .closest('section') as HTMLElement,
+      ).getByRole('article', { name: '编写实施方案' }),
     ).toBeInTheDocument();
     expect(screen.queryByRole('columnheader')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '查看' })).not.toBeInTheDocument();

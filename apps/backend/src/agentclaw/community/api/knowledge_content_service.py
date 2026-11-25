@@ -41,6 +41,9 @@ class KnowledgeContentServiceProtocol(Protocol):
     async def cancel_knowledge_base_deletion(
         self, *, kb_id: str, access: ContentAccess
     ) -> ContentReply: ...
+    async def data_sources(
+        self, *, kb_id: str, access: ContentAccess, offset: int, limit: int
+    ) -> ContentReply: ...
     async def sources(
         self,
         *,

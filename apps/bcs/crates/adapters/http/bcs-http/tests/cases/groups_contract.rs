@@ -444,7 +444,7 @@ impl GroupManagementService for RecordingGroupManagement {
             participants.push(participant_view(caller, "observer"));
         }
         participants.push(participant_view(&cmd.target_actor_id, "driver"));
-        let result = GroupDetailResult {
+        let result = GroupDetailResult { catalog_labels:Default::default(),
             group_id: cmd
                 .group_id
                 .clone()
@@ -489,7 +489,7 @@ impl GroupManagementService for RecordingGroupManagement {
             "error" => GroupStatus::Error,
             _ => GroupStatus::Active,
         };
-        let result = GroupDetailResult {
+        let result = GroupDetailResult { catalog_labels:Default::default(),
             group_id: cmd.group_id.clone(),
             label: Some("Updated group".to_string()),
             status,
@@ -561,7 +561,7 @@ impl GroupManagementService for RecordingGroupManagement {
         &self,
         cmd: GroupTerminateCommand,
     ) -> Result<GroupDetailResult, bcs_service_api::GroupUseCaseError> {
-        let result = GroupDetailResult {
+        let result = GroupDetailResult { catalog_labels:Default::default(),
             group_id: cmd.group_id.clone(),
             label: Some("Terminated group".to_string()),
             status: GroupStatus::Completed,
@@ -593,7 +593,7 @@ impl GroupManagementService for RecordingGroupManagement {
         &self,
         cmd: GroupUpdateLabelCommand,
     ) -> Result<GroupDetailResult, bcs_service_api::GroupUseCaseError> {
-        let result = GroupDetailResult {
+        let result = GroupDetailResult { catalog_labels:Default::default(),
             group_id: cmd.group_id.clone(),
             label: cmd.label.clone(),
             status: GroupStatus::Active,
@@ -808,7 +808,7 @@ async fn register_bot(registry: &BotCore, bot_id: &str, name: &str) {
 }
 
 fn detail_from_create(cmd: &GroupCreateCommand) -> GroupDetailResult {
-    GroupDetailResult {
+    GroupDetailResult { catalog_labels:Default::default(),
         group_id: cmd
             .group_id
             .clone()

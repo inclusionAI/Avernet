@@ -113,9 +113,6 @@ class SkillsPoolEditGuard:
                 "Another skill update is already in progress; please retry shortly"
             )
 
-        # Legacy Bots have no Pool rollback to serialize against, but still
-        # need this ordinary mutex so concurrent same-name uploads cannot both
-        # observe an absent Skill and create competing records/packages.
         if not participation.participates_in_pool_layout:
             return SkillsPoolEditLease(
                 key="", token=None, ordinary_lock_entry=ordinary_lock_entry

@@ -62,6 +62,7 @@ pub struct GroupServiceConfig {
 /// delegating existing group creation/deletion side effects to the legacy-
 /// compatible application service. No HTTP type crosses this boundary.
 pub struct GroupServiceImpl {
+    catalog_label_policy: Arc<bcs_service_api::types::catalog_labels::CatalogLabelPolicy>,
     groups: Arc<dyn GroupCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     friends: Arc<dyn FriendCoreService>,
@@ -402,6 +403,18 @@ mod tests;
 
 
 impl GroupServiceImpl {
+    pub fn with_catalog_label_policy(mut self,policy:Arc<bcs_service_api::types::catalog_labels::CatalogLabelPolicy>)->Self {
+        self.catalog_label_policy=policy;self
+    }
+    fn normalize_catalog_labels(&self,input:Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,kind:GroupKind,strategy:GroupStrategy)
+        ->Result<Option<bcs_service_api::types::catalog_labels::CatalogLabels>,ApplicationError> {
+        let labels=input.map(|input|self.catalog_label_policy.normalize(input).map_err(|error|match error {ServiceError::A2aManagement(error)=>ApplicationError::invalid("invalid_request",format!("{}: {}",error.field,error.reason)),other=>map_service_error(other)})).transpose()?;
+        if labels.as_ref().is_some_and(|labels|!labels.is_empty()) && (kind!=GroupKind::Normal || !matches!(strategy,GroupStrategy::ManagerWorker|GroupStrategy::StateMachine)) {
+            return Err(ApplicationError::invalid("invalid_request","catalog_labels unsupported for this Group"));
+        }
+        Ok(labels)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         groups: Arc<dyn GroupCoreService>,
@@ -411,6 +424,7 @@ impl GroupServiceImpl {
         management: Arc<dyn GroupManagementService>,
     ) -> Self {
         Self {
+            catalog_label_policy:Arc::default(),
             groups,
             registry,
             friends,
@@ -784,3 +798,5 @@ fn map_runtime_and_rollback_error(
         group_cleanup_error.as_deref().unwrap_or("ok"),
     ))
 }
+
+mod update;

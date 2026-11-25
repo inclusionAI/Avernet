@@ -83,6 +83,7 @@ from engine.community.shared import (
 
 from engine.community.core.session.models import SessionResetRequest  # noqa: E402
 from engine.community.api.transport.auth_gate import verify_chat_send  # noqa: E402
+from engine.community.api.transport.chat_error_fields import complete_chat_error
 from engine.community.api.transport.openclaw_resume import (
     OpenClawResumeRegistry,
     OpenClawResumeRun,
@@ -1024,6 +1025,21 @@ class EngineWebSocketServer:
 
     # ── OpenClaw foreground chat recovery ──────────────────────────────────
 
+    def get_session_runtime_status(self, session_key: str) -> dict[str, Any]:
+        """Called only after the HTTP adapter authorizes session history access."""
+        try:
+            run = self._openclaw_resume.lookup_session(session_key)
+        except ValueError:
+            return {"session_id": session_key, "found": False, "reason": "AMBIGUOUS_RUN"}
+        if run is None:
+            return {"session_id": session_key, "found": False, "reason": "NO_ACTIVE_RUN"}
+        return {
+            "session_id": session_key, "found": True,
+            "run_id": run.run_id, "state": run.state,
+            "started_at": run.started_at_ms, "last_event_seq": run.summary()["lastResumeSeq"],
+            "reason": None,
+        }
+
     def _handle_chat_status(
         self, request: RequestFrame, params: Dict[str, Any]
     ) -> ResponseFrame:
@@ -1081,6 +1097,13 @@ class EngineWebSocketServer:
         materialized_paths: tuple[str, ...] = (),
         resume_run: OpenClawResumeRun | None = None,
     ) -> None:
+        # Complete only the wire payload, after startup ACK sanitization. Other
+        # engines and non-error events retain their existing protocol behavior.
+        if (
+            payload.get("state") == "error"
+            and EngineManager.get_instance().engine in ("openclaw", "hermes")
+        ):
+            payload = complete_chat_error(payload)
         if resume_run is None:
             await self._send_event(
                 websocket, event_name, payload, materialized_paths=materialized_paths

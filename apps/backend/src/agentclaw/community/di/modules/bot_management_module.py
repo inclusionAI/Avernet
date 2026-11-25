@@ -19,8 +19,6 @@ from __future__ import annotations
 
 from agentclaw.community.core.caller_identity.scheduled_refresh import ScheduledCallerRefreshProtocol
 
-from agentclaw.community.core.apply_engine.compiler import StateCompilers
-from agentclaw.community.core.apply_engine.completion import StateCompletionHandlers
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.core.bot_management.creation_source import validate_creation_source
@@ -89,9 +87,6 @@ from agentclaw.community.api.bot_config_manifest_service import (
 )
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_service import (
     BotConfigManifestService,
-)
-from agentclaw.community.api.apply_run_service import (
-    ApplyRunServiceProtocol,
 )
 from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.core.mcp.mcp_config_service_protocol import (
@@ -219,9 +214,6 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
 )
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
-from agentclaw.community.core.apply_engine.delivery import (
-    DeliveryStrategyFactory,
-)
 from agentclaw.community.core.apply_engine.managed_files import ManagedFilesStore
 from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
@@ -392,14 +384,6 @@ class BotManagementModule(Module):
             to=BotConfigManifestApplyLockRepository,
             scope=singleton,
         )
-        # ``ApplyRunService`` is built by the provider below rather
-        # than auto-constructed: its task-queue dependency is a lazy callable, and
-        # the queue module imports the DI container at module scope, so the
-        # annotation the injector would have to resolve cannot be imported here.
-        # The Protocol is bound through a provider too: ``bind(Protocol,
-        # to=ConcreteClass)`` builds a ClassProvider that instantiates the class
-        # *directly*, bypassing the provider below and failing on the same
-        # annotation.
         # TemplateService: constructed with injected TemplateRepository.
         binder.bind(TemplateService, to=TemplateService, scope=singleton)
         # CronAutoSetupService: constructed with injected dependencies.
@@ -748,53 +732,6 @@ class BotManagementModule(Module):
     @singleton
     @provider
     @inject
-    def bot_config_manifest_apply_service(
-        self,
-        manifest_service: BotConfigManifestServiceProtocol,
-        apply_repository: BotConfigManifestApplyRepositoryProtocol,
-        lock_repository: BotConfigManifestApplyLockRepositoryProtocol,
-        task_queue_provider: Callable[[], TaskQueueService],
-        bot_repository: BotRepository,
-        delivery_strategies: DeliveryStrategyFactory,
-        compilers: StateCompilers,
-        completion_handlers: StateCompletionHandlers,
-    ) -> ApplyRunService:
-        """The apply lifecycle, over a delivery seam and a compiler map it does not assemble.
-
-        The ten lazy service providers this used to thread through — the write
-        targets every materialiser calls — are gone from here and from the
-        service: they were only ever the ARCA port bundle's ingredients, and a
-        bundle is a wiring decision. ``manifest_fetch_module`` builds both
-        bundles and both strategies beside the store one of them writes to, and
-        hands over the finished seam. The compilers are a map multibinding
-        the same way: ``manifest_fetch_module`` contributes the Manifest row
-        beside the fetch pipeline it compiles through, and a genome row comes
-        from the genome module. The completion subscribers are the same shape;
-        only the genome contributes one (the Manifest wants no notice).
-        """
-        return ApplyRunService(
-            manifest_service,
-            apply_repository,
-            lock_repository,
-            task_queue_provider,
-            bot_repository,
-            delivery_strategies=delivery_strategies,
-            compilers=compilers,
-            completion_handlers=completion_handlers,
-        )
-
-    @singleton
-    @provider
-    @inject
-    def bot_config_manifest_apply_service_protocol(
-        self, service: ApplyRunService
-    ) -> ApplyRunServiceProtocol:
-        """The Protocol every adapter injects, delegated to the one instance."""
-        return service
-
-    @singleton
-    @provider
-    @inject
     def bot_creation_manifest_seam(
         self,
         injector: Injector,
@@ -875,6 +812,7 @@ class BotManagementModule(Module):
             # A creation that gives up before a bot exists withdraws the grant
             # the submitting application was given at submission.
             grant_sweep_provider=lambda: injector.get(BotAppGrantService),
+
         )
 
     @singleton

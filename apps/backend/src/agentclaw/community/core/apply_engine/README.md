@@ -77,6 +77,11 @@ An unchanged Direct Skill installation still reaches the claim flow so Device
 delivery can retry runtime projection. The report keeps `unchanged` and exposes
 any pending/degraded projection; Platform delegates retain their no-projection
 behavior. Dry run stops after planning and can still fetch and cache sources.
+For a live platform-managed TeClaw Apply, the closing redelivery records the
+MCP codes in the artifact actually accepted by the runtime. The Passport-only
+projection returns the codes actually written to its scope; permission notes
+use only the intersection with successful declared entries. Unbound, failed,
+legacy or otherwise unconfirmed deliveries have no MCP receipt.
 Explicit active ordinary Sets and applicable Default references also retry the
 existing projection flow on unchanged desired state. Inactive unchanged Set
 declarations remain no-ops. Set replacement tracks resolved prior supply and
@@ -198,6 +203,7 @@ internal_dependencies:
   - agentclaw.community.core.config_compose.models  # the collector-shaped refs the managed-files reader yields to the teclaw composer
   - agentclaw.community.core.config_compose.protocols  # ManagedFilesReader + PlatformOwnershipReader, the compose seams the managed-files reader inherits
   - agentclaw.community.core.content_store
+  - agentclaw.community.core.devices.services.device_context
   - agentclaw.community.core.mcp
   - agentclaw.community.core.ports
   - agentclaw.community.core.repository

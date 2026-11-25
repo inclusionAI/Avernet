@@ -62,7 +62,7 @@ class _FakeEvalPublishService(EvalPublishMixin):
         }
         self._ext_state = Mock()
         self._ext_state.owner_id.return_value = "u1"
-        self._ext_state.compose_live.return_value = ({}, None)
+        self._ext_state.compose_eval_delivery.return_value = {}
         self._operation_runner = Mock()
         self._operation_runner.open_operation.return_value = Mock(
             bot_uuid="eval-uuid",
@@ -207,6 +207,81 @@ async def test_eval_publish_resource_override_is_deployment_local(with_template,
     assert kwargs["template_config"] == expected
     assert kwargs["docker_image"] == "registry/image:tag"
     assert bot == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "default_tag",
+    ["eval", "default"],
+)
+async def test_eval_publish_composes_teclaw_delivery_stage_stamp(
+    default_tag
+) -> None:
+    """TeClaw eval delivery maps the business tag to the engine stage."""
+    record = _record(ext={"migration_path": "/arca/snapshot"})
+    svc = _FakeEvalPublishService(publish_record=record)
+    svc.device_provider = Mock(return_value="teclaw")
+    release_async = _capture_release(svc)
+
+    with patch(_TEARDOWN_PATCH):
+        result = await svc.eval_publish(
+            publish_id=42,
+            operator="tester",
+            default_tag=default_tag,
+            docker_image="registry/image:tag",
+        )
+
+    assert result["success"] is True
+    call = svc._ext_state.compose_eval_delivery.call_args
+    assert call.args[0] is record
+    assert call.kwargs["default_tag"] == default_tag
+    assert call.kwargs["device_provider"] == "teclaw"
+    assert release_async.await_args.kwargs["runtime_kind"] == "teclaw"
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_non_teclaw_uses_default_eval_stage_stamp() -> None:
+    """Non-TeClaw providers keep PublishStage.EVAL's default engine stage."""
+    record = _record(ext={"migration_path": "/arca/snapshot"})
+    svc = _FakeEvalPublishService(publish_record=record)
+    release_async = _capture_release(svc)
+
+    with patch(_TEARDOWN_PATCH):
+        result = await svc.eval_publish(
+            publish_id=42,
+            operator="tester",
+            default_tag="eval",
+            docker_image="registry/image:tag",
+        )
+
+    assert result["success"] is True
+    call = svc._ext_state.compose_eval_delivery.call_args
+    assert call.args[0] is record
+    assert call.kwargs["default_tag"] == "eval"
+    assert call.kwargs["device_provider"] == "baas"
+    assert release_async.await_args.kwargs["runtime_kind"] == "baas"
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_rejects_unknown_teclaw_default_tag() -> None:
+    """Unknown TeClaw business tags must fail before delivery composition."""
+    svc = _FakeEvalPublishService()
+    svc.device_provider = Mock(return_value="teclaw")
+    svc._ext_state.compose_eval_delivery.side_effect = PublishFlowServiceError(
+        "unsupported evaluation default_tag for TeClaw: 'defualt'"
+    )
+
+    with pytest.raises(PublishFlowServiceError, match="unsupported evaluation default_tag"):
+        await svc.eval_publish(
+            publish_id=42,
+            operator="tester",
+            default_tag="defualt",
+            docker_image="registry/image:tag",
+        )
+
+    # The unified seam sees the bad tag and fails before a BaaS release is issued.
+    svc._ext_state.compose_eval_delivery.assert_called_once()
+    svc._ext_state.compose_live.assert_not_called()
 
 
 @pytest.mark.asyncio

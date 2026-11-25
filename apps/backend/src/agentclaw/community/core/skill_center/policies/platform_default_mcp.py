@@ -18,6 +18,18 @@ from agentclaw.community.core.skill_center.policies.capability_ownership import 
 )
 
 
+def platform_default_mcp_codes(
+    bot: Mapping[str, Any], *, ext_info: Mapping[str, Any] | None,
+) -> frozenset[str]:
+    return frozenset(
+        get_default_mcp_server_codes(
+            str(bot.get("active_engine") or ""),
+            bot.get("template_type"),
+            ext_info=ext_info,
+        )
+    )
+
+
 class PlatformDefaultMcpPolicy:
     """Resolve the platform-owned MCP codes for an exact Bot context.
 
@@ -33,13 +45,8 @@ class PlatformDefaultMcpPolicy:
         self._ext_info_provider = ext_info_provider
 
     def server_codes_for(self, bot: Mapping[str, Any]) -> frozenset[str]:
-        bot_id = str(bot["bot_id"])
-        return frozenset(
-            get_default_mcp_server_codes(
-                str(bot.get("active_engine") or ""),
-                bot.get("template_type"),
-                ext_info=self._ext_info_provider(bot_id),
-            )
+        return platform_default_mcp_codes(
+            bot, ext_info=self._ext_info_provider(str(bot["bot_id"])),
         )
 
     def require_direct_control_allowed(

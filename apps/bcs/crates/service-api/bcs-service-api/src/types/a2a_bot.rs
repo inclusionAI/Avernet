@@ -24,6 +24,8 @@ impl A2aCardSource {
 pub struct A2aBotAvailability { pub bot_uuid:String, pub provider_id:String, pub provider_bot_ref:String, pub ready:bool, pub interfaces:Value, pub authentication:Value }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct A2aBotRecord {
+    #[serde(default)]
+    pub catalog_labels: super::catalog_labels::CatalogLabels,
     pub bot_uuid:String,
     pub provider_id:String,
     pub provider_bot_ref:String,
@@ -49,6 +51,7 @@ impl A2aRegistrationVisibility {
 /// Validated declaration passed to atomic Bot creation, not a persistence format.
 #[derive(Clone, Debug, PartialEq)]
 pub struct A2aRegistrationCard {
+    pub catalog_labels: super::catalog_labels::CatalogLabels,
     pub visibility: A2aRegistrationVisibility,
     pub agent_card_url:Option<String>,
     pub agent_card:Value,

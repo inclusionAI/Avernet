@@ -19,7 +19,7 @@ Implementations:
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from agentclaw.community.plugin_api.base import Plugin
 
@@ -43,6 +43,15 @@ class SandboxRuntimeUnavailableError(Exception):
 
 class SandboxFileReadError(Exception):
     """A sandbox file read failed for a reason other than file absence."""
+
+
+@runtime_checkable
+class CheckedSandboxFileClient(Protocol):
+    """Optional strict file I/O; failures must not be reported as absence."""
+
+    async def list_files_checked(self, *, sandbox_id: str, path: str) -> list[dict[str, Any]]: ...
+
+    async def read_file_checked(self, *, sandbox_id: str, path: str) -> bytes | None: ...
 
 
 class SandboxRuntimeClient(Plugin, Protocol):
@@ -77,6 +86,14 @@ class SandboxRuntimeClient(Plugin, Protocol):
 
     def destroy_sandbox(self, *, sandbox_id: str, tenant_idx: int) -> bool:
         """Destroy ``sandbox_id`` (raw id, no ``@alt`` suffix). Idempotent."""
+        ...
+
+    def is_sandbox_destroyed(self, *, sandbox_id: str, tenant_idx: int) -> bool:
+        """True only on explicit provider destruction; transport/auth errors raise.
+
+        A failed query or missing projection is never evidence of destruction.
+        This read is used by durable recycle recovery after an ambiguous destroy.
+        """
         ...
 
     def get_sandbox_info(self, *, sandbox_id: str, tenant_idx: int) -> "SandboxInfo":
