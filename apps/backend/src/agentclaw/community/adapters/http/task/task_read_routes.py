@@ -137,7 +137,7 @@ async def list_tasks_internal(
     ] = None,
     keyword: Annotated[
         str | None,
-        Query(description="可选关键字过滤:task_id/source_type/owner_bot_id/context.title/metadata.title"),
+        Query(description="可选关键字过滤:task_id/owner_bot_id/task_spec.context.title/task_spec.goal.objective"),
     ] = None,
     page: Annotated[
         int | None, Query(ge=1, description="分页页码(1-based);不传则不分页,返回全量(列表契约不变)。")
@@ -152,7 +152,7 @@ async def list_tasks_internal(
 
     user_id 是直接的筛选条件,不要求与认证主体一致,也不执行 owner 作用域校验。
     keyword 空白时不过滤;非空时服务端按大小写不敏感 substring 匹配
-    task_id/source_type/owner_bot_id/context.title/metadata.title,分页前完成过滤。
+    task_id/owner_bot_id/task_spec.context.title/task_spec.goal.objective,分页前完成过滤。
     分页为可选入参(向后兼容):page/page_size 均不传时 data 为列表(历史契约);
     两者同时传入时 data 为 Page(total, items)(1-based,page_size 最大 100);
     仅传其一视为入参错误(400)。非法 status → 400。"""
