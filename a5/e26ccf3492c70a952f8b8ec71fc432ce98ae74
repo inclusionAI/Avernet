@@ -1,0 +1,125 @@
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_open_swarm.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-590
+apps/backend/tests/community/core/task/context_collab/test_method_lifecycle_service.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-791
+apps/backend/tests/community/repository/task/context_collab/test_collet_metadata.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-312
+apps/backend/tests/community/core/task/context_collab/test_method_service_api.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-539
+apps/backend/tests/community/core/task/context_collab/test_context_collab_service.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-725
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_open_single.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-527
+apps/backend/tests/community/repository/task/context_collab/test_repository_create_get.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-224
+apps/backend/tests/community/core/task/context_collab/products/task_commission_e2e_support.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-736
+apps/backend/tests/community/core/task/context_collab/test_l6_runtime_contract.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-776
+apps/backend/tests/community/core/task/context_collab/test_method_profiles.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-111
+apps/backend/tests/community/repository/task/context_collab/test_collet_resources.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-166
+apps/backend/tests/community/repository/task/context_collab/test_models.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-160
+apps/backend/tests/community/repository/task/context_collab/test_l4_repository_wiring.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-86
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_method_topology.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-385
+apps/backend/tests/community/core/task/context_collab/test_method_composition.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-397
+apps/backend/tests/community/core/task/context_collab/test_open_guards.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-235
+apps/backend/tests/community/core/task/context_collab/products/test_open_swarm_enrollment.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-408
+apps/backend/tests/community/core/task/context_collab/test_method_store.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-318
+apps/backend/tests/community/core/task/context_collab/test_network_profiles.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-196
+apps/backend/tests/community/core/task/context_collab/creation_facts.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-110
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_publish.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-330
+apps/backend/tests/community/core/task/context_collab/test_open_lifecycle.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-620
+apps/backend/tests/community/core/task/context_collab/test_executor.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-388
+apps/backend/tests/community/repository/task/context_collab/conftest.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-53
+apps/backend/tests/community/repository/task/context_collab/test_product_instantiation.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-537
+apps/backend/tests/community/core/task/context_collab/products/test_open_capability_admission.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-116
+apps/backend/tests/community/core/task/context_collab/products/swarm_coding_support.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-104
+apps/backend/tests/community/repository/task/context_collab/test_participant_scope.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-551
+apps/backend/tests/community/core/task/context_collab/conftest.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-85
+apps/backend/tests/community/core/task/context_collab/products/open_admission_support.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-38
+apps/backend/tests/community/core/task/context_collab/test_method_binding.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-457
+apps/backend/tests/community/repository/task/context_collab/test_work_start_creation.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-362
+apps/backend/tests/community/core/task/context_collab/products/swarm_execution_support.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-127
+apps/backend/tests/community/core/task/context_collab/test_open_review.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-202
+apps/backend/tests/community/core/task/context_collab/open_profile_support.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-371
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_bot_runtime.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-334
+apps/backend/tests/community/core/task/context_collab/test_reliability_observation.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-210
+apps/backend/tests/community/repository/task/context_collab/test_repository_listing.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-192
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-956
+apps/backend/tests/community/core/task/context_collab/test_open_profile.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-204
+apps/backend/tests/community/core/task/context_collab/test_open_query.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-329
+apps/backend/tests/community/core/task/context_collab/test_g3_telemetry.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-495
+apps/backend/tests/community/repository/task/context_collab/test_repository_append.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-297
+apps/backend/tests/community/core/task/context_collab/product_catalog.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-31
+apps/backend/tests/community/repository/task/context_collab/test_task_authority.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-506
+apps/backend/tests/community/core/task/context_collab/test_layer_operations.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-341
+apps/backend/tests/community/factories/task_commission.py
+  s_7ab90fcb7b0ff0::t_ba017c495a5f2a 1-40
+apps/backend/tests/community/core/task/context_collab/test_open_collet_participation.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-250
+apps/backend/tests/community/repository/task/context_collab/test_collet_creation.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-518
+apps/backend/tests/community/core/task/context_collab/test_open_publication.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-390
+apps/backend/tests/community/repository/task/context_collab/test_product_creation.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-347
+apps/backend/tests/community/repository/task/context_collab/test_l4_repository.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-279
+apps/backend/tests/community/core/task/context_collab/test_open_submission.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-277
+apps/backend/tests/community/core/task/context_collab/test_method_authorization.py
+  s_7ab90fcb7b0ff0::t_0329ae3c4f5ba9 1-365
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a5e26ccf3492c70a952f8b8ec71fc432ce98ae74",
+  "prompts": {},
+  "sessions": {
+    "s_7ab90fcb7b0ff0": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0270308e-3f7f-424f-a1b3-a2e6113a5268",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
