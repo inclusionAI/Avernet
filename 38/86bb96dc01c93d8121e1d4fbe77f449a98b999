@@ -1,0 +1,14 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/swarm_planning.py
+  h_059e888e5e4e82 41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3886bb96dc01c93d8121e1d4fbe77f449a98b999",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

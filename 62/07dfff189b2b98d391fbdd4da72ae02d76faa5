@@ -1,0 +1,37 @@
+apps/bcs/crates/adapters/http/bcs-api-http/CONTEXT.md
+  s_c3514a76a0dbf3::t_cd1da4e2b83176 12-14
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/management.rs
+  s_c3514a76a0dbf3::t_bcaa2fe5477427 78,226
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/transport.rs
+  s_c3514a76a0dbf3::t_8edf77863df509 91-100,107-113,118
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/error.rs
+  s_c3514a76a0dbf3::t_d0fdd0a1230e12 17-21
+apps/bcs/crates/adapters/http/bcs-api-http/tests/agentcard_error_messages.rs
+  s_c3514a76a0dbf3::t_8f1f146378c0d7 1-354
+apps/bcs/crates/adapters/http/bcs-api-http/tests/agentcard_warning.rs
+  s_c3514a76a0dbf3::t_1afb633ebadfe8 124-146
+apps/bcs/crates/application/bcs-app-a2a-bot/CONTEXT.md
+  s_c3514a76a0dbf3::t_425e6c10db80ed 88-93
+apps/bcs/crates/application/bcs-app-a2a-bot/src/v1.rs
+  s_c3514a76a0dbf3::t_05604d96ceb6b8 16-17,53,65,69,71-72,82,86,89,92,100,106,110,113
+apps/bcs/crates/application/bcs-app-a2a-bot/src/v1/error_message.rs
+  s_c3514a76a0dbf3::t_44fb2f2f6ee84e 1-226
+apps/bcs/crates/application/bcs-app-a2a-bot/src/v1/error_message/tests.rs
+  s_c3514a76a0dbf3::t_903776fb880593 1-198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6207dfff189b2b98d391fbdd4da72ae02d76faa5",
+  "prompts": {},
+  "sessions": {
+    "s_c3514a76a0dbf3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20734-6dfe-7521-98b8-ff59645a4011",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

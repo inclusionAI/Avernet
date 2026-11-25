@@ -1,0 +1,19 @@
+singlebox/ci/tests/test_unit_test_workflow_diff.py
+  s_415e3c9e89448e::t_e3664fcea8076c 61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d12009fa536d258048eb918b4bb1bb68408e6617",
+  "prompts": {},
+  "sessions": {
+    "s_415e3c9e89448e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20cce-7e0f-7113-90e5-442450306709",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

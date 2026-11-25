@@ -1,0 +1,20 @@
+apps/backend/tests/community/adapters/http/task/test_relay_handoff_display.py
+  s_abbd34b394aecf::t_372469baf686f7 1-106
+  s_abbd34b394aecf::t_d5fe6160ba4833 107-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4494ee81571b5e3c6554b5cce2ea7636309afc70",
+  "prompts": {},
+  "sessions": {
+    "s_abbd34b394aecf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f24b-c3d4-75a0-a9dd-f07cd92d719c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
