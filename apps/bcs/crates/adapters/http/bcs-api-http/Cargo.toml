@@ -35,6 +35,11 @@ url = { workspace = true }
 urlencoding = { workspace = true }
 
 [dev-dependencies]
+uuid = { workspace = true }
+bcs-db-local = { workspace = true }
+bcs-db-migrations = { workspace = true }
+bcs-edge-permission = { workspace = true }
+bcs-edge-permission-store = { workspace = true }
 bcs-app-a2a-bot = { workspace = true }
 bcs-tracing-api = { workspace = true }
 bcs-app-auth = { workspace = true }

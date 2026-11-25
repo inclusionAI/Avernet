@@ -1122,3 +1122,17 @@ must reauthorize the same data snapshot, propagate backend/corrupt-row errors,
 and perform no write. Central query harnesses exercise policy, application and
 real SQLite repository implementations; MySQL executes the same application
 and repo harnesses in its explicit native gate. HTTP and SDK remain unmounted.
+
+
+## AgentInvoke HTTP vocabulary export
+
+`application::agent_invoke` re-exports its protocol-free commands, result/error
+and governance query vocabulary so delivery adapters import only the application
+boundary. No Core/repository methods or concrete implementation are aliased as
+an application service. Trusted publication/context types still have no serde;
+HTTP owns its strict wire DTOs and constructs principal/scope from verified,
+composition-bound identity. Existing Service API methods and persisted shapes
+remain unchanged. The V1 adapter now implements the management/query protocol
+under independent AgentInvoke prefixes; disabled/missing production capability
+returns 503 rather than enabling the feature. SDK/host/runtime integration is
+not established by exposing these declarations.

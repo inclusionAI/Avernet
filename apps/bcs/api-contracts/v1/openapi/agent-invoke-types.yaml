@@ -1,0 +1,657 @@
+# Strict AgentInvoke wire shapes and closed errors. No trusted publication input.
+GrantRef:
+  type: object
+  additionalProperties: false
+  required:
+  - edge_id
+  - status
+  - version
+  properties:
+    edge_id: &id002
+      type: integer
+      format: int64
+      minimum: 1
+      maximum: 9223372036854775807
+    status:
+      type: string
+      enum:
+      - approved
+      - revoked
+    version: &id001
+      type: integer
+      format: int64
+      minimum: 1
+      maximum: 9223372036854775807
+RequestRef:
+  type: object
+  additionalProperties: false
+  required:
+  - request_id
+  - status
+  - version
+  - edge_id
+  properties:
+    request_id:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum:
+      - pending
+      - approved
+      - rejected
+      - cancelled
+    version: *id001
+    edge_id:
+      anyOf:
+      - *id002
+      - type: 'null'
+GrantRecord:
+  type: object
+  additionalProperties: false
+  required:
+  - edge_id
+  - status
+  - version
+  - grant_kind
+  - from_bot_id
+  - to_bot_id
+  - from_name
+  - to_name
+  - from_agent_code
+  - to_agent_code
+  - created_at_ms
+  - updated_at_ms
+  properties:
+    edge_id:
+      type: integer
+      format: int64
+      minimum: 1
+      maximum: 9223372036854775807
+    status:
+      type: string
+      enum:
+      - approved
+      - revoked
+    version:
+      type: integer
+      format: int64
+      minimum: 1
+      maximum: 9223372036854775807
+    grant_kind:
+      const: agent_invoke
+    from_bot_id:
+      type: string
+    to_bot_id:
+      type: string
+    from_name:
+      type:
+      - string
+      - 'null'
+    to_name:
+      type:
+      - string
+      - 'null'
+    from_agent_code:
+      type:
+      - string
+      - 'null'
+    to_agent_code:
+      type:
+      - string
+      - 'null'
+    created_at_ms:
+      type: integer
+      format: int64
+      minimum: 0
+    updated_at_ms:
+      type: integer
+      format: int64
+      minimum: 0
+RequestRecord:
+  type: object
+  additionalProperties: false
+  required:
+  - request_id
+  - status
+  - version
+  - edge_id
+  - request_kind
+  - from_bot_id
+  - to_bot_id
+  - from_name
+  - to_name
+  - from_agent_code
+  - to_agent_code
+  - created_at_ms
+  - updated_at_ms
+  properties:
+    request_id:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum:
+      - pending
+      - approved
+      - rejected
+      - cancelled
+    version:
+      type: integer
+      format: int64
+      minimum: 1
+      maximum: 9223372036854775807
+    edge_id:
+      anyOf:
+      - type: integer
+        format: int64
+        minimum: 1
+        maximum: 9223372036854775807
+      - type: 'null'
+    request_kind:
+      const: agent_invoke
+    from_bot_id:
+      type: string
+    to_bot_id:
+      type: string
+    from_name:
+      type:
+      - string
+      - 'null'
+    to_name:
+      type:
+      - string
+      - 'null'
+    from_agent_code:
+      type:
+      - string
+      - 'null'
+    to_agent_code:
+      type:
+      - string
+      - 'null'
+    created_at_ms:
+      type: integer
+      format: int64
+      minimum: 0
+    updated_at_ms:
+      type: integer
+      format: int64
+      minimum: 0
+GrantBody:
+  type: object
+  additionalProperties: false
+  required:
+  - from_bot_id
+  - to_bot_id
+  - expected_version
+  - reason
+  properties:
+    from_bot_id:
+      type: string
+      minLength: 1
+      maxLength: 256
+    to_bot_id:
+      type: string
+      minLength: 1
+      maxLength: 256
+    expected_version:
+      type: integer
+      minimum: 0
+      maximum: 9223372036854775807
+    reason: &id003
+      type: string
+      minLength: 1
+      maxLength: 2048
+RequestBody:
+  type: object
+  additionalProperties: false
+  required:
+  - from_bot_id
+  - to_bot_id
+  - reason
+  properties:
+    from_bot_id:
+      type: string
+      minLength: 1
+      maxLength: 256
+    to_bot_id:
+      type: string
+      minLength: 1
+      maxLength: 256
+    reason: *id003
+VersionBody:
+  type: object
+  additionalProperties: false
+  required:
+  - expected_version
+  - reason
+  properties:
+    expected_version: *id001
+    reason: *id003
+References:
+  type: object
+  additionalProperties: false
+  required:
+  - grant
+  - request
+  properties:
+    grant:
+      anyOf:
+      - $ref: '#/GrantRef'
+      - type: 'null'
+    request:
+      anyOf:
+      - $ref: '#/RequestRef'
+      - type: 'null'
+Receipt:
+  type: object
+  additionalProperties: false
+  required:
+  - action_id
+  - replayed
+  - from_bot_id
+  - to_bot_id
+  - original
+  - current
+  properties:
+    action_id:
+      type: string
+    replayed:
+      type: boolean
+    from_bot_id:
+      type: string
+    to_bot_id:
+      type: string
+    original:
+      $ref: '#/References'
+    current:
+      $ref: '#/References'
+ReceiptEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+  - code
+  - message
+  - data
+  - request_id
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      $ref: '#/Receipt'
+    request_id:
+      type: string
+Degrees:
+  type: object
+  additionalProperties: false
+  required:
+  - out_degree
+  - in_degree
+  - pending_out
+  - pending_in
+  - count_basis
+  properties:
+    out_degree:
+      type: integer
+      minimum: 0
+    in_degree:
+      type: integer
+      minimum: 0
+    pending_out:
+      type: integer
+      minimum: 0
+    pending_in:
+      type: integer
+      minimum: 0
+    count_basis:
+      const: stored_approved
+AuditRecord:
+  type: object
+  additionalProperties: false
+  required:
+  - id
+  - action_id
+  - action
+  - from_bot_id
+  - to_bot_id
+  - principal_kind
+  - principal_id
+  - reason
+  - created_at_ms
+  properties:
+    id: *id002
+    action_id:
+      type: string
+    action:
+      type: string
+      enum:
+      - request
+      - grant
+      - approve
+      - reject
+      - cancel
+      - revoke
+      - qualification_publish
+      - qualification_invalidate
+      - delegation_publish
+    from_bot_id:
+      type: string
+    to_bot_id:
+      type: string
+    principal_kind:
+      type: string
+      enum:
+      - human
+      - governance
+      - inventory
+    principal_id:
+      type: string
+    reason:
+      type: string
+    created_at_ms:
+      type: integer
+      minimum: 0
+GrantPage:
+  type: object
+  additionalProperties: false
+  required:
+  - items
+  - next_cursor
+  properties:
+    items:
+      type: array
+      maxItems: 100
+      items:
+        $ref: '#/GrantRecord'
+    next_cursor:
+      type:
+      - string
+      - 'null'
+      description: Opaque v1 keyset; bind the original scope, principal and filters;
+        not an authorization token.
+RequestPage:
+  type: object
+  additionalProperties: false
+  required:
+  - items
+  - next_cursor
+  properties:
+    items:
+      type: array
+      maxItems: 100
+      items:
+        $ref: '#/RequestRecord'
+    next_cursor:
+      type:
+      - string
+      - 'null'
+      description: Opaque v1 keyset; bind the original scope, principal and filters;
+        not an authorization token.
+AuditPage:
+  type: object
+  additionalProperties: false
+  required:
+  - items
+  - next_cursor
+  properties:
+    items:
+      type: array
+      maxItems: 100
+      items:
+        $ref: '#/AuditRecord'
+    next_cursor:
+      type:
+      - string
+      - 'null'
+      description: Opaque v1 keyset; bind the original scope, principal and filters;
+        not an authorization token.
+GrantRecordEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+  - code
+  - message
+  - data
+  - request_id
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      type: object
+      additionalProperties: false
+      required:
+      - snapshot_at_ms
+      - result
+      properties:
+        snapshot_at_ms:
+          type: integer
+          minimum: 0
+        result:
+          $ref: '#/GrantRecord'
+    request_id:
+      type: string
+RequestRecordEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+  - code
+  - message
+  - data
+  - request_id
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      type: object
+      additionalProperties: false
+      required:
+      - snapshot_at_ms
+      - result
+      properties:
+        snapshot_at_ms:
+          type: integer
+          minimum: 0
+        result:
+          $ref: '#/RequestRecord'
+    request_id:
+      type: string
+GrantPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+  - code
+  - message
+  - data
+  - request_id
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      type: object
+      additionalProperties: false
+      required:
+      - snapshot_at_ms
+      - result
+      properties:
+        snapshot_at_ms:
+          type: integer
+          minimum: 0
+        result:
+          $ref: '#/GrantPage'
+    request_id:
+      type: string
+RequestPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+  - code
+  - message
+  - data
+  - request_id
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      type: object
+      additionalProperties: false
+      required:
+      - snapshot_at_ms
+      - result
+      properties:
+        snapshot_at_ms:
+          type: integer
+          minimum: 0
+        result:
+          $ref: '#/RequestPage'
+    request_id:
+      type: string
+DegreesEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+  - code
+  - message
+  - data
+  - request_id
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      type: object
+      additionalProperties: false
+      required:
+      - snapshot_at_ms
+      - result
+      properties:
+        snapshot_at_ms:
+          type: integer
+          minimum: 0
+        result:
+          $ref: '#/Degrees'
+    request_id:
+      type: string
+AuditPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+  - code
+  - message
+  - data
+  - request_id
+  properties:
+    code:
+      type: integer
+    message:
+      type: string
+    data:
+      type: object
+      additionalProperties: false
+      required:
+      - snapshot_at_ms
+      - result
+      properties:
+        snapshot_at_ms:
+          type: integer
+          minimum: 0
+        result:
+          $ref: '#/AuditPage'
+    request_id:
+      type: string
+Error400:
+  description: Closed failure; no partial result or raw dependency detail. Commit
+    unknown requires receipt recovery with the SAME canonical command and key.
+  x-error-codes:
+  - agent_invoke_invalid_input
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+Error401:
+  description: Closed failure; no partial result or raw dependency detail. Commit
+    unknown requires receipt recovery with the SAME canonical command and key.
+  x-error-codes:
+  - unauthenticated
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+Error403:
+  description: Closed failure; no partial result or raw dependency detail. Commit
+    unknown requires receipt recovery with the SAME canonical command and key.
+  x-error-codes:
+  - agent_invoke_forbidden
+  - forbidden
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+Error404:
+  description: Closed failure; no partial result or raw dependency detail. Commit
+    unknown requires receipt recovery with the SAME canonical command and key.
+  x-error-codes:
+  - agent_invoke_not_found
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+Error405:
+  description: Closed failure; no partial result or raw dependency detail. Commit
+    unknown requires receipt recovery with the SAME canonical command and key.
+  x-error-codes:
+  - method_not_allowed
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+Error409:
+  description: Closed failure; no partial result or raw dependency detail. Commit
+    unknown requires receipt recovery with the SAME canonical command and key.
+  x-error-codes:
+  - agent_invoke_conflict
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+Error429:
+  description: Closed failure; no partial result or raw dependency detail. Commit
+    unknown requires receipt recovery with the SAME canonical command and key.
+  x-error-codes:
+  - agent_invoke_limit_exceeded
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+Error503:
+  description: Closed failure; no partial result or raw dependency detail. Commit
+    unknown requires receipt recovery with the SAME canonical command and key.
+  x-error-codes:
+  - agent_invoke_unavailable
+  - agent_invoke_commit_unknown
+  - agent_invoke_invalid_state
+  - auth_dependency_unavailable
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope
+Error502:
+  description: Closed failure; no partial result or raw dependency detail. Commit
+    unknown requires receipt recovery with the SAME canonical command and key.
+  x-error-codes:
+  - bot_identity_unavailable
+  content:
+    application/json:
+      schema:
+        $ref: ../shared.yaml#/ErrorEnvelope

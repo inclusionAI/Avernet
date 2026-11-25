@@ -589,7 +589,11 @@ dependencies = [
  "bcs-config",
  "bcs-config-api",
  "bcs-db-api",
+ "bcs-db-local",
+ "bcs-db-migrations",
  "bcs-domain",
+ "bcs-edge-permission",
+ "bcs-edge-permission-store",
  "bcs-observability",
  "bcs-service-api",
  "bcs-storage-api",
@@ -612,6 +616,7 @@ dependencies = [
  "ulid",
  "url",
  "urlencoding",
+ "uuid",
 ]
 
 [[package]]

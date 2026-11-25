@@ -13,6 +13,26 @@ info:
     the long-standing Bot identity store fault keeps its 502 /
     bot_identity_unavailable mapping.
 paths:
+  /api/v1/collaboration/agent-invoke/grants:
+    $ref: ./openapi/agent-invoke.yaml#/InternalGrantsPath
+  /api/v1/collaboration/agent-invoke/requests:
+    $ref: ./openapi/agent-invoke.yaml#/InternalRequestsPath
+  /api/v1/collaboration/agent-invoke/grants/{edge_id}:
+    $ref: ./openapi/agent-invoke.yaml#/InternalGrantPath
+  /api/v1/collaboration/agent-invoke/requests/{request_id}:
+    $ref: ./openapi/agent-invoke.yaml#/InternalRequestPath
+  /api/v1/collaboration/agent-invoke/degrees:
+    $ref: ./openapi/agent-invoke.yaml#/InternalDegreesPath
+  /api/v1/collaboration/agent-invoke/audit:
+    $ref: ./openapi/agent-invoke.yaml#/InternalAuditPath
+  /api/v1/collaboration/agent-invoke/requests/{request_id}/approve:
+    $ref: ./openapi/agent-invoke.yaml#/InternalApprovePath
+  /api/v1/collaboration/agent-invoke/requests/{request_id}/reject:
+    $ref: ./openapi/agent-invoke.yaml#/InternalRejectPath
+  /api/v1/collaboration/agent-invoke/requests/{request_id}/cancel:
+    $ref: ./openapi/agent-invoke.yaml#/InternalCancelPath
+  /api/v1/collaboration/agent-invoke/grants/{edge_id}/revoke:
+    $ref: ./openapi/agent-invoke.yaml#/InternalRevokePath
   /api/v1/collaboration/invite-codes/init:
     $ref: ./internal/invite-codes.yaml#/InitInviteCodesPath
   /api/v1/collaboration/drafts/{draftId}/revisions/{revision}:

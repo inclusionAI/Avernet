@@ -18,7 +18,11 @@ impl std::io::Write for Output {
 async fn scenario(method: &str, status: u16, body: &str, timeout: bool) -> (bool, Vec<Value>, String) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let mut config = BcsFuseConfig {
-        url: format!("http://{}", listener.local_addr().unwrap()), sync_timeout_ms: 100,
+        url: format!("http://{}", listener.local_addr().unwrap()),
+        // Success/status/redaction cases do not assert latency. Keep their
+        // loopback deadline independent of instrumented CI scheduling; only
+        // the explicit never-responding case tests the 100 ms deadline.
+        sync_timeout_ms: if timeout { 100 } else { 5_000 },
         ..Default::default()
     };
     config.set_resolved_authorization("never-log-authorization".into());
@@ -68,7 +72,7 @@ async fn card_http_logs_validated_ack_status_and_redacted_summaries() {
         ("DELETE", 404, "never-log-response-body", false, "http_status"),
     ] {
         let (success, logs, text) = scenario(method, status, body, false).await;
-        assert_eq!(success, expected);
+        assert_eq!(success, expected, "{method} {status}: {text}");
         assert_eq!(logs.len(), 2, "{text}");
         assert_eq!(logs[0]["event"], "fuse.card.write_started");
         assert_eq!(logs[1]["http_status"], status);

@@ -3614,9 +3614,19 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - 真实完整 SQLite schema 的 registry→invocation 回归覆盖 code 大小写/恢复、hidden ABA、同值重放、Provider attachment/mode、binding ABA、普通/Provider 退役与恢复；独立测试验证 revision 耗尽时 binding INSERT 前缀也回滚，以及 Notify 控制的“approve 预检后真实 registry hidden→restore 已确认、旧 approve 提交被拒且无 audit/receipt 前缀”。共享实际 writer 场景进入原 native MySQL selector，本地 ignored 不算 MySQL 通过。
 - **仍不是完整 3.6/4.5 验收**：Provider-wide config/credential 及外部资格的生产 generation/失效 feed、host capability/freshness/owners、多 worker 撤权后证明，以及 HTTP/统一 dispatch/E2E 仍须补齐。公共 bootstrap 不启用新 writer/runtime，不以本次 physical revision producer 代替宿主 inventory 或完整研发完成。
 
+### 后续实现增补：可信 HTTP 管理/查询 delivery 与 OpenAPI（生产能力仍默认关闭）
+
+- `bcs-api-http` 的 V1 router 现挂载 `/api/v1/collaboration/agent-invoke` 与 `/openapi/v1/collaboration/agent-invoke` 同实现镜像，共 12 个 method/path：POST grants/requests，GET 精确 grant/request、grants/requests 列表、degrees、audit，POST approve/reject/cancel/revoke。旧 friend/admission/AgentCard 不增加新 kind 快捷写法；未发布旧名不保留别名。
+- composition 注入独立 management/query application + scope/tenant + 可选精确数字 App→Governance 映射；默认未注入返回 503，不开启 writer/runtime。使用既有 V1 Principal 验证及 actual-source CSRF，精确 tenant 匹配；Bot 身份优先，owner 展示不能提升为 Human。Human 映射 canonical actor；治理 App 必须显式配置且仍需当前 pair/action 委托，不接受 body/header 自报资格或 unsigned identity、anonymous/auto-claim。
+- strict body 16 KiB、query 8 KiB，拒绝未知/重复字段；Idempotency-Key 单一可见 ASCII，1..128 bytes。创建/申请仅 pair/reason/expected_version；决策/撤销仅 expected_version/reason。精确读及 Human 决策 query 明确 `bot_id+direction`（可选 peer），经独立授权精确查询后从结果推导 pair。Governance 决策必须给 peer，直接调用 exact-pair/action command（其中原子核验 resource ID+pair），不额外要求无关 Query 委托。不做无 scope 的 ID lookup，也不接受 body 伪造身份。management/atomic store 仍执行完整授权/fences。
+- opaque v1 cursor 绑定 scope/principal/anchor/peer/resource/direction/status/action，default50/max100，结构化 context hash 不是可复用授权签名，任意 position 仍经 Core/store 校验与重新授权。只返回安全投影及 StoredApproved count basis；optional name/code 不能授权，audit 不暴露 raw before/after JSON。
+- POST 回应为 action_id/replayed、pair 与 **original/current 分离的状态引用**，不用另一次查询伪造创建时间；真实 timestamps 在 GET record。create/replay 保持 201 与同前缀 ID Location，decision/revoke 200。拒绝在提交后追加展示查询、以免已提交写因二次 read 失败伪装未写；commit unknown 为独立稳定 503 code。继承 V1 envelope/request_id/no-store，framework/JSON 错误不回显原始凭据/依赖细节。
+- Human decision/revoke 比已有 command 多一个精确授权 query use case（6 SQL），Governance explicit-pair 决策直接调用原 atomic command、不增加 Query use case；无事务跨网络、无自动 HTTP retry、无逐边 inventory 或正向 cache。GET 仍用原 bounded SQL 查询。不会用 HTTP port 存在替代 actual trusted ingress 唯一 Bot resolver、operation-aware invocation 或生产 host capability。
+- OpenAPI internal/public 两 entrypoint 具有完整严格 input/result/error schemas、12+12 operation IDs、HTTP 状态和幂等/游标约定；mirror 共用 operation definition，仅区分唯一 operationId。真实 SQLite handler tests 分别覆盖六类写和六类读、权限/租户/重放/终态/游标/配额/关闭态；逐端点 401 和各闭合 application 错误码及真实 port hit 另有 recording fault wrapper，后者不算 DB rollback 或 unknown-commit 证明。SDK 与真实 HTTP→DB→A2A Singlebox changed-line 仍未完成。
+
 ### 原 27 项研发与验收跟踪（保留完整范围）
 
-将原 change 的 27 项跟踪合并到本 spec，不恢复独立 change 目录。仅在整项有实现与对应证据时勾选，不把 SQL core、静态检查或旧 SHA 的绿灯折算成 HTTP/host/E2E 完成。当前 10/27 项已有实现与对应本地回归证据；剩余项包含未完研发和真实 MySQL、并发、宿主、E2E/发布验收，不是都已转为运维事项。每次提交的具体命令、分母和新 SHA checks 记录在 PR Validation，不能继承前一 SHA 的结论。
+将原 change 的 27 项跟踪合并到本 spec，不恢复独立 change 目录。仅在整项有实现与对应证据时勾选，不把 SQL core、静态检查或旧 SHA 的绿灯折算成 HTTP/host/E2E 完成。当前 12/27 项已有实现与对应本地回归证据；剩余项包含未完研发和真实 MySQL、并发、宿主、E2E/发布验收，不是都已转为运维事项。每次提交的具体命令、分母和新 SHA checks 记录在 PR Validation，不能继承前一 SHA 的结论。
 
 #### 1. 评审与启用前置
 
@@ -3628,7 +3638,7 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 #### 2. 纯契约与安全读端（默认关闭 writer）
 
 - [x] 2.1 AgentInvoke 新 kind、稳定 serde/DB 字符串、canonical shape 和版本语义；旧四类 round-trip 与坏形状回归保留。
-- [ ] 2.2 独立管理/operation-aware invocation/core/facts/DTO/errors 完整契约；当前写/运行/publisher/治理查询契约已实现，HTTP DTO 仍缺，整项不勾选。
+- [x] 2.2 独立管理/operation-aware invocation/core/facts/DTO/errors 契约已实现，HTTP strict DTO/闭合 error mapping 与 internal/OpenAPI 声明及对应测试已补齐。实际 dispatch/SDK/host 仍分别跟踪。
 - [x] 2.3 精确 kind 候选集和 fallible checked read，未知 kind/坏行/DB error 整体失败，Memory/SQLite 共享 conformance；MySQL 执行验收归 3.5/5.2。
 - [x] 2.4 旧 admission/build_authz_context 隔离新 kind；新 invocation application 返回 ref=edge_id、revision=approval generation，已有真实 SQL consumer 回归；统一 dispatch 挂载仍归 4.4。
 - [x] 2.5 friend request/list/approve/revoke/通知/writeback 与 owner/manager kind 隔离，未开放旧 API 写新 kind，保留 legacy 回归。
@@ -3646,7 +3656,7 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 
 - [ ] 4.1 管理矩阵和 scoped governance 已实现；仍需新入口禁止 anonymous/auto-claim、可信 ingress 唯一 scoped bot_uuid resolver 和拒绝自报资格的实际挂载。
 - [x] 4.2 request/grant/approve/reject/cancel/revoke、receipt/state conflict/error 映射已由 application + 真实 SQLite store 实现；资格预读不持写事务锁，unknown commit 恢复无第二次 mutation。HTTP 挂载/真实 MySQL分别归 4.3/3.5。
-- [ ] 4.3 D6 独立 routes/DTO/OpenAPI、逐端点验证/响应/鉴权和 SDK；不能以 internal service method 当成已注册 HTTP endpoint。
+- [ ] 4.3 独立 routes/DTO/OpenAPI 与逐端点验证/响应/鉴权已有真实 V1 router 实现；SDK 尚未补齐，整项不勾选，HTTP 默认不启用生产能力。
 - [ ] 4.4 统一 operation-aware authz dispatch hook、originator/qualification generation 与一般 admission/friend/public/collaboration 旧语义隔离；独立 invocation application 的通过不等同于真正 dispatch 接入。
 - [ ] 4.5 composition roots 注入真实/假身份资格源、validated limits、consumer capability 与默认关闭 writer；当前 stores 未生产挂载，不伪造 host capability。
 
@@ -3654,10 +3664,10 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 
 - [x] 5.1 纯类型/shape/policy/identity/state 单元测试，包含旧四 kind、坏输入和 requester/资格恢复不复活；当前 scoped unit run 已覆盖，非 whole-workspace/E2E 声明。
 - [ ] 5.2 完整管理/运行 consumer 与 repo conformance、Memory/SQLite/真实 MySQL 同语义及实际 port 命中；已有共享 lifecycle/facts/snapshot 和 native DB outcome harness，query consumer 已有真实 SQLite，真实 MySQL 与完整其余 consumer 验收仍需补齐。
-- [ ] 5.3 每个新 GET/create/request/approve/reject/cancel/revoke/list/degree endpoint 独立 HTTP contract，覆盖 401/403/404/400/409/429/503 和 legacy 不变。
+- [x] 5.3 每个新 GET/create/request/approve/reject/cancel/revoke/list/degree（及 audit）endpoint 独立 HTTP contract，覆盖 401/403/404/400/409/429/503 与真实 application port hit；真实 SQLite 路由场景和完整 adapter legacy 回归已实现。recording error injection 仅证明 delivery 映射，不代替 5.4/5.5。
 - [ ] 5.4 真实 DB + Notify/barrier 覆盖 approve/cancel、approve/revoke、旧 key/regrant、并发配额和 commit-unknown 全矩阵；已有部分确定性交错和真实 rollback/recovery，不把顺序 harness 等同于完整争用证明。
 - [ ] 5.5 production-domain synthetic Singlebox HTTP→application→DB→A2A fake-target E2E 与 changed-line gate；不以单测调用 domain 方法冒充 E2E。
 - [ ] 5.6 完整受影响 architecture/boundary/module/HTTP/legacy/authority 与扩展 gates；已通过限定范围检查不代表全架构 baseline 绿灯。
 - [ ] 5.7 reader/SDK/runtime 接收兼容、迁移后 writer 启用、关闭/回滚/保留历史演练，以及 current-SHA CI 和 host 集成记录；未获部署授权不操作生产。
 
-完成条目：1.4、2.1、2.3、2.4、2.5、3.1、3.3、3.4、4.2、5.1。其余原条目均按完整验收范围保留，不重新拆小来增加完成数量。
+完成条目：1.4、2.1、2.2、2.3、2.4、2.5、3.1、3.3、3.4、4.2、5.1、5.3。其余原条目均按完整验收范围保留，不重新拆小来增加完成数量。

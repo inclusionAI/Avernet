@@ -2,10 +2,16 @@
 //! legacy friend/admission APIs or raw edge insert/upsert methods.
 use async_trait::async_trait;
 
-use crate::types::agent_invoke::{
+// Delivery imports the application contract and its credential-free input/
+// result vocabulary, never Core, repository ports or concrete implementations.
+pub use crate::types::agent_invoke::{
     AgentInvocationInput, AgentInvocationPermit, AgentInvokeCommand, AgentInvokeReceipt,
-    AgentInvokeResult,
+    AgentInvokeResult, AgentInvokeScope, AgentInvokePrincipal, AgentInvokePair,
+    AgentInvokeChange, AgentInvokeError, AgentInvokeGrantView, AgentInvokeRequestView,
 };
+pub use crate::types::agent_invoke_query::*;
+pub use bcs_domain::edge_permission::{EdgeStatus, RequestStatus};
+
 
 #[async_trait]
 pub trait AgentInvocationService: Send + Sync {
@@ -28,6 +34,6 @@ pub trait AgentInvokeGrantManagementService: Send + Sync {
 /// Read-only governance, distinct from invocation permission and write commands.
 #[async_trait]
 pub trait AgentInvokeGovernanceQueryService: Send + Sync {
-    async fn read(&self, query: crate::types::agent_invoke_query::AgentInvokeQuery)
-        -> AgentInvokeResult<crate::types::agent_invoke_query::AgentInvokeQueryResult>;
+    async fn read(&self, query: AgentInvokeQuery)
+        -> AgentInvokeResult<AgentInvokeQueryResult>;
 }

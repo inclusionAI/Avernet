@@ -1,4 +1,5 @@
 pub mod a2a;
+pub mod agent_invoke;
 pub mod bot_authority;
 pub mod common;
 pub mod gateway_principal;
@@ -20,6 +21,7 @@ pub use group_session_connection::group_session_connection_router;
 /// Public and internal collaboration routes that need caller verification share
 /// the same protected boundary.
 pub fn router(state: ApiState) -> Router {
+    let invoke = agent_invoke::protected_router(state.clone());
     let drafts = collaboration_drafts::router(state.collaboration_drafts.clone());
     let protected = Router::new()
         .merge(openapi::protected_router())
@@ -49,6 +51,7 @@ pub fn router(state: ApiState) -> Router {
     Router::new()
         .merge(protected)
         .merge(authority_protected)
+        .merge(invoke)
         .merge(openapi::public_router())
         .merge(internal::public_router())
         .merge(a2a::router())

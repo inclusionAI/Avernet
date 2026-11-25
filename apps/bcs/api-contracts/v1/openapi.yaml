@@ -29,6 +29,26 @@ tags:
   - name: Group Context
     description: Versioned, permission-tagged KV store for bot teams within a group.
 paths:
+  /openapi/v1/collaboration/agent-invoke/grants:
+    $ref: ./openapi/agent-invoke.yaml#/ExternalGrantsPath
+  /openapi/v1/collaboration/agent-invoke/requests:
+    $ref: ./openapi/agent-invoke.yaml#/ExternalRequestsPath
+  /openapi/v1/collaboration/agent-invoke/grants/{edge_id}:
+    $ref: ./openapi/agent-invoke.yaml#/ExternalGrantPath
+  /openapi/v1/collaboration/agent-invoke/requests/{request_id}:
+    $ref: ./openapi/agent-invoke.yaml#/ExternalRequestPath
+  /openapi/v1/collaboration/agent-invoke/degrees:
+    $ref: ./openapi/agent-invoke.yaml#/ExternalDegreesPath
+  /openapi/v1/collaboration/agent-invoke/audit:
+    $ref: ./openapi/agent-invoke.yaml#/ExternalAuditPath
+  /openapi/v1/collaboration/agent-invoke/requests/{request_id}/approve:
+    $ref: ./openapi/agent-invoke.yaml#/ExternalApprovePath
+  /openapi/v1/collaboration/agent-invoke/requests/{request_id}/reject:
+    $ref: ./openapi/agent-invoke.yaml#/ExternalRejectPath
+  /openapi/v1/collaboration/agent-invoke/requests/{request_id}/cancel:
+    $ref: ./openapi/agent-invoke.yaml#/ExternalCancelPath
+  /openapi/v1/collaboration/agent-invoke/grants/{edge_id}/revoke:
+    $ref: ./openapi/agent-invoke.yaml#/ExternalRevokePath
   /openapi/v1/collaboration/me:
     $ref: ./openapi/human.yaml#/CurrentUserPath
   /openapi/v1/auth/url:
