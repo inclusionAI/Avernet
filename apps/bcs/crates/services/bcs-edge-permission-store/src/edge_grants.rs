@@ -395,6 +395,24 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
         .await
     }
 
+    async fn revoke_grant_if_active(&self, edge_id: u64, env: &str) -> ServiceResult<bool> {
+        // Atomic conditional revoke: only the call that actually flips an
+        // approved edge reports the transition, so concurrent removals of
+        // the same friendship revoke (and notify) exactly once.
+        let result = self
+            .execute_result(
+                "revoke_grant_if_active",
+                DbStatement::with_params(
+                    "UPDATE edge_grants SET status = 'revoked', \
+                         gmt_modified = CURRENT_TIMESTAMP \
+                     WHERE id = ? AND env = ? AND status = 'approved'",
+                    vec![DbValue::from(edge_id), DbValue::from(env)],
+                ),
+            )
+            .await?;
+        Ok(result.affected_rows > 0)
+    }
+
     async fn get_default_profile_id(&self, bot_id: &str, env: &str) -> Option<u64> {
         let rows = self
             .query(
