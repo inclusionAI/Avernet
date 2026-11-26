@@ -80,6 +80,45 @@ it('allows opening the empty form without a target Bot', async () => {
   expect(api.evolve.listAvailableLocalSkills).not.toHaveBeenCalled()
 })
 
+it('preselects an optional space and includes it in registration', async () => {
+  api.evolve.listSpaces.mockResolvedValue({ items: [{ id: '235', name: '97', type: 'TEAM', role: 'MEMBER' }] })
+  open(query + '&skillId=skill-1&spaceId=235')
+  await screen.findByRole('option', { name: '团队空间 · 97' })
+  expect((screen.getByRole('combobox', { name: '所属空间' }) as HTMLSelectElement).value).toBe('235')
+  await waitFor(() => expect(skillSelector().value).toBe('skill-1'))
+  fireEvent.click(screen.getByRole('button', { name: '登记', exact: true }))
+  await waitFor(() => expect(api.evolve.registerSkillAsset).toHaveBeenCalledExactlyOnceWith({
+    botId: 'bot-1', botEnv: 'prod', skillId: 'skill-1', spaceId: '235',
+  }))
+})
+
+it('keeps a manually cleared space when the preselected Bot finishes loading', async () => {
+  let finish!: (result: { bots: typeof bots }) => void
+  api.bots.list.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  open(query + '&skillId=skill-1&spaceId=235')
+  fireEvent.change(screen.getByRole('combobox', { name: '所属空间' }), { target: { value: '' } })
+  await act(async () => { finish({ bots }) })
+  await waitFor(() => expect(skillSelector().value).toBe('skill-1'))
+  expect((screen.getByRole('combobox', { name: '所属空间' }) as HTMLSelectElement).value).toBe('')
+  fireEvent.click(screen.getByRole('button', { name: '登记', exact: true }))
+  await waitFor(() => expect(api.evolve.registerSkillAsset).toHaveBeenCalledExactlyOnceWith({
+    botId: 'bot-1', botEnv: 'prod', skillId: 'skill-1',
+  }))
+})
+
+it('preserves an explicit space and displays registration permission failures', async () => {
+  api.evolve.registerSkillAsset.mockRejectedValueOnce(new Error('当前账号无权访问该空间'))
+  open(query + '&skillId=skill-1&spaceId=inaccessible')
+  await waitFor(() => expect(skillSelector().value).toBe('skill-1'))
+  expect(screen.getByRole('option', { name: '所选空间 · inaccessible' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '登记', exact: true }))
+  await screen.findByText('当前账号无权访问该空间')
+  expect(api.evolve.registerSkillAsset).toHaveBeenCalledWith({
+    botId: 'bot-1', botEnv: 'prod', skillId: 'skill-1', spaceId: 'inaccessible',
+  })
+  expect((screen.getByRole('combobox', { name: '所属空间' }) as HTMLSelectElement).value).toBe('inaccessible')
+})
+
 it.each([
   ['?register=1&botId=bot-1', '请提供目标 botEnv'],
   ['?register=1&botId=inaccessible&botEnv=prod', '未找到可访问的目标 Bot'],
@@ -131,7 +170,7 @@ it('keeps manual Skill changes and clears the preset when switching Bots', async
 })
 
 it('removes registration parameters on close and keeps unrelated query parameters', async () => {
-  open(query + '&skillId=skill-2&ownerId=viewer&entityId=viewer&filter=keep')
+  open(query + '&skillId=skill-2&spaceId=235&ownerId=viewer&entityId=viewer&filter=keep')
   await waitFor(() => expect(skillSelector().value).toBe('skill-2'))
   fireEvent.click(screen.getByRole('button', { name: '关闭', exact: true }))
   expect(screen.queryByRole('dialog')).toBeNull()

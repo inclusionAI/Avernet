@@ -80,7 +80,7 @@ export default function SkillCenter() {
   const closeRegistration = () => {
     setSearchParams(current => {
       const next = new URLSearchParams(current)
-      for (const key of ['register', 'botId', 'botEnv', 'ownerId', 'entityId', 'skillId']) next.delete(key)
+      for (const key of ['register', 'botId', 'botEnv', 'ownerId', 'entityId', 'skillId', 'spaceId']) next.delete(key)
       return next
     }, { replace: true })
   }
@@ -115,7 +115,8 @@ export default function SkillCenter() {
     {error && !showRegister && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
     {launch && <SkillTaskLaunchDialog key={`${launch.asset.assetId}:${launch.action}`} asset={launch.asset} action={launch.action} returnTo="/evolve/skills" onClose={() => setLaunch(null)} />}
     {showRegister && <SkillRegistrationDialog key={registrationQuery} bots={bots} botsLoading={botsLoading} botsError={botsError}
-      initialBotKey={initialBotKey} initialSkillId={searchParams.get('skillId')?.trim() ?? ''} onClose={closeRegistration} onRegistered={asset => {
+      initialBotKey={initialBotKey} initialSkillId={searchParams.get('skillId')?.trim() ?? ''}
+      initialSpaceId={searchParams.get('spaceId')?.trim() ?? ''} onClose={closeRegistration} onRegistered={asset => {
       navigate(`/evolve/skills/${encodeURIComponent(asset.assetId)}`)
     }} />}
   </div>

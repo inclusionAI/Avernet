@@ -18,12 +18,13 @@ function registrationError(reason: unknown, fallback: string): string {
   return reason instanceof Error && !/^API \d+:/.test(reason.message) ? reason.message : fallback
 }
 
-export default function SkillRegistrationDialog({ bots, botsLoading = false, botsError = '', initialBotKey = '', initialSkillId = '', onClose, onRegistered }: {
+export default function SkillRegistrationDialog({ bots, botsLoading = false, botsError = '', initialBotKey = '', initialSkillId = '', initialSpaceId = '', onClose, onRegistered }: {
   bots: EvolveBotPickerOption[]
   botsLoading?: boolean
   botsError?: string
   initialBotKey?: string
   initialSkillId?: string
+  initialSpaceId?: string
   onClose: () => void
   onRegistered: (asset: EvolveSkillAsset) => void | Promise<void>
 }) {
@@ -33,7 +34,7 @@ export default function SkillRegistrationDialog({ bots, botsLoading = false, bot
   const [botQuery, setBotQuery] = useState('')
   const [skills, setSkills] = useState<Array<{ skillId: string; displayName: string }>>([])
   const [skillId, setSkillId] = useState('')
-  const [spaceId, setSpaceId] = useState('')
+  const [spaceId, setSpaceId] = useState(initialSpaceId)
   const [loading, setLoading] = useState(false)
   const [registering, setRegistering] = useState(false)
   const [loadError, setLoadError] = useState('')
