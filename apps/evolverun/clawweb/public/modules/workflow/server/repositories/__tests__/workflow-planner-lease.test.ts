@@ -44,3 +44,30 @@ it('does not renew its own expired lease without reacquiring it', async () => {
   const owner = (await f.a.claim('prod', 100))!;
   await expect(f.a.checkpoint(owner, null, 300_100)).rejects.toThrow('AUTOMATION_PLANNER_LEASE_LOST');
 });
+
+it('isolates self-healing from Workflow planning and from other environments', async () => {
+  const f = await fixture();
+  const options = { namespace: 'session-recovery-maintenance/v1', leaseMs: 120_000 };
+  const a = new WorkflowPlannerLeaseRepository(f.db, options);
+  const b = new WorkflowPlannerLeaseRepository(f.db, options);
+  expect(await f.a.claim('prod', 100)).not.toBeNull();
+  const claims = await Promise.all([a.claim('prod', 100), b.claim('prod', 100)]);
+  expect(claims.filter(Boolean)).toHaveLength(1);
+  expect(await b.claim('pre', 100)).not.toBeNull();
+  expect(await b.claim('prod', 120_099)).toBeNull();
+  expect(await b.claim('prod', 120_100)).toMatchObject({ untilMs: 240_100 });
+});
+it('renews a custom lease and releases against the original scan cadence', async () => {
+  const f = await fixture();
+  const options = { namespace: 'session-recovery-maintenance/v1', leaseMs: 120_000 };
+  const a = new WorkflowPlannerLeaseRepository(f.db, options);
+  const b = new WorkflowPlannerLeaseRepository(f.db, options);
+  const owner = (await a.claim('prod', 100))!;
+  const renewed = await a.checkpoint(owner, null, 20_100);
+  expect(renewed.untilMs).toBe(140_100);
+  await a.checkpoint(renewed, null, 30_100, true, 60_100);
+  expect(await b.claim('prod', 60_099)).toBeNull();
+  const replacement = (await b.claim('prod', 60_100))!;
+  expect(replacement.ownerId).not.toBe(owner.ownerId);
+  await expect(a.checkpoint(renewed, null, 30_101, true)).rejects.toThrow('AUTOMATION_PLANNER_LEASE_LOST');
+});

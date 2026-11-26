@@ -36,7 +36,7 @@ it.each([
     const runtime = createSessionRecoveryRuntime({
       db, repo, runtime: { sendMessage: vi.fn(), request: vi.fn(), executeShell: vi.fn() },
       targets: { resolve: async () => target }, trajectory, ais, nasRoots: [],
-      publicBaseUrl: "https://fixture.invalid", snapshotId: 1, artifactStore,
+      publicBaseUrl: "https://fixture.invalid", snapshotId: 1, artifactStore, maintenanceLease: { claim: vi.fn().mockResolvedValue(null) },
     })!;
     const { task_id } = await runtime.service.create({
       event_id: "late-trajectory", delivery_key: "late-trajectory", diagnosis: "原任务受阻", tc_fault_label: null,

@@ -600,7 +600,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       effect: task.judgment?.effect === "recovered" ? "recovered" : "unknown", summary, evidence_ids: task.evidence.map(item => item.evidence_id) };
   }
 
-  async maintenance(): Promise<void> {
+  async maintenance(assertLease: () => void = () => {}): Promise<void> {
+    assertLease();
     const environment = this.deps.controlPlaneEnvironment;
     const config = await this.deps.tasks.effectResumeConfig?.(environment).catch(error => {
       logRepairEvent("session-recovery", "session_recovery_maintenance", "effect_resume_config_unavailable", { environment, ...repairLogError(error) });
@@ -612,6 +613,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const pendingStarts: RecoveryStoredTask[] = [];
     let cursor = "";
     for (;;) {
+      assertLease();
       let batch: Array<RecoveryStoredTask | RecoveryMaintenanceTask>;
       try { batch = await this.deps.tasks.listForMaintenance?.(200, cursor, environment, true) ?? []; }
       catch (error) {
@@ -619,8 +621,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           ...repairLogError(error) });
         throw error;
       }
+      assertLease();
       if (!batch.length) break;
       for (const task of batch) {
+      assertLease();
       cursor = task.taskId;
       try {
         if (!this.ownsTask(task)) continue;
@@ -642,6 +646,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           // A retained retry marker must never retire a successor launched by another worker.
           if (task.executionRetry.executionId !== task.execution?.executionId) continue;
           await this.deps.agent.release(task);
+          assertLease();
         }
         if (task.status === "running" && ["observe", "verify"].includes(task.phase)
           && task.observationDeadlineAt !== null && task.observationDeadlineAt <= this.now() && !task.requiresFreshObservation) {
@@ -663,36 +668,42 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       }
     }
     // Keep the scan and its existing startup/retry work ahead of effect resumption.
-    for (const task of pendingStarts) this.startEffectObservation(task);
-    await this.maintainEffectWait(config ?? null, slots, close, resume);
+    for (const task of pendingStarts) { assertLease(); this.startEffectObservation(task); }
+    await this.maintainEffectWait(config ?? null, slots, close, resume, assertLease);
   }
 
   private async maintainEffectWait(policy: RecoveryEffectResumeConfig | null,
     slots: Array<RecoveryStoredTask | RecoveryMaintenanceTask>,
     close: Array<RecoveryStoredTask | RecoveryMaintenanceTask>,
-    resume: Array<RecoveryStoredTask | RecoveryMaintenanceTask>): Promise<void> {
+    resume: Array<RecoveryStoredTask | RecoveryMaintenanceTask>, assertLease: () => void): Promise<void> {
     let occupied = slots.length;
     for (const { taskId, effectResumeSlot } of slots) {
+      assertLease();
       if (effectResumeSlot?.lastExecutionNo === undefined) continue;
       await this.effectMaintenance(taskId, async () => {
         if (await this.deps.tasks.settleEffectResumeSlot?.(taskId, effectResumeSlot,
           jobId => this.deps.agent.effectResumeJobEnded?.(jobId) ?? Promise.resolve(false))) occupied--;
       });
     }
+    assertLease();
     if (!policy) return;
     let config: RecoveryEffectResumeConfig = policy;
     for (const candidate of close.slice(0, config.concurrency)) {
+      assertLease();
       await this.effectMaintenance(candidate.taskId, async () => {
         const task = await this.required(candidate.taskId);
+        assertLease();
         const wait = recoveryEffectWait(task);
         if (wait && this.ownsTask(task) && effectResumeAction({ ...task, effectWait: wait }, this.now(), config) === "close") await this.closeEffectWait(task, config);
       });
     }
     let remainingCloses = Math.max(0, config.concurrency - close.length);
     for (const candidate of resume) {
+      assertLease();
       if (occupied >= config.concurrency) break;
       await this.effectMaintenance(candidate.taskId, async () => {
         const task = await this.required(candidate.taskId);
+        assertLease();
         const wait = recoveryEffectWait(task);
         if (!wait || !this.ownsTask(task) || task.simulation || task.level === "debug"
           || (task.judgment && task.judgment.effect !== "unknown")) return;
@@ -710,10 +721,12 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           if (!updated) return;
           occupied++;
           config = { ...config, version: config.version + 1 };
+          assertLease();
           this.startEffectObservation(updated);
         }
       });
     }
+    assertLease();
   }
 
   private async closeEffectWait(task: RecoveryStoredTask, config: RecoveryEffectResumeConfig | null, expiredBeforeDispatch = false): Promise<void> {

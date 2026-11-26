@@ -37,6 +37,24 @@ Bootstrap publishes `planProtocol.allowedOperations` from the same definition us
 
 Owner waiting and effect waiting have separate deadlines. Owner expiry releases the execution while preserving the business task. A later decision creates a new execution for that task; an in-window decision continues the current execution. Effect waiting resumes the paused phase after reading new records, without resending initial advice. Old execution reports cannot overwrite new execution state.
 
+### Maintenance coordination
+
+The host schedules recovery maintenance every 60 seconds and injects the existing
+database lease provider. Only the replica that owns the control-plane environment's
+lease enters the original maintenance scan. Session recovery uses a separate lease
+namespace from Workflow planning, with a 120-second lease renewed every 20 seconds.
+Lease-store failures skip or stop maintenance; they never enable an unlocked scan.
+A lost lease stops subsequent scan pages and task processing. Release uses the
+current ownership revision and retains the next scan time measured from the round's
+start, so another replica cannot immediately repeat the scan or add another minute
+of cooldown after a short round. No maintenance cursor is persisted across rounds.
+The host continues using the existing journal's background lease records, without
+adding a table or changing the task query, task selection, or maintenance decisions.
+Task-level row locks, versions and execution leases remain necessary for callbacks,
+user operations and takeover overlap. Result reporting and execution monitoring keep
+their separate schedules. Newly created tasks and Owner confirmations still dispatch
+directly; persisted retry deadlines and other maintenance work wait for a later scan.
+
 ### Automatic effect resumption
 
 The existing recovery maintenance scan resumes the same task and observation phase.

@@ -27,7 +27,7 @@ it.each(["legacy", "team"])("freezes DB team routes through production assembly,
     const execute = vi.fn(async () => "fixture-job");
     const recovery = createSessionRecoveryRuntime({ db, repo, runtime: botRuntime, targets: { resolve: async () => target },
       ais: { execute } as unknown as AisExecutor, resolveModelApiKey, publicBaseUrl: "https://fixture.invalid",
-      snapshotId: 1, artifactStore: artifacts, nasRoots: [] })!;
+      snapshotId: 1, artifactStore: artifacts, nasRoots: [], maintenanceLease: { claim: vi.fn().mockResolvedValue(null) } })!;
     const request = { event_id: "event", delivery_key: "initial", tc_fault_label: "TC.MCP.PERMISSION", diagnosis: "工具调用失败",
       target: { entity_id: "owner", bot_id: "default", env: "prod", engine: "OC" }, session_key: "agent:main:session:original" };
     const actor = { userId: "owner", isAdmin: false }, stored = new SessionRecoveryTaskRepository(db, repo, artifacts);

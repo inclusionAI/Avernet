@@ -14,16 +14,18 @@ import { SessionRecoveryTaskService } from "./task-service.js";
 import { SessionRecoveryAgentService, recoveryTargetSnapshot } from "./agent-service.js";
 import { HttpRecoveryResultReporter } from "./result-reporter.js";
 
-import type { SessionRecoveryRuntime } from "./contracts.js";
+import type { RecoveryMaintenanceLease, SessionRecoveryRuntime } from "./contracts.js";
 import type { AgentRuntimeTool } from "../common/agent-tools/runtime-tool.js";
 import { SessionRecoveryError } from "./errors.js";
-import { logRepairEvent } from "../common/logging.js";
+import { logRepairEvent, repairLogError } from "../common/logging.js";
 import type { AgentLogTool } from "../common/agent-tools/log-tool.js";
 import type { RecoveryNotificationSender } from "./notification.js";
 
+export const SESSION_RECOVERY_MAINTENANCE_INTERVAL_MS = 60_000;
+
 export function createSessionRecoveryRuntime(options: {
   db: IDatabase; repo: EvolveRepository; runtime: BotRuntime; targets: BotTargetResolver; ais: AisExecutor;
-  publicBaseUrl: string; snapshotId: number; artifactStore: RecoveryArtifactStore;
+  publicBaseUrl: string; snapshotId: number; artifactStore: RecoveryArtifactStore; maintenanceLease: RecoveryMaintenanceLease;
   notificationSender?: RecoveryNotificationSender | null; logs?: AgentLogTool; runtimeTool?: AgentRuntimeTool;
   resolveSessionUrl?: ConstructorParameters<typeof SessionRecoveryNotifier>[5];
   trajectory?: BotSessionTrajectoryReader; nasRoots: string[];
@@ -64,5 +66,38 @@ export function createSessionRecoveryRuntime(options: {
       if (target.environment !== request.target.env || target.ownerId !== request.target.entity_id || target.botId !== request.target.bot_id || target.activeEngine !== expected) throw new SessionRecoveryError(422, "invalid_recovery_target", "目标快照与请求身份或引擎不一致");
       return recoveryTargetSnapshot(target);
     } });
-  return { service: tasks, tasks, agent, maintenance: () => tasks.maintenance(), reportResults: () => tasks.reportResults() };
+  const maintenance = async (): Promise<void> => {
+    const lease = await options.maintenanceLease.claim(controlPlaneEnvironment, Date.now());
+    if (!lease) return;
+    let expiresAtMs = lease.expiresAtMs;
+    let lost: Error | undefined;
+    let renewing: Promise<void> | undefined;
+    const assertLease = () => {
+      if (!lost && Date.now() >= expiresAtMs) lost = new Error("SESSION_RECOVERY_MAINTENANCE_LEASE_LOST");
+      if (lost) throw lost;
+    };
+    const timer = setInterval(() => {
+      if (renewing || lost) return;
+      try { assertLease(); } catch { return; }
+      renewing = Promise.resolve().then(() => lease.renew(Date.now()))
+        .then(untilMs => { expiresAtMs = untilMs; })
+        .catch(error => {
+          lost = error instanceof Error ? error : new Error("SESSION_RECOVERY_MAINTENANCE_LEASE_LOST");
+          logRepairEvent("session-recovery", "session_recovery_maintenance", "lease_lost", {
+            environment: controlPlaneEnvironment, ...repairLogError(error),
+          });
+        }).finally(() => { renewing = undefined; });
+    }, 20_000).unref();
+    try {
+      assertLease();
+      await tasks.maintenance(assertLease);
+      assertLease();
+    } finally {
+      clearInterval(timer);
+      await renewing;
+      assertLease();
+      await lease.release(Date.now());
+    }
+  };
+  return { service: tasks, tasks, agent, maintenance, reportResults: () => tasks.reportResults() };
 }

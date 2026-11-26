@@ -97,6 +97,15 @@ export interface RecoveryResultReporter { report(result: RecoveryResult): Promis
 export type RecoveryDeliveryLog = RecoveryResult & { event: "session_recovery_delivery" };
 export interface RecoveryLogger { log(result: RecoveryDeliveryLog): void }
 
+/** Host-supplied coordination; ownership and CAS persistence stay in the existing lease provider. */
+export interface RecoveryMaintenanceLease {
+  claim(environment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment, nowMs: number): Promise<{
+    expiresAtMs: number;
+    renew(nowMs: number): Promise<number>;
+    release(nowMs: number): Promise<void>;
+  } | null>;
+}
+
 /** Service assembly contract; HTTP authentication belongs to the router adapter. */
 export type SessionRecoveryRuntime = {
   service: SessionRecoveryApi;

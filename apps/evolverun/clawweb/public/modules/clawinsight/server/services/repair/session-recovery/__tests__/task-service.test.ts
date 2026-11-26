@@ -600,3 +600,25 @@ it("retains confirmed business recovery when an execution ends before delivery i
   expect(records.get(task_id)).toMatchObject({ status: "failed", judgment: { effect: "recovered", delivery: "unconfirmed" },
     pending_results: [expect.objectContaining({ status: "failed", effect: "recovered", intervention_status: "unknown" })] });
 });
+
+it("does not scan when maintenance ownership has already been lost", async () => {
+  const { service, deps } = setup();
+  const scan = vi.spyOn(deps.tasks, "listForMaintenance");
+  await expect(service.maintenance(() => { throw new Error("lease lost"); })).rejects.toThrow("lease lost");
+  expect(scan).not.toHaveBeenCalled();
+});
+it("stops after an in-flight scan loses ownership, before touching any returned task", async () => {
+  const { service, deps, records, agent } = setup();
+  const { task_id } = await service.create(request, actor);
+  await flush();
+  agent.start.mockClear();
+  let lost = false;
+  const scan = vi.spyOn(deps.tasks, "listForMaintenance").mockImplementation(async () => {
+    lost = true;
+    return [structuredClone(records.get(task_id)!)];
+  });
+  await expect(service.maintenance(() => { if (lost) throw new Error("lease lost"); })).rejects.toThrow("lease lost");
+  expect(scan).toHaveBeenCalledOnce();
+  expect(agent.start).not.toHaveBeenCalled();
+  expect(records.get(task_id)).toMatchObject({ status: "running", phase: "assess", version: 1 });
+});
