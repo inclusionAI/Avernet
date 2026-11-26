@@ -1,6 +1,6 @@
 # Workflow execution record HTTP contract
 
-Owner: `@avernet/workflow`. Contract version: 1 (additive Service API).
+Owner: `@avernet/workflow`. Contract version: 2 (authenticated Service API with executed-workflow YAML).
 
 `GET /api/runs/:flowId/execution-record` lets clients query the stored
 execution record in the same envelope as workflow HTTP callbacks. The path is
@@ -15,12 +15,14 @@ read Service API, not the engine's outgoing HTTP callback Plugin API.
 - Optional query parameter `includeNodeOutput` accepts only `true` or `false`.
   The default is `false`, matching HTTP callback configuration. Repeated,
   structured, empty, or other values return HTTP 400.
-- Use the host's existing authentication/session mechanism. Passing
-  `botOwnerId`, `botId`, or another query filter does not supply an identity or
-  filter the selected run. This endpoint does not require a workflow/run view grant.
+- Send `Authorization: Bearer <token>` using the dedicated 64-character lowercase
+  hexadecimal service token. The scheme is case-insensitive; token bytes are not
+  normalized. Login cookies, identity headers, administrator status and query
+  parameters do not replace this credential. A workflow/run view grant is not required.
 
 ```sh
-curl "$CLAWWEB_URL/api/runs/$FLOW_ID/execution-record?includeNodeOutput=true"
+curl -H "Authorization: Bearer $EXECUTION_RECORD_TOKEN" \
+  "$CLAWWEB_URL/api/runs/$FLOW_ID/execution-record?includeNodeOutput=true"
 ```
 
 ## Successful response
@@ -32,6 +34,17 @@ HTTP 200, `Content-Type: application/json`, `Cache-Control: no-store`.
   "workflow_id": "review-pipeline",
   "flow_id": "flow-example",
   "status": "succeeded",
+  "workflow_yaml": "id: review-pipeline\nnodes: []\n",
+  "workflow_snapshot": {
+    "status": "resolved",
+    "snapshot": {
+      "kind": "deployment",
+      "workflowId": "review-pipeline",
+      "workflowVersion": 1,
+      "deployNumber": 7,
+      "configDigest": "b03d646b3352ccb661e011c28e25ca90c35856128556e123ca56070c49644220"
+    }
+  },
   "ext_info": {
     "flow_runs": {
       "id": 1,
@@ -105,6 +118,50 @@ columns such as `state_json`, `resolved_prompt`, and `version` are not exposed.
 For security, `flow_runs.credentials_json` is **always null** and the stored
 credential column is never read by this endpoint.
 
+## Executed workflow YAML
+
+`workflow_yaml` is the YAML representation of the configuration used by this
+execution instance. `workflow_snapshot` identifies its provenance using Shared's
+`WorkflowSnapshotBinding`; the callback-compatible `ext_info` allowlist is unchanged.
+
+- Deployment runs use the selected run's `workflow_version` and
+  `workflow_deploy_number`, requiring an unambiguous matching deployment-history
+  entry. An active/latest deployment or mutable `workflow_specs` is never a fallback.
+- Saved/remote runs (`workflow_version = -1`) use the same selected run's captured
+  `state_json.workflowSnapshot` and verified `workflowPin` identity/commit, without
+  Git or network access. The state itself is not included in the response.
+- Existing captured snapshot associations, when available, must match the run's
+  identity and configuration digest. Older managed schemas without the optional
+  association column remain supported; ordinary database failures still propagate.
+- A valid historical content-only YAML wrapper preserves its YAML text. Structured
+  JSON snapshots are serialized as equivalent YAML; original formatting, comments
+  and byte identity cannot be recovered from JSON-only storage.
+- Saved-run YAML recovery checks the complete `state_json` against an 8 MiB
+  budget and the optional `workflow_snapshot_json` association against a 64 KiB
+  budget before parsing either. Oversized state returns `SNAPSHOT_MISSING`; an
+  oversized association returns `IDENTITY_MISMATCH`. These are YAML-recovery
+  budgets, not limits on the complete callback-compatible execution record.
+- Workflow document input/output is limited to 1 MiB. Documents are validated as
+  JSON-compatible YAML 1.2 with at most 100,000 visited AST nodes and path depth 100;
+  duplicate keys, multiple documents, aliases/anchors, explicit tags, non-string
+  mapping keys, non-finite numbers, negative zero and unsafe integers are rejected.
+  Decimal fractions retain JavaScript `number` precision, not arbitrary source-text
+  decimal precision. For saved state, the AST budget and numeric checks apply to
+  identity/pin/snapshot subtrees, not unrelated execution fields. Unsupported
+  historical documents are reported as unavailable.
+- Historical data without a reliable association returns `workflow_yaml: null`
+  together with `workflow_snapshot: { status: "unresolved", reason: ... }`.
+  Reasons are `LEGACY_MISSING`, `SNAPSHOT_MISSING`, or `IDENTITY_MISMATCH`. Do not
+  silently substitute the current workflow or return a fabricated version.
+- An infrastructure/database failure is an HTTP 500, not a successful historical
+  unavailability result. YAML resolution happens only after authentication and
+  structural payload guards.
+
+The YAML is the complete captured workflow configuration and may contain inline
+secrets or business data. The service token therefore authorizes more than public
+workflow topology; it is not safe for general browser sharing. This endpoint does
+not promise payload-wide secret redaction.
+
 ## Snapshot and callback compatibility
 
 - This endpoint reads the current persisted record; it does not replay a
@@ -127,18 +184,53 @@ credential column is never read by this endpoint.
 
 ## Access and errors
 
-When the host supplies a workflow permission repository or a run-subworkflows
-reader, an identity is still required unless the host has already authorized the
-caller as an administrator. The effective reader includes the legacy composition
-that passes it in the `facadeRepo` argument. Request validation and flow ID trimming
-happen before any database reads.
+Every mount requires the dedicated service token, including isolated mounts and
+administrator requests. A valid token authenticates this endpoint without needing
+an additional user cookie/header or a workflow view grant. Request validation and
+flow ID trimming happen before database reads; token verification completes before
+flow, node or workflow-snapshot payloads are read.
 
-**This endpoint does not check workflow view grants or Bot/owner run scope.** An
-identified caller can query an ordinary run by `flowId` even without a view grant,
-with a different Bot/owner, or when the run has no origin Bot. It does not call
-`resolveRunViewScope` or the authorization-enforcing `inspectRun` reader method.
-This is a deliberate endpoint-specific access relaxation; run lists, detail,
-node and subworkflow APIs retain their existing authorization.
+### Token configuration
+
+Store exactly one enabled row in **Workflow's `cm_app_config`**, not Clawevolve's
+`ce_app_config`:
+
+- `config_key`: `api_token`
+- `enabled`: `1`
+- `config_yaml`:
+
+```yaml
+execution_record_sha256: "<SHA-256 digest of the original token: 64 hex characters>"
+```
+
+The token is generated from 32 cryptographically random bytes encoded as lowercase
+hexadecimal. Only its SHA-256 digest is stored in this configuration; the caller
+keeps the original token. The configuration must be a mapping with precisely the
+one expected digest field. Missing/disabled/malformed configuration, a missing
+configuration reader, or a configuration database read failure returns a fixed
+HTTP 503. Disabling/deleting the row disables access, not authentication.
+
+The reader loads the `api_token` row on each request using the existing parameterized
+`AppConfigRepository.findByKey` query. Subsequent requests observe rotation or
+revocation without a process restart. The received token is hashed as UTF-8 and
+compared to the stored 32-byte digest using `crypto.timingSafeEqual`. Duplicate or
+malformed Authorization headers and missing/incorrect credentials return a fixed
+HTTP 401. The digest itself is not an accepted bearer credential.
+
+Hosts must pass Workflow's configuration repository through
+`createRunsRouter(..., { executionRecordConfigRepo: new AppConfigRepository(db) })`;
+the public composition does so. Existing external hosts that omit this dependency
+fail closed until updated. Do not introduce an environment-token or identity-header
+fallback. Protect the configuration management API with a verified administrator
+principal: an unauthorized configuration writer could install their own digest.
+Use HTTPS, retain deployment-level rate limits, keep tokens out of URLs and logs,
+and use separate credentials for separate environments.
+
+**This endpoint does not check workflow view grants or Bot/owner run scope.** A
+valid service credential can query ordinary runs across workflows and owners.
+It does not call `resolveRunViewScope` or the authorization-enforcing `inspectRun`
+reader method. This dedicated credential is not accepted as authentication by
+other run list/detail/node/subworkflow or write APIs, whose ACLs remain unchanged.
 
 On reader-enabled mounts, the endpoint still rejects **fanout parent and sensitive
 fanout child payloads with a fixed HTTP 403**, including for administrators. It
@@ -156,22 +248,17 @@ trimmed requested flow ID, and a state snapshot's embedded `flowId`, if present,
 must match the selected run. A mismatch returns a fixed HTTP 409 before reading
 node payloads. Flow and node reads are not transactional.
 
-Caller-supplied query filters do not override these rules. Hosts remain
-responsible for verifying request identities before the router; the shared actor
-resolver extracts an identity but does not verify a session. Neither a permission
-repository nor a reader is required for isolated mounts, which retain their
-existing unrestricted mode. Mounting this endpoint therefore requires a trusted
-host authentication boundary; knowing a flow ID plus a host-accepted identity is
-sufficient for ordinary records, not a per-workflow authorization grant.
+Caller-supplied query filters do not override these rules. No login, administrator,
+loopback, development or legacy-mount exception bypasses token verification.
 
 | HTTP status | Meaning |
 | --- | --- |
 | 400 | Blank flow ID or invalid `includeNodeOutput` |
-| 401 | Identity required on a permission- or reader-enabled mount |
+| 401 | Missing, malformed, duplicate or incorrect Bearer credential |
 | 403 | Reader-enabled mount identifies a fanout parent or sensitive child snapshot |
 | 404 | No stored run with this `flowId` |
 | 409 | Selected or embedded flow identity differs from the requested flow; retry |
-| 503 | Required database repositories are not configured |
+| 503 | Required repositories or enabled/valid token configuration unavailable |
 | 500 | Database read, malformed classification state or other internal failure; no SQL/error details returned |
 
 Errors keep the runs API's `{ "error": "...", "message": "..." }` shape.
@@ -180,7 +267,8 @@ propagate as failures, never as a successful empty node list or a false not-foun
 response. Reader/permission service outages do not affect this endpoint because
 it does not invoke either service.
 
-Every 5xx failure emits fixed privacy-safe ERROR metadata and places a diagnostic
+Token/configuration failures never return or log the supplied token, stored digest,
+configuration YAML or caught database/parser errors. Every 5xx failure emits fixed privacy-safe ERROR metadata and places a diagnostic
 in `res.locals.taskGuardApiDiagnostic` using `captureSensitiveApiError`. Its
 stack is explicitly an **observation**, not the caught exception stack. The
 caught error's message, stack, objects and extension properties are never
@@ -189,25 +277,22 @@ logged; they can contain SQL, credentials or raw workflow payloads. Expected
 
 ## Propagation and validation
 
-This is an additive route on the existing `createRunsRouter` mount. The
-existing run list, detail, node routes, outgoing callback implementation, and
-storage schema are unchanged. Consumers opt in by calling this endpoint;
-there is no deployment configuration change, schema migration, or new
-cross-package runtime dependency. Removing this route is the rollback path.
+The response adds `workflow_yaml` and `workflow_snapshot` without changing the
+callback-compatible `ext_info` fields. Requiring a service token is a breaking
+access-contract change: configure the enabled digest row, wire the configuration
+repository in every host, and update callers to send the original Bearer token
+before deploying this route version. There is no schema migration, credential
+seed, environment fallback or new runtime dependency. No production token/digest
+belongs in repository source, fixtures or documentation.
 
-`server/routes/__tests__/run-execution-record.test.ts` covers the HTTP contract
-with Express and an in-memory SQLite database, including output opt-in,
-multiple attempts, large records, identity requirements, grant-independent reads,
-and database failures.
-`server/services/__tests__/execution-record-service.test.ts` independently pins
-the transport-free projection, output opt-in, credential redaction, and error
-propagation behavior.
+The existing run list, detail, node routes and outgoing callbacks retain their
+contracts. Rollback must not accidentally re-expose this sensitive endpoint;
+disabling/removing the route is safer than reverting to an unguarded mount.
 
-`server/routes/__tests__/run-execution-record-authorization.test.ts` exercises
-reader-only, reader-plus-permission-repository, and legacy reader compositions
-using the actual reader service, permission resolver and migrated SQLite schema.
-It covers ordinary reads without workflow/run grants, preserved identity checks,
-state-based fanout denial including administrators, snapshot identity conflicts,
-malformed state, and privacy-safe console/HTTP logging diagnostics. Regression
-checks ensure other run read endpoints still enforce the real reader's scope.
-Existing run-subworkflows service suites remain the reader contract baseline.
+Verification belongs to the execution-record route, token and workflow snapshot
+suites, the transport-free projection suite, and the actual public-host composition
+suite `server/__tests__/public-execution-record.test.ts`. These cover Token-only
+access, administrator bypass prevention, `cm_app_config` selection and dynamic
+revocation, preserved fanout guards, exact historical YAML, null/unresolved legacy
+data, error privacy, and unchanged authorization on other read endpoints. The
+existing run-subworkflows service suites remain the reader contract baseline.

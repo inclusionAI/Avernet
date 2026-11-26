@@ -2,6 +2,7 @@ import type {
   ExecutionRecord,
   ExecutionRecordFlowRun,
   ExecutionRecordNodeExecution,
+  ExecutionRecordWorkflow,
 } from "../../shared/execution-record.js";
 import type { ExecutionRecordSnapshot } from "../repositories/flow-run-repository.js";
 import { readFanoutMap } from "./fanout-state-reader.js";
@@ -22,6 +23,7 @@ export async function readExecutionRecord(
   run: ExecutionRecordFlowRun,
   nodeExecRepo: Pick<NodeExecutionRepository, "findExecutionRecordsByFlowIdStrict">,
   includeNodeOutput = false,
+  workflow: ExecutionRecordWorkflow = { workflow_yaml: null, workflow_snapshot: { status: "unresolved", reason: "LEGACY_MISSING" } },
 ): Promise<ExecutionRecord> {
   const rows = await nodeExecRepo.findExecutionRecordsByFlowIdStrict(run.flow_id, includeNodeOutput);
   // Explicit projections prevent future repository columns from expanding this contract.
@@ -83,6 +85,8 @@ export async function readExecutionRecord(
     workflow_id: run.workflow_id,
     flow_id: run.flow_id,
     status: run.status,
+    workflow_yaml: workflow.workflow_yaml,
+    workflow_snapshot: workflow.workflow_snapshot,
     ext_info: { flow_runs: flowRun, node_executions: nodes },
   };
 }

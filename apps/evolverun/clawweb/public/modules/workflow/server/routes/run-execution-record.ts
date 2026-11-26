@@ -1,6 +1,7 @@
 import type { Request, Response, Router } from "express";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
-import { resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access";
+import type { AppConfigRepository } from "../repositories/app-config-repository.js";
+import { verifyExecutionRecordToken } from "../services/execution-record-token-service.js";
 import type { FlowRunRepository } from "../repositories/flow-run-repository.js";
 import type { NodeExecutionRepository } from "../repositories/node-execution-repository.js";
 import { isFanoutExecutionRecord, readExecutionRecord } from "../services/execution-record-service.js";
@@ -32,7 +33,7 @@ export function registerRunExecutionRecord(
   router: Router,
   flowRunRepo: FlowRunRepository | null,
   nodeExecRepo: NodeExecutionRepository | null,
-  options: { requireIdentity: boolean; restrictFanoutPayloads: boolean },
+  options: { executionRecordConfigRepo?: Pick<AppConfigRepository, "findByKey"> | null; restrictFanoutPayloads: boolean },
 ): void {
   router.get("/:flowId/execution-record", asyncHandler(async (req, res) => {
     res.set("Cache-Control", "no-store");
@@ -43,12 +44,17 @@ export function registerRunExecutionRecord(
         rejectExecutionRecord(res, 400, "Bad Request", !flowId ? "flowId must be nonblank" : "includeNodeOutput must be a single true or false value");
         return;
       }
-      if (!flowRunRepo || !nodeExecRepo) {
-        rejectExecutionRecord(res, 503, "Service Unavailable", "Database not configured");
+      const auth = await verifyExecutionRecordToken(options.executionRecordConfigRepo, req.headers.authorization, req.rawHeaders);
+      if (auth === "unavailable") {
+        rejectExecutionRecord(res, 503, "Service Unavailable", "Execution record authentication unavailable");
         return;
       }
-      if (options.requireIdentity && !req.isAdmin && !resolveWorkflowActorId(req)) {
-        rejectExecutionRecord(res, 401, "Unauthorized", "User identity required");
+      if (auth !== "authenticated") {
+        rejectExecutionRecord(res, 401, "Unauthorized", "Invalid execution record token");
+        return;
+      }
+      if (!flowRunRepo || !nodeExecRepo) {
+        rejectExecutionRecord(res, 503, "Service Unavailable", "Database not configured");
         return;
       }
       const run = await flowRunRepo.findExecutionRecordByFlowIdStrict(flowId);
@@ -65,7 +71,8 @@ export function registerRunExecutionRecord(
         rejectExecutionRecord(res, 403, "Forbidden", "Execution records are unavailable for fanout runs");
         return;
       }
-      res.json(await readExecutionRecord(run, nodeExecRepo, includeNodeOutput));
+      const workflow = await flowRunRepo.readExecutionRecordWorkflow(run);
+      res.json(await readExecutionRecord(run, nodeExecRepo, includeNodeOutput, workflow));
     } catch (error) {
       if (error instanceof FanoutReadError && error.code === "identity_conflict") {
         rejectExecutionRecord(res, 409, "Conflict", "Run identity changed; retry the request");

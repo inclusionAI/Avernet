@@ -13,6 +13,8 @@ import { RunSubworkflowsRepository } from "../../repositories/run-subworkflows-r
 import { RunSubworkflowsService } from "../../services/run-subworkflows-service.js";
 import type { TaskGuardApiDiagnostic } from "../error-log-format.js";
 import { createRunsRouter } from "../runs.js";
+import { AppConfigRepository } from "../../repositories/app-config-repository.js";
+import { executionRecordTokenHeaders, executionRecordUnauthorized, executionRecordLegacyWorkflow, seedExecutionRecordToken } from "./execution-record-token.fixture.js";
 
 const secret = "<PRIVATE_EXECUTION_RECORD_CREDENTIAL>";
 const privatePayload = "<PRIVATE_FANOUT_PAYLOAD>";
@@ -22,12 +24,13 @@ const failed = { error: "Internal Server Error", message: "Failed to load execut
 const mounts = ["reader-only", "reader-and-repo", "legacy-reader"] as const;
 
 // Real readers remain installed for other routes. Execution records must not call them or resolve view ACL.
-// Headers exercise the inherited identity gate, not host verification of a login/session.
-describe("execution record identity and structural payload guards", () => {
+// Identity headers and server admin status cannot substitute for the dedicated service token.
+describe("execution record token identity and structural payload guards", () => {
   const raw = new Database(":memory:");
   const db = new SqliteDatabase(raw);
   const flowRepo = new FlowRunRepository(db);
   const nodeRepo = new NodeExecutionRepository(db);
+  const options = { executionRecordConfigRepo: new AppConfigRepository(db) };
   const directory = { listBots: vi.fn(async () => []) };
   const permissions = new BotWorkflowPermissionRepository(db, directory);
   const store = new RunSubworkflowsRepository(db);
@@ -38,6 +41,7 @@ describe("execution record identity and structural payload guards", () => {
 
   beforeAll(async () => {
     await runMigrations(db, "sqlite");
+    seedExecutionRecordToken(raw);
     const app = express();
     app.use((req, res, next) => {
       req.isAdmin = req.header("x-test-admin") === "true";
@@ -45,12 +49,12 @@ describe("execution record identity and structural payload guards", () => {
       next();
     });
     app.use("/reader-only", createRunsRouter(flowRepo, nodeRepo, null, null, null, null,
-      null, null, null, null, reader));
+      null, null, null, null, reader, options));
     app.use("/reader-and-repo", createRunsRouter(flowRepo, nodeRepo, null, null, null, null,
-      permissions, null, null, null, reader));
+      permissions, null, null, null, reader, options));
     // Compatibility composition: the reader occupies the historical facadeRepo argument.
     app.use("/legacy-reader", createRunsRouter(flowRepo, nodeRepo, null, null, null, null,
-      null, null, null, reader));
+      null, null, null, reader, null, options));
     server = app.listen(0, "127.0.0.1");
     await once(server, "listening");
     baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -67,6 +71,7 @@ describe("execution record identity and structural payload guards", () => {
     vi.spyOn(permissions, "resolveRunViewScope");
     vi.spyOn(permissions, "listRunViewScopes");
     vi.spyOn(flowRepo, "findExecutionRecordByFlowIdStrict");
+    vi.spyOn(flowRepo, "readExecutionRecordWorkflow");
     vi.spyOn(nodeRepo, "findExecutionRecordsByFlowIdStrict");
     vi.spyOn(db, "query");
     raw.exec("DELETE FROM node_executions; DELETE FROM flow_runs; DELETE FROM bot_workflow_permissions;");
@@ -87,8 +92,8 @@ describe("execution record identity and structural payload guards", () => {
     await db.close();
   });
 
-  function read(mount: string, suffix = "", headers: Record<string, string> = { "x-user-id": "reader" }, flowId = "record-flow") {
-    return fetch(`${baseUrl}/${mount}/${flowId}/execution-record${suffix}`, { headers });
+  function read(mount: string, suffix = "", headers: Record<string, string> = {}, flowId = "record-flow") {
+    return fetch(`${baseUrl}/${mount}/${flowId}/execution-record${suffix}`, { headers: { ...executionRecordTokenHeaders, ...headers } });
   }
   function expectNoAccessLookups() {
     expect(reader.inspectRun).not.toHaveBeenCalled();
@@ -155,13 +160,13 @@ describe("execution record identity and structural payload guards", () => {
       expectNoNodeReads();
     });
 
-    it.each([{}, { "x-user-id": "   " }])("requires identity regardless of query identity (%j)", async headers => {
-      const response = await read(mount, "?botOwnerId=reader&botId=bot&userId=reader&isAdmin=true", headers);
+    it.each([{}, { "x-user-id": "   " }])("requires a token regardless of query identity (%j)", async headers => {
+      const response = await read(mount, "?botOwnerId=reader&botId=bot&userId=reader&isAdmin=true", { ...headers, authorization: "" });
       expect(response.status).toBe(401);
       expect(response.headers.get("cache-control")).toBe("no-store");
-      expect(await response.json()).toEqual({ error: "Unauthorized", message: "User identity required" });
+      expect(await response.json()).toEqual(executionRecordUnauthorized);
       expect(flowRepo.findExecutionRecordByFlowIdStrict).not.toHaveBeenCalled();
-      expect(db.query).not.toHaveBeenCalled();
+      expect(vi.mocked(db.query).mock.calls.every(([sql]) => /FROM cm_app_config\b/.test(sql))).toBe(true);
       expectNoNodeReads();
     });
 
@@ -207,7 +212,8 @@ describe("execution record identity and structural payload guards", () => {
       const text = await response.text();
       expect(text).not.toContain(secret);
       const body = JSON.parse(text);
-      expect(Object.keys(body).sort()).toEqual(["ext_info", "flow_id", "status", "workflow_id"]);
+      expect(Object.keys(body).sort()).toEqual(["ext_info", "flow_id", "status", "workflow_id", "workflow_snapshot", "workflow_yaml"]);
+      expect(body).toMatchObject(executionRecordLegacyWorkflow);
       expect(body).toMatchObject({ flow_id: "record-flow", workflow_id: "record-workflow", status: "running",
         ext_info: { flow_runs: { credentials_json: null, params_json: " [1] ", input_json: "invalid {",
           result_json: "null", total_duration_ms: 2000000 }, node_executions: [{ input_json: "node-input" }] } });
@@ -218,9 +224,10 @@ describe("execution record identity and structural payload guards", () => {
       expect(nodeRepo.findExecutionRecordsByFlowIdStrict).toHaveBeenCalledExactlyOnceWith("record-flow", suffix.endsWith("=true"));
     });
 
-    it("preserves the server-authorized administrator exception to the actor gate without using the reader", async () => {
-      expect((await read(mount, "", { "x-test-admin": "true" })).status).toBe(200);
-      expectOneSnapshot();
+    it("does not let server-authorized administrators bypass the token gate", async () => {
+      expect((await read(mount, "", { "x-test-admin": "true", authorization: "" })).status).toBe(401);
+      expect(flowRepo.findExecutionRecordByFlowIdStrict).not.toHaveBeenCalled();
+      expectNoNodeReads();
     });
 
     it.each(["parent", "child"] as const)("denies real fanout %s payloads independently of caller and grants, including admins", async kind => {
@@ -236,6 +243,7 @@ describe("execution record identity and structural payload guards", () => {
         expect(text).not.toMatch(/PRIVATE_/);
       }
       expect(flowRepo.findExecutionRecordByFlowIdStrict).toHaveBeenCalledTimes(identities.length);
+      expect(flowRepo.readExecutionRecordWorkflow).not.toHaveBeenCalled();
       expectNoNodeReads();
     });
 
@@ -316,18 +324,19 @@ describe("execution record identity and structural payload guards", () => {
       else expect((await response.json()).ext_info.flow_runs).not.toHaveProperty("state_json");
     });
 
-    it.each(["flow", "nodes"] as const)("records only safe observation diagnostics on a %s read failure", async phase => {
+    it.each(["flow", "workflow", "nodes"] as const)("records only safe observation diagnostics on a %s read failure", async phase => {
       const error = Object.assign(new Error(`SELECT credentials_json FROM flow_runs ${secret}`), {
         stack: `original-private-stack ${secret}`, config: { headers: { Authorization: secret } },
       });
       if (phase === "flow") vi.mocked(flowRepo.findExecutionRecordByFlowIdStrict).mockRejectedValueOnce(error);
+      else if (phase === "workflow") vi.mocked(flowRepo.readExecutionRecordWorkflow).mockRejectedValueOnce(error);
       else vi.mocked(nodeRepo.findExecutionRecordsByFlowIdStrict).mockRejectedValueOnce(error);
       const response = await read(mount);
       expect(response.status).toBe(500);
       expect(await response.json()).toEqual(failed);
       expectSafeDiagnostic();
       expectNoAccessLookups();
-      if (phase === "flow") expectNoNodeReads();
+      if (phase !== "nodes") expectNoNodeReads();
     });
 
     it("does not inspect message, stack, coercion or extension properties on an unexpected throw", async () => {
