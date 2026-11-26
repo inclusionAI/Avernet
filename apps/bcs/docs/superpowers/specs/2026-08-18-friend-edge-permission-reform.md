@@ -3651,11 +3651,24 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - 失败方必须得到真实 native NotCommitted/Conflict，且只尝试一次事务；检查 12 张相关表的完整 scoped durable rows 与获胜提交后的快照逐行一致，包含实体/metadata 版本、pending、原 receipt、audit JSON、facts/authority/scope，而非仅计数。显式释放容量后，未成功 key 以原 payload 再提交成功；没有测试侧自动重试掩盖失败。
 - 旧批准 key 在新批准事务暂停期间只能回放 revoked current state、不能调用；新批准提交后仍保留旧 original grant/action，current 引用新版本。相同 key 两个预构建事务、相同 key 不同 payload，以及实际 COMMIT 已完成但首个调用确认尚未返回时第二 worker 的同 key恢复均单独验证，最多一次批准变更。
 - 六类 command（grant/request/approve/reject/cancel/revoke）逐一执行真正的 audit SQL 失败并由 native plugin 确认 rollback，完整 durable rows 恢复、key 未消耗；另逐一在实际提交成功后注入确认丢失，只返回 CommitUnknown，跨 worker receipt 恢复不执行第二次 mutation。并发 revoke 在原 grant 确认丢失窗口提交后，恢复仍返回 original approved/current revoked，不复活权限。确认丢失是测试 transport 注入，不冒称真实网络故障或 OceanBase 证明。
-- 本增补仅增加 consumer/SQL 测试及远端 native selector，没有修改生产策略、迁移或任何覆盖率阈值；不因此把原 5.4/5.2/3.2 的当前 SHA 原生 MySQL 验收、其他 writer/host fencing 或 Singlebox E2E 勾选完成。后续当前 SHA 的完整测试分母与远端结果记录在 PR。
+- 本增补仅增加 consumer/SQL 测试及远端 native selector，没有修改生产策略、迁移或任何覆盖率阈值；该增补提交时仍不勾选缺少原生执行结果的 5.4；后续已取得 55b3876818 的真实 MySQL 31 场景证明（见下）。5.2/3.2 的其他 writer/host fencing、完整消费者与 Singlebox E2E 不据此完成，后续当前 SHA checks 仍单独记录在 PR。
+
+### 后续实现增补：显式宿主装配入口与关闭态 bootstrap
+
+- `BcsServerExtensions.agent_invoke` 增加 non-serde `AgentInvokeRegistration`，仅供嵌入宿主通过真实 SQL composition root 注入 scope、exact tenant/App→治理 principal 映射、有限 degree/pending/lease/timeout。不是配置/header 开关，也不把一组 bool 或 AgentCode/App 类型当宿主能力/资格证明。实际 process env 必须一致，stored namespace/limits/TTL 冲突导致启动失败。
+- 同一个 SQL store/policy/command/query application 组装管理 API、exact Bot resolver 和 operation-aware interceptor；在 interceptor chain 首次共享前追加 provider，保留普通安全拦截器和 instrumentation，再将同一 metrics-wrapped Direct A2A run facade 挂到 invocation HTTP application。普通 inline、queue pickup 和 final before_send 继续走既有统一 hook，不另写授权实现或 legacy fallback。
+- 默认 extension None 和 memory constructors 不挂能力、不读写 AgentInvoke scope、不加 provider；显式注册最多初始化 CLOSED scope，不发布资格/治理、不调用 set_enabled，不重置已有 durable gates。全链路 producer/SDK/reader capability 和激活仍由宿主独立提供并验证，不能以注册结构体本身证明它们完成。首次 scope 初始化 3 reads + 1 insert，reopen 2 reads，未注册 0 statements；运行热路径 DB 成本不变。
+- 真实 SQL constructor/最终 ApiState 和真实 Gateway HS256 签名的两个 V1 Router 前缀验证默认未挂载、显式挂载但 CLOSED 都拒绝调用；无资格/grant/receipt/audit 产生。独立 SQLite 装配测试验证零 schema/零 SQL 的 None、非法注册/共享过早的 chain、scope/limits 冲突、显式 gate 保留、真实 grant/revoke 立即被注册 hook 观察。它们是进程内 bootstrap/Router 回归，不是真实 Singlebox、外部 inventory 或宿主能力证明。
+- 原 4.5 尚不整体勾选：装配入口已补，但 public-local synthetic producer/production host inventory、reader/SDK/capability、实际 E2E 和验收记录仍有未完成工作；不以关闭态默认构造代替这些交付，也不替 owner 做生产启用或审批。
+
+### 争用矩阵的原生 MySQL 验收记录（限定已验证提交）
+
+- 2026-11-26，提交 `55b387681822a79c0a2be5e2bb4e29a03d3723e3` 的 BCS run `45723053506` / job `139586023456` 完成 SUCCESS。真实 disposable MySQL 执行了 indices 0..30 的全部共享场景，日志具有 `agent-invoke-mysql-gate=deterministic-races scenarios=31 native-outcomes=verified`，同一 contract 为 1 passed / 0 failed / 0 ignored；不是本地 ignored 或仅 selector 编译。
+- 原 5.4 所列 SQL/Notify 争用与六类 command 事务结果矩阵据此已有 SQLite 与原生 MySQL 两套执行证明。该 source/test 增量与最新 bootstrap 装配代码分开：新 head 的全部 CI、外部宿主/OceanBase、inventory freshness/多 worker 撤销确认、SDK/Singlebox 和 rollout 仍需各自证明，不能继承该 SHA 的绿灯。
 
 ### 原 27 项研发与验收跟踪（保留完整范围）
 
-将原 change 的 27 项跟踪合并到本 spec，不恢复独立 change 目录。仅在整项有实现与对应证据时勾选，不把 SQL core、静态检查或旧 SHA 的绿灯折算成 HTTP/host/E2E 完成。当前 14/27 项已有实现与对应本地回归证据；剩余项包含未完研发和真实 MySQL、并发、宿主、E2E/发布验收，不是都已转为运维事项。每次提交的具体命令、分母和新 SHA checks 记录在 PR Validation，不能继承前一 SHA 的结论。
+将原 change 的 27 项跟踪合并到本 spec，不恢复独立 change 目录。仅在整项有实现与对应证据时勾选，不把 SQL core、静态检查或旧 SHA 的绿灯折算成 HTTP/host/E2E 完成。当前 15/27 项已有实现与对应回归证据；剩余项包含未完研发和真实 MySQL、并发、宿主、E2E/发布验收，不是都已转为运维事项。每次提交的具体命令、分母和新 SHA checks 记录在 PR Validation，不能继承前一 SHA 的结论。
 
 #### 1. 评审与启用前置
 
@@ -3687,16 +3700,16 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - [x] 4.2 request/grant/approve/reject/cancel/revoke、receipt/state conflict/error 映射已由 application + 真实 SQLite store 实现；资格预读不持写事务锁，unknown commit 恢复无第二次 mutation。HTTP 挂载/真实 MySQL分别归 4.3/3.5。
 - [ ] 4.3 独立 routes/DTO/OpenAPI 与逐端点验证/响应/鉴权已有真实 V1 router 实现；SDK 尚未补齐，整项不勾选，HTTP 默认不启用生产能力。
 - [x] 4.4 统一 operation-aware interceptor hook 已接入真实 Direct A2A inline/queue 与最终 before_send；exact operation/originator/current qualification generation、Provider 上界和旧 friend/public/organization 隔离有真实 SQL→scheduler/transport 及撤权回归。可信外部 ingress 与生产 composition 仍分别归 4.1/4.5，不以内部入口代替。
-- [ ] 4.5 composition roots 注入真实/假身份资格源、validated limits、consumer capability 与默认关闭 writer；当前 stores 未生产挂载，不伪造 host capability。
+- [ ] 4.5 SQL composition root 的显式 extension/validated limits、共享 SQL/interceptor/HTTP 与默认关闭挂载已补；真实/假资格 producer、consumer capability 和宿主验收仍需完成，不伪造 host capability 或启用生产 writer。
 
 #### 5. 分层回归与发布证据
 
 - [x] 5.1 纯类型/shape/policy/identity/state 单元测试，包含旧四 kind、坏输入和 requester/资格恢复不复活；当前 scoped unit run 已覆盖，非 whole-workspace/E2E 声明。
 - [ ] 5.2 完整管理/运行 consumer 与 repo conformance、Memory/SQLite/真实 MySQL 同语义及实际 port 命中；已有共享 lifecycle/facts/snapshot 和 native DB outcome harness，query consumer 已有真实 SQLite，真实 MySQL 与完整其余 consumer 验收仍需补齐。
 - [x] 5.3 每个新 GET/create/request/approve/reject/cancel/revoke/list/degree（及 audit）endpoint 独立 HTTP contract，覆盖 401/403/404/400/409/429/503 与真实 application port hit；真实 SQLite 路由场景和完整 adapter legacy 回归已实现。recording error injection 仅证明 delivery 映射，不代替 5.4/5.5。
-- [ ] 5.4 真实 DB + Notify/barrier 的 approve/cancel、approve/revoke、旧 key/regrant、双向配额/pending、同 key 和六类 command rollback/commit-unknown 已补 31 场景/双独立 SQLite connection；同矩阵已加入远端 MySQL selector，当前 SHA 原生执行结果仍待验证，不以 SQLite 或编译替代。
+- [x] 5.4 真实 DB + Notify/barrier 的 approve/cancel、approve/revoke、旧 key/regrant、双向配额/pending、同 key 和六类 command rollback/commit-unknown 的 31 场景已在双独立 SQLite connection 及提交 55b3876818 的真实 MySQL 执行通过；失败方完整 durable rows 不变、无自动 mutation retry。最新 head CI/宿主/全 E2E 仍分别跟踪，不把该旧 SHA 绿灯当当前 checks。
 - [ ] 5.5 production-domain synthetic Singlebox HTTP→application→DB→A2A fake-target E2E 与 changed-line gate；不以单测调用 domain 方法冒充 E2E。
 - [ ] 5.6 完整受影响 architecture/boundary/module/HTTP/legacy/authority 与扩展 gates；已通过限定范围检查不代表全架构 baseline 绿灯。
 - [ ] 5.7 reader/SDK/runtime 接收兼容、迁移后 writer 启用、关闭/回滚/保留历史演练，以及 current-SHA CI 和 host 集成记录；未获部署授权不操作生产。
 
-完成条目：1.4、2.1、2.2、2.3、2.4、2.5、3.1、3.3、3.4、4.1、4.2、4.4、5.1、5.3。其余原条目均按完整验收范围保留，不重新拆小来增加完成数量。
+完成条目：1.4、2.1、2.2、2.3、2.4、2.5、3.1、3.3、3.4、4.1、4.2、4.4、5.1、5.3、5.4。其余原条目均按完整验收范围保留，不重新拆小来增加完成数量。

@@ -384,7 +384,11 @@ impl BcsServer {
                 frontend_run_channels.clone(),
             ));
         let frontend_delivery = maybe_wrap_frontend_delivery(&config, raw_frontend_delivery);
-        let interceptors = create_interceptor_chain(&config)?;
+        let mut interceptors = create_interceptor_chain(&config)?;
+        let agent_invoke = crate::agent_invoke_wiring::AgentInvokeWiring::select(
+            extensions.agent_invoke.clone(), db_plugin.clone(), db_flavor,
+            &crate::env::resolve_env(), &mut interceptors,
+        ).await?;
         let cutoff_timestamp = config.message_history.cutoff_timestamp;
         let manager_worker_cutoff_timestamp =
             config.message_history.manager_worker_cutoff_timestamp;
@@ -849,6 +853,10 @@ impl BcsServer {
         // Per-actual-source CSRF origins composed by the explicit-chain
         // assembly attach to the SAME ApiState the verifier lives in.
         let openapi_v1 = authentication.apply_origins(openapi_v1);
+        let openapi_v1 = match agent_invoke {
+            Some(wiring) => wiring.mount(openapi_v1, a2a_chat_runs.clone())?,
+            None => openapi_v1,
+        };
         register_channel_lifecycles(&lifecycle, &channel_runtime.lifecycles);
         let provider_bot_events_impl = Arc::new(
             ProviderBotEvents::new(

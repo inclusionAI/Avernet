@@ -183,6 +183,8 @@ impl std::fmt::Debug for BcsServerState {
 /// of the public plugin contracts without adding private SDKs to this crate.
 #[derive(Clone, Default)]
 pub struct BcsServerExtensions {
+    /// Explicit AgentInvoke assembly only; no facts/capability proof or automatic activation.
+    pub agent_invoke: Option<crate::agent_invoke_wiring::AgentInvokeRegistration>,
     /// Shared with separately assembled adapters; public bootstrap owns its sole worker.
     pub card_changes: Option<Arc<bcs_fusion::CardChangeQueue>>,
     pub auth_plugin_factories: Vec<AuthPluginFactory>,
@@ -900,3 +902,7 @@ mod card_change_extension_tests {
         assert!(enabled.card_changes.is_some());
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/agent_invoke_wiring/bootstrap.rs"]
+mod agent_invoke_bootstrap_tests;
