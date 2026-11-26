@@ -154,7 +154,7 @@ it('maps detail-only verified launch/lineage/projection fields with display reda
       run: {
         ...run,
         input_json:
-          '{"message":"token=unsafe-input","command":"/stored","params":{"late":"never-fallback"},"iamToken":"unsafe"}',
+          '{"message":"token=xxxxxxxx","command":"/stored","params":{"late":"never-fallback"},"iamToken":"unsafe"}',
         params_json: '{"target":"original","nested":[{"iamToken":"xxxxxxxx","system_context":{"unsafe":true}}]}',
         parent_flow_id: 'parent',
         root_flow_id: 'root',
