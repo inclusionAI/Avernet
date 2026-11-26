@@ -11,6 +11,7 @@ from agentclaw.community.core.repository.implementations.bot.template_bots impor
     TemplateBotRepository,
 )
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from tests.community.core.bot_management.managed_bot_support import Database, seed
 
@@ -39,13 +40,37 @@ def test_service_publications_do_not_borrow_draft_snapshot_version():
             session.add(BotPublishModel(source_bot_pk=bot_pk, source_bot_id='bot',
                 publish_bot_id='bot', name='Example', owner_id='owner', status=status,
                 env='dev', permission_owner='owner', ext=json.dumps({'binding': binding})))
-    result = TemplateBotRepository(db).query(template_key='coding', offset=0, limit=20)
+    result = TemplateBotRepository(db).query(template_key='coding', offset=0, limit=20, bot_type='service')
     assert result['total'] == 3
     stages = {item['stage']: item for item in result['items']}
     assert stages['draft']['template_version_id'] == 7
     assert stages['prestable']['template_version_id'] is None
     assert stages['online']['template_version_id'] is None
     assert stages['online']['publication_id'] is not None
+
+
+@pytest.mark.parametrize('bot_type,expected_ids', [
+    ('service', ['service']),
+    ('non_service', ['legacy', 'personal', 'unknown']),
+    ('', ['legacy', 'personal', 'service', 'unknown']),
+])
+def test_bot_type_filters_before_count_and_pagination(bot_type, expected_ids):
+    db = Database()
+    seed(db, 'service', bot_type='service')
+    seed(db, 'personal', bot_type='personal')
+    seed(db, 'unknown', bot_type='')
+    seed(db, 'legacy')
+    seed(db, 'other-env', bot_type='service', env='pre')
+    seed(db, 'deleted', bot_type='personal', is_delete=1)
+    with db.orm_session() as session:
+        session.query(BotModel).filter(BotModel.bot_id == 'legacy').update({'bot_type': None})
+    service = ManagedBotService(TemplateBotRepository(db), Mock())
+    result = service.query(template_key='coding', offset=0, limit=20, bot_type=bot_type)
+    assert result['total'] == len(expected_ids)
+    assert [item['bot_id'] for item in result['items']] == expected_ids
+    page = service.query(template_key='coding', offset=1, limit=1, bot_type=bot_type)
+    assert page['total'] == len(expected_ids)
+    assert [item['bot_id'] for item in page['items']] == expected_ids[1:2]
 
 
 def test_snapshot_requires_exact_owner_template_and_environment():

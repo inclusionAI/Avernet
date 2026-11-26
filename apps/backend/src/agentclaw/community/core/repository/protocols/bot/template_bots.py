@@ -11,6 +11,7 @@ class TemplateBotRepositoryProtocol(ABC):
         offset: int,
         limit: int,
         search: str = '',
+        bot_type: str = '',
         stage: str = '',
         outdated_before: int | None = None,
     ) -> dict[str, Any]: ...

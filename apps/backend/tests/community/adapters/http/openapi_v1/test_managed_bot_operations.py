@@ -53,6 +53,25 @@ def headers():
     return {PRINCIPAL_HEADER: mint(user_id=None)}
 
 
+@pytest.mark.parametrize('bot_type', ['', 'service', 'non_service'])
+def test_template_query_forwards_bot_type(operations_client, bot_type):
+    client, service = operations_client
+    response = client.post('/openapi/v1/bots/template-queries', headers=headers(), json={
+        'template_key': 'coding', 'bot_type': bot_type,
+    })
+    assert response.status_code == 200
+    assert service.query.call_args.kwargs['bot_type'] == bot_type
+
+
+def test_template_query_rejects_unknown_bot_type(operations_client):
+    client, service = operations_client
+    response = client.post('/openapi/v1/bots/template-queries', headers=headers(), json={
+        'template_key': 'coding', 'bot_type': 'unknown',
+    })
+    assert response.status_code == 422
+    service.query.assert_not_called()
+
+
 def test_restart_is_200_acceptance_and_forwards_snapshot(operations_client):
     client, service = operations_client
     response = client.post('/openapi/v1/bots/restart-for-others', headers=headers(), json={

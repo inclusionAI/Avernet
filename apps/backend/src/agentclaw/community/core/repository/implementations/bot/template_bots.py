@@ -156,6 +156,7 @@ class TemplateBotRepository(TemplateBotRepositoryProtocol):
         offset: int,
         limit: int,
         search: str = '',
+        bot_type: str = '',
         stage: str = '',
         outdated_before: int | None = None,
     ) -> dict[str, Any]:
@@ -169,6 +170,10 @@ class TemplateBotRepository(TemplateBotRepositoryProtocol):
                 ))
             if stage:
                 filters.append(rows.c.stage == stage)
+            if bot_type == 'service':
+                filters.append(rows.c.bot_type == 'service')
+            elif bot_type == 'non_service':
+                filters.append(or_(rows.c.bot_type != 'service', rows.c.bot_type.is_(None)))
             if outdated_before is not None:
                 filters.append(rows.c.template_version_id < outdated_before)
             total = session.execute(select(func.count()).select_from(rows).where(*filters)).scalar_one()

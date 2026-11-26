@@ -75,6 +75,10 @@ class TemplateBotQueries(BaseModel):
     offset: int = Field(default=0, ge=0, le=1000000, description='Zero-based result offset after filtering.')
     limit: int = Field(default=20, ge=1, le=100, description='Maximum number of stage rows, at most 100.')
     search: str = Field(default='', max_length=256, description='Literal substring of Bot name, Bot ID or Owner.')
+    bot_type: Literal['', 'service', 'non_service'] = Field(
+        default='',
+        description='Empty selects all; non_service includes legacy Bots with no type. Applied before pagination.',
+    )
     stage: Literal['', 'draft', 'prestable', 'online'] = Field(
         default='',
         description='Empty selects all; prestable denotes the verification runtime.',

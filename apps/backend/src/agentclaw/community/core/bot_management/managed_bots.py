@@ -34,6 +34,7 @@ class ManagedBotService(ManagedBotServiceProtocol):
         offset: int,
         limit: int,
         search: str = '',
+        bot_type: str = '',
         stage: str = '',
         outdated_before: int | None = None,
     ) -> dict[str, Any]:
@@ -42,6 +43,7 @@ class ManagedBotService(ManagedBotServiceProtocol):
             offset=offset,
             limit=limit,
             search=search,
+            bot_type=bot_type,
             stage=stage,
             outdated_before=outdated_before,
         )

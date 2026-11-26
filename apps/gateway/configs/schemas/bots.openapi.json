@@ -30947,6 +30947,17 @@
         "additionalProperties": false,
         "description": "Discover Bot identities by creation template without returning credentials.",
         "properties": {
+          "bot_type": {
+            "default": "",
+            "description": "Empty selects all; non_service includes legacy Bots with no type. Applied before pagination.",
+            "enum": [
+              "",
+              "service",
+              "non_service"
+            ],
+            "title": "Bot Type",
+            "type": "string"
+          },
           "limit": {
             "default": 20,
             "description": "Maximum number of stage rows, at most 100.",

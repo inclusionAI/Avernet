@@ -98,7 +98,12 @@ query. It projects readiness and public restart fields without loading complete
 template snapshots, raw Bot configuration or device properties.
 
 Discovery filters before count/pagination in the database and projects only
-display fields. It does not load whole snapshots or probe containers. Platform
+display fields. It does not load whole snapshots or probe containers.
+Bot type is an optional `bot_type` filter: empty or omitted selects all,
+`service` selects service Bots, and `non_service` selects every other type,
+including legacy empty or null values. Service Bots retain their draft and
+published runtime rows; non-service Bots have no publication stage in the UI,
+but keep the `draft` address for status and restart compatibility. Platform
 environment differs from service stage: verification is `prestable`, production
 publication is `online`, and the editable source is `draft`. A publication's
 version is unknown unless that publication recorded its own snapshot version;
