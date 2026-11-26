@@ -1,4 +1,5 @@
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { planAnchor, recoveryEntryAnchor, recoveryJourney } from '@/domain/recovery/journey';
 import { recoveryTime } from '@/domain/recovery/presentation';
 import { object, readableReport, text } from '@/domain/recovery/report';
@@ -124,9 +125,10 @@ export function RecoveryHistory({ task, children }: { task: RecoveryTask; childr
         <ol className="m-0 flex list-none overflow-x-auto p-0 pb-2">
           {nodes.map(({ id, label, state, done: finished }, index) => (
             <li key={id} className="tc-recovery-progress-node relative min-w-[105px] flex-1 px-2 text-center">
-              <button
+              <Button
                 type="button"
-                className="relative z-10 mx-auto flex w-full min-w-0 flex-col items-center gap-1"
+                variant="ghost"
+                className="relative z-10 mx-auto flex h-auto w-full min-w-0 flex-col items-center gap-1 border-0 p-0 font-normal hover:bg-transparent"
                 onClick={() => locateRecoverySection(id)}
               >
                 <span
@@ -140,7 +142,7 @@ export function RecoveryHistory({ task, children }: { task: RecoveryTask; childr
                 </span>
                 <span className="text-sm font-medium">{label}</span>
                 <span className="text-xs text-muted-foreground">{state}</span>
-              </button>
+              </Button>
             </li>
           ))}
         </ol>
