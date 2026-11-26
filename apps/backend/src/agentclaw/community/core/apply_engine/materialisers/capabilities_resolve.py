@@ -252,6 +252,7 @@ def resolve_supply(target, snapshot, direct, groups, mcp):
         tuple(final),
         frozenset(final_codes),
         tuple(mcp),
+        frozenset(default_codes),
     )
     # Keep one stable failure per report row; member details remain in the reason.
     combined = {}

@@ -49,11 +49,11 @@ export function useServicePublications(botId?: string, ownerId?: string) {
     advance: (stage: 'prestable' | 'online') =>
       act(
         () => botEditorService.advanceLifecycle(botId!, stage, ownerId),
-        stage === 'prestable' ? '预发发布已提交' : '上线请求已提交',
+        stage === 'prestable' ? '试运行请求已提交' : '正式运行请求已提交',
       ),
     restart: (stage: 'prestable' | 'online') =>
       act(() => botEditorService.restartLifecycle(botId!, stage, ownerId), '重启发布已提交'),
-    cancel: () => act(() => botEditorService.cancelStaging(botId!, ownerId), '预发发布已取消'),
+    cancel: () => act(() => botEditorService.cancelStaging(botId!, ownerId), '已取消试运行'),
     offline: () => act(() => botEditorService.offlineLifecycle(botId!, ownerId), '下线请求已提交'),
     retry: () => act(() => botEditorService.retryLifecycle(botId!, ownerId), '重试请求已提交'),
     upgrade: (publicationId: number) =>

@@ -35,8 +35,7 @@ export interface CollaborationBotView {
   onlineAvailable?: boolean | null;
   templateType?: string;
   templateName?: string;
-  /** Caller 模式标记('caller'):好友 Bot 会话 IAM 换签带 caller_runtime_target 使用
-   * (openspec add-iam-caller-runtime-target);缺失视为非 Caller Bot。 */
+  /** Caller 模式标记('caller'),遗留目录字段:新版目录接口不再下发,前端不再消费;保留仅为类型兼容。 */
   callType?: string;
   detailsResolved?: boolean;
 }

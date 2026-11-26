@@ -617,7 +617,7 @@ class ChannelService:
         device_fs = self._device_fs_dispatcher.dispatch(ctx)
 
         # 3. 加载当前 openclaw.json 作为模版
-        json_config = await JsonConfigFile.load(openclaw_config_path, device_fs)
+        json_config = await JsonConfigFile.load(openclaw_config_path, device_fs, checked=True)
         template_config = json_config.to_dict()
 
         # 4. 查询所有钉钉配置，在内存中过滤 verify 和 online

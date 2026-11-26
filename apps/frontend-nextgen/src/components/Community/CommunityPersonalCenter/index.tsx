@@ -4,29 +4,11 @@ import { Pagination } from '@/components/ui/Pagination';
 import { Segmented } from '@/components/ui/Segmented';
 import type { CommunityAuthor, CommunityTopicOpenTarget, InteractionSummary, PersonalCenterActivityType } from '@/domain/community/types';
 import { usePersonalCenter } from '@/hooks/usePersonalCenter';
-import { ArrowLeft, FileText, Heart, History, MessageSquare, Star, UserRoundPlus } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import { ActivityList } from './ActivityList';
 import { FollowList } from './FollowList';
 import { personalCenterActivityOptions } from './model';
-
-const activityOptions: Array<{
-  value: PersonalCenterActivityType;
-  label: string;
-  icon: ReactNode;
-}> = [
-  ...personalCenterActivityOptions.map((option) => {
-    const icons = {
-      AUTHORED: <FileText className="size-3.5" aria-hidden />,
-      REPLIED: <MessageSquare className="size-3.5" aria-hidden />,
-      FAVORITED: <Star className="size-3.5" aria-hidden />,
-      LIKED: <Heart className="size-3.5" aria-hidden />,
-      FOLLOWED: <UserRoundPlus className="size-3.5" aria-hidden />,
-      VIEWED: <History className="size-3.5" aria-hidden />,
-    } as const;
-    return { ...option, icon: icons[option.value] };
-  }),
-];
+import './PersonalCenter.css';
 
 export function CommunityPersonalCenter({
   onBack,
@@ -38,7 +20,7 @@ export function CommunityPersonalCenter({
   authorFollowLoading,
   authorFollowed,
 }: {
-  onBack: () => void;
+  onBack?: () => void;
   onOpenTopic: (target: CommunityTopicOpenTarget) => void;
   currentUserId?: string;
   getAuthorSummary?: (author: CommunityAuthor) => InteractionSummary | undefined;
@@ -48,6 +30,71 @@ export function CommunityPersonalCenter({
   authorFollowed?: (author: CommunityAuthor) => boolean;
 }) {
   const center = usePersonalCenter();
+
+  const pagination = (
+    <div className="mt-4">
+      <Pagination
+        current={center.page}
+        pageSize={center.pageSize}
+        total={center.activityPage.total}
+        onChange={center.goToPage}
+      />
+    </div>
+  );
+
+  const content = (
+    <>
+      <div className="overflow-x-auto">
+        <Segmented<PersonalCenterActivityType>
+          value={center.activityType}
+          onChange={center.setActivityType}
+          options={personalCenterActivityOptions}
+          aria-label="我的内容"
+          className="community-personal-tabs mt-4 w-fit"
+          activeOptionClassName="text-foreground"
+          inactiveOptionClassName="font-normal text-muted-foreground"
+        />
+      </div>
+
+      <div className="mt-4">
+        {center.activityType === 'FOLLOWED' ? (
+          <FollowList
+            items={center.activityPage.items}
+            pagination={pagination}
+            loading={center.loading}
+            error={center.error}
+            onRetry={center.reload}
+            onUnfollow={center.unfollow}
+            onOpenTopic={onOpenTopic}
+            currentUserId={currentUserId}
+            getAuthorSummary={getAuthorSummary}
+            loadAuthorSummary={loadAuthorSummary}
+            followAuthor={followAuthor}
+            authorFollowLoading={authorFollowLoading}
+            authorFollowed={authorFollowed}
+          />
+        ) : (
+          <ActivityList
+            items={center.activityPage.items}
+            loading={center.loading}
+            error={center.error}
+            onRetry={center.reload}
+            onOpenTopic={onOpenTopic}
+            currentUserId={currentUserId}
+            getAuthorSummary={getAuthorSummary}
+            loadAuthorSummary={loadAuthorSummary}
+            followAuthor={followAuthor}
+            authorFollowLoading={authorFollowLoading}
+            authorFollowed={authorFollowed}
+          />
+        )}
+      </div>
+
+      {center.activityType !== 'FOLLOWED' && pagination}
+    </>
+  );
+  // 在社区「我的」标签内只展示内容，共用外层社区页头。
+  if (!onBack) return content;
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -72,55 +119,7 @@ export function CommunityPersonalCenter({
             </div>
           </header>
 
-          <Segmented<PersonalCenterActivityType>
-            value={center.activityType}
-            onChange={center.setActivityType}
-            options={activityOptions}
-            aria-label="我的内容"
-            className="mt-4 h-9 w-fit p-1"
-          />
-
-          <div className="mt-4">
-            {center.activityType === 'FOLLOWED' ? (
-              <FollowList
-                items={center.activityPage.items}
-                loading={center.loading}
-                error={center.error}
-                onRetry={center.reload}
-                onUnfollow={center.unfollow}
-                onOpenTopic={onOpenTopic}
-                currentUserId={currentUserId}
-                getAuthorSummary={getAuthorSummary}
-                loadAuthorSummary={loadAuthorSummary}
-                followAuthor={followAuthor}
-                authorFollowLoading={authorFollowLoading}
-                authorFollowed={authorFollowed}
-              />
-            ) : (
-              <ActivityList
-                items={center.activityPage.items}
-                loading={center.loading}
-                error={center.error}
-                onRetry={center.reload}
-                onOpenTopic={onOpenTopic}
-                currentUserId={currentUserId}
-                getAuthorSummary={getAuthorSummary}
-                loadAuthorSummary={loadAuthorSummary}
-                followAuthor={followAuthor}
-                authorFollowLoading={authorFollowLoading}
-                authorFollowed={authorFollowed}
-              />
-            )}
-          </div>
-
-          <div className="mt-4">
-            <Pagination
-              current={center.page}
-              pageSize={center.pageSize}
-              total={center.activityPage.total}
-              onChange={center.goToPage}
-            />
-          </div>
+          {content}
         </div>
       </main>
     </div>

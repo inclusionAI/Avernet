@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
-import { defaultCapabilities, extendCapabilities } from '@/capabilities';
+import { defaultCapabilities, extendCapabilities, type CodingBotConversationHostProps } from '@/capabilities';
+import { RetainedCodingBotStage } from '@/pages/Workspace/Chat/RetainedCodingBotStage';
 import { CodingBotStageBoundary } from '@/pages/Workspace/Chat/CodingBotStageBoundary';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { resolveServiceBotPublishSelection } from '@/services/workspace/serviceBotPublishResolver';
@@ -265,4 +266,41 @@ describe('CodingBotStageBoundary', () => {
     );
     expect(screen.getByTestId('injected-coding-stage')).toBeInTheDocument();
   });
+});
+
+it('retains the opted-in stage through suspension and service publish resolution', async () => {
+  const Stage = jest.fn((props: CodingBotConversationHostProps) => <div data-testid="retained-stage" data-active={String(props.workspaceActive)} />);
+  extendCapabilities({ getCodingBotConversationHost: () => ({ status: 'available', value: { Stage, supportsWorkspaceSuspension: true } }) });
+  const view = render(<CodingBotStageBoundary bot={bot} human={human} />);
+  const node = screen.getByTestId('retained-stage');
+  view.rerender(<CodingBotStageBoundary bot={bot} human={human} workspaceActive={false} />);
+  expect(Stage.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ workspaceActive: false }));
+  expect(screen.getByTestId('retained-stage')).toBe(node);
+  let resolve!: (value: any) => void;
+  (resolveServiceBotPublishSelection as jest.Mock).mockImplementation(() => new Promise((done) => { resolve = done; }));
+  view.rerender(<CodingBotStageBoundary bot={{ ...bot, botType: 'service', runtimeStage: 'online', realBotId: 'service-b' }} human={human} />);
+  expect(Stage.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ workspaceActive: false, botId: bot.realBotId }));
+  resolve({ publishId: '2', stage: 'online' });
+  await waitFor(() => expect(Stage.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ workspaceActive: true, botId: 'service-b', publishId: '2' })));
+  expect(screen.getByTestId('retained-stage')).toBe(node);
+  view.unmount();
+});
+
+
+it('retains a single stage across Coding/ordinary/Coding selection and clears it on logout', () => {
+  const Stage = jest.fn((props: CodingBotConversationHostProps) => <div data-testid="single-stage" data-active={String(props.workspaceActive)} />);
+  extendCapabilities({ getCodingBotConversationHost: () => ({ status: 'available', value: { Stage, supportsWorkspaceSuspension: true } }) });
+  const props = { human, onOpenSessionList: () => {} };
+  const view = render(<RetainedCodingBotStage {...props} bot={null} />);
+  expect(screen.queryByTestId('single-stage')).toBeNull();
+  view.rerender(<RetainedCodingBotStage {...props} bot={bot} />);
+  const node = screen.getByTestId('single-stage');
+  view.rerender(<RetainedCodingBotStage {...props} bot={null} />);
+  expect(screen.getByTestId('single-stage')).toBe(node);
+  expect(Stage.mock.calls.at(-1)?.[0].workspaceActive).toBe(false);
+  view.rerender(<RetainedCodingBotStage {...props} bot={{ ...bot, realBotId: 'b' }} />);
+  expect(screen.getByTestId('single-stage')).toBe(node);
+  expect(Stage.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({ workspaceActive: true, botId: 'b' }));
+  view.rerender(<RetainedCodingBotStage {...props} bot={null} human={null} />);
+  expect(screen.queryByTestId('single-stage')).toBeNull();
 });

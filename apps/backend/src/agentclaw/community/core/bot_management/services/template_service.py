@@ -21,16 +21,21 @@ as BotService / BotRepository.
 """
 
 from typing import Optional, Dict, Any, List
+from functools import partial
 
 from injector import inject
 
 from agentclaw.community.core.bot_management.token_vault import CIPHER_PREFIX, TokenVault
 from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.core.repository.protocols.bot import TemplateRepository
+from agentclaw.community.core.bot_management.snapshot_guard import (
+    ManagedSnapshotConflictError, ManagedSnapshotPersistenceError, validate_snapshot_write,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.bot_template_write_extension import (
     NoopTemplateWriteExtension,
     TemplateWriteExtension,
+    TemplateWriteInvalidInput,
 )
 
 logger = get_logger()
@@ -435,6 +440,23 @@ class TemplateService:
                 bot_id, e, exc_info=True,
             )
             raise TemplateServiceError(f"更新模板失败: {str(e)}")
+
+    def update_template_conditionally(self, *, bot_id: str, template_config: Dict[str, Any],
+                                    expected_hash: str, template_type: Optional[str] = None,
+                                    active_engine: Optional[str] = None) -> Dict[str, Any]:
+        try:
+            candidate = self._invoke_write_hook(bot_id, template_config, 'update')
+            self._validate_ext_content(candidate)
+            candidate = self._encrypt_token_field(candidate, template_type, active_engine)
+            guard = partial(validate_snapshot_write, candidate=candidate, expected_hash=expected_hash)
+            saved = self._repository.update_by_bot_id(bot_id, {'ext': candidate}, validator=guard)
+            if saved is None:
+                raise ManagedSnapshotConflictError('managed snapshot no longer exists')
+            return saved
+        except (ManagedSnapshotConflictError, TemplateWriteInvalidInput):
+            raise
+        except Exception:
+            raise ManagedSnapshotPersistenceError('conditional snapshot write failed') from None
 
     def delete_template(
         self,

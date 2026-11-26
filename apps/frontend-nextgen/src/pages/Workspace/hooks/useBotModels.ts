@@ -32,8 +32,10 @@ export function useBotModels(
   activeIdentityId: string | null,
   onSessionModelChange: (botId: string, sessionId: string, model: string) => void,
   autoLoad = true,
+  options: { subjectScoped?: boolean } = {},
 ): UseBotModelsResult {
-  const key = botModelContextKey(bot, activeIdentityId);
+  const subjectScoped = options.subjectScoped !== false;
+  const key = botModelContextKey(bot, activeIdentityId, subjectScoped);
   const context = useRef({ bot, activeIdentityId });
   context.current = { bot, activeIdentityId };
   const [request, setRequest] = useState({ key: '', revision: 0 });
@@ -53,7 +55,7 @@ export function useBotModels(
     }
     let cancelled = false;
     setState((current) => ({ key, models: current.key === key ? current.models : [], loading: true }));
-    loadCachedBotModels(bot, activeIdentityId).then((res) => {
+    loadCachedBotModels(bot, activeIdentityId, subjectScoped).then((res) => {
       if (cancelled) return;
       if (!res.ok) toast.error(res.error.friendlyMessage);
       setState({ key, models: res.ok ? withModelBadges(res.data) : [], loading: false });
@@ -65,14 +67,16 @@ export function useBotModels(
     return () => {
       cancelled = true;
     };
-  }, [key, autoLoad, request]);
+  }, [key, autoLoad, request, subjectScoped]);
 
   const activeModelId = useMemo(() => session?.model ?? models[0]?.modelId ?? null, [models, session?.model]);
 
   const selectModel = useCallback(
     async (modelId: string) => {
       if (!bot || bot.isFriendBot || !session || !activeIdentityId || modelId === session.model) return false;
-      const res = await botSessionService.updateSessionModel(bot, activeIdentityId, session.sessionId, modelId);
+      const res = await botSessionService.updateSessionModel(
+        bot, activeIdentityId, session.sessionId, modelId, subjectScoped,
+      );
       if (!res.ok) {
         toast.error(res.error.friendlyMessage);
         return false;
@@ -81,7 +85,7 @@ export function useBotModels(
       toast.success('模型已切换');
       return true;
     },
-    [activeIdentityId, bot, onSessionModelChange, session],
+    [activeIdentityId, bot, onSessionModelChange, session, subjectScoped],
   );
 
   return { models, activeModelId, isLoadingModels, loadModels, selectModel };

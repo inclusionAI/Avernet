@@ -44,6 +44,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from agentclaw.community.core.config_compose.models import ComposeOccasion, ComposeRequest
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
+from agentclaw.community.core.ports.manifest_delivery import ManifestDeliveryReceipt, ManifestDeliveryStatus
 from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
     enrich_engine_ext,
 )
@@ -177,6 +178,30 @@ class TeclawDeviceSyncService(DeviceSync):
             caller="deliver_manifest_apply", occasion=ComposeOccasion.MANIFEST_APPLY
         )
 
+    def deliver_manifest_apply_with_receipt(self) -> ManifestDeliveryReceipt:
+        """Deliver and return only the non-secret MCP identities actually sent."""
+        delivered: list[frozenset[str]] = []
+
+        def observe(artifact: BotConfigArtifact) -> None:
+            body = artifact.to_dict()
+            mcp = body.get("mcp")
+            servers = mcp.get("servers") if isinstance(mcp, dict) else None
+            if isinstance(servers, list) and all(
+                isinstance(item, dict) and isinstance(item.get("server_code"), str)
+                and item["server_code"] for item in servers
+            ):
+                delivered.append(frozenset(item["server_code"] for item in servers))
+
+        result = self._compose_and_deliver(
+            caller="deliver_manifest_apply", occasion=ComposeOccasion.MANIFEST_APPLY,
+            on_delivered=observe,
+        )
+        if result.get("success") is not True:
+            return ManifestDeliveryReceipt(status=ManifestDeliveryStatus.FAILED, note=str(result.get("message") or "delivery failed"))
+        if not delivered:
+            return ManifestDeliveryReceipt()
+        return ManifestDeliveryReceipt(status=ManifestDeliveryStatus.CONFIRMED, delivered_mcp_codes=delivered[0])
+
     def sync_bot_config(
         self,
         bot_id: str,
@@ -225,6 +250,7 @@ class TeclawDeviceSyncService(DeviceSync):
         effective_mcps: Optional[list[dict[str, Any]]] = None,
         desired_skills: Optional[list[dict[str, Any]]] = None,
         occasion: ComposeOccasion = ComposeOccasion.RUNTIME,
+        on_delivered: Callable[[BotConfigArtifact], None] | None = None,
     ) -> dict[str, Any]:
         """Compose this bot's whole artifact and POST it to its container.
 
@@ -297,6 +323,12 @@ class TeclawDeviceSyncService(DeviceSync):
             if not delivery_attempted:
                 result["dispatched"] = False
             return result
+
+        if on_delivered is not None:
+            try:
+                on_delivered(artifact)
+            except Exception:
+                logger.warning("[TeclawDeviceSyncService] delivery receipt unavailable", exc_info=True)
 
         logger.info(
             "[TeclawDeviceSyncService.%s] delivered artifact for bot=%s",

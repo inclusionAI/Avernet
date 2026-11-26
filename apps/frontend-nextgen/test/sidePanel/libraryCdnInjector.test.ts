@@ -7,7 +7,9 @@ import {
   clearManifestCdnConfig,
   getLibraryCdn,
   getLibraryNames,
+  hasBotCdnBucket,
   hasLibraryCdn,
+  storeBotCdnConfigs,
   storeCdnConfigs,
   storeManifestBundles,
 } from '@/services/bcs/libraryCdnInjector';
@@ -93,6 +95,30 @@ describe('libraryCdnInjector', () => {
     clearCdnConfig();
     const w = window as unknown as { aixLibraryCdnMap: Map<string, string> };
     expect(w.aixLibraryCdnMap.size).toBe(0);
+  });
+
+  test('多 owner 同名 botId 各自入桶互不覆盖', () => {
+    storeBotCdnConfigs('default', '100001', [{ name: 'libA', cdn_url: 'https://cdn/a.js' }]);
+    storeBotCdnConfigs('default', '100002', [{ name: 'libB', cdn_url: 'https://cdn/b.js' }]);
+    expect(getLibraryCdn('libA')).toBe('https://cdn/a.js');
+    expect(getLibraryCdn('libB')).toBe('https://cdn/b.js');
+  });
+
+  test('clearBotCdnConfig 支持复合 botId:ownerId 形态与显式 (botId, ownerId) 参数', () => {
+    storeBotCdnConfigs('default', '100001', [{ name: 'libA', cdn_url: 'https://cdn/a.js' }]);
+    storeBotCdnConfigs('default', '100002', [{ name: 'libB', cdn_url: 'https://cdn/b.js' }]);
+    clearBotCdnConfig('default:100001');
+    expect(hasBotCdnBucket('default', '100001')).toBe(false);
+    expect(hasLibraryCdn('libA')).toBe(false);
+    expect(hasBotCdnBucket('default', '100002')).toBe(true);
+    clearBotCdnConfig('default', '100002');
+    expect(hasBotCdnBucket('default', '100002')).toBe(false);
+  });
+
+  test('空配置写桶作为负缓存（hasBotCdnBucket 命中，会话内不重拉）', () => {
+    storeBotCdnConfigs('default', '100001', []);
+    expect(hasBotCdnBucket('default', '100001')).toBe(true);
+    expect(getLibraryNames()).toEqual([]);
   });
 });
 

@@ -361,8 +361,9 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
             ? { stage: 'online' as const }
             : {}),
           ...(ownerId ? { owner_id: ownerId } : {}),
-          // f_user_id 仅好友 Bot 会话需要；目标 Bot 归登录用户所有（自有 Bot）时不得携带。
-          ...(options?.isOwnedByLoggedInUser ? {} : { f_user_id: context.userId }),
+          // 所有对话入口都以登录 Human 作为会话主体；后端仅在 Caller 模式
+          // 路由独立实例，owner 模式保持原共享运行时。
+          f_user_id: context.userId,
         },
         {},
       );

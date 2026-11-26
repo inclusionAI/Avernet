@@ -370,8 +370,13 @@ async def test_exact_operations_do_not_provision_missing_or_pending_caller(calle
         "delete": lambda: service.delete_owned_chat_session("user1", "bot1", "owner1", "runtime-only"),
         "clear": lambda: service.clear_owned_chat_session_messages("user1", "bot1", "owner1", "runtime-only"),
     }
-    with pytest.raises(BotNotFoundError if status is None else ConnectionError):
-        await calls[operation]()
+    if operation == "connect" and status == "init":
+        result = await calls[operation]()
+        assert result["need_poll"] is True
+        assert result["connection"] is None
+    else:
+        with pytest.raises(BotNotFoundError if status is None else ConnectionError):
+            await calls[operation]()
     service._instance_service.get_caller_connection.assert_not_awaited()
     transport.invoke.assert_not_awaited()
     repo.get_owned_session.assert_not_called()

@@ -4,7 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/Textarea';
 import type { BotIdentityFile } from '@/domain/botAdvancedConfig';
 import { MarkdownRenderer } from '@tc-chat/ui/es/MarkdownRender';
-import { Eye, RefreshCw, Save, SquarePen } from 'lucide-react';
+import { Eye, Loader2, RefreshCw, Save, SquarePen } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 // 设计稿 artboard-049:工具栏为 32×32 白底描边按钮,圆角 10、阴影 0 1px 2px rgba(0,0,0,0.05)。
@@ -24,6 +24,7 @@ export function IdentityConfigPanel({
   const [type, setType] = useState('RULES');
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   // 文档默认以预览态呈现(设计稿稿面即预览),编辑入口收进预览卡片右上角工具栏。
   const [mode, setMode] = useState<'preview' | 'edit'>('preview');
   // 只读访客无论如何都停留在预览态。
@@ -37,6 +38,18 @@ export function IdentityConfigPanel({
   useEffect(() => {
     void loadContent();
   }, [loadContent]);
+  // 保存成功后退回预览态;失败保持编辑态(错误 toast 由 useBotAdvancedConfig.act 统一弹出,这里吞掉避免未处理的 Promise 拒绝)。
+  const handleSave = useCallback(async () => {
+    try {
+      setSaving(true);
+      await onSave(type, content);
+      setMode('preview');
+    } catch {
+      // 保持编辑态,让用户修改后重试。
+    } finally {
+      setSaving(false);
+    }
+  }, [onSave, type, content]);
   return (
     <div className="flex min-h-full flex-col bg-background">
       <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-divider bg-card px-8 lg:px-10">
@@ -111,11 +124,11 @@ export function IdentityConfigPanel({
               />
               <IconButton
                 label="保存"
-                icon={<Save className="size-4" />}
+                icon={saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
                 variant="secondary"
                 className={toolButtonClass}
-                disabled={!editable}
-                onClick={() => void onSave(type, content)}
+                disabled={!editable || saving}
+                onClick={() => void handleSave()}
               />
             </div>
           </div>

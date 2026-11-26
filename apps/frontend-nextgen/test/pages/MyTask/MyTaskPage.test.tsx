@@ -108,7 +108,7 @@ describe('MyTaskPage work identity visibility', () => {
     expect(screen.getByTestId('user-task-tab')).toBeInTheDocument();
     expect(screen.queryByTestId('routine-task-tab')).not.toBeInTheDocument();
     expect(screen.queryByText('定时任务')).not.toBeInTheDocument();
-    expect(mockedUseMyTaskTasks).toHaveBeenLastCalledWith('900003', 1, 10, 'all', true);
+    expect(mockedUseMyTaskTasks).toHaveBeenLastCalledWith('900003', 1, 10, 'all', true, '');
     expect(mockedUseRoutineTasks.mock.calls.at(-1)?.at(-1)).toBe(false);
   });
 
@@ -124,7 +124,9 @@ describe('MyTaskPage work identity visibility', () => {
     expect(routineTab).toHaveAttribute('data-selected-bot-id', 'bot-123');
     expect(routineTab).toHaveAttribute('data-bot-options', JSON.stringify([{ value: 'bot-123', label: '当前 Bot' }]));
     expect(routineTab).toHaveAttribute('data-show-bot-selector', 'false');
-    expect(mockedUseMyTaskTasks.mock.calls.at(-1)?.at(-1)).toBe(false);
+    const userTaskCall = mockedUseMyTaskTasks.mock.calls.at(-1)!;
+    expect(userTaskCall.at(4)).toBe(false);
+    expect(userTaskCall.at(5)).toBe('');
     expect(mockedUseRoutineTasks).toHaveBeenLastCalledWith(
       'bot-123',
       [{ botId: 'bot-123', botName: '当前 Bot' }],

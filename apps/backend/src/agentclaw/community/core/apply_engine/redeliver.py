@@ -20,6 +20,7 @@ from typing import Any, Callable, Optional
 
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.cli_tools.context import CliToolContext
+from agentclaw.community.core.ports.manifest_delivery import ManifestDeliveryReceipt, ManifestDeliveryStatus
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -97,6 +98,27 @@ class TeclawRedeliver:
             )
             return f"artifact could not be redelivered to the running container: {message}"
         return None
+
+    async def deliver_with_receipt(self, ctx: ApplyContext) -> ManifestDeliveryReceipt:
+        """Return evidence only when the device confirms the actual artifact."""
+        try:
+            device = await asyncio.to_thread(self._resolve, ctx.bot_id, ctx.owner_id)
+        except self._not_bound:
+            return ManifestDeliveryReceipt(status=ManifestDeliveryStatus.NOT_BOUND)
+        service = self._dispatch(device)
+        deliver = getattr(service, "deliver_manifest_apply_with_receipt", None)
+        if not callable(deliver):
+            # Older device implementations have no trustworthy MCP receipt.
+            result = await asyncio.to_thread(service.deliver_manifest_apply)
+            if isinstance(result, dict) and result.get("success") is False:
+                return ManifestDeliveryReceipt(status=ManifestDeliveryStatus.FAILED, note=f"artifact could not be redelivered to the running container: {result.get('message') or 'delivery failed'}")
+            return ManifestDeliveryReceipt()
+        result = await asyncio.to_thread(deliver)
+        if not isinstance(result, ManifestDeliveryReceipt):
+            return ManifestDeliveryReceipt()
+        if result.note:
+            return ManifestDeliveryReceipt(status=ManifestDeliveryStatus.FAILED, note=f"artifact could not be redelivered to the running container: {result.note}")
+        return result
 
 
 __all__ = ["DispatchDeviceSync", "ResolveDeviceContext", "TeclawRedeliver"]

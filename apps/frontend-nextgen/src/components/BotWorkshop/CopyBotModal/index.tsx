@@ -70,7 +70,7 @@ const CopyBotModal: React.FC<CopyBotModalProps> = ({
     sourceBot ? initialValues(sourceBot) : initialValues({} as BotDomain),
   );
   const [error, setError] = useState<string>();
-  const excludeTree = useExcludeFileTree(sourceBot?.id, sourceBot?.ownerId);
+  const excludeTree = useExcludeFileTree(sourceBot?.id, sourceBot?.ownerId, sourceBot?.runtime?.engine);
 
   useEffect(() => {
     if (!sourceBot) {
@@ -229,6 +229,7 @@ const CopyBotModal: React.FC<CopyBotModalProps> = ({
               loading={excludeTree.loading}
               error={excludeTree.error}
               checkState={excludeTree.checkState}
+              isProtected={excludeTree.isProtected}
               onExpand={(path) => void excludeTree.expand(path)}
               onCollapse={excludeTree.collapse}
               onToggle={excludeTree.toggle}
