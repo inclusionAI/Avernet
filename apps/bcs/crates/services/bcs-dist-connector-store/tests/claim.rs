@@ -344,13 +344,13 @@ async fn startup_fails_without_a_required_capability() {
 async fn unsupported_document_version_is_refused() {
     let store = store();
     let mut spec = dispatch_spec(&did());
-    spec.schema_version = 2;
+    spec.schema_version = 1;
     WorkerFixture::new(&store).create_spec(spec).await;
     let error = match queue(&store).claim(claim_request(&instance("conn-03"))).await {
         Err(error) => error,
         Ok(_) => panic!("claimed an unreadable document"),
     };
-    assert_eq!(error, StoreError::UnsupportedFormat { format: 2 });
+    assert_eq!(error, StoreError::UnsupportedFormat { format: 1 });
     assert_eq!(stored(&store).await.1, 1);
 }
 

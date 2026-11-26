@@ -3,7 +3,7 @@
 ## Admission boundary
 
 `WorkerTaskAdmission` implements the public `TaskAdmissionCoreService`. Gateway
-supplies authenticated scope and stable caller input, plus a resolved group
+supplies authenticated scope and stable caller input, plus a frozen session
 proposal when creating a session. Worker admission owns creation time, initial
 Submitted task, diagnostic usage and versioned empty neutral display. It first
 reads Inbox's scoped canonical request and compares caller intent. A matching

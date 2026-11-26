@@ -35,6 +35,7 @@ async fn matching_interaction_on_another_queued_task_is_consumed_without_reducin
         &queued,
         "wrong-task-reply",
         InputBody::HumanReply {
+            responder: PrincipalId("p".into()),
             interaction: InteractionId("confirm".into()),
             payload: Payload::Inline(serde_json::json!("wrong task")),
         },
@@ -80,6 +81,7 @@ async fn human_reply_requires_current_interaction_and_replays_once_through_dispa
         &tid,
         "wrong",
         InputBody::HumanReply {
+            responder: PrincipalId("p".into()),
             interaction: InteractionId("stale".into()),
             payload: Payload::Inline(serde_json::json!("ignored")),
         },
@@ -95,6 +97,7 @@ async fn human_reply_requires_current_interaction_and_replays_once_through_dispa
         &tid,
         "reply",
         InputBody::HumanReply {
+            responder: PrincipalId("p".into()),
             interaction: InteractionId("confirm".into()),
             payload: Payload::Inline(serde_json::json!("approved")),
         },
@@ -109,7 +112,8 @@ async fn human_reply_requires_current_interaction_and_replays_once_through_dispa
     ));
     let mut conflict = request;
     conflict.input.body = InputBody::HumanReply {
-        interaction: InteractionId("confirm".into()),
+        responder: PrincipalId("p".into()),
+            interaction: InteractionId("confirm".into()),
         payload: Payload::Inline(serde_json::json!("changed")),
     };
     assert_eq!(
@@ -137,6 +141,7 @@ async fn human_reply_requires_current_interaction_and_replays_once_through_dispa
         &tid,
         "late",
         InputBody::HumanReply {
+            responder: PrincipalId("p".into()),
             interaction: InteractionId("confirm".into()),
             payload: Payload::Inline(serde_json::json!("late")),
         },
@@ -190,6 +195,7 @@ async fn cancel_before_finish_is_independent_and_retires_only_after_dispatch_can
         &tid,
         "reply-after-cancel",
         InputBody::HumanReply {
+            responder: PrincipalId("p".into()),
             interaction: InteractionId("confirm".into()),
             payload: Payload::Inline(serde_json::json!("too late")),
         },

@@ -218,7 +218,7 @@ fn control_result(result: ReceiptResult, new: bool) -> ControlOutcome {
     }
 }
 fn validate_spec(spec: &DispatchSpec, source: &EffectSource) -> Result<(), StoreError> {
-    if spec.schema_version != 1 {
+    if spec.schema_version != DISPATCH_SCHEMA_VERSION {
         return Err(StoreError::UnsupportedFormat {
             format: spec.schema_version,
         });

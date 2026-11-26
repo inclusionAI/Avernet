@@ -33,6 +33,7 @@ pub enum InputBody {
     },
     HumanReply {
         interaction: InteractionId,
+        responder: PrincipalId,
         payload: Payload,
     },
     Cancel {

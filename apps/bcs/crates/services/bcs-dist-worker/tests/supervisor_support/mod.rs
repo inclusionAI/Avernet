@@ -224,27 +224,15 @@ impl Harness {
             panic!("acquired")
         };
         let spec = DispatchSpec {
-            schema_version: 1,
+            schema_version: 2,
             sid: processor_support::spec().sid,
             tid: tid.clone(),
             did: did.clone(),
-            node: NodeId("node".into()),
+            source: CorrelationKey("node".into()),
             attempt: 1,
-            target: AgentBinding {
-                agent: AgentId("agent".into()),
-                binding_version: BindingVersion("v1".into()),
-                credential_ref: CredentialRef("ref".into()),
-            },
+            agent: AgentId("agent".into()),
             pool: PoolId("a2a".into()),
-            capabilities: DownstreamCapabilities {
-                idempotent_start: false,
-                idempotent_input: false,
-                query_by_request: false,
-                query_by_task: true,
-                subscribe: true,
-                resume_events: false,
-                cancel: true,
-            },
+            downstream_context: None,
             request: Payload::Inline(serde_json::json!("request")),
             deadline: TimestampMillis(60000),
         };

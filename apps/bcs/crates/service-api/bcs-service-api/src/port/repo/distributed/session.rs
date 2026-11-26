@@ -54,6 +54,7 @@ pub struct DispatchSequence {
     pub tid: Tid,
     pub holder_epoch: HolderEpoch,
     pub sequence: InputSeq,
+    pub terminal_seen: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -109,6 +110,8 @@ pub struct Checkpoint {
     pub consumed: Option<InboxPos>,
     pub tasks: VecDeque<TaskProgress>,
     pub runner_state: Option<TaskRunnerState>,
+    pub downstream_generation: u64,
+    pub pending_cancel_did: Option<Did>,
     pub dispatch_seq: BTreeMap<Did, DispatchSequence>,
     pub deadlines: Vec<Deadline>,
     /// Retained identities for this Task lifetime, including canceled/fired
@@ -118,6 +121,21 @@ pub struct Checkpoint {
     pub view_drafts: BTreeMap<Tid, TaskContent>,
     pub last_event_id: Option<EventId>,
     pub outbox: Option<CommittedBatch>,
+}
+
+impl Checkpoint {
+    pub const FORMAT_VERSION: u32 = 2;
+
+    pub fn empty() -> Self {
+        Self {
+            format_version: Self::FORMAT_VERSION, commit_seq: CommitSeq(0), consumed: None,
+            tasks: VecDeque::new(), runner_state: None,
+            downstream_generation: 0, pending_cancel_did: None,
+            dispatch_seq: BTreeMap::new(), deadlines: Vec::new(),
+            deadline_history: BTreeMap::new(), view_drafts: BTreeMap::new(),
+            last_event_id: None, outbox: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

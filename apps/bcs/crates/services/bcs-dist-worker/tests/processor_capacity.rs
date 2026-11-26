@@ -17,7 +17,6 @@ fn ports(f: &Fixture) -> ProcessorPorts {
         )),
         runner: Arc::new(FinishingRunner::default()),
         projection: Arc::new(OutputProjectionService),
-        directory: Arc::new(Directory),
         tasks: f.feed.clone(),
         output: f.publisher.clone(),
         blobs: f.blobs.clone(),

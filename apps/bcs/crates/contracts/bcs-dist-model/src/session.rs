@@ -1,24 +1,42 @@
 use crate::ids::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionKind {
-    FsmGroup,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SessionTarget {
+    DirectAgent { agent: AgentId },
+    Group { group: GroupId },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorkflowRef {
-    pub definition_id: String,
+impl SessionTarget {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::DirectAgent { agent } => &agent.0,
+            Self::Group { group } => &group.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CollaborationMode {
+    DirectA2a,
+    StateMachine,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModeConfigEnvelope {
+    pub mode: CollaborationMode,
+    pub mode_version: u32,
     pub revision: String,
     pub digest: Digest,
+    pub payload: Payload,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AgentBinding {
+pub struct AuthorizedAgent {
     pub agent: AgentId,
-    pub binding_version: BindingVersion,
-    pub credential_ref: CredentialRef,
+    pub pool: PoolId,
 }
 
 /// Capabilities are explicit; a transport method's presence is not a guarantee.
@@ -34,14 +52,6 @@ pub struct DownstreamCapabilities {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ParticipantBinding {
-    pub node: NodeId,
-    pub target: AgentBinding,
-    pub pool: PoolId,
-    pub capabilities: DownstreamCapabilities,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionLimits {
     pub max_queued_tasks: u32,
     pub max_task_steps: u32,
@@ -49,17 +59,18 @@ pub struct SessionLimits {
     pub max_inline_bytes: u32,
 }
 
+pub const SESSION_SCHEMA_VERSION: u32 = 2;
+
 /// Frozen at admission. Identifiers do not confer authority.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionSpec {
     pub schema_version: u32,
     pub sid: Sid,
     pub shard: ShardId,
     pub scope: TaskScope,
-    pub kind: SessionKind,
-    pub group: GroupId,
-    pub workflow: WorkflowRef,
-    pub participants: Vec<ParticipantBinding>,
+    pub target: SessionTarget,
+    pub mode_envelope: ModeConfigEnvelope,
+    pub authorized_agents: Vec<AuthorizedAgent>,
     pub limits: SessionLimits,
     pub digest: Digest,
     pub created_at: TimestampMillis,

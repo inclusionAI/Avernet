@@ -1,7 +1,7 @@
 # Distributed domain model
 
 Status: additive contract definitions, not an active runtime or deployed format.
-Crate version: `0.1.0`. This crate depends only on serde and serde_json.
+Crate version: `0.2.0`. This crate depends only on serde and serde_json.
 
 ## Ownership and navigation
 
@@ -66,10 +66,12 @@ No existing records are migrated and no old wire API is replaced. This initial
 format is not yet frozen for deployment. Subsequent persisted changes require an
 explicit version/reader/migration decision before a provider writes them.
 
-The phase-one refinement keeps the unpublished version-1 envelope and requires a
-fresh namespace. Old implicit artifact operations, missing frozen profiles and
-unbound RunnerState are rejected rather than reinterpreted. There is no migration
-for retained prototype records and no change to deployed legacy HTTP/task data.
+SessionSpec and DispatchSpec use schema version 2. The frozen session contains
+a target, a mode configuration and authorized logical agents and pools. Dispatches
+carry a logical agent and a downstream context. Checkpoint format 2 records the
+shared-context generation and pending cancellation. Deploy the distributed roles
+together on a fresh namespace. Inbox entries, task snapshots and display snapshots
+retain their own format versions.
 
 `tests/persistence_shape.rs` checks representative persisted identities/tags.
 The `InboxPos` compile-fail example prevents accidental business ordering of

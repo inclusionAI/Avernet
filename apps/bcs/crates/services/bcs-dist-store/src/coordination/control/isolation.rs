@@ -95,7 +95,7 @@ impl CoordinationStore {
                         }
                     ) && serde_json::from_value::<Checkpoint>(header.raw["checkpoint"].clone())
                         .ok()
-                        .is_some_and(|c| c.format_version == 1);
+                        .is_some_and(|c| c.format_version == Checkpoint::FORMAT_VERSION);
                 let isolation = IsolationRecord {
                     operation_id: isolation_id.clone(),
                     reason: code.clone(),

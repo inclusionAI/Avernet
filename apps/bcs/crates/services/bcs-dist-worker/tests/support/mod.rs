@@ -434,21 +434,22 @@ impl World {
     }
     pub async fn pending(&self, sid: &Sid) {
         let spec = SessionSpec {
-            schema_version: 1,
+            schema_version: 2,
             sid: sid.clone(),
             shard: KeyLayout::shard_of(sid).unwrap(),
             scope: TaskScope {
                 tenant: TenantId("t".into()),
                 principal: PrincipalId("p".into()),
             },
-            kind: SessionKind::FsmGroup,
-            group: GroupId("g".into()),
-            workflow: WorkflowRef {
-                definition_id: "wf".into(),
+            target: SessionTarget::Group { group: GroupId("g".into()) },
+            mode_envelope: ModeConfigEnvelope {
+                mode: CollaborationMode::StateMachine,
+                mode_version: 1,
                 revision: "1".into(),
                 digest: Digest("d".into()),
+                payload: Payload::Inline(serde_json::json!({})),
             },
-            participants: vec![],
+            authorized_agents: vec![],
             limits: SessionLimits {
                 max_queued_tasks: 4,
                 max_task_steps: 32,
@@ -496,10 +497,12 @@ pub fn sid() -> Sid {
 }
 pub fn initial() -> Checkpoint {
     Checkpoint {
-        format_version: 1,
+        format_version: 2,
         commit_seq: CommitSeq(0),
         consumed: None,
         tasks: Default::default(),
+        downstream_generation: 0,
+        pending_cancel_did: None,
         runner_state: None,
         dispatch_seq: Default::default(),
         deadlines: vec![],

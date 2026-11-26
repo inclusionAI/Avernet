@@ -21,6 +21,10 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+bcs-direct-a2a-runner.workspace = true
+bcs-dist-connector.workspace = true
+bcs-a2a-http = { workspace = true, features = ["dist-agent"] }
+bcs-route-security.workspace = true
 bcs-dist-connector-store.workspace = true
 bcs-app-dist-gateway.workspace = true
 bcs-dist-gateway.workspace = true

@@ -49,10 +49,12 @@ async fn conformance_membership_shard_and_checkpoint() {
     .unwrap();
     let claim = port.current(ShardId(42)).await.unwrap().unwrap().claim;
     let checkpoint = Checkpoint {
-        format_version: 1,
+        format_version: 2,
         commit_seq: CommitSeq(0),
         consumed: None,
         tasks: Default::default(),
+        downstream_generation: 0,
+        pending_cancel_did: None,
         runner_state: None,
         dispatch_seq: Default::default(),
         deadlines: vec![],

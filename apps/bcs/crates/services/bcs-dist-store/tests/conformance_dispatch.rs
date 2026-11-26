@@ -76,6 +76,7 @@ async fn conformance_held_input_survives_dequeue() {
     f.board.push_input(input.clone()).await.unwrap();
     // Held is the real private holder implementation returned by claim.
     let mut held = f.claim().await;
+    assert_eq!(held.view().spec, spec(), "the Connector claims the exact dispatch the Worker committed");
     held.begin_send(start()).await.unwrap();
     held.record_acceptance(acceptance(start())).await.unwrap();
     let operation = SendOperation::Input {

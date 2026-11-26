@@ -76,14 +76,14 @@ fn invalid_artifact(code: &'static str) -> ProjectionError {
 }
 
 fn identity(
-    node: &NodeId,
+    source: &CorrelationKey,
     artifact: &ArtifactId,
     limits: &OutputLimits,
 ) -> Result<(), ProjectionError> {
-    if node.0.is_empty() || artifact.0.is_empty() {
+    if source.0.is_empty() || artifact.0.is_empty() {
         return Err(invalid_artifact("empty_artifact_identity"));
     }
-    if encoded_bytes(&node.0, u64::from(limits.max_identity_bytes)).is_none()
+    if encoded_bytes(&source.0, u64::from(limits.max_identity_bytes)).is_none()
         || encoded_bytes(&artifact.0, u64::from(limits.max_identity_bytes)).is_none()
     {
         return Err(quota(OutputBudget::IdentityBytes));
@@ -105,14 +105,14 @@ fn validate_snapshot(
     }
     let mut identities = BTreeSet::new();
     for unit in &snapshot.units {
-        identity(&unit.node, &unit.artifact_id, limits)
+        identity(&unit.source, &unit.artifact_id, limits)
             .map_err(|_| invalid_snapshot("artifact_identity"))?;
         let class = match unit.class {
             OutputClass::Output => 0,
             OutputClass::Tool => 1,
             OutputClass::Thinking => return Err(invalid_snapshot("thinking_in_snapshot")),
         };
-        if !identities.insert((&unit.node.0, &unit.artifact_id.0, class)) {
+        if !identities.insert((&unit.source.0, &unit.artifact_id.0, class)) {
             return Err(invalid_snapshot("duplicate_artifact_identity"));
         }
     }
@@ -137,7 +137,7 @@ fn project(
         charged_bytes: 0,
     };
     for change in changes {
-        identity(&change.node, &change.artifact_id, limits)?;
+        identity(&change.source, &change.artifact_id, limits)?;
         let payload = match &change.update {
             ArtifactUpdate::Upsert { content } => content,
             ArtifactUpdate::AppendText { delta } => delta,
@@ -171,7 +171,7 @@ fn apply(
     limits: &OutputLimits,
 ) -> Result<(), ProjectionError> {
     let index = snapshot.units.iter().position(|unit| {
-        unit.node == change.node
+        unit.source == change.source
             && unit.artifact_id == change.artifact_id
             && unit.class == change.class
     });
@@ -189,7 +189,7 @@ fn apply(
             return Err(quota(OutputBudget::Artifacts));
         }
         let unit = DisplayUnit {
-            node: change.node.clone(),
+            source: change.source.clone(),
             artifact_id: change.artifact_id.clone(),
             class: change.class,
             content: value.clone(),

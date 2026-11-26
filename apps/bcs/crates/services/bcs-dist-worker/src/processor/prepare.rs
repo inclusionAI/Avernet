@@ -50,14 +50,36 @@ impl WorkerProcessor {
                 .map(|c| Some((c, false)))
                 .map_err(store_error);
         }
+        // A terminal event already in this delivery confirms the remote dispatch,
+        // even if its CancelGrace deadline has become due on the same visit.
+        let confirmed_cancel = slot.input.as_ref().and_then(|batch| match batch.entries.as_slice() {
+            [InputEnvelope { body: InputBody::Agent { event }, .. }]
+                if before.pending_cancel_did.as_ref() == Some(&event.did)
+                    && matches!(event.kind, AgentEventKind::Final | AgentEventKind::Error) =>
+            {
+                Some(&event.did)
+            }
+            _ => None,
+        });
         if let Some(deadline) = before
             .deadlines
             .iter()
             .filter(|d| d.at <= now)
+            .filter(|d| !matches!(&d.kind, DeadlineKind::CancelGrace { did } if confirmed_cancel == Some(did)))
             .min_by_key(|d| d.at)
             .cloned()
         {
             let tid = match &deadline.kind {
+                DeadlineKind::CancelGrace { did } => {
+                    let mut candidate = next_checkpoint(before, slot.completed.as_ref()).map_err(store_error)?;
+                    if candidate.pending_cancel_did.as_ref() == Some(did) {
+                        candidate.downstream_generation = candidate.downstream_generation.checked_add(1)
+                            .ok_or_else(|| err("downstream_generation_exhausted"))?;
+                        candidate.pending_cancel_did = None;
+                    }
+                    candidate.deadlines.retain(|d| d.id != deadline.id);
+                    return Ok(Some((candidate, false)));
+                }
                 DeadlineKind::Task { tid }
                 | DeadlineKind::Snapshot { tid }
                 | DeadlineKind::Dispatch { tid, .. } => tid,
@@ -114,7 +136,8 @@ impl WorkerProcessor {
             candidate.deadlines.retain(|d| d.id != deadline.id);
             return Ok(Some((candidate, false)));
         }
-        if !before.tasks.iter().any(|t| t.phase == TaskPhase::Running)
+        if before.pending_cancel_did.is_none()
+            && !before.tasks.iter().any(|t| t.phase == TaskPhase::Running)
             && let Some(task) = before.tasks.iter().find(|t| t.phase == TaskPhase::Queued)
         {
             let metadata = self.metadata(spec, &task.tid).await?;
@@ -233,6 +256,11 @@ impl WorkerProcessor {
                 .map(|c| Some((c, false)))
                 .map_err(store_error);
         }
+        if let Some(confirmed) = confirmed_cancel {
+            base.pending_cancel_did = None;
+            base.deadlines.retain(|d| !matches!(&d.kind, DeadlineKind::CancelGrace { did } if did == confirmed));
+            return next_checkpoint(&base, slot.completed.as_ref()).map(|c| Some((c, false))).map_err(store_error);
+        }
         let Some(task) = base.tasks.iter().find(|t| t.tid == input.tid) else {
             return next_checkpoint(&base, slot.completed.as_ref())
                 .map(|c| Some((c, false)))
@@ -259,6 +287,7 @@ impl WorkerProcessor {
         let runner_input = match &input.body {
             InputBody::HumanReply {
                 interaction,
+                responder,
                 payload,
             } => {
                 let content = base
@@ -273,6 +302,7 @@ impl WorkerProcessor {
                 RunnerInput::HumanReply {
                     tid: input.tid.clone(),
                     interaction: interaction.clone(),
+                    responder: responder.clone(),
                     payload: Payload::Inline(
                         self.references
                             .resolve(payload, PHASE_ONE_MAX_INPUT_PAYLOAD_BYTES)
@@ -310,11 +340,11 @@ impl WorkerProcessor {
                     || (event.holder_epoch == sequence.holder_epoch
                         && event.seq > sequence.sequence)
                 {
-                    *sequence = DispatchSequence {
-                        tid: input.tid.clone(),
-                        holder_epoch: event.holder_epoch,
-                        sequence: event.seq,
-                    };
+                    sequence.holder_epoch = event.holder_epoch;
+                    sequence.sequence = event.seq;
+                }
+                if matches!(event.kind, AgentEventKind::Final | AgentEventKind::Error) {
+                    sequence.terminal_seen = true;
                 }
                 if matches!(event.kind, AgentEventKind::Thinking) {
                     return self
@@ -417,20 +447,6 @@ impl WorkerProcessor {
             return Err(err("processor_preparing"));
         }
         let display = self.display(&base, &metadata).await?;
-        let workflow = tokio::time::timeout(
-            self.config.request_timeout,
-            self.ports
-                .directory
-                .load_workflow(&spec.scope, &spec.workflow),
-        )
-        .await
-        .map_err(|_| err("workflow_unavailable"))?
-        .map_err(|error| match error {
-            bcs_service_api::port::dist_agent::GroupDirectoryError::Unavailable => {
-                err("workflow_unavailable")
-            }
-            _ => err("workflow_invalid_revision"),
-        })?;
         let task = base
             .tasks
             .iter_mut()
@@ -458,16 +474,33 @@ impl WorkerProcessor {
             .steps
             .checked_add(1)
             .ok_or_else(|| err("task_steps_exhausted"))?;
+        let attempt = self.begin_evaluation(slot, &base, &inputs, &spec, now, initialize).await?;
+        let config = if let Some(config) = &slot.mode_config {
+            config.clone()
+        } else {
+            // Inline Direct A2A configurations require no directory or database lookup.
+            let raw = self.references.resolve(&spec.mode_envelope.payload, PHASE_ONE_MAX_INPUT_PAYLOAD_BYTES)
+                .await.map_err(store_error)?;
+            match self.ports.runner.validate_session(&spec, &raw) {
+                Ok(config) => {
+                    slot.mode_config = Some(config.clone());
+                    config
+                }
+                Err(error) => {
+                    self.reject_risk(slot, attempt, &runner_error(error).code, false);
+                    return Err(err("risk_outcome_pending"));
+                }
+            }
+        };
         let context = EvaluationContext {
             spec: &spec,
-            workflow: &workflow,
+            config: config.as_ref(),
+            downstream_generation: base.downstream_generation,
+            tid: &metadata.tid,
             now,
         };
-        let attempt = self
-            .begin_evaluation(slot, &base, &inputs, &context, initialize)
-            .await?;
         let state = if initialize {
-            self.ports.runner.init(&context)
+            self.ports.runner.init(&context).await
         } else {
             base.runner_state
                 .as_ref()
@@ -477,7 +510,10 @@ impl WorkerProcessor {
                     code: "runner_state_missing".into(),
                 })
         };
-        let result = state.and_then(|state| self.ports.runner.reduce(&context, &state, &inputs));
+        let result = match state {
+            Ok(state) => self.ports.runner.reduce(&context, &state, &inputs).await,
+            Err(error) => Err(error),
+        };
         let decision = match result {
             Ok(decision) => decision,
             Err(error) => {

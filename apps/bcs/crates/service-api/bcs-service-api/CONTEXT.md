@@ -1,5 +1,14 @@
 # bcs-service-api Context
 
+## Version 9.0.0 — distributed Direct A2A
+
+Distributed Gateway, Worker, Connector, and their host now consume session
+targets, immutable mode configurations and logical agent IDs. The Gateway
+directory owns admission policy. The Worker runner SPI prepares typed effects.
+The Connector agent port resolves transport capabilities at call time. Workspace
+consumers rebuild together. External implementations of the distributed ports
+must update their signatures.
+
 ## Version 8.0.0: Owner-side friend removal contract
 
 `DeleteFriendConnection` (application/v1) gains `actor:

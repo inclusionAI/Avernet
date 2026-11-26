@@ -59,11 +59,7 @@ async fn a_custom_binding_card_resolves_to_its_custom_route() {
     bcs_a2a_binding_api::install(Registry::new(vec![Arc::new(ExampleRpc)]).unwrap()).unwrap();
     let registry = YamlAgentResolver::from_yaml(YAML, &OutboundUrlGuard::new(false, true), None, |_| None).unwrap();
     let agent = registry
-        .resolve(&AgentBinding {
-            agent: AgentId("order-agent-001".into()),
-            binding_version: BindingVersion("1".into()),
-            credential_ref: CredentialRef("none".into()),
-        })
+        .resolve(&AgentId("order-agent-001".into()))
         .await
         .unwrap();
     assert_eq!(agent.interface.binding, A2aBinding::Custom);

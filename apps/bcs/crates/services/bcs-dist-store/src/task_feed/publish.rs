@@ -9,14 +9,14 @@ impl StoreTaskFeed {
     ) -> Result<(), StoreError> {
         match &event.body {
             OutputBody::Artifact {
-                node,
+                source,
                 artifact_id,
                 update,
                 ..
             } => {
-                if node.0.is_empty()
+                if source.0.is_empty()
                     || artifact_id.0.is_empty()
-                    || node.0.len() > 256
+                    || source.0.len() > 256
                     || artifact_id.0.len() > 256
                 {
                     return Err(invalid("artifact_identity"));
@@ -42,7 +42,7 @@ impl StoreTaskFeed {
                 if terminal_status(*status).is_some() {
                     return Err(invalid("terminal_requires_archive"));
                 }
-                if interactions.len() > 64 || bounded_bytes(interactions, 64 * 1024).is_err() {
+                if interactions.len() > 64 || bounded_bytes(interactions, MAX_INTERACTION_METADATA_BYTES).is_err() {
                     return Err(invalid("interaction_bound"));
                 }
             }

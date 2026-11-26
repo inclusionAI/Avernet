@@ -1,4 +1,4 @@
-use super::workload::{Directory, Runner, initial};
+use super::workload::{Runner, initial};
 use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_dist_projection::OutputProjectionService;
@@ -245,7 +245,6 @@ impl Host {
                 )),
                 runner: self.runner.clone(),
                 projection: Arc::new(OutputProjectionService),
-                directory: Arc::new(Directory),
                 tasks: self.feed.clone(),
                 output: self.feed.clone(),
                 blobs: self.archive.clone(),

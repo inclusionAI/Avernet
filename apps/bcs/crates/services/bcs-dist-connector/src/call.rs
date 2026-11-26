@@ -100,6 +100,10 @@ pub(crate) struct Call {
     /// The handle on the claimed dispatch: proves ownership, fences every
     /// `disp` read and write, and keeps the last view read.
     pub held: Box<dyn HeldDispatchPort>,
+    // The protocol contract is stable for this dispatch. Credentials and the actual
+    // endpoint are still resolved by the client on every network operation.
+    capabilities: Option<DownstreamCapabilities>,
+    capability_retry_at: Option<Instant>,
     /// What the engine sees of this actor.
     pub status: Arc<CallStatus>,
     /// Signalled by the engine to make the actor tick at once (a poke).
@@ -216,6 +220,8 @@ impl Call {
             ports,
             config,
             held,
+            capabilities: None,
+            capability_retry_at: None,
             status,
             poke,
             cursor,
@@ -244,6 +250,22 @@ impl Call {
 
     pub fn spec(&self) -> &DispatchSpec {
         &self.held.view().spec
+    }
+
+    pub async fn capabilities(&mut self) -> Option<DownstreamCapabilities> {
+        if self.capabilities.is_none() {
+            if self.capability_retry_at.is_some_and(|retry| Instant::now() < retry) {
+                return None;
+            }
+            match self.ports.agent.capabilities(&self.spec().agent).await {
+                Ok(caps) => self.capabilities = Some(caps),
+                Err(error) => {
+                    self.capability_retry_at = Some(Instant::now() + self.config.backoff_min);
+                    tracing::warn!(did = %self.did().0, code = error.code, "agent capabilities unavailable");
+                }
+            }
+        }
+        self.capabilities.clone()
     }
 
     pub fn backoff(&self) -> Backoff {
@@ -418,11 +440,12 @@ impl Call {
     /// re-subscribe every few ticks.
     async fn observe_while_waiting(&mut self) -> Flow {
         const RESUBSCRIBE_EVERY: u32 = 8;
-        if self.spec().capabilities.query_by_task {
+        let Some(caps) = self.capabilities().await else { return Ok(()) };
+        if caps.query_by_task {
             return self.poll_remote().await;
         }
         self.waiting_ticks += 1;
-        if self.waiting_ticks >= RESUBSCRIBE_EVERY && self.spec().capabilities.subscribe {
+        if self.waiting_ticks >= RESUBSCRIBE_EVERY && caps.subscribe {
             self.waiting_ticks = 0;
             self.reattach().await?;
         }

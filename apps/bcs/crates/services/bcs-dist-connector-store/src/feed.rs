@@ -13,8 +13,8 @@
 //! Keys and values:
 //!
 //! ```text
-//! partition key: bcn:v1:cmd:<cluster>:<ns>:<pool>:p<n>
-//!                bcn:v1:cmd:c01:main:a2a:p3
+//! partition key: bcn:v2:cmd:<cluster>:<ns>:<pool>:p<n>
+//!                bcn:v2:cmd:c01:main:a2a:p3
 //! entry:         id 1794370950123-0, fields {"did": "s0042.7f3a9c.b21e.n2.a1"}
 //! group:         connectors      consumer: conn-03:1794370950
 //! ```
@@ -70,7 +70,7 @@ pub struct StoreCommandFeed {
     /// e.g. `conn-03:1794370950`.
     consumer: String,
     /// One stream key per partition, indexed by partition number,
-    /// e.g. `["bcn:v1:cmd:c01:main:a2a:p0", ..., "...:p7"]`.
+    /// e.g. `["bcn:v2:cmd:c01:main:a2a:p0", ..., "...:p7"]`.
     keys: Vec<String>,
     /// At most one in-flight group read per partition.
     ///

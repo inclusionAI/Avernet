@@ -41,18 +41,17 @@ impl WorkerTaskAdmission {
                     .and_then(|s| s.parse().ok())
                     .ok_or_else(|| invalid("session_id_format"))?;
                 let digest = bcs_dist_encoding::digest_json(&serde_json::json!({
-                    "group": definition.group, "workflow": definition.workflow,
-                    "participants": definition.participants, "limits": definition.limits,
+                    "target": definition.target, "mode": definition.mode_envelope,
+                    "authorized_agents": definition.authorized_agents, "limits": definition.limits,
                 }));
                 Ok(SessionSpec {
-                    schema_version: 1,
+                    schema_version: SESSION_SCHEMA_VERSION,
                     sid: input.sid.clone(),
                     shard: ShardId(shard),
                     scope: scope.clone(),
-                    kind: SessionKind::FsmGroup,
-                    group: definition.group.clone(),
-                    workflow: definition.workflow.clone(),
-                    participants: definition.participants.clone(),
+                    target: definition.target.clone(),
+                    mode_envelope: definition.mode_envelope.clone(),
+                    authorized_agents: definition.authorized_agents.clone(),
                     limits: definition.limits.clone(),
                     digest,
                     created_at: now,
@@ -106,7 +105,7 @@ impl WorkerTaskAdmission {
                 original
                     .create_session
                     .as_ref()
-                    .is_some_and(|frozen| frozen.group == proposed.group)
+                    .is_some_and(|frozen| frozen.target == proposed.target)
             });
         if !same {
             return Ok(AdmitOutcome::ContentConflict);

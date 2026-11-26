@@ -23,7 +23,7 @@ impl StoreDispatch {
             }
         })?
     }
-    pub(super) async fn read<T: DeserializeOwned>(
+    pub(super) async fn read<T: DeserializeOwned + 'static>(
         &self,
         key: &str,
     ) -> Result<Option<Versioned<T>>, StoreError> {
@@ -47,7 +47,7 @@ impl StoreDispatch {
         )
         .await
     }
-    pub(super) async fn write<T: Serialize>(
+    pub(super) async fn write<T: Serialize + 'static>(
         &self,
         key: &str,
         expected: Option<Version>,
@@ -97,7 +97,9 @@ impl StoreDispatch {
             )
             .await?;
         if let Some(d) = &doc {
-            format(d.value.view.spec.schema_version)?;
+            if d.value.view.spec.schema_version != DISPATCH_SCHEMA_VERSION {
+                return Err(StoreError::UnsupportedFormat { format: d.value.view.spec.schema_version });
+            }
             if d.value.view.spec.did != *did {
                 return Err(invalid("dispatch_identity"));
             }

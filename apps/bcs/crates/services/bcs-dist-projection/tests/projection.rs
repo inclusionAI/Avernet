@@ -12,7 +12,7 @@ fn empty() -> DisplaySnapshot {
 }
 fn upsert(id: &str, value: Value) -> ArtifactChange {
     ArtifactChange {
-        node: NodeId("node".into()),
+        source: CorrelationKey("source".into()),
         artifact_id: ArtifactId(id.into()),
         class: OutputClass::Output,
         update: ArtifactUpdate::Upsert {
@@ -57,8 +57,8 @@ fn stable_identity_and_first_appearance_order_survive_replacement() {
     assert_eq!(state.snapshot.units[0].content, Value::Null);
     assert_eq!(state.snapshot.units[1].content, json!(2));
     assert_eq!(state.usage.cumulative_bytes, 12 + 1 + 4);
-    let mut by_node = upsert("a", json!("other node"));
-    by_node.node = NodeId("other".into());
+    let mut by_node = upsert("a", json!("other source"));
+    by_node.source = CorrelationKey("other".into());
     let mut by_class = upsert("a", json!("tool"));
     by_class.class = OutputClass::Tool;
     let expanded = OutputProjectionService

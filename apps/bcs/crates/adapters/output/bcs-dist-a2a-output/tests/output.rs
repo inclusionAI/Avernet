@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 fn change(class: OutputClass, update: ArtifactUpdate) -> ArtifactChange {
     ArtifactChange {
-        node: NodeId("n1".into()),
+        source: CorrelationKey("n1".into()),
         artifact_id: ArtifactId("answer".into()),
         class,
         update,
@@ -16,7 +16,7 @@ fn change(class: OutputClass, update: ArtifactUpdate) -> ArtifactChange {
 
 fn snapshot(content: Value) -> Value {
     json!({ "format_version": 1, "units": [
-        { "node": "n1", "artifact_id": "answer", "class": "output", "content": content }
+        { "source": "n1", "artifact_id": "answer", "class": "output", "content": content }
     ] })
 }
 
@@ -68,9 +68,9 @@ fn node_and_class_are_part_of_collision_free_artifact_identity() {
     let first = change(OutputClass::Output, ArtifactUpdate::Upsert { content: Payload::Inline(json!("x")) });
     let base = adapter.artifact(&first).unwrap();
     let mut other = first.clone();
-    other.node = NodeId("n2".into());
+    other.source = CorrelationKey("n2".into());
     assert_ne!(base["artifact"]["artifactId"], adapter.artifact(&other).unwrap()["artifact"]["artifactId"]);
-    other.node = first.node;
+    other.source = first.source;
     other.class = OutputClass::Tool;
     let tool = adapter.artifact(&other).unwrap();
     assert_ne!(base["artifact"]["artifactId"], tool["artifact"]["artifactId"]);

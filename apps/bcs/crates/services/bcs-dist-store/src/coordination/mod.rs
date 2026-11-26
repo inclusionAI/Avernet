@@ -143,7 +143,7 @@ impl CoordinationStore {
             timers: Mutex::new(HashMap::new()),
         })
     }
-    async fn read<T: DeserializeOwned>(
+    async fn read<T: DeserializeOwned + 'static>(
         &self,
         key: &str,
     ) -> Result<Option<Versioned<T>>, StoreError> {
@@ -159,7 +159,7 @@ impl CoordinationStore {
             })
             .transpose()
     }
-    async fn write<T: Serialize>(
+    async fn write<T: Serialize + 'static>(
         &self,
         key: &str,
         expected: Option<Version>,
@@ -349,7 +349,7 @@ fn decode_checkpoint(value: serde_json::Value) -> Result<StoredCheckpoint, Store
         runner.contains_key("format_version") && runner.contains_key("value")
             && !runner.contains_key("tid") && !runner.contains_key("state")
     });
-    if format != 1 || legacy_runner {
+    if format != Checkpoint::FORMAT_VERSION || legacy_runner {
         return Err(StoreError::UnsupportedFormat { format });
     }
     decode_json(value)

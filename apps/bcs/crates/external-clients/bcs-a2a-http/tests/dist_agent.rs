@@ -87,8 +87,8 @@ struct Fixed {
 
 #[async_trait]
 impl DistAgentResolver for Fixed {
-    async fn resolve(&self, target: &AgentBinding) -> Result<ResolvedAgent, String> {
-        assert_eq!(target.credential_ref.0, "cred://agent-analyst/v3");
+    async fn resolve(&self, target: &AgentId) -> Result<ResolvedAgent, String> {
+        assert_eq!(target.0, "agent-analyst");
         let mut failures = self.failures.lock().unwrap();
         if *failures > 0 {
             *failures -= 1;
@@ -108,12 +108,8 @@ impl DistAgentResolver for Fixed {
     }
 }
 
-fn target() -> AgentBinding {
-    AgentBinding {
-        agent: AgentId("agent-analyst".into()),
-        binding_version: BindingVersion("3".into()),
-        credential_ref: CredentialRef("cred://agent-analyst/v3".into()),
-    }
+fn target() -> AgentId {
+    AgentId("agent-analyst".into())
 }
 
 fn client_for(url: String, extensions: Vec<String>, failures: usize) -> A2aDistAgentClient {
@@ -216,7 +212,9 @@ async fn a_start_is_sent_once_with_a_stable_message_id_and_mapped_to_events() {
             status("TASK_STATE_COMPLETED", None),
         ]),
     );
-    let outcome = client.start(&target(), request("s0042.d1:start")).await;
+    let mut initial = request("s0042.d1:start");
+    initial.context_id = Some("s0042.7f3a9c:0".into());
+    let outcome = client.start(&target(), initial).await;
     let SendOutcome::Accepted { remote: accepted, events } = outcome else {
         panic!("{}", name(&outcome));
     };
@@ -225,6 +223,7 @@ async fn a_start_is_sent_once_with_a_stable_message_id_and_mapped_to_events() {
     assert_eq!(sent["method"], "SendStreamingMessage");
     assert_eq!(sent["params"]["message"]["messageId"], "s0042.d1:start");
     assert_eq!(sent["params"]["message"]["role"], "ROLE_USER");
+    assert_eq!(sent["params"]["message"]["contextId"], "s0042.7f3a9c:0");
     assert_eq!(sent["params"]["message"]["parts"][0]["text"], "compare the quarters");
     assert!(sent["params"]["message"].get("taskId").is_none());
     let (_, authorization, extensions) = agent.calls.lock().unwrap()[0].clone();
@@ -247,7 +246,11 @@ async fn a_start_is_sent_once_with_a_stable_message_id_and_mapped_to_events() {
 
 #[tokio::test]
 async fn a_direct_message_answer_completes_the_call() {
-    let (client, agent) = fixture().await;
+    let dedup = bcs_a2a_http::delivery::DEDUP_EXTENSION;
+    let (client, agent) = fixture_with(vec![dedup.into()]).await;
+    let caps = client.capabilities(&target()).await.unwrap();
+    assert!(caps.idempotent_start && caps.subscribe);
+    assert!(!caps.idempotent_input);
     agent.on("SendStreamingMessage", Answer::Sse(vec![json!({"message": agent_message("42")})]));
     let outcome = client.start(&target(), request("r-1")).await;
     let SendOutcome::Completed { result: Payload::Inline(result) } = outcome else {
@@ -255,23 +258,27 @@ async fn a_direct_message_answer_completes_the_call() {
     };
     assert_eq!(result["state"], "completed");
     assert_eq!(result["message"]["parts"][0]["text"], "42");
+    assert_eq!(agent.calls.lock().unwrap()[0].2.as_deref(), Some(dedup));
 }
 
 /// Resolves to an interface of an agent that declares no streaming.
-struct Unary(String);
+struct Unary {
+    url: String,
+    bearer: Mutex<Option<String>>,
+}
 
 #[async_trait]
 impl DistAgentResolver for Unary {
-    async fn resolve(&self, _: &AgentBinding) -> Result<ResolvedAgent, String> {
+    async fn resolve(&self, _: &AgentId) -> Result<ResolvedAgent, String> {
         Ok(ResolvedAgent {
             interface: A2aInterface {
-                url: self.0.clone(),
+                url: self.url.clone(),
                 tenant: None,
                 protocol_version: "1.0".into(),
                 binding: A2aBinding::JsonRpc,
                 update_mode: A2aUpdateMode::Poll,
             },
-            bearer: None,
+            bearer: self.bearer.lock().unwrap().clone(),
             extensions: Vec::new(),
         })
     }
@@ -284,9 +291,15 @@ async fn a_non_streaming_interface_is_sent_to_with_the_unary_operation() {
     let address = listener.local_addr().unwrap();
     let app = Router::new().route("/rpc", post(rpc)).with_state(agent.clone());
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let resolver = Unary(format!("http://{address}/rpc"));
-    let client = A2aDistAgentClient::new(Arc::new(resolver), OutboundUrlGuard::new(false, true), None);
+    let resolver = Arc::new(Unary {
+        url: format!("http://{address}/rpc"),
+        bearer: Mutex::new(Some("test-original".into())),
+    });
+    let client = A2aDistAgentClient::new(resolver.clone(), OutboundUrlGuard::new(false, true), None);
 
+    let caps = client.capabilities(&target()).await.unwrap();
+    assert!(caps.query_by_task && caps.cancel);
+    assert!(!caps.idempotent_start && !caps.subscribe && !caps.query_by_request);
     agent.on("SendMessage", Answer::Result(json!({"task": task("TASK_STATE_WORKING")})));
     let outcome = client.start(&target(), request("s0042.d1:start")).await;
     let SendOutcome::Accepted { remote: accepted, events } = outcome else {
@@ -297,12 +310,15 @@ async fn a_non_streaming_interface_is_sent_to_with_the_unary_operation() {
     assert_eq!(sent["method"], "SendMessage");
     assert_eq!(sent["params"]["message"]["messageId"], "s0042.d1:start");
     assert_eq!(sent["params"]["configuration"]["returnImmediately"], true);
+    assert_eq!(agent.calls.lock().unwrap()[0].1.as_deref(), Some("Bearer test-original"));
     // The answer's task is the only event; the caller follows the task.
     assert_eq!(kinds(&collect(events.unwrap()).await), vec!["snapshot"]);
 
+    *resolver.bearer.lock().unwrap() = Some("test-rotated".into());
     agent.on("SendMessage", Answer::Result(json!({"message": agent_message("42")})));
     let outcome = client.send_input(&target(), &remote(), request("s0042.d1:in:1")).await;
     assert_eq!(agent.call(1)["params"]["message"]["taskId"], "rt-1");
+    assert_eq!(agent.calls.lock().unwrap()[1].1.as_deref(), Some("Bearer test-rotated"));
     assert!(matches!(outcome, SendOutcome::Completed { .. }), "{}", name(&outcome));
 
     agent.on("SendMessage", Answer::Rpc(-32601));

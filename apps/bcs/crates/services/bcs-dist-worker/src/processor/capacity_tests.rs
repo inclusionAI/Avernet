@@ -8,6 +8,10 @@ fn independent_field_maxima_fit_ordinary_and_reserved_finalization_frames() {
     // mutually impossible full dispatch sets, to upper-bound legal candidates.
     assert_eq!(serde_json::to_vec(&identity(1)).unwrap().len(), 256);
     assert_eq!(serde_json::to_vec(&payload()["value"]).unwrap().len(), 1024);
+    assert_eq!(
+        serde_json::to_vec(&snapshot().unwrap().content.interactions).unwrap().len(),
+        MAX_INTERACTION_METADATA_BYTES,
+    );
     let ordinary = seal_candidate(
         owner(),
         CommitSeq(u64::MAX - 1),

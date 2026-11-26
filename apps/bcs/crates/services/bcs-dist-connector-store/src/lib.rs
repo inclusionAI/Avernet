@@ -32,10 +32,9 @@
 //! One JSON document per dispatch, shared by the Worker and the holding
 //! Connector. Each side writes only its own parts:
 //!
-//! - `/spec`: written by the Worker at creation, never changed. It names the
-//!   agent, the request and `/spec/capabilities` (`DownstreamCapabilities`),
-//!   which decides how a task is followed (subscribe, poll, or blind) and what
-//!   a new holder may resend.
+//! - `/spec`: written by the Worker at creation, never changed. It identifies
+//!   the logical agent, request and downstream conversation context. The
+//!   Connector resolves the agent's capabilities when it handles the call.
 //! - `/control`: written by the Worker: `cancel` (a cancel intent) and
 //!   `pending_input` (human replies waiting in the Worker's queue).
 //! - `/execution`: written by the holder: `holder`, `phase`, `remote`,
@@ -50,8 +49,8 @@
 //!
 //! ```text
 //! disp document (JSON, one per dispatch)
-//!   key:   bcn:v1:<cluster>:<ns>:s<shard>:disp:<did>
-//!          bcn:v1:c01:main:s0042:disp:s0042.7f3a9c.b21e.n2.a1
+//!   key:   bcn:v2:<cluster>:<ns>:s<shard>:disp:<did>
+//!          bcn:v2:c01:main:s0042:disp:s0042.7f3a9c.b21e.n2.a1
 //!   value: {"spec": {...}, "control": {"cancel": null, "pending_input": []},
 //!           "execution": {"holder": {"instance": {"node": "conn-03",
 //!             "incarnation": "1794370950"}, "epoch": 2}, "phase": "accepted",
@@ -64,13 +63,13 @@
 //!            more writes by either side)
 //!
 //! command stream partition (stream, read through consumer group `connectors`)
-//!   key:   bcn:v1:cmd:<cluster>:<ns>:<pool>:p<n>
-//!          bcn:v1:cmd:c01:main:a2a:p3
+//!   key:   bcn:v2:cmd:<cluster>:<ns>:<pool>:p<n>
+//!          bcn:v2:cmd:c01:main:a2a:p3
 //!   entry: id 1794370950123-0, fields {"did": "s0042.7f3a9c.b21e.n2.a1"}
 //!
 //! held index (sorted set, one per Connector process run)
-//!   key:   bcn:v1:held:<cluster>:<ns>:<node>:<incarnation>
-//!          bcn:v1:held:c01:main:conn-03:1794370950
+//!   key:   bcn:v2:held:<cluster>:<ns>:<node>:<incarnation>
+//!          bcn:v2:held:c01:main:conn-03:1794370950
 //!   value: member "s0042.7f3a9c.b21e.n2.a1", score 1794370950456
 //!          (member = dispatch id, score = claim time in ms)
 //! ```

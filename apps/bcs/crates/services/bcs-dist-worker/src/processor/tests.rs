@@ -24,21 +24,22 @@ pub(super) fn task() -> TaskProgress {
 }
 pub(super) fn spec() -> SessionSpec {
     SessionSpec {
-        schema_version: 1,
+        schema_version: 2,
         sid: Sid("s0001.session".into()),
         shard: ShardId(1),
         scope: TaskScope {
             tenant: TenantId("tenant".into()),
             principal: PrincipalId("principal".into()),
         },
-        kind: SessionKind::FsmGroup,
-        group: GroupId("group".into()),
-        workflow: WorkflowRef {
-            definition_id: "wf".into(),
+        target: SessionTarget::Group { group: GroupId("group".into()) },
+        mode_envelope: ModeConfigEnvelope {
+            mode: CollaborationMode::StateMachine,
+            mode_version: 1,
             revision: "1".into(),
             digest: Digest("digest".into()),
+            payload: Payload::Inline(serde_json::json!({})),
         },
-        participants: vec![],
+        authorized_agents: vec![],
         limits: SessionLimits {
             max_queued_tasks: 32,
             max_task_steps: 100,
@@ -62,7 +63,7 @@ fn decision(actions: Vec<ActionIntent>) -> Decision {
 fn show(text: String) -> ActionIntent {
     ActionIntent::Show {
         tid: task().tid,
-        node: NodeId("node".into()),
+        source: CorrelationKey("source".into()),
         artifact_id: ArtifactId("answer".into()),
         class: OutputClass::Output,
         update: ArtifactUpdate::Upsert {
@@ -145,10 +146,12 @@ fn sealed_commit_digest_covers_checkpoint_and_rejects_corrupted_late_effects() {
         },
     };
     let candidate = Checkpoint {
-        format_version: 1,
+        format_version: 2,
         commit_seq: CommitSeq(1),
         consumed: None,
         tasks: VecDeque::from([task()]),
+        downstream_generation: 0,
+        pending_cancel_did: None,
         runner_state: None,
         dispatch_seq: BTreeMap::new(),
         deadlines: vec![],
@@ -233,10 +236,12 @@ fn sealed_commit_digest_covers_checkpoint_and_rejects_corrupted_late_effects() {
 
 fn initial() -> Checkpoint {
     Checkpoint {
-        format_version: 1,
+        format_version: 2,
         commit_seq: CommitSeq(0),
         consumed: None,
         tasks: std::collections::VecDeque::from([task()]),
+        downstream_generation: 0,
+        pending_cancel_did: None,
         runner_state: None,
         dispatch_seq: BTreeMap::new(),
         deadlines: vec![],
@@ -466,7 +471,8 @@ fn nested_task_ids_do_not_steal_another_tasks_dispatch_obligations() {
     before.dispatch_seq.insert(
         did.clone(),
         DispatchSequence {
-            tid: child.clone(),
+            terminal_seen: false,
+                    tid: child.clone(),
             holder_epoch: HolderEpoch(1),
             sequence: InputSeq(0),
         },
@@ -576,4 +582,60 @@ fn repeated_status_actions_are_rejected_before_building_unbounded_status_events(
     };
     assert!(matches!(check(decision(vec![status.clone(), status])),
         Err(DecisionFailure::Invalid("multiple_status_actions"))));
+}
+
+#[test]
+fn encoded_interaction_metadata_at_the_limit_fits_and_one_more_byte_fails_the_task() {
+    let did = Did(format!("{}.agent.1", task().tid.0));
+    let mut interactions = vec![Interaction {
+        id: InteractionId("question".into()),
+        origin: InteractionOrigin::Dispatch { did: did.clone() },
+        kind: InteractionKind::HumanInput,
+        prompt: Some(String::new()),
+    }];
+    let budget = MAX_INTERACTION_METADATA_BYTES - serde_json::to_vec(&interactions).unwrap().len();
+    interactions[0].prompt = Some("a".repeat(budget));
+    let dispatches = BTreeMap::from([(
+        did.clone(),
+        DispatchSpec {
+            schema_version: DISPATCH_SCHEMA_VERSION,
+            did,
+            sid: spec().sid,
+            tid: task().tid,
+            source: CorrelationKey("agent".into()),
+            agent: AgentId("bot".into()),
+            pool: PoolId("pool".into()),
+            attempt: 1,
+            downstream_context: None,
+            request: Payload::Inline(serde_json::Value::Null),
+            deadline: TimestampMillis(1000),
+        },
+    )]);
+    let ask = |interactions| {
+        validate_decision(
+            DecisionContext {
+                spec: &spec(),
+                task: &task(),
+                display: &DisplaySnapshot {
+                    format_version: 1,
+                    units: vec![],
+                },
+                dispatches: &dispatches,
+                registered_deadlines: &[],
+                deadline_history: &BTreeMap::new(),
+            },
+            decision(vec![ActionIntent::SetStatus {
+                tid: task().tid,
+                status: TaskStatus::InputRequired,
+                interactions,
+            }]),
+            &OutputProjectionService,
+        )
+    };
+    assert!(ask(interactions.clone()).is_ok());
+    interactions[0].prompt.as_mut().unwrap().push('b');
+    assert!(matches!(
+        ask(interactions),
+        Err(DecisionFailure::OutputQuota)
+    ));
 }

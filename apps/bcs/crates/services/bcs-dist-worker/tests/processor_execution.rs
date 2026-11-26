@@ -449,11 +449,12 @@ async fn mixed_failure_and_delivery_retains_the_healthy_input_even_if_rewatch_fa
 }
 
 struct AppendingRunner;
+#[async_trait::async_trait]
 impl DistRunnerCoreService for AppendingRunner {
-    fn init(&self, context: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
-        FinishingRunner::default().init(context)
+    async fn init(&self, context: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
+        FinishingRunner::default().init(context).await
     }
-    fn reduce(
+    async fn reduce(
         &self,
         context: &EvaluationContext<'_>,
         state: &RunnerState,
@@ -463,7 +464,7 @@ impl DistRunnerCoreService for AppendingRunner {
             text: 1_048_574,
             ..Default::default()
         }
-        .reduce(context, state, inputs)?;
+        .reduce(context, state, inputs).await?;
         let ActionIntent::Show { update, .. } = &mut decision.actions[0] else {
             panic!()
         };

@@ -18,8 +18,8 @@ use std::time::Duration;
 const SID: &str = "s0042.7f3a9c";
 const TID: &str = "s0042.7f3a9c.b21e";
 
-fn group() -> GroupId {
-    GroupId("grp-research-01".into())
+fn group() -> SessionTarget {
+    SessionTarget::Group { group: GroupId("grp-research-01".into()) }
 }
 
 fn scope() -> TaskScope {
@@ -41,7 +41,7 @@ impl DistGatewayCoreService for AlwaysGap {
     async fn admit(&self, _: &TaskScope, _: AdmitTaskCommand) -> Result<CoreAdmission, DistGatewayCoreError> {
         Err(DistGatewayCoreError::NotFound)
     }
-    async fn session_group(&self, _: &TaskScope, _: &Sid) -> Result<GroupId, DistGatewayCoreError> {
+    async fn session_target(&self, _: &TaskScope, _: &Sid) -> Result<SessionTarget, DistGatewayCoreError> {
         Ok(group())
     }
     async fn restore_task(&self, _: &TaskScope, _: &Tid) -> Result<RestoredTaskCut, DistGatewayCoreError> {
@@ -85,17 +85,15 @@ impl DistGatewayCoreService for AlwaysGap {
 
 struct NoGroups;
 #[async_trait]
-impl DistGroupDirectoryPort for NoGroups {
-    async fn resolve(&self, _: &TaskScope, _: &GroupId) -> Result<FrozenGroupDefinition, GroupDirectoryError> {
-        Err(GroupDirectoryError::NotFound)
+impl DistSessionDirectoryPort for NoGroups {
+    async fn authorize(&self, _: &TaskScope, _: &SessionTarget, _: &SessionAccessContext) -> Result<(), DirectoryError> {
+        Ok(())
     }
-    async fn load_workflow(
-        &self,
-        _: &TaskScope,
-        _: &WorkflowRef,
-    ) -> Result<bcs_domain::collaboration::StateMachineDefinition, GroupDirectoryError> {
-        Err(GroupDirectoryError::Unavailable)
+
+    async fn resolve(&self, _: &TaskScope, _: &SessionTarget) -> Result<FrozenSessionProposal, DirectoryError> {
+        Err(DirectoryError::NotFound)
     }
+
 }
 
 struct TestClock;
@@ -112,13 +110,14 @@ async fn a_wait_that_keeps_hitting_gaps_pauses_between_attempts() {
     config.snapshot_cover_retry = Duration::from_millis(50);
     let gateway = DistGateway::new(core.clone(), Arc::new(NoGroups), Arc::new(TestClock), config).unwrap();
     let caller = GatewayCaller {
+        access: Default::default(),
         tenant: TenantId("t-ant".into()),
         caller: CallerContext::Bot(BotActor {
             bot_uuid: "pa-001".into(),
         }),
     };
     let wait = WaitTask {
-        group: group(),
+        target: group(),
         tid: Tid(TID.into()),
         until: WaitUntil::Final,
         after: None,

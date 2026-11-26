@@ -1,6 +1,6 @@
 //! Stable task input intent. Runtime initialization belongs to Worker admission.
 use crate::port::{
-    dist_agent::FrozenGroupDefinition,
+    dist_agent::FrozenSessionProposal,
     repo::distributed::{common::StoreError, inbox::AdmitOutcome},
 };
 use async_trait::async_trait;
@@ -10,7 +10,7 @@ use bcs_dist_model::*;
 pub struct TaskAdmissionCommand {
     pub input: InputEnvelope,
     /// A resolved definition is a proposal only until Inbox selects the original.
-    pub create_session: Option<FrozenGroupDefinition>,
+    pub create_session: Option<FrozenSessionProposal>,
     pub start_task: bool,
 }
 

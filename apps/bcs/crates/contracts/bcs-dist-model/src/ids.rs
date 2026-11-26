@@ -20,7 +20,7 @@ identities!(
     PrincipalId,
     GroupId,
     AgentId,
-    NodeId,
+    CorrelationKey,
     ArtifactId,
     DeadlineId,
     PoolId,

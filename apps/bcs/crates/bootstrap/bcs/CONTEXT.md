@@ -344,3 +344,21 @@ creation and daily rotation use the standard rotating writer semantics shared wi
 other BCS log files, without a permission exception. See the request-operation
 logging diagnostic contract for redaction, correlation, limits and runtime
 verification boundaries.
+
+## Distributed Direct A2A
+
+With the `dist-direct-a2a` feature, [DirectA2aStores](src/dist_direct_a2a.rs)
+assembles the Gateway router, Worker runtime, processor and dispatch supervisor,
+and Connector engine for an embedding host. Mount the router behind a layer
+that supplies the authenticated GatewayCaller. Direct targets use
+`/a2a/agents/{target}`. Gateway invokes the shared DB-backed Direct access policy
+before admitting each send or reply. Worker executes the persisted input.
+
+All three roles use the same cluster, namespace and SQL Result/Blob archive.
+The Worker and its durable scan providers share one scan budget. The host drives
+the Worker, processor, supervisor and Connector lifecycles and supplies the
+peer client for the registered Worker instance. Connector resolves the current
+registered agent endpoint and credentials when it calls the agent. Give each
+independent registry a distinct Connector pool when logical agent IDs overlap. Enable this
+composition in the distributed host. The standalone server keeps its existing
+Direct and group deployments.

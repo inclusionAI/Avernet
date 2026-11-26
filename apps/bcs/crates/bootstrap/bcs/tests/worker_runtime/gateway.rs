@@ -12,27 +12,24 @@ use bcs_service_api::{
 use std::sync::Arc;
 struct Groups;
 #[async_trait]
-impl DistGroupDirectoryPort for Groups {
+impl DistSessionDirectoryPort for Groups {
+    async fn authorize(&self, _: &TaskScope, _: &SessionTarget, _: &SessionAccessContext) -> Result<(), DirectoryError> {
+        Ok(())
+    }
     async fn resolve(
         &self,
         _: &TaskScope,
-        group: &GroupId,
-    ) -> Result<FrozenGroupDefinition, GroupDirectoryError> {
+        target: &SessionTarget,
+    ) -> Result<FrozenSessionProposal, DirectoryError> {
         let s = workload::specification(Sid("s0001.template".into()));
-        Ok(FrozenGroupDefinition {
-            group: group.clone(),
-            workflow: s.workflow,
-            participants: s.participants,
+        Ok(FrozenSessionProposal {
+            target: target.clone(),
+            mode_envelope: s.mode_envelope,
+            authorized_agents: s.authorized_agents,
             limits: s.limits,
         })
     }
-    async fn load_workflow(
-        &self,
-        _: &TaskScope,
-        _: &WorkflowRef,
-    ) -> Result<bcs_domain::collaboration::StateMachineDefinition, GroupDirectoryError> {
-        Err(GroupDirectoryError::NotFound)
-    }
+
 }
 impl Host {
     pub async fn gateway_listen(&self) -> anyhow::Result<String> {
@@ -58,6 +55,7 @@ impl Host {
             bcs_app_dist_gateway::DistGatewayConfig::new(2),
         )?;
         let caller = GatewayCaller {
+        access: Default::default(),
             tenant: workload::scope().tenant,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "gateway-story".into(),

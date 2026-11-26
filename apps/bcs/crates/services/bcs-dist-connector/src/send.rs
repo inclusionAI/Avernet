@@ -52,18 +52,28 @@ impl Call {
     /// only watches for a cancel.
     pub async fn start(&mut self, possibly_sent: bool) -> Flow {
         let did = self.did().clone();
-        let target = self.spec().target.clone();
-        let capabilities = self.spec().capabilities.clone();
+        let target = self.spec().agent.clone();
         let request = self.spec().request.clone();
         let request_id = self.ports.rules.start_request_id(&did);
         let operation = SendOperation::Start {
             request_id: request_id.clone(),
         };
         let retries = self.config.not_sent_retries;
+        let mut capability_retries = 0;
         let (mut uncertain, mut not_sent, mut resends) = (possibly_sent, 0u32, 0u32);
         let mut backoff = self.backoff();
         loop {
             if uncertain {
+                let Some(capabilities) = self.capabilities().await else {
+                    if capability_retries >= retries {
+                        self.mark_unresolved(UnresolvedKind::Uncertain, "agent_capabilities_unavailable").await;
+                        return Ok(());
+                    }
+                    capability_retries += 1;
+                    backoff.wait().await;
+                    self.still_holder().await?;
+                    continue;
+                };
                 match self.ports.rules.uncertain_start(&capabilities) {
                     UncertainSend::Resend if resends < retries => resends += 1,
                     UncertainSend::Resend => {
@@ -108,7 +118,7 @@ impl Call {
             held_write!(self, "send intent", self.held.begin_send(operation.clone()));
             let send = StableSendRequest {
                 request_id: request_id.clone(),
-                context_id: None,
+                context_id: self.spec().downstream_context.clone(),
                 payload,
             };
             match self.ports.agent.start(&target, send).await {
@@ -163,7 +173,7 @@ impl Call {
     /// the start did reach it: record the acceptance and go on as if the
     /// start had just been accepted.
     async fn ask_agent(&mut self, operation: SendOperation, request_id: RequestId) -> Flow {
-        let target = self.spec().target.clone();
+        let target = self.spec().agent.clone();
         let mut backoff = self.backoff();
         let mut tries = 0u32;
         loop {
@@ -236,8 +246,7 @@ impl Call {
     /// Follows an accepted remote task again: after a takeover, a resume, or
     /// a stream that broke. The declared capabilities decide how.
     ///
-    /// The mode comes from `rules::reattach` over `/spec/capabilities`
-    /// (`DownstreamCapabilities`, written by the Worker):
+    /// The mode comes from `rules::reattach` over the agent's registered capabilities:
     /// - subscribe: open a new event stream (after one task read when the
     ///   agent can be queried by task); a failed subscribe is tried again on
     ///   the next tick;
@@ -248,10 +257,13 @@ impl Call {
     /// marked unresolved.
     pub async fn reattach(&mut self) -> Flow {
         self.reattach_due = false;
-        let target = self.spec().target.clone();
-        let capabilities = self.spec().capabilities.clone();
+        let target = self.spec().agent.clone();
         let Some(remote) = self.held.view().execution.remote.clone() else {
             self.mark_unresolved(UnresolvedKind::Uncertain, "no_remote_task").await;
+            return Ok(());
+        };
+        let Some(capabilities) = self.capabilities().await else {
+            self.reattach_due = true;
             return Ok(());
         };
         match self.ports.rules.reattach(&capabilities) {
@@ -321,7 +333,7 @@ impl Call {
     /// unavailable agent is not an agent result and is simply asked again
     /// later.
     pub async fn read_remote(&mut self) -> Flow<RemoteRead> {
-        let target = self.spec().target.clone();
+        let target = self.spec().agent.clone();
         let Some(remote) = self.held.view().execution.remote.clone() else {
             return Ok(RemoteRead::Gone);
         };

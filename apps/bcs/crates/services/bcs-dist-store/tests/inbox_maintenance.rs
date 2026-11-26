@@ -291,7 +291,7 @@ async fn full_schedule_with_conflicting_start() -> (Arc<Recorder>, AdmitRequest)
     // A fresh helper starts with the first persisted key, which is hashed.
     pending.sort_by_key(|r| layout().admission(&r.scope, &r.input.input_id).unwrap());
     let mut loser = pending.remove(0);
-    loser.create_session.as_mut().unwrap().group = GroupId("other-group".into());
+    loser.create_session.as_mut().unwrap().target = SessionTarget::Group { group: GroupId("other-group".into()) };
     let sk = layout().schedule(&loser.input.sid).unwrap();
     let pause = store.pause_after("document.create", &sk, 1);
     abandon_at(&p, loser.clone(), pause).await;

@@ -1,5 +1,9 @@
 pub mod event_parser;
 pub mod run_store;
+mod access;
+mod directory;
+pub use access::DirectChatAccess;
+pub use directory::DirectSessionDirectory;
 mod queued;
 mod queued_runtime;
 mod frame;
@@ -42,8 +46,7 @@ pub use run_store::{
 #[derive(Clone)]
 pub struct A2aChat {
     bot_delivery: Arc<dyn BotDeliveryPort>,
-    registry: Arc<dyn BotRegistryCoreService>,
-    friend: Arc<dyn FriendCoreService>,
+    access: DirectChatAccess,
     run_store: Arc<ChatRunStore>,
     chat_run_events: Arc<dyn ChatRunEventPort>,
     chat_run_cleanup: Arc<dyn ChatRunCleanupPort>,
@@ -60,11 +63,7 @@ pub struct A2aChat {
     /// existing callers/tests don't need to thread a chain. Bootstrap attaches
     /// the production chain via `with_interceptors`.
     interceptors: Arc<bcs_service_api::interceptor::InterceptorChain>,
-    organization: Option<Arc<dyn OrganizationCoreService>>,
-    /// Narrow bot-authority hook for the Human→Bot
-    /// control judgment (bot-authority plan Task 6.5);
-    /// unwired instances fail closed at that judgment.
-    bot_authority: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>>,
+
 }
 
 impl A2aChat {
@@ -97,8 +96,7 @@ impl A2aChat {
     ) -> Self {
         Self {
             bot_delivery,
-            registry,
-            friend,
+            access: DirectChatAccess::new(registry, friend, None, None),
             run_store,
             chat_run_events,
             chat_run_cleanup,
@@ -107,8 +105,6 @@ impl A2aChat {
             default_timeout_ms,
             session_management: None, queue_owner: Arc::new(std::sync::OnceLock::new()),
             interceptors: Arc::new(bcs_service_api::interceptor::InterceptorChain::new()),
-            organization: None,
-            bot_authority: None,
         }
     }
 
@@ -117,7 +113,7 @@ impl A2aChat {
         mut self,
         hook: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>>,
     ) -> Self {
-        self.bot_authority = hook;
+        self.access.bot_authority = hook;
         self
     }
 
@@ -139,7 +135,7 @@ impl A2aChat {
         mut self,
         organization: Arc<dyn OrganizationCoreService>,
     ) -> Self {
-        self.organization = Some(organization);
+        self.access.organization = Some(organization);
         self
     }
 
@@ -688,89 +684,8 @@ impl A2aChat {
         }
     }
 
-    /// Human→Bot control judgment for acting AS the
-    /// source Bot (spec §8 / bot-authority plan Task 6.5).
-    /// The legacy `created_by` comparison — including its
-    /// `created_by: None → allow` auto-claim — is replaced
-    /// by the live management edge: a Bot without an
-    /// authorized manager controls nothing, and a failing
-    /// authority read is an internal error, never a deny.
-    async fn ensure_source_owner(
-        &self,
-        from_bot_id: &str,
-        authenticated_staff_id: Option<&str>,
-    ) -> ServiceResult<()> {
-        let Some(staff_id) = authenticated_staff_id.filter(|id| !id.is_empty()) else {
-            return Ok(());
-        };
-        let authority = self.bot_authority.as_deref().ok_or_else(|| {
-            ServiceError::InternalError("bot authority hook is not wired".into())
-        })?;
-        match authority.can_manage(staff_id, from_bot_id).await {
-            Ok(true) => Ok(()),
-            Ok(false) => Err(ServiceError::Unauthorized(format!(
-                "User {} does not control bot {}",
-                staff_id, from_bot_id
-            ))),
-            Err(error) => Err(ServiceError::InternalError(format!(
-                "bot authority lookup failed: {error}"
-            ))),
-        }
-    }
-
-    async fn ensure_target_reachable(
-        &self,
-        from_bot_id: &str,
-        target_bot_id: &str,
-    ) -> ServiceResult<RegisteredBot> {
-        let target = self
-            .registry
-            .get(target_bot_id)
-            .await
-            .ok_or_else(|| ServiceError::BotNotFound(target_bot_id.to_string()))?;
-
-        if self.registry.collaboration_owner(&[from_bot_id.into(), target_bot_id.into()]).await?.is_some() {
-            if target.status == ActorStatus::Hidden {
-                return Err(ServiceError::Forbidden("target Bot is hidden".into()));
-            }
-            return Ok(target);
-        }
-
-        if from_bot_id == target_bot_id {
-            return Ok(target);
-        }
-
-        match target.capabilities.visibility.as_str() {
-            "public" => Ok(target),
-            "protected" if self.friend.are_friends(from_bot_id, target_bot_id).await => Ok(target),
-            "protected" => Err(ServiceError::NotFriends(vec![target_bot_id.to_string()])),
-            // "private" or unknown: friends can still reach, strangers get 404
-            _ if self.friend.are_friends(from_bot_id, target_bot_id).await => Ok(target),
-            _ => Err(ServiceError::BotNotFound(target_bot_id.to_string())),
-        }
-    }
-
-    async fn ensure_organization_target_reachable(
-        &self,
-        from_bot_id: &str,
-        target_bot_id: &str,
-    ) -> ServiceResult<RegisteredBot> {
-        self.registry.collaboration_owner(&[from_bot_id.into(), target_bot_id.into()]).await?;
-        let target = self
-            .registry
-            .get(target_bot_id)
-            .await
-            .ok_or_else(|| ServiceError::BotNotFound(target_bot_id.to_string()))?;
-
-        match target.capabilities.visibility.as_str() {
-            "public" | "protected" => Ok(target),
-            _ if self.friend.are_friends(from_bot_id, target_bot_id).await => Ok(target),
-            _ => Err(ServiceError::BotNotFound(target_bot_id.to_string())),
-        }
-    }
-
     async fn sender_display_name(&self, from_bot_id: &str) -> String {
-        self.registry
+        self.access.registry
             .get(from_bot_id)
             .await
             .and_then(|bot| bot.capabilities.name)

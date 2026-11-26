@@ -110,16 +110,11 @@ impl std::fmt::Debug for ResolvedAgent {
     }
 }
 
-/// Turns the frozen `AgentBinding` of a dispatch into a callable agent.
-///
-/// Delayed (walkthrough §17): what resolves `CredentialRef` and what
-/// `BindingVersion` means are not settled. Until then the composition injects
-/// [`YamlAgentResolver`], a static registry read from a YAML file of agent
-/// registrations, keyed by `AgentBinding.agent`.
+/// Resolves a logical agent to the currently selected endpoint and credential.
 #[async_trait]
 pub trait DistAgentResolver: Send + Sync {
     /// The error is a machine code, never a credential or a URL.
-    async fn resolve(&self, target: &AgentBinding) -> Result<ResolvedAgent, String>;
+    async fn resolve(&self, target: &AgentId) -> Result<ResolvedAgent, String>;
 }
 
 /// Longest wait for the first event of a send (or for the unary answer). It is
@@ -231,7 +226,7 @@ impl A2aDistAgentClient {
     /// Builds the binding client of a target. An error means nothing was sent.
     /// The `(bool, bool)` says whether tools v1 / v2 were negotiated, i.e.
     /// whether tool records in the agent's messages are decoded (`events`).
-    async fn client(&self, target: &AgentBinding) -> Result<(BindingClient, (bool, bool)), String> {
+    async fn client(&self, target: &AgentId) -> Result<(BindingClient, (bool, bool)), String> {
         self.client_and_mode(target).await.map(|(client, tools, _)| (client, tools))
     }
 
@@ -242,7 +237,7 @@ impl A2aDistAgentClient {
     /// `address_rejected`, or the resolver's own code). Building an HTTP or
     /// gRPC client sends nothing to the agent: the gRPC channel connects
     /// lazily on the first request, and the HTTP check only resolves DNS.
-    async fn client_and_mode(&self, target: &AgentBinding) -> Result<(BindingClient, (bool, bool), A2aUpdateMode), String> {
+    async fn client_and_mode(&self, target: &AgentId) -> Result<(BindingClient, (bool, bool), A2aUpdateMode), String> {
         let agent = self.resolver.resolve(target).await?;
         let tools = (
             agent.extensions.iter().any(|uri| uri == crate::tools::EXTENSION),
@@ -308,7 +303,7 @@ impl A2aDistAgentClient {
     /// message then names the stored remote task.
     async fn send(
         &self,
-        target: &AgentBinding,
+        target: &AgentId,
         remote: Option<&RemoteTaskRef>,
         request: StableSendRequest,
     ) -> SendOutcome {
@@ -470,8 +465,21 @@ fn finished(state: &a2a::TaskState) -> Option<FinalDispatchOutcome> {
 
 #[async_trait]
 impl DistAgentClientPort for A2aDistAgentClient {
+    async fn capabilities(&self, target: &AgentId) -> Result<DownstreamCapabilities, AgentReadError> {
+        let agent = self.resolver.resolve(target).await.map_err(|code| AgentReadError { code })?;
+        Ok(DownstreamCapabilities {
+            idempotent_start: agent.extensions.iter().any(|uri| uri == crate::delivery::DEDUP_EXTENSION),
+            idempotent_input: false,
+            query_by_request: false,
+            query_by_task: true,
+            subscribe: agent.interface.update_mode == A2aUpdateMode::Stream,
+            resume_events: false,
+            cancel: true,
+        })
+    }
+
     /// Sends the first message of a call; creates the remote task.
-    async fn start(&self, target: &AgentBinding, request: StableSendRequest) -> SendOutcome {
+    async fn start(&self, target: &AgentId, request: StableSendRequest) -> SendOutcome {
         self.send(target, None, request).await
     }
 
@@ -479,7 +487,7 @@ impl DistAgentClientPort for A2aDistAgentClient {
     /// like `start`; an `Accepted` answer may carry a new event stream.
     async fn send_input(
         &self,
-        target: &AgentBinding,
+        target: &AgentId,
         remote: &RemoteTaskRef,
         request: StableSendRequest,
     ) -> SendOutcome {
@@ -490,7 +498,7 @@ impl DistAgentClientPort for A2aDistAgentClient {
     /// found" error (a bare HTTP 404 or gRPC 5 is `Unavailable`): a missing
     /// task must be proven, not guessed. The snapshot is the payload of the
     /// event the task's state stands for (see `events::task_event`).
-    async fn query(&self, target: &AgentBinding, query: RemoteQuery) -> QueryOutcome {
+    async fn query(&self, target: &AgentId, query: RemoteQuery) -> QueryOutcome {
         let remote = match query {
             // A2A has no lookup by message id.
             RemoteQuery::ByRequest(_) => return QueryOutcome::Unsupported,
@@ -519,7 +527,7 @@ impl DistAgentClientPort for A2aDistAgentClient {
     /// takeover or a resume. Events may repeat what was already reported.
     async fn subscribe(
         &self,
-        target: &AgentBinding,
+        target: &AgentId,
         remote: &RemoteTaskRef,
         _after: Option<ReplayToken>,
     ) -> Result<RemoteEventStream, AgentReadError> {
@@ -546,7 +554,7 @@ impl DistAgentClientPort for A2aDistAgentClient {
     /// - `OutcomeUnknown`: anything else, including a client that could not be
     ///   built or no connection: the port has no "not sent" for a cancel, and
     ///   the Connector keeps an unknown cancel supervised.
-    async fn cancel(&self, target: &AgentBinding, remote: &RemoteTaskRef, _request_id: RequestId) -> CancelOutcome {
+    async fn cancel(&self, target: &AgentId, remote: &RemoteTaskRef, _request_id: RequestId) -> CancelOutcome {
         let unknown = |code: String| CancelOutcome::OutcomeUnknown { code };
         let client = match self.client(target).await {
             Ok((client, _)) => client,

@@ -222,7 +222,7 @@ impl CoordinationStore {
                 }
                 if serde_json::from_value::<Checkpoint>(header.raw["checkpoint"].clone())
                     .ok()
-                    .is_none_or(|c| c.format_version != 1)
+                    .is_none_or(|c| c.format_version != 2)
                     || !self.verified_certificate(&authorization.completion).await?
                 {
                     return Ok(not_ready());

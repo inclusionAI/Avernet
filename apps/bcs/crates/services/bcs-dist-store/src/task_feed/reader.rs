@@ -82,7 +82,7 @@ impl StoreTaskFeed {
     ) -> Result<(), StoreError> {
         match event.body {
             OutputBody::Artifact {
-                node,
+                source,
                 artifact_id,
                 class,
                 update,
@@ -109,7 +109,7 @@ impl StoreTaskFeed {
                     .fold_committed(
                         display,
                         &[ArtifactChange {
-                            node,
+                            source,
                             artifact_id,
                             class,
                             update,

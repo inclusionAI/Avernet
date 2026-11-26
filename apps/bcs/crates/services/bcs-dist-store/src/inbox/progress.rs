@@ -49,7 +49,7 @@ impl StoreInboxProducer {
                             .load::<SessionSpec>(&spec_key)
                             .await?
                             .ok_or_else(|| unknown(key))?;
-                        if stored.scope != spec.scope || stored.group != spec.group {
+                        if stored.scope != spec.scope || stored.target != spec.target {
                             return self.finish_content_conflict(v, c, key).await;
                         }
                     }

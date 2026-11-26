@@ -128,10 +128,12 @@ use bcs_service_api::port::repo::distributed::session::*;
 use common::Recorder;
 fn initial() -> Checkpoint {
     Checkpoint {
-        format_version: 1,
+        format_version: 2,
         commit_seq: CommitSeq(0),
         consumed: None,
         tasks: Default::default(),
+        downstream_generation: 0,
+        pending_cancel_did: None,
         runner_state: None,
         dispatch_seq: Default::default(),
         deadlines: vec![],

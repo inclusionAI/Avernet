@@ -30,16 +30,22 @@ use tower::ServiceExt;
 
 struct Groups;
 #[async_trait]
-impl DistGroupDirectoryPort for Groups {
-    async fn resolve(&self, _scope: &TaskScope, group: &GroupId) -> Result<FrozenGroupDefinition, GroupDirectoryError> {
-        Ok(FrozenGroupDefinition {
-            group: group.clone(),
-            workflow: WorkflowRef {
-                definition_id: "wf-research".into(),
+impl DistSessionDirectoryPort for Groups {
+    async fn authorize(&self, _: &TaskScope, _: &SessionTarget, _: &SessionAccessContext) -> Result<(), DirectoryError> {
+        Ok(())
+    }
+
+    async fn resolve(&self, _scope: &TaskScope, target: &SessionTarget) -> Result<FrozenSessionProposal, DirectoryError> {
+        Ok(FrozenSessionProposal {
+            target: target.clone(),
+            mode_envelope: ModeConfigEnvelope {
+                mode: CollaborationMode::StateMachine,
+                mode_version: 1,
+                payload: Payload::Inline(serde_json::json!({})),
                 revision: "7".into(),
                 digest: Digest("sha256:ab12".into()),
             },
-            participants: vec![],
+            authorized_agents: vec![],
             limits: SessionLimits {
                 max_queued_tasks: 16,
                 max_task_steps: 200,
@@ -48,13 +54,7 @@ impl DistGroupDirectoryPort for Groups {
             },
         })
     }
-    async fn load_workflow(
-        &self,
-        _scope: &TaskScope,
-        _reference: &WorkflowRef,
-    ) -> Result<bcs_domain::collaboration::StateMachineDefinition, GroupDirectoryError> {
-        Err(GroupDirectoryError::Unavailable)
-    }
+
 }
 
 struct TestClock;
@@ -66,6 +66,7 @@ impl Clock for TestClock {
 
 fn caller() -> GatewayCaller {
     GatewayCaller {
+        access: Default::default(),
         tenant: TenantId("t-ant".into()),
         caller: CallerContext::Bot(BotActor {
             bot_uuid: "pa-001".into(),
@@ -195,7 +196,7 @@ fn artifact_event(tid: &str, id: EventId, text: &str) -> OutputEvent {
         id,
         tid: Tid(tid.into()),
         body: OutputBody::Artifact {
-            node: NodeId("n1".into()),
+            source: CorrelationKey("n1".into()),
             artifact_id: ArtifactId("a-1".into()),
             class: OutputClass::Output,
             update: ArtifactUpdate::AppendText { delta: Payload::Inline(json!(text)) },
@@ -313,7 +314,7 @@ async fn admission_always_writes_wake_while_the_listener_contract_is_stubbed() {
     json_of(&app, send("msg-2", "next", Some(&sid), None, true)).await;
     json_of(&app, send("msg-3", "more", Some(&sid), None, true)).await;
     let shard = sid.split_once('.').unwrap().0;
-    let prefix = format!("bcn:v1:c01:main:{shard}");
+    let prefix = format!("bcn:v2:c01:main:{shard}");
     assert_eq!(stream_len(&p, &format!("{prefix}:inbox:{sid}")).await, 3);
     // D1: without a listener read, every admitted input also wakes the shard.
     assert_eq!(stream_len(&p, &format!("{prefix}:wake")).await, 3);
@@ -529,7 +530,7 @@ impl DistGatewayService for Failing {
     async fn submit(&self, _: &GatewayCaller, _: SubmitInput) -> Result<AdmissionReceipt, GatewayError> {
         Err(self.0.clone())
     }
-    async fn get_task(&self, _: &GatewayCaller, _: &GroupId, _: &Tid) -> Result<TaskView, GatewayError> {
+    async fn get_task(&self, _: &GatewayCaller, _: &SessionTarget, _: &Tid) -> Result<TaskView, GatewayError> {
         Err(self.0.clone())
     }
     async fn subscribe(&self, _: &GatewayCaller, _: SubscribeTask) -> Result<TaskSubscription, GatewayError> {
@@ -718,4 +719,23 @@ async fn a_question_that_arrives_in_a_resent_snapshot_ends_the_stream() {
     let frames = parse_frames(&text);
     assert_eq!(frames.len(), 2, "{frames:?}");
     assert_eq!(frames[1].data["result"]["task"]["status"]["state"], "TASK_STATE_INPUT_REQUIRED");
+}
+
+#[tokio::test]
+async fn direct_agent_and_group_with_the_same_name_have_separate_routes_and_sessions() {
+    let p = ports();
+    let app = app(&p);
+    let direct_url = "/a2a/agents/grp-research-01";
+    let card = Request::get(format!("{direct_url}/.well-known/agent-card.json")).body(Body::empty()).unwrap();
+    assert_eq!(json_of(&app, card).await["supportedInterfaces"][0]["url"],
+        format!("https://gw.example{direct_url}"));
+    let group = json_of(&app, send("first", "hello", None, None, true)).await;
+    let mut direct = send("first", "hello", None, None, true);
+    *direct.uri_mut() = direct_url.parse().unwrap();
+    let direct = json_of(&app, direct).await;
+    let direct_task = &direct["result"]["task"];
+    assert!(direct_task["id"].is_string(), "{direct}");
+    assert_ne!(direct_task["contextId"], group["result"]["task"]["contextId"]);
+    let read_via_group = rpc("GetTask", json!({ "id": direct_task["id"] }));
+    assert_eq!(error_code(&json_of(&app, read_via_group).await), -32001);
 }

@@ -14,7 +14,7 @@
 //! visits (a re-post), so repeated or late hints must be harmless.
 //!
 //! ```text
-//! key:   bcn:v1:cmd:<cluster>:<ns>:<pool>:p<n>    e.g. bcn:v1:cmd:c01:main:a2a:p3
+//! key:   bcn:v2:cmd:<cluster>:<ns>:<pool>:p<n>    e.g. bcn:v2:cmd:c01:main:a2a:p3
 //! entry: id 1794370950123-0, fields {"did": "s0042.7f3a9c.b21e.n2.a1"}
 //! ```
 //!

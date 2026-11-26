@@ -21,7 +21,7 @@ struct FailsOnce {
 
 #[async_trait]
 impl DistAgentResolver for FailsOnce {
-    async fn resolve(&self, _: &AgentBinding) -> Result<ResolvedAgent, String> {
+    async fn resolve(&self, _: &AgentId) -> Result<ResolvedAgent, String> {
         if !self.failed.swap(true, Ordering::SeqCst) {
             return Err("target_unresolved".into());
         }
@@ -49,11 +49,7 @@ async fn conformance_a2a_dist_agent_client() {
     let resolver = FailsOnce { url: format!("http://{address}/rpc"), failed: AtomicBool::new(false) };
     let client = A2aDistAgentClient::new(Arc::new(resolver), OutboundUrlGuard::new(false, true), None);
 
-    let target = AgentBinding {
-        agent: AgentId("agent-analyst".into()),
-        binding_version: BindingVersion("3".into()),
-        credential_ref: CredentialRef("cred://agent-analyst/v3".into()),
-    };
+    let target = AgentId("agent-analyst".into());
     let request = |id: &str| StableSendRequest {
         request_id: RequestId(id.into()),
         context_id: None,

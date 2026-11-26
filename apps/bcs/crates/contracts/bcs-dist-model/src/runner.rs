@@ -14,6 +14,7 @@ pub enum DeadlineKind {
     Task { tid: Tid },
     Dispatch { tid: Tid, did: Did },
     Snapshot { tid: Tid },
+    CancelGrace { did: Did },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

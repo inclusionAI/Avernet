@@ -8,17 +8,44 @@ use bcs_service_api::{
 };
 use std::time::Duration;
 
-pub fn dist_runner_core_service_contract_tests(
+pub async fn dist_runner_core_service_contract_tests(
     runner: &dyn DistRunnerCoreService,
     context: &EvaluationContext<'_>,
     state: &RunnerState,
     inputs: &[RunnerInput],
 ) -> ContractResult {
-    assert_eq!(runner.init(context)?, runner.init(context)?);
+    assert_eq!(runner.init(context).await?, runner.init(context).await?);
     assert_eq!(
-        runner.reduce(context, state, inputs)?,
-        runner.reduce(context, state, inputs)?
+        runner.reduce(context, state, inputs).await?,
+        runner.reduce(context, state, inputs).await?
     );
+    Ok(())
+}
+
+/// A replay from the same frozen config, generation and clock must produce
+/// the same serializable state and effects.
+pub async fn collaboration_mode_runner_service_contract_tests<R: CollaborationModeRunnerService>(
+    runner: &R,
+    spec: &SessionSpec,
+    tid: &Tid,
+    inputs: &[RunnerInput],
+) -> ContractResult {
+    assert_eq!(runner.mode(), spec.mode_envelope.mode);
+    assert_eq!(runner.mode_version(), spec.mode_envelope.mode_version);
+    let Payload::Inline(raw) = &spec.mode_envelope.payload else {
+        return Err("conformance fixture requires a resolved inline config".into());
+    };
+    let config = runner.parse_and_validate_config(raw, &spec.authorized_agents, &spec.limits)?;
+    let evaluate = || async {
+        let now = spec.created_at;
+        let state = runner.init_task(spec, &config, tid, 0, now).await?;
+        runner.reduce_task(spec, &config, tid, 0, &state, inputs, now).await
+    };
+    let first = evaluate().await?;
+    let replay = evaluate().await?;
+    assert_eq!(serde_json::to_value(first.next_state)?, serde_json::to_value(replay.next_state)?);
+    assert_eq!(first.actions, replay.actions);
+    assert_eq!(first.next_deadlines, replay.next_deadlines);
     Ok(())
 }
 
@@ -33,13 +60,13 @@ pub async fn dist_gateway_core_service_contract_tests(
     if let Some(spec) = created {
         // The session keeps the group it was created for, and is absent for
         // another scope.
-        assert_eq!(core.session_group(scope, &receipt.sid).await?, spec.group);
+        assert_eq!(core.session_target(scope, &receipt.sid).await?, spec.target);
         let stranger = TaskScope {
             tenant: scope.tenant.clone(),
             principal: PrincipalId(format!("{}-another", scope.principal.0)),
         };
         assert_eq!(
-            core.session_group(&stranger, &receipt.sid).await,
+            core.session_target(&stranger, &receipt.sid).await,
             Err(DistGatewayCoreError::NotFound)
         );
     }
@@ -52,7 +79,7 @@ pub async fn dist_gateway_service_contract_tests(
     unauthorized: &GatewayCaller,
     request: SubmitInput,
 ) -> ContractResult {
-    let group = request.group.clone();
+    let group = request.target.clone();
     let receipt = gateway.submit(caller, request.clone()).await?;
     assert_eq!(gateway.submit(caller, request).await?, receipt);
     assert_eq!(
@@ -64,7 +91,7 @@ pub async fn dist_gateway_service_contract_tests(
         Err(GatewayError::AccessDenied | GatewayError::NotFound)
     ));
     // A task is reached only through the group it was created for.
-    let another = GroupId(format!("{}-another", group.0));
+    let another = SessionTarget::Group { group: GroupId(format!("{}-another", group.id())) };
     assert_eq!(
         gateway.get_task(caller, &another, &receipt.tid).await,
         Err(GatewayError::NotFound)
@@ -112,7 +139,7 @@ pub async fn dist_runtime_control_port_contract_tests(
 /// Fixture adapter scripts definite pre-send failure, ambiguous send, cancel timeout.
 pub async fn dist_agent_client_port_contract_tests(
     client: &dyn DistAgentClientPort,
-    target: &AgentBinding,
+    target: &AgentId,
     not_sent: StableSendRequest,
     ambiguous: StableSendRequest,
     remote: &RemoteTaskRef,
@@ -133,18 +160,18 @@ pub async fn dist_agent_client_port_contract_tests(
     Ok(())
 }
 
-pub async fn dist_group_directory_port_contract_tests(
-    directory: &dyn DistGroupDirectoryPort,
+pub async fn dist_session_directory_port_contract_tests(
+    directory: &dyn DistSessionDirectoryPort,
     scope: &TaskScope,
-    group: &GroupId,
+    group: &SessionTarget,
 ) -> ContractResult {
     let first = directory.resolve(scope, group).await?;
-    assert_eq!(&first.group, group);
+    assert_eq!(&first.target, group);
     assert_eq!(directory.resolve(scope, group).await?, first);
-    let workflow = directory.load_workflow(scope, &first.workflow).await?;
+    let workflow = directory.load_mode_config(scope, &first.mode_envelope).await?;
     assert_eq!(
         serde_json::to_value(workflow)?,
-        serde_json::to_value(directory.load_workflow(scope, &first.workflow).await?)?
+        serde_json::to_value(directory.load_mode_config(scope, &first.mode_envelope).await?)?
     );
     Ok(())
 }

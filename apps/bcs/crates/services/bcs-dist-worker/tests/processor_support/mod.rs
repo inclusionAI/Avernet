@@ -51,35 +51,33 @@ impl Clock for ClockAt {
 }
 pub struct Directory;
 #[async_trait]
-impl DistGroupDirectoryPort for Directory {
+impl DistSessionDirectoryPort for Directory {
+    async fn authorize(&self, _: &TaskScope, _: &SessionTarget, _: &SessionAccessContext) -> Result<(), DirectoryError> {
+        Ok(())
+    }
     async fn resolve(
         &self,
         _: &TaskScope,
-        _: &GroupId,
-    ) -> Result<FrozenGroupDefinition, GroupDirectoryError> {
-        Err(GroupDirectoryError::NotFound)
+        _: &SessionTarget,
+    ) -> Result<FrozenSessionProposal, DirectoryError> {
+        Err(DirectoryError::NotFound)
     }
-    async fn load_workflow(
-        &self,
-        _: &TaskScope,
-        _: &WorkflowRef,
-    ) -> Result<bcs_domain::collaboration::StateMachineDefinition, GroupDirectoryError> {
-        Ok(serde_json::from_value(serde_json::json!({})).unwrap())
-    }
+
 }
 #[derive(Default)]
 pub struct FinishingRunner {
     pub calls: AtomicUsize,
     pub text: usize,
 }
+#[async_trait::async_trait]
 impl DistRunnerCoreService for FinishingRunner {
-    fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
+    async fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         Ok(RunnerState {
             format_version: 1,
             value: serde_json::Value::Null,
         })
     }
-    fn reduce(
+    async fn reduce(
         &self,
         _: &EvaluationContext<'_>,
         state: &RunnerState,
@@ -95,7 +93,7 @@ impl DistRunnerCoreService for FinishingRunner {
             actions: vec![
                 ActionIntent::Show {
                     tid: tid.clone(),
-                    node: NodeId("n".into()),
+                    source: CorrelationKey("n".into()),
                     artifact_id: ArtifactId("answer".into()),
                     class: OutputClass::Output,
                     update: ArtifactUpdate::Upsert {
@@ -393,7 +391,6 @@ impl Fixture {
                 admission: Arc::new(StoreAdmissionControl::new((*inbox).clone(), feed.clone())),
                 runner,
                 projection: Arc::new(OutputProjectionService),
-                directory: Arc::new(Directory),
                 tasks: feed.clone(),
                 output: publisher.clone(),
                 blobs: blobs.clone(),
@@ -484,21 +481,22 @@ impl Fixture {
 }
 pub fn spec() -> SessionSpec {
     SessionSpec {
-        schema_version: 1,
+        schema_version: 2,
         sid: Sid("s0001.session".into()),
         shard: ShardId(1),
         scope: TaskScope {
             tenant: TenantId("t".into()),
             principal: PrincipalId("p".into()),
         },
-        kind: SessionKind::FsmGroup,
-        group: GroupId("g".into()),
-        workflow: WorkflowRef {
-            definition_id: "wf".into(),
+        target: SessionTarget::Group { group: GroupId("g".into()) },
+        mode_envelope: ModeConfigEnvelope {
+            mode: CollaborationMode::StateMachine,
+            mode_version: 1,
             revision: "1".into(),
             digest: Digest("wf-digest".into()),
+            payload: Payload::Inline(serde_json::json!({})),
         },
-        participants: vec![],
+        authorized_agents: vec![],
         limits: SessionLimits {
             max_queued_tasks: 32,
             max_task_steps: 100,
@@ -565,7 +563,6 @@ impl Fixture {
                 )),
                 runner,
                 projection: Arc::new(OutputProjectionService),
-                directory: Arc::new(Directory),
                 tasks: self.feed.clone(),
                 output: self.publisher.clone(),
                 blobs: self.blobs.clone(),

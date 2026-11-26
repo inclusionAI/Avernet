@@ -67,20 +67,20 @@ pub(super) fn validate_decision(
         match action {
             ActionIntent::Show {
                 tid,
-                node,
+                source,
                 artifact_id,
                 class,
                 update,
             } => {
                 task_identity(&context, &tid)?;
                 changes.push(ArtifactChange {
-                    node: node.clone(),
+                    source: source.clone(),
                     artifact_id: artifact_id.clone(),
                     class,
                     update: update.clone(),
                 });
                 events.push(OutputBody::Artifact {
-                    node,
+                    source,
                     artifact_id,
                     class,
                     update,
@@ -101,8 +101,8 @@ pub(super) fn validate_decision(
                 if status_change.is_some() {
                     return Err(DecisionFailure::Invalid("multiple_status_actions"));
                 }
-                if interactions.len() > 64 || encoded_size(&interactions, 64 * 1024).is_none() {
-                    return Err(DecisionFailure::Invalid("interaction_bound"));
+                if interactions.len() > 64 || encoded_size(&interactions, MAX_INTERACTION_METADATA_BYTES).is_none() {
+                    return Err(DecisionFailure::OutputQuota);
                 }
                 let mut ids = BTreeSet::new();
                 for interaction in &interactions {
@@ -110,7 +110,8 @@ pub(super) fn validate_decision(
                     if !ids.insert(&interaction.id) {
                         return Err(DecisionFailure::Invalid("interaction_identity"));
                     }
-                    dispatch(&context, &interaction.did, &created)?;
+                    let InteractionOrigin::Dispatch { did } = &interaction.origin;
+                    dispatch(&context, did, &created)?;
                 }
                 events.push(OutputBody::Status {
                     status,
@@ -121,7 +122,7 @@ pub(super) fn validate_decision(
             ActionIntent::StartDispatch(spec) => {
                 task_identity(&context, &spec.tid)?;
                 identity(&spec.did.0, limits)?;
-                if spec.schema_version != 1
+                if spec.schema_version != DISPATCH_SCHEMA_VERSION
                     || spec.sid != context.spec.sid
                     || !spec.did.0.starts_with(&format!("{}.", context.task.tid.0))
                     || spec.attempt == 0
@@ -133,11 +134,12 @@ pub(super) fn validate_decision(
                 if context.dispatches.len() + created.len() > limits.max_dispatches as usize {
                     return Err(DecisionFailure::Invalid("dispatch_count"));
                 }
-                if !context.spec.participants.iter().any(|binding| {
-                    binding.node == spec.node
-                        && binding.target == spec.target
-                        && binding.pool == spec.pool
-                        && binding.capabilities == spec.capabilities
+                identity(&spec.source.0, limits)?;
+                if let Some(context) = &spec.downstream_context {
+                    identity(context, limits)?;
+                }
+                if !context.spec.authorized_agents.iter().any(|binding| {
+                    binding.agent == spec.agent && binding.pool == spec.pool
                 }) {
                     return Err(DecisionFailure::Invalid("dispatch_binding"));
                 }

@@ -154,7 +154,7 @@ pub fn state() -> RunnerState {
 
 pub fn checkpoint() -> Checkpoint {
     Checkpoint {
-        format_version: 1,
+        format_version: 2,
         commit_seq: CommitSeq(8),
         consumed: Some(position()),
         tasks: vec![TaskProgress {
@@ -169,6 +169,8 @@ pub fn checkpoint() -> Checkpoint {
             finalization: None,
         }]
         .into(),
+        downstream_generation: 0,
+        pending_cancel_did: None,
         runner_state: Some(TaskRunnerState {
             tid: input().tid,
             state: state(),
@@ -194,44 +196,27 @@ pub fn checkpoint() -> Checkpoint {
     }
 }
 
-pub fn target() -> AgentBinding {
-    AgentBinding {
-        agent: AgentId("agent-a".into()),
-        binding_version: BindingVersion("v2".into()),
-        credential_ref: CredentialRef("credential-reference".into()),
-    }
-}
-
-pub fn capabilities() -> DownstreamCapabilities {
-    DownstreamCapabilities {
-        idempotent_start: true,
-        idempotent_input: true,
-        query_by_request: true,
-        query_by_task: true,
-        subscribe: true,
-        resume_events: true,
-        cancel: true,
-    }
+pub fn target() -> AgentId {
+    AgentId("agent-a".into())
 }
 
 pub fn spec() -> SessionSpec {
     SessionSpec {
-        schema_version: 1,
+        schema_version: 2,
         sid: owner().sid,
         shard: owner().shard,
         scope: scope(),
-        kind: SessionKind::FsmGroup,
-        group: GroupId("group-a".into()),
-        workflow: WorkflowRef {
-            definition_id: "workflow-a".into(),
+        target: SessionTarget::Group { group: GroupId("group-a".into()) },
+        mode_envelope: ModeConfigEnvelope {
+            mode: CollaborationMode::StateMachine,
+            mode_version: 1,
             revision: "2".into(),
             digest: Digest("workflow-digest".into()),
+            payload: Payload::Inline(serde_json::json!({})),
         },
-        participants: vec![ParticipantBinding {
-            node: NodeId("node-a".into()),
-            target: target(),
+        authorized_agents: vec![AuthorizedAgent {
+            agent: target(),
             pool: PoolId("pool-a".into()),
-            capabilities: capabilities(),
         }],
         limits: SessionLimits {
             max_queued_tasks: 10,
@@ -244,22 +229,18 @@ pub fn spec() -> SessionSpec {
     }
 }
 
-pub fn workflow() -> bcs_domain::collaboration::StateMachineDefinition {
-    serde_json::from_value(json!({})).expect("workflow fixture")
-}
-
 pub fn dispatch_view() -> DispatchView {
     DispatchView {
         spec: DispatchSpec {
-            schema_version: 1,
+            schema_version: 2,
             sid: owner().sid,
             tid: input().tid,
             did: Did("dispatch-a".into()),
-            node: NodeId("node-a".into()),
+            source: CorrelationKey("node-a".into()),
             attempt: 1,
-            target: target(),
+            agent: target(),
             pool: PoolId("pool-a".into()),
-            capabilities: capabilities(),
+            downstream_context: None,
             request: payload(),
             deadline: TimestampMillis(60_100),
         },

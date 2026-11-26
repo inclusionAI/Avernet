@@ -3,8 +3,8 @@
 //! [`Shared`] is built once by `StoreDispatchQueue::new` and shared (`Arc`)
 //! by the queue, every held-dispatch handle and the command feed.
 //!
-//! The `disp` key is `bcn:v1:<cluster>:<ns>:s<shard>:disp:<did>`, e.g.
-//! `bcn:v1:c01:main:s0042:disp:s0042.7f3a9c.b21e.n2.a1`; the value is the
+//! The `disp` key is `bcn:v2:<cluster>:<ns>:s<shard>:disp:<did>`, e.g.
+//! `bcn:v2:c01:main:s0042:disp:s0042.7f3a9c.b21e.n2.a1`; the value is the
 //! dispatch JSON described in `doc.rs`.
 //!
 //! Every `disp` write here is conditional with `WriteCondition::Newer(v)`:

@@ -7,7 +7,6 @@ use bcs_dist_model::*;
 use bcs_service_api::{
     core::{dist_projection::OutputProjectionCoreService, dist_runner::DistRunnerCoreService},
     port::{
-        dist_agent::DistGroupDirectoryPort,
         repo::distributed::{
             admission::*, budget::*, common::*, control::*, dispatch::*, inbox::*, result::*,
             session::*, task_feed::*,
@@ -27,7 +26,6 @@ pub struct ProcessorPorts {
     pub admission: Arc<dyn AdmissionClosurePort>,
     pub runner: Arc<dyn DistRunnerCoreService>,
     pub projection: Arc<dyn OutputProjectionCoreService>,
-    pub directory: Arc<dyn DistGroupDirectoryPort>,
     pub tasks: Arc<dyn TaskReaderPort>,
     pub output: Arc<dyn TaskPublisherPort>,
     pub blobs: Arc<dyn BlobStorePort>,
@@ -40,6 +38,7 @@ pub struct ProcessorConfig {
     pub concurrency: usize,
     pub max_sessions: usize,
     pub request_timeout: Duration,
+    pub cancel_grace: Duration,
     pub poll_interval: Duration,
     pub retry_delay: Duration,
     /// Temporary remote Thinking is lossy above this per-Worker token rate.
@@ -55,6 +54,7 @@ impl Default for ProcessorConfig {
             concurrency: 4,
             max_sessions: 128,
             request_timeout: Duration::from_secs(2),
+            cancel_grace: Duration::from_secs(15),
             poll_interval: Duration::from_millis(50),
             retry_delay: Duration::from_millis(200),
             thinking_events_per_second: 32,
@@ -76,6 +76,7 @@ pub(super) struct Slot {
     pub risk_outcome: Option<(AttemptIdentity, AttemptOutcome)>,
     pub risk_begin: Option<(AttemptIdentity, ReplayIdentity, u64)>,
     pub spec: Option<SessionSpec>,
+    pub mode_config: Option<Arc<dyn std::any::Any + Send + Sync>>,
     pub dispatch_specs: BTreeMap<Did, DispatchSpec>,
     pub recovering: bool,
     pub effects_pending: bool,
@@ -106,6 +107,7 @@ impl Slot {
             risk_outcome: None,
             risk_begin: None,
             spec: None,
+            mode_config: None,
             dispatch_specs: BTreeMap::new(),
             recovering: true,
             completed: None,
@@ -157,7 +159,7 @@ impl WorkerProcessor {
         ports: ProcessorPorts,
         config: ProcessorConfig,
     ) -> Result<Self, RuntimeError> {
-        if config.concurrency == 0
+        if config.cancel_grace.is_zero() || config.concurrency == 0
             || config.concurrency > 32
             || config.max_sessions == 0
             || config.max_sessions > 128

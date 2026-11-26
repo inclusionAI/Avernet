@@ -1,4 +1,5 @@
 //! Worker execution policy. Storage and pure Runner boundaries stay injected.
+mod cancel_fence;
 mod capacity;
 mod commit;
 mod decision;

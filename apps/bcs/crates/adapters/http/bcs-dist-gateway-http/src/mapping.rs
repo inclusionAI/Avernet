@@ -77,7 +77,7 @@ pub(crate) fn task(view: &TaskView, shape: TaskShape) -> Task {
         context_id: view.sid.0.clone(),
         status: a2a::TaskStatus {
             state: state(view.content.status),
-            message: display.status_message,
+            message: interaction_prompt(&view.sid, &view.tid, &view.content.interactions).or(display.status_message),
             timestamp: None,
         },
         artifacts: display.artifacts.filter(|_| shape.artifacts),
@@ -86,13 +86,22 @@ pub(crate) fn task(view: &TaskView, shape: TaskShape) -> Task {
     }
 }
 
-fn status_update(sid: &Sid, tid: &Tid, state: TaskState) -> StreamResponse {
+fn interaction_prompt(sid: &Sid, tid: &Tid, interactions: &[Interaction]) -> Option<a2a::Message> {
+    let question = interactions.iter().find(|i| i.prompt.is_some())?;
+    let mut message = a2a::Message::new(a2a::Role::Agent, vec![a2a::Part::text(question.prompt.as_deref()?)]);
+    message.message_id = question.id.0.clone();
+    message.context_id = Some(sid.0.clone());
+    message.task_id = Some(tid.0.clone());
+    Some(message)
+}
+
+fn status_update(sid: &Sid, tid: &Tid, state: TaskState, interactions: &[Interaction]) -> StreamResponse {
     StreamResponse::StatusUpdate(TaskStatusUpdateEvent {
         task_id: tid.0.clone(),
         context_id: sid.0.clone(),
         status: a2a::TaskStatus {
             state,
-            message: None,
+            message: interaction_prompt(sid, tid, interactions),
             timestamp: None,
         },
         metadata: None,
@@ -103,8 +112,8 @@ fn status_update(sid: &Sid, tid: &Tid, state: TaskState) -> StreamResponse {
 /// can read (its position is still advanced by later events).
 pub(crate) fn event(sid: &Sid, event: &FormattedOutputEvent) -> Option<StreamResponse> {
     match &event.body {
-        FormattedOutputBody::Status { status, .. } => Some(status_update(sid, &event.tid, state(*status))),
-        FormattedOutputBody::Terminal { status, .. } => Some(status_update(sid, &event.tid, terminal(*status))),
+        FormattedOutputBody::Status { status, interactions } => Some(status_update(sid, &event.tid, state(*status), interactions)),
+        FormattedOutputBody::Terminal { status, .. } => Some(status_update(sid, &event.tid, terminal(*status), &[])),
         FormattedOutputBody::Artifact { content } => {
             let Some(update) = content::artifact_update(content) else {
                 tracing::warn!(id = ?event.id, "skipping artifact event without readable content");

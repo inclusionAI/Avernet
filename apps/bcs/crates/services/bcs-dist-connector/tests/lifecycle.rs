@@ -25,7 +25,7 @@ async fn a_call_runs_from_hint_to_end_in_the_contract_order() {
     assert_eq!(
         rig.agent.calls()[0],
         format!(
-            "start {DID}:start agent=agent-analyst payload={} phase=sending cancel=not_sent input_sending=null",
+            "start {DID}:start agent=agent-analyst payload={} context=None phase=sending cancel=not_sent input_sending=null",
             json!({"parts": [{"text": "compare"}]})
         )
     );
@@ -207,8 +207,8 @@ async fn a_broken_stream_is_not_an_agent_result() {
 #[tokio::test]
 async fn an_agent_without_subscribe_is_followed_by_polling() {
     let rig = Rig::new().await;
-    let mut spec = dispatch_spec(&did());
-    spec.capabilities.subscribe = false;
+    let spec = dispatch_spec(&did());
+    rig.agent.change_capabilities(|c| c.subscribe = false);
     rig.worker.create_spec(spec).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Accepted);
@@ -228,18 +228,17 @@ async fn large_payloads_go_to_blob_storage_and_requests_are_loaded_from_it() {
     rig.config.max_inline_bytes = 64;
     let events = rig.agent.start_stream();
     // The Worker stored the request by reference.
-    let reference = BlobRef { key: "req/b21e/n2".into(), digest: Digest("sha256:r".into()) };
-    rig.blobs
-        .blobs
-        .lock()
-        .unwrap()
-        .insert(reference.key.clone(), serde_json::to_vec(&json!({"parts": [{"text": "big request"}]})).unwrap());
+    let bytes = serde_json::to_vec(&json!({"parts": [{"text": "big request"}]})).unwrap();
+    let reference = bcs_dist_encoding::blob_reference("req/b21e/n2", &bytes);
+    rig.blobs.blobs.lock().unwrap().insert(reference.key.clone(), bytes);
     let mut spec = dispatch_spec(&did());
     spec.request = Payload::Ref(reference);
+    spec.downstream_context = Some("s0042.7f3a9c:0".into());
     rig.worker.create_spec(spec).await;
     rig.worker.notify().await;
     let _running = rig.start();
     until("accepted", || async { rig.phase().await == "accepted" }).await;
+    assert!(rig.agent.calls()[0].contains("s0042.7f3a9c:0"));
     assert!(rig.agent.calls()[0].contains("big request"), "{:?}", rig.agent.calls());
 
     let text = "x".repeat(200);
@@ -259,21 +258,26 @@ async fn large_payloads_go_to_blob_storage_and_requests_are_loaded_from_it() {
 }
 
 #[tokio::test]
-async fn a_missing_request_blob_fails_the_call_without_sending() {
-    let rig = Rig::new().await;
-    let mut spec = dispatch_spec(&did());
-    spec.request = Payload::Ref(BlobRef { key: "gone".into(), digest: Digest("sha256:x".into()) });
-    rig.worker.create_spec(spec).await;
-    rig.worker.notify().await;
-    let _running = rig.start();
-    until("the call ends", || async { rig.phase().await == "ended" }).await;
-    assert_eq!(rig.agent.count("start"), 0);
-    let reported = rig.inbox_events().await;
-    assert_eq!(reported[0].1.payload, Payload::Inline(json!({"state": "failed", "code": "request_unavailable"})));
-    assert_eq!(rig.doc().await["execution"]["outcome"], "failed");
-    // The request is loaded before send intent is recorded: the call never
-    // entered "sending" (claim, then end: two dispatch writes).
-    assert_eq!(stored(&rig.store).await.1, 1_000_000_001);
+async fn a_missing_or_corrupt_request_blob_fails_the_call_without_sending() {
+    for stored_bytes in [None, Some(br#"{"parts":[{"text":"corrupt"}]}"#.to_vec())] {
+        let rig = Rig::new().await;
+        let reference = bcs_dist_encoding::blob_reference("request", br#"{"parts":[{"text":"original"}]}"#);
+        if let Some(bytes) = stored_bytes {
+            rig.blobs.blobs.lock().unwrap().insert(reference.key.clone(), bytes);
+        }
+        let mut spec = dispatch_spec(&did());
+        spec.request = Payload::Ref(reference);
+        rig.worker.create_spec(spec).await;
+        rig.worker.notify().await;
+        let _running = rig.start();
+        until("the call ends", || async { rig.phase().await == "ended" }).await;
+        assert_eq!(rig.agent.count("start"), 0);
+        let reported = rig.inbox_events().await;
+        assert_eq!(reported[0].1.payload, Payload::Inline(json!({"state": "failed", "code": "request_unavailable"})));
+        assert_eq!(rig.doc().await["execution"]["outcome"], "failed");
+        // No send intent was recorded between claim and end.
+        assert_eq!(stored(&rig.store).await.1, 1_000_000_001);
+    }
 }
 
 #[tokio::test]

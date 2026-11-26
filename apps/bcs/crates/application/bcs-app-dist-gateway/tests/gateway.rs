@@ -26,25 +26,35 @@ use std::time::Duration;
 struct Groups {
     /// The directory cannot answer: every resolve fails as unavailable.
     down: AtomicBool,
+    revoked: AtomicBool,
 }
 #[async_trait]
-impl DistGroupDirectoryPort for Groups {
-    async fn resolve(&self, _scope: &TaskScope, group: &GroupId) -> Result<FrozenGroupDefinition, GroupDirectoryError> {
+impl DistSessionDirectoryPort for Groups {
+    async fn authorize(&self, _: &TaskScope, _: &SessionTarget, _: &SessionAccessContext) -> Result<(), DirectoryError> {
+        if self.revoked.load(Ordering::SeqCst) { Err(DirectoryError::AccessDenied) } else { Ok(()) }
+    }
+
+    async fn resolve(&self, _scope: &TaskScope, target: &SessionTarget) -> Result<FrozenSessionProposal, DirectoryError> {
         if self.down.load(Ordering::SeqCst) {
-            return Err(GroupDirectoryError::Unavailable);
+            return Err(DirectoryError::Unavailable);
         }
-        if group.0 == "grp-missing" {
-            return Err(GroupDirectoryError::NotFound);
+        if target.id() == "grp-missing" {
+            return Err(DirectoryError::NotFound);
         }
-        Ok(FrozenGroupDefinition {
+        Ok(FrozenSessionProposal {
             // A directory that answers an alias with its canonical id.
-            group: GroupId(group.0.to_lowercase()),
-            workflow: WorkflowRef {
-                definition_id: "wf-research".into(),
+            target: match target {
+                SessionTarget::Group { group } => SessionTarget::Group { group: GroupId(group.0.to_lowercase()) },
+                direct => direct.clone(),
+            },
+            mode_envelope: ModeConfigEnvelope {
+                mode: CollaborationMode::StateMachine,
+                mode_version: 1,
+                payload: Payload::Inline(serde_json::json!({})),
                 revision: "7".into(),
                 digest: Digest("sha256:ab12".into()),
             },
-            participants: vec![],
+            authorized_agents: vec![],
             limits: SessionLimits {
                 max_queued_tasks: 16,
                 max_task_steps: 200,
@@ -53,13 +63,7 @@ impl DistGroupDirectoryPort for Groups {
             },
         })
     }
-    async fn load_workflow(
-        &self,
-        _scope: &TaskScope,
-        _reference: &WorkflowRef,
-    ) -> Result<bcs_domain::collaboration::StateMachineDefinition, GroupDirectoryError> {
-        Err(GroupDirectoryError::Unavailable)
-    }
+
 }
 
 struct TestClock;
@@ -71,6 +75,7 @@ impl Clock for TestClock {
 
 fn caller(bot: &str) -> GatewayCaller {
     GatewayCaller {
+        access: Default::default(),
         tenant: TenantId("t-ant".into()),
         caller: CallerContext::Bot(BotActor {
             bot_uuid: bot.into(),
@@ -98,13 +103,13 @@ fn gateway(p: &Ports) -> DistGateway {
     gateway_over(p, p.inbox.clone())
 }
 
-fn grp() -> GroupId {
-    GroupId("grp-research-01".into())
+fn grp() -> SessionTarget {
+    SessionTarget::Group { group: GroupId("grp-research-01".into()) }
 }
 
 fn message(id: &str, text: &str) -> SubmitInput {
     SubmitInput {
-        group: grp(),
+        target: grp(),
         message_id: RequestId(id.into()),
         session: None,
         task: None,
@@ -233,6 +238,7 @@ async fn callers_only_reach_their_own_sessions_and_tasks() {
     // Another caller's session is reported as absent, not as forbidden.
     assert_eq!(g.submit(&other, intrude).await, Err(GatewayError::NotFound));
     let public = GatewayCaller {
+        access: Default::default(),
         tenant: TenantId("t-ant".into()),
         caller: CallerContext::Public,
     };
@@ -243,7 +249,7 @@ async fn callers_only_reach_their_own_sessions_and_tasks() {
         Err(GatewayError::Invalid { .. })
     ));
     assert_eq!(
-        g.submit(&me(), SubmitInput { group: GroupId("grp-missing".into()), ..message("msg-5", "x") }).await,
+        g.submit(&me(), SubmitInput { target: SessionTarget::Group { group: GroupId("grp-missing".into()) }, ..message("msg-5", "x") }).await,
         Err(GatewayError::NotFound)
     );
 }
@@ -255,7 +261,7 @@ async fn a_new_subscriber_gets_the_snapshot_then_events_and_ends_on_input_requir
     let receipt = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
     let tid = receipt.tid.clone();
     let mut stream = g
-        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
+        .subscribe(&me(), SubscribeTask { target: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
         .await
         .unwrap();
     let TaskStreamItem::Snapshot { view, cursor } = next(&mut stream).await else {
@@ -284,7 +290,7 @@ async fn a_resume_gets_only_later_events_and_an_unusable_cursor_gets_the_snapsho
     publish(&p.worker, &tid, TaskStatus::Working, Some(eid(2, 1)), &[]).await;
 
     let mut first = g
-        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
+        .subscribe(&me(), SubscribeTask { target: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
         .await
         .unwrap();
     let TaskStreamItem::Snapshot { cursor, .. } = next(&mut first).await else {
@@ -296,7 +302,7 @@ async fn a_resume_gets_only_later_events_and_an_unusable_cursor_gets_the_snapsho
 
     // Resume right after the snapshot's coverage: no snapshot, only what follows.
     let mut resumed = g
-        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(at_snapshot.clone()) })
+        .subscribe(&me(), SubscribeTask { target: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(at_snapshot.clone()) })
         .await
         .unwrap();
     assert_eq!(next(&mut resumed).await, TaskStreamItem::ResumeAccepted { cursor: at_snapshot.clone() });
@@ -306,7 +312,7 @@ async fn a_resume_gets_only_later_events_and_an_unusable_cursor_gets_the_snapsho
     let mut stale = at_snapshot.clone();
     stale.token.value = "1-1".into();
     let mut restarted = g
-        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(stale) })
+        .subscribe(&me(), SubscribeTask { target: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(stale) })
         .await
         .unwrap();
     assert!(matches!(next(&mut restarted).await, TaskStreamItem::Snapshot { .. }));
@@ -315,11 +321,11 @@ async fn a_resume_gets_only_later_events_and_an_unusable_cursor_gets_the_snapsho
     let mut foreign = at_snapshot.clone();
     foreign.tid = Tid(format!("{}.ffff", foreign.sid.0));
     assert!(matches!(
-        g.subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(foreign) }).await,
+        g.subscribe(&me(), SubscribeTask { target: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(foreign) }).await,
         Err(GatewayError::AccessDenied)
     ));
     assert!(matches!(
-        g.subscribe(&caller("pa-002"), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot }).await,
+        g.subscribe(&caller("pa-002"), SubscribeTask { target: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot }).await,
         Err(GatewayError::NotFound)
     ));
 }
@@ -331,7 +337,7 @@ async fn subscribing_to_a_finished_task_yields_its_final_view_and_ends() {
     let tid = g.submit(&me(), message("msg-1", "hello")).await.unwrap().tid;
     publish(&p.worker, &tid, TaskStatus::Completed, Some(eid(9, 1)), &[]).await;
     let mut stream = g
-        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
+        .subscribe(&me(), SubscribeTask { target: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
         .await
         .unwrap();
     let TaskStreamItem::Snapshot { view, cursor } = next(&mut stream).await else {
@@ -344,7 +350,7 @@ async fn subscribing_to_a_finished_task_yields_its_final_view_and_ends() {
 
 fn wait(tid: &Tid, until: WaitUntil, after: Option<EventId>, millis: u64) -> WaitTask {
     WaitTask {
-        group: grp(),
+        target: grp(),
         tid: tid.clone(),
         until,
         after,
@@ -483,7 +489,7 @@ async fn cancel_is_admitted_once_and_refused_for_a_finished_task() {
     let g = gateway(&p);
     let tid = g.submit(&me(), message("msg-1", "hello")).await.unwrap().tid;
     let request = CancelTask {
-        group: grp(),
+        target: grp(),
         tid: tid.clone(),
         request_id: RequestId("req-55".into()),
         reason: None,
@@ -515,7 +521,7 @@ async fn listing_needs_a_session_and_pages_its_tasks() {
         g.submit(&me(), next).await.unwrap();
     }
     let list = |session: Option<Sid>, after: Option<PageToken>, limit: u32| ListTasks {
-        group: grp(),
+        target: grp(),
         session,
         statuses: vec![],
         after,
@@ -542,7 +548,7 @@ async fn listing_needs_a_session_and_pages_its_tasks() {
 }
 
 async fn snapshot_stream(g: &DistGateway, tid: &Tid) -> TaskSubscription {
-    g.subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
+    g.subscribe(&me(), SubscribeTask { target: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
         .await
         .unwrap()
 }
@@ -647,33 +653,33 @@ async fn a_session_is_reached_only_through_the_group_it_was_created_for() {
     let receipt = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
     let (sid, tid) = (receipt.sid.clone(), receipt.tid.clone());
     publish(&p.worker, &tid, TaskStatus::InputRequired, Some(eid(7, 1)), &["i-3"]).await;
-    let other = GroupId("grp-legal-01".into());
+    let other = SessionTarget::Group { group: GroupId("grp-legal-01".into()) };
 
     // A new task in the session.
     let mut next_task = message("msg-2", "next");
-    next_task.group = other.clone();
+    next_task.target = other.clone();
     next_task.session = Some(sid.clone());
     assert_eq!(g.submit(&me(), next_task).await, Err(GatewayError::NotFound));
     // A reply to its open question.
     let mut answer = message("msg-3", "B");
-    answer.group = other.clone();
+    answer.target = other.clone();
     answer.task = Some(tid.clone());
     assert_eq!(g.submit(&me(), answer).await, Err(GatewayError::NotFound));
     // Get, subscribe, wait, cancel and list.
     assert_eq!(g.get_task(&me(), &other, &tid).await, Err(GatewayError::NotFound));
-    let subscribe = SubscribeTask { group: other.clone(), tid: tid.clone(), mode: SubscribeMode::Snapshot };
+    let subscribe = SubscribeTask { target: other.clone(), tid: tid.clone(), mode: SubscribeMode::Snapshot };
     assert!(matches!(g.subscribe(&me(), subscribe).await, Err(GatewayError::NotFound)));
-    let waiting = WaitTask { group: other.clone(), ..wait(&tid, WaitUntil::Final, None, 50) };
+    let waiting = WaitTask { target: other.clone(), ..wait(&tid, WaitUntil::Final, None, 50) };
     assert_eq!(g.wait_task(&me(), waiting).await, Err(GatewayError::NotFound));
     let cancel = CancelTask {
-        group: other.clone(),
+        target: other.clone(),
         tid: tid.clone(),
         request_id: RequestId("req-1".into()),
         reason: None,
     };
     assert_eq!(g.cancel(&me(), cancel).await, Err(GatewayError::NotFound));
     let list = ListTasks {
-        group: other,
+        target: other,
         session: Some(sid.clone()),
         statuses: vec![],
         after: None,
@@ -683,7 +689,7 @@ async fn a_session_is_reached_only_through_the_group_it_was_created_for() {
 
     // Nothing was admitted through the wrong group; the right one still works.
     let listed = ListTasks {
-        group: grp(),
+        target: grp(),
         session: Some(sid),
         statuses: vec![],
         after: None,
@@ -698,10 +704,10 @@ async fn a_directory_answer_for_another_group_id_creates_nothing() {
     let p = ports();
     let g = gateway(&p);
     let mut aliased = message("msg-1", "hello");
-    aliased.group = GroupId("Grp-Research-01".into());
+    aliased.target = SessionTarget::Group { group: GroupId("Grp-Research-01".into()) };
     assert_eq!(
         g.submit(&me(), aliased).await,
-        Err(GatewayError::Unavailable { code: "group_directory_mismatch".into() })
+        Err(GatewayError::Unavailable { code: "session_directory_mismatch".into() })
     );
     // The group's own id still works, and creates the session.
     let canonical = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
@@ -729,6 +735,50 @@ async fn a_retried_first_message_needs_no_directory_once_its_session_is_frozen()
     // A genuinely new session still needs the directory.
     assert_eq!(
         g.submit(&me(), message("msg-2", "hello")).await,
-        Err(GatewayError::Unavailable { code: "group_directory_unavailable".into() })
+        Err(GatewayError::Unavailable { code: "session_directory_unavailable".into() })
     );
+}
+
+
+#[tokio::test]
+async fn revocation_rejects_new_sends_and_replies_but_leaves_accepted_tasks_intact() {
+    let p = ports();
+    let directory = Arc::new(Groups::default());
+    let g = gateway_with(&p, p.inbox.clone(), directory.clone());
+    let target = SessionTarget::DirectAgent { agent: AgentId("protected-agent".into()) };
+    let request = SubmitInput { target: target.clone(), ..message("first", "hello") };
+    let accepted = g.submit(&me(), request.clone()).await.unwrap();
+    directory.revoked.store(true, Ordering::SeqCst);
+    let next = SubmitInput { message_id: RequestId("second".into()), session: Some(accepted.sid.clone()), ..request.clone() };
+    assert_eq!(g.submit(&me(), next.clone()).await, Err(GatewayError::AccessDenied));
+    let reply = SubmitInput { task: Some(accepted.tid.clone()), ..next };
+    assert_eq!(g.submit(&me(), reply).await, Err(GatewayError::AccessDenied));
+    assert_eq!(g.get_task(&me(), &target, &accepted.tid).await.unwrap().content.status, TaskStatus::Submitted);
+}
+
+#[tokio::test]
+async fn sessions_are_bound_to_the_delegated_source_and_organization() {
+    let p = ports();
+    let g = gateway(&p);
+    let target = SessionTarget::DirectAgent { agent: AgentId("target".into()) };
+    let request = SubmitInput { target: target.clone(), ..message("first", "hello") };
+    let mut actor = me();
+    actor.caller = CallerContext::Human(bcs_service_api::application::principal::HumanActor {
+        actor_id: "human_owner".into(), staff_no: "owner".into(),
+    });
+    actor.access.acting_agent = Some(AgentId("s".repeat(180)));
+    actor.access.organization = Some("o".repeat(180));
+    let accepted = g.submit(&actor, request.clone()).await.unwrap();
+    let stored = g.get_task(&actor, &target, &accepted.tid).await.unwrap();
+    assert!(stored.scope.principal.0.len() < 256);
+    assert_eq!(g.submit(&actor, request.clone()).await.unwrap().tid, accepted.tid);
+    let mut other_org = actor.clone();
+    other_org.access.organization = Some("org-b".into());
+    assert_eq!(g.get_task(&other_org, &target, &accepted.tid).await, Err(GatewayError::NotFound));
+    actor.access.acting_agent = Some(AgentId("source-b".into()));
+    assert_eq!(g.get_task(&actor, &target, &accepted.tid).await, Err(GatewayError::NotFound));
+    actor.caller = CallerContext::Human(bcs_service_api::application::principal::HumanActor {
+        actor_id: String::new(), staff_no: "owner".into(),
+    });
+    assert_eq!(g.submit(&actor, request).await, Err(GatewayError::AccessDenied));
 }

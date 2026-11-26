@@ -4,7 +4,7 @@ use serde_json::json;
 #[test]
 fn artifact_events_keep_stable_identity_and_explicit_reference_operation()
 -> Result<(), serde_json::Error> {
-    let wire = json!({"kind":"artifact", "node":"node-a", "artifact_id":"answer", "class":"output",
+    let wire = json!({"kind":"artifact", "source":"node-a", "artifact_id":"answer", "class":"output",
         "update":{"op":"append_text","delta":{"kind":"ref","value":{"key":"immutable-delta","digest":"sha256:content"}}}});
     let event: OutputBody = serde_json::from_value(wire.clone())?;
     assert_eq!(serde_json::to_value(event)?, wire);

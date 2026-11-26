@@ -386,18 +386,19 @@ pub fn scope() -> TaskScope {
 
 pub fn spec(group: &str) -> SessionSpec {
     SessionSpec {
-        schema_version: 1,
+        schema_version: 2,
         sid: Sid(SID.into()),
         shard: ShardId(42),
         scope: scope(),
-        kind: SessionKind::FsmGroup,
-        group: GroupId(group.into()),
-        workflow: WorkflowRef {
-            definition_id: "wf-research".into(),
+        target: SessionTarget::Group { group: GroupId(group.into()) },
+        mode_envelope: ModeConfigEnvelope {
+            mode: CollaborationMode::StateMachine,
+            mode_version: 1,
             revision: "3".into(),
             digest: Digest("sha256:6b1e".into()),
+            payload: Payload::Inline(serde_json::json!({})),
         },
-        participants: vec![],
+        authorized_agents: vec![],
         limits: SessionLimits {
             max_queued_tasks: 4,
             max_task_steps: 32,

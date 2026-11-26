@@ -5,8 +5,9 @@ pub struct InvalidRunner {
     pub corrupt: bool,
 }
 
+#[async_trait::async_trait]
 impl DistRunnerCoreService for InvalidRunner {
-    fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
+    async fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         if self.corrupt {
             self.calls.fetch_add(1, Ordering::SeqCst);
             return Err(RunnerError::UnsupportedFormat { format: 999 });
@@ -16,7 +17,7 @@ impl DistRunnerCoreService for InvalidRunner {
             value: serde_json::Value::Null,
         })
     }
-    fn reduce(
+    async fn reduce(
         &self,
         _: &EvaluationContext<'_>,
         state: &RunnerState,
@@ -37,14 +38,15 @@ impl DistRunnerCoreService for InvalidRunner {
 
 pub struct DeadlineRunner(pub AtomicUsize);
 
+#[async_trait::async_trait]
 impl DistRunnerCoreService for DeadlineRunner {
-    fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
+    async fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         Ok(RunnerState {
             format_version: 1,
             value: serde_json::Value::Null,
         })
     }
-    fn reduce(
+    async fn reduce(
         &self,
         _: &EvaluationContext<'_>,
         state: &RunnerState,
@@ -73,14 +75,15 @@ impl DistRunnerCoreService for DeadlineRunner {
 
 pub struct FutureDeadlineRunner(pub AtomicUsize);
 
+#[async_trait::async_trait]
 impl DistRunnerCoreService for FutureDeadlineRunner {
-    fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
+    async fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         Ok(RunnerState {
             format_version: 1,
             value: serde_json::Value::Null,
         })
     }
-    fn reduce(
+    async fn reduce(
         &self,
         _: &EvaluationContext<'_>,
         state: &RunnerState,
@@ -124,14 +127,15 @@ pub struct RefRunner {
     pub result: BlobRef,
 }
 
+#[async_trait::async_trait]
 impl DistRunnerCoreService for RefRunner {
-    fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
+    async fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         Ok(RunnerState {
             format_version: 1,
             value: serde_json::Value::Null,
         })
     }
-    fn reduce(
+    async fn reduce(
         &self,
         _: &EvaluationContext<'_>,
         state: &RunnerState,

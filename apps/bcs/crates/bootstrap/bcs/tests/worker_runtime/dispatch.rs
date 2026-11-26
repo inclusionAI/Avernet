@@ -37,6 +37,7 @@ impl Host {
                             input_id: InputId(field(request, "id")?.into()),
                             business_digest: Digest(String::new()),
                             body: InputBody::HumanReply {
+                                responder: scope().principal,
                                 interaction: InteractionId(
                                     request["interaction"].as_str().unwrap_or("confirm").into(),
                                 ),

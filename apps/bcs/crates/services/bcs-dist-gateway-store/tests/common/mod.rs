@@ -90,7 +90,7 @@ pub fn text_event(tid: &str, id: EventId, text: &str) -> OutputEvent {
         id,
         tid: Tid(tid.into()),
         body: OutputBody::Artifact {
-            node: NodeId("n1".into()),
+            source: CorrelationKey("n1".into()),
             artifact_id: ArtifactId("a-1".into()),
             class: OutputClass::Output,
             update: ArtifactUpdate::Upsert {
@@ -416,18 +416,19 @@ pub fn ports() -> Ports {
 
 pub fn session_spec(sid: &str, scope: TaskScope) -> SessionSpec {
     SessionSpec {
-        schema_version: 1,
+        schema_version: 2,
         sid: Sid(sid.into()),
         shard: KeyLayout::shard_of(&Sid(sid.into())).unwrap(),
         scope,
-        kind: SessionKind::FsmGroup,
-        group: GroupId("grp-research-01".into()),
-        workflow: WorkflowRef {
-            definition_id: "wf-research".into(),
+        target: SessionTarget::Group { group: GroupId("grp-research-01".into()) },
+        mode_envelope: ModeConfigEnvelope {
+            mode: CollaborationMode::StateMachine,
+            mode_version: 1,
             revision: "7".into(),
             digest: Digest("sha256:ab12".into()),
+            payload: Payload::Inline(serde_json::json!({})),
         },
-        participants: vec![],
+        authorized_agents: vec![],
         limits: SessionLimits {
             max_queued_tasks: 16,
             max_task_steps: 200,
@@ -460,7 +461,8 @@ pub fn user_body(text: &str) -> InputBody {
 pub fn question(id: &str) -> Interaction {
     Interaction {
         id: InteractionId(id.into()),
-        did: Did(format!("{TID}.n2.a1")),
+        origin: InteractionOrigin::Dispatch { did: Did(format!("{TID}.n2.a1")) },
+        prompt: None,
         kind: InteractionKind::HumanInput,
     }
 }

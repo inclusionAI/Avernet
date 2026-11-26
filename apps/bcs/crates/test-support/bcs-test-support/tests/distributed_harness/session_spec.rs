@@ -49,7 +49,7 @@ async fn spec_readback_rejects_missing_or_replaced_frozen_definition() {
             script.replace(index, ok(None::<SessionSpec>));
         } else {
             let mut changed = spec();
-            changed.workflow.revision = "newer-workflow".into();
+            changed.mode_envelope.revision = "newer-workflow".into();
             script.replace(index, ok(Some(changed)));
         }
         rejects(

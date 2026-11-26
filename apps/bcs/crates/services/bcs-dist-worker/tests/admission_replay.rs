@@ -4,7 +4,7 @@ mod common;
 use bcs_dist_model::*;
 use bcs_dist_worker::WorkerTaskAdmission;
 use bcs_service_api::core::dist_admission::{TaskAdmissionCommand, TaskAdmissionCoreService};
-use bcs_service_api::port::{dist_agent::FrozenGroupDefinition, repo::distributed::inbox::*};
+use bcs_service_api::port::{dist_agent::FrozenSessionProposal, repo::distributed::inbox::*};
 use common::*;
 use std::sync::{
     Arc,
@@ -22,10 +22,10 @@ fn command() -> TaskAdmissionCommand {
     TaskAdmissionCommand {
         input: r.input,
         start_task: true,
-        create_session: Some(FrozenGroupDefinition {
-            group: s.group,
-            workflow: s.workflow,
-            participants: s.participants,
+        create_session: Some(FrozenSessionProposal {
+            target: s.target,
+            mode_envelope: s.mode_envelope,
+            authorized_agents: s.authorized_agents,
             limits: s.limits,
         }),
     }
@@ -48,7 +48,7 @@ async fn retry_reuses_initial_request_after_time_and_definition_change() {
     };
     now.fetch_add(10000, Ordering::SeqCst);
     let mut retry = original.clone();
-    retry.create_session.as_mut().unwrap().workflow.revision = "new-config".into();
+    retry.create_session.as_mut().unwrap().mode_envelope.revision = "new-config".into();
     assert_eq!(
         service.admit(&scope(), retry).await.unwrap(),
         AdmitOutcome::Duplicate(receipt)
@@ -217,7 +217,7 @@ async fn inbox_len(store: &Recorder) -> usize {
     store
         .model
         .range(
-            "bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
+            "bcn:v2:c01:main:s0042:inbox:s0042.7f3a9c",
             std::ops::Bound::Unbounded,
             std::ops::Bound::Unbounded,
             std::num::NonZeroU32::new(100).unwrap(),

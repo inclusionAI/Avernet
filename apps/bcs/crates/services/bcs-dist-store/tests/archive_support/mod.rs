@@ -68,10 +68,12 @@ impl Fixture {
         let envelope = CheckpointEnvelope {
             owner: source.commit.owner.clone(),
             checkpoint: Checkpoint {
-                format_version: 1,
+                format_version: 2,
                 commit_seq: source.commit.sequence,
                 consumed: source.commit.consumed.clone(),
                 tasks: VecDeque::new(),
+                downstream_generation: 0,
+                pending_cancel_did: None,
                 runner_state: None,
                 dispatch_seq: BTreeMap::new(),
                 deadlines: vec![],

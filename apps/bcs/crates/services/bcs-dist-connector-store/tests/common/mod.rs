@@ -382,27 +382,15 @@ pub fn pool() -> PoolId {
 
 pub fn dispatch_spec(did: &Did) -> DispatchSpec {
     DispatchSpec {
-        schema_version: 1,
+        schema_version: 2,
         sid: Sid("s0042.7f3a9c".into()),
         tid: Tid("s0042.7f3a9c.b21e".into()),
         did: did.clone(),
-        node: NodeId("n2".into()),
+        source: CorrelationKey("n2".into()),
         attempt: 1,
-        target: AgentBinding {
-            agent: AgentId("agent-analyst".into()),
-            binding_version: BindingVersion("3".into()),
-            credential_ref: CredentialRef("cred://agent-analyst/v3".into()),
-        },
+        agent: AgentId("agent-analyst".into()),
         pool: pool(),
-        capabilities: DownstreamCapabilities {
-            idempotent_start: false,
-            idempotent_input: false,
-            query_by_request: false,
-            query_by_task: true,
-            subscribe: true,
-            resume_events: false,
-            cancel: true,
-        },
+        downstream_context: None,
         request: Payload::Inline(serde_json::json!({"parts": [{"text": "compare"}]})),
         deadline: TimestampMillis(NOW + 300_000),
     }

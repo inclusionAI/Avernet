@@ -87,7 +87,7 @@ impl StoreInboxProducer {
             return Err(invalid("frozen_spec_conflict"));
         }
         if let (Some((_, stored)), Some(proposed)) = (&stored, &r.create_session)
-            && stored.group != proposed.group
+            && stored.target != proposed.target
         {
             return Err(invalid("frozen_spec_conflict"));
         }

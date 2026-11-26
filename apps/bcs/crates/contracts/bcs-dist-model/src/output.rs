@@ -1,5 +1,5 @@
 //! Versioned display data and the frozen phase-one output safety profile.
-use crate::{ArtifactId, Deadline, EventId, NodeId, OutputClass, Payload};
+use crate::{ArtifactId, Deadline, EventId, CorrelationKey, OutputClass, Payload};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -23,7 +23,7 @@ pub enum ArtifactUpdate {
 /// retry counts. Node, artifact ID and class together identify the display unit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArtifactChange {
-    pub node: NodeId,
+    pub source: CorrelationKey,
     pub artifact_id: ArtifactId,
     pub class: OutputClass,
     pub update: ArtifactUpdate,
@@ -33,7 +33,8 @@ pub struct ArtifactChange {
 /// through TaskContent.snapshot; references never change this inner encoding.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DisplayUnit {
-    pub node: NodeId,
+    #[serde(alias = "node")]
+    pub source: CorrelationKey,
     pub artifact_id: ArtifactId,
     pub class: OutputClass,
     pub content: Value,

@@ -55,6 +55,7 @@ pub struct ScriptedAgent {
     store: Option<Arc<Recorder>>,
     /// Every call, e.g. `start <request id> phase=<stored phase>`.
     pub calls: Mutex<Vec<String>>,
+    pub caps: Mutex<Option<DownstreamCapabilities>>,
     pub starts: Mutex<VecDeque<Reply>>,
     pub inputs: Mutex<VecDeque<Reply>>,
     /// Answers to `query(ByTask)`; the last one repeats.
@@ -71,6 +72,15 @@ impl ScriptedAgent {
         Self {
             store: Some(store.clone()),
             ..Self::default()
+        }
+    }
+    pub fn change_capabilities(&self, change: impl FnOnce(&mut DownstreamCapabilities)) {
+        change(self.caps.lock().unwrap().get_or_insert_with(Self::default_capabilities));
+    }
+    fn default_capabilities() -> DownstreamCapabilities {
+        DownstreamCapabilities {
+            idempotent_start: false, idempotent_input: false, query_by_request: false,
+            query_by_task: true, subscribe: true, resume_events: false, cancel: true,
         }
     }
     pub fn calls(&self) -> Vec<String> {
@@ -164,8 +174,12 @@ fn payload_text(payload: &Payload) -> String {
 
 #[async_trait]
 impl DistAgentClientPort for ScriptedAgent {
-    async fn start(&self, target: &AgentBinding, request: StableSendRequest) -> SendOutcome {
-        self.log(format!("start {} agent={} payload={}", request.request_id.0, target.agent.0, payload_text(&request.payload)))
+    async fn capabilities(&self, _: &AgentId) -> Result<DownstreamCapabilities, AgentReadError> {
+        Ok(self.caps.lock().unwrap().clone().unwrap_or_else(Self::default_capabilities))
+    }
+
+    async fn start(&self, target: &AgentId, request: StableSendRequest) -> SendOutcome {
+        self.log(format!("start {} agent={} payload={} context={:?}", request.request_id.0, target.0, payload_text(&request.payload), request.context_id))
             .await;
         let gate = self.start_gate.lock().unwrap().take();
         if let Some(gate) = gate {
@@ -174,7 +188,7 @@ impl DistAgentClientPort for ScriptedAgent {
         let reply = self.starts.lock().unwrap().pop_front();
         Self::outcome(reply)
     }
-    async fn send_input(&self, _: &AgentBinding, remote: &RemoteTaskRef, request: StableSendRequest) -> SendOutcome {
+    async fn send_input(&self, _: &AgentId, remote: &RemoteTaskRef, request: StableSendRequest) -> SendOutcome {
         self.log(format!(
             "input {} task={} context={:?} payload={}",
             request.request_id.0,
@@ -186,7 +200,7 @@ impl DistAgentClientPort for ScriptedAgent {
         let reply = self.inputs.lock().unwrap().pop_front();
         Self::outcome(reply)
     }
-    async fn query(&self, _: &AgentBinding, query: RemoteQuery) -> QueryOutcome {
+    async fn query(&self, _: &AgentId, query: RemoteQuery) -> QueryOutcome {
         let (queue, what) = match &query {
             RemoteQuery::ByRequest(id) => (&self.by_request, format!("query_request {}", id.0)),
             RemoteQuery::ByTask(remote) => (&self.tasks, format!("query_task {}", remote.task_id)),
@@ -201,7 +215,7 @@ impl DistAgentClientPort for ScriptedAgent {
     }
     async fn subscribe(
         &self,
-        _: &AgentBinding,
+        _: &AgentId,
         remote: &RemoteTaskRef,
         after: Option<ReplayToken>,
     ) -> Result<RemoteEventStream, AgentReadError> {
@@ -212,7 +226,7 @@ impl DistAgentClientPort for ScriptedAgent {
             None => Err(AgentReadError { code: "unscripted".into() }),
         }
     }
-    async fn cancel(&self, _: &AgentBinding, remote: &RemoteTaskRef, request_id: RequestId) -> CancelOutcome {
+    async fn cancel(&self, _: &AgentId, remote: &RemoteTaskRef, request_id: RequestId) -> CancelOutcome {
         self.log(format!("cancel {} task={}", request_id.0, remote.task_id)).await;
         self.cancels
             .lock()

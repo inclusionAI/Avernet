@@ -114,6 +114,7 @@ pub(super) fn retire_published(
     candidate
         .deadline_history
         .retain(|_, deadline| match &deadline.kind {
+            DeadlineKind::CancelGrace { .. } => false,
             DeadlineKind::Task { tid }
             | DeadlineKind::Snapshot { tid }
             | DeadlineKind::Dispatch { tid, .. } => !done.contains(tid),

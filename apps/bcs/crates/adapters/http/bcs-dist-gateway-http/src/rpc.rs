@@ -52,7 +52,7 @@ fn error_response(status: StatusCode, id: JsonRpcId, error: &A2AError) -> Respon
 
 pub(crate) async fn handle(
     State(state): State<AppState>,
-    Path(group): Path<String>,
+    Path(id_or_group): Path<String>,
     caller: Option<Extension<GatewayCaller>>,
     headers: HeaderMap,
     body: Result<Json<JsonRpcRequest>, JsonRejection>,
@@ -80,7 +80,8 @@ pub(crate) async fn handle(
     let call = Call {
         state: &state,
         caller: &caller,
-        group: GroupId(group),
+        target: if state.direct { SessionTarget::DirectAgent { agent: AgentId(id_or_group) } }
+                else { SessionTarget::Group { group: GroupId(id_or_group) } },
         id: id.clone(),
     };
     let outcome = match request.method.as_str() {
@@ -144,7 +145,7 @@ fn end_on_waiting_snapshot(
 struct Call<'a> {
     state: &'a AppState,
     caller: &'a GatewayCaller,
-    group: GroupId,
+    target: SessionTarget,
     id: JsonRpcId,
 }
 
@@ -172,7 +173,7 @@ impl Call<'_> {
         }
         let message = &request.message;
         Ok(SubmitInput {
-            group: self.group.clone(),
+            target: self.target.clone(),
             message_id: RequestId(message.message_id.clone()),
             session: message.context_id.clone().map(Sid),
             task: message.task_id.clone().map(Tid),
@@ -188,16 +189,16 @@ impl Call<'_> {
         // A message to an existing task answers its open question: remember what
         // the task showed before, so the wait does not stop on that question.
         let before = match &input.task {
-            Some(tid) => gw.get_task(self.caller, &self.group, tid).await.map_err(gateway)?.covered_through,
+            Some(tid) => gw.get_task(self.caller, &self.target, tid).await.map_err(gateway)?.covered_through,
             None => None,
         };
         let receipt = gw.submit(self.caller, input).await.map_err(gateway)?;
         let configuration = request.configuration.as_ref();
         let view = if configuration.and_then(|c| c.return_immediately) == Some(true) {
-            gw.get_task(self.caller, &self.group, &receipt.tid).await
+            gw.get_task(self.caller, &self.target, &receipt.tid).await
         } else {
             let wait = WaitTask {
-                group: self.group.clone(),
+                target: self.target.clone(),
                 tid: receipt.tid.clone(),
                 until: WaitUntil::InputOrFinal,
                 after: before,
@@ -219,7 +220,7 @@ impl Call<'_> {
         // shows that question, and ends on a newer one.
         let answered = match &input.task {
             Some(tid) => Some(
-                gw.get_task(self.caller, &self.group, tid)
+                gw.get_task(self.caller, &self.target, tid)
                     .await
                     .map_err(gateway)?
                     .covered_through,
@@ -228,7 +229,7 @@ impl Call<'_> {
         };
         let receipt = gw.submit(self.caller, input).await.map_err(gateway)?;
         let subscribe = SubscribeTask {
-            group: self.group.clone(),
+            target: self.target.clone(),
             tid: receipt.tid,
             mode: SubscribeMode::Snapshot,
         };
@@ -246,7 +247,7 @@ impl Call<'_> {
         let view = self
             .state
             .gateway
-            .get_task(self.caller, &self.group, &Tid(request.id))
+            .get_task(self.caller, &self.target, &Tid(request.id))
             .await
             .map_err(gateway)?;
         result(&mapping::task(&view, TaskShape::history(request.history_length)))
@@ -264,7 +265,7 @@ impl Call<'_> {
             .filter(|cursor| cursor.tid == tid)
             .map_or(SubscribeMode::Snapshot, SubscribeMode::Resume);
         let subscribe = SubscribeTask {
-            group: self.group.clone(),
+            target: self.target.clone(),
             tid,
             mode,
         };
@@ -304,14 +305,14 @@ impl Call<'_> {
         };
         let gw = &self.state.gateway;
         let cancel = CancelTask {
-            group: self.group.clone(),
+            target: self.target.clone(),
             tid: tid.clone(),
             request_id: RequestId(request_id),
             reason: None,
         };
         gw.cancel(self.caller, cancel).await.map_err(gateway)?;
         let wait = WaitTask {
-            group: self.group.clone(),
+            target: self.target.clone(),
             tid,
             until: WaitUntil::Final,
             after: None,
@@ -329,7 +330,7 @@ impl Call<'_> {
         };
         let limit = NonZeroU32::new(size).ok_or_else(|| A2AError::invalid_params("pageSize must be positive"))?;
         let list = ListTasks {
-            group: self.group.clone(),
+            target: self.target.clone(),
             session: request.context_id.map(Sid),
             statuses: request.status.as_ref().and_then(mapping::status_filter).into_iter().collect(),
             after: request.page_token.filter(|token| !token.is_empty()).map(PageToken),

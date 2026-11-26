@@ -27,13 +27,13 @@ impl A2aChat {
         if message.run_id != run || message.sender_id != p.from_bot_id || message.owner_bot_id.as_deref() != Some(&row.target_bot_id)
             || message.session_id != row.session_id || !message.group_id.is_empty() { return Err(invalid("direct source scope mismatch")); }
         let bot = if let Some(code) = &p.organization_code {
-            self.organization.as_ref().ok_or_else(|| invalid("organization service unavailable"))?.authorize_pair(code, &p.from_bot_id, &row.target_bot_id).await?;
-            self.ensure_organization_target_reachable(&p.from_bot_id, &row.target_bot_id).await?
-        } else { self.ensure_target_reachable(&p.from_bot_id, &row.target_bot_id).await? };
+            self.access.organization.as_ref().ok_or_else(|| invalid("organization service unavailable"))?.authorize_pair(code, &p.from_bot_id, &row.target_bot_id).await?;
+            self.access.ensure_organization_target_reachable(&p.from_bot_id, &row.target_bot_id).await?
+        } else { self.access.ensure_target_reachable(&p.from_bot_id, &row.target_bot_id).await? };
         if bot.status == ActorStatus::Hidden { return Err(invalid("direct target hidden")); }
         let text = message.content.get("text").and_then(Value::as_str).ok_or_else(|| invalid("direct source text missing"))?;
         self.authorize_queued_text(run, &p.from_bot_id, &row.target_bot_id, text).await?;
-        let target = self.registry.resolve_delivery_target(&row.target_bot_id).await?;
+        let target = self.access.registry.resolve_delivery_target(&row.target_bot_id).await?;
         let headers = bcs_config_api::queued_provider_headers::snapshot(&p.provider_route_headers, &flow.queue_persistable_headers).map_err(invalid)?;
         let connection_id = if target.is_gateway() { None } else {
             Some(self.bot_delivery.connection_identity(&target).await.ok_or_else(|| invalid("direct connection unavailable"))?)
@@ -58,7 +58,7 @@ impl A2aChat {
     async fn authorize_queued_text(&self, run: &str, sender: &str, target: &str, text: &str) -> ServiceResult<()> {
         use bcs_service_api::interceptor::{InterceptorDecision, OutboundMessage};
         if self.interceptors.is_empty() { return Ok(()); }
-        let (Some(caller), Some(receiver)) = (self.registry.get_agent_credentials(sender).await, self.registry.get_agent_credentials(target).await) else { return Ok(()); };
+        let (Some(caller), Some(receiver)) = (self.access.registry.get_agent_credentials(sender).await, self.access.registry.get_agent_credentials(target).await) else { return Ok(()); };
         if caller.agent_code.as_deref().is_none_or(str::is_empty) || receiver.agent_code.as_deref().is_none_or(str::is_empty) { return Ok(()); }
         let mut outbound = OutboundMessage { group_id: run.into(), receiver_bot_id: target.into(), caller, receiver,
             message: bcs_domain::GroupMessage { id: run.into(), timestamp: 0, sender: sender.into(), content: text.into(),

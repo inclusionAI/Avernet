@@ -12,7 +12,7 @@ fn empty() -> DisplaySnapshot {
 }
 fn upsert(id: &str, text: &str) -> ArtifactChange {
     ArtifactChange {
-        node: NodeId("node".into()),
+        source: CorrelationKey("source".into()),
         artifact_id: ArtifactId(id.into()),
         class: OutputClass::Output,
         update: ArtifactUpdate::Upsert {

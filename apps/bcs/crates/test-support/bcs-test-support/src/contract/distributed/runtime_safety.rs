@@ -121,7 +121,7 @@ pub fn output_projection_core_service_contract_tests(port: &dyn OutputProjection
         units: vec![],
     };
     let change = ArtifactChange {
-        node: NodeId("node".into()),
+        source: CorrelationKey("source".into()),
         artifact_id: ArtifactId("answer".into()),
         class: OutputClass::Output,
         update: ArtifactUpdate::Upsert {

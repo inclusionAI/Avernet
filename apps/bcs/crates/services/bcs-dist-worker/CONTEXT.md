@@ -3,7 +3,7 @@
 - Role: public generic Worker runtime, processor, Dispatch supervisor and output
   read facade.
 - Consumes: membership/shard/session/Inbox/Dispatch/TaskFeed/Result/Blob/control
-  repository ports, shared scan budget, pure Runner/projection, group directory,
+  repository ports, shared scan budget, typed mode runner, output projection,
   injected time, peer transport and pure output formatter.
 - Owns: readiness, HRW, bounded recovery and handoff, one round per Session,
   atomic checkpoint/effect preparation, replay, task queue and two-commit terminal

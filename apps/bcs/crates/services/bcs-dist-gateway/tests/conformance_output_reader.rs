@@ -37,7 +37,7 @@ async fn conformance_worker_output_reader_uses_the_injected_format() {
     }, &FormattedOutputEvent {
         id: eid(1, 1), tid: Tid(TID.into()), body: FormattedOutputBody::Artifact {
             content: json!({ "change": {
-                "node": "n1", "artifact_id": "a-1", "class": "output",
+                "source": "n1", "artifact_id": "a-1", "class": "output",
                 "update": { "op": "upsert", "content": { "kind": "inline", "value": "hello" } }
             } }),
         },

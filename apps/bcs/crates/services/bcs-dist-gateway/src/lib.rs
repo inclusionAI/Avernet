@@ -51,14 +51,14 @@ impl DistGatewayCoreService for DistGatewayCore {
         admission::admit(self, scope, command).await
     }
 
-    async fn session_group(
+    async fn session_target(
         &self,
         scope: &TaskScope,
         sid: &Sid,
-    ) -> Result<GroupId, DistGatewayCoreError> {
+    ) -> Result<SessionTarget, DistGatewayCoreError> {
         // Another scope's session is reported as absent, like its tasks.
         match self.sessions.get_spec(sid).await.map_err(read_error)? {
-            Some(spec) if &spec.scope == scope => Ok(spec.group),
+            Some(spec) if &spec.scope == scope => Ok(spec.target),
             _ => Err(DistGatewayCoreError::NotFound),
         }
     }

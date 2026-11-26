@@ -21,10 +21,10 @@ fn class_name(class: OutputClass) -> &'static str {
     }
 }
 
-fn artifact(node: &NodeId, id: &ArtifactId, class: OutputClass, value: &Value) -> Artifact {
-    // Length framing keeps arbitrary node/artifact names collision free. This
+fn artifact(source: &CorrelationKey, id: &ArtifactId, class: OutputClass, value: &Value) -> Artifact {
+    // Length framing keeps arbitrary source/artifact names collision free. This
     // uses exactly the identity tuple used by the shared display projection.
-    let artifact_id = format!("dist:{}:{}:{}:{}", class_name(class), node.0.len(), node.0, id.0);
+    let artifact_id = format!("dist:{}:{}:{}:{}", class_name(class), source.0.len(), source.0, id.0);
     Artifact {
         artifact_id,
         name: None,
@@ -34,7 +34,7 @@ fn artifact(node: &NodeId, id: &ArtifactId, class: OutputClass, value: &Value) -
             value => Part::data(value.clone()),
         }],
         metadata: Some(HashMap::from([
-            ("node".to_owned(), json!(node.0)),
+            ("node".to_owned(), json!(source.0)),
             ("class".to_owned(), json!(class_name(class))),
         ])),
         extensions: None,
@@ -53,7 +53,7 @@ impl DistOutputAdapterPort for A2aOutputAdapter {
             if unit.class == OutputClass::Thinking {
                 return Err(invalid("output_snapshot_contains_thinking"));
             }
-            artifacts.push(artifact(&unit.node, &unit.artifact_id, unit.class, &unit.content));
+            artifacts.push(artifact(&unit.source, &unit.artifact_id, unit.class, &unit.content));
         }
         let mut result = json!({ "artifacts": artifacts });
         // DisplaySnapshot itself has no history or status message. Preserve
@@ -78,9 +78,9 @@ impl DistOutputAdapterPort for A2aOutputAdapter {
             return Err(invalid("output_append_requires_text"));
         }
         Ok(json!({
-            "artifact": artifact(&change.node, &change.artifact_id, change.class, value),
+            "artifact": artifact(&change.source, &change.artifact_id, change.class, value),
             "append": append,
-            "metadata": { "node": change.node.0, "class": class_name(change.class) },
+            "metadata": { "node": change.source.0, "class": class_name(change.class) },
         }))
     }
 }

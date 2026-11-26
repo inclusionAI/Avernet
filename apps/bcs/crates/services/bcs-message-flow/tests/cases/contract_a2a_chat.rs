@@ -588,6 +588,12 @@ impl OrganizationCoreService for StaticOrganizationCoreService {
     }
 
     async fn authorize_pair(&self, organization_code: &str, sender_bot_uuid: &str, target_bot_uuid: &str) -> ServiceResult<AuthorizedOrganizationPair> {
+        if organization_code != Self::organization().code {
+            return Err(ServiceError::InvalidOperation {
+                message: format!("organization '{organization_code}' not found"),
+                request_id: None,
+            });
+        }
         let sender = self.require_effective_member(organization_code, sender_bot_uuid).await?;
         let target = self.require_effective_member(organization_code, target_bot_uuid).await?;
         Ok(AuthorizedOrganizationPair {
@@ -835,5 +841,7 @@ mod run_terminal;
 mod event_parser;
 #[path = "contract_a2a_chat/access.rs"]
 mod access;
+#[path = "contract_a2a_chat/conformance_session_directory.rs"]
+mod conformance_session_directory;
 #[path = "contract_a2a_chat/organization.rs"]
 mod organization;

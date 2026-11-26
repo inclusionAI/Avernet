@@ -88,7 +88,7 @@ pub(super) fn apply_decision(
         .map(|d| d.id.clone())
         .collect::<std::collections::BTreeSet<_>>();
     for deadline in &candidate.deadlines {
-        if !matches!(deadline.kind, DeadlineKind::Snapshot { .. }) {
+        if !matches!(deadline.kind, DeadlineKind::Snapshot { .. } | DeadlineKind::CancelGrace { .. }) {
             candidate
                 .deadline_history
                 .entry(deadline.id.clone())
@@ -122,6 +122,7 @@ pub(super) fn apply_decision(
             candidate.dispatch_seq.insert(
                 spec.did.clone(),
                 DispatchSequence {
+                    terminal_seen: false,
                     tid: spec.tid.clone(),
                     holder_epoch: HolderEpoch(0),
                     sequence: InputSeq(0),
@@ -438,6 +439,7 @@ fn published(
 }
 fn belongs_to_task(deadline: &Deadline, task: &Tid) -> bool {
     match &deadline.kind {
+        DeadlineKind::CancelGrace { .. } => false,
         DeadlineKind::Task { tid }
         | DeadlineKind::Dispatch { tid, .. }
         | DeadlineKind::Snapshot { tid } => tid == task,

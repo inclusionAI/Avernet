@@ -25,13 +25,20 @@ fn scope() -> TaskScope {
     }
 }
 fn content() -> Value {
-    json!({"status":"input_required","interactions":(0..64).map(|i|json!({"id":identity(i+10),"did":identity(i+100),"kind":"authorization"})).collect::<Vec<_>>(),"snapshot":framed_payload(),"result_ref":null})
+    let mut interactions = Value::Array((0..64).map(|i| json!({
+        "id": identity(i + 10), "origin": {"kind": "dispatch", "did": identity(i + 100)},
+        "prompt": "", "kind": "authorization",
+    })).collect());
+    // Charge the full encoded list budget, including escaping and origins.
+    let free = MAX_INTERACTION_METADATA_BYTES.saturating_sub(interactions.to_string().len());
+    interactions[0]["prompt"] = Value::String("p".repeat(free));
+    json!({"status":"input_required", "interactions":interactions, "snapshot":framed_payload(), "result_ref":null})
 }
 pub(super) fn snapshot() -> Result<TaskSnapshot, StoreError> {
     serde_json::from_value(json!({"schema_version":1,"scope":scope(),"sid":identity(1),"tid":identity(2),"content":content(),"output_limits":PHASE_ONE_OUTPUT_LIMITS,"output_usage":{"cumulative_bytes":8_388_608u64},"snapshot_event_id":{"commit":u64::MAX,"index":u32::MAX},"source_commit":u64::MAX,"created_at":i64::MIN,"updated_at":i64::MIN})).map_err(|_| invalid("capacity_shape"))
 }
 fn dispatch(i: usize) -> Result<EffectKind, StoreError> {
-    serde_json::from_value(json!({"kind":"create_dispatch","spec":{"schema_version":1,"sid":identity(1),"tid":identity(2),"did":identity(i+100),"node":identity(5),"attempt":u32::MAX,"target":{"agent":identity(6),"binding_version":identity(7),"credential_ref":identity(8)},"pool":identity(9),"capabilities":{"idempotent_start":false,"idempotent_input":false,"query_by_request":false,"query_by_task":false,"subscribe":false,"resume_events":false,"cancel":false},"request":framed_payload(),"deadline":i64::MIN}})).map_err(|_| invalid("capacity_shape"))
+    serde_json::from_value(json!({"kind":"create_dispatch","spec":{"schema_version":2,"sid":identity(1),"tid":identity(2),"did":identity(i+100),"source":identity(5),"attempt":u32::MAX,"agent":identity(6),"pool":identity(9),"downstream_context":identity(8),"request":framed_payload(),"deadline":i64::MIN}})).map_err(|_| invalid("capacity_shape"))
 }
 pub(super) fn owner() -> SessionOwnership {
     SessionOwnership {
@@ -50,14 +57,18 @@ pub(super) fn candidate() -> Result<Checkpoint, StoreError> {
     let task = |i: usize| json!({"steps":u32::MAX,"tid":identity(i+2),"phase":{"kind":"queued"},"input":framed_payload(),"result_ref":null,"output_limits":PHASE_ONE_OUTPUT_LIMITS,"output_usage":{"cumulative_bytes":0},"publication":{"published_through":{"commit":u64::MAX,"index":u32::MAX},"pending_events":u32::MAX,"pending_bytes":u64::MAX,"flush_deadline":{"id":identity(i+900),"at":i64::MIN,"kind":{"kind":"snapshot","tid":identity(i+2)}}},"finalization":null});
     let deadline = |i: usize| json!({"id":identity(i+600),"at":i64::MIN,"kind":{"kind":"dispatch","tid":identity(2),"did":identity(i%64+100)}});
     let mut result:Checkpoint=serde_json::from_value(json!({
-        "format_version":1,"commit_seq":u64::MAX,"consumed":{"sid":identity(1),"token":{"backend":identity(0),"generation":"1","value":format!("{}-{}",u64::MAX,u64::MAX)}},
+        "format_version":2,"downstream_generation":u64::MAX,"pending_cancel_did":identity(100),"commit_seq":u64::MAX,"consumed":{"sid":identity(1),"token":{"backend":identity(0),"generation":"1","value":format!("{}-{}",u64::MAX,u64::MAX)}},
         "tasks":(0..34).map(task).collect::<Vec<_>>(),
         "runner_state":{"tid":identity(2),"state":{"format_version":1,"value":"r".repeat(65_505)}},
-        "dispatch_seq":(0..64).map(|i|(identity(i+100),json!({"tid":identity(2),"holder_epoch":u64::MAX,"sequence":u64::MAX}))).collect::<BTreeMap<_,_>>(),
+        "dispatch_seq":(0..64).map(|i|(identity(i+100),json!({"tid":identity(2),"holder_epoch":u64::MAX,"sequence":u64::MAX,"terminal_seen":false}))).collect::<BTreeMap<_,_>>(),
         "deadlines":(0..34).map(deadline).collect::<Vec<_>>(),
         "deadline_history":(0..256).map(|i|(identity(i+600),deadline(i))).collect::<BTreeMap<_,_>>(),
         "view_drafts":{identity(2):content()},"last_event_id":{"commit":u64::MAX-1,"index":u32::MAX},"outbox":null,
     })).map_err(|_| invalid("capacity_shape"))?;
+    result.deadlines.push(Deadline {
+        id: DeadlineId(identity(999)), at: TimestampMillis(i64::MIN),
+        kind: DeadlineKind::CancelGrace { did: Did(identity(100)) },
+    });
     result.tasks[0].phase = TaskPhase::Running;
     let mut kinds = (0..31).map(dispatch).collect::<Result<Vec<_>, _>>()?;
     kinds.push(EffectKind::AppendEvents {
@@ -263,7 +274,7 @@ fn ordinary_candidates() -> Result<Vec<Checkpoint>, StoreError> {
                             index: NonZeroU32::MAX,
                         },
                         body: OutputBody::Artifact {
-                            node: NodeId(identity(5)),
+                            source: CorrelationKey(identity(5)),
                             artifact_id: ArtifactId(identity(i + 800)),
                             class: OutputClass::Output,
                             update: ArtifactUpdate::AppendText {

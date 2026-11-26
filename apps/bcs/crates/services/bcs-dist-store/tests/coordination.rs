@@ -29,7 +29,7 @@ fn setup() -> (Arc<Model>, CoordinationStore) {
 }
 fn initial() -> Checkpoint {
     Checkpoint {
-        format_version: 1,
+        format_version: 2,
         commit_seq: CommitSeq(0),
         consumed: None,
         tasks: vec![TaskProgress {
@@ -44,6 +44,8 @@ fn initial() -> Checkpoint {
             finalization: None,
         }]
         .into(),
+        downstream_generation: 0,
+        pending_cancel_did: None,
         runner_state: Some(TaskRunnerState {
             tid: Tid("s0042.session.task".into()),
             state: RunnerState {
