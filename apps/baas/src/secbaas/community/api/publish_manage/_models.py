@@ -161,6 +161,11 @@ class PublishConfig(BaseModel):
     # auto_approve: when True, manual /approve calls are rejected; only internal loop drives gates
     auto_approve: bool = False
 
+    # Publish stage semantic forwarded by backend (e.g. 'online'); BaaS reads
+    # publish_stage == 'online' to decide ChangeFlow registration. Absent for
+    # verify/draft publishes (no CF change created for those).
+    publish_stage: str | None = None
+
     @classmethod
     def get_defaults_for_type(cls, publish_type: PublishType) -> dict[str, Any]:
         """Get default stage configuration for publish type per D-01a.

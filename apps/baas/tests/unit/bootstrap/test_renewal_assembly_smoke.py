@@ -56,6 +56,7 @@ _PLUGINS = {
     "bot": {
         "teclaw": "stub",
     },
+    "changeflow": "stub",
 }
 
 

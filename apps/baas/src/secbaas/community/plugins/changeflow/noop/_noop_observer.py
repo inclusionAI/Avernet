@@ -15,7 +15,7 @@ from secbaas.community.spi.changeflow import (
     TerminalCtx,
 )
 
-logger = get_logger("changeflow")
+logger = get_logger("core-service")
 
 
 class NoopChangeFlowObserver(ChangeFlowObserver):
