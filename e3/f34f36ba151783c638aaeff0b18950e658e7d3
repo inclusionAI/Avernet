@@ -1,0 +1,19 @@
+apps/bcs/scripts/e2e-test/agent_invoke_story.py
+  s_7d114ded8fc0da::t_b42a8a225ed8fc 130,133,138,144
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e3f34f36ba151783c638aaeff0b18950e658e7d3",
+  "prompts": {},
+  "sessions": {
+    "s_7d114ded8fc0da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b4-ef36-7703-9562-0f40ee69f61b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
