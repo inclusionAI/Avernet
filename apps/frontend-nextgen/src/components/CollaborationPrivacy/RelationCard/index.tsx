@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import type { PendingPublication, PublicAudience, PublicConfig } from '@/domain/collaborationPrivacy/types';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, TriangleAlert } from 'lucide-react';
 import { visibilityAudience, visibilityScopeLabels } from '../botVisibilityCopy';
 
 const audienceLabels: Record<PublicAudience, string> = {
@@ -25,7 +25,7 @@ export interface RelationCardProps {
         onRefreshStatus?: () => void;
         refreshingStatus?: boolean;
       }
-    | { kind: 'failed' | 'attention'; label: string }
+    | { kind: 'failed' | 'attention'; label: string; rowSummary?: { title: string; description: string } }
     | null;
 }
 
@@ -39,13 +39,14 @@ export function RelationCard({
   riskStatus,
 }: RelationCardProps) {
   const failure = riskStatus && 'label' in riskStatus ? riskStatus : null;
+  const rowSummary = failure?.rowSummary;
   const inFlight = riskStatus && 'onViewApprovalProgress' in riskStatus ? riskStatus : null;
   const approving = inFlight?.kind === 'approving';
   const pendingApproval =
     !riskStatus || (approving && (!inFlight.approvalPuid || pending?.id === inFlight.approvalPuid))
       ? pending
       : undefined;
-  const riskBadge = failure ? (
+  const riskBadge = failure && !rowSummary ? (
     <Badge tone="error">{failure.label}</Badge>
   ) : !pendingApproval && inFlight ? (
     <Badge tone={approving ? 'warning' : 'primary'}>{approving ? '审批中' : '检测中'}</Badge>
@@ -91,29 +92,45 @@ export function RelationCard({
           )}
         </p>
       </div>
-      <div className="flex shrink-0 items-center gap-2">
-        {stateLink}
-        {inFlight?.onRefreshStatus ? (
+      {!rowSummary && (
+        <div className="flex shrink-0 items-center gap-2">
+          {stateLink}
+          {inFlight?.onRefreshStatus ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="px-2 text-primary"
+              loading={inFlight.refreshingStatus ?? false}
+              leftIcon={<RefreshCw className="size-3.5" aria-hidden />}
+              onClick={inFlight.onRefreshStatus}
+            >
+              刷新状态
+            </Button>
+          ) : null}
           <Button
-            variant="ghost"
+            variant="secondary"
             size="sm"
-            className="px-2 text-primary"
-            loading={inFlight.refreshingStatus ?? false}
-            leftIcon={<RefreshCw className="size-3.5" aria-hidden />}
-            onClick={inFlight.onRefreshStatus}
+            disabled={disabled || Boolean(pendingApproval || inFlight)}
+            onClick={onEdit}
           >
-            刷新状态
+            {pendingApproval || approving ? '审批中' : inFlight ? '检测中' : failure ? '去处理' : '修改可见性'}
           </Button>
-        ) : null}
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled={disabled || Boolean(pendingApproval || inFlight)}
-          onClick={onEdit}
-        >
-          {pendingApproval || approving ? '审批中' : inFlight ? '检测中' : failure ? '去处理' : '修改可见性'}
-        </Button>
-      </div>
+        </div>
+      )}
+      {rowSummary && (
+        <div className="flex basis-full flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2.5">
+          <div role="status" className="flex min-w-0 items-start gap-2">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
+            <div>
+              <p className="m-0 text-sm font-semibold text-foreground">{rowSummary.title}</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">{rowSummary.description}</p>
+            </div>
+          </div>
+          <Button variant="secondary" size="sm" disabled={disabled} onClick={onEdit}>
+            查看并重新申请
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
