@@ -23,6 +23,8 @@ export interface CollaborationBotDto {
   agent_code?: string;
   created_at?: number;
   created_by?: string;
+  /** 仅 mine 返回，表示当前 Human 的关系，不是写操作的授权结果。 */
+  access_relation?: 'owner' | 'manager' | 'self';
   env?: string;
   /** Bot 类型原始枚举值，与通用 /openapi/v1/bots 目录接口保持一致。 */
   bot_type?: string;

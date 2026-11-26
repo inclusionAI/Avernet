@@ -13,6 +13,7 @@ import {
   type FriendConnectionActorType,
   type FriendConnectionDto,
 } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
+import { normalizeAvatarUrl } from '@/utils/avatarSource';
 import { mapBotSessionMessages } from './botSessionMessageMapper';
 import { mapBotSessionSummary } from './botSessionService';
 import type { DomainError, DomainResult } from './identityService';
@@ -24,6 +25,7 @@ export interface BotIdentityFriendView {
   actorId: string;
   queryId: string;
   displayName: string;
+  avatarUrl?: string;
   online: boolean;
   detailsResolved: boolean;
   disabledReason?: string;
@@ -172,7 +174,9 @@ function mapFriendSection(
           ? detail.status === 'online' && detail.reachability !== 'unreachable'
           : Boolean(relation.is_online),
         detailsResolved: Boolean(detail),
-        ...(targetType === 'bot' ? { disabledReason: BOT_FRIEND_DISABLED_REASON } : {}),
+        ...(targetType === 'bot'
+          ? { avatarUrl: normalizeAvatarUrl(detail?.avatar_url), disabledReason: BOT_FRIEND_DISABLED_REASON }
+          : {}),
       };
     }),
     total: relations.total,

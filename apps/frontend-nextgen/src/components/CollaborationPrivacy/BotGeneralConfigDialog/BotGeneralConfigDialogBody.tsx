@@ -32,13 +32,16 @@ import { useBotPublishApproval } from '@/hooks/useBotPublishApproval';
 import { useCollaborationPrivacy } from '@/hooks/useCollaborationPrivacy';
 import type { UseHumanIdentityResult } from '@/hooks/useHumanIdentity';
 import { getGeneralConfigAvailability, type BotDomain } from '@/services/botWorkshop';
+import type { ExternalBotDomain } from '@/services/botWorkshop/externalBotService';
 import { Copy, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 
 export interface BotGeneralConfigDialogProps {
   /** BotWorkshop 列表行数据：身份三要素（id / 名称 / 引擎）+ 头像透传；外部 Bot PRD 预留同形复用。 */
   bot: BotDomain;
-  /** 外部 Bot 仅配置对 Bot 可见性、好友审批及群聊参与。 */
+  /** 外部 Bot 使用独立的公开设置合同。 */
   isExternalBot?: boolean;
+  /** 外部 Bot 没有 TC 目录的 ownerId，取 mine 中当前 Human 的关系。 */
+  externalBotAccessRelation?: ExternalBotDomain['accessRelation'];
   onClose: () => void;
 }
 
@@ -62,7 +65,8 @@ function DialogLoadingState() {
   );
 }
 
-export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose, human }: BotGeneralConfigDialogBodyProps) {
+export function BotGeneralConfigDialogBody(props: BotGeneralConfigDialogBodyProps) {
+  const { bot, isExternalBot = false, externalBotAccessRelation, onClose, human } = props;
   // 外部 Bot 由入口显式声明（绝不按 ID 猜测）：加载与可见性提交都走外部 PATCH 直改合同，无审批链路。
   const privacy = useCollaborationPrivacy({ fixedBotId: bot.id, isExternalBot });
   const targetBot = privacy.visibleBots[0];
@@ -74,12 +78,9 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
     isExternalBot || isAgentCodingBot ? codingBotAbilitySettings : generalConfigAbilitySettings;
   // 修复入口仅内部 Bot 且能力分组可见；外部 Bot / 未声明 BCN 的 Coding Bot 不出现。
   const userId = human.identity?.userId ?? '';
+  const isOwner = Boolean(userId && (isExternalBot ? externalBotAccessRelation === 'owner' : bot.ownerId === userId));
   const repairVisible = !isExternalBot && showCollaborationAbilitySettings;
-  const availability = getGeneralConfigAvailability(
-    bot,
-    Boolean(userId && bot.ownerId === userId),
-    bot.lock?.status === 'other',
-  );
+  const availability = getGeneralConfigAvailability(bot, isOwner, bot.lock?.status === 'other');
   const repairEnabled = repairVisible && human.status === 'ready' && availability.enabled;
   // 请求寻址使用 Backend 列表行 bot.id 与当前认证 Human，不使用 BCS targetBot.id。
   // 修复后的配置刷新走静默读取：只更新数据，不把整个「公开设置」切回加载骨架（刷新范围收敛到修复行自身的状态反馈）。
@@ -204,10 +205,8 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
                 onViewFriendApprovalScope={privacy.openFriendScopeViewer}
               />
             </div>
-            {/* 好友名单(bot-friend-roster):严格 Owner 判定(userId 非空且等于
-                行数据 ownerId);只在已解析出协作 Bot UUID(targetBot.id)时挂载——
-                绝不传后端行 bot.id。外部 Bot 变体同样渲染(CF-1 已确认同权)。 */}
-            {Boolean(userId && bot.ownerId === userId) ? (
+            {/* 仅 Owner 可见；好友名单读取、移除都使用已解析的协作身份 ID。 */}
+            {isOwner ? (
               <div className={sectionCardClass}>
                 <BotFriendListSettings botUuid={targetBot.id} />
               </div>
