@@ -11,7 +11,7 @@ from search_core.application.emergency import (
 )
 
 
-def control():
+def control(*, fallback=True):
     def variants(policy):
         allowed = tuple(policy.retrieval.pipeline_switches().values())
         return {
@@ -35,7 +35,10 @@ def control():
         lambda p: object(),
         build_variants=variants,
         request_defaults=RetrievalSwitches(
-            keyword_enabled=True, vector_enabled=True, rerank_enabled=False
+            keyword_enabled=True,
+            vector_enabled=True,
+            rerank_enabled=False,
+            empty_result_fallback_enabled=fallback,
         ),
     )
 
@@ -181,3 +184,17 @@ def test_legacy_control_retains_tc_semantics():
     assert c.update(policy.model_dump())
     assert not c.update({"retrieval": {"vector_enabled": False}})
     assert c.current.policy == policy
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_startup_fallback_default_does_not_require_a_config_callback(enabled):
+    c = control(fallback=enabled)
+    assert c.for_request({}).policy.retrieval.empty_result_fallback_enabled is enabled
+    assert c.update({"retrieval": {"vector_enabled": False}})
+    assert c.for_request({}).policy.retrieval.empty_result_fallback_enabled is enabled
+    assert c.update_retrieval({"empty_result_fallback_enabled": not enabled})
+    assert (
+        c.for_request({}).policy.retrieval.empty_result_fallback_enabled is not enabled
+    )
+    assert c.update_retrieval({})
+    assert c.for_request({}).policy.retrieval.empty_result_fallback_enabled is enabled

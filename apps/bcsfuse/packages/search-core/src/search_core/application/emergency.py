@@ -112,6 +112,18 @@ class EmergencyControl:
         build_variants: Callable | None = None,
         request_defaults: RetrievalSwitches | None = None,
     ):
+        if request_defaults is not None:
+            defaults = defaults.model_copy(
+                update={
+                    "retrieval": defaults.retrieval.model_copy(
+                        update={
+                            "empty_result_fallback_enabled": (
+                                request_defaults.empty_result_fallback_enabled
+                            )
+                        }
+                    )
+                }
+            )
         self._startup_policy = defaults
         self._startup_request_defaults = request_defaults
         self._default_keyword_timeout_ms = defaults.keyword_timeout_ms
