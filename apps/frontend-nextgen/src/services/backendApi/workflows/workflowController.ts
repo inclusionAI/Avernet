@@ -1,7 +1,7 @@
 /**
  * 工作流菜单 API Controller。
  *
- * 仅服务单聊「+」菜单里的工作流列表与详情，不依赖 HarnessFlow 运行记录模块。
+ * 收口共享工作流列表与详情；可执行菜单与普通浏览分别调用，不依赖 HarnessFlow 运行记录模块。
  * 后端接口由 clawweb 提供：GET /api/workflows、GET /api/workflows/{workflowId}。
  * 前端统一使用同源相对路径，由开发/部署代理转发到 clawweb。
  */
@@ -46,6 +46,11 @@ export async function listWorkflows(botOwnerId?: string, botId?: string): Promis
   return requestWorkflows(botOwnerId, botId, 'view');
 }
 
+/**
+ * 查询当前认证用户可执行的工作流，保留通用列表 API 的可选资源范围。
+ * 任务入口由 taskService 校验完整 Bot/owner 范围；botOwnerId 不代替请求认证。
+ * 依赖服务端 execute 权限过滤上线（PR4275），不回退到 view。
+ */
 export async function listExecutableWorkflows(botOwnerId?: string, botId?: string): Promise<WorkflowListItem[]> {
   return requestWorkflows(botOwnerId, botId, 'execute');
 }

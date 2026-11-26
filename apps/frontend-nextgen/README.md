@@ -250,6 +250,14 @@ requests are GET-only; write actions stay unsupported, and read failures never
 fall back to demo data. Fixture modules are not reachable from the formal page.
 See the [approved feature scope and validation handoff](specs/2026-11-18-task-escort-readonly/spec.md)
 and its [file ownership manifest](specs/2026-11-18-task-escort-readonly/ownership-manifest.json).
+### Chat workflow selector and standalone demo
+
+The conversation header's Task Escort drawer shares the workflow-task menu's
+executable-list request and displays real returned workflow titles/IDs, with no
+fallback to simulated runs or metrics. The standalone `/demo/task-escort`
+remains local-only. See [request semantics, backend prerequisite and validation](docs/task-escort-chat-demo.md)
+before enabling the executable-list frontend against a deployed backend.
+
 ## Conversation session origins
 
 The conversation sidebar sends `f_user_id=<current Human>` for the current

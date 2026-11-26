@@ -1,4 +1,5 @@
-import { TaskEscortDemoPanel } from '@/components/Workspace/TaskEscortDemo';
+import { TaskEscortPanel } from '@/components/Workspace/TaskEscortPanel';
+import type { TaskComposerContext } from '@/services/tasks/taskMapper';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import { useRef } from 'react';
 import type { UseChatHeaderPanelsResult } from '../hooks/useChatHeaderPanels';
@@ -9,10 +10,11 @@ interface ConversationHeaderPanelsProps {
   headerPanels: UseChatHeaderPanelsResult;
   session: BotChatSessionView | null;
   botName?: string;
+  taskComposerContext: TaskComposerContext | null;
 }
 
-/** 保留详情/历史内联面板的收起过渡；护航常挂载，草稿仅属于当前 Bot / 会话。 */
-export function ConversationHeaderPanels({ headerPanels, session, botName }: ConversationHeaderPanelsProps) {
+/** 保留详情/历史内联面板的收起过渡；实时护航复用任务菜单上下文。 */
+export function ConversationHeaderPanels({ headerPanels, session, botName, taskComposerContext }: ConversationHeaderPanelsProps) {
   const openPanel = headerPanels.openPanel === 'escort' ? null : headerPanels.openPanel;
   const renderPanelKindRef = useRef<'detail' | 'history'>('detail');
   if (openPanel) renderPanelKindRef.current = openPanel;
@@ -31,13 +33,13 @@ export function ConversationHeaderPanels({ headerPanels, session, botName }: Con
           <SessionDetailPanel session={session} />
         )}
       </ChatHeaderRightPanel>
-      <TaskEscortDemoPanel
-        key={JSON.stringify([session?.botId, session?.sessionId])}
+      <TaskEscortPanel
         open={headerPanels.openPanel === 'escort'}
         onOpenChange={(open) => {
           if (!open) headerPanels.closePanel();
         }}
         botName={botName}
+        context={taskComposerContext}
       />
     </>
   );
