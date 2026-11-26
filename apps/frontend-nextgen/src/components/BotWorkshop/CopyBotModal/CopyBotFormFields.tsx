@@ -4,6 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/Switch';
 import { Textarea } from '@/components/ui/Textarea';
 import type { BotCopyInput, BotCreateSpace } from '@/services/botWorkshop';
+import { BOT_NAME_MAX_LEN, botNameHasInvalidCharacter } from '@/utils/botName';
 import { cn } from '@/utils/cn';
 import type React from 'react';
 import { useState } from 'react';
@@ -39,7 +40,7 @@ export const CopyBotFormFields: React.FC<CopyBotFormFieldsProps> = ({
   onSubmit,
 }) => {
   const [avatarStatus, setAvatarStatus] = useState<AvatarProcessingStatus>('idle');
-  const nameHasInvalidCharacter = values.name.includes('@');
+  const nameHasInvalidCharacter = botNameHasInvalidCharacter(values.name);
   // 锁定字段只读展示:服务模式从源 Bot 继承,开关只显示状态。
   const sourceSpace = sourceSpaces.find((space) => space.id === values.spaceId);
 
@@ -51,18 +52,18 @@ export const CopyBotFormFields: React.FC<CopyBotFormFieldsProps> = ({
             <span>
               Bot 名称 <span className="text-destructive">*</span>
             </span>
-            <span className="text-[10px] font-normal text-muted-foreground">{values.name.length}/40</span>
+            <span className="text-[10px] font-normal text-muted-foreground">{values.name.length}/{BOT_NAME_MAX_LEN}</span>
           </span>
           <Input
             value={values.name}
-            maxLength={40}
+            maxLength={BOT_NAME_MAX_LEN}
             placeholder="例如:项目知识助手"
             className={inputFocusClass}
             onChange={(event) => setValues((current) => ({ ...current, name: event.target.value }))}
             aria-invalid={Boolean(error || nameHasInvalidCharacter)}
           />
           {nameHasInvalidCharacter ? (
-            <span className="block text-[10px] font-normal text-destructive">名称不能包含 @</span>
+            <span className="block text-[10px] font-normal text-destructive">名称只能包含中英文、数字、下划线、中划线、空格及 +、(、)</span>
           ) : null}
         </label>
 

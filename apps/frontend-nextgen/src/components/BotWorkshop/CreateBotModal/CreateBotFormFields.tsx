@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import { useBotEngineOptions } from '@/hooks/useBotEngineOptions';
 import type { BotCreateInput, BotCreateSpace } from '@/services/botWorkshop';
 import { supportsServiceBot, type AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
+import { BOT_NAME_MAX_LEN, botNameHasInvalidCharacter } from '@/utils/botName';
 import { cn } from '@/utils/cn';
 import type React from 'react';
 import { useState } from 'react';
@@ -65,7 +66,7 @@ export function CreateBotFormFields({
   const templateSupportsService = supportsServiceBot(values.agentCoding?.template as AgentCodingTemplate | undefined);
   const agentCodingServiceDisabled = isApplicationCoding || !templateSupportsService;
   const serviceDisabled = isLocal || values.engine === 'hermes' || (isAgentCoding && agentCodingServiceDisabled);
-  const nameHasInvalidCharacter = values.name.includes('@');
+  const nameHasInvalidCharacter = botNameHasInvalidCharacter(values.name);
   const serviceHint = isLocal
     ? '本地 Bot 暂不支持'
     : values.engine === 'hermes'
@@ -125,11 +126,11 @@ export function CreateBotFormFields({
             <span>
               Bot 名称 <span className="text-destructive">*</span>
             </span>
-            <span className="text-[10px] font-normal text-muted-foreground">{values.name.length}/40</span>
+            <span className="text-[10px] font-normal text-muted-foreground">{values.name.length}/{BOT_NAME_MAX_LEN}</span>
           </span>
           <Input
             value={values.name}
-            maxLength={40}
+            maxLength={BOT_NAME_MAX_LEN}
             placeholder="例如：项目知识助手"
             className={inputFocusClass}
             onChange={(event) => {
@@ -141,7 +142,7 @@ export function CreateBotFormFields({
             aria-invalid={Boolean(error || nameHasInvalidCharacter)}
           />
           {nameHasInvalidCharacter ? (
-            <span className="block text-[10px] font-normal text-destructive">名称不能包含 @</span>
+            <span className="block text-[10px] font-normal text-destructive">名称只能包含中英文、数字、下划线、中划线、空格及 +、(、)</span>
           ) : null}
         </label>
 
