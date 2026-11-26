@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.dialects import registry
+from sqlalchemy.dialects.sqlite.pysqlite import SQLiteDialect_pysqlite
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -197,6 +199,49 @@ class InMemoryDB:
                 return False
 
         return SessionContext(self._session_factory)
+
+
+class _ZeroChangedRowsSQLiteDialect(SQLiteDialect_pysqlite):
+    """SQLite dialect reproducing the production DB proxy's rowcount."""
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+        cursor.execute(statement, parameters)
+        if (
+            isinstance(statement, str)
+            and statement.upper().lstrip().startswith("UPDATE")
+            and "ac_bot_quality_task" in statement
+        ):
+            # The production DB proxy reports changed rows, not matched
+            # rows: a racing identical write makes the UPDATE a no-op and
+            # the driver sees rowcount == 0 even though the row matched.
+            context._rowcount = 0
+
+
+class ZeroChangedRowsDB(InMemoryDB):
+    """In-memory SQLite whose quality-task UPDATEs report 0 changed rows.
+
+    SQLite itself counts matched rows for no-op updates, which is why the
+    production failure never reproduced locally; the dialect hook above
+    pins the production semantics at the layer SQLAlchemy reads rowcount
+    from, so an identity-checked ORM flush raises StaleDataError while the
+    Core UPDATE path stays idempotent.
+    """
+
+    def __init__(self):
+        self.engine = create_engine(
+            "sqlite+zerocount:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        from agentclaw.community.core.base import Base
+
+        Base.metadata.create_all(self.engine)
+        self._session_factory = sessionmaker(bind=self.engine, autoflush=False)
+
+
+registry.register(
+    "sqlite.zerocount", __name__, "_ZeroChangedRowsSQLiteDialect"
+)
 
 
 class TestQualityTaskRepository:
@@ -749,6 +794,46 @@ class TestQualityTaskRepository:
 
         assert first is not None and second is not None
         assert second.ext == payload
+
+    def test_update_status_matched_update_reporting_zero_rows_does_not_raise(self):
+        """A matched UPDATE the proxy reports as 0 rows must return the row.
+
+        Production DB proxies report changed rows, so an UPDATE racing a
+        twin driver that already persisted the same values gets
+        ``rowcount == 0`` even though the row exists and matched. The old
+        identity-checked ORM flush turned exactly this into
+        ``StaleDataError``; the Core UPDATE path must return the persisted
+        record instead of raising.
+        """
+        db = ZeroChangedRowsDB()
+        repo = QualityTaskRepository(db)
+        created = repo.create(
+            uuid="test-uuid-zero-rowcount",
+            task_type="eval",
+            biz_type="service_bot_single",
+        )
+
+        update = repo.update_status(created.id, "task_created", {"eval_progress": {"status": "running"}})
+
+        assert update is not None
+        assert update.status == "task_created"
+        assert update.ext == {"eval_progress": {"status": "running"}}
+
+    def test_update_ext_matched_update_reporting_zero_rows_does_not_raise(self):
+        """update_ext mirrors update_status under the proxy's 0-row rowcount."""
+        db = ZeroChangedRowsDB()
+        repo = QualityTaskRepository(db)
+        created = repo.create(
+            uuid="test-uuid-ext-zero-rowcount",
+            task_type="eval",
+            biz_type="service_bot_single",
+        )
+
+        update = repo.update_ext(created.id, {"eval_progress": {"status": "judging"}})
+
+        assert update is not None
+        assert update.status == "init"
+        assert update.ext == {"eval_progress": {"status": "judging"}}
 
     def test_update_status_row_unreachable_mid_update_does_not_raise(self, db):
         """A row unreachable between guard SELECT and UPDATE must not raise.
