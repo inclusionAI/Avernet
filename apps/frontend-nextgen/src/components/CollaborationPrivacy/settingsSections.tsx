@@ -142,7 +142,7 @@ export function PublishApprovalSettings({
 /**
  * 好友名单分区（bot-friend-roster）：分类计数「好友用户 N · 好友 Bot M」+
  * 「管理好友」入口（两页签全量抽屉 + 搜索 + 二次确认移除）。
- * 仅 Owner 可见（由弹窗容器按 `userId && bot.ownerId === userId` 决定渲染）；
+ * 仅 Owner 可见（由公开设置弹窗容器判定）；
  * 每个类型独立降级：加载中为 `-`,失败的计数为 `-` 并随「重试」。只在容器
  * 已解析出协作 Bot UUID（targetBot.id）时挂载——绝不接收后端行 bot.id。
  */
@@ -160,7 +160,7 @@ export function BotFriendListSettings({ botUuid }: { botUuid: string }) {
         <LabelHelpTooltip label="好友名单" content="查看并管理该 Bot 的好友用户与好友 Bot;移除后双方好友关系同步解除。" />
       </div>
       <div className="flex items-center justify-between gap-3">
-        <p className="m-0 text-sm text-muted-foreground">
+        <p className="m-0 text-xs text-muted-foreground">
           {roster.loading
             ? '好友名单加载中…'
             : `好友用户 ${display(users)} · 好友 Bot ${display(bots)}`}
