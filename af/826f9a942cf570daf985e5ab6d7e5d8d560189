@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/errors_managed_bots.py
+  s_fdf2a0ea5d90fc::t_950b53e31a7e72 1-21
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  s_fdf2a0ea5d90fc::t_950b53e31a7e72 112,443
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "af826f9a942cf570daf985e5ab6d7e5d8d560189",
+  "prompts": {},
+  "sessions": {
+    "s_fdf2a0ea5d90fc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2139d-64fb-7a71-901f-98915583e8f7",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

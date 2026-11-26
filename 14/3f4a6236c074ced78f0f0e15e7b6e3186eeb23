@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/core/bot_public/README.md
+  s_4b3bb5e3f4e05a::t_819d582498c061 20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "143f4a6236c074ced78f0f0e15e7b6e3186eeb23",
+  "prompts": {},
+  "sessions": {
+    "s_4b3bb5e3f4e05a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212ee-6dfd-7652-9c5d-c1f683ce868a",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
