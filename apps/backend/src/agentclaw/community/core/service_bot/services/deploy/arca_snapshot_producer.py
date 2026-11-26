@@ -164,9 +164,9 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
                     "Center snapshot must not copy the shared corpus"
                 )
 
-        center_delivery = next(
-            delivery
-            for delivery in captured.shared_corpora
+        center_delivery, center_snapshot_path = next(
+            (delivery, PurePosixPath(relative))
+            for delivery, relative in zip(captured.shared_corpora, snapshot_paths, strict=True)
             if delivery.corpus == "center"
         )
         center_root = PurePosixPath(center_delivery.runtime_path)
@@ -189,15 +189,28 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
             )
         actual: list[tuple[str, str]] = []
         assert captured.active_runtime_path is not None
-        runtime_active = PurePosixPath(captured.active_runtime_path)
+        runtime_parent = PurePosixPath(captured.active_runtime_path).parent
+        snapshot_parent = active.parent
+        # Existing publications tolerate opaque, unrelated snapshot directories.
+        # Omitting configured Center references requires a complete dependency scan.
+        omitted_center = len(delivered) != len(captured.center_skills)
         try:
-            for entry in _snapshot_links(root):
-                target = os.readlink(entry)
-                target_path = PurePosixPath(target)
-                if not target_path.is_absolute() and entry.is_relative_to(active):
-                    target_path = runtime_active / entry.relative_to(active).parent / target_path
-                if PurePosixPath(os.path.normpath(target_path)).is_relative_to(center_root):
-                    actual.append((entry.relative_to(root).as_posix(), target))
+            for entry in _snapshot_links(root, strict=omitted_center):
+                relative = entry.relative_to(root)
+                target = PurePosixPath(os.readlink(entry))
+                points_to_center = target.is_relative_to(center_root)
+                if omitted_center and not points_to_center:
+                    if target.is_absolute():
+                        points_to_center = PurePosixPath(os.path.normpath(target)).is_relative_to(center_root)
+                    else:
+                        points_to_center = PurePosixPath(
+                            os.path.normpath(relative.parent / target)
+                        ).is_relative_to(center_snapshot_path)
+                        if not points_to_center and entry.is_relative_to(snapshot_parent):
+                            runtime_target = runtime_parent / entry.relative_to(snapshot_parent).parent / target
+                            points_to_center = PurePosixPath(os.path.normpath(runtime_target)).is_relative_to(center_root)
+                if points_to_center:
+                    actual.append((relative.as_posix(), target.as_posix()))
         except OSError as error:
             raise ServiceSkillsManifestError("cannot inspect Skills links in snapshot") from error
         actual_links = set(actual)
@@ -239,10 +252,10 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         return True
 
 
-def _snapshot_links(root: Path) -> Iterator[Path]:
+def _snapshot_links(root: Path, *, strict: bool = True) -> Iterator[Path]:
     if not root.exists():
         return
-    for directory, _, names in root.walk(on_error=_raise_walk_error):
+    for directory, _, names in root.walk(on_error=_raise_walk_error if strict else None):
         for name in names:
             entry = directory / name
             if entry.is_symlink():
