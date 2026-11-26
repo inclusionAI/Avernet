@@ -47,6 +47,12 @@ from agentclaw.community.core.bot_dormant.activate_service import (
     validate_activation,
 )
 from agentclaw.community.core.bot_dormant.audit_service import DormantAuditService
+from agentclaw.community.core.bot_dormant.auto_reactivate_policy import (
+    AutoReactivatePolicyService,
+)
+from agentclaw.community.core.bot_dormant.auto_reactivate_whitelist import (
+    AutoReactivateWhitelistService,
+)
 from agentclaw.community.core.bot_dormant.baas_client import BaasDormantClient
 from agentclaw.community.core.bot_dormant.internal_service import DormantInternalService
 from agentclaw.community.core.bot_dormant.lifecycle import DormantBotLifecycle
@@ -145,6 +151,8 @@ class BotDormantModule(Module):
             DormantScanPolicyService, to=DormantScanPolicyService, scope=singleton
         )
         binder.bind(DormantAuditService, to=DormantAuditService, scope=singleton)
+        binder.bind(AutoReactivatePolicyService, to=AutoReactivatePolicyService, scope=singleton)
+        binder.bind(AutoReactivateWhitelistService, to=AutoReactivateWhitelistService, scope=singleton)
 
     @singleton
     @provider
@@ -348,6 +356,9 @@ class BotDormantModule(Module):
         recycle_service: RecycleBotService,
         scan_policy: DormantScanPolicyService,
         common_whitelist_service: CommonWhiteListService,
+        activate_service: ActivateBotService,
+        auto_reactivate_policy: AutoReactivatePolicyService,
+        auto_reactivate_whitelist: AutoReactivateWhitelistService,
         config: DormantConfig,
         notify_config: DormantNotifyConfig,
     ) -> DormantBotService:
@@ -355,6 +366,9 @@ class BotDormantModule(Module):
 
         Inject DormantScanPolicyService so is_dry_run() reads ac_common_config
         at runtime instead of the legacy YAML/env knob.
+
+        Also injects auto-reactivation services: ActivateBotService,
+        AutoReactivatePolicyService, and AutoReactivateWhitelistService.
         """
         return DormantBotService(
             db=db,
@@ -363,6 +377,9 @@ class BotDormantModule(Module):
             recycle_service=recycle_service,
             scan_policy=scan_policy,
             common_whitelist_service=common_whitelist_service,
+            activate_service=activate_service,
+            auto_reactivate_policy=auto_reactivate_policy,
+            auto_reactivate_whitelist=auto_reactivate_whitelist,
             dry_run=config.dry_run,
             action_link_pattern=notify_config.action_link_pattern,
         )

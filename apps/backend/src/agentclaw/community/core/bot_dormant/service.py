@@ -23,6 +23,12 @@ from typing import TYPE_CHECKING
 from injector import inject
 from sqlalchemy import func
 
+from agentclaw.community.core.bot_dormant.auto_reactivate_policy import (
+    AutoReactivatePolicyService,
+)
+from agentclaw.community.core.bot_dormant.auto_reactivate_whitelist import (
+    AutoReactivateWhitelistService,
+)
 from agentclaw.community.core.bot_dormant.baas_client import (
     BaasDormantClient,
 )
@@ -47,6 +53,15 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.bot_dormant.activate_service import (
+        ActivateBotService,
+    )
+    from agentclaw.community.core.bot_dormant.auto_reactivate_policy import (
+        AutoReactivatePolicyService,
+    )
+    from agentclaw.community.core.bot_dormant.auto_reactivate_whitelist import (
+        AutoReactivateWhitelistService,
+    )
     from agentclaw.community.core.bot_dormant.protocols import BotServiceProtocol
     from agentclaw.community.core.bot_dormant.sqlite_models import DormantExternalInput
 
@@ -100,6 +115,11 @@ class DormantBotService:
         N: Dormant threshold (days). Bots inactive >= N days enter the warn window.
         M: Recycle margin (days). Bots inactive >= N+M days are recycled.
         recycle_service: Shared personal Bot recycle operation.
+        activate_service: Shared personal Bot reactivate operation.
+        auto_reactivate_policy: Runtime policy controlling whether auto-reactivate
+            is enabled and its dry-run mode.
+        auto_reactivate_whitelist: Eligibility whitelist for auto-reactivation
+            after recycle.
     """
 
     @inject
@@ -111,6 +131,9 @@ class DormantBotService:
         recycle_service: RecycleBotService,
         scan_policy: DormantScanPolicyService,
         common_whitelist_service: CommonWhiteListService,
+        activate_service: "ActivateBotService | None" = None,
+        auto_reactivate_policy: "AutoReactivatePolicyService | None" = None,
+        auto_reactivate_whitelist: "AutoReactivateWhitelistService | None" = None,
         N: int = DEFAULT_INACTIVE_THRESHOLD_DAYS,
         M: int = DEFAULT_RECYCLE_GRACE_DAYS,
         dry_run: bool | None = None,
@@ -120,6 +143,9 @@ class DormantBotService:
 
         dry_run None (test default) → module-level env helper. action_link_pattern
         is the bot-detail link template (DormantNotifyConfig); "" ⇒ no link.
+        activate_service, auto_reactivate_policy and auto_reactivate_whitelist
+        default to None so existing test helpers that don't wire them continue
+        to work — auto-reactivation is implicitly off when they are missing.
         """
         self._db = db
         self._baas_client = baas_client
@@ -133,6 +159,9 @@ class DormantBotService:
         self._scan_policy = scan_policy
         self._common_whitelist_service = common_whitelist_service
         self._action_link_pattern = action_link_pattern
+        self._activate_service = activate_service
+        self._auto_reactivate_policy = auto_reactivate_policy
+        self._auto_reactivate_whitelist = auto_reactivate_whitelist
 
     # ------------------------------------------------------------------
     # Environment helpers
@@ -389,6 +418,94 @@ class DormantBotService:
             log_row.id if log_row is not None else None,
             row.bot_id, owner_id, dry_run,
         )
+
+    def _try_auto_reactivate(
+        self,
+        session,
+        c: Candidate,
+        run_id: str,
+        dry_run: bool,
+    ) -> None:
+        """Attempt auto-reactivation after a successful recycle.
+
+        Three-layer guard:
+          1. auto_reactivate_policy.auto_reactivate_enabled == True
+          2. bot is on the auto_reactivate_whitelist
+          3. activate_service is available (wired by DI)
+
+        When ``dry_run`` is True the auto-reactivate path is skipped entirely
+        (no audit rows are written) — the policy's own dry_run flag is checked
+        inside the activate call but the outer skip avoids logging a spurious
+        'skipped' audit for every scan while the feature is being previewed.
+        """
+        if dry_run:
+            return
+
+        policy = self._auto_reactivate_policy
+        if policy is None:
+            return
+
+        if not policy.auto_reactivate_enabled():
+            return
+
+        whitelist = self._auto_reactivate_whitelist
+        if whitelist is None:
+            return
+
+        if not whitelist.is_enabled(bot_id=c.bot_id, owner_id=c.owner_id):
+            return
+
+        activate = self._activate_service
+        if activate is None:
+            logger.warning(
+                "[dormant.run=%s] event=auto_reactivate_skipped "
+                "reason=activate_service_not_wired "
+                "bot_id=%s owner_id=%s",
+                run_id, c.bot_id, c.owner_id,
+            )
+            return
+
+        try:
+            activate.activate(
+                bot_id=c.bot_id,
+                owner_id=c.owner_id,
+            )
+            self._write_audit(
+                session,
+                run_id=run_id,
+                bot_id=c.bot_id,
+                owner_id=c.owner_id,
+                check_result="auto_reactivate",
+                action_taken="auto_reactivate_triggered",
+                dry_run=False,
+                source="auto_reactivate",
+            )
+        except Exception as exc:
+            # Auto-reactivate failure must never block or roll back the
+            # recycle — log and audit independently.
+            logger.exception(
+                "[dormant.run=%s] event=auto_reactivate_failed "
+                "bot_id=%s owner_id=%s",
+                run_id, c.bot_id, c.owner_id,
+            )
+            try:
+                self._write_audit(
+                    session,
+                    run_id=run_id,
+                    bot_id=c.bot_id,
+                    owner_id=c.owner_id,
+                    check_result="auto_reactivate",
+                    action_taken="auto_reactivate_failed",
+                    dry_run=False,
+                    error_msg=str(exc)[:512],
+                    source="auto_reactivate",
+                )
+            except Exception:
+                logger.exception(
+                    "[dormant.run=%s] event=auto_reactivate_audit_failed "
+                    "bot_id=%s owner_id=%s",
+                    run_id, c.bot_id, c.owner_id,
+                )
 
     def _process_external_inputs(self, session, dry_run: bool, summary: RunSummary,
                                  run_id: str, protected_owner_ids: frozenset[str], env: str) -> None:
@@ -979,3 +1096,11 @@ class DormantBotService:
             dry_run=dry_run,
         )
         summary.recycled += 1
+
+        # -- auto-reactivation after recycle ----------------------------------
+        # After a successful recycle (real mode only), conditionally trigger
+        # auto-reactivation when the bot is on the whitelist and the policy
+        # enables it.  Failure here never rolls back the recycle.
+        self._try_auto_reactivate(
+            session, c, run_id, dry_run,
+        )
