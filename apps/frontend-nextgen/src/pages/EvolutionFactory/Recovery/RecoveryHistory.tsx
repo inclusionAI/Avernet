@@ -29,6 +29,17 @@ function SectionLink({ id, children }: { id: string; children: string }) {
   );
 }
 
+function OriginalText({ content, label }: { content: string; label: string }) {
+  return (
+    <details className="rounded-md bg-muted/40 px-3 py-1">
+      <summary className="cursor-pointer text-sm text-primary">{label}</summary>
+      <pre className="my-2 max-h-72 overflow-y-auto whitespace-pre-wrap break-all text-xs leading-6 text-foreground">
+        {content}
+      </pre>
+    </details>
+  );
+}
+
 export function RecoveryHistory({ task, children }: { task: RecoveryTask; children: ReactNode }) {
   const entries = useMemo(() => recoveryJourney(task), [task]);
   const active = ['running', 'waiting_owner', 'waiting_effect'].includes(task.status);
@@ -206,17 +217,6 @@ export function RecoveryHistory({ task, children }: { task: RecoveryTask; childr
         </Section>
       )}
     </>
-  );
-}
-
-function OriginalText({ content, label }: { content: string; label: string }) {
-  return (
-    <details className="rounded-md bg-muted/40 px-3 py-1">
-      <summary className="cursor-pointer text-sm text-primary">{label}</summary>
-      <pre className="my-2 max-h-72 overflow-y-auto whitespace-pre-wrap break-all text-xs leading-6 text-foreground">
-        {content}
-      </pre>
-    </details>
   );
 }
 
