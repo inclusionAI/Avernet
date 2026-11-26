@@ -36,6 +36,7 @@ from agentclaw.community.di.modules.bbs_config_module import BbsConfigModule
 from agentclaw.community.di.modules.bbs_digest_module import BbsDigestModule
 from agentclaw.community.di.modules.bot_app_grant_module import BotAppGrantModule
 from agentclaw.community.di.modules.bot_chat_open_module import BotChatOpenModule
+from agentclaw.community.di.modules.bot_token_usage_module import BotTokenUsageModule
 from agentclaw.community.di.modules.bot_collaborator_module import BotCollaboratorModule
 from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
 from agentclaw.community.di.modules.bot_extension_module import BotExtensionModule
@@ -293,6 +294,7 @@ def build_injector(
         CollaborationRepairModule(),
         BotAppGrantModule(),
         BotChatOpenModule(),
+        BotTokenUsageModule(),
         CallerIdentityModule(),
         AcliClisModule(),
         UserListModule(),
