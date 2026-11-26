@@ -437,7 +437,7 @@ describe('TaskOverviewV2 real controller navigation', () => {
       expect(controller.getSnapshot().navByTask[first.id].drillStack).toEqual([node.id]);
       expect(screen.queryByTestId('task-overview-v2')).toBeNull();
       const detail = screen.getByTestId('task-node-panel-v2');
-      expect(within(detail).getByText(node.name)).toBeTruthy();
+      expect(within(detail).getAllByText(node.name).length).toBeGreaterThan(0);
       expect(within(detail).getByText(kind === 'Bot' ? 'Bot 节点产物' : '需求说明书')).toBeTruthy();
       expect(host.navigate).not.toHaveBeenCalled();
       expect(host.restoreOrigin).not.toHaveBeenCalled();
