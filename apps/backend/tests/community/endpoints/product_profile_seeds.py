@@ -6,6 +6,7 @@ from agentclaw.community.api.task.product_profile_service import (
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
+    actor_context_scope,
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
     ProfilePublisherAllowlist,
@@ -66,7 +67,6 @@ PROFILE_BODY = {
     "name": "endpoint-profile",
     "composition": encode_composition(COMPOSITION),
     "stages": STAGES,
-    "request_id": "endpoint-profile",
 }
 
 
@@ -94,26 +94,27 @@ def seed_service(world):
 
 def seed_profile(world):
     service = seed_service(world)
-    profile = asyncio.run(
-        service.create_product_profile(
-            "seed-profile",
-            COMPOSITION,
-            STAGES,
-            context=OWNER,
-            request_id="seed-profile",
+    with actor_context_scope(OWNER):
+        profile = asyncio.run(
+            service.create_product_profile("seed-profile", COMPOSITION, STAGES)
         )
-    )
     assert profile.id == 1
     return service
 
 
 def seed_collet(world):
     service = seed_profile(world)
-    collet = asyncio.run(
-        service.create_product_collet(
-            1, "endpoint request", context=OWNER, request_id="seed-collet"
-        )
-    )
+    with actor_context_scope(OWNER):
+        collet = asyncio.run(service.create_product_collet(1, "endpoint request"))
+        values = asyncio.run(service.query_collet_rollout(1))
     assert collet.id == 1
-    values = asyncio.run(service.query_collet_rollout(1, context=OWNER))
     assert values[0].rollout_id == 2 and values[0].stages[0].stage_rollout_id == 3
+    return service
+
+
+def seed_intervention(world):
+    service = seed_collet(world)
+    with actor_context_scope(OWNER):
+        asyncio.run(
+            service.interactive(2, "endpoint-intervention", "original feedback")
+        )

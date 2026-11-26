@@ -2,6 +2,10 @@
 
 当前状态：**A–E 新域主路径已实施并通过专项及完整 Backend CI；F 的旧产品/存量历史全量切换与外部验证仍有边界，逐项结果见 [delivery.md](delivery.md)。** 以下保留原实施顺序与验收目标。原设计阶段状态为“待实施”。按 [方案 R3](spec.md) 和本轮用户要求组织，ProductProfile 同时保留 composition 与 stages YAML，不沿用初稿“只做 Rollout 视图/只保留资源引用”的目标。[证据与初稿被替换的选择](research.md) 独立保存。
 
+2026-11-26 接口精简修订：五方法及其 HTTP 正文移除 `context`、`request_id`，身份通过可信 G1 作用域传递，回执标识内部生成；保留 `expected_revision`。以下历史创建/干预的客户端幂等目标由 [spec §5.2](spec.md#52-服务签名草图) 的独立调用合同替代，独立进度上报与仓储内部回执幂等不变。新增验收：缺失身份拒绝、并发身份隔离、相同创建内容产生独立 ID、干预旧 revision 冲突和 HTTP schema 无旧参数。
+
+2026-11-26 后续干预合同修订：在 `interactive_context` 前新增必填 `interactive_uuid`，移除公开 `expected_revision`，替代上一段中干预按次调用及传入 revision 的合同；创建仍为独立调用。新增验收：四种干预顺序/跨服务重放、当前授权先于回执、同 UUID 改内容/改 rollout 冲突、相同反馈不同 UUID 独立生效、回执与所有副作用原子提交、并发重复在 save 回执读取及 CAS 两种竞态下只提交一次。详见 [spec §5.6](spec.md#56-interactive) 与 [delivery §6](delivery.md#6-用户追加修订干预唯一-id-与内部并发围栏)。
+
 ## 1. 实施顺序
 
 ```text

@@ -38,6 +38,49 @@ L6. L4 values do not import L5/L6. Changes affect the product HTTP schemas,
 worker/report consumers, runtime/message adapters, receipts and SQL snapshots.
 Legacy v1 shapes have explicit names and cannot mutate v2 runtime tables.
 
+### Caller scope and invocation identity
+
+The five methods do not accept `context` or `request_id`. HTTP delivery uses a
+shared authenticated dependency to bind the task-local G1
+[`actor_context_scope`](../../g1_secure_govern/actor_context.py); library callers
+must establish the same trusted scope around calls. An unbound caller is denied,
+never treated as the stored owner. The scope is restored on success and error,
+including nested/concurrent callers; singleton services do not retain an actor.
+Tenant/environment keep their existing trusted scope and cannot be supplied in
+the request body. The actor carrier is transport-free and does not authenticate
+unverified claims itself.
+
+Creates generate internal receipt identifiers. Repeating a create, even with
+identical content, creates a new Profile/Collet; there is no content-based
+deduplication. Interventions instead require a caller-generated `interactive_uuid`:
+
+```python
+await service.interactive(collet_rollout_id, interactive_uuid, interactive_context)
+```
+
+The UUID is an opaque, nonblank string bounded to 128 UTF-8 bytes. Keep it stable
+for every retry of the same intervention; use a new UUID for a new intervention.
+Within the trusted tenant/environment and actor, the same UUID with identical
+rollout ID and feedback returns the persisted original `InteractiveResult`, even
+after a successor rollout or later state change. Reusing it for different content
+or a different rollout conflicts. Current authorization always precedes replay.
+The result, state changes, successor identities and cancellation/advance intents
+commit atomically; repeated calls cannot add another committed side effect.
+Receipts survive service/process reconstruction. Concurrent duplicates may compute
+a proposal more than once, but the proposal capability must not mutate durable
+state or dispatch/cancel runs itself.
+
+`interactive` no longer accepts `expected_revision`: it captures the loaded
+revision internally and uses SQL CAS. A competing distinct write still conflicts,
+not silently reapplies a stale proposal. A duplicate losing CAS re-reads its
+committed receipt before returning; it does not rerun the proposal. New UUIDs
+cannot control a superseded rollout. `limit` remains bounded. This signature
+change is breaking: remove old `context`/`request_id` and interactive
+`expected_revision` fields; HTTP interaction bodies contain only `interactive_uuid`
+and `interactive_context` (unknown body fields are rejected). No SQL migration
+is required; existing receipts and independent Bot progress replay semantics are
+unchanged.
+
 ## Creation, queries and revision metadata
 
 - `create_product_profile` checks the existing independent publication authority,
@@ -50,9 +93,10 @@ Legacy v1 shapes have explicit names and cannot mutate v2 runtime tables.
   `current_rollout_id` and `stopped` attributes; these are not domain fields.
   HTTP returns those alongside `rollouts` in its Envelope data. `all_rollout=false`
   follows the persisted pointer, not list order.
-- `interactive` checks exact current rollout/revision before invoking a trusted
-  proposal capability on a detached copy. Replays are checked after current G1
-  authorization and before stale-version rejection. RE_DO/OPTIMIZE invalidate
+- `interactive` authorizes and checks the UUID receipt before rejecting a new
+  intervention on a superseded rollout. It invokes a trusted proposal capability
+  on a detached copy and commits against the internally loaded revision.
+  RE_DO/OPTIMIZE invalidate
   targets and successors and create fresh IDs. Accepted unaffected evidence can
   be reused explicitly, but not its session ID. SHUTDOWN persists a stop fact
   and cancellation intents; it does not manufacture another business status.

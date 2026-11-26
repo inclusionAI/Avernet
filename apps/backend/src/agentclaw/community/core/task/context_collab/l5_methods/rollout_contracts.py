@@ -144,7 +144,13 @@ class RolloutExecutionPort(Protocol):
 class RolloutInteractionPort(Protocol):
     async def propose(
         self, snapshot: RuntimeSnapshot, content: str, context: ActorContext
-    ) -> Adjustment: ...
+    ) -> Adjustment:
+        """Return a proposal only; concurrent retries may evaluate it again.
+
+        Do not mutate durable state or dispatch/cancel runs here. The caller
+        atomically commits the accepted proposal and outbox behind receipt/CAS.
+        """
+        ...
 
 
 @runtime_checkable

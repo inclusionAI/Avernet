@@ -1,20 +1,24 @@
 """HTTP requests exercise the real service and SQL repository through a test injector."""
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector
+from agentclaw.community.adapters.http.app import _domain_error_handler
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.task.product_profiles import (
     router,
     ProfileCreate,
+    ColletCreate,
+    Interaction,
     create_profile,
 )
 from agentclaw.community.api.task.product_profile_service import (
     ProductProfileServiceProtocol,
 )
+from agentclaw.community.core.errors import DomainError
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.configuration import (
     encode_composition,
 )
@@ -25,6 +29,7 @@ def client(runtime):
     injector = Injector(auto_bind=False)
     injector.binder.bind(ProductProfileServiceProtocol, to=runtime.service)
     app = FastAPI()
+    app.add_exception_handler(DomainError, _domain_error_handler)
     app.include_router(router)
     app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
         "test", "profile-owner", "test"
@@ -45,7 +50,6 @@ def test_http_create_query_messages_and_interaction_are_wired(client, runtime):
             "name": "coding",
             "composition": encode_composition(h.composition),
             "stages": h.stages,
-            "request_id": "http-profile",
         },
     )
     assert response.status_code == 200, response.text
@@ -58,7 +62,6 @@ def test_http_create_query_messages_and_interaction_are_wired(client, runtime):
         json={
             "profile_id": profile["id"],
             "content": "request",
-            "request_id": "http-collet",
         },
     )
     assert response.status_code == 200, response.text
@@ -76,8 +79,7 @@ def test_http_create_query_messages_and_interaction_are_wired(client, runtime):
         f"{BASE}/rollouts/{queried['current_rollout_id']}/interactive",
         json={
             "interactive_context": "review progress",
-            "request_id": "http-interaction",
-            "expected_revision": queried["revision"],
+            "interactive_uuid": "http-intervention",
         },
     )
     assert (
@@ -87,23 +89,94 @@ def test_http_create_query_messages_and_interaction_are_wired(client, runtime):
 
 
 @pytest.mark.parametrize(
-    "field,value", [("tenant", "other"), ("context", {}), ("session_id", "injected")]
+    "field,value",
+    [
+        ("tenant", "other"),
+        ("context", {}),
+        ("request_id", "removed-client-key"),
+        ("session_id", "injected"),
+    ],
 )
 def test_http_rejects_caller_scope_or_session_override(client, runtime, field, value):
     body = {
         "name": "coding",
         "composition": encode_composition(runtime.composition),
         "stages": runtime.stages,
-        "request_id": "invalid-http",
         field: value,
     }
     assert client.post(BASE + "/profiles", json=body).status_code == 422
 
 
+@pytest.mark.parametrize("schema", [ProfileCreate, ColletCreate, Interaction])
+def test_http_schema_has_no_actor_context_or_request_id(schema):
+    assert {"context", "request_id"}.isdisjoint(schema.model_fields)
+    assert {"context", "request_id"}.isdisjoint(
+        schema.model_json_schema()["properties"]
+    )
+
+
+def test_http_uses_authenticated_actor_for_every_product_operation(client, created):
+    h = created
+    saved = h.repository.get_collet(h.collet.id)
+    stage_id = saved.current().stages[0].stage_rollout_id
+    reads = [
+        f"{BASE}/collets/{h.collet.id}/rollouts",
+        f"{BASE}/stages/{stage_id}/messages",
+    ]
+    client.app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        "test", "outsider", "test"
+    )
+    for path in reads:
+        assert client.get(path).status_code == 403
+    assert (
+        client.post(
+            BASE + "/profiles",
+            json={
+                "name": "forbidden",
+                "composition": encode_composition(h.composition),
+                "stages": h.stages,
+            },
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            BASE + "/collets", json={"profile_id": h.profile.id, "content": "forbidden"}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            f"{BASE}/rollouts/{saved.current_rollout_id}/interactive",
+            json={"interactive_uuid": "forbidden", "interactive_context": "forbidden"},
+        ).status_code
+        == 403
+    )
+    h.interaction.propose.assert_not_awaited()
+    h.bot.get_session_messages.assert_not_awaited()
+    assert h.repository.get_collet(h.collet.id).revision == 1
+
+    client.app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        "test", "profile-owner", "test"
+    )
+    for path in reads:
+        assert client.get(path).status_code == 200
+
+
+def test_product_routes_do_not_fall_back_to_an_ambient_actor_without_http_auth(
+    client, created
+):
+    def unauthenticated():
+        raise HTTPException(status_code=401, detail="not authenticated")
+
+    client.app.dependency_overrides[get_current_user] = unauthenticated
+    assert client.get(f"{BASE}/collets/{created.collet.id}/rollouts").status_code == 401
+
+
 def test_http_strict_boolean_identity_is_rejected(client):
     response = client.post(
         BASE + "/collets",
-        json={"profile_id": True, "content": "request", "request_id": "bad-id"},
+        json={"profile_id": True, "content": "request"},
     )
     assert response.status_code == 422
 
@@ -119,7 +192,6 @@ def test_http_error_logging_redacts_entire_inline_configuration(runtime):
         name="name",
         composition=encode_composition(runtime.composition),
         stages="contains confidential content",
-        request_id="log-safe",
     )
     params = capture_call_params(
         inspect.signature(create_profile), (), {"private_body": body}
@@ -142,3 +214,69 @@ def test_profile_inline_request_is_bounded_before_yaml_and_composition_decode(
     )
     assert response.status_code == 413
     assert not runtime.calls
+
+
+def test_interaction_schema_requires_uuid_before_context_without_revision():
+    assert tuple(Interaction.model_fields) == (
+        "interactive_uuid",
+        "interactive_context",
+    )
+    assert set(Interaction.model_json_schema()["required"]) == {
+        "interactive_uuid",
+        "interactive_context",
+    }
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"interactive_context": "feedback"},
+        {"interactive_uuid": "", "interactive_context": "feedback"},
+        {"interactive_uuid": True, "interactive_context": "feedback"},
+        {"interactive_uuid": "x" * 129, "interactive_context": "feedback"},
+        {
+            "interactive_uuid": "intervention",
+            "interactive_context": "feedback",
+            "expected_revision": 1,
+        },
+        {
+            "interactive_uuid": "intervention",
+            "interactive_context": "feedback",
+            "request_id": "removed",
+        },
+    ],
+)
+def test_http_interaction_rejects_missing_uuid_invalid_uuid_and_removed_fields(
+    client, created, body
+):
+    h = created
+    before = h.repository.get_collet(h.collet.id)
+    response = client.post(
+        f"{BASE}/rollouts/{before.current_rollout_id}/interactive", json=body
+    )
+    assert response.status_code == 422
+    assert h.repository.get_collet(h.collet.id).revision == before.revision
+    h.interaction.propose.assert_not_awaited()
+
+
+def test_http_interaction_retries_replay_and_changed_uuid_content_conflicts(
+    client, created
+):
+    h = created
+    before = h.repository.get_collet(h.collet.id)
+    path = f"{BASE}/rollouts/{before.current_rollout_id}/interactive"
+    body = {"interactive_uuid": "http-intervention", "interactive_context": "feedback"}
+    first, repeated = client.post(path, json=body), client.post(path, json=body)
+    assert first.status_code == repeated.status_code == 200
+    assert first.json()["data"] == repeated.json()["data"]
+    h.interaction.propose.assert_awaited_once()
+    conflict = client.post(path, json={**body, "interactive_context": "changed"})
+    assert conflict.status_code == 409
+    assert h.repository.get_collet(h.collet.id).revision == before.revision + 1
+    assert (
+        client.post(
+            path, json={**body, "interactive_uuid": "new-intervention"}
+        ).status_code
+        == 200
+    )
+    assert h.repository.get_collet(h.collet.id).revision == before.revision + 2

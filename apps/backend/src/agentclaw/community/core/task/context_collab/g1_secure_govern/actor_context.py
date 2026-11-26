@@ -9,7 +9,12 @@ ACCS 一致性条款:"每个有副作用操作必须执行 G1 授权"——实�
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+from typing import Iterator
+
+from agentclaw.community.core.errors import Forbidden
 
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
@@ -26,3 +31,28 @@ class ActorContext:
     # Optional for operations that do not need accountability; a human acts for
     # themselves when omitted. Bot application submission requires this fact.
     accountable_principal_ref: PrincipalRef | None = None
+
+
+_CURRENT_ACTOR: ContextVar[ActorContext] = ContextVar("context_collab_actor")
+
+
+def current_actor_context() -> ActorContext:
+    """Read a trusted caller bound by delivery or a library entrypoint.
+
+    There is deliberately no anonymous/default-owner fallback. This carrier
+    does not authenticate claims; only trusted entrypoints may establish it.
+    """
+    try:
+        return _CURRENT_ACTOR.get()
+    except LookupError:
+        raise Forbidden("an authenticated actor scope is required") from None
+
+
+@contextmanager
+def actor_context_scope(actor: ActorContext) -> Iterator[None]:
+    """Bind one caller task-locally and restore the prior scope on every exit."""
+    token = _CURRENT_ACTOR.set(actor)
+    try:
+        yield
+    finally:
+        _CURRENT_ACTOR.reset(token)

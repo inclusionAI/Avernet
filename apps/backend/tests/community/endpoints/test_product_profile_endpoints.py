@@ -10,6 +10,7 @@ from tests.community.endpoints.product_profile_seeds import (
     seed_service,
     seed_profile,
     seed_collet,
+    seed_intervention,
     PROFILE_BODY,
 )
 
@@ -50,7 +51,7 @@ def create_profile_invalid_yaml():
     seed=seed_profile,
     input=CaseInput(
         headers=AUTH,
-        json_body={"profile_id": 1, "content": "request", "request_id": "new-collet"},
+        json_body={"profile_id": 1, "content": "request"},
     ),
     expect=ExpectSuccess(
         status=200,
@@ -68,7 +69,7 @@ def create_collet_happy():
     seed=seed_service,
     input=CaseInput(
         headers=AUTH,
-        json_body={"profile_id": 999, "content": "request", "request_id": "missing"},
+        json_body={"profile_id": 999, "content": "request"},
     ),
     expect=ExpectError(status=404),
 )
@@ -122,9 +123,8 @@ def query_rollouts_missing():
         headers=AUTH,
         path_params={"rollout_id": 2},
         json_body={
+            "interactive_uuid": "endpoint-review",
             "interactive_context": "review",
-            "request_id": "feedback",
-            "expected_revision": 1,
         },
     ),
     expect=ExpectSuccess(status=200, json_contains={"data": {"type": "DO_NOTHING"}}),
@@ -136,21 +136,19 @@ def interactive_happy():
 @endpoint_test(
     method="POST",
     path=BASE + "/rollouts/{rollout_id}/interactive",
-    scenario="stale",
+    scenario="missing_interactive_uuid",
     seed=seed_collet,
     input=CaseInput(
         headers=AUTH,
         path_params={"rollout_id": 2},
         json_body={
             "interactive_context": "review",
-            "request_id": "feedback",
-            "expected_revision": 999,
         },
     ),
-    expect=ExpectError(status=409),
+    expect=ExpectError(status=422),
 )
-def interactive_stale():
-    """Revision conflicts are returned rather than overwriting facts."""
+def interactive_missing_uuid():
+    """Every intervention requires an explicit idempotency identity."""
 
 
 @endpoint_test(
@@ -185,3 +183,22 @@ def messages_happy():
 )
 def messages_missing():
     """Unknown stages never trigger an arbitrary provider read."""
+
+
+@endpoint_test(
+    method="POST",
+    path=BASE + "/rollouts/{rollout_id}/interactive",
+    scenario="uuid_content_conflict",
+    seed=seed_intervention,
+    input=CaseInput(
+        headers=AUTH,
+        path_params={"rollout_id": 2},
+        json_body={
+            "interactive_uuid": "endpoint-intervention",
+            "interactive_context": "different feedback",
+        },
+    ),
+    expect=ExpectError(status=409),
+)
+def interactive_uuid_content_conflict():
+    """A committed intervention UUID cannot be repurposed with new content."""
