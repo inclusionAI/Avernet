@@ -31,7 +31,8 @@ export function useUserRiskStatus({ userRisk, load }: UserRiskStatusSource): Rel
   const { uiState, record, isRefreshing } = userRisk;
   return useMemo(() => {
     if (uiState.kind === 'failed' || uiState.kind === 'attention') {
-      return { kind: uiState.kind, label: getRiskFailurePresentation(uiState.kind, uiState.record).label };
+      const { label, rowSummary } = getRiskFailurePresentation(uiState.kind, uiState.record);
+      return { kind: uiState.kind, label, rowSummary };
     }
     if (uiState.kind === 'checking' || uiState.kind === 'advancing' || uiState.kind === 'approving') {
       return {
