@@ -199,9 +199,7 @@ TASK_TODO_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     (
         "GET",
         "/openapi/v1/collaboration/tasks/todo-template-capabilities",
-    ): NoCheck(
-        "read-only platform Todo template capabilities; no addressed bot"
-    ),
+    ): NoCheck("read-only platform Todo template capabilities; no addressed bot"),
     ("POST", "/openapi/v1/collaboration/tasks/todo-templates"): NoCheck(
         "Todo template creation is Space Admin-enforced in the service; no addressed bot"
     ),
@@ -273,6 +271,44 @@ TASK_TODO_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "GET",
         "/openapi/v1/collaboration/tasks/todos/sources/dima/projects/{project_id}/work-items/{work_item_id}",
     ): NoCheck("Human self-service Dima item read; no addressed bot"),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules",
+    ): NoCheck("Human-owned rule creation validates Space membership and Bot scope"),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules",
+    ): NoCheck("Human-owned rule list is service-scoped; no addressed bot"),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/active",
+    ): NoCheck(
+        "tenant-scoped active rule list for any authenticated caller; no addressed bot"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/{rule_id}",
+    ): NoCheck(
+        "tenant-scoped rule detail for any authenticated caller; no addressed bot"
+    ),
+    (
+        "PATCH",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/{rule_id}",
+    ): NoCheck("Human-owned rule update validates Space membership and Bot scope"),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/{rule_id}/progress",
+    ): NoCheck(
+        "tenant-scoped Agent progress for any authenticated caller; no addressed bot"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/{rule_id}/checkpoints",
+    ): NoCheck("tenant-scoped Agent checkpoint write; readable rule is executable"),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/{rule_id}/todos",
+    ): NoCheck("tenant-scoped Todo creation; rule fixes owner, Space, and Bot"),
     ("POST", "/openapi/v1/collaboration/tasks/todos/from-template"): NoCheck(
         "Templated Todo creation validates Space membership and template bindings in the service"
     ),

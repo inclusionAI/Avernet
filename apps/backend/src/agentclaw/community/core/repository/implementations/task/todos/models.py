@@ -23,6 +23,12 @@ from agentclaw.community.core.task.todos.artifact_models import (
     TodoExecutionRecord,
     TodoExecutionStatus,
 )
+from agentclaw.community.core.task.todos.auto_import_models import (
+    TodoAutoImportProgressRecord,
+    TodoAutoImportProgressStatus,
+    TodoAutoImportRuleRecord,
+    TodoAutoImportRuleStatus,
+)
 from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
 from agentclaw.community.core.task.todos.stage_models import (
     TodoPendingActionKind,
@@ -297,6 +303,7 @@ class TodoSourceBindingModel(Base):
     source_item_id = Column(String(128), nullable=False)
     source_url = Column(String(2048), nullable=True)
     source_updated_at = Column(String(128), nullable=True)
+    source_metadata_json = Column(Text, nullable=False, default="{}")
     imported_by = Column(String(256), nullable=False)
     env = Column(String(20), nullable=False, default=get_current_env)
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
@@ -331,6 +338,149 @@ class TodoSourceBindingModel(Base):
             "source_item_id",
         ),
     )
+
+
+class TodoAutoImportRuleModel(Base):
+    """One user-owned configuration consumed by an external import Agent."""
+
+    __tablename__ = "ac_todo_source_import_rule"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    rule_id = Column(String(64), nullable=False)
+    space_id = Column(AutoIncrementBigInteger, nullable=False)
+    source_type = Column(String(32), nullable=False, default="dima")
+    source_container_ids_json = Column(Text, nullable=False)
+    filter_text = Column(Text, nullable=False)
+    bot_id = Column(String(256), nullable=False)
+    status = Column(String(32), nullable=False)
+    cursor_updated_at = Column(DateTime, nullable=True)
+    created_by = Column(String(256), nullable=False)
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "avernet_tenant",
+            "env",
+            "rule_id",
+            name="uk_todo_source_import_rule_id",
+        ),
+        Index(
+            "idx_todo_source_import_rule_owner",
+            "avernet_tenant",
+            "env",
+            "created_by",
+            "status",
+            "gmt_modified",
+            "id",
+        ),
+        Index(
+            "idx_todo_source_import_rule_space",
+            "avernet_tenant",
+            "env",
+            "space_id",
+            "status",
+            "gmt_modified",
+            "id",
+        ),
+    )
+
+    def to_record(self) -> TodoAutoImportRuleRecord:
+        container_ids = json.loads(self.source_container_ids_json)
+        return TodoAutoImportRuleRecord(
+            rule_id=self.rule_id,
+            space_id=self.space_id,
+            source_container_ids=tuple(str(item) for item in container_ids),
+            filter_text=self.filter_text,
+            bot_id=self.bot_id,
+            status=TodoAutoImportRuleStatus(self.status),
+            cursor_updated_at=self.cursor_updated_at,
+            created_by=self.created_by,
+            created_at=self.gmt_create,
+            updated_at=self.gmt_modified,
+        )
+
+
+class TodoAutoImportProgressModel(Base):
+    """One retry-safe outcome for a version of a Dima work item."""
+
+    __tablename__ = "ac_todo_source_import_progress"
+
+    id = Column(
+        AutoIncrementBigInteger,
+        primary_key=True,
+        autoincrement=True,
+        nullable=False,
+    )
+    progress_id = Column(String(64), nullable=False)
+    rule_id = Column(String(64), nullable=False)
+    source_container_id = Column(String(128), nullable=False)
+    source_item_id = Column(String(128), nullable=False)
+    source_updated_at = Column(DateTime, nullable=False)
+    status = Column(String(32), nullable=False)
+    todo_id = Column(String(64), nullable=True)
+    detail = Column(Text, nullable=False, default="")
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "avernet_tenant",
+            "env",
+            "progress_id",
+            name="uk_todo_source_import_progress_id",
+        ),
+        UniqueConstraint(
+            "avernet_tenant",
+            "env",
+            "rule_id",
+            "source_container_id",
+            "source_item_id",
+            "source_updated_at",
+            name="uk_todo_source_import_progress_version",
+        ),
+        Index(
+            "idx_todo_source_import_progress_rule",
+            "avernet_tenant",
+            "env",
+            "rule_id",
+            "source_updated_at",
+            "id",
+        ),
+    )
+
+    def to_record(self) -> TodoAutoImportProgressRecord:
+        return TodoAutoImportProgressRecord(
+            progress_id=self.progress_id,
+            rule_id=self.rule_id,
+            source_container_id=self.source_container_id,
+            source_item_id=self.source_item_id,
+            source_updated_at=self.source_updated_at,
+            status=TodoAutoImportProgressStatus(self.status),
+            todo_id=self.todo_id,
+            detail=self.detail,
+            created_at=self.gmt_create,
+            updated_at=self.gmt_modified,
+        )
 
 
 class TodoExecutionModel(Base):
@@ -419,6 +569,8 @@ for _model in (
     TodoStageInstanceModel,
     TodoAcceptanceModel,
     TodoSourceBindingModel,
+    TodoAutoImportRuleModel,
+    TodoAutoImportProgressModel,
     TodoExecutionModel,
     TodoArtifactModel,
 ):

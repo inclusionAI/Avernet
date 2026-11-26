@@ -80,10 +80,10 @@ def test_lists_projects_and_preserves_numeric_project_ids() -> None:
 
     projects = service.list_projects(actor_id="149844", auth_request=_request())
 
-    assert [(item.id, item.name) for item in projects] == [
-        ("P00000000001", "个人项目"),
-        ("W00000000001", "团队空间"),
-        ("1259", "团队项目"),
+    assert [(item.id, item.name, item.kind) for item in projects] == [
+        ("P00000000001", "个人项目", "project"),
+        ("W00000000001", "团队空间", "workspace"),
+        ("1259", "团队项目", "project"),
     ]
     assert client.calls == [
         {
@@ -172,6 +172,10 @@ def test_loads_editable_draft_and_strips_basic_html() -> None:
                     "content": "<p>第一行&nbsp;</p><div>第二行</div>",
                     "url": "https://dima.example/work-item/3",
                     "updatedAt": "2026-11-20T12:00:00Z",
+                    "processor": {
+                        "userId": "149844",
+                        "displayName": "张三",
+                    },
                 }
             )
         }
@@ -194,6 +198,10 @@ def test_loads_editable_draft_and_strips_basic_html() -> None:
     )
     assert draft.source_url == "https://dima.example/work-item/3"
     assert draft.source_updated_at == "2026-11-20T12:00:00Z"
+    assert draft.metadata == {
+        "processor_id": "149844",
+        "processor_name": "张三",
+    }
     assert client.calls[0]["arguments"] == {"workItemId": "2026112000000000003"}
 
 

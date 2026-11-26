@@ -28,10 +28,15 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     envelope,
     envelope_errors,
+)
+from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.api.task.todo_artifact_service import (
     TodoArtifactServiceProtocol,
+)
+from agentclaw.community.api.task.todo_auto_import_service import (
+    TodoAutoImportServiceProtocol,
 )
 from agentclaw.community.api.task.todo_service import TodoServiceProtocol
 from agentclaw.community.api.task.todo_source_service import TodoSourceServiceProtocol
@@ -49,27 +54,30 @@ from agentclaw.community.core.task.todos.models import (
     TodoInteractionMentionActorType,
 )
 from agentclaw.community.core.task.todos.source_models import TodoSourceInput
+from agentclaw.community.core.task.todos.stage_models import TodoParticipantBindingInput
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.auth import AuthRequestContext
 
 from .schemas import (
+    CancelTodoRequest,
+    CompleteTodoStageRequest,
+    CreateTodoAutoImportRuleRequest,
+    CreateTodoFromTemplateRequest,
     CreateTodoInteractionRequest,
     CreateTodoRequest,
     SubmitTodoAcceptanceRequest,
-    CreateTodoFromTemplateRequest,
     TodoArtifactRecordResponse,
-    TodoStageResponse,
+    TodoAutoImportRuleResponse,
     TodoEventResponse,
     TodoInteractionResponse,
     TodoResponse,
     TodoSourceDraftResponse,
     TodoSourceProjectResponse,
     TodoSourceWorkItemResponse,
+    TodoStageResponse,
     TodoStatusSchema,
-    CompleteTodoStageRequest,
-    CancelTodoRequest,
+    UpdateTodoAutoImportRuleRequest,
 )
-from agentclaw.community.core.task.todos.stage_models import TodoParticipantBindingInput
 
 OwnersDep = Annotated[str, Query(min_length=1, description=USER_ID_DESCRIPTION)]
 
@@ -193,6 +201,7 @@ async def create_todo(
             item_id=body.source.item_id,
             url=body.source.url,
             updated_at=body.source.updated_at,
+            metadata=body.source.metadata,
         )
     result = await run_in_threadpool(  # allow-run-in-threadpool
         service.create_todo,
@@ -302,6 +311,104 @@ async def get_dima_work_item_draft(
     return envelope(TodoSourceDraftResponse.from_record(draft), request)
 
 
+@router.post(
+    "/sources/dima/auto-import-rules",
+    response_model=Envelope[TodoAutoImportRuleResponse],
+)
+@envelope_errors
+async def create_dima_auto_import_rule(
+    body: CreateTodoAutoImportRuleRequest,
+    request: Request,
+    response: Response,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoAutoImportServiceProtocol = Injected(TodoAutoImportServiceProtocol),
+) -> Envelope[TodoAutoImportRuleResponse]:
+    """Save one Dima auto-import rule for an external Agent to execute."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    rule = await run_in_threadpool(
+        service.create_rule,
+        space_id=body.space_id,
+        actor_id=actor_id,
+        source_container_ids=tuple(body.source_container_ids),
+        filter_text=body.filter_text,
+        bot_id=body.bot_id,
+    )
+    response.status_code = 201
+    return created(TodoAutoImportRuleResponse.from_record(rule), request)
+
+
+@router.get(
+    "/sources/dima/auto-import-rules",
+    response_model=Envelope[list[TodoAutoImportRuleResponse]],
+)
+@envelope_errors
+async def list_dima_auto_import_rules(
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    space_id: int | None = Query(
+        default=None,
+        gt=0,
+        description="Only return rules owned by this Product Space.",
+    ),
+    status: Literal["enabled", "disabled"] | None = Query(
+        default=None,
+        description="Only return rules in this enablement state.",
+    ),
+    service: TodoAutoImportServiceProtocol = Injected(TodoAutoImportServiceProtocol),
+) -> Envelope[list[TodoAutoImportRuleResponse]]:
+    """List the authenticated Human's automatic Dima import rules."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    rules = await run_in_threadpool(
+        service.list_rules,
+        actor_id=actor_id,
+        space_id=space_id,
+        status=status,
+    )
+    return envelope(
+        [TodoAutoImportRuleResponse.from_record(rule) for rule in rules], request
+    )
+
+
+@router.patch(
+    "/sources/dima/auto-import-rules/{rule_id}",
+    response_model=Envelope[TodoAutoImportRuleResponse],
+)
+@envelope_errors
+async def update_dima_auto_import_rule(
+    rule_id: Annotated[
+        str,
+        Path(
+            min_length=1,
+            max_length=64,
+            description="Automatic Dima import rule identifier.",
+        ),
+    ],
+    body: UpdateTodoAutoImportRuleRequest,
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoAutoImportServiceProtocol = Injected(TodoAutoImportServiceProtocol),
+) -> Envelope[TodoAutoImportRuleResponse]:
+    """Update configuration or enablement for one automatic import rule."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    rule = await run_in_threadpool(
+        service.update_rule,
+        rule_id=rule_id,
+        actor_id=actor_id,
+        source_container_ids=(
+            tuple(body.source_container_ids)
+            if body.source_container_ids is not None
+            else None
+        ),
+        filter_text=body.filter_text,
+        bot_id=body.bot_id,
+        status=body.status,
+    )
+    return envelope(TodoAutoImportRuleResponse.from_record(rule), request)
+
+
 @router.post("/from-template", response_model=Envelope[TodoResponse])
 @envelope_errors
 async def create_todo_from_template(
@@ -402,7 +509,9 @@ async def list_todo_stages(
 @envelope_errors
 async def complete_human_todo_stage(
     todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
-    stage_instance_id: Annotated[str, Path(description="Current Human stage instance.")],
+    stage_instance_id: Annotated[
+        str, Path(description="Current Human stage instance.")
+    ],
     body: CompleteTodoStageRequest,
     request: Request,
     principal: PrincipalDep,

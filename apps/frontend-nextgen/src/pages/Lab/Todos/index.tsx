@@ -1,9 +1,10 @@
 import { PageHeader } from '@/components/Common/PageHeader';
-import type { TodoBotOption } from '@/domain/todos/models';
+import type { TodoBotOption, TodoSourceType } from '@/domain/todos/models';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useSpaceContext, useSpaceContextActions } from '@/hooks/useSpaceContext';
 import { useTodos } from '@/hooks/useTodos';
 import { botWorkshopService } from '@/services/botWorkshop';
+import { loadPublicTodoBotCatalogIds } from '@/services/todos/todoBotCatalogService';
 import { safeReportError } from '@/utils/errorToast';
 import { history } from '@umijs/max';
 import { useEffect, useState } from 'react';
@@ -11,7 +12,6 @@ import { eligibleTodoBots } from './botScope';
 import { TodoBoard } from './components/TodoBoard';
 import { TodoCreateModal } from './components/TodoCreateModal';
 import { TodoToolbar } from './components/TodoToolbar';
-import { loadPublicTodoBotCatalogIds } from '@/services/todos/todoBotCatalogService';
 
 /** 实验室待办工作台：当前空间内的待办列表、事件时序、互动和验收。 */
 export default function LabTodosPage() {
@@ -21,7 +21,7 @@ export default function LabTodosPage() {
   const spaceInitialized = useSpaceContext((state) => state.initialized);
   const { identity: humanIdentity } = useHumanIdentity();
   const currentUserId = humanIdentity?.userId.trim() || undefined;
-  const [createOpen, setCreateOpen] = useState(false);
+  const [createSourceType, setCreateSourceType] = useState<TodoSourceType | null>(null);
   const [bots, setBots] = useState<TodoBotOption[]>([]);
   const [botsLoading, setBotsLoading] = useState(false);
 
@@ -85,7 +85,8 @@ export default function LabTodosPage() {
           onKeywordChange={todos.setKeyword}
           onStatusChange={todos.setStatus}
           onBotIdChange={todos.setBotId}
-          onCreate={() => setCreateOpen(true)}
+          onImportDima={() => setCreateSourceType('dima')}
+          onCreate={() => setCreateSourceType('manual')}
         />
 
         <TodoBoard
@@ -104,10 +105,14 @@ export default function LabTodosPage() {
       </div>
 
       <TodoCreateModal
-        open={createOpen}
+        open={createSourceType !== null}
+        sourceType={createSourceType ?? 'manual'}
+        spaceId={currentSpaceId}
         bots={bots}
         loading={botsLoading}
-        onOpenChange={setCreateOpen}
+        onOpenChange={(open) => {
+          if (!open) setCreateSourceType(null);
+        }}
         onSubmit={async (input) => Boolean(await todos.create(input))}
       />
     </main>

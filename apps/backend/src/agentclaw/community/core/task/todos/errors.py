@@ -78,6 +78,18 @@ class TodoSourceAlreadyImportedError(Conflict):
         self.existing_todo_id = existing_todo_id
 
 
+class TodoAutoImportRuleNotFoundError(NotFound):
+    """The automatic Dima import rule is outside the caller's scope."""
+
+
+class TodoAutoImportRuleDisabledError(Conflict):
+    """A disabled automatic import rule cannot create new Todos."""
+
+
+class TodoAutoImportCursorConflictError(Conflict):
+    """An Agent attempted to move an import cursor backwards."""
+
+
 class TodoTemplateValidationError(ValidationError):
     """A Todo template definition violates the supported product contract."""
 

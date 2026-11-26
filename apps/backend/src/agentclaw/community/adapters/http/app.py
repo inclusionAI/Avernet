@@ -387,7 +387,7 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     _TodoErrors.TodoArtifactStorageError: 502, _TodoErrors.TodoSourceResponseError: 502,
     _TodoErrors.TodoTemplateValidationError: 400,
     _TodoErrors.TodoTemplateNotFoundError: 404,
-    _TodoErrors.TodoTemplateStateConflictError: 409, _TodoErrors.TodoSourceAlreadyImportedError: 409,
+    _TodoErrors.TodoTemplateStateConflictError: 409, _TodoErrors.TodoSourceAlreadyImportedError: 409, _TodoErrors.TodoAutoImportRuleNotFoundError: 404, _TodoErrors.TodoAutoImportRuleDisabledError: 409, _TodoErrors.TodoAutoImportCursorConflictError: 409,
     **ACLI_CLI_ERROR_STATUS,
     **CONTEXT_COLLAB_ERROR_STATUS,
 }

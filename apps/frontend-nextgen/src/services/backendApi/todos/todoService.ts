@@ -1,8 +1,10 @@
 import type {
+  CreateTodoAutoImportRuleInput,
   CreateTodoInput,
   CreateTodoInteractionInput,
   TodoAcceptanceInput,
   TodoArtifact,
+  TodoAutoImportRule,
   TodoEvent,
   TodoListQuery,
   TodoRecord,
@@ -10,10 +12,12 @@ import type {
   TodoSourceProject,
   TodoSourceWorkItem,
   TodoStatus,
+  UpdateTodoAutoImportRuleInput,
 } from '@/domain/todos/models';
 import { BackendRequestError } from '../httpClient';
 import { isEnvelopeSuccess, type BackendApiEnvelope, type BackendApiPage } from '../types';
 import {
+  createTodoAutoImportRule as createTodoAutoImportRuleRequest,
   createTodo,
   createTodoInteraction,
   downloadTodoArtifactContent as downloadTodoArtifactContentRequest,
@@ -25,8 +29,11 @@ import {
   listTodos,
   listTodoSourceProjects,
   listTodoSourceWorkItems,
+  listTodoAutoImportRules,
   runTodo,
   submitTodoAcceptance,
+  updateTodoAutoImportRule as updateTodoAutoImportRuleRequest,
+  type TodoAutoImportRuleDto,
   type TodoArtifactDto,
   type TodoDto,
   type TodoEventDto,
@@ -148,8 +155,28 @@ function sourceCategory(value: unknown, path: string, response: unknown): 'req' 
   throw invalidResponse(path, 'Dima 待办来源响应无效', response);
 }
 
+function sourceMetadata(value: unknown, path: string, response: unknown): Record<string, string> {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw invalidResponse(path, 'Dima 待办来源响应无效', response);
+  }
+  const metadata: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item !== 'string') throw invalidResponse(path, 'Dima 待办来源响应无效', response);
+    metadata[key] = item;
+  }
+  return metadata;
+}
+
 function mapSourceProject(dto: TodoSourceProjectDto, path: string): TodoSourceProject {
-  return { id: requiredText(dto.id, path, dto), name: requiredText(dto.name, path, dto) };
+  const id = requiredText(dto.id, path, dto);
+  const kind =
+    dto.kind === 'workspace' || dto.kind === 'project'
+      ? dto.kind
+      : id.toUpperCase().startsWith('W')
+      ? 'workspace'
+      : 'project';
+  return { id, name: requiredText(dto.name, path, dto), kind };
 }
 
 function mapSourceWorkItem(dto: TodoSourceWorkItemDto, path: string): TodoSourceWorkItem {
@@ -175,6 +202,35 @@ function mapSourceDraft(dto: TodoSourceDraftDto, path: string): TodoSourceDraft 
     sourceUrl: typeof dto.source_url === 'string' && dto.source_url.trim() ? dto.source_url : undefined,
     sourceUpdatedAt:
       typeof dto.source_updated_at === 'string' && dto.source_updated_at.trim() ? dto.source_updated_at : undefined,
+    metadata: sourceMetadata(dto.metadata, path, dto),
+  };
+}
+
+function mapAutoImportRule(dto: TodoAutoImportRuleDto, path: string): TodoAutoImportRule {
+  const spaceId = Number(dto.space_id);
+  if (!Number.isInteger(spaceId) || spaceId <= 0) {
+    throw invalidResponse(path, 'Dima 自动导入规则响应无效', dto);
+  }
+  if (!Array.isArray(dto.source_container_ids) || dto.source_container_ids.length === 0) {
+    throw invalidResponse(path, 'Dima 自动导入规则响应无效', dto);
+  }
+  const sourceContainerIds = dto.source_container_ids.map((item) =>
+    requiredText(item, path, dto),
+  );
+  if (dto.status !== 'enabled' && dto.status !== 'disabled') {
+    throw invalidResponse(path, 'Dima 自动导入规则响应无效', dto);
+  }
+  return {
+    ruleId: requiredText(dto.rule_id, path, dto),
+    spaceId,
+    sourceContainerIds,
+    filterText: requiredText(dto.filter_text, path, dto),
+    botId: requiredText(dto.bot_id, path, dto),
+    status: dto.status,
+    cursorUpdatedAt:
+      typeof dto.cursor_updated_at === 'string' && dto.cursor_updated_at.trim() ? dto.cursor_updated_at : undefined,
+    createdAt: requiredText(dto.created_at, path, dto),
+    updatedAt: requiredText(dto.updated_at, path, dto),
   };
 }
 
@@ -195,4 +251,24 @@ export async function loadTodoSourceDraft(projectId: string, workItemId: string)
     projectId,
   )}/work-items/${encodeURIComponent(workItemId)}`;
   return mapSourceDraft(unwrap(await getTodoSourceDraft(projectId, workItemId), path), path);
+}
+
+const AUTO_IMPORT_RULES_PATH = '/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules';
+
+export async function createTodoAutoImportRule(input: CreateTodoAutoImportRuleInput): Promise<TodoAutoImportRule> {
+  return mapAutoImportRule(unwrap(await createTodoAutoImportRuleRequest(input), AUTO_IMPORT_RULES_PATH), AUTO_IMPORT_RULES_PATH);
+}
+
+export async function loadTodoAutoImportRules(spaceId: number): Promise<TodoAutoImportRule[]> {
+  return unwrap(await listTodoAutoImportRules(spaceId), AUTO_IMPORT_RULES_PATH).map((item) =>
+    mapAutoImportRule(item, AUTO_IMPORT_RULES_PATH),
+  );
+}
+
+export async function updateTodoAutoImportRule(
+  ruleId: string,
+  input: UpdateTodoAutoImportRuleInput,
+): Promise<TodoAutoImportRule> {
+  const path = `${AUTO_IMPORT_RULES_PATH}/${encodeURIComponent(ruleId)}`;
+  return mapAutoImportRule(unwrap(await updateTodoAutoImportRuleRequest(ruleId, input), path), path);
 }

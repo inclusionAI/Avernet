@@ -181,7 +181,9 @@ from .bots.classification import router as classification_router
 from .bots.overview import router as bot_overview_router
 from .bot_access_check import router as bot_access_check_router
 from .collaboration_bots import public_router as collaboration_public_router
-from agentclaw.community.adapters.http.bot_public.risk_routes import openapi_router as risk_openapi_router
+from agentclaw.community.adapters.http.bot_public.risk_routes import (
+    openapi_router as risk_openapi_router,
+)
 from .collaborating_bots import router as collaborating_bots_router
 from .task import task_router
 from .task.context_collab import router as task_context_collab_router
@@ -240,6 +242,9 @@ from .task.bbs import read_router as bbs_read_router
 from .task.bbs import browse_open_router
 from .task.feedback import read_router as feedback_read_router
 from .task.todos import router as todo_router
+from .task.todos.auto_import_agent_router import (
+    router as todo_auto_import_agent_router,
+)
 from .task.todos.template_capability_router import (
     router as todo_template_capability_router,
 )
@@ -536,7 +541,9 @@ def build_public_router() -> APIRouter:
     """
     public = APIRouter(route_class=PublicAPIRoute)
     # Explicit business locators, no acting-user query dimension.
-    public.include_router(service_envs_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
+    public.include_router(
+        service_envs_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+    )
     # The caller's own identity — the one operation whose answer IS the user,
     # so it takes no ``user_id`` and can answer no 403: it gets the base error
     # table, not the user-scoped one. The caller is the sole top-level public
@@ -595,7 +602,9 @@ def build_public_router() -> APIRouter:
         )
     # Tenant-identical marketplace queries. This literal group must be mounted
     # before the ``{bot_id}`` wildcard router below.
-    public.include_router(experts_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
+    public.include_router(
+        experts_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+    )
     public.include_router(
         market_router,
         responses=ERROR_RESPONSES,
@@ -687,7 +696,12 @@ def build_public_router() -> APIRouter:
         )
 
     from .dws_hosting.router import router as dws_hosting_router
-    public.include_router(dws_hosting_router, responses=ENGINE_RUNTIME_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
+
+    public.include_router(
+        dws_hosting_router,
+        responses=ENGINE_RUNTIME_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
 
     # bot-copy routes (`POST /copy`, `POST /copy/{operation_id}/retry`):
     # top-level literals under `/openapi/v1/bots`, mounted before the `bots`
@@ -711,7 +725,11 @@ def build_public_router() -> APIRouter:
         responses=USER_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
-    public.include_router(risk_openapi_router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH)
+    public.include_router(
+        risk_openapi_router,
+        responses=USER_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
     # Task public surface (execute/dashboard/list) — served at the external
     # contract path the gateway's `collaboration-tasks` domain routes to the
     # backend (pulled out of the broad collaboration→bcs namespace). Not
@@ -732,6 +750,11 @@ def build_public_router() -> APIRouter:
     public.include_router(
         todo_template_router,
         responses=SPACE_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    public.include_router(
+        todo_auto_import_agent_router,
+        responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
     public.include_router(

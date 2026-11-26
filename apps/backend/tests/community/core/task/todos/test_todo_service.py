@@ -338,6 +338,7 @@ def test_create_todo_normalizes_and_forwards_dima_source():
             item_id="  work_1  ",
             url="  https://dima.example/items/work_1  ",
             updated_at="  2026-11-20T12:00:00Z  ",
+            metadata={" processor_id ": " 149844 ", "empty": "  "},
         ),
     )
 
@@ -347,6 +348,7 @@ def test_create_todo_normalizes_and_forwards_dima_source():
         item_id="work_1",
         url="https://dima.example/items/work_1",
         updated_at="2026-11-20T12:00:00Z",
+        metadata={"processor_id": "149844"},
     )
 
 
@@ -394,6 +396,15 @@ def test_create_todo_normalizes_and_forwards_dima_source():
                 updated_at="yesterday",
             ),
             "updated_at",
+        ),
+        (
+            TodoSourceInput(
+                source_type="dima",
+                container_id="P1",
+                item_id="work_1",
+                metadata={"processor_id": 149844},  # type: ignore[dict-item]
+            ),
+            "keys and values",
         ),
     ],
 )

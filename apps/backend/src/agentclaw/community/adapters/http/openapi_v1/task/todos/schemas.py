@@ -2,25 +2,23 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 from agentclaw.community.core.task.todos.artifact_models import (
     TodoArtifactKind,
     TodoArtifactRecord,
 )
-from agentclaw.community.core.task.todos.source_models import (
-    MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
-    MAX_TODO_SOURCE_ITEM_ID_LENGTH,
-    MAX_TODO_SOURCE_UPDATED_AT_LENGTH,
-    MAX_TODO_SOURCE_URL_LENGTH,
-    TodoSourceDraft,
-    TodoSourceProject,
-    TodoSourceWorkItem,
+from agentclaw.community.core.task.todos.auto_import_models import (
+    MAX_TODO_AUTO_IMPORT_CONTAINERS,
+    MAX_TODO_AUTO_IMPORT_FILTER_LENGTH,
+    MAX_TODO_AUTO_IMPORT_PROGRESS_DETAIL_LENGTH,
+    TodoAutoImportProgressRecord,
+    TodoAutoImportRuleRecord,
 )
-from agentclaw.community.core.task.todos.stage_models import TodoStageRecord
 from agentclaw.community.core.task.todos.models import (
     MAX_ACCEPTANCE_ID_LENGTH,
     MAX_ACCEPTANCE_TARGETS,
@@ -34,17 +32,31 @@ from agentclaw.community.core.task.todos.models import (
     TodoEventRecord,
     TodoRecord,
 )
+from agentclaw.community.core.task.todos.source_models import (
+    MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
+    MAX_TODO_SOURCE_ITEM_ID_LENGTH,
+    MAX_TODO_SOURCE_UPDATED_AT_LENGTH,
+    MAX_TODO_SOURCE_URL_LENGTH,
+    TodoSourceDraft,
+    TodoSourceProject,
+    TodoSourceWorkItem,
+    normalize_todo_source_metadata,
+)
+from agentclaw.community.core.task.todos.stage_models import TodoStageRecord
 
 
 class TodoSourceProjectResponse(BaseModel):
-    """One Dima project visible to the authenticated Human."""
+    """One Dima workspace or project visible to the authenticated Human."""
 
-    id: str = Field(description="Stable Dima project identifier.")
-    name: str = Field(description="Human-readable Dima project name.")
+    id: str = Field(description="Stable Dima workspace or project identifier.")
+    name: str = Field(description="Human-readable Dima workspace or project name.")
+    kind: Literal["workspace", "project"] = Field(
+        description="Whether this selectable container is a workspace or project."
+    )
 
     @classmethod
     def from_record(cls, record: TodoSourceProject) -> "TodoSourceProjectResponse":
-        return cls(id=record.id, name=record.name)
+        return cls(id=record.id, name=record.name, kind=record.kind)
 
 
 class TodoSourceWorkItemResponse(BaseModel):
@@ -100,6 +112,10 @@ class TodoSourceDraftResponse(BaseModel):
         default=None,
         description="Dima update timestamp when the provider returned one.",
     )
+    metadata: dict[str, str] = Field(
+        default_factory=dict,
+        description="Whitelisted Dima field snapshot, such as processor identity.",
+    )
 
     @classmethod
     def from_record(cls, record: TodoSourceDraft) -> "TodoSourceDraftResponse":
@@ -112,6 +128,7 @@ class TodoSourceDraftResponse(BaseModel):
             description=record.description,
             source_url=record.source_url,
             source_updated_at=record.source_updated_at,
+            metadata=record.metadata,
         )
 
 
@@ -175,6 +192,15 @@ class CreateTodoSourceRequest(BaseModel):
         max_length=MAX_TODO_SOURCE_UPDATED_AT_LENGTH,
         description="Optional Dima update timestamp snapshot.",
     )
+    metadata: dict[str, str] = Field(
+        default_factory=dict,
+        description="Bounded whitelisted Dima field snapshot.",
+    )
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def validate_metadata(cls, value: object) -> dict[str, str]:
+        return normalize_todo_source_metadata(value)
 
 
 class CreateTodoRequest(BaseModel):
@@ -202,6 +228,199 @@ class CreateTodoRequest(BaseModel):
         default=None,
         description="Imported-source identity; omitted for manually created Todos.",
     )
+
+
+class CreateTodoFromAutoImportRuleRequest(BaseModel):
+    """Create one Todo from a Dima item selected by an automatic import rule."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(
+        min_length=1,
+        max_length=MAX_TITLE_LENGTH,
+        description="Todo title derived from the selected Dima work item.",
+    )
+    description: str = Field(
+        max_length=MAX_DESCRIPTION_LENGTH,
+        description="Todo objective derived from the selected Dima work item.",
+    )
+    source: CreateTodoSourceRequest = Field(
+        description="Dima source identity and whitelisted source-field snapshot."
+    )
+
+
+class CreateTodoAutoImportRuleRequest(BaseModel):
+    """Create one automatic Dima import rule for an external Agent."""
+
+    space_id: int = Field(gt=0, description="Product Space that owns imported Todos.")
+    source_container_ids: list[str] = Field(
+        min_length=1,
+        max_length=MAX_TODO_AUTO_IMPORT_CONTAINERS,
+        description="Dima workspace or project identifiers scanned by the Agent.",
+    )
+    filter_text: str = Field(
+        min_length=1,
+        max_length=MAX_TODO_AUTO_IMPORT_FILTER_LENGTH,
+        description="Natural-language filter interpreted by the external Agent.",
+    )
+    bot_id: str = Field(
+        min_length=1,
+        max_length=MAX_BOT_ID_LENGTH,
+        description="Space-eligible Bot assigned to imported Todos.",
+    )
+
+
+class UpdateTodoAutoImportRuleRequest(BaseModel):
+    """Patch mutable configuration or enablement of one import rule."""
+
+    source_container_ids: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_TODO_AUTO_IMPORT_CONTAINERS,
+        description="Replacement Dima workspace or project identifiers.",
+    )
+    filter_text: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_TODO_AUTO_IMPORT_FILTER_LENGTH,
+        description="Replacement natural-language filter.",
+    )
+    bot_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_BOT_ID_LENGTH,
+        description="Replacement Space-eligible Bot.",
+    )
+    status: Literal["enabled", "disabled"] | None = Field(
+        default=None,
+        description="Whether the external Agent should scan this rule.",
+    )
+
+
+class TodoAutoImportRuleResponse(BaseModel):
+    """Saved automatic Dima import configuration and its scan cursor."""
+
+    rule_id: str = Field(description="Stable automatic import rule identifier.")
+    space_id: int = Field(description="Product Space that owns imported Todos.")
+    source_container_ids: list[str] = Field(
+        description="Dima workspace or project identifiers scanned by the Agent."
+    )
+    filter_text: str = Field(
+        description="Natural-language filter interpreted by the external Agent."
+    )
+    bot_id: str = Field(description="Bot assigned to Todos created by this rule.")
+    status: Literal["enabled", "disabled"] = Field(
+        description="Whether the external Agent should scan this rule."
+    )
+    cursor_updated_at: str | None = Field(
+        description="Latest fully scanned Dima update time, or null before the first scan."
+    )
+    created_at: str = Field(description="Rule creation time in ISO 8601 format.")
+    updated_at: str = Field(description="Last rule update time in ISO 8601 format.")
+
+    @classmethod
+    def from_record(
+        cls, record: TodoAutoImportRuleRecord
+    ) -> "TodoAutoImportRuleResponse":
+        return cls(
+            rule_id=record.rule_id,
+            space_id=record.space_id,
+            source_container_ids=list(record.source_container_ids),
+            filter_text=record.filter_text,
+            bot_id=record.bot_id,
+            status=record.status.value,
+            cursor_updated_at=(
+                _iso_datetime(record.cursor_updated_at)
+                if record.cursor_updated_at is not None
+                else None
+            ),
+            created_at=_iso_datetime(record.created_at),
+            updated_at=_iso_datetime(record.updated_at),
+        )
+
+
+class TodoAutoImportCheckpointRequest(BaseModel):
+    """Record one source-version result and optionally advance the scan cursor."""
+
+    source_container_id: str = Field(
+        min_length=1,
+        max_length=MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
+        description="Configured Dima workspace or project containing the source item.",
+    )
+    source_item_id: str = Field(
+        min_length=1,
+        max_length=MAX_TODO_SOURCE_ITEM_ID_LENGTH,
+        description="Stable Dima work-item identifier.",
+    )
+    source_updated_at: datetime = Field(
+        description="Timezone-aware update time of the processed Dima work-item version."
+    )
+    status: Literal["imported", "skipped", "failed", "duplicate"] = Field(
+        description="Outcome recorded for this Dima work-item version."
+    )
+    todo_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Created or existing Todo identifier for imported or duplicate outcomes.",
+    )
+    detail: str = Field(
+        default="",
+        max_length=MAX_TODO_AUTO_IMPORT_PROGRESS_DETAIL_LENGTH,
+        description="Optional diagnostic detail about the processing outcome.",
+    )
+    cursor_updated_at: datetime | None = Field(
+        default=None,
+        description="Optional fully scanned update time used to advance the rule cursor.",
+    )
+
+
+class TodoAutoImportProgressResponse(BaseModel):
+    """Persisted retry-safe outcome for one Dima work-item version."""
+
+    progress_id: str = Field(description="Stable checkpoint record identifier.")
+    rule_id: str = Field(description="Automatic import rule that owns this checkpoint.")
+    source_container_id: str = Field(
+        description="Dima workspace or project containing the source item."
+    )
+    source_item_id: str = Field(description="Stable Dima work-item identifier.")
+    source_updated_at: str = Field(
+        description="Processed source update time in ISO 8601 format."
+    )
+    status: Literal["imported", "skipped", "failed", "duplicate"] = Field(
+        description="Persisted processing outcome for this source version."
+    )
+    todo_id: str | None = Field(
+        description="Created or existing Todo identifier when applicable."
+    )
+    detail: str = Field(description="Diagnostic detail recorded by the external Agent.")
+    created_at: str = Field(description="Checkpoint creation time in ISO 8601 format.")
+    updated_at: str = Field(
+        description="Last checkpoint update time in ISO 8601 format."
+    )
+
+    @classmethod
+    def from_record(
+        cls, record: TodoAutoImportProgressRecord
+    ) -> "TodoAutoImportProgressResponse":
+        return cls(
+            progress_id=record.progress_id,
+            rule_id=record.rule_id,
+            source_container_id=record.source_container_id,
+            source_item_id=record.source_item_id,
+            source_updated_at=_iso_datetime(record.source_updated_at),
+            status=record.status.value,
+            todo_id=record.todo_id,
+            detail=record.detail,
+            created_at=_iso_datetime(record.created_at),
+            updated_at=_iso_datetime(record.updated_at),
+        )
+
+
+def _iso_datetime(value: datetime) -> str:
+    normalized = (
+        value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    )
+    return normalized.isoformat()
 
 
 class TodoInteractionMentionRequest(BaseModel):
@@ -407,7 +626,9 @@ class TodoStageResponse(BaseModel):
             state_reason=record.state_reason,
             requested_action=record.requested_action,
             started_at=record.started_at.isoformat() if record.started_at else None,
-            completed_at=record.completed_at.isoformat() if record.completed_at else None,
+            completed_at=record.completed_at.isoformat()
+            if record.completed_at
+            else None,
             created_at=record.created_at.isoformat(),
             updated_at=record.updated_at.isoformat(),
         )
@@ -631,8 +852,12 @@ class TodoResponse(BaseModel):
     pending_action_kind: str | None = Field(
         description="Why the Todo is waiting for an explicit Human action, if any."
     )
-    state_reason: str | None = Field(description="Current product-state reason, if any.")
-    requested_action: str | None = Field(description="Action requested from the Human, if any.")
+    state_reason: str | None = Field(
+        description="Current product-state reason, if any."
+    )
+    requested_action: str | None = Field(
+        description="Action requested from the Human, if any."
+    )
 
     @classmethod
     def from_record(cls, record: TodoRecord) -> "TodoResponse":

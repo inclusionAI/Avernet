@@ -11,9 +11,11 @@ export {
   acceptTodo,
   addTodo,
   addTodoInteraction,
+  createTodoAutoImportRule,
   downloadTodoArtifactContent,
   loadTodo,
   loadTodoArtifacts,
+  loadTodoAutoImportRules,
   loadTodoEvents,
   loadTodoInteractions,
   loadTodos,
@@ -21,6 +23,7 @@ export {
   loadTodoSourceProjects,
   loadTodoSourceWorkItems,
   startTodoRun,
+  updateTodoAutoImportRule,
 } from '@/services/backendApi/todos/todoService';
 export type { TodoPage, TodoStatus } from '@/services/backendApi/todos/todoService';
 

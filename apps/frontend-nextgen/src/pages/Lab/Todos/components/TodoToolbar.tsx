@@ -4,7 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { Space } from '@/domain/admin/models';
 import type { TodoBotOption, TodoStatus } from '@/domain/todos/models';
 import { TODO_STATUS_OPTIONS } from '@/domain/todos/status';
-import { Plus, Search } from 'lucide-react';
+import { Download, Plus, Search } from 'lucide-react';
 
 interface TodoToolbarProps {
   space?: Space;
@@ -16,6 +16,7 @@ interface TodoToolbarProps {
   onKeywordChange: (value: string) => void;
   onStatusChange: (value: TodoStatus | undefined) => void;
   onBotIdChange: (value: string | undefined) => void;
+  onImportDima: () => void;
   onCreate: () => void;
 }
 
@@ -29,6 +30,7 @@ export function TodoToolbar({
   onKeywordChange,
   onStatusChange,
   onBotIdChange,
+  onImportDima,
   onCreate,
 }: TodoToolbarProps) {
   const activeStatus = status ?? 'all';
@@ -87,7 +89,16 @@ export function TodoToolbar({
         </div>
 
         <Button
-          className="ml-auto h-8 rounded-lg bg-primary px-4 text-xs font-semibold text-primary-foreground hover:bg-primary hover:opacity-90"
+          variant="outline"
+          className="ml-auto h-8 rounded-lg px-4 text-xs font-semibold"
+          onClick={onImportDima}
+          leftIcon={<Download className="size-[14px]" aria-hidden />}
+        >
+          导入 Dima
+        </Button>
+
+        <Button
+          className="h-8 rounded-lg bg-primary px-4 text-xs font-semibold text-primary-foreground hover:bg-primary hover:opacity-90"
           onClick={onCreate}
           leftIcon={<Plus className="size-[14px]" aria-hidden />}
         >

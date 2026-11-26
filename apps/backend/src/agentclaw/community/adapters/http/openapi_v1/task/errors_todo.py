@@ -1,5 +1,8 @@
 """Stable public error mapping for the Todo workbench."""
 
+from agentclaw.community.core.task.todos.collaboration.protocol import (
+    TodoCollaborationError,
+)
 from agentclaw.community.core.task.todos.errors import (
     TodoArtifactContentError,
     TodoArtifactNotFoundError,
@@ -7,19 +10,19 @@ from agentclaw.community.core.task.todos.errors import (
     TodoArtifactStorageError,
     TodoArtifactStorageNotConfiguredError,
     TodoArtifactUploadTooLargeError,
+    TodoAutoImportCursorConflictError,
+    TodoAutoImportRuleDisabledError,
+    TodoAutoImportRuleNotFoundError,
     TodoBotAmbiguousError,
     TodoBotScopeError,
     TodoExecutionAuthError,
     TodoNotFoundError,
-    TodoStateConflictError,
-    TodoSourceAuthError,
     TodoSourceAlreadyImportedError,
+    TodoSourceAuthError,
     TodoSourceResponseError,
     TodoSourceUnavailableError,
     TodoSourceWorkItemNotFoundError,
-)
-from agentclaw.community.core.task.todos.collaboration.protocol import (
-    TodoCollaborationError,
+    TodoStateConflictError,
 )
 
 TODO_HTTP_ERRORS: dict[type[Exception], tuple[int, str]] = {
@@ -34,6 +37,9 @@ TODO_HTTP_ERRORS: dict[type[Exception], tuple[int, str]] = {
     TodoArtifactObjectNotFoundError: (404, "Not found"),
     TodoArtifactStorageNotConfiguredError: (503, "Todo artifact storage unavailable"),
     TodoArtifactStorageError: (502, "Todo artifact storage operation failed"),
+    TodoAutoImportRuleNotFoundError: (404, "Not found"),
+    TodoAutoImportRuleDisabledError: (409, "Todo auto-import rule is disabled"),
+    TodoAutoImportCursorConflictError: (409, "Todo auto-import cursor conflict"),
     TodoCollaborationError: (503, "Todo collaboration service unavailable"),
     TodoSourceAuthError: (401, "Dima authorization is unavailable"),
     TodoSourceAlreadyImportedError: (409, "Dima work item already imported"),

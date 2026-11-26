@@ -59,6 +59,7 @@ from agentclaw.community.core.task.todos.source_models import (
     MAX_TODO_SOURCE_UPDATED_AT_LENGTH,
     MAX_TODO_SOURCE_URL_LENGTH,
     TodoSourceInput,
+    normalize_todo_source_metadata,
 )
 from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationEvent,
@@ -797,6 +798,10 @@ class TodoService(TodoServiceProtocol):
                 datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
             except ValueError as exc:
                 raise ValidationError("source updated_at is invalid") from exc
+        try:
+            metadata = normalize_todo_source_metadata(value.metadata)
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
         return TodoSourceInput(
             source_type="dima",
             container_id=cls._required_text(
@@ -811,4 +816,5 @@ class TodoService(TodoServiceProtocol):
             ),
             url=url,
             updated_at=updated_at,
+            metadata=metadata,
         )

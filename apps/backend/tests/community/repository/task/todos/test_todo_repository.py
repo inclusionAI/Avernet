@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 
 import pytest
@@ -55,6 +56,10 @@ def _source(**overrides) -> TodoSourceInput:
         "item_id": "2026112000000000001",
         "url": "https://dima.example/items/2026112000000000001",
         "updated_at": "2026-11-20T12:00:00Z",
+        "metadata": {
+            "processor_id": "149844",
+            "processor_name": "张三",
+        },
     }
     values.update(overrides)
     return TodoSourceInput(**values)
@@ -89,6 +94,13 @@ def test_create_todo_persists_dima_source_binding(db):
         assert binding.source_item_id == "2026112000000000001"
         assert binding.source_url == "https://dima.example/items/2026112000000000001"
         assert binding.source_updated_at == "2026-11-20T12:00:00Z"
+        assert binding.source_metadata_json == (
+            '{"processor_id":"149844","processor_name":"张三"}'
+        )
+        assert json.loads(binding.source_metadata_json) == {
+            "processor_id": "149844",
+            "processor_name": "张三",
+        }
         assert binding.imported_by == "user_1"
 
 

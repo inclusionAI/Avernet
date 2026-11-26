@@ -170,6 +170,12 @@ class TodoRepository(TodoRepositoryProtocol):
                             source_item_id=source.item_id,
                             source_url=source.url,
                             source_updated_at=source.updated_at,
+                            source_metadata_json=json.dumps(
+                                source.metadata,
+                                ensure_ascii=False,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ),
                             imported_by=created_by,
                             env=get_current_env(),
                             avernet_tenant=get_current_avernet_tenant(),
