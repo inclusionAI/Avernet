@@ -1,0 +1,23 @@
+apps/backend/tests/community/core/task/task_harness/test_runtime_probe.py
+  s_03e7ef62150935::t_d3bebdc484132f 143-147,149-158
+  s_03e7ef62150935::t_d7775a7c138fc1 148
+apps/backend/src/agentclaw/community/core/task/task_harness/runtime_probe.py
+  s_03e7ef62150935::t_d3bebdc484132f 90-98,100-101,501-510
+  s_03e7ef62150935::t_d7775a7c138fc1 99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7bae0ac5acac048b8d18987b8f781a0a331e58a3",
+  "prompts": {},
+  "sessions": {
+    "s_03e7ef62150935": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2117d-458d-7882-91e6-559116264dd4",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

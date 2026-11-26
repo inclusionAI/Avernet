@@ -1,0 +1,29 @@
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_7d114ded8fc0da::t_a7b6a991fe2a8b 344-345
+apps/bcs/crates/bootstrap/bcs/src/server/server_infrastructure.rs
+  s_7d114ded8fc0da::t_baf08eb1eb0009 576
+apps/bcs/crates/services/bcs-message-flow/CONTEXT.md
+  s_7d114ded8fc0da::t_95131084fdfa58 530-538,541-545
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/edge_admission.rs
+  s_7d114ded8fc0da::t_17432fd72659c1 1,5-8,10,13,18-20
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/mod.rs
+  s_7d114ded8fc0da::t_281213592f0e4e 48,104
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_a2a_chat/edge_grant.rs
+  s_7d114ded8fc0da::t_970b5dab9b8811 5,34,121-136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "beaafdde35d7142d607f58c3a09e5eabb27f9095",
+  "prompts": {},
+  "sessions": {
+    "s_7d114ded8fc0da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b4-ef36-7703-9562-0f40ee69f61b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
