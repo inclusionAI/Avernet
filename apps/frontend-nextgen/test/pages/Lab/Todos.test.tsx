@@ -89,6 +89,9 @@ jest.mock('@/services/todos/todoService', () => ({
   loadTodoSourceProjects: jest.fn(),
   loadTodoSourceWorkItems: jest.fn(),
   loadTodoSourceDraft: jest.fn(),
+  createTodoAutoImportRule: jest.fn(),
+  loadTodoAutoImportRules: jest.fn(),
+  updateTodoAutoImportRule: jest.fn(),
 }));
 
 jest.mock('@/components/ui/notify', () => ({ notifySuccess: jest.fn() }));
@@ -178,6 +181,7 @@ beforeEach(() => {
   mockedService.addTodo.mockResolvedValue(createdTodo);
   mockedService.loadTodoSourceProjects.mockResolvedValue([]);
   mockedService.loadTodoSourceWorkItems.mockResolvedValue([]);
+  mockedService.loadTodoAutoImportRules.mockResolvedValue([]);
 });
 
 describe('LabTodosPage（待办卡片工作台）', () => {
@@ -217,13 +221,16 @@ describe('LabTodosPage（待办卡片工作台）', () => {
 
     const owner = within(toolbar).getByRole('combobox', { name: '负责人' });
     const search = within(toolbar).getByRole('textbox', { name: '搜索待办' });
+    const importButton = within(toolbar).getByRole('button', { name: '导入 Dima' });
     const createButton = within(toolbar).getByRole('button', { name: '发起待办' });
     expect(statusGroup.compareDocumentPosition(owner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(owner.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(search.compareDocumentPosition(createButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(search.compareDocumentPosition(importButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(importButton.compareDocumentPosition(createButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(owner).toHaveClass('h-8', 'w-40', 'rounded-lg', 'text-xs');
     expect(search).toHaveAttribute('placeholder', '搜索待办标题');
     expect(search).toHaveClass('h-8', 'rounded-lg', 'text-xs');
+    expect(importButton).toHaveClass('h-8', 'rounded-lg', 'px-4', 'text-xs', 'font-semibold');
     expect(createButton).toHaveClass('h-8', 'rounded-lg', 'bg-primary', 'px-4', 'text-xs', 'font-semibold');
     expect(tabs[0]).toHaveClass('h-8', 'bg-primary', 'text-primary-foreground', 'text-xs');
 
@@ -322,6 +329,9 @@ describe('LabTodosPage（待办卡片工作台）', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '发起待办' }));
     const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: '创建待办' })).toBeInTheDocument();
+    expect(within(dialog).queryByText('选择 Dima 来源')).not.toBeInTheDocument();
+    expect(mockedService.loadTodoSourceProjects).not.toHaveBeenCalled();
     fireEvent.change(within(dialog).getByRole('textbox', { name: '标题' }), {
       target: { value: ' 分析本周用户反馈 ' },
     });
@@ -342,11 +352,14 @@ describe('LabTodosPage（待办卡片工作台）', () => {
   });
 
   it('从 Dima 工作项导入可编辑内容并携带稳定来源身份', async () => {
-    mockedService.loadTodoSourceProjects.mockResolvedValue([{ id: 'P1', name: '支付项目' }]);
+    mockedService.loadTodoSourceProjects.mockResolvedValue([
+      { id: 'W1', name: '支付空间', kind: 'workspace' },
+      { id: 'P1', name: '支付项目', kind: 'project' },
+    ]);
     mockedService.loadTodoSourceWorkItems.mockResolvedValue([
       {
         id: '2026112000000000001',
-        projectId: 'P1',
+        projectId: 'W1',
         category: 'req',
         title: '优化支付体验',
         status: '处理中',
@@ -354,30 +367,36 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     ]);
     mockedService.loadTodoSourceDraft.mockResolvedValue({
       sourceType: 'dima',
-      projectId: 'P1',
+      projectId: 'W1',
       workItemId: '2026112000000000001',
       category: 'req',
       title: '优化支付体验',
       description: '来源：Dima REQ 2026112000000000001\n\n原始需求描述',
       sourceUrl: 'https://dima.example/items/2026112000000000001',
       sourceUpdatedAt: '2026-11-20T12:00:00Z',
+      metadata: {
+        processor_id: '149844',
+        processor_name: '张三',
+      },
     });
 
     render(<LabTodosPage />);
     await screen.findByText('编写实施方案');
-    fireEvent.click(screen.getByRole('button', { name: '发起待办' }));
+    fireEvent.click(screen.getByRole('button', { name: '导入 Dima' }));
     const dialog = await screen.findByRole('dialog');
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Dima 导入' }));
+    expect(within(dialog).getByRole('heading', { name: '导入 Dima 待办' })).toBeInTheDocument();
+    const importMode = within(dialog).getByRole('group', { name: 'Dima 导入方式' });
+    expect(within(importMode).getByRole('button', { name: '手动导入' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(importMode).getByRole('button', { name: '自动导入' })).toHaveAttribute('aria-pressed', 'false');
     await waitFor(() => expect(mockedService.loadTodoSourceProjects).toHaveBeenCalledTimes(1));
+    expect(within(dialog).getByText('当前账号可访问 1 个空间、1 个项目')).toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole('combobox', { name: 'Dima 项目' }));
-    fireEvent.click(await screen.findByRole('option', { name: '支付项目' }));
-    await waitFor(() => expect(mockedService.loadTodoSourceWorkItems).toHaveBeenCalledWith('P1'));
+    fireEvent.click(within(dialog).getByRole('button', { name: '选择 Dima 空间 支付空间' }));
+    await waitFor(() => expect(mockedService.loadTodoSourceWorkItems).toHaveBeenCalledWith('W1'));
 
-    fireEvent.click(within(dialog).getByRole('combobox', { name: 'Dima 工作项' }));
-    fireEvent.click(await screen.findByRole('option', { name: '[需求] 优化支付体验' }));
-    await waitFor(() => expect(mockedService.loadTodoSourceDraft).toHaveBeenCalledWith('P1', '2026112000000000001'));
+    fireEvent.click(within(dialog).getByRole('button', { name: '导入 Dima 工作项 优化支付体验' }));
+    await waitFor(() => expect(mockedService.loadTodoSourceDraft).toHaveBeenCalledWith('W1', '2026112000000000001'));
     expect(within(dialog).getByRole('textbox', { name: '标题' })).toHaveValue('优化支付体验');
 
     fireEvent.change(within(dialog).getByRole('textbox', { name: '标题' }), {
@@ -386,7 +405,7 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     fireEvent.change(within(dialog).getByRole('textbox', { name: '描述' }), {
       target: { value: '整理后的执行要求' },
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: '创建待办' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '导入待办' }));
 
     await waitFor(() =>
       expect(mockedService.addTodo).toHaveBeenCalledWith({
@@ -396,14 +415,71 @@ describe('LabTodosPage（待办卡片工作台）', () => {
         botId: 'bot-owned:u-1',
         source: {
           type: 'dima',
-          containerId: 'P1',
+          containerId: 'W1',
           itemId: '2026112000000000001',
           url: 'https://dima.example/items/2026112000000000001',
           updatedAt: '2026-11-20T12:00:00Z',
+          metadata: {
+            processor_id: '149844',
+            processor_name: '张三',
+          },
         },
       }),
     );
     expect(mockedService.startTodoRun).not.toHaveBeenCalled();
+  });
+
+  it('配置多空间 Dima 自动导入规则并可停用', async () => {
+    mockedService.loadTodoSourceProjects.mockResolvedValue([
+      { id: 'W1', name: '支付空间', kind: 'workspace' },
+      { id: 'P1', name: '支付项目', kind: 'project' },
+    ]);
+    const enabledRule = {
+      ruleId: 'rule-1',
+      spaceId: 10,
+      sourceContainerIds: ['W1', 'P1'],
+      filterText: '只导入需要研发处理且尚未完成的事项',
+      botId: 'bot-owned:u-1',
+      status: 'enabled' as const,
+      createdAt: '2026-11-25T07:00:00+00:00',
+      updatedAt: '2026-11-25T07:00:00+00:00',
+    };
+    mockedService.createTodoAutoImportRule.mockResolvedValue(enabledRule);
+    mockedService.updateTodoAutoImportRule.mockResolvedValue({ ...enabledRule, status: 'disabled' });
+
+    render(<LabTodosPage />);
+    await screen.findByText('编写实施方案');
+    fireEvent.click(screen.getByRole('button', { name: '导入 Dima' }));
+    const dialog = await screen.findByRole('dialog');
+    const importMode = within(dialog).getByRole('group', { name: 'Dima 导入方式' });
+    fireEvent.click(within(importMode).getByRole('button', { name: '自动导入' }));
+
+    await waitFor(() => expect(mockedService.loadTodoAutoImportRules).toHaveBeenCalledWith(10));
+    fireEvent.click(await within(dialog).findByRole('checkbox', { name: '选择自动导入 Dima 空间 支付空间' }));
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: '选择自动导入 Dima 项目 支付项目' }));
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '自动导入过滤条件' }), {
+      target: { value: '只导入需要研发处理且尚未完成的事项' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存自动导入规则' }));
+
+    await waitFor(() =>
+      expect(mockedService.createTodoAutoImportRule).toHaveBeenCalledWith({
+        spaceId: 10,
+        sourceContainerIds: ['W1', 'P1'],
+        filterText: '只导入需要研发处理且尚未完成的事项',
+        botId: 'bot-owned:u-1',
+      }),
+    );
+    expect(await within(dialog).findByText('只导入需要研发处理且尚未完成的事项')).toBeInTheDocument();
+
+    fireEvent.click(
+      within(dialog).getByRole('switch', {
+        name: '停用自动导入规则 只导入需要研发处理且尚未完成的事项',
+      }),
+    );
+    await waitFor(() =>
+      expect(mockedService.updateTodoAutoImportRule).toHaveBeenCalledWith('rule-1', { status: 'disabled' }),
+    );
   });
 
   it('Dima 来源失败时展示可恢复错误且不创建待办', async () => {
@@ -411,11 +487,10 @@ describe('LabTodosPage（待办卡片工作台）', () => {
 
     render(<LabTodosPage />);
     await screen.findByText('编写实施方案');
-    fireEvent.click(screen.getByRole('button', { name: '发起待办' }));
+    fireEvent.click(screen.getByRole('button', { name: '导入 Dima' }));
     const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Dima 导入' }));
 
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Dima 项目加载失败，请重试。');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Dima 空间与项目加载失败，请重试。');
     expect(within(dialog).getByRole('button', { name: '重试' })).toBeInTheDocument();
     expect(mockedService.addTodo).not.toHaveBeenCalled();
   });

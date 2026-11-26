@@ -5,10 +5,13 @@ export type AcceptanceVerdict = 'approved' | 'rejected';
 
 export type TodoSourceType = 'manual' | 'dima';
 export type TodoSourceWorkItemCategory = 'req' | 'task' | 'bug';
+export type TodoSourceMetadata = Record<string, string>;
+export type TodoAutoImportRuleStatus = 'enabled' | 'disabled';
 
 export interface TodoSourceProject {
   id: string;
   name: string;
+  kind: 'workspace' | 'project';
 }
 
 export interface TodoSourceWorkItem {
@@ -29,6 +32,7 @@ export interface TodoSourceDraft {
   description: string;
   sourceUrl?: string;
   sourceUpdatedAt?: string;
+  metadata: TodoSourceMetadata;
 }
 
 export interface TodoCreateSource {
@@ -37,6 +41,33 @@ export interface TodoCreateSource {
   itemId: string;
   url?: string;
   updatedAt?: string;
+  metadata: TodoSourceMetadata;
+}
+
+export interface TodoAutoImportRule {
+  ruleId: string;
+  spaceId: number;
+  sourceContainerIds: string[];
+  filterText: string;
+  botId: string;
+  status: TodoAutoImportRuleStatus;
+  cursorUpdatedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateTodoAutoImportRuleInput {
+  spaceId: number;
+  sourceContainerIds: string[];
+  filterText: string;
+  botId: string;
+}
+
+export interface UpdateTodoAutoImportRuleInput {
+  sourceContainerIds?: string[];
+  filterText?: string;
+  botId?: string;
+  status?: TodoAutoImportRuleStatus;
 }
 
 export interface TodoEventArtifact {

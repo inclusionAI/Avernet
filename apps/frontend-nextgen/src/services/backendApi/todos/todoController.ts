@@ -1,8 +1,11 @@
 import type {
+  CreateTodoAutoImportRuleInput,
   CreateTodoInput,
   CreateTodoInteractionInput,
   TodoAcceptanceInput,
   TodoListQuery,
+  TodoAutoImportRuleStatus,
+  UpdateTodoAutoImportRuleInput,
 } from '@/domain/todos/models';
 import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import { userScopedParams } from '../bots/botController';
@@ -65,6 +68,7 @@ export interface TodoPageDto {
 export interface TodoSourceProjectDto extends BackendUnknownRecord {
   id?: string | number;
   name?: string;
+  kind?: string;
 }
 
 export interface TodoSourceWorkItemDto extends BackendUnknownRecord {
@@ -85,6 +89,19 @@ export interface TodoSourceDraftDto extends BackendUnknownRecord {
   description?: string;
   source_url?: string | null;
   source_updated_at?: string | null;
+  metadata?: BackendUnknownRecord;
+}
+
+export interface TodoAutoImportRuleDto extends BackendUnknownRecord {
+  rule_id?: string;
+  space_id?: number | string;
+  source_container_ids?: unknown[];
+  filter_text?: string;
+  bot_id?: string;
+  status?: string;
+  cursor_updated_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export const TODO_ENDPOINTS = {
@@ -104,6 +121,9 @@ export const TODO_ENDPOINTS = {
     `${TODO_API_BASE}/sources/dima/projects/${encodeURIComponent(projectId)}/work-items/${encodeURIComponent(
       workItemId,
     )}`,
+  dimaAutoImportRules: `${TODO_API_BASE}/sources/dima/auto-import-rules`,
+  dimaAutoImportRule: (ruleId: string) =>
+    `${TODO_API_BASE}/sources/dima/auto-import-rules/${encodeURIComponent(ruleId)}`,
 };
 
 export function listTodos(query: TodoListQuery) {
@@ -147,6 +167,7 @@ export function createTodo(input: CreateTodoInput) {
       item_id: input.source.itemId,
       url: input.source.url,
       updated_at: input.source.updatedAt,
+      metadata: input.source.metadata,
     };
   }
   return backendRequest<BackendApiEnvelope<TodoDto>>(TODO_ENDPOINTS.list, {
@@ -264,5 +285,45 @@ export function getTodoSourceDraft(projectId: string, workItemId: string) {
     params: userScopedParams(),
     operation: 'get-todo-source-draft',
     retryOnTransient: true,
+  });
+}
+
+export function createTodoAutoImportRule(input: CreateTodoAutoImportRuleInput) {
+  return backendRequest<BackendApiEnvelope<TodoAutoImportRuleDto>>(TODO_ENDPOINTS.dimaAutoImportRules, {
+    method: 'POST',
+    params: userScopedParams(),
+    data: {
+      space_id: input.spaceId,
+      source_container_ids: input.sourceContainerIds,
+      filter_text: input.filterText,
+      bot_id: input.botId,
+    },
+    operation: 'create-todo-auto-import-rule',
+  });
+}
+
+export function listTodoAutoImportRules(spaceId: number, status?: TodoAutoImportRuleStatus) {
+  return backendRequest<BackendApiEnvelope<TodoAutoImportRuleDto[]>>(TODO_ENDPOINTS.dimaAutoImportRules, {
+    method: 'GET',
+    params: userScopedParams({
+      space_id: spaceId,
+      ...(status ? { status } : {}),
+    }),
+    operation: 'list-todo-auto-import-rules',
+    retryOnTransient: true,
+  });
+}
+
+export function updateTodoAutoImportRule(ruleId: string, input: UpdateTodoAutoImportRuleInput) {
+  const data: BackendUnknownRecord = {};
+  if (input.sourceContainerIds) data.source_container_ids = input.sourceContainerIds;
+  if (input.filterText !== undefined) data.filter_text = input.filterText;
+  if (input.botId !== undefined) data.bot_id = input.botId;
+  if (input.status !== undefined) data.status = input.status;
+  return backendRequest<BackendApiEnvelope<TodoAutoImportRuleDto>>(TODO_ENDPOINTS.dimaAutoImportRule(ruleId), {
+    method: 'PATCH',
+    params: userScopedParams(),
+    data,
+    operation: 'update-todo-auto-import-rule',
   });
 }

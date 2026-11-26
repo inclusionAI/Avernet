@@ -60,24 +60,40 @@ class _Resolver:
         return _Secret()
 
 
-def principal_headers() -> dict[str, str]:
+def principal_headers(*, app_only: bool = False) -> dict[str, str]:
     now = int(time.time())
+    if app_only:
+        principals = [
+            {
+                "type": "app",
+                "tenant": "todo-template-endpoint-test",
+                "app": {
+                    "app_id": 1,
+                    "app_name": "todo-auto-import-agent",
+                    "owners": "todo-platform",
+                    "tenant": "todo-template-endpoint-test",
+                    "app_type": "integration",
+                },
+            }
+        ]
+    else:
+        principals = [
+            {
+                "type": "user",
+                "tenant": "todo-template-endpoint-test",
+                "subject": {
+                    "id": USER_ID,
+                    "username": "tod***@example.com",
+                },
+            }
+        ]
     principal_value = jwt.encode(
         {
             "iss": "gateway",
             "aud": "backend",
             "iat": now,
             "exp": now + 60 * 60,
-            "principals": [
-                {
-                    "type": "user",
-                    "tenant": "todo-template-endpoint-test",
-                    "subject": {
-                        "id": USER_ID,
-                        "username": "todo-template@example.com",
-                    },
-                }
-            ],
+            "principals": principals,
         },
         _SIGNING_KEY,
         algorithm="HS256",

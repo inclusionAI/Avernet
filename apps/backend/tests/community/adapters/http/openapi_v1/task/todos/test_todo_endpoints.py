@@ -8,11 +8,24 @@ import pytest
 from fastapi import Request, Response
 from pydantic import ValidationError as PydanticValidationError
 
+from agentclaw.community.adapters.http.openapi_v1.responses import mapped_error_response
+from agentclaw.community.adapters.http.openapi_v1.task.todos.auto_import_agent_router import (
+    create_todo_from_dima_auto_import_rule,
+    get_dima_auto_import_rule,
+    list_active_dima_auto_import_rules,
+    list_dima_auto_import_progress,
+    record_dima_auto_import_checkpoint,
+)
+from agentclaw.community.adapters.http.openapi_v1.task.todos.auto_import_agent_router import (
+    router as auto_import_agent_router,
+)
 from agentclaw.community.adapters.http.openapi_v1.task.todos.router import (
+    create_dima_auto_import_rule,
     create_todo,
     create_todo_interaction,
     get_dima_work_item_draft,
     get_todo,
+    list_dima_auto_import_rules,
     list_dima_projects,
     list_dima_work_items,
     list_todo_artifacts,
@@ -22,17 +35,42 @@ from agentclaw.community.adapters.http.openapi_v1.task.todos.router import (
     read_todo_artifact_content,
     run_todo,
     submit_todo_acceptance,
+    update_dima_auto_import_rule,
 )
 from agentclaw.community.adapters.http.openapi_v1.task.todos.schemas import (
+    CreateTodoAutoImportRuleRequest,
+    CreateTodoFromAutoImportRuleRequest,
     CreateTodoInteractionRequest,
     CreateTodoRequest,
     SubmitTodoAcceptanceRequest,
+    TodoAutoImportCheckpointRequest,
+    UpdateTodoAutoImportRuleRequest,
 )
-from agentclaw.community.adapters.http.openapi_v1.responses import mapped_error_response
 from agentclaw.community.core.task.todos.artifact_models import (
     TodoArtifactDownload,
     TodoArtifactKind,
     TodoArtifactRecord,
+)
+from agentclaw.community.core.task.todos.auto_import_models import (
+    TodoAutoImportCheckpoint,
+    TodoAutoImportProgressRecord,
+    TodoAutoImportProgressStatus,
+    TodoAutoImportRuleRecord,
+    TodoAutoImportRuleStatus,
+)
+from agentclaw.community.core.task.todos.errors import (
+    TodoAutoImportCursorConflictError,
+    TodoSourceAlreadyImportedError,
+)
+from agentclaw.community.core.task.todos.models import (
+    AcceptanceVerdict,
+    TodoEventRecord,
+    TodoPage,
+    TodoRecord,
+    TodoStatus,
+)
+from agentclaw.community.core.task.todos.models import (
+    TodoArtifactRecord as TodoEventArtifactRecord,
 )
 from agentclaw.community.core.task.todos.source_models import (
     TodoSourceDraft,
@@ -40,19 +78,9 @@ from agentclaw.community.core.task.todos.source_models import (
     TodoSourceProject,
     TodoSourceWorkItem,
 )
-from agentclaw.community.core.task.todos.errors import (
-    TodoSourceAlreadyImportedError,
-)
-from agentclaw.community.core.task.todos.models import (
-    AcceptanceVerdict,
-    TodoArtifactRecord as TodoEventArtifactRecord,
-    TodoEventRecord,
-    TodoPage,
-    TodoRecord,
-    TodoStatus,
-)
 
 NOW = datetime(2026, 11, 10, 8, 30, tzinfo=timezone.utc)
+AUTO_IMPORT_TIME = datetime(2026, 11, 25, 8, 0, tzinfo=timezone.utc)
 
 
 def _request(method: str, path: str) -> Request:
@@ -187,6 +215,80 @@ class _RecordedService:
         return _todo(status=status)
 
 
+def _auto_import_rule(
+    *,
+    status: TodoAutoImportRuleStatus = TodoAutoImportRuleStatus.ENABLED,
+) -> TodoAutoImportRuleRecord:
+    return TodoAutoImportRuleRecord(
+        rule_id="rule_1",
+        space_id=42,
+        source_container_ids=("W1", "P1"),
+        filter_text="只导入需要研发处理且尚未完成的事项",
+        bot_id="bot_1",
+        status=status,
+        cursor_updated_at=AUTO_IMPORT_TIME.replace(tzinfo=None),
+        created_by="human_1",
+        created_at=AUTO_IMPORT_TIME.replace(tzinfo=None),
+        updated_at=AUTO_IMPORT_TIME.replace(tzinfo=None),
+    )
+
+
+def _auto_import_progress() -> TodoAutoImportProgressRecord:
+    return TodoAutoImportProgressRecord(
+        progress_id="progress_1",
+        rule_id="rule_1",
+        source_container_id="W1",
+        source_item_id="item_1",
+        source_updated_at=AUTO_IMPORT_TIME.replace(tzinfo=None),
+        status=TodoAutoImportProgressStatus.IMPORTED,
+        todo_id="todo_1",
+        detail="created",
+        created_at=AUTO_IMPORT_TIME.replace(tzinfo=None),
+        updated_at=AUTO_IMPORT_TIME.replace(tzinfo=None),
+    )
+
+
+class _RecordedAutoImportService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def _record(self, operation: str, **kwargs: Any) -> None:
+        self.calls.append({"operation": operation, **kwargs})
+
+    def create_rule(self, **kwargs: Any) -> TodoAutoImportRuleRecord:
+        self._record("create_rule", **kwargs)
+        return _auto_import_rule()
+
+    def list_rules(self, **kwargs: Any) -> tuple[TodoAutoImportRuleRecord, ...]:
+        self._record("list_rules", **kwargs)
+        return (_auto_import_rule(),)
+
+    def list_active_rules(self, **kwargs: Any) -> tuple[TodoAutoImportRuleRecord, ...]:
+        self._record("list_active_rules", **kwargs)
+        return (_auto_import_rule(),)
+
+    def get_rule(self, **kwargs: Any) -> TodoAutoImportRuleRecord:
+        self._record("get_rule", **kwargs)
+        return _auto_import_rule()
+
+    def update_rule(self, **kwargs: Any) -> TodoAutoImportRuleRecord:
+        self._record("update_rule", **kwargs)
+        status = kwargs["status"] or TodoAutoImportRuleStatus.ENABLED
+        return _auto_import_rule(status=TodoAutoImportRuleStatus(status))
+
+    def list_progress(self, **kwargs: Any) -> tuple[TodoAutoImportProgressRecord, ...]:
+        self._record("list_progress", **kwargs)
+        return (_auto_import_progress(),)
+
+    def record_checkpoint(self, **kwargs: Any) -> TodoAutoImportProgressRecord:
+        self._record("record_checkpoint", **kwargs)
+        return _auto_import_progress()
+
+    def create_todo_from_rule(self, **kwargs: Any) -> TodoRecord:
+        self._record("create_todo_from_rule", **kwargs)
+        return _todo(status=TodoStatus.PENDING, collab_context_id=None)
+
+
 @pytest.mark.asyncio
 async def test_list_todos_maps_product_page_without_internal_fields():
     service = _RecordedService()
@@ -277,6 +379,10 @@ async def test_create_todo_maps_dima_source_identity():
                 "item_id": "work_1",
                 "url": "https://dima.example/items/work_1",
                 "updated_at": "2026-11-20T12:00:00Z",
+                "metadata": {
+                    "processor_id": "149844",
+                    "processor_name": "张三",
+                },
             },
         ),
         request=_request("POST", "/openapi/v1/collaboration/tasks/todos"),
@@ -292,7 +398,24 @@ async def test_create_todo_maps_dima_source_identity():
         item_id="work_1",
         url="https://dima.example/items/work_1",
         updated_at="2026-11-20T12:00:00Z",
+        metadata={"processor_id": "149844", "processor_name": "张三"},
     )
+
+
+def test_create_todo_rejects_non_string_dima_source_metadata():
+    with pytest.raises(PydanticValidationError, match="keys and values"):
+        CreateTodoRequest(
+            space_id=42,
+            title="Prepare release notes",
+            description="Summarize the changes",
+            bot_id="bot_1",
+            source={
+                "type": "dima",
+                "container_id": "P1",
+                "item_id": "work_1",
+                "metadata": {"processor_id": 149844},
+            },
+        )
 
 
 def test_duplicate_source_error_exposes_existing_todo_id():
@@ -307,6 +430,235 @@ def test_duplicate_source_error_exposes_existing_todo_id():
     assert payload["code"] == 409000
     assert payload["message"] == "Dima work item already imported"
     assert payload["data"] == {"existing_todo_id": "todo_existing"}
+
+
+@pytest.mark.asyncio
+async def test_auto_import_rule_routes_forward_authenticated_human_fields():
+    service = _RecordedAutoImportService()
+    principal = {"user_id": "human_1"}
+    response = Response()
+
+    created_payload = await create_dima_auto_import_rule(
+        body=CreateTodoAutoImportRuleRequest(
+            space_id=42,
+            source_container_ids=["W1", "P1"],
+            filter_text="只导入需要研发处理且尚未完成的事项",
+            bot_id="bot_1",
+        ),
+        request=_request(
+            "POST",
+            "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules",
+        ),
+        response=response,
+        principal=principal,
+        user_id="human_1",
+        service=service,
+    )
+    listed_payload = await list_dima_auto_import_rules(
+        request=_request(
+            "GET",
+            "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules",
+        ),
+        principal=principal,
+        user_id="human_1",
+        space_id=42,
+        status="disabled",
+        service=service,
+    )
+    active_payload = await list_active_dima_auto_import_rules(
+        request=_request(
+            "GET",
+            "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/active",
+        ),
+        space_id=None,
+        service=service,
+    )
+
+    assert response.status_code == 201
+    assert created_payload.code == 201000
+    assert created_payload.data.rule_id == "rule_1"
+    assert created_payload.data.cursor_updated_at == "2026-11-25T08:00:00+00:00"
+    assert created_payload.data.created_at == "2026-11-25T08:00:00+00:00"
+    assert listed_payload.data[0].space_id == 42
+    assert active_payload.data[0].status == "enabled"
+    assert service.calls == [
+        {
+            "operation": "create_rule",
+            "space_id": 42,
+            "actor_id": "human_1",
+            "source_container_ids": ("W1", "P1"),
+            "filter_text": "只导入需要研发处理且尚未完成的事项",
+            "bot_id": "bot_1",
+        },
+        {
+            "operation": "list_rules",
+            "actor_id": "human_1",
+            "space_id": 42,
+            "status": "disabled",
+        },
+        {
+            "operation": "list_active_rules",
+            "space_id": None,
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_auto_import_detail_update_progress_and_checkpoint_routes():
+    service = _RecordedAutoImportService()
+    principal = {"user_id": "human_1"}
+
+    detail = await get_dima_auto_import_rule(
+        rule_id="rule_1",
+        request=_request(
+            "GET",
+            "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/rule_1",
+        ),
+        service=service,
+    )
+    updated = await update_dima_auto_import_rule(
+        rule_id="rule_1",
+        body=UpdateTodoAutoImportRuleRequest(
+            source_container_ids=["P2"],
+            filter_text="只导入缺陷",
+            bot_id="bot_2",
+            status="disabled",
+        ),
+        request=_request(
+            "PATCH",
+            "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/rule_1",
+        ),
+        principal=principal,
+        user_id="human_1",
+        service=service,
+    )
+    progress = await list_dima_auto_import_progress(
+        rule_id="rule_1",
+        request=_request(
+            "GET",
+            "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/rule_1/progress",
+        ),
+        source_container_id="W1",
+        source_item_id="item_1",
+        source_updated_at=AUTO_IMPORT_TIME,
+        limit=25,
+        service=service,
+    )
+    checkpoint = await record_dima_auto_import_checkpoint(
+        rule_id="rule_1",
+        body=TodoAutoImportCheckpointRequest(
+            source_container_id="W1",
+            source_item_id="item_1",
+            source_updated_at=AUTO_IMPORT_TIME,
+            status="imported",
+            todo_id="todo_1",
+            detail="created",
+            cursor_updated_at=AUTO_IMPORT_TIME,
+        ),
+        request=_request(
+            "POST",
+            "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/rule_1/checkpoints",
+        ),
+        service=service,
+    )
+    created_response = Response()
+    created = await create_todo_from_dima_auto_import_rule(
+        rule_id="rule_1",
+        body=CreateTodoFromAutoImportRuleRequest(
+            title="Imported Dima task",
+            description="Created by the external Agent",
+            source={
+                "type": "dima",
+                "container_id": "W1",
+                "item_id": "item_1",
+                "updated_at": AUTO_IMPORT_TIME.isoformat(),
+                "metadata": {"processor_id": "human_2"},
+            },
+        ),
+        request=_request(
+            "POST",
+            "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/rule_1/todos",
+        ),
+        response=created_response,
+        service=service,
+    )
+
+    assert detail.data.rule_id == "rule_1"
+    assert updated.data.status == "disabled"
+    assert progress.data[0].source_updated_at == "2026-11-25T08:00:00+00:00"
+    assert checkpoint.data.todo_id == "todo_1"
+    assert created_response.status_code == 201
+    assert created.data.todo_id == "todo_1"
+    assert service.calls[:3] == [
+        {
+            "operation": "get_rule",
+            "rule_id": "rule_1",
+        },
+        {
+            "operation": "update_rule",
+            "rule_id": "rule_1",
+            "actor_id": "human_1",
+            "source_container_ids": ("P2",),
+            "filter_text": "只导入缺陷",
+            "bot_id": "bot_2",
+            "status": "disabled",
+        },
+        {
+            "operation": "list_progress",
+            "rule_id": "rule_1",
+            "source_container_id": "W1",
+            "source_item_id": "item_1",
+            "source_updated_at": AUTO_IMPORT_TIME,
+            "limit": 25,
+        },
+    ]
+    recorded_checkpoint = service.calls[3]
+    assert recorded_checkpoint["operation"] == "record_checkpoint"
+    assert recorded_checkpoint["rule_id"] == "rule_1"
+    assert recorded_checkpoint["checkpoint"] == TodoAutoImportCheckpoint(
+        source_container_id="W1",
+        source_item_id="item_1",
+        source_updated_at=AUTO_IMPORT_TIME,
+        status=TodoAutoImportProgressStatus.IMPORTED,
+        todo_id="todo_1",
+        detail="created",
+        cursor_updated_at=AUTO_IMPORT_TIME,
+    )
+    created_call = service.calls[4]
+    assert created_call["operation"] == "create_todo_from_rule"
+    assert created_call["rule_id"] == "rule_1"
+    assert created_call["source"] == TodoSourceInput(
+        source_type="dima",
+        container_id="W1",
+        item_id="item_1",
+        url=None,
+        updated_at=AUTO_IMPORT_TIME.isoformat(),
+        metadata={"processor_id": "human_2"},
+    )
+
+
+def test_auto_import_active_route_precedes_dynamic_rule_route():
+    paths = [route.path for route in auto_import_agent_router.routes]
+
+    assert paths.index(
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/active"
+    ) < paths.index(
+        "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/{rule_id}"
+    )
+
+
+def test_auto_import_cursor_conflict_maps_to_409():
+    response = mapped_error_response(
+        TodoAutoImportCursorConflictError("cursor cannot move backwards"),
+        _request(
+            "POST",
+            "/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/rule_1/checkpoints",
+        ),
+    )
+
+    assert response is not None
+    assert response.status_code == 409
+    assert json.loads(response.body)["message"] == "Todo auto-import cursor conflict"
 
 
 @pytest.mark.asyncio
@@ -673,6 +1025,7 @@ class _RecordedSourceService:
             description="Imported description",
             source_url="https://dima.example/items/1",
             source_updated_at="2026-11-20T12:00:00Z",
+            metadata={"processor_id": "149844", "processor_name": "张三"},
         )
 
 
@@ -711,10 +1064,18 @@ async def test_dima_source_routes_forward_verified_human_request_context():
         service=service,
     )
 
-    assert projects.data[0].model_dump() == {"id": "P1", "name": "Dima project"}
+    assert projects.data[0].model_dump() == {
+        "id": "P1",
+        "name": "Dima project",
+        "kind": "project",
+    }
     assert items.data[0].category == "req"
     assert draft.data.title == "Dima requirement"
     assert draft.data.description == "Imported description"
+    assert draft.data.metadata == {
+        "processor_id": "149844",
+        "processor_name": "张三",
+    }
     assert [call["op"] for call in service.calls] == [
         "list_projects",
         "list_work_items",

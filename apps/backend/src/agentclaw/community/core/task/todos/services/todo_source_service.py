@@ -203,15 +203,16 @@ def _text(record: dict[str, Any], *keys: str) -> str | None:
 def _normalize_projects(payload: object) -> tuple[TodoSourceProject, ...]:
     projects: dict[str, TodoSourceProject] = {}
     for record in _walk_dicts(payload):
+        workspace_id = _text(record, "workspaceId", "workspace_id")
         project_id = _text(
             record,
             "projectId",
             "project_id",
             "projectCode",
             "project_code",
-            "workspaceId",
-            "workspace_id",
         )
+        container_id = project_id or workspace_id
+        kind = "workspace" if workspace_id and not project_id else "project"
         name = _text(
             record,
             "projectName",
@@ -232,20 +233,33 @@ def _normalize_projects(payload: object) -> tuple[TodoSourceProject, ...]:
                 "project_name",
                 "projectTitle",
                 "project_title",
-                "workspaceName",
-                "workspace_name",
             )
         )
-        if (
-            project_id is None
-            and generic_id
-            and (has_project_shape or generic_id.upper().startswith(("P", "W")))
-        ):
-            project_id = generic_id
-        if project_id is None:
+        has_workspace_shape = any(
+            record.get(key) not in (None, "")
+            for key in ("workspaceName", "workspace_name")
+        )
+        if container_id is None and generic_id:
+            generic_kind = (
+                "workspace"
+                if has_workspace_shape or generic_id.upper().startswith("W")
+                else "project"
+            )
+            if (
+                has_project_shape
+                or has_workspace_shape
+                or generic_id.upper().startswith(("P", "W"))
+            ):
+                container_id = generic_id
+                kind = generic_kind
+        if container_id is None:
             continue
         if name:
-            projects[project_id] = TodoSourceProject(id=project_id, name=name)
+            projects[container_id] = TodoSourceProject(
+                id=container_id,
+                name=name,
+                kind=kind,
+            )
     return tuple(sorted(projects.values(), key=lambda item: item.name.casefold()))
 
 
@@ -388,6 +402,63 @@ def _plain_text(value: object) -> str:
     return str(value).strip() if value is not None else ""
 
 
+def _processor_metadata(detail: dict[str, Any]) -> dict[str, str]:
+    """Extract only the Dima processor fields needed by later product flows."""
+
+    processor_id = _text(
+        detail,
+        "processorId",
+        "processor_id",
+        "processorNo",
+        "processor_no",
+        "processorUserId",
+        "processor_user_id",
+    )
+    processor_name = _text(
+        detail,
+        "processorName",
+        "processor_name",
+        "processorNick",
+        "processor_nick",
+    )
+    processor = detail.get("processor")
+    if isinstance(processor, dict):
+        processor_id = processor_id or _text(
+            processor,
+            "id",
+            "userId",
+            "user_id",
+            "employeeNo",
+            "employee_no",
+            "workNo",
+            "work_no",
+            "login",
+        )
+        processor_name = processor_name or _text(
+            processor,
+            "name",
+            "displayName",
+            "display_name",
+            "nickName",
+            "nick_name",
+            "realName",
+            "real_name",
+        )
+    elif processor is not None and str(processor).strip():
+        raw_processor = str(processor).strip()
+        if raw_processor.isdigit() or raw_processor.upper().startswith("WB"):
+            processor_id = processor_id or raw_processor
+        else:
+            processor_name = processor_name or raw_processor
+
+    metadata: dict[str, str] = {}
+    if processor_id:
+        metadata["processor_id"] = processor_id
+    if processor_name:
+        metadata["processor_name"] = processor_name
+    return metadata
+
+
 def _draft_from_detail(
     detail: dict[str, Any],
     *,
@@ -447,4 +518,5 @@ def _draft_from_detail(
             if item
             else _text(detail, "updatedAt", "updated_at", "gmtModified")
         ),
+        metadata=_processor_metadata(detail),
     )

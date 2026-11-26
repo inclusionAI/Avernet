@@ -336,7 +336,10 @@ class _InMemoryTodos:
         return (self.todo,)[: kwargs["limit"]]
 
     def bind_context_if_pending(self, **kwargs: Any) -> TodoRecord:
-        if self.todo.status is not TodoStatus.NOT_STARTED or self.todo.collab_context_id:
+        if (
+            self.todo.status is not TodoStatus.NOT_STARTED
+            or self.todo.collab_context_id
+        ):
             raise TodoStateConflictError("Todo is not available for context binding")
         self.todo = replace(
             self.todo,
@@ -521,7 +524,13 @@ def create_todo_validation_failed():
         status=200,
         json_contains={
             "code": 200000,
-            "data": [{"id": "dima-project-1", "name": "Todo Project"}],
+            "data": [
+                {
+                    "id": "dima-project-1",
+                    "name": "Todo Project",
+                    "kind": "project",
+                }
+            ],
         },
     ),
 )

@@ -1,14 +1,20 @@
 import {
+  createTodoAutoImportRule,
   getTodoSourceDraft,
   listTodoArtifacts,
+  listTodoAutoImportRules,
   listTodoSourceProjects,
   listTodoSourceWorkItems,
+  updateTodoAutoImportRule,
 } from '@/services/backendApi/todos/todoController';
 import {
+  createTodoAutoImportRule as createTodoAutoImportRuleService,
   loadTodoArtifacts,
+  loadTodoAutoImportRules,
   loadTodoSourceDraft,
   loadTodoSourceProjects,
   loadTodoSourceWorkItems,
+  updateTodoAutoImportRule as updateTodoAutoImportRuleService,
 } from '@/services/backendApi/todos/todoService';
 
 jest.mock('@/services/backendApi/todos/todoController', () => ({
@@ -16,12 +22,18 @@ jest.mock('@/services/backendApi/todos/todoController', () => ({
   listTodoSourceProjects: jest.fn(),
   listTodoSourceWorkItems: jest.fn(),
   getTodoSourceDraft: jest.fn(),
+  createTodoAutoImportRule: jest.fn(),
+  listTodoAutoImportRules: jest.fn(),
+  updateTodoAutoImportRule: jest.fn(),
 }));
 
 const listArtifacts = jest.mocked(listTodoArtifacts);
 const listProjects = jest.mocked(listTodoSourceProjects);
 const listWorkItems = jest.mocked(listTodoSourceWorkItems);
 const getDraft = jest.mocked(getTodoSourceDraft);
+const createAutoImportRule = jest.mocked(createTodoAutoImportRule);
+const listAutoImportRules = jest.mocked(listTodoAutoImportRules);
+const updateAutoImportRule = jest.mocked(updateTodoAutoImportRule);
 
 describe('todoService artifacts', () => {
   beforeEach(() => {
@@ -99,7 +111,7 @@ describe('todoService Dima source normalization', () => {
   it('映射项目、工作项和可编辑草稿', async () => {
     listProjects.mockResolvedValue({
       code: 200000,
-      data: [{ id: 1259, name: '支付项目' }],
+      data: [{ id: 1259, name: '支付项目', kind: 'project' }],
     });
     listWorkItems.mockResolvedValue({
       code: 200000,
@@ -124,10 +136,14 @@ describe('todoService Dima source normalization', () => {
         title: '登录缺陷',
         description: '整理后的内容',
         source_url: 'https://dima.example/items/1',
+        metadata: {
+          processor_id: '149844',
+          processor_name: '张三',
+        },
       },
     });
 
-    await expect(loadTodoSourceProjects()).resolves.toEqual([{ id: '1259', name: '支付项目' }]);
+    await expect(loadTodoSourceProjects()).resolves.toEqual([{ id: '1259', name: '支付项目', kind: 'project' }]);
     await expect(loadTodoSourceWorkItems('1259')).resolves.toEqual([
       {
         id: '2026112000000000001',
@@ -147,6 +163,70 @@ describe('todoService Dima source normalization', () => {
       description: '整理后的内容',
       sourceUrl: 'https://dima.example/items/1',
       sourceUpdatedAt: undefined,
+      metadata: {
+        processor_id: '149844',
+        processor_name: '张三',
+      },
+    });
+  });
+});
+
+describe('todoService Dima auto import rule normalization', () => {
+  beforeEach(() => {
+    createAutoImportRule.mockReset();
+    listAutoImportRules.mockReset();
+    updateAutoImportRule.mockReset();
+  });
+
+  const ruleDto = {
+    rule_id: 'rule-1',
+    space_id: 10,
+    source_container_ids: ['W1', 'P1'],
+    filter_text: '只导入需要研发处理且尚未完成的事项',
+    bot_id: 'bot-owned:u-1',
+    status: 'enabled',
+    cursor_updated_at: '2026-11-25T08:00:00+00:00',
+    created_at: '2026-11-25T07:00:00+00:00',
+    updated_at: '2026-11-25T08:00:00+00:00',
+  };
+
+  const rule = {
+    ruleId: 'rule-1',
+    spaceId: 10,
+    sourceContainerIds: ['W1', 'P1'],
+    filterText: '只导入需要研发处理且尚未完成的事项',
+    botId: 'bot-owned:u-1',
+    status: 'enabled' as const,
+    cursorUpdatedAt: '2026-11-25T08:00:00+00:00',
+    createdAt: '2026-11-25T07:00:00+00:00',
+    updatedAt: '2026-11-25T08:00:00+00:00',
+  };
+
+  it('映射创建和查询响应中的 snake_case 字段', async () => {
+    createAutoImportRule.mockResolvedValue({ code: 200000, data: ruleDto });
+    listAutoImportRules.mockResolvedValue({ code: 200000, data: [ruleDto] });
+
+    await expect(
+      createTodoAutoImportRuleService({
+        spaceId: 10,
+        sourceContainerIds: ['W1', 'P1'],
+        filterText: '只导入需要研发处理且尚未完成的事项',
+        botId: 'bot-owned:u-1',
+      }),
+    ).resolves.toEqual(rule);
+    await expect(loadTodoAutoImportRules(10)).resolves.toEqual([rule]);
+  });
+
+  it('映射规则更新结果', async () => {
+    updateAutoImportRule.mockResolvedValue({
+      code: 200000,
+      data: { ...ruleDto, status: 'disabled', cursor_updated_at: null },
+    });
+
+    await expect(updateTodoAutoImportRuleService('rule-1', { status: 'disabled' })).resolves.toEqual({
+      ...rule,
+      status: 'disabled',
+      cursorUpdatedAt: undefined,
     });
   });
 });

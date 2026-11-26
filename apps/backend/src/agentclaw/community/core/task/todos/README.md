@@ -105,12 +105,34 @@ change that identity, so moving a work item between Dima projects cannot create
 a duplicate Todo in the same TeamClaw Space. The same source item may be
 imported independently into another TeamClaw Space.
 
+`source_metadata_json` stores a bounded, whitelisted JSON snapshot of useful
+Dima fields such as `processor_id` and `processor_name`. It is descriptive
+source metadata only: it does not participate in duplicate identity, bind the
+processor to a Todo template participant, select an Action notification target,
+or update automatically after import.
+
 Todo and source binding are inserted in one database transaction. A friendly
 pre-check returns the existing Todo ID for ordinary retries, while the database
 unique constraint closes concurrent-import races; an import conflict returns
 `409` with `data.existing_todo_id`. This binding is an import snapshot only. It
-does not introduce automatic Dima synchronization, status write-back, or a
-periodic import job.
+does not introduce Dima status write-back.
+
+Automatic Dima import is configuration and progress persistence, not an
+in-process scheduler. Backend stores Human-owned rules, one monotonic
+`cursor_updated_at`, and an idempotent checkpoint for each
+`(rule, container, item, source_updated_at)` source version. Rule creation, owner
+listing, and updates remain Human owner-scoped. Execution is tenant-scoped: any
+authenticated caller, including an application-only Bot caller, may list enabled
+rules, read rule detail and progress, create a Todo through a rule, and write a
+checkpoint. `created_by` is audit and imported-Todo ownership, not an execution
+permission. Rule-bound Todo creation takes `space_id`, `bot_id`, and `created_by`
+only from the rule; the caller cannot override them. An external Agent scans every
+configured Dima container, interprets the natural-language filter, creates
+matching Todos, and writes one checkpoint per processed item. It should query Dima with
+`source_updated_at >= cursor_updated_at`, use persisted progress to de-duplicate
+equal timestamps, and advance the rule cursor only after the full multi-container
+scan window is complete. Backend does not call Dima or run a periodic import job
+for these rules.
 
 ## Bot execution and artifact reporting contract
 
@@ -202,9 +224,14 @@ provides:
   - TodoSourceServiceProtocol
   - TodoSourceService
   - TodoSourceInput
+  - TodoAutoImportServiceProtocol
+  - TodoAutoImportService
+  - TodoAutoImportRuleRecord
+  - TodoAutoImportProgressRecord
   - InProcessTodoCollaborationAdapter
 consumes:
   - TodoRepositoryProtocol
+  - TodoAutoImportRepositoryProtocol
   - SpaceAccessServiceProtocol
   - BotRepository
   - CachePlugin

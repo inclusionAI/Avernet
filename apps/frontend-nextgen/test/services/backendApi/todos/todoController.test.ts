@@ -1,5 +1,6 @@
 import { backendRequest } from '@/services/backendApi/httpClient';
 import {
+  createTodoAutoImportRule,
   createTodo,
   createTodoInteraction,
   getTodo,
@@ -9,8 +10,10 @@ import {
   listTodos,
   listTodoSourceProjects,
   listTodoSourceWorkItems,
+  listTodoAutoImportRules,
   runTodo,
   submitTodoAcceptance,
+  updateTodoAutoImportRule,
 } from '@/services/backendApi/todos/todoController';
 
 jest.mock('@/services/backendApi/httpClient', () => ({ backendRequest: jest.fn() }));
@@ -121,6 +124,10 @@ describe('todoController', () => {
         itemId: 'work-1',
         url: 'https://dima.example/items/work-1',
         updatedAt: '2026-11-20T12:00:00Z',
+        metadata: {
+          processor_id: '149844',
+          processor_name: '张三',
+        },
       },
     });
 
@@ -138,6 +145,10 @@ describe('todoController', () => {
           item_id: 'work-1',
           url: 'https://dima.example/items/work-1',
           updated_at: '2026-11-20T12:00:00Z',
+          metadata: {
+            processor_id: '149844',
+            processor_name: '张三',
+          },
         },
       },
       operation: 'create-todo',
@@ -182,6 +193,51 @@ describe('todoController', () => {
     expect(request).toHaveBeenCalledWith(
       '/openapi/v1/collaboration/tasks/todos/sources/dima/projects/P1/work-items',
       expect.objectContaining({ params: userParams }),
+    );
+  });
+
+  it('创建、查询和更新 Dima 自动导入规则时使用用户作用域', async () => {
+    await createTodoAutoImportRule({
+      spaceId: 10,
+      sourceContainerIds: ['W1', 'P1'],
+      filterText: '只导入需要研发处理且尚未完成的事项',
+      botId: 'bot-owned:u-1',
+    });
+    expect(request).toHaveBeenLastCalledWith(
+      '/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules',
+      {
+        method: 'POST',
+        params: userParams,
+        data: {
+          space_id: 10,
+          source_container_ids: ['W1', 'P1'],
+          filter_text: '只导入需要研发处理且尚未完成的事项',
+          bot_id: 'bot-owned:u-1',
+        },
+        operation: 'create-todo-auto-import-rule',
+      },
+    );
+
+    await listTodoAutoImportRules(10, 'enabled');
+    expect(request).toHaveBeenLastCalledWith(
+      '/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules',
+      {
+        method: 'GET',
+        params: { space_id: 10, status: 'enabled', user_id: 'human-1' },
+        operation: 'list-todo-auto-import-rules',
+        retryOnTransient: true,
+      },
+    );
+
+    await updateTodoAutoImportRule('rule/1', { status: 'disabled' });
+    expect(request).toHaveBeenLastCalledWith(
+      '/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/rule%2F1',
+      {
+        method: 'PATCH',
+        params: userParams,
+        data: { status: 'disabled' },
+        operation: 'update-todo-auto-import-rule',
+      },
     );
   });
 

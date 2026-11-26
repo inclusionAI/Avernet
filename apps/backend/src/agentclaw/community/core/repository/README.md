@@ -294,6 +294,7 @@ provides:
   - TaskDiscoveryLockRepositoryProtocol
   - TaskArtifactRepositoryProtocol
   - TodoRepositoryProtocol
+  - TodoAutoImportRepositoryProtocol
   - TodoTemplateRepositoryProtocol
   - TodoArtifactRepositoryProtocol
   - TodoArtifactRepository
@@ -400,6 +401,7 @@ provides:
   - TaskDiscoveryLockRepository
   - TaskArtifactRepository
   - TodoRepository
+  - TodoAutoImportRepository
   - TodoTemplateRepository
 consumes:
   - DatabasePlugin                # the per-profile session seam, injected into every implementation
