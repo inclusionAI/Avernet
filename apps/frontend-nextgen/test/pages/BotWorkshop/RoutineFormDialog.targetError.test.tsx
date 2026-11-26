@@ -85,7 +85,7 @@ it('多实例环境需先勾选运行实例，勾选后才能保存', () => {
   );
   fillForm();
   fireEvent.click(screen.getByRole('combobox', { name: '生效环境' }));
-  fireEvent.click(screen.getByRole('option', { name: '运行中' }));
+  fireEvent.click(screen.getByRole('option', { name: '正式运行' }));
   expect(screen.getByText('请选择当前环境中已确认的运行实例')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
   fireEvent.pointerDown(screen.getByRole('button', { name: '运行实例' }));
