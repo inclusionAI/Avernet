@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 
 from agentclaw.community.core.task.context_collab.errors import (
@@ -20,11 +21,13 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
-    ContextCollabCreatedResult,
     ContextCollabServiceProtocol,
     ContextCollabStatusProjection,
-    ContextCreateCommand,
+    CollaborationCreateCommand,
     EventAppendCommand,
+)
+from agentclaw.community.core.task.todos.collaboration.context_runtime import (
+    TodoContextRuntime,
 )
 from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationArtifact,
@@ -51,16 +54,19 @@ _CONTEXT_COLLAB_DOMAIN_ERRORS = (
 class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
     """Translate Todo requests without routing an internal call through HTTP."""
 
-    def __init__(self, service: ContextCollabServiceProtocol) -> None:
+    def __init__(
+        self, service: ContextCollabServiceProtocol, runtime: TodoContextRuntime
+    ) -> None:
         self._service = service
+        self._runtime = runtime
 
     def create_context(
         self, request: TodoCollaborationContextRequest
     ) -> TodoCollaborationContext:
         try:
-            result = self._service.create_context(
-                ContextCreateCommand(
-                    space=SpaceRef(request.space_id, request.environment),
+            result = self._service.create_collaboration(
+                CollaborationCreateCommand(
+                    to_space=SpaceRef(request.space_id, request.environment),
                     principal_ref=PrincipalRef("human", request.principal_id),
                     product_kind=request.product_kind,
                     workflow_kind=request.workflow_kind,
@@ -82,7 +88,12 @@ class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
             raise TodoCollaborationError(
                 "ContextCollab rejected Todo context creation"
             ) from exc
-        return _created_context(result)
+        return _projected_context(
+            self._get_projection(
+                result.collet_id,
+                _actor_context(request.principal_id, "human"),
+            )
+        )
 
     def get_context(
         self, *, collab_context_id: str, actor_id: str
@@ -104,7 +115,7 @@ class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
     ) -> TodoCollaborationContext:
         actor = _actor_context(actor_id, "human")
         try:
-            result = await self._service.run_context(
+            result = await self._runtime.run_context(
                 collab_context_id,
                 actor,
                 todo_execution_id=todo_execution_id,
@@ -129,7 +140,7 @@ class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
     ) -> TodoCollaborationContext:
         actor = _actor_context(actor_id, "human")
         try:
-            projection = await self._service.refresh_run(collab_context_id, actor)
+            await self._runtime.refresh_run(collab_context_id, actor)
         except ContextCollabExecutorError as exc:
             raise TodoCollaborationError(
                 "ContextCollab runtime could not refresh the Todo executor"
@@ -138,7 +149,7 @@ class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
             raise TodoCollaborationError(
                 "ContextCollab rejected the Todo runtime refresh"
             ) from exc
-        return _projected_context(projection)
+        return _projected_context(self._get_projection(collab_context_id, actor))
 
     async def resume_context(
         self,
@@ -152,7 +163,7 @@ class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
     ) -> TodoCollaborationContext:
         actor = _actor_context(actor_id, "human")
         try:
-            result = await self._service.resume_context(
+            result = await self._runtime.resume_context(
                 collab_context_id,
                 triggered_by_event_id=triggered_by_event_id,
                 context=actor,
@@ -209,11 +220,44 @@ class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
         actor: ActorContext,
     ) -> ContextCollabStatusProjection:
         try:
-            return self._service.get_status(
+            projection = self._service.get_status(
                 collab_context_id,
                 trunk_events=False,
                 context=actor,
-                include_event_payload=True,
+            )
+            # Keep the northbound status DTO compact. Rich Todo content comes
+            # only from the authorized raw Event API, not a transport-only flag.
+            visible_events = self._service.get_events(collab_context_id, context=actor)
+            by_id = {row["event_id"]: row for row in projection.task_progress.events}
+            rows = []
+            for seq, event in enumerate(visible_events, 1):
+                row = dict(by_id.get(event.event_id, {}))
+                payload = dict(event.payload or {})
+                row.update(
+                    event_id=event.event_id,
+                    event_seq=seq,
+                    event_kind=event.event_kind,
+                    primitive_type=event.primitive_type,
+                    actor_id=event.actor_ref.principal_id if event.actor_ref else "",
+                    actor_type=event.actor_ref.principal_type
+                    if event.actor_ref
+                    else "",
+                    execution_id=payload.get("run_id")
+                    or payload.get("execution_id")
+                    or "",
+                    context_version=event.context_version_after,
+                    created_at=event.occurred_at,
+                    payload=payload,
+                    artifacts=payload.get("artifacts", []),
+                )
+                rows.append(row)
+            return replace(
+                projection,
+                task_progress=replace(
+                    projection.task_progress,
+                    total_events=len(rows),
+                    events=rows,
+                ),
             )
         except _CONTEXT_COLLAB_DOMAIN_ERRORS as exc:
             raise TodoCollaborationError(
@@ -238,22 +282,6 @@ def _actor_context(actor_id: str, actor_type: str) -> ActorContext:
     return ActorContext(
         actor=PrincipalRef(actor_type, actor_id),
         source="todo",
-    )
-
-
-def _created_context(result: ContextCollabCreatedResult) -> TodoCollaborationContext:
-    snapshot = _dict(result.current_snapshot)
-    progress = _dict(snapshot.get("progress"))
-    current_event = _dict(result.current_event)
-    current_event_id = progress.get("current_event_id") or current_event.get("event_id")
-    return TodoCollaborationContext(
-        collab_context_id=_required_string(
-            result.collab_context_id,
-            "collab_context_id",
-        ),
-        status=_required_string(snapshot.get("status"), "current_snapshot.status"),
-        context_version=_required_int(result.context_version, "context_version"),
-        current_event_id=_optional_string(current_event_id),
     )
 
 

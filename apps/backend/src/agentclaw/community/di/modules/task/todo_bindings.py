@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import fields
+import logging
 from typing import Any
 
 from injector import Binder, Injector, Module, inject, provider, singleton
@@ -26,6 +27,25 @@ from agentclaw.community.core.repository.protocols.task.todo_templates import (
     TodoTemplateRepositoryProtocol,
 )
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
+from agentclaw.community.core.task.context_collab.executor import (
+    ContextCollabExecutor,
+    UnavailableContextCollabExecutor,
+)
+from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
+    ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.task_runner.client.ports import (
+    OpenApiBotPort,
+    BcsClientPort,
+)
+from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
+    BcsBotTokenProvider,
+    NullBcsBotTokenProvider,
+)
+from agentclaw.community.core.task.todos.collaboration.context_runtime import (
+    TodoContextRuntime,
+)
+from agentclaw.community.di.config import TaskDispatchConfig
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabServiceProtocol,
 )
@@ -51,7 +71,9 @@ from agentclaw.community.core.task.todos.execution_protocol import (
     TodoExecutionServiceProtocol,
 )
 from agentclaw.community.core.task.todos.scheduler import TodoScheduler
-from agentclaw.community.core.task.todos.stage_outcome_protocol import TodoStageServiceProtocol
+from agentclaw.community.core.task.todos.stage_outcome_protocol import (
+    TodoStageServiceProtocol,
+)
 from agentclaw.community.core.task.todos.service_protocol import TodoServiceProtocol
 from agentclaw.community.core.task.todos.source_client_protocol import (
     TodoSourceClientProtocol,
@@ -84,7 +106,9 @@ from agentclaw.community.core.task.todos.services.todo_service import TodoServic
 from agentclaw.community.core.task.todos.services.todo_source_service import (
     TodoSourceService,
 )
-from agentclaw.community.core.task.todos.services.todo_stage_service import TodoStageService
+from agentclaw.community.core.task.todos.services.todo_stage_service import (
+    TodoStageService,
+)
 from agentclaw.community.core.task.todos.services.todo_template_capability_service import (
     TodoTemplateCapabilityService,
 )
@@ -97,6 +121,8 @@ from agentclaw.community.core.task.todos.services.todo_template_service import (
 from agentclaw.community.di.modules.config_module import _as_bool, _as_int, _block
 from agentclaw.community.di.todo_config import TodoSchedulerConfig
 from agentclaw.community.plugin_api.cache import CachePlugin
+
+logger = logging.getLogger("task.todo")
 
 _TODO_KEYS = frozenset({"scheduler"})
 _SCHEDULER_KEYS = frozenset(field.name for field in fields(TodoSchedulerConfig))
@@ -158,6 +184,50 @@ class TaskTodoBindings(Module):
             TodoExecutionServiceProtocol,
             to=TodoExecutionService,
             scope=singleton,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def context_collab_executor(
+        self,
+        injector: Injector,
+        task_dispatch: TaskDispatchConfig,
+    ) -> ContextCollabExecutor:
+        """Build direct Todo execution with optional legacy BCS compatibility."""
+        try:
+            openapi_bot = injector.get(OpenApiBotPort)
+        except Exception as exc:  # noqa: BLE001 lightweight deployment
+            logger.info(
+                "[task][context-collab] OpenApiBotPort unavailable: %s",
+                exc,
+            )
+            return UnavailableContextCollabExecutor(str(exc))
+        if openapi_bot is None:
+            return UnavailableContextCollabExecutor("OpenApiBotPort resolved to None")
+        try:
+            bcs = injector.get(BcsClientPort)
+        except Exception as exc:  # noqa: BLE001 lightweight deployment
+            logger.info(
+                "[task][context-collab] BcsClientPort unavailable; "
+                "legacy group-backed Todo resume disabled: %s",
+                exc,
+            )
+            bcs = None
+        try:
+            bot_tokens = injector.get(BcsBotTokenProvider)
+        except Exception as exc:  # noqa: BLE001 lightweight deployment
+            logger.info(
+                "[task][context-collab] BcsBotTokenProvider unavailable; "
+                "legacy group-backed Todo resume disabled: %s",
+                exc,
+            )
+            bot_tokens = NullBcsBotTokenProvider()
+        return ContextCollabExecutor(
+            openapi_bot,
+            bcs=bcs,
+            bot_tokens=bot_tokens,
+            backend_url=task_dispatch.backend_url,
         )
 
     @singleton
@@ -255,8 +325,13 @@ class TaskTodoBindings(Module):
     def todo_collaboration_port(
         self,
         context_collab: ContextCollabServiceProtocol,
+        repository: ContextCollabRepositoryProtocol,
+        executor: ContextCollabExecutor,
     ) -> TodoCollaborationPort:
-        return InProcessTodoCollaborationAdapter(context_collab)
+        return InProcessTodoCollaborationAdapter(
+            context_collab,
+            TodoContextRuntime(context_collab, repository, executor),
+        )
 
     @singleton
     @provider

@@ -90,6 +90,9 @@ The worker runtime builds the injector and attaches it to the application.
 `di/modules/` binds services and Protocol aliases; `di/profile_modules.py`
 selects the infrastructure column. Prefer constructor injection for services
 and `Injected(Protocol)` at HTTP boundaries; do not add service-locator calls.
+Task/context_collab composition fragments live in
+[`di/modules/task/`](src/agentclaw/community/di/modules/task/); the existing
+`TaskModule` and `TaskPersistenceModule` remain the aggregate entrypoints.
 
 `DEPLOY_PROFILE` is mandatory and selects assembly; `SERVER_ENV` selects runtime
 environment. Supported values and validation live in `di/profile.py`.

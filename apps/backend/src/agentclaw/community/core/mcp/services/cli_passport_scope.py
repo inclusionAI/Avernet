@@ -16,8 +16,10 @@ from agentclaw.community.core.repository.protocols.identity import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import (
+    CliItem,
     McpScopeItem,
     PassportPlugin,
+    PassportResourceScope,
     extract_cli_items,
 )
 
@@ -39,11 +41,11 @@ class CliScopeReconcileResult:
 class _CliScopeSnapshot:
     """One complete Passport snapshot normalized for an overwrite writer."""
 
-    historical_cli_items: list[dict[str, Any]]
+    historical_cli_items: list[CliItem]
     historical_mcp_items: list[McpScopeItem]
-    cli_items: list[dict[str, Any]]
+    cli_items: list[CliItem]
     mcp_items: list[McpScopeItem]
-    resource_scope: dict[str, Any]
+    resource_scope: PassportResourceScope
 
     @property
     def changed(self) -> bool:
@@ -67,7 +69,7 @@ class CliPassportScopeReconciler:
         self._identity_repository = identity_repository
         self._manifest_resolver = manifest_resolver or CliCapabilityManifestResolver()
 
-    def current_passport_cli_items(self, *, bot: Mapping[str, Any]) -> list[dict[str, Any]]:
+    def current_passport_cli_items(self, *, bot: Mapping[str, Any]) -> list[CliItem]:
         """Read the validated current CLI scope without mutating Passport."""
         return list(self._build_snapshot(bot).historical_cli_items)
 
@@ -320,7 +322,7 @@ def build_passport_resource_scope(
     additional_cli_items: list[Mapping[str, Any]] | None = None,
     cli_identity_modes: Mapping[str, object] | None = None,
     removed_cli_codes: set[str] | None = None,
-) -> dict[str, Any]:
+) -> PassportResourceScope:
     """Build an overwrite-safe scope from Passport history and local sparse rows.
 
     The caller owns desired MCP membership; this pure helper only restores the
@@ -350,6 +352,18 @@ def build_passport_resource_scope(
         "mcp_items": mcp_items,
         "cli_items": cli_items,
     }
+
+
+def passport_grants_match(
+    passport: Mapping[str, Any] | None, resource_scope: PassportResourceScope,
+) -> bool:
+    """Compare grants independently of list order and display metadata."""
+    return (
+        {item["mcp_code"]: item["identity_mode"] for item in extract_passport_mcp_items(passport)}
+        == {item["mcp_code"]: item["identity_mode"] for item in resource_scope["mcp_items"]}
+        and {item["cli_code"]: item["identity_mode"] for item in extract_cli_items(passport)}
+        == {item["cli_code"]: item["identity_mode"] for item in resource_scope["cli_items"]}
+    )
 
 
 def _merge_desired_mcp_identity_modes(
@@ -394,7 +408,7 @@ def _dedupe_by_code(items: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
 
 def _normalize_cli_additions(
     additional_cli_items: list[Mapping[str, Any]] | None,
-) -> list[dict[str, Any]]:
+) -> list[CliItem]:
     if not additional_cli_items:
         return []
     return extract_cli_items({"clis": list(additional_cli_items)})

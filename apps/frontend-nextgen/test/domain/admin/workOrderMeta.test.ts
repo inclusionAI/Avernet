@@ -28,6 +28,9 @@ const MATRIX_BASELINE: Record<string, WorkOrderTypeMeta> = {
   BOT_MEMBER_ADDED: { label: '通知', tone: 'blue', category: 'NOTICE' },
   HUMAN2BOT_FRIEND_REVIEWED: { label: '审批类', tone: 'green', category: 'NOTICE' },
   BOT2BOT_FRIEND_REVIEWED: { label: '审批类', tone: 'green', category: 'NOTICE' },
+  // bot-friend-roster：Owner 移除好友通知（好友 NOTICE 视觉语言 = 普通通知蓝）
+  HUMAN2BOT_FRIEND_REMOVED: { label: '通知', tone: 'blue', category: 'NOTICE' },
+  BOT2BOT_FRIEND_REMOVED: { label: '通知', tone: 'blue', category: 'NOTICE' },
   // 通知类（NOTICE）：公开工单紫
   HUMAN2BOT_PUBLIC_ORDER_CREATED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },
   HUMAN2BOT_PUBLIC_ORDER_COMPLETED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },
@@ -38,7 +41,7 @@ const MATRIX_BASELINE: Record<string, WorkOrderTypeMeta> = {
 };
 
 describe('消息文案矩阵基线（§4.2 全量事件）', () => {
-  it('覆盖且仅覆盖基线中的 16 个 event_type：后端增删事件必须显式改基线', () => {
+  it('覆盖且仅覆盖基线中的 18 个 event_type：后端增删事件必须显式改基线', () => {
     expect(Object.keys(WORK_ORDER_TYPE_META).sort()).toEqual(Object.keys(MATRIX_BASELINE).sort());
   });
 
@@ -46,10 +49,10 @@ describe('消息文案矩阵基线（§4.2 全量事件）', () => {
     expect(WORK_ORDER_TYPE_META[eventType]).toEqual(expected);
   });
 
-  it('分类配比与契约一致：5 个 APPROVAL / 11 个 NOTICE', () => {
+  it('分类配比与契约一致：5 个 APPROVAL / 13 个 NOTICE', () => {
     const categories = Object.values(WORK_ORDER_TYPE_META).map((m) => m.category);
     expect(categories.filter((c) => c === 'APPROVAL')).toHaveLength(5);
-    expect(categories.filter((c) => c === 'NOTICE')).toHaveLength(11);
+    expect(categories.filter((c) => c === 'NOTICE')).toHaveLength(13);
   });
 
   it('resolveWorkOrderType 对全量事件都返回基线 meta（不落 fallback）', () => {

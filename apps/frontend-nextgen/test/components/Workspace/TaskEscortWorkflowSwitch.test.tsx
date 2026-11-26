@@ -65,7 +65,7 @@ it('switches version, metrics, runs and nodes, rather than changing only the tit
   const before = screen.getByRole('region', { name: '模拟运行指标' }).textContent;
   await selectWorkflow(user, inspection.name);
   expect(screen.getByRole('combobox', { name: '切换工作流' })).toHaveTextContent(inspection.id);
-  expect(screen.getByText(inspection.version, { selector: 'span' })).toBeInTheDocument();
+  expect(screen.getByRole('table', { name: '模拟运行记录' })).toHaveTextContent(inspection.version);
   const metrics = screen.getByRole('region', { name: '模拟运行指标' });
   expect(metrics).toHaveTextContent(getOverview('24h', inspection.runs).successRate);
   expect(metrics.textContent).not.toBe(before);

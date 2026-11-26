@@ -86,6 +86,7 @@ class TaskServiceRelayMixin:
         relay_token = str(root.run_info.extend_props.get("relay_token") or "")
         if not relay_token:
             raise TaskStateError("relay root node has no run generation")
+        execution_config = graph.extend_props.get("execution_config") or {}
         return format_relay_execution_instruction(
             task_id=task_id,
             node_id=root.node_id,
@@ -98,6 +99,7 @@ class TaskServiceRelayMixin:
                 for item in root.task_spec.goal.acceptances
             ],
             allowed_run_modes=list(TaskRuntimeProfile.run_modes_from_graph(graph)),
+            source_channel=execution_config.get("source_channel"),
         )
 
     async def report(self, command: TaskReportCommand) -> TaskReportResult:
