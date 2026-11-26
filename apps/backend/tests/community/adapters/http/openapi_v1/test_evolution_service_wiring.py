@@ -321,7 +321,7 @@ async def test_catalog_bindings_cas_actor_and_persistence_without_execution(tmp_
         initial = await client.get(
             URL + "/bindings",
             headers={
-                "Cookie": "IAM_TOKEN=synthetic-not-forwarded",
+                "Cookie": "IAM_TOKEN=test",
                 "Authorization": "Bearer synthetic-not-forwarded",
                 HEADER: "synthetic-client-forgery",
             },

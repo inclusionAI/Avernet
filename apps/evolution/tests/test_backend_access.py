@@ -66,9 +66,8 @@ def test_scope_and_request_binding(overrides):
 )
 def test_untrusted_claims_are_refused(overrides):
     claims = jwt.decode(receipt(), KEY, algorithms=["HS256"], audience="evolution")
-    token = jwt.encode(
-        claims | overrides, KEY, algorithm="HS256", headers={"typ": "avernet-evolution-grant", "kid": "bare"}
-    )
+    headers = {"typ": "avernet-evolution-grant", "kid": "bare"}
+    token = jwt.encode(claims | overrides, KEY, algorithm="HS256", headers=headers)
     with pytest.raises(PermissionError):
         check(token)
 

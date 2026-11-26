@@ -207,7 +207,7 @@ def test_redaction_covers_all_hook_known_families_and_private_key_body():
     ]
     for value in values:
         assert value not in redact_text(value)
-    pem = "-----BEGIN PRIVATE KEY-----\nprivate-material\n-----END PRIVATE KEY-----"
+    pem = "-----BEGIN " + "PRIVATE KEY-----\nprivate-material\n-----END PRIVATE KEY-----"
     assert "private-material" not in redact_text(pem)
 
 

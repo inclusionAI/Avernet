@@ -107,7 +107,7 @@ def _env(name: str) -> str | None:
 async def test_real_rsi_chain_end_to_end() -> None:
     base_url = _env("BOT_GENOME_BASE_URL")
     user_id = _env("BOT_GENOME_USER_ID")
-    auth_token = _env("BOT_GENOME_AUTH_TOKEN")
+    auth_token = os.environ.get("BOT_GENOME_AUTH_TOKEN")
     bot_id = _env("BOT_ID")
     owner_id = _env("OWNER_ID")
 

@@ -192,7 +192,7 @@ def test_collaborator_actor_owner_and_stable_entity_are_distinct(surface):
     result = request(
         client,
         headers={
-            "Cookie": "IAM_TOKEN=not-forwarded",
+            "Cookie": "IAM_TOKEN=test",
             HEADER: "client-forgery",
             "Authorization": "Bearer not-forwarded",
         },

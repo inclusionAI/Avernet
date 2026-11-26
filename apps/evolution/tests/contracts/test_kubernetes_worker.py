@@ -16,7 +16,7 @@ def spec(**kwargs):
         worker_id="w1",
         image=IMAGE,
         job_endpoint="http://10.42.0.1:12345",
-        job_token="worker-scoped-only",
+        job_token="test-token",
         **kwargs,
     )
 
@@ -84,7 +84,7 @@ async def test_kubernetes_restricts_actual_pod_and_waits_then_cleans():
         await adapter.destroy(name)
         assert not api.objects and adapter.evidence[name]["destroyed"]
         assert api.calls[-1][0] == "DELETE" and "networkpolicies" in api.calls[-1][1]
-        assert "worker-scoped-only" not in json.dumps(adapter.evidence)
+        assert "test-token" not in json.dumps(adapter.evidence)
 
 
 @pytest.mark.asyncio

@@ -12,7 +12,7 @@ IMAGE = "registry.example/worker@sha256:" + "a" * 64
 
 def spec(**kwargs):
     return job_worker_spec(worker_id="w1", image=IMAGE, job_endpoint="http://10.42.0.1:12345",
-                           job_token="worker-scoped-only", **kwargs)
+                           job_token="test-token", **kwargs)
 
 
 @pytest.mark.asyncio

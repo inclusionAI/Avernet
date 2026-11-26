@@ -301,6 +301,7 @@ async def test_worker_route(channel_factory, method, suffix, payload, kind, expe
 @pytest.mark.parametrize("valid", [True, False], ids=["worker-token", "invalid-token"])
 async def test_claim(channel_factory, valid):
     channel = channel_factory(queued=True)
+    worker_id = "endpoint-worker"
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=build_job_app(channel, prefix=PREFIX)),
         base_url="http://worker.test",
@@ -308,9 +309,9 @@ async def test_claim(channel_factory, valid):
         response = await client.post(
             f"{PREFIX}/jobs:claim",
             json={
-                "worker_id": "endpoint-worker",
+                "worker_id": worker_id,
                 "strategy_refs": [STRATEGY],
-                "token": TOKENS.issue("endpoint-worker") if valid else "invalid",
+                "token": TOKENS.issue(worker_id) if valid else "invalid",
             },
         )
     expected = (

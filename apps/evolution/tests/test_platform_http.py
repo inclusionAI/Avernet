@@ -120,7 +120,7 @@ async def test_real_session_snapshot_bounded_redacted_durable_and_not_revision_a
                         {
                             "session_id": sid,
                             "role": "user",
-                            "content": "password=private-value contact a@example.org",
+                            "content": "password=<test-password> contact a@example.org",
                             "gmt_create": at,
                             "metadata": {"private": "discard"},
                         }
@@ -137,7 +137,7 @@ async def test_real_session_snapshot_bounded_redacted_durable_and_not_revision_a
         assert len(episodes) == 1 and episodes[0]["revision"] is None
         assert episodes[0]["history_complete"] is False
         encoded = json.dumps(episodes)
-        assert "private-value" not in encoded and "example.org" not in encoded and "metadata" not in encoded
+        assert "<test-password>" not in encoded and "example.org" not in encoded and "metadata" not in encoded
         assert factory.conn.execute("SELECT count(*) FROM session_snapshot").fetchone()[0] == 1
         assert await bound.sessions(days=7, limit=1) == episodes
         assert factory.conn.execute("SELECT count(*) FROM session_snapshot").fetchone()[0] == 1

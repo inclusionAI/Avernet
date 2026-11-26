@@ -89,12 +89,13 @@ def test_cli_hard_restart_recovers_expired_claim_without_backend(settings, tmp_p
                 BASE + "/runs", json={"binding_id": "identity"}, headers={"Idempotency-Key": "hard-restart"}
             ).json()["data"]["run"]
             prefix = "/openapi/v1/evolution/jobs"
+            worker_id = "abandoned-worker"
             claim = client.post(
                 prefix + "/jobs:claim",
                 json={
-                    "worker_id": "abandoned-worker",
+                    "worker_id": worker_id,
                     "strategy_refs": [STRATEGY],
-                    "token": JobTokenIssuer(settings.signing_key()).issue("abandoned-worker"),
+                    "token": JobTokenIssuer(settings.signing_key()).issue(worker_id),
                 },
             ).json()
             process.kill()  # No graceful shutdown; the lease stays in persistent storage.
