@@ -192,7 +192,7 @@ def test_pool_ignores_stale_persisted_probe_and_freezes_repo_then_center() -> No
 @pytest.mark.unit
 def test_center_requires_mapping_v3() -> None:
     asset = _center_asset()
-    builder = _builder(_legacy_state(), _Reader((asset,)))
+    builder = _builder(_legacy_state(), _Reader((asset,), (asset,)))
 
     captured = builder.capture(
         bot=_bot(),

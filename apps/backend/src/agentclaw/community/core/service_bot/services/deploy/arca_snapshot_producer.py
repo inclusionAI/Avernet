@@ -14,6 +14,7 @@ Task 12; external bots take :class:`TeclawComposeProducer` instead.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
@@ -189,16 +190,16 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         actual: list[tuple[str, str]] = []
         assert captured.active_runtime_path is not None
         runtime_active = PurePosixPath(captured.active_runtime_path)
-        if root.exists():
-            for entry in root.rglob("*"):
-                if not entry.is_symlink():
-                    continue
+        try:
+            for entry in _snapshot_links(root):
                 target = os.readlink(entry)
                 target_path = PurePosixPath(target)
                 if not target_path.is_absolute() and entry.is_relative_to(active):
                     target_path = runtime_active / entry.relative_to(active).parent / target_path
                 if PurePosixPath(os.path.normpath(target_path)).is_relative_to(center_root):
                     actual.append((entry.relative_to(root).as_posix(), target))
+        except OSError as error:
+            raise ServiceSkillsManifestError("cannot inspect Skills links in snapshot") from error
         actual_links = set(actual)
         if len(actual) != len(actual_links) or actual_links != expected:
             paths = ", ".join(sorted({path for path, _ in actual_links ^ expected}))
@@ -222,24 +223,28 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
             return False
         package_root = directory.resolve()
         try:
-            for parent, _, names in directory.walk(on_error=_raise_walk_error):
-                for name in names:
-                    entry = parent / name
-                    if not entry.is_symlink():
-                        continue
-                    target = Path(os.readlink(entry))
-                    if target.is_absolute() or not Path(
-                        os.path.normpath(parent / target)
-                    ).is_relative_to(directory):
+            for entry in _snapshot_links(directory):
+                target = Path(os.readlink(entry))
+                if target.is_absolute() or not Path(
+                    os.path.normpath(entry.parent / target)
+                ).is_relative_to(directory):
+                    return False
+                candidate = entry.parent
+                for part in target.parts:
+                    candidate /= part
+                    if not candidate.resolve(strict=True).is_relative_to(package_root):
                         return False
-                    candidate = parent
-                    for part in target.parts:
-                        candidate /= part
-                        if not candidate.resolve(strict=True).is_relative_to(package_root):
-                            return False
         except (OSError, RuntimeError):
             return False
         return True
+
+
+def _snapshot_links(root: Path) -> Iterator[Path]:
+    for directory, _, names in root.walk(on_error=_raise_walk_error):
+        for name in names:
+            entry = directory / name
+            if entry.is_symlink():
+                yield entry
 
 
 def _raise_walk_error(error: OSError) -> None:
