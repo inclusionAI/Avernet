@@ -67,13 +67,13 @@ export function RiskInFlightBanner({
                 查看审批进度
               </a>
             ) : (
-              <button
-                type="button"
-                className="font-medium text-primary hover:opacity-80"
+              <Button
+                variant="link"
+                className="h-auto p-0 text-xs no-underline"
                 onClick={() => history.push('/ticket-center')}
               >
                 查看审批进度
-              </button>
+              </Button>
             )
           ) : record?.detail_url ? (
             <a
