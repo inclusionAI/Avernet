@@ -175,9 +175,12 @@ def test_a_sync_builds_the_rsync_argv_at_the_engine_root(tmp_path):
     # System baseline excludes, un-anchored (rsync's choice for build_ignore).
     assert "--exclude=workspace/sessions/" in argv
     assert "--exclude=.git/" in argv
-    # Caller excludes, anchored to the source root.
-    assert "--exclude=/secrets" in argv
-    assert "--exclude=/large/tmp" in argv
+    # Caller excludes, anchored under the workspace subdir — the excludes are
+    # authored workspace-namespace relative (e.g. ``1124.pdf`` lives at
+    # ``<root>/workspace/1124.pdf``), not engine-root relative, so anchoring at
+    # the transfer root would never match. See nas_bot_file_sync.sync.
+    assert "--exclude=/workspace/secrets" in argv
+    assert "--exclude=/workspace/large/tmp" in argv
     # Source→target at the engine root, trailing slashes (tree scope).
     assert argv[-2] == f"{storage_id_dir / '.openclaw'}/"
     assert argv[-1].endswith("/.openclaw/")
@@ -387,3 +390,61 @@ def test_a_raising_build_plan_resolution_is_a_composed_reason(tmp_path):
     assert result.ok is False
     assert result.reason == "bot workspace sync failed"
     assert seen == []
+
+
+# ── exclude anchor: real rsync semantics ────────────────────────────────────
+
+
+def test_caller_exclude_anchored_under_workspace_actually_excludes(tmp_path):
+    """The caller excludes are authored workspace-namespace relative — e.g.
+    ``1124.pdf`` lives at ``<root>/workspace/1124.pdf``, never at ``<root>/1124.pdf``.
+    Anchoring ``/{rule}`` at the transfer root (``<root>``) is a silent no-op: the
+    rule looks for ``<root>/1124.pdf`` and the file is copied. This regression test
+    runs the *real rsync* (sudo stripped — the flag set is what matters) against a
+    real source tree and asserts the excluded entry is absent from the target and
+    a sibling keep-file is present. The argv-only test above cannot catch a path
+    mismatch because it never matches a rule against a file path.
+    """
+    # A source tree shaped like the real openclaw layout: engine root .openclaw
+    # with the user files one level down under workspace/.
+    src_root = tmp_path / "src" / ".openclaw"
+    (src_root / "workspace").mkdir(parents=True)
+    (src_root / "workspace" / "1124.pdf").write_bytes(b"secret")
+    (src_root / "workspace" / "keep.pdf").write_bytes(b"keep")
+    (src_root / "workspace" / "subdir").mkdir()
+    (src_root / "workspace" / "subdir" / "nested.pdf").write_bytes(b"nested")
+    dst_root = tmp_path / "dst" / ".openclaw"
+    dst_root.mkdir(parents=True)
+
+    # Drive the port with a recording runner to capture the exact argv it builds.
+    seen = []
+    port = _port(tmp_path, _recording_runner(seen), source={
+        "bot_id": "src_1", "active_engine": "openclaw", "entity_id": "owner",
+        "owner_id": "owner", "entity_type": "staff", "env": "dev",
+    })
+    result = _ok(port, excludes=("1124.pdf", "subdir"))
+
+    assert result.ok is True
+    (argv,) = seen
+    # The port anchors caller excludes under the workspace subdir (``--exclude=
+    # /workspace/<rule>``), so the rules match files that actually live there —
+    # not at the engine root. Prove it by running a *real* rsync with the port's
+    # caller-exclude rules against a real source tree and asserting the excluded
+    # entries are absent. The port's other flags (``--no-devices`` etc.) are
+    # GNU-rsync-only and unsupported by the BSD rsync in CI runners, so only the
+    # exclude rules and the ``--delete-excluded`` semantic are replayed here.
+    caller_rules = [a for a in argv if a.startswith("--exclude=/workspace/")]
+    assert {a for a in argv if a.startswith("--exclude=/workspace/")} >= {
+        "--exclude=/workspace/1124.pdf",
+        "--exclude=/workspace/subdir",
+    }
+    rsync_argv = ["rsync", "-a", "--delete", "--delete-excluded", *caller_rules,
+                  f"{src_root}/", f"{dst_root}/"]
+    cp = subprocess.run(rsync_argv, capture_output=True, text=True)
+    assert cp.returncode == 0, cp.stderr
+
+    # Excluded file and the excluded directory (with its child) are gone…
+    assert not (dst_root / "workspace" / "1124.pdf").exists()
+    assert not (dst_root / "workspace" / "subdir").exists()
+    # …while the sibling keep-file is copied.
+    assert (dst_root / "workspace" / "keep.pdf").read_bytes() == b"keep"
