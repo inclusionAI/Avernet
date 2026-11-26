@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
+from uuid import uuid4
 
 from agentclaw.community.plugin_api.approval_workflow import (
     ApprovalWorkflowPlugin,
@@ -63,6 +64,9 @@ from .public_support import (
 )
 from .publication_actions import PublicationActions
 from .friend_catalog_actions import FriendCatalogActions
+
+class _RiskDeviceOfflineBeforeDispatch(Exception):
+    """The device resolver failed before a risk callback could dispatch a write."""
 
 class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServiceProtocol):
     """Bot public service for managing friend request approval flow.
@@ -429,10 +433,14 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
                 return {"success": False, "message": "risk callback owner changed"}
             if not bot:
                 return {"success": False, "message": "risk callback bot unavailable"}
+            is_legacy_agree = not public_scope and (last_operate or "").upper() == "AGREE"
+            claim_id = uuid4().hex if is_legacy_agree else None
+            claim_args = {"claim_id": claim_id} if claim_id else {}
             result = guard.check(get_current_env(), risk_check_id, owner_id, bot["id"], puid,
-                                 (last_operate or "").upper(), public_scope or "legacy")
-            if result != "ALLOW":
+                                 (last_operate or "").upper(), public_scope or "legacy", **claim_args)
+            if result != "ALLOW" and not (claim_id and result.startswith("ALLOW:")):
                 return {"success": result in {"DEFERRED", "ALREADY_APPLIED"}, "message": f"risk callback {result.lower()}"}
+            claim_version = int(result.removeprefix("ALLOW:")) if claim_id and result.startswith("ALLOW:") else None
             try:
                 risk_row = guard.repo.get(env=get_current_env(), risk_check_id=risk_check_id)
                 if risk_row is None:
@@ -442,6 +450,12 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
                     bot_id, owner_id, puid, last_operate, public_scope,
                     risk_check_id=risk_check_id, _risk_guarded=True, _risk_target=risk_target,
                 )
+            except _RiskDeviceOfflineBeforeDispatch:
+                if (claim_id and claim_version is not None and guard.finish_device_offline(
+                    get_current_env(), risk_check_id, puid, claim_id, claim_version
+                )):
+                    return {"success": False, "message": "risk callback device offline; reapply"}
+                raise
             except Exception:
                 guard.finish(get_current_env(), risk_check_id, puid, (last_operate or "").upper(), False)
                 raise
@@ -534,7 +548,8 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
                 get_current_env(), risk_check_id, puid, last_operate_upper
             ) is not True:
                 return {"success": False, "public": None, "message": "risk callback eligibility changed"}
-            updated_bot = self._update_bot_with_notification(bot_id, owner_id, update_data, bot, notify_device=True)
+            updated_bot = self._update_bot_with_notification(bot_id, owner_id, update_data, bot, notify_device=True,
+                                                             classify_device_offline=_risk_guarded)
             if not updated_bot:
                 return {"success": False, "public": None, "message": "Failed to update bot"}
             # Sync passport accessMode and auth relationships
@@ -565,7 +580,7 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
             logger.warning(f"[bot_service.handle_public_approval_callback] Unknown last_operate: {last_operate}")
             return {"success": False, "public": None, "message": f"Unknown operation: {last_operate}"}
 
-    def _update_bot_with_notification(self, bot_id: str, owner_id: str, update_data: Dict[str, Any], bot: Dict[str, Any], notify_device: bool) -> Optional[Dict[str, Any]]:
+    def _update_bot_with_notification(self, bot_id: str, owner_id: str, update_data: Dict[str, Any], bot: Dict[str, Any], notify_device: bool, *, classify_device_offline: bool = False) -> Optional[Dict[str, Any]]:
         """更新 bot 并可选地发送通知（先通知，成功再更新）。
 
         Args:
@@ -591,6 +606,7 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
                 user_id=owner_id,
                 public=public,
                 permission_owner=permission_owner,
+                **({"classify_device_offline": True} if classify_device_offline else {}),
             )
             logger.info(f"[_update_bot_with_notification] Notification sent for bot {bot_id}, owner_id={owner_id}, public={public}, permission_owner={permission_owner}")
 
@@ -602,6 +618,7 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
         user_id: str,
         public: str,
         permission_owner: Optional[str],
+        *, classify_device_offline: bool = False,
     ) -> Dict[str, Any]:
         """通过 BaaS/Arca/Teclaw 链路把 bot config 同步到容器。
 
@@ -612,10 +629,15 @@ class BotPublicService(PublicationActions, FriendCatalogActions, BotPublicServic
         """
         from agentclaw.community.core.devices.services.device_context import (
             DeviceNotBoundError,
+            DeviceOfflineError,
             UnknownProviderError,
         )
         try:
             ctx = self._resolver_factory().resolve_for_bot(bot_id, user_id)
+        except DeviceOfflineError as e:
+            if classify_device_offline:
+                raise _RiskDeviceOfflineBeforeDispatch() from e
+            raise
         except (DeviceNotBoundError, UnknownProviderError) as e:
             logger.warning(
                 "[bot_service.sync_bot_config_to_device] bot=%s no syncable device: %s",
