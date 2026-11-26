@@ -49,10 +49,10 @@ minimum 60-second acquisition interval measured from the scan start; quick relea
 does not let a staggered replica immediately repeat the scan.
 
 A lost lease stops subsequent pages and maintenance actions. Renewal and release
-both check the acquisition token and current version in SQL. The original SQL,
-task selection, pagination and business decisions remain unchanged. No Workflow
-repository, journal, new index on task tables, or separate maintenance queue is
-used. Provision schema v158 before rollout; absent or incompatible lock schema
+both check the acquisition token and current version in SQL. The lease wraps
+the status-based candidate scan and maintenance actions described below. No
+Workflow repository, journal, new index on task tables, or separate maintenance
+queue is used. Provision schema v158 before rollout; absent or incompatible lock schema
 fails closed without request-path DDL or unlocked fallback.
 
 Repair's existing fixed logger, field whitelist and output paths are unchanged.
@@ -82,6 +82,26 @@ or `session_recovery_effect_resume_prod`. The enabled record holds integer
 An absent or disabled record leaves automatic resumption off. A busy environment
 or an interval that has not elapsed does not make a task eligible for offline
 recheck. A reserved or active round occupies its slot until its AIS steps settle.
+
+Maintenance selects active task statuses plus `settling`, with no card-sync or
+resume-slot JSON search. A short page is processed completely and then ends the
+scan. Owner cards are sent/updated by normal state changes and callbacks; periodic
+maintenance does not compensate failed or interrupted card synchronization.
+
+`settling` is only the `ce_tasks.status` scheduler value for a terminal business
+task that still owns an automatic-resume slot. Its JSON/API status remains
+`completed`, `failed` or `canceled`, and result publication keeps its original
+timing. Once AIS termination is confirmed, the same transaction clears the slot,
+restores the column's business status and increments the state version, fencing
+stale result-delivery snapshots. Disabling resumption still permits slot cleanup.
+
+Before deploying or rolling back this storage change, disable the existing
+per-environment automatic-resume record, wait for every existing resume slot to
+settle, and replace all writers before restoring the previous configuration.
+Existing running rounds must finish or be stopped and confirmed settled; do not
+force-clear permits. This change adds no rollout configuration or automatic
+historical-data migration. Old terminal rows that still own slots must drain on
+the old version before deployment.
 
 ### Historical effect recheck
 

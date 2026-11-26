@@ -611,11 +611,12 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const close: Array<RecoveryStoredTask | RecoveryMaintenanceTask> = [];
     const slots: Array<RecoveryStoredTask | RecoveryMaintenanceTask> = [];
     const pendingStarts: RecoveryStoredTask[] = [];
+    const batchSize = 200;
     let cursor = "";
     for (;;) {
       assertLease();
       let batch: Array<RecoveryStoredTask | RecoveryMaintenanceTask>;
-      try { batch = await this.deps.tasks.listForMaintenance?.(200, cursor, environment, true) ?? []; }
+      try { batch = await this.deps.tasks.listForMaintenance?.(batchSize, cursor, environment) ?? []; }
       catch (error) {
         logRepairEvent("session-recovery", "session_recovery_maintenance", "scan_failed", { environment: this.deps.controlPlaneEnvironment,
           ...repairLogError(error) });
@@ -640,7 +641,6 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           }
         }
         if ("compact" in task) continue;
-        if (task.ownerRequest) this.scheduleOwnerCard(task);
         // Persisted retry scheduling also survives a process restart between state save and release.
         if (task.status === "running" && task.executionRetry?.retryAt && task.execution?.state !== "ended") {
           // A retained retry marker must never retire a successor launched by another worker.
@@ -666,6 +666,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
           taskId: task.taskId, phase: task.phase, executionId: "compact" in task ? undefined : task.execution?.executionId, ...repairLogError(error) });
       }
       }
+      if (batch.length < batchSize) break;
     }
     // Keep the scan and its existing startup/retry work ahead of effect resumption.
     for (const task of pendingStarts) { assertLease(); this.startEffectObservation(task); }
@@ -790,14 +791,6 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   private ownerCardStateKey(task: RecoveryStoredTask): string {
     return `owner-card-${task.ownerRequest!.requestId}-${task.ownerRequest!.status}-${task.status}-${task.phase}`;
   }
-  private async settleOwnerCard(taskId: string, stateKey: string): Promise<void> {
-    const task = await this.required(taskId);
-    if (!task.ownerCardSyncPending || !task.ownerRequest || this.ownerCardStateKey(task) !== stateKey) return;
-    await this.mutate(taskId, task.version, value => {
-      if (!value.ownerRequest || this.ownerCardStateKey(value) !== stateKey) this.fail(409, "待同步卡片状态已更新");
-      return { ...value, ownerCardSyncPending: false, version: value.version + 1 };
-    });
-  }
   private async syncOwnerCard(input: RecoveryStoredTask, refreshSource = "", depth = 0): Promise<void> {
     const task = await this.required(input.taskId), request = task.ownerRequest;
     if (request?.reason !== "permission" || task.simulation || !this.ownsTask(task)) return;
@@ -805,11 +798,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     const key = refreshSource ? `${stateKey}-sync-${createHash("sha256").update(refreshSource).digest("hex").slice(0, 16)}` : stateKey;
     const attempts = task.timeline.filter(event => event.payload.notification_key === key && event.payload.state === "sending");
     const last = attempts.at(-1), result = last && task.timeline.find(event => event.event_id === `${last.event_id}-result`);
-    if (result && ["sent", "disabled"].includes(String(result.payload.state))) { await this.settleOwnerCard(task.taskId, stateKey); return; }
+    if (result && ["sent", "disabled"].includes(String(result.payload.state))) return;
     if (last && this.now() - last.at_ms < (result ? 60000 : 30000)) return;
     if (attempts.length >= 3) {
       if (last && !result) await this.deps.tasks.appendNotification(task.taskId, { ...this.event("notification", "service", "卡片同步回执缺失，请在任务页处理", { ...last.payload, state: "unconfirmed", sent: false }), event_id: `${last.event_id}-result` });
-      await this.settleOwnerCard(task.taskId, stateKey);
       return;
     }
     const id = `${key}-${attempts.length}`;
@@ -836,7 +828,6 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       { ...payload, state, sent: state === "sent", synced, ...(failedBeforeDispatch ? { dispatched: false } : {}) }), event_id: `${id}-result` };
     const recorded = await this.deps.tasks.appendNotification(task.taskId, receipt);
     if (recorded && !updateOnly && state === "sent") this.notifyGroup(task, "owner_card_sent", receipt);
-    if (["sent", "disabled"].includes(state) || attempts.length === 2) await this.settleOwnerCard(task.taskId, stateKey);
     // A slow old send must not leave a newer revision/terminal state overwritten.
     const latest = await this.required(task.taskId);
     if (latest.ownerRequest && this.ownerCardStateKey(latest) !== stateKey) {
@@ -870,7 +861,6 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         if (changed.effectResumeSlot && changed.effectResumeSlot.lastExecutionNo === undefined && changed.status !== "running") {
           changed.effectResumeSlot = { ...changed.effectResumeSlot, lastExecutionNo: value.executionNo ?? 0 };
         }
-        if (changed.ownerRequest && (!value.ownerRequest || this.ownerCardStateKey(changed) !== this.ownerCardStateKey(value))) changed.ownerCardSyncPending = true;
         // Optional presentation metadata must never invalidate a valid business result.
         if (changed.status !== value.status && ["completed", "failed", "waiting_effect"].includes(changed.status)) {
           const text = typeof finalSummary === "string" ? finalSummary.trim() : "";

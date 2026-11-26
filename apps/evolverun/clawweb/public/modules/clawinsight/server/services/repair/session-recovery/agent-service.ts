@@ -398,7 +398,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return task;
   }
   async bootstrap(task: RecoveryStoredTask) {
-    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ownerCardSyncPending: _cardSync, effectWait: _effectWait, effectResumeSlot: _effectSlot, sessionReadCoverage, trajectoryIndexReads, ...business } = task;
+    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, effectWait: _effectWait, effectResumeSlot: _effectSlot, sessionReadCoverage, trajectoryIndexReads, ...business } = task;
     const recheck = rawExecution?.effectRecheck;
     const { ticketDigest: _digest, effectRecheck: _recheck, ...execution } = task.status === "canceled" && !recheck ? this.executions.end(rawExecution!) : rawExecution!;
     const latestMessage = [...business.timeline].reverse().find(event => event.kind === "operation"

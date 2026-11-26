@@ -40,14 +40,12 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       await tx.exec("UPDATE ce_steps SET output_json = ?, status = 'running' WHERE step_id = ?", [JSON.stringify(report), stepId]);
     });
   }
-  async listForMaintenance(limit: number, afterTaskId = "", environment?: AgentControlPlaneEnvironment,
-    includeEffectResumeSlots = false): Promise<Array<RecoveryStoredTask | RecoveryMaintenanceTask>> {
+  async listForMaintenance(limit: number, afterTaskId = "", environment?: AgentControlPlaneEnvironment): Promise<Array<RecoveryStoredTask | RecoveryMaintenanceTask>> {
     this.limit(limit);
-    const slots = includeEffectResumeSlots ? " OR config_json LIKE ?" : "";
     const rows = await this.db.query<{ task_id: string; config_json: string }>(
       `SELECT task_id, config_json FROM ce_tasks WHERE task_type = 'session_recovery' AND task_id > ?
-       AND (status IN ('pending','running','waiting_owner','waiting_effect') OR config_json LIKE ?${slots}) ORDER BY task_id ASC LIMIT ?`,
-      [afterTaskId, '%"ownerCardSyncPending":true%', ...(includeEffectResumeSlots ? ['%"effectResumeSlot":%'] : []), limit]);
+       AND status IN ('pending','running','waiting_owner','waiting_effect','settling') ORDER BY task_id ASC LIMIT ?`,
+      [afterTaskId, limit]);
     return Promise.all(rows.map(row => {
       const state = JSON.parse(row.config_json);
       if (!environment || (resolveTaskControlPlaneEnvironment(state) === environment
@@ -122,7 +120,9 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       if (current?.firstExecutionNo !== slot.firstExecutionNo || current.lastExecutionNo !== slot.lastExecutionNo) return false;
       // Scheduler bookkeeping only. A concurrent business update reads the same locked row.
       delete state.effectResumeSlot;
-      await tx.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify(state), taskId]);
+      // Invalidate delivery CAS snapshots so they cannot restore the released slot.
+      state.version++;
+      await tx.exec("UPDATE ce_tasks SET config_json = ?, status = ? WHERE task_id = ?", [JSON.stringify(state), state.status, taskId]);
       return true;
     });
   }
@@ -178,6 +178,10 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
         effect: details.judgment?.effect ?? 'unknown' as const, createdAt: row.gmt_create };
     }));
     return { items, page: query.page, pageSize: query.pageSize, total: Number(count?.total ?? 0) };
+  }
+  private storageStatus(task: RecoveryStoredTask): string {
+    // Preserve the business result in JSON while the scheduler still owns a permit.
+    return task.effectResumeSlot && ["completed", "failed", "canceled"].includes(task.status) ? "settling" : task.status;
   }
   private eventRemark(eventId: string): string { return `session-recovery-event:${createHash("sha256").update(eventId).digest("hex")}`; }
   async listForEvent(eventId: string, ownerId: string, isAdmin: boolean): Promise<RecoveryStoredTask[]> {
@@ -235,7 +239,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
           executionNo: updated.executionNo!, handler: "session_recovery", metadata: { effectRecheckRequestId: execution.effectRecheck!.requestId } });
       }
       await this.savePhase(tx, updated, details, fresh, added);
-      await tx.exec("UPDATE ce_tasks SET config_json = ?, status = ?, gmt_modified = ? WHERE task_id = ?", [this.config(updated, details, deliveries, stored.stoppedResultDelivery), updated.status, nowForDb(tx.dbType), taskId]);
+      await tx.exec("UPDATE ce_tasks SET config_json = ?, status = ?, gmt_modified = ? WHERE task_id = ?", [this.config(updated, details, deliveries, stored.stoppedResultDelivery), this.storageStatus(updated), nowForDb(tx.dbType), taskId]);
       // Another dispatcher that scanned before this claim must discard its older slot count.
       if (effectResumeClaim && !("recheck" in effectResumeClaim)) await tx.exec("UPDATE ce_app_config SET version = version + 1 WHERE id = ?", [effectResumeClaim.config.id]);
       return updated;
@@ -343,6 +347,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
   }
   private async hydrate(db: IDatabase, raw: string, forBootstrap = false): Promise<RecoveryStoredTask> {
     const value = JSON.parse(raw);
+    delete value.ownerCardSyncPending;
     const legacy = value.artifactStorage !== 2;
     const { artifactStorage: _storage, detailsRef, resultDelivery, stoppedResultDelivery, ...state } = value;
     const details = legacy ? { ...value, interventionAuditComplete: undefined } : await this.get(detailsRef) as Pick<RecoveryStoredTask, "plan" | "judgment" | "delivery" | "evidence" | "interventionAuditComplete">;
