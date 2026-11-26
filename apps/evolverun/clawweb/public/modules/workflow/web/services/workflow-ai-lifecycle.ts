@@ -10,7 +10,11 @@ const workflowAiErrorDescriptions: Record<string, string> = {
   AUTO_HEAL_BOT_UNAVAILABLE: '服务器配置的 AutoHeal Bot 绑定不可用或无效：请检查 effective autoHeal.botId 中的 Bot ID 与 owner，核对目标 BaaS 环境、endpoint 与配套 API key，并确认该 Bot 在该环境中的绑定为 ACTIVE。',
   BAAS_AUTH_FAILED: 'BaaS 认证或权限失败：请检查 BaaS API Key / IAM token 及相关权限；认证失败不能证明任务未被派发，可能在提交或轮询阶段发生。',
   BAAS_REQUEST_REJECTED: 'BaaS 明确拒绝本次请求：请检查 BaaS 请求策略、Bot 状态和输入限制，根据提供方错误信息调整后重试。',
-  BAAS_GENERATION_FAILED: 'BaaS 生成失败：请检查上游任务状态或日志，并确认需求、Bot 配置和输入限制后重试。',
+  BAAS_GENERATION_FAILED: 'BaaS 生成失败：请使用草稿任务 ID 检查上游任务状态或日志，确认具体错误后再决定是否重试；原工作流未修改。',
+  BAAS_GENERATION_TIMEOUT: 'BaaS 已报告原消息执行超时：请核对原消息状态和服务端执行超时配置，不要盲目重新派发；原工作流未修改。',
+  BAAS_GENERATION_CANCELLED: 'BaaS 已报告原消息被取消或中止：请核对原消息状态和中止原因；不会自动重新派发，原工作流未修改。',
+  BAAS_SESSION_UNAVAILABLE: 'BaaS 会话创建或会话上下文失败：请检查 Bot 运行实例、会话初始化、引擎适配器和租户上下文，不要仅重复提交需求；原工作流未修改。',
+  BAAS_RESULT_PERSISTENCE_FAILED: 'BaaS 结果持久化失败：请检查提供方存储及日志；即使模型已返回内容，也未接受草稿，不会自动重新派发。',
   BAAS_PROVIDER_REJECTED: 'BaaS 服务提供方拒绝本次请求或结果：请检查提供方错误信息、配额、访问策略和 Bot 配置。',
   INVALID_GENERATION_RESULT: 'BaaS 返回内容无法解析或未通过工作流结构校验：请检查 Bot 输出格式、工作流 ID、版本和节点配置；未接受草稿。',
   EXECUTION_TIMEOUT: '草稿任务已超过服务端等待期限：BaaS 远端任务可能继续，不能保证已停止。请先核对原消息状态，不要盲目重新派发。',
@@ -19,11 +23,11 @@ const workflowAiErrorDescriptions: Record<string, string> = {
 }
 
 /** Known provider codes stay traceable; unknown server diagnostics are preserved verbatim. */
-export function describeWorkflowAiError(reason?: string) {
+export function describeWorkflowAiError(reason?: string, draftId?: string) {
   if (!reason) return ''
   const code = reason.trim()
   const description = Object.hasOwn(workflowAiErrorDescriptions, code) ? workflowAiErrorDescriptions[code] : undefined
-  return description ? `${code}：${description}` : reason
+  return description ? `${code}：${description}${draftId ? ` 草稿任务 ID：${draftId}` : ''}` : reason
 }
 
 export function describeWorkflowAiUnavailable(reason?: string) {

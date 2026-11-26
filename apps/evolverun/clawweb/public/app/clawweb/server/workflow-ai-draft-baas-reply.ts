@@ -1,5 +1,6 @@
 /** BaaS response decoding only. Never execute Bot output or echo raw diagnostics. */
 import { WorkflowAiDraftInvalidResultError, type WorkflowAiDraftPollResult } from '@avernet/workflow/server/contracts/workflow-ai-draft';
+import { classifyWorkflowAiDraftBaasFailure } from './workflow-ai-draft-baas-failure.js';
 const record = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 function text(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -23,15 +24,6 @@ function reply(data: Record<string, unknown>): string {
   }
   return text(data.content) || text(data.text) || text(data.message) || text(data.body);
 }
-function terminalFailure(error: unknown): 'AUTO_HEAL_BOT_UNAVAILABLE' | 'BAAS_GENERATION_FAILED' {
-  // Poll validates provider/message/Bot identity before decoding. Only a bounded
-  // provider error string may select an allowlisted code; never echo diagnostics.
-  if (typeof error === 'string' && error.length <= 4096
-    && /^(?:BotBindingNotFoundError(?::|$)|Bot binding not found:)/.test(error.trim())) {
-    return 'AUTO_HEAL_BOT_UNAVAILABLE';
-  }
-  return 'BAAS_GENERATION_FAILED';
-}
 export function decodeWorkflowAiDraftBaasReply(value: unknown): WorkflowAiDraftPollResult {
   const outer = record(value);
   if (!outer) throw new WorkflowAiDraftInvalidResultError('INVALID_BAAS_RESPONSE');
@@ -44,7 +36,7 @@ export function decodeWorkflowAiDraftBaasReply(value: unknown): WorkflowAiDraftP
   if (!data) throw new WorkflowAiDraftInvalidResultError('INVALID_BAAS_RESPONSE');
   const status = String(data.status ?? data.message_status ?? '').toLowerCase();
   if (['failed', 'error', 'cancelled', 'canceled', 'stopped', 'aborted', 'time_out'].includes(status)) {
-    return { status: 'failed', error: terminalFailure(Object.hasOwn(outer, 'data') ? data.error : undefined) };
+    return { status: 'failed', error: classifyWorkflowAiDraftBaasFailure(status, Object.hasOwn(outer, 'data') ? data.error : undefined) };
   }
   if (['running', 'pending', 'processing', 'queued', 'accepted'].includes(status)) return { status: 'running' };
   const completed = ['completed', 'complete', 'succeeded', 'success', 'done'].includes(status);
