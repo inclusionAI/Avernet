@@ -819,12 +819,13 @@ describe('GroupChatBubble avatar wiring', () => {
     mockBubbleRenders.length = 0;
     render(
       <GroupChatBubble
-        message={{ id: 'm-user', role: 'user', content: 'hi', status: 'history' } as never}
+        message={{ id: 'm-user', role: 'user', content: 'hi', status: 'history', extra: { senderId: 'human_123' } } as never}
         isLastMessage
         isRequesting={false}
         group={group}
         participants={[]}
         userAvatarUrl="https://example.test/current-user.png"
+        userIdentityId="123"
       />,
     );
 

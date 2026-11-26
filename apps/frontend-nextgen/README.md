@@ -103,6 +103,27 @@ Sidebar and route regressions are covered by
 [useWorkspacePage.deepLinkLocation.test.tsx](test/pages/Workspace/hooks/useWorkspacePage.deepLinkLocation.test.tsx)
 and [useGroupSessionLocation.deepLink.test.tsx](test/pages/Workspace/hooks/useGroupSessionLocation.deepLink.test.tsx).
 
+## Group message sender identity
+
+The [group Provider](src/services/workspace/groupChatProvider.ts) normalizes live
+SDK messages through [the sender mapper](src/services/workspace/groupLiveMessageMapper.ts)
+before delivering updates or completion callbacks, including buffered hydration
+events. Existing canonical sender fields take precedence; BCS
+`payload.message.from` / `from_name` / `from_avatar` and SDK `senderAvatar` supply
+missing `senderId` / `senderName` / `senderAvatarUrl` fields. Routing targets and
+the current viewer never supply a missing author ID.
+
+Human names, avatars and right alignment use the same explicit normalized-ID
+match against the authenticated Human. An unknown author retains the message's
+name/avatar or a neutral fallback; it never borrows the viewer's identity. Local
+send echoes and history mapping already supply sender IDs. This keeps same-user
+tabs consistent and preserves another Human's attribution in other viewers.
+
+Regression coverage includes the real SDK parser and Provider callbacks in
+[realtime identity tests](test/pages/Workspace/components/GroupChatPane/GroupChatBubble.realtimeIdentity.test.tsx)
+and unknown-author rendering in
+[bubble identity tests](test/pages/Workspace/components/GroupChatPane/GroupChatBubble.identity.test.tsx).
+
 ## Other-initiated conversation labels
 
 The read-only “他人发起” list identifies human initiators only from explicit
