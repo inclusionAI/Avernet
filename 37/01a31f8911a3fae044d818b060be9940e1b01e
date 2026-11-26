@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  s_f5a038329f9887::t_a805e03e2088d0 186,193,195-196,216-217,219-220,223-224,227,239-240,261-265,271,276-277,281-282,300,549,557
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3701a31f8911a3fae044d818b060be9940e1b01e",
+  "prompts": {},
+  "sessions": {
+    "s_f5a038329f9887": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a11eb9-8752-7fa0-9ce5-2caaeefd6148",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xingchi.wxc <xingchi.wxc@alipay.com>"
+    }
+  }
+}
