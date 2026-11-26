@@ -4,7 +4,7 @@
  * ① 节点信息(名称/执行体/present 标签/返工/HITL/goal/起止时间/步骤追踪)
  * ② 执行流程(node.execDag,action_log 派生,DagViewV2 只读)
  * ③ 节点产物(nodes[].artifacts,Descriptor 优先口径)
- * ④ 群节点追加:bcsBaseUrl 注入时内嵌 GroupSessionView(存量群成员/群消息明细能力吸收)
+ * ④ 会话视图节点追加:bcsBaseUrl 注入时内嵌 GroupSessionView(协作群/单 Bot 消息明细能力吸收)
  * ⑤ 子任务链路保持 hasSubTask → 宿主 onOpenSubTask(不回退,spec P3)
  * drillStack 顶节点消失(图变更)→ 空态 + 返回,不崩溃不卡栈。
  */

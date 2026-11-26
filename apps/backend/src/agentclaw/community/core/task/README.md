@@ -281,6 +281,7 @@ Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.p
   不因探针临时不可用而清零；活动只证明 Runtime/消息变化，不证明业务验收进展。
   run/session 的版本与更新时间变化不单独算活动；当前进程同节点恢复互斥，发送后
   留一个探针观察窗口避免重复介入；active 静默即使耗尽续跑次数也不直接判 HUNG。无后端分布式恢复锁，不保证多进程全局去重。
+  OpenAPI Bot 会话在 active 静默达到预算后，会先对当前旧 run 做 best-effort abort，再向同一 session 发送 resume；该 abort 只释放旧 run，不改写图谱状态，也不算业务 terminal_failed。
 - `manager_worker` 协作群以当前协调 Bot 的 `send` delivery 为执行状态依据，不以群的
   `active` 生命周期或错误文本代替执行状态。沿用现有参与者 Bearer 查询消息和 delivery；
   同一节点代次、run、delivery 连续两个检测间隔确认失败且无新执行/消息活动，才恢复原会话。
