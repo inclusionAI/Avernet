@@ -120,6 +120,53 @@ class TestBaasServiceHttpMethods:
         assert call.kwargs["params"]["tenant"] == "tnt"
         assert call.kwargs["params"]["include_devices"] == "true"
 
+    @staticmethod
+    def _http_status_error(status_code: int, text: str):
+        """Build a response stub whose raise_for_status raises, like a real error."""
+        import httpx
+
+        url = f"http://baas.test/api/v1/publishes/{status_code}/progress"
+        request = httpx.Request("GET", url)
+        response = MagicMock()
+        response.status_code = status_code
+        response.text = text
+        response.json.return_value = {
+            "code": 404 if status_code == 404 else 500,
+            "message": text,
+            "data": None,
+        }
+        response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            f"{status_code} error", request=request, response=response
+        )
+        return response
+
+    def test_get_publish_progress_404_raises_publish_not_found(self):
+        """BaaS 404 PUBLISH_NOT_FOUND must surface as BaasPublishNotFoundError."""
+        from agentclaw.community.core.service_bot.services.baas_service import (
+            BaasPublishNotFoundError,
+        )
+
+        service, http = _make_service()
+        http.set_response("get", self._http_status_error(404, "Publish not found or access denied: 1"))
+
+        with pytest.raises(BaasPublishNotFoundError, match="BaaS publish not found: 1"):
+            service.get_publish_progress(1, include_devices=True)
+
+    def test_get_publish_progress_other_status_error_keeps_base_class(self):
+        """Non-404 HTTP failures keep the base BaasServiceError contract."""
+        from agentclaw.community.core.service_bot.services.baas_service import (
+            BaasPublishNotFoundError,
+            BaasServiceError,
+        )
+
+        service, http = _make_service()
+        http.set_response("get", self._http_status_error(500, "upstream exploded"))
+
+        with pytest.raises(BaasServiceError) as excinfo:
+            service.get_publish_progress(1, include_devices=True)
+        assert not isinstance(excinfo.value, BaasPublishNotFoundError)
+        assert "BaaS API error: 500 - upstream exploded" in str(excinfo.value)
+
     def test_get_bot(self):
         service, http = _make_service()
         http.set_response("get", _resp({"bot_uuid": "BOT-1", "status": "RUNNING"}))

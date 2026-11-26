@@ -3678,6 +3678,37 @@ def test_get_baas_publish_progress_raises_when_baas_fails_public_name():
     with pytest.raises(RuntimeError, match="boom"):
         svc.get_baas_publish_progress(baas_publish_id="789")
 
+def test_get_baas_publish_progress_404_maps_to_public_not_found_error():
+    """BaaS publish-workflow-not-found surfaces as the public 404 error type (from-chain kept)."""
+    from agentclaw.community.core.service_bot.baas_service_errors import (
+        BaasPublishNotFoundError,
+    )
+    from agentclaw.community.core.service_bot.errors import (
+        ServicePublishWorkflowNotFoundError,
+    )
+
+    svc = _pf(Mock(), Mock(), Mock(), Mock(), Mock())
+    original = BaasPublishNotFoundError("BaaS publish not found: 1")
+    svc._baas_service.get_publish_progress.side_effect = original
+
+    with pytest.raises(ServicePublishWorkflowNotFoundError, match="publish workflow not found") as excinfo:
+        svc.get_baas_publish_progress(baas_publish_id=1)
+    assert excinfo.value.__cause__ is original
+
+
+def test_get_baas_publish_progress_other_baas_failure_maps_to_public_upstream_error():
+    """Non-404 BaaS failures surface as the public 502 upstream error type."""
+    from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
+    from agentclaw.community.core.service_bot.errors import ServicePublishUpstreamError
+
+    svc = _pf(Mock(), Mock(), Mock(), Mock(), Mock())
+    original = BaasServiceError("BaaS API error: 500 - upstream exploded")
+    svc._baas_service.get_publish_progress.side_effect = original
+
+    with pytest.raises(ServicePublishUpstreamError, match="publish provider failed") as excinfo:
+        svc.get_baas_publish_progress(baas_publish_id=1)
+    assert excinfo.value.__cause__ is original
+
 
 @pytest.mark.unit
 def test_handle_sync_success_skips_destroy_verify_bot_for_teclaw_online_publish():

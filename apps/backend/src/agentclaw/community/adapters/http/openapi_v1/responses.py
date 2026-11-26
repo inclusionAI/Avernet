@@ -350,6 +350,8 @@ from agentclaw.community.core.service_bot.errors import (
     ServicePublicationLockedError,
     ServicePublicationNotFoundError,
     ServicePublicationUnsupportedError,
+    ServicePublishUpstreamError,
+    ServicePublishWorkflowNotFoundError,
 )
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterMarketSearchError,
@@ -552,6 +554,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Container is not in a valid state for this operation",
     ),
     ServiceContainerUpstreamError: (502, "Container service error"),
+    ServicePublishWorkflowNotFoundError: (404, "Not found"),
+    ServicePublishUpstreamError: (502, "Publish service error"),
     HealthDiagnosisNotFoundError: (404, "Not found"),
     HealthDiagnosisConflictError: (409, "A health diagnosis is already running"),
     HealthDiagnosisUnavailableError: (502, "Health diagnosis service error"),

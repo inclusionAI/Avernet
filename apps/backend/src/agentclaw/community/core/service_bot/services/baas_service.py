@@ -35,6 +35,7 @@ from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasBotNotFoundError,
     BaasNoActiveDevicesError,
     BaasNoDevicesFoundError,
+    BaasPublishNotFoundError,
     BaasServiceError,
     BaasTransientServiceError,
 )
@@ -1979,6 +1980,12 @@ class BaasService:  # pragma: no cover
                 f"[BaasService.get_publish_progress] "
                 f"HTTP error: {e.response.status_code} - {e.response.text}"
             )
+            if e.response.status_code == 404:
+                # BaaS reports an unknown publish workflow as HTTP 404
+                # PUBLISH_NOT_FOUND; keep that fact observable to callers.
+                raise BaasPublishNotFoundError(
+                    f"BaaS publish not found: {publish_id}"
+                ) from e
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )

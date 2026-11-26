@@ -3,6 +3,14 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from agentclaw.community.core.service_bot.baas_service_errors import (
+    BaasPublishNotFoundError,
+    BaasServiceError,
+)
+from agentclaw.community.core.service_bot.errors import (
+    ServicePublishUpstreamError,
+    ServicePublishWorkflowNotFoundError,
+)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -35,6 +43,22 @@ class BaasPublishOpsMixin:
                 publish_id=int(baas_publish_id),
                 include_devices=include_devices,
             )
+        except BaasPublishNotFoundError as e:
+            logger.error(
+                f"[PublishFlowService.get_baas_publish_progress] "
+                f"BaaS publish workflow not found: baas_publish_id={baas_publish_id}, "
+                f"error={e}"
+            )
+            raise ServicePublishWorkflowNotFoundError(
+                "publish workflow not found"
+            ) from e
+        except BaasServiceError as e:
+            logger.error(
+                f"[PublishFlowService.get_baas_publish_progress] "
+                f"Failed to get BaaS publish progress: baas_publish_id={baas_publish_id}, "
+                f"error={e}"
+            )
+            raise ServicePublishUpstreamError("publish provider failed") from e
         except Exception as e:
             logger.error(
                 f"[PublishFlowService.get_baas_publish_progress] "
