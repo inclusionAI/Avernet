@@ -9,14 +9,11 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     USER_SCOPED_403,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import (
-    manifest_creation_subject,
     UserIdDep,
     OwnerNameDep,
     DelegatedUserDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
-    Principal,
-    require_principal,
     resolve_avernet_tenant,
 )
 from fastapi import Depends
@@ -73,7 +70,6 @@ async def create_bot_from_expert(
     owner_id: UserIdDep,
     owner_name: OwnerNameDep,
     caller: DelegatedUserDep,
-    principal: Annotated[Principal, Depends(require_principal)],
     experts: ExpertCreationServiceProtocol = Injected(ExpertCreationServiceProtocol),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
@@ -95,7 +91,6 @@ async def create_bot_from_expert(
     try:
         submitted = submit_bot_creation_with_manifest(
             user_id=owner_id, nick_name=owner_name, bot_id=bot_id,
-            permission_subject=manifest_creation_subject(caller, principal),
             document=compiled.document, modifier=owner_id,
             spec=replace(spec, expert_origin=compiled.origin), context=context,
             bot_service=bot_service, passport_plugin=passport_plugin,

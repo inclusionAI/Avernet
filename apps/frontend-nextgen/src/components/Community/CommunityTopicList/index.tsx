@@ -146,7 +146,7 @@ export function CommunityTopicList({
   }
 
   return (
-    <div className="bg-card">
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
       {topics.map((topic) => (
         <TopicRow
           key={topic.id}

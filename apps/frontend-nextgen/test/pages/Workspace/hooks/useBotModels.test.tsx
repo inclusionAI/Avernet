@@ -81,7 +81,7 @@ it('托管 Bot 会话保持拉取模型列表', async () => {
   );
 
   await waitFor(() => expect(result.current.isLoadingModels).toBe(false));
-  expect(mockedListModels).toHaveBeenCalledWith(managedBot, 'human_900003', true);
+  expect(mockedListModels).toHaveBeenCalledWith(managedBot, 'human_900003');
   expect(result.current.activeModelId).toBe('session-model');
 });
 

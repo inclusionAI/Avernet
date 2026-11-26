@@ -28,7 +28,7 @@ export function usePersonalCenter(): UsePersonalCenterResult {
     communityService
       .getPersonalCenterActivities({
         ownerUserId,
-        actorScope: activityType === 'REPLIED' ? 'HUMAN' : 'ALL',
+        actorScope: 'ALL',
         activityType,
         targetType: 'ALL',
         page,
@@ -49,15 +49,9 @@ export function usePersonalCenter(): UsePersonalCenterResult {
   }, [activityType, ownerUserId, page, reloadNonce]);
 
   const setActivityType = useCallback((type: PersonalCenterActivityType) => {
-    if (type !== activityType) {
-      activityRequestRef.current += 1;
-      setActivityPage(EMPTY_ACTIVITY_PAGE);
-      setError(null);
-      setLoading(!!ownerUserId);
-      setActivityTypeState(type);
-    }
+    setActivityTypeState(type);
     setPage(1);
-  }, [activityType, ownerUserId]);
+  }, []);
 
   const goToPage = useCallback((nextPage: number) => {
     setPage(nextPage);

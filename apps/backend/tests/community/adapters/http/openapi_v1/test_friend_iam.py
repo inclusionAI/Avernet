@@ -21,7 +21,6 @@ from agentclaw.community.core.bot_management.addressing import (
 from agentclaw.community.core.bot_management.errors import BotAddressNotFoundError
 from agentclaw.community.core.caller_identity.contracts import CallerIamTokenOutcome, CallerIdentityStage
 from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
-from agentclaw.community.core.engine_runtime.models import BotFacts
 from agentclaw.community.core.expert_chat.errors import BotNotFoundError
 from tests.community.adapters.http.openapi_v1.conftest import user_scoped_client, mount_public_error_handlers
 from tests.community.adapters.http.openapi_v1.engine_runtime.conftest import FakeExpertChat, FakeFriendships, FakeRelay
@@ -33,7 +32,6 @@ def friend_iam():
         get_iam_token=AsyncMock(return_value=CallerIamTokenOutcome("iam")),
     )
     expert, friendships = FakeExpertChat(), FakeFriendships()
-    relay = FakeRelay()
     expert.resolve_chat_stage = Mock(return_value="online")
     friendships.allowed = True
     bot_addresses = Mock(spec=BotAddressResolverProtocol)
@@ -55,7 +53,7 @@ def friend_iam():
             binder.bind(CallerIamTokenServiceProtocol, to=service)
             binder.bind(ExpertChatServiceProtocol, to=expert)
             binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
-            binder.bind(EngineRuntimeRelayProtocol, to=relay)
+            binder.bind(EngineRuntimeRelayProtocol, to=FakeRelay())
             binder.bind(
                 BotAddressResolverProtocol,
                 to=InstanceProvider(bot_addresses),
@@ -69,7 +67,6 @@ def friend_iam():
     return SimpleNamespace(
         client=user_scoped_client(app, "friend"), service=service,
         expert=expert, friendships=friendships, bot_addresses=bot_addresses,
-        relay=relay,
     )
 
 
@@ -98,26 +95,6 @@ def test_friend_iam_uses_effective_online_stage_and_original_owned_session(frien
         bot_id="b1",
         legacy_owner_id="owner",
     )
-
-
-def test_collaborator_caller_iam_uses_self_subject_without_friendship(friend_iam):
-    friend_iam.friendships.allowed = False
-    friend_iam.relay.bots[("b1", "owner")] = BotFacts(
-        bot_id="b1", bot_type="service", active_engine="openclaw",
-        owner_id="owner", call_type="caller",
-    )
-    friend_iam.relay.add_operator("friend", bot_id="b1", owner_id="owner")
-
-    response = request(friend_iam)
-
-    assert response.status_code == 200, response.json()
-    args = friend_iam.service.get_iam_token.await_args.kwargs
-    assert args["friend_user_id"] == "friend"
-    assert args["session_key"] == "owned-session"
-    assert friend_iam.friendships.calls == []
-    assert [call[0] for call in friend_iam.expert.calls] == [
-        "add_chat_bot", "get_owned_chat_session",
-    ]
 
 
 @pytest.mark.parametrize(

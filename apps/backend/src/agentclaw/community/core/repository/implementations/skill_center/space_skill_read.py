@@ -53,15 +53,7 @@ class SpaceSkillReadRepository(SpaceSkillReadRepositoryProtocol):
     ) -> tuple[int, list[SpaceSkillReadRecord]]:
         with self._db.orm_session() as session:
             query, columns = self._query(session, actor_id=actor_id, env=env)
-            query = query.filter(
-                SkillSpaceBinding.space_id == space_id,
-                or_(
-                    Skill.draft_status.is_not(None),
-                    SkillVersion.id.is_not(None),
-                    SkillPublicationAttempt.id.is_not(None),
-                    Skill.offline_at.is_not(None),
-                ),
-            )
+            query = query.filter(SkillSpaceBinding.space_id == space_id)
             if keyword is not None:
                 pattern = f"%{keyword.lower()}%"
                 query = query.filter(
@@ -119,23 +111,7 @@ class SpaceSkillReadRepository(SpaceSkillReadRepositoryProtocol):
             .group_by(SkillVersion.skill_id)
             .subquery()
         )
-        failed_attempt = aliased(SkillPublicationAttempt)
-        draft_publication_error_code = (
-            session.query(failed_attempt.error_code)
-            .filter(
-                failed_attempt.skill_id == Skill.id,
-                failed_attempt.env == env,
-                failed_attempt.status == "FAILED",
-                failed_attempt.frozen_draft_locator == Skill.zip_url,
-                Skill.draft_status == "EDITING",
-            )
-            .order_by(failed_attempt.id.desc())
-            .limit(1)
-            .correlate(Skill)
-            .scalar_subquery()
-        )
         columns = {
-            "draft_publication_error_code": draft_publication_error_code,
             "space_type": SpaceModel.space_type,
             "actor_role": actor_grant.c.role,
             "owner_user_id": SkillGrant.user_id,
@@ -276,7 +252,6 @@ class SpaceSkillReadRepository(SpaceSkillReadRepositoryProtocol):
             "latest_version_ordinal": values["latest_version_ordinal"],
             "latest_sc_version_number": values["latest_sc_version_number"],
             "latest_published_at": values["latest_published_at"],
-            "draft_publication_error_code": values["draft_publication_error_code"],
             "active_attempt_id": values["active_attempt_id"],
             "active_attempt_target_version": values[
                 "active_attempt_target_version"

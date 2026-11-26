@@ -72,10 +72,8 @@ class TaskServiceProtocol(Protocol):
         self,
         status: "str | None" = None,
         owner_user_id: "str | None" = None,
-        *,
-        keyword: "str | None" = None,
     ) -> list[TaskInfoRecord]:
-        """列持久化任务记录,可选按状态、owner 和关键字过滤。"""
+        """列持久化任务记录,可选按状态(单值或逗号分隔多值)和 owner 过滤。"""
         ...
 
     def list_tasks_page(
@@ -84,10 +82,8 @@ class TaskServiceProtocol(Protocol):
         owner_user_id: "str | None" = None,
         page: int = 1,
         page_size: int = 20,
-        *,
-        keyword: "str | None" = None,
     ) -> tuple[list[TaskInfoRecord], int]:
-        """列持久化任务记录的一页(1-based),可选按状态、owner 和关键字过滤,返回 (items, total)。"""
+        """列持久化任务记录的一页(1-based),可选按状态(单值或逗号分隔多值)和 owner 过滤,返回 (items, total)。"""
         ...
 
     def list_bbs_tasks(

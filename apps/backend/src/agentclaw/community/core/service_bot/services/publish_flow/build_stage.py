@@ -60,7 +60,6 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
 )
 from agentclaw.community.core.workspace.skill_layout import (
-    LEGACY_SERVICE_BUILD_ENGINES,
     runtime_layout_engine_for_bot,
 )
 from agentclaw.community.log import get_logger
@@ -169,7 +168,7 @@ class BuildStageRunner:
                 bot_id=str(bot["bot_id"]),
                 user_id=str(bot["owner_id"]),
                 engine=runtime_engine,
-                for_service_build=runtime_engine in LEGACY_SERVICE_BUILD_ENGINES,
+                for_service_build=runtime_engine == "openclaw",
             )
             layout_observation = ServiceArtifactLayoutObservation.from_probe(
                 probe,

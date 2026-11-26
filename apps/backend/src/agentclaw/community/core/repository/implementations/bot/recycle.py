@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Callable
 
 from agentclaw.community.core.bot_management.engines.restart_contract import (
@@ -15,9 +15,6 @@ from agentclaw.community.core.bot_management.engines.restart_contract import (
     journal,
 )
 from agentclaw.community.core.bot_dormant.sqlite_models import DormantCheckAudit
-from agentclaw.community.core.bot_dormant.notify_log import (
-    flush_notify_log_idempotent, recycle_notification,
-)
 from agentclaw.community.core.bot_management.owner_handoff.guard import (
     assert_bot_mutable,
 )
@@ -46,13 +43,11 @@ class RecycleRepository(BotRecycleRepositoryProtocol):
     """
 
     def __init__(
-        self, db: DatabasePlugin, app: str, *, validate_activation: Callable[[dict], None],
-        action_link_pattern: str = "",
+        self, db: DatabasePlugin, app: str, *, validate_activation: Callable[[dict], None]
     ):
         self.db, self.app = db, app
         # The owning domain supplies policy; execute it on the locked snapshot.
         self.validate_activation = validate_activation
-        self.action_link_pattern = action_link_pattern
 
     def _row(self, session, bot_id, owner_id, *, lock=False):
         q = session.query(BotModel).filter(
@@ -189,8 +184,6 @@ class RecycleRepository(BotRecycleRepositoryProtocol):
                 or not self._matches(session, row, record["target"], record["engine"])
             ):
                 raise RecycleTargetChanged("Recycle completion no longer owns target")
-            source = record.get("source", "openapi")
-            manual = source == "manual_ops"
             if row.binding_id is not None:
                 binding = (
                     session.query(EntityDeviceBinding)
@@ -201,35 +194,22 @@ class RecycleRepository(BotRecycleRepositoryProtocol):
                     .one()
                 )
                 binding.status = "RELEASED"
-                binding.release_reason = "dormant_recycle" if manual else "openapi recycle"
+                binding.release_reason = "openapi recycle"
                 binding.released_by = row.owner_id
                 binding.released_at = datetime.now()
-            # This transaction is the sole async recycle audit writer. A retry
+            # This transaction is the sole OpenAPI recycle audit writer. A retry
             # sees SUCCEEDED under the row lock and never writes a second audit.
             session.add(
                 DormantCheckAudit(
                     run_id=payload["operation_id"],
                     bot_id=row.bot_id,
                     owner_id=row.owner_id,
-                    check_result="inactive" if manual else "manual",
-                    days_inactive=max((datetime.now(UTC).replace(tzinfo=None) - row.gmt_create).days, 0)
-                    if manual and row.gmt_create else None,
+                    check_result="manual",
                     action_taken="recycled",
-                    source=source,
+                    source="openapi",
                     dry_run=0,
                 )
             )
-            if manual:
-                # Keep notification insertion in this completion transaction. Existing
-                # dry-run/cancelled daily rows still suppress a new notification.
-                session.flush()
-                enqueued = flush_notify_log_idempotent(session, recycle_notification(
-                    bot_id=row.bot_id, owner_id=row.owner_id, bot_name=row.bot_name,
-                    action_link_pattern=self.action_link_pattern,
-                ))
-                record["notification_enqueued"] = enqueued
-                if not enqueued:
-                    record["notification_suppressed_reason"] = "daily_duplicate"
             row.status, row.binding_id, row.device_id = "RECYCLED", None, None
             record.update(phase="SUCCEEDED", finished_at=datetime.now().isoformat())
             ext = _ext(row)

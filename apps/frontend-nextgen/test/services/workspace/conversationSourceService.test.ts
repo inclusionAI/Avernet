@@ -35,27 +35,16 @@ it('preserves the Coding collab tab without sending an unsupported source to Ope
 it('keeps Coding task sessions in their dedicated collab tab, not in mine', async () => {
   list.mockResolvedValue(reply({ source: 'mine', items: [dto('user:123:session:task:agent:member-task', '')],
     total: 1, has_more: true, next_cursor: 'next' }));
-  const result = await listConversationSource({ ...bot, isAgentCodingBot: true }, '123', 'mine', 1, 10, '');
-  expect(result).toMatchObject({ ok: true, data: { items: [] } });
+  const result = await listConversationSource({ ...bot, isAgentCodingBot: true }, '123', 'mine', 10, '');
+  expect(result).toMatchObject({ ok: true, data: { items: [], hasMore: true, nextCursor: 'next' } });
 });
 
-it('uses the authenticated collaborator as the mine conversation subject', async () => {
-  list.mockResolvedValue(reply({ items: [], total: 0 }));
-  const result = await listConversationSource(bot, 'human_123', 'mine', 1, 10, 'session:key',
-    { deviceUuid: 'device', stage: 'online' });
-  expect(list).toHaveBeenCalledWith('bot', {
-    user_id: '123', owner_id: 'owner', f_user_id: '123', page: 1, page_size: 10,
-    stage: 'online', session_key: 'session:key', device_uuid: 'device',
-  });
-  expect(result).toMatchObject({ ok: true, data: { items: [], hasMore: false } });
-});
-
-it('keeps the others operator window and cursor free of subject impersonation', async () => {
-  list.mockResolvedValue(reply({ source: 'others', items: [], total: 0, has_more: true, next_cursor: 'next', scan_limited: true }));
-  const result = await listConversationSource(bot, 'human_123', 'others', 1, 10, 'session:key',
+it.each(['mine', 'others'] as const)('uses authenticated collaborator + real owner for %s with cursor and instance', async (source) => {
+  list.mockResolvedValue(reply({ source, items: [], total: 0, has_more: true, next_cursor: 'next', scan_limited: true }));
+  const result = await listConversationSource(bot, 'human_123', source, 10, 'session:key',
     { deviceUuid: 'device', stage: 'online' }, 'previous');
   expect(list).toHaveBeenCalledWith('bot', {
-    user_id: '123', owner_id: 'owner', source: 'others', page: 1, page_size: 10,
+    user_id: '123', owner_id: 'owner', source, page: 1, page_size: 10,
     stage: 'online', source_cursor: 'previous', session_key: 'session:key', device_uuid: 'device',
   });
   expect(result).toMatchObject({ ok: true, data: { items: [], hasMore: true, nextCursor: 'next', scanLimited: true } });
@@ -68,7 +57,7 @@ it('keeps the others operator window and cursor free of subject impersonation', 
 it('sorts loaded sessions by updated time, falling back to created time without mutating the input', async () => {
   list.mockResolvedValue(reply({ source: 'mine', items: [dto('old', '2026-01-02'), dto('new', '2026-02-03')],
     total: 2, has_more: false, next_cursor: null }));
-  const result = await listConversationSource(bot, '123', 'mine', 1, 10, '');
+  const result = await listConversationSource(bot, '123', 'mine', 10, '');
   if (!result.ok) throw new Error('missing source page');
   expect(result.data.items.map((item) => item.sessionId)).toEqual(['new', 'old']);
   const items = result.data.items;
@@ -80,9 +69,10 @@ it('sorts loaded sessions by updated time, falling back to created time without 
 it.each([
   { items: [], total: 0 },
   { source: 'mine', items: [], total: 0, has_more: true, next_cursor: null },
+  { source: 'others', items: [], total: 0, has_more: false },
 ])('does not silently treat an unsupported or malformed source response as filtered', async (data) => {
   list.mockResolvedValue(reply(data));
-  expect(await listConversationSource(bot, '123', 'others', 1, 10, '')).toMatchObject({ ok: false });
+  expect(await listConversationSource(bot, '123', 'mine', 10, '')).toMatchObject({ ok: false });
 });
 
 it('keeps existing rows and cursor on continuation failure', () => {

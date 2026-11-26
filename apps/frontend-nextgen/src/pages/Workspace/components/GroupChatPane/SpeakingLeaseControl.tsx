@@ -3,9 +3,6 @@
  *
  * 形态与「用户发言模式」帽条保持同构：一条 26px 高的语义色横条承载
  * 左侧状态说明与右侧主要动作；持有者判定、续期、命令裁决均由 BCS 权威完成。
- * 帽条堆叠几何：仅当本条是输入卡上方帽条堆叠的最上条时保留顶圆角（rounded-t-xl）；
- * 上方还有「用户发言模式」帽条时 topRounded=false，方角密接——否则下方条的顶圆角
- * 会在接缝处切出缺口，视觉割裂（走查反馈 2026-11-25）。
  */
 import { Button } from '@/components/ui';
 import type { SpeakingLease, SpeakingLeaseStatus } from '@/domain/collaboration/speakingLease';
@@ -23,11 +20,6 @@ export interface SpeakingLeaseControlProps {
   nowMs?: number;
   /** 有指令在途时按钮 loading。 */
   isRequesting?: boolean;
-  /**
-   * 顶缘圆角几何：本条为帽条堆叠最上条时保留（默认 true，rounded-t-xl）；
-   * 上方有「用户发言模式」帽条时由装配点传 false，改为方角密接，避免接缝处圆角缺口。
-   */
-  topRounded?: boolean;
   onAcquire: () => void;
   onPreempt: () => void;
   onRelease: () => void;
@@ -74,7 +66,6 @@ export const SpeakingLeaseControl: React.FC<SpeakingLeaseControlProps> = ({
   lease,
   nowMs,
   isRequesting,
-  topRounded = true,
   onAcquire,
   onPreempt,
   onRelease,
@@ -88,11 +79,9 @@ export const SpeakingLeaseControl: React.FC<SpeakingLeaseControlProps> = ({
 
   return (
     <div
-      // 宽高、左右留白与 ComposerStatusBar 相同；顶缘圆角随堆叠位置由 topRounded 决定；
-      // 色彩用语义 token 随租约状态切换。
+      // 宽高、左右留白与 ComposerStatusBar 相同；色彩用语义 token 随租约状态切换。
       className={cn(
-        'mx-auto flex h-[26px] w-[calc(100%-64px)] items-center justify-between pl-3 pr-1.5 text-xs',
-        topRounded ? 'rounded-t-xl' : 'rounded-none',
+        'mx-auto flex h-[26px] w-[calc(100%-64px)] items-center justify-between rounded-t-xl pl-3 pr-1.5 text-xs',
         statusClasses[status],
       )}
       data-testid="speaking-lease-control"
@@ -130,15 +119,8 @@ export const SpeakingLeaseControl: React.FC<SpeakingLeaseControlProps> = ({
 /**
  * 群聊输入区上方的发言权条装配（模型直通）。
  * 非 lease_required 会话（或模型缺失）渲染 null——普通会话零感知。
- * topRounded 由装配点按「上方是否还有发言模式帽条」传入，保证堆叠接缝方角密接。
  */
-export function SpeakingLeaseStrip({
-  model,
-  topRounded,
-}: {
-  model?: GroupSpeakingLeaseModel;
-  topRounded?: boolean;
-}) {
+export function SpeakingLeaseStrip({ model }: { model?: GroupSpeakingLeaseModel }) {
   if (!model || model.speakingMode !== 'lease_required') return null;
   return (
     <SpeakingLeaseControl
@@ -146,7 +128,6 @@ export function SpeakingLeaseStrip({
       lease={model.speakingLease}
       nowMs={model.leaseNowMs}
       isRequesting={model.isUpdatingSpeakingLease}
-      topRounded={topRounded}
       onAcquire={() => void model.acquireSpeakingLease()}
       onPreempt={() => void model.acquireSpeakingLease({ preempt: true })}
       onRelease={() => void (model.speakingLease && model.releaseSpeakingLease(model.speakingLease))}

@@ -381,13 +381,11 @@ consent page) never enter the gate (the decision keys off the application
 status being pending, never off the presence of consent URLs).
 
 A creation apply whose report is `RUNNING` remains `PROVISIONING`, even
-when the container is already active; an unfinished apply is not `APPLY_FAILED`.
-Only a succeeded `create:on_container` apply can make an active bot `READY`
-before its creation job settles. A succeeded `create:pre_container` apply
-does not prove on-container delivery: a live creation remains `PROVISIONING`,
-and a terminal creation keeps the job's existing success or failure verdict.
-A successful record-first creation still requires an active bot before `READY`;
-all terminal pre-container reports wait while the creation job is live.
+when the container is already active. Only a succeeded creation apply can
+make an active bot `READY`; an unfinished apply is not `APPLY_FAILED`.
+A terminal pre-container report still means `PROVISIONING` while its creation
+job is live: the on-container phase may not have started yet. Record-first
+creation can use that report once its job has finished provisioning.
 
 **Run detail** — an agent with a passport application actually PENDING
 inside its window carries an additive `authorization` descriptor. Presence

@@ -11,7 +11,7 @@ export function useDebugChatClearContext(
 ) {
   return useCallback(async () => {
     if (!userId || !sessionId) return;
-    const result = await botSessionService.clearContext(bot, userId, sessionId, false);
+    const result = await botSessionService.clearContext(bot, userId, sessionId);
     if (!result.ok) {
       toast.error(result.error.friendlyMessage);
       return;

@@ -187,7 +187,6 @@ def start_put_apply(
     owner_id: str,
     actor_id: str,
     audit: str,
-    permission_subject: str | None = None,
 ) -> ConfigManifestApplyStarted:
     """Start the apply a ``PUT`` owes, and say whether it started (spec D-8).
 
@@ -202,7 +201,6 @@ def start_put_apply(
             bot=bot,
             owner_id=owner_id,
             actor_id=actor_id,
-            permission_subject=permission_subject,
             audit_actor=audit,
             state=MANIFEST_STATE,
             trigger=PUT_TRIGGER,

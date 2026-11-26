@@ -83,7 +83,6 @@ from agentclaw.community.core.apply_engine.run.termination import (
     terminate_on_launch_failure,
     terminate_unstartable,
 )
-from agentclaw.community.core.apply_engine.run.context_builder import build_apply_context
 from agentclaw.community.core.apply_engine.run.report_codec import (
     report_from_payload,
 )
@@ -91,13 +90,9 @@ from agentclaw.community.core.apply_engine.run.capability_projection import (
     finish_capability_projection,
     previous_projection_retry,
 )
-from agentclaw.community.core.apply_engine.run.mcp_permission_notes import (
-    ServerCheck, finish_permission_notes,
-)
 from agentclaw.community.core.skill_center.capability_projection_reconcile import (
     CapabilityProjectionReconcileProtocol,
 )
-from agentclaw.community.core.skill_center.mcp_apply_policy import manifest_mcp_install_scope
 from agentclaw.community.core.apply_engine.run.lock_reaper import (
     APPLY_LOCK_TTL_SECONDS,
     is_abandoned,
@@ -130,10 +125,6 @@ logger = get_logger()
 
 
 
-def _mcp_install_policy(state: StateRef):
-    return manifest_mcp_install_scope() if state.kind == LEGACY_STATE.kind else nullcontext()
-
-
 class ManifestApplyBotMissingError(RuntimeError):
     """The bot a queued apply targets no longer exists."""
 
@@ -141,6 +132,21 @@ class ManifestApplyBotMissingError(RuntimeError):
         super().__init__(f"bot {bot_id} not found for a queued apply")
 
 
+
+def _engine_and_bot_type(
+    bot: Optional[dict],
+    engine_type: Optional[str],
+    bot_type: Optional[str],
+) -> tuple[str, str]:
+    """The two values every capability question is answered from.
+
+    One helper because the record and record-free paths must not drift: a bot
+    whose engine is read one way here and another way there would validate
+    against one set of capabilities and apply against a different one.
+    """
+    if bot is not None:
+        return str(bot.get("active_engine") or ""), str(bot.get("bot_type") or "")
+    return str(engine_type or ""), str(bot_type or "")
 
 class ApplyRunService(ApplyRunServiceProtocol):
     """Start applies, and read what they did."""
@@ -162,7 +168,6 @@ class ApplyRunService(ApplyRunServiceProtocol):
         compilers: StateCompilers,
         completion_handlers: StateCompletionHandlers,
         capability_projection: CapabilityProjectionReconcileProtocol | None = None,
-        server_permission_check: ServerCheck | None = None,
     ) -> None:
         # Read for capabilities only (``_context``): what a document may be is
         # the Manifest compiler's question now, asked when it compiles.
@@ -198,7 +203,6 @@ class ApplyRunService(ApplyRunServiceProtocol):
         # (``completion.py``). A kind with no row — the Manifest — is told nothing.
         self._completion = CompletionPublisher(completion_handlers)
         self._capability_projection = capability_projection
-        self._server_permission_check = server_permission_check
 
     # ── starting ────────────────────────────────────────────────────────────
 
@@ -217,7 +221,6 @@ class ApplyRunService(ApplyRunServiceProtocol):
         engine_type: Optional[str] = None,
         bot_type: Optional[str] = None,
         carry_from_apply_id: Optional[str] = None,
-        permission_subject: str | None = None,
     ) -> ApplyAccepted:
         """Lock, check, record ``RUNNING``, enqueue the work, return the id.
 
@@ -285,7 +288,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
             # the worker compiles from the same reference again, because the
             # compile fetches and a fetch does not belong on this thread.
             compiler.check(
-                build_apply_context(self._capabilities,
+                self._context(
                     bot_id=bot_id,
                     bot=bot,
                     owner_id=owner_id,
@@ -338,7 +341,6 @@ class ApplyRunService(ApplyRunServiceProtocol):
             self._task_queue_provider().enqueue(
                 APPLY_TASK_TYPE,
                 build_apply_task_payload(
-                    permission_subject=permission_subject,
                     apply_id=apply_id,
                     entity_id=entity_id,
                     bot_id=bot_id,
@@ -653,8 +655,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
             # enqueue and now, and applying against defaulted capabilities
             # would be a guess.
             raise ManifestApplyBotMissingError(bot_id)
-        subject = payload.get("permission_subject")
-        ctx = build_apply_context(self._capabilities,
+        ctx = self._context(
             bot_id=bot_id,
             bot=bot,
             owner_id=str(payload["owner_id"]),
@@ -667,7 +668,6 @@ class ApplyRunService(ApplyRunServiceProtocol):
             # linkage column answers "what did THIS apply fetch" as an
             # indexed read.
             apply_id=str(payload["apply_id"]),
-            permission_subject=subject if isinstance(subject, str) and subject else None,
         )
         return ctx, compiler, state
 
@@ -705,7 +705,7 @@ class ApplyRunService(ApplyRunServiceProtocol):
         refusal is unwrapped to the error it carries.
         """
         compiler = self._compiler_for(state)
-        ctx = build_apply_context(self._capabilities,
+        ctx = self._context(
             bot_id=bot_id,
             bot=bot,
             owner_id=owner_id,
@@ -724,17 +724,16 @@ class ApplyRunService(ApplyRunServiceProtocol):
             except CompileRefused as exc:
                 domain_error = exc.domain_error
             else:
-                with _mcp_install_policy(state):
-                    report = await self._orchestrator(self.delivery_for_engine(ctx.engine_type)).apply(
-                        ctx,
-                        compiled.state,
-                        # A dry run has no history entry to address.
-                        apply_id="",
-                        trigger="dry_run",
-                        started_at=datetime.now(),
-                        dry_run=True,
-                        sources=compiled.sources,
-                    )
+                report = await self._orchestrator(self.delivery_for_engine(ctx.engine_type)).apply(
+                    ctx,
+                    compiled.state,
+                    # A dry run has no history entry to address.
+                    apply_id="",
+                    trigger="dry_run",
+                    started_at=datetime.now(),
+                    dry_run=True,
+                    sources=compiled.sources,
+                )
                 return dataclasses.replace(report, state=state)
             # Raised outside the handler: the domain error keeps its own chain and
             # does not acquire the worker-only refusal as its context.
@@ -844,16 +843,15 @@ class ApplyRunService(ApplyRunServiceProtocol):
                 retry=previous_projection_retry(self._applies, ctx),
             ) if projection is not None else nullcontext()
             async with deferred as delivery:
-                with _mcp_install_policy(state):
-                    report = await self._orchestrator(strategy).apply(
-                        dataclasses.replace(ctx, capability_write_scope=delivery.write_scope if delivery else None),
-                        compiled.state,
-                        apply_id=apply_id,
-                        trigger=trigger,
-                        started_at=started_at,
-                        phase=phase,
-                        sources=compiled.sources,
-                    )
+                report = await self._orchestrator(strategy).apply(
+                    dataclasses.replace(ctx, capability_write_scope=delivery.write_scope if delivery else None),
+                    compiled.state,
+                    apply_id=apply_id,
+                    trigger=trigger,
+                    started_at=started_at,
+                    phase=phase,
+                    sources=compiled.sources,
+                )
                 if delivery is not None:
                     report = await finish_capability_projection(delivery, report)
             report = dataclasses.replace(report, state=state)
@@ -868,12 +866,64 @@ class ApplyRunService(ApplyRunServiceProtocol):
                 note = f"delivery could not be closed: {exc.__class__.__name__}"
             if note:
                 report = dataclasses.replace(report, notes=report.notes + (note,))
-            if state.kind == LEGACY_STATE.kind:
-                if trigger != "create:pre_container":
-                    report = await finish_permission_notes(ctx, report, self._server_permission_check)
             if projection is not None:
                 report = dataclasses.replace(report, finished_at=datetime.now())
             return report
+
+    def _context(
+        self,
+        *,
+        bot_id: str,
+        bot: Optional[dict],
+        owner_id: str,
+        actor_id: str,
+        entity_id: str,
+        env: str,
+        apply_id: Optional[str] = None,
+        engine_type: Optional[str] = None,
+        bot_type: Optional[str] = None,
+    ) -> ApplyContext:
+        """The identity one apply runs under, with or without a bot record.
+
+        ``bot`` is ``None`` on exactly one path: W13 runs the pre-container phase
+        **before** the bot is created, so there is no record to read. That case
+        supplies ``engine_type`` / ``bot_type`` from the creation request and
+        resolves capabilities from those — which is the second entry point W1
+        built for this caller, not a parallel implementation. ``ApplyContext.bot``
+        is then a minimal stand-in; the two shipped materialisers do not read it,
+        and the one that runs in this phase (``script``) reads only the engine,
+        env and tenant.
+        """
+        engine, kind = _engine_and_bot_type(bot, engine_type, bot_type)
+        # The stand-in the docstring describes, named rather than inlined so the
+        # "no record yet" case reads as one thing.
+        record = bot
+        if record is None:
+            record = {
+                "bot_id": bot_id,
+                "entity_id": entity_id,
+                "active_engine": engine,
+                "bot_type": kind,
+            }
+        return ApplyContext(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            entity_id=entity_id,
+            env=env,
+            tenant=get_current_avernet_tenant(),
+            engine_type=engine,
+            bot_type=kind,
+            bot=record,
+            capabilities=(
+                self._capabilities.capabilities_for_bot(bot)
+                if bot is not None
+                else self._capabilities.resolve_capabilities(
+                    active_engine=engine, bot_type=kind
+                )
+            ),
+            apply_id=apply_id,
+        )
 
     def _compiler_for(self, state: StateRef) -> DesiredStateCompiler:
         """The compiler registered for this reference's kind; a missing one is a wiring error, not a bot state."""

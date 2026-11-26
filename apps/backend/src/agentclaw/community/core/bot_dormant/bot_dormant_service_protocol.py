@@ -1,7 +1,7 @@
 """Public service protocols for personal Bot dormant lifecycle operations."""
 from __future__ import annotations
 
-from typing import Literal, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.bot_dormant.types import BotLifecycleResult
 
@@ -51,19 +51,13 @@ class BotDormantAuditServiceProtocol(Protocol):
 
 @runtime_checkable
 class BotDormantRecycleOperationProtocol(Protocol):
-    """Engine-selected recycle and OWNER-scoped read-only operation query.
+    """Uniform async recycle and OWNER-scoped read-only latest operation.
 
-    Confirmed-fastdisk AICoding Bots return a durable operation handle. Other
-    supported personal managed-cloud Bots use the original synchronous path and
-    return a null operation handle. An already RECYCLED Bot without an unresolved
-    operation is idempotent.
+    All supported personal managed-cloud Bots return the same operation handle.
+    An already RECYCLED Bot without an unresolved operation is idempotent.
     get_operation returns only the current/latest matching handle, hiding others as not-found.
-    Backup/release errors after asynchronous acceptance are reported in the operation result.
-    source/reason are trusted adapter metadata, never OpenAPI request fields.
-    First admission owns them: duplicate submissions do not replace metadata.
-    manual_ops retains its existing success audit/notification at completion.
+    Backup/release errors after acceptance are reported in the operation result.
     """
     def submit(self, *, bot_id: str, owner_id: str, owner_name: str | None = None,
-               request_id: str = "", source: Literal["openapi", "manual_ops"] = "openapi",
-               reason: str | None = None) -> dict: ...
+               request_id: str = "") -> dict: ...
     def get_operation(self, *, bot_id: str, owner_id: str, operation_id: str) -> dict: ...

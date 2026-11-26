@@ -108,7 +108,6 @@ _BOT_FREE = frozenset(
         "logs",
         "market",
         "metadata",
-        'template-queries', 'template-config-for-others', 'restart-for-others', 'status-for-others',
         "mcp",
         # `routines/all` is the owner-level aggregate: it lists the named
         # user's fleet across every bot, so the first segment names the

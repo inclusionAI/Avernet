@@ -520,6 +520,179 @@ describe('remove/内容链 device_uuid 拼装(openspec add-session-files-device-
   });
 });
 
+describe('caller_runtime_target 拼装 - Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target)', () => {
+  beforeEach(() => {
+    [
+      mocked.createUploadIntents,
+      mocked.uploadToUrl,
+      mocked.completeUpload,
+      mocked.getMaterializeStatus,
+      mocked.listReady,
+    ].forEach((m) => m?.mockClear?.());
+    jest.useFakeTimers();
+    mocked.createUploadIntents.mockResolvedValue({
+      files: [
+        {
+          resource_id: 'sr_1',
+          display_name: 'a.pdf',
+          status: 'upload_url_issued',
+          size_bytes: 100,
+          content_hash: null,
+          task_version: null,
+          error_code: null,
+          transfer_id: 'tr_1',
+          upload_type: 'SINGLE',
+          http_method: 'PUT',
+          upload_url: 'https://oss/put',
+          expires_at: null,
+          upload_session_id: null,
+          part_size: null,
+          part_count: null,
+          parts: null,
+        },
+      ],
+    });
+    mocked.uploadToUrl.mockResolvedValue(undefined);
+    mocked.completeUpload.mockResolvedValue({
+      resource_id: 'sr_1',
+      display_name: 'a.pdf',
+      status: 'device_syncing',
+      size_bytes: 100,
+      content_hash: null,
+      task_version: null,
+      error_code: null,
+    });
+    mocked.getMaterializeStatus.mockResolvedValue({
+      resource_id: 'sr_1',
+      display_name: 'a.pdf',
+      status: 'ready',
+      size_bytes: 100,
+      content_hash: null,
+      task_version: null,
+      error_code: null,
+    });
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('uploadOne 传 callerRuntimeTarget=service 时仅 upload-intents 带;complete/物化轮询不带(R20261119 契约 §2)', async () => {
+    const pending = botSessionFileService.uploadOne('bot-1', 'sess-1', 'user-1', file('a.pdf'), {
+      callerRuntimeTarget: 'service',
+    });
+    await jest.advanceTimersByTimeAsync(2000);
+    const res = await pending;
+    expect(res.ok).toBe(true);
+    expect(mocked.createUploadIntents.mock.calls[0][2]).toEqual(
+      expect.objectContaining({ caller_runtime_target: 'service' }),
+    );
+    expect(mocked.completeUpload.mock.calls[0][2]).not.toHaveProperty('caller_runtime_target');
+    expect(mocked.getMaterializeStatus.mock.calls[0][3]).not.toHaveProperty('caller_runtime_target');
+  });
+
+  it('uploadOne 不传 callerRuntimeTarget 时上传链 params 无该键', async () => {
+    const pending = botSessionFileService.uploadOne('bot-1', 'sess-1', 'user-1', file('a.pdf'), {});
+    await jest.advanceTimersByTimeAsync(2000);
+    await pending;
+    expect(mocked.createUploadIntents.mock.calls[0][2]).not.toHaveProperty('caller_runtime_target');
+    expect(mocked.completeUpload.mock.calls[0][2]).not.toHaveProperty('caller_runtime_target');
+    expect(mocked.getMaterializeStatus.mock.calls[0][3]).not.toHaveProperty('caller_runtime_target');
+  });
+
+  it('uploadOne 同时传 deviceUuid 与 callerRuntimeTarget 时两参数并存', async () => {
+    const pending = botSessionFileService.uploadOne('bot-1', 'sess-1', 'user-1', file('a.pdf'), {
+      deviceUuid: 'DEVICE-A',
+      callerRuntimeTarget: 'service',
+    });
+    await jest.advanceTimersByTimeAsync(2000);
+    await pending;
+    expect(mocked.createUploadIntents.mock.calls[0][2]).toEqual(
+      expect.objectContaining({ device_uuid: 'DEVICE-A', caller_runtime_target: 'service' }),
+    );
+  });
+
+  it('loadReady 传 callerRuntimeTarget=caller_instance 时 listReady params 带 caller_runtime_target', async () => {
+    mocked.listReady.mockResolvedValue({ files: [] });
+    await botSessionFileService.loadReady('bot-1', 'sess-1', '900003', 'owner-1', 'friend-9', 'online', undefined, 'caller_instance');
+    expect(mocked.listReady).toHaveBeenCalledWith('bot-1', 'sess-1', {
+      user_id: '900003',
+      owner_id: 'owner-1',
+      stage: 'online',
+      f_user_id: 'friend-9',
+      caller_runtime_target: 'caller_instance',
+    });
+  });
+
+  it('loadReady 不传 callerRuntimeTarget 时 params 无该键', async () => {
+    mocked.listReady.mockResolvedValue({ files: [] });
+    await botSessionFileService.loadReady('bot-1', 'sess-1', '900003', 'owner-1', undefined, 'online');
+    expect(mocked.listReady).toHaveBeenCalledWith('bot-1', 'sess-1', {
+      user_id: '900003',
+      owner_id: 'owner-1',
+      stage: 'online',
+    });
+  });
+});
+
+describe('remove/内容链 caller_runtime_target 拼装(openspec add-session-files-caller-runtime-target)', () => {
+  beforeEach(() => {
+    [
+      mocked.deleteFile,
+      mocked.getContentBlob,
+      mocked.buildBotSessionFileContentUrl,
+    ].forEach((m) => m?.mockClear?.());
+    mocked.deleteFile.mockResolvedValue({ deleted: true });
+    mocked.getContentBlob.mockResolvedValue(new Blob(['x']));
+    mocked.buildBotSessionFileContentUrl.mockReturnValue('/content?x=1');
+  });
+
+  it('remove 传 callerRuntimeTarget 时 deleteFile params 含 caller_runtime_target', async () => {
+    const res = await botSessionFileService.remove('bot-1', 'sess-1', 'sr_1', '900003', undefined, undefined, undefined, 'caller_instance');
+    expect(res.ok).toBe(true);
+    expect(mocked.deleteFile.mock.calls[0][3]).toEqual({
+      user_id: '900003',
+      caller_runtime_target: 'caller_instance',
+    });
+  });
+
+  it('remove 不传 callerRuntimeTarget 时 params 无该键', async () => {
+    await botSessionFileService.remove('bot-1', 'sess-1', 'sr_1', '900003', undefined, undefined);
+    expect(mocked.deleteFile.mock.calls[0][3]).toEqual({ user_id: '900003' });
+  });
+
+  it('resolveContentUrl 传 callerRuntimeTarget 时 URL 构造 params 含 caller_runtime_target', () => {
+    botSessionFileService.resolveContentUrl('bot-1', 'sess-1', 'sr_1', 'u-9', undefined, 'inline', undefined, undefined, 'service');
+    expect(mocked.buildBotSessionFileContentUrl.mock.calls[0][3]).toEqual(
+      expect.objectContaining({ caller_runtime_target: 'service' }),
+    );
+  });
+
+  it('fetchBlob 传 callerRuntimeTarget 时 getContentBlob params 含 caller_runtime_target', async () => {
+    await botSessionFileService.fetchBlob('bot-1', 'sess-1', 'sr_1', 'u-9', undefined, 'inline', undefined, undefined, 'caller_instance');
+    expect(mocked.getContentBlob.mock.calls[0][3]).toEqual(
+      expect.objectContaining({ caller_runtime_target: 'caller_instance' }),
+    );
+  });
+
+  it('resolveExternalDownloadUrl 传 callerRuntimeTarget 时 URL 构造 params 含 caller_runtime_target', async () => {
+    const originalFetch = (global as { fetch?: unknown }).fetch;
+    (global as { fetch?: unknown }).fetch = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ download_url: 'https://oss/dl' }),
+      } as Response);
+    try {
+      await botSessionFileService.resolveExternalDownloadUrl('bot-1', 'sess-1', 'sr_1', 'u-9', undefined, undefined, undefined, 'service');
+      expect(mocked.buildBotSessionFileContentUrl.mock.calls[0][3]).toEqual(
+        expect.objectContaining({ caller_runtime_target: 'service' }),
+      );
+    } finally {
+      (global as { fetch?: unknown }).fetch = originalFetch;
+    }
+  });
+});
+
 describe('f_user_id 拼装 - 好友 Bot 文件全链携带(2026-11-19 需求追加)', () => {
   describe('上传链', () => {
     beforeEach(() => {
@@ -578,27 +751,34 @@ describe('f_user_id 拼装 - 好友 Bot 文件全链携带(2026-11-19 需求追�
 
     it('uploadOne 传 friendUserId 时三接口 params 均带规范化 f_user_id', async () => {
       const pending = botSessionFileService.uploadOne('bot-1', 'sess-1', 'human_900003', file('a.pdf'), {
+        callerRuntimeTarget: 'caller_instance',
         friendUserId: 'human_900003',
       });
       await jest.advanceTimersByTimeAsync(2000);
       await pending;
-      // intents/complete/materialize 三接口 f_user_id 全链携带
+      // upload-intents: f_user_id 与 caller_runtime_target=caller_instance 并存(合法组合)
       expect(mocked.createUploadIntents.mock.calls[0][2]).toEqual(
         expect.objectContaining({
           user_id: '900003',
           f_user_id: '900003',
+          caller_runtime_target: 'caller_instance',
         }),
       );
+      // upload-complete / materialize-status: 不带 caller_runtime_target(§2),但 f_user_id 全链携带
       expect(mocked.completeUpload.mock.calls[0][2]).toEqual(
         expect.objectContaining({ user_id: '900003', f_user_id: '900003' }),
       );
+      expect(mocked.completeUpload.mock.calls[0][2]).not.toHaveProperty('caller_runtime_target');
       expect(mocked.getMaterializeStatus.mock.calls[0][3]).toEqual(
         expect.objectContaining({ user_id: '900003', f_user_id: '900003' }),
       );
+      expect(mocked.getMaterializeStatus.mock.calls[0][3]).not.toHaveProperty('caller_runtime_target');
     });
 
     it('uploadOne 不传 friendUserId 时上传链 params 无该键(非好友形态)', async () => {
-      const pending = botSessionFileService.uploadOne('bot-1', 'sess-1', 'human_900003', file('a.pdf'), {});
+      const pending = botSessionFileService.uploadOne('bot-1', 'sess-1', 'human_900003', file('a.pdf'), {
+        callerRuntimeTarget: 'service',
+      });
       await jest.advanceTimersByTimeAsync(2000);
       await pending;
       expect(mocked.createUploadIntents.mock.calls[0][2]).not.toHaveProperty('f_user_id');
@@ -617,20 +797,21 @@ describe('f_user_id 拼装 - 好友 Bot 文件全链携带(2026-11-19 需求追�
 
     it('remove 传 friendUserId 时 deleteFile params 含 f_user_id', async () => {
       const res = await botSessionFileService.remove(
-        'bot-1', 'sess-1', 'sr_1', 'human_900003', 'owner-1', 'online', undefined, 'human_900003',
+        'bot-1', 'sess-1', 'sr_1', 'human_900003', 'owner-1', 'online', undefined, 'caller_instance', 'human_900003',
       );
       expect(res.ok).toBe(true);
       expect(mocked.deleteFile.mock.calls[0][3]).toEqual({
         user_id: '900003',
         owner_id: 'owner-1',
         stage: 'online',
+        caller_runtime_target: 'caller_instance',
         f_user_id: '900003',
       });
     });
 
     it('resolveContentUrl 传 friendUserId 时 URL 构造 params 含 f_user_id', () => {
       botSessionFileService.resolveContentUrl(
-        'bot-1', 'sess-1', 'sr_1', 'human_900003', 'owner-1', 'inline', 'online', undefined, 'human_900003',
+        'bot-1', 'sess-1', 'sr_1', 'human_900003', 'owner-1', 'inline', 'online', undefined, undefined, 'human_900003',
       );
       expect(mocked.buildBotSessionFileContentUrl.mock.calls[0][3]).toEqual(
         expect.objectContaining({ f_user_id: '900003' }),
@@ -639,7 +820,7 @@ describe('f_user_id 拼装 - 好友 Bot 文件全链携带(2026-11-19 需求追�
 
     it('fetchBlob 传 friendUserId 时 getContentBlob params 含 f_user_id', async () => {
       await botSessionFileService.fetchBlob(
-        'bot-1', 'sess-1', 'sr_1', 'human_900003', 'owner-1', 'inline', 'online', undefined, 'human_900003',
+        'bot-1', 'sess-1', 'sr_1', 'human_900003', 'owner-1', 'inline', 'online', undefined, undefined, 'human_900003',
       );
       expect(mocked.getContentBlob.mock.calls[0][3]).toEqual(
         expect.objectContaining({ user_id: '900003', f_user_id: '900003' }),
@@ -656,7 +837,7 @@ describe('f_user_id 拼装 - 好友 Bot 文件全链携带(2026-11-19 需求追�
         } as Response);
       try {
         await botSessionFileService.resolveExternalDownloadUrl(
-          'bot-1', 'sess-1', 'sr_1', 'human_900003', 'owner-1', 'online', undefined, 'human_900003',
+          'bot-1', 'sess-1', 'sr_1', 'human_900003', 'owner-1', 'online', undefined, undefined, 'human_900003',
         );
         expect(mocked.buildBotSessionFileContentUrl.mock.calls[0][3]).toEqual(
           expect.objectContaining({ f_user_id: '900003' }),
@@ -667,7 +848,7 @@ describe('f_user_id 拼装 - 好友 Bot 文件全链携带(2026-11-19 需求追�
     });
 
     it('非好友形态(不传 friendUserId)params 无该键', async () => {
-      await botSessionFileService.remove('bot-1', 'sess-1', 'sr_1', '900003', 'owner-1', 'online', undefined);
+      await botSessionFileService.remove('bot-1', 'sess-1', 'sr_1', '900003', 'owner-1', 'online', undefined, 'service');
       expect(mocked.deleteFile.mock.calls[0][3]).not.toHaveProperty('f_user_id');
     });
   });

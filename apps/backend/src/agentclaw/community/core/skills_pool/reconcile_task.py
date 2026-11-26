@@ -21,6 +21,10 @@ from agentclaw.community.core.skills_pool.claim_service import (
     MigrationClaimOutcome,
     SkillsPoolMigrationClaimService,
 )
+from agentclaw.community.core.skills_pool.edit_guard import (
+    SkillsPoolEditGuard,
+    SkillsPoolEditPausedError,
+)
 from agentclaw.community.core.skills_pool.quarantine import QUARANTINE_RETENTION, SKILLS_POOL_QUARANTINE_CLEANUP_TASK, QuarantineStatus, SkillsPoolQuarantineCleanupTaskHandler
 from agentclaw.community.core.repository.protocols.skills_pool import QuarantineRepositoryProtocol
 from agentclaw.community.core.skills_pool.reconcile_service import (
@@ -96,6 +100,7 @@ class SkillsPoolReconcileTaskHandler:
         claim_service: SkillsPoolMigrationClaimService,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         reconcile_service: SkillsPoolReconcileService,
+        edit_guard: SkillsPoolEditGuard,
         quarantine_repository: QuarantineRepositoryProtocol,
         task_queue_service: TaskQueueService | None = None,
         lease_seconds: int = SKILLS_POOL_LEASE_SECONDS,
@@ -103,6 +108,7 @@ class SkillsPoolReconcileTaskHandler:
         self._claims = claim_service
         self._layouts = layout_repository
         self._reconcile = reconcile_service
+        self._edits = edit_guard
         self._quarantines = quarantine_repository
         self._queue = task_queue_service
         self._lease_seconds = lease_seconds
@@ -119,6 +125,22 @@ class SkillsPoolReconcileTaskHandler:
         except ValueError as error:
             return Fail(f"invalid payload: {error}")
 
+        try:
+            edit_lease = self._edits.acquire_for_migration(scope=scope)
+        except SkillsPoolEditPausedError:
+            return Reschedule(SKILLS_POOL_LEASE_BUSY_DELAY_SECONDS)
+        try:
+            return self._reconcile_while_edit_locked(
+                scope=scope, wakeup_id=wakeup_id, source=source,
+                signal_identity=signal_identity, observed_at=observed_at,
+            )
+        finally:
+            self._edits.release(edit_lease)
+
+    def _reconcile_while_edit_locked(
+        self, *, scope: BotSkillLayoutScope, wakeup_id: str, source: str,
+        signal_identity: dict[str, object], observed_at: datetime | None,
+    ) -> TaskOutcome:
         lease_owner = f"skills-pool:{wakeup_id}"
         claim = self._claims.claim(
             scope=scope,

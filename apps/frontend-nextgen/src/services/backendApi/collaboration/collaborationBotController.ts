@@ -38,7 +38,8 @@ export interface CollaborationBotDto {
   task_claim_mode?: boolean;
   /** 任务发现(Dream)开关：任务发现模块专用，与任务执行阶段无关。 */
   task_dream_mode?: boolean;
-  /** Caller 模式标记('caller'),遗留目录字段:新版目录接口不再下发,前端不再消费;保留仅为类型兼容。 */
+  /** Caller 模式标记('caller'):好友详情路由 IAM 换签带 caller_runtime_target 使用
+   * (openspec add-iam-caller-runtime-target);缺失视为非 Caller Bot,不带参数。 */
   call_type?: string;
 }
 

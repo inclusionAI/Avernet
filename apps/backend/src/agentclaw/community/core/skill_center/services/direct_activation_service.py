@@ -48,14 +48,11 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
 )
-from agentclaw.community.core.skill_center.mcp_apply_policy import is_manifest_mcp_install
-from agentclaw.community.core.skill_center.services.mcp_admission import resolve_mcp_catalog_detail
 from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
     PlatformDefaultMcpPolicy,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
-    ProjectionScope,
 )
 from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import (
     DesktopSkillRecoveryServiceProtocol,
@@ -412,18 +409,8 @@ class DirectActivationService(DirectActivationServiceProtocol):
     ) -> dict[str, Any]:
         """An apply's Direct claim and preserve/clear/replace action; refused when a Set supplies it."""
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
-        manifest = is_manifest_mcp_install()
-        if manifest:
-            resolve_mcp_catalog_detail(self._mcp_center, server_code)
-        else:
-            self._require_mcp_permission(actor_id=actor_id, server_code=server_code)
+        self._require_mcp_permission(actor_id=actor_id, server_code=server_code)
         mutation_result = None
-        delivered_mcp_codes = frozenset()
-
-        def projected(receipt):
-            nonlocal delivered_mcp_codes
-            if receipt.passport_updated is True and receipt.passport_mcp_codes is not None:
-                delivered_mcp_codes = receipt.delivered_mcp_codes & receipt.passport_mcp_codes
 
         def mutation():
             return self._repository.claim_apply_mcp(
@@ -450,16 +437,10 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 runtime_required=project,
                 mutation=mutation,
                 on_committed=committed,
-                on_projection=projected,
-                scope_from_result=(lambda mutation: ProjectionScope(
-                    mcp=True,
-                    claimed_mcp=mutation.mcp_codes | frozenset({server_code}),
-                    updated_mcp=mutation.updated_mcp_codes,
-                )) if manifest else mcp_claim_scope,
-                # A repeated Manifest claim retries actual delivery, even when
-                # the stored installation and config were already identical.
-                record_projection_when_unchanged=manifest,
-                skip_projection_when_unchanged=not manifest,
+                scope_from_result=mcp_claim_scope,
+                # Explicit config still reaches the claim to consume aliases.
+                # Only an effective supply/config delta requires MCP delivery.
+                skip_projection_when_unchanged=True,
             )
             self._log_manifest_source_transitions(
                 apply_id=apply_id, bot_id=bot_id, capability_type="mcp",
@@ -475,7 +456,6 @@ class DirectActivationService(DirectActivationServiceProtocol):
                     "Manifest desired state committed before follow-up failure"
                 ) from None
             raise
-        result["_manifest_delivered_mcp_codes"] = delivered_mcp_codes
         return result
 
     async def remove_apply_mcp(

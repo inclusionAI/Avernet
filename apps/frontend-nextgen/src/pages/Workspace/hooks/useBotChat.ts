@@ -27,7 +27,6 @@ export function useBotChat(
   panelRef?: RefObject<PanelHandle | null>,
   loadBotLibraryCdn: BotLibraryCdnLoader = queryAndRegisterBotLibraryCdn,
   authenticatedUserId?: string | null,
-  options: { subjectScoped?: boolean } = {},
 ) {
   const workspaceIdentityId = useWorkspaceStore((s) => s.activeIdentityId);
   const identityId = authenticatedUserId === undefined ? workspaceIdentityId : authenticatedUserId;
@@ -45,12 +44,13 @@ export function useBotChat(
   const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
   const provider = useMemo(() => {
     if (!bot || !sessionId || !identityId) return null;
-    return createBotChatProvider({ bot, userId: identityId, sessionId, range: sessionRange, subjectScoped: options.subjectScoped });
-  }, [bot, sessionId, identityId, options.subjectScoped, sessionRange]);
+    return createBotChatProvider({ bot, userId: identityId, sessionId, range: sessionRange });
+  }, [bot, sessionId, identityId, sessionRange]);
   const connectionRuntime = useBotConnectionRuntime(provider);
   const historyDone = provider !== null && historyProvider === provider;
   const currentProvider = useRef(provider);
   currentProvider.current = provider;
+
   // 副屏 CDN 映射后台加载；切 Bot/卸载清旧 scope，失败不阻塞历史和连接。
   useEffect(() => {
     const botId = bot?.botId ?? null;

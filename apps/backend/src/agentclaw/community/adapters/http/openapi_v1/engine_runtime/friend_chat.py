@@ -24,11 +24,11 @@ from agentclaw.community.core.expert_chat.errors import (
 )
 
 FRIEND_USER_ID_DESCRIPTION = (
-    "The Human whose conversation resources are addressed. A caller naming "
-    "itself selects its own Caller runtime when the Bot uses Caller identity; "
-    "owner-mode Bots keep their shared runtime. Existing friend-session reads "
-    "may name the friend subject under the established BCN authorization rule. "
-    "Omit this parameter to preserve the legacy operator-console behavior."
+    "The Human friend whose caller-owned chat resources are addressed. Omit "
+    "this parameter to preserve the existing owner/collaborator Engine Runtime "
+    "behavior. When supplied, BCN friendship is authoritative; the caller must "
+    "be this Human or the Bot owner. Service Bot conversations address online "
+    "(legacy draft selectors also mean online); personal Bots address draft."
 )
 
 FriendUserIdQuery = Annotated[

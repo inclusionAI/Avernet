@@ -362,7 +362,7 @@ class ApplyEngineModule(Module):
     @provider
     @inject
     def manifest_teclaw_platform_delivery(
-        self, platform_ports: PlatformPorts, redeliver: Redeliver, injector: Injector
+        self, platform_ports: PlatformPorts, redeliver: Redeliver
     ) -> TeclawPlatformDelivery:
         """The artifact family delivering through platform state (W8, spec D-3).
 
@@ -371,17 +371,7 @@ class ApplyEngineModule(Module):
         *requires* the redeliver, which is what makes "platform-managed with
         nothing to be platform-managed with" unexpressible.
         """
-        async def passport(ctx):
-            from agentclaw.community.core.skill_center.runtime_projection_contract import (
-                BotRuntimeProjectorProtocol, ProjectionScope,
-            )
-
-            return await injector.get(BotRuntimeProjectorProtocol).project(
-                bot_id=ctx.bot_id, owner_id=ctx.owner_id,
-                scope=ProjectionScope(passport=True),
-            )
-
-        return TeclawPlatformDelivery(ports=platform_ports, redeliver=redeliver, passport=passport)
+        return TeclawPlatformDelivery(ports=platform_ports, redeliver=redeliver)
 
     @singleton
     @provider

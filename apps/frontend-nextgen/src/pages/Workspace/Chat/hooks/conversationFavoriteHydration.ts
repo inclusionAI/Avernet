@@ -15,8 +15,6 @@ export async function hydrateConversationFavorites(
   range?: ConversationSessionRequestRange,
 ): Promise<void> {
   if (!page.items.some((item) => item.favorite === undefined)) return;
-  // Ordinary managed `others` views are read-only. AgentCoding's flat shared lists are the
-  // exception because mine/others/collab all enable favorite actions for Coding sessions.
   try {
     const hydrated = await conversationFavoriteService.hydrate(view.bot, userId, page, range);
     if (!isCurrent()) return;

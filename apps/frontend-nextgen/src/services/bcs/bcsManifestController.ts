@@ -79,21 +79,14 @@ export async function getManifest(): Promise<BcsManifest> {
  * 查询 Bot 副屏 CDN 库配置（GET /openapi/v1/bots/{bot_id}/render-screens）。
  * 复用 openapi 新接口（与 Bot 工坊 botEditorController.listRenderScreens 同路径、
  * 同 user_id 注入），返回挂载副屏 CDN 库映射所需的 {name,cdn_url} 记录；失败抛错。
- * botId 形如 `default:146836`，接口要求纯 bot 名，故剥离 `:工号` 后缀；
- * 显式传 ownerId 时以显式值为准（协作群场景 sender 集合已持纯 botId + 独立 owner），
- * 否则由后缀推导。
+ * botId 形如 `default:146836`，接口要求纯 bot 名，故剥离 `:工号` 后缀。
  * 旧 ocb /api/bot-render-screens?bot_id= 路由在 teamclaw 网关不存在（404），已废弃。
  */
-export async function listBotRenderScreens(botId: string, ownerId?: string): Promise<BotRenderScreen[]> {
-  const explicit = ownerId !== undefined;
+export async function listBotRenderScreens(botId: string): Promise<BotRenderScreen[]> {
   const separatorIndex = botId.indexOf(':');
   const pureBotId = separatorIndex >= 0 ? botId.slice(0, separatorIndex) : botId;
-  const resolvedOwnerId = explicit
-    ? ownerId
-    : separatorIndex >= 0
-      ? botId.slice(separatorIndex + 1)
-      : undefined;
-  const res = await botEditorController.listRenderScreens(pureBotId, resolvedOwnerId);
+  const ownerId = separatorIndex >= 0 ? botId.slice(separatorIndex + 1) : undefined;
+  const res = await botEditorController.listRenderScreens(pureBotId, ownerId);
   // RenderScreenDto 缺 bot_id，按需补齐为 BotRenderScreen（CDN 映射实际只用 name+cdn_url）
   return (res.data?.items ?? []).map((item) => ({
     id: item.id,

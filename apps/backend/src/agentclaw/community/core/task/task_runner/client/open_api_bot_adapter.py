@@ -356,41 +356,17 @@ class OpenApiBotAdapter(
             params["bot_id"] = bot_id
         if lifecycle_stage:
             params["lifecycle_stage"] = lifecycle_stage
-        path = "/openapi/v1/sessions/runtime/status"
-        logger.info(
-            "[task][openapi_bot] >>> runtime_status GET %s session=%s bot=%s stage=%s",
-            path, session_id, bot_id, lifecycle_stage,
-        )
-        try:
-            async with self._client_for_current_loop() as client:
-                response = await client.get(path, params=params, headers=self._headers())
-            logger.info(
-                "[task][openapi_bot] <<< runtime_status session=%s http_status=%s",
-                session_id, response.status_code,
+        async with self._client_for_current_loop() as client:
+            response = await client.get(
+                "/openapi/v1/sessions/runtime/status", params=params, headers=self._headers(),
             )
-            _map_status(response)
-            payload = response.json()
-            logger.info(
-                "[task][openapi_bot] runtime_status envelope session=%s code=%s",
-                session_id, payload.get("code"),
-            )
-            if payload.get("code") != 0:
-                raise OpenApiError("Runtime observation query rejected")
-            observation = BotSessionRuntimeStatus.model_validate(payload.get("data"))
-            if observation.session_id != session_id:
-                raise OpenApiError("Runtime observation session mismatch")
-        except Exception as exc:  # Log metadata only, never response bodies or credentials.
-            logger.warning(
-                "[task][openapi_bot] runtime_status failed session=%s bot=%s stage=%s error=%s",
-                session_id, bot_id, lifecycle_stage, type(exc).__name__,
-            )
-            raise
-        logger.info(
-            "[task][openapi_bot] runtime_status observed session=%s found=%s reason=%s "
-            "state=%s run=%s last_event_seq=%s",
-            session_id, observation.found, observation.reason, observation.state,
-            observation.run_id, observation.last_event_seq,
-        )
+        _map_status(response)
+        payload = response.json()
+        if payload.get("code") != 0:
+            raise OpenApiError("Runtime observation query rejected")
+        observation = BotSessionRuntimeStatus.model_validate(payload.get("data"))
+        if observation.session_id != session_id:
+            raise OpenApiError("Runtime observation session mismatch")
         return observation
 
     async def get_session_messages(

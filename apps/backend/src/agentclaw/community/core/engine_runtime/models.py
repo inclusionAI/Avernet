@@ -56,15 +56,6 @@ class BotFacts:
     #: were once "the caller's id" now need the owner the bot was actually
     #: resolved against.
     owner_id: str
-    #: Conversation identity mode.  Session adapters use this trusted projection
-    #: to decide whether an explicit session subject selects an independent
-    #: Caller runtime or keeps the existing shared service runtime.
-    call_type: str = "owner"
-    #: Engine capability resolved from the registered provisioning strategy.
-    #: Caller-mode service Bots only switch to ExpertChat's per-Human runtime
-    #: when this is true.  Shared-runtime engines (currently TeClaw) keep the
-    #: stage-addressed service binding even when a conversation names a subject.
-    requires_caller_chat_instance: bool = True
 
     @classmethod
     def from_record(
@@ -100,39 +91,11 @@ class BotFacts:
         three of its four consumers already hold the row for, and give it a
         default no caller could satisfy.
         """
-        from agentclaw.community.core.bot_management.engines.registry import (
-            resolve_provisioning,
-        )
-
-        resolved_bot_id = str(record.get("bot_id") or bot_id)
-        resolved_owner_id = str(record.get("owner_id") or owner_id)
-        bot_type = str(record.get("bot_type") or "")
-        active_engine = str(record.get("active_engine") or "")
-        engine_context, engine_strategy = resolve_provisioning(
-            bot_id=resolved_bot_id,
-            owner_id=resolved_owner_id,
-            bot_type=bot_type,
-            active_engine=active_engine,
-            template_type=(
-                str(record["template_type"])
-                if record.get("template_type") is not None
-                else None
-            ),
-            template_config=(
-                record.get("template_config")
-                if isinstance(record.get("template_config"), dict)
-                else None
-            ),
-        )
         return cls(
-            bot_id=resolved_bot_id,
-            bot_type=bot_type,
-            active_engine=active_engine,
-            owner_id=resolved_owner_id,
-            call_type=str(record.get("call_type") or "owner"),
-            requires_caller_chat_instance=(
-                engine_strategy.requires_caller_chat_instance(engine_context)
-            ),
+            bot_id=str(record.get("bot_id") or bot_id),
+            bot_type=str(record.get("bot_type") or ""),
+            active_engine=str(record.get("active_engine") or ""),
+            owner_id=str(record.get("owner_id") or owner_id),
         )
 
 

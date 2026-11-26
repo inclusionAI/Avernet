@@ -1,4 +1,5 @@
 import { notifyError, notifySuccess } from '@/components/ui/notify';
+import { COMMUNITY_REPLY_PAGE_SIZE } from '@/domain/community/constants';
 import { communityErrorMessage } from '@/domain/community/errors';
 import { forumAuthorRef, interactionTargetRef, summaryTargetRef } from '@/domain/community/interactionQueries';
 import type {
@@ -22,8 +23,9 @@ interface UseCommunityTopicActionsOptions {
   currentAuthorName?: string;
   currentAuthorAvatarUrl?: string;
   selectedTopic: CommunityTopic | null;
-  refreshReply: (topicId: string, postId?: string) => Promise<void>;
-  recordReplyCreated: (topicId: string) => void;
+  replyPage: number;
+  replyTotal: number;
+  goToReplyPage: (page: number) => Promise<unknown>;
   interactions: UseCommunityInteractionsResult;
 }
 
@@ -48,8 +50,9 @@ export function useCommunityTopicActions({
   currentAuthorName,
   currentAuthorAvatarUrl,
   selectedTopic,
-  refreshReply,
-  recordReplyCreated,
+  replyPage,
+  replyTotal,
+  goToReplyPage,
   interactions,
 }: UseCommunityTopicActionsOptions) {
   const [helpfulPostId, setHelpfulPostId] = useState<string | null>(null);
@@ -67,8 +70,10 @@ export function useCommunityTopicActions({
           ...(currentAuthorName ? { authorName: currentAuthorName } : {}),
           ...(currentAuthorAvatarUrl ? { authorAvatarUrl: currentAuthorAvatarUrl } : {}),
         });
-        recordReplyCreated(selectedTopic.id);
-        await refreshReply(selectedTopic.id, input.replyToPostId);
+        const nextPage = input.replyToPostId
+          ? replyPage
+          : Math.max(1, Math.ceil((replyTotal + 1) / COMMUNITY_REPLY_PAGE_SIZE));
+        await goToReplyPage(nextPage);
         notifySuccess('回复发布成功');
         return true;
       } catch (error) {
@@ -82,8 +87,9 @@ export function useCommunityTopicActions({
       currentAuthorAvatarUrl,
       currentAuthorName,
       currentUserId,
-      refreshReply,
-      recordReplyCreated,
+      goToReplyPage,
+      replyPage,
+      replyTotal,
       selectedTopic,
     ],
   );
@@ -200,7 +206,7 @@ export function useCommunityTopicActions({
           selectedTopic.author.id,
           helpful,
         );
-        await refreshReply(selectedTopic.id, postId);
+        await goToReplyPage(replyPage);
         notifySuccess(helpful ? '已标记为有帮助' : '已取消有帮助');
         return true;
       } catch (error) {
@@ -212,7 +218,7 @@ export function useCommunityTopicActions({
         setHelpfulPostId(null);
       }
     },
-    [refreshReply, selectedTopic],
+    [goToReplyPage, replyPage, selectedTopic],
   );
 
   return {

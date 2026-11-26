@@ -103,7 +103,7 @@ export function BotManagementRuntimeItems({
               发起评测
             </Button>
           ) : null}
-          {isServiceBot && !isAgentCodingBot && bot.evalGateVisible === true && onOpenEvalHistory ? (
+          {isServiceBot && !isAgentCodingBot && onOpenEvalHistory ? (
             <Button
               variant="ghost"
               size="sm"
@@ -143,8 +143,6 @@ export function BotManagementRuntimeItems({
                     ? 'TeClaw 暂不支持重启容器'
                     : restartDisabledReason && !bot.actions.includes('restart')
                     ? restartDisabledReason
-                    : isAgentCodingBot
-                    ? 'Bot 卡住或没有响应时，可以尝试重启。重启前可能按引擎策略同步模板配置；不会改变服务发布版本'
                     : 'Bot 卡住或没有响应时，可以尝试重启。不改变 Bot 已保存的配置和发布版本'
                 }
               >
@@ -170,7 +168,7 @@ export function BotManagementRuntimeItems({
                     ? 'TeClaw 暂不支持重启发布'
                     : restartPublishDisabledReason && !bot.actions.includes('restart_publish')
                     ? restartPublishDisabledReason
-                    : '指重新启动该服务已发布环境（试运行环境／正式运行环境）的运行时，不影响草稿机器。'
+                    : '指重新启动该服务已发布环境（预发/线上）的运行时，不影响草稿机器。'
                 }
               >
                 {actionLabel.restart_publish}

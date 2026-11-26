@@ -6,19 +6,7 @@ from enum import StrEnum
 
 
 class AdmissionMode(StrEnum):
-    """How an operation admits an application caller with no human on the wire.
-
-    Engine-scoped members carry their shared allowlist. They do not replace the
-    operation's Owner or application checks.
-    """
-
-    engines: frozenset[str]
-
-    def __new__(cls, value: str, engines: tuple[str, ...] = ()) -> AdmissionMode:
-        member = str.__new__(cls, value)
-        member._value_ = value
-        member.engines = frozenset(engines)
-        return member
+    """How an operation admits an application caller with no human on the wire."""
 
     GRANT_CHECKED_OWN_BOT = "grant-checked"
     GRANT_CHECKED_ADDRESSED_BOT = "grant-checked-owner-addressed"
@@ -29,6 +17,5 @@ class AdmissionMode(StrEnum):
     #: by ``require_delegated_user`` before the handler runs; a bot grant
     #: cannot serve here because there is no bot for it to name yet.
     USER_DELEGATED = "user-delegated"
-    ENGINE_CODING = ("engine-coding", ("aicoding", "claude_code"))
     OPEN = "open"
     REFUSED = "refused"

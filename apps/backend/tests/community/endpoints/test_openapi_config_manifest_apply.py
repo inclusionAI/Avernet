@@ -218,7 +218,6 @@ def _await_the_background_apply(_response, world) -> None:
     ]
     assert enqueued, "the accepted apply enqueued no task"
     for task in enqueued:
-        assert task.payload["permission_subject"] == _OWNER
         # The route applies a whole document to a bot that already exists, so it
         # names no phase and the payload says so. A phase here would mean the
         # route had quietly become a creation half and delivered a fraction of
@@ -270,51 +269,6 @@ def apply_returns_202_with_a_handle():
     """Apply does not block: it answers 202 with an ``apply_id`` and continues
     in the background. A caller holding an HTTP connection across device I/O —
     and, from W5, network fetching — is a caller timing out."""
-
-
-def _app_principal() -> str:
-    from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
-
-    now = int(time.time())
-    return jwt.encode({"iss": "gateway", "aud": "backend", "iat": now, "exp": now + 3600,
-        "principals": [{"type": "app", "tenant": DEFAULT_AVERNET_TENANT,
-                        "app": {"app_id": 701, "app_name": "manifest-test",
-                                "owners": _OWNER, "tenant": DEFAULT_AVERNET_TENANT}}]}, _KEY, algorithm="HS256")
-
-
-def _seed_granted_app(world) -> None:
-    from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
-
-    _seed_bot_with_manifest(world)
-    world.get(BotAppGrantServiceProtocol).grant(bot_id=_BOT_ID, user_id=_OWNER,
-                                               owner_id=_OWNER, app_id=701, app_name="manifest-test")
-
-
-@endpoint_test(
-    method="POST",
-    path="/openapi/v1/bots/{bot_id}/config-manifest/apply",
-    scenario="delegated_app_uses_delegating_user_permission_subject",
-    input=CaseInput(path_params={"bot_id": _BOT_ID}, query_params=_QUERY,
-                    headers={PRINCIPAL_HEADER: _app_principal()}),
-    seed=_seed_granted_app,
-    expect=ExpectSuccess(status=202, json_contains={"code": 200000}),
-    extra_assertions=(_await_the_background_apply,),
-)
-def delegated_app_apply_selects_permission_subject():
-    """A live Bot grant authorizes observation on behalf of its user."""
-
-
-@endpoint_test(
-    method="POST",
-    path="/openapi/v1/bots/{bot_id}/config-manifest/apply",
-    scenario="app_without_delegation_cannot_apply",
-    input=CaseInput(path_params={"bot_id": _BOT_ID}, query_params=_QUERY,
-                    headers={PRINCIPAL_HEADER: _app_principal()}),
-    seed=_seed_bot_with_manifest,
-    expect=ExpectError(status=404),
-)
-def ungranted_app_cannot_apply():
-    """Naming a target owner alone does not establish delegation."""
 
 
 @endpoint_test(

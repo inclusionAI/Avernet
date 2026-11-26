@@ -13,24 +13,11 @@ export function collectDescendantPaths(resources: BotEditorResource[], folderPat
     .map((item) => item.path);
 }
 
-/** 列出某 path 的所有祖先目录 path(不含自身);例如 `a/b/c` → `['a','a/b']`。root 条目返回空数组。 */
-function ancestorFolderPaths(path: string): string[] {
-  if (!path) return [];
-  const segments = path.split('/').filter(Boolean);
-  const ancestors: string[] = [];
-  for (let i = 1; i < segments.length; i++) {
-    ancestors.push(segments.slice(0, i).join('/'));
-  }
-  return ancestors;
-}
-
 export type ExcludeCheckState = 'checked' | 'unchecked' | 'indeterminate';
 
 /**
  * 对单条资源计算其复选框状态。
  * 'checked' = 已排除;'unchecked' = 未排除;'indeterminate' = 文件夹子树部分排除。
- * 当任一祖先目录位于 `excluded` 时,该后代视为「继承排除」直接判 'checked'(纯视觉继承:
- * 后代展开后自动展示为已排除,不向 `excluded` 写入自身 path)。
  */
 export function excludeCheckState(
   resources: BotEditorResource[],
@@ -39,7 +26,6 @@ export function excludeCheckState(
   type: 'file' | 'folder',
 ): ExcludeCheckState {
   if (excluded.has(path)) return 'checked';
-  if (ancestorFolderPaths(path).some((p) => excluded.has(p))) return 'checked';
   if (type === 'file') return 'unchecked';
   const descendants = collectDescendantPaths(resources, path);
   if (descendants.length === 0) return 'unchecked';

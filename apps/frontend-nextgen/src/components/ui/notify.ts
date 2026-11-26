@@ -19,7 +19,6 @@ export interface NotifyErrorOptions {
 
 const ERROR_DURATION_MS = 6000;
 const SUCCESS_DURATION_MS = 4000;
-const WARNING_DURATION_MS = 5000;
 const ERROR_COOLDOWN_MS = 3000;
 // id -> 冷静到期时间戳(ms)。仅对显式提供 id 的调用生效;不提供 id 的调用不进表,不参与去重。
 const errorCooldown = new Map<string, number>();
@@ -81,9 +80,4 @@ export const notifyError: NotifyErrorFn = Object.assign(
 /** 成功提示:停留 4s。 */
 export function notifySuccess(message: string): void {
   toast.success(message, { duration: SUCCESS_DURATION_MS });
-}
-
-/** 警示提示:用于业务过程完成但结果未通过等非系统错误状态。 */
-export function notifyWarning(message: string): void {
-  toast.warning(message, { duration: WARNING_DURATION_MS });
 }

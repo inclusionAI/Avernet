@@ -592,18 +592,19 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
             # READY/APPLY_FAILED are answerable from the report even then
             # (a later explicit apply — "how is the bot configured now" —
             # is not read here).
-            if report.status is ApplyStatus.SUCCEEDED and (
-                report.trigger == CREATE_ON_CONTAINER_TRIGGER
-                or job.status is TaskStatus.SUCCEEDED
-            ):
+            if report.status is ApplyStatus.SUCCEEDED:
                 if bot_status_ in _BOT_UP:
                     return BotState.READY.value
+                # Record-first engines apply before the container: applied,
+                # container still coming.
                 return BotState.PROVISIONING.value
-            if report.status is not ApplyStatus.SUCCEEDED:
-                if (bot_status_ not in _BOT_UP
-                        and bool((bot.get("device_id") or "").strip())):
-                    return BotState.PROVISIONING.value
-                return BotState.APPLY_FAILED.value
+            if (bot_status_ not in _BOT_UP
+                    and bool((bot.get("device_id") or "").strip())):
+                # Mid-boot apply reports may flap FAILED under N-way quota
+                # serialization — a live device binding owns the outcome,
+                # so wait; an UP row keeps its apply verdict.
+                return BotState.PROVISIONING.value
+            return BotState.APPLY_FAILED.value
         if job.status not in TERMINAL_STATUSES:
             # Live job with no creation report yet: every remaining in-flight
             # state (authorization window, creating, applying) reads the same.
@@ -775,3 +776,4 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
                 bot_id, exc,
             )
             return False
+

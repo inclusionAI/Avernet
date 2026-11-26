@@ -96,8 +96,7 @@ class JsonConfigFile:
     async def load(
         cls,
         file_path: Union[str, Path],
-        device_fs: "DeviceFileSystem | None" = None,
-        *, checked: bool = False,
+        device_fs: "DeviceFileSystem | None" = None
     ) -> "JsonConfigFile":
         """Load JSON file into JsonConfigFile instance.
 
@@ -118,11 +117,7 @@ class JsonConfigFile:
         if device_fs:
             # Use DeviceFileSystem (local or Arca)
             logger.info(f"[JsonConfigFile.load] Using DeviceFileSystem: path={str(path)}")
-            if checked:
-                from agentclaw.community.core.devices.services.device_filesystem import checked_read_file
-                content_bytes = await checked_read_file(device_fs, str(path))
-            else:
-                content_bytes = await device_fs.read_file(str(path))
+            content_bytes = await device_fs.read_file(str(path))
             if content_bytes is None:
                 raise FileNotFoundError(f"JSON config file not found: {path}")
             content = content_bytes.decode('utf-8')

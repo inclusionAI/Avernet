@@ -162,7 +162,7 @@ export function loadSessionPage(
       return;
     }
     const hydrateFavorites = () => {
-      if (scope !== 'all' || (origin === 'others' && view.bot.isAgentCodingBot !== true)) return;
+      if (scope !== 'all' || origin === 'others') return;
       void hydrateConversationFavorites(view, userIdNow, result.data, origin, () => {
         const current = useConversationStore.getState();
         return ctx.generation.current === generation && ctx.userId.current === userIdNow &&

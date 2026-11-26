@@ -187,12 +187,10 @@ class BotDormantModule(Module):
         self,
         db: DatabasePlugin,
         config: TaskQueueConfig,
-        notify_config: DormantNotifyConfig,
         engine_test: Callable[[], TeclawEngineTestProtocol],
     ) -> BotRecycleRepositoryProtocol:
         return RecycleRepository(
             db, config.app,
-            action_link_pattern=notify_config.action_link_pattern,
             validate_activation=lambda bot: validate_activation(
                 bot, lambda engine: engine_test().is_teclaw(engine)
             ),
@@ -266,12 +264,6 @@ class BotDormantModule(Module):
             finally:
                 locks.release(env, entity, bot["bot_id"], lock.lock_token)
 
-        runtime = ManagedRecycleRuntime(
-            lambda: injector.get(DeviceService),
-            bots,
-            dependencies,
-            lambda: injector.get(ArcaRecycleTransport),
-        )
         return RecycleOperations(
             store=store,
             queue=queue,
@@ -279,8 +271,12 @@ class BotDormantModule(Module):
             app=config.app,
             worker_enabled=worker.enabled,
             is_teclaw=lambda engine: engine_test().is_teclaw(engine),
-            should_queue=runtime.should_queue,
-            runtime=runtime,
+            runtime=ManagedRecycleRuntime(
+                lambda: injector.get(DeviceService),
+                bots,
+                dependencies,
+                lambda: injector.get(ArcaRecycleTransport),
+            ),
         )
 
     @singleton

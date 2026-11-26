@@ -11,10 +11,6 @@ class BaasBotNotFoundError(BaasServiceError):
     """BaaS confirms that the target Bot no longer exists."""
 
 
-class BaasNoDevicesFoundError(BaasServiceError):
-    """BaaS confirms that the Bot has no device records."""
-
-
 class BaasNoActiveDevicesError(BaasServiceError):
     """BaaS confirms that the Bot currently has no active device."""
 
@@ -34,7 +30,6 @@ class BaasTransientServiceError(BaasServiceError):
 
 __all__ = [
     "BaasBotNotFoundError",
-    "BaasNoDevicesFoundError",
     "BaasNoActiveDevicesError",
     "BaasServiceError",
     "BaasTransientServiceError",

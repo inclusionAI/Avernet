@@ -81,9 +81,7 @@ async def list_sessions(
     # Legacy page-number behavior is intentionally unchanged, including its
     # owner-only source filter and the separately authorized friend backend.
     params: dict[str, Any] = _window(page)
-    if facts is not None and (
-        f_user_id is not None or facts.owner_id == user_id
-    ):
+    if (facts.owner_id if facts is not None else owner_id) == user_id:
         params.update(user_id=user_id, source="all_but_others")
     if agent_id:
         params["agent_id"] = agent_id

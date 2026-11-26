@@ -9,13 +9,12 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_collaborator.models import BotCollabLockRecord, BotCollabLogRecord, CollaboratorRecord
 
 
-@runtime_checkable
 class CollaboratorRepositoryProtocol(Protocol):
     """Bot 协作者数据访问接口。
 

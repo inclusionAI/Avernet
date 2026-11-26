@@ -1,14 +1,12 @@
-"""Owned-session authorization shared by subject-scoped file operations."""
-
-import asyncio
+"""Owned-session authorization shared by friend-chat file operations."""
 
 from dataclasses import dataclass
 
 from fastapi import Request
 
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.friend_chat import authorize_friend_chat
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import resolve_operable_bot
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.backend import resolve_session_backend
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
 from agentclaw.community.api.human_bot_friendship_service import HumanBotFriendshipServiceProtocol
@@ -21,6 +19,7 @@ from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError as ChatSessionNotFoundError,
     ConnectionError,
 )
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingTarget
 
 
 @dataclass(frozen=True)
@@ -29,7 +28,6 @@ class SessionFileAccess:
 
     facts: BotFacts
     stage: str
-    session_user_id: str | None = None
 
 
 async def authorize_file_list(
@@ -37,17 +35,20 @@ async def authorize_file_list(
     owner_id: str, stage: RuntimeStage, friend_user_id: str | None,
     relay: EngineRuntimeRelayProtocol, friendships: HumanBotFriendshipServiceProtocol,
     expert: ExpertChatServiceProtocol,
+    runtime_target: RuntimeBindingTarget = RuntimeBindingTarget.AUTO,
 ) -> str:
-    facts = await resolve_session_backend(
-        relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id,
-        friend_user_id=friend_user_id, stage=stage,
-    )
-    if facts is not None:
+    if friend_user_id is None:
+        await resolve_operable_bot(
+            relay, bot_id, caller_id=user_id, owner_id=owner_id,
+            stage=stage.value, surface="sessions",
+        )
         return stage.value
-    assert friend_user_id is not None
-    resolved_stage = await asyncio.to_thread(
-        expert.resolve_chat_stage, bot_id, owner_id, stage.value,
+    # Friend authorization grants access only to the friend's conversation runtime.
+    if runtime_target is RuntimeBindingTarget.CALLER_SERVICE:
+        raise EngineResourceNotFoundError("service runtime selection is unavailable for friend chat")
+    resolved_stage = await authorize_friend_chat(
+        request=request, bot_id=bot_id, caller_id=user_id, owner_id=owner_id,
+        friend_user_id=friend_user_id, friendships=friendships, expert=expert, stage=stage.value,
     )
     try:
         # The subject's independent Caller container or shared-runtime session
@@ -69,13 +70,15 @@ async def authorize_file_operation(
     owner_id: str, stage: RuntimeStage, friend_user_id: str | None,
     relay: EngineRuntimeRelayProtocol, friendships: HumanBotFriendshipServiceProtocol,
     expert: ExpertChatServiceProtocol,
-    require_explicit_subject: bool = False,
+    runtime_target: RuntimeBindingTarget = RuntimeBindingTarget.AUTO,
+    require_caller_instance: bool = False,
 ) -> SessionFileAccess:
     """Authorize an operator or the Human owning a non-TeClaw friend session.
 
-    Upload completion/status preserve the legacy implicit friend authorization.
-    New runtime selections (upload intent/delete) require an explicit subject
-    so an omitted ``f_user_id`` always addresses the operator's service stage.
+    Upload requests do not historically carry ``f_user_id``.  An operator is
+    therefore attempted first; only its masked not-found result can fall back
+    to friend authorization, which still requires a live BCN friendship and an
+    owned session.  The fallback never turns a friend into a Bot collaborator.
     """
     if friend_user_id is None:
         try:
@@ -85,20 +88,17 @@ async def authorize_file_operation(
             )
             return SessionFileAccess(facts=facts, stage=stage.value)
         except ManagedBotNotFoundError:
-            if require_explicit_subject:
-                raise
             friend_user_id = user_id
 
-    facts = await resolve_session_backend(
-        relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id,
-        friend_user_id=friend_user_id, stage=stage, device_uuid=None,
-    )
-    if facts is not None:
-        return SessionFileAccess(facts=facts, stage=stage.value)
-    assert friend_user_id is not None
-    resolved_stage = await asyncio.to_thread(
-        expert.resolve_chat_stage, bot_id, owner_id, stage.value,
+    if require_caller_instance and runtime_target is not RuntimeBindingTarget.CALLER_INSTANCE:
+        raise EngineResourceNotFoundError(
+            "caller instance selection is required for friend session files"
+        )
+
+    resolved_stage = await authorize_friend_chat(
+        request=request, bot_id=bot_id, caller_id=user_id, owner_id=owner_id,
+        friend_user_id=friend_user_id, friendships=friendships, expert=expert,
+        stage=stage.value,
     )
     try:
         await expert.get_owned_chat_session(
@@ -115,4 +115,4 @@ async def authorize_file_operation(
         raise EngineResourceNotFoundError(
             "friend session files are unavailable for TeClaw"
         )
-    return SessionFileAccess(facts=facts, stage=resolved_stage, session_user_id=friend_user_id)
+    return SessionFileAccess(facts=facts, stage=resolved_stage)

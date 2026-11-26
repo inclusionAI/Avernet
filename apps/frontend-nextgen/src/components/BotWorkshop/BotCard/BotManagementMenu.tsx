@@ -119,7 +119,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
                     }}
                   >
                     {copyAvailability.enabled ? (
-                      <ActionHelp description="仅支持 openclaw 引擎的 Bot 复制">复制 Bot</ActionHelp>
+                      '复制 Bot'
                     ) : (
                       <ActionHelp description={copyAvailability.disabledReason ?? '当前不可复制'}>复制 Bot</ActionHelp>
                     )}

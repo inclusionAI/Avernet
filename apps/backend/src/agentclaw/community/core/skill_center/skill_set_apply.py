@@ -78,4 +78,3 @@ class SkillSetApplyResult:
     runtime_projection: dict[str, Any]
     default_changed: bool
     default_removed: bool
-    delivered_mcp_codes: frozenset[str] = frozenset()

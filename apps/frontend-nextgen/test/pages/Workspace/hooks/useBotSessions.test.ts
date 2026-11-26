@@ -419,7 +419,7 @@ it('展开「好友 Bot」分类下的 bot：按 isFriendBot 调用会话列表�
   useWorkspaceStore.getState().setView('chat');
   const { result } = renderHook(() => useBotSessions([friendBot], ['botfriend:999'], 'human_900003', false));
   // 懒加载必须以好友 bot 实体（isFriendBot=true、realBotId 拆分）与当前用户 id 调用 listSessionsPage；
-  // 服务层 withConversationSubjectParams 据此在 GET /openapi/v1/bots/{realBotId}/sessions 上附带 f_user_id。
+  // 服务层 withFriendBotRequestParams 据此在 GET /openapi/v1/bots/{realBotId}/sessions 上附带 f_user_id。
   await waitFor(() => expect(svc.listSessionsPage).toHaveBeenCalledWith(friendBot, 'human_900003', 1, 10));
   const [calledBot] = svc.listSessionsPage.mock.calls[0];
   expect(calledBot.isFriendBot).toBe(true);

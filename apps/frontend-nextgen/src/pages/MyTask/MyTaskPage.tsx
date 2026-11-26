@@ -37,7 +37,6 @@ export default function MyTaskPage() {
   const routineBots = useMemo(() => (currentRoutineBot ? [currentRoutineBot] : []), [currentRoutineBot]);
   const selectedRoutineBotId = currentRoutineBot?.botId ?? '';
 
-  const [userTaskKeyword, setUserTaskKeyword] = useState('');
   const [userTaskPage, setUserTaskPage] = useState(DEFAULT_PAGE);
   const [userTaskPageSize, setUserTaskPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [userTaskStatusFilter, setUserTaskStatusFilter] = useState<UserTaskStatusFilter>('all');
@@ -59,7 +58,6 @@ export default function MyTaskPage() {
     userTaskPageSize,
     userTaskStatusFilter,
     isUserIdentity && Boolean(ownerUserId),
-    userTaskKeyword,
   );
   const { chatBots, isLoading: ownedBotsLoading } = useOwnedBots(
     ownerUserId || null,
@@ -157,8 +155,6 @@ export default function MyTaskPage() {
               loading={humanIdentityStatus === 'loading' || ownedBotsLoading || teamBotsLoading || userLoading}
               error={userError}
               statusFilter={userTaskStatusFilter}
-              keyword={userTaskKeyword}
-              onKeywordChange={setUserTaskKeyword}
               onStatusFilterChange={(status) => {
                 setUserTaskStatusFilter(status);
                 setUserTaskPage(DEFAULT_PAGE);

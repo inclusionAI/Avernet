@@ -143,7 +143,7 @@ class _InlineQueue:
         return (None, True)
 
 
-def _world(*, bot, mode, platform_activation=None, redeliver=None, capability_projection=None, passport=None, server_permission_check=None):
+def _world(*, bot, mode, platform_activation=None, redeliver=None, capability_projection=None):
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -185,7 +185,7 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None, capability_pr
     # names the shape the effective provider would have built.
     teclaw = (
         TeclawPlatformDelivery(
-            ports=platform_ports, redeliver=redeliver or no_redeliver, passport=passport,
+            ports=platform_ports, redeliver=redeliver or no_redeliver
         )
         if mode is TeclawDeliveryMode.PLATFORM
         else TeclawDeviceDelivery(
@@ -201,7 +201,6 @@ def _world(*, bot, mode, platform_activation=None, redeliver=None, capability_pr
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(bot),
         capability_projection=capability_projection,
-        server_permission_check=server_permission_check,
         delivery_strategies=DeliveryStrategyFactory(
             family_of=family_from_engine_test(teclaw_engine_test),
             strategies={
@@ -637,31 +636,3 @@ def test_the_folded_category_order_is_untouched() -> None:
         Category.MCP,
         Category.SKILLS,
     ]
-
-
-@pytest.mark.parametrize("trigger", [triggers.PUT, triggers.EXPLICIT])
-def test_platform_apply_reports_permission_after_artifact_and_passport_confirm(trigger):
-    from agentclaw.community.core.ports.manifest_delivery import ManifestDeliveryReceipt, ManifestDeliveryStatus
-
-    class Redelivery:
-        async def deliver_with_receipt(self, ctx):
-            return ManifestDeliveryReceipt(status=ManifestDeliveryStatus.CONFIRMED, delivered_mcp_codes=frozenset({"github"}))
-    async def passport(ctx):
-        return RuntimeProjectionResult(status=RuntimeProjectionStatus.CONVERGED,
-            passport_updated=True, passport_mcp_codes=frozenset({"github"}))
-    checks = []
-    def check(user, code, timeout):
-        checks.append((user, code))
-        return False
-    service, _, activation = _world(bot=_TECLAW_BOT, mode=TeclawDeliveryMode.PLATFORM,
-                                    redeliver=Redelivery(), passport=passport,
-                                    server_permission_check=check)
-    for _ in range(2):
-        accepted = service.start_apply(entity_id=_ENTITY, bot_id=_BOT, bot=_TECLAW_BOT,
-            owner_id=_ENTITY, actor_id=_ENTITY, state=MANIFEST_STATE, trigger=trigger,
-            permission_subject=_ENTITY)
-        report = service.get_apply(entity_id=_ENTITY, bot_id=_BOT, apply_id=accepted.apply_id)
-        assert report.status is ApplyStatus.SUCCEEDED
-        assert len(report.notes) == 1 and "github" in report.notes[0]
-    assert activation.installed == {"github"}
-    assert checks == [(_ENTITY, "github"), (_ENTITY, "github")]

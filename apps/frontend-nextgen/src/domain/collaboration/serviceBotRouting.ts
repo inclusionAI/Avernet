@@ -1,4 +1,3 @@
-import { serviceBotStageLabel } from '@/domain/botWorkshop';
 export type ServiceBotStage = 'online' | 'verify' | 'draft';
 export type ServiceBotRoutingMode = 'dynamic' | 'specified';
 export type ParticipantRoutingState =
@@ -7,9 +6,9 @@ export type ParticipantRoutingState =
 export type ParticipantRoutingStates = Record<string, ParticipantRoutingState>;
 
 export const SERVICE_BOT_STAGE_OPTIONS: Array<{ value: ServiceBotStage; label: string }> = [
-  { value: 'online', label: serviceBotStageLabel.online },
-  { value: 'verify', label: serviceBotStageLabel.verify },
-  { value: 'draft', label: serviceBotStageLabel.draft },
+  { value: 'online', label: '生产' },
+  { value: 'verify', label: '预发' },
+  { value: 'draft', label: '草稿' },
 ];
 
 export function areParticipantRoutesReady(actorIds: string[], states: ParticipantRoutingStates): boolean {

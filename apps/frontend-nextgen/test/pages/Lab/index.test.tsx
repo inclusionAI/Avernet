@@ -68,10 +68,7 @@ describe('LabLandingPage', () => {
     const community = within(screen.getByRole('article', { name: '社区' }));
     fireEvent.click(community.getByRole('button', { name: /我要反馈/ }));
     // 反馈弹窗渲染标题/提交按钮（FeedbackModal 走 /openapi/v1/collaboration/tasks/feedback §5.2.1）。Toast 占位已下线。
-    expect(screen.getByRole('button', { name: '提交' })).toBeInTheDocument();
-    expect(screen.getByText('0/4000')).toBeVisible();
-    fireEvent.change(screen.getByRole('textbox', { name: '反馈内容' }), { target: { value: '建议' } });
-    expect(screen.getByText('2/4000')).toBeVisible();
+    expect(screen.getByRole('button', { name: '提交反馈' })).toBeInTheDocument();
     expect(screen.getByText('反馈关于实验性功能（社区等）的体验与建议，我们会持续优化。')).toBeInTheDocument();
     expect(toastInfo).not.toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();

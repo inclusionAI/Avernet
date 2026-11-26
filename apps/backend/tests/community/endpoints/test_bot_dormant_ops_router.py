@@ -68,19 +68,6 @@ def _seed_activate_error(world) -> None:
     _seed_bot(world, status="PENDING")
 
 
-def _assert_sync_recycle_has_no_queue(response, world):
-    from agentclaw.community.core.repository.protocols.bot.recycle import BotRecycleRepositoryProtocol
-    from agentclaw.community.core.task_queue.repository.models import TaskQueueModel
-    from agentclaw.community.plugin_api.database import DatabasePlugin
-
-    data = response.json()["data"]
-    assert data["operation_id"] is None and data["phase"] is None
-    bot = world.get(BotRecycleRepositoryProtocol).read(_BOT_ID, _OWNER_ID)
-    assert bot["status"] == "RECYCLED" and bot["binding_id"] is None
-    with world.get(DatabasePlugin).orm_session() as session:
-        assert session.query(TaskQueueModel).filter(TaskQueueModel.task_type == "bot.recycle").count() == 0
-
-
 @endpoint_test(
     method="POST",
     path="/api/internal/dormant/recycle-one",
@@ -95,12 +82,10 @@ def _assert_sync_recycle_has_no_queue(response, world):
         },
     ),
     seed=_seed_recycle_ok,
-    expect=ExpectSuccess(status=200, json_contains={"ok": True, "data": {
-        "status": "recycled", "operation_id": None, "phase": None}}),
-    extra_assertions=(_assert_sync_recycle_has_no_queue,),
+    expect=ExpectSuccess(status=200, json_contains={"ok": True}),
 )
 def recycle_one_ok():
-    """A non-fastdisk Bot completes synchronously without a queue or handle."""
+    """Happy path: ops recycle-one returns the manual recycle result."""
     pass
 
 
@@ -210,66 +195,3 @@ def activate_one_ok():
 def activate_one_err():
     """Error path: invalid activation state is surfaced as HTTP 400."""
     pass
-
-
-def _seed_recycle_operation(world):
-    from agentclaw.community.core.repository.protocols.bot.recycle import BotRecycleRepositoryProtocol
-    from agentclaw.community.di.config import TaskQueueConfig
-    from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
-    from agentclaw.community.utils.env_utils import get_current_env
-
-    _seed_recycle_ok(world)
-    store = world.get(BotRecycleRepositoryProtocol)
-    bot = store.read(_BOT_ID, _OWNER_ID)
-    store.ensure({
-        "bot_id": _BOT_ID, "owner_id": _OWNER_ID, "bot_pk": bot["id"],
-        "operation_id": "ops-query", "app": world.get(TaskQueueConfig).app,
-        "tenant": get_current_avernet_tenant(), "env": get_current_env(),
-        "engine": bot["active_engine"], "source": "manual_ops",
-        "target": {"binding_id": None, "provider": None, "device_id": None},
-    }, 1)
-
-
-@endpoint_test(
-    method="GET",
-    path="/api/internal/dormant/bots/{bot_id}/recycle-operations/{operation_id}",
-    scenario="ok",
-    input=CaseInput(headers=_AUTH_HEADERS,
-                    path_params={"bot_id": _BOT_ID, "operation_id": "ops-query"},
-                    query_params={"owner_id": _OWNER_ID}),
-    seed=_seed_recycle_operation,
-    expect=ExpectSuccess(status=200, json_contains={"ok": True, "data": {
-        "bot_id": _BOT_ID, "operation_id": "ops-query", "phase": "QUEUED"}}),
-)
-def recycle_operation_ok():
-    """The real shared repository supplies the read-only operation projection."""
-
-
-@endpoint_test(
-    method="GET",
-    path="/api/internal/dormant/bots/{bot_id}/recycle-operations/{operation_id}",
-    scenario="not_found",
-    input=CaseInput(headers=_AUTH_HEADERS,
-                    path_params={"bot_id": _BOT_ID, "operation_id": "old"},
-                    query_params={"owner_id": _OWNER_ID}),
-    seed=_seed_recycle_operation,
-    expect=ExpectError(status=404, json_contains={"detail": "Recycle operation not found"}),
-)
-def recycle_operation_not_found():
-    """Replaced or mismatched handles do not expose another operation."""
-
-
-@endpoint_test(
-    method="POST",
-    path="/api/internal/dormant/recycle-one",
-    scenario="already_queued",
-    input=CaseInput(
-        headers=_AUTH_HEADERS,
-        json_body={"bot_id": _BOT_ID, "owner_id": _OWNER_ID, "dry_run": False},
-    ),
-    seed=_seed_recycle_operation,
-    expect=ExpectSuccess(status=202, json_contains={"ok": True, "data": {
-        "operation_id": "ops-query", "phase": "QUEUED", "changed": False}}),
-)
-def recycle_one_already_queued():
-    """Existing async admission wins over the synchronous fallback on retries."""

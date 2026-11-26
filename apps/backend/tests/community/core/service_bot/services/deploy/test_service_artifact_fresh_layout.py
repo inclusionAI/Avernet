@@ -289,7 +289,6 @@ def test_legacy_manifest_requires_center_delivery_iff_center_skills_exist() -> N
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("engine", ["openclaw", "aicoding"])
 @pytest.mark.parametrize(
     ("v3_supported", "store_ready", "expected_error"),
     [
@@ -299,18 +298,9 @@ def test_legacy_manifest_requires_center_delivery_iff_center_skills_exist() -> N
     ],
 )
 def test_legacy_center_build_without_pool_preparation(
-    engine, v3_supported, store_ready, expected_error
+    v3_supported, store_ready, expected_error
 ) -> None:
     active = "/home/admin/.openclaw/workspace/skills"
-    local = f"{active}/skills-local"
-    repo = f"{active}/skills-repo"
-    center = _CENTER_ROOT
-    if engine == "aicoding":
-        active = "/home/admin/.claude/skills"
-        local = "/home/admin/.aicoding/workspace/skills/skills-local"
-        repo = "/home/admin/.aicoding/skills-repo"
-        center = "/home/admin/.aicoding/workspace/skills-pool/skill-center"
-    bot = {**_bot(), "active_engine": "claude_code" if engine == "aicoding" else engine}
     mappings = [MAPPING_CONTRACT_VERSION]
     if v3_supported:
         mappings.append(MAPPING_V3_CONTRACT_VERSION)
@@ -318,55 +308,33 @@ def test_legacy_center_build_without_pool_preparation(
         "success": True,
         "data": {
             "status": "READY",
-            "engine": engine,
+            "engine": "openclaw",
             "layout_contract_version": "skills-pool-p3-v1",
             "preparation_id": None,
             "evidence": {
                 "source_layout": "legacy",
                 "supported_mapping_contract_versions": mappings,
                 "resolved_layout": {
-                    "engine": engine,
+                    "engine": "openclaw",
                     "layout_contract_version": "skills-pool-p3-v1",
                     "active_root": active,
-                    "local_root": local,
-                    "repo_root": repo,
-                    "pool_center": center,
+                    "local_root": f"{active}/skills-local",
+                    "repo_root": f"{active}/skills-repo",
+                    "pool_center": _CENTER_ROOT,
                 },
             },
         },
     }
     normal_probe = CurrentRuntimeLayoutProbeService._parse_response(
-        wire_response, engine=engine
+        wire_response, engine="openclaw"
     )
     assert normal_probe.status is RuntimeLayoutProbeStatus.INVALID
     service_probe = CurrentRuntimeLayoutProbeService._parse_response(
-        wire_response, engine=engine, for_service_build=True
+        wire_response, engine="openclaw", for_service_build=True
     )
     observed = ServiceArtifactLayoutObservation.from_probe(
-        service_probe, expected_engine=engine
+        service_probe, expected_engine="openclaw"
     )
-
-    assert observed.status is RuntimeLayoutProbeStatus.READY
-    if engine == "aicoding":
-        wrong_roots = wire_response["data"]["evidence"]["resolved_layout"]
-        for key in ("active_root", "local_root", "repo_root", "pool_center"):
-            invalid_probe = CurrentRuntimeLayoutProbeService._parse_response(
-                {
-                    **wire_response,
-                    "data": {
-                        **wire_response["data"],
-                        "evidence": {
-                            **wire_response["data"]["evidence"],
-                            "resolved_layout": {**wrong_roots, key: "/tmp/other-root"},
-                        },
-                    },
-                },
-                engine=engine,
-                for_service_build=True,
-            )
-            assert ServiceArtifactLayoutObservation.from_probe(
-                invalid_probe, expected_engine=engine
-            ).status is RuntimeLayoutProbeStatus.INVALID
 
     asset = _center_asset()
     builder = _builder(
@@ -374,17 +342,17 @@ def test_legacy_center_build_without_pool_preparation(
     )
     if expected_error is not None:
         with pytest.raises(ServiceSkillsManifestError) as raised:
-            builder.capture(bot=bot, layout_observation=observed)
+            builder.capture(bot=_bot(), layout_observation=observed)
         assert raised.value.code is expected_error
         return
 
-    captured = builder.capture(bot=bot, layout_observation=observed)
-    manifest = builder.finalize(captured=captured, bot=bot)
+    captured = builder.capture(bot=_bot(), layout_observation=observed)
+    manifest = builder.finalize(captured=captured, bot=_bot())
     assert manifest["active_layout"] == "legacy"
     assert manifest["center_skills"][0]["sc_version_number"] == "1.0.0"
     assert [item["corpus"] for item in manifest["shared_corpora"]] == ["center"]
 
     pool_builder = _builder(_pool_state(), _Reader((asset,)))
     with pytest.raises(ServiceSkillsManifestError) as raised:
-        pool_builder.capture(bot=bot, layout_observation=observed)
+        pool_builder.capture(bot=_bot(), layout_observation=observed)
     assert raised.value.code is ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_INVALID

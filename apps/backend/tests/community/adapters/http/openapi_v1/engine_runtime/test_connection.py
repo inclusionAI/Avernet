@@ -270,24 +270,6 @@ def test_explicit_friend_connection_requires_session_id(client, friendships, exp
     assert expert.calls == []
 
 
-def test_owner_caller_connection_uses_the_subject_instance(
-    client, relay, connections, friendships, expert
-):
-    relay.set_bot_type("service")
-    relay.set_call_type("caller")
-
-    data = ok(client.get(URL, params={
-        "owner_id": OWNER, "f_user_id": OWNER,
-        "session_id": "caller-session", "stage": "online",
-    }))
-
-    assert data["engine"] == "openclaw"
-    assert connections.calls == []
-    assert friendships.calls == []
-    connect = next(call for call in expert.calls if call[0] == "connect_chat_session")
-    assert connect[2]["user_id"] == OWNER
-
-
 def test_friend_connection_preserves_not_ready_polling_contract(
     client, friendships, expert
 ):
@@ -430,10 +412,6 @@ def test_baas_http_failure_through_device_router_and_public_api(
     class _M(Module):
         def configure(self, binder):
             binder.bind(EngineConnectionServiceProtocol, to=connection_service)
-            # The public router also owns subject-scoped Caller routing;
-            # this case omits f_user_id, so the relay is bound only to
-            # satisfy the complete production dependency graph.
-            binder.bind(EngineRuntimeRelayProtocol, to=Mock())
             binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
             binder.bind(ExpertChatServiceProtocol, to=expert)
             binder.bind(GatewayEndpoint, to=GatewayEndpoint(base_url="https://gw.example"))

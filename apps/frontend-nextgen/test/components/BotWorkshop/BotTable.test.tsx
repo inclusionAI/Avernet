@@ -66,7 +66,7 @@ function containersCell() {
 describe('BotTable 表格结构', () => {
   const bot = mapBotDto({ bot_id: 'b1', bot_name: 'Openclaw Bot', engine: 'openclaw', status: 'ACTIVE' }).item;
 
-  test('试运行服务 Bot 使用试运行验证按钮打开详情', () => {
+  test('预发服务 Bot 使用预发验证按钮打开详情，而不是进入对话协作', () => {
     const serviceBot = mapBotDto({
       bot_id: 'verify-bot', bot_name: '验证 Bot', engine: 'openclaw', bot_type: 'service',
       status: 'ACTIVE', publish: { id: 1, status: 'VALIDATING', version: 1 },
@@ -82,8 +82,7 @@ describe('BotTable 表格结构', () => {
         chat: getInventoryActionAvailability(item, 'chat'),
       }),
     });
-    expect(cellForHeader('状态')).toHaveTextContent('试运行');
-    fireEvent.click(screen.getByRole('button', { name: '试运行验证 验证 Bot' }));
+    fireEvent.click(screen.getByRole('button', { name: '预发验证 验证 Bot' }));
     expect(onEdit).toHaveBeenCalledWith(serviceBot);
     expect(onConversation).not.toHaveBeenCalled();
   });

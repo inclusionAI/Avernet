@@ -9,7 +9,7 @@ so this single body runs unchanged on OceanBase (prod) and SQLite
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from injector import inject
 from sqlalchemy import func
@@ -79,8 +79,7 @@ class TemplateRepository(
             template = find_template(db, bot_id)
             return template.to_dict() if template else None
 
-    def update_by_bot_id(self, bot_id: str, update_data: Dict[str, Any], *,
-                         validator: Callable[[Dict[str, Any]], None] | None = None) -> Optional[Dict[str, Any]]:
+    def update_by_bot_id(self, bot_id: str, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Update template by bot_id.
 
         Args:
@@ -90,14 +89,12 @@ class TemplateRepository(
         Returns:
             Updated template record as dictionary, or None if not found
         """
-        session = self._db.transactional_orm_session if validator is not None else self._db.orm_session
-        with session() as db:
-            query = db.query(TemplateModel).filter(TemplateModel.bot_id == bot_id)
-            template = query.with_for_update().first() if validator is not None else query.first()
+        with self._db.orm_session() as db:
+            template = db.query(TemplateModel).filter(
+                TemplateModel.bot_id == bot_id
+            ).first()
             if not template:
                 return None
-            if validator is not None:
-                validator(json.loads(template.ext) if template.ext else {})
 
             data = dict(update_data)
             if "ext" in data and data["ext"] is not None:

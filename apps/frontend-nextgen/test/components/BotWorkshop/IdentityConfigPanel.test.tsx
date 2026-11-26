@@ -46,59 +46,6 @@ test('编辑进入编辑态,修改后保存携带最新内容', async () => {
   await waitFor(() => expect(onSave).toHaveBeenCalledWith('RULES', '改后的内容'));
 });
 
-test('保存成功后退回预览态展示已保存内容', async () => {
-  render(
-    <IdentityConfigPanel files={files} editable getFile={async () => '原文 RULES'} onSave={jest.fn().mockResolvedValue(undefined)} />,
-  );
-  await screen.findByText('原文 RULES');
-
-  fireEvent.click(screen.getByRole('button', { name: '编辑' }));
-  fireEvent.change(screen.getByRole('textbox'), { target: { value: '改后的内容' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存' }));
-
-  // 编辑器消失,预览区渲染保存后的最新内容
-  await waitFor(() => expect(screen.queryByRole('textbox')).not.toBeInTheDocument());
-  expect(await screen.findByText('改后的内容')).toBeInTheDocument();
-});
-
-test('保存失败保持编辑态不退出', async () => {
-  render(
-    <IdentityConfigPanel files={files} editable getFile={async () => '原文 RULES'} onSave={jest.fn().mockRejectedValue(new Error('保存失败'))} />,
-  );
-  await screen.findByText('原文 RULES');
-
-  fireEvent.click(screen.getByRole('button', { name: '编辑' }));
-  fireEvent.change(screen.getByRole('textbox'), { target: { value: '改后的内容' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存' }));
-
-  await waitFor(() => expect(screen.queryByText('原文 RULES')).not.toBeInTheDocument());
-  // 等待 promise 落定后仍停留在编辑态
-  await waitFor(() => expect(screen.getByRole('textbox')).toBeInTheDocument());
-  expect(screen.getByRole('textbox')).toHaveValue('改后的内容');
-});
-
-test('保存进行中保存按钮禁用且展示 loading 图标', async () => {
-  let resolveSave: (() => void) | undefined;
-  const onSave = jest.fn(() => new Promise<void>((resolve) => { resolveSave = resolve; }));
-  render(
-    <IdentityConfigPanel files={files} editable getFile={async () => '原文 RULES'} onSave={onSave} />,
-  );
-  await screen.findByText('原文 RULES');
-
-  fireEvent.click(screen.getByRole('button', { name: '编辑' }));
-  fireEvent.change(screen.getByRole('textbox'), { target: { value: '改后的内容' } });
-  fireEvent.click(screen.getByRole('button', { name: '保存' }));
-
-  // 保存未落定前按钮禁用且图标转圈
-  const saveButton = screen.getByRole('button', { name: '保存' });
-  expect(saveButton).toBeDisabled();
-  expect(saveButton.querySelector('.animate-spin')).toBeInTheDocument();
-
-  resolveSave?.();
-  await waitFor(() => expect(screen.queryByRole('textbox')).not.toBeInTheDocument());
-  expect(screen.getByRole('button', { name: '保存' })).toBeEnabled();
-});
-
 test('刷新丢弃本地编辑并重新拉取当前文档', async () => {
   let remote = '第一版内容';
   const getFile = jest.fn(async () => remote);

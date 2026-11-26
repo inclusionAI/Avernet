@@ -16,7 +16,6 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
-from agentclaw.community.core.workspace.skill_layout import LEGACY_SERVICE_BUILD_ENGINES
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
     DeviceAdapterHTTPStatusError,
@@ -28,6 +27,7 @@ LAYOUT_CONTRACT_VERSION = "skills-pool-p3-v1"
 MAPPING_CONTRACT_VERSION = "skills-pool-mapping-v2"
 MAPPING_V3_CONTRACT_VERSION = "skills-pool-mapping-v3"
 CUTOVER_EVIDENCE_CONTRACT_VERSION = "quarantine-v1"
+
 
 class RuntimeLayoutProbeStatus(str, Enum):
     READY = "READY"
@@ -220,7 +220,7 @@ class CurrentRuntimeLayoutProbeService:
         )
         legacy = data.evidence.source_layout == "legacy"
         if (
-            (legacy and not (for_service_build and engine in LEGACY_SERVICE_BUILD_ENGINES))
+            (legacy and not (for_service_build and engine == "openclaw"))
             or data.engine != engine
             or data.layout_contract_version != LAYOUT_CONTRACT_VERSION
             or (

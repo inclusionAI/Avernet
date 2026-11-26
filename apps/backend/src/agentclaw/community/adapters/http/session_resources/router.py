@@ -3,9 +3,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 import hashlib
-import logging
 import secrets
-import time
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -29,7 +27,6 @@ from agentclaw.community.di import Injected
 
 router = APIRouter(prefix="/api/session-resources", tags=["session-resources"])
 internal_router = APIRouter(prefix="/internal/session-resources", tags=["session-resources-internal"])
-log = logging.getLogger("session_resource.api")
 
 
 def _resource(record: SessionResourceRecord) -> dict:
@@ -92,14 +89,6 @@ async def create_upload_intents(
     service: SessionResourceServiceProtocol = Injected(SessionResourceServiceProtocol),
 ) -> dict:
     files = []
-    started = time.monotonic()
-    log.info(
-        "session_resource.upload_intents.request owner_id=%s bot_id=%s session_hash=%s scope_type=%s engine_type=%s target_entity_id=%s binding_id=%s device_uuid=%s files=%s",
-        user.staffId, body.bot_id, hashlib.sha256(body.session_key.encode()).hexdigest()[:16],
-        body.scope_type, body.engine_type,
-        body.target_entity_id, body.binding_id, body.device_uuid,
-        [item.model_dump() for item in body.files],
-    )
     try:
         for item in body.files:
             intent = service.create_upload_intent(
@@ -112,7 +101,6 @@ async def create_upload_intents(
                 filename=item.filename,
                 target_entity_id=body.target_entity_id,
                 binding_id=body.binding_id,
-                device_uuid=body.device_uuid,
                 size_bytes=item.size_bytes,
                 content_hash=item.content_hash,
             )
@@ -130,21 +118,8 @@ async def create_upload_intents(
                     "parts": intent.grant.parts,
                 }
             )
-    except Exception as exc:
-        log.warning(
-            "session_resource.upload_intents.failed bot_id=%s binding_id=%s device_uuid=%s error_type=%s duration_ms=%.1f",
-            body.bot_id, body.binding_id, body.device_uuid, type(exc).__name__,
-            (time.monotonic() - started) * 1000,
-        )
-        if isinstance(exc, ValueError):
-            raise _domain_error(exc) from exc
-        raise
-    log.info(
-        "session_resource.upload_intents.success bot_id=%s binding_id=%s device_uuid=%s resources=%s duration_ms=%.1f",
-        body.bot_id, body.binding_id, body.device_uuid,
-        [{"resource_id": item["resource_id"], "status": item["status"]} for item in files],
-        (time.monotonic() - started) * 1000,
-    )
+    except ValueError as exc:
+        raise _domain_error(exc) from exc
     return {"files": files}
 
 

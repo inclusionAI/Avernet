@@ -1,4 +1,3 @@
-import { serviceBotStageLabel } from '@/domain/botWorkshop';
 import {
   botEditorController,
   type ServicePublicationDto,
@@ -22,6 +21,10 @@ const PREFERRED_PUBLICATION_STATUS: Record<ServiceBotPublishStage, string> = {
   online: 'running',
 };
 
+const STAGE_LABEL: Record<ServiceBotPublishStage, string> = {
+  verify: '预发',
+  online: '线上',
+};
 
 function normalizePublicationId(value: number | string): number | undefined {
   const publicationId = typeof value === 'number' ? value : Number(value);
@@ -61,7 +64,7 @@ export async function resolveServiceBotPublishSelection({
   const publications = response.data?.items ?? [];
   const selection = selectServiceBotPublishSelection(publications, stage);
   if (!selection) {
-    throw new Error(`未找到可用的${serviceBotStageLabel[stage]}服务发布单`);
+    throw new Error(`未找到可用的${STAGE_LABEL[stage]}服务发布单`);
   }
   return selection;
 }

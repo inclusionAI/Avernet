@@ -32,7 +32,6 @@ interface CommunityState {
   setDetailError: (error: string | null) => void;
   prependTopic: (topic: CommunityTopic) => void;
   replaceTopic: (topic: CommunityTopic) => void;
-  incrementTopicReplyCount: (topicId: string, fallbackCount: number) => void;
   removeTopic: (topicId: string) => void;
   markTopicClosed: (topicId: string) => void;
   reset: () => void;
@@ -73,15 +72,6 @@ export const useCommunityStore = create<CommunityState>((set) => ({
       topics: state.topics.map((item) => (item.id === topic.id ? topic : item)),
       selectedTopic: state.selectedTopic?.id === topic.id ? topic : state.selectedTopic,
     })),
-  incrementTopicReplyCount: (topicId, fallbackCount) => set((state) => {
-    const current = state.selectedTopic?.id === topicId ? state.selectedTopic : null;
-    const listed = state.topics.find((topic) => topic.id === topicId);
-    const replyCount = Math.max(current?.replyCount ?? listed?.replyCount ?? 0, fallbackCount) + 1;
-    return {
-      topics: state.topics.map((topic) => topic.id === topicId ? { ...topic, replyCount } : topic),
-      selectedTopic: current ? { ...current, replyCount } : state.selectedTopic,
-    };
-  }),
   removeTopic: (topicId) =>
     set((state) => ({
       topics: state.topics.filter((topic) => topic.id !== topicId),

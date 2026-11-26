@@ -7,7 +7,6 @@ import { useState } from 'react';
 export interface ReplyComposerTarget {
   postId: string;
   authorName: string;
-  preview?: string;
 }
 
 export type ReplyComposerPayload = CreateCommunityReplyDraft;
@@ -15,8 +14,6 @@ export type ReplyComposerPayload = CreateCommunityReplyDraft;
 interface ReplyComposerProps {
   topic: CommunityTopic;
   placeholder?: string;
-  pollSelection: number[];
-  onPollChange: (next: number[]) => void;
   submitLabel?: string;
   replyTo?: ReplyComposerTarget;
   saving?: boolean;
@@ -25,7 +22,11 @@ interface ReplyComposerProps {
   onCancel?: () => void;
 }
 
-function togglePollSelection(current: number[], index: number, selectionType: 'single' | 'multi'): number[] {
+function togglePollSelection(
+  current: number[],
+  index: number,
+  selectionType: 'single' | 'multi',
+): number[] {
   if (selectionType === 'single') return current[0] === index ? [] : [index];
   if (current.includes(index)) return current.filter((item) => item !== index);
   return [...current, index];
@@ -37,9 +38,7 @@ function togglePollSelection(current: number[], index: number, selectionType: 's
  */
 export function ReplyComposer({
   topic,
-  pollSelection,
-  onPollChange,
-  placeholder = '发表你的评论…',
+  placeholder = '写下回复...',
   submitLabel = '回复',
   replyTo,
   saving = false,
@@ -48,7 +47,7 @@ export function ReplyComposer({
   onCancel,
 }: ReplyComposerProps) {
   const [body, setBody] = useState('');
-
+  const [pollSelection, setPollSelection] = useState<number[]>([]);
   const poll = topic.topicType === 'poll' ? topic.topicConfig?.poll : undefined;
 
   const submit = async () => {
@@ -61,12 +60,18 @@ export function ReplyComposer({
     const succeeded = await onSubmit(payload);
     if (succeeded) {
       setBody('');
-      onPollChange([]);
+      setPollSelection([]);
     }
   };
 
   return (
-    <section aria-label={replyTo ? `回复 ${replyTo.authorName}` : '回复主题'} className="bg-background">
+    <section aria-label={replyTo ? `回复 ${replyTo.authorName}` : '回复主题'} className="rounded-xl border border-border bg-card px-4 py-3">
+      {replyTo ? (
+        <p className="m-0 text-xs text-muted-foreground">
+          回复
+          <span className="ml-1 font-medium text-primary">@{replyTo.authorName}</span>
+        </p>
+      ) : null}
       {poll ? (
         <div aria-label="选择投票选项" className="mb-2 flex flex-wrap gap-2">
           {poll.options.map((option, index) => {
@@ -78,7 +83,7 @@ export function ReplyComposer({
                 size="sm"
                 variant={selected ? 'secondary' : 'outline'}
                 aria-pressed={selected}
-                onClick={() => onPollChange(togglePollSelection(pollSelection, index, poll.selection))}
+                onClick={() => setPollSelection((previous) => togglePollSelection(previous, index, poll.selection))}
               >
                 {option}
               </Button>
@@ -86,25 +91,18 @@ export function ReplyComposer({
           })}
         </div>
       ) : null}
-      {replyTo && (
-        <p className="m-0 mb-2 truncate text-xs text-muted-foreground">
-          回复 <span className="font-medium text-foreground">@{replyTo.authorName}</span>
-          {replyTo.preview && `：${replyTo.preview}`}
-        </p>
-      )}
       <Textarea
-        autoFocus
         value={body}
         onChange={(event) => setBody(event.target.value)}
         placeholder={placeholder}
         aria-label={replyTo ? `回复 ${replyTo.authorName}` : '回复正文'}
         disabled={disabled || saving}
         variant="default"
-        className="h-10 min-h-10 resize-none text-sm focus-visible:border-primary focus-visible:ring-0"
+        className="min-h-20 text-xs"
       />
       <footer className="mt-2 flex items-center justify-end gap-2">
         {onCancel ? (
-          <Button variant="outline" size="sm" disabled={saving} onClick={onCancel}>
+          <Button variant="ghost" size="sm" onClick={onCancel}>
             取消
           </Button>
         ) : null}

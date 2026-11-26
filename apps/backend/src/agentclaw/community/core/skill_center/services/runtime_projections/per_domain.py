@@ -258,10 +258,8 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                 reason="MCP 运行环境当前不可连接，能力状态已保存但尚未同步",
                 delivery_uncertain=True,
             )
-        return RuntimeProjectionResult(
-            status=RuntimeProjectionStatus.CONVERGED,
-            components={"mcp": RuntimeProjectionStatus.CONVERGED},
-            delivered_mcp_codes=claimed,
+        return RuntimeProjectionResult.converged(
+            components={"mcp": RuntimeProjectionStatus.CONVERGED}
         )
 
 

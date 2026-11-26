@@ -12,14 +12,12 @@ import type { ConversationSessionPlaceholderModel } from './hooks/useConversatio
  * sessionId，避免为首会话重新挂载 qiankun 子应用。
  */
 export function CodingBotConversationStage({
-  workspaceActive = true,
   bot,
   session,
   human,
   placeholder,
   onOpenSessionList,
 }: {
-  workspaceActive?: boolean;
   bot: ChatBotView;
   session?: BotChatSessionView | null;
   human: HumanIdentity | null;
@@ -36,7 +34,7 @@ export function CodingBotConversationStage({
         aria-hidden={showPlaceholder ? true : undefined}
         className={`flex min-h-0 min-w-0 flex-1 ${showPlaceholder ? 'invisible pointer-events-none' : ''}`}
       >
-        <CodingBotStageBoundary workspaceActive={workspaceActive} bot={bot} session={session} human={human} />
+        <CodingBotStageBoundary bot={bot} session={session} human={human} />
       </div>
 
       {showPlaceholder && placeholder && (

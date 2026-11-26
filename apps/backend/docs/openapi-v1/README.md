@@ -1,8 +1,5 @@
 # `/openapi/v1` Public API + Tenant Isolation — Team Handoff
 
-Trusted application draft restart, snapshot and batch status contracts are in
-[Managed Bot operations](managed-bot-operations.md).
-
 Bot public-risk operations use the full `bot_id:entity_id` path identity. They
 reuse the declaration-driven explicit ADMIN check and the existing addressed-Bot
 application grant. An app-only caller names its delegating `user_id`; its live
@@ -983,25 +980,13 @@ else** — `openapi_v1/authorization.py`. A handler declares nothing. The router
 class reads the row and attaches what it calls for.
 
 This is a deliberate **reversal** of the convention its neighbour
-`admission.py`'s existing grant/user modes follow, where a route also names its own dependency and
+`admission.py` follows, where a route also names its own dependency and
 `test_admission_inventory.py` holds the two in step. That redundancy is
 valuable: a mislabelled table entry still refuses at the route. It was traded
 for a single source, because two declarations for one fact is two things to
 keep in step and 43 hand-written ones had already accumulated. If you are
 adding an operation, this is the difference that will surprise you: **there is
 nothing to write on the route.**
-
-Engine admission also has a single policy declaration:
-`AdmissionMode.ENGINE_CODING` in `ADMISSION`. The enum member carries the shared
-`frozenset({"aicoding", "claude_code"})` allowlist; every inventory entry remains
-a bare enum member. Other modes carry an empty engine set and retain their
-existing behavior. Route-specific authorized Bot dependency providers are wired
-separately in `admission_managed_bot_routes.py`, without an extra rule class.
-`PublicAPIRoute` invokes `admission.apply_admission`
-to attach that check without an engine decorator, and `require_principal` reads
-the same rule to decide application admission. The existing grant/user-mode
-dependencies and the independent `AUTHORIZATION` decision remain unchanged.
-See [Managed Bot operations](managed-bot-operations.md) for the configured routes.
 
 What replaces the lost redundancy is that omission is not survivable:
 
@@ -1240,7 +1225,6 @@ literals the routes actually publish:
 all  approvals  authorized  authorized-apps  catalog  ceiling  check-name  copy  collaborations  connection  engine  identity
 loadtest  local  logs  market  metadata  mcp  models  resources  routines  service-envs  sessions  skills  spaces
 source-credentials  with-manifest  work-order-notifications  work-orders
-template-queries  template-config-for-others  restart-for-others  status-for-others
 ```
 
 Eight of those twenty-seven — `approvals`, `connection`, `engine`, `identity`,
@@ -1253,7 +1237,6 @@ list is the nineteen that remain:
 ```text
 all  authorized  authorized-apps  catalog  ceiling  check-name  collaborations  loadtest  local  logs  market  metadata  mcp  skills
 source-credentials  spaces  with-manifest  work-order-notifications  work-orders
-template-queries  template-config-for-others  restart-for-others  status-for-others
 ```
 
 They are still reserved today, and the list above is the accurate one: a bot
@@ -1370,7 +1353,7 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}/space` | Change the Bot's owning Business Space | `Envelope[BotSpaceAssignment]` |
 | DELETE | `/openapi/v1/bots/{bot_id}` | Delete bot | `Envelope[Deleted]` |
 | POST | `/openapi/v1/bots/{bot_id}/restart` | Restart (re-provision device); AICoding progress in `ext.aicoding.restart` | `200 Envelope[Bot]`, not completion |
-| POST | `/openapi/v1/bots/{bot_id}/recycle` | Recycle an ACTIVE personal managed-cloud Bot; async only for confirmed-fastdisk coding | Confirmed-fastdisk coding: `202 Envelope[BotRecycleResult]`; other supported engines/non-fastdisk coding: `200`; already RECYCLED: `200` |
+| POST | `/openapi/v1/bots/{bot_id}/recycle` | Recycle an ACTIVE personal managed-cloud Bot asynchronously | All supported engines: `202 Envelope[BotRecycleResult]`; already RECYCLED: `200` |
 | GET | `/openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}` | Read the current/latest recycle operation without advancing it | `200 Envelope[BotRecycleOperation]` |
 | POST | `/openapi/v1/bots/{bot_id}/activate` | Start reactivation of a RECYCLED personal managed-cloud Bot | `202 Envelope[BotActivateResult]`, or `200` when already ACTIVE |
 | POST | `/openapi/v1/bots/{bot_id}/auth-status` | Poll Passport auth (attributes echoed in the body); completes creation when ISSUED — a write, hence a POST | `Envelope[BotAuthStatus]` |
@@ -1445,22 +1428,18 @@ incompatible states and unresolved recycling return 409.
 
 #### Asynchronous recycle and reactivation
 
-`POST .../recycle` has no body. Confirmed-fastdisk `aicoding` / `claude_code`
-Bots use the existing `bot.recycle` task and return HTTP 202 with
-`bot_id`, `owner_id`, current Bot `status`, `changed`, `operation_id` and `phase`.
-The request does not wait for backup or provider destruction. Other supported
-engines, and coding Bots whose read-only probe is non-fastdisk or unknown, use the
-original synchronous path and return HTTP 200 with `operation_id=null` and
-`phase=null`; their resource release is complete when the response succeeds.
-For queued operations, `changed=true` means admission, **not that the Bot is
-already recycled**. A repeated queued submission returns the same handle with
-`changed=false`. A fully recycled Bot returns 200 / `status=RECYCLED` /
-`changed=false`, with no new backup, release or audit. Incompatible state or a
-busy lifecycle returns 409; a disabled worker or unconfirmed durable admission
-returns 503.
+`POST .../recycle` has no body. Fastdisk coding, non-fastdisk coding and non-coding
+personal managed-cloud Bots all use the same `bot.recycle` task and return HTTP
+202 with `bot_id`, `owner_id`, current Bot `status`, `changed`, `operation_id`
+and `phase`. It does not wait for backup or call container destruction in the
+HTTP request. `changed=true` means a new operation was admitted, **not that the
+Bot is already recycled**. A repeated submission returns the same in-progress
+handle with `changed=false`. A fully recycled Bot without an unresolved
+operation still returns 200 / `status=RECYCLED` / `changed=false`, with no new
+backup, release or audit. Incompatible state or a busy lifecycle returns 409;
+a disabled worker or unconfirmed durable admission returns 503.
 
-For a confirmed-fastdisk queued operation, poll the same dedicated
-`GET .../recycle-operations/{operation_id}`.
+For all three types, poll the same dedicated `GET .../recycle-operations/{operation_id}`.
 A missing or replaced operation handle answers 404. Its data contains
 `bot_id`, `owner_id`, `operation_id`, `bot_status`, `phase`, nullable
 `error_code`, `message`, and `warning` (safe code/message only). HTTP 200 means
@@ -1473,14 +1452,13 @@ recycle result. This is independent of the existing Bot `/status` response.
 ```text
 QUEUED -> BACKING_UP -> RELEASING -> SUCCEEDED
                 |             |
-              FAILED         FAILED
+              FAILED    NEEDS_CONFIRMATION
 ```
 
 Only AICoding (`aicoding` / `claude_code`) runs the existing read-only fastdisk
-probe during admission and again in the worker. Non-coding Bots skip backup
-probing, configuration and the helper entirely. Non-fastdisk or unknown-probe
-coding falls back to synchronous recycle and skips the helper and failure-switch
-read. Confirmed fastdisk coding reuses its restart strategy and `fastdisk_fail_block`
+probe in the worker. Non-coding Bots skip backup probing, configuration and the
+helper entirely. Non-fastdisk coding skips the helper and failure-switch read.
+Confirmed fastdisk coding reuses its restart strategy and `fastdisk_fail_block`
 policy, read once per operation. With blocking enabled, a failed/expired required
 backup ends the **operation** as FAILED: Bot remains ACTIVE, with its old
 binding and Passport unchanged. It does not set Bot.status or startup markers
@@ -1489,19 +1467,19 @@ confirmed degraded backup is surfaced as a warning. Other engines share the
 same lifecycle state machine, with a no-op backup precondition. Redelivery preserves the backup operation
 ID, first-start budget and already-confirmed fastdisk targets.
 
-Resource release is submitted only after the durable RELEASING fence. Keep the
-original recycle success criterion: a successful release call proceeds directly
-to completion, without an additional provider physical-state query. A release
-failure ends the operation as FAILED and leaves Bot state unchanged; the same
-task does not repeat the release call. This does not roll back provider side effects.
-New tasks do not enter NEEDS_CONFIRMATION; existing legacy records remain readable
-and guarded, without automatic repair or replay.
+Resource release is submitted only after the durable RELEASING fence, followed
+by provider confirmation. Acceptance, a DB-only RELEASED binding, an arbitrary
+404 or an empty inventory is not enough. An ambiguous release is observed, not
+blindly resubmitted. If release/finalization cannot be confirmed, the operation
+ends as NEEDS_CONFIRMATION and blocks new recycle/activate/restart/delete/stop
+requests until an operator verifies the result. There is no new manual-confirm
+or cancel API in this change.
 
-After successful release, Passport freeze is best effort; a failure is a warning.
+After confirmed release, Passport freeze is best effort; a failure is a warning.
 One transaction releases the binding, sets Bot.status=RECYCLED, finishes the
-journal as SUCCEEDED, and inserts one audit (`source=openapi`, `run_id=operation_id`).
-Retries never repeat a successful release call or successful audit. No recycle
-DingTalk notification is enqueued by this path.
+journal, and inserts one audit (`source=openapi`, `run_id=operation_id`). Retries
+never repeat a confirmed destruction or successful audit. No recycle DingTalk
+notification is enqueued by this path.
 
 The existing `POST .../activate` remains asynchronous, with the same response
 shape. Pending recycle / NEEDS_CONFIRMATION returns 409 **before** ACTIVE
@@ -1512,8 +1490,8 @@ endpoint. Backup data restoration still uses the existing provisioning path.
 
 Timing is deliberately separated: confirmed fastdisk backup uses the shared
 restart strategy's 1500s worker budget;
-release/finalization waits for an in-flight delivery are bounded to 600s,
-rescheduled at 3s; there is no physical-status polling. The task queue deadline is 24h. These are worker budgets, **not HTTP timeouts or hard
+release/finalization observation is bounded to 600s, polling at 3s; the task
+queue deadline is 24h. These are worker budgets, **not HTTP timeouts or hard
 cancellation** of an in-flight SDK call/container backup script.
 
 Deployment must enable the existing task worker and keep all worker versions
@@ -1944,10 +1922,6 @@ as `""` — an empty string standing in for "no id" is a sentinel a caller canno
 tell from a real address until it fails. `GET /stat` replaces both the
 id-addressed single lookup and `check-name`: it answers existence against the
 workspace, the same authority the listing reads, so the two cannot disagree._
-
-The `GET /resources` list endpoint accepts a directory path. An empty path lists the workspace root. If the device rejects the listing and the parent entry confirms that the supplied path is a file, the endpoint returns 400 with `path must refer to a directory`. Use `GET /resources/stat` for a single entry.
-
-`DELETE` resolves the target in the parent directory listing before changing its record or deleting its content. A missing target returns 404. An ambiguous parent listing or a target without a valid type returns 502. Downstream listing errors still propagate, and deletion stops before changing the resource record.
 
 _Note: `Page` here is applied by the backend over a whole directory listing —
 the engine's `ListDirRequest` carries no page, limit or cursor. `page_size`

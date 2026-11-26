@@ -589,51 +589,6 @@ async def test_default_restore_resets_actual_exclusions_and_becomes_noop():
 
 
 @pytest.mark.asyncio
-async def test_manifest_explicit_default_includes_inactive_default_server():
-    from dataclasses import replace
-    from ._capabilities_world import CapabilityWorld
-    from agentclaw.community.core.apply_engine.desired_state import DefaultSkillSetRef
-    from agentclaw.community.core.models.skill import SkillSet
-    from agentclaw.community.core.models.mcp import SkillSetMCPServer
-    from agentclaw.community.core.skill_center.mcp_apply_policy import manifest_mcp_install_scope
-
-    world = CapabilityWorld()
-    with world.db.transactional_orm_session() as session:
-        group = SkillSet(name="default", user_id="", bolt_id="", engine_type="moltis",
-                         is_default=True, is_active=False, env="dev")
-        session.add(group)
-        session.flush()
-        session.add(SkillSetMCPServer(skill_set_id=group.id, server_code="mcp.default", name="Default", env="dev"))
-    target = DesiredCapabilities(skill_sets=Declaration((DefaultSkillSetRef(),)))
-    read_snapshot = world.sets.read_apply_snapshot
-    def inactive_snapshot(**kwargs):
-        snapshot = read_snapshot(**kwargs)
-        return replace(snapshot, sets=tuple(replace(item, is_active=False) for item in snapshot.sets))
-    world.sets.read_apply_snapshot = inactive_snapshot
-    with manifest_mcp_install_scope():
-        report = await apply(world.ctx, world.materialiser, target)
-    assert not report.categories[0].aborted
-    assert world.ctx.capability_state.manifest_mcp_candidates["skill_sets/default"] == frozenset({"mcp.default"})
-
-
-@pytest.mark.asyncio
-async def test_manifest_explicit_default_includes_policy_server_without_default_row():
-    from unittest.mock import MagicMock
-    from ._capabilities_world import CapabilityWorld
-    from agentclaw.community.core.apply_engine.desired_state import DefaultSkillSetRef
-    from agentclaw.community.core.skill_center.mcp_apply_policy import manifest_mcp_install_scope
-
-    world = CapabilityWorld()
-    world.management._platform_default_mcp_policy = MagicMock()
-    world.management._platform_default_mcp_policy.server_codes_for.return_value = frozenset({"mcp.default"})
-    target = DesiredCapabilities(skill_sets=Declaration((DefaultSkillSetRef(),)))
-    with manifest_mcp_install_scope():
-        report = await apply(world.ctx, world.materialiser, target)
-    assert not report.categories[0].aborted
-    assert world.ctx.capability_state.manifest_mcp_candidates["skill_sets/default"] == frozenset({"mcp.default"})
-
-
-@pytest.mark.asyncio
 async def test_failed_shared_preparation_prevents_local_upload_and_all_bot_writes():
     from ._capabilities_world import CapabilityWorld
     from agentclaw.community.testing.canonical_center_store import (

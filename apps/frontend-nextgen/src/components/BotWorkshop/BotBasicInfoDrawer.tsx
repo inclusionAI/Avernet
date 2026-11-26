@@ -2,7 +2,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Badge } from '@/components/ui/Badge';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/Drawer';
 import type { BotDomain } from '@/services/botWorkshop';
-import { botLifecycleLabel } from './BotCard/config';
+import { lifecycleLabel } from './BotCard/config';
 
 function InfoItem({ label, value }: { label: string; value?: string }) {
   return (
@@ -41,7 +41,7 @@ export function BotBasicInfoDrawer({ bot, onClose }: { bot?: BotDomain; onClose:
                 <Badge
                   tone={bot.lifecycle === 'failed' ? 'error' : bot.lifecycle === 'running' ? 'success' : 'neutral'}
                 >
-                  {botLifecycleLabel(bot)}
+                  {lifecycleLabel[bot.lifecycle]}
                 </Badge>
               </div>
             </div>

@@ -313,7 +313,6 @@ class IdentityService(IdentityFilePort):
         owner_id: str,
         engine_type: str,
         stage: str = STAGE_DRAFT,
-        operator_id: str | None = None,
     ):
         """Resolve the runtime ``stage`` names and build its identity-addressing
         DeviceFileSystem via the dispatcher.
@@ -322,9 +321,7 @@ class IdentityService(IdentityFilePort):
         was (raises if unbound). A service bot's published runtimes resolve
         through the shared stage rule, which raises ``EngineStageNotLiveError``
         when the named stage has none up. Both legs, and the reasons behind
-        them, live in :func:`resolve_stage_device_context`. ``owner_id`` remains
-        the stable resource locator; ``operator_id`` is only the authenticated
-        identity used to connect after an Owner handoff.
+        them, live in :func:`resolve_stage_device_context`.
         """
         ctx = resolve_stage_device_context(
             self._resolver,
@@ -334,7 +331,6 @@ class IdentityService(IdentityFilePort):
             bot_id=bot_id,
             owner_id=owner_id,
             stage=stage,
-            operator_id=operator_id or None,
         )
         return self._device_fs_dispatcher.dispatch_addressed(
             ctx,
@@ -355,7 +351,6 @@ class IdentityService(IdentityFilePort):
         owner_id: str,
         engine_type: str,
         stage: str = STAGE_DRAFT,
-        operator_id: str | None = None,
     ) -> str:
         device_fs = self._identity_device_fs(
             entity_type=entity_type,
@@ -364,7 +359,6 @@ class IdentityService(IdentityFilePort):
             owner_id=owner_id,
             engine_type=engine_type,
             stage=stage,
-            operator_id=operator_id,
         )
         # identity 域的契约是"缺省即空内容"。``DeviceFileSystem.read_file`` 的契约
         # 同样是"文件不存在 → None",baas/teclaw/local 都已按此实现,所以正常路径
@@ -403,7 +397,6 @@ class IdentityService(IdentityFilePort):
         content: str,
         owner_id: str,
         engine_type: str,
-        operator_id: str | None = None,
     ) -> None:
         device_fs = self._identity_device_fs(
             entity_type=entity_type,
@@ -411,7 +404,6 @@ class IdentityService(IdentityFilePort):
             bot_id=bot_id,
             owner_id=owner_id,
             engine_type=engine_type,
-            operator_id=operator_id,
         )
         await device_fs.write_file(
             f"{IDENTITY_NS}/{file_type}", content.encode("utf-8")
@@ -427,7 +419,6 @@ class IdentityService(IdentityFilePort):
         *,
         engine_type: str | None = None,
         stage: str = STAGE_DRAFT,
-        operator_id: str | None = None,
     ) -> str:
         """Read a bot-level **identity** file (provider-blind, coordinate-based).
 
@@ -449,7 +440,6 @@ class IdentityService(IdentityFilePort):
             owner_id=owner_id,
             engine_type=eng,
             stage=stage,
-            operator_id=operator_id,
         )
 
     async def write_identity_file(
@@ -462,7 +452,6 @@ class IdentityService(IdentityFilePort):
         owner_id: str,
         *,
         engine_type: str | None = None,
-        operator_id: str | None = None,
     ) -> None:
         """Write a bot-level **identity** file (provider-blind, coordinate-based)."""
         eng = resolve_runtime_engine_for_bot(
@@ -476,7 +465,6 @@ class IdentityService(IdentityFilePort):
             content=content,
             owner_id=owner_id,
             engine_type=eng,
-            operator_id=operator_id,
         )
 
     # ── generic device-or-local file I/O (by absolute path) ──────────────
@@ -583,7 +571,6 @@ class IdentityService(IdentityFilePort):
         engine_type: str = DEFAULT_ENGINE_TYPE,
         *,
         owner_id: str | None = None,
-        operator_id: str | None = None,
     ) -> None:
         """Sync AGENTS.md with reference files section using HTML comment markers.
 
@@ -599,7 +586,6 @@ class IdentityService(IdentityFilePort):
                 AGENTS_MD_FILE,
                 owner,
                 engine_type=engine_type,
-                operator_id=operator_id,
             )
             base_content = (
                 self._remove_reference_section(existing_content)
@@ -615,7 +601,6 @@ class IdentityService(IdentityFilePort):
                 new_content,
                 owner,
                 engine_type=engine_type,
-                operator_id=operator_id,
             )
             logger.info(
                 "[sync_agents_md] Updated AGENTS.md for %s/%s bot=%s",
@@ -775,7 +760,6 @@ class IdentityService(IdentityFilePort):
             owner_id,
             engine_type=eng,
             stage=stage,
-            operator_id=operator_id,
         )
         return BotIdentityFileResponse(
             success=True,
@@ -962,13 +946,11 @@ class IdentityService(IdentityFilePort):
             content,
             entity_id,
             engine_type=eng,
-            operator_id=operator_id,
         )
         # AGENTS.md sync only applies to openclaw reference files (router parity).
         if file_type in REFERENCE_FILES and eng == "openclaw":
             await self.sync_agents_md(
-                entity_type, entity_id, bot_id, eng, owner_id=entity_id,
-                operator_id=operator_id,
+                entity_type, entity_id, bot_id, eng, owner_id=entity_id
             )
         return BotIdentityFileUpdateResponse(
             success=True,

@@ -257,7 +257,7 @@ describe('CollaborationSquareApiAdapter 好友申请', () => {
     expect(mockedCreateBotSession).toHaveBeenCalledWith('bot-1', { user_id: '900003', owner_id: '2088', f_user_id: '900003' }, {});
   });
 
-  it('uses the logged-in user as subject when the target Bot is owned by them', async () => {
+  it('omits f_user_id when the target Bot is owned by the logged-in user', async () => {
     mockedCreateBotSession.mockResolvedValue({
       code: 200000,
       data: { session_id: 'session-owned' } as never,
@@ -268,9 +268,7 @@ describe('CollaborationSquareApiAdapter 好友申请', () => {
         isOwnedByLoggedInUser: true,
       }),
     ).resolves.toEqual({ sessionId: 'session-owned' });
-    expect(mockedCreateBotSession).toHaveBeenCalledWith(
-      'bot-1', { user_id: '900003', owner_id: '2088', f_user_id: '900003' }, {},
-    );
+    expect(mockedCreateBotSession).toHaveBeenCalledWith('bot-1', { user_id: '900003', owner_id: '2088' }, {});
   });
 
   it('creates an owned service Bot session with stage=online to match the chat page read scope', async () => {
@@ -287,7 +285,7 @@ describe('CollaborationSquareApiAdapter 好友申请', () => {
     ).resolves.toEqual({ sessionId: 'session-owned-service' });
     expect(mockedCreateBotSession).toHaveBeenCalledWith(
       'bot-1',
-      { user_id: '900003', stage: 'online', owner_id: '2088', f_user_id: '900003' },
+      { user_id: '900003', stage: 'online', owner_id: '2088' },
       {},
     );
   });
@@ -304,9 +302,7 @@ describe('CollaborationSquareApiAdapter 好友申请', () => {
         botType: 'personal',
       }),
     ).resolves.toEqual({ sessionId: 'session-owned-personal' });
-    expect(mockedCreateBotSession).toHaveBeenCalledWith(
-      'bot-1', { user_id: '900003', owner_id: '2088', f_user_id: '900003' }, {},
-    );
+    expect(mockedCreateBotSession).toHaveBeenCalledWith('bot-1', { user_id: '900003', owner_id: '2088' }, {});
   });
 
   it('rejects a session response without session_id as a protocol error', async () => {

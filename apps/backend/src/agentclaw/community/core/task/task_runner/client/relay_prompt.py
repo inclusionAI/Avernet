@@ -124,12 +124,7 @@ def format_relay_execution_instruction(
         "Backend 调用 TaskDispatcher.dispatch(target_node) 真正投递。"
         "task_completed=true、task_hung=true 或 bbs_publish_pending=true 时"
         "不得调用 dispatch，分别记录 task_completed、task_hung、"
-        "bbs_publish_pending。"
-        "成功响应中的 data.handoff_display 是当前棒 S6 用户可见交接卡片的数据；"
-        "只有当前运行会话被明确识别为钉钉渠道时，才允许通过 Runtime message 工具"
-        "单独投递该模板卡片；其它渠道不调用 message 工具，也不再生成、"
-        "不外发转协作模板消息，继续保持普通会话回复逻辑不变。"
-        "字段缺失时不得编造，也不得在会话回复与旁路消息之间重复发送。",
+        "bbs_publish_pending。",
         "分布式接力不要求构造或上报 trace；S1-S6 的执行职责不变，"
         "正确性由业务字段和服务端任务状态、当前代次搜索回执及执行者身份校验，"
         "不依赖 Bot 自报轨迹。通用上报接口仍支持可选 trace，"

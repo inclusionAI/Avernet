@@ -840,12 +840,8 @@ class TaskService(TaskServiceControlMixin, TaskServiceIntakeMixin, TaskServiceDe
         self,
         status: str | None = None,
         owner_user_id: str | None = None,
-        *,
-        keyword: str | None = None,
     ) -> list[TaskInfoRecord]:
-        return task_service_queries.list_tasks(
-            self, status, owner_user_id, keyword=keyword
-        )
+        return task_service_queries.list_tasks(self, status, owner_user_id)
 
     def list_tasks_page(
         self,
@@ -853,16 +849,9 @@ class TaskService(TaskServiceControlMixin, TaskServiceIntakeMixin, TaskServiceDe
         owner_user_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
-        *,
-        keyword: str | None = None,
     ) -> tuple[list[TaskInfoRecord], int]:
         return task_service_queries.list_tasks_page(
-            self,
-            status,
-            owner_user_id,
-            page,
-            page_size,
-            keyword=keyword,
+            self, status, owner_user_id, page, page_size
         )
 
     def list_bbs_tasks(

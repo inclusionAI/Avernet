@@ -172,16 +172,11 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
                 reason="Bot 运行配置未完成同步",
                 delivery_uncertain=True,
             )
-        return RuntimeProjectionResult(
-            status=RuntimeProjectionStatus.CONVERGED,
+        return RuntimeProjectionResult.converged(
             components={
                 "skills": RuntimeProjectionStatus.CONVERGED,
                 "mcp": RuntimeProjectionStatus.CONVERGED,
-            },
-            delivered_mcp_codes=(
-                frozenset(plan.projection.mcp_server_codes)
-                if isinstance(plan, ResolvedCapabilityPlan) else frozenset()
-            ),
+            }
         )
 
     @staticmethod

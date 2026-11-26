@@ -426,6 +426,9 @@ class _Guard:
         await self._lock.acquire()
         return object()
 
+    def refresh(self, _lease):
+        assert self._lock.locked()
+
     def release(self, _lease):
         self._lock.release()
         return True

@@ -19,7 +19,6 @@ from agentclaw.community.adapters.http.task.schemas_node_context import (
 from agentclaw.community.adapters.http.task.schemas_relay_dispatch import (
     TaskDispatchRequestDTO,
     TaskDispatchResultDTO,
-    build_dispatch_handoff_display,
 )
 from agentclaw.community.adapters.http.task.schemas_relay_search import (
     BotCandidateDTO,
@@ -29,9 +28,6 @@ from agentclaw.community.adapters.http.task.schemas_relay_search import (
 from agentclaw.community.adapters.http.task.schemas import BbsClaimDTO
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
 from agentclaw.community.core.task.domain.errors import TaskStateError
-from agentclaw.community.core.task.task_discovery.frontend_url import (
-    ConfigFrontendUrlProvider,
-)
 from agentclaw.community.di import Injected
 
 router = APIRouter()
@@ -112,7 +108,6 @@ async def dispatch_relay_node(
     body: TaskDispatchRequestDTO,
     request: Request,
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-    frontend_url_provider: ConfigFrontendUrlProvider = Injected(ConfigFrontendUrlProvider),  # noqa: B008
 ) -> Envelope[TaskDispatchResultDTO]:
     if not body.origin_node_id or not body.relay_token:
         raise TaskStateError("relay dispatch requires origin_node_id and relay_token")
@@ -124,18 +119,8 @@ async def dispatch_relay_node(
     if target.run_info.extend_props.get("relay_planned_by") != origin.node_id:
         raise TaskStateError("relay dispatch target was not planned by this origin")
     node = await service.dispatch_node(body.task_id, body.target_node_id)
-    # Dispatch persistence writes the target session/run facts into the graph;
-    # read that projection before building the user-facing entry URL.
-    dispatched_graph = service.get_task_dashboard(body.task_id)
-    delivered = _require_graph_node(dispatched_graph, body.target_node_id)
-    handoff = build_dispatch_handoff_display(
-        delivered, target, dispatched_graph, frontend_url_provider.get()
-    )
     return envelope(
-        TaskDispatchResultDTO(
-            ok=True, node_id=node.node_id, handoff_display=handoff
-        ),
-        request,
+        TaskDispatchResultDTO(ok=True, node_id=node.node_id), request
     )
 
 

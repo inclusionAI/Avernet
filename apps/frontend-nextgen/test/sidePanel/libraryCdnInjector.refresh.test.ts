@@ -60,7 +60,7 @@ test('刷新失败保留上次成功映射，后续请求仍可重试', async ()
 
 test('成功的空清单会清除已移除的 manifest 库，不影响 Bot 配置', async () => {
   storeManifestBundles(manifest(oldUrl).bundles);
-  storeBotCdnConfigs('bot1', undefined, [{ name: 'botPanel', url: '/assets/bot.umd.js' }]);
+  storeBotCdnConfigs('bot1', [{ name: 'botPanel', url: '/assets/bot.umd.js' }]);
   mockGetManifest.mockResolvedValueOnce({ ...manifest(newUrl), bundles: [] });
   await queryAndRegisterManifestLibraryCdn();
   expect(getLibraryCdn('bcsPanel')).toBeUndefined();
@@ -69,7 +69,7 @@ test('成功的空清单会清除已移除的 manifest 库，不影响 Bot 配�
 
 test('并发刷新复用同一请求，成功后保留 Bot 配置的覆盖优先级', async () => {
   storeManifestBundles(manifest(oldUrl).bundles);
-  storeBotCdnConfigs('bot1', undefined, [{ name: 'bcsPanel', url: '/assets/bot-override.umd.js' }]);
+  storeBotCdnConfigs('bot1', [{ name: 'bcsPanel', url: '/assets/bot-override.umd.js' }]);
   const resolve = pendingManifest();
   const first = queryAndRegisterManifestLibraryCdn();
   const second = queryAndRegisterManifestLibraryCdn();

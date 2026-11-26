@@ -20,7 +20,6 @@ export function useMyTaskTasks(
   pageSize: number,
   statusFilter: UserTaskStatusFilter,
   enabled = true,
-  keyword = '',
 ) {
   const [taskRecords, setTaskRecords] = useState<TaskListItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -53,7 +52,6 @@ export function useMyTaskTasks(
       // 服务端分页 + 服务端状态过滤:page/page_size 必传；status 为运行时态逗号串(all 时不传)。
       const result = await listMyTasks({
         user_id: ownerUserId,
-        keyword: keyword.trim() || undefined,
         page,
         page_size: pageSize,
         status: statusParam,
@@ -74,7 +72,7 @@ export function useMyTaskTasks(
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [enabled, keyword, ownerUserId, page, pageSize, statusFilter]);
+  }, [enabled, ownerUserId, page, pageSize, statusFilter]);
 
   useEffect(() => {
     void refresh();

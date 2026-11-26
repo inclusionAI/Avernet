@@ -477,7 +477,7 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
         if self._is_independent_caller(bot):
             return await self._list_caller_sessions(bot, user_id, owner_id, session_key,
                 favorite_only, limit, offset, bcn_friend_authorized=bcn_friend_authorized,
-                actor_user_id=actor_user_id, iam_token=iam_token)
+                actor_user_id=actor_user_id)
         legacy_session_key = self._repo.get_session(user_id, bot_id, owner_id)
         if legacy_session_key:
             self._repo.add_owned_session(user_id, bot_id, owner_id, legacy_session_key)

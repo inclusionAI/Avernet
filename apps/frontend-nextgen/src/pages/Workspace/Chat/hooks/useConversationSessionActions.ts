@@ -1,11 +1,6 @@
-import {
-  extractCodingSessionCreatorUserId,
-  resolveCodingSessionOrigin,
-  serializeConversationRoute,
-  type ConversationBotSection,
-  type ConversationBotView,
-} from '@/domain/conversation';
+import type { ConversationBotSection, ConversationBotView } from '@/domain/conversation';
 import { isManagedConversationSection } from '@/domain/conversation/types';
+import { serializeConversationRoute } from '@/domain/conversation';
 import {
   conversationSessionActionService,
   type ConversationSessionAction,
@@ -13,7 +8,6 @@ import {
 } from '@/services/workspace/conversationSessionActionService';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getCapabilities } from '@/capabilities';
-import { useConversationStore } from '@/stores/conversationStore';
 import { toast } from 'sonner';
 
 export type ConversationSessionFeatures = ConversationSessionActionFeatures;
@@ -84,24 +78,10 @@ export function useConversationSessionActions(options: {
         const codingHost = getCapabilities().getCodingBotConversationHost().value;
         if (codingHost?.runSessionAction) {
           if (action.type === 'share') {
-            // Coding session 的归属由 sessionId 权威表达。分享链接必须携带实际
-            // mine/others/collab，不能退回 opaque managed-bot 的默认 mine；
-            // 否则新开页的列表/详情会按错误来源查不到目标会话。
-            const managedSection = isManagedConversationSection(section);
-            const managedOrigin = managedSection
-              ? useConversationStore.getState().originByManagedBotId[view.bot.botId] ?? 'mine'
-              : undefined;
-            const shareOrigin = managedSection
-              ? resolveCodingSessionOrigin(sessionId, userId) ?? managedOrigin
-              : undefined;
-            const shareFriendUserId =
-              shareOrigin === 'others' ? extractCodingSessionCreatorUserId(sessionId) ?? undefined : undefined;
             const search = serializeConversationRoute({
               section,
               botId: view.bot.botId,
-              ...(managedSection && shareOrigin
-                ? { origin: shareOrigin, friendUserId: shareFriendUserId }
-                : {}),
+              ...(isManagedConversationSection(section) ? { origin: 'mine' } : {}),
               sessionId,
             });
             try {

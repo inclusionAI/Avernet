@@ -1,11 +1,9 @@
 """Persisted MCP configuration in the first artifact and whole-artifact updates."""
 
-from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
 
-from agentclaw.community.core.apply_engine.compiler import StateRef
 from agentclaw.community.core.apply_engine.delivery import TeclawPlatformDelivery
 from agentclaw.community.core.apply_engine.redeliver import TeclawRedeliver
 from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
@@ -124,8 +122,7 @@ def _assert_servers(world, artifact, *, case):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", ["omitted", "clear", "replace"])
-@pytest.mark.parametrize("state_kind", ["manifest", "genome"])
-async def test_first_artifact_and_redeliver_use_inherited_and_replaced_configuration(case, state_kind, tmp_path):
+async def test_first_artifact_and_redeliver_use_inherited_and_replaced_configuration(case, tmp_path):
     world = McpWorld(platform=True)
     with world.db.transactional_orm_session() as session:
         session.add(UserMCPConfig(
@@ -166,11 +163,8 @@ async def test_first_artifact_and_redeliver_use_inherited_and_replaced_configura
         redeliver=TeclawRedeliver(resolve=lambda *args: object(), dispatch=lambda device: sync, not_bound=LookupError),
     )
     _save_target(world, "edited")
-    report = await world.apply_manifest([entry], retain_fixture_supplies=True)
-    assert report.status is ApplyStatus.SUCCEEDED
-    if state_kind == "genome":
-        report = replace(report, state=StateRef("genome", "revision"))
+    assert (await world.apply_manifest([entry], retain_fixture_supplies=True)).status is ApplyStatus.SUCCEEDED
     _save_dormant(world)
-    assert await closing.finish(world.context, report) is None
+    assert await closing.finish(world.context, None) is None
     delivered = io["http_client"].post.call_args.kwargs["json"]["bot_config"]
     _assert_servers(world, delivered, case=case)

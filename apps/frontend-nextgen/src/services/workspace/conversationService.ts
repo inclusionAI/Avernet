@@ -61,14 +61,8 @@ const CODING_SESSION_SCAN_PAGE_SIZE = 100;
 const CODING_SESSION_MAX_SCAN_PAGES = 20;
 
 /**
- * AgentCoding Bot 的 mine/others/collab/favorite 全部沿用 AgentCoding 原生三分类：
- * 后端不接收 source 窗口，前端按 session id 中的创建者归档。这样 BCS-CLI 等
- * AgentCoding 特殊身份不会落入通用 OpenAPI source 的兼容规则。
- * 非 AgentCoding Bot 保持 listConversationSource，不受该分类影响。
- *
- * 后续维护者（包括 AI）不要把这条分支“简化”回 listConversationSource，
- * 也不要给 AgentCoding 的 OpenAPI 请求补 source 参数；详见 OCB 的
- * apps/frontend-nextgen/docs/agent-coding/README.md。
+ * 收藏接口没有 source 窗口，保持原有 Coding 收藏归属过滤。
+ * 普通 mine/others 列表改走 listConversationSource，不再由浏览器扫描原始页。
  */
 async function listCodingSessionsByOrigin(
   bot: ChatBotView,
@@ -87,6 +81,7 @@ async function listCodingSessionsByOrigin(
   let exhausted = false;
 
   while (matching.length < targetEnd && rawPage <= CODING_SESSION_MAX_SCAN_PAGES) {
+    const rangeArgs: [] | [ConversationSessionRequestRange] = range ? [range] : [];
     const result =
       scope === 'favorite' && supportsBotSessionFavorites(bot.engine)
         ? await botSessionService.listFavoriteSessionsPage(
@@ -94,8 +89,7 @@ async function listCodingSessionsByOrigin(
             userId,
             rawPage,
             CODING_SESSION_SCAN_PAGE_SIZE,
-            range,
-            false,
+            ...rangeArgs,
           )
         : await botSessionService.listSessionsPage(
             bot,
@@ -103,8 +97,7 @@ async function listCodingSessionsByOrigin(
             rawPage,
             CODING_SESSION_SCAN_PAGE_SIZE,
             sessionKey,
-            range,
-            false,
+            ...rangeArgs,
           );
     if (!result.ok) return result;
 
@@ -161,7 +154,7 @@ export const conversationService = {
     origin: ConversationOrigin = 'mine',
     cursor?: string | null,
   ): Promise<DomainResult<BotSessionPageView>> {
-    if (bot.isAgentCodingBot) {
+    if ((scope === 'favorite' || origin === 'collab') && bot.isAgentCodingBot) {
       return listCodingSessionsByOrigin(bot, userId, scope, origin, page, pageSize, sessionKey, range);
     }
     if (origin === 'collab') return { ok: true, data: { items: [], total: 0 } };
@@ -169,10 +162,10 @@ export const conversationService = {
     if (scope === 'favorite' && supportsBotSessionFavorites(bot.engine)) {
       return botSessionService.listFavoriteSessionsPage(bot, userId, page, pageSize, ...rangeArgs);
     }
-    return listConversationSource(bot, userId, origin, page, pageSize, sessionKey, range, cursor);
+    return listConversationSource(bot, userId, origin, pageSize, sessionKey, range, cursor);
   },
 
-  /** Human→Bot 对话会话分页：当前 Human 同时作为 user_id 与 f_user_id；
+  /** Human→Bot 好友 Bot 会话分页:鉴权 Human 既作 user_id 也作 f_user_id;
    *  scope=favorite 走收藏接口,supportsBotSessionFavorites 保留引擎能力边界(TEClaw 回退普通列表)。 */
   async listFriendBotSessions(
     bot: ChatBotView,

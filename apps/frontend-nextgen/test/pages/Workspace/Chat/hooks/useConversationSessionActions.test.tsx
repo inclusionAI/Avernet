@@ -13,7 +13,6 @@ jest.mock('@/services/workspace/botSessionService', () => ({
   botSessionService: { deleteSession: jest.fn(), clearContext: jest.fn(), updateSessionTitle: jest.fn() },
 }));
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
-const clipboardWriteText = jest.fn();
 const view: ConversationBotView = {
   section: 'managed',
   bot: { botId: 'b:owner', realBotId: 'b', ownerId: 'owner', displayName: 'Bot', online: true, chatable: true },
@@ -43,13 +42,6 @@ afterEach(() => {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  // jsdom 未内置 Clipboard API；share 用例需要精确断言复制出的 TeamClaw 深链。
-  Object.defineProperty(window.navigator, 'clipboard', {
-    configurable: true,
-    value: { writeText: clipboardWriteText },
-  });
-  clipboardWriteText.mockReset();
-  clipboardWriteText.mockResolvedValue(undefined);
   store.getState().reset();
   store
     .getState()
@@ -100,48 +92,6 @@ it('delegates Coding Bot mutations to the embedded bridge and updates the local 
   expect(botSessionService.deleteSession).not.toHaveBeenCalled();
   expect(store.getState().sessionsByBotId[codingView.bot.botId].sessions.items).toEqual([]);
   expect(toast.success).toHaveBeenCalledWith('会话已删除');
-});
-
-it.each([
-  ['mine', 'user:000101:session:shared:agent:coding-bot', null],
-  ['others', 'user:202:session:shared:agent:coding-bot', '202'],
-  ['collab', 'agent:main:session:shared:agent:member-task', null],
-] as const)('copies a Coding %s share link with the authoritative session origin', async (origin, sessionId, friendUserId) => {
-  const codingView: ConversationBotView = {
-    ...view,
-    section: 'managed',
-    bot: { ...view.bot, engine: 'claude_code', isAgentCodingBot: true },
-  };
-  const runSessionAction = jest.fn().mockResolvedValue({ ok: true });
-  extendCapabilities({
-    getCodingBotConversationHost: () => ({
-      status: 'available',
-      value: { Stage: () => null, runSessionAction },
-    }),
-  });
-  store.getState().setManagedBotOrigin(codingView.bot.botId, origin, {
-    supportsScopesOutsideMine: true,
-  });
-
-  const { result } = renderHook(() =>
-    useConversationSessionActions({ userId: '101', managedBots: [codingView], friendBots: [] }),
-  );
-  let copied = false;
-  await act(async () => {
-    copied = await result.current.run(codingView.bot.botId, 'managed', sessionId, { type: 'share' });
-  });
-
-  expect(copied).toBe(true);
-  expect(clipboardWriteText).toHaveBeenCalledTimes(1);
-  const [url] = clipboardWriteText.mock.calls[0];
-  expect(url).toContain('/workspace/chat?');
-  const params = new URLSearchParams(url.slice(url.indexOf('?') + 1));
-  expect(params.get('section')).toBe('managed');
-  expect(params.get('bot')).toBe(codingView.bot.botId);
-  expect(params.get('origin')).toBe(origin);
-  expect(params.get('friend')).toBe(friendUserId);
-  expect(params.get('session')).toBe(sessionId);
-  expect(runSessionAction).not.toHaveBeenCalled();
 });
 
 it('blocks reentry for all writes on a Bot while pending and releases after completion', async () => {

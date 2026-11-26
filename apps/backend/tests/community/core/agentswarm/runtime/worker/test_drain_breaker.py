@@ -569,14 +569,7 @@ class TestRealHandlerDrain:
         assert reclaim[0]["claim_epoch"] == state["claim_epoch"] + 1
 
     def test_within_grace_real_slice_completes(self, real_db):
-        slice_started = asyncio.Event()
-
-        class StartedGate(asyncio.Event):
-            async def wait(self):
-                slice_started.set()
-                return await super().wait()
-
-        gate = StartedGate()
+        gate = asyncio.Event()
         env = _build_env(
             real_db,
             [
@@ -597,14 +590,16 @@ class TestRealHandlerDrain:
             )
             await worker.startup()
 
-            # Dispatch startup is outside the drain budget. Wait for the real
-            # subagent to park before testing the unchanged 3s drain grace.
-            try:
-                await asyncio.wait_for(slice_started.wait(), timeout=30.0)
-            except TimeoutError:
-                gate.set()
-                await worker.shutdown()
-                raise
+            # A fixed 30ms sleep races slow CI workers that have not claimed
+            # the dispatch yet. Wait until the slice is genuinely in flight,
+            # then release it shortly after drain starts so the real handler
+            # completes inside its 3s grace window.
+            deadline = time.monotonic() + 3.0
+            while not worker._inflight_snapshot():
+                if time.monotonic() > deadline:
+                    await worker.shutdown()
+                    raise AssertionError("worker did not claim the run in time")
+                await asyncio.sleep(0.01)
 
             async def release_slice():
                 await asyncio.sleep(0.1)

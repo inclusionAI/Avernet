@@ -6,7 +6,6 @@ import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from engine.community.core.skills.layout_planner import RuntimeLayoutContext
 from engine.community.plugins.skills_pool.layout_activation import (
     MappingApplyMode,
     MappingPublishResult,
@@ -30,9 +29,6 @@ from engine.community.plugins.skills_pool.layout_probe import (
     RuntimeLayoutInspectionStatus,
     inspect_runtime_layout,
 )
-from engine.community.plugins.skills_pool.service_layout_probe import (
-    inspect_legacy_service_layout,
-)
 
 
 def inspect_aicoding_runtime_layout(
@@ -41,25 +37,14 @@ def inspect_aicoding_runtime_layout(
     mapping_contract_version: str | None = None,
     home: Path = Path("/home/admin"),
     repo_is_mounted: Callable[[Path], bool] = os.path.ismount,
-    for_service_build: bool = False,
 ) -> RuntimeLayoutInspection:
-    result = inspect_runtime_layout(
+    return inspect_runtime_layout(
         engine="aicoding",
         expected_contract_version=expected_contract_version,
         mapping_contract_version=mapping_contract_version,
         home=home,
         repo_is_mounted=repo_is_mounted,
     )
-    if for_service_build and result.evidence.get("reason") == "pool_ready_marker_absent":
-        legacy = inspect_legacy_service_layout(
-            engine="aicoding",
-            context=RuntimeLayoutContext(home=home),
-            contract_version=expected_contract_version,
-            is_mounted=repo_is_mounted,
-        )
-        if legacy is not None:
-            return legacy
-    return result
 
 
 def publish_aicoding_pool_mappings(

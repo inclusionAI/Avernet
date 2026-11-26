@@ -54,7 +54,7 @@ class BotRecycleResult(BotLifecycleResult):
     )
     phase: str | None = Field(
         default=None,
-        description="QUEUED, BACKING_UP, RELEASING, SUCCEEDED or FAILED; independent of Bot runtime status. Legacy operations may report NEEDS_CONFIRMATION.",
+        description="QUEUED, BACKING_UP, RELEASING, SUCCEEDED, FAILED or NEEDS_CONFIRMATION; independent of Bot runtime status.",
     )
 
 
@@ -70,11 +70,11 @@ class BotRecycleOperation(BaseModel):
         description="Current Bot runtime lifecycle status, independent of operation phase."
     )
     phase: str = Field(
-        description="QUEUED, BACKING_UP, RELEASING, SUCCEEDED or FAILED. Legacy operations may report NEEDS_CONFIRMATION."
+        description="QUEUED, BACKING_UP, RELEASING, SUCCEEDED, FAILED or NEEDS_CONFIRMATION."
     )
     error_code: str | None = Field(
         default=None,
-        description="Safe error code, e.g. BACKUP_FAILED, BACKUP_TIMEOUT, RELEASE_FAILED or FINALIZATION_FAILED.",
+        description="Safe error code, e.g. BACKUP_FAILED, BACKUP_TIMEOUT, RELEASE_UNCONFIRMED or FINALIZATION_UNCONFIRMED.",
     )
     message: str | None = Field(
         default=None, description="Sanitized operation error detail, if any."

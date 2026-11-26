@@ -3,7 +3,6 @@
 import pytest
 from sqlalchemy import inspect
 
-from agentclaw.community.api.apply_run_service import ApplyRunServiceProtocol
 from agentclaw.community.core.apply_engine.run.service import ApplyRunService
 from agentclaw.community.core.mcp.scoped_config_flow import MCPScopedConfigService
 from agentclaw.community.core.task_queue.services.worker import TaskWorker
@@ -18,7 +17,6 @@ async def test_backend_bootstraps_without_manifest_dispatch_tables(test_injector
         tables = set(inspect(session.get_bind()).get_table_names())
     assert "ac_bot_config_manifest_apply" in tables
     assert tables.isdisjoint({"ac_bot_capability_projection", "ac_local_skill_package_dispatch"})
-    apply_service = test_injector.get(ApplyRunService)
-    assert test_injector.get(ApplyRunServiceProtocol) is apply_service
+    assert test_injector.get(ApplyRunService)
     assert test_injector.get(MCPScopedConfigService)
     assert await test_injector.get(TaskWorker).run_once() == 0

@@ -12,7 +12,6 @@ import type {
   CodingBotRestoredSessionItem,
   ConversationSessionArchiveListState,
 } from '@/domain/conversation';
-import type { SessionStatusPresentation } from '@/domain/conversation/sessionStatusProtocol';
 import type { NavigationItem } from '@/shell/navigation';
 import type { RouteMeta } from '@/shell/routeMeta';
 import type { ComponentType } from 'react';
@@ -406,8 +405,6 @@ export interface ConversationInstanceScopeState {
  * 不包含 TeamClaw URL、内部应用地址或部署信息。
  */
 export interface CodingBotConversationHostProps {
-  /** Suspend the primary runtime while retaining workspace-level services. Defaults to true. */
-  workspaceActive?: boolean;
   /** Host sidebar identity (may be compound); optional for older/custom hosts. */
   conversationBotId?: string;
   /**
@@ -558,35 +555,6 @@ export type CodingBotRestoredSessionListResult =
   | CodingBotRestoredSessionListResultOk
   | { ok: false; message: string };
 
-export interface CodingBotSessionStatusQueryInput {
-  /** The sidebar/compound Bot identity used by the conversation store. */
-  viewBotId: string;
-  /** The real AICoding engine Bot ID (without the TeamClaw owner suffix). */
-  botId: string;
-  /** The current canonical OpenAPI user ID. */
-  userId: string;
-  /** Optional Bot owner, used by the internal legacy connection resolver. */
-  ownerId?: string;
-  /** All currently loaded full session keys for the expanded Bot. */
-  sessionIds: string[];
-  /** Cancellation is mandatory when the active expanded Bot changes. */
-  signal?: AbortSignal;
-}
-
-export type CodingBotSessionStatusQueryResult =
-  | {
-      ok: true;
-      items: Array<{
-        sessionId: string;
-        status: SessionStatusPresentation | null;
-      }>;
-    }
-  | { ok: false; message: string };
-
-export interface CodingBotSessionStatusHost {
-  query(input: CodingBotSessionStatusQueryInput): Promise<CodingBotSessionStatusQueryResult>;
-}
-
 export interface CodingBotSessionArchiveHost {
   list(input: CodingBotSessionArchiveListInput): Promise<CodingBotSessionArchiveListResult>;
   restore(input: CodingBotSessionArchiveRestoreInput): Promise<CodingBotSessionArchiveRestoreResult>;
@@ -600,8 +568,6 @@ export interface CodingBotSessionArchiveHost {
  */
 export interface CodingBotConversationHost {
   Stage: ComponentType<CodingBotConversationHostProps>;
-  /** Opt in only when Stage and its child implement workspaceActive. */
-  supportsWorkspaceSuspension?: boolean;
   /**
    * 内部会话的可见性策略。Open Core 不注入时列表保留全部会话；
    * TeamClaw 内部部署用它隐藏内部系统生成的 Coding 会话，不影响其他 Bot。
@@ -620,8 +586,6 @@ export interface CodingBotConversationHost {
    */
   createSession?: (input: CodingBotSessionCreateInput) => Promise<CodingBotSessionActionResult>;
   runSessionAction?: (input: CodingBotSessionActionInput) => Promise<CodingBotSessionActionResult>;
-  /** Coding Bot 外层会话状态查询能力。Open Core 不注实现；旧 Child bridge 继续兜底。 */
-  sessionStatus?: CodingBotSessionStatusHost;
   /** Coding Bot 会话归档能力。Open Core 不注实现；旧 Child 缺方法时必须返回 unsupported。 */
   sessionArchive?: CodingBotSessionArchiveHost;
 }
@@ -662,27 +626,6 @@ export interface BotModelBadgeContext {
 }
 
 export interface AppCapabilities {
-  /** Optional deployment preparation for a cloud Coding Bot's draft/default restart.
-   * Returns extra_configs additions; rejection aborts restart. Never called for
-   * local bots, engine-only actions, or published-service lifecycle restarts.
-   * Must preserve owner/operator identity and must not restart or poll itself.
-   */
-  prepareCodingBotRestart?: (target: {
-    botId: string;
-    ownerId?: string;
-    userId?: string;
-  }) => Promise<Record<string, unknown>>;
-  /** Optional deployment-only submit hook for a prepared Coding Bot restart.
-   * It must route the engine-owned `extra_configs` envelope to a backend contract
-   * that persists and applies it before restart. Rejection aborts without
-   * falling back to a confirmation-only restart. It must not poll or update UI.
-   */
-  submitCodingBotRestart?: (target: {
-    botId: string;
-    ownerId?: string;
-    userId?: string;
-    extraConfigs: Record<string, unknown>;
-  }) => Promise<{ success?: boolean; message?: string; data?: unknown }>;
   /** Open Core 返回版本化提示配置；Internal 返回 null，且不得访问知悉状态。 */
   getOpenSourceExperienceNotice: () => CapabilityResult<OpenSourceExperienceNoticeSpec | null>;
   /**

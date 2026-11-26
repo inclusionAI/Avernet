@@ -83,7 +83,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
         creator_name: str | None = None,
         target_entity_id: str | None = None,
         binding_id: int | None = None,
-        device_uuid: str | None = None,
         size_bytes: int | None = None,
         content_hash: str | None = None,
     ) -> SessionUploadIntent:
@@ -95,7 +94,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
                 target_entity_id=target_entity_id,
                 scope_type=scope_type,
                 binding_id=binding_id,
-                device_uuid=device_uuid,
             )
         except DeviceConnectionUnavailableError as exc:
             raise SessionFileUpstreamUnavailableError() from exc
@@ -176,7 +174,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
                 status=SessionResourceStatus.UPLOAD_URL_ISSUED,
                 transfer_api_version=TransferApiVersion.SESSION_V2,
                 binding_id=binding_id,
-                device_uuid=device_uuid,
                 session_key_ciphertext=self._vault.encrypt(session_key),
                 size_bytes=size_bytes,
                 client_content_hash=content_hash,
@@ -560,7 +557,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
         target_entity_id: str | None,
         scope_type: str,
         binding_id: int | None,
-        device_uuid: str | None = None,
     ) -> tuple[DeviceContext, int]:
         if binding_id is not None:
             try:
@@ -568,7 +564,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
                     binding_id,
                     requester_id,
                     bot_id=bot_id,
-                    **({"device_uuid": device_uuid} if device_uuid else {}),
                 )
             except DeviceNotBoundError as exc:
                 log.warning(
@@ -629,7 +624,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
                 binding_id,
                 requester_id,
                 bot_id=bot_id,
-                **({"device_uuid": device_uuid} if device_uuid else {}),
             )
         except DeviceNotBoundError as exc:
             log.warning(
@@ -650,7 +644,6 @@ class SessionResourceService(SessionResourceServiceProtocol):
                 record.binding_id,
                 record.owner_id,
                 bot_id=record.bot_id,
-                **({"device_uuid": record.device_uuid} if record.device_uuid else {}),
             )
         except DeviceNotBoundError as exc:
             log.warning(

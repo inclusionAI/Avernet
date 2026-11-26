@@ -59,12 +59,11 @@ class _Run:
     __slots__ = ("run_id", "context_id", "state", "events", "bytes", "last_seq",
                  "saw_delta", "cache_limit", "subscribers", "lock",
                  "replay_expires_at", "idempotency_key", "request_digest",
-                 "latest_text", "native_run_id", "started_at_ms")
+                 "latest_text", "native_run_id")
 
     def __init__(self, run_id: str, context_id: str):
         self.run_id = run_id
         self.context_id = context_id
-        self.started_at_ms = int(time.time() * 1000)
         self.state = "TASK_STATE_SUBMITTED"
         self.events: list[dict[str, Any]] = []
         self.bytes = 0
@@ -159,36 +158,6 @@ class A2aKernel:
         return {"task": {"id": r.run_id, "contextId": r.context_id,
                          "status": {"state": r.state},
                          "metadata": {"created": created}}}
-
-    def get_session_runtime_status(self, context_id: str) -> dict[str, Any]:
-        """Read process-local activity without subscribing, replaying or dispatching."""
-        now = time.monotonic()
-        matches = [r for r in self.runs.values()
-                   if r.context_id == context_id
-                   and (r.replay_expires_at is None or r.replay_expires_at > now)]
-        active = [r for r in matches if r.state not in wire.TERMINAL_STATES]
-        if len(active) > 1:
-            return {"session_id": context_id, "found": False, "reason": "AMBIGUOUS_RUN"}
-        run = active[0] if active else max(
-            matches, key=lambda r: r.replay_expires_at or 0, default=None)
-        if run is None:
-            return {"session_id": context_id, "found": False, "reason": "NO_ACTIVE_RUN"}
-        state = {
-            "TASK_STATE_SUBMITTED": "starting",
-            "TASK_STATE_WORKING": "running",
-            "TASK_STATE_INPUT_REQUIRED": "running",
-            "TASK_STATE_AUTH_REQUIRED": "running",
-            "TASK_STATE_COMPLETED": "final",
-            "TASK_STATE_FAILED": "error",
-            "TASK_STATE_REJECTED": "error",
-            "TASK_STATE_CANCELED": "aborted",
-        }[run.state]
-        return {
-            "session_id": context_id, "found": True,
-            "run_id": run.run_id, "state": state,
-            "started_at": run.started_at_ms, "last_event_seq": run.last_seq,
-            "reason": None,
-        }
 
     # ── completion ──
     async def complete_run(self, rid: str,

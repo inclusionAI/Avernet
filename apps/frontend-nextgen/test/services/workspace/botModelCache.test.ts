@@ -30,13 +30,6 @@ it('不同 owner、stage、用户分别请求，切换用户清除旧缓存', as
   expect(listModels).toHaveBeenCalledTimes(5);
 });
 
-it('对话与 Bot 工坊模型缓存按 subject scope 隔离', async () => {
-  await loadCachedBotModels(bot, 'viewer', true);
-  await loadCachedBotModels(bot, 'viewer', false);
-  expect(listModels).toHaveBeenNthCalledWith(1, bot, 'viewer', true);
-  expect(listModels).toHaveBeenNthCalledWith(2, bot, 'viewer', false);
-});
-
 it('过期后重新读取，失败不缓存且允许重试', async () => {
   const now = jest.spyOn(Date, 'now').mockReturnValue(1000);
   try {

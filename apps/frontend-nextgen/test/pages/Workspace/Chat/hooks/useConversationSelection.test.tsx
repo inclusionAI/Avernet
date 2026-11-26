@@ -792,43 +792,4 @@ describe('Coding Bot 会话归属按 sessionId 解析', () => {
     expect(result.current.interactive.session?.sessionId).toBe(sessionId);
     expect(result.current.readonly.session).toBeNull();
   });
-
-  it('目录与用户身份到达后修复老分享链接错误的 origin=mine', () => {
-    const sessionId = 'user:202:session:shared:agent:coding-bot';
-    const initialProps = {
-      userId: '101',
-      managedBots: [] as ConversationBotView[],
-      friendBots: [] as ConversationBotView[],
-      hydrated: false,
-    };
-    const { result, rerender } = renderHook(
-      (props: typeof initialProps) =>
-        useConversationSelection(props),
-      { initialProps },
-    );
-
-    // 模拟真实冷启动：URL 先解析，Coding Bot 目录尚未到达，owner 深链会被旧逻辑保留为 mine。
-    act(() =>
-      result.current.onRouteSelection({
-        section: 'team',
-        botId: codingBot.botId,
-        origin: 'mine',
-        sessionId,
-      }),
-    );
-    expect(useConversationStore.getState().selectedOrigin).toBe('mine');
-
-    act(() =>
-      rerender({
-        ...initialProps,
-        managedBots: [codingView],
-        hydrated: true,
-      }),
-    );
-
-    const store = useConversationStore.getState();
-    expect(store.selectedOrigin).toBe('others');
-    expect(store.selectedFriendUserId).toBe('202');
-    expect(store.selectedSessionId).toBe(sessionId);
-  });
 });

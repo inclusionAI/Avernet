@@ -48,11 +48,6 @@ export function useConversationRouteResolver(options: {
   // 入向:URL → Store。section 缺失且目录可匹配时补齐;目录无匹配保持 null,
   // 待 hydration 完成后由下方 effect 重解析(旧/外部链接原样透传)。
   const lastRouteRef = useRef<ConversationRouteState | null>(null);
-  // 身份/目录都是异步到达。首个路由解析可能发生在 userId 尚未 ready 时,此时 Coding
-  // sessionId 只能保留 URL origin;老分享链接曾把 others/collab 固定成 mine。这里在
-  // userId 或 hydration 状态变化后再解析一次,让 sessionId 修正归属。
-  const lastUserIdRef = useRef(userId);
-  const lastHydratedRef = useRef(hydrated);
   const onRouteSelection = useCallback(
     (inputRoute: ConversationRouteState) => {
       const target = resolveConversationRouteTarget(inputRoute, [...managedBots, ...friendBots], hydrated);
@@ -143,18 +138,6 @@ export function useConversationRouteResolver(options: {
     if (!storeNow.selectedBotId || storeNow.selectedSection) return;
     onRouteSelection(lastRouteRef.current);
   }, [friendBotIdKey, hydrated, managedBotIdKey, onRouteSelection]);
-
-  // userId 首次到达或目录 hydration 完成时重放最后一次路由。只在身份/hydration 状态
-  // 本身变化时触发,不因目录数组重建打回用户后续手动切换的来源。
-  useEffect(() => {
-    const userIdChanged = lastUserIdRef.current !== userId;
-    const hydratedChanged = lastHydratedRef.current !== hydrated;
-    lastUserIdRef.current = userId;
-    lastHydratedRef.current = hydrated;
-    if (!hydrated || !userId || !lastRouteRef.current) return;
-    if (!userIdChanged && !hydratedChanged) return;
-    onRouteSelection(lastRouteRef.current);
-  }, [hydrated, onRouteSelection, userId]);
 
   // 完整目录到达后按管理→团队→好友归类；不能拿旧 friend 缓存搭配 team 请求身份。
   useEffect(() => {

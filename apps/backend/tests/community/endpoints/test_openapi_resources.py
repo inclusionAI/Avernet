@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import time
 
-import httpx
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
@@ -148,10 +147,9 @@ def _seed_happy_services(world) -> None:
         yield ("a.txt", b"hello world")
 
     async def exists(_self, *, path, **_kwargs) -> bool:
+        # ``upload`` must find its target free (fresh branch, no 409) while
+        # ``delete`` must find its target present (or it 404s).
         return path == _EXISTING_PATH
-
-    async def lookup_path_is_dir(_self, *, path, **_kwargs) -> bool | None:
-        return False if path == _EXISTING_PATH else None
 
     async def upload_file(_self, **kwargs):
         rel = kwargs["filename"]
@@ -175,7 +173,6 @@ def _seed_happy_services(world) -> None:
             "read_file": read_file,
             "iter_directory_files": iter_directory_files,
             "exists": exists,
-            "lookup_path_is_dir": lookup_path_is_dir,
             "upload_file": upload_file,
             "create_directory": create_directory,
             "delete": delete,
@@ -356,33 +353,5 @@ endpoint_test(
     seed=_seed_offline_services,
     expect=ExpectError(
         status=502, json_contains={"code": 502000, "message": "Bot device is offline", "data": None}
-    ),
-)(lambda: None)
-
-
-def _seed_file_path_listing(world) -> None:
-    _seed_happy_services(world)
-
-    async def list_dir(_self, **_kwargs):
-        request = httpx.Request("POST", "http://device.test/api/file/list")
-        response = httpx.Response(400, request=request)
-        response.raise_for_status()
-
-    bind_overrides(world, ResourceFileService, {"list_dir": list_dir})
-
-
-endpoint_test(
-    method="GET",
-    path=_BASE_PATH,
-    scenario="reject_file_path_as_directory",
-    input=CaseInput(
-        path_params=_PATH_PARAMS,
-        query_params=_query(path=_EXISTING_PATH),
-        headers=_HEADERS,
-    ),
-    seed=_seed_file_path_listing,
-    expect=ExpectError(
-        status=400,
-        json_contains={"code": 400000, "message": "path must refer to a directory", "data": None},
     ),
 )(lambda: None)

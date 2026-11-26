@@ -52,12 +52,6 @@ _kernel = A2aKernel()
 # collected mid-run and silently kill the event stream.
 _BRIDGE_TASKS: set[asyncio.Task] = set()
 
-
-def get_session_runtime_status(session_id: str) -> dict[str, Any]:
-    """Called only after the HTTP observer authorizes session history access."""
-    return _kernel.get_session_runtime_status(session_id)
-
-
 # Methods that can trigger engine execution or state mutation — gated
 # exactly like ws_server's handling of chat.send / chat.inject. CancelTask
 # 是写操作（改写 run 终态），与 ResolveInteraction 同级进 gate；

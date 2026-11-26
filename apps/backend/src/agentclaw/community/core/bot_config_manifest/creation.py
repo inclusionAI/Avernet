@@ -387,7 +387,6 @@ class BotCreationManifestSeam(ManifestCreationSeam):
         spec: dict[str, Any],
         iframe_url: Optional[str],
         redirect_url: Optional[str],
-        permission_subject: str | None = None,
     ) -> None:
         """Hand the creation to the durable job.
 
@@ -396,7 +395,6 @@ class BotCreationManifestSeam(ManifestCreationSeam):
         that finds nothing and reschedules.
         """
         self._start_job(
-            permission_subject=permission_subject,
             bot_id=bot_id,
             entity_id=entity_id,
             user_id=user_id,

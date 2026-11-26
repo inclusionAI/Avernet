@@ -1,4 +1,3 @@
-import { profileStats } from '../profileStats';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
@@ -57,7 +56,6 @@ export function CommunityAuthorAvatar({
   followed = false,
 }: CommunityAuthorAvatarProps): JSX.Element {
   const [open, setOpen] = useState(false);
-  const openedByPointer = useRef(false);
   const pendingCloseRef = useRef<number | undefined>(undefined);
   const cancelPendingClose = useCallback(() => {
     if (pendingCloseRef.current === undefined) return;
@@ -91,21 +89,20 @@ export function CommunityAuthorAvatar({
           className="rounded-full p-0 focus-visible:ring-2 focus-visible:ring-primary"
           style={{ width: size, height: size }}
           aria-label={`查看${author.displayName}资料`}
-          onMouseEnter={() => { openedByPointer.current = true; openCard(); }}
+          onMouseEnter={openCard}
           onMouseLeave={scheduleClose}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            openedByPointer.current = event.detail > 0;
             openCard();
           }}
         >
           {baseAvatar}
         </Button>
       </PopoverTrigger>
-      <PopoverContent onOpenAutoFocus={(event) => { if (openedByPointer.current) event.preventDefault(); }} sideOffset={16} className="w-[360px] max-w-[calc(100vw-24px)] rounded-xl border-0 px-3 pb-4 pt-0 shadow-lg" onMouseEnter={cancelPendingClose} onMouseLeave={closeCard}>
-        <div className="relative flex h-[68px] items-center border-b border-divider pl-[84px]">
-          <div className="absolute -top-3 left-0">{avatarContent(author, 68)}</div>
+      <PopoverContent className="w-64" onMouseEnter={cancelPendingClose} onMouseLeave={closeCard}>
+        <div className="flex items-center gap-3">
+          {avatarContent(author, 40)}
           <div className="min-w-0 flex-1">
             <p className="m-0 truncate text-sm font-semibold text-foreground">{author.displayName}</p>
             <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">
@@ -116,15 +113,32 @@ export function CommunityAuthorAvatar({
         {summaryLoading ? (
           <p className="m-0 mt-3 text-xs text-muted-foreground">统计加载中...</p>
         ) : (
-          <dl className="m-0 mt-4 grid grid-cols-4 text-center text-xs text-muted-foreground">
-            {profileStats(summary).map(({ label, count }) => <div key={label}><dt>{label}</dt><dd className="m-0 text-base leading-[21px] text-foreground">{count}</dd></div>)}
+          <dl className="m-0 mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+            <div>
+              <dt>关注者</dt>
+              <dd className="m-0 text-sm font-semibold text-foreground">{summary?.followCount ?? 0}</dd>
+            </div>
+            <div>
+              <dt>发布主题</dt>
+              <dd className="m-0 text-sm font-semibold text-foreground">{summary?.topicCount ?? 0}</dd>
+            </div>
+            <div>
+              <dt>回帖</dt>
+              <dd className="m-0 text-sm font-semibold text-foreground">{summary?.replyCount ?? 0}</dd>
+            </div>
+            <div>
+              <dt>被采纳回帖</dt>
+              <dd className="m-0 text-sm font-semibold text-foreground">
+                {summary?.acceptedReplyCount ?? 0}
+              </dd>
+            </div>
           </dl>
         )}
         {!isSelf && onFollow ? (
           <Button
-            variant={followed ? "secondary" : "primary"}
+            variant="primary"
             size="sm"
-            className={`group mt-4 h-8 w-full justify-center border-0 px-3 text-sm focus-visible:ring-primary ${followed ? 'bg-muted' : ''}`}
+            className="mt-3 h-8 w-full justify-center px-3 text-sm"
             leftIcon={
               followed ? (
                 <CommunityFollowIcon className="h-4 w-4" aria-hidden />
@@ -133,7 +147,6 @@ export function CommunityAuthorAvatar({
               )
             }
             loading={followLoading}
-            aria-label={followed ? "已关注" : "关注"}
             aria-pressed={followed}
             onClick={(event) => {
               event.preventDefault();
@@ -141,7 +154,7 @@ export function CommunityAuthorAvatar({
               onFollow();
             }}
           >
-            {followed ? <><span className="group-hover:hidden group-focus-visible:hidden">已关注</span><span className="hidden group-hover:inline group-focus-visible:inline">取消关注</span></> : '关注'}
+            {followed ? '已关注' : '关注'}
           </Button>
         ) : null}
       </PopoverContent>
