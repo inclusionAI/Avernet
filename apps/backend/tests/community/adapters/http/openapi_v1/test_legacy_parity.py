@@ -38,16 +38,22 @@ surface at once and would prove less than it appeared to.
 
 from __future__ import annotations
 
+import functools
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tests.community.adapters.http.openapi_v1.conftest import public_router
+from tests.community.adapters.http.openapi_v1.conftest import (
+    public_document,
+    public_router,
+)
 from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
 
 from .conftest import mount_public_error_handlers
 
 
+@functools.cache
 def _client() -> TestClient:
     app = FastAPI()
     app.include_router(public_router())
@@ -96,7 +102,7 @@ def test_a_legacy_address_refuses_exactly_as_its_replacement_does(
 
 def test_every_legacy_route_names_a_replacement_that_exists() -> None:
     """A legacy address pointing at nothing would be a dead end in the document."""
-    published = set(_client().app.openapi()["paths"])
+    published = set(public_document()["paths"])
     missing = sorted(
         replacement
         for replacement in LEGACY_ROUTES.values()
@@ -138,7 +144,7 @@ def test_a_retiring_body_keeps_the_component_name_it_published() -> None:
     what would answer that, and that lives in the release compat gate rather
     than here.
     """
-    document = _client().app.openapi()
+    document = public_document()
 
     def body_schema(method: str, path: str) -> str | None:
         operation = document["paths"].get(path, {}).get(method.lower())

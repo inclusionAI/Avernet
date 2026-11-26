@@ -26,6 +26,15 @@ class EngineDeviceNotReadyError(EngineRuntimeError):
     """
 
 
+class EngineCallerRuntimePreparingError(EngineDeviceNotReadyError):
+    """A first Caller session request started its runtime successfully.
+
+    The allocation is durable but not ready for a session yet.  Clients may
+    retry the same create request after the advertised delay; the provisioning
+    path is idempotent and no session was created by the pending response.
+    """
+
+
 class EngineCapabilityUnsupportedError(EngineRuntimeError):
     """The bot's engine does not declare the capability this call needs.
 
@@ -117,6 +126,7 @@ class EngineUpstreamError(EngineRuntimeError):
 
 __all__ = [
     "EngineRuntimeError",
+    "EngineCallerRuntimePreparingError",
     "EngineBotTypeNotSupportedError",
     "EngineCapabilityUnsupportedError",
     "EngineDeviceNotReadyError",

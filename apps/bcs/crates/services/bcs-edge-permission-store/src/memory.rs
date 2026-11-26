@@ -415,6 +415,23 @@ impl EdgeGrantRepoPort for MemoryEdgeGrantStore {
         Ok(())
     }
 
+    async fn revoke_grant_if_active(&self, edge_id: u64, env: &str) -> ServiceResult<bool> {
+        // Conditional transition parity with the SQL store: report whether
+        // this call performed the approved → revoked flip.
+        let mut grants = self.grants.write().await;
+        let Some(grant) = grants
+            .iter_mut()
+            .find(|grant| grant.edge_id == edge_id && grant.env == env)
+        else {
+            return Ok(false);
+        };
+        if grant.status != EdgeStatus::Approved {
+            return Ok(false);
+        }
+        grant.status = EdgeStatus::Revoked;
+        Ok(true)
+    }
+
     async fn get_default_profile_id(&self, bot_id: &str, env: &str) -> Option<u64> {
         self.default_profile_id(bot_id, env).await
     }

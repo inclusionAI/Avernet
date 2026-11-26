@@ -8,7 +8,8 @@ import type { ExecutionStepLogRepository } from "../repositories/execution-step-
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import { resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access";
-import { fixDurationMs, computeAvailableInterventions, allowsRuntimeMetadataFromStoredState, readRunRuntimeMetadata, toSafeRunFields } from "./run-read-fields.js";
+import { fixDurationMs, computeAvailableInterventions, allowsRuntimeMetadataFromStoredState, readRunRuntimeMetadata, toSafeRunFields, withoutRunLineage } from "./run-read-fields.js";
+import { readVisibleRunLineage } from "./run-launch-lineage.js";
 import type { RunSubworkflowsReader, RunReadInspection } from "../contracts/run-subworkflows.js";
 import { installFanoutReadHandlers, projectRun, projectNodes, sendRunReadError } from "./run-subworkflows-http.js";
 
@@ -87,7 +88,7 @@ export function createRunReadRouter(
           botId: typeof _req.query.botId === 'string' ? _req.query.botId.trim() : undefined,
         });
         res.setHeader('Cache-Control', 'private, no-store');
-        res.json({ ...page, runs: page.runs.map(fixDurationMs) });
+        res.json({ ...page, runs: page.runs.map(run => withoutRunLineage(fixDurationMs(run))) });
         return;
       }
 
@@ -152,7 +153,7 @@ export function createRunReadRouter(
       // Apply the same permission predicate before counting and pagination.
       const runs = await flowRunRepo.findRuns({ ...countOptions, limit, offset });
 
-      res.json({ runs: runs.map(fixDurationMs), total, limit, offset, statusCounts });
+      res.json({ runs: runs.map(run => withoutRunLineage(fixDurationMs(run))), total, limit, offset, statusCounts });
     } catch (error) {
       sendRunReadError(res, error);
     }
@@ -284,11 +285,13 @@ export function createRunReadRouter(
       const availableInterventions = res.locals.runRead?.managed || res.locals.runRead?.sensitiveChild ? [] : computeAvailableInterventions(run);
       // Never expose credentials_json; add safe derived fields
       const safeRun = projectRun(toSafeRunFields(fixDurationMs(run) as Record<string, unknown>), inspection);
+      const lineage = runSubviews && inspection ? await readVisibleRunLineage(runSubviews,
+        { actorId: resolveWorkflowActorId(req), isAdmin: req.isAdmin === true }, inspection) : {};
       const includeMetadata = exposeRuntimeMetadata && (inspection
         ? !inspection.managed && !inspection.restricted && !inspection.sensitiveChild
         : allowsRuntimeMetadataFromStoredState(run.state_json));
       res.json({
-        run: includeMetadata ? { ...safeRun, ...readRunRuntimeMetadata(run.credentials_json) } : safeRun,
+        run: { ...safeRun, ...lineage, ...(includeMetadata ? readRunRuntimeMetadata(run.credentials_json) : {}) },
         nodes: projectNodes(nodes, inspection),
         availableInterventions,
       });

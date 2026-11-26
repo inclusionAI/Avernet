@@ -31,7 +31,7 @@ async fn public_fixture() -> (RegistrationChain, A2aBotManagement) {
     (chain, service)
 }
 fn request(raw: serde_json::Value) -> RegisterAgentCommand {
-    RegisterAgentCommand { catalog_labels:Default::default(),
+    RegisterAgentCommand { agent_id:Default::default(), catalog_labels:Default::default(),
         provider_bot_ref: uuid::Uuid::new_v4().simple().to_string(),        visibility: Default::default(),
         provider_admin_token: "test-admin".into(),
         owners: Some(vec!["delegated-owner".into()]),
@@ -58,7 +58,7 @@ async fn public_registration_query_update_and_inline_refresh_follow_contract() {
     assert_eq!(registered.agent_name, "订单助手");
     let serialized = serde_json::to_value(&registered).unwrap();
     assert!(serialized.get("bot_runtime_token").is_none());
-    assert_eq!(serialized.as_object().unwrap().len(), 7);
+    assert_eq!(serialized.as_object().unwrap().len(), 11);
     assert_eq!(serialized["catalog_labels"],json!({}));
     assert_eq!(
         service
@@ -286,8 +286,6 @@ async fn registration_persists_visibility_atomically_and_card_updates_preserve_i
 async fn visibility_only_update_preserves_card_and_combined_update_rolls_back_on_failure() {
     use bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::{Protected,Public,Private};
     let (chain,service)=public_fixture().await;
-    // The minimal chain fixture omits this independent Human-facing setting.
-    chain.db.execute(DbStatement::new("ALTER TABLE bcs_bots ADD COLUMN user_visibility TEXT NOT NULL DEFAULT 'protected'")).await.unwrap();
     let raw=card("权限测试",None);
     let registered=service.register_agent(request(raw.clone())).await.unwrap();
     let before=chain.db.query(DbStatement::with_params("SELECT visibility,user_visibility FROM bcs_bots WHERE bot_uuid=?",vec![registered.bot_id.clone().into()])).await.unwrap();
@@ -309,6 +307,99 @@ async fn visibility_only_update_preserves_card_and_combined_update_rolls_back_on
     assert_eq!(service.get_agent_by_id("test-admin",&registered.bot_id).await.unwrap().agent_card,raw);
     assert_eq!(chain.db.query(read()).await.unwrap()[0].get_string("visibility").unwrap().as_deref(),Some("public"));
     assert!(service.update_agent_by_id_with_visibility("wrong-token","权限测试",None,Some(Protected)).await.is_err());
+}
+
+
+#[tokio::test]
+async fn agent_id_registration_accepts_omitted_null_empty_and_exact_values() {
+    use bcs_service_api::types::a2a_bot::A2aAgentIdentity;
+    for (identity, stored) in [
+        (A2aAgentIdentity::Omitted, None),
+        (A2aAgentIdentity::Null, None),
+        (A2aAgentIdentity::Text(String::new()), Some("")),
+        (A2aAgentIdentity::Text("billing-agent".into()), Some("billing-agent")),
+    ] {
+        let (chain, service) = public_fixture().await;
+        let mut command = request(card("AgentId 测试", None));
+        command.agent_id = identity.clone();
+        let registered = service.register_agent(command).await.unwrap();
+        assert_eq!(registered.agent_id.as_deref(), stored, "{identity:?}");
+        let rows = chain.db.query(DbStatement::with_params(
+            "SELECT agent_code FROM bcs_bots WHERE bot_uuid=?",
+            vec![registered.bot_id.into()])).await.unwrap();
+        assert_eq!(rows[0].get_string("agent_code").unwrap(), stored.map(str::to_owned), "{identity:?}");
+    }
+}
+
+#[tokio::test]
+async fn update_agent_id_fills_empty_identity_and_rejects_changes() {
+    use bcs_service_api::types::a2a_bot::A2aAgentIdentity;
+    let (chain, service)=public_fixture().await;
+    let raw=card("AgentId 更新",None);
+    let registered=service.register_agent(request(raw.clone())).await.unwrap();
+    let read_agent=|| DbStatement::with_params("SELECT agent_code,agent_card_revision FROM bcs_bots WHERE bot_uuid=?",
+        vec![registered.bot_id.clone().into()]);
+    let update=|agent_id| bcs_service_api::application::a2a_bot::UpdateAgentCommand {
+        agent_id, provider_admin_token:"test-admin".into(), bot_id:registered.bot_id.clone(),
+        source:None, visibility:None, catalog_labels:None,
+    };
+    let filled=service.update_agent(update(A2aAgentIdentity::Text("trusted-agent".into()))).await.unwrap();
+    assert_eq!(filled.agent_id.as_deref(),Some("trusted-agent"));
+    let rows=chain.db.query(read_agent()).await.unwrap();
+    assert_eq!(rows[0].get_string("agent_code").unwrap().as_deref(),Some("trusted-agent"));
+    let revision=rows[0].get_i64("agent_card_revision").unwrap().unwrap();
+
+    service.update_agent(update(A2aAgentIdentity::Text("trusted-agent".into()))).await.unwrap();
+    let conflict=A2aAgentIdentity::Text("another-agent".into());
+    assert_eq!(code(service.update_agent(update(conflict)).await.unwrap_err()),Code::AgentIdentityConflict);
+    assert_eq!(code(service.update_agent(update(A2aAgentIdentity::Null)).await.unwrap_err()),Code::AgentIdentityConflict);
+    assert_eq!(code(service.update_agent(update(A2aAgentIdentity::Text(String::new()))).await.unwrap_err()),Code::AgentIdentityConflict);
+    let rows=chain.db.query(read_agent()).await.unwrap();
+    assert_eq!(rows[0].get_string("agent_code").unwrap().as_deref(),Some("trusted-agent"));
+    assert_eq!(rows[0].get_i64("agent_card_revision").unwrap(),Some(revision+1));
+    assert_eq!(service.get_agent_by_id("test-admin",&registered.bot_id).await.unwrap().agent_card,raw);
+}
+
+#[tokio::test]
+async fn metadata_patch_updates_four_fields_and_omits_latest_values() {
+    use bcs_service_api::application::v1::UserVisibility;
+    use bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Private;
+    let (chain, service)=public_fixture().await;
+    let raw=card("状态测试",None);
+    let registered=service.register_agent(request(raw.clone())).await.unwrap();
+    let metadata=bcs_service_api::application::a2a_bot::UpdateAgentCardMetadataCommand {
+        provider_admin_token:"test-admin".into(), bot_id:registered.bot_id.clone(),
+        catalog_labels:Some(Default::default()), status:Some(bcs_service_api::ActorStatus::Hidden),
+        visibility:Some(Private), user_visibility:Some(UserVisibility::Private),
+    };
+    let hidden=service.update_agent_metadata(metadata).await.unwrap();
+    assert_eq!(hidden.agent_id,None);
+    assert_eq!(hidden.status,bcs_service_api::ActorStatus::Hidden);
+    assert_eq!(hidden.visibility,Private);
+    assert_eq!(hidden.user_visibility,UserVisibility::Private);
+    assert_eq!(hidden.agent_card,raw);
+    let rows=chain.db.query(DbStatement::with_params(
+        "SELECT status,visibility,user_visibility FROM bcs_bots WHERE bot_uuid=?",
+        vec![registered.bot_id.clone().into()])).await.unwrap();
+    assert_eq!(rows[0].get_string("status").unwrap().as_deref(),Some("hidden"));
+    assert_eq!(rows[0].get_string("visibility").unwrap().as_deref(),Some("private"));
+    assert_eq!(rows[0].get_string("user_visibility").unwrap().as_deref(),Some("private"));
+
+    let metadata=bcs_service_api::application::a2a_bot::UpdateAgentCardMetadataCommand {
+        provider_admin_token:"test-admin".into(), bot_id:registered.bot_id.clone(),
+        catalog_labels:None, status:Some(bcs_service_api::ActorStatus::Online),
+        visibility:None, user_visibility:None,
+    };
+    let online=service.update_agent_metadata(metadata).await.unwrap();
+    assert_eq!(online.status,bcs_service_api::ActorStatus::Online);
+    assert_eq!(online.visibility,Private);
+    assert_eq!(online.user_visibility,UserVisibility::Private);
+    let rows=chain.db.query(DbStatement::with_params(
+        "SELECT visibility,user_visibility,status FROM bcs_bots WHERE bot_uuid=?",
+        vec![registered.bot_id.into()])).await.unwrap();
+    assert_eq!(rows[0].get_string("visibility").unwrap().as_deref(),Some("private"));
+    assert_eq!(rows[0].get_string("user_visibility").unwrap().as_deref(),Some("private"));
+    assert_eq!(rows[0].get_string("status").unwrap().as_deref(),Some("online"));
 }
 
 #[path="catalog_labels.rs"]

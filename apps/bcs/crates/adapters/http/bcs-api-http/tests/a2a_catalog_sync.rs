@@ -46,7 +46,7 @@ async fn v1_mutations_publish_to_fuse_and_rejected_writes_do_not() {
     // The registration fixture intentionally has a minimal schema; publication
     // additionally reads these existing control-plane columns.
     for column in ["task_claim_mode INTEGER DEFAULT 0", "task_dream_mode INTEGER DEFAULT 0",
-        "user_visibility TEXT DEFAULT 'protected'", "friend_ext TEXT", "friend_check_in_strategy TEXT"] {
+        "friend_ext TEXT", "friend_check_in_strategy TEXT"] {
         chain.db.execute(DbStatement::new(format!("ALTER TABLE bcs_bots ADD COLUMN {column}"))).await.unwrap();
     }
     chain.db.execute(DbStatement::new("UPDATE bcs_providers SET slug='orders', config='{\"downlink\":{\"enabled\":true,\"auth_mode\":\"static_bearer\"}}' WHERE provider_id='provider-a'")).await.unwrap();
@@ -68,7 +68,7 @@ async fn v1_mutations_publish_to_fuse_and_rejected_writes_do_not() {
     let server=tokio::spawn(async move {axum::serve(listener,fuse).await.unwrap()});
     let worker=fuse_card_sync_worker(&chain, stack.queue, stack.cards, addr.to_string());
     worker.initialize().await.unwrap();
-    let input=json!({"provider_bot_ref":"catalog-ref","owners":["delegated-owner"],"agent_card_url":"https://example.org/card.json"});
+    let input=json!({"provider_bot_ref":"catalog-ref","owners":["delegated-owner"],"agent_id":"catalog-agent-id","agent_card_url":"https://example.org/card.json"});
     let (status, saved)=call(&app,"POST","/api/v1/collaboration/a2a/agents",input.clone()).await;
     assert_eq!(status,201,"{saved}");
     let id=saved["data"]["bot_id"].as_str().unwrap().to_owned();
@@ -82,6 +82,10 @@ async fn v1_mutations_publish_to_fuse_and_rejected_writes_do_not() {
     assert_eq!(published.1["card"]["domains"],json!(["billing"]));
     assert_eq!(published.1["card"]["scopes"],json!(["orders:read"]));
     assert_eq!(published.1["resource_type"],"agent");
+    assert!(!published.1.to_string().contains("catalog-agent-id"));
+    assert!(!published.1.to_string().contains("agent_id"));
+    assert!(!published.1.to_string().contains("agentId"));
+    assert!(!published.1.to_string().contains("agent_code"));
     let path=format!("/api/v1/collaboration/a2a/agents/{id}/agent-card");
     for (method,path,body) in [
         ("PUT",path.clone(),json!({"visibility":"public"})),
@@ -94,9 +98,25 @@ async fn v1_mutations_publish_to_fuse_and_rejected_writes_do_not() {
         assert_eq!(published_id,id);
         assert_eq!(body["labels"]["visibility"],json!(["public"]));
     }
+    let metadata_path=format!("/api/v1/collaboration/a2a/agents/{id}/agent-card/metadata");
+    let (metadata_status,metadata_response)=call(&app,"PATCH",&metadata_path,json!({
+        "status":"hidden","visibility":"private","user_visibility":"private"
+    })).await;
+    assert_eq!(metadata_status,200,"{metadata_response}");
+    let (published_id,body)=tokio::time::timeout(std::time::Duration::from_secs(3),rx.recv()).await.unwrap().unwrap();
+    assert_eq!(published_id,id);
+    assert_eq!(body["labels"]["status"],json!(["hidden"]));
+    assert_eq!(body["labels"]["visibility"],json!(["private"]));
+    assert_eq!(body["labels"]["user_visibility"],json!(["private"]));
+    assert!(!body.to_string().contains("agent_id"));
+    assert!(!body.to_string().contains("agentId"));
+    assert!(!body.to_string().contains("agent_code"));
+
     let (status,_) = call(&app,"POST","/api/v1/collaboration/a2a/agents",input).await;
     assert_eq!(status,409);
     let (status,_) = call(&app,"PUT",&path,json!({})).await;
+    assert_eq!(status,400);
+    let (status,_) = call(&app,"PATCH",&metadata_path,json!({"agent_id":"catalog-agent-id"})).await;
     assert_eq!(status,400);
     assert!(tokio::time::timeout(std::time::Duration::from_millis(100),rx.recv()).await.is_err());
     worker.shutdown().await.unwrap();

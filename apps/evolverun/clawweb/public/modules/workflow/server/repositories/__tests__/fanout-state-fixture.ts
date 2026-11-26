@@ -26,7 +26,7 @@ export function fixture() {
     gmt_create INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX idx_flow_run_links_parent ON flow_run_links(parent_flow_id);`);
-  for (const name of ['state_json', 'credentials_json', 'origin_session_key', 'origin_bot_id', 'user_id', 'current_phase']) {
+  for (const name of ['parent_flow_id', 'root_flow_id', 'state_json', 'credentials_json', 'origin_session_key', 'origin_bot_id', 'user_id', 'current_phase']) {
     raw.exec(`ALTER TABLE flow_runs ADD COLUMN ${name} TEXT`);
   }
   raw.prepare('INSERT INTO flow_runs (flow_id, workflow_id, status, started_at) VALUES (?, ?, ?, ?)')

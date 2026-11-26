@@ -51,7 +51,7 @@ fn invalid(field: &str, reason: &'static str) -> ServiceError {
 // retained system label. valid_key already restricts keys to ASCII, so the
 // ASCII comparison is exact over the accepted alphabet.
 fn reserved(key: &str) -> bool {
-    key.eq_ignore_ascii_case("visibility") || key.eq_ignore_ascii_case("user_visibility")
+    key.eq_ignore_ascii_case("visibility") || key.eq_ignore_ascii_case("user_visibility") || key.eq_ignore_ascii_case("status")
 }
 fn valid_key(key: &str) -> bool {
     !key.is_empty() && key.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn reserved_keys_are_case_insensitive_in_dictionary_and_labels() {
         // Dictionary config cannot register a case-variant of a reserved key.
-        for key in ["Visibility", "VISIBILITY", "User_Visibility", "UsEr_vIsIbIlItY"] {
+        for key in ["Visibility", "VISIBILITY", "User_Visibility", "UsEr_vIsIbIlItY", "Status", "STATUS"] {
             assert!(
                 CatalogLabelPolicy::new([(key.into(), CatalogLabelRule {allowed_values:vec!["a".into()],allow_multiple:false})].into()).is_err(),
                 "dictionary should reject reserved case-variant {key:?}"
@@ -138,7 +138,7 @@ mod tests {
         }
         // Stored/DTO catalog labels cannot carry a case-variant reserved key;
         // valid_key accepts these spellings, so only reserved() must reject them.
-        for key in ["Visibility", "VISIBILITY", "USER_VISIBILITY", "user_Visibility"] {
+        for key in ["Visibility", "VISIBILITY", "USER_VISIBILITY", "user_Visibility", "Status", "STATUS"] {
             assert!(
                 serde_json::from_value::<CatalogLabels>(json!({key: ["a"]})).is_err(),
                 "CatalogLabels should reject reserved case-variant {key:?}"

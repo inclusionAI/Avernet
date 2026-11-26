@@ -20,7 +20,38 @@ fn view(provider: &str, record: A2aBotRecord) -> ServiceResult<ManagedA2aCard> {
         provider_bot_ref: record.provider_bot_ref,
         agent_card_url: record.agent_card_url,
         agent_card: record.agent_card,
+        agent_id: record.agent_id,
+        visibility: record.visibility,
+        status: record.status,
+        user_visibility: record.user_visibility,
     })
+}
+
+fn identity_conflict() -> ServiceError {
+    ServiceError::A2aManagement(ManagementError::new(
+        Code::AgentIdentityConflict, "agent_id", "IDENTITY_CONFLICT"))
+}
+
+/// Resolve a Card PUT AgentId against the latest dedicated column. Omission
+/// preserves the stored value; null and an empty value preserve an empty
+/// representation but cannot clear a nonempty identity.
+fn resolve_update_identity(
+    declaration: &bcs_service_api::types::a2a_bot::A2aAgentIdentity,
+    current: &Option<String>,
+) -> ServiceResult<Option<String>> {
+    use bcs_service_api::types::a2a_bot::A2aAgentIdentity;
+    let empty = current.as_deref().unwrap_or("").is_empty();
+    match declaration {
+        A2aAgentIdentity::Omitted => Ok(current.clone()),
+        A2aAgentIdentity::Null if empty => Ok(None),
+        A2aAgentIdentity::Text(value) if empty => Ok(Some(value.clone())),
+        A2aAgentIdentity::Text(value)
+            if current.as_deref().is_some_and(|current| current == value.as_str()) =>
+        {
+            Ok(current.clone())
+        }
+        _ => Err(identity_conflict()),
+    }
 }
 impl A2aBotManagement {
     async fn authenticated_public_provider(&self, token: &str) -> ServiceResult<(String, String, String)> {
@@ -138,6 +169,7 @@ impl A2aBotManagement {
                 card,
                 command.now_ms,
                 command.visibility,
+                command.agent_id,
                 labels,
             )
             .await?;
@@ -177,10 +209,11 @@ impl A2aBotManagement {
         bot_id: &str,
         source: Option<A2aCardSource>,
         visibility: Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>,
+        agent_id: bcs_service_api::types::a2a_bot::A2aAgentIdentity,
         labels: Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     ) -> ServiceResult<ManagedA2aCard> {
         let (provider, label, _) = self.authenticated_public_provider(token).await?;
-        if source.is_none() && visibility.is_none() && labels.is_none() {return Err(failure(Code::InvalidRequest,"","UPDATE_REQUIRED"));}
+        if source.is_none() && visibility.is_none() && labels.is_none() && agent_id==bcs_service_api::types::a2a_bot::A2aAgentIdentity::Omitted {return Err(failure(Code::InvalidRequest,"","UPDATE_REQUIRED"));}
         let labels=labels.map(|input|self.policy.normalize(input)).transpose()?;
         let target = self.public_record_by_id(&provider, bot_id).await?;
         let loaded = match source {Some(source)=>Some(self.public_load(source).await?),None=>None};
@@ -218,6 +251,10 @@ impl A2aBotManagement {
                 catalog_labels: labels.clone().unwrap_or_else(||current.catalog_labels.clone()),
                 agent_card_url: url.clone(),
                 agent_card: raw,
+                agent_id: resolve_update_identity(&agent_id,&current.agent_id)?,
+                visibility: visibility.clone().unwrap_or(current.visibility),
+                status: current.status,
+                user_visibility: current.user_visibility,
                 revision,
                 ..current
             };
@@ -235,6 +272,41 @@ impl A2aBotManagement {
             "bot_id",
             "CONCURRENT_UPDATE",
         ))
+    }
+    pub(super) async fn public_update_metadata(
+        &self,
+        command: bcs_service_api::application::a2a_bot::UpdateAgentCardMetadataCommand,
+    ) -> ServiceResult<ManagedA2aCard> {
+        let (provider, label, _) = self.authenticated_public_provider(&command.provider_admin_token).await?;
+        if command.catalog_labels.is_none() && command.status.is_none()
+            && command.visibility.is_none() && command.user_visibility.is_none() {
+            return Err(failure(Code::InvalidRequest, "", "METADATA_UPDATE_REQUIRED"));
+        }
+        let labels=command.catalog_labels.map(|input|self.policy.normalize(input)).transpose()?;
+        for _ in 0..3 {
+            self.authorize(&provider, &command.provider_admin_token).await?;
+            let current=self.public_record_by_id(&provider, &command.bot_id).await?;
+            let revision=current.revision.checked_add(1)
+                .ok_or_else(|| failure(Code::InternalError, "", "REVISION_EXHAUSTED"))?;
+            let mut next=current.clone();
+            next.revision=revision;
+            if let Some(labels)=&labels { next.catalog_labels=labels.clone(); }
+            if let Some(visibility)=command.visibility { next.visibility=visibility.clone(); }
+            if let Some(status)=command.status { next.status=status; }
+            if let Some(user_visibility)=command.user_visibility { next.user_visibility=user_visibility; }
+            match self.core.commit_card_with_visibility(next, revision-1, command.visibility).await {
+                Ok(record) => {
+                    self.providers.pin_a2a_provider_name(&provider, &label).await?;
+                    return view(&label, record);
+                }
+                Err(ServiceError::Conflict(_)) => continue,
+                Err(ServiceError::Forbidden(_)) => {
+                    return Err(failure(Code::TargetChanged, "bot_id", "TARGET_CHANGED"));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(failure(Code::TargetChanged, "bot_id", "CONCURRENT_UPDATE"))
     }
     pub(super) async fn public_refresh(
         &self,

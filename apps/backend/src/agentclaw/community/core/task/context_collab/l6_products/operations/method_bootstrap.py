@@ -1,0 +1,270 @@
+"""L6-owned product Method bootstrap/recovery orchestration.
+
+This adapter translates L4 Collet/Task identities and the selected L6 profile
+into L5 facts.  It never accepts or reconstructs a ContextSpec-like aggregate.
+"""
+
+from __future__ import annotations
+
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError,
+    ContextCollabValidationError,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
+)
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+    PrincipalRef,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    MethodBinding,
+    parse_method_kinds,
+    top_level_binding_id,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
+    METHOD_PROFILE_REGISTRY,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.initialization import (
+    ResolvedMethodSpec,
+    build_top_level_binding,
+    find_top_level_binding,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.initialization import (
+    initialize_top_level_binding as initialize_method,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
+    current_axes,
+)
+from agentclaw.community.core.task.context_collab.l6_products.binding import (
+    role_binding_refs,
+)
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
+    ProductProfileReader,
+)
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    LegacyProductConfiguration,
+)
+from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
+    creation_method_kind,
+    creation_product_kind,
+    creation_profile_ref,
+    decode_creation_facts,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.topology_projection import (
+    project_method_topology,
+)
+from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
+    ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.l6_products.topology import (
+    product_binding_refs,
+)
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    MethodStoreProtocol,
+    StoreAxes,
+)
+from injector import inject
+
+
+def _resolve_method_spec(
+    collet_id: str,
+    *,
+    method_kind: str,
+    principal_ref: PrincipalRef,
+    executor_ref: AgentRef | None,
+    profile: LegacyProductConfiguration | None,
+) -> ResolvedMethodSpec:
+    versions = (
+        {
+            item.profile.method_kind: item.profile.profile_version
+            for item in profile.composition.required_methods
+        }
+        if profile is not None
+        else {
+            kind.value: METHOD_PROFILE_REGISTRY[kind.value].profile_version
+            for kind in parse_method_kinds(method_kind)
+        }
+    )
+    return ResolvedMethodSpec(
+        method_kind=method_kind,
+        profile_versions=versions,
+        role_binding_refs=role_binding_refs(
+            collet_id, profile=profile, executor_ref=executor_ref
+        )
+        if profile is not None
+        else (),
+        principal_id=principal_ref.principal_id,
+        executor_id=executor_ref.agent_id if executor_ref else None,
+    )
+
+
+def project_created_context(
+    store: MethodStoreProtocol,
+    axes: StoreAxes,
+    collab_context_id: str,
+    *,
+    method_kind: str,
+    principal_ref: PrincipalRef,
+    executor_ref: AgentRef | None,
+    profile: LegacyProductConfiguration | None,
+    context: ActorContext,
+    now: str,
+) -> MethodBinding:
+    if profile is not None and profile.composition.relations:
+        return project_method_topology(
+            store,
+            axes,
+            collab_context_id,
+            profile,
+            _resolve_method_spec(
+                collab_context_id,
+                method_kind=method_kind,
+                principal_ref=principal_ref,
+                executor_ref=executor_ref,
+                profile=profile,
+            ),
+            context,
+            now=now,
+            healing=False,
+        )
+    existing = find_top_level_binding(store, axes, collab_context_id)
+    if existing is not None:
+        return existing
+    return initialize_method(
+        store,
+        axes,
+        collab_context_id,
+        _resolve_method_spec(
+            collab_context_id,
+            method_kind=method_kind,
+            principal_ref=principal_ref,
+            executor_ref=executor_ref,
+            profile=profile,
+        ),
+        context,
+        now=now,
+    )
+
+
+def ensure_top_level_binding(
+    store: MethodStoreProtocol,
+    axes: StoreAxes,
+    collab_context_id: str,
+    collab_repo: ContextCollabRepositoryProtocol,
+    actor: ActorContext,
+    *,
+    now: str,
+    catalog: ProductProfileReader,
+    method_binding_id: str | None = None,
+) -> MethodBinding:
+    """Read-path recovery of the L5 top-level binding from persisted facts."""
+    record = collab_repo.get_current_status(collab_context_id)
+    if record is None:
+        raise ContextCollabNotFoundError(
+            f"collaboration context {collab_context_id!r} not found"
+        )
+    facts = decode_creation_facts(record.creation_facts)
+    if creation_method_kind(facts) is None:
+        raise ContextCollabValidationError("Collet has no selected Method to recover")
+    profile = None
+    if creation_product_kind(facts) is not None:
+        profile = catalog.get(
+            creation_product_kind(facts),
+            creation_profile_ref(facts).version
+            if creation_profile_ref(facts) is not None
+            else 1,
+        )
+    allowed_refs = (
+        product_binding_refs(collab_context_id, profile)
+        if profile is not None
+        else (top_level_binding_id(collab_context_id),)
+    )
+    requested_ref = allowed_refs[0] if method_binding_id is None else method_binding_id
+    if requested_ref not in allowed_refs:
+        raise ContextCollabNotFoundError(
+            f"method binding {requested_ref!r} is not part of the pinned product topology"
+        )
+    if profile is not None and profile.composition.relations:
+        project_method_topology(
+            store,
+            axes,
+            collab_context_id,
+            profile,
+            _resolve_method_spec(
+                collab_context_id,
+                method_kind=creation_method_kind(facts),
+                principal_ref=record.collet.initiator_ref,
+                executor_ref=AgentRef.from_dict(facts["executor_ref"])
+                if facts.get("executor_ref") is not None
+                else None,
+                profile=profile,
+            ),
+            actor,
+            now=now,
+            healing=True,
+        )
+        binding = store.get_binding(axes, requested_ref, collab_context_id)
+        if binding is None:
+            raise ContextCollabNotFoundError(
+                f"method binding {requested_ref!r} not recovered"
+            )
+        return binding
+    existing = find_top_level_binding(store, axes, collab_context_id)
+    if existing is not None:
+        return existing
+    return store.upsert_binding(
+        axes,
+        build_top_level_binding(
+            collab_context_id,
+            _resolve_method_spec(
+                collab_context_id,
+                method_kind=creation_method_kind(facts),
+                principal_ref=record.collet.initiator_ref,
+                executor_ref=(
+                    AgentRef.from_dict(facts["executor_ref"])
+                    if facts.get("executor_ref") is not None
+                    else None
+                ),
+                profile=profile,
+            ),
+            actor,
+            now=now,
+            bind_reason="create_collet_heal",
+            reason="top-level projection heal",
+        ),
+    )
+
+
+class ProductMethodBindingRecovery:
+    """L6 recovery port adapter; preserves pinned versions and restart behavior."""
+
+    @inject
+    def __init__(
+        self,
+        store: MethodStoreProtocol,
+        repository: ContextCollabRepositoryProtocol,
+        catalog: ProductProfileReader,
+    ) -> None:
+        self._store = store
+        self._repository = repository
+        self._catalog = catalog
+
+    def recover(
+        self,
+        collab_context_id: str,
+        actor: ActorContext,
+        *,
+        method_binding_id: str,
+        now: str,
+    ) -> MethodBinding:
+        return ensure_top_level_binding(
+            self._store,
+            current_axes(),
+            collab_context_id,
+            self._repository,
+            actor,
+            now=now,
+            catalog=self._catalog,
+            method_binding_id=method_binding_id,
+        )

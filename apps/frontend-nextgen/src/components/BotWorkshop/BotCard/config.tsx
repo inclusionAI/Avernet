@@ -1,4 +1,4 @@
-import type { BotManagementVerb } from '@/domain/botWorkshop';
+import { serviceBotStageLabel, type BotManagementVerb } from '@/domain/botWorkshop';
 import type { BotDomain } from '@/services/botWorkshop';
 import { FolderOpen, Power, RefreshCw, RotateCw, Server, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -9,11 +9,18 @@ export const lifecycleLabel: Record<BotDomain['lifecycle'], string> = {
   draft: '草稿',
   deploying: '部署中',
   prestable: '预发',
-  running: '运行中',
+  running: serviceBotStageLabel.online,
   offline: '已下线',
   failed: '创建失败',
   unknown: '状态未知',
 };
+
+export function botLifecycleLabel(bot: BotDomain): string {
+  if (bot.serviceMode === 'service' && bot.lifecycle === 'prestable') {
+    return serviceBotStageLabel.verify;
+  }
+  return lifecycleLabel[bot.lifecycle];
+}
 
 export const actionLabel: Record<BotCardManagementAction, string> = {
   activate: '激活 Bot',

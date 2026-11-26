@@ -418,8 +418,20 @@ from agentclaw.community.core.task.todos.services.todo_template_service import (
     TodoTemplateService,
 )
 
+from agentclaw.community.api.task.task_commission_service import TaskCommissionServiceProtocol
+from agentclaw.community.core.task.context_collab.products.task_commission.service import TaskCommissionService
+
+from agentclaw.community.api.task.product_profile_service import ProductProfileServiceProtocol
+from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.service import ProductProfileService
+
+from agentclaw.community.api.task.rollout_progress_service import RolloutProgressServiceProtocol
+from agentclaw.community.core.task.context_collab.l5_methods.rollout_engine import RolloutEngine
+
 _PAIRS = [
+    (RolloutProgressServiceProtocol, RolloutEngine),
+    (ProductProfileServiceProtocol, ProductProfileService),
     (TodoTemplateManagementServiceProtocol, TodoTemplateService),
+    (TaskCommissionServiceProtocol, TaskCommissionService),
     (EngineSessionFilesProtocol, EngineSessionFilesService),
     (BotOverviewServiceProtocol, BotOverviewService),
     (ConversationKnowledgeServiceProtocol, ConversationKnowledgeService),

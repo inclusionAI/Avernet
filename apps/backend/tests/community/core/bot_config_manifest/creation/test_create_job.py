@@ -103,6 +103,16 @@ def test_binding_reaches_the_on_container_run_as_a_manifest_reference():
     assert "expected_manifest_digest" not in applies.started[0]
 
 
+@pytest.mark.parametrize("subject,expected", [(None, None), ("u_owner", "u_owner"), ("", None), (42, None)])
+def test_on_container_preserves_only_explicit_permission_subject(subject, expected):
+    handler, applies, _, _ = _handler(bots=_Bots(_ISSUED_BOT), seam=_BoundSeam())
+    payload = _bound_payload()
+    if subject is not None:
+        payload["permission_subject"] = subject
+    assert isinstance(handler.handle(payload), Complete)
+    assert applies.started[0]["permission_subject"] == expected
+
+
 @pytest.mark.parametrize("field,value", [
     ("manifest_digest", "bad"), ("digest_encoding", "unknown"),
     ("entity_id", "other"), ("bot_id", "other"), ("tenant", "other"), ("env", "prod"),

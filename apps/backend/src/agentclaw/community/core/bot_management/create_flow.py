@@ -441,6 +441,7 @@ def submit_bot_creation_with_manifest(
     passport_plugin: PassportPlugin,
     skill_set_factory: SkillSetServiceFactory,
     manifest_seam: ManifestCreationSeam,
+    permission_subject: str | None = None,
 ) -> ManifestCreationSubmitted:
     """Validate, store the manifest, apply for a Passport — and stop.
 
@@ -543,6 +544,7 @@ def submit_bot_creation_with_manifest(
                 manifest_digest=binding["manifest_digest"],
             )
         return _apply_and_hand_off(
+            permission_subject=permission_subject,
             nick_name=nick_name,
             manifest_seam=manifest_seam,
             passport_plugin=passport_plugin,
@@ -575,6 +577,7 @@ def _apply_and_hand_off(
     spec: BotCreateSpec,
     payload_spec: dict[str, Any],
     context: BotCreateContext,
+    permission_subject: str | None,
 ) -> ManifestCreationSubmitted:
     """Apply for the Passport, then hand the creation to its durable job.
 
@@ -633,6 +636,7 @@ def _apply_and_hand_off(
         bot_id=bot_id,
         entity_id=entity_id,
         user_id=user_id,
+        permission_subject=permission_subject,
         document_owner=user_id,
         spec=payload_spec,
         iframe_url=iframe_url,

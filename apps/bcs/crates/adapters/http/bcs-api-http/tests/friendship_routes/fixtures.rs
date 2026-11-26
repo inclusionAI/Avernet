@@ -401,6 +401,7 @@ pub(crate) struct FakeFriendConnectionService {
     pub(crate) request_view: Mutex<FriendConnectionRequestView>,
     pub(crate) connection_page: Mutex<FriendConnectionPage>,
     pub(crate) delete_result: Mutex<DeleteResult>,
+    pub(crate) delete_error: Mutex<Option<ApplicationError>>,
 }
 
 impl Default for FakeFriendConnectionService {
@@ -418,6 +419,7 @@ impl Default for FakeFriendConnectionService {
             request_view: Mutex::new(friend_connection_request_view()),
             connection_page: Mutex::new(friend_connection_page()),
             delete_result: Mutex::new(DeleteResult { deleted: true }),
+            delete_error: Mutex::new(None),
         }
     }
 }
@@ -477,6 +479,9 @@ impl FriendConnectionService for FakeFriendConnectionService {
         command: DeleteFriendConnection,
     ) -> Result<DeleteResult, ApplicationError> {
         *self.deleted_connection.lock().expect("delete connection lock") = Some(command);
+        if let Some(error) = self.delete_error.lock().expect("delete error lock").take() {
+            return Err(error);
+        }
         Ok(self.delete_result.lock().expect("delete result lock").clone())
     }
 }

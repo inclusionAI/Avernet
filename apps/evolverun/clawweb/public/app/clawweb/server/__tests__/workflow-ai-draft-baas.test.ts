@@ -34,7 +34,7 @@ const baasResult = (messageId: string, botId: string, data: Record<string, unkno
 beforeEach(() => { Object.assign(state, { botId: 'autoheal-bot:configured-owner', apiKey: 'baas-test',
   baseUrl: 'http://127.0.0.1:1', iamtoken: '', environment: 'pre', baasEnvironment: 'pre',
   prodApiKey: 'provider-test', prodBaseUrl: 'http://127.0.0.1:9', unavailable: false }); });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe('Editor AutoHeal/BaaS adapter', () => {
   it('sends the complete configured AutoHeal binding through the existing BaaS transport, not onboarding/user identity', async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => new Response(JSON.stringify({
@@ -408,8 +408,8 @@ it.each([false, true])('integrates stateless draft core with BaaS without a task
   } finally { await f.db.close(); }
 });
 
-it.each(['ABORTED', 'TIME_OUT'])('recognizes the BaaS terminal state %s', status => {
-  expect(decodeWorkflowAiDraftBaasReply({ data: { status } })).toEqual({ status: 'failed', error: 'BAAS_GENERATION_FAILED' });
+it.each([['ABORTED', 'BAAS_GENERATION_CANCELLED'], ['TIME_OUT', 'BAAS_GENERATION_TIMEOUT']])('recognizes the BaaS terminal state %s', (status, error) => {
+  expect(decodeWorkflowAiDraftBaasReply({ data: { status } })).toEqual({ status: 'failed', error });
 });
 it.each([{ code: 60001, data: null }, { buserviceErrorCode: 'TOKEN_EXPIRED' }, { code: '60001', data: { status: 'completed', content: yaml } }])('never treats provider diagnostics as Bot YAML', envelope => {
   expect(decodeWorkflowAiDraftBaasReply({ ...envelope, message: '```yaml\n' + yaml + '```' })).toEqual({ status: 'failed', error: 'BAAS_PROVIDER_REJECTED' });
@@ -421,4 +421,181 @@ it('continues polling accepted work after AutoHeal Bot configuration is removed'
   vi.stubGlobal('fetch', fetch);
   expect(await port.poll({ ...frozen, jobId: 'accepted-message' })).toMatchObject({ status: 'completed', result: { yaml } });
   expect(fetch).toHaveBeenCalledOnce();
+});
+
+// Signatures emitted by BaaS bot_run/_executor.py, _task_message_dispatcher.py,
+// _baas_service.py and api/{bot_runtime,api_gateway,open_api} contracts.
+const failures = [
+  ['FAILED', 'BotBindingNotFoundError', 'AUTO_HEAL_BOT_UNAVAILABLE'],
+  ['FAILED', 'BotBindingNotFoundError: Bot binding not found: synthetic-bot:owner', 'AUTO_HEAL_BOT_UNAVAILABLE'],
+  ['FAILED', 'binding not found: synthetic-bot:owner', 'AUTO_HEAL_BOT_UNAVAILABLE'],
+  ['error', 'Bot binding not found: synthetic-bot:owner', 'AUTO_HEAL_BOT_UNAVAILABLE'],
+  ['FAILED', 'executor safety-net: api key not found: synthetic-key-prefix', 'BAAS_AUTH_FAILED'],
+  ['FAILED', 'Token missing', 'BAAS_AUTH_FAILED'],
+  ['FAILED', 'Token expired', 'BAAS_AUTH_FAILED'],
+  ['FAILED', 'Failed to send message: Token invalid: synthetic-rejection', 'BAAS_AUTH_FAILED'],
+  ['FAILED', 'Token verification failed: synthetic-rejection', 'BAAS_AUTH_FAILED'],
+  ['TIME_OUT', null, 'BAAS_GENERATION_TIMEOUT'],
+  ['FAILED', 'Task execution timeout', 'BAAS_GENERATION_TIMEOUT'],
+  ['FAILED', 'executor safety-net: execution cancelled (timeout)', 'BAAS_GENERATION_TIMEOUT'],
+  ['ABORTED', null, 'BAAS_GENERATION_CANCELLED'],
+  ['cancelled', null, 'BAAS_GENERATION_CANCELLED'],
+  ['canceled', null, 'BAAS_GENERATION_CANCELLED'],
+  ['stopped', null, 'BAAS_GENERATION_CANCELLED'],
+  ['FAILED', 'executor safety-net: execution cancelled (not timeout)', 'BAAS_GENERATION_CANCELLED'],
+  ['FAILED', 'session_id missing', 'BAAS_SESSION_UNAVAILABLE'],
+  ['FAILED', 'Session not found: synthetic-session', 'BAAS_SESSION_UNAVAILABLE'],
+  ['FAILED', 'tenant is required for materialize session, session_id=synthetic-session', 'BAAS_SESSION_UNAVAILABLE'],
+  ['FAILED', 'Failed to resolve WS connection for materialize: Connection failed', 'BAAS_SESSION_UNAVAILABLE'],
+  ['FAILED', 'Failed to materialize session synthetic-session: synthetic-failure', 'BAAS_SESSION_UNAVAILABLE'],
+  ['FAILED', "No engine adapter registered for engine_type='synthetic', cannot materialize session synthetic-session", 'BAAS_SESSION_UNAVAILABLE'],
+  ['FAILED', 'Failed to send message: tenant is required for materialize session, session_id=synthetic-session', 'BAAS_SESSION_UNAVAILABLE'],
+  ['FAILED', 'Failed to send message stream: Failed to materialize session synthetic-session: synthetic-failure', 'BAAS_SESSION_UNAVAILABLE'],
+  ['FAILED', 'result persistence failed: synthetic-database-failure', 'BAAS_RESULT_PERSISTENCE_FAILED'],
+] as const;
+
+describe('BaaS bounded failure classification', () => {
+  it.each(failures)('classifies %s / %s without accepting failed content', (status, diagnostic, error) => {
+    expect(decodeWorkflowAiDraftBaasReply({ code: 0, data: {
+      status, error: diagnostic, result: { content: yaml }, content: yaml,
+      messages: [{ role: 'assistant', content: yaml }],
+    } })).toEqual({ status: 'failed', error });
+  });
+  it.each([
+    null, '', 'Unknown provider failure', 'Maximum completion token budget exceeded',
+    'Cannot load token file', 'Token expired while explaining the prompt',
+    'Quoted diagnostic: binding not found: synthetic-bot:owner',
+    'session_id missing in user prompt', 'Failed to send message: Connection failed',
+    'Failed to materialize session statistics', 'No engine adapter registered for synthetic telemetry',
+    '401 in model output', { code: 'TOKEN_EXPIRED' }, 40103,
+  ])('keeps unproven causes generic (%j)', diagnostic => {
+    expect(decodeWorkflowAiDraftBaasReply({ data: { status: 'FAILED', error: diagnostic, content: yaml } }))
+      .toEqual({ status: 'failed', error: 'BAAS_GENERATION_FAILED' });
+  });
+  it.each(['RUNNING', 'PENDING', 'PROCESSING', 'QUEUED', 'ACCEPTED', 'UNKNOWN_STATE'])('keeps nonterminal %s with diagnostics polling', status => {
+    expect(decodeWorkflowAiDraftBaasReply({ data: { status, error: 'Token expired', content: yaml } }))
+      .toEqual({ status: 'running' });
+  });
+  it.each([
+    ['TIME_OUT', 'binding not found: synthetic-bot:owner', 'BAAS_GENERATION_TIMEOUT'],
+    ['ABORTED', 'session_id missing', 'BAAS_GENERATION_CANCELLED'],
+  ])('prefers terminal %s over a conflicting diagnostic', (status, diagnostic, error) => {
+    expect(decodeWorkflowAiDraftBaasReply({ data: { status, error: diagnostic, content: yaml } }))
+      .toEqual({ status: 'failed', error });
+  });
+  it.each([null, ''])('preserves successful replies with empty error %j', error => {
+    expect(decodeWorkflowAiDraftBaasReply({ code: 0, data: { status: 'COMPLETED', error, result: { content: yaml } } }))
+      .toMatchObject({ status: 'completed', result: { yaml } });
+  });
+  it.each([
+    { code: 40101 }, { code: '40102' }, { buserviceErrorCode: 40103 },
+    { code: '40301' }, { buserviceErrorCode: 'TOKEN_EXPIRED' },
+    { code: 'UNKNOWN_PROVIDER_ERROR' }, { buserviceErrorCode: 'x'.repeat(4097) },
+    { code: 60001, message: 'BotBindingNotFoundError: Bot binding not found: synthetic-bot:owner' },
+  ])('keeps outer API rejections generic, never native terminal diagnostics (%j)', outer => {
+    expect(decodeWorkflowAiDraftBaasReply({ ...outer, data: { status: 'COMPLETED', content: yaml } }))
+      .toEqual({ status: 'failed', error: 'BAAS_PROVIDER_REJECTED' });
+  });
+  it.each([
+    ['BotBindingNotFoundError:', 'AUTO_HEAL_BOT_UNAVAILABLE'],
+    ['BotBindingNotFoundError: Bot binding not found: synthetic-bot:owner', 'AUTO_HEAL_BOT_UNAVAILABLE'],
+    ['Bot binding not found:', 'AUTO_HEAL_BOT_UNAVAILABLE'],
+    ['api key not found: ', 'BAAS_AUTH_FAILED'],
+    ['Failed to materialize session synthetic-session: ', 'BAAS_SESSION_UNAVAILABLE'],
+    ['result persistence failed: ', 'BAAS_RESULT_PERSISTENCE_FAILED'],
+  ])('bounds native %s classification to 4096 characters', (prefix, code) => {
+    const bounded = prefix + 'x'.repeat(4096 - prefix.length);
+    expect(decodeWorkflowAiDraftBaasReply({ data: { status: 'FAILED', error: bounded, content: yaml } }))
+      .toEqual({ status: 'failed', error: code });
+    for (const error of [bounded + 'x', ' '.repeat(4096) + prefix, 'executor safety-net: ' + bounded]) {
+      expect(decodeWorkflowAiDraftBaasReply({ data: { status: 'FAILED', error, content: yaml } }))
+        .toEqual({ status: 'failed', error: 'BAAS_GENERATION_FAILED' });
+    }
+  });
+  it.each(failures.filter(([status]) => status === 'FAILED' || status === 'error'))(
+    'does not classify %s / %s outside native data.error', (status, diagnostic) => {
+      const generic = { status: 'failed', error: 'BAAS_GENERATION_FAILED' };
+      expect(decodeWorkflowAiDraftBaasReply({ status, error: diagnostic, content: yaml })).toEqual(generic);
+      expect(decodeWorkflowAiDraftBaasReply({ error: diagnostic, data: { status, content: yaml,
+        result: { error: diagnostic, content: yaml }, messages: [{ role: 'assistant', content: diagnostic }] } })).toEqual(generic);
+    },
+  );
+  it.each(failures)('checks provider identity before classifying %s / %s', async (status, error) => {
+    for (const identity of [{ message_id: 'wrong-message' }, { bot_id: 'wrong-bot:configured-owner' }]) {
+      const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify(baasResult(taskId, state.botId,
+        { status, error, ...identity }))));
+      vi.stubGlobal('fetch', fetch);
+      await expect(createWorkflowAiDraftBaasExecution()!.poll({ ...request(), jobId: taskId }))
+        .rejects.toThrow(/^BAAS_RESULT_IDENTITY_MISMATCH$/);
+      expect(fetch).toHaveBeenCalledOnce();
+      expect(fetch.mock.calls[0][1]?.method).not.toBe('POST');
+    }
+  });
+});
+
+it.each([
+  ['FAILED', 'binding not found: ', 'AUTO_HEAL_BOT_UNAVAILABLE'],
+  ['FAILED', 'Failed to send message: Token invalid: ', 'BAAS_AUTH_FAILED'],
+  ['TIME_OUT', '', 'BAAS_GENERATION_TIMEOUT'],
+  ['ABORTED', '', 'BAAS_GENERATION_CANCELLED'],
+  ['FAILED', 'Failed to send message: Failed to materialize session synthetic-session: ', 'BAAS_SESSION_UNAVAILABLE'],
+  ['FAILED', 'result persistence failed: ', 'BAAS_RESULT_PERSISTENCE_FAILED'],
+  ['FAILED', 'Unrecognized upstream diagnostic: ', 'BAAS_GENERATION_FAILED'],
+])('exposes only %s / %s through receipt-based send/poll without a task table or redispatch', async (status, prefix, code) => {
+  const { aiDraftFixture, draftRequest } = await import('./workflow-ai-draft-db-fixture.js');
+  const { createWorkflowAiDraftRuntime } = await import('../workflow-ai-draft-runtime.js');
+  const f = await aiDraftFixture();
+  const privatePayload = 'synthetic-private-prompt';
+  const credential = ['synthetic', 'credential', 'not-real'].join('-');
+  const privateUrl = 'https://synthetic-private.invalid/provider';
+  const diagnostic = `${prefix}Authorization: Bearer ${credential}; prompt=${privatePayload}; endpoint=${privateUrl}`;
+  const content = '```yaml\n' + draftRequest().currentYaml + '```';
+  const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
+    if (init?.method === 'POST') return new Response(JSON.stringify({ data: { message_id: JSON.parse(init.body as string).message_id } }));
+    const messageId = String(_url).split('/').pop()!;
+    return new Response(JSON.stringify(baasResult(messageId, state.botId, {
+      status, error: diagnostic, result: { content }, messages: [{ role: 'assistant', content }],
+    })));
+  });
+  vi.stubGlobal('fetch', fetch);
+  const logs = (['log', 'info', 'warn', 'error', 'debug', 'trace'] as const).map(method =>
+    vi.spyOn(console, method).mockImplementation(() => {}));
+  try {
+    f.raw.exec("INSERT INTO workflow_deploy_history VALUES ('flow', 'pack', 'existing', 1, 'deploy', 1)");
+    const tables = f.raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all();
+    const specs = f.raw.prepare('SELECT * FROM workflow_specs').all();
+    const deployments = f.raw.prepare('SELECT * FROM workflow_deploy_history').all();
+    const options = { principal: async () => ({ actorId: 'owner' }), execution: createWorkflowAiDraftBaasExecution(), receipts: f.receipts };
+    const runtime = createWorkflowAiDraftRuntime(f.db, options);
+    const input = draftRequest();
+    const prepared = await runtime.service.prepare('owner', 'flow', input);
+    expect(fetch).not.toHaveBeenCalled();
+    const task = await runtime.service.create('owner', 'flow', { ...input, receipt: prepared.receipt });
+    expect(task).toEqual({ draftId: prepared.draftId, status: 'running' });
+    const context = { receipt: prepared.receipt, currentYaml: input.currentYaml };
+    const detail = await runtime.service.get('owner', 'flow', task.draftId, context);
+    expect(detail).toMatchObject({ draftId: prepared.draftId, status: 'failed', error: code });
+    expect(detail).not.toHaveProperty('result');
+    // A fresh runtime recovers only the signed original message, never a new create.
+    const restored = createWorkflowAiDraftRuntime(f.db, options);
+    expect(await restored.service.get('owner', 'flow', task.draftId, context)).toEqual(detail);
+    expect(await restored.monitor.reconcile()).toBe(0);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    const sent = JSON.parse(fetch.mock.calls[0][1]!.body as string);
+    expect(sent.message_id).toBe(prepared.draftId);
+    expect(sent.bot_id).toBe('autoheal-bot:configured-owner');
+    expect(sent).not.toHaveProperty('lifecycle_stage');
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      'http://127.0.0.1:1/openapi/v1/messages',
+      `http://127.0.0.1:1/openapi/v1/messages/${prepared.draftId}`,
+      `http://127.0.0.1:1/openapi/v1/messages/${prepared.draftId}`,
+    ]);
+    expect(f.raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflow_ai_drafts'").get()).toBeUndefined();
+    expect(f.raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()).toEqual(tables);
+    expect(f.raw.prepare('SELECT * FROM workflow_specs').all()).toEqual(specs);
+    expect(f.raw.prepare('SELECT * FROM workflow_deploy_history').all()).toEqual(deployments);
+    const observable = JSON.stringify({ task, detail, logs: logs.flatMap(log => log.mock.calls) });
+    for (const sensitive of [diagnostic, credential, privatePayload, privateUrl, prepared.receipt, input.currentYaml]) expect(observable).not.toContain(sensitive);
+  } finally { await f.db.close(); }
 });

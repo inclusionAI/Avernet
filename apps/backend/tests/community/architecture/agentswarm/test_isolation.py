@@ -83,10 +83,17 @@ _SCHEMAS = (
 #   message — refusal wording on the identity-source path: "" means the
 #     refusal named none, and the consumer supplies its own from ``code``.
 #     Like goal_excerpt it is a semantic empty, not a value of an open set.
+#   role — on an agent definition, free-form prose describing what the agent
+#     does ("checks things", "greets politely"), length-bounded only; it is
+#     not the closed ``MessageRole`` vocabulary, and "" is the documented
+#     "no description given" default an inline agent also gets.
+#   manifest_document — the caller-authored bot manifest YAML, same open
+#     document as ``config_manifest``; "" is the semantic "no manifest, use
+#     the synthesized identity-only persona", not a value of an open set.
 _STR_DEFAULT_ALLOWLIST: frozenset[str] = frozenset({
     "provider", "model", "instructions", "description", "identity_file",
     "engine", "bot_type", "owner_id", "config_manifest",
-    "goal_excerpt", "message",
+    "goal_excerpt", "message", "role", "manifest_document",
 })
 
 # Closed-set parameter vocabulary must be typed with one of the module
@@ -95,8 +102,17 @@ _ENUM_NAMES: frozenset[str] = frozenset({
     "RunStatus", "AgentStatus", "AgentKind", "WaitMode", "TerminationReason",
     "MessageRole", "GuardKind", "DispatchStatus", "BotState",
 })
+# ``role`` is deliberately NOT listed. It names two different things in this
+# module: ``MessageRole`` (user/assistant/system), which is genuinely closed
+# and already typed as such at its only Protocol-path use, and an agent
+# definition's ``role``, which is free-form prose describing what the agent
+# does ("checks things", "greets politely"). The definition's role is bounded
+# by length alone (``_check_definition_role``) and flows into
+# ``AgentSpec.role``, an open description the orchestrator reads verbatim, so
+# no StrEnum can represent it — the same reasoning that keeps
+# ``instructions`` and ``description`` out of the closed-set check.
 _CLOSED_SET_PARAMS: frozenset[str] = frozenset({
-    "status", "kind", "mode", "termination_reason", "role",
+    "status", "kind", "mode", "termination_reason",
 })
 
 

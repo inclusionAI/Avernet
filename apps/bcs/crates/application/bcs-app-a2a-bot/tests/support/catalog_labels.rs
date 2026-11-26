@@ -9,7 +9,7 @@ pub(super) fn policy() -> Arc<CatalogLabelPolicy> {
 }
 fn input(value:serde_json::Value)->CatalogLabelsInput {serde_json::from_value(value).unwrap()}
 fn update(id:&str,labels:Option<CatalogLabelsInput>)->UpdateAgentCommand {
-    UpdateAgentCommand {provider_admin_token:"test-admin".into(),bot_id:id.into(),source:None,visibility:None,catalog_labels:labels}
+    UpdateAgentCommand { agent_id:Default::default(),provider_admin_token:"test-admin".into(),bot_id:id.into(),source:None,visibility:None,catalog_labels:labels}
 }
 #[tokio::test]
 async fn register_get_find_replace_clear_and_refresh_persist_labels() {

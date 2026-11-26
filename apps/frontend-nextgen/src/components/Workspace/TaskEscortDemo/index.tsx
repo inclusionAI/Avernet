@@ -1,7 +1,6 @@
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, Empty, IconButton, Segmented } from '@/components/ui';
 import { Maximize2, Minimize2, ShieldCheck, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { DemoBadge } from './DemoPrimitives';
 import { DemoWorkflow } from './model';
 import { Overview } from './Overview';
 import './styles.css';
@@ -90,11 +89,7 @@ export function TaskEscortDemoPanel({ open, onOpenChange, botName, workflows }: 
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <DrawerTitle className="text-base font-semibold">任务护航</DrawerTitle>
-                <DemoBadge />
               </div>
-              <DrawerDescription className="mt-0.5 text-[11px] text-muted-foreground">
-                全部为模拟数据 · 不调用后台，不触发真实运行或部署
-              </DrawerDescription>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
@@ -114,14 +109,6 @@ export function TaskEscortDemoPanel({ open, onOpenChange, botName, workflows }: 
         </header>
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-5 py-3 text-xs">
           <WorkflowSelector workflow={workflow} workflows={demo.workflows} onSelect={selectWorkflow} />
-          {workflow && (
-            <>
-              <span className="rounded bg-muted px-2 py-1 font-mono text-[10px] text-muted-foreground">
-                {workflow.version}
-              </span>
-              <span className="text-muted-foreground">{workflow.nodes.length} 节点 · 示意编排</span>
-            </>
-          )}
           {botName && <span className="ml-auto max-w-48 truncate text-muted-foreground">当前 Bot · {botName}</span>}
         </div>
         {workflow && (
@@ -136,7 +123,6 @@ export function TaskEscortDemoPanel({ open, onOpenChange, botName, workflows }: 
               ]}
               className="w-52"
             />
-            <span className="text-[11px] text-muted-foreground">本地交互演示 · 与真实工作流隔离</span>
           </div>
         )}
         <main
@@ -152,7 +138,9 @@ export function TaskEscortDemoPanel({ open, onOpenChange, botName, workflows }: 
           )}
         </main>
         <footer className="flex shrink-0 flex-wrap items-center justify-between gap-1 border-t border-border bg-background px-5 py-2 text-[10px] text-muted-foreground">
-          <span>演示沙盒 · 所有运行记录、指标与节点状态均为虚构</span>
+          <DrawerDescription asChild>
+            <span>演示沙盒 · 所有运行记录、指标与节点状态均为虚构</span>
+          </DrawerDescription>
           <span>Esc 关闭 · 聊天区仍可交互</span>
         </footer>
       </DrawerContent>

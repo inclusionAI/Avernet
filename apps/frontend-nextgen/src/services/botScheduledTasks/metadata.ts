@@ -33,7 +33,7 @@ export async function loadRoutineContext(scope: RoutineScope): Promise<RoutineCo
   const environments: RoutineEnvironment[] = (['draft', 'verify', 'online'] as const).map((stage) => ({
     runtime_stage: stage,
     instances: [],
-    reason: caller && stage !== 'online' ? 'Caller 模式仅支持运行中环境' : '当前尚未取得该环境的可信实例清单',
+    reason: caller && stage !== 'online' ? 'Caller 模式仅支持正式运行环境' : '当前尚未取得该环境的可信实例清单',
   }));
   // This existing endpoint reports ONLINE only. Never reuse its UUIDs for draft/verify or Caller bindings.
   // containers 描述的是 Bot 本身的线上运行属性：无论链接的 runtime_stage 指向哪个阶段

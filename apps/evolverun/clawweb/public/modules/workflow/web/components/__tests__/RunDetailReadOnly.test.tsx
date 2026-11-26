@@ -21,7 +21,7 @@ const node = { flow_id: 'child', node_id: 'n', node_title: 'node', executor_type
 
 describe('read-only run detail components', () => {
   it('retains the summary but hides rerun, abort, delete, heal, and approval actions', () => {
-    const view = render(<RunSummaryHeader run={run} nodeCount={1} onAutoHeal={() => {}} onApproval={() => {}} pendingApprovalCount={1} />)
+    const view = render(<RunSummaryHeader run={run} nodeCount={1} onAutoHeal={() => {}} onApproval={() => {}} pendingApprovalCount={1} />, { wrapper: MemoryRouter })
     expect(screen.getByTitle('重跑：重新发送原始命令到 Bot')).toBeInTheDocument()
     expect(screen.getByTitle('中止运行中的工作流')).toBeInTheDocument()
     expect(screen.getByTitle('AI 自动诊断与修复')).toBeInTheDocument()

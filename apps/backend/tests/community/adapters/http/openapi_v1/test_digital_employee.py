@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from tests.community.adapters.http.openapi_v1.conftest import public_router
 from agentclaw.community.api.digital_employee_service import DigitalEmployeeCatalogProtocol, DigitalEmployeeServiceProtocol
 from agentclaw.community.core.digital_employee.contracts import DigitalEmployeeError
 from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
@@ -17,8 +17,18 @@ BASE = "/openapi/v1/bots/metadata/digital-employees"
 KEY = "employee-catalog-test-signing-key-32-bytes"
 
 
+@pytest.fixture(scope="module")
+def _base_app():
+    from agentclaw.community.adapters.http.app import _unhandled_exception_handler
+
+    app = FastAPI()
+    app.add_exception_handler(Exception, _unhandled_exception_handler)
+    app.include_router(public_router())
+    return app
+
+
 @pytest.fixture
-def client():
+def client(_base_app):
     resolver = Mock()
     resolver.get_secret.return_value = type("Secret", (), {"secret_value": KEY, "secret_user": "test"})()
     init_principal_verifier_config(resolver, "test-key", strict=False)
@@ -28,12 +38,8 @@ def client():
     injector = Injector()
     injector.binder.bind(DigitalEmployeeServiceProtocol, to=service)
     injector.binder.bind(DigitalEmployeeCatalogProtocol, to=catalog)
-    app = FastAPI()
-    from agentclaw.community.adapters.http.app import _unhandled_exception_handler
-    app.add_exception_handler(Exception, _unhandled_exception_handler)
-    attach_injector(app, injector)
-    app.include_router(build_public_router())
-    return TestClient(app, raise_server_exceptions=False), service, catalog
+    attach_injector(_base_app, injector)
+    return TestClient(_base_app, raise_server_exceptions=False), service, catalog
 
 
 def headers():

@@ -1,35 +1,27 @@
-use std::path::{Path, PathBuf};
-
-use anyhow::{Result, anyhow};
-use serde::{Deserialize, Serialize};
+use anyhow::Result;
 use tracing::{debug, info};
 
 use super::{CLI_LOG_TARGET, Cli};
 use bcs_cli::BcsClient;
 
-/// Get current environment from `AGENTCLAW_ENV` or `env` variable.
-/// Priority: `AGENTCLAW_ENV` > `env` > `SERVER_ENV` chain > "dev" (default)
-pub(super) fn get_current_env() -> String {
-    std::env::var("AGENTCLAW_ENV")
-        .or_else(|_| std::env::var("env"))
-        .unwrap_or_else(|_| bcs_config::resolve_env_str())
-}
+// Nothing below is redefined here: names shared with the library target come
+// from `bcs_cli` (which owns `SessionInfo` and `get_current_env`) or from
+// `super::shared_env` (the eight pure session/URL helpers). The `pub(super)`
+// re-exports keep the existing bin call sites working. Reference the shared
+// module as `super::shared_env`, never `crate::shared_env`: the internal overlay
+// reuses `main.rs` through `#[path]`, where that path does not exist.
+pub(super) use bcs_cli::{SessionInfo, get_current_env};
+pub(super) use super::shared_env::{
+    get_optional_session_file_path, load_optional_session_info, normalize_bcs_api_url,
+};
+use super::shared_env::{
+    load_session_info_from_path, normalize_url_from_source, resolve_env_bcs_url,
+    resolve_session_bcs_url,
+};
 
 // ============================================================================
-// Token Discovery
+// Network Environment and BCS URL Resolution
 // ============================================================================
-
-/// Session info saved by BCN plugin (read-only for bcs-cli).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(super) struct SessionInfo {
-    #[serde(default)]
-    pub bot_uuid: Option<String>,
-    pub token: String,
-    #[serde(default)]
-    pub bcs_url: Option<String>,
-    #[serde(default)]
-    pub api_base_url: Option<String>,
-}
 
 /// Network environment for BCS CLI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,69 +30,6 @@ pub(super) enum NetworkEnv {
     Office,
     /// Production network - uses bot token only (default).
     Prod,
-}
-
-fn session_file_path(data_dir: impl AsRef<Path>) -> PathBuf {
-    data_dir.as_ref().join(".bcs").join("session.json")
-}
-
-pub(super) fn get_optional_session_file_path() -> Option<PathBuf> {
-    std::env::var("BOT_DATA_DIR").ok().map(session_file_path)
-}
-
-fn load_session_info_from_path(session_file: &Path) -> Result<Option<SessionInfo>> {
-    if !session_file.exists() {
-        return Ok(None);
-    }
-
-    let content = std::fs::read_to_string(session_file)
-        .map_err(|e| anyhow!("Failed to read session file {:?}: {}", session_file, e))?;
-
-    let session: SessionInfo = serde_json::from_str(&content)
-        .map_err(|e| anyhow!("Failed to parse session file {:?}: {}", session_file, e))?;
-
-    Ok(Some(session))
-}
-
-pub(super) fn load_optional_session_info() -> Result<Option<SessionInfo>> {
-    let Some(session_file) = get_optional_session_file_path() else {
-        return Ok(None);
-    };
-    load_session_info_from_path(&session_file)
-}
-
-pub(super) fn normalize_bcs_api_url(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let mut url = reqwest::Url::parse(trimmed).ok()?;
-    match url.scheme() {
-        "ws" => url.set_scheme("http").ok()?,
-        "wss" => url.set_scheme("https").ok()?,
-        "http" | "https" => {}
-        _ => return None,
-    }
-
-    url.set_query(None);
-    url.set_fragment(None);
-
-    let normalized_path = match url.path() {
-        "/" | "" => "/".to_string(),
-        path if path.ends_with("/ws/bot") => {
-            let stripped = path.trim_end_matches("/ws/bot").trim_end_matches('/');
-            if stripped.is_empty() {
-                "/".to_string()
-            } else {
-                stripped.to_string()
-            }
-        }
-        path => path.trim_end_matches('/').to_string(),
-    };
-    url.set_path(&normalized_path);
-
-    Some(url.as_str().trim_end_matches('/').to_string())
 }
 
 pub(super) fn normalize_bcs_ws_url(raw: &str) -> Option<String> {
@@ -120,39 +49,6 @@ pub(super) fn normalize_bcs_ws_url(raw: &str) -> Option<String> {
     url.set_path(&ws_path);
 
     Some(url.to_string())
-}
-
-fn normalize_url_from_source(raw: String, source: &str) -> Result<String> {
-    normalize_bcs_api_url(&raw)
-        .ok_or_else(|| anyhow!("Invalid BCS API URL from {}: {}", source, raw))
-}
-
-fn resolve_env_bcs_url() -> Result<Option<String>> {
-    if let Ok(url) = std::env::var("BCS_API_BASE_URL") {
-        return normalize_url_from_source(url, "BCS_API_BASE_URL").map(Some);
-    }
-
-    if let Ok(url) = std::env::var("MOLTIS_BCS_URL") {
-        return normalize_url_from_source(url, "MOLTIS_BCS_URL").map(Some);
-    }
-
-    Ok(None)
-}
-
-fn resolve_session_bcs_url() -> Result<Option<String>> {
-    let Some(session) = load_optional_session_info()? else {
-        return Ok(None);
-    };
-
-    let Some(raw_url) = session
-        .api_base_url
-        .as_deref()
-        .or(session.bcs_url.as_deref())
-    else {
-        return Ok(None);
-    };
-
-    normalize_url_from_source(raw_url.to_string(), "$BOT_DATA_DIR/.bcs/session.json").map(Some)
 }
 
 pub(super) fn resolve_bcs_url(cli: &Cli) -> Result<String> {
@@ -179,6 +75,14 @@ pub(super) fn resolve_bcs_url(cli: &Cli) -> Result<String> {
     );
     normalize_url_from_source(default_url.to_string(), "default (local)")
 }
+
+// ============================================================================
+// Token Discovery
+// ============================================================================
+
+// Intentionally NOT shared with the library's `discover_token`: this variant
+// carries CallerContext resolution, `BCN_AUTH_MODE=agentpass-subbots`, and the
+// `CLI_LOG_TARGET` logging target. Unifying them is out of scope for the cleanup.
 
 /// Discover authentication token from various sources.
 ///

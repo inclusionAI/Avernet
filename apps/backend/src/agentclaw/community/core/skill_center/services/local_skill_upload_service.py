@@ -77,7 +77,6 @@ from agentclaw.community.core.skill_center.skill_package import (
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditBusyError,
     SkillsPoolEditGuard,
-    SkillsPoolEditLease,
     SkillsPoolEditLockUnavailableError,
     SkillsPoolEditPausedError,
     SkillsPoolEditRollbackError,
@@ -121,7 +120,6 @@ class _LocalSkillEdit:
     owner_id: str
     actor_id: str
     bot: dict[str, Any]
-    lease: SkillsPoolEditLease
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,7 +296,7 @@ class LocalSkillUploadService(
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
-            yield _LocalSkillEdit(bot_id, stable_resource_owner_id(bot), actor_id, bot, lease)
+            yield _LocalSkillEdit(bot_id, stable_resource_owner_id(bot), actor_id, bot)
         finally:
             self._edit_guard.release(lease)
 
@@ -427,7 +425,6 @@ class LocalSkillUploadService(
                 return package_result(name, skill.digest, PackagePublication.NOT_DISPATCHED)
             if not destination.matches(context):
                 raise LocalSkillRuntimeUnavailableError()
-            self._edit_guard.refresh(edit.lease)
             runtime_result = None
             started = perf_counter()
             if destination.supports_package_apply:
@@ -443,7 +440,6 @@ class LocalSkillUploadService(
                     "Local Skill package published bot_id=%s skill_name=%s upload_ms=%.3f",
                     edit.bot_id, name, (perf_counter() - started) * 1000,
                 )
-                self._edit_guard.refresh(edit.lease)
             else:
                 # A legacy command can fail after writing a subset of the files.
                 publication = PackagePublication.UNKNOWN

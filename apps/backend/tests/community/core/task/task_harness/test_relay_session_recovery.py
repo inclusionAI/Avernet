@@ -17,6 +17,8 @@ from agentclaw.community.core.task.task_harness.runtime_probe import (
 class _FakeOpenApiBot:
     def __init__(self):
         self.calls = []
+        self.cancel_calls = []
+        self.events = []
         self.messages = [
             {"id": "new", "created_at": "2026-10-20T18:17:26Z", "content": "new"},
             {
@@ -33,9 +35,14 @@ class _FakeOpenApiBot:
 
     async def send_message(self, *, bot_id, message, metadata, message_id=None):
         self.calls.append({"bot_id": bot_id, "message": message, "metadata": metadata})
+        self.events.append(("send", message))
         from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 
         return BotSendResult(run_id="resume-run", session_id=metadata["session_id"])
+
+    async def cancel_run(self, run_id):
+        self.cancel_calls.append(run_id)
+        self.events.append(("abort", run_id))
 
 
 class _FakeBcs:
@@ -109,6 +116,41 @@ class RelaySessionRecoveryTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_openapi_resume_aborts_stale_run_before_sending_resume(self):
+        bot = _FakeOpenApiBot()
+        recovery = RelaySessionRecovery(bot=bot)
+        node = _Node(assignee="bot1", owner_id="146836", session_id="engine-session")
+
+        await recovery.resume(
+            node, abort_before_resume_run_id="old-run"
+        )
+
+        self.assertEqual(bot.cancel_calls, ["old-run"])
+        self.assertEqual(len(bot.calls), 1)
+        self.assertEqual(bot.events[0], ("abort", "old-run"))
+        self.assertEqual(bot.events[1][0], "send")
+
+    async def test_openapi_resume_does_not_send_after_pre_resume_abort_failure(self):
+        from agentclaw.community.core.task.task_harness.relay_session_recovery import (
+            RelaySessionRecoveryError,
+        )
+
+        class _AbortFailed(_FakeOpenApiBot):
+            async def cancel_run(self, run_id):
+                self.cancel_calls.append(run_id)
+                self.events.append(("abort", run_id))
+                raise RuntimeError("engine unreachable")
+
+        bot = _AbortFailed()
+        recovery = RelaySessionRecovery(bot=bot)
+        node = _Node(assignee="bot1", owner_id="146836", session_id="engine-session")
+
+        with self.assertRaisesRegex(RelaySessionRecoveryError, "engine unreachable"):
+            await recovery.resume(node, abort_before_resume_run_id="old-run")
+
+        self.assertEqual(bot.cancel_calls, ["old-run"])
+        self.assertEqual(bot.calls, [])
+
     async def test_openapi_resume_preserves_draft_lifecycle_stage(self):
         bot = _FakeOpenApiBot()
         recovery = RelaySessionRecovery(bot=bot)
@@ -148,6 +190,18 @@ class RelaySessionRecoveryTest(unittest.IsolatedAsyncioTestCase):
                 }
             ],
         )
+
+    async def test_group_resume_rejects_pre_resume_abort(self):
+        bcs = _FakeBcs()
+        recovery = RelaySessionRecovery(bcs=bcs, bot_tokens=_FakeTokens())
+        node = _Node(assignee="g1", group_id="g1", session_id="group-session")
+
+        with self.assertRaisesRegex(
+            RelaySessionPreconditionError, "only supported by the OpenAPI Bot session"
+        ):
+            await recovery.resume(node, abort_before_resume_run_id="old-run")
+
+        self.assertEqual(bcs.session_calls, [])
 
     async def test_all_resume_steps_use_the_same_continuation_prompt(self):
         bot = _FakeOpenApiBot()

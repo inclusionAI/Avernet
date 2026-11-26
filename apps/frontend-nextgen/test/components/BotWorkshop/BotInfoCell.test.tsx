@@ -42,3 +42,29 @@ test.each(['mine', 'other'] as const)('%s lock stays below the name and does not
   expect(screen.getByRole('alertdialog')).toBeInTheDocument();
   expect(onRowClick).not.toHaveBeenCalled();
 });
+
+test('BotId 旁提供复制按钮，点击写入剪贴板并中断冒泡，不触发行点击', async () => {
+  const writeText = jest.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  const bot = {
+    ...mapBotDto({
+      bot_id: 'mine-bot',
+      bot_name: '我的 Bot',
+      bot_type: 'service',
+      engine: 'openclaw',
+      display_state: 'service_draft',
+    }).item,
+    spaceKind: 'personal' as const,
+  };
+  const onRowClick = jest.fn();
+  render(
+    <div onClick={onRowClick}>
+      <BotInfoCell bot={bot} />
+    </div>,
+  );
+  const copyButton = screen.getByRole('button', { name: `复制 BotId：${bot.entityKey}` });
+  fireEvent.click(copyButton);
+  expect(writeText).toHaveBeenCalledWith(bot.entityKey);
+  expect(await screen.findByRole('button', { name: 'BotId 已复制' })).toBeInTheDocument();
+  expect(onRowClick).not.toHaveBeenCalled();
+});

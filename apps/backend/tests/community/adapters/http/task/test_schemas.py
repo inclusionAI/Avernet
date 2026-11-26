@@ -5,8 +5,12 @@ import pytest
 from pydantic import ValidationError
 
 from agentclaw.community.adapters.http.task.schemas import (
+    ExecutionConfigDTO,
+    RequestTaskSpecDTO,
     TaskCallbackRequest,
     TaskDispatchRequestDTO,
+    TaskInfoRequestDTO,
+    task_info_request_from_dto,
     TaskNodeCallbackRequest,
     _normalize_execution_config,
     execution_graph_to_product_status,
@@ -67,6 +71,27 @@ def test_workflow_source_literal():
 def test_required_fields_enforced():
     with pytest.raises(ValidationError):
         TaskCallbackRequest(task_id="t1", workflow_source="bcn")  # 缺必填
+
+
+def test_execute_request_preserves_task_source_channel():
+    request = task_info_request_from_dto(TaskInfoRequestDTO(
+        task_spec=RequestTaskSpecDTO(),
+        source_type="api",
+        owner_user_id="user-1",
+        owner_bot_id="bot-1",
+        execution_config=ExecutionConfigDTO(
+            task_type="dynamic",
+            source_channel="dingtalk",
+        ),
+    ))
+
+    assert request.source_type.value == "api"
+    assert request.execution_config["source_channel"] == "dingtalk"
+
+
+def test_execute_request_rejects_unknown_source_channel():
+    with pytest.raises(ValidationError):
+        ExecutionConfigDTO(task_type="dynamic", source_channel="sms")
 
 
 def test_op_result_to_dto_returns_extend_props():

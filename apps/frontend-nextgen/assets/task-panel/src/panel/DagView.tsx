@@ -478,7 +478,7 @@ export const DagView: React.FC<{
                 >
                   #{n.id.slice(-4)}
                 </text>
-                {/* V2 下钻热区:仅协作群节点(mapper 富化的 drillable)+ 宿主提供回调时渲染(PRD 方案A) */}
+                {/* V2 下钻热区:可解析会话节点(mapper 富化 drillable)+ 宿主提供回调时渲染(PRD 方案A) */}
                 {n.drillable && onNodeDrill && (
                   <g
                     role="button"

@@ -59,6 +59,12 @@ _RETRYABLE_OUTCOMES = {
     DeviceOperationOutcome.HOOK_FAILED,
 }
 
+# Cap for operator-authorized retries of a single record. Deliberately separate
+# from ``publish_max_retry_times`` (the automatic budget, default 0 = disabled):
+# a manual recovery must work on publishes that never opted into auto-retry,
+# while still being bounded so one device cannot be re-provisioned without limit.
+DEFAULT_MAX_MANUAL_RETRIES = 3
+
 
 class PublishAttemptOrchestrator:
     """Mixin providing the per-device publish attempt orchestrator.
@@ -75,6 +81,8 @@ class PublishAttemptOrchestrator:
         operator: str,
         publish_id: int,
         failure_reason: str,
+        manual: bool = False,
+        max_manual_retries: int = DEFAULT_MAX_MANUAL_RETRIES,
     ) -> bool:
         """Claim and perform one retry attempt for a device publish record.
 
@@ -82,11 +90,22 @@ class PublishAttemptOrchestrator:
         record is not retryable, the budget is exhausted, another caller holds
         the claim, or the publish deadline has passed — in which case the
         record is left in its terminal failed state.
+
+        ``manual=True`` starts an operator-authorized attempt from ``FAILED``
+        (see :meth:`try_claim_manual_retry`); the default path continues an
+        in-flight ``PROCESSING`` attempt.
         """
         env = get_current_env()
         record_repo = self._publish_record_repo
 
-        if record.result_status in _TERMINAL_STATUSES:
+        if manual:
+            if record.result_status != PublishRecordResult.FAILED.value:
+                logger.info(
+                    f"[retry] manual retry skipped: record={record.id} is not "
+                    f"FAILED (status={record.result_status})"
+                )
+                return False
+        elif record.result_status in _TERMINAL_STATUSES:
             return False
 
         state = record_repo.get_retry_state(record.id, tenant, env)
@@ -104,17 +123,34 @@ class PublishAttemptOrchestrator:
             )
             return False
 
-        if not self._retry_allowed(record, state, tenant, env):
+        if not self._retry_allowed(
+            record,
+            state,
+            tenant,
+            env,
+            manual=manual,
+            max_manual_retries=max_manual_retries,
+        ):
             return False
 
-        claimed = record_repo.try_claim_retry(
-            record_id=record.id,
-            tenant=tenant,
-            env=env,
-            expected_retry_count=state.publish_retry_count,
-            attempt_started_at=attempt_started_at(),
-            modifier=operator,
-        )
+        if manual:
+            claimed = record_repo.try_claim_manual_retry(
+                record_id=record.id,
+                tenant=tenant,
+                env=env,
+                expected_manual_retry_count=state.publish_manual_retry_count,
+                attempt_started_at=attempt_started_at(),
+                modifier=operator,
+            )
+        else:
+            claimed = record_repo.try_claim_retry(
+                record_id=record.id,
+                tenant=tenant,
+                env=env,
+                expected_retry_count=state.publish_retry_count,
+                attempt_started_at=attempt_started_at(),
+                modifier=operator,
+            )
         if not claimed:
             logger.info(
                 f"[retry] attempt already claimed by another signal: "
@@ -122,11 +158,16 @@ class PublishAttemptOrchestrator:
             )
             return False
 
-        attempt_ordinal = state.publish_retry_count + 1
+        attempt_ordinal = (
+            state.publish_manual_retry_count + 1
+            if manual
+            else state.publish_retry_count + 1
+        )
+        budget = max_manual_retries if manual else state.publish_max_retry_times
         logger.warning(
-            f"[retry] starting attempt {attempt_ordinal}/{state.publish_max_retry_times} "
+            f"[retry] starting attempt {attempt_ordinal}/{budget} "
             f"for record={record.id} device_uuid={record.device_uuid} "
-            f"after failure: {failure_reason}"
+            f"manual={manual} after failure: {failure_reason}"
         )
 
         if attempt_ordinal > 1:
@@ -194,16 +235,27 @@ class PublishAttemptOrchestrator:
         state: PublishRecordExtraConfig,
         tenant: str,
         env: str,
+        *,
+        manual: bool = False,
+        max_manual_retries: int = DEFAULT_MAX_MANUAL_RETRIES,
     ) -> bool:
-        if state.publish_max_retry_times <= 0:
-            return False
-        if state.publish_retry_count >= state.publish_max_retry_times:
-            return False
+        if manual:
+            # Operator-authorized attempts are bounded by their own counter so a
+            # publish with auto-retry disabled (publish_max_retry_times=0) can
+            # still be recovered by hand.
+            if state.publish_manual_retry_count >= max_manual_retries:
+                return False
+        else:
+            if state.publish_max_retry_times <= 0:
+                return False
+            if state.publish_retry_count >= state.publish_max_retry_times:
+                return False
+            if state.publish_retry_count > 0 and not is_attempt_expired(
+                state.attempt_started_at,
+                self._attempt_timeout_seconds(record, tenant, env),
+            ):
+                return False
         if not self._provider_supports_retry(record, tenant, env):
-            return False
-        if state.publish_retry_count > 0 and not is_attempt_expired(
-            state.attempt_started_at, self._attempt_timeout_seconds(record, tenant, env)
-        ):
             return False
 
         publish = self._publish_repo.get_by_id(
@@ -445,6 +497,13 @@ class PublishAttemptOrchestrator:
                 batch_id=record.batch_id,
                 publish_id=record.publish_id,
             )
+        # A recorded success may be the last one a previously-failed stage was
+        # waiting for, in which case the publish becomes recoverable.
+        await self._reconcile_failed_stage(
+            tenant=tenant,
+            publish_id=record.publish_id,
+            operator=operator,
+        )
 
     async def sweep_record_attempt(
         self, *, record: PublishRecordRecord, tenant: str
@@ -488,6 +547,25 @@ class PublishAttemptOrchestrator:
 def _is_not_found(exc: Exception) -> bool:
     text = str(exc).lower()
     return "not_found" in text or "not found" in text
+
+
+# Records flipped to FAILED purely because their stage had already failed. They
+# keep the historical message below, which is also the fallback marker for rows
+# written before ``cleanup_reason`` existed.
+STAGE_CLEANUP_MESSAGE = "Publish marked as FAILED before this record could be processed"
+
+
+def is_cleanup_record(record: object) -> bool:
+    """Whether a record never actually ran and only inherited its stage's failure.
+
+    Such records must not count as real failures when deciding whether a failed
+    stage can be reconciled after the genuine failure has been recovered.
+    """
+    raw = getattr(record, "extra_config", None)
+    if isinstance(raw, dict) and raw.get("cleanup_reason"):
+        return True
+    message = getattr(record, "result_message", None) or ""
+    return message.strip() == STAGE_CLEANUP_MESSAGE
 
 
 def _is_usable_retry_state(state: object) -> bool:

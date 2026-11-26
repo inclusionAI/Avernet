@@ -53,10 +53,16 @@ class ResourceRepository(
         return str(value)
 
     def get_by_id(self, resource_id: str) -> Optional[dict]:
+        value = int(resource_id)
         with self._db.orm_session() as db:
+            # SQLite cannot store or bind integers outside its signed 64-bit range.
+            if db.get_bind().dialect.name == "sqlite" and not -(1 << 63) <= value < (
+                1 << 63
+            ):
+                return None
             row = (
                 db.query(self.Model)
-                .filter(self.Model.id == int(resource_id))
+                .filter(self.Model.id == value)
                 .first()
             )
             return row.to_dict() if row else None

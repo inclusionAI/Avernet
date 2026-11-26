@@ -28,11 +28,11 @@ use chrono::{SecondsFormat, TimeZone, Utc};
 use sha2::{Digest, Sha256};
 use tracing::warn;
 
-use crate::transaction_plan::EventAppendTransactionPlan;
+use crate::event_filter_matches;
 use crate::timestamp::{
     optional_timestamp_value_from_ms, sql_with_timestamp_params, timestamp_value_from_ms,
 };
-use crate::{event_filter_matches, validate_scope};
+use crate::transaction_plan::EventAppendTransactionPlan;
 
 mod subscriptions;
 mod events;
@@ -40,17 +40,14 @@ mod deliveries;
 mod replay;
 mod retention;
 mod claim_sql;
-mod validation;
 mod subscription_sql;
 mod rows;
 mod results;
 
 use claim_sql::*;
-use validation::*;
 use subscription_sql::*;
 use rows::*;
 use results::*;
-
 
 #[derive(Clone)]
 pub struct DbEventStore {
@@ -254,6 +251,22 @@ impl DbEventStore {
     }
 }
 
+pub(super) fn claim_owner(worker_id: &str) -> String {
+    format!("{worker_id}#{}", uuid::Uuid::new_v4())
+}
+
+pub(super) fn deterministic_target_id(
+    env: &str,
+    event_id: &str,
+    subscription_id: &str,
+    revision: u64,
+    purpose: EventFanoutTargetPurpose,
+) -> String {
+    let digest = Sha256::digest(
+        format!("{env}\0{event_id}\0{subscription_id}\0{revision}\0{purpose:?}").as_bytes(),
+    );
+    format!("evtgt_{digest:x}")
+}
 
 #[async_trait]
 impl EventRepoPort for DbEventStore {

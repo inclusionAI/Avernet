@@ -99,6 +99,24 @@ class PublishRecordRepository(Protocol):
         self, publish_id: int, tenant: str, env: str
     ) -> dict[str, int]: ...
 
+    def list_by_publish_id(
+        self, publish_id: int, tenant: str, env: str
+    ) -> list[PublishRecordRecord]:
+        """List every live record of a publish, ordered by id."""
+        ...
+
+    def update_extra_config(
+        self,
+        *,
+        record_id: int,
+        tenant: str,
+        env: str,
+        extra_config: dict,
+        modifier: str | None = None,
+    ) -> None:
+        """Replace a record's ``extra_config`` wholesale (JSON document)."""
+        ...
+
     def list_stale_processing_records(
         self, publish_id: int, timeout_seconds: int, tenant: str, env: str
     ) -> list[PublishRecordRecord]: ...
@@ -126,6 +144,27 @@ class PublishRecordRepository(Protocol):
         self, record_id: int, tenant: str, env: str
     ) -> PublishRecordExtraConfig | None:
         """Read the retry sub-state currently stored on a record."""
+        ...
+
+    def try_claim_manual_retry(
+        self,
+        *,
+        record_id: int,
+        tenant: str,
+        env: str,
+        expected_manual_retry_count: int,
+        attempt_started_at: str,
+        modifier: str | None = None,
+    ) -> bool:
+        """Atomically claim an operator-authorized retry for a FAILED record.
+
+        Unlike :meth:`try_claim_retry`, which continues an in-flight
+        ``PROCESSING`` attempt, this starts a fresh attempt from ``FAILED``:
+        on success the record moves to ``PROCESSING``, ``publish_manual_retry_count``
+        is incremented, and the attempt timestamp is persisted. Succeeds only
+        when the stored count still equals ``expected_manual_retry_count`` so a
+        concurrent caller cannot double-provision the same device.
+        """
         ...
 
     def list_stale_processing_records_across_tenants(

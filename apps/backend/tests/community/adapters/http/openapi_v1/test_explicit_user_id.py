@@ -280,6 +280,7 @@ def _without_request_id(response) -> dict:
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
+    *(('post', f'{PUBLIC_API_PREFIX}/bots/{operation}') for operation in ('template-queries', 'template-config-for-others', 'restart-for-others', 'status-for-others')),
     # Environment operations declare business operator/owner, not an acting user.
     ("post", "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish"),
     ("get", "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress"),
@@ -700,8 +701,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # adds one OWNER-only Bot-path read: path 237 -> 238. The seven Dima
 # auto-import rule/progress operations plus rule-bound Todo creation are
 # Space-scoped rather than Bot-addressed, even though create and update accept
-# a Bot in the body: none 177 -> 185.
-_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 185}
+# a Bot in the body. Product profile/progress operations are also not
+# Bot-addressed: none 177 -> 189 across both branches.
+_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 189}
 
 
 def _schema() -> dict:
@@ -944,7 +946,7 @@ def test_the_exempt_operations_take_none():
     for method, path in _NO_USER_DIMENSION:
         operation = schema["paths"][path][method]
         assert _param(operation, USER_ID_QUERY) is None, f"{method.upper()} {path}"
-        assert "403" not in operation["responses"], f"{method.upper()} {path}"
+        assert ('403' in operation['responses']) is (path.rsplit('/', 1)[-1] in {'template-queries', 'template-config-for-others', 'restart-for-others', 'status-for-others'}), f'{method.upper()} {path}'
 
 
 def test_authenticated_self_operations_derive_the_user_from_the_principal():
@@ -1032,7 +1034,7 @@ def test_bot_id_is_in_the_path_wherever_it_addresses_a_bot():
 def test_the_403_is_documented_on_exactly_the_user_scoped_operations():
     for path, method, operation in _operations(_schema()):
         documented = "403" in operation["responses"]
-        expected = _user_scoped(path, method) or (method, path) in _AUTHENTICATED_SELF
+        expected = _user_scoped(path, method) or (method, path) in _AUTHENTICATED_SELF or path.rsplit('/', 1)[-1] in {'template-queries', 'template-config-for-others', 'restart-for-others', 'status-for-others'}
         assert documented is expected, f"{method.upper()} {path}"
 
 

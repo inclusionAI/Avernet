@@ -1,6 +1,7 @@
 //! Group listing, pagination, and counting queries for the MySQL-backed Group store.
 
 use super::*;
+use std::collections::HashSet;
 
 impl MySqlGroupStore {
 
@@ -27,29 +28,68 @@ impl MySqlGroupStore {
     /// (the previous default in-memory filter returned the all-kinds total
     /// which made the X-of-Y display lie for filtered queries).
     pub(crate) async fn count_by_kind_sql(&self, kind: Option<bcs_service_api::GroupKind>) -> u64 {
-        let rows =
-            match kind {
-                None => self
-                    .db
-                    .query_with(
-                        &self.logical_db,
-                        "SELECT COUNT(*) as cnt FROM bcs_groups WHERE env = ?",
-                        vec![Value::from(self.env.as_str())],
-                    )
-                    .await
-                    .unwrap_or_default(),
-                Some(k) => {
-                    let kind_str = Self::group_kind_to_str(k);
-                    self.db.query_with(
-                    &self.logical_db,
-                    "SELECT COUNT(*) as cnt FROM bcs_groups WHERE env = ? AND group_kind = ?",
-                    vec![Value::from(self.env.as_str()), Value::from(kind_str)],
-                ).await.unwrap_or_default()
-                }
-            };
+        // Without a kind the query is exactly the unfiltered count.
+        let Some(kind) = kind else {
+            return self.count_sql().await;
+        };
+        let kind_str = Self::group_kind_to_str(kind);
+        let rows = self
+            .db
+            .query_with(
+                &self.logical_db,
+                "SELECT COUNT(*) as cnt FROM bcs_groups WHERE env = ? AND group_kind = ?",
+                vec![Value::from(self.env.as_str()), Value::from(kind_str)],
+            )
+            .await
+            .unwrap_or_default();
         rows.first()
             .and_then(|row| db_get_column::<i64>(row, "cnt").ok())
             .unwrap_or(0) as u64
+    }
+
+    /// Build the shared `list_paginated` / `list_paginated_by_kind` statement.
+    ///
+    /// Only the fixed inner fragment differs between the two entries: `""` or
+    /// `" AND group_kind = ?"`, placed between the inner `WHERE env = ?` and
+    /// `LIMIT ? OFFSET ?` so `LIMIT`/`OFFSET` apply to the filtered group rows.
+    /// The outer participant JOIN literal and its `gp.env = ?` binding never
+    /// depend on `kind`.
+    fn paginated_groups_statement(
+        &self,
+        kind: Option<bcs_service_api::GroupKind>,
+        offset: u64,
+        limit: u64,
+    ) -> (String, Vec<Value>) {
+        let kind_filter = if kind.is_some() {
+            " AND group_kind = ?"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
+                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
+                    gs.service_group_uuid, gs.service_mode, gs.version, gs.record_status, \
+                    gs.created_ts, gs.updated_ts, \
+                    gp.actor_kind, gp.mode, gp.tags_json, gp.message_view_scope, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility, gs.human_mention_notify_mode \
+             FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
+                          service_group_uuid, service_mode, version, record_status, \
+                          {} AS created_ts, {} AS updated_ts, \
+                          group_kind, dm_pair_key, group_strategy, visibility, human_mention_notify_mode \
+                   FROM bcs_groups WHERE env = ?{} LIMIT ? OFFSET ?) gs \
+             LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ?",
+            self.flavor.unix_ts("gmt_create"),
+            self.flavor.unix_ts("gmt_modified"),
+            kind_filter,
+        );
+
+        let mut params = vec![Value::from(self.env.as_str())];
+        if let Some(k) = kind {
+            params.push(Value::from(Self::group_kind_to_str(k)));
+        }
+        params.push(Value::from(limit as i64));
+        params.push(Value::from(offset as i64));
+        params.push(Value::from(self.env.as_str()));
+        (sql, params)
     }
 
     /// CR-4: paginate groups optionally filtered by `group_kind`.
@@ -67,71 +107,11 @@ impl MySqlGroupStore {
         limit: u64,
     ) -> Vec<Group> {
         // We share the same SELECT shape as `list_paginated` (subquery
-        // paginates groups → outer JOIN fetches participants) but conditionally
-        // append `AND group_kind = ?` to the inner WHERE. This keeps the
-        // same row → Group reduction logic below.
-        let created_ts_expr = self.flavor.unix_ts("gmt_create");
-        let updated_ts_expr = self.flavor.unix_ts("gmt_modified");
-        let rows_result = match kind {
-            None => {
-                let sql = format!(
-                    "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                            gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
-                            gs.service_group_uuid, gs.service_mode, gs.version, gs.record_status, \
-                            gs.created_ts, gs.updated_ts, \
-                            gp.actor_kind, gp.mode, gp.tags_json, gp.message_view_scope, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility, gs.human_mention_notify_mode \
-                     FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
-                                  service_group_uuid, service_mode, version, record_status, \
-                                  {} AS created_ts, {} AS updated_ts, \
-                                  group_kind, dm_pair_key, group_strategy, visibility, human_mention_notify_mode \
-                           FROM bcs_groups WHERE env = ? LIMIT ? OFFSET ?) gs \
-                     LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ?",
-                    created_ts_expr, updated_ts_expr,
-                );
-                self.db
-                    .query_with(
-                        &self.logical_db,
-                        &sql,
-                        vec![
-                            Value::from(self.env.as_str()),
-                            Value::from(limit as i64),
-                            Value::from(offset as i64),
-                            Value::from(self.env.as_str()),
-                        ],
-                    )
-                    .await
-            }
-            Some(k) => {
-                let kind_str = Self::group_kind_to_str(k);
-                let sql = format!(
-                    "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                            gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
-                            gs.service_group_uuid, gs.service_mode, gs.version, gs.record_status, \
-                            gs.created_ts, gs.updated_ts, \
-                            gp.actor_kind, gp.mode, gp.tags_json, gp.message_view_scope, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility, gs.human_mention_notify_mode \
-                     FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
-                                  service_group_uuid, service_mode, version, record_status, \
-                                  {} AS created_ts, {} AS updated_ts, \
-                                  group_kind, dm_pair_key, group_strategy, visibility, human_mention_notify_mode \
-                           FROM bcs_groups WHERE env = ? AND group_kind = ? LIMIT ? OFFSET ?) gs \
-                     LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ?",
-                    created_ts_expr, updated_ts_expr,
-                );
-                self.db
-                    .query_with(
-                        &self.logical_db,
-                        &sql,
-                        vec![
-                            Value::from(self.env.as_str()),
-                            Value::from(kind_str),
-                            Value::from(limit as i64),
-                            Value::from(offset as i64),
-                            Value::from(self.env.as_str()),
-                        ],
-                    )
-                    .await
-            }
-        };
+        // paginates groups → outer JOIN fetches participants) through
+        // `paginated_groups_statement`, which only swaps the inner kind
+        // fragment. This keeps the same row → Group reduction logic below.
+        let (sql, params) = self.paginated_groups_statement(kind, offset, limit);
+        let rows_result = self.db.query_with(&self.logical_db, &sql, params).await;
 
         let rows = match rows_result {
             Ok(r) => r,
@@ -142,7 +122,7 @@ impl MySqlGroupStore {
         };
 
         // Identical row → Group aggregation as `list_paginated`.
-        let mut groups_map: HashMap<String, Group> = HashMap::new();
+        let mut groups_map: HashMap<String, (Group, HashSet<String>)> = HashMap::new();
         for row in &rows {
             let group_id: String = match db_get_column(row, "group_id") {
                 Ok(v) => v,
@@ -155,105 +135,16 @@ impl MySqlGroupStore {
                     return Vec::new();
                 }
             };
-            let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
-                let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
-                let status_str: String = db_get_column(row, "status").unwrap_or_default();
-                let driver_bot: String = db_get_column(row, "driver_bot").unwrap_or_default();
-                let originator: Option<String> =
-                    db_get_column_opt(row, "originator").ok().flatten();
-                let routing_policy_json: Option<String> =
-                    db_get_column_opt(row, "routing_policy_json").ok().flatten();
-                let context: Option<String> = db_get_column_opt(row, "context").ok().flatten();
-                let service_group_uuid: Option<String> =
-                    db_get_column_opt(row, "service_group_uuid").ok().flatten();
-                let service_mode: Option<String> =
-                    db_get_column_opt(row, "service_mode").ok().flatten();
-                let version: i32 = db_get_column_opt::<i64>(row, "version")
-                    .ok()
-                    .flatten()
-                    .unwrap_or(1) as i32;
-                let record_status: String = db_get_column_opt(row, "record_status")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| "active".to_string());
-                let created_ts: Option<i64> = db_get_column_opt(row, "created_ts").ok().flatten();
-                let updated_ts: Option<i64> = db_get_column_opt(row, "updated_ts").ok().flatten();
-                let group_kind_str: Option<String> =
-                    db_get_column_opt(row, "group_kind").ok().flatten();
-                let dm_pair_key: Option<String> =
-                    db_get_column_opt(row, "dm_pair_key").ok().flatten();
-                let group_strategy_str: Option<String> =
-                    db_get_column_opt(row, "group_strategy").ok().flatten();
-                let group_strategy = Self::parse_group_strategy(group_strategy_str.as_deref());
-                let visibility: String = db_get_column_opt(row, "visibility")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| "private".to_string());
-
-                Group {
-                    id: group_id.clone(),
-                    label,
-                    status: Self::str_to_status(&status_str),
-                    driver_bot,
-                    originator,
-                    routing_policy: Self::deserialize_routing_policy(routing_policy_json),
-                    human_mention_notify_mode: Self::human_mention_notify_mode_from_row(row, &group_id),
-                    context,
-                    opening_message,
-                    participants: Vec::new(),
-                    messages: Vec::new(),
-                    service_group_uuid,
-                    service_mode,
-                    created_at: Self::seconds_to_millis(created_ts),
-                    updated_at: Self::seconds_to_millis(updated_ts),
-                    group_kind: Self::parse_group_kind(group_kind_str.as_deref()),
-                    dm_pair_key,
-                    group_strategy,
-
-                    version,
-                    record_status,
-                    visibility,
-                }
-            });
-            if let (Ok(bot_uuid), Ok(role_str)) = (
-                db_get_column::<String>(row, "bot_uuid"),
-                db_get_column::<String>(row, "role"),
-            ) {
-                if !entry.participants.iter().any(|p| p.bot_uuid == bot_uuid) {
-                    let actor_kind_str: Option<String> =
-                        db_get_column_opt(row, "actor_kind").ok().flatten();
-                    let mode_str: Option<String> = db_get_column_opt(row, "mode").ok().flatten();
-                    let (actor_kind, mode) = Self::normalize_kind_mode(
-                        &entry.id,
-                        &bot_uuid,
-                        self.env.as_str(),
-                        actor_kind_str.as_deref(),
-                        mode_str.as_deref(),
-                    );
-                    entry.participants.push(Participant {
-                        bot_uuid: bot_uuid.clone(),
-                        bot_name: None,
-                        kind: Some(ParticipantKind::Bot),
-                        role: Self::str_to_role(&role_str),
-                        actor_kind,
-                        mode: Some(mode),
-                        tags: Self::deserialize_participant_tags(
-                            db_get_column_opt(row, "tags_json").ok().flatten(),
-                        ),
-                        message_view_scope: Self::message_view_scope_from_row(
-                            row,
-                            "message_view_scope",
-                            &entry.id,
-                            &bot_uuid,
-                            actor_kind,
-                        ),
-                    });
-                }
-            }
+            store_projection::insert_join_row(
+                &mut groups_map,
+                row,
+                store_projection::GROUP_COLUMNS,
+                self.env.as_str(),
+                group_id,
+                opening_message,
+            );
         }
-        let mut groups = groups_map.into_values().collect::<Vec<_>>();
-        Group::sort_by_updated_at_desc(&mut groups);
-        groups
+        store_projection::into_sorted_groups(groups_map)
     }
 
     /// Count groups where the given bot is a participant.
@@ -377,7 +268,7 @@ impl MySqlGroupStore {
             }
         };
 
-        let mut groups_map: HashMap<String, Group> = HashMap::new();
+        let mut groups_map: HashMap<String, (Group, HashSet<String>)> = HashMap::new();
         for row in &rows {
             let group_id: String = match db_get_column(row, "group_id") {
                 Ok(v) => v,
@@ -390,105 +281,16 @@ impl MySqlGroupStore {
                     return Vec::new();
                 }
             };
-            let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
-                let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
-                let status_str: String = db_get_column(row, "status").unwrap_or_default();
-                let driver_bot: String = db_get_column(row, "driver_bot").unwrap_or_default();
-                let originator: Option<String> =
-                    db_get_column_opt(row, "originator").ok().flatten();
-                let routing_policy_json: Option<String> =
-                    db_get_column_opt(row, "routing_policy_json").ok().flatten();
-                let context: Option<String> = db_get_column_opt(row, "context").ok().flatten();
-                let service_group_uuid: Option<String> =
-                    db_get_column_opt(row, "service_group_uuid").ok().flatten();
-                let service_mode: Option<String> =
-                    db_get_column_opt(row, "service_mode").ok().flatten();
-                let version: i32 = db_get_column_opt::<i64>(row, "version")
-                    .ok()
-                    .flatten()
-                    .unwrap_or(1) as i32;
-                let record_status: String = db_get_column_opt(row, "record_status")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| "active".to_string());
-                let created_ts: Option<i64> = db_get_column_opt(row, "created_ts").ok().flatten();
-                let updated_ts: Option<i64> = db_get_column_opt(row, "updated_ts").ok().flatten();
-                let group_kind_str: Option<String> =
-                    db_get_column_opt(row, "group_kind").ok().flatten();
-                let dm_pair_key: Option<String> =
-                    db_get_column_opt(row, "dm_pair_key").ok().flatten();
-                let group_strategy_str: Option<String> =
-                    db_get_column_opt(row, "group_strategy").ok().flatten();
-                let group_strategy = Self::parse_group_strategy(group_strategy_str.as_deref());
-                let visibility: String = db_get_column_opt(row, "visibility")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| "private".to_string());
-
-                Group {
-                    id: group_id.clone(),
-                    label,
-                    status: Self::str_to_status(&status_str),
-                    driver_bot,
-                    originator,
-                    routing_policy: Self::deserialize_routing_policy(routing_policy_json),
-                    human_mention_notify_mode: Self::human_mention_notify_mode_from_row(row, &group_id),
-                    context,
-                    opening_message,
-                    participants: Vec::new(),
-                    messages: Vec::new(),
-                    service_group_uuid,
-                    service_mode,
-                    created_at: Self::seconds_to_millis(created_ts),
-                    updated_at: Self::seconds_to_millis(updated_ts),
-                    group_kind: Self::parse_group_kind(group_kind_str.as_deref()),
-                    dm_pair_key,
-                    group_strategy,
-
-                    version,
-                    record_status,
-                    visibility,
-                }
-            });
-            if let (Ok(bot_uuid), Ok(role_str)) = (
-                db_get_column::<String>(row, "bot_uuid"),
-                db_get_column::<String>(row, "role"),
-            ) {
-                if !entry.participants.iter().any(|p| p.bot_uuid == bot_uuid) {
-                    let actor_kind_str: Option<String> =
-                        db_get_column_opt(row, "actor_kind").ok().flatten();
-                    let mode_str: Option<String> = db_get_column_opt(row, "mode").ok().flatten();
-                    let (actor_kind, mode) = Self::normalize_kind_mode(
-                        &entry.id,
-                        &bot_uuid,
-                        self.env.as_str(),
-                        actor_kind_str.as_deref(),
-                        mode_str.as_deref(),
-                    );
-                    entry.participants.push(Participant {
-                        bot_uuid: bot_uuid.clone(),
-                        bot_name: None,
-                        kind: Some(ParticipantKind::Bot),
-                        role: Self::str_to_role(&role_str),
-                        actor_kind,
-                        mode: Some(mode),
-                        tags: Self::deserialize_participant_tags(
-                            db_get_column_opt(row, "tags_json").ok().flatten(),
-                        ),
-                        message_view_scope: Self::message_view_scope_from_row(
-                            row,
-                            "message_view_scope",
-                            &entry.id,
-                            &bot_uuid,
-                            actor_kind,
-                        ),
-                    });
-                }
-            }
+            store_projection::insert_join_row(
+                &mut groups_map,
+                row,
+                store_projection::GROUP_COLUMNS,
+                self.env.as_str(),
+                group_id,
+                opening_message,
+            );
         }
-        let mut groups = groups_map.into_values().collect::<Vec<_>>();
-        Group::sort_by_updated_at_desc(&mut groups);
-        groups
+        store_projection::into_sorted_groups(groups_map)
     }
 
     /// List groups with pagination.
@@ -498,35 +300,8 @@ impl MySqlGroupStore {
         // Task G.2: project group_kind / dm_pair_key from both inner and outer
         // SELECT so dm groups stay tagged after pagination.
         let _start = std::time::Instant::now();
-        let paginated_sql = format!(
-            "SELECT gs.group_id, gs.label, gs.status, gs.driver_bot, gs.originator, \
-                    gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
-                    gs.service_group_uuid, gs.service_mode, gs.version, gs.record_status, \
-                    gs.created_ts, gs.updated_ts, \
-                    gp.actor_kind, gp.mode, gp.tags_json, gp.message_view_scope, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility, gs.human_mention_notify_mode \
-             FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
-                          service_group_uuid, service_mode, version, record_status, \
-                          {} AS created_ts, {} AS updated_ts, \
-                          group_kind, dm_pair_key, group_strategy, visibility, human_mention_notify_mode \
-                   FROM bcs_groups WHERE env = ? LIMIT ? OFFSET ?) gs \
-             LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ?",
-            self.flavor.unix_ts("gmt_create"),
-            self.flavor.unix_ts("gmt_modified"),
-        );
-        let rows = match self
-            .db
-            .query_with(
-                &self.logical_db,
-                &paginated_sql,
-                vec![
-                    Value::from(self.env.as_str()),
-                    Value::from(limit as i64),
-                    Value::from(offset as i64),
-                    Value::from(self.env.as_str()),
-                ],
-            )
-            .await
-        {
+        let (paginated_sql, params) = self.paginated_groups_statement(None, offset, limit);
+        let rows = match self.db.query_with(&self.logical_db, &paginated_sql, params).await {
             Ok(r) => {
                 let elapsed = _start.elapsed();
                 if elapsed.as_millis() > 100 {
@@ -542,7 +317,7 @@ impl MySqlGroupStore {
             }
         };
 
-        let mut groups_map: HashMap<String, Group> = HashMap::new();
+        let mut groups_map: HashMap<String, (Group, HashSet<String>)> = HashMap::new();
         for row in &rows {
             let group_id: String = match db_get_column(row, "group_id") {
                 Ok(v) => v,
@@ -555,104 +330,15 @@ impl MySqlGroupStore {
                     return Vec::new();
                 }
             };
-            let entry = groups_map.entry(group_id.clone()).or_insert_with(|| {
-                let label: Option<String> = db_get_column_opt(row, "label").ok().flatten();
-                let status_str: String = db_get_column(row, "status").unwrap_or_default();
-                let driver_bot: String = db_get_column(row, "driver_bot").unwrap_or_default();
-                let originator: Option<String> =
-                    db_get_column_opt(row, "originator").ok().flatten();
-                let routing_policy_json: Option<String> =
-                    db_get_column_opt(row, "routing_policy_json").ok().flatten();
-                let context: Option<String> = db_get_column_opt(row, "context").ok().flatten();
-                let service_group_uuid: Option<String> =
-                    db_get_column_opt(row, "service_group_uuid").ok().flatten();
-                let service_mode: Option<String> =
-                    db_get_column_opt(row, "service_mode").ok().flatten();
-                let version: i32 = db_get_column_opt::<i64>(row, "version")
-                    .ok()
-                    .flatten()
-                    .unwrap_or(1) as i32;
-                let record_status: String = db_get_column_opt(row, "record_status")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| "active".to_string());
-                let created_ts: Option<i64> = db_get_column_opt(row, "created_ts").ok().flatten();
-                let updated_ts: Option<i64> = db_get_column_opt(row, "updated_ts").ok().flatten();
-                let group_kind_str: Option<String> =
-                    db_get_column_opt(row, "group_kind").ok().flatten();
-                let dm_pair_key: Option<String> =
-                    db_get_column_opt(row, "dm_pair_key").ok().flatten();
-                let group_strategy_str: Option<String> =
-                    db_get_column_opt(row, "group_strategy").ok().flatten();
-                let group_strategy = Self::parse_group_strategy(group_strategy_str.as_deref());
-                let visibility: String = db_get_column_opt(row, "visibility")
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| "private".to_string());
-
-                Group {
-                    id: group_id.clone(),
-                    label,
-                    status: Self::str_to_status(&status_str),
-                    driver_bot,
-                    originator,
-                    routing_policy: Self::deserialize_routing_policy(routing_policy_json),
-                    human_mention_notify_mode: Self::human_mention_notify_mode_from_row(row, &group_id),
-                    context,
-                    opening_message,
-                    participants: Vec::new(),
-                    messages: Vec::new(),
-                    service_group_uuid,
-                    service_mode,
-                    created_at: Self::seconds_to_millis(created_ts),
-                    updated_at: Self::seconds_to_millis(updated_ts),
-                    group_kind: Self::parse_group_kind(group_kind_str.as_deref()),
-                    dm_pair_key,
-                    group_strategy,
-
-                    version,
-                    record_status,
-                    visibility,
-                }
-            });
-            if let (Ok(bot_uuid), Ok(role_str)) = (
-                db_get_column::<String>(row, "bot_uuid"),
-                db_get_column::<String>(row, "role"),
-            ) {
-                if !entry.participants.iter().any(|p| p.bot_uuid == bot_uuid) {
-                    let actor_kind_str: Option<String> =
-                        db_get_column_opt(row, "actor_kind").ok().flatten();
-                    let mode_str: Option<String> = db_get_column_opt(row, "mode").ok().flatten();
-                    let (actor_kind, mode) = Self::normalize_kind_mode(
-                        &entry.id,
-                        &bot_uuid,
-                        self.env.as_str(),
-                        actor_kind_str.as_deref(),
-                        mode_str.as_deref(),
-                    );
-                    entry.participants.push(Participant {
-                        bot_uuid: bot_uuid.clone(),
-                        bot_name: None,
-                        kind: Some(ParticipantKind::Bot),
-                        role: Self::str_to_role(&role_str),
-                        actor_kind,
-                        mode: Some(mode),
-                        tags: Self::deserialize_participant_tags(
-                            db_get_column_opt(row, "tags_json").ok().flatten(),
-                        ),
-                        message_view_scope: Self::message_view_scope_from_row(
-                            row,
-                            "message_view_scope",
-                            &entry.id,
-                            &bot_uuid,
-                            actor_kind,
-                        ),
-                    });
-                }
-            }
+            store_projection::insert_join_row(
+                &mut groups_map,
+                row,
+                store_projection::GROUP_COLUMNS,
+                self.env.as_str(),
+                group_id,
+                opening_message,
+            );
         }
-        let mut groups = groups_map.into_values().collect::<Vec<_>>();
-        Group::sort_by_updated_at_desc(&mut groups);
-        groups
+        store_projection::into_sorted_groups(groups_map)
     }
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from .router_test_support import (
     BotCandidate,
     NodeNotFoundError,
@@ -8,6 +9,7 @@ from .router_test_support import (
     TaskExecutionMode,
     TaskIntakeStatus,
     TaskReportResult,
+    RuntimeInfo,
     TaskReportStatus,
     TaskSourceType,
     TaskStateError,
@@ -186,8 +188,113 @@ class TestRouter:
         )
 
         assert response.status_code == 200, response.text
-        assert response.json()["data"] == {"ok": True, "node_id": "target"}
+        data = response.json()["data"]
+        assert data["ok"] is True
+        assert data["node_id"] == "target"
+        from datetime import datetime
+        assert data["handoff_display"]["subject"] == f"{datetime.now().strftime('%m%d')}:T"
+        assert data["handoff_display"]["collaborator_name"] is None
+        assert data["handoff_display"]["entry_url"] is None
         assert svc.callback.calls[-1] == ("dispatch_node", ("t1", "target"))
+
+    def test_relay_dispatch_returns_user_facing_handoff_display(self, task_client):
+        client, svc = task_client
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
+        svc.set_node_status("t1", "origin", Status.RUNNING)
+        svc.set_node_status("t1", "target", Status.PENDING)
+        svc.set_node_planned_by("t1", "target", "origin")
+        svc.set_node_profile(
+            "t1",
+            "target",
+            run_mode="single_bot",
+            assignee="bot-1",
+            extend_props={
+                "assignee_owner_id": "146836",
+                "assignee_name": "UCT2.0值班助手",
+                "relay_planned_by": "origin",
+                "session_id": "agent:main:session:handoff",
+            },
+        )
+        svc.dispatch_result = SimpleNamespace(
+            node_id="target",
+            run_info=RuntimeInfo(
+                run_mode="single_bot",
+                assignee="bot-1",
+                extend_props={
+                    "assignee_owner_id": "146836",
+                    "session_id": "agent:main:session:handoff",
+                },
+            ),
+            task_spec=None,
+        )
+
+        response = client.post(
+            "/api/v1/collaboration/tasks/dispatch",
+            json={
+                "task_id": "t1",
+                "origin_node_id": "origin",
+                "target_node_id": "target",
+                "relay_token": "run-1",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        handoff = response.json()["data"]["handoff_display"]
+        from datetime import datetime
+        assert handoff["subject"] == f"{datetime.now().strftime('%m%d')}:T"
+        assert handoff["collaborator_name"] == "UCT2.0值班助手"
+        assert handoff["entry_url"] == (
+            "https://teamclaw.test/workspace/chat"
+            "?section=managed&bot=bot-1%3A146836&origin=mine"
+            "&session=agent%3Amain%3Asession%3Ahandoff"
+        )
+
+    def test_relay_dispatch_returns_group_deep_link_for_coop_group(self, task_client):
+        client, svc = task_client
+        svc.set_execution_config(
+            {"orchestration_mode": "relay", "intake_session_id": "tis-1"}
+        )
+        svc.set_node_status("t1", "origin", Status.RUNNING)
+        svc.set_node_status("t1", "target", Status.PENDING)
+        svc.set_node_planned_by("t1", "target", "origin")
+        svc.set_node_profile(
+            "t1",
+            "target",
+            run_mode="coop_group",
+            assignee="bcs_grp_group_1",
+            extend_props={
+                "group_id": "bcs_grp_group_1",
+                "group_name": "协作群",
+                "session_id": "bcs_grp_group_1:343ec96d",
+                "relay_planned_by": "origin",
+            },
+        )
+        svc.owner_user_id = "146836"
+
+        response = client.post(
+            "/api/v1/collaboration/tasks/dispatch",
+            json={
+                "task_id": "t1",
+                "origin_node_id": "origin",
+                "target_node_id": "target",
+                "relay_token": "run-1",
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        handoff = response.json()["data"]["handoff_display"]
+        from datetime import datetime
+        assert handoff["subject"] == f"{datetime.now().strftime('%m%d')}:T"
+        assert handoff["collaborator_name"] == "协作群"
+        assert handoff["entry_url"] == (
+            "https://teamclaw.test/workspace/collaboration"
+            "?current=human_146836"
+            "&group=bcs_grp_group_1"
+            "&session=bcs_grp_group_1%3A343ec96d"
+            "&membership=direct"
+        )
 
     def test_relay_dispatch_ignores_unknown_fields(self, task_client):
         client, svc = task_client

@@ -326,7 +326,7 @@ it('读取并持久化 MCP caller 模式，不在前端模拟', async () => {
   expect(controller.updateMcpCallType).toHaveBeenCalledWith('bot-1', 'mcp.weather', 'owner', 'owner-1');
 });
 
-it('getCallerContext 透传 bot_call_type 为 botCallType(openspec add-session-files-caller-runtime-target D6)', async () => {
+it('getCallerContext 透传 bot_call_type 为 botCallType', async () => {
   controller.getCallerContext.mockResolvedValue({
     data: { editable: false, bot_call_type: 'caller', mcp_call_types: {}, cli_call_types: {} },
   });

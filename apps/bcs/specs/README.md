@@ -12,6 +12,7 @@ When a change yields verified reusable knowledge, update its owning documentatio
 
 These entries are task-specific records. Inspect their individual status, evidence and target version; their presence does not establish current authority or deployment. Explicitly adopted contracts retain their authority until replaced.
 
+- [BCS code cleanup design](2026-11-23-bcs-code-cleanup/spec.md) and [implementation plan](2026-11-23-bcs-code-cleanup/plan.md) — behavior-preserving refactor; implemented on `codex/bcs-code-cleanup-design`; Manifest cluster deferred.
 - [2026-11-15-distributed-contracts](2026-11-15-distributed-contracts/spec.md) — declarations and ordered tasks; no runtime implementation
 - [2026-11-17-worker-coordination](2026-11-17-worker-coordination/spec.md) — proposed heartbeat, shard ownership, failover and graceful handoff specification; documentation only
 - [2026-11-17-gateway-a2a-inbound](2026-11-17-gateway-a2a-inbound/spec.md) — Gateway inbound A2A server: spec, store mapping, plan, tasks and as-built notes; not wired into a binary

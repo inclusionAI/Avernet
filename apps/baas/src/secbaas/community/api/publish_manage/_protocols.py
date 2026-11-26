@@ -166,6 +166,25 @@ class PublishService(Protocol):
         reason: str | None = None,
     ) -> PublishResponse: ...
 
+    async def retry_device(
+        self,
+        *,
+        tenant: str,
+        publish_id: int,
+        device_uuid: str,
+        operator: str,
+        max_manual_retries: int = 3,
+    ) -> dict: ...
+
+    async def retry_failed_devices(
+        self,
+        *,
+        tenant: str,
+        publish_id: int,
+        operator: str,
+        max_manual_retries: int = 3,
+    ) -> dict: ...
+
     async def retry_publish(
         self,
         *,

@@ -10,7 +10,7 @@ describe('AIStudio schema migration', () => {
   it('uses the next free migration after all latest-dev registrations through 154 and is registered in the runner', () => {
     const all = allMigrations;
     expect(all.filter(m => m.version === 155)).toHaveLength(1);
-    expect(Math.max(...all.filter(m => !aistudioTrainMigrations.includes(m)).map(m => m.version))).toBe(154);
+    expect(Math.max(...all.filter(m => m.version < 155).map(m => m.version))).toBe(154);
     expect(workflowSnapshotMigrations.filter(m => m.version === 147 || m.version === 148)).toHaveLength(2);
     expect(aistudioTrainMigrations[0].version).toBe(155);
     expect(readFileSync(new URL('../db/migrations-registry.ts',import.meta.url),'utf8')).toMatch(/\.\.\.aistudioTrainMigrations/);
@@ -28,9 +28,12 @@ describe('AIStudio schema migration', () => {
         CREATE TRIGGER trg_schema_version_update AFTER UPDATE ON schema_version FOR EACH ROW BEGIN UPDATE schema_version SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END;`);
       // Existing installations may still have rejected tables. Retirement must NOT drop or rewrite them.
       raw.exec("CREATE TABLE aistudio_train_watches(payload TEXT); INSERT INTO aistudio_train_watches VALUES('keep');");
+      // Provision later additive columns before the snapshot: retired IDs themselves must still be no-DDL.
+      raw.exec("CREATE TABLE flow_runs(id INTEGER PRIMARY KEY,gmt_modified INTEGER,parent_flow_id VARCHAR(255) DEFAULT NULL,root_flow_id VARCHAR(255) DEFAULT NULL);");
+      raw.exec("CREATE TRIGGER trg_flow_runs_update AFTER UPDATE ON flow_runs FOR EACH ROW BEGIN UPDATE flow_runs SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END;");
       const schema=raw.prepare('SELECT * FROM sqlite_master ORDER BY name').all();
       await runMigrations(db,'sqlite');
-      expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({v:156});
+      expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({v:Math.max(...allMigrations.map(m => m.version))});
       expect(raw.prepare('SELECT * FROM sqlite_master ORDER BY name').all()).toEqual(schema);
       expect(raw.prepare('SELECT * FROM aistudio_train_watches').all()).toEqual([{payload:'keep'}]);
       for(const m of aistudioTrainMigrations) {expect(m.sql).toEqual([]); await m.migrate?.(db);}
@@ -53,10 +56,13 @@ describe('AIStudio schema migration', () => {
       raw.exec(`CREATE TABLE schema_version(id INTEGER PRIMARY KEY AUTOINCREMENT,version INTEGER,description TEXT,gmt_create INTEGER DEFAULT (unixepoch()),gmt_modified INTEGER DEFAULT (unixepoch()));
         INSERT INTO schema_version(version,description) VALUES(154,'latest dev'),(155,'original watch migration'),(156,'original audit migration');
         CREATE TRIGGER trg_schema_version_update AFTER UPDATE ON schema_version FOR EACH ROW BEGIN UPDATE schema_version SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END;`);
+      // Provision later additive columns before the snapshot: retired IDs themselves must still be no-DDL.
+      raw.exec("CREATE TABLE flow_runs(id INTEGER PRIMARY KEY,gmt_modified INTEGER,parent_flow_id VARCHAR(255) DEFAULT NULL,root_flow_id VARCHAR(255) DEFAULT NULL);");
+      raw.exec("CREATE TRIGGER trg_flow_runs_update AFTER UPDATE ON flow_runs FOR EACH ROW BEGIN UPDATE flow_runs SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END;");
       const schema=raw.prepare('SELECT * FROM sqlite_master ORDER BY name').all();
       const ledger=raw.prepare('SELECT * FROM schema_version ORDER BY id').all();
       await runMigrations(db,'sqlite');
-      expect(raw.prepare('SELECT * FROM schema_version ORDER BY id').all()).toEqual(ledger);
+      expect(raw.prepare('SELECT * FROM schema_version WHERE version <= 156 ORDER BY id').all()).toEqual(ledger);
       expect(raw.prepare('SELECT * FROM sqlite_master ORDER BY name').all()).toEqual(schema);
     } finally {raw.close();}
   });

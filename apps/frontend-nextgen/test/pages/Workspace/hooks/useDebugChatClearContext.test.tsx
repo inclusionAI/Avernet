@@ -14,7 +14,7 @@ it('clears exactly the debug session and reloads only after success', async () =
   const reload = jest.fn(async () => {});
   const { result } = renderHook(() => useDebugChatClearContext(bot, 'viewer', 'session', reload));
   await act(async () => result.current());
-  expect(clear).toHaveBeenCalledWith(bot, 'viewer', 'session');
+  expect(clear).toHaveBeenCalledWith(bot, 'viewer', 'session', false);
   expect(reload).toHaveBeenCalledTimes(1);
 });
 it('reports failure and does not reload', async () => {

@@ -103,26 +103,33 @@ class OrmPublishRepository(OrmConnectionMixin, PublishRepository):
         env: str,
         status: str,
         modifier: str | None = None,
-    ) -> None:
+        expected_status: str | None = None,
+    ) -> bool:
         log.info(
-            "update_status: publish_id=%s, tenant=%s, env=%s, status=%s",
+            "update_status: publish_id=%s, tenant=%s, env=%s, status=%s, expected_status=%s",
             publish_id,
             tenant,
             env,
             status,
+            expected_status,
         )
         from sqlalchemy import func
 
         values = {"status": status, "gmt_modified": func.now()}
         if modifier is not None:
             values["modifier"] = modifier
-        self._session.query(PublishModel).filter(
+        query = self._session.query(PublishModel).filter(
             PublishModel.id == publish_id,
             PublishModel.tenant == tenant,
             PublishModel.env == env,
             PublishModel.is_deleted == 0,
-        ).update(values, synchronize_session=False)
-        log.info("[publish:update_status] result: done")
+        )
+        if expected_status is not None:
+            query = query.filter(PublishModel.status == expected_status)
+        updated = query.update(values, synchronize_session=False)
+        result = int(updated) > 0
+        log.info("[publish:update_status] result: %s", result)
+        return result
 
     @with_orm_session
     def update_publish(

@@ -3,7 +3,8 @@ import { Activity, CircleAlert, Clock3, Layers3, ShieldCheck } from 'lucide-reac
 import { useState } from 'react';
 import { DemoSelect } from './DemoPrimitives';
 import { DemoRange, DemoWorkflow, getOverview, NodeId, p95, RunStatus, STATUS_LABEL } from './model';
-import { RunList } from './RunList';
+import { RunDetail } from './RunDetail';
+import { RunList, StatusFilter } from './RunList';
 import { RunRiskSummary } from './RunRiskSummary';
 import { TrendCharts } from './TrendCharts';
 
@@ -11,7 +12,15 @@ export function Overview({ workflow, onLocate }: { workflow: DemoWorkflow; onLoc
   const [range, setRange] = useState<DemoRange>('24h');
   const [tab, setTab] = useState<'runs' | 'nodes'>('runs');
   const [focusRun, setFocusRun] = useState<string | null>(null);
+  const [status, setStatus] = useState<StatusFilter>('all');
+  const [keyword, setKeyword] = useState('');
   const overview = getOverview(range, workflow.runs);
+  const selected = overview.runs.find((run) => run.id === focusRun);
+  if (selected) {
+    return (
+      <RunDetail run={selected} nodes={workflow.nodes} onBack={() => setFocusRun(null)} onLocate={onLocate} />
+    );
+  }
   const samples = Object.values(workflow.nodeLatencies).flat();
   const hasRuns = overview.runs.length > 0;
   const blocked = overview.runs.filter((run) => run.status === 'blocked').length;
@@ -133,9 +142,11 @@ export function Overview({ workflow, onLocate }: { workflow: DemoWorkflow; onLoc
           <RunList
             runs={overview.runs}
             nodes={workflow.nodes}
-            focusRun={focusRun}
+            status={status}
+            onStatusChange={setStatus}
+            keyword={keyword}
+            onKeywordChange={setKeyword}
             onFocusRun={setFocusRun}
-            onLocate={onLocate}
           />
         ) : (
           <div className="overflow-x-auto p-3.5">

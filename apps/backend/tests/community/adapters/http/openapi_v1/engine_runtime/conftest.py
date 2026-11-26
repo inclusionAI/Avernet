@@ -130,8 +130,20 @@ class FakeRelay:
 
     # -- helpers -----------------------------------------------------------
     def set_bot_type(self, bot_type: str) -> None:
+        current = self.bots[(BOT, OWNER)]
         self.bots[(BOT, OWNER)] = BotFacts(
-            bot_id=BOT, bot_type=bot_type, active_engine="openclaw", owner_id=OWNER
+            bot_id=BOT, bot_type=bot_type, active_engine=current.active_engine,
+            owner_id=OWNER, call_type=current.call_type,
+            requires_caller_chat_instance=current.requires_caller_chat_instance,
+        )
+
+    def set_call_type(self, call_type: str) -> None:
+        current = self.bots[(BOT, OWNER)]
+        self.bots[(BOT, OWNER)] = BotFacts(
+            bot_id=current.bot_id, bot_type=current.bot_type,
+            active_engine=current.active_engine, owner_id=current.owner_id,
+            call_type=call_type,
+            requires_caller_chat_instance=current.requires_caller_chat_instance,
         )
 
     def set_active_engine(self, active_engine: str) -> None:
@@ -147,6 +159,8 @@ class FakeRelay:
             bot_type=current.bot_type,
             active_engine=active_engine,
             owner_id=current.owner_id,
+            call_type=current.call_type,
+            requires_caller_chat_instance=active_engine.casefold() != "teclaw",
         )
 
     def add_operator(
@@ -281,6 +295,7 @@ class FakeExpertChat:
                 "bind_id": 123,
             },
         }
+        self.create_result: dict[str, Any] = {"session_key": self.session["id"]}
 
     def resolve_chat_stage(self, bot_id, owner_id, stage):
         from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
@@ -299,7 +314,7 @@ class FakeExpertChat:
 
     async def create_chat_session(self, *args, **kwargs):
         self.calls.append(("create_chat_session", args, kwargs))
-        return {"session_key": self.session["id"]}
+        return self.create_result
 
     async def connect_chat_session(self, *args, **kwargs):
         self.calls.append(("connect_chat_session", args, kwargs))

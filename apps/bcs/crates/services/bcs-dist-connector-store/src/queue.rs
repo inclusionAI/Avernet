@@ -177,8 +177,9 @@ impl StoreDispatchQueue {
     }
 
     /// The dispatches `instance` is listed as holding (it may list too much).
-    /// First page only, oldest claim first. Not used by the engine yet; it is
-    /// the read a recovery of a dead Connector's calls (D3) would make.
+    /// First page only, oldest claim first. Not used by the engine: a dead
+    /// Connector's calls are recovered through the Worker's supervisor
+    /// re-posting their hints and a takeover once the holder is `Dead`.
     pub async fn held_by(
         &self,
         instance: &Instance,

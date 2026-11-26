@@ -22,6 +22,7 @@ What the probes cover:
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import subprocess
@@ -86,15 +87,18 @@ _mw.install_middleware = _install_middleware
 # The cache is cleared on both sides because the same app is inspected before
 # and after ``finalize_worker_runtime``, and ``openapi()`` memoizes into
 # ``app.openapi_schema``.
+def routes_from_spec(spec):
+    return sorted(
+        [path, method.upper(), operation.get("operationId")]
+        for path, operations in spec.get("paths", {}).items()
+        for method, operation in operations.items()
+    )
+
+
 def route_table(app):
     app.openapi_schema = None
     try:
-        spec = app.openapi()
-        return sorted(
-            [path, method.upper(), operation.get("operationId")]
-            for path, operations in spec.get("paths", {}).items()
-            for method, operation in operations.items()
-        )
+        return routes_from_spec(app.openapi())
     finally:
         app.openapi_schema = None
 
@@ -143,7 +147,6 @@ from agentclaw.community.adapters.http import app as app_mod
 from agentclaw.community.adapters.http import boot
 
 emit({
-    "routes": route_table(app_mod.app),
     "middleware": [m.cls.__name__ for m in app_mod.app.user_middleware],
     "has_injector": getattr(app_mod.app.state, "injector", None) is not None,
     "finalized": boot.worker_runtime_finalized(),
@@ -202,25 +205,26 @@ def test_unset_and_empty_boot_mode_are_eager():
 # 2. preload leaves no worker-owned runtime behind
 # ---------------------------------------------------------------------------
 
-def test_preload_import_starts_no_worker_runtime():
-    got = _run(_IMPORT_AND_REPORT, AGENTCLAW_HTTP_BOOT_MODE="preload", SERVER_ENV="pre")
+def test_preload_import_starts_no_worker_runtime(preload_then_finalize):
+    before = preload_then_finalize["before"]
+    probe_before = preload_then_finalize["probe_before"]
 
-    assert got["routes"], "preload import registered no routes at all"
-    assert got["middleware"] == [], (
+    assert before["routes"], "preload import registered no routes at all"
+    assert before["middleware"] == [], (
         "preload import installed middleware — the master would hand forked "
-        f"workers a frozen stack: {got['middleware']}"
+        f"workers a frozen stack: {before['middleware']}"
     )
-    assert got["has_injector"] is False, "preload import built and attached an injector"
-    assert got["finalized"] is False
+    assert before["has_injector"] is False, "preload import built and attached an injector"
+    assert before["finalized"] is False
     # Even with SERVER_ENV=pre — the gate that makes these fire in eager mode —
     # neither the eager binding check nor the secret-store read may happen in a
     # process that is only going to fork.
-    assert got["probe"]["eager_check"] == 0
-    assert got["probe"]["verifier_init"] == 0
-    assert got["probe"]["install_middleware"] == 0
+    assert probe_before["eager_check"] == 0
+    assert probe_before["verifier_init"] == 0
+    assert probe_before["install_middleware"] == 0
     # Fork-safety proper: nothing a child could inherit.
-    assert got["probe"]["threads"] == []
-    assert got["probe"]["connects"] == []
+    assert probe_before["threads"] == []
+    assert probe_before["connects"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -231,10 +235,21 @@ _PRELOAD_THEN_FINALIZE = """
 from agentclaw.community.adapters.http import app as app_mod
 from agentclaw.community.adapters.http import boot
 
+probe_before = {
+    k: (list(v) if isinstance(v, list) else v)
+    for k, v in _probe.items()
+}
+
+# Warm the OpenAPI cache before finalize (do not clear it) so we also verify
+# that finalize's OptionalRouters mounts invalidate the cached schema.
+before_spec = app_mod.app.openapi()
+cached_before = app_mod.app.openapi_schema is not None
 before = {
     "has_injector": getattr(app_mod.app.state, "injector", None) is not None,
     "finalized": boot.worker_runtime_finalized(),
-    "routes": route_table(app_mod.app),
+    "middleware": [m.cls.__name__ for m in app_mod.app.user_middleware],
+    "routes": routes_from_spec(before_spec),
+    "cached_openapi": cached_before,
 }
 
 # ``_app_lifespan`` looks this name up in the app module's globals at call
@@ -247,14 +262,16 @@ app_mod.discover_lifecycle_participants = (
 
 app_mod.finalize_worker_runtime()
 first_injector = id(app_mod.app.state.injector)
+after_one_spec = app_mod.app.openapi()
 after_one = {
     "middleware": [m.cls.__name__ for m in app_mod.app.user_middleware],
-    "routes": route_table(app_mod.app),
+    "routes": routes_from_spec(after_one_spec),
     "finalized": boot.worker_runtime_finalized(),
 }
 
 # Second call in the same pid must be inert.
 app_mod.finalize_worker_runtime()
+routes_after_two = routes_from_spec(app_mod.app.openapi())
 
 import asyncio
 async def _drive(app):
@@ -262,14 +279,20 @@ async def _drive(app):
         pass
 asyncio.run(_drive(app_mod.app))
 
+from fastapi.testclient import TestClient
+health_response = TestClient(app_mod.app).get("/api/health")
+
 emit({
     "before": before,
+    "probe_before": probe_before,
     "after_one": after_one,
     "first_injector": first_injector,
     "second_injector": id(app_mod.app.state.injector),
     "middleware_after_two": [m.cls.__name__ for m in app_mod.app.user_middleware],
-    "routes_after_two": route_table(app_mod.app),
+    "routes_after_two": routes_after_two,
     "lifespan_saw": seen_by_lifespan,
+    "health_status": health_response.status_code,
+    "health_body": health_response.text,
 })
 """
 
@@ -615,17 +638,21 @@ from agentclaw.community.adapters.http import app as app_mod
 if os.environ.get("AGENTCLAW_HTTP_BOOT_MODE") == "preload":
     app_mod.finalize_worker_runtime()
 
+spec = app_mod.app.openapi()
 emit({
-    "routes": route_table(app_mod.app),
-    "openapi": app_mod.app.openapi(),
+    "routes": routes_from_spec(spec),
+    "openapi": spec,
     "middleware": [m.cls.__name__ for m in app_mod.app.user_middleware],
 })
 """
 
 
 def test_eager_and_preload_plus_finalize_are_the_same_app():
-    eager = _run(_OPENAPI_REPORT)
-    preload = _run(_OPENAPI_REPORT, AGENTCLAW_HTTP_BOOT_MODE="preload")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        eager_fut = pool.submit(_run, _OPENAPI_REPORT)
+        preload_fut = pool.submit(_run, _OPENAPI_REPORT, AGENTCLAW_HTTP_BOOT_MODE="preload")
+        eager = eager_fut.result()
+        preload = preload_fut.result()
 
     assert preload["routes"] == eager["routes"], (
         "route paths / methods / operation ids diverge between boot modes"
@@ -711,15 +738,10 @@ def test_an_unfinalized_worker_refuses_requests_without_a_lifespan():
     assert got["middleware"] == []
 
 
-def test_a_finalized_worker_serves_normally_through_the_guard():
+def test_a_finalized_worker_serves_normally_through_the_guard(preload_then_finalize):
     """The guard is inert once the runtime is up — in either mode."""
-    got = _run(_REQUEST_WITHOUT_FINALIZE.replace(
-        "client = TestClient(app_mod.app)",
-        "app_mod.finalize_worker_runtime()\nclient = TestClient(app_mod.app)",
-    ), AGENTCLAW_HTTP_BOOT_MODE="preload")
-
-    assert got["status"] == 200, got["body"][:300]
-    assert "RequireWorkerRuntime" not in got["middleware"], (
+    assert preload_then_finalize["health_status"] == 200, preload_then_finalize["health_body"][:300]
+    assert "RequireWorkerRuntime" not in preload_then_finalize["after_one"]["middleware"], (
         "the guard wraps the stack from outside; it is not a user middleware"
     )
 
@@ -839,29 +861,7 @@ def test_lifespan_refuses_an_inherited_injector_even_though_one_is_attached():
         boot._finalized_pid = previous
 
 
-# Deliberately does NOT clear ``app.openapi_schema``: the point is what a worker
-# serves when a preload master warmed the cache before forking.
-_WARM_OPENAPI_CACHE = """
-from agentclaw.community.adapters.http import app as app_mod
-
-# A master that exports or inspects the schema pre-fork warms the cache with the
-# phase-1 route set only — finalize has not mounted OptionalRouters yet.
-before = sorted(app_mod.app.openapi()["paths"])
-cached_before = app_mod.app.openapi_schema is not None
-
-app_mod.finalize_worker_runtime()
-
-after = sorted(app_mod.app.openapi()["paths"])
-
-emit({
-    "cached_before": cached_before,
-    "before_has_local_sql": "/local/sql/execute" in before,
-    "after_has_local_sql": "/local/sql/execute" in after,
-})
-"""
-
-
-def test_a_warm_openapi_cache_does_not_hide_routers_finalize_mounts():
+def test_a_warm_openapi_cache_does_not_hide_routers_finalize_mounts(preload_then_finalize):
     """What the worker serves must match what it routes, cache or no cache.
 
     ``finalize_worker_runtime`` mounts the DI-conditional routers *after*
@@ -874,14 +874,17 @@ def test_a_warm_openapi_cache_does_not_hide_routers_finalize_mounts():
     back to caching unconditionally, this fails and the fix is to clear
     ``app.openapi_schema`` after the mount loop in ``_install_worker_runtime``.
     """
-    got = _run(_WARM_OPENAPI_CACHE, AGENTCLAW_HTTP_BOOT_MODE="preload")
+    before_paths = {row[0] for row in preload_then_finalize["before"]["routes"]}
+    after_paths = {row[0] for row in preload_then_finalize["after_one"]["routes"]}
 
-    assert got["cached_before"] is True, "the master never warmed the cache"
-    assert got["before_has_local_sql"] is False, (
+    assert preload_then_finalize["before"]["cached_openapi"] is True, (
+        "the master never warmed the cache"
+    )
+    assert "/local/sql/execute" not in before_paths, (
         "construction mounted the DI-conditional router after all — this test no "
         "longer exercises the stale-cache shape"
     )
-    assert got["after_has_local_sql"] is True, (
+    assert "/local/sql/execute" in after_paths, (
         "the worker routes /local/sql/execute but serves an OpenAPI document that "
         "omits it; clear app.openapi_schema after finalize mounts OptionalRouters"
     )

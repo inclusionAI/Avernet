@@ -286,7 +286,10 @@ impl ProviderRegistrationCore {
                 catalog_labels:card.catalog_labels,
                 bot_uuid:record.bot_uuid.clone(),provider_id:record.provider_id.clone(),
                 provider_bot_ref:record.provider_bot_ref.clone(),agent_card_url:card.agent_card_url,
-                agent_card:card.agent_card,revision:1,
+                agent_card:card.agent_card,
+                visibility:bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Protected,
+                status:bcs_service_api::ActorStatus::Online,
+                user_visibility:Default::default(),agent_id:identity.agent_code.clone(),revision:1,
             };
             self.registrations.create_a2a_provider_bot_with_ownership(provider_bot, capabilities,
                 &record.owner, &record.bot_token, initialization, card).await?;

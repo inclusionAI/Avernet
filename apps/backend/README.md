@@ -90,6 +90,11 @@ The worker runtime builds the injector and attaches it to the application.
 `di/modules/` binds services and Protocol aliases; `di/profile_modules.py`
 selects the infrastructure column. Prefer constructor injection for services
 and `Injected(Protocol)` at HTTP boundaries; do not add service-locator calls.
+The [product runtime v2 guide](src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md) documents the five-method ProductProfile API, durable rollouts, required host capabilities and legacy cutover.
+
+Task/context_collab composition fragments live in
+[`di/modules/task/`](src/agentclaw/community/di/modules/task/); the existing
+`TaskModule` and `TaskPersistenceModule` remain the aggregate entrypoints.
 
 `DEPLOY_PROFILE` is mandatory and selects assembly; `SERVER_ENV` selects runtime
 environment. Supported values and validation live in `di/profile.py`.
@@ -128,6 +133,7 @@ remain the authoritative topic sources.
 | Need | Existing source |
 | --- | --- |
 | API behavior | [OpenAPI v1 guide](docs/openapi-v1/README.md), [session-lock errors](docs/session-lock-api.md), and the owning contract/schema. |
+| Trusted application Bot management | [Managed Bot operations](docs/openapi-v1/managed-bot-operations.md): template discovery, guarded snapshot writes, restart and progress. |
 | Subsystem knowledge | [Manifest](docs/bot-config-manifest/README.zh-CN.md), [Bot evolution](docs/bot-evolution/README.md), and the relevant core boundary. |
 | Operations and failure handling | The flow/diagnostic links above and their referenced runbooks. |
 | A change's intent, tradeoffs or verification history | The relevant topic under `specs/`, selected by issue or source history. |

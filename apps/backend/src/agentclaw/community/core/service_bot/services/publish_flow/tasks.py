@@ -277,14 +277,19 @@ def enqueue_eval_teardown(
     An ``idempotency_key`` derived from ``(publish_id, bot_uuid)`` ensures
     at most one **live** teardown task per environment+app — duplicate
     enqueues (e.g. from a renewal loop) join the existing live task
-    instead of inserting new rows.
+    instead of inserting new rows. The deadline retains the existing floor but
+    extends for longer TTLs so the task has at least one hour to execute after
+    it becomes eligible.
     """
     task_queue_service.enqueue(
         EVAL_TEARDOWN_TASK,
         build_eval_teardown_payload(
             publish_id=publish_id, bot_uuid=bot_uuid, operator=operator
         ),
-        deadline_seconds=_EVAL_TEARDOWN_DEADLINE_SECONDS,
+        deadline_seconds=max(
+            _EVAL_TEARDOWN_DEADLINE_SECONDS,
+            delay_seconds + _STAGE_TASK_DEADLINE_SECONDS,
+        ),
         delay_seconds=delay_seconds,
         idempotency_key=_eval_teardown_idempotency_key(publish_id, bot_uuid),
     )

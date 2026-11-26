@@ -1,15 +1,26 @@
 //! Shared library for BCS CLI tools.
 //!
-//! Contains token discovery, debug macros, and client helpers
-//! shared between `bcs-cli` (bot-facing) and `bcs-admin` (developer-facing).
-
-use std::path::{Path, PathBuf};
+//! Contains token discovery, session file and BCS API URL resolution, debug
+//! macros, and client helpers used by the `bcs-cli` binary and by consumers
+//! that link this crate. The `bcs-cli` binary target loads the same
+//! `cli/environment/shared.rs` source privately, so those helpers have a single
+//! implementation even though `lib.rs` and `main.rs` are separate targets.
 
 use anyhow::{Result, anyhow};
 use clap::ArgAction;
 use serde::{Deserialize, Serialize};
 use tracing::{Level, debug, info};
 use tracing_subscriber::FmtSubscriber;
+
+#[path = "cli/environment/shared.rs"]
+mod shared_env;
+
+use shared_env::{
+    get_optional_session_file_path, load_session_info_from_path, normalize_url_from_source,
+    resolve_env_bcs_url, resolve_session_bcs_url,
+};
+#[cfg(test)]
+use shared_env::{load_optional_session_info, normalize_bcs_api_url};
 
 mod client;
 pub mod collaboration_draft;
@@ -47,102 +58,6 @@ pub struct SessionInfo {
     pub bcs_url: Option<String>,
     #[serde(default)]
     pub api_base_url: Option<String>,
-}
-
-fn session_file_path(data_dir: impl AsRef<Path>) -> PathBuf {
-    data_dir.as_ref().join(".bcs").join("session.json")
-}
-
-fn get_optional_session_file_path() -> Option<PathBuf> {
-    std::env::var("BOT_DATA_DIR").ok().map(session_file_path)
-}
-
-fn load_session_info_from_path(session_file: &Path) -> Result<Option<SessionInfo>> {
-    if !session_file.exists() {
-        return Ok(None);
-    }
-
-    let content = std::fs::read_to_string(session_file)
-        .map_err(|e| anyhow!("Failed to read session file {:?}: {}", session_file, e))?;
-
-    let session: SessionInfo = serde_json::from_str(&content)
-        .map_err(|e| anyhow!("Failed to parse session file {:?}: {}", session_file, e))?;
-
-    Ok(Some(session))
-}
-
-fn load_optional_session_info() -> Result<Option<SessionInfo>> {
-    let Some(session_file) = get_optional_session_file_path() else {
-        return Ok(None);
-    };
-    load_session_info_from_path(&session_file)
-}
-
-fn normalize_bcs_api_url(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let mut url = reqwest::Url::parse(trimmed).ok()?;
-    match url.scheme() {
-        "ws" => url.set_scheme("http").ok()?,
-        "wss" => url.set_scheme("https").ok()?,
-        "http" | "https" => {}
-        _ => return None,
-    }
-
-    url.set_query(None);
-    url.set_fragment(None);
-
-    let normalized_path = match url.path() {
-        "/" | "" => "/".to_string(),
-        path if path.ends_with("/ws/bot") => {
-            let stripped = path.trim_end_matches("/ws/bot").trim_end_matches('/');
-            if stripped.is_empty() {
-                "/".to_string()
-            } else {
-                stripped.to_string()
-            }
-        }
-        path => path.trim_end_matches('/').to_string(),
-    };
-    url.set_path(&normalized_path);
-
-    Some(url.as_str().trim_end_matches('/').to_string())
-}
-
-fn normalize_url_from_source(raw: String, source: &str) -> Result<String> {
-    normalize_bcs_api_url(&raw)
-        .ok_or_else(|| anyhow!("Invalid BCS API URL from {}: {}", source, raw))
-}
-
-fn resolve_env_bcs_url() -> Result<Option<String>> {
-    if let Ok(url) = std::env::var("BCS_API_BASE_URL") {
-        return normalize_url_from_source(url, "BCS_API_BASE_URL").map(Some);
-    }
-
-    if let Ok(url) = std::env::var("MOLTIS_BCS_URL") {
-        return normalize_url_from_source(url, "MOLTIS_BCS_URL").map(Some);
-    }
-
-    Ok(None)
-}
-
-fn resolve_session_bcs_url() -> Result<Option<String>> {
-    let Some(session) = load_optional_session_info()? else {
-        return Ok(None);
-    };
-
-    let Some(raw_url) = session
-        .api_base_url
-        .as_deref()
-        .or(session.bcs_url.as_deref())
-    else {
-        return Ok(None);
-    };
-
-    normalize_url_from_source(raw_url.to_string(), "$BOT_DATA_DIR/.bcs/session.json").map(Some)
 }
 
 fn resolve_distribution_default_url_for_env(
@@ -216,6 +131,10 @@ fn resolve_bcs_url_with_distribution_defaults(
 fn resolve_bcs_url(args: &GlobalArgs) -> Result<String> {
     resolve_bcs_url_with_distribution_defaults(args, COMPILED_PRE_BCS_URL, COMPILED_PROD_BCS_URL)
 }
+
+// Intentionally NOT shared with the binary's `discover_token`: that variant
+// adds CallerContext resolution, `BCN_AUTH_MODE=agentpass-subbots`, and the
+// binary log target. Unifying them is out of scope for the cleanup.
 
 /// Discover authentication token from various sources.
 ///
@@ -403,7 +322,10 @@ pub fn init(args: &GlobalArgs) -> Result<RuntimeConfig> {
     // Get current environment (defaults to "dev")
     let env = get_current_env();
 
-    // Determine BCS URL: CLI arg > env var > session.json > compiled default > local
+    // Determine BCS URL: --url > BCS_API_BASE_URL > MOLTIS_BCS_URL > session.json
+    // > compiled default > local. For clap-derived args the top slot is the
+    // captured argument, so `MOLTIS_BCS_URL` already sits there with `--url`
+    // before `BCS_API_BASE_URL` > session > compiled/local are consulted.
     let bcs_url = resolve_bcs_url(args)?;
 
     // Determine cookie: CLI arg > env var
@@ -433,6 +355,10 @@ pub fn init(args: &GlobalArgs) -> Result<RuntimeConfig> {
 }
 
 #[cfg(test)]
+#[path = "tests/session_url.rs"]
+mod session_url_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use serial_test::serial;
@@ -440,20 +366,20 @@ mod tests {
     use tempfile::TempDir;
 
     #[allow(unsafe_code)]
-    fn safe_set_var(key: &str, value: impl AsRef<std::ffi::OsStr>) {
+    pub(super) fn safe_set_var(key: &str, value: impl AsRef<std::ffi::OsStr>) {
         unsafe {
             std::env::set_var(key, value);
         }
     }
 
     #[allow(unsafe_code)]
-    fn safe_remove_var(key: &str) {
+    pub(super) fn safe_remove_var(key: &str) {
         unsafe {
             std::env::remove_var(key);
         }
     }
 
-    fn write_session_file(temp_dir: &TempDir, value: serde_json::Value) {
+    pub(super) fn write_session_file(temp_dir: &TempDir, value: serde_json::Value) {
         let session_dir = temp_dir.path().join(".bcs");
         std::fs::create_dir_all(&session_dir).unwrap();
         let session_file = session_dir.join("session.json");

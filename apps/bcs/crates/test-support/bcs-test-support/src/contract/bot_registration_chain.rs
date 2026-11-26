@@ -50,6 +50,7 @@ const SCHEMA: &[&str] = &[
         created_by TEXT, \
         visibility TEXT NOT NULL DEFAULT 'protected', \
         status TEXT NOT NULL DEFAULT 'online', \
+        user_visibility TEXT NOT NULL DEFAULT 'protected', \
         actor_kind TEXT NOT NULL DEFAULT 'bot', \
         is_deleted INTEGER NOT NULL DEFAULT 0, \
         ownership_version INTEGER NOT NULL DEFAULT 0, \

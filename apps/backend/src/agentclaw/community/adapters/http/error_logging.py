@@ -72,6 +72,7 @@ _SENSITIVE_NAME_PARTS: tuple[str, ...] = (
     "cookie",
     "session",
     "avatar_url",
+    "private_body",  # Product configuration/feedback may contain inline user content.
 )
 
 # Budgets. A log line is a diagnosis, not a payload dump: a request body with a
@@ -126,7 +127,7 @@ class _Opaque:
 
 def _is_sensitive(name: str) -> bool:
     lowered = name.lower()
-    return any(part in lowered for part in _SENSITIVE_NAME_PARTS)
+    return lowered in {'template_config', 'templateconfig'} or any(part in lowered for part in _SENSITIVE_NAME_PARTS)
 
 
 def _truncate(text: str) -> str:

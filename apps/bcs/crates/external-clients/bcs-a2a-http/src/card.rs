@@ -53,7 +53,7 @@ pub fn select_card_with_bindings(
         return Err(CardError::TextRequired);
     }
     for extension in card.capabilities.extensions.iter().flatten() {
-        let streaming_only=matches!(extension.uri.as_str(),crate::tools::EXTENSION | crate::structured_exec::EXTENSION);
+        let streaming_only=crate::tools::is_extension(extension.uri.as_str()) || extension.uri.as_str()==crate::structured_exec::EXTENSION;
         if extension.required == Some(true) && (!extensions.contains(&extension.uri.as_str())
             || (streaming_only && raw.pointer("/capabilities/streaming").and_then(Value::as_bool)!=Some(true))) {
             return Err(CardError::RequiredExtensionUnsupported(extension.uri.clone()));

@@ -160,6 +160,11 @@ explicit repair/rebuild. OCB retains its historical version/key calculation.
 The catalog factory accepts application-specific update, metadata and HTTP factories
 for hosts that need legacy Card decoding, operational state or a different response
 projection. These are ordinary injected callables, not a plugin registry.
+Ranked and filtered empty-result candidates pass the same retrieval
+request to metadata enrichment. A host can select a read scope from that request.
+Scoped batch reads receive the IDs and scope; the default reader takes only IDs.
+The scope participates in cache lookup and in-flight batch sharing. Card changes
+still invalidate all cached projections of the affected ID.
 `QdrantProcessProvider` and `VectorIndexLifecycleProvider` are public optional
 providers; binary paths, process environment, schedules and internal SDK clients
 remain the host's responsibility. Install the `scheduler` extra for the latter.

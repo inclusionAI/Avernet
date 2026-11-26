@@ -2,6 +2,7 @@ import { captureApiError, errorStack } from "./error-log-format.js";
 import { createRunBaasRouter, computeAvailableInterventions } from "./run-baas-routes.js";
 import type { RunSubworkflowsReader } from "../contracts/run-subworkflows.js";
 import { createRunReadRouter } from "../services/run-read-http.js";
+import { registerRunExecutionRecord } from "./run-execution-record.js";
 
 /**
  * Runs API routes — reads from flow_runs, node_executions, flow_events.
@@ -100,6 +101,7 @@ export function createRunsRouter(
   const exposeRuntimeMetadata = options.exposeRuntimeMetadata === true;
   const effectiveRunSubviews = runSubviews ?? (facadeRepo && 'listRuns' in facadeRepo ? facadeRepo : null);
   const effectiveFacadeRepo = facadeRepo && !('listRuns' in facadeRepo) ? facadeRepo : null;
+  registerRunExecutionRecord(router, flowRunRepo, nodeExecRepo, botPermRepo, effectiveRunSubviews);
   router.use(createRunReadRouter(flowRunRepo, nodeExecRepo, eventRepo, botPermRepo, workflowSpecRepo,
     executionStepLogRepo, effectiveRunSubviews, exposeRuntimeMetadata));
   router.use(createRunBaasRouter(flowRunRepo, eventRepo, effectiveFacadeRepo));

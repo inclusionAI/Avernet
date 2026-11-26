@@ -19,8 +19,8 @@
 //!
 //! - [`held_index`]: the dispatches one Connector instance holds.
 //! - [`doc`]: decoding the stored dispatch document and building its patches.
-//! - [`membership`], [`delayed`]: explicit stubs of contracts that are not
-//!   final; they fail with `need_contract_not_implemented`.
+//! - [`membership`]: an explicit stub of the membership provider; it fails
+//!   with `need_contract_not_implemented`.
 //!
 //! Key names and versions come from `bcs-dist-store` (`layout`, `version`,
 //! `command`); nothing here builds one. The dispatch document is the truth:
@@ -94,7 +94,6 @@
 //! - **Held index**: the per-instance list of held dispatches. It may list too
 //!   much, never too little (spec rule B6).
 
-pub mod delayed;
 pub mod doc;
 pub mod feed;
 pub mod held;

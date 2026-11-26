@@ -4,7 +4,7 @@ import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-ha
 import type { EvolveRepository, EvolveTaskRow } from "../repositories/evolve-repository.js";
 import type { ObjectStore } from "../services/object-storage/oss-object-store.js";
 import type { AisExecutor, SessionAisOptions } from "../contracts/ais-executor.js";
-import { sessionAisBaseConfig, sessionAisDeadline, sessionAisParams, type SessionAisBaseConfig } from "../services/session-ais-config.js";
+import { sessionAisBaseConfig, sessionAisDeadline, sessionAisParams, sessionExportAisArtifacts, type SessionAisBaseConfig } from "../services/session-ais-config.js";
 import { AisTaskRunner, type AisTaskDefinition } from "../services/ais/ais-task-runner.js";
 import {
   parseAisArtifactContract,
@@ -376,9 +376,9 @@ export function createSessionAnalysisRouter(options: SessionAnalysisRouterOption
       return res.status(422).json({ error: `一期仅支持 OpenClaw，当前为 ${runtime.activeEngine}` });
     const taskId = `SA-${randomUUID()}`; const stepId = `${taskId}-AIS`; const attempt = 1;
     const prefix = `evolution/${taskId}/session-analysis/attempt-${attempt}`;
-    if (mode === "ANALYZE_SINGLE" && aisOptions.configurationError)
+    if (aisOptions.configurationError)
       return res.status(503).json({ code: aisOptions.configurationError, error: "会话 AIS 配置无效，请联系管理员" });
-    const aisBase = mode === "ANALYZE_SINGLE" ? sessionAisBaseConfig(aisOptions) : undefined;
+    const aisBase = sessionAisBaseConfig(aisOptions);
     const names = mode === "ANALYZE_SINGLE" ? ["raw", "manifest", "report", "analysis", "result"] : ["raw", "manifest", "result"];
     if (aisBase) names.push("trajectory", "trajectoryPath", "artifactBundle", "runtimeBundle", "openclawSessions");
     const suffix: Record<string, string> = {
@@ -401,8 +401,9 @@ export function createSessionAnalysisRouter(options: SessionAnalysisRouterOption
       ...(sessionKey ? { sessionKey } : {}), ...(question ? { question } : {}),
       llmAnalysis, llmUseDefault, ...(mode === "ANALYZE_SINGLE" ? { sessionLookbackDays } : {}),
       ...(!llmUseDefault ? { llmModel, ...(llmApiKey ? { llmApiKey } : {}) } : {}),
-      attempt, artifactUploadMode: aisBase ? "broker" : artifactUploadMode, artifacts,
-      ...(aisBase ? { artifactAnyOfOnSuccess: [["raw", "trajectory"]] } : {}) };
+      attempt, artifactUploadMode: aisBase ? "broker" : artifactUploadMode,
+      artifacts: aisBase && mode !== "ANALYZE_SINGLE" ? sessionExportAisArtifacts(artifacts, isSingleSessionMode(mode)) : artifacts,
+      ...(aisBase && mode === "ANALYZE_SINGLE" ? { artifactAnyOfOnSuccess: [["raw", "trajectory"]] } : {}) };
     await repo.createTask({ taskId, taskType: mode === "ANALYZE_SINGLE" ? "session_analysis" : "session_export",
       userId, botId, taskName, remark: remark || undefined, configJson: JSON.stringify(config), createdBy: creatorUserId });
     await repo.createStep({ stepId, taskId, stepType: "session_ais", stepNo: 1, command: mode === "ANALYZE_SINGLE" ? "analysis" : "package" });
@@ -458,7 +459,7 @@ export function createSessionAnalysisRouter(options: SessionAnalysisRouterOption
     if (!task || (task.created_by !== userId && !req.isClawEvolveAdmin) || !["session_analysis", "session_export"].includes(task.task_type)) return res.status(404).json({ error: "任务不存在" });
     if (task.status !== "failed") return res.status(409).json({ error: "只有失败任务可以重试" });
     const previous = configOf(task); const attempt = previous.attempt + 1;
-    if (previous.aisBase && aisOptions.configurationError) return res.status(503).json({ code: aisOptions.configurationError, error: "会话 AIS 配置无效，请联系管理员" });
+    if ((previous.aisBase || previous.mode !== "ANALYZE_SINGLE") && aisOptions.configurationError) return res.status(503).json({ code: aisOptions.configurationError, error: "会话 AIS 配置无效，请联系管理员" });
     const stepNo = (await repo.listSteps(task.task_id)).length + 1; const stepId = `${task.task_id}-AIS-${attempt}`;
     const clawwebUrl = previous.clawwebUrl ?? publicBaseUrl;
     const artifacts = Object.fromEntries(Object.entries(previous.artifacts).map(([name, item]) => {
@@ -469,9 +470,13 @@ export function createSessionAnalysisRouter(options: SessionAnalysisRouterOption
       if (name === "manifest") objectKey = objectKey.replace(/\/raw\.manifest\.json$/, "/session.manifest.json");
       return [name, { ...item, objectKey }];
     }));
-    const next = { ...previous, ...(previous.aisBase ? {
-      aisBase: { ...previous.aisBase, deadlineAt: sessionAisDeadline(aisOptions.deadlineSeconds) },
-    } : {}), attempt, stepId, clawwebUrl, callbackUrl: undefined, artifacts }; await repo.prepareTaskRetry(task.task_id, next);
+    const aisBase = previous.aisBase
+      ? { ...previous.aisBase, deadlineAt: sessionAisDeadline(aisOptions.deadlineSeconds) }
+      : previous.mode !== "ANALYZE_SINGLE" ? sessionAisBaseConfig(aisOptions) : undefined;
+    const next = { ...previous, ...(aisBase ? { aisBase, artifactUploadMode: "broker" } : {}),
+      attempt, stepId, clawwebUrl, callbackUrl: undefined,
+      artifacts: aisBase && previous.mode !== "ANALYZE_SINGLE"
+        ? sessionExportAisArtifacts(artifacts, isSingleSessionMode(previous.mode)) : artifacts }; await repo.prepareTaskRetry(task.task_id, next);
     await repo.createStep({ stepId, taskId: task.task_id, stepType: "session_ais", stepNo, command: previous.mode === "ANALYZE_SINGLE" ? "analysis" : "package" });
     try { const jobId = await runner!.dispatch((await repo.findTask(task.task_id))!, stepId, userId); res.status(202).json({ analysisId: task.task_id, attempt, aisJobId: jobId }); }
     catch (error) { await repo.markDispatchFailed(stepId, error instanceof Error ? error.message : String(error)); throw error; }

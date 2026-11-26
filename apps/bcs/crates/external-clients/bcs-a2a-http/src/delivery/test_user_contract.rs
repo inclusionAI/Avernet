@@ -19,14 +19,11 @@ fn target(url: &str, binding: A2aBinding, mode: A2aUpdateMode) -> BotDeliveryTar
 }
 
 #[test]
-fn test_user_header_requires_an_exact_https_streaming_route_and_binding() {
-    let config = config();
+fn test_user_header_requires_an_exact_streaming_route_and_binding() {
+    let mut config = config();
     let selection = A2aTestUserSelection::new("caller".into(), "12345678".into()).unwrap();
     let route = target(&config.interface_url, A2aBinding::JsonRpc, A2aUpdateMode::Stream);
-    let (name, value) = test_user_header(Some(&config), &selection, &route).unwrap();
-    assert_eq!(name, "x-example-agent-user");
-    assert_eq!(value, "12345678");
-    assert!(value.is_sensitive());
+    assert!(test_user_header(Some(&config), &selection, &route).is_ok());
 
     for url in [
         "http://gateway.example.test/rpc/weather?deployment=pre",
@@ -45,6 +42,13 @@ fn test_user_header_requires_an_exact_https_streaming_route_and_binding() {
     let BotDeliveryTarget::A2a { credential_kind, .. } = &mut bearer_route else { unreachable!() };
     *credential_kind = bcs_service_api::types::a2a_auth::PROVIDER_BEARER.into();
     assert!(test_user_header(Some(&config), &selection, &bearer_route).is_err());
+
+    config.interface_url = "http://gateway.example.test/rpc/weather?deployment=pre".into();
+    let http_route = target(&config.interface_url, A2aBinding::JsonRpc, A2aUpdateMode::Stream);
+    let (name, value) = test_user_header(Some(&config), &selection, &http_route).unwrap();
+    assert_eq!(name, "x-example-agent-user");
+    assert_eq!(value, "12345678");
+    assert!(value.is_sensitive());
 }
 
 #[test]

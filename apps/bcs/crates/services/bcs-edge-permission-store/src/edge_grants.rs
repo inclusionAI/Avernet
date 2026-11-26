@@ -395,6 +395,68 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
         .await
     }
 
+    async fn revoke_grant_if_active(&self, edge_id: u64, env: &str) -> ServiceResult<bool> {
+        // Atomic conditional revoke: only the call that actually flips an
+        // approved edge reports the transition, so concurrent removals of
+        // the same friendship revoke (and notify) exactly once.
+        let result = self
+            .execute_result(
+                "revoke_grant_if_active",
+                DbStatement::with_params(
+                    "UPDATE edge_grants SET status = 'revoked', \
+                         gmt_modified = CURRENT_TIMESTAMP \
+                     WHERE id = ? AND env = ? AND status = 'approved'",
+                    vec![DbValue::from(edge_id), DbValue::from(env)],
+                ),
+            )
+            .await?;
+        Ok(result.affected_rows > 0)
+    }
+
+    async fn revoke_relation_if_active(
+        &self,
+        primary: u64,
+        others: &[u64],
+        env: &str,
+    ) -> ServiceResult<Vec<u64>> {
+        // Relation-level winner: `primary` runs with stop-on-no-rows inside a
+        // transaction, so a caller that loses the token commits an empty
+        // prefix and never touches the opposite direction. The winner then
+        // revokes the remaining edges in the same transaction.
+        let sql = "UPDATE edge_grants SET status = 'revoked', \
+                       gmt_modified = CURRENT_TIMESTAMP \
+                   WHERE id = ? AND env = ? AND status = 'approved'";
+        let mut steps = Vec::with_capacity(others.len() + 1);
+        steps.push(bcs_db_api::DbTransactionStep::Execute(
+            DbStatement::with_params(sql, vec![DbValue::from(primary), DbValue::from(env)])
+                .with_transaction_stop_on_no_rows(),
+        ));
+        for edge_id in others {
+            steps.push(bcs_db_api::DbTransactionStep::Execute(
+                DbStatement::with_params(sql, vec![DbValue::from(*edge_id), DbValue::from(env)]),
+            ));
+        }
+        let results = self.db.transaction(steps).await.map_err(|err| {
+            warn!(operation = "revoke_relation_if_active", error = %err, "db_edge_grant: transaction failed");
+            ServiceError::InternalError(format!("revoke friend relation failed: {err}"))
+        })?;
+        let mut revoked = Vec::new();
+        match results.first() {
+            Some(bcs_db_api::DbTransactionStepResult::Executed(first)) if first.affected_rows > 0 => {
+                revoked.push(primary);
+            }
+            _ => return Ok(revoked),
+        }
+        for (index, edge_id) in others.iter().enumerate() {
+            if let Some(bcs_db_api::DbTransactionStepResult::Executed(result)) = results.get(index + 1) {
+                if result.affected_rows > 0 {
+                    revoked.push(*edge_id);
+                }
+            }
+        }
+        Ok(revoked)
+    }
+
     async fn get_default_profile_id(&self, bot_id: &str, env: &str) -> Option<u64> {
         let rows = self
             .query(

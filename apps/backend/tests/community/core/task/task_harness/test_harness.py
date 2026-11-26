@@ -112,12 +112,14 @@ class _FakeRelayRecovery:
         self.error = error
         self.nodes = []
         self.resume_steps = []
+        self.abort_before_resume_run_ids = []
 
-    async def resume(self, node, *, resume_step=None):
+    async def resume(self, node, *, resume_step=None, abort_before_resume_run_id=None):
         if self.error is not None:
             raise self.error
         self.nodes.append(node)
         self.resume_steps.append(resume_step)
+        self.abort_before_resume_run_ids.append(abort_before_resume_run_id)
         from agentclaw.community.core.task.task_harness.relay_session_recovery import (
             RelayResumeResult,
         )
@@ -424,6 +426,7 @@ class TestHarnessOnlyPollsExecutionLeaves:
         node = svc._get_node(graph, "c1")
         node.run_info.extend_props["session_id"] = "s1"
         node.run_info.extend_props["relay_token"] = "token-1"
+        node.run_info.extend_props["run_id"] = "old-run"
         probe = _ScriptedProbe(_runtime_result("active"))
         recovery = _FakeRelayRecovery()
         clock = _Clock(0.0)
@@ -451,6 +454,7 @@ class TestHarnessOnlyPollsExecutionLeaves:
         assert node.run_info.extend_props["relay_token"] == "token-1"
         assert len(recovery.nodes) == 1
         assert recovery.resume_steps == ["S1-S4a"]
+        assert recovery.abort_before_resume_run_ids == ["old-run"]
         assert node.run_info.extend_props["relay_harness_resume_attempts"] == 1
         assert h._runtime_seen[("t1", "c1")]["no_progress"] == 0
         assert rec.patches == []
@@ -841,6 +845,7 @@ def test_relay_stagnation_uses_elapsed_time_and_survives_probe_outage(svc, graph
     graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
     _dispatch_running(svc, graph, "c1")
     node = svc._get_node(graph, "c1")
+    node.run_info.extend_props["run_id"] = "old-run"
     node.run_info.extend_props["session_id"] = "s1"
     clock = _Clock(0.0)
     probe = _ScriptedProbe(_runtime_result("active"))
@@ -902,6 +907,7 @@ def test_activity_query_outage_never_resumes_or_fails_task_and_restarts_window(s
     graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
     _dispatch_running(svc, graph, "c1")
     node = svc._get_node(graph, "c1")
+    node.run_info.extend_props["run_id"] = "old-run"
     node.run_info.extend_props["session_id"] = "s1"
     clock = _Clock(0.0)
     probe = _ScriptedProbe(_runtime_result("active", heartbeat_cursor="runtime:one"))
@@ -933,6 +939,8 @@ def test_activity_query_outage_never_resumes_or_fails_task_and_restarts_window(s
 def test_activity_generation_reset_restarts_silence_window(svc, graph):
     graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
     _dispatch_running(svc, graph, "c1")
+    node = svc._get_node(graph, "c1")
+    node.run_info.extend_props["run_id"] = "old-run"
     clock = _Clock(0.0)
     probe = _ScriptedProbe(_runtime_result("active", baseline_reset=True))
     recovery = _FakeRelayRecovery()
@@ -950,3 +958,47 @@ def test_activity_generation_reset_restarts_silence_window(svc, graph):
     clock.advance(1)
     harness._poll_once()
     assert len(recovery.nodes) == 1
+
+
+@pytest.mark.parametrize("mode", ["runtime", "fallback", "unavailable"])
+def test_real_bot_probe_drives_harness_without_resuming_on_probe_failure(svc, graph, mode):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from agentclaw.community.core.task.task_harness.runtime_probe import TaskRuntimeLivenessProbe
+    from agentclaw.community.core.task.task_runner.client.ports import BotSessionRuntimeStatus
+
+    graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+    _dispatch_running(svc, graph, "c1")
+    node = svc._get_node(graph, "c1")
+    node.run_info.extend_props["run_id"] = "old-run"
+    node.run_info.extend_props["session_id"] = "s1"
+    bot = SimpleNamespace(
+        get_session_runtime_status=AsyncMock(side_effect=TimeoutError("status unavailable")),
+        get_session_messages=AsyncMock(return_value=[{"id": "m1", "content": "working"}]),
+    )
+    if mode == "unavailable":
+        bot.get_session_messages.side_effect = TimeoutError("messages unavailable")
+    recovery = _FakeRelayRecovery()
+    clock = _Clock(0.0)
+    recorder = Recorder()
+    harness = TaskHarness(svc, recorder, clock=clock, runtime_probe=TaskRuntimeLivenessProbe(bot=bot),
+                          runtime_probe_threshold=120, relay_recovery=recovery)
+    harness.register("t1")
+    harness._poll_once()
+    for seq in range(7):
+        if mode == "runtime":
+            bot.get_session_runtime_status.side_effect = None
+            bot.get_session_runtime_status.return_value = BotSessionRuntimeStatus(
+                session_id="s1", found=True, run_id="engine-run", state="running",
+                started_at=1000, last_event_seq=seq,
+            )
+        clock.advance(120)
+        harness._poll_once()
+    assert node.status == Status.RUNNING
+    assert not recorder.patches
+    assert len(recovery.nodes) == (1 if mode == "fallback" else 0)
+    if mode == "runtime":
+        bot.get_session_messages.assert_not_awaited()
+    elif mode == "unavailable":
+        assert harness._runtime_seen[("t1", "c1")]["no_progress"] == 0
+        assert "relay_harness_resume_attempts" not in node.run_info.extend_props

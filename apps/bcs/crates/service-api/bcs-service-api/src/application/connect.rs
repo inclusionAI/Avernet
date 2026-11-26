@@ -106,6 +106,21 @@ pub trait ConnectService: Send + Sync {
         request_auth: Option<RequestAuthHeaders>,
     ) -> ServiceResult<Vec<u64>>;
 
+    /// Owner-initiated removal: revoke the friend-profile edge(s) between the
+    /// two given actors, mirroring the orientation rules the caller chooses
+    /// (human→bot auth-sync fires only for a human `first` argument). The
+    /// default delegates to `revoke_friend`; the durable implementation
+    /// overrides to revoke atomically per edge and also emit the
+    /// `RemovedByOwner` notice when at least one edge actually transitioned.
+    async fn revoke_friend_as_owner(
+        &self,
+        first: &str,
+        second: &str,
+        request_auth: Option<RequestAuthHeaders>,
+    ) -> ServiceResult<Vec<u64>> {
+        self.revoke_friend(first, second, request_auth).await
+    }
+
     /// Friend list (any direction, default-profile edge), enriched.
     async fn list_friends(&self, actor: &str) -> ServiceResult<Vec<FriendListEntry>>;
 

@@ -4,12 +4,16 @@
  * 提取为 DOM 等价重构——页面侧渲染结果与提取前一致，既有测试断言不受影响。
  */
 import type { CollaborationBot, PublicAudience } from '@/domain/collaborationPrivacy/types';
-import { TriangleAlert } from 'lucide-react';
+import { useBotFriendRoster } from '@/hooks/useBotFriendRoster';
+import { RefreshCw, TriangleAlert } from 'lucide-react';
+import { useState } from 'react';
+import { BotFriendManageDrawer } from './BotFriendManageDrawer';
 import { botFriendApprovalSection, botVisibilitySection, visibilityAudience } from './botVisibilityCopy';
 import { LabelHelpTooltip } from './HelpTooltip';
 import { RelationCard, type RelationCardProps } from './RelationCard';
 import { RequestList } from './RequestList';
 import { SettingRow } from './SettingRow';
+import { Button } from '@/components/ui/Button';
 
 export { BotAbilitySettings } from './BotAbilitySettings';
 
@@ -131,6 +135,52 @@ export function PublishApprovalSettings({
         ) : null}
         {error ? <p className="m-0 py-2 text-xs text-destructive">{error}</p> : null}
       </div>
+    </>
+  );
+}
+
+/**
+ * 好友名单分区（bot-friend-roster）：分类计数「好友用户 N · 好友 Bot M」+
+ * 「管理好友」入口（两页签全量抽屉 + 搜索 + 二次确认移除）。
+ * 仅 Owner 可见（由弹窗容器按 `userId && bot.ownerId === userId` 决定渲染）；
+ * 每个类型独立降级：加载中为 `-`,失败的计数为 `-` 并随「重试」。只在容器
+ * 已解析出协作 Bot UUID（targetBot.id）时挂载——绝不接收后端行 bot.id。
+ */
+export function BotFriendListSettings({ botUuid }: { botUuid: string }) {
+  const roster = useBotFriendRoster(botUuid);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const users = roster.counts.users;
+  const bots = roster.counts.bots;
+  const failedType = !roster.loading && bots === null ? 'bot' : !roster.loading && users === null ? 'human' : null;
+  const display = (value: number | null) => (value === null ? '-' : value);
+  return (
+    <>
+      <div className="mb-3 flex items-center gap-1.5">
+        <h4 className="m-0 text-xs font-semibold tracking-wide text-muted-foreground">好友名单</h4>
+        <LabelHelpTooltip label="好友名单" content="查看并管理该 Bot 的好友用户与好友 Bot;移除后双方好友关系同步解除。" />
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <p className="m-0 text-sm text-muted-foreground">
+          {roster.loading
+            ? '好友名单加载中…'
+            : `好友用户 ${display(users)} · 好友 Bot ${display(bots)}`}
+          {failedType ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-2"
+              leftIcon={<RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+              onClick={() => void roster.reload(failedType)}
+            >
+              重试
+            </Button>
+          ) : null}
+        </p>
+        <Button variant="outline" size="sm" onClick={() => setDrawerOpen(true)}>
+          管理好友
+        </Button>
+      </div>
+      <BotFriendManageDrawer open={drawerOpen} onOpenChange={setDrawerOpen} roster={roster} />
     </>
   );
 }

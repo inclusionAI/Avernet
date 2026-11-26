@@ -18,13 +18,13 @@
 /apps/frontend-nextgen/ @liaoxianhao @ityuqiao @sanqi450255-star @XduXmy @carolvvvvv @xianmuyq @rudyLi
 /apps/bcsfuse/ @archer910517-ctrl @wienyang @xianmuyq @3h-william @ZhaosenLin @XIEAN99
 /apps/backend/ @totalfrank @xianmuyq @FreddieSun
-/engine/adapter/ @totalfrank @xianmuyq @FreddieSun
+/engine/adapter/ @totalfrank @xianmuyq @FreddieSun @evilcoda
 /apps/baas/ @cassiuscai @pfmiles @phoenixliu @xxxxpenny @EVASHINJI
 /apps/proxy/ @cassiuscai @pfmiles @phoenixliu @xxxxpenny @EVASHINJI
 /apps/gateway/ @cassiuscai @xxxxpenny @totalfrank @liveandevil @vzvince
 /apps/evolverun/ @archer910517-ctrl @wienyang @fudp @3h-william @ZhaosenLin @XIEAN99
 
 # Task goal-driven execution framework — dedicated owners.
-/apps/backend/**/community/**/task/               @totalfrank @regrecall @msjbear @jiangj0627 @guok974-dot
-/apps/backend/specs/*task*/                       @totalfrank @regrecall @msjbear @jiangj0627 @guok974-dot
-/apps/backend/src/agentclaw/community/**/{task*.py, test_*task*.py} @totalfrank @regrecall @msjbear @jiangj0627 @guok974-dot
+/apps/backend/**/community/**/task/ @totalfrank @regrecall @msjbear @jiangj0627 @guok974-dot @WEN6Lev57q4
+/apps/backend/specs/*task*/ @totalfrank @regrecall @msjbear @jiangj0627 @guok974-dot @WEN6Lev57q4
+/apps/backend/src/agentclaw/community/**/{task*.py, test_*task*.py} @totalfrank @regrecall @msjbear @jiangj0627 @guok974-dot @WEN6Lev57q4

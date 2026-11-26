@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from dataclasses import replace
+import json
 
 import pytest
 from sqlalchemy import create_engine
@@ -11,12 +12,14 @@ from agentclaw.community.core.bot_public_risk.repository import (
     RiskCheck,
     RiskCheckModel,
 )
+from agentclaw.community.plugin_api.models import BotModel
 
 
 class Database:
     def __init__(self):
         self.engine = create_engine("sqlite:///:memory:")
         RiskCheckModel.__table__.create(self.engine)
+        BotModel.__table__.create(self.engine)
         self.sessions = sessionmaker(bind=self.engine)
 
     @contextmanager
@@ -270,3 +273,32 @@ def test_replacement_preserves_published_history(repo):
     a, _ = repo.create_or_replay(record(phase="PUBLISHED"))
     repo.create_or_replay(record("b", "req-b"))
     assert repo.get(env="dev", risk_check_id=a.risk_check_id).phase == "PUBLISHED"
+
+
+@pytest.mark.parametrize("stored_puid", ["puid-a", "another-puid"])
+def test_replacement_archives_only_its_legacy_approval_before_a_new_scan(stored_puid):
+    db = Database()
+    repo = BotPublicRiskRepository(db)
+    approval = {"puid": stored_puid, "status": "PROCESSING"}
+    with db.transactional_orm_session() as session:
+        session.add(BotModel(
+            id=7, bot_id="b", entity_id="owner", entity_type="staff", creator_id="owner",
+            owner_id="owner", env="dev", public="0",
+            ext=json.dumps({"public_approval": approval, "other_field": "retained"}),
+        ))
+    repo.create_or_replay(record(public_scope="legacy", approval_puid="puid-a", phase="APPROVING"))
+    new, _ = repo.create_or_replay(record("b", "req-b", public_scope="legacy"))
+    assert new.phase == "PREPARING"
+    assert repo.get(env="dev", risk_check_id="a").phase == "CLOSED"
+    with db.orm_session() as session:
+        bot = session.get(BotModel, 7)
+        ext = json.loads(bot.ext)
+        assert bot.public == "0"
+        assert ext["other_field"] == "retained"
+        if stored_puid == "puid-a":
+            assert "public_approval" not in ext
+            archived, = ext["public_approval_history"]
+            assert archived["puid"] == "puid-a"
+            assert archived["status"] == "REPLACED"
+        else:
+            assert ext["public_approval"] == approval

@@ -8,13 +8,20 @@
 //!
 //! # Configuration
 //!
-//! BCS CLI can be configured via:
-//! 1. `--url` (highest priority)
+//! URL selection has two layers. clap captures `--url` and, when that flag is
+//! absent, the `MOLTIS_BCS_URL` value into the same argument, so an explicit
+//! `--url` still wins. The resolver then applies, in order:
+//! 1. The captured argument (`--url`, otherwise `MOLTIS_BCS_URL`)
 //! 2. `BCS_API_BASE_URL`
-//! 3. `MOLTIS_BCS_URL`
-//! 4. Session file: `$BOT_DATA_DIR/.bcs/session.json`
-//! 5. Runtime-selected compiled distribution default
-//! 6. Default local URL (lowest priority)
+//! 3. Session file: `$BOT_DATA_DIR/.bcs/session.json` (`api_base_url`, then
+//!    `bcs_url`)
+//! 4. Runtime-selected compiled distribution default
+//! 5. Default local URL (lowest priority)
+//!
+//! Because clap already captures `MOLTIS_BCS_URL`, the binary ranks it above
+//! `BCS_API_BASE_URL`; a resolver call that is handed `url: None` instead ranks
+//! `BCS_API_BASE_URL` first. An invalid URL from a higher-priority source is an
+//! error, never a silent fallback to a lower one.
 //!
 //! # Environment-Based Configuration
 //!
@@ -56,6 +63,10 @@ mod collaboration_snapshot;
 // resolved via `inventory`). Public builds link no provider and fall back to a
 // stub; internal builds link an Ant provider that performs the real flow.
 use bcs_cli::oauth;
+
+// The library owns `SessionInfo`; `shared_env` reads it as `super::SessionInfo`
+// so both targets deserialize the same type.
+use bcs_cli::SessionInfo;
 
 #[cfg(test)]
 use std::path::PathBuf;
@@ -131,6 +142,11 @@ mod collaboration_commands;
 mod collaboration_input;
 #[path = "cli/environment.rs"]
 mod environment;
+// Session/URL helpers are compiled from the same file as the library target.
+// Declared at this root so `cli::environment` can reach `super::shared_env`
+// under both the normal binary and the internal `#[path]` overlay.
+#[path = "cli/environment/shared.rs"]
+mod shared_env;
 #[path = "cli/group_commands.rs"]
 mod group_commands;
 #[path = "cli/group_context_commands.rs"]
@@ -165,7 +181,9 @@ use collaboration_input::{
 use environment::{NetworkEnv, detect_network_env, normalize_bcs_ws_url};
 use environment::{get_current_env, resolve_bcs_url};
 #[cfg(test)]
-use environment::{discover_token, is_localhost_url, normalize_bcs_api_url};
+use environment::{
+    discover_token, is_localhost_url, load_optional_session_info,
+};
 #[cfg(test)]
 use group_context_commands::{
     group_context_add_body, group_context_query, group_context_update_body,
@@ -276,8 +294,11 @@ pub async fn run() -> Result<()> {
     // Get current environment (defaults to "dev")
     let env = get_current_env();
 
-    // Determine BCS URL: CLI arg > env var > session.json > compiled default > local
-    // Note: bcs_url resolution is deferred for commands that don't need it (e.g., --web mode).
+    // Resolve the BCS URL from the clap-captured argument, BCS_API_BASE_URL,
+    // session.json, the compiled default and finally local; see the module docs
+    // for why the captured argument already covers MOLTIS_BCS_URL here.
+    // Note: bcs_url resolution is deferred for commands that don't need it (e.g., --web mode),
+    // and resolver errors keep collapsing to an empty URL on this path.
     let bcs_url = resolve_bcs_url(&cli).unwrap_or_default();
 
     // Determine cookie: CLI arg > env var

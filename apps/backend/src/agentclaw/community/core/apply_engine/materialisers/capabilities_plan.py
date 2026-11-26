@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agentclaw.community.core.apply_engine.registry import Intent, PlannedEntry
 from agentclaw.community.core.mcp.config_comparison import comparable_config
+from agentclaw.community.core.skill_center.mcp_apply_policy import is_manifest_mcp_install
 from .capabilities_types import (
     CapabilityPlan,
     Resolved,
@@ -90,7 +91,7 @@ def build_plan(resolved: Resolved) -> CapabilityPlan:
         if resolved.default_enabled:
             # Default read may need to repair absent Installation without changing exclusions.
             defaults = [
-                group for group in snapshot.sets if group.is_default and group.is_active
+                group for group in snapshot.sets if group.is_default and (group.is_active or is_manifest_mcp_install())
             ]
             ids = {
                 int(asset["id"])
@@ -102,16 +103,19 @@ def build_plan(resolved: Resolved) -> CapabilityPlan:
                 for group in defaults
                 for code in set(group.mcp_codes) | snapshot.platform_default_codes
             }
-            missing = bool(
-                ids - snapshot.installed_skill_ids
-                or codes - snapshot.installed_mcp_codes
-            )
+            if is_manifest_mcp_install():
+                codes = set(resolved.default_mcp_codes)
+            missing_codes = codes - snapshot.installed_mcp_codes
+            if is_manifest_mcp_install():
+                # Platform defaults are supplied by policy without an Installation row.
+                missing_codes -= snapshot.platform_default_codes
+            missing = bool(ids - snapshot.installed_skill_ids or missing_codes)
             entries.append(
                 PlannedEntry(
                     Intent("skill_sets/default"),
                     "updated" if default_changed or missing else "unchanged",
                     # A declared active Default may still need runtime retry.
-                    requires_write=default_changed or missing or bool(defaults),
+                    requires_write=default_changed or missing or bool(defaults) or (is_manifest_mcp_install() and bool(codes)),
                 )
             )
         elif default_removed:
