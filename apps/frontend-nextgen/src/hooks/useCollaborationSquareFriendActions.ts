@@ -30,7 +30,7 @@ export interface UseCollaborationSquareFriendActionsOptions {
   /** 广场 busy 状态（busy 防重）与关系回填的既有 store 接缝。 */
   busyKeys: string[];
   setBusy: (key: string, busy: boolean) => void;
-  updateBotRelationship: (targetId: string, status: BotRelationshipStatus) => void;
+  updateBotRelationship: (targetId: string, status: BotRelationshipStatus, pendingRequestId?: string) => void;
 }
 
 /**
@@ -142,7 +142,7 @@ export function useCollaborationSquareFriendActions({
             )
           : await collaborationSquareBotService.requestBotFriendship(bot.id, humanBotContext, undefined, activeActor);
         if (!isCurrent()) return;
-        updateBotRelationship(targetId, result.status);
+        updateBotRelationship(targetId, result.status, result.pendingRequestId);
         if (result.status === 'friend') {
           notifySuccess('好友关系已建立');
           // 仅配置 Backend 增强时为 Human 继续创建私聊并跳转；建聊失败不回滚好友结果。
@@ -192,7 +192,7 @@ export function useCollaborationSquareFriendActions({
             )
           : await collaborationSquareBotService.requestBotFriendship(bot.id, humanBotContext, undefined, activeActor);
         if (!isCurrent()) return;
-        updateBotRelationship(targetId, result.status);
+        updateBotRelationship(targetId, result.status, result.pendingRequestId);
         if (result.status === 'friend') {
           // 罕见窗口（重试瞬间申请被接受）直接成为好友：与主操作同款落点。
           notifySuccess('好友关系已建立');
