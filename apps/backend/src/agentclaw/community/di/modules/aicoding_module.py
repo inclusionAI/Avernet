@@ -50,6 +50,16 @@ from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting
 from agentclaw.community.core.bot_management.services.template_service import (
     TemplateService,
 )
+from agentclaw.community.core.aicoding.work_item_bots import (
+    RepositoryWorkItemsBotLister,
+    WorkItemsBotLister,
+)
+from agentclaw.community.core.aicoding.services.work_items_service import (
+    AICodingWorkItemsService,
+)
+from agentclaw.community.core.aicoding.work_items_service_protocol import (
+    AICodingWorkItemsServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import (
     BotRepository,
 )
@@ -92,12 +102,28 @@ class AICodingModule(Module):
             scope=singleton,
         )
         binder.bind(ArchitectRebindService, to=ArchitectRebindService, scope=singleton)
+        binder.bind(
+            WorkItemsBotLister,
+            to=RepositoryWorkItemsBotLister,
+            scope=singleton,
+        )
+        binder.bind(
+            AICodingWorkItemsService, to=AICodingWorkItemsService, scope=singleton
+        )
         # Resolve only when a coding restart reads its switch, after all module
         # overrides are installed. Capturing this injector avoids a service locator.
         injector = binder.injector
         configure_restart_common_config(
             lambda: injector.get(CommonConfigServiceProtocol)
         )
+
+    @singleton
+    @provider
+    @inject
+    def _work_items_service_protocol(
+        self, svc: AICodingWorkItemsService
+    ) -> AICodingWorkItemsServiceProtocol:
+        return svc
 
     @singleton
     @provider
