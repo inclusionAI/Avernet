@@ -7,6 +7,10 @@ import type { AisExecutor } from "@avernet/clawevolve/server/contracts/ais-execu
 import type { RecoveryMaintenanceLease } from "../contracts.js";
 import { createSessionRecoveryRuntime } from "../index.js";
 import { SessionRecoveryTaskService } from "../task-service.js";
+import { logRepairEvent } from "../../common/logging.js";
+vi.mock("../../common/logging.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../../common/logging.js")>(), logRepairEvent: vi.fn(),
+}));
 
 const databases: SqliteDatabase[] = [];
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(0); });
@@ -16,7 +20,7 @@ afterEach(async () => {
 });
 function fixture() {
   const db = new SqliteDatabase(new Database(":memory:")); databases.push(db);
-  const owner = { expiresAtMs: 120_000, renew: vi.fn(async (now: number) => now + 120_000),
+  const owner = { expiresAtMs: 120_000, stateVersion: 7, renew: vi.fn(async (now: number) => now + 120_000),
     release: vi.fn(async (_now: number) => {}) };
   const provider: RecoveryMaintenanceLease = { claim: vi.fn().mockResolvedValue(owner) };
   const maintenance = vi.spyOn(SessionRecoveryTaskService.prototype, "maintenance").mockResolvedValue(undefined);
@@ -36,6 +40,7 @@ it("skips the complete scan when another replica owns the lease", async () => {
   await f.runtime.maintenance!();
   expect(f.maintenance).not.toHaveBeenCalled();
   expect(f.owner.release).not.toHaveBeenCalled();
+  expect(logRepairEvent).not.toHaveBeenCalled();
   expect(vi.getTimerCount()).toBe(0);
 });
 it("propagates lease-store errors without falling back to an unlocked scan", async () => {
@@ -92,4 +97,17 @@ it("does not revive an expired scan when its delayed renewal eventually complete
   renewal.resolve(240_001); await running;
   expect(f.owner.release).not.toHaveBeenCalled();
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it("uses the existing metadata logger to correlate each acquired scan without logging skipped replicas", async () => {
+  const f = fixture();
+  f.maintenance.mockImplementation(async () => { await vi.advanceTimersByTimeAsync(123); });
+  await f.runtime.maintenance!();
+  expect(logRepairEvent).toHaveBeenNthCalledWith(1, "session-recovery", "session_recovery_maintenance", "scan_started", {
+    environment: expect.any(String), stateVersion: 7,
+  });
+  expect(logRepairEvent).toHaveBeenNthCalledWith(2, "session-recovery", "session_recovery_maintenance", "scan_completed", {
+    environment: expect.any(String), stateVersion: 7, outcome: "succeeded", elapsedMs: 123,
+  });
+  expect(logRepairEvent).toHaveBeenCalledTimes(2);
 });

@@ -101,6 +101,8 @@ export interface RecoveryLogger { log(result: RecoveryDeliveryLog): void }
 export interface RecoveryMaintenanceLease {
   claim(environment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment, nowMs: number): Promise<{
     expiresAtMs: number;
+    /** Acquisition revision, retained as the correlation identity for this scan. */
+    stateVersion: number;
     renew(nowMs: number): Promise<number>;
     release(nowMs: number): Promise<void>;
   } | null>;

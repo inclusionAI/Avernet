@@ -69,6 +69,8 @@ export function createSessionRecoveryRuntime(options: {
   const maintenance = async (): Promise<void> => {
     const lease = await options.maintenanceLease.claim(controlPlaneEnvironment, Date.now());
     if (!lease) return;
+    const startedAtMs = Date.now();
+    const context = { environment: controlPlaneEnvironment, stateVersion: lease.stateVersion };
     let expiresAtMs = lease.expiresAtMs;
     let lost: Error | undefined;
     let renewing: Promise<void> | undefined;
@@ -84,14 +86,24 @@ export function createSessionRecoveryRuntime(options: {
         .catch(error => {
           lost = error instanceof Error ? error : new Error("SESSION_RECOVERY_MAINTENANCE_LEASE_LOST");
           logRepairEvent("session-recovery", "session_recovery_maintenance", "lease_lost", {
-            environment: controlPlaneEnvironment, ...repairLogError(error),
+            ...context, ...repairLogError(error),
           });
         }).finally(() => { renewing = undefined; });
     }, 20_000).unref();
     try {
       assertLease();
+      logRepairEvent("session-recovery", "session_recovery_maintenance", "scan_started", context);
       await tasks.maintenance(assertLease);
       assertLease();
+      // Record scan completion while ownership is still held, before another replica can enter.
+      logRepairEvent("session-recovery", "session_recovery_maintenance", "scan_completed", {
+        ...context, outcome: "succeeded", elapsedMs: Date.now() - startedAtMs,
+      });
+    } catch (error) {
+      logRepairEvent("session-recovery", "session_recovery_maintenance", "maintenance_failed", {
+        ...context, outcome: "failed", elapsedMs: Date.now() - startedAtMs, ...repairLogError(error),
+      });
+      throw error;
     } finally {
       clearInterval(timer);
       await renewing;

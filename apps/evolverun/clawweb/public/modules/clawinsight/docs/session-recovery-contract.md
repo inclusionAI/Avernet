@@ -50,6 +50,11 @@ start, so another replica cannot immediately repeat the scan or add another minu
 of cooldown after a short round. No maintenance cursor is persisted across rounds.
 The host continues using the existing journal's background lease records, without
 adding a table or changing the task query, task selection, or maintenance decisions.
+The existing metadata logger emits one `scan_started` / `scan_completed` pair per
+acquired scan, using its existing `stateVersion` field for the acquisition revision
+shared by both events and `elapsedMs` for duration. Its existing environment,
+instance, PID and timestamp fields identify the worker. Completion is recorded before
+lease release; skipped contenders remain silent. Failures retain existing redaction.
 Task-level row locks, versions and execution leases remain necessary for callbacks,
 user operations and takeover overlap. Result reporting and execution monitoring keep
 their separate schedules. Newly created tasks and Owner confirmations still dispatch
