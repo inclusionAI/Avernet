@@ -24,7 +24,7 @@ export async function previewRecoveries(db: IDatabase, authenticated: (req: Requ
       request: { event_id: `preview-${i}`, delivery_key: `preview-${i}`, diagnosis: '原任务执行遇到工具调用异常。', tc_fault_label: 'TC.MCP.PERMISSION',
         target: { bot_id: 'default', entity_id: '001234', env: 'prod', engine: 'OC' }, session_key: `agent:main:session:preview-${i}` },
       plan: null, judgment: { effect, summary: ({ recovered: '已核验原任务继续执行。', not_recovered: '已核验原任务未恢复。', not_intervened: '本次未执行干预。', unknown: '恢复效果尚未确认。' })[effect], delivery: 'confirmed', response: 'acted', evidence_ids: [] },
-      evidence: [], timeline: [], pending_results: [] };
+      evidence: [], timeline: [] };
     await tasks.create(task, `${task.taskId}-1`);
   }
   const unavailable = async (): Promise<never> => { throw new Error('Local preview does not execute recovery operations'); };

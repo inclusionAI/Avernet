@@ -18,7 +18,7 @@ beforeAll(async () => {
       request: { event_id: `event-${i}`, delivery_key: `key-${i}`, diagnosis: '任务尚未完成', tc_fault_label: null, session_key: 'original',
         target: { bot_id: 'default', entity_id: i === 3 ? 'other' : 'owner', env: i === 2 ? 'pre' : 'prod', engine: 'OC' } },
       status: i === 1 ? 'running' : 'completed', phase: 'verify', plan: null, judgment: { effect: 'unknown', summary: '效果待确认', delivery: 'unconfirmed', response: 'unknown', evidence_ids: [] },
-      timeline: [], evidence: [], pending_results: [], observationDeadlineAt: null, ownerDeadlineAt: null };
+      timeline: [], evidence: [], observationDeadlineAt: null, ownerDeadlineAt: null };
     await repo.create(task, `${task.taskId}-1`);
   }
 }, 30000);

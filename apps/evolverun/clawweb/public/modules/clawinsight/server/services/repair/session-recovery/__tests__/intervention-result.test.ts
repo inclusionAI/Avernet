@@ -1,3 +1,4 @@
+const flush = () => new Promise(resolve => setImmediate(resolve));
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
@@ -55,13 +56,13 @@ beforeEach(async () => {
   reporter = { report: async result => { callbacks.push(result); } };
   service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target), actionNotifier });
 });
-afterEach(async () => { await db.close(); await rm(directory, { recursive: true, force: true }); });
+afterEach(async () => { await service?.dispose(); await db.close(); await rm(directory, { recursive: true, force: true }); });
 
 it("reports none for investigation-only failures without adding a persisted task field", async () => {
   const task = await create();
   await inspect(task);
   await service.executionFailure(task.taskId, "无法继续调查");
-  await service.reportResults();
+  await flush();
   expect(callbacks.at(-1)).toMatchObject({ status: "failed", effect: "unknown", intervention_status: "none" });
   expect(JSON.parse((await repo.findTask(task.taskId))!.config_json).interventionStatus).toBeUndefined();
 });
@@ -73,7 +74,7 @@ it.each([false, true])("keeps an unfinished write uncertain only after it is cla
   await audit.createToolCall(input);
   if (claimed) await audit.claimToolCall({ ...input, leaseOwner: "intervention-worker", leaseExpiresAt: Math.floor(now / 1000) + 60 });
   await service.terminate(task.taskId, actor);
-  await service.reportResults();
+  await flush();
   expect(callbacks.at(-1)).toMatchObject({ status: "canceled", intervention_status: claimed ? "unknown" : "none" });
 });
 it.each([false, true])("requires actual message presence, not channel acceptance: confirmed=%s", async confirmed => {
@@ -81,7 +82,7 @@ it.each([false, true])("requires actual message presence, not channel acceptance
   await agent.retryMessage(task, { clientRequestId: "intervention-message", purpose: "提供原任务继续指引", message: "请依据工具返回继续" });
   if (confirmed) await inspect(await current(task.taskId));
   await service.executionFailure(task.taskId, "执行中断");
-  await service.reportResults();
+  await flush();
   expect(callbacks.at(-1)).toMatchObject({ status: "failed", effect: "unknown", intervention_status: confirmed ? "performed" : "unknown" });
 });
 it.each(["applied", "not_applied"] as const)("does not substitute generic write reconciliation for message proof: %s", async outcome => {
@@ -93,7 +94,7 @@ it.each(["applied", "not_applied"] as const)("does not substitute generic write 
   await agent.reconcileWrite(await current(task.taskId), { clientRequestId: "intervention-message-reconcile", purpose: "记录已有核实结论", sourceToolCallId: sent.toolCallId,
     outcome, summary: "这项通用写入结论不能代替消息触达证明", evidenceToolCallIds: [evidence.toolCallId] });
   await service.executionFailure(task.taskId, "结束本次执行");
-  await service.reportResults();
+  await flush();
   expect(callbacks.at(-1)?.intervention_status).toBe("unknown");
 });
 it.each(["success", "nonzero", "lost", "applied", "not_applied"] as const)("derives environment intervention from execution and reconciliation: %s", async outcome => {
@@ -114,28 +115,10 @@ it.each(["success", "nonzero", "lost", "applied", "not_applied"] as const)("deri
   tasks = new SessionRecoveryTaskRepository(db, repo, artifactStore);
   expect((await agent.bootstrap(await current(task.taskId))).task.interventionStatus).toBeUndefined();
   await service.executionFailure(task.taskId, "执行结束");
-  await service.reportResults();
+  await flush();
   expect(callbacks.at(-1)?.intervention_status).toBe(outcome === "success" || outcome === "applied" ? "performed" : outcome === "not_applied" ? "none" : "unknown");
   expect((await service.detail(task.taskId, actor)).interventionStatus).toBeUndefined();
 });
-it("preserves unavailable historical audit after legacy migration and later termination", async () => {
-  const { interventionStatus: _projection, ...task } = await create();
-  const result = { event_id: task.request.event_id, task_id: task.taskId, result_version: task.version, status: "waiting_effect" as const,
-    phase: "observe" as const, waiting_reason: "effect" as const, effect: "unknown" as const, result_text: "历史观察结果", evidence_ids: [] };
-  await db.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify({ ...task, status: "waiting_effect", phase: "observe", pending_results: [result] }), task.taskId]);
-  await db.exec("UPDATE ce_steps SET output_json = NULL WHERE task_id = ? AND step_no > 0", [task.taskId]);
-  await service.reportResults();
-  expect(callbacks).toEqual([result]);
-  const migrated = await current(task.taskId);
-  expect(migrated.interventionAuditComplete).toBeUndefined();
-  expect(JSON.parse((await repo.findTask(task.taskId))!.config_json).interventionAuditComplete).toBeUndefined();
-  expect((await agent.bootstrap(migrated)).task.interventionAuditComplete).toBeUndefined();
-  expect((await service.detail(task.taskId, actor)).interventionAuditComplete).toBeUndefined();
-  await service.terminate(task.taskId, actor);
-  await service.reportResults();
-  expect(callbacks.at(-1)).toMatchObject({ status: "canceled", intervention_status: "unknown" });
-});
-
 it("does not treat a pre-upgrade v2 artifact without audit coverage as no intervention", async () => {
   const task = await create();
   const stored = JSON.parse((await repo.findTask(task.taskId))!.config_json);
@@ -145,7 +128,7 @@ it("does not treat a pre-upgrade v2 artifact without audit coverage as no interv
   await artifactStore.putObject(objectKey, content, "application/json");
   stored.detailsRef = { objectKey, sha256: createHash("sha256").update(content).digest("hex") };
   await db.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify(stored), task.taskId]);
-  await service.executionFailure(task.taskId, "历史任务结束"); await service.reportResults();
+  await service.executionFailure(task.taskId, "历史任务结束"); await flush();
   expect(callbacks.at(-1)).toMatchObject({ status: "failed", intervention_status: "unknown" });
 });
 
@@ -160,7 +143,7 @@ it("holds recovered results until delayed delivery evidence arrives, including a
   task = await current(task.taskId); const deadline = task.observationDeadlineAt;
   const judgment = { delivery: "unconfirmed", response: "unknown", effect: "recovered", summary: "原业务产物已恢复，触达证据尚未入库", evidence_ids: [read.evidenceId] };
   await agent.report(task, { kind: "observation", phase: "observe", judgment, final_summary: "应继续观察，不能提前收尾" });
-  await service.reportResults();
+  await flush();
   expect(callbacks).toEqual([]);
   expect(await current(task.taskId)).toMatchObject({ status: "running", judgment, observationDeadlineAt: deadline });
   await expect(agent.report(await current(task.taskId), { kind: "observation", phase: "observe",
@@ -179,7 +162,7 @@ it("holds recovered results until delayed delivery evidence arrives, including a
   expect(after.result.delivery_confirmed).toBe(true);
   saved = await current(task.taskId);
   await agent.report(saved, { kind: "observation", phase: "observe", judgment: { ...judgment, delivery: "confirmed", response: "acted", evidence_ids: [read.evidenceId, after.evidenceId] } });
-  await service.reportResults();
+  await flush();
   expect(await current(task.taskId)).toMatchObject({ status: "completed", observationDeadlineAt: deadline, judgment: { effect: "recovered" } });
   expect(callbacks.at(-1)).toMatchObject({ status: "completed", effect: "recovered", intervention_status: "performed" });
   expect(runtime.sendMessage).toHaveBeenCalledOnce();
@@ -204,12 +187,12 @@ it.each([true, false])("waits for delayed TE AIVision evidence after recovery: i
   await agent.report(await current(task.taskId), { kind: "observation", phase, judgment });
   task = await current(task.taskId);
   expect(task).toMatchObject({ status: "running", phase, judgment });
-  expect(task.pending_results).toEqual([]);
+  expect(callbacks).toEqual([]);
   const deadline = task.observationDeadlineAt;
   read.mockResolvedValue({ delivery_confirmed: true, traces: [] });
   const after = await agent.trajectoryRead(task, { clientRequestId: "te-late-ingestion", purpose: "补读迟到轨迹确认触达" });
   await agent.report(await current(task.taskId), { kind: "observation", phase, judgment: { ...judgment, delivery: "confirmed", evidence_ids: [after.evidenceId] } });
-  await service.reportResults();
+  await flush();
   expect(callbacks.at(-1)).toMatchObject({ effect: "recovered", intervention_status: "performed" });
   expect((await current(task.taskId)).observationDeadlineAt).toBe(deadline);
   expect(runtime.sendMessage).toHaveBeenCalledOnce();
@@ -235,7 +218,7 @@ it("counts durable Owner feedback once while keeping recovery unknown and preser
   const cardReceipt = (await current(task.taskId)).timeline.find(event => event.payload.channel === "owner_card"
     && event.payload.operation === "create" && event.payload.state === "sent")!;
   expect(actionNotifier.after).toHaveBeenCalledWith({ taskId: task.taskId, eventId: cardReceipt.event_id, kind: "owner_card_sent" });
-  expect(await current(task.taskId)).toMatchObject({ status: "waiting_owner", interventionStatus: "none", pending_results: [] });
+  expect(await current(task.taskId)).toMatchObject({ status: "waiting_owner", interventionStatus: "none" });
   await expect(service.confirmOwner(task.taskId, first, { userId: "other", isAdmin: false })).rejects.toMatchObject({ status: 403 });
   await expect(service.confirmOwner(task.taskId, "stale-request", actor)).rejects.toMatchObject({ status: 409 });
   const save = vi.spyOn(tasks, "update").mockRejectedValueOnce(new Error("storage unavailable"));
@@ -245,7 +228,7 @@ it("counts durable Owner feedback once while keeping recovery unknown and preser
   await service.confirmOwner(task.taskId, first, actor, "已处理权限");
   await service.confirmOwner(task.taskId, first, actor, "重复回执");
   tasks = new SessionRecoveryTaskRepository(db, repo, artifactStore);
-  expect(await current(task.taskId)).toMatchObject({ status: "running", interventionStatus: "performed", judgment: null, pending_results: [] });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", interventionStatus: "performed", judgment: null });
   expect((await current(task.taskId)).timeline.filter(event => event.kind === "owner_decision")).toHaveLength(1);
   await inspect(await current(task.taskId), "after-owner-feedback");
   const second = await ask();
@@ -258,7 +241,7 @@ it("counts durable Owner feedback once while keeping recovery unknown and preser
   expect(await current(task.taskId)).toMatchObject({ status: "waiting_owner", interventionStatus: "performed", ownerRequest: { requestId: second, status: "pending" } });
   await service.confirmOwner(task.taskId, second, actor, "已处理剩余权限");
   await service.executionFailure(task.taskId, "回执已保存，后续执行未完成核验");
-  await service.reportResults();
+  await flush();
   expect(callbacks.at(-1)).toMatchObject({ effect: "unknown", intervention_status: "performed" });
   expect(runtime.sendMessage).not.toHaveBeenCalled();
 });

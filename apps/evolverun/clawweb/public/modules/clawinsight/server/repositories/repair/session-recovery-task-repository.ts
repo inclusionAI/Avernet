@@ -4,7 +4,7 @@ import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { nowForDb } from "@avernet/clawweb-shared/server/db";
 import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import type { ObjectStore } from "../../services/object-storage/oss-object-store.js";
-import type { RecoveryEffect, RecoveryEffectConfigCheck, RecoveryEffectResumeConfig, RecoveryEffectResumeSlot, RecoveryMaintenanceTask, RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } from "../../services/repair/session-recovery/task-contracts.js";
+import type { RecoveryEffect, RecoveryEffectConfigCheck, RecoveryEffectResumeConfig, RecoveryEffectResumeSlot, RecoveryMaintenanceTask, RecoveryStoredTask, RecoveryTaskChange, RecoveryTaskResult, RecoveryTaskStore, RecoveryTimelineEvent } from "../../services/repair/session-recovery/task-contracts.js";
 import { containsSecret } from "@avernet/clawweb-shared/server/services/redaction";
 import { AgentToolCallRepository, type AgentToolCall } from "./agent-tool-call-repository.js";
 import { recoveryInterventionStatus } from "../../services/repair/session-recovery/result.js";
@@ -16,11 +16,8 @@ import { trajectoryIndexReads } from "../../services/repair/session-recovery/boo
 export type { RecoveryStoredTask } from "../../services/repair/session-recovery/task-contracts.js";
 export type RecoveryArtifactStore = Required<Pick<ObjectStore, "getObject" | "putObject">>;
 type ArtifactRef = { objectKey: string; sha256: string };
-type ResultDelivery = ArtifactRef & { resultVersion: number; attempts: number; retryAfterMs: number };
-type StoppedResultDelivery = ResultDelivery & { stoppedAtMs: number };
-type ResultDeliveryState = { resultDelivery: ResultDelivery[]; stoppedResultDelivery?: StoppedResultDelivery[] };
-const RESULT_RETRY_DELAYS_MS = [60000, 300000, 900000] as const;
-const MAX_RESULT_ATTEMPTS = RESULT_RETRY_DELAYS_MS.length + 1;
+// Read-only compatibility for failed callback audit written by older versions.
+type LegacyStoppedResult = ArtifactRef & { resultVersion: number; attempts: number; stoppedAtMs: number };
 const businessEvent = (event: RecoveryTimelineEvent) => !event.payload.raw_tool_call_id;
 const phases = ["assess", "observe", "plan", "apply", "verify"] as const;
 
@@ -68,7 +65,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     const [row] = await db.query<{ self_healing_results: string | null }>(
       `SELECT self_healing_results FROM insight_monitoring_diagnose WHERE event_id = ?${lock && db.dbType !== "sqlite" ? " FOR UPDATE" : ""}`, [task.request.event_id]);
     if (!row) return null;
-    const results = JSON.parse(row.self_healing_results ?? "[]") as RecoveryStoredTask["pending_results"];
+    const results = JSON.parse(row.self_healing_results ?? "[]") as RecoveryTaskResult[];
     return results.reduce<{ version: number; effect: RecoveryEffect }>((latest, item) =>
       item.task_id === task.taskId && item.result_version > latest.version
         ? { version: item.result_version, effect: item.effect } : latest, { version: 0, effect: "unknown" });
@@ -120,38 +117,11 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       if (current?.firstExecutionNo !== slot.firstExecutionNo || current.lastExecutionNo !== slot.lastExecutionNo) return false;
       // Scheduler bookkeeping only. A concurrent business update reads the same locked row.
       delete state.effectResumeSlot;
-      // Invalidate delivery CAS snapshots so they cannot restore the released slot.
+      // Invalidate older business snapshots so they cannot restore the released slot.
       state.version++;
       await tx.exec("UPDATE ce_tasks SET config_json = ?, status = ? WHERE task_id = ?", [JSON.stringify(state), state.status, taskId]);
       return true;
     });
-  }
-  async listForReporting(limit: number, afterTaskId: string, controlPlaneEnvironment: AgentControlPlaneEnvironment): Promise<{ tasks: RecoveryStoredTask[]; nextTaskId: string }> {
-    this.limit(limit);
-    const result: RecoveryStoredTask[] = [];
-    // One compact candidate page per tick, not an unbounded scan to fill the batch.
-    const rows = await this.db.query<{ task_id: string; config_json: string }>(
-      `SELECT task_id, config_json FROM ce_tasks WHERE task_type = 'session_recovery' AND task_id > ? AND (
-        (config_json LIKE '%"resultDelivery":%' AND config_json NOT LIKE '%"resultDelivery":[]%')
-        OR (config_json NOT LIKE '%"artifactStorage":2%' AND config_json NOT LIKE '%"pending_results":[]%'))
-        ORDER BY task_id ASC LIMIT ?`, [afterTaskId, limit]);
-    for (const row of rows) {
-      let state = JSON.parse(row.config_json);
-      if (resolveTaskControlPlaneEnvironment(state) !== controlPlaneEnvironment) continue;
-      if (state.artifactStorage !== 2) {
-        await this.update(row.task_id, state.version, value => ({ ...value, version: value.version + 1 }));
-        state = JSON.parse((await this.tasks.findTask(row.task_id))!.config_json);
-      }
-      const first = (state.resultDelivery as ResultDelivery[] | undefined)?.[0];
-      if (!first || first.retryAfterMs > Date.now()) continue;
-      if (first.attempts >= MAX_RESULT_ATTEMPTS) {
-        await this.claimResult(row.task_id, first.resultVersion); // Retire historical/crashed exhausted attempts without HTTP or OSS.
-        continue;
-      }
-      const task = await this.find(row.task_id);
-      if (task) result.push(task);
-    }
-    return { tasks: result, nextTaskId: rows.length === limit ? rows[rows.length - 1].task_id : "" };
   }
   async find(taskId: string, options: { forBootstrap?: boolean } = {}): Promise<RecoveryStoredTask | null> {
     const row = await this.tasks.findTask(taskId);
@@ -189,7 +159,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       "SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery' AND remark = ? AND (? = 1 OR user_id = ? OR JSON_EXTRACT(config_json, '$.shared') = true) ORDER BY id DESC LIMIT 100", [this.eventRemark(eventId), isAdmin ? 1 : 0, ownerId]);
     return (await Promise.all(rows.map(row => this.find(row.task_id)))).filter((task): task is RecoveryStoredTask => !!task);
   }
-  async update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask,
+  async update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryTaskChange,
     effectResumeClaim?: RecoveryEffectConfigCheck): Promise<RecoveryStoredTask | null> {
     return this.db.transaction(async tx => {
       if (effectResumeClaim) {
@@ -215,7 +185,7 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
           if (active) return null;
         }
       }
-      const updated = change(structuredClone(current));
+      const { resultToReport, ...updated } = change(structuredClone(current));
       if (updated.taskId !== taskId || updated.version !== expectedVersion + 1) throw new Error("Invalid recovery task transition");
       const priorEvents = current.timeline.filter(businessEvent);
       const events = updated.timeline.filter(businessEvent);
@@ -223,94 +193,56 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       const stored = JSON.parse(raw);
       const details = await this.put(taskId, this.details(updated), stored.detailsRef);
       const legacy = stored.artifactStorage !== 2;
-      const fresh = legacy ? events : events.filter(event => !priorEvents.some(item => item.event_id === event.event_id));
-      const deliveries: ResultDelivery[] = stored.resultDelivery ?? [];
-      const added: ResultDelivery[] = [];
-      for (const result of updated.pending_results) {
-        if (!["waiting_effect", "completed", "failed", "canceled"].includes(result.status)
-          || deliveries.some(item => item.resultVersion === result.result_version)) continue;
-        added.push({ ...await this.put(taskId, result), resultVersion: result.result_version, attempts: 0, retryAfterMs: 0 });
+      // Older failures were projected from config rather than saved as Step events.
+      const stoppedIds = new Set((stored.stoppedResultDelivery ?? []).map((item: LegacyStoppedResult) => `result-stopped-${item.resultVersion}`));
+      const fresh = legacy ? events : events.filter(event => stoppedIds.has(event.event_id) || !priorEvents.some(item => item.event_id === event.event_id));
+      const snapshots: RecoveryTaskResult[] = legacy ? stored.pending_results ?? [] : [];
+      if (resultToReport) {
+        if (resultToReport.task_id !== taskId || resultToReport.event_id !== updated.request.event_id
+          || resultToReport.result_version !== updated.version) throw new Error("Invalid recovery result snapshot");
+        snapshots.push(resultToReport);
       }
-      deliveries.push(...added);
-      deliveries.sort((a, b) => a.resultVersion - b.resultVersion);
+      const results: Array<ArtifactRef & { resultVersion: number }> = [];
+      for (const result of snapshots) {
+        if (["waiting_effect", "completed", "failed", "canceled"].includes(result.status)
+          && !results.some(item => item.resultVersion === result.result_version)) {
+          results.push({ ...await this.put(taskId, result), resultVersion: result.result_version });
+        }
+      }
       if (effectResumeClaim && "recheck" in effectResumeClaim && effectResumeClaim.recheck.register) {
         const execution = updated.execution!;
         await createAgentExecutionStep(new EvolveRepository(tx), { taskId, executionId: execution.executionId,
           executionNo: updated.executionNo!, handler: "session_recovery", metadata: { effectRecheckRequestId: execution.effectRecheck!.requestId } });
       }
-      await this.savePhase(tx, updated, details, fresh, added);
-      await tx.exec("UPDATE ce_tasks SET config_json = ?, status = ?, gmt_modified = ? WHERE task_id = ?", [this.config(updated, details, deliveries, stored.stoppedResultDelivery), this.storageStatus(updated), nowForDb(tx.dbType), taskId]);
+      await this.savePhase(tx, updated, details, fresh, results);
+      await tx.exec("UPDATE ce_tasks SET config_json = ?, status = ?, gmt_modified = ? WHERE task_id = ?", [this.config(updated, details), this.storageStatus(updated), nowForDb(tx.dbType), taskId]);
       // Another dispatcher that scanned before this claim must discard its older slot count.
       if (effectResumeClaim && !("recheck" in effectResumeClaim)) await tx.exec("UPDATE ce_app_config SET version = version + 1 WHERE id = ?", [effectResumeClaim.config.id]);
       return updated;
     });
   }
-  async claimResult(taskId: string, resultVersion: number): Promise<number | null> {
-    const row = (await this.db.query<{ config_json: string }>("SELECT config_json FROM ce_tasks WHERE task_id = ? AND task_type = 'session_recovery'", [taskId]))[0];
-    if (!row) return null;
-    const stored = JSON.parse(row.config_json), entry = (stored.resultDelivery as ResultDelivery[] | undefined)?.[0];
-    if (!entry || entry.resultVersion !== resultVersion || entry.retryAfterMs > Date.now()) return null;
-    const version = stored.version;
-    const exhausted = entry.attempts >= MAX_RESULT_ATTEMPTS;
-    if (exhausted) this.stopResult(stored, entry);
-    else {
-      entry.attempts += 1;
-      // Fence an in-flight/crashed sender beyond the reporter's maximum 60s timeout.
-      // A known failure below replaces this grace period with its retry delay.
-      entry.retryAfterMs = Date.now() + Math.max(120000, RESULT_RETRY_DELAYS_MS[entry.attempts - 1] ?? 0);
-    }
-    stored.version += 1;
-    const json = JSON.stringify(stored); this.validateConfig(json);
-    // The task's unique key bounds this update to one row; no network/object I/O in the reservation.
-    const changed = await this.db.exec("UPDATE ce_tasks SET config_json = ?, gmt_modified = ? WHERE task_id = ? AND JSON_EXTRACT(config_json, '$.version') = ?",
-      [json, nowForDb(this.db.dbType), taskId, version]);
-    return changed.affectedRows === 1 && !exhausted ? entry.attempts : null;
-  }
-  async acknowledgeResult(taskId: string, resultVersion: number, attempt: number): Promise<void> {
-    await this.updateDelivery(taskId, resultVersion, attempt, true);
-  }
   async appendNotification(taskId: string, event: RecoveryTimelineEvent): Promise<boolean> {
     if (event.kind !== "notification" || containsSecret(JSON.stringify(event))) throw new Error("Invalid recovery notification event");
+    return this.appendEvent(taskId, event);
+  }
+  async appendResultOutcome(taskId: string, resultVersion: number, attempts: number, accepted: boolean): Promise<void> {
+    if (!Number.isSafeInteger(resultVersion) || resultVersion < 1 || !Number.isSafeInteger(attempts) || attempts < 1) throw new Error("Invalid recovery callback outcome");
+    await this.appendEvent(taskId, { event_id: accepted ? `result-${resultVersion}` : `result-stopped-${resultVersion}`,
+      at_ms: Date.now(), kind: "result", actor: "service",
+      summary: accepted ? "诊断服务已接收任务结果" : "诊断结果回传失败，已达重试上限，停止自动回传",
+      payload: { result_version: resultVersion, attempts, ...(!accepted ? { delivery_status: "exhausted" } : {}) } });
+  }
+  private async appendEvent(taskId: string, event: RecoveryTimelineEvent): Promise<boolean> {
     return this.db.transaction(async tx => {
       const raw = await this.lock(tx, taskId);
-      if (!raw) throw new Error("Recovery task not found during notification");
+      if (!raw) throw new Error("Recovery task not found during audit");
       const task = await this.hydrate(tx, raw);
       if (task.timeline.some(item => item.event_id === event.event_id)) return false;
       const stored = JSON.parse(raw);
-      if (stored.artifactStorage !== 2) throw new Error("Recovery task requires artifact storage before notification");
+      if (stored.artifactStorage !== 2) throw new Error("Recovery task requires artifact storage before audit");
       await this.savePhase(tx, task, stored.detailsRef, [event]);
       return true;
     });
-  }
-  async failResult(taskId: string, resultVersion: number, attempt: number): Promise<void> {
-    await this.updateDelivery(taskId, resultVersion, attempt, false);
-  }
-  private async updateDelivery(taskId: string, resultVersion: number, attempt: number, accepted: boolean): Promise<void> {
-    await this.db.transaction(async tx => {
-      const raw = await this.lock(tx, taskId);
-      if (!raw) throw new Error("Recovery task not found during result delivery");
-      const stored = JSON.parse(raw), deliveries: ResultDelivery[] = stored.resultDelivery ?? [];
-      const entry = deliveries.find(item => item.resultVersion === resultVersion);
-      if (!entry) return; // An identical successful acknowledgment is idempotent.
-      if (entry.attempts !== attempt) return; // A late response cannot settle a successor's reservation.
-      if (deliveries[0] !== entry) throw new Error("Recovery results must be delivered in order");
-      if (accepted) {
-        const task = await this.hydrate(tx, raw);
-        await this.savePhase(tx, task, stored.detailsRef, [{ event_id: `result-${resultVersion}`, at_ms: Date.now(),
-          kind: "result", actor: "service", summary: "诊断服务已接收任务结果", payload: { result_version: resultVersion, attempts: entry.attempts } }]);
-        deliveries.shift();
-      } else if (entry.attempts >= MAX_RESULT_ATTEMPTS) this.stopResult(stored, entry);
-      else entry.retryAfterMs = Date.now() + RESULT_RETRY_DELAYS_MS[entry.attempts - 1];
-      stored.resultDelivery = deliveries;
-      stored.version += 1;
-      const json = JSON.stringify(stored);
-      this.validateConfig(json);
-      await tx.exec("UPDATE ce_tasks SET config_json = ?, gmt_modified = ? WHERE task_id = ?", [json, nowForDb(tx.dbType), taskId]);
-    });
-  }
-  private stopResult(stored: ResultDeliveryState, entry: ResultDelivery): void {
-    stored.stoppedResultDelivery = [...stored.stoppedResultDelivery ?? [], { ...entry, stoppedAtMs: Date.now() }];
-    stored.resultDelivery.splice(stored.resultDelivery.indexOf(entry), 1);
   }
   private async lock(tx: IDatabase, taskId: string): Promise<string | undefined> {
     return (await tx.query<{ config_json: string }>(`SELECT config_json FROM ce_tasks WHERE task_id = ? AND task_type = 'session_recovery'${tx.dbType === "sqlite" ? "" : " FOR UPDATE"}`, [taskId]))[0]?.config_json;
@@ -321,11 +253,11 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       ...(value.ownerRequest ? { ownerRequest: value.ownerRequest } : {}),
       ...(value.delivery ? { delivery: value.delivery } : {}), ...(value.interventionAuditComplete ? { interventionAuditComplete: true } : {}) };
   }
-  private config(value: RecoveryStoredTask, detailsRef: ArtifactRef, resultDelivery: ResultDelivery[] = [], stoppedResultDelivery: StoppedResultDelivery[] = []): string {
-    const { timeline: _timeline, evidence: _evidence, pending_results: _results, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, sessionReadCoverage: _readCoverage, trajectoryIndexReads: _indexReads, plan, delivery: _delivery, judgment: _judgment, ownerRequest, ...state } = value;
-    const json = JSON.stringify({ ...state, artifactStorage: 2, detailsRef, resultDelivery,
+  private config(value: RecoveryStoredTask, detailsRef: ArtifactRef): string {
+    const { timeline: _timeline, evidence: _evidence, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, sessionReadCoverage: _readCoverage, trajectoryIndexReads: _indexReads, plan, delivery: _delivery, judgment: _judgment, ownerRequest, ...state } = value;
+    const json = JSON.stringify({ ...state, artifactStorage: 2, detailsRef,
       ...(ownerRequest ? { ownerRequest: { requestId: ownerRequest.requestId, revision: ownerRequest.revision, status: ownerRequest.status, reason: ownerRequest.reason, resumePhase: ownerRequest.resumePhase, createdAtMs: ownerRequest.createdAtMs } } : {}),
-      ...(stoppedResultDelivery.length ? { stoppedResultDelivery } : {}), plan: plan ? { digest: plan.digest, approvedAt: plan.approvedAt, actions: plan.actions.map(action => ({ actionId: action.actionId })) } : null });
+      plan: plan ? { digest: plan.digest, approvedAt: plan.approvedAt, actions: plan.actions.map(action => ({ actionId: action.actionId })) } : null });
     this.validateConfig(json);
     return json;
   }
@@ -333,12 +265,12 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     if (Buffer.byteLength(json, "utf8") > 60000) throw new Error("Recovery current state exceeds Task config capacity");
     if (containsSecret(json)) throw new Error("Recovery task state must not contain credentials");
   }
-  private async savePhase(tx: IDatabase, value: RecoveryStoredTask, details: ArtifactRef, added: RecoveryTimelineEvent[], results: ResultDelivery[] = []) {
+  private async savePhase(tx: IDatabase, value: RecoveryStoredTask, details: ArtifactRef, added: RecoveryTimelineEvent[], results: Array<ArtifactRef & { resultVersion: number }> = []) {
     const stepNo = phases.indexOf(value.phase) + 1, stepId = `${value.taskId}-${stepNo}`;
     const row = (await tx.query<{ output_json: string | null }>("SELECT output_json FROM ce_steps WHERE step_id = ?", [stepId]))[0];
     const oldRef = row?.output_json ? JSON.parse(row.output_json) : null;
     const previous = oldRef?.objectKey ? await this.get(oldRef) as { events: RecoveryTimelineEvent[]; results?: ArtifactRef[] } : { events: [] };
-    const report = await this.put(value.taskId, { events: [...previous.events, ...added], details, results: [...previous.results ?? [], ...results.map(({ objectKey, sha256, resultVersion }) => ({ objectKey, sha256, resultVersion }))] }, oldRef);
+    const report = await this.put(value.taskId, { events: [...previous.events, ...added.filter(event => !previous.events.some(item => item.event_id === event.event_id))], details, results: [...previous.results ?? [], ...results.map(({ objectKey, sha256, resultVersion }) => ({ objectKey, sha256, resultVersion }))] }, oldRef);
     if (!row) await new EvolveRepository(tx).createStep({ taskId: value.taskId, stepId, stepType: `session_recovery_${value.phase}`, stepNo, command: "session_recovery" });
     const status = value.status === "completed" ? "succeeded" : value.status === "failed" ? "failed" : value.status;
     await tx.exec("UPDATE ce_steps SET output_json = ?, summary = ?, status = ?, gmt_modified = ? WHERE step_id = ?",
@@ -349,10 +281,10 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     const value = JSON.parse(raw);
     delete value.ownerCardSyncPending;
     const legacy = value.artifactStorage !== 2;
-    const { artifactStorage: _storage, detailsRef, resultDelivery, stoppedResultDelivery, ...state } = value;
+    const { artifactStorage: _storage, detailsRef, resultDelivery: _oldQueue, pending_results: _oldResults, stoppedResultDelivery, ...state } = value;
     const details = legacy ? { ...value, interventionAuditComplete: undefined } : await this.get(detailsRef) as Pick<RecoveryStoredTask, "plan" | "judgment" | "delivery" | "evidence" | "interventionAuditComplete">;
-    const task = { ...state, ...details, timeline: legacy ? [...value.timeline ?? []] : [], evidence: details.evidence ?? [],
-      pending_results: legacy ? value.pending_results ?? [] : [] } as RecoveryStoredTask;
+    const { pending_results: _legacyQueue, resultDelivery: _legacyDelivery, stoppedResultDelivery: _legacyStopped, ...businessDetails } = details as typeof details & Record<string, unknown>;
+    const task = { ...state, ...businessDetails, timeline: legacy ? [...value.timeline ?? []] : [], evidence: details.evidence ?? [] } as RecoveryStoredTask;
     const steps = legacy ? [] : await db.query<{ output_json: string }>("SELECT output_json FROM ce_steps WHERE task_id = ? AND step_type LIKE 'session_recovery%' AND output_json IS NOT NULL ORDER BY step_no", [value.taskId]);
     for (const step of steps) {
       const ref = JSON.parse(step.output_json);
@@ -382,10 +314,8 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     task.sessionReadCoverage = sessionReadCoverage(interventionCalls);
     if (forBootstrap) task.trajectoryIndexReads = trajectoryIndexReads(interventionCalls);
     task.interventionStatus = intervention === "none" && !task.interventionAuditComplete ? "unknown" : intervention;
-    for (const result of (resultDelivery ?? []) as ResultDelivery[]) {
-      task.pending_results.push(await this.get(result) as RecoveryStoredTask["pending_results"][number]);
-    }
-    for (const result of (stoppedResultDelivery ?? []) as StoppedResultDelivery[]) {
+    for (const result of (stoppedResultDelivery ?? []) as LegacyStoppedResult[]) {
+      if (task.timeline.some(event => event.event_id === `result-stopped-${result.resultVersion}`)) continue;
       task.timeline.push({ event_id: `result-stopped-${result.resultVersion}`, at_ms: result.stoppedAtMs, kind: "result", actor: "service",
         summary: "诊断结果回传失败，已达重试上限，停止自动回传", payload: { result_version: result.resultVersion,
           attempts: result.attempts, delivery_status: "exhausted", result_ref: { objectKey: result.objectKey, sha256: result.sha256 } } });

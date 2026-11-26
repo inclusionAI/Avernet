@@ -20,15 +20,12 @@ function setup(callbackFails = false, now = () => 100) {
     create: async value => { if (records.has(value.taskId)) throw new Error("duplicate"); records.set(value.taskId, structuredClone(value)); },
     find: async id => records.has(id) ? structuredClone(records.get(id)!) : null,
     listForEvent: async (eventId, ownerId, isAdmin) => [...records.values()].filter(value => value.request.event_id === eventId && (isAdmin || value.request.target.entity_id === ownerId || value.shared === true)),
-    listForReporting: async (limit, afterTaskId = "") => ({ tasks: [...records.values()].filter(value => value.taskId > afterTaskId && value.pending_results.length > 0).sort((a, b) => a.taskId.localeCompare(b.taskId)).slice(0, limit), nextTaskId: "" }),
     listForMaintenance: async (limit, afterTaskId = "") => [...records.values()].filter(value => value.taskId > afterTaskId).slice(0, limit),
     update: async (id, version, change) => {
       const value = records.get(id); if (!value || value.version !== version) return null;
-      const changed = change(structuredClone(value)); records.set(id, structuredClone(changed)); return changed;
+      const { resultToReport: _snapshot, ...changed } = change(structuredClone(value)); records.set(id, structuredClone(changed)); return changed;
     },
-    acknowledgeResult: async (id, version) => { const value = records.get(id)!; value.pending_results = value.pending_results.filter(item => item.result_version !== version); },
-    claimResult: async (id, version) => records.get(id)?.pending_results[0]?.result_version === version ? 1 : null,
-    failResult: async () => {},
+    appendResultOutcome: async () => {},
     appendNotification: async (id, event) => { const value = records.get(id)!; if (value.timeline.some(item => item.event_id === event.event_id)) return false; value.timeline.push(event); return true; },
   };
   const delivery = { create: vi.fn().mockResolvedValue({ event_id: "evt", delivery_key: "send1", status: "accepted" }) };
@@ -65,7 +62,7 @@ describe("self-healing task orchestration", () => {
 
   it.each(["none", "unknown", "performed", "accepted", "unknown_delivery", "missing_read"] as const)(
     "closes an assessment as unnecessary only with verified evidence and no possible intervention (%s)", async scenario => {
-      const { service, records, agent } = setup();
+      const { service, records, agent, reporter } = setup();
       const { task_id } = await service.create(request, actor);
       const task = records.get(task_id)!;
       task.interventionStatus = scenario === "unknown" || scenario === "performed" ? scenario : "none";
@@ -83,7 +80,7 @@ describe("self-healing task orchestration", () => {
 
       if (scenario !== "none") {
         await expect(assessed).rejects.toMatchObject({ status: 422 });
-        expect(records.get(task_id)).toMatchObject({ status: "running", phase: "assess", pending_results: [] });
+        expect(records.get(task_id)).toMatchObject({ status: "running", phase: "assess" });
         expect(agent.release).not.toHaveBeenCalled();
         return;
       }
@@ -91,8 +88,8 @@ describe("self-healing task orchestration", () => {
       expect(records.get(task_id)).toMatchObject({
         status: "completed", phase: "assess", completionReason: "no_recovery_needed",
         judgment: { effect: "unknown", evidence_ids: ["read"] },
-        pending_results: [{ status: "completed", completion_reason: "no_recovery_needed", intervention_status: "none", effect: "unknown" }],
       });
+      expect(reporter.report).toHaveBeenCalledWith(expect.objectContaining({ status: "completed", completion_reason: "no_recovery_needed", intervention_status: "none", effect: "unknown" }));
       expect(agent.release).toHaveBeenCalledOnce();
     });
   it("does not retry failed card creation from maintenance", async () => {
@@ -156,7 +153,7 @@ describe("self-healing task orchestration", () => {
       payload: { raw_tool_call_id: "call", tool_name: "session_read", status: "succeeded" } });
     await service.requestOwner(task_id, task.version, { reason: "permission", summary: "缺文档权限", instructions: "申请原文档读取权限", evidence_ids: ["read"], executionId: "exec" });
     const pending = records.get(task_id)!;
-    expect(pending).toMatchObject({ status: "waiting_owner", plan: null, pending_results: [] });
+    expect(pending).toMatchObject({ status: "waiting_owner", plan: null });
     const id = pending.ownerRequest!.requestId;
     await expect(service.confirmOwner(task_id, id, { userId: "forged", isAdmin: false })).rejects.toMatchObject({ status: 403 });
     records.get(task_id)!.controlPlaneEnvironment = "prod";
@@ -366,22 +363,17 @@ describe("self-healing task orchestration", () => {
     const task = await service.detail(ack.task_id, actor);
     expect(task.phase).toBe("assess"); expect(task.timeline[1].summary).toContain("不实际发送");
   });
-  it("retains the exact saved result when callback fails and never resends advice", async () => {
-    const { service, records, delivery, reporter } = setup(true);
+  it("reports a committed failure immediately and never resends advice on duplicate creation", async () => {
+    const { service, delivery, reporter } = setup();
     const ack = await service.create(request, actor); await flush();
     await service.recordDelivery(ack.task_id, { event_id: "evt", delivery: { delivery_key: "send1", status: "accepted",
       result_text: "通道接受", started_at_ms: 1, finished_at_ms: 2, error: null } });
-    await service.reportResults();
     expect(reporter.report).not.toHaveBeenCalled();
     await service.executionFailure(ack.task_id, "执行失败，任务结束");
-    await service.reportResults();
-    const saved = records.get(ack.task_id)!.pending_results[0];
-    expect(saved.result_version).toBe(3);
-    reporter.report.mockResolvedValueOnce(undefined);
-    await service.create(request, actor);
-    await service.reportResults();
-    expect(reporter.report).toHaveBeenLastCalledWith(saved);
-    expect(records.get(ack.task_id)!.pending_results).toEqual([]);
+    expect(reporter.report).toHaveBeenCalledOnce();
+    expect(reporter.report.mock.calls[0][0]).toMatchObject({ result_version: 3, status: "failed" });
+    await service.create(request, actor); await flush();
+    expect(reporter.report).toHaveBeenCalledOnce();
     expect(delivery.create).not.toHaveBeenCalled();
   });
   it("does not reveal another Owner's task", async () => {
@@ -425,7 +417,7 @@ describe("self-healing task orchestration", () => {
     expect(await service.list(request.event_id, { userId: "reader", isAdmin: false })).toHaveLength(1);
     await service.setTaskShared(task_id, false, { userId: "admin", isAdmin: true });
     await expect(service.detail(task_id, { userId: "reader", isAdmin: false })).rejects.toMatchObject({ status: 403 });
-    expect(records.get(task_id)).toMatchObject({ phase: "assess", status: "running", pending_results: [] });
+    expect(records.get(task_id)).toMatchObject({ phase: "assess", status: "running" });
     expect(agent.start).toHaveBeenCalledTimes(1); expect(reporter.report).not.toHaveBeenCalled();
   });
 });
@@ -433,19 +425,19 @@ describe("self-healing task orchestration", () => {
 it("slow callbacks cannot block state changes or expire an Owner wait", async () => {
   const { service, records, reporter, agent } = setup();
   const ack = await service.create(request, actor); await flush();
+  let unblock!: () => void;
+  reporter.report.mockImplementationOnce(() => new Promise<void>(resolve => { unblock = resolve; }));
   await service.executionFailure(ack.task_id, "执行失败，任务结束");
   const waiting = await service.create({ ...request, event_id: "owner-wait" }, actor); await flush();
   const value = records.get(waiting.task_id)!;
   value.status = "waiting_owner"; value.ownerDeadlineAt = 1;
   value.execution = { state: "running" } as any;
   agent.release.mockClear();
-  let unblock!: () => void;
-  reporter.report.mockImplementation(() => new Promise<void>(resolve => { unblock = resolve; }));
-  const reporting = service.reportResults(); await flush();
-  await service.maintenance(); expect(agent.release).not.toHaveBeenCalled();
-  expect(records.get(ack.task_id)!.pending_results).toHaveLength(1);
-  unblock(); await reporting;
-  expect(records.get(ack.task_id)!.pending_results).toEqual([]);
+  try {
+    await service.maintenance(); expect(agent.release).not.toHaveBeenCalled();
+    expect(records.get(ack.task_id)!.status).toBe("failed");
+    expect(reporter.report).toHaveBeenCalledOnce();
+  } finally { unblock(); await service.dispose(); }
 });
 
 
@@ -453,22 +445,21 @@ it("terminal annotations and repeated failure reports do not enqueue another res
   const { service, records, reporter } = setup();
   const ack = await service.create(request, actor); await flush();
   await service.executionFailure(ack.task_id, "执行失败");
-  await service.reportResults();
+  await flush();
   await service.annotate(ack.task_id, actor, { layer: "effect", correct: null, reason: "人工复核", evidence_ids: [] });
   await service.executionFailure(ack.task_id, "重复上报");
-  await service.reportResults();
+  await flush();
   expect(reporter.report).toHaveBeenCalledOnce();
-  expect(records.get(ack.task_id)!.pending_results).toEqual([]);
 });
 it("makes concurrent stop requests idempotent without a duplicate final result", async () => {
-  const { service, records } = setup();
+  const { service, records, reporter } = setup();
   const ack = await service.create(request, actor); await flush();
   const responses = await Promise.all([service.terminate(ack.task_id, actor), service.terminate(ack.task_id, actor)]);
   expect(responses.every(value => value.status === "canceled")).toBe(true);
   const saved = records.get(ack.task_id)!;
   expect(saved.timeline.filter(event => event.kind === "termination")).toHaveLength(1);
-  expect(saved.pending_results).toHaveLength(1);
-  expect(saved.pending_results[0].status).toBe("canceled");
+  expect(reporter.report).toHaveBeenCalledOnce();
+  expect(reporter.report.mock.calls[0][0]).toMatchObject({ status: "canceled" });
 });
 
 it("validates runtime identity only through the recovery creation contract", () => {
@@ -570,7 +561,7 @@ it("clears a paused summary when the same task resumes observation", async () =>
 
 it.each(["observe", "verify"] as const)("preserves recovery at maintenance expiry after waiting for delivery in %s", async phase => {
   let now = 100;
-  const { service, records, agent } = setup(false, () => now);
+  const { service, records, agent, reporter } = setup(false, () => now);
   const { task_id } = await service.create(request, actor); await flush();
   await service.recordDelivery(task_id, { event_id: "evt", delivery: { delivery_key: "send1", status: "accepted",
     result_text: "accepted", started_at_ms: 1, finished_at_ms: 2, error: null } });
@@ -579,26 +570,26 @@ it.each(["observe", "verify"] as const)("preserves recovery at maintenance expir
   const deadline = task.observationDeadlineAt!;
   await service.observe(task_id, task.version, { delivery: "unconfirmed", response: "unknown", effect: "recovered",
     summary: "原任务已恢复，等待触达证据", evidence_ids: ["proof"] }, [], "不应提前保存的最终总结");
-  expect(records.get(task_id)).toMatchObject({ status: "running", phase, pending_results: [], observationDeadlineAt: deadline, judgment: { effect: "recovered" } });
+  expect(records.get(task_id)).toMatchObject({ status: "running", phase, observationDeadlineAt: deadline, judgment: { effect: "recovered" } });
   expect(records.get(task_id)?.final_summary).toBeUndefined();
   expect(agent.release).not.toHaveBeenCalled();
   now = deadline;
   await service.maintenance();
   expect(records.get(task_id)).toMatchObject({ status: "completed", phase, observationDeadlineAt: deadline,
-    judgment: { effect: "recovered", delivery: "unconfirmed", evidence_ids: ["proof"] },
-    pending_results: [expect.objectContaining({ effect: "recovered", intervention_status: "unknown" })] });
+    judgment: { effect: "recovered", delivery: "unconfirmed", evidence_ids: ["proof"] } });
+  expect(reporter.report).toHaveBeenCalledWith(expect.objectContaining({ effect: "recovered", intervention_status: "unknown" }));
   expect(agent.release).toHaveBeenCalledOnce();
 });
 
 
 it("retains confirmed business recovery when an execution ends before delivery is confirmed", async () => {
-  const { service, records } = setup();
+  const { service, records, reporter } = setup();
   const { task_id } = await service.create(request, actor); await flush();
   const task = records.get(task_id)!; task.phase = "observe";
   task.judgment = { delivery: "unconfirmed", response: "unknown", effect: "recovered", summary: "业务产物已恢复，等待触达证据", evidence_ids: [] };
   await service.executionFailure(task_id, "AIS execution timed out");
-  expect(records.get(task_id)).toMatchObject({ status: "failed", judgment: { effect: "recovered", delivery: "unconfirmed" },
-    pending_results: [expect.objectContaining({ status: "failed", effect: "recovered", intervention_status: "unknown" })] });
+  expect(records.get(task_id)).toMatchObject({ status: "failed", judgment: { effect: "recovered", delivery: "unconfirmed" } });
+  expect(reporter.report).toHaveBeenCalledWith(expect.objectContaining({ status: "failed", effect: "recovered", intervention_status: "unknown" }));
 });
 
 it("does not scan when maintenance ownership has already been lost", async () => {

@@ -33,7 +33,7 @@ import { recoveryTaskResult, validateRecoveryEvidenceReferences } from "./task-s
 import { recoveryResult } from "./result.js";
 import type { RecoveryAgentExecutor } from "./task-service.js";
 import type { RecoveryActionNotifier, RecoveryExecutionView, RecoveryTermination, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "./contracts.js";
-import type { RecoveryAssessment, RecoveryEffectConfigCheck, RecoveryEffectRecheckAck, RecoveryStoredTask, RecoveryTaskStore, RecoveryJudgment, RecoveryPlan } from "./task-contracts.js";
+import type { RecoveryAssessment, RecoveryEffectConfigCheck, RecoveryEffectRecheckAck, RecoveryStoredTask, RecoveryTaskResult, RecoveryTaskStore, RecoveryJudgment, RecoveryPlan } from "./task-contracts.js";
 
 function fail(status: number, message: string): never { throw new SessionRecoveryError(status, "recovery_execution_conflict", message); }
 function recoveryToolRequest(body: Record<string, unknown>): Record<string, unknown> {
@@ -126,17 +126,19 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const reported = await this.deps.tasks.latestDiagnosisEffect!(task);
     if (!reported) recheckError("diagnosis_missing");
     if (definitiveEffect(reported.effect)) recheckError("effect_already_known");
-    if (task.pending_results.some(result => definitiveEffect(result.effect))) recheckError("result_delivery_pending");
     const check = { environment, config: policy, recheck: { register: true, diagnosisVersion: reported.version } };
     if (definitiveEffect(task.judgment?.effect)) {
       let resultVersion = 0;
+      let result: RecoveryTaskResult | undefined;
       const saved = await this.deps.tasks.update(task.taskId, task.version, value => {
         resultVersion = value.version + 1;
         const next = { ...value, version: resultVersion, timeline: [...value.timeline, this.event("execution", "补传已确认的效果结果", {
           effect_recheck_request_id: requestId, result_version: resultVersion })] };
-        return { ...next, pending_results: [...next.pending_results, { ...recoveryTaskResult(next), result_text: next.judgment!.summary }] };
+        result = { ...recoveryTaskResult(next), result_text: next.judgment!.summary };
+        return { ...next, resultToReport: result };
       }, { ...check, recheck: { ...check.recheck, register: false } });
       if (!saved) recheckError("recheck_conflict");
+      this.deps.business().reportResult(saved, result!);
       return { task_id: task.taskId, status: "result_queued", result_version: resultVersion };
     }
     if (task.interventionStatus === "none" || !task.runtimeTarget || !task.current || !task.authorizationScopeDigest) recheckError("intervention_or_target_unverified");
@@ -398,7 +400,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return task;
   }
   async bootstrap(task: RecoveryStoredTask) {
-    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, effectWait: _effectWait, effectResumeSlot: _effectSlot, sessionReadCoverage, trajectoryIndexReads, ...business } = task;
+    const { execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, effectWait: _effectWait, effectResumeSlot: _effectSlot, sessionReadCoverage, trajectoryIndexReads, ...business } = task;
     const recheck = rawExecution?.effectRecheck;
     const { ticketDigest: _digest, effectRecheck: _recheck, ...execution } = task.status === "canceled" && !recheck ? this.executions.end(rawExecution!) : rawExecution!;
     const latestMessage = [...business.timeline].reverse().find(event => event.kind === "operation"
