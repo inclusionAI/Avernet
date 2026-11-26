@@ -1,0 +1,67 @@
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFileUpload.ts
+  s_69451519b95315::t_236c3fac2c14f1 130
+apps/frontend-nextgen/test/services/workspace/botSessionFileService.test.ts
+  s_69451519b95315::t_472827850f2321 585,601,620,633,642,659,670
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileStages.test.tsx
+  s_69451519b95315::t_86cd6a8d2034da 39,43,61,66,83-84
+apps/frontend-nextgen/src/services/backendApi/bots/botEditorController.ts
+  s_69451519b95315::t_2a0f52c176e5c4 397
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFiles.ts
+  s_69451519b95315::t_0c65ff1e4f81b7 70
+  s_69451519b95315::t_7852abddc00949 60
+  s_69451519b95315::t_46a4aec46c6a7c 94
+  s_69451519b95315::t_6cb3aeb9a8fbec 139
+  s_69451519b95315::t_c8fd65a8efd8e6 164
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilePreview.ts
+  s_69451519b95315::t_f5d3b331f3e96a 54
+  s_69451519b95315::t_b3ea5d24ed9b07 119
+apps/frontend-nextgen/src/services/workspace/botSessionFileService.ts
+  s_69451519b95315::t_7b060f0bb20e42 223
+  s_69451519b95315::t_52e1e6c59b31ab 152-153
+  s_69451519b95315::t_8b390180441cac 156,164,181
+  s_69451519b95315::t_a60f405e4ba730 249
+  s_69451519b95315::t_7e7efe03c11093 320
+  s_69451519b95315::t_3fecd5b909752e 295
+  s_69451519b95315::t_f9b90b391e7586 272
+apps/frontend-nextgen/src/services/backendApi/bots/collaboratingBotController.ts
+  s_69451519b95315::t_8129db8417a365 23
+apps/frontend-nextgen/src/services/backendApi/collaboration/collaborationBotController.ts
+  s_69451519b95315::t_8129db8417a365 41
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  s_69451519b95315::t_b4abc6142de29d 71
+apps/frontend-nextgen/src/services/backendApi/bots/botController.ts
+  s_69451519b95315::t_8129db8417a365 74,107
+apps/frontend-nextgen/src/services/workspace/collaborationCandidateService.ts
+  s_69451519b95315::t_8129db8417a365 38
+apps/frontend-nextgen/test/services/botWorkshop/botEditorService.test.ts
+  s_69451519b95315::t_f132f30ac5c980 329
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilesFeature.tsx
+  s_69451519b95315::t_5ba180831fef15 18
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileCommand.test.tsx
+  s_69451519b95315::t_86cd6a8d2034da 57
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.identity.test.tsx
+  s_69451519b95315::t_9ccc62722def77 82,140
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFilesFeature.test.tsx
+  s_69451519b95315::t_fcb328dd8cd9b8 10
+  s_69451519b95315::t_d3ffd7a17ddc33 66,76,249-250
+apps/frontend-nextgen/src/pages/Workspace/components/BotSessionFiles/BotSessionFileOverlays.tsx
+  s_69451519b95315::t_c1721a43719df2 40
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFiles.test.tsx
+  s_69451519b95315::t_86cd6a8d2034da 57,73,199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "92a23576b0303eb075605410792848d9c23ead02",
+  "prompts": {},
+  "sessions": {
+    "s_69451519b95315": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "3acb8802-4031-4d17-abda-909c0cfd4414",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_7d114ded8fc0da::t_89b0137e2d9819 341-367
+apps/bcs/crates/bootstrap/bcs/src/agent_invoke_wiring.rs
+  s_7d114ded8fc0da::t_41329c99a3e581 1-95
+apps/bcs/crates/bootstrap/bcs/src/lib.rs
+  s_7d114ded8fc0da::t_d43d267ee9a5bb 152
+apps/bcs/crates/bootstrap/bcs/src/server/server_infrastructure.rs
+  s_7d114ded8fc0da::t_0c62f3bbe6bc6b 387-391,856-859
+apps/bcs/crates/bootstrap/bcs/src/server/state.rs
+  s_7d114ded8fc0da::t_862a3095f11cd0 186-187,905-908
+apps/bcs/crates/bootstrap/bcs/tests/agent_invoke_wiring/bootstrap.rs
+  s_7d114ded8fc0da::t_58ec24b784fa32 1-89
+apps/bcs/crates/bootstrap/bcs/tests/agent_invoke_wiring/mod.rs
+  s_7d114ded8fc0da::t_c684676a0f8eb7 1-130
+apps/bcs/docs/superpowers/specs/2026-08-18-friend-edge-permission-reform.md
+  s_7d114ded8fc0da::t_8c38d7d275068e 3654-3667,3671,3703,3710,3715
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c6a910e80d510db129940954e7997a97e51595a9",
+  "prompts": {},
+  "sessions": {
+    "s_7d114ded8fc0da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b4-ef36-7703-9562-0f40ee69f61b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

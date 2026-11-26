@@ -1,0 +1,96 @@
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_delete_service.py
+  s_3d36bb45bb2a35::t_1df3316fa33952 113,184
+apps/backend/src/agentclaw/community/di/modules/runtime_projection_recovery_module.py
+  s_3d36bb45bb2a35::t_61ad9e1229e254 17,61,63,80,87
+apps/backend/src/agentclaw/community/core/apply_engine/outcomes.py
+  s_3d36bb45bb2a35::t_36c8b36b8b9508 583-586,588
+  s_3d36bb45bb2a35::t_93b1ad06c1c28f 587
+  s_3d36bb45bb2a35::t_42683882a57e00 21-24,522
+  s_3d36bb45bb2a35::t_cd34a538514d69 589
+apps/backend/tests/community/core/skill_center/test_desktop_skill_recovery.py
+  s_3d36bb45bb2a35::t_011d7e6a2db531 719
+apps/backend/src/agentclaw/community/core/mcp/scoped_config_flow.py
+  s_3d36bb45bb2a35::t_61ad9e1229e254 6,306,321,323-324,352,355-363,367-370,373,376-377
+  s_3d36bb45bb2a35::t_96b9f41d452b5e 364-366,382-384
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/config_manifest_apply.py
+  s_3d36bb45bb2a35::t_42683882a57e00 24,204-218
+  s_3d36bb45bb2a35::t_9dc7592edb56e5 219
+apps/backend/src/agentclaw/community/core/skill_center/runtime_projection_contract.py
+  s_3d36bb45bb2a35::t_ed91c1440a0ffa 88,431
+apps/backend/src/agentclaw/community/core/skill_center/services/_mutation_flow.py
+  s_3d36bb45bb2a35::t_be0f474222cb1d 185,187,189,193-194,200,258
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/config_manifest_apply.py
+  s_3d36bb45bb2a35::t_42683882a57e00 96-101
+  s_3d36bb45bb2a35::t_ffc7c30060324e 95
+apps/backend/tests/community/core/skill_center/test_capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_ed91c1440a0ffa 140-141,144
+  s_3d36bb45bb2a35::t_36c8b36b8b9508 1-2,8-9,15-17,21-22,25-29,31-32,34-35,38-43,45-46,48-49,51-54,57-60,65-79,83-87,89-114,118-119,121-126,128-129,131,133-135,137-139,143,145-152
+apps/backend/src/agentclaw/community/core/skill_center/capability_projection_intent.py
+  s_3d36bb45bb2a35::t_51ee033e6b0071 1,5,8,10,15,19-37,46-47
+apps/backend/src/agentclaw/community/core/repository/protocols/capability_desired_state.py
+  s_3d36bb45bb2a35::t_be0f474222cb1d 6,32,35,37
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/mcp.py
+  s_3d36bb45bb2a35::t_61ad9e1229e254 97-99,105
+apps/backend/src/agentclaw/community/core/apply_engine/run/service.py
+  s_3d36bb45bb2a35::t_36c8b36b8b9508 479,595
+  s_3d36bb45bb2a35::t_42683882a57e00 91,842-843,845,847,855-856,953
+apps/backend/src/agentclaw/community/core/apply_engine/run/capability_projection.py
+  s_3d36bb45bb2a35::t_42683882a57e00 1-3,9-10,12-15,17,22-33,36-37,41,49-67,69
+  s_3d36bb45bb2a35::t_93b1ad06c1c28f 34-35
+apps/backend/tests/community/core/apply_engine/test_apply_service_uses_strategy.py
+  s_3d36bb45bb2a35::t_36c8b36b8b9508 13,47-50,240-243,249-250,256-257,260,270,288-289,293-296,300-303
+  s_3d36bb45bb2a35::t_681cd796c71d41 258
+apps/backend/tests/community/repository/bot/test_scoped_mcp_config.py
+  s_3d36bb45bb2a35::t_011d7e6a2db531 355,388,391,394
+apps/backend/tests/community/di/test_manifest_apply_without_dispatch_tables.py
+  s_3d36bb45bb2a35::t_36c8b36b8b9508 1-22
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/scoped_mcp_config.py
+  s_3d36bb45bb2a35::t_61ad9e1229e254 96-97,107,187-194,198,204
+apps/backend/src/agentclaw/community/core/skill_center/capability_projection_reconcile.py
+  s_3d36bb45bb2a35::t_93b1ad06c1c28f 12,27-56
+  s_3d36bb45bb2a35::t_51ee033e6b0071 1,5,17-26,57-64,73-74
+  s_3d36bb45bb2a35::t_42683882a57e00 72
+apps/backend/src/agentclaw/community/core/skills_pool/edit_guard.py
+  s_3d36bb45bb2a35::t_1df3316fa33952 188,225
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/capability_desired_state.py
+  s_3d36bb45bb2a35::t_be0f474222cb1d 10,105,109,112,114,120,128
+apps/backend/tests/community/core/skill_center/test_direct_activation_service.py
+  s_3d36bb45bb2a35::t_011d7e6a2db531 47
+apps/backend/tests/community/core/skill_center/_test_skill_set_management_service_support.py
+  s_3d36bb45bb2a35::t_011d7e6a2db531 86
+apps/backend/tests/community/core/skill_center/test_local_skill_package_batch.py
+  s_3d36bb45bb2a35::t_011d7e6a2db531 15-18,146,164-166,189-191,199,203,215,315,318
+apps/backend/src/agentclaw/community/core/skill_center/README.md
+  s_3d36bb45bb2a35::t_93b1ad06c1c28f 177
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_57237461b4df0e 1-2,7-8,18,20,25-26,33,56-80,84-89,91-155,157-169,177,183,189-191,193-199,214,224-225,233-235,237-240,242-249,251,255-256,258-260,262-264,276-277,279,281,283-285,287-288,294,297-300,303
+  s_3d36bb45bb2a35::t_ed91c1440a0ffa 81,192,236,253-254,257,266-274,280
+  s_3d36bb45bb2a35::t_42683882a57e00 82-83,90,156,188,200
+apps/backend/tests/community/adapters/http/openapi_v1/test_bot_mcp_config.py
+  s_3d36bb45bb2a35::t_36c8b36b8b9508 270
+  s_3d36bb45bb2a35::t_011d7e6a2db531 260-262,284-288,336-337
+apps/backend/tests/community/core/skills_pool/test_edit_guard.py
+  s_3d36bb45bb2a35::t_011d7e6a2db531 99
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_3d36bb45bb2a35::t_011d7e6a2db531 186,428-443
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_upload_service.py
+  s_3d36bb45bb2a35::t_1df3316fa33952 35,260,328,336,346,457,459-462
+apps/backend/tests/community/core/mcp/test_scoped_config_flow.py
+  s_3d36bb45bb2a35::t_f168800ec544e6 159-161,163
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "59618c1f278698e3885dcf02213a0492a3e398ae",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

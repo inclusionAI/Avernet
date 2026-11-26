@@ -1,0 +1,19 @@
+apps/bcs/crates/bootstrap/bcs/tests/agent_invoke_wiring/bootstrap.rs
+  s_7d114ded8fc0da::t_4719e326002f21 16-17,27,71-72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2dfe554522bbb9cf8131f22696a96140223ad780",
+  "prompts": {},
+  "sessions": {
+    "s_7d114ded8fc0da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b4-ef36-7703-9562-0f40ee69f61b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

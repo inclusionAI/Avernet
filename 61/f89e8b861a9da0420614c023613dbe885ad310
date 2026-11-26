@@ -1,0 +1,23 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  s_d23d2dd74fff18::t_7da9e767006167 24,112,443,891-898
+apps/backend/tests/community/adapters/http/openapi_v1/resources/test_delete_workspace_path.py
+  s_d23d2dd74fff18::t_1ba5808f76feff 1,3,30,88-96
+apps/backend/tests/community/adapters/http/openapi_v1/resources/test_list_workspace_path.py
+  s_d23d2dd74fff18::t_918d8f9155ceee 24-29,33,75-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "61f89e8b861a9da0420614c023613dbe885ad310",
+  "prompts": {},
+  "sessions": {
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

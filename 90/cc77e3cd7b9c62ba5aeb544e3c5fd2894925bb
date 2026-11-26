@@ -1,0 +1,42 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/run-detail-contract.md
+  h_bb3ca6fb13c5df 149-181
+apps/evolverun/clawweb/public/modules/workflow/web/components/RunArchivePanel.tsx
+  h_bb3ca6fb13c5df 1-2,4-16,18-24,27-28,30-31,34-37,41,43-52,57-63,67-73,75-99,101-107,110-117,120-153,155-160
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunArchivePanel.content.test.tsx
+  h_bb3ca6fb13c5df 1-162
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunArchivePanel.fixture.ts
+  h_bb3ca6fb13c5df 1-104
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunArchivePanel.integration.test.tsx
+  h_bb3ca6fb13c5df 1-87
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunArchivePanel.process.test.tsx
+  h_bb3ca6fb13c5df 1-241
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunArchivePanel.test.tsx
+  h_bb3ca6fb13c5df 1-143
+apps/evolverun/clawweb/public/modules/workflow/web/components/run-archive/ArchivePrimitives.tsx
+  h_bb3ca6fb13c5df 1-81
+apps/evolverun/clawweb/public/modules/workflow/web/components/run-archive/EventAndLogViews.tsx
+  h_bb3ca6fb13c5df 1-73
+apps/evolverun/clawweb/public/modules/workflow/web/components/run-archive/EvidenceSections.tsx
+  h_bb3ca6fb13c5df 1-101
+apps/evolverun/clawweb/public/modules/workflow/web/components/run-archive/NodeExecutionsView.tsx
+  h_bb3ca6fb13c5df 1-187
+apps/evolverun/clawweb/public/modules/workflow/web/components/run-archive/OverviewSection.tsx
+  h_bb3ca6fb13c5df 1-109
+apps/evolverun/clawweb/public/modules/workflow/web/components/run-archive/ProcessSection.tsx
+  h_bb3ca6fb13c5df 1-60
+apps/evolverun/clawweb/public/modules/workflow/web/components/run-archive/SuggestedYamlSection.tsx
+  h_bb3ca6fb13c5df 1-130
+apps/evolverun/clawweb/public/modules/workflow/web/components/run-archive/archive-helpers.ts
+  h_bb3ca6fb13c5df 1-152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "90cc77e3cd7b9c62ba5aeb544e3c5fd2894925bb",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

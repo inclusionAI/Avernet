@@ -1,0 +1,48 @@
+apps/backend/src/agentclaw/community/core/repository/implementations/chat/expert_chat_instance.py
+  s_64a7f809f622a3::t_55aa8bb3620e5b 222-265
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_service.py
+  s_64a7f809f622a3::t_55aa8bb3620e5b 480
+apps/backend/src/agentclaw/community/core/repository/protocols/chat.py
+  s_64a7f809f622a3::t_55aa8bb3620e5b 211-216,219-222
+  s_64a7f809f622a3::t_e0740f99513e78 210,217-218
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_64a7f809f622a3::t_55aa8bb3620e5b 1911,1953-1957,1980-1981,1986-1987
+apps/backend/specs/caller-publish-backfill-rel20261125/001-spec-output.md
+  s_64a7f809f622a3::t_396ff62a34b529 33,35,101,117-118
+  s_64a7f809f622a3::t_51be82bc466d1c 1-32,34,36-100,102-116,119-130
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_caller_sessions.py
+  s_64a7f809f622a3::t_55aa8bb3620e5b 62-63,65-67,76-78,109,111,126-133
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_instance_progress.py
+  s_64a7f809f622a3::t_55aa8bb3620e5b 1-37,42-71,74-75
+  s_64a7f809f622a3::t_f5dcffdc75f4c2 38-41,72-73
+apps/backend/src/agentclaw/community/core/expert_chat/expert_chat_instance_service_protocol.py
+  s_64a7f809f622a3::t_55aa8bb3620e5b 70-76
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_instance_service.py
+  s_64a7f809f622a3::t_55aa8bb3620e5b 78,86
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  s_64a7f809f622a3::t_e753e2d0fc9a5f 165-179
+apps/backend/tests/community/core/expert_chat/services/test_caller_cron_sessions.py
+  s_64a7f809f622a3::t_fee1ad39c469b8 373-379
+apps/backend/tests/community/core/expert_chat/services/test_caller_publish_backfill.py
+  s_64a7f809f622a3::t_09b21632567c6c 1-188
+apps/backend/tests/community/core/service_bot/services/test_caller_publish_progress_logging.py
+  s_64a7f809f622a3::t_c0f3cb93f31d1e 1-37
+apps/backend/tests/community/repository/chat/test_caller_publish_progress.py
+  s_64a7f809f622a3::t_dbba163c6075f8 1-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7cb382eb59116940be66038bf8d1aa86bc5042d2",
+  "prompts": {},
+  "sessions": {
+    "s_64a7f809f622a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20dd4-ce1e-7513-8fbc-595a2722a0e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

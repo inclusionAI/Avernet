@@ -1,0 +1,48 @@
+apps/backend/src/agentclaw/community/api/task/bbs_public_discussion_service.py
+  h_059e888e5e4e82 1-13
+apps/backend/src/agentclaw/community/api/task/task_commission_service.py
+  h_059e888e5e4e82 1-12
+apps/backend/src/agentclaw/community/core/task/context_collab/products/bbs_public_discussion/service.py
+  h_059e888e5e4e82 1-428
+apps/backend/src/agentclaw/community/core/task/context_collab/products/bbs_public_discussion/views.py
+  h_059e888e5e4e82 1-54
+apps/backend/src/agentclaw/community/core/task/context_collab/products/legacy_profiles.py
+  h_059e888e5e4e82 1-115
+apps/backend/src/agentclaw/community/core/task/context_collab/products/service_api.py
+  h_059e888e5e4e82 1-95
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/README.md
+  h_059e888e5e4e82 1-778
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/dispatch.py
+  h_059e888e5e4e82 1-184
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/profile.py
+  h_059e888e5e4e82 1-151
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/publication.py
+  h_059e888e5e4e82 1-27
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service.py
+  h_059e888e5e4e82 1-776
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service_api.py
+  h_059e888e5e4e82 1-338
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/views.py
+  h_059e888e5e4e82 1-37
+apps/backend/src/agentclaw/community/di/modules/context_collab_products.py
+  h_059e888e5e4e82 1-32
+apps/backend/src/agentclaw/community/di/modules/task_commission_authorization.py
+  h_059e888e5e4e82 1-191
+apps/backend/src/agentclaw/community/di/modules/task_commission_method_ops_adapter.py
+  h_059e888e5e4e82 1-161
+apps/backend/src/agentclaw/community/di/modules/task_commission_module.py
+  h_059e888e5e4e82 1-62
+apps/backend/src/agentclaw/community/di/modules/task_commission_self_application.py
+  h_059e888e5e4e82 1-554
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2f662806e7fbdd46cf153bed0073e05c4cd89a28",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

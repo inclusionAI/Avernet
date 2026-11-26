@@ -1,0 +1,21 @@
+apps/backend/docs/openapi-v1/README.md
+  s_9e36e09e5dbdc6::t_c83c4995a56fe5 1926
+apps/backend/docs/openapi-v1/README.zh-CN.md
+  s_9e36e09e5dbdc6::t_fc88929e5eff0a 1033
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3bd4d42d9fd76e2a77d16e63e37db544cb3e99a9",
+  "prompts": {},
+  "sessions": {
+    "s_9e36e09e5dbdc6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20c40-35fa-7b63-a937-b9f3623a79af",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

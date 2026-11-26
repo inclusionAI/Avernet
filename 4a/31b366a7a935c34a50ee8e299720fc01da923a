@@ -1,0 +1,20 @@
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a_auth.py
+  s_7ab90fcb7b0ff0::t_564e50f9d12d66 4,7,9,11-12,18-63
+  s_7ab90fcb7b0ff0::t_180feff7a31884 64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4a31b366a7a935c34a50ee8e299720fc01da923a",
+  "prompts": {},
+  "sessions": {
+    "s_7ab90fcb7b0ff0": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0270308e-3f7f-424f-a1b3-a2e6113a5268",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

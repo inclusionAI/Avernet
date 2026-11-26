@@ -1,0 +1,20 @@
+apps/backend/tests/community/adapters/http/task/test_relay_handoff_display.py
+  s_d23d2dd74fff18::t_a195b836a3e114 37-40,42-43,45,47-49,57,60-61,74,81-82,84-88,92-102
+  s_d23d2dd74fff18::t_f4ef030594795e 22-26,31,35-36,103-114,121,134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3661f3d7dbd209f5531ccc1d7d01c8e34e35ef93",
+  "prompts": {},
+  "sessions": {
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

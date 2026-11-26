@@ -1,0 +1,59 @@
+apps/bcs/Cargo.lock
+  s_7d114ded8fc0da::t_e7dd0f0bd70cd4 592-593,595-596,619
+apps/bcs/api-contracts/v1/internal.yaml
+  s_7d114ded8fc0da::t_b870dafd2ba71c 16-35
+apps/bcs/api-contracts/v1/openapi.yaml
+  s_7d114ded8fc0da::t_416de9ae908c64 32-51
+apps/bcs/api-contracts/v1/openapi/agent-invoke-types.yaml
+  s_7d114ded8fc0da::t_f6bf70682bbade 1-657
+apps/bcs/api-contracts/v1/openapi/agent-invoke.yaml
+  s_7d114ded8fc0da::t_dd350b0807b84d 1-958
+apps/bcs/crates/adapters/http/bcs-api-http/CONTEXT.md
+  s_7d114ded8fc0da::t_ef6c9a80ae8afa 189-253
+apps/bcs/crates/adapters/http/bcs-api-http/Cargo.toml
+  s_7d114ded8fc0da::t_2e56b7b9860d37 38-42
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/agent_invoke/dto.rs
+  s_7d114ded8fc0da::t_a743e2f4b76092 1-264
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/agent_invoke/mod.rs
+  s_7d114ded8fc0da::t_01f3102104afb4 1-236
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/agent_invoke/reads.rs
+  s_7d114ded8fc0da::t_09e1c385904cc6 1-156
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/agent_invoke/writes.rs
+  s_7d114ded8fc0da::t_b177b063b7f871 1-177
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/state.rs
+  s_7d114ded8fc0da::t_896d0ccc2ad158 31,88,123-127
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/mod.rs
+  s_7d114ded8fc0da::t_263cdd22d72c44 2,24,54
+apps/bcs/crates/adapters/http/bcs-api-http/tests/agent_invoke_errors.rs
+  s_7d114ded8fc0da::t_506fbe3e87cb3d 1-117
+apps/bcs/crates/adapters/http/bcs-api-http/tests/agent_invoke_routes.rs
+  s_7d114ded8fc0da::t_5563fba02b0eb0 1-355
+apps/bcs/crates/adapters/http/bcs-api-http/tests/agent_invoke_security.rs
+  s_7d114ded8fc0da::t_ae879378a101b0 1-226
+apps/bcs/crates/adapters/http/bcs-api-http/tests/agent_invoke_support/mod.rs
+  s_7d114ded8fc0da::t_bafeda94b94c40 1-352
+apps/bcs/crates/external-clients/bcs-fuse-client/tests/card_observations.rs
+  s_7d114ded8fc0da::t_a19f503725ca68 21-25,75
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_7d114ded8fc0da::t_d877c481aacbd1 1125-1138
+apps/bcs/crates/service-api/bcs-service-api/src/application/agent_invoke.rs
+  s_7d114ded8fc0da::t_6252cabdf8a112 5-7,9-10,12-14,37-38
+apps/bcs/docs/superpowers/specs/2026-08-18-friend-edge-permission-reform.md
+  s_7d114ded8fc0da::t_368a8c1ca1a8a6 3617-3626,3629,3641,3659,3667,3673
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "08e7c165a2ead628cbaaa584372bb4e0b9b07e2d",
+  "prompts": {},
+  "sessions": {
+    "s_7d114ded8fc0da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b4-ef36-7703-9562-0f40ee69f61b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,58 @@
+apps/backend/specs/2026-11-12-context-collab-bbs-public-discussion-product/plan.md
+  h_059e888e5e4e82 1-206
+apps/backend/specs/2026-11-12-context-collab-bbs-public-discussion-product/spec.md
+  h_059e888e5e4e82 1-173
+apps/backend/specs/2026-11-12-context-collab-l4-collet-accs-alignment/plan.md
+  h_059e888e5e4e82 1-140
+apps/backend/specs/2026-11-12-context-collab-l4-collet-accs-alignment/spec.md
+  h_059e888e5e4e82 1-134
+apps/backend/specs/2026-11-12-context-collab-l4-creation-event-facts/spec.md
+  h_059e888e5e4e82 1-59
+apps/backend/specs/2026-11-12-context-collab-l4-resource-binding/spec.md
+  h_059e888e5e4e82 1-111
+apps/backend/specs/2026-11-12-context-collab-l5-method-objects/plan.md
+  h_059e888e5e4e82 1-310
+apps/backend/specs/2026-11-12-context-collab-l5-method-objects/spec.md
+  h_059e888e5e4e82 1-388
+apps/backend/specs/2026-11-12-context-collab-l6-product-forms/spec.md
+  h_059e888e5e4e82 1-176
+apps/backend/specs/2026-11-13-context-collab-l1-interoperate-deliver/plan.md
+  h_059e888e5e4e82 1-68
+apps/backend/specs/2026-11-13-context-collab-l1-interoperate-deliver/spec.md
+  h_059e888e5e4e82 1-111
+apps/backend/specs/2026-11-13-context-collab-l6-product-contracts/spec.md
+  h_059e888e5e4e82 1-376
+apps/backend/specs/2026-11-13-context-collab-task-commission-product/plan.md
+  h_059e888e5e4e82 1-127
+apps/backend/specs/2026-11-13-context-collab-task-commission-product/spec.md
+  h_059e888e5e4e82 1-186
+apps/backend/specs/2026-11-23-context-collab-swarm-workflow-mode/delivery.md
+  h_059e888e5e4e82 1-148
+apps/backend/specs/2026-11-23-context-collab-swarm-workflow-mode/plan.md
+  h_059e888e5e4e82 1-150
+apps/backend/specs/2026-11-23-context-collab-swarm-workflow-mode/research.md
+  h_059e888e5e4e82 1-90
+apps/backend/specs/2026-11-23-context-collab-swarm-workflow-mode/spec.md
+  h_059e888e5e4e82 1-660
+apps/backend/specs/2026-11-23-swarm-execution-interactions/delivery.md
+  h_059e888e5e4e82 1-206
+apps/backend/specs/2026-11-23-swarm-execution-interactions/plan.md
+  h_059e888e5e4e82 1-16
+apps/backend/specs/2026-11-23-swarm-execution-interactions/spec.md
+  h_059e888e5e4e82 1-82
+apps/backend/specs/README.md
+  h_059e888e5e4e82 15-17,146-153,187-188
+docs/superpowers/specs/2026-08-11-bot-inventory-personal-local-tech-design.md
+  h_059e888e5e4e82 313-352
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7d990281da537a3c7fba356ec487b2cb31dc8cf1",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
