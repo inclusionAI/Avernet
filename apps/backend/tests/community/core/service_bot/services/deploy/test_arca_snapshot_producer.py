@@ -628,8 +628,6 @@ def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
     assert [ref.identity.sc_version_number for ref in center_store.refs] == [
         "1.0.0",
         "2.0.0",
-        "1.0.0",
-        "2.0.0",
     ]
     expected_reader_call = {
         "bot_id": "b1",
@@ -682,16 +680,20 @@ def test_center_service_build_fails_when_exact_store_version_is_missing() -> Non
         _REPO_STORE_PREFIX,
     )
 
+    bot = {
+        "bot_id": "b1",
+        "owner_id": "u1",
+        "entity_id": "u1",
+        "env": "dev",
+        "active_engine": "openclaw",
+    }
+    captured = builder.capture(bot=bot, layout_observation=_ready_observation("openclaw"))
+
     with pytest.raises(ServiceSkillsManifestError, match="exact Store Version"):
-        builder.capture(
-            bot={
-                "bot_id": "b1",
-                "entity_id": "u1",
-                "env": "dev",
-                "active_engine": "openclaw",
-            },
-            layout_observation=_ready_observation("openclaw"),
+        builder.finalize(
+            captured=captured, delivered_center_skills=captured.center_skills, bot=bot,
         )
+
 
 
 @pytest.mark.unit

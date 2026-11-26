@@ -264,7 +264,7 @@ Desktop Skill Recovery 使用 Bot 级持久任务，但明确设备离线不是�
 Service Bot 的边界在 `community/core/service_bot/services/`：
 
 - `publish_flow/build_stage.py` 与 `deploy/artifact_build_request.py`：文件型 Producer 使用本次 Runtime layout observation。
-- `deploy/service_skills_manifest.py`、`deploy/arca_snapshot_producer.py`、`bot_build_service.py`：捕获精确 Center 引用，排除共享仓库内容并验证 Artifact；历史重启/扩缩容/回滚消费冻结的 Artifact。
+- `deploy/service_skills_manifest.py`、`deploy/arca_snapshot_producer.py`、`bot_build_service.py`：按产物实际交付记录精确 Center 引用，排除共享仓库内容并验证 Artifact。同名且自包含的普通技能目录随文件型产物交付；历史重启、扩缩容和回滚消费冻结的 Artifact。
 - `deploy/managed_composer.py`：`shared_corpora` 是 Snapshot 排除/历史声明，物理 Repo/Center mount 由镜像/启动脚本负责。
 - Teclaw 走 Whole Artifact/StoreRef；核对 `runtime_projections/whole_artifact.py` 及对应 composer，不能把文件型路径 probe 强加给它。
 
