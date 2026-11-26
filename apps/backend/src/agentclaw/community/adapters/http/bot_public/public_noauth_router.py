@@ -6,22 +6,38 @@
 - PATCH /api/public/bots/{bot_id}/ext - 更新 bot ext 字段（限制字段）
 """
 import json
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Path, Request
+from fastapi import APIRouter, Path, Query, Request
 from pydantic import BaseModel
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
 )
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceNotBoundError,
+)
+from agentclaw.community.core.engine_runtime.errors import (
+    EngineStageNotLiveError,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository, TemplateRepository
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+)
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
 router = APIRouter(prefix="/api/public/bots", tags=["bot-public-noauth"])
+
+RuntimeStage = Literal["draft", "verify", "online"]
+_SERVICE_BOT_TYPE = "service"
 
 
 # ==================== Response Models ====================
@@ -102,27 +118,68 @@ def _public_bot_detail(bot: dict[str, Any]) -> dict[str, Any]:
     return scrubbed
 
 
+def _resolve_runtime_binding_id(
+    *,
+    bot: dict[str, Any],
+    stage: RuntimeStage,
+    publish_repo: BotPublishRepositoryProtocol,
+    binding_repo: DeviceBindingRepository,
+) -> int:
+    """Resolve the Bot binding that a caller should route to.
+
+    Personal bots have one workspace runtime, stored as ``ac_bots.binding_id``.
+    Service bots additionally publish verify/online runtimes; those live only in
+    publish-record ``ext.binding.{verify,online}``, so published stages must use
+    the shared runtime-stage resolver instead of silently routing to the draft.
+    """
+    if bot.get("bot_type") != _SERVICE_BOT_TYPE or stage == "draft":
+        raw_binding_id = bot.get("binding_id")
+        if raw_binding_id is None:
+            raise DeviceNotBoundError(f"No binding for bot={bot.get('bot_id')}")
+        return int(raw_binding_id)
+
+    # Import lazily to avoid making every public route import the heavier
+    # engine-runtime dependency graph.
+    from agentclaw.community.core.engine_runtime.stage import (
+        resolve_stage_bind_id,
+    )
+
+    return resolve_stage_bind_id(
+        publish_repo,
+        binding_repo,
+        bot_pk=int(bot.get("id") or 0),
+        bot_id=str(bot.get("bot_id") or ""),
+        stage=stage,
+        env=str(bot.get("env") or ""),
+    )
+
+
 # ==================== Public Endpoints ====================
 
 
 @router.get("/{bot_id}/binding", response_model=ApiResponse)
 async def get_bot_binding_public(
     bot_id: str = Path(..., description="Bot ID"),
+    stage: RuntimeStage = Query("online", description="服务 Bot 运行阶段"),
     bot_repo: BotRepository = Injected(BotRepository),
     template_repo: TemplateRepository = Injected(TemplateRepository),
+    publish_repo: BotPublishRepositoryProtocol = Injected(
+        BotPublishRepositoryProtocol
+    ),
+    binding_repo: DeviceBindingRepository = Injected(DeviceBindingRepository),
 ) -> ApiResponse:
     """获取架构师 bot 绑定详情.
 
     GET /api/public/bots/{bot_id}/binding
 
     返回架构师 Bot 详情，包含 template_config；保留 device_id 和 binding_id，
-    并递归去除 token 类敏感字段。
+    并递归去除 token 类敏感字段。个人 Bot 直接返回 `ac_bots.binding_id`；
+    服务 Bot 默认返回 online runtime binding，也可通过 `?stage=draft|verify|online`
+    指定运行阶段。
     """
     try:
-        _total, items = bot_repo.list_by_conditions(
-            bot_id=bot_id, page=1, page_size=1
-        )
-        if not items:
+        bot = bot_repo.get_unique_by_id(bot_id)
+        if not bot:
             return ApiResponse(
                 success=False,
                 message=f"Bot不存在: {bot_id}",
@@ -130,7 +187,13 @@ async def get_bot_binding_public(
                 data=None,
             )
 
-        bot = dict(items[0])
+        bot = dict(bot)
+        runtime_binding_id = _resolve_runtime_binding_id(
+            bot=bot,
+            stage=stage,
+            publish_repo=publish_repo,
+            binding_repo=binding_repo,
+        )
         if bot.get("template_config") is None:
             bot.pop("template_config", None)
             template = template_repo.get_by_bot_id(bot_id)
@@ -138,8 +201,35 @@ async def get_bot_binding_public(
                 bot["template_config"] = template.get("ext")
 
         scrubbed = _public_bot_detail(bot)
-        logger.info("[public_noauth.get_bot_binding] bot_id=%s", bot_id)
+        scrubbed["binding_id"] = runtime_binding_id
+        logger.info(
+            "[public_noauth.get_bot_binding] bot_id=%s stage=%s binding_id=%s",
+            bot_id,
+            stage,
+            runtime_binding_id,
+        )
         return ApiResponse(success=True, data=scrubbed)
+    except BotLookupAmbiguousError:
+        logger.warning("[public_noauth.get_bot_binding] ambiguous bot: %s", bot_id)
+        return ApiResponse(
+            success=False,
+            message=f"Bot ID 无法唯一定位: {bot_id}",
+            error_code=409,
+            data=None,
+        )
+    except (EngineStageNotLiveError, DeviceNotBoundError) as e:
+        logger.warning(
+            "[public_noauth.get_bot_binding] runtime not ready: bot_id=%s stage=%s: %s",
+            bot_id,
+            stage,
+            e,
+        )
+        return ApiResponse(
+            success=False,
+            message=f"服务Bot指定运行阶段不可用: {e}",
+            error_code=409,
+            data=None,
+        )
     except BotServiceError as e:
         logger.error("[public_noauth.get_bot_binding] Service error: %s", e)
         return ApiResponse(
