@@ -1,0 +1,30 @@
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-draft-baas.test.ts
+  h_bb3ca6fb13c5df 20,103-107,109-116,126-263
+apps/evolverun/clawweb/public/app/clawweb/server/workflow-ai-draft-baas-failure.ts
+  h_bb3ca6fb13c5df 1-62
+apps/evolverun/clawweb/public/app/clawweb/server/workflow-ai-draft-baas-reply.ts
+  h_bb3ca6fb13c5df 3,33,38-40,44-46
+apps/evolverun/clawweb/public/modules/workflow/docs/specs/2026-11-13-workflow-ai-draft-editor.md
+  h_bb3ca6fb13c5df 149-191
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-ai-drafts.md
+  h_bb3ca6fb13c5df 80-84,91-119
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowAiDrawer.test.tsx
+  h_bb3ca6fb13c5df 6-7,143-147,152-153,156-157,161-178
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-draft.ts
+  h_bb3ca6fb13c5df 108
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-lifecycle.test.ts
+  h_bb3ca6fb13c5df 174-177,188-190
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-lifecycle.ts
+  h_bb3ca6fb13c5df 11-15,24,28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7fee912df17ce2cc25d3bbe5e65460f9833748d8",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
