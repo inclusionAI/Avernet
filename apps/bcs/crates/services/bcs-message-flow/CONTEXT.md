@@ -527,19 +527,19 @@ reply target followed by a valid sibling with one invocation remaining.
 
 ## Directed edge admission for existing direct calls
 
-`A2aChat::with_edge_admission` attaches the host's existing `AdmissionService`
-and environment. Existing direct chat and async-start APIs use it when legacy
-self/same-owner/public/friend paths do not already admit the call. Directed
-profile/rules/AgentInvoke access never becomes symmetric friendship. Existing
-source identity, target status, organization and outbound security checks remain
-in force. No new invocation endpoint, queue payload, permit or per-kind switch
-is introduced. Minimal test setups without an edge service retain legacy paths.
+`A2aChat::with_edge_grants` attaches the same existing edge repo/environment
+as the host's admission API. Existing direct chat and async-start APIs recognize
+an approved AgentInvoke direction edge when legacy self/same-owner/public/friend
+paths do not already admit the call. Profile/rules are still consumed normally
+by the admission API/AuthzContext; they do not gain new direct reachability as a
+side effect of the new kind. AgentInvoke never becomes symmetric friendship.
+Existing source identity, target status, organization and outbound security
+checks remain in force. No new invocation endpoint, queue payload, permit or
+per-kind switch is introduced. Minimal test setups retain legacy paths.
 
 Additional cost on the previously denied private/protected nonfriend path is
-one target configuration lookup, at most one existing collaboration-owner batch
-read (the host wires that guard), and one exact-pair edge query: at most three
-SQL statements, no per-edge N+1. The owner query reads at most the two endpoints;
-the edge query reads only that indexed pair. AgentInvoke requires no profile
-write/read, qualification lookup, retry or external I/O.
-Other existing allow paths add no edge queries. Queue processing and edge-change
-visibility retain their existing behavior, not a new revocation protocol.
+one indexed exact-pair edge SELECT, reading only this direction/environment's
+runtime grant rows. There is no extra profile/configuration/owner lookup, write,
+qualification query, retry, external I/O or N+1 graph traversal. Other existing
+allow paths add no edge queries. Queue processing and edge-change visibility
+retain existing behavior, not a new revocation protocol.

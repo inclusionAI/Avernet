@@ -2,7 +2,7 @@
 use super::*;
 use bcs_db_api::{DbPlugin, DbStatement};
 use bcs_domain::edge_permission::{EdgeGrant, EdgeStatus, GrantKind, OriginatorPolicyType};
-use bcs_edge_permission_store::{DbBotActorConfigStore, DbEdgeGrantStore, DbPermissionProfileStore};
+use bcs_edge_permission_store::DbEdgeGrantStore;
 use bcs_service_api::port::repo::EdgeGrantRepoPort;
 
 fn edge(from: &str, to: &str, kind: GrantKind) -> EdgeGrant {
@@ -31,10 +31,7 @@ async fn fixture(visibility: &str) -> (A2aChat, Arc<RecordingDelivery>, Arc<Memo
         )).await.unwrap();
     }
     let grants = Arc::new(DbEdgeGrantStore::sqlite(db.clone()));
-    let admission = Arc::new(bcs_edge_permission::DbAdmissionService::new(grants.clone(),
-        Arc::new(DbBotActorConfigStore::sqlite(db.clone())),
-        Arc::new(DbPermissionProfileStore::sqlite(db.clone()))));
-    (service.with_edge_admission(admission, "dev".into()), delivery, registry, grants, db)
+    (service.with_edge_grants(grants.clone(), "dev".into()), delivery, registry, grants, db)
 }
 
 fn command(from: &str, to: &str, id: &str) -> A2aChatCommand {
@@ -120,4 +117,20 @@ async fn async_start_uses_the_same_directed_edge_admission() {
     }).await.unwrap();
     assert_eq!(accepted.run_id, "async-edge");
     assert_eq!(delivery.frames().await.len(), 1);
+}
+
+#[tokio::test]
+async fn new_kind_does_not_expand_legacy_nonfriend_profile_rules_or_authority_access() {
+    for kind in [GrantKind::PermissionProfile, GrantKind::Rules, GrantKind::Owner, GrantKind::Manager] {
+        let (service, delivery, _registry, grants, db) = fixture("protected").await;
+        let mut grant = edge("bot-source", "bot-target", kind);
+        if matches!(kind, GrantKind::PermissionProfile | GrantKind::Rules) { grant.grant_ref_id = 91; }
+        if kind == GrantKind::Rules { grant.rules = Some(serde_json::json!([])); }
+        grants.insert_grant(grant).await.unwrap();
+        assert!(matches!(service.chat(command("bot-source", "bot-target", "legacy-kind")).await,
+            Err(ServiceError::NotFriends(_))), "{kind:?}");
+        assert!(delivery.frames().await.is_empty());
+        let profiles = db.query(DbStatement::new("SELECT COUNT(*) AS n FROM permission_profiles")).await.unwrap();
+        assert_eq!(bcs_db_api::db_get_column::<u64>(&profiles[0], "n").unwrap(), 0);
+    }
 }
