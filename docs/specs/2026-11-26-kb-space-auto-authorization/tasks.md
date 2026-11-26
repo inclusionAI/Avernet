@@ -2,153 +2,110 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 >
-> 当前为待实施清单，创建开发分支和编写文档不计作功能完成。公共路径缩写与 plan 的 Key Files 一致；ECB 与工作台修改在各自目标分支的隔离 checkout 中进行。每组完成后先复核契约与验收，再继续下一组。
+> 本清单替代旧归属投影/继承授权方案，全部任务待实施。路径缩写与 plan 的 Key Files 一致；不预设新表或认证体系。
 
-## Task 1: 固定跨模块合同和源代码基线
-- **Goal:** 将主体、入驻、策略屏障、有效权限和人工 CAS 的语义变为可测试合同。
-- **Files:** `kernel/knowledge_bot_membership.py`、`plugin_api/knowledge_bot_membership.py`、`core/knowledge_management/ports.py`、`api/knowledge_management_service.py`；ECB 对应 domain/schema；`contract.md`（本目录新增）。
+## Task 1: 核对并固定最小复用方案
+- **Goal:** 查明现有存储、授权执行权限和可靠任务能力，固定最小补充。
+- **Files:** `core/knowledge_management/ports.py`、现有 task queue repository、ECB KB ext/授权/活动/认证入口、宿主 database/DI；本目录 `plan.md`。
 - **Done when:**
-  - [ ] 更新并记录 ECB / 宿主精确基线、读取相应规则，定位真实文件，建立独立开发分支。
-  - [ ] 固定 v2 字段、分页、认证、request_id、错误与旧客户端切换规则，列出所有调用方。
-  - [ ] AC04/07/09/12 的反例进入合同测试，不使用 owner_id 作为稳定主体。
+  - [ ] 记录公共、ECB 与宿主实际基线和文件；核对现有 ext 的局部更新、并发控制及保留能力。
+  - [ ] 证明自动执行者具有增权与生命周期撤权的限定权限，Owner 离开后仍按真实授权执行；不足则记录现有能力最小补充，不冒充用户。
+  - [ ] 核对同事务持久待办、任务清理后的恢复、false→false CAS 屏障及未知结果回执；明确每项实际承载位置与测试。
+  - [ ] 任何必要持久化/接口扩展先更新方案并说明复用不足的证据，不预设新表、新认证或 Bot 归属接收 API。
 - **Depends on:** —
 
-## Task 2: 实现 Bot 当前事实与持久 outbox
-- **Goal:** 建立不可重用实例、当前入驻、单调版本及空间有序事件。
-- **Files:** `core/knowledge_bot_sync/{README.md,models.py,repository.py,capture.py}`、`core/repository/protocols/bot/knowledge_effects.py`、`apps/backend/sql/2026_11_26_knowledge_bot_sync.sql`、`tests/community/core/knowledge_bot_sync/test_capture.py`。
+## Task 2: 实现 KB ext 开关与汇总记录
+- **Goal:** 将开关及控制版本存入既有 KB ext，复用 ECB 活动。
+- **Files:** ECB KB metadata/ext 更新、授权校验、活动 service/store 及对应测试；公共 metadata adapter。
 - **Done when:**
-  - [ ] 当前事实、不可变 payload/hash、序列、确认与 tombstone 有真实数据库测试。
-  - [ ] 重复事实不重建入驻；同名重建不复用主体；数据错误不能被当成缺失。
-  - [ ] AC06/07/10/12 的身份与版本断言通过。
+  - [ ] AC01：新旧库字段缺失为 OFF，只有创建者能改，局部更新不覆盖其他 ext。
+  - [ ] AC02/05：一次开关动作一条汇总；保存成功与批次收敛分开，关闭不撤销已有 grant。
+  - [ ] 记录批次和操作来源，重试不重复动态；按 plan 定义新增成功/已授权/跳过/失败/待确认，关闭新增数正常为 0。
 - **Depends on:** Task 1
 
-## Task 3: 在创建与普通移动中原子捕获
-- **Goal:** 创建、个人空间解析和空间移动与事实事件同事务提交。
-- **Files:** `core/repository/implementations/bot/{initial_layout.py,mutations.py}`、`core/repository/implementations/spaces/space.py`、`core/knowledge_bot_sync/capture.py`、`tests/community/core/knowledge_bot_sync/test_capture.py`。
+## Task 3: 补齐现有 grant mutation 的最小执行保证
+- **Goal:** 自动授权仍落真实 grant，保持原鉴权和 CAS。
+- **Files:** ECB Bot authorization service/store、原 mutation router/schema、活动入口及测试；`adapters/knowledge_platform/catalog.py`。
 - **Done when:**
-  - [ ] 两个 Bot 创建入口、普通移动及 legacy NULL 有效空间变化均覆盖；只归一化到原有效空间不重置入驻。
-  - [ ] 注入 outbox 写失败时源变更回滚，捕获关闭时兼容默认公开环境。
-  - [ ] AC03/07/10 覆盖个人/团队空间。
-- **Depends on:** Task 2
+  - [ ] AC08/09：复用实际 grant 行、正 revision 与现有读路径，接收人及原生 READ 不被绕过。
+  - [ ] 自动/人工/生命周期来源可信且可审计；自动单项写不产生虚假人工活动。
+  - [ ] 按 Task 1 证据补齐同值拒绝屏障、操作回执/幂等必要缺口；CAS 冲突不能刷新版本后原样重试。
+  - [ ] AC04/10：迟到授权、无原行的撤权屏障、未知结果归因与重复活动测试通过。
+- **Depends on:** Task 1
 
-## Task 4: 接入删除、回收和 Owner 转交
-- **Goal:** 所有身份失效与转交路径使用同一捕获规则。
-- **Files:** `core/repository/implementations/bot/{mutations.py,recycle.py,owner_handoff.py}`、`tests/community/core/knowledge_bot_sync/test_capture.py`。
+## Task 4: 可靠记录 Bot 生命周期待办
+- **Goal:** 所有权威写入口可靠保留增撤权工作及旧授权目标。
+- **Files:** `core/repository/implementations/bot/{initial_layout.py,mutations.py,owner_handoff.py,recycle.py}`、Task 1 确认的既有持久载体、企业事务适配及测试。
 - **Done when:**
-  - [ ] 软删除和回收最终路径产生持久失效；停止/休眠不产生删除事件。
-  - [ ] 同空间转交保留 residency，跨空间转交结束旧入驻并创建新入驻。
-  - [ ] AC06/07/12 及转交失败回滚均有测试。
-- **Depends on:** Task 3
+  - [ ] AC03/06/10：新建、转入、移出、删除和回收均覆盖；停止/休眠不撤权。
+  - [ ] 源变更与恢复标记可靠绑定，写后入队前崩溃仍可恢复；Bot 删除/队列清理不丢旧身份撤权。
+  - [ ] 企业真实事务故障注入验证源行与待办同回滚；不能用普通 AUTOCOMMIT 或单次写后 HTTP 冒充。
+  - [ ] 无 ECB Bot 归属投影、入驻历史同步或全量初始化任务。
+- **Depends on:** Tasks 1, 3
 
-## Task 5: 实现投递、补偿和存量初始化
-- **Goal:** 复用队列恢复追平，不因重启或丢队列指针丢事实。
-- **Files:** `core/knowledge_bot_sync/{delivery.py,tasks.py,bootstrap.py}`、`di/modules/knowledge_bot_sync_module.py`、既有 `configs/` 配置装配、`tests/community/core/knowledge_bot_sync/test_delivery.py`、`tests/community/contracts/test_knowledge_bot_membership.py`。
+## Task 5: 实现有界自动授权与失败恢复
+- **Goal:** TC 通过既有队列执行真实 grant 写入并持续恢复未完成操作。
+- **Files:** `core/knowledge_management/services/auto_authorization.py`（新增）、`ports.py`、现有任务 handler/生命周期/DI、相关测试。
 - **Done when:**
-  - [ ] 有界扫描、精确 hash 确认、失败重试和 at-least-once 幂等通过。
-  - [ ] 初始化进度可恢复，锁内读事实，完成屏障前拒绝自动策略生效。
-  - [ ] 断网、apply 后 ack 前退出、旧确认及迁移/删除并发初始化覆盖 AC10。
-  - [ ] 完整 DI 与消费者合同测试证明实际调用 sink，默认关闭不依赖企业服务。
-- **Depends on:** Task 4
+  - [ ] AC02/03：开启后分页处理当前 Bot，后续新建/转入由生命周期接续；保存开关后排队前退出可补偿。
+  - [ ] AC04/05/10：执行时复查权限、归属、开关、人工取消及代次，OFF 停新增但不阻断撤权清理。
+  - [ ] 旧任务、旧确认和未知回执不会覆盖当前决定；接收端 CAS 与失效屏障有并发测试，active-only 去重不作为唯一保证。
+  - [ ] 进度可恢复，成功数仅归因已确认新增并去重，失败和未知单列；批次完成后不计后续生命周期任务。
+- **Depends on:** Tasks 2, 3, 4
 
-## Task 6: 实现提供方可信归属接收
-- **Goal:** ECB 验证认证与源版本，本地保存主体、Owner 和入驻历史。
-- **Files:** ECB `knowledge_tenant` domain/store、TC space 接收 router/schema、迁移文件及对应 store/router 测试；具体路径在 Task 1 固定。
+## Task 6: 实现人工例外、迁回及 Owner 承接
+- **Goal:** 保留业务规则，将变更落实到现有 owner-keyed grant。
+- **Files:** `core/knowledge_management/services/{service.py,auto_authorization.py}`、`core/repository/implementations/bot/owner_handoff.py`、既有人工操作入口和测试。
 - **Done when:**
-  - [ ] 未认证/越权更新拒绝；重复事件幂等，旧 revision 不能覆盖新当前归属。
-  - [ ] 跨空间乱序的退出记录只结束对应入驻，不删除新空间当前身份。
-  - [ ] AC06/07/10/12 覆盖；未知主体拒绝访问。
-- **Depends on:** Tasks 1, 5
+  - [ ] AC04/07：人工取消跨重试/OFF→ON保留，真正迁出再迁回重置本次取消，来源不明 false 不批量恢复。
+  - [ ] AC06/12：迁出/删除清所有旧空间实际授权；同空间转交迁移四类状态并撤销旧键，新 Owner 仍过原生 READ。
+  - [ ] 迁回/OFF 不复活历史 true，旧撤权不能取消新授权；同名重建不复用旧任务。
+  - [ ] 受控迁移部分成功可恢复，执行主体无权处理旧键时明确阻塞，不伪报完成。
+- **Depends on:** Task 5
 
-## Task 7: 实现每库策略、区间资格与人工选择
-- **Goal:** 默认 OFF、关闭保留及入驻内例外由一个提供方策略计算。
-- **Files:** ECB `knowledge_tenant` Bot authorization domain/service/store、策略命令与活动存储、迁移文件及对应测试。
+## Task 7: 接入开关和进度并回归原有读路径
+- **Goal:** 提供最小管理扩展，保持实际 grant 查询与消费者兼容。
+- **Files:** `adapters/http/knowledge_management/{router.py,schemas.py,errors.py}`、`adapters/knowledge_platform/{catalog.py,grant_state_reader.py}`、`api/knowledge_management_service.py`、知识管理/Bot 知识消费者与合同测试。
 - **Done when:**
-  - [ ] 新旧库默认 OFF；创建者后端权限校验与策略 CAS 生效。
-  - [ ] 策略命令在同空间序列屏障上应用，重复请求不产生重复动态；失败可查询。
-  - [ ] 区间交集表达自动资格，人工 false 优先，Owner 变化不重置选择。
-  - [ ] 取消自动资格无物理 grant 时仍有一条活动；ON/OFF 各只有汇总活动。
-  - [ ] AC01–05/07/12 测试通过，不批量建立自动 grant/viewer。
-- **Depends on:** Task 6
+  - [ ] AC01/02/05/10：开关字段级读写、创建者权限及任务状态可观察，保存成功不伪装全部完成。
+  - [ ] AC09：原授权列表/数量/批量状态/整数游标直接消费真实 grant，不引入 effective v2 或虚拟行。
+  - [ ] AC08/09：Bot 可选目录、开启检查、配置、对话和服务阶段、实际内容访问复用原读路径；启用/发布行为不变。
+- **Depends on:** Tasks 5, 6
 
-## Task 8: 统一提供方读取和实际访问
-- **Goal:** 有效资格、原生 READ 与可消费性在所有读取入口一致。
-- **Files:** ECB Bot authorization/catalog service/store、实际内容及 MCP 权限门禁、v2 router/schema、对应授权/批量/分页测试。
+## Task 8: 完成工作台和企业装配
+- **Goal:** 界面展示实际授权与准确批次结果，企业执行身份接入既有认证。
+- **Files:** 宿主 `internal/knowledge/` 的 AuthorizedBotsPanel、GrantBotDialog、domain、service/controller；enterprise knowledge identity/DI/database 和测试。
 - **Done when:**
-  - [ ] 点查、批量过滤、列表/数量、目录共享统一有效策略，无旧 grant OR 兜底。
-  - [ ] 自动资格无人工 ID/时间；有效版本和 choice revision 分开；v2 游标不依赖 grant 行。
-  - [ ] 可信执行用户仍通过原生 READ；非 TC/人员调用、WRITE 与管理权限不变。
-  - [ ] AC08/09/12 和迁出后旧 KB ID 直调拒绝有业务断言。
+  - [ ] 创建者开关、逐 Bot 人工操作、部分完成/失败/重试反馈覆盖个人及团队空间。
+  - [ ] 明确区分本次自动新增成功数与当前授权总数，关闭显示本次新增 0；不由浏览器遍历授权。
+  - [ ] 现有服务认证和任务权限检查贯通，UI 无权隐藏不能替代后端拒绝；AC01/02/04/05/10/12 通过。
 - **Depends on:** Task 7
 
-## Task 9: 适配公共管理接口和策略命令
-- **Goal:** BFF 透传提供方有效结果，并持久记录策略屏障命令。
-- **Files:** `adapters/knowledge_platform/{catalog.py,grant_state_reader.py,bot_policy.py}`、`adapters/http/knowledge_management/{router.py,schemas.py,errors.py}`、`core/knowledge_management/services/service.py`、`core/knowledge_bot_sync/repository.py`、`tests/community/endpoints/test_knowledge_management.py`。
+## Task 9: 完善兼容、回滚及知识记录
+- **Goal:** 保留真实授权和未收敛清理，移除旧投影迁移工作。
+- **Files:** 知识管理 README、Backend 导航、宿主集成说明/gitlink、本目录 `verification.md`（实施时新增）。
 - **Done when:**
-  - [ ] 策略读写/状态、v2 授权页和人工选择可贯通；自动资格不再被旧 ID/revision 校验拒绝。
-  - [ ] 显式版本能力协商，旧合同有兼容测试；新版本失败不回落到旧授权放行。
-  - [ ] 只补当页 Bot 展示，无逐项远程查 TC 或前端全量授权。
-  - [ ] AC01/02/04/05/09/10 的响应与错误语义通过。
-- **Depends on:** Tasks 5, 8
+  - [ ] 默认 OFF、旧 grant true/false 保留，无 Bot 投影初始化、区间迁移或全量改写。
+  - [ ] 回滚停止新增权，但继续旧关系撤权和未知结果回查；不能清队列丢进度。
+  - [ ] 实际公共/宿主版本与能力边界可追溯，未执行生产 DDL、数据变更或部署。
+- **Depends on:** Task 8
 
-## Task 10: 接入 Bot 配置、对话和服务阶段
-- **Goal:** 所有消费阶段都使用提供方有效权限，保持启用与发布不变。
-- **Files:** `core/bot_knowledge/{service.py,stage_selection.py}`、`core/knowledge_management/services/conversation.py`、`tests/community/core/bot_knowledge/`、`tests/community/endpoints/test_bot_knowledge_router.py`、`tests/community/contracts/test_knowledge_catalog.py`。
+## Task 10: Tests & Verification
+- **Goal:** 逐项验证 spec AC01–AC12 和本轮执行权限、恢复、数量要求。
+- **Files:** `tests/community/core/knowledge_management/test_auto_authorization.py`（新增）、现有 endpoints/contracts/bot_knowledge/architecture/DI 测试；ECB、企业驱动、UI 和组合验证；`verification.md`。
 - **Done when:**
-  - [ ] 可选目录、enable 前检查、draft/verify/online 都验证当前有效权限。
-  - [ ] 未知历史阶段不回退草稿；自动授权不写 enabled 或发布快照。
-  - [ ] AC04/08/09/12 覆盖；无需改动的消费者用回归证据说明。
+  - [ ] 创建者权限/任务执行权限、manual vs auto CAS、无 grant 迟到增权、Owner 旧键撤权、重启和任务清理故障注入通过。
+  - [ ] AC11 完整链路核对页面、真实 grant 和新发起访问；AC12 四类状态承接独立覆盖。
+  - [ ] 汇总不重复、不认领他人写入、不将未知计成功；关闭及部分失败数量口径正确。
+  - [ ] 按实际变更跑必需合同/架构/HTTP及企业测试；所有 AC 有证据，未执行单列 UNVERIFIED，不以 HTTP200/入队成功替代验收。
 - **Depends on:** Task 9
-
-## Task 11: 完成企业装配与真实事务验证
-- **Goal:** 企业运行路径具备同事务捕获、可信身份与可恢复投递。
-- **Files:** 宿主 enterprise database adapter、knowledge identity/DI、任务注册及对应驱动/装配测试；Avernet `core/knowledge_bot_sync/` 合同测试。
-- **Done when:**
-  - [ ] 权威写单元使用已有显式事务，不能在 AUTOCOMMIT 上宣称原子性。
-  - [ ] 真实目标数据库适配注入第二写失败，源行/outbox 同回滚；验证锁和提交行为。
-  - [ ] 同空间 Owner 转交仍以稳定主体查资格；不从不可信 Header 补身份。
-  - [ ] AC10/12 的企业证据齐全；不可运行时标 UNVERIFIED 并禁止声称全链路完成。
-- **Depends on:** Tasks 5, 8, 9
-
-## Task 12: 实现工作台开关与同步反馈
-- **Goal:** 展示每库策略、人工调整和真实同步状态。
-- **Files:** 宿主 `internal/knowledge/components/{AuthorizedBotsPanel.tsx,GrantBotDialog.tsx}`、`domain.ts`、管理 service/controller、相关 hooks 与组件测试。
-- **Done when:**
-  - [ ] 仅创建者可操作开关；其他管理者保留逐 Bot 授权/取消。
-  - [ ] PENDING/APPLIED/FAILED、冲突刷新、列表/数量/活动刷新可观察。
-  - [ ] 不按物理授权 ID 控制取消，不遍历全部 Bot 模拟自动授权。
-  - [ ] AC01/02/04/05/09 覆盖个人与团队空间。
-- **Depends on:** Task 9
-
-## Task 13: 完成兼容迁移、回滚和知识维护
-- **Goal:** 数据准备和代码切换不造成历史权限复活。
-- **Files:** 公共及 ECB 迁移文件、`core/knowledge_bot_sync/bootstrap.py`、新模块与既有知识管理/Bot 知识 README、Backend README、`verification.md`（本目录新增）；宿主集成说明与 gitlink。
-- **Done when:**
-  - [ ] 旧 true/false 唯一映射、歧义拒绝、并发初始化和中断恢复验证通过。
-  - [ ] 默认关闭、灰度顺序和保留捕获/有效判断的回滚流程可执行；未执行生产变更。
-  - [ ] 更新模块边界注册、协议测试映射、知识导航；宿主 gitlink 对应已验证公共版本。
-  - [ ] 文档区分实现、集成、部署，所有源文件大小符合仓库规则。
-- **Depends on:** Tasks 10, 11, 12
-
-## Task 14: Tests & Verification
-- **Goal:** 逐项验证 spec AC01–AC12，分别报告实际结果和外部缺口。
-- **Files:** `tests/community/core/knowledge_bot_sync/`、既有知识管理/Bot 知识/contracts/architecture 测试、ECB 权限测试、宿主 UI/企业驱动和组合验收、`verification.md`。
-- **Done when:**
-  - [ ] 聚焦单测、合同、DI、HTTP fast gate 和必要仓库 CI 通过，执行结果可追溯。
-  - [ ] 受控环境完成 AC11 全链，分别核对页面、提供方与新发起实际检索访问。
-  - [ ] AC12 四类承接状态及新 Owner 原生 READ 独立验证。
-  - [ ] 所有 AC 有证据或明确 UNVERIFIED；仅全部满足后才能勾选 spec 完成，不伪造端到端或企业验收。
-- **Depends on:** Task 13
 
 ## Groups
-- **Group A — 合同与持久身份:** Tasks 1, 2
-  - Theme: 固定公开边界，并验证主体/入驻/事件模型。
-- **Group B — 权威捕获与恢复:** Tasks 3, 4, 5
-  - Theme: 创建、移动、删除、转交和初始化可靠输出事实。
-- **Group C — 提供方有效权限:** Tasks 6, 7, 8
-  - Theme: 可信投影、策略、例外和实际访问形成一致闭环。
-- **Group D — 公共消费者:** Tasks 9, 10
-  - Theme: 管理、配置与对话/服务阶段使用相同有效结果。
-- **Group E — 企业集成与工作台:** Tasks 11, 12, 13
-  - Theme: 真实事务、UI、兼容迁移与宿主集成可核验。
-- **Group F — Verification:** Task 14
+- **Group A — 复用与实际授权合同:** Tasks 1, 2, 3
+  - Theme: 开关存 KB ext，执行权限和真实 grant mutation 有明确保证。
+- **Group B — TC 生命周期执行:** Tasks 4, 5, 6
+  - Theme: 可靠执行、人工例外、迁移和转交可恢复且拒绝旧任务。
+- **Group C — 接口与企业集成:** Tasks 7, 8, 9
+  - Theme: 保持旧读路径，完成 UI、装配、兼容及回滚说明。
+- **Group D — Verification:** Task 10
   - Theme: Final spec acceptance check.

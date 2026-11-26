@@ -1,183 +1,146 @@
 # Plan: 知识库按空间自动授权 Bot
 
 ## Approach
-采用“权威 Bot 事实可靠投递，知识提供方本地计算有效权限”。Avernet 不保存第二套知识授权，也不向每个 Bot×知识库批量写人工授权；提供方用入驻区间、开关区间与稀疏人工选择表达资格。沿用现有任务队列和生命周期补偿模式，新增独立 Bot 事实合同，不能把人员成员快照当作 Bot 名册。
+TC 感知 Bot 新建、转入、移出、删除和 Owner 转交，可靠调用 ECB 的授权/撤权能力。自动操作写入现有实际 grant；ECB 在现有 KB ext 保存每库开关，继续负责实际授权、鉴权和更新记录。列表、数量、状态、分页和内容访问继续读取现有 grant，不另算继承资格。
 
-本方案是待实施设计，所有新增字段、表和接口均未实现。交付分为 Avernet、ECB、企业工作台/装配三部分；单独完成 Avernet 不构成功能交付。公开仓库仅放提供方中立合同和公共实现；企业认证、连接配置及现场数据留在宿主仓库或私有验证记录。
+本次按评审意见替换旧方案。删除 Bot 归属投影、入驻历史接收、区间计算、effective v2、独立游标和相关初始化迁移。TC 为可靠执行保留必要的当前操作代次、人工取消标记与待处理意图，这些是执行控制状态，不是第二套访问权限事实；不传给 ECB 建立 Bot 名册。
+
+不预设新增表、认证体系或调度系统。先核对并复用现有 KB ext、Bot 扩展/生命周期记录、任务队列、授权 CAS、服务认证和活动能力；无法表达必要保证时，记录具体缺口并提出最小补充，禁止用“已有队列”冒充可靠捕获已经成立。
 
 ## Affected Components
-下列路径相对 Avernet；行号基于本次分支基线 `e1eebb459d`。
+路径相对 Avernet，行号为本分支基线 `e1eebb459d` 的证据，不代表新功能已存在。
 
-| Current source | Evidence / impact |
+| Source | Current behavior and change |
 | --- | --- |
-| `apps/backend/src/agentclaw/community/core/repository/implementations/bot/initial_layout.py:30` | `insert` 和带初始布局的创建均需同事务捕获。 |
-| `apps/backend/src/agentclaw/community/core/repository/implementations/bot/mutations.py:82` | 普通移动入口；同文件 `:199` 是软删除入口。 |
-| `apps/backend/src/agentclaw/community/core/repository/implementations/bot/owner_handoff.py:306` | 转交最终事务内同时变更 Owner 与可能的空间；必须独立接入。 |
-| `apps/backend/src/agentclaw/community/core/repository/implementations/bot/recycle.py:177` | 回收终结事务需检查是否还有绕过普通删除的写路径。 |
-| `apps/backend/src/agentclaw/community/core/space_knowledge/membership_tasks.py:53` | 可复用队列补偿和生命周期模式，保留人员流的独立修订/确认。 |
-| `apps/backend/src/agentclaw/community/core/knowledge_management/services/service.py:158` | 已授权列表要求物理行 ID、正数 revision；需新增有效授权响应模式。 |
-| `apps/backend/src/agentclaw/community/adapters/knowledge_platform/grant_state_reader.py:10` | 当前拒绝 granted=true/revision=0；不能只删校验而不升级合同。 |
-| `apps/backend/src/agentclaw/community/adapters/knowledge_platform/catalog.py:266` | 授权列表、状态、目录和写操作的传输适配。 |
-| `apps/backend/src/agentclaw/community/adapters/http/knowledge_management/router.py:164` | 管理入口及新策略接口；业务校验留在服务/提供方。 |
+| `apps/backend/src/agentclaw/community/core/repository/implementations/bot/initial_layout.py:30` | 两个创建入口需要可靠记录授权工作。 |
+| `apps/backend/src/agentclaw/community/core/repository/implementations/bot/mutations.py:82` | 移动入口；同文件 `:199` 为删除入口，需要保留旧授权目标以便撤权。 |
+| `apps/backend/src/agentclaw/community/core/repository/implementations/bot/owner_handoff.py:306` | 转交最终事务变化 Owner 和可能的空间，需要保留原 grant 身份及选择状态。 |
+| `apps/backend/src/agentclaw/community/core/repository/implementations/bot/recycle.py:177` | 回收终结不得丢失未确认撤权工作。 |
+| `apps/backend/src/agentclaw/community/adapters/knowledge_platform/catalog.py:353` | 现有 set_grant 传 actor、Owner 和 expected_revision；优先复用。 |
+| `apps/backend/src/agentclaw/community/core/knowledge_management/services/service.py:158` | 列表展示真实授权行，继续沿用 ID 和 revision。 |
+| `apps/backend/src/agentclaw/community/adapters/knowledge_platform/grant_state_reader.py:10` | 状态批量读取和 CAS 校验保留，无自动虚拟授权例外。 |
+| `apps/backend/src/agentclaw/community/core/task_queue/repository/models.py:129` | active-only 去重只防并发排队，不是永久操作幂等或恢复凭据。 |
 
-现有边界：[知识管理](../../../apps/backend/src/agentclaw/community/core/knowledge_management/README.md)、[Bot 知识选择](../../../apps/backend/src/agentclaw/community/core/bot_knowledge/README.md)、[人员同步](../../../apps/backend/src/agentclaw/community/core/space_knowledge/README.md)、[架构规则](../../arch/arch.rules.md)、[协议测试](../../arch/protocol-contract-tests.md)。本次不改变 enabled、原生发布或人员权限的所有权。
+边界沿用[知识管理](../../../apps/backend/src/agentclaw/community/core/knowledge_management/README.md)、[Bot 知识选择](../../../apps/backend/src/agentclaw/community/core/bot_knowledge/README.md)及[架构规则](../../arch/arch.rules.md)。现有人员同步维持原职责，不扩展为 Bot 同步通道。
 
-宿主调查发现：ECB 开发分支仍以显式 Bot authorization store 判断访问；宿主 dev 与 ECB 分支目录布局不同，不能拿宿主 dev 的旧 ECB 副本实施。ECB 在 `0731_ecb_dev` 基线上开发，工作台/企业装配在宿主 `dev` 基线上开发；实施前分别更新并记录精确基线、读取当地规则，独立 worktree 避免切换现有工作目录。公共分支已创建，不覆盖用户未跟踪资料。
+ECB 在宿主 `0731_ecb_dev` 基线上核对 knowledge_tenant 授权 service/store、KB ext 更新、活动及认证入口；工作台/企业装配在宿主 `dev`。实际实现前更新基线并读取当地规则，私有配置和现场资料不进入公共仓库。
 
 ## Data Model Changes
-以下为合同草图，SQL 类型和索引须对应公共 SQLite/PostgreSQL 与企业 MySQL 模式迁移；不执行生产 DDL。
-
-```python
-# apps/backend/src/agentclaw/community/kernel/knowledge_bot_membership.py (new)
-@dataclass(frozen=True)
-class KnowledgeBotFact:
-    subject_id: str       # 持久化实例标识；不由 owner_id 或显示名称构造
-    entity_id: str        # 现有稳定资源身份，仍与 bot_id、env 联合限定
-    bot_id: str
-    owner_id: str         # 可变化；不是执行主体或权限证明
-    environment: str
-    space_id: int | None  # 删除/无有效空间时允许为空，不能自动放行
-    incarnation: str     # 同名重建不能复用旧实例
-    residency_id: str    # 同空间转交不变，真实迁入重新生成
-    revision: int        # 本实例单调递增
-    deleted: bool
-```
-
-Bot 当前事实与不可变 outbox 分开：当前行按本地 Bot PK 和环境唯一；保留 tombstone 与 incarnation，避免 SQLite PK 重用导致旧权限复活。未知/歧义历史映射不生成推测身份。legacy NULL space 仅解析既有有效个人空间；NULL 归一化到同一有效空间不产生新入驻。
-
-```sql
--- apps/backend/sql/2026_11_26_knowledge_bot_sync.sql (new; logical keys)
--- current: subject_id PK, UNIQUE(env, bot_pk), incarnation, residency_id,
---          entity_id, bot_id, owner_id, space_id, revision, deleted
--- outbox: event_id PK, subject_id, bot_revision, space_id, space_sequence,
---         kind, payload, payload_hash, acknowledged_at, last_error
--- UNIQUE(subject_id, bot_revision, space_id, kind)
--- UNIQUE(env, space_id, space_sequence)
--- index pending acknowledgements + environment/space/sequence
--- stream: PRIMARY KEY(env, space_id), next_sequence, initialization_status
-```
-
-提供方增加可信 Bot 投影、入驻历史区间、每库策略及策略 ON 区间、当前入驻人工选择。只保存实际人工选择，不为自动获权者创建 grant/viewer 笛卡尔积。人工选择唯一键为 KB + subject + residency；Owner 改变不会重新分配此键。旧人工记录仅在当前可信实例/空间可唯一匹配时绑定到初始入驻，历史 false 同样保留；迁出后旧记录不参加新入驻计算，来源不明的旧 true 不自动恢复。
-
-```python
-# Provider effective-authorization contract (new; implementation owned by provider)
-eligible = live_subject and same_space and trusted_identity
-automatic = overlaps(residency_interval, kb_on_intervals)
-choice = manual_choice(kb_id, subject_id, residency_id)
-granted = eligible and (choice.value if choice.exists else automatic)
-# 原生 READ 与知识库可消费性仍是实际访问的附加必要条件。
-# OFF 关闭 ON 区间，已有交集保留；新入驻无交集则不获权。
-# 人工 false 覆盖自动资格；Owner 变化不改变 residency_interval。
-```
-
-### Ordering and policy boundaries
-开关与 Bot 入驻必须共享可证明的顺序，不能拿接收时间或两机墙钟推断“ON 期间新建”。每空间 outbox 序列包含 Bot 事实和策略屏障命令；创建/迁移/删除与该序列同事务提交。迁移产生旧空间退出、新空间进入记录，并携带同一递增 Bot revision；提供方旧空间记录只结束相应入驻，不能覆盖更高 revision 的当前事实。
-
-开关请求先通过提供方创建者校验，再以 request_id 和 expected_policy_revision 持久记录策略命令。提供方按空间顺序应用命令并再次校验权限及 CAS；失败记录明确错误，命令不会静默变成成功。ON/OFF 区间端点取命令序列；此前入驻必须先被应用。接口返回 PENDING 与 command_id 不等同于策略已生效；只有回查 APPLIED 才显示完成。重复 request_id 内容不一致拒绝；重复应用不重复动态。
-
-初始化先启用所有权威写入口的捕获，再以逐 Bot 锁内重读建立初始事实；完成屏障前不能启用自动策略。并发迁移/删除由实例 revision 与空间序列保护，回填不能用锁外旧快照覆盖新事实。初始化进度可恢复，不在普通读取中执行全量初始化。
-
-## API Changes
-保留旧显式授权合同作为独立兼容模式；新界面与消费者显式使用有效授权版本，不用旧 grant OR 新结果兜底。接口路径草图相对已有知识管理前缀，不包含部署地址。
-
-```ts
-// apps/backend/.../adapters/http/knowledge_management/schemas.py (wire sketch)
-type EffectiveGrant = {
-  subject_id: string; residency_id: string;
-  bot_id: string; owner_id: string; granted: boolean;
-  source: 'manual' | 'automatic' | 'none';
-  choice_revision: number; // 没有人工选择时为 0；不冒充 effective revision
-  effective_version: string; // 投影、策略、入驻及人工版本的不可混用令牌
-  grant_id: string | null; updated_by: string | null;
-  updated_at: string | null; // 自动资格不伪造人工历史
-};
-```
+ECB 开关存放现有 KB ext，缺字段视为 OFF。下面是建议的局部扩展键；实施时沿用实际 ext 更新/CAS 机制，不覆盖其他字段。版本字段只用于开关并发与旧任务校验，不是新授权模型。
 
 ```jsonc
-// Proposed BFF policy contract: .../spaces/{space}/knowledge-bases/{kb}/bot-policy
-// GET: creator capability and actual provider state
-{"enabled":false,"policy_revision":0,"can_update":true,"sync_status":"APPLIED"}
-// PUT: creator-only; return 202 while durable command awaits application
-{"enabled":true,"expected_policy_revision":0,"request_id":"opaque-client-id"}
-// response / command status
-{"command_id":"opaque","sync_status":"PENDING","policy_revision":0}
-// manual choice v2: stale residency or effective version returns conflict
-{"subject_id":"opaque","residency_id":"opaque","granted":false,
- "expected_choice_revision":0,"expected_effective_version":"opaque"}
+// ECB KnowledgeBaseRegistry.ext — additive key sketch
+{
+  "bot_auto_authorization": {
+    "enabled": false,
+    "revision": 0
+  }
+}
 ```
 
-分页使用提供方有效主体/目录索引，不以可空 grant_id 作为游标。新增 v2 opaque string cursor，绑定 KB/空间、查询版本与排序键；过期游标明确返回刷新错误，不把变化中的两页拼成完整快照。每页最多 20，批量状态一次最多 20；BFF 只批量补当页展示信息。列表 total 与同一有效策略查询计算；不得在前端遍历 Bot 逐个授权。旧 int cursor 路径在兼容期保留，但不能用于新自动策略显示。
+实际授权使用现有 grant 行及其 revision。TC 必须能持久区分当前 Bot 实例、当前连续空间归属、人工取消与生命周期撤权：同空间 Owner 转交保留取消；真实迁出再迁回重置本次取消，但旧任务仍失效。仅有一条 false grant 不足以判断取消原因，不能扫描 false 后全部恢复；需要从已确认操作来源及 TC 控制状态判定，未知来源保守保留并报告。
 
 ```python
-# apps/backend/src/agentclaw/community/core/knowledge_management/ports.py (additive)
-def read_bot_policy(self, *, space_id, kb_id, actor_id) -> dict: ...
-def validate_bot_policy(self, *, space_id, kb_id, actor_id, command) -> dict: ...
-def effective_bots(self, *, space_id, kb_id, actor_id, cursor, limit) -> dict: ...
-def effective_states(self, *, space_id, kb_id, actor_id, subjects) -> dict: ...
-def set_choice(self, *, space_id, kb_id, actor_id, command) -> dict: ...
+# TC existing lifecycle/task metadata — required semantics, not new table DDL
+# Resolve the actual storage seam in Task 1 before implementation.
+operation_id: str             # stable across retries
+bot_instance: str             # derived from authoritative identity; no name reuse
+control_generation: str       # changes on move/delete; not same-space handoff
+source_and_target: dict       # exact old/new Bot grant identities and KB scope
+expected_grant_revision: int  # captured before dispatch, never blindly refreshed
+policy_revision: int         # only applicable to automatic additions
+origin: str                  # automatic / manual / lifecycle
+progress: dict                # confirmed / pending / failed / outcome_unknown
 ```
 
-同一提供方策略必须接入：点查、批量过滤、已授权列表/数量、Bot 可用目录、启用前检查、draft/verify/online 目录及 MCP/内容请求。可信执行主体由现有认证链提供，不能用 Owner ID、非可信 Header 或显示字段替代。原生人员 READ 与 Bot 资格分开判断；人员/非 TC 调用保持原生流程。
+优先复用现有扩展及任务载荷；待处理撤权不得随 Bot 删除或任务历史清理消失。若现有持久载体不满足保留或原子更新，Task 1 给出具体证据和最小改动，不能先创建另一套事实表。无归属投影回填、区间迁移、全量历史 grant 改写或默认批量开放旧库。
+
+## Execution authority
+- 修改开关：仍只有 KB 创建者，ECB 后端用可信身份校验；有人工授权权限不等于有改开关权限。
+- 人工授权/取消：保持现有 actor 的 KB_MEMBER_MANAGE 和 recipient/native READ 规则及 CAS。
+- 自动任务：通过现有 TC→ECB 服务认证和明确的授权执行范围调用。操作发起人、执行主体和 Bot Owner 分开留痕；队列消息、开关 ON、actor_staff_no 字段都不是独立授权凭据，不能把创建者字段填上就视为委托。
+- Task 1 必须验证现有服务主体是否能在限定环境、KB/空间范围内执行自动授权，以及在 Owner 离开/转交/删除后执行旧关系撤权。现有 set_grant 会校验 actor 的 KB_MEMBER_MANAGE，不能假定后台天然有权限。
+- 如果已有委托/服务权限不足，记录最小执行授权缺口，补充现有能力的范围校验；不得切换为无条件管理员、冒充旧 Owner 或新建认证体系。无权时记录阻塞和恢复条件，权限恢复后重新校验再续作；不能以撤权失败冒充权限已收敛。
+- 新授权仍检查接收人及原生 READ，不无条件批量创建 viewer；实际消费继续执行原生鉴权。后台控制调用的权限不转移成人员 READ/WRITE 或管理权限。
+
+## Reliable execution and stale-work protection
+1. **可靠捕获。** Bot 权威变更与持久待办/恢复标记必须可靠绑定；优先同一真实事务写入既有载体，队列负责唤醒。企业普通 ORM 的 AUTOCOMMIT 不能提供多语句原子性，复用显式事务能力。写后一次 HTTP/enqueue 不够；只扫最终 Bot 当前态也会漏掉迁出迁回。
+2. **开启。** 开关保存成功与授权执行完成分开。可靠发现开关变化并建立可恢复批次，有界分页枚举当前 Bot，再逐项复核；保存开关后、创建任务前崩溃也必须被补偿发现。新增/转入通过生命周期待办接续，不依赖一次性扫描碰巧看到。
+3. **关闭。** 只停止未完成的新增自动授权，已有 grant 不撤销、人工取消不清除。撤权清理不受开关 OFF 影响；关闭前已发出、结果未知的授权须先回查再收尾，不能将其计入关闭批次新增数量。重新开启是新批次，不能复活旧任务。
+4. **逐次执行。** 发送前校验当前实例、空间、Owner、控制代次、开关版本、取消标记及权限。修改同一 grant 的自动/人工/生命周期操作需要可验证的并发控制；先读后写只解决已知过期，不能挡住读后发生的迁移。
+5. **接收端保护。** 复用 grant CAS 作为最终写入保护。旧请求携带原 expected_revision；迁出、删除、取消等使旧授权失效的操作，必须确认撤权或拒绝状态并推进 revision（必要时是 false→false 的屏障），否则无 grant 的迟到写仍可能获权。同名重建/迁回/Owner 身份切换也要处理旧目标键；未知旧请求未收口前不允许其覆盖新选择。若现有接口的同值写不推进 revision，最小补齐现有 mutation 合同并测试，而非仅加发送前检查。
+6. **冲突与未知。** 409 后重读当前事实重新决策，不能更新 expected_revision 后原样重试。超时先用现有状态/CAS及操作回执判断结果；单看 granted=true 不能认领是本任务成功。无法确认归属的成功不计数，标待核对。需要回执时复用既有操作元数据/活动能力，缺口在原接口最小补充，不新增授权读模型。
+7. **恢复。** 按当前待处理意图补队列；保留撤权目标、执行版本和确认结果直到收敛。重试不重复计数/活动，失败任务可恢复；active-only 队列去重不是持久幂等。跨进程并发、任务过期、旧 worker 延迟返回及任务清理都需故障注入验证。
+8. **Owner 转交。** 同空间承接人工 true/false、自动 true 和 OFF 后保留 true，按现有 owner-keyed grant 做受控迁移并撤销旧键，不靠新 Owner 查不到行就自动授权。迁移保留授权来源/取消语义，新主体仍过原生 READ；跨空间先清旧关系，再按目标库开关处理。部分成功留可恢复进度，不能伪报原子完成。
+
+## API Changes
+复用实际 grant 的点查、批量状态、列表/数量、整数游标和人工 CAS 写接口。Bot 配置、对话/服务阶段和实际内容读路径保持原有授权查询；用回归测试证明自动写出的 grant 能被它们直接消费。
+
+```python
+# apps/backend/src/agentclaw/community/adapters/knowledge_platform/catalog.py:353
+# Existing mutation shape remains the baseline.
+set_grant(kb_id=kb_id, actor_id=authorized_actor, bot_id=bot_id,
+          owner_id=owner_id, granted=desired,
+          expected_revision=observed_revision, bot_name=trusted_display)
+# Add only demonstrated gaps to this existing mutation family:
+# trusted operation origin/id, same-value fencing, verifiable receipt.
+```
+
+开关读写优先扩展既有 KB metadata/ext 的受控路径，不把通用 ext 覆盖接口直接交给浏览器。creator 校验、字段级更新/CAS、状态与授权批次进度是新增能力；URL/方法名在查明既有能力后定，不预设 effective API 或新的认证路由。进度明确区分策略已保存、任务待执行、部分完成、失败和已收敛。
+
+## Activity and count semantics
+ECB 继续拥有更新记录。一次开关动作只产生一条汇总记录；可更新同一记录的执行进度/最终数量，不能每次重试追加动态。自动单项 mutation 标明真实来源，不能调用默认人工活动路径刷一屏“人工授权”。人工取消/恢复仍逐条记活动。
+
+| Field | Meaning |
+| --- | --- |
+| 自动新增成功数 | 本次开启批次从未授权变为授权、且可归因于该操作并确认成功的去重 Bot 数；同 Bot 重试一次计数。 |
+| 已授权/跳过数 | 原已 true、人工取消、归属改变等分别统计，不并入新增成功数。 |
+| 失败/待确认数 | 单列；部分失败不报全量成功，结果未知不推算为成功。 |
+| 关闭汇总数 | 同一“本次实际新增成功数”口径，正常为 0；关闭不执行撤权。保留授权总数如需展示，另标名称并按实际 grant 查询。 |
+| 后续新建/转入 | 归各自生命周期任务，不回填已经完成的开启批次数量。 |
+
+开启批次保存分页进度与去重依据，枚举/目标校验完成且所有分项终结才结束；不宣称瞬时全空间一致快照。关闭时未确认的旧开启操作仍归旧批次，不能计入关闭结果。该口径与页面当前授权总数不同，UI 必须明确命名。
 
 ## Key Files
-新增文件的具体模块边界见下表；修改来源位置见 Affected Components，实施前再次核对移动后的行号。
+公共目录缩写相对 `apps/backend/src/agentclaw/community/`，测试相对 `apps/backend/`。新增文件仅为按职责拆分的候选，不新增事实表。
 
-| Work unit | Files / ownership |
+| Work | Files |
 | --- | --- |
-| Public contract | `kernel/knowledge_bot_membership.py`、`plugin_api/knowledge_bot_membership.py`、`core/knowledge_management/ports.py` |
-| Durable capture | `core/knowledge_bot_sync/{README.md,models.py,repository.py,capture.py}`、`core/repository/protocols/bot/knowledge_effects.py`、`sql/2026_11_26_knowledge_bot_sync.sql` |
-| All writers | `core/repository/implementations/bot/{initial_layout.py,mutations.py,owner_handoff.py,recycle.py}`、`core/repository/implementations/spaces/space.py`（有效个人空间创建/退休的必要影响） |
-| Delivery/bootstrap | `core/knowledge_bot_sync/{delivery.py,tasks.py,bootstrap.py}`、`di/modules/knowledge_bot_sync_module.py`、`configs/` 中既有 user-config 装配 |
-| BFF/provider adapter | `adapters/knowledge_platform/{catalog.py,grant_state_reader.py,bot_policy.py}`、`adapters/http/knowledge_management/{router.py,schemas.py,errors.py}`、`core/knowledge_management/services/service.py` |
-| Consumers | `core/bot_knowledge/{service.py,stage_selection.py}`、`core/knowledge_management/services/conversation.py`、`api/knowledge_management_service.py`；若公共接口纯透传，使用合同测试证明无需改动 |
-| Knowledge | 新模块 README、既有知识管理/Bot 知识 README、Backend README 导航、`verification.md` |
-
-表中 `core/`、`kernel/`、`api/`、`di/`、`plugin_api/`、`adapters/`、`configs/` 均相对 `apps/backend/src/agentclaw/community/`；`sql/` 相对 `apps/backend/`。
-
-宿主文件分别在正确基线定位：ECB 的 knowledge_tenant Bot authorization/catalog/store、实际内容权限门禁与 router/schema；工作台 `internal/knowledge/components/AuthorizedBotsPanel.tsx`、授权对话框、`domain.ts` 和管理 service/controller；企业 database adapter、身份 resolver、DI 及 Avernet gitlink。不要将这些私有实现复制进公开仓库。
+| Grant orchestration | `core/knowledge_management/services/auto_authorization.py`（新增）、`ports.py`、`services/service.py` |
+| Durable capture | `core/repository/implementations/bot/{initial_layout.py,mutations.py,owner_handoff.py,recycle.py}`、既有任务 repository/生命周期装配；实际扩展载体在 Task 1 固定 |
+| Policy/mutation adapter | `adapters/knowledge_platform/catalog.py`、`adapters/http/knowledge_management/{router.py,schemas.py,errors.py}`、`api/knowledge_management_service.py` |
+| Consumers (regression first) | `core/bot_knowledge/{service.py,stage_selection.py}`、`core/knowledge_management/services/conversation.py`、`adapters/knowledge_platform/grant_state_reader.py` |
+| Provider/host | ECB KB ext、Bot authorization service/store、活动、既有认证；宿主 DI/database、工作台 `internal/knowledge/` 的 panel/domain/service/controller、Avernet gitlink |
+| Knowledge/tests | 知识管理 README、Backend 导航、相关合同/接口/数据库/消费者/工作台测试；本目录 `verification.md` 在实施时记录证据 |
 
 ## Alternatives Considered
-- 每个 Bot×KB 写自动 grant：放大数据与活动量，掩盖来源，不采用。
-- 当前同空间且开关 ON 即获权：关闭会丢资格，不满足 AC05，不采用。
-- 将 Owner 纳入例外主键：同空间转交重置人工取消，不采用。
-- 仅发写后事件/定时扫描当前态：崩溃丢事件且看不到迁出迁回，不采用；采用同事务 outbox 与入驻历史。
-- 仅按提供方收到事件的时间计算开关区间：网络延迟会改变结果，不采用；采用空间序列与策略屏障。代价是开关可能异步完成，需要命令状态和失败恢复。
-- 扩充现有人员整表快照：职责、限额和修订语义不同；复用队列/生命周期模式，不改变现有人员合同。
+- ECB 投影 Bot 归属并计算继承权限：职责扩大且改造读链，按本轮裁决移除。
+- 自动任务调用现有实际 grant：采用；存在写放大，以有界批次、限流、重试和汇总活动控制，不隐瞒逐关系写入成本。
+- 只依靠队列去重或发送前校验：不能覆盖崩溃和在途旧写，不采用；必须结合可靠控制状态与接收端 CAS/屏障。
+- 预设新表或新服务认证：缺少必要性证据，不采用；先验证既有载体和授权能力，最小补齐真实缺口。
 
 ## Migration / Rollout
-1. 先交付 provider v2 合同及默认关闭的存储能力，再部署公共/企业捕获代码和 DDL；所有写进程切换到真实事务和 capture 后才初始化。
-2. 企业普通 orm_session 的 AUTOCOMMIT 不能承担该写单元。使用既有 transactional_orm_session，源变更、当前事实、空间序列及 outbox 一起提交；事务失败必须抛错且全部回滚。源码观察不代替真实驱动测试。
-3. 回填可唯一解析的既有 Bot/人工选择并完成同步屏障；所有库仍 OFF。歧义数据生成定向报告并拒绝自动复活，不全量清 false。
-4. 提供方与全部消费者先支持有效判断，再启用界面；迁移/撤权保护不能靠旧路径 OR 兜底。版本能力不足时显示不可用，不返回空列表伪装成功。
-5. 回滚首先关闭新增策略命令入口，保持事实捕获与有效权限执行。不能通过全库 OFF 恢复旧语义（OFF 保留资格），不能删 tombstone/outbox 或退回 grant-only 放行；无法保留安全链路时停用受影响消费。
-6. 生产 DDL、初始化、部署和 gitlink 发布单独授权。本阶段只写迁移文件和受控验证方案；不执行线上操作。
+新旧 KB 缺开关字段均 OFF，保留既有 grant true/false；不上线自动授权旧库。删除旧方案的 Bot 投影初始化与数据迁移任务，开启时按需枚举现有 Bot 并写实际 grant。
+
+先完成执行权限、可靠捕获、CAS 旧写保护和活动来源，再开放开关；公开环境保持可独立测试。扩展字段局部更新，不覆盖其他 ext。任何新增持久结构需由复用调查证明必要，不能把本方案当 DDL 授权。
+
+回滚时停止新自动增权，保留待处理撤权、未知结果回查和恢复记录；不能清空队列或控制状态后宣称完成。真实 grant 读路径不切换，已经成功授予的访问按既有授权继续保留。发布、生产数据操作和部署另行授权。
 
 ## Test Strategy
-先按行为补失败测试，再实现。测试必须覆盖真实持久化/消费者调用，不能只验证 DTO 或 mock 自己的方法。
+按 spec AC01–AC12 建立实际 grant、页面与新发起内容访问断言；不以任务入队/HTTP 200 代替收敛。
 
 ```python
-# apps/backend/tests/community/core/knowledge_bot_sync/test_capture.py (new)
-def test_source_and_outbox_rollback_together(): ...
-def test_same_space_handoff_preserves_residency(): ...
-def test_move_out_and_back_rotates_residency_even_before_delivery(): ...
-def test_delete_recreate_never_reuses_subject(): ...
-def test_bootstrap_reloads_under_lock_and_never_overwrites_delete(): ...
-def test_policy_barrier_orders_before_and_after_arrivals(): ...
-# apps/backend/tests/community/core/knowledge_bot_sync/test_delivery.py (new)
-def test_crash_after_apply_before_ack_is_idempotent(): ...
-def test_stale_ack_and_reordered_moves_do_not_restore_old_space(): ...
+# apps/backend/tests/community/core/knowledge_management/test_auto_authorization.py (new)
+def test_missing_ext_defaults_off_and_creator_only_toggle(): ...
+def test_automatic_execution_requires_existing_scoped_authority(): ...
+def test_manual_revoke_beats_delayed_auto_grant_cas(): ...
+def test_same_value_revoke_fences_late_grant_with_no_prior_row(): ...
+def test_reentry_invalidates_old_revoke_and_resets_current_exception(): ...
+def test_same_space_owner_handoff_preserves_all_four_states(): ...
+def test_unknown_receipt_is_not_counted_as_success(): ...
+def test_toggle_summary_counts_only_confirmed_new_grants_once(): ...
 ```
 
-提供方测试独立覆盖 ON/OFF 区间交集、false 优先、稀疏 grant、同空间 Owner 承接、原生 READ、策略创建者权限、活动幂等、版本冲突和分页。企业驱动测试注入第二写失败，检查 Bot 与 outbox 同回滚，并验证真实隔离级别、行锁与提交；公共 SQLite 结果不能代替该证据。
+另测 Bot 写后/入队前退出、开关保存后/排队前退出、grant 已提交但回执丢失、旧 worker 返回、队列清理、企业事务回滚、无权撤旧 Owner 关系和权限恢复。企业 AUTOCOMMIT/真实驱动证据单列；不能只以 SQLite 测试证明可靠性。回归沿用 `tests/community/core/bot_knowledge/`、`tests/community/endpoints/test_knowledge_management.py`、`tests/community/contracts/test_knowledge_catalog.py` 和架构/DI 检查；宿主验证现有列表、计数、整数分页及实际检索无需 effective v2。
 
-```bash
-# apps/backend/ — 既有回归；新增 suite 在实施时加入同一次运行
-DEPLOY_PROFILE=test uv run --no-sync pytest -q \
-  tests/community/core/space_knowledge tests/community/core/bot_knowledge \
-  tests/community/endpoints/test_knowledge_management.py \
-  tests/community/endpoints/test_bot_knowledge_router.py \
-  tests/community/contracts/test_knowledge_catalog.py \
-  tests/community/architecture
-```
-
-增加 `tests/community/contracts/test_knowledge_bot_membership.py` 的消费者调用证明、新增模块边界注册及 DI 完整装配测试；HTTP 变更另跑 Backend README 的 fast gate。受控组合场景逐项覆盖 spec AC01–AC12，保存运行版本与结果；至少区分公共测试、企业驱动、工作台、实际内容访问、发布/部署状态。未运行项标 UNVERIFIED，不能仅用 HTTP 200 或 grant 行存在表示通过。
+设计文档修改本身只检查一致性、引用和格式；上述功能测试均待实施，不宣称已通过。
