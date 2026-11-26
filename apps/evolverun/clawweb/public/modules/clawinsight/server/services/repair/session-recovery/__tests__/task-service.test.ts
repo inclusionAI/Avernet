@@ -95,7 +95,7 @@ describe("self-healing task orchestration", () => {
       });
       expect(agent.release).toHaveBeenCalledOnce();
     });
-  it("retries card creation if the first request never left the notifier", async () => {
+  it("does not retry failed card creation from maintenance", async () => {
     let now = 40000;
     const { service, records, deps } = setup(false, () => now);
     const { task_id } = await service.create(request, actor); await flush();
@@ -104,16 +104,16 @@ describe("self-healing task orchestration", () => {
     task.ownerRequest = { requestId: "r1", revision: 1, status: "pending", reason: "permission", summary: "权限", instructions: "申请权限", evidence_ids: [], resumePhase: "assess", createdAtMs: 1 };
     const notify = vi.fn().mockRejectedValueOnce(new DingTalkCardNotDispatchedError(new Error("token unavailable"))).mockResolvedValueOnce(true);
     deps.notifier.notifyOwnerRequest = notify;
-    await service.maintenance(); await flush();
+    await service.setTaskShared(task_id, true, actor); await flush();
     expect(records.get(task_id)?.timeline.at(-1)?.payload).toMatchObject({ operation: "create", dispatched: false });
 
     now += 61000;
     await service.maintenance(); await flush();
-    expect(notify.mock.calls.map(([input]) => input.updateOnly)).toEqual([false, false]);
-    expect(records.get(task_id)?.timeline.at(-1)?.payload).toMatchObject({ operation: "create", state: "sent" });
+    expect(notify.mock.calls.map(([input]) => input.updateOnly)).toEqual([false]);
+    expect(records.get(task_id)?.timeline.at(-1)?.payload).toMatchObject({ operation: "create", dispatched: false });
   });
 
-  it("reconciles a crashed card send with bounded updates of the same instance, retaining unknown delivery", async () => {
+  it("does not reconcile a crashed card send from maintenance", async () => {
     let now = 40000;
     const { service, records, deps } = setup(false, () => now);
     const { task_id } = await service.create(request, actor); await flush();
@@ -124,11 +124,11 @@ describe("self-healing task orchestration", () => {
     task.timeline.push({ event_id: `${key}-0`, at_ms: 1, kind: "notification", actor: "service", summary: "发送中", payload: { channel: "owner_card", notification_key: key, state: "sending", operation: "create", owner_request_id: "r1" } });
     const notify = vi.fn().mockResolvedValue(true); deps.notifier.notifyOwnerRequest = notify;
     await service.maintenance(); await flush();
-    expect(notify).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ updateOnly: true }));
-    expect(records.get(task_id)?.timeline.at(-1)?.payload).toMatchObject({ state: "unconfirmed", sent: false, synced: true });
-    await service.maintenance(); await flush(); expect(notify).toHaveBeenCalledOnce();
-    now = 200000; await service.maintenance(); await flush(); expect(notify).toHaveBeenCalledTimes(2);
-    now = 400000; await service.maintenance(); await flush(); expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify).not.toHaveBeenCalled();
+    now = 200000; await service.maintenance(); await flush();
+    now = 400000; await service.maintenance(); await flush();
+    expect(notify).not.toHaveBeenCalled();
+    expect(records.get(task_id)?.timeline.at(-1)?.payload).toMatchObject({ state: "sending", operation: "create" });
   });
   it("repairs a late old card write with the latest request instead of leaving a stale button", async () => {
     const { service, records, deps } = setup();
@@ -138,9 +138,9 @@ describe("self-healing task orchestration", () => {
     let finishOld!: (value: boolean) => void;
     const notify = vi.fn().mockImplementationOnce(() => new Promise<boolean>(resolve => { finishOld = resolve; })).mockResolvedValue(true);
     deps.notifier.notifyOwnerRequest = notify;
-    await service.maintenance(); await flush();
+    await service.setTaskShared(task_id, true, actor); await flush();
     records.get(task_id)!.ownerRequest = { ...task.ownerRequest, requestId: "r2", revision: 2, instructions: "仍缺写权限" };
-    await service.maintenance(); await flush();
+    await service.setTaskShared(task_id, false, actor); await flush();
     finishOld(true); await flush();
     expect(notify).toHaveBeenCalledTimes(3);
     expect(notify.mock.calls[2][0]).toMatchObject({ updateOnly: true, task: { ownerRequest: { requestId: "r2", instructions: "仍缺写权限" } } });

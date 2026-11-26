@@ -103,8 +103,6 @@ export type RecoveryTaskState = {
   ownerDeadlineAt: number | null;
   /** Absent on legacy tasks and ordinary terminal Owner handoffs. */
   ownerRequest?: RecoveryOwnerRequest;
-  /** Durable notification work marker, including terminal tasks; not a business wait. */
-  ownerCardSyncPending?: boolean;
   plan: (RecoveryPlan & { digest: string; approvedAt: number | null }) | null;
   judgment: RecoveryJudgment | null;
   /** Agent-authored overall closeout summary; absent on legacy tasks or failed generation. */
@@ -178,6 +176,5 @@ export interface RecoveryTaskStore {
   failResult(taskId: string, resultVersion: number, attempt: number): Promise<void>;
   acknowledgeResult(taskId: string, resultVersion: number, attempt: number): Promise<void>;
   listForReporting?(limit: number, afterTaskId: string, controlPlaneEnvironment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment): Promise<{ tasks: RecoveryStoredTask[]; nextTaskId: string }>;
-  listForMaintenance?(limit: number, afterTaskId?: string, environment?: import("../common/task-control-plane.js").AgentControlPlaneEnvironment,
-    includeEffectResumeSlots?: boolean): Promise<Array<RecoveryStoredTask | RecoveryMaintenanceTask>>;
+  listForMaintenance?(limit: number, afterTaskId?: string, environment?: import("../common/task-control-plane.js").AgentControlPlaneEnvironment): Promise<Array<RecoveryStoredTask | RecoveryMaintenanceTask>>;
 }

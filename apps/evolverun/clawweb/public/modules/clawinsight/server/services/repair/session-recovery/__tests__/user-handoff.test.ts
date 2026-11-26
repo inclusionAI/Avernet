@@ -93,17 +93,21 @@ it.each([
   expect((await current(saved.taskId)).timeline.filter(event => event.kind === "owner_decision" && event.payload.owner_request_id === requestId)).toHaveLength(1);
 });
 
-it("keeps terminal tasks with unfinished card synchronization in maintenance after a restart", async () => {
+it("does not scan or resend terminal Owner cards during maintenance", async () => {
   const task = await create();
-  await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1, status: "completed", ownerCardSyncPending: true,
+  await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1, status: "completed",
     ownerRequest: { requestId: "r1", revision: 1, status: "confirmed", reason: "permission", summary: "权限", instructions: "已处理，等待实际核验", evidence_ids: [], resumePhase: "assess", createdAtMs: now } }));
-  expect((await tasks.listForMaintenance(200)).map(value => value.taskId)).toContain(task.taskId);
+  // Existing persisted markers must no longer keep a terminal task in the maintenance scan.
+  const row = (await repo.findTask(task.taskId))!;
+  await db.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?",
+    [JSON.stringify({ ...JSON.parse(row.config_json!), ownerCardSyncPending: true }), task.taskId]);
   notifier.notifyOwnerRequest = vi.fn().mockResolvedValue(true);
-  await service.maintenance();
-  await vi.waitFor(async () => expect((await current(task.taskId)).ownerCardSyncPending).toBe(false));
   expect((await tasks.listForMaintenance(200)).map(value => value.taskId)).not.toContain(task.taskId);
+  await service.maintenance();
+  expect(notifier.notifyOwnerRequest).not.toHaveBeenCalled();
   expect((await current(task.taskId)).status).toBe("completed");
 });
+
 async function toObserve(task: RecoveryStoredTask) {
   const sent = await agent.retryMessage(task, { clientRequestId: "initial-advice", purpose: "发送针对性继续建议", message: "请核对权限错误后继续原任务" });
   await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message", summary: "原Bot可以自行调整调用，已发送建议", evidence_ids: [sent.evidenceId] });

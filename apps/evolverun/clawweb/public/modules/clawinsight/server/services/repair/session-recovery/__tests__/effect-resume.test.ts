@@ -80,8 +80,23 @@ it("keeps new starts on later pages ahead of resumption and avoids hydrating the
   await service.maintenance();
   await vi.waitFor(() => expect(start.mock.calls.map(([task]) => task.taskId)).toEqual(["zzz-new", "000-due"]));
   expect(getObject.mock.calls.length).toBeLessThan(25);
-  expect(query.mock.calls.filter(([sql]) => sql.includes("ORDER BY task_id ASC LIMIT"))).toHaveLength(3);
+  expect(query.mock.calls.filter(([sql]) => sql.includes("ORDER BY task_id ASC LIMIT"))).toHaveLength(2);
 });
+
+it.each([[0, 1], [181, 1], [200, 2], [201, 2], [400, 3]])(
+  "processes all %i maintenance tasks in %i scans without querying past a short page",
+  async (count, scans) => {
+    const ids = Array.from({ length: count }, (_, index) => `task-${String(index).padStart(3, "0")}`);
+    for (const id of ids) await seed(id, { status: "running", phase: "assess", effectWait: undefined });
+    const list = vi.spyOn(tasks, "listForMaintenance");
+    await service.maintenance();
+    expect(start.mock.calls.map(([task]) => task.taskId)).toEqual(ids);
+    expect(list).toHaveBeenCalledTimes(scans);
+    expect(list.mock.calls.map(([, cursor]) => cursor)).toEqual([
+      "", ...ids.filter((_, index) => (index + 1) % 200 === 0),
+    ]);
+  },
+);
 
 it("shares two slots across maintenance workers and holds them until the AIS step is terminal", async () => {
   await enable();
@@ -209,4 +224,67 @@ it("applies live interval and closes if the next round cannot fit in the configu
   await service.maintenance();
   expect(await current("next-fits")).toMatchObject({ status: "running", effectWait: { resumes: 1 } });
   expect(await current("next-too-late")).toMatchObject({ status: "completed", judgment: { effect: "unknown" } });
+});
+
+it.each(["completed", "failed", "canceled"] as const)("keeps a %s business result indexed until AIS settlement, including with resumption disabled", async status => {
+  const slot = { firstExecutionNo: 1, lastExecutionNo: 1 };
+  await seed("settlement", { status, effectResumeSlot: slot });
+  await repo.createStep({ taskId: "settlement", stepId: "settlement-AIS-1", stepType: "agent_execution", stepNo: -1, command: "session_recovery" });
+  await db.exec("UPDATE ce_steps SET status = 'canceled', bot_run_id = 'job', bot_response_json = ? WHERE step_id = ?",
+    [JSON.stringify({ evolve_cancel: { status: "remote_stop_failed" } }), "settlement-AIS-1"]);
+  const raw = (await repo.findTask("settlement"))!;
+  expect(raw.status).toBe("settling");
+  expect(JSON.parse(raw.config_json!)).toMatchObject({ status, effectResumeSlot: slot });
+  expect((await tasks.listForMaintenance(200, "", "pre")).map(task => task.taskId)).toContain("settlement");
+  const before = await current("settlement");
+  deps.agent.effectResumeJobEnded = vi.fn().mockResolvedValue(false);
+  await service.maintenance();
+  expect(await current("settlement")).toMatchObject({ status, effectResumeSlot: slot, version: before.version });
+  expect(start).not.toHaveBeenCalled();
+  vi.mocked(deps.agent.effectResumeJobEnded).mockResolvedValue(true);
+  await service.maintenance();
+  const after = await current("settlement");
+  expect(after).toMatchObject({ status, version: before.version + 1, pending_results: before.pending_results, timeline: before.timeline });
+  expect(after.effectResumeSlot).toBeUndefined();
+  expect((await repo.findTask("settlement"))!.status).toBe(status);
+  expect(await tasks.settleEffectResumeSlot("settlement", slot, async () => true)).toBe(false);
+  expect(await tasks.update("settlement", before.version, value => ({ ...value, version: value.version + 1 }))).toBeNull();
+  expect((await tasks.listForMaintenance(200)).map(task => task.taskId)).not.toContain("settlement");
+});
+
+it("rejects a result-delivery snapshot taken before slot cleanup instead of resurrecting the slot", async () => {
+  const slot = { firstExecutionNo: 1, lastExecutionNo: 1 };
+  await seed("delivery-race", { status: "completed", effectResumeSlot: slot });
+  await repo.createStep({ taskId: "delivery-race", stepId: "delivery-race-AIS-1", stepType: "agent_execution", stepNo: -1, command: "session_recovery" });
+  await db.exec("UPDATE ce_steps SET status = 'succeeded' WHERE step_id = ?", ["delivery-race-AIS-1"]);
+  const raw = JSON.parse((await repo.findTask("delivery-race"))!.config_json!);
+  raw.resultDelivery = [{ objectKey: "fixture", sha256: "fixture", resultVersion: 7, attempts: 0, retryAfterMs: 0 }];
+  await db.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify(raw), "delivery-race"]);
+  const exec = db.exec.bind(db);
+  const intercept = vi.spyOn(db, "exec").mockImplementation(async (sql, params) => {
+    if (sql.includes("AND JSON_EXTRACT(config_json, '$.version') = ?")) {
+      expect(await tasks.settleEffectResumeSlot("delivery-race", slot, async () => true)).toBe(true);
+    }
+    return exec(sql, params);
+  });
+  try { expect(await tasks.claimResult("delivery-race", 7)).toBeNull(); }
+  finally { intercept.mockRestore(); }
+  const stored = (await repo.findTask("delivery-race"))!;
+  expect(stored.status).toBe("completed");
+  expect(JSON.parse(stored.config_json!)).toMatchObject({ version: raw.version + 1, resultDelivery: [{ resultVersion: 7, attempts: 0 }] });
+  expect(JSON.parse(stored.config_json!).effectResumeSlot).toBeUndefined();
+});
+
+it("uses only status predicates for every maintenance candidate page", async () => {
+  await seed("ordinary-terminal", { status: "completed" });
+  const query = vi.spyOn(db, "query");
+  await tasks.listForMaintenance(200);
+  await tasks.listForMaintenance(200);
+  const scans = query.mock.calls.filter(([sql]) => sql.includes("ORDER BY task_id ASC LIMIT"));
+  expect(scans).toHaveLength(2);
+  for (const [sql, params] of scans) {
+    expect(sql).toContain("'settling'");
+    expect(sql).not.toMatch(/LIKE|JSON_EXTRACT|\bOR\b/);
+    expect(params).toEqual(["", 200]);
+  }
 });
