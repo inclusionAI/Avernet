@@ -33,8 +33,8 @@ from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.obs
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
     validate_event_body,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
     ContextCollabStatusProjection,
@@ -106,7 +106,7 @@ class ContextService(ContextServiceProtocol, Generic[StateT]):
 
     def create_collet(
         self, command: ColletCreateCommand, context: ActorContext
-    ) -> Collet:
+    ) -> LegacyCollet:
         self._authorizer.check_create_collet(command=command, actor=context)
         return self._repository.create_l4_collet(command, context.actor).collet
 
@@ -179,7 +179,7 @@ class ContextService(ContextServiceProtocol, Generic[StateT]):
         if start_command is not None:
             if status.task is None:
                 task_creation = prepare_root_task(status, start_command)
-                # G1/G4 see the exact candidate Work and the unchanged Collet,
+                # G1/G4 see the exact candidate Work and the unchanged LegacyCollet,
                 # participation and method evidence. No write has happened yet.
                 status = status.with_task(task_creation)
             elif (

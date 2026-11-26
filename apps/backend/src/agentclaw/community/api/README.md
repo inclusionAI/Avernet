@@ -103,6 +103,8 @@ untangling first: `baas_service.py`, `bot_build_service.py`,
 ```yaml
 purpose: "Service API Protocols — transport-agnostic contracts between adapters and core services."
 provides:
+  - ProductProfileServiceProtocol
+  - RolloutProgressServiceProtocol
   - TaskCommissionServiceProtocol  # Product use cases and binding-scoped Swarm controls
   - BotOwnershipSyncProtocol
   - CollaborationRepairServiceProtocol   # defined in its owning core module, re-exported by collaboration_repair_service.py
@@ -143,6 +145,8 @@ consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.core.task.context_collab.l5_methods.rollout_progress_protocol
+  - agentclaw.community.core.task.context_collab.l6_products.product_profile_service.contracts
   - agentclaw.community.core.task.todos.source_service_protocol  # Todo source-import Service API contract re-export
   - agentclaw.community.core.bot_management.managed_bots_protocol
   - agentclaw.community.core.task.bot_grant_reconciliation_service_protocol  # Owned-Bot secbaas grant compensation Service API re-export

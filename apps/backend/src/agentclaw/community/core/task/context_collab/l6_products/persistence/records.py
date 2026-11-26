@@ -21,8 +21,8 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
@@ -81,7 +81,7 @@ class CreateColletRecordRequest:
 class _RecordView:
     """Compatibility views generated from Collet/Task and plain facts."""
 
-    collet: Collet
+    collet: LegacyCollet
     creation_facts: dict
     task: Task | None
 
@@ -113,7 +113,7 @@ class _RecordView:
 class ContextCreatedRecord(_RecordView):
     """New Collet, identified Task and creation evidence in one transaction."""
 
-    collet: Collet
+    collet: LegacyCollet
     creation_facts: dict
     task: Task
     initial_event: EventRecord
@@ -124,7 +124,7 @@ class ContextCreatedRecord(_RecordView):
 class ContextStatusRecord(_RecordView):
     """Current Collet, independent Task, event history and plain creation facts."""
 
-    collet: Collet
+    collet: LegacyCollet
     creation_facts: dict
     task: Task | None
     events: list[EventRecord]
@@ -149,7 +149,7 @@ class EventAppendedRecord(_RecordView):
     """Saved Event, Collet revision and root Task; views are derived only."""
 
     event: EventRecord
-    collet: Collet
+    collet: LegacyCollet
     creation_facts: dict
     task: Task | None
 

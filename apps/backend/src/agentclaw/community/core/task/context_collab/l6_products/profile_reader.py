@@ -3,7 +3,7 @@
 from typing import Protocol, runtime_checkable
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductCapabilities,
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
 )
 
 
@@ -15,5 +15,5 @@ class ProductProfileReader(Protocol):
     an implementation for pure authoring and explicitly isolated tests.
     """
 
-    def get(self, product: str, version: int) -> ProductProfileDefinition: ...
+    def get(self, product: str, version: int) -> LegacyProductConfiguration: ...
     def capabilities(self) -> ProductCapabilities: ...

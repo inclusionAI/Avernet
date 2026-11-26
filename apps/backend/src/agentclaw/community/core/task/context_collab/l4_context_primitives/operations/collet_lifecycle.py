@@ -31,8 +31,8 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.conte
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine import (
     resolve_transition,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
     ColletState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
@@ -185,7 +185,7 @@ class ColletLifecycleService:
 
     @staticmethod
     def _assert_guard(
-        collet: Collet,
+        collet: LegacyCollet,
         executor_id: str | None,
         context: ActorContext,
     ) -> None:

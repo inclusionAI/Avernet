@@ -31,7 +31,7 @@ from agentclaw.community.core.task.todos.collaboration.in_process import (
 )
 
 from agentclaw.community.core.task.todos.collaboration.context_runtime import TodoContextRunResult
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import Collet, ColletState
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import LegacyCollet, ColletState
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import EventRecord
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import PrincipalRef
 
@@ -117,7 +117,7 @@ class _RecordingContextService:
 
     def create_collaboration(self, command, context):
         self.create_calls.append((command, context))
-        return Collet(
+        return LegacyCollet(
             collet_id=_CONTEXT_ID, initiator_ref=context.actor,
             state=ColletState.CREATED, scope=command.to_space, version=1,
         )

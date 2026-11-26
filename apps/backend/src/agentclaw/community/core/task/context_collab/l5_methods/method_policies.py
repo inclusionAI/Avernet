@@ -58,4 +58,19 @@ class SwarmWorkflowPolicy:
             raise ContextCollabValidationError("Swarm workflow requires a typed DAG")
 
 
-MethodPolicy: TypeAlias = OpenMethodPolicy | SwarmMethodPolicy | SwarmWorkflowPolicy
+@dataclass(frozen=True)
+class SwarmStagesPolicy:
+    """Capabilities for YAML-owned stages, never a second authored stage graph."""
+    execution_ref: str
+    acceptance_ref: str
+    overall_acceptance: Literal["stages", "owner"]
+    method: Literal["Swarm"] = field(default="Swarm", init=False)
+
+    def __post_init__(self) -> None:
+        if any(type(v) is not str or not v.strip() for v in (self.execution_ref, self.acceptance_ref)):
+            raise ContextCollabValidationError("stage execution/acceptance capability refs are required")
+        if self.overall_acceptance not in {"stages", "owner"}:
+            raise ContextCollabValidationError("overall acceptance must be explicit")
+
+
+MethodPolicy: TypeAlias = SwarmStagesPolicy | OpenMethodPolicy | SwarmMethodPolicy | SwarmWorkflowPolicy

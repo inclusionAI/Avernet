@@ -90,6 +90,8 @@ The worker runtime builds the injector and attaches it to the application.
 `di/modules/` binds services and Protocol aliases; `di/profile_modules.py`
 selects the infrastructure column. Prefer constructor injection for services
 and `Injected(Protocol)` at HTTP boundaries; do not add service-locator calls.
+The [product runtime v2 guide](src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md) documents the five-method ProductProfile API, durable rollouts, required host capabilities and legacy cutover.
+
 Task/context_collab composition fragments live in
 [`di/modules/task/`](src/agentclaw/community/di/modules/task/); the existing
 `TaskModule` and `TaskPersistenceModule` remain the aggregate entrypoints.

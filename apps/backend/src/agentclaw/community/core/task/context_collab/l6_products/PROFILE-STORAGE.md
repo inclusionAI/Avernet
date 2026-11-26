@@ -1,5 +1,13 @@
 # Published ProductProfile storage and Swarm DAG configuration
 
+## New runtime/configuration storage
+
+New creation uses [ProductProfileService v2](product_profile_service/README.md)
+and its [five-table DDL](../sql/2026_11_26_product_runtime_v2.sql). The publication,
+string IDs and process-local Methods below belong to **legacy v1** only.
+V2 configuration durability and execution recovery have separate explicit
+contracts; v1 SQL Task rows are not a recoverable v2 runtime snapshot.
+
 Owner: L6 product composition. Production assembly uses `ProductProfileReader`
 backed by `SqlProductProfileRepository`; `ProductCatalog` remains an immutable
 snapshot for pure authoring, explicit test assemblies and capability projection.

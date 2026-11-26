@@ -16,7 +16,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_profile impo
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductCapabilities,
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     VersionedProfileRef,
 )
 from agentclaw.community.core.task.context_collab.l6_products.validation import (
@@ -27,8 +27,8 @@ from agentclaw.community.core.task.context_collab.l6_products.validation import 
 class ProductCatalog:
     """Exact version lookup; product teams may supply definitions without extending the ID enum."""
 
-    def __init__(self, definitions: tuple[ProductProfileDefinition, ...]) -> None:
-        indexed: dict[VersionedProfileRef, ProductProfileDefinition] = {}
+    def __init__(self, definitions: tuple[LegacyProductConfiguration, ...]) -> None:
+        indexed: dict[VersionedProfileRef, LegacyProductConfiguration] = {}
         for definition in definitions:
             if definition.ref in indexed:
                 raise ContextCollabValidationError(
@@ -38,7 +38,7 @@ class ProductCatalog:
             indexed[definition.ref] = definition
         self._definitions = MappingProxyType(indexed)
 
-    def get(self, product: str, version: int) -> ProductProfileDefinition:
+    def get(self, product: str, version: int) -> LegacyProductConfiguration:
         ref = VersionedProfileRef(product, version)
         try:
             return self._definitions[ref]

@@ -34,8 +34,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
     ColletState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
@@ -124,7 +124,7 @@ def _status_record(**overrides) -> ContextStatusRecord:
         created_event_ref="evt_fixture",
         last_event_ref="evt_fixture",
     )
-    collet = Collet(
+    collet = LegacyCollet(
         collet_id=fields["collab_context_id"],
         initiator_ref=principal_ref,
         state=ColletState.ACTIVE,

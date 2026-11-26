@@ -9,7 +9,7 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publi
     ProductProfilePublicationAuthorizer,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
 )
 from agentclaw.community.core.task.context_collab.l6_products.persistence.profile_repository import (
     SqlProductProfileRepository,
@@ -42,7 +42,7 @@ class ProductProfilePublicationService:
         return self.repository.publish_many((definition,), actor.actor)[0]
 
     def import_profiles(
-        self, definitions: tuple[ProductProfileDefinition, ...], actor: ActorContext
+        self, definitions: tuple[LegacyProductConfiguration, ...], actor: ActorContext
     ) -> tuple[PublishedProductProfile, ...]:
         """Explicit transactionally replayable seed/import for the current scope."""
         for definition in definitions:

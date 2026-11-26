@@ -12,6 +12,7 @@ Use the [repository knowledge standard](../../../docs/agents/knowledge-standard.
 
 ## Existing change records
 
+- [2026-11-26-context-collab-protocol-optimization](2026-11-26-context-collab-protocol-optimization/spec.md): R3 integer-ID product models, Method composition + strict stages YAML, five-method ProductProfileService, durable rollouts, signed Bot progress and real session-port adapters implemented; local verification and remaining legacy cutover/external integration gaps are recorded in [delivery](2026-11-26-context-collab-protocol-optimization/delivery.md). See original [evidence](2026-11-26-context-collab-protocol-optimization/research.md) and [acceptance plan](2026-11-26-context-collab-protocol-optimization/plan.md).
 - [2026-11-23-context-collab-swarm-workflow-mode](2026-11-23-context-collab-swarm-workflow-mode/spec.md): database-backed, versioned ProductProfiles with embedded Swarm DAGs, named artifact handoffs and random eligible Agent selection. Implemented locally; 708 target tests pass. Broad regression/full CI retain reproducible baseline failures; see [delivery evidence](2026-11-23-context-collab-swarm-workflow-mode/delivery.md) for cutover prerequisites and unverified integration/deployment.
 - [2026-11-13-context-collab-l6-product-contracts](2026-11-13-context-collab-l6-product-contracts/spec.md): executable versioned composition and pinned instance contracts; see record for verification and scope limits.
 

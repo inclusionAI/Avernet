@@ -13,8 +13,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     AgentRef,
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.artifact import (
-    Artifact,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_artifact import (
+    LegacyArtifact,
 )
 
 
@@ -69,7 +69,7 @@ class Task:
     reported_percent: int | None = None
     progress_event_ref: str | None = None
     legacy_context_version: int | None = None
-    artifacts: tuple[Artifact, ...] = ()
+    artifacts: tuple[LegacyArtifact, ...] = ()
 
     def __post_init__(self) -> None:
         for key in ("task_id", "collet_ref", "objective"):
@@ -110,7 +110,7 @@ class Task:
                 "Task completion conditions must be strings"
             )
         if not isinstance(self.artifacts, tuple) or any(
-            not isinstance(artifact, Artifact) for artifact in self.artifacts
+            not isinstance(artifact, LegacyArtifact) for artifact in self.artifacts
         ):
             raise ContextCollabValidationError(
                 "Task.artifacts must be a tuple of L4 Artifact values"
@@ -206,7 +206,7 @@ class Task:
                     "Task artifacts must be a list of objects"
                 )
             values["artifacts"] = tuple(
-                Artifact.from_dict(artifact) for artifact in artifacts
+                LegacyArtifact.from_dict(artifact) for artifact in artifacts
             )
             return cls(**values)
         except (KeyError, TypeError) as error:

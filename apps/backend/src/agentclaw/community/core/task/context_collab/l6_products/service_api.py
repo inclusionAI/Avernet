@@ -21,8 +21,8 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
     ContextServiceProtocol,
@@ -66,7 +66,7 @@ class ContextCollabServiceProtocol(ContextServiceProtocol, Protocol):
 
     def create_collaboration(
         self, command: CollaborationCreateCommand, context: ActorContext
-    ) -> Collet:
+    ) -> LegacyCollet:
         """L6 composition with explicit Method and optional product selection.
 
         Preserves the existing HTTP composition flow, including its single

@@ -236,7 +236,7 @@ class CompatibilityRequirements:
 
 
 @dataclass(frozen=True)
-class ProductProfileDefinition:
+class LegacyProductConfiguration:
     ref: VersionedProfileRef
     composition: MethodCompositionTemplate
     scenario_roles: tuple[ScenarioRole, ...]
@@ -275,7 +275,7 @@ class NegotiationResult:
 
 
 def negotiate(
-    profile: ProductProfileDefinition, offer: ProductCapabilities
+    profile: LegacyProductConfiguration, offer: ProductCapabilities
 ) -> NegotiationResult:
     """No silent fallback: missing required capabilities produce an explicit rejection."""
     missing: list[str] = []

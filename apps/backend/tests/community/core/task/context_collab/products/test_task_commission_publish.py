@@ -32,8 +32,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
     ColletState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
@@ -108,7 +108,7 @@ class _FakeRepo:
             created_event_ref=event_id,
             last_event_ref=event_id,
         )
-        collet = Collet(
+        collet = LegacyCollet(
             collet_id=collab_context_id,
             initiator_ref=request.initial_event.actor_ref,
             state=ColletState.ACTIVE,

@@ -1,5 +1,14 @@
 # Context collaboration: authority, telemetry and read projections
 
+## Product runtime v2 (2026-11-26)
+
+The new [ProductProfileService](l6_products/product_profile_service/README.md)
+provides the five-method product API, canonical integer-ID objects, YAML-owned
+stages and durable rollouts. That guide owns its authority, DDL, worker/report
+integration, real session routing and finite v1 compatibility boundary.
+The remaining sections describe the retained **legacy v1** collaboration path;
+its Event-backed logical sessions are not v2 runtime sessions.
+
 Owner: Backend `core/task/context_collab`. This is the ACCS collaboration path,
 separate from the older goal-driven TaskGraph framework in the parent directory.
 It implements bounded local contracts, not full ACCS conformance.
@@ -137,7 +146,7 @@ products/
 ```
 
 - L6 [profile creation](l6_products/README.md#create-a-product-profile) is a pure
-  `create_product_profile` operation returning `ProductProfileDefinition`.
+  `create_product_profile` operation returning `LegacyProductConfiguration`.
   L5-owned Method policies are co-located in each `MethodTemplate(profile, policy)`
   declaration (for example, `OpenMethodPolicy(publication=...)`), not top-level Profile fields; see the
   [L6 authoring contract](l6_products/README.md#create-a-product-profile). Creation

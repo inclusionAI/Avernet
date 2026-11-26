@@ -15,7 +15,7 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     AgentRef,
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
     ColletState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (

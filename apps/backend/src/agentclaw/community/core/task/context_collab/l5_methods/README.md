@@ -1,5 +1,16 @@
 # L5 Method contracts and operations
 
+## Durable product rollout path
+
+[RolloutEngine](rollout_engine.py) owns serial product-stage transitions and the
+independent [ProgressEvent Service API](rollout_progress_protocol.py). [Runtime contracts](rollout_contracts.py)
+and the bounded [intent worker](rollout_worker.py) use durable allocation,
+attempt/lease, actual runtime session and revision facts. They do not import L6
+or use the legacy process-local Swarm Plan as a second write authority.
+[Product runtime integration](../l6_products/product_profile_service/README.md)
+owns assembly, graph-free SwarmStagesPolicy, SQL boundaries and compatibility.
+The existing Method controls below remain the legacy v1 path.
+
 Owner: Backend `core/task/context_collab/l5_methods`. L5 composes L4 primitives
 into Methods and owns their profiles, bindings, composition, publication and
 admission constraints. [L6](../l6_products/README.md) selects these contracts to
@@ -50,6 +61,8 @@ internal_dependencies:
   - agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine
   - agentclaw.community.core.task.context_collab.persistence.method_store
   - agentclaw.community.core.task.context_collab.swarm_planning
+  - agentclaw.community.core.errors
+  - agentclaw.community.core.task.task_runner.client
   - agentclaw.community.utils
 ```
 

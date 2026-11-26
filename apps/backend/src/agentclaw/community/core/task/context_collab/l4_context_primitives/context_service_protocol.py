@@ -9,8 +9,8 @@ from typing import Protocol, runtime_checkable
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
@@ -78,7 +78,7 @@ class ContextServiceProtocol(Protocol):
     @abstractmethod
     def create_collet(
         self, command: ColletCreateCommand, context: ActorContext
-    ) -> Collet:
+    ) -> LegacyCollet:
         """Authorize and persist only Collet identity, description and audit.
 
         No Space, root Task, initial Work event, Profile or bindings are created.

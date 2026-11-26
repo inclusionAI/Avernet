@@ -27,8 +27,8 @@ from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliabil
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
@@ -526,7 +526,7 @@ class ContextCollabRepository(Generic[StateT]):
 
     @staticmethod
     def _collet_row(
-        collet: Collet,
+        collet: LegacyCollet,
         creation_facts_json: str,
         task: Task | None,
         *,

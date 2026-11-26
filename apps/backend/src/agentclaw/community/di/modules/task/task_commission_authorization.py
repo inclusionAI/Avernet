@@ -21,8 +21,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
     StructuralContextCollabAuthorizer,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     Task,
@@ -159,7 +159,7 @@ class CommissionAdmissionAuthorizer(StructuralContextCollabAuthorizer):
 
     def check_append(
         self,
-        collet: Collet,
+        collet: LegacyCollet,
         task: Task | None,
         creation_facts: dict,
         product_instance: ProductInstance | None,

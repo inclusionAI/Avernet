@@ -20,12 +20,12 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
     validate_role_sources,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
 )
 
 
 def product_participation(
-    profile: ProductProfileDefinition,
+    profile: LegacyProductConfiguration,
     principal: PrincipalRef,
     agents: tuple[AgentRef, ...],
     executor: AgentRef | None,

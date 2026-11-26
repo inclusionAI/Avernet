@@ -10,8 +10,8 @@ from __future__ import annotations
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
     ContextServiceProtocol,
@@ -94,7 +94,7 @@ def create_collet_request(
 
 
 def creation_event_id(
-    service: ContextServiceProtocol, created: Collet, context: ActorContext
+    service: ContextServiceProtocol, created: LegacyCollet, context: ActorContext
 ) -> str:
     """Resolve the combined L6 flow's immutable Task creation evidence.
 
