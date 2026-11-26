@@ -40,14 +40,18 @@ pub(crate) fn session_id(scope: &TaskScope, group: &GroupId, message: &RequestId
     Sid(format!("s{shard:04}.{}", hex::encode(&digest[8..16])))
 }
 
-/// The group-A2A session namespace: same derivation, distinct domain and a
-/// `g` marker in the suffix, so neither entrance can recreate the other's
-/// identity for the same message key (plan T8 source isolation).
+/// The group-A2A session namespace: same derivation domain and a `g`
+/// marker in the suffix, so neither entrance can recreate the other's
+/// identity for the same message key (plan T8 source isolation). The
+/// session's shard is the assembly's mounted shard, never a spread
+/// bucket: the strict round admission binding follows ONE shard record
+/// (plan T9), so a group-entrance session must always land on the licensed
+/// shard claim its rounds admit through.
 pub(crate) fn group_session_id(
     scope: &TaskScope,
     group: &GroupId,
     message: &RequestId,
-    shards: u32,
+    shard: u32,
 ) -> Sid {
     let digest = hash(&[
         "group_a2a:v1",
@@ -56,9 +60,6 @@ pub(crate) fn group_session_id(
         &group.0,
         &message.0,
     ]);
-    let mut head = [0u8; 8];
-    head.copy_from_slice(&digest[..8]);
-    let shard = u64::from_be_bytes(head) % u64::from(shards.max(1));
     Sid(format!("s{shard:04}.g{}", hex::encode(&digest[8..16])))
 }
 

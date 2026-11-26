@@ -118,7 +118,7 @@ impl JsonRpcClient {
     /// above remain the only way to reach the standard A2A methods.
     pub async fn call_extension<R: DeserializeOwned>(
         &self,
-        method: &str,
+        method: &'static str,
         params: &Value,
     ) -> Result<R, A2AError> {
         self.call(method, params).await

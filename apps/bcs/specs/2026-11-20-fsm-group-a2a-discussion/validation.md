@@ -6,6 +6,75 @@
 
 完整修复映射、RED→GREEN、实际命令与限制见 [修复验证记录](review-fixes-2026-11-25.md)。受影响 8 crate 完整套件 **1078 passed / 0 failed / 6 ignored，exit 0**；API 脚本回归 4 passed。真实 MySQL、P、当前完整 API/R25 与全量 workspace 测试不以这些结果替代。**D0 原冻结结论暂停；Stage 2 未完成退出验收，不放行 Stage 3。**
 
+## 第七轮（2026-11-26，plan T9）：装配、注入故障、可上线范围记录
+
+本节是 plan T9 的交付记录：功能装配、配置接缝与验收程序。**不回填 Stage 2；T1 节头不动。** 全部结论以同进程功能证据为层级；跨进程矩阵、真实 MySQL、容量认证与 P 认证按 2026-11-25 拆分裁定继续 **blocked(P)**，不以任何同进程结果替代。
+
+### 实际角色与挂载
+
+| 角色/接缝 | 实际形态 |
+| --- | --- |
+| 持久 provider | 同进程 Model（`bcs_test_support::store_model`，测试专用实现），经 `GroupA2aProvider` 注入五类 store plugin 端口；Result/Blob 走既有 SQLite + 迁移链。**生产 P 端口零实现，生产启用=启动失败**（`mount_production` refuse，`resolve_production` 无认证实现注册）。 |
+| 认证/授权 | Host 注册的 D0 策略 fixture（published/invoke/read/cancel 四项开关），经 `GroupA2aHost.policy` 注入；无匿名回退。 |
+| 群目录 | Host 注册的目录 port fixture（research→review 两节点工作流），经 `GroupA2aHost.directory` 注入；冻结修订校验按 T8。 |
+| Worker/Runner | 真实 `bcs_dist_worker::WorkerRuntime`+`WorkerProcessor`；Runner 为真实 strict-FSM reducer（`bcs_dist_runner_fsm::FsmReducerRunner::d0`）。**T9 落-runner 接线**（见“联合装配补齐”）新增 `runner_start_inputs` 桥接（`bcs-dist-worker prepare.rs`）。 |
+| Connector | 真实 `bcs_dist_connector::ConnectorEngine`+`DistConnectorRules`；下游 A2A 对象为受控 journal fixture（协议允许边界：idempotent dedupe、按需完成）。 |
+| Supervisor | 真实 `DispatchSupervisor`（`supervisor_enabled` 配置开关；disabled 即崩溃恢复对照组，装配为 `None`）。 |
+| listing/Card | `bcs-dist-gateway-store` 真实 `StoreTaskReader`（同一 reader 服务 T4 legacy list + T8 GroupListingPort）、`cursor_secret` 生产配置落线、未配置即 fail-closed；Card 为 `GroupDiscovery`（published-only）。 |
+| reclaim 驱动 | 最小接线：`GroupA2aRoles::tick` 在每个 shard 心跳驱动一次受限批量 `reclaim_dispatch_directory`（稳定游标，T7 切片的效果面）。 |
+| D3 held-index 抢救 | 联合装配自建宿主提供方（`AssemblyHeldRecovery`）：扫描真实 held 索引（`layout.held`），按所见 revision 将死主持有的 dispatch **重新 arm 为 due**（真实 `DispatchControlPort::reschedule`）；**唤醒动作由 DispatchSupervisor 完成并以聚合的 `SupervisorReport.notified + settled ≥ 1` 为通过断言**（drive 报告聚合全部心跳迭代，先 visited/notify 后 success 才算过）；D8 保持未接线（recorder 断言零调用）。仅在 supervisor 装配下挂载——**禁用 Supervisor 的对照组不得恢复**。 |
+| Heartbeat | 装配不 spawn 后台循环：宿主驱动 `GroupA2aRoles::tick`/`CompanionWorld::drive`（测试驱动 Model lease 时钟，`model.advance`），跨进程真实时钟/生命周期归 P 装配。 |
+
+配置接缝 `[group_a2a]`：`enabled`（默认 false）、`cursor_secret`、`supervisor_enabled`、`verification_backoff_max_ms`（≤64 讨论、已接线并受 ConnectorConfig 校验约束）、`shards`、`public_url`、`namespace`。cut-snapshot 保留政策未定（contract-decisions:174）：**记录为 ONLY-RECORD**，配置注释明示“无治理决定不得加开关”；`due_verifications` ≤64 单趟续页与 retained 核实 ≤8 lane 为结构性定数，注释记录。
+
+### 联合装配补齐（本次交付内新发现并修复的生产缺口，三项全部同进程证据+受影响 crate 全量回归）
+
+1. **admission 身份摘要稳定性**（`bcs-dist-store/src/inbox/validation.rs`）：`request_digest` 把系统时间戳字段计入身份 → 两次同等构造 digest 不同 → `strict_start_rejected`（对面异步骤时序）。修复：身份摘要剔除 `create_task/session` 的 created_at/updated_at/时间戳（同 `WorkerTaskAdmission::recover` “永不比较新生成时间戳”原则）。受影响 `bcs-dist-store` 全量 46 suites exit 0。
+2. **strict FSM 轮次进入 Runner 的生产桥**（`bcs-dist-worker/src/processor/prepare.rs`）：排队任务的提升此前只送 `RunnerInput::Start`，真实 FSM reducer 需要 `GroupStart`（冻结 RoundInput）。新增 `runner_start_inputs`：FsmGroup 会话+rounds 装配时从**license `get` 的权威 cut** 取整输入（不信任 inbox payload）。受影响 `bcs-dist-worker` 全量 31 suites exit 0（T7 commit-spine harness 同步对齐 GroupStart 入口）。
+3. **shard lease 轮换下的 licensed admit 绑定 + 单 shard 范围 + 外主排斥**：`StoreGroupRoundAdmission` 构造即 pin 一个 ShardClaim，接管后旧 claim 获 `strict_session_fenced`。修复于装配层（`RebindingRoundAdmission`）：(i) shard 由 claim 派生（`[group_a2a].shards` 非 1 元素即启动失败——多 shard 需按 shard 多装配，P 期决定）；(ii) 只跟踪宿主注册 leaser 的 claim，**未注册外主的 claim 一律 strict_session_fenced 排斥，不借用他人 epoch**；(iii) 轮换时依当前 shard 记录重建绑定，持久行/许可证不动。
+4. **T17 披露的 T9 隔离腿落地**：通过真实机械（no-dedupe profile 的不确定首发 → AskAgent 短期耗尽 → 核实队列 handoff → 5s stop 停核期限）产出**真实 `DispatchRecord.quarantined`**（向量 `quarantined_round_keeps_working_face_and_bounded_stream`）：GET 经真实路由保持 **WORKING 面、非终态**；订阅先快照后有界关闭；同键重投奉回已决槽位（仍占用）。
+
+### 关闭入口（计划必含断言）
+
+`entrance_closed_keeps_existing_routes_untouched`（装配口径）+ 修复轮新增 `closed_entrance_real_router_mounts_no_group_routes`（**真实构建路由**口径）：默认配置下 `BcsServer` 实建 + 随机端口，全组 REST 面（message:send/stream、tasks 列表、agent-card）逐一路由 **404**（未合并，而非挂载面 401/40x），既有路由 `/health` **200 不受影响**——计划“关闭入口时既有路由不受影响”必含断言两面齐备。
+
+### 命令与结果（PIPE-FREE 日志 + 捕获时 `TEST_EXIT`，均在 `.superpowers/sdd/plan/logs/`）
+
+| 命令 | 结果 | 日志 |
+| --- | --- | --- |
+| `cargo test -p bcs --test group_a2a_companion`（接线前 stub 装配） | RED：功能性场景 3 失败/2 通过（NotMounted 拒绝），`TEST_EXIT=101` | `task18-red-companion-run.log` |
+| 同上（装配完成+修复轮） | GREEN：**11 passed / 0 failed**（takeover 全链、acked 死连接器 + Supervisor 唤醒归因、对照、配置层+真实路由双关闭入口、P 缺失启动失败、cursor fail-closed+行、backoff 校验、多 shard 拒绝、外主 lease 排斥、隔离段 quarantine 腿 GET/流/占用），`TEST_EXIT=0` | `task18-green-companion.log` |
+| `cargo test -p bcs-dist-worker --no-fail-fast` | 31 suites 全 ok，`TEST_EXIT=0` | `task18-green-bcs-dist-worker.log` |
+| `cargo test -p bcs-dist-store --no-fail-fast` | 46 suites 全 ok，`TEST_EXIT=0` | `task18-green-bcs-dist-store.log` |
+| `cargo test -p bcs-db-migrations --no-fail-fast` | 全 ok，`TEST_EXIT=0` | `task18-green-bcs-db-migrations.log` |
+| `cargo test -p bcs --no-fail-fast`（整 crate） | 87 test targets **894 passed / 0 failed**，`TEST_EXIT=0` | `task18-green-bcs-whole-crate.log` |
+| `cargo check --workspace --all-targets` | Finished，`TEST_EXIT=0` | `task18-green-workspace-check.log` |
+| `bash scripts/ci/check-r25-conformance.sh`（静态腿全跑；R25.3 环境有界） | 静态腿结果与分支基线一致（详“跳过与受限”）；**TEST_EXIT=1（R25.3 linker Bus Error，磁盘重链接波）** | `task18-r25-statics-bounded.log` |
+
+建库双链：工作树内迁移链经 `LocalSqliteDbPlugin::new_file` + `run_sqlite_migrations` 实跑于每个装配（companion archive/artifacts 每次新文件）；`bcs-db-migrations` 目标全绿。MySQL 双方言：不适用——**本任务未改任何迁移或双方言面**。
+
+### 跳过与受限（如实）
+
+- **真实跨进程崩溃矩阵**（独立进程 Singlebox companion、共享持久 provider、停 Gateway/Provider、真 MySQL）：**blocked(P)**——P 未认证，none。同进程表达如下并已全绿：Worker 代际更替（takeover 全链）、Connector 死亡+D3 re-hint 唤醒接任（远端恰好执行一次）、对照（无 Supervisor 不得恢复）。**不得以此替代跨进程证据**。
+- **`acked_connector_dies_without_hint` 的宿主声明形态**：同进程内进程死亡由宿主显式声明（`retire_connector`）声明“该 incarnation 已死”——这是同进程崩溃表达；跨进程的 liveness 驱动断言归 P 矩阵。D3 重建走真实 notify。D8 未接线（计划明示非验收前提，recorder 零调用已断言）。
+- **resident-slot 语义缺口（如实记录）**：实测发现 External strict-license CAS 落在 resident Worker 已有 slot 上时，`control_head_conflict` 循环推迟（同进程内需 Worker 代际更替才消化新 envelope）。生产 P 装配需在 P 阶段决定 resident-refresh 语义；本任务不越权改 T7 引擎循环，companion 以“install→代际更替→接续”表达。**记录为 P/后续联合装配缺口，不掩盖。**
+- **验证/隔离核实队列补发、TaskFeed 首次补发、Dispatch 目录跨容量**：跨进程结果 **blocked(P)**；同进程对照已在 Supervisor/装配 tick 下有功能证据（D3 re-hint + reschedule/notify 全走真实存储）。
+- **quarantined 面的语义 GET/订阅**（T17 遗留 T9 依赖腿）：**本轮落地**（修复轮 1）：以真实核实队列停核产出真 Quarantined 记录并断言 GET WORKING 面/有界流/占用——上前披露的"T16 dispatch-reader read path"两腿均已在同进程装配上钉住；真实 cross-provider 语义归 P。
+- **listing 的多行阳性续页**：严格轮次归档后 accepted 索引回收该行，严格下实时 cut 至多一行 live（多项队列在 T 系归档后被移除）——多行续页/Tamper/expiry 断言由 T17 `group_rest` 已有 8 向量覆盖（同 store/router 对）；本装配断言之分仅覆盖 fail-closed 与真实行/cut 形态。
+- **R25**（如实）：静态腿（R25.1/R25.2）CI 仲裁项与既有基线一致差集，本轮修复未新增 trait/边界面；R25.3 `cargo test --workspace -- --list` 在本磁盘重链接波后以 **exit 1（linker Bus Error）** 止步——既定 CI 仲裁纪律维持，不以此冒充绿灯（完整日志 `task18-r25-statics-bounded.log`）。
+- **API 门禁**：本轮公开 API 无破坏性变更；无 public-api 清单差异需求（决策记录级别：无）。
+- 磁盘事件：`/home` 曾耗尽（workspace check 后 2.8 GiB）——删除 `target/debug/deps`（59 GiB，可重链）释放至 58 GiB；R25 重跑后仍 < 20 GiB 的规则按记录归档。
+
+### GREEN 度量（数字来自代码与向量，非估计）
+
+| 度量 | 值（来源） |
+| --- | --- |
+| 受理最大存储调用 | inbox `lookup`（观察性读，不保留）→ `admit`；WorkerTaskAdmission::recover 对照性读 ≤2 bounded reads；admit 失败路径每次失败的 inbox 写入都有 durable 记录（决策类写单条）。严格 admission aftermath 是幂等复访（`AdmitOutcome::Duplicate` 不再追加 Start entry）。 |
+| 结果未知路径 | `OutcomeUnknown` 走 `abandon_strict_start`/`resolve_commit`，不烧回复重试；store `resolve_commit` 一次。commit 冲突走 `license_commit`→reread→recovery CAS 一趟。 |
+| 分页/恢复扫描有界 | dispatch scan page ≤128 rows/页、稳定 key 游标 round 有界；Supervisor：concurrency ≤8、max_pending ≤64 jobs、page_entries ≤128、IO 超时 ≤2s；TaskFeed：page_entries ≤128、scan_pages ≤32、followers ≤128；listing：LIST_READ_CONCURRENCY=8、group cut ≤4096 行、页上限 profile v1 100 行、`pageSize>budget` 拒绝。 |
+| 故障退避 | Supervisor retry_backoff 200ms 起、2^n 增、cap 5s、3 败弃 pending job；Connector send backoff 200ms→5s；verification lane：interval 2s、backoff min 2s、**backoff_max 经 `[group_a2a] wbackoff 配置接线（默认 60s，校验 backoff_max ≥ backoff_min）**。 |
+| Retention/GC | cut-snapshot：cursor TTL 300s、过期拒绝续页；**reaper 未挂载（政策未定，ONLY-RECORD，不自动删除）**。dispatch 目录：角色 tick 每心跳一次受限批量 reclaim（`reclaim_dispatch_directory`）；held 索引按 claim 生命周期；deadline 历史/admission 记录保留（无自动删除）。 |
+
 ## 基线和证据边界（以下为历史记录）
 
 - 当前分支工作基线：`a702256fc24611a97bbb622eed6d310fc0347a73`。

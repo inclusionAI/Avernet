@@ -8,6 +8,56 @@ use bcs_service_api::{
 };
 use std::collections::BTreeMap;
 
+impl WorkerProcessor {
+    /// The runner inputs that promote one queued task to running:
+    /// [`RunnerInput::Start`] for generic sessions; the strict FSM-group
+    /// round's [`RunnerInput::GroupStart`] — the frozen `RoundInput` read
+    /// through the licensed `get` of the mounted round repo. The strict
+    /// task's queued entry only names the round (request id + generation,
+    /// written by the admission's license commit); the authority cut
+    /// supplies the full input, so the reducer never trusts an inbox
+    /// payload to be the round. Without the rounds seam an FsmGroup task
+    /// keeps the generic `Start` behavior (it cannot be a strict round:
+    /// the strict-claim source fence rejects generic entries on licensed
+    /// FSM-group sessions before any of this runs).
+    pub(super) async fn runner_start_inputs(
+        &self,
+        spec: &SessionSpec,
+        tid: &Tid,
+        payload: serde_json::Value,
+    ) -> Result<Vec<RunnerInput>, RuntimeError> {
+        if spec.kind != SessionKind::FsmGroup || self.ports.rounds.is_none() {
+            return Ok(vec![RunnerInput::Start {
+                tid: tid.clone(),
+                payload: Payload::Inline(payload),
+            }]);
+        }
+        let rounds = self
+            .ports
+            .rounds
+            .as_ref()
+            .expect("checked above");
+        let generation = payload
+            .get("generation")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(std::num::NonZeroU64::new)
+            .ok_or_else(|| err("strict_round_stub_missing"))?;
+        let view = self
+            .io(rounds.get(&RoundKey {
+                scope: spec.scope.clone(),
+                group: spec.group.clone(),
+                sid: spec.sid.clone(),
+                tid: tid.clone(),
+                generation,
+            }))
+            .await?
+            .ok_or_else(|| err("strict_round_view_missing"))?;
+        Ok(vec![RunnerInput::GroupStart {
+            input: view.accepted.input,
+        }])
+    }
+}
+
 pub(super) struct FrozenDecision {
     attempt: AttemptIdentity,
     base: Checkpoint,
@@ -177,18 +227,11 @@ impl WorkerProcessor {
                 at: TimestampMillis(at),
                 kind: DeadlineKind::Task { tid: tid.clone() },
             });
-            self.evaluate(
-                slot,
-                base,
-                metadata,
-                vec![RunnerInput::Start {
-                    tid,
-                    payload: Payload::Inline(payload),
-                }],
-                now,
-                true,
-            )
-            .await?;
+            let inputs = self
+                .runner_start_inputs(spec, &tid, payload)
+                .await?;
+            self.evaluate(slot, base, metadata, inputs, now, true)
+                .await?;
             return self.finish_evaluation(slot).await.map(Some);
         }
         let Some(batch) = &slot.input else {

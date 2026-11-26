@@ -17,6 +17,7 @@
 //! - `tests` — configuration tests (colocated at module scope).
 
 mod bot_authority;
+mod group_a2a;
 mod a2a_input;
 mod collaboration;
 mod http;
@@ -61,6 +62,7 @@ pub use bcs_config_api::{DmPolicy, RedisAuthMode};
 
 #[allow(unused_imports)]
 pub use bot_authority::{BotAuthorityConfig, TrustedAppScopeRuleConfig};
+pub use group_a2a::GroupA2aConfig;
 #[allow(unused_imports)]
 pub use collaboration::{
     CollaborationConfig, CollaborationTemplateStorageKind, CollaborationTemplatesConfig,

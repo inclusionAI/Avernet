@@ -186,11 +186,15 @@ impl Shared {
     }
 
     /// May this task's terminal be disclosed on the old read path? For
-    /// strictly claimed sessions only through the retained authority
-    /// (`group_terminal` sealed by the terminal CAS, cold-confirmed by the
-    /// spine); every other strict state — an archive row alone or an old
-    /// snapshot — stays invisible as success. Non-strict sessions keep the
-    /// generic behavior.
+    /// strictly claimed sessions only through the authoritative cut
+    /// (plan T17 ruling 4(b)): the current licensed round through its
+    /// retained hot terminal (`group_terminal` sealed by the terminal CAS,
+    /// cold-confirmed by the spine), and every closed predecessor through
+    /// the session's cold index — an entry the install chain only writes
+    /// after the owner-fenced window closed and the cold proof was
+    /// confirmed and read back. Every other strict state — an archive row
+    /// alone, an old snapshot, a guessable pre-write — stays invisible as
+    /// success. Non-strict sessions keep the generic behavior.
     async fn strict_terminal_viewable(&self, sid: &Sid, tid: &Tid) -> Result<bool, StoreError> {
         let retained =
             bcs_dist_store::group_admission::probe_strict_license(&self.documents, &self.layout, sid)
@@ -198,13 +202,26 @@ impl Shared {
         if retained.is_none() {
             return Ok(true);
         }
-        Ok(bcs_dist_store::group_terminal::probe_retained_terminal(
+        if bcs_dist_store::group_terminal::probe_retained_terminal(
             &self.documents,
             &self.layout,
             sid,
         )
         .await?
-        .is_some_and(|proof| proof.key.tid == *tid))
+        .is_some_and(|proof| proof.key.tid == *tid)
+        {
+            return Ok(true);
+        }
+        // Superseded rounds stay publicly resolvable through the cold cut
+        // the successor's install condensed into the session checkpoint.
+        Ok(bcs_dist_store::group_terminal::probe_cold_index(
+            &self.documents,
+            &self.layout,
+            sid,
+            tid,
+        )
+        .await?
+        .is_some())
     }
 
     /// Id of the newest entry of a stream; `None` when it has none.

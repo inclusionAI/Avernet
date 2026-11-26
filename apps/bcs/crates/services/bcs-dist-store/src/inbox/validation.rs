@@ -206,5 +206,20 @@ pub(super) fn request_digest(
         event.remove("holder_epoch");
         event.remove("seq");
     }
+    // System-assigned timestamps are not caller intent. Two constructions
+    // of the same admission (the strict round install builds one per
+    // aftermath pass) differ only in these clock-derived fields; the
+    // identity removes them so a retry never reads as changed content —
+    // the same principle `WorkerTaskAdmission::recover` states: never
+    // compare a newly generated timestamp with the original.
+    for (key, field) in [
+        ("create_task", "created_at"),
+        ("create_task", "updated_at"),
+        ("create_session", "created_at"),
+    ] {
+        if let Some(sections) = identity.get_mut(key).and_then(|v| v.as_object_mut()) {
+            sections.remove(field);
+        }
+    }
     Ok(digest_json(&identity))
 }

@@ -318,6 +318,28 @@ impl InboxProducerPort for StoreInboxProducer {
     async fn append_stream(&self, request: AppendAgentEvent) -> Result<InboxPos, StoreError> {
         self.append_intermediate(request).await
     }
+
+    async fn stage_strict_round(
+        &self,
+        request: AdmitRequest,
+        round: StrictRoundIdentity,
+    ) -> Result<StrictRoundStage, StoreError> {
+        let outcome = self
+            .admit_strict_round(
+                request,
+                StrictRound {
+                    request_id: round.request_id,
+                    generation: round.generation,
+                },
+            )
+            .await?;
+        Ok(match outcome {
+            crate::group_admission::StrictOutcome::Staged => StrictRoundStage::Staged,
+            crate::group_admission::StrictOutcome::Delivered(inner) => {
+                StrictRoundStage::Delivered(inner)
+            }
+        })
+    }
 }
 
 /// Terminal state of one admission visit: a public outcome, or a staged
@@ -456,9 +478,23 @@ impl StoreInboxProducer {
     /// the generic (`InboxProducerPort::admit`) path.
     pub async fn admit_strict_round(
         &self,
-        request: AdmitRequest,
+        mut request: AdmitRequest,
         round: StrictRound,
     ) -> Result<crate::group_admission::StrictOutcome, StoreError> {
+        // First-identity adoption: every license-repair rebuild pass carries
+        // no session pre-write, so it adopts the record's staged
+        // `create_session` instead of failing the digest equality with the
+        // record's first construction (plan T2: a retry keeps the first
+        // identity and configuration).
+        if request.create_session.is_none() {
+            let key = self
+                .inner
+                .layout
+                .admission(&request.scope, &request.input.input_id)?;
+            if let Some((_, existing)) = self.admission_record(&key).await? {
+                request.create_session = existing.request.create_session.clone();
+            }
+        }
         match self.admit_scoped(request, None, Some(round)).await? {
             AdmissionResult::Outcome(outcome) => {
                 Ok(crate::group_admission::StrictOutcome::Delivered(outcome))

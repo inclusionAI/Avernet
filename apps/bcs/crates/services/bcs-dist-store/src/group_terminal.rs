@@ -275,14 +275,27 @@ impl StoreGroupRoundAdmission {
                 return Err(invalid("terminal_sequence"));
             }
             candidate.commit_seq = sequence;
+            // The terminal CAS condenses the closing round's hot authority
+            // but must carry the existing cold index verbatim: rounds the
+            // install chain already moved to the cold cut stay there, or a
+            // successor install would read this runner state as if they had
+            // never closed and `get(predecessor)` would be lost forever.
+            let mut value = serde_json::json!({
+                "group_admission": license,
+                "group_terminal": proof,
+            });
+            if let Some(cold) = checkpoint
+                .runner_state
+                .as_ref()
+                .and_then(|state| state.state.value.get(COLD_INDEX_KEY))
+            {
+                value[COLD_INDEX_KEY] = cold.clone();
+            }
             candidate.runner_state = Some(TaskRunnerState {
                 tid: license.tid.clone(),
                 state: RunnerState {
                     format_version: 1,
-                    value: serde_json::json!({
-                        "group_admission": license,
-                        "group_terminal": proof,
-                    }),
+                    value,
                 },
             });
             let commit_id = proof.commit_id.clone();

@@ -332,6 +332,21 @@ impl BcsServer {
             ))
             .merge(group_session_websocket_router);
 
+        // Plan T9: the FSM-Group-as-A2A-Agent surface is strictly opt-in —
+        // closed by default, and enabled-but-no-provider is a STARTUP
+        // failure (never a runtime degradation). The production P provider
+        // does not exist yet, so enabling the section fails the startup
+        // here on purpose until a certified provider registers itself.
+        if let Some(group_a2a) =
+            super::group_a2a_wiring::mount_production(&self.config.group_a2a).await?
+        {
+            info!(
+                namespace = %self.config.group_a2a.namespace,
+                "Mounting FSM group A2A surface (explicit opt-in)"
+            );
+            router = router.merge(group_a2a.router);
+        }
+
         if let Some(oauth_router) = self.build_auth_router(oauth_state) {
             router = router.merge(oauth_router);
         }

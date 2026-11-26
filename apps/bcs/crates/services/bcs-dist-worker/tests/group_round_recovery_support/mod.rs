@@ -166,13 +166,17 @@ impl DistRunnerCoreService for FsmRunner {
     ) -> Result<Decision, RunnerError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let mut actions = Vec::new();
-        if let RunnerInput::Start { tid, .. } = &inputs[0] {
+        // The T9 joint assembly hands strict rounds to the runner as
+        // `GroupStart` (the licensed frozen RoundInput), so the fixture
+        // reduces the same round facts it always did.
+        if let RunnerInput::GroupStart { input } = &inputs[0] {
+            let tid = input.key.tid.clone();
             if self.mode == FsmMode::AnswerThenFinish {
                 actions.push(show(&tid));
                 actions.push(finish(&tid));
             } else if self.mode == FsmMode::HugeAnswer {
                 actions.push(show_update(
-                    tid,
+                    &tid,
                     ArtifactUpdate::Upsert {
                         content: Payload::Inline(serde_json::json!("x".repeat(80_000))),
                     },
@@ -180,20 +184,20 @@ impl DistRunnerCoreService for FsmRunner {
                 actions.push(finish(&tid));
             } else if self.mode == FsmMode::AmendAnswer {
                 actions.push(show_update(
-                    tid,
+                    &tid,
                     ArtifactUpdate::Upsert {
                         content: Payload::Inline(serde_json::json!("a")),
                     },
                 ));
                 actions.push(show_update(
-                    tid,
+                    &tid,
                     ArtifactUpdate::AppendText {
                         delta: Payload::Inline(serde_json::json!(" b")),
                     },
                 ));
                 actions.push(finish(&tid));
             } else {
-                actions.push(ActionIntent::StartDispatch(dispatch_spec_for(tid, c.spec)));
+                actions.push(ActionIntent::StartDispatch(dispatch_spec_for(&tid, c.spec)));
             }
         } else if let RunnerInput::Agent { event, .. } = &inputs[0] {
             if matches!(event.kind, AgentEventKind::Final)

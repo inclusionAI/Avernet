@@ -122,13 +122,32 @@ pub(crate) async fn probe_strict_staging(
 /// durable admission record without re-deriving the digest algorithm.
 pub fn strict_round_input_id(request: &AcceptedRound) -> Result<InputId, StoreError> {
     let key = &request.input.key;
+    strict_round_input_id_parts(
+        &key.scope,
+        &key.group,
+        &request.request_id,
+        &request.request_digest,
+    )
+}
+
+/// The parts form of the strict-round inbox identity: the stable request
+/// key (scope, group, request id, request digest) without the full round.
+/// Callers that must locate a message key's record BEFORE freezing the
+/// round's drifting fields (the execution window) derive the same identity
+/// from these stable parts alone.
+pub fn strict_round_input_id_parts(
+    scope: &TaskScope,
+    group: &GroupId,
+    request_id: &RequestId,
+    request_digest: &Digest,
+) -> Result<InputId, StoreError> {
     let digest = crate::identity::digest_fields(&[
         b"group_input:v1",
-        key.scope.tenant.0.as_bytes(),
-        key.scope.principal.0.as_bytes(),
-        key.group.0.as_bytes(),
-        request.request_id.0.as_bytes(),
-        request.request_digest.0.as_bytes(),
+        scope.tenant.0.as_bytes(),
+        scope.principal.0.as_bytes(),
+        group.0.as_bytes(),
+        request_id.0.as_bytes(),
+        request_digest.0.as_bytes(),
     ]);
     Ok(InputId(format!("ga:{}", crate::identity::hex_of(&digest))))
 }
@@ -706,10 +725,12 @@ impl StoreGroupRoundAdmission {
                 }
                 self.abandon(&row_key).await?;
                 self.abandon_start(request).await?;
-                if license.generation.get() >= request.input.key.generation.get() {
-                    return Ok(Admission::Busy);
-                }
-                return Err(invalid("stale_generation"));
+                // A request that passed classification can only see the
+                // PREDECESSOR license here (a concurrent head commit won the
+                // acceptance CAS): that is a rejected competition the same
+                // message key retries — never a stale-generation claim. True
+                // generation fencing happened in classification.
+                return Ok(Admission::Busy);
             }
         }
         self.mark_accepted(request, &row_key).await?;
