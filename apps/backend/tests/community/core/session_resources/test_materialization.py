@@ -179,30 +179,6 @@ def test_handler_leaves_upload_time_empty_for_legacy_record():
     assert transport.calls[0][3]["creator_name"] is None
 
 
-def test_retry_uses_persisted_replica_and_never_selects_another_device():
-    from unittest.mock import Mock
-    from agentclaw.community.core.devices.services.device_context import ConnInfoBuildError
-
-    vault = TokenVault(master_key="test-master-key")
-    resolver = Mock()
-    resolver.resolve_for_binding.side_effect = [
-        ConnInfoBuildError("selected replica temporarily unavailable"),
-        _Resolver()._context(),
-    ]
-    transport = _Transport()
-    handler = SessionResourceMaterializeHandler(
-        resolver, transport, _Repo(replace(_record(vault), binding_id=77, device_uuid="DEVICE-B")), vault,
-    )
-    assert isinstance(handler.handle(_payload()), Retry)
-    assert transport.calls == []
-    assert isinstance(handler.handle(_payload()), Complete)
-    assert len(resolver.resolve_for_binding.call_args_list) == 2
-    for call in resolver.resolve_for_binding.call_args_list:
-        assert call.args == (77, "owner-1")
-        assert call.kwargs == {"bot_id": "bot-1", "device_uuid": "DEVICE-B"}
-    resolver.resolve_for_bot.assert_not_called()
-
-
 def test_handler_ignores_stale_task_without_calling_engine():
     vault = TokenVault(master_key="test-master-key")
     transport = _Transport()

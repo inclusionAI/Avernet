@@ -96,7 +96,6 @@ class ApplyRunServiceProtocol(Protocol):
         engine_type: Optional[str] = None,
         bot_type: Optional[str] = None,
         carry_from_apply_id: Optional[str] = None,
-        permission_subject: str | None = None,
     ) -> ApplyAccepted:
         """Take the lock, check, record ``RUNNING``, start the work, return.
 

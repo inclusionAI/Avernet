@@ -1,4 +1,5 @@
 import type { TaskListItem } from '@/domain/tasks/models';
+import { getUserTaskTitle } from '../userTaskUtils';
 
 export interface UserTaskOwnerBotOption {
   value: string;
@@ -8,16 +9,22 @@ export interface UserTaskOwnerBotOption {
 
 interface FilterUserTaskRecordsOptions {
   taskRecords: TaskListItem[];
+  keyword: string;
+  /** Lab searches only the displayed title; other task views retain broad matching. */
+  titleOnly?: boolean;
   ownerBotFilter: string;
   ownerBotOptions: UserTaskOwnerBotOption[];
 }
 
-/** 状态与关键字由服务端完成；Lab 的 Owner Bot 是展示层筛选，仍在本页过滤。 */
+/** 状态过滤由服务端完成；这里只处理列表已有的关键字与 Owner Bot 本地筛选。 */
 export function filterUserTaskRecords({
   taskRecords,
+  keyword,
+  titleOnly = false,
   ownerBotFilter,
   ownerBotOptions,
 }: FilterUserTaskRecordsOptions): TaskListItem[] {
+  const normalizedKeyword = keyword.trim().toLowerCase();
   const selectedOwnerBot = ownerBotOptions.find((item) => item.value === ownerBotFilter);
   const selectedOwnerBotIds =
     ownerBotFilter === 'all'
@@ -29,8 +36,18 @@ export function filterUserTaskRecords({
         );
 
   return taskRecords.filter((record) => {
+    const title = getUserTaskTitle(record).toLowerCase();
+    const taskId = record.task_id.toLowerCase();
     const botId = record.owner_bot_id.toLowerCase();
+    const sourceType = (record.source_type ?? '').toLowerCase();
+    const matchesKeyword =
+      !normalizedKeyword ||
+      title.includes(normalizedKeyword) ||
+      (!titleOnly &&
+        (taskId.includes(normalizedKeyword) ||
+          botId.includes(normalizedKeyword) ||
+          sourceType.includes(normalizedKeyword)));
     const matchesOwnerBot = !selectedOwnerBotIds || selectedOwnerBotIds.has(botId);
-    return matchesOwnerBot;
+    return matchesKeyword && matchesOwnerBot;
   });
 }

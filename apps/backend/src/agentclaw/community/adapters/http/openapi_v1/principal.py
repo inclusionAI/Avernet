@@ -703,39 +703,3 @@ async def refuse_app_only_caller(
     if caller_names_a_user(principal):
         return
     _refuse(connection, "this operation requires a caller naming an end user")
-
-
-def manifest_creation_subject(caller: ActingCaller, principal: Principal) -> str | None:
-    """A creation is self-service or explicitly delegated at the user level."""
-    try:
-        if caller.is_application:
-            return caller.user_id if caller.has_user_delegation() else None
-        if (
-            caller_names_a_user(principal)
-            and caller_owner_id(principal) == caller.user_id
-        ):
-            return caller.user_id
-    except Exception:  # An unconfirmed identity only suppresses the advisory note.
-        return None
-    return None
-
-
-def manifest_existing_bot_subject(
-    caller: ActingCaller, principal: Principal, *, bot: dict, bot_id: str
-) -> str | None:
-    """A collaborator's authority to edit is not authority to query the owner."""
-    owner = bot.get("owner_id")
-    if not owner or caller.user_id != owner:
-        return None
-    try:
-        if caller.is_application:
-            caller.require_bot(bot_id, owner_id=owner)
-            return caller.user_id
-        if (
-            caller_names_a_user(principal)
-            and caller_owner_id(principal) == caller.user_id
-        ):
-            return caller.user_id
-    except Exception:  # An unconfirmed grant only suppresses the advisory note.
-        return None
-    return None

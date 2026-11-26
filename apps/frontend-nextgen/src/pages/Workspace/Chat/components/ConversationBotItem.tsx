@@ -51,10 +51,6 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
 }: ConversationBotItemProps) {
   const isManaged = isManagedConversationSection(section);
   const isOthers = isManaged && origin === 'others';
-  // AgentCoding-only list exceptions. Ordinary bots keep the generic others read-only row.
-  const isAgentCoding = bot.isAgentCodingBot === true;
-  const allowCodingSharedOriginActions = isAgentCoding;
-  const allowCodingActionsWithInitiator = isOthers && allowCodingSharedOriginActions;
   const isArchiveScope = isManaged && scope === 'archived';
   const supportsArchives = Boolean(sessionArchives && sessionArchiveActions);
   const supportsCollab = Boolean(supportsArchives);
@@ -260,19 +256,17 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
             />
           ) : (
             <ConversationSessionList
-              actions={isOthers && !allowCodingSharedOriginActions ? undefined : sessionActions}
+              actions={isOthers ? undefined : sessionActions}
               sessions={visibleSessions}
               selectedSessionId={selectedSessionId}
               onSelectSession={onSelectSession}
               onLoadMore={onLoadMore}
-              onToggleFavorite={canFavorite && (!isOthers || allowCodingSharedOriginActions) ? onToggleFavorite : undefined}
+              onToggleFavorite={!isOthers && canFavorite ? onToggleFavorite : undefined}
               isFavoritePending={isFavoritePending}
               replyingSessionId={replyingSessionId ?? null}
               emptyTitle={isOthers ? '暂无他人发起的会话' : undefined}
               showCreateHint={!isOthers}
               showInitiator={isOthers}
-              allowActionsWithInitiator={allowCodingActionsWithInitiator}
-              showFullTitleTooltip={isAgentCoding}
             />
           )}
         </div>

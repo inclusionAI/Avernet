@@ -9,6 +9,7 @@ import {
 import type { CancelOutcome } from '@avernet/a2a-chat-client';
 import { getBotConnection } from '@/services/backendApi/bots/privateBotSessionController';
 import { getBotIamToken } from '@/services/backendApi/privateChat/iamTokenController';
+import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { OpenClawProvider, type ConnectionStatusEvent, type OpenClawProviderConfig } from '@tc-chat/adapters';
 import type { ChatMessage, ChatProvider, PromptFileRef, ResourceReference } from '@tc-chat/core';
 import { installCompleteFallback } from './botChatCompleteFallback';
@@ -18,7 +19,7 @@ import {
   botSessionService,
   resolveChatRuntimeStage,
   resolveUserId,
-  withBotSessionScope,
+  withFriendBotRequestParams,
   type ChatBotView,
 } from './botSessionService';
 
@@ -78,8 +79,6 @@ interface BotChatProviderOptions {
   sessionId: string;
   /** 多实例服务 Bot 的实例范围;缺省按后端默认实例解析。 */
   range?: ConversationSessionRequestRange;
-  /** Bot 工坊调试关闭；“对话”栏目缺省开启本人会话主体寻址。 */
-  subjectScoped?: boolean;
   /** 注入 SDK Provider 构造(测试 stub);缺省真实 SDK。 */
   createSdkProvider?: (config: OpenClawProviderConfig) => OpenClawProvider;
   /** 注入 IAM token 拉取(测试 stub);缺省走 /openapi/v1/bots/{bot_id}/iam-token。 */
@@ -131,6 +130,8 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   /** disconnect() 递增；异步 connect 在每个 await 后校验，过期连接静默清理。 */
   private connectionEpoch = 0;
   private readonly getIamTokenFn: typeof getBotIamToken;
+  /** Caller 判据探测(单飞缓存):首次换签后结果定格,null=尚未发起。 */
+  private callerRuntimeTargetPromise: Promise<'service' | 'caller_instance' | undefined> | null = null;
   private iamToken = '';
   private directDesktop = false;
   private desktopReconnectTimer?: ReturnType<typeof setTimeout>;
@@ -170,6 +171,35 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       options.bot.realBotId, options.bot.ownerId,
       resolveChatRuntimeStage(options.bot),
     ].join(' ');
+    // Caller 判据探测随构造即发,与连接握手(getBotConnection)并行,保证首次换签
+    // 前已有结论、不串行加时延;desktop 直连不走云端换签,不探测。
+    if (options.bot.botType !== 'desktop') void this.resolveCallerRuntimeTarget();
+  }
+
+  /** Caller 模式判据运行时化(2026-11-19 需求变更,与文件链 useBotSessionFilesFeature
+   *  同款判据/取值):新版目录接口族不下发 call_type,静态 options.bot.callType 恒
+   *  undefined(判据死参数事故的根因);改探测 GET /openapi/v1/bots/{id}/caller-context
+   *  (stage=draft,聚合 bot_call_type 存量存于 Bot 行,与运行 stage 无关)。
+   *  取值:我管理的/我协作的 → service(服务实例池,实例仍由 stage/device_uuid 定位);
+   *  好友 Bot → caller_instance(当前用户独立 Caller 实例)。
+   *  三轮勘误(2026-11-19):好友探测照旧发起——gateway 契约本接口仅授权 Bot 的
+   *  owner/collaborator,好友视角探测预期失败,但无论成败 caller_runtime_target
+   *  电文均可能无法落地,不再据此裁剪请求面;探测失败/非 caller 一律静默降级不带
+   *  且零提示(请求层 suppressErrorNotification 不投 httpClient 默认错误 toast,
+   *  契约安全:f_user_id 路由自明)。
+   *  单飞缓存:结果跨多次换签定格,失效面(改调用身份)随 provider 重建刷新。 */
+  private resolveCallerRuntimeTarget(): Promise<'service' | 'caller_instance' | undefined> {
+    if (this.options.bot.botType === 'desktop') return Promise.resolve(undefined);
+    this.callerRuntimeTargetPromise ??= botEditorService
+      .getCallerContext(this.options.bot.realBotId, this.options.bot.ownerId, {
+        suppressErrorNotification: true,
+      })
+      .then((ctx) =>
+        ctx.botCallType === 'caller'
+          ? (this.options.bot.isFriendBot ? ('caller_instance' as const) : ('service' as const))
+          : undefined)
+      .catch(() => undefined);
+    return this.callerRuntimeTargetPromise;
   }
 
   get isConnected(): boolean {
@@ -248,9 +278,11 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   }
 
   private async fetchIamToken(): Promise<string> {
-    const params = withBotSessionScope(this.options.bot, this.options.userId, {
+    const params = withFriendBotRequestParams(this.options.bot, this.options.userId, {
       user_id: resolveUserId(this.options.userId),
-    }, this.options.subjectScoped !== false);
+    });
+    // IAM 与文件链同规则(2026-11-19 勘误):判据与取值同 resolveCallerRuntimeTarget 单点收口。
+    const callerRuntimeTarget = await this.resolveCallerRuntimeTarget();
     return this.getIamTokenFn(
       this.options.bot.realBotId,
       params.user_id,
@@ -258,8 +290,9 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
       params.stage,
       {
         sessionKey: this.options.sessionId,
-        friendUserId: params.f_user_id,
-        ownerId: this.options.bot.ownerId,
+        ...(this.options.bot.isFriendBot
+          ? { friendUserId: params.user_id, ownerId: this.options.bot.ownerId }
+          : {}),
         // 多实例服务 Bot:IAM 换签带选中实例 device_uuid(与 getChatUrl 的实例选址同源
         // options.range,避免 Token 与实际实例不一致)。range 产出已由 useBotSessionRange /
         // supportsConversationInstanceScope 收口(服务 Bot+非好友+非 teclaw+已选实例)。
@@ -268,6 +301,9 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
         ...(this.options.range?.deviceUuid
           ? { deviceUuid: this.options.range.deviceUuid }
           : {}),
+        ...(callerRuntimeTarget
+          ? { callerRuntimeTarget }
+          : {}),
       },
     );
   }
@@ -275,12 +311,12 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   private async getChatUrl(): Promise<A2aProxyConnection & { url: string }> {
     const resp = await getBotConnection(
       this.options.bot.realBotId,
-      withBotSessionScope(this.options.bot, this.options.userId, {
+      withFriendBotRequestParams(this.options.bot, this.options.userId, {
         user_id: resolveUserId(this.options.userId),
         owner_id: this.options.bot.ownerId,
-        session_id: this.options.sessionId,
+        ...(this.options.bot.isFriendBot ? { session_id: this.options.sessionId } : {}),
         ...(this.options.range ? { device_uuid: this.options.range.deviceUuid } : {}),
-      }, this.options.subjectScoped !== false),
+      }),
     );
     const connectionEngine = resp.data?.engine?.trim().toLowerCase() || null;
     this.setConnectionRuntime({
@@ -641,15 +677,14 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   async loadHistory(): Promise<ChatMessage[]> {
     this.setState({ phase: 'loading-history', error: null });
     try {
-      const page = this.options.subjectScoped === false
-        ? await botSessionService.listMessagesPage(
-            this.options.bot, this.options.userId, this.options.sessionId,
-            1, BOT_MESSAGE_PAGE_SIZE, this.options.range, false,
-          )
-        : await botSessionService.listMessagesPage(
-            this.options.bot, this.options.userId, this.options.sessionId,
-            1, BOT_MESSAGE_PAGE_SIZE, this.options.range,
-          );
+      const page = await botSessionService.listMessagesPage(
+        this.options.bot,
+        this.options.userId,
+        this.options.sessionId,
+        1,
+        BOT_MESSAGE_PAGE_SIZE,
+        this.options.range,
+      );
       this.historyPage = 1;
       this.loadedHistoryRawCount = page.rawCount;
       this.historyTotal = page.total;
@@ -670,15 +705,14 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     this.loadingMoreHistory = true;
     try {
       const nextPage = this.historyPage + 1;
-      const page = this.options.subjectScoped === false
-        ? await botSessionService.listMessagesPage(
-            this.options.bot, this.options.userId, this.options.sessionId,
-            nextPage, BOT_MESSAGE_PAGE_SIZE, this.options.range, false,
-          )
-        : await botSessionService.listMessagesPage(
-            this.options.bot, this.options.userId, this.options.sessionId,
-            nextPage, BOT_MESSAGE_PAGE_SIZE, this.options.range,
-          );
+      const page = await botSessionService.listMessagesPage(
+        this.options.bot,
+        this.options.userId,
+        this.options.sessionId,
+        nextPage,
+        BOT_MESSAGE_PAGE_SIZE,
+        this.options.range,
+      );
       this.historyPage = nextPage;
       this.loadedHistoryRawCount += page.rawCount;
       this.historyTotal = page.total;

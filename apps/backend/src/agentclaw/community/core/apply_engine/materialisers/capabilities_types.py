@@ -66,7 +66,6 @@ class Resolved:
     final_skills: tuple[Skill, ...] = ()
     set_codes: frozenset[str] = frozenset()
     mcp: tuple[tuple[str, dict | None], ...] = ()
-    default_mcp_codes: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, kw_only=True)

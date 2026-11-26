@@ -104,18 +104,8 @@ async def get_bot_iam_token(
             "explicit friend IAM request; defaults to the acting user."
         ),
     ),
-    f_user_id: str | None = Query(
-        default=None,
-        description=(
-            "Conversation subject. A self subject selects its Caller runtime "
-            "when applicable; an empty value preserves the operator runtime."
-        ),
-    ),
-    session_id: str | None = Query(
-        default=None,
-        min_length=1,
-        description="Required with f_user_id: a session owned by that subject.",
-    ),
+    f_user_id: str | None = Query(default=None, description="Friend-chat user; an empty value selects the Bot's service runtime."),
+    session_id: str | None = Query(default=None, min_length=1, description="Required with f_user_id: an owned friend session identifier."),
     session_key: str | None = Query(
         default=None,
         min_length=1,

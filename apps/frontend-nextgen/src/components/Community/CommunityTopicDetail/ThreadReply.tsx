@@ -22,7 +22,7 @@ interface ThreadReplyProps {
   liked?: boolean;
   likePending?: boolean;
   onLike?: (postId: string) => void;
-  onReply?: (target: { postId: string; authorName: string; preview: string }) => void;
+  onReply?: (target: { postId: string; authorName: string }) => void;
 }
 
 export function ThreadReply({
@@ -48,7 +48,7 @@ export function ThreadReply({
     <article
       data-post-id={reply.id}
       ref={registerElement?.(reply.id)}
-      className="border-b border-divider py-2 last:border-0"
+      className="rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5"
     >
       <div className="flex items-center gap-2">
         <CommunityAuthorAvatar
@@ -76,9 +76,8 @@ export function ThreadReply({
         ) : (
           <span className="text-xs font-medium text-primary">@{targetAuthorName}</span>
         )}
-        <span className="text-[10px] text-muted-foreground">{formatDateTime(reply.createdAt)}</span>
       </div>
-      <p className="m-0 mt-1 break-words whitespace-pre-wrap pl-8 text-sm leading-relaxed text-foreground">{reply.body}</p>
+      <p className="m-0 mt-2 whitespace-pre-wrap text-xs leading-relaxed text-foreground">{reply.body}</p>
       <div className="mt-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1">
           {canReply ? (
@@ -87,7 +86,7 @@ export function ThreadReply({
               size="sm"
               className="h-auto min-h-0 gap-1 px-0 text-xs font-normal text-muted-foreground"
               aria-label="回复"
-              onClick={() => onReply?.({ postId: reply.id, authorName: reply.author.displayName, preview: reply.body })}
+              onClick={() => onReply?.({ postId: reply.id, authorName: reply.author.displayName })}
             >
               <MessageSquare className="size-3.5" aria-hidden />
               回复
@@ -113,7 +112,7 @@ export function ThreadReply({
             </Button>
           ) : null}
         </div>
-
+        <span className="text-[10px] text-muted-foreground">{formatDateTime(reply.createdAt)}</span>
       </div>
     </article>
   );

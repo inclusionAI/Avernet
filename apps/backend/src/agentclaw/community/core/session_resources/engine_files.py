@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from typing import Any
 from urllib.parse import quote
 
@@ -17,9 +18,10 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineRuntimeError,
 )
 from agentclaw.community.core.resources.service import FileTooLargeError
-from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest, RuntimeBindingSource, RuntimeBindingTarget
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.runtime_binding.errors import RuntimeBindingResolutionError
-from agentclaw.community.core.session_resources.runtime import SessionFileRuntimeResolver
+from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
@@ -35,24 +37,37 @@ log = get_logger()
 class EngineSessionFilesService:
     @inject
     def __init__(
-        self, runtime_bindings: SessionFileRuntimeResolver,
+        self, runtime_bindings: RuntimeBindingResolutionService,
         resolver: DeviceContextResolver, transport: DeviceAdapterTransport,
+        bot_repository: BotRepository,
     ) -> None:
         self._bindings = runtime_bindings
         self._resolver = resolver
         self._transport = transport
+        self._bots = bot_repository
 
     def _connection(
         self, target: RuntimeBindingRequest, session_user_id: str | None = None,
-        device_uuid: str | None = None,
     ) -> dict[str, Any]:
+        # On the friend surface the selector can confirm the authorized runtime only.
+        confirm_caller = session_user_id is not None and target.target is RuntimeBindingTarget.CALLER_INSTANCE
+        if confirm_caller:
+            target = replace(target, target=RuntimeBindingTarget.AUTO)
+        if session_user_id is not None and session_user_id != target.actor_user_id:
+            # COSEC: only an authorized owner may address another session subject.
+            if target.actor_user_id != target.owner_id:
+                raise EngineResourceNotFoundError("session file not found")
+            bot = self._bots.get_by_id_and_owner(target.bot_id, target.owner_id)
+            if not bot:
+                raise EngineResourceNotFoundError("session file bot not found")
+            if bot.get("bot_type") == "service" and bot.get("call_type") == "caller":
+                target = replace(target, actor_user_id=session_user_id, target=RuntimeBindingTarget.CALLER_INSTANCE)
         try:
-            runtime = self._bindings.resolve(
-                target, session_user_id=session_user_id, device_uuid=device_uuid,
-            )
+            binding = self._bindings.resolve(target)
+            if confirm_caller and binding.source is not RuntimeBindingSource.CALLER_INSTANCE:
+                raise EngineResourceNotFoundError("caller runtime is unavailable for friend chat")
             return self._resolver.resolve_for_binding(
-                runtime.binding_id, runtime.affinity_id, bot_id=target.bot_id,
-                **({"device_uuid": runtime.device_uuid} if runtime.device_uuid else {}),
+                binding.binding_id, target.actor_user_id, bot_id=target.bot_id,
             ).conn_info
         except (RuntimeBindingResolutionError, ConnInfoBuildError, DeviceNotBoundError):
             raise EngineDeviceNotReadyError("session file binding unavailable") from None
@@ -72,7 +87,6 @@ class EngineSessionFilesService:
         self, target: RuntimeBindingRequest, session_key: str,
         method: str, path: str,
         *, session_user_id: str | None = None,
-        device_uuid: str | None = None,
     ) -> dict[str, Any]:
         started = time.monotonic()
         log.info(
@@ -82,7 +96,7 @@ class EngineSessionFilesService:
         )
         try:
             result = await self._transport.invoke(
-                self._connection(target, session_user_id, device_uuid), method, path,
+                self._connection(target, session_user_id), method, path,
                 params={"sessionKey": session_key}, timeout=60.0,
             )
             if method == "GET":
@@ -120,9 +134,8 @@ class EngineSessionFilesService:
     async def list_files(
         self, target: RuntimeBindingRequest, session_key: str,
         *, session_user_id: str | None = None,
-        device_uuid: str | None = None,
     ) -> list[dict[str, Any]]:
-        result = await self._invoke(target, session_key, "GET", self._path(), session_user_id=session_user_id, device_uuid=device_uuid)
+        result = await self._invoke(target, session_key, "GET", self._path(), session_user_id=session_user_id)
         return result["files"]
 
     @staticmethod
@@ -159,7 +172,6 @@ class EngineSessionFilesService:
         self, target: RuntimeBindingRequest, session_key: str,
         resource_id: str, disposition: str,
         *, session_user_id: str | None = None,
-        device_uuid: str | None = None,
     ) -> DeviceAdapterStreamResponse:
         if disposition not in {"inline", "attachment"}:
             raise ValueError("invalid_disposition")
@@ -173,7 +185,7 @@ class EngineSessionFilesService:
         status_code = None
         try:
             response = await self._transport.stream(
-                self._connection(target, session_user_id, device_uuid), "GET", path,
+                self._connection(target, session_user_id), "GET", path,
                 params={"sessionKey": session_key, "disposition": disposition},
                 timeout=60.0,
             )
@@ -205,9 +217,5 @@ class EngineSessionFilesService:
 
     async def delete_file(
         self, target: RuntimeBindingRequest, session_key: str, resource_id: str,
-        *, session_user_id: str | None = None,
-        device_uuid: str | None = None,
     ) -> None:
-        await self._invoke(
-            target, session_key, "DELETE", self._path(resource_id), session_user_id=session_user_id, device_uuid=device_uuid,
-        )
+        await self._invoke(target, session_key, "DELETE", self._path(resource_id))

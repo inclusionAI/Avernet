@@ -12,7 +12,7 @@ Current implementations:
 - ``core.devices.services.arca_device_filesystem.ArcaDeviceFileSystem``
 """
 
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import Any, Protocol
 
 
 class FileTooLargeError(Exception):
@@ -24,40 +24,8 @@ class FileTooLargeError(Exception):
     """
 
 
-@runtime_checkable
-class CheckedDeviceFileSystem(Protocol):
-    """Opt-in read capability separating absence from runtime failure."""
-
-    async def read_file_checked(self, file_path: str, *, enforce_download_limit: bool = False) -> bytes | None:
-        """Return bytes or confirmed absence; propagate other errors."""
-        ...
-
-
-async def checked_read_file(filesystem: object, path: str, *, enforce_download_limit: bool = False) -> bytes | None:
-    """Read through an explicitly supported error-preserving capability.
-
-    Legacy providers remain usable by existing callers, but cannot satisfy a
-    checked read by silently reporting transport errors as missing files.
-    """
-    if not isinstance(filesystem, CheckedDeviceFileSystem):
-        if enforce_download_limit:
-            raise RuntimeError("Device filesystem does not support checked downloads")
-        legacy_read = getattr(filesystem, "read_file", None)
-        if not callable(legacy_read):
-            raise RuntimeError("Device filesystem does not support checked reads")
-        content = await legacy_read(path, enforce_download_limit=enforce_download_limit)
-        if content is None:
-            raise RuntimeError("Legacy device filesystem cannot distinguish absence from failure")
-        return content
-    return await filesystem.read_file_checked(path, enforce_download_limit=enforce_download_limit)
-
-
 class DeviceFileSystem(Protocol):
     """Read / write / delete files on a device filesystem."""
-
-    # True when a None from list_dir proves absence. Some legacy adapters
-    # also return None for a failed listing.
-    missing_directory_is_authoritative: ClassVar[bool] = False
 
     async def read_file(
         self,

@@ -35,7 +35,6 @@ from agentclaw.community.adapters.http.openapi_v1.deprecated import (
 from agentclaw.community.adapters.http.openapi_v1.admission import (
     ADMISSION,
     ADMITTING_MODES,
-    admission_for,
     HARNESS_SCOPED_OPERATIONS,
     SKILL_SCOPED_OPERATIONS,
     AdmissionMode,
@@ -360,7 +359,7 @@ def test_every_mode_is_used(mode: AdmissionMode):
     entries are re-labelled, leaving the definition and its docstring behind as
     documentation of a policy that is no longer applied anywhere.
     """
-    assert any(admission_for(operation) is mode for operation in ADMISSION), (
+    assert any(value is mode for value in ADMISSION.values()), (
         f"AdmissionMode.{mode.name} is defined but assigned to no operation"
     )
 

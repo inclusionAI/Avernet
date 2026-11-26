@@ -35,5 +35,4 @@ class SkillSetApplyPort(Protocol):
         remove_names: tuple[str, ...],
         default_change: DefaultExclusionChange,
         platform_default_codes: frozenset[str],
-        retry_mcp_codes: frozenset[str] = frozenset(),
     ) -> SkillSetApplyResult: ...

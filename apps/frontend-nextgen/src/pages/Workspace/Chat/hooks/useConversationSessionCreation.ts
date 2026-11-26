@@ -20,7 +20,6 @@ export function useConversationSessionCreation(
 ): ConversationSessionCreationModel {
   const generation = useRef(0);
   const pendingBotIdsRef = useRef<Set<string>>(new Set());
-  const pendingControllersRef = useRef<Map<string, AbortController>>(new Map());
   const [, refreshPending] = useState(0);
 
   useEffect(() => {
@@ -28,8 +27,6 @@ export function useConversationSessionCreation(
     pendingBotIdsRef.current.clear();
     return () => {
       generation.current += 1;
-      pendingControllersRef.current.forEach((controller) => controller.abort());
-      pendingControllersRef.current.clear();
       pendingBotIdsRef.current.clear();
     };
   }, [userId]);
@@ -80,8 +77,6 @@ export function useConversationSessionCreation(
       // 必须 capture 切换后的 selection。否则 A 的选中保护会拦住 B 的创建结果。
       const selectionAtStart = useConversationStore.getState();
       const codingHost = view.bot.isAgentCodingBot ? getCapabilities().getCodingBotConversationHost().value : null;
-      const abortController = view.bot.isAgentCodingBot ? null : new AbortController();
-      if (abortController) pendingControllersRef.current.set(botId, abortController);
       let result;
       try {
         if (view.bot.isAgentCodingBot) {
@@ -127,11 +122,7 @@ export function useConversationSessionCreation(
             },
           };
         } else {
-          result = await botSessionService.createSession(view.bot, userIdNow, undefined, {
-            friendlyErrors: true,
-            waitForCallerRuntime: true,
-            signal: abortController?.signal,
-          });
+          result = await botSessionService.createSession(view.bot, userIdNow, undefined, { friendlyErrors: true });
         }
 
         if (userIdRef.current !== userIdNow || generation.current !== started) return;
@@ -203,7 +194,6 @@ export function useConversationSessionCreation(
         }
         toast.success('会话已创建');
       } finally {
-        pendingControllersRef.current.delete(botId);
         pendingBotIdsRef.current.delete(botId);
         refreshPending((value) => value + 1);
       }

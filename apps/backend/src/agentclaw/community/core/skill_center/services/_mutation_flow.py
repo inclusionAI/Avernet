@@ -140,8 +140,6 @@ class MutationProjectionFlow:
         ) = None,
         skip_projection_when_unchanged: bool = False,
         on_committed: Callable[[DesiredStateMutation], None] | None = None,
-        on_projection: Callable[[RuntimeProjectionResult], None] | None = None,
-        record_projection_when_unchanged: bool = False,
     ) -> dict:
         """Run the command; return ``{**item, "changed": ..., **details}``.
 
@@ -193,7 +191,7 @@ class MutationProjectionFlow:
                 )
             else:
                 result = mutation()
-            if deferred is not None and (result.changed or record_projection_when_unchanged):
+            if deferred is not None and result.changed:
                 deferred.record(effective_scope(result))
             if on_committed is not None:
                 on_committed(result)
@@ -297,8 +295,6 @@ class MutationProjectionFlow:
             scope=selected_scope,
             previous_snapshot_failed=previous_snapshot_failed,
         )
-        if on_projection is not None:
-            on_projection(runtime_result)
         self._ensure_skill_recovery(
             bot=bot,
             bot_id=bot_id,

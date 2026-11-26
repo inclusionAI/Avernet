@@ -30,7 +30,6 @@ from agentclaw.community.core.session_resources.types import (
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterStreamResponse,
 )
-from agentclaw.community.core.devices.services.device_context import ConnInfoBuildError
 
 
 def _record(**overrides):
@@ -67,10 +66,7 @@ class _Service:
         self.intent_kwargs = kwargs
         return SessionUploadIntent(
             resource=_record(),
-            grant=UploadGrant(
-                transfer_id="transfer-1", upload_type="SINGLE",
-                upload_url="https://upload.example.invalid/file?Signature=private-upload-grant",
-            ),
+            grant=UploadGrant(transfer_id="transfer-1", upload_type="SINGLE"),
         )
 
     def complete_upload(self, **kwargs):
@@ -116,16 +112,13 @@ class _Service:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("device_uuid", [None, "DEVICE-B"])
-async def test_upload_intent_keeps_the_primary_service_contract_only(device_uuid, caplog):
-    caplog.set_level("INFO", logger="session_resource.api")
+async def test_upload_intent_keeps_the_primary_service_contract_only():
     service = _Service()
     body = UploadIntentRequest(
         bot_id="bot-1",
         session_key="session-raw",
         scope_type="friend_bot_chat",
         engine_type="openclaw",
-        device_uuid=device_uuid,
         files=[
             {
                 "filename": "report.pdf",
@@ -150,62 +143,12 @@ async def test_upload_intent_keeps_the_primary_service_contract_only(device_uuid
         "filename": "report.pdf",
         "target_entity_id": None,
         "binding_id": None,
-        "device_uuid": device_uuid,
         "size_bytes": 12,
         "content_hash": "hash-1",
         "creator_name": None,
     }
     assert result["files"][0]["resource_id"] == "sr_001"
     assert "mime_type" not in result["files"][0]
-    assert "session_resource.upload_intents.request" in caplog.text
-    assert "session_resource.upload_intents.success" in caplog.text
-    assert f"device_uuid={device_uuid}" in caplog.text
-    assert "session_hash=" in caplog.text
-    assert "session-raw" not in caplog.text
-    assert "sr_001" in caplog.text
-    assert "private-upload-grant" not in caplog.text
-    assert "transfer-1" not in caplog.text
-
-
-@pytest.mark.parametrize("device_uuid", ["", "x" * 129, True])
-def test_upload_intent_rejects_invalid_device_uuid(device_uuid):
-    with pytest.raises(ValidationError, match="device_uuid"):
-        UploadIntentRequest(
-            bot_id="bot-1", session_key="session-raw", scope_type="personal_bot_chat",
-            engine_type="openclaw", device_uuid=device_uuid,
-            files=[{"filename": "a.txt"}],
-        )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("unexpected", [False, True])
-async def test_upload_intent_logs_selected_device_failure_without_changing_error(caplog, unexpected):
-    error = ConnInfoBuildError("private-device-credential") if unexpected else ValueError("resource_not_found")
-
-    class UnavailableService(_Service):
-        def create_upload_intent(self, **kwargs):
-            raise error
-
-    body = UploadIntentRequest(
-        bot_id="bot-1", session_key="session-raw", scope_type="personal_bot_chat",
-        engine_type="openclaw", binding_id=91, device_uuid="DEVICE-B",
-        files=[{"filename": "a.txt"}],
-    )
-    with pytest.raises(ConnInfoBuildError if unexpected else HTTPException) as raised:
-        await create_upload_intents(
-            body=body, user=AuthenticatedUser("id", "owner-1", "owner-1"),
-            service=UnavailableService(),
-        )
-    if unexpected:
-        assert raised.value is error
-    else:
-        assert raised.value.status_code == 404
-        assert raised.value.detail == "resource_not_found"
-    assert "session_resource.upload_intents.failed" in caplog.text
-    assert "device_uuid=DEVICE-B" in caplog.text
-    assert f"error_type={type(error).__name__}" in caplog.text
-    assert "private-device-credential" not in caplog.text
-    assert "session_resource.upload_intents.success" not in caplog.text
 
 
 def test_upload_intent_ignores_sidecar_authority_and_legacy_extra_fields():
@@ -231,7 +174,6 @@ def test_upload_intent_ignores_sidecar_authority_and_legacy_extra_fields():
         "engine_type": "openclaw",
         "target_entity_id": None,
         "binding_id": None,
-        "device_uuid": None,
         "files": [
             {
                 "filename": "report.txt",

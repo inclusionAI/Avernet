@@ -18,7 +18,7 @@ import { history } from '@umijs/max';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { ReadOnlyConversationPanel } from '../components/ReadOnlyConversationPanel';
-import { RetainedCodingBotStage } from './RetainedCodingBotStage';
+import { CodingBotConversationStage } from './CodingBotConversationStage';
 import { StandardConversationStageContainer } from './StandardConversationStageContainer';
 import { ConversationMobileSidebarDrawer } from './components/ConversationMobileSidebarDrawer';
 import { ConversationSessionPlaceholder } from './components/ConversationSessionPlaceholder';
@@ -32,7 +32,6 @@ import { useConversationSelection } from './hooks/useConversationSelection';
 import { useConversationSessionPlaceholder } from './hooks/useConversationSessionPlaceholder';
 import { useConversationSessions } from './hooks/useConversationSessions';
 import { useConversationUrlSync } from './hooks/useConversationUrlSync';
-import { useExpandedCodingBotStatusPolling } from './hooks/useExpandedCodingBotStatusPolling';
 import { useLegacyShareLinkGuard } from './hooks/useLegacyShareLinkGuard';
 import { useLegacyFriendOthers } from './hooks/useLegacyFriendOthers';
 
@@ -115,8 +114,8 @@ export default function ConversationPage(): JSX.Element {
   // 停用旧用户会话,防止上一用户的缓存/选中串号。
   const interactiveBot = identityChanged || !userId ? null : interactive.bot;
   const selectedSession = interactive.session;
-  const codingBotHost = getCapabilities().getCodingBotConversationHost().value;
-  const codingBotPreload = codingBotHost?.preload;
+  const codingBotPreload = getCapabilities().getCodingBotConversationHost().value?.preload;
+
   // interactive.bot 只有在目标 Session 已解析后才存在，太晚。这里从目录推导当前
   // 选中 Bot，以便在“Bot 已识别、Session 未就绪”时就挂载 embedded Stage。
   const selectedCodingBot = useMemo(() => {
@@ -140,8 +139,6 @@ export default function ConversationPage(): JSX.Element {
     () => [...managedAndTeamBots.map((view) => view.bot), ...directory.friendBots.map((view) => view.bot)],
     [managedAndTeamBots, directory.friendBots],
   );
-
-  useExpandedCodingBotStatusPolling({ chatBots, userId });
 
   // 只读(others)装配:三元组不完整时 Hook 内部只清态不发请求。
   const selectionIsReadonly = origin === 'others' && selectedCodingBot === null && store.selectedBotId !== null;
@@ -241,12 +238,6 @@ export default function ConversationPage(): JSX.Element {
           }}
         />
         <div className="relative flex h-full min-h-0 min-w-0 flex-1">
-          {human && !identityChanged && (
-            <RetainedCodingBotStage key={human.userId}
-              bot={selectionIsReadonly ? null : selectedCodingBot}
-              session={selectedSession} human={human} placeholder={placeholder}
-              onOpenSessionList={() => setMobileListOpen(true)} />
-          )}
           {selectionIsReadonly ? (
             <ReadOnlyConversationPanel
               bot={readonly.bot}
@@ -262,7 +253,18 @@ export default function ConversationPage(): JSX.Element {
               onLoadMore={() => void readonlyHistory.loadMore()}
               onOpenSessionList={() => setMobileListOpen(true)}
             />
-          ) : selectedCodingBot ? null : placeholder ? (
+          ) : selectedCodingBot ? (
+            // managed/team Coding Bot 被选中即挂载 Stage；sessionId 只决定子应用打开的
+            // 会话，不决定 Runtime identity。loading / empty / unselected / error 等
+            // placeholder 统一覆盖在其上方，目标 controller 仍可完成注册。
+            <CodingBotConversationStage
+              bot={selectedCodingBot}
+              session={selectedSession}
+              human={human}
+              placeholder={placeholder}
+              onOpenSessionList={() => setMobileListOpen(true)}
+            />
+          ) : placeholder ? (
             // 其他加载/失败/筛选空态继续由宿主占位，不启动消息 Runtime。
             <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={() => setMobileListOpen(true)} />
           ) : selectedBotPending ? (

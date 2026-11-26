@@ -86,10 +86,10 @@ describe('CommunityPersonalCenter', () => {
       within(screen.getByRole('group', { name: '我的内容' }))
         .getAllByRole('button')
         .map((item) => item.textContent),
-    ).toEqual(['我的帖子', '我的回帖', '我的收藏', '我的点赞', '我的关注', '浏览历史']);
+    ).toEqual(['我的帖子', '我的回贴', '我的收藏', '我的点赞', '我的关注', '浏览历史']);
     expect(screen.getByText('PRD 风格主题卡片')).toBeInTheDocument();
     expect(screen.getByText('这是一个带完整上下文的帖子内容预览。')).toBeInTheDocument();
-    expect(screen.getByText('#讨论')).toBeInTheDocument();
+    expect(screen.getByText('讨论')).toBeInTheDocument();
     expect(screen.getByText('协作助手')).toBeInTheDocument();
     expect(screen.getByText('12')).toBeInTheDocument();
     expect(screen.getByText('34')).toBeInTheDocument();
@@ -160,7 +160,7 @@ describe('CommunityPersonalCenter', () => {
     expect(screen.queryByText('bot-post-author')).not.toBeInTheDocument();
   });
 
-  it('个人中心帖子发布者为 Human 时使用清晰的 24px 头像', () => {
+  it('个人中心帖子发布者为 Human 时使用清晰的 32px 头像', () => {
     mockedCenter.activityPage = {
       items: [
         {
@@ -179,10 +179,10 @@ describe('CommunityPersonalCenter', () => {
 
     render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={jest.fn()} />);
 
-    expect(screen.getByAltText('李四')).toHaveStyle({ width: '24px', height: '24px' });
+    expect(screen.getByAltText('李四')).toHaveStyle({ width: '32px', height: '32px' });
   });
 
-  it('truncates favorite and browse activity content to two lines', () => {
+  it('truncates favorite and browse activity content to one line', () => {
     const onOpenTopic = jest.fn();
     mockedCenter.activityType = 'FAVORITED';
     mockedCenter.activityPage = {
@@ -194,9 +194,8 @@ describe('CommunityPersonalCenter', () => {
     );
     expect(
       screen.getByText('这是一个带完整上下文的帖子内容预览。'),
-    ).toHaveClass('line-clamp-2');
+    ).toHaveClass('truncate');
 
-    const favoriteListClasses = screen.getByLabelText('个人中心内容列表').className;
     favoriteView.unmount();
     mockedCenter.activityType = 'VIEWED';
     mockedCenter.activityPage = {
@@ -206,10 +205,7 @@ describe('CommunityPersonalCenter', () => {
     render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={onOpenTopic} />);
     expect(
       screen.getByText('这是一个带完整上下文的帖子内容预览。'),
-    ).toHaveClass('line-clamp-2');
-    expect(screen.getByLabelText('个人中心内容列表').className).toBe(favoriteListClasses);
-    expect(screen.getByLabelText('个人中心内容列表')).not.toHaveClass('border', 'overflow-hidden');
-    expect(screen.getByRole('button', { name: '浏览历史', pressed: true })).toBeVisible();
+    ).toHaveClass('truncate');
   });
 
   it('keeps liked topic and reply rows separate while distinguishing their source content', async () => {
@@ -345,9 +341,7 @@ describe('CommunityPersonalCenter', () => {
     expect(screen.queryByText('暂无关注的用户')).not.toBeInTheDocument();
     expect(screen.queryByText('暂无关注的 Bot')).not.toBeInTheDocument();
 
-    expect(screen.getByText('共 2 条')).toBeVisible();
     fireEvent.click(screen.getByText('张三'));
-    expect(screen.queryByText('共 2 条')).not.toBeInTheDocument();
 
     await waitFor(() =>
       expect(communityService.listTopics).toHaveBeenCalledWith({
@@ -355,9 +349,7 @@ describe('CommunityPersonalCenter', () => {
         limit: 20,
       }),
     );
-    expect(screen.getByRole('complementary', { name: '关注对象资料' })).toHaveTextContent('张三');
-    expect(within(screen.getByLabelText('关注对象帖子列表')).queryByAltText('张三')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '返回我的关注列表' })).toBeVisible();
+    expect(screen.getByText('张三 的帖子')).toBeInTheDocument();
     expect(await screen.findByLabelText('浏览 321')).toBeInTheDocument();
     expect(screen.getByLabelText('点赞 123')).toBeInTheDocument();
     expect(screen.getByLabelText('收藏 54')).toBeInTheDocument();
@@ -366,12 +358,8 @@ describe('CommunityPersonalCenter', () => {
     ]);
     fireEvent.click(screen.getByText('张三的主题'));
     expect(onOpenTopic).toHaveBeenCalledWith({ topicId: 'topic-2' });
-    fireEvent.click(within(screen.getByRole('complementary', { name: '关注对象资料' })).getByRole('button', { name: '取消关注' }));
+    fireEvent.click(screen.getByRole('button', { name: '取消关注 张三' }));
     expect(onUnfollow).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: '返回我的关注列表' }));
-    expect(screen.getByText('关注的用户')).toBeVisible();
-    expect(screen.getByText('共 2 条')).toBeVisible();
-    expect(screen.queryByRole('complementary', { name: '关注对象资料' })).not.toBeInTheDocument();
   });
 
   it('关注 Bot 时直接展示后端返回的 Bot 名称', () => {
@@ -400,7 +388,7 @@ describe('CommunityPersonalCenter', () => {
     expect(screen.queryByText('bot-lookup')).not.toBeInTheDocument();
   });
 
-  it('renders the replied-to topic once in the standard topic row and opens the original topic', () => {
+  it('groups replies by topic and explains nested reply targets', () => {
     mockedCenter.activityType = 'REPLIED';
     const topicContext: PersonalCenterTopicContext = {
       title: '误报率怎么压下来',
@@ -461,15 +449,36 @@ describe('CommunityPersonalCenter', () => {
     const onOpenTopic = jest.fn();
     render(<CommunityPersonalCenter onBack={jest.fn()} onOpenTopic={onOpenTopic} />);
 
-    const list = within(screen.getByLabelText('我的回帖列表'));
-    expect(list.getByRole('heading', { name: '误报率怎么压下来' }).closest('article')).toBeInTheDocument();
-    expect(list.getAllByText('误报率怎么压下来')).toHaveLength(1);
-    expect(list.getByText('求助一个关于误报率治理的问题。')).toBeVisible();
-    expect(list.getByText('#求助')).toBeVisible();
-    expect(list.getByLabelText('浏览 12')).toBeVisible();
-    expect(list.queryByText('我直接回复帖子本身的内容。')).not.toBeInTheDocument();
-    expect(list.queryByText('我回复另一个回复的内容。')).not.toBeInTheDocument();
-    fireEvent.click(list.getByText('误报率怎么压下来'));
-    expect(onOpenTopic).toHaveBeenCalledWith({ topicId: 'topic-2' });
+    expect(screen.getAllByText('误报率怎么压下来')).toHaveLength(1);
+    expect(screen.getByText('最近回复：2026-10-27 18:00')).toBeInTheDocument();
+    expect(screen.getAllByText('本人')).toHaveLength(2);
+    expect(screen.getAllByText('149844')).toHaveLength(2);
+    expect(screen.getByText('bot-mine:149844')).toBeInTheDocument();
+    expect(screen.queryByText(/回帖人：/)).not.toBeInTheDocument();
+    expect(screen.getByText('我直接回复帖子本身的内容。')).toBeInTheDocument();
+    expect(screen.getByText('我回复另一个回复的内容。')).toBeInTheDocument();
+    expect(
+      screen.getByText('回复 @风控分析 Bot：先按 true/false positive 分类标注误报。'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('我直接回复帖子本身的内容。')).toHaveClass('truncate');
+    expect(screen.getByText('我回复另一个回复的内容。')).toHaveClass('truncate');
+    expect(
+      screen.getByText('回复 @风控分析 Bot：先按 true/false positive 分类标注误报。'),
+    ).toHaveClass('truncate');
+
+    fireEvent.click(screen.getByText('误报率怎么压下来'));
+    expect(onOpenTopic).toHaveBeenLastCalledWith({ topicId: 'topic-2' });
+
+    fireEvent.click(screen.getByText('我直接回复帖子本身的内容。'));
+    expect(onOpenTopic).toHaveBeenLastCalledWith({
+      topicId: 'topic-2',
+      postId: 'post-direct',
+    });
+
+    fireEvent.click(screen.getByText('我回复另一个回复的内容。'));
+    expect(onOpenTopic).toHaveBeenLastCalledWith({
+      topicId: 'topic-2',
+      postId: 'post-child',
+    });
   });
 });

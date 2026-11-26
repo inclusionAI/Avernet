@@ -270,7 +270,6 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessions).toHaveBeenCalledWith('20260402_ab', {
       user_id: '900003',
       owner_id: '2088',
-      f_user_id: '900003',
       page: 1,
       page_size: 50,
     });
@@ -299,7 +298,7 @@ describe('botSessionService', () => {
     const res = await botSessionService.createSession(bot, 'human_900003', '新');
     expect(mocked.createBotSession).toHaveBeenCalledWith(
       '20260402_ab',
-      { user_id: '900003', owner_id: '2088', f_user_id: '900003' },
+      { user_id: '900003', owner_id: '2088' },
       { title: '新' },
     );
     expect((res as any).data.sessionId).toBe('sid-new');
@@ -325,85 +324,9 @@ describe('botSessionService', () => {
 
     expect(mocked.createBotSession).toHaveBeenCalledWith(
       '20260402_ab',
-      { user_id: '900003', owner_id: '2088', f_user_id: '900003' },
+      { user_id: '900003', owner_id: '2088' },
       { title: '新会话' },
     );
-  });
-
-  it('Bot 工坊运维请求保留 stage 且不扩大为 f_user_id 会话主体', async () => {
-    const debugBot = { ...bot, botType: 'service', runtimeStage: 'verify' as const };
-    mocked.listBotSessions.mockResolvedValue({ data: { items: [], total: 0 } });
-    mocked.createBotSession.mockResolvedValue({
-      data: { session_id: 'debug', title: 'Debug', message_count: 0, gmt_create: '', gmt_modified: '' },
-    });
-    mocked.deleteBotSessionMessages.mockResolvedValue({ data: { deleted: true } });
-    mocked.listBotModels.mockResolvedValue({ data: { items: [], total: 0 } });
-
-    await botSessionService.listSessions(debugBot, 'human_900003', false);
-    await botSessionService.createSession(debugBot, 'human_900003', 'Debug', { subjectScoped: false });
-    await botSessionService.clearContext(debugBot, 'human_900003', 'debug', false);
-    await botSessionService.listModels(debugBot, 'human_900003', false);
-
-    const params = { user_id: '900003', owner_id: '2088', stage: 'verify' };
-    expect(mocked.listBotSessions).toHaveBeenLastCalledWith('20260402_ab', {
-      ...params, page: 1, page_size: 50,
-    });
-    expect(mocked.createBotSession).toHaveBeenLastCalledWith(
-      '20260402_ab', params, { title: 'Debug' },
-    );
-    expect(mocked.deleteBotSessionMessages).toHaveBeenLastCalledWith(
-      '20260402_ab', 'debug', { user_id: '900003', stage: 'verify' },
-    );
-    expect(mocked.listBotModels).toHaveBeenLastCalledWith('20260402_ab', {
-      ...params, page: 1, page_size: 50,
-    });
-  });
-
-  it('Caller 首次准备中时只按专用子码轮询并在就绪后返回会话', async () => {
-    jest.useFakeTimers();
-    try {
-      mocked.createBotSession.mockReset();
-      mocked.createBotSession
-        .mockRejectedValueOnce(new BackendRequestError('Caller runtime is preparing', {
-          status: 409,
-          data: { code: 409113, message: 'Caller runtime is preparing' },
-          apiPath: '/openapi/v1/bots/b/sessions',
-          toastKey: 'preparing',
-          alreadyHandled: true,
-        }))
-        .mockResolvedValueOnce({ data: {
-          session_id: 'ready', title: '新会话', message_count: 0, gmt_create: '', gmt_modified: '',
-        } });
-
-      const result = botSessionService.createSession(bot, 'human_900003', undefined, {
-        friendlyErrors: true,
-        waitForCallerRuntime: true,
-      });
-      await jest.advanceTimersByTimeAsync(3_000);
-
-      await expect(result).resolves.toMatchObject({ ok: true, data: { sessionId: 'ready' } });
-      expect(mocked.createBotSession).toHaveBeenCalledTimes(2);
-    } finally {
-      jest.useRealTimers();
-    }
-  });
-
-  it('普通设备未就绪 409000 保持原失败语义且不轮询', async () => {
-    mocked.createBotSession.mockReset();
-    mocked.createBotSession.mockRejectedValueOnce(new BackendRequestError('Bot device is not ready', {
-      status: 409,
-      data: { code: 409000, message: 'Bot device is not ready' },
-      apiPath: '/openapi/v1/bots/b/sessions',
-      alreadyHandled: true,
-    }));
-
-    const result = await botSessionService.createSession(bot, 'human_900003', undefined, {
-      friendlyErrors: true,
-      waitForCallerRuntime: true,
-    });
-
-    expect(result).toMatchObject({ ok: false, error: { friendlyMessage: 'Bot device is not ready' } });
-    expect(mocked.createBotSession).toHaveBeenCalledTimes(1);
   });
 
   it('deleteSession 调用 controller', async () => {
@@ -417,7 +340,6 @@ describe('botSessionService', () => {
     expect(mocked.deleteBotSession).toHaveBeenCalledWith('20260402_ab', 'sid-9', {
       user_id: '900003',
       owner_id: '2088',
-      f_user_id: '900003',
     });
     expect(res.ok).toBe(true);
   });
@@ -445,7 +367,6 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessionMessages).toHaveBeenCalledWith('20260402_ab', 's', {
       user_id: '2088',
       owner_id: '2088',
-      f_user_id: '2088',
       page: 1,
       page_size: 50,
     });
@@ -464,7 +385,6 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessionMessages).toHaveBeenCalledWith('20260402_ab', 's', {
       user_id: '900003',
       owner_id: '2088',
-      f_user_id: '900003',
       page: 1,
       page_size: 50,
     });
@@ -487,7 +407,6 @@ describe('botSessionService', () => {
     expect(mocked.listBotModels).toHaveBeenCalledWith('20260402_ab', {
       user_id: '900003',
       owner_id: '2088',
-      f_user_id: '900003',
       page: 1,
       page_size: 50,
     });
@@ -513,13 +432,13 @@ describe('botSessionService', () => {
     expect(mocked.updateBotSession).toHaveBeenCalledWith(
       '20260402_ab',
       's1',
-      { user_id: '900003', f_user_id: '900003' },
+      { user_id: '900003' },
       { model: 'openai/gpt-5.3' },
     );
     expect(res.ok && res.data.model).toBe('openai/gpt-5.3');
   });
 
-  it('所有对话 Bot 的本人会话接口统一携带 f_user_id', async () => {
+  it('好友 Bot 的单聊接口统一携带 f_user_id，管理 Bot 不携带', async () => {
     const sessionDto = {
       session_id: 's1',
       title: '标题',
@@ -603,7 +522,6 @@ describe('botSessionService', () => {
     expect(mocked.listBotSessions).toHaveBeenLastCalledWith('20260402_ab', {
       user_id: '900003',
       owner_id: '2088',
-      f_user_id: '900003',
       page: 1,
       page_size: 10,
     });
@@ -640,7 +558,6 @@ it('listSessionsPage 与收藏分页复用统一标题映射并透传分页参�
   expect(mocked.listBotSessions).toHaveBeenCalledWith('20260402_ab', {
     user_id: '900003',
     owner_id: '2088',
-    f_user_id: '900003',
     page: 2,
     page_size: 10,
   });

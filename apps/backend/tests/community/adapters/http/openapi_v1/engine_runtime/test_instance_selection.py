@@ -16,7 +16,7 @@ from agentclaw.community.core.engine_runtime.models import EngineResult
 from .conftest import BOT
 
 
-def test_session_file_contract_selects_device_only_when_resolving_a_runtime():
+def test_session_file_contract_does_not_expose_instance_selection():
     from tests.community.adapters.http.openapi_v1.conftest import public_document
 
     paths = public_document()["paths"]
@@ -25,15 +25,11 @@ def test_session_file_contract_selects_device_only_when_resolving_a_runtime():
         if path.startswith("/openapi/v1/bots/{bot_id}/sessions/{session_id}/files")
     }
     assert len(file_paths) == 6
-    for path, item in file_paths.items():
+    for item in file_paths.values():
         for operation in item.values():
-            names = {
+            assert "device_uuid" not in {
                 param["name"] for param in operation.get("parameters", [])
             }
-            # Completion/status reload the device pinned on the upload record.
-            selects_runtime = not path.endswith(("/upload-complete", "/materialize-status"))
-            assert ("device_uuid" in names) is selects_runtime
-            assert "caller_runtime_target" not in names
 
 
 @pytest.mark.parametrize(

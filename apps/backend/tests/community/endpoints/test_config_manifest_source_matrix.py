@@ -183,7 +183,7 @@ def _document(category: Category, kind: SourceKind) -> str:
             "  src:\n"
             "    protocol: bot\n"
             f"    bot_id: {_SRC_BOT_ID}\n"
-            f"    owner_id: {_OWNER}\n"
+            "    owner_id: src-owner\n"
         )
     else:
         source = (

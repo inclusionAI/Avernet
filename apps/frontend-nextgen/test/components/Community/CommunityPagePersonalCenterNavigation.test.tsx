@@ -95,18 +95,16 @@ jest.mock('@/components/Community/CommunityTopicDetail', () => ({
 }));
 
 describe('CommunityPage 个人中心导航', () => {
-  test('一级标签在全部帖子和我的之间原地切换', () => {
+  test('发帖按钮旁当前用户头像使用清晰的 40px 尺寸', () => {
     render(<CommunityPage />);
-    fireEvent.click(screen.getByRole('tab', { name: '我的' }));
-    expect(screen.getByRole('tab', { name: '我的', selected: true })).toBeVisible();
-    fireEvent.click(screen.getByRole('tab', { name: '全部帖子' }));
-    expect(screen.getByRole('tab', { name: '全部帖子', selected: true })).toBeVisible();
+
+    expect(screen.getByLabelText('张三')).toHaveStyle({ width: '40px', height: '40px' });
   });
 
   test('从个人中心进入详情后，详情返回应回到个人中心', () => {
     const view = render(<CommunityPage />);
 
-    fireEvent.click(screen.getByRole('tab', { name: '我的' }));
+    fireEvent.click(screen.getByRole('button', { name: '个人中心' }));
     expect(screen.getByText('打开个人中心主题')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '切换到我的回帖' }));

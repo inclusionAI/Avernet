@@ -46,18 +46,17 @@ describe('BotBrowseConfigPanel', () => {
     expect(screen.getByText('暂无 Bot')).toBeInTheDocument();
   });
 
-  test('渲染 Bot 名称和引擎，打开开关时使用真实 Bot ID', () => {
+  test('渲染 Bot 行（名称/真实 id/开关/备注）并响应开关：已关闭→点开', () => {
     const toggle = jest.fn().mockResolvedValue(undefined);
     mockHook.mockReturnValue(
       setResult({
-        rows: [{ botId: 'b1', botName: '小红', engine: 'teclaw', note: '', enabled: false, saving: false }],
+        rows: [{ botId: 'b1', botName: '小红', note: '', enabled: false, saving: false }],
         toggle,
       }),
     );
     render(<BotBrowseConfigPanel />);
     expect(screen.getByText('小红')).toBeInTheDocument();
-    expect(screen.getByText('TEClaw')).toBeInTheDocument();
-    expect(screen.queryByText('b1')).not.toBeInTheDocument();
+    expect(screen.getByText('b1')).toBeInTheDocument();
     const sw = screen.getByRole('switch', { name: '小红 周期性逛社区' });
     // 开关当前为关；点击后 radix onCheckedChange 回调传「下一个状态 = true」。
     expect(sw).toHaveAttribute('aria-checked', 'false');
@@ -65,22 +64,33 @@ describe('BotBrowseConfigPanel', () => {
     expect(toggle).toHaveBeenCalledWith('b1', true);
   });
 
-  test('关闭已启用的开关，不显示或修改已有备注', () => {
-    const toggle = jest.fn().mockResolvedValue(undefined);
+  test('备注输入 blur 触发 saveNote（已开启行）', () => {
     const saveNote = jest.fn().mockResolvedValue(undefined);
     mockHook.mockReturnValue(
       setResult({
-        rows: [{ botId: 'b2', botName: '小蓝', note: '已有备注', enabled: true, saving: false }],
-        toggle,
+        rows: [{ botId: 'b2', botName: '小蓝', note: '', enabled: true, saving: false }],
         saveNote,
       }),
     );
     render(<BotBrowseConfigPanel />);
-    expect(screen.queryByRole('textbox', { name: '小蓝 备注' })).not.toBeInTheDocument();
-    const sw = screen.getByRole('switch', { name: '小蓝 周期性逛社区' });
-    expect(sw).toHaveAttribute('aria-checked', 'true');
-    fireEvent.click(sw);
-    expect(toggle).toHaveBeenCalledWith('b2', false);
+    const input = screen.getByRole('textbox', { name: '小蓝 备注' }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '新备注' } });
+    fireEvent.blur(input);
+    expect(saveNote).toHaveBeenCalledWith('b2', '新备注');
+  });
+
+  test('未开启行的备注输入被禁用，blur 不触发 saveNote', () => {
+    const saveNote = jest.fn().mockResolvedValue(undefined);
+    mockHook.mockReturnValue(
+      setResult({
+        rows: [{ botId: 'b3', botName: '小灰', note: '', enabled: false, saving: false }],
+        saveNote,
+      }),
+    );
+    render(<BotBrowseConfigPanel />);
+    const input = screen.getByRole('textbox', { name: '小灰 备注' }) as HTMLInputElement;
+    expect(input).toBeDisabled();
+    fireEvent.blur(input);
     expect(saveNote).not.toHaveBeenCalled();
   });
 

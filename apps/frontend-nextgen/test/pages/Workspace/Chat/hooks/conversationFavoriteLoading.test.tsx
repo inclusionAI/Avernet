@@ -54,35 +54,6 @@ it('收藏慢时普通列表先展示，后台返回后才补齐星标，不改�
   expect(current()).toMatchObject({ total: 1, page: 1, loading: false, error: null });
 });
 
-it.each(['mine', 'others', 'collab'] as const)(
-  'AgentCoding %s 列表补齐收藏状态',
-  async (origin) => {
-    const coding: ConversationBotView = {
-      ...view,
-      bot: { ...view.bot, isAgentCodingBot: true },
-    };
-    favorites.mockResolvedValue({ ok: true, data: page(['s1']) });
-    if (origin !== 'mine') {
-      useConversationStore.getState().setManagedBotOrigin(view.bot.botId, origin, {
-        supportsScopesOutsideMine: true,
-      });
-    }
-    loadSessionPage(createSessionRequestContext('viewer'), () => false, coding, false);
-
-    await waitFor(() => expect(current()?.items[0]?.favorite).toBe(true));
-    expect(useConversationStore.getState().sessionsByBotId[view.bot.botId]?.origin).toBe(origin);
-  },
-);
-
-it('普通 Bot 他人发起列表仍不后台补齐收藏状态', async () => {
-  useConversationStore.getState().setManagedBotOrigin(view.bot.botId, 'others');
-  loadSessionPage(createSessionRequestContext('viewer'), () => false, view, false);
-  await waitFor(() => expect(current()?.loading).toBe(false));
-  await act(async () => undefined);
-  expect(current()?.items[0].favorite).toBeUndefined();
-  expect(favorites).not.toHaveBeenCalled();
-});
-
 it.each(['user', 'generation', 'filter'] as const)('%s 改变后忽略晚到收藏响应', async (change) => {
   const response = deferred();
   favorites.mockReturnValue(response.promise);

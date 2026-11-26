@@ -5,7 +5,7 @@ import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 
-const createBot = (engine: string, botType: 'service' | 'personal', canOpenEvalHistory: boolean, evalGateVisible = true) => {
+const createBot = (engine: string, botType: 'service' | 'personal', canOpenEvalHistory: boolean) => {
   const bot = mapBotDto({
     bot_id: 'evaluation-bot',
     bot_name: 'Evaluation Bot',
@@ -16,7 +16,6 @@ const createBot = (engine: string, botType: 'service' | 'personal', canOpenEvalH
     actions: ['view', 'chat'],
   }).item;
   bot.canOpenEvalHistory = canOpenEvalHistory;
-  bot.evalGateVisible = evalGateVisible;
   return bot;
 };
 
@@ -36,7 +35,7 @@ const renderMenu = (bot: ReturnType<typeof createBot>) => {
 };
 
 describe('Bot management evaluation history', () => {
-  test('openclaw service bot in the gate whitelist shows history entry', () => {
+  test('openclaw service bot shows its authorized evaluation history entry', () => {
     const bot = createBot('openclaw', 'service', true);
     const { onClose, onOpenEvalHistory } = renderMenu(bot);
 
@@ -45,14 +44,6 @@ describe('Bot management evaluation history', () => {
 
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onOpenEvalHistory).toHaveBeenCalledWith(bot);
-  });
-
-
-  test('service bot outside the gate whitelist hides evaluation history', () => {
-    const { onOpenEvalHistory } = renderMenu(createBot('openclaw', 'service', true, false));
-
-    expect(screen.queryByRole('button', { name: '历史评测记录' })).not.toBeInTheDocument();
-    expect(onOpenEvalHistory).not.toHaveBeenCalled();
   });
 
   test.each([

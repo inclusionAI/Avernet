@@ -11,19 +11,6 @@ from agentclaw.community.plugin_api.base import Plugin
 
 
 @runtime_checkable
-class MCPServerPermissionPlugin(Protocol):
-    """Optional bounded Server observation; existing auth plugins may omit it.
-
-    True means authorized, False means explicitly denied, and None means
-    unknown. Each remote request must respect the remaining timeout in seconds.
-    """
-
-    def check_server_permission(
-        self, staff_no: str, service_code: str, timeout_seconds: float,
-    ) -> bool | None: ...
-
-
-@runtime_checkable
 class MCPAuthPlugin(Plugin, Protocol):
     """Client for MCP Server / Tool permission checks and applications."""
 

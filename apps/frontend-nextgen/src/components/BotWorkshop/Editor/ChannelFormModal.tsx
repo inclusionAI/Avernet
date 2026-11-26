@@ -4,15 +4,14 @@ import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalT
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import type { BotChannel, BotChannelInput, ChannelBindingMode, ChannelStage } from '@/domain/botAdvancedConfig';
-import { serviceBotStageLabel } from '@/domain/botWorkshop';
 import { Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { BcnChannelFields, ChannelSwitch } from './ChannelModeFields';
 
 const stageOptions: Array<{ value: ChannelStage; label: string }> = [
-  { value: 'draft', label: serviceBotStageLabel.draft },
-  { value: 'verify', label: serviceBotStageLabel.verify },
-  { value: 'online', label: serviceBotStageLabel.online },
+  { value: 'draft', label: '草稿' },
+  { value: 'verify', label: '预发' },
+  { value: 'online', label: '线上' },
 ];
 
 export const emptyChannelInput: BotChannelInput = {

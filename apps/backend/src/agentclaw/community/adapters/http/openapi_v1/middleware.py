@@ -63,7 +63,6 @@ _DEPRECATION_HEADER = b"deprecation"
 _SUNSET_HEADER = b"sunset"
 
 _SENSITIVE_ROUTES = {
-    ('POST', '/openapi/v1/bots/template-config-for-others'),
     ("POST", "/openapi/v1/bots/{bot_id}/iam-token"),
 }
 _CACHE_CONTROL_HEADER = b"cache-control"

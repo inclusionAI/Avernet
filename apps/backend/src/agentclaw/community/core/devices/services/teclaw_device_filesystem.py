@@ -40,7 +40,6 @@ from agentclaw.community.core.devices.services.baas_invoke_transport import (
     BaasTransport,
 )
 from agentclaw.community.core.devices.services.device_filesystem import DeviceFileSystem
-from agentclaw.community.core.devices.services.device_read_errors import raise_if_unavailable
 
 logger = get_logger()
 
@@ -133,13 +132,6 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
                 "[TeclawDeviceFileSystem.delete_tree] error: %s: %s", engine_dir, e
             )
             return False
-
-    async def read_file_checked(self, file_path: str, *, enforce_download_limit: bool = False) -> bytes | None:
-        try:
-            return await self.read_file(file_path, enforce_download_limit=enforce_download_limit, preserve_read_errors=True)
-        except Exception as error:
-            raise_if_unavailable(error)
-            raise
 
     async def read_file(
         self,

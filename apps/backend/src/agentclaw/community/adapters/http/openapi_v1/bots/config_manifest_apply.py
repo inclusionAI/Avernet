@@ -15,10 +15,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, Request, Response
+from fastapi import APIRouter, Path, Query, Request, Response
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
-from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal, require_principal
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     USER_SCOPED_403,
     BotIdPath,
@@ -28,7 +27,6 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import (
-    manifest_existing_bot_subject,
     ActingCallerDep,
     UserIdDep,
 )
@@ -100,7 +98,6 @@ async def apply_bot_config_manifest(
     actor_id: UserIdDep,
     owner_id: OwnerIdDep,
     caller: ActingCallerDep,
-    principal: Annotated[Principal, Depends(require_principal)],
     dry_run: Annotated[
         bool,
         Query(
@@ -187,7 +184,6 @@ async def apply_bot_config_manifest(
         bot=bot,
         owner_id=owner_id,
         actor_id=actor_id,
-        permission_subject=manifest_existing_bot_subject(caller, principal, bot=bot, bot_id=bot_id),
         audit_actor=audit,
         # This API applies the bot's stored document; a promotion's revision
         # starts from the genome routes.

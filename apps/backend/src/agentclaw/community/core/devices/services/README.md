@@ -73,13 +73,6 @@ builder 仅算 conn_info，不做权限判断。BaaS builder 会把边界层结�
 `NO_ACTIVE_DEVICES` 转为 provider-neutral `DeviceOfflineError`，并把网络/5xx
 转为 `DeviceConnectionUnavailableError`；不得靠异常字符串识别。
 
-旧渠道配置生成和资源文件下载/预览使用 `CheckedDeviceFileSystem` 可选能力：
-已确认缺失才返回 `None`，运行时离线或网络暂不可用抛出对应的 typed error，
-由旧 HTTP 适配层返回 503。权限和来源不明的错误不得伪装为文件缺失或暂态。
-未实现该能力的旧 provider 在预览或配置读取时可以返回实际内容，但返回 `None`
-时会失败，因为无法区分缺失与故障；受大小限制的下载则直接失败，避免跳过预检。其他
-`read_file` 调用保留原契约。企业部署需要同时更新公共版本与企业 provider。
-
 ## 2 个 Dispatcher
 
 | Dispatcher                  | 入口                              | 出口                       |

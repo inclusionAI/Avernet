@@ -251,8 +251,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         self, plan: ResolvedCapabilityPlan, result: RuntimeProjectionResult,
     ) -> RuntimeProjectionResult:
         try:
-            # Keep the worker's delivery lease heartbeat live during Passport I/O.
-            passport_codes = await asyncio.to_thread(self._apply_passport_projection, plan=plan)
+            await asyncio.to_thread(self._apply_passport_projection, plan=plan)
         except Exception:
             logger.exception(
                 "[BotRuntimeProjector] Passport projection unavailable "
@@ -264,7 +263,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                 code="PASSPORT_RUNTIME_UNAVAILABLE", reason="MCP 授权配置尚未完成同步",
             )
             return replace(RuntimeProjectionResult.combine(result, pending), passport_updated=False)
-        return replace(result, passport_updated=True, passport_mcp_codes=passport_codes)
+        return replace(result, passport_updated=True)
 
     def _resolve_plan(
         self,
@@ -587,7 +586,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         self,
         *,
         plan: ResolvedCapabilityPlan,
-    ) -> frozenset[str]:
+    ) -> None:
         """Declare the Bot's complete MCP/CLI scope to the authorization service.
 
         Not a runtime write, and deliberately not part of
@@ -662,7 +661,6 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                 len(resource_scope["cli_items"]),
                 int((time.monotonic() - started) * 1000),
             )
-            return frozenset(item["mcp_code"] for item in resource_scope["mcp_items"])
         except Exception as exc:
             logger.error(
                 "agentpass_runtime_scope_update_failed bot_id=%s engine_type=%s "

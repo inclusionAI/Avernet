@@ -171,8 +171,6 @@ imports in the finite set of legacy writers. There is no new CI exemption.
 ```yaml
 purpose: "Every repository contract (protocols/) and implementation (implementations/) in the backend, grouped by domain. Persistence only — no services, no routers, no domain policy."
 provides:
-  - TemplateBotRepositoryProtocol
-  - TemplateBotRepository
   - RecycleRepository
   - BotRecycleRepositoryProtocol
   - OwnershipSyncReadRepository

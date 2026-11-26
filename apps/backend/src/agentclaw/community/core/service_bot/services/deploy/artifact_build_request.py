@@ -21,7 +21,6 @@ from agentclaw.community.core.skill_center.runtime_layout_probe_service_protocol
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     LAYOUT_CONTRACT_VERSION,
 )
-from agentclaw.community.core.workspace.skill_layout import AICodingPoolPaths
 
 
 class ServiceArtifactBuildErrorCode(str, Enum):
@@ -193,15 +192,6 @@ class ServiceArtifactLayoutObservation:
                 or center.parent.parent != active.parent
             ):
                 raise ValueError("invalid OpenClaw Legacy Skills roots")
-        elif source_layout == "legacy" and expected_engine == "aicoding":
-            aicoding = AICodingPoolPaths()
-            if (
-                active != PurePosixPath(aicoding.active)
-                or local != PurePosixPath(aicoding.legacy_local)
-                or repo != PurePosixPath(aicoding.legacy_repo)
-                or center != PurePosixPath(aicoding.pool_repo).with_name("skill-center")
-            ):
-                raise ValueError("invalid AICoding Legacy Skills roots")
         elif source_layout is not None or (
             local.parent != repo.parent
             or repo.parent != center.parent

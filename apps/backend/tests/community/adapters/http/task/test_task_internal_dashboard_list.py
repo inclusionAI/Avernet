@@ -137,14 +137,12 @@ class _StubTaskService:
             raise TaskNotFoundError(task_id)
         return _graph()
 
-    def list_tasks(self, status=None, owner_user_id=None, *, keyword=None):
-        self.list_calls.append((status, owner_user_id, keyword))
+    def list_tasks(self, status=None, owner_user_id=None):
+        self.list_calls.append((status, owner_user_id))
         return [_task_record()]
 
-    def list_tasks_page(
-        self, status=None, owner_user_id=None, page=1, page_size=100, *, keyword=None
-    ):
-        self.page_calls.append((status, owner_user_id, page, page_size, keyword))
+    def list_tasks_page(self, status=None, owner_user_id=None, page=1, page_size=100):
+        self.page_calls.append((status, owner_user_id, page, page_size))
         return [_task_record()], 1
 
 
@@ -220,7 +218,7 @@ class TestInternalListMirror:
         data = response.json()["data"]
         assert isinstance(data, list) and len(data) == 1
         assert data[0]["task_id"] == "T-1"
-        assert svc.list_calls == [(None, "U-1", None)]
+        assert svc.list_calls == [(None, "U-1")]
 
     def test_list_status_filter_passthrough(self):
         svc = _StubTaskService()
@@ -229,7 +227,7 @@ class TestInternalListMirror:
             "/api/v1/collaboration/tasks/list?user_id=U-1&status=RUNNING,PLANNING"
         )
         assert response.status_code == 200
-        assert svc.list_calls == [("RUNNING,PLANNING", "U-1", None)]
+        assert svc.list_calls == [("RUNNING,PLANNING", "U-1")]
 
     def test_list_invalid_status_is_400(self):
         svc = _StubTaskService()
@@ -246,20 +244,6 @@ class TestInternalListMirror:
         assert paged.status_code == 200
         data = paged.json()["data"]
         assert data["total"] == 1 and len(data["items"]) == 1
-        assert svc.page_calls == [(None, "U-1", 1, 10, None)]
+        assert svc.page_calls == [(None, "U-1", 1, 10)]
         half = client.get("/api/v1/collaboration/tasks/list?user_id=U-1&page=1")
         assert half.status_code == 400
-
-    def test_list_keyword_reaches_both_read_shapes(self):
-        svc = _StubTaskService()
-        client = _client(svc, _StubArtifactRepo([]))
-
-        full = client.get("/api/v1/collaboration/tasks/list?user_id=U-1&keyword=title")
-        assert full.status_code == 200, full.text
-        assert svc.list_calls == [(None, "U-1", "title")]
-
-        paged = client.get(
-            "/api/v1/collaboration/tasks/list?user_id=U-1&keyword=title&page=2&page_size=20"
-        )
-        assert paged.status_code == 200, paged.text
-        assert svc.page_calls == [(None, "U-1", 2, 20, "title")]

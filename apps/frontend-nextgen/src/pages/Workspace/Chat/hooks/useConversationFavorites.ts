@@ -15,25 +15,16 @@ export interface ConversationFavoritesModel {
 const keyOf = (botId: string, section: ConversationBotSection, sessionId: string) =>
   JSON.stringify([section, botId, sessionId]);
 
-function currentList(
-  botId: string,
-  section: ConversationBotSection,
-  allowSharedOrigins = false,
-): ConversationSessionListState | undefined {
+function currentList(botId: string, section: ConversationBotSection): ConversationSessionListState | undefined {
   const store = useConversationStore.getState();
   if (section === 'friend') return store.friendBotSessionsByBotId[botId];
-  const origin = store.originByManagedBotId[botId] ?? 'mine';
   const cache = store.sessionsByBotId[botId];
-  // Ordinary other-user views remain read-only and intentionally have no favorite state.
-  // AgentCoding is the only shared-origin exception: its mine/others/collab lists all call
-  // the CodingBot favorite action and patch the currently displayed origin cache.
-  if (!allowSharedOrigins && origin !== 'mine') return undefined;
-  if (!cache || cache.origin !== origin) return undefined;
+  if ((store.originByManagedBotId[botId] ?? 'mine') !== 'mine' || cache?.origin !== 'mine') return undefined;
   if (cache.scope !== (store.effectiveScopeByManagedBotId[botId] ?? 'all')) return undefined;
   return cache.sessions;
 }
 
-function favoriteListLoading(botId: string, section: ConversationBotSection, allowSharedOrigins = false): boolean {
+function favoriteListLoading(botId: string, section: ConversationBotSection): boolean {
   const store = useConversationStore.getState();
   // 好友 Bot 的 favorite 列表分页同样阻止收藏写入(移行使 offset 前移,与分页重取互斥)。
   if (section === 'friend') {
@@ -42,12 +33,10 @@ function favoriteListLoading(botId: string, section: ConversationBotSection, all
       store.friendBotSessionsByBotId[botId]?.isLoadingMore === true
     );
   }
-  const origin = store.originByManagedBotId[botId] ?? 'mine';
   const cache = store.sessionsByBotId[botId];
   return (
     isManagedConversationSection(section) &&
-    (allowSharedOrigins || origin === 'mine') &&
-    cache?.origin === origin &&
+    cache?.origin === 'mine' &&
     cache.scope === 'favorite' &&
     cache.sessions.isLoadingMore
   );
@@ -79,10 +68,7 @@ export function useConversationFavorites(options: {
       const view = (isManagedConversationSection(section) ? managedBots : friendBots).find(
         (item) => item.bot.botId === botId,
       );
-      const allowSharedOrigins = view?.bot.isAgentCodingBot === true;
-      const current = currentList(botId, section, allowSharedOrigins)?.items.find(
-        (item) => item.sessionId === sessionId,
-      );
+      const current = currentList(botId, section)?.items.find((item) => item.sessionId === sessionId);
       const key = keyOf(botId, section, sessionId);
       if (
         !userId ||
@@ -90,7 +76,7 @@ export function useConversationFavorites(options: {
         !supportsBotSessionFavorites(view.bot.engine) ||
         current?.favorite === undefined ||
         requests.current.has(key) ||
-        favoriteListLoading(botId, section, allowSharedOrigins)
+        favoriteListLoading(botId, section)
       )
         return false;
       const request = Symbol(key);
@@ -134,7 +120,7 @@ export function useConversationFavorites(options: {
         }
 
         const store = useConversationStore.getState();
-        const list = currentList(botId, section, allowSharedOrigins);
+        const list = currentList(botId, section);
         if (!list?.items.some((item) => item.sessionId === sessionId)) return true;
         const cache = store.sessionsByBotId[botId];
         // favorite 视图取消收藏移除行并回算 total(管理/好友同语义);all 视图仅翻转星标。
@@ -187,14 +173,7 @@ export function useConversationFavorites(options: {
 
   return {
     toggleFavorite,
-    isPending: (botId, section, sessionId) => {
-      const view = (isManagedConversationSection(section) ? managedBots : friendBots).find(
-        (item) => item.bot.botId === botId,
-      );
-      return (
-        Boolean(pending[keyOf(botId, section, sessionId)]) ||
-        favoriteListLoading(botId, section, view?.bot.isAgentCodingBot === true)
-      );
-    },
+    isPending: (botId, section, sessionId) =>
+      Boolean(pending[keyOf(botId, section, sessionId)]) || favoriteListLoading(botId, section),
   };
 }

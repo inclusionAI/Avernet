@@ -170,26 +170,6 @@ def test_owner_can_list_models_for_an_explicit_bcn_friend(
     assert friendships.calls[0]["human_id"] == "friend-1"
 
 
-def test_owner_caller_models_authorize_the_self_subject_without_bcn(
-    models_client, relay, friendships, expert
-):
-    relay.set_bot_type("service")
-    relay.set_call_type("caller")
-    relay.results = [EngineResult(data={"models": [{"id": "model-1"}], "total": 1})]
-
-    data = ok(models_client.get(
-        f"/openapi/v1/bots/{BOT}/models",
-        params={
-            "f_user_id": OWNER, "stage": "online", "device_uuid": "stale-shared",
-        },
-    ))
-
-    assert data["total"] == 1
-    assert friendships.calls == []
-    assert [call[0] for call in expert.calls] == ["add_chat_bot"]
-    assert "device_uuid" not in relay.calls[-1]
-
-
 def test_list_models_prefers_the_engines_total(models_client, relay):
     relay.results = [
         EngineResult(data={"models": [{"id": "a"}, {"id": "b"}], "total": 97})

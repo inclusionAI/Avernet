@@ -229,7 +229,6 @@ class SpaceSkillQueryService(SpaceSkillQueryServiceProtocol):
             },
             "latest_published_version": latest,
             "draft": draft,
-            "draft_publication_error_code": record["draft_publication_error_code"],
             "active_publication": active_publication,
             "actor": {
                 "skill_role": role,

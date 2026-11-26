@@ -498,9 +498,8 @@ below.
   — the alternative is tenant tokens in the clear.
 - **`mcp[].config` is Bot-scoped desired state.** It is a closed object containing
   only `url`, non-sensitive plaintext `headers`, `endpoint_env`, and
-  `transport_protocol`. Apply validates the registered `server_code` and Center
-  endpoint combination independently of the actor's personal invocation permission,
-  then writes the installation and the explicit
+  `transport_protocol`. Apply validates the registered `server_code`, permission,
+  and Center endpoint combination, then writes the installation and the explicit
   override to `ac_bot_mcp_installation` / `ac_bot_mcp_config` in one transaction.
   Missing fields inherit `ac_user_mcp_config`; Manifest fields win per field.
   `headers` is the exception with complete-field semantics: present replaces user
@@ -587,7 +586,7 @@ consumes:
   - "BotCapabilityStateReaderProtocol (core.skill_center.capability_state_contract) — active capability state plus the complete Bot-owned Local catalog used for retryable cleanup"
   - "SkillPackageValidator (core.skill_center.skill_package) — the manual-upload package gate the `skills` materialiser validates fetched bytes with, so an installed skill is an uploaded one (W5)"
   - "ContentStoreProtocol (core.content_store) — files every fetched receipt, reads the platform copy for delivery, and answers latest_receipt, the per-source lookup keep_last asks (W5); canonical_tree_bytes is how a git-delivered tree is stored; DIGEST_RE is re-exported by fetch/limits as the fetch vocabulary"
-  - "MCPAuthServiceProtocol (api) — personal invocation permission is independent of Manifest installation"
+  - "MCPAuthServiceProtocol (api) — the same permission check DirectActivationService consults, asked up front so a category is all-or-nothing"
   - "MCPConfigServiceProtocol (core.mcp) — validates Bot overrides against Center metadata before any MCP category write"
   - "TeclawEngineTestProtocol (core.bot_startup_script, bound to core.bot_management TeclawProvisionService) — the single definition of 'runs in a teclaw container'"
   - "VALID_IDENTITY_FILES / CLAUDE_CODE_IDENTITY_FILES (core.services.identity) — the identity vocabulary, imported lazily because that module pulls in the device dispatcher"

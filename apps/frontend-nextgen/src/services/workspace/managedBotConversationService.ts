@@ -126,7 +126,7 @@ export const managedBotConversationService = {
   ): Promise<DomainResult<ConversationMessagePageView>> {
     try {
       const result = await botSessionService.listMessagesPage(
-        { ...bot, isFriendBot: false }, userId, sessionId, page, BOT_MESSAGE_PAGE_SIZE, range, false,
+        { ...bot, isFriendBot: false }, userId, sessionId, page, BOT_MESSAGE_PAGE_SIZE, range,
       );
       return { ok: true, data: {
         ...result, page, hasMore: page * BOT_MESSAGE_PAGE_SIZE < result.total,

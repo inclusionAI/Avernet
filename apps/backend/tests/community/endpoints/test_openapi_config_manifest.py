@@ -578,9 +578,6 @@ _IDENTITY_DOCUMENT = (
 
 
 def _the_apply_is_running_and_readable(response, world) -> None:
-    from agentclaw.community.core.apply_engine.apply_task import APPLY_TASK_TYPE
-    from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
-    from agentclaw.community.core.task_queue.types import DEFAULT_APP, TaskStatus
     data = response.json()["data"]
     assert data["apply"]["result"] == "RUNNING" and data["apply"]["reason"] is None
     apply_id = data["apply"]["apply_id"]
@@ -591,12 +588,6 @@ def _the_apply_is_running_and_readable(response, world) -> None:
     )
     assert latest is not None and latest.apply_id == apply_id
     assert latest.status == "RUNNING" and latest.trigger == "put"
-    repo = world.get(TaskQueueRepositoryProtocol)
-    tasks = [task for status in TaskStatus for task in repo.list_by_status(
-        status=status, env=get_current_env(), app=DEFAULT_APP
-    ) if task.task_type == APPLY_TASK_TYPE and task.payload["apply_id"] == apply_id]
-    assert len(tasks) == 1
-    assert tasks[0].payload["permission_subject"] == _OWNER
 
 
 @endpoint_test(
@@ -618,42 +609,6 @@ def put_config_manifest_starts_an_apply():
     """Storing starts an apply of the stored document, trigger ``put``, and the
     response carries its id. The document declares a script, so the response
     also says the script takes effect on the next start."""
-
-
-def _seed_admin(world) -> None:
-    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
-    _insert_bot(world, bot_id=_SHARED_BOT_ID, bot_type="service")
-    make_staff_user(world, user_id=_MEMBER)
-    make_collaborator(world, bot_id=_SHARED_BOT_ID, owner_id=_OWNER,
-                      user_id=_MEMBER, role="admin", operator_id=_OWNER)
-
-
-def _collaborator_apply_has_no_permission_subject(response, world) -> None:
-    from agentclaw.community.core.apply_engine.apply_task import APPLY_TASK_TYPE
-    from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
-    from agentclaw.community.core.task_queue.types import DEFAULT_APP, TaskStatus
-
-    apply_id = response.json()["data"]["apply"]["apply_id"]
-    repo = world.get(TaskQueueRepositoryProtocol)
-    tasks = [task for status in TaskStatus for task in repo.list_by_status(
-        status=status, env=get_current_env(), app=DEFAULT_APP
-    ) if task.task_type == APPLY_TASK_TYPE and task.payload["apply_id"] == apply_id]
-    assert len(tasks) == 1
-    assert tasks[0].payload["permission_subject"] is None
-
-
-@endpoint_test(
-    method="PUT",
-    path="/openapi/v1/bots/{bot_id}/config-manifest",
-    scenario="collaborator_apply_does_not_select_a_permission_subject",
-    input=CaseInput(path_params={"bot_id": _SHARED_BOT_ID}, query_params=_MEMBER_QUERY,
-                    headers=_MEMBER_HEADERS, json_body={"document": _DOCUMENT}),
-    seed=_seed_admin,
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
-    extra_assertions=(_collaborator_apply_has_no_permission_subject,),
-)
-def collaborator_apply_has_no_permission_subject():
-    """Bot management rights do not authorize checking another user's MCP access."""
 
 
 def _seed_bot_with_the_lock_held(world) -> None:

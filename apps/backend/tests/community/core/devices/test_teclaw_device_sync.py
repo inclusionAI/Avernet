@@ -456,26 +456,3 @@ def test_overridden_delivery_is_called_and_keeps_opaque_failures_uncertain():
     }
     m["http_client"].post.assert_not_called()
     m["recorder"].record_draft_artifact.assert_not_called()
-
-
-def test_manifest_delivery_receipt_names_only_the_servers_in_sent_artifact():
-    @dataclass(frozen=True)
-    class ArtifactWithMcps(_Artifact):
-        def to_dict(self):
-            return {"engine_ext": self.engine_ext, "mcp": {"servers": [
-                {"server_code": "weather"}, {"server_code": "calendar"},
-            ]}}
-
-    service, collaborators = _make_service()
-    collaborators["composer"].compose.return_value = ArtifactWithMcps()
-    receipt = service.deliver_manifest_apply_with_receipt()
-    assert receipt.delivered_mcp_codes == frozenset({"weather", "calendar"})
-    assert receipt.note is None
-
-
-def test_manifest_receipt_requires_a_well_formed_delivered_artifact():
-    service, collaborators = _make_service()
-    assert service.deliver_manifest_apply_with_receipt().status == "unknown"
-    collaborators["http_client"].post.side_effect = RuntimeError("offline")
-    receipt = service.deliver_manifest_apply_with_receipt()
-    assert receipt.status == "failed" and receipt.delivered_mcp_codes is None

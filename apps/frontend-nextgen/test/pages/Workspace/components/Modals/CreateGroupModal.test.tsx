@@ -842,8 +842,8 @@ it.each(['自由聊天', '任务协作', '自定义协作'])('%s carries the sel
   expect(within(serviceBotChip).getByRole('group', { name: 'Alpha运行阶段' })).toBeInTheDocument();
   expect(screen.queryByRole('region', { name: '服务 Bot 路由' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: '确认创建' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: '试运行' }));
-  expect(within(serviceBotChip).getByText('Alpha（试运行）')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '预发' }));
+  expect(within(serviceBotChip).getByText('Alpha（预发）')).toBeInTheDocument();
   await waitFor(() => expect(screen.getByRole('button', { name: '确认创建' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
   await waitFor(() =>

@@ -20,16 +20,6 @@ Bot or collaboration profile stores cannot persist.
 
 ## Context Boundary
 
-Managed draft operations expose `ManagedBotServiceProtocol`, consuming the
-existing Bot lifecycle and a template-association read repository. The HTTP
-trust gate belongs to deployment configuration; the service verifies persisted
-template scope and delegates restart without changing backup or deduplication.
-Guarded snapshot writes validate their revision under the existing row lock.
-The engine's `restart_config_error_is_fatal` policy prevents a rejected mandatory
-write from becoming an ordinary restart on the legacy unbound/recovery path;
-other optional engine extensions keep their existing failure behavior.
-See [the public contract](../../../../../docs/openapi-v1/managed-bot-operations.md).
-
 ```yaml
 purpose: "Bot lifecycle, creation policy, repository, engine resolution, render-screen models, and skill-set switching."
 provides:
@@ -42,7 +32,6 @@ provides:
   - provider_address_kwargs
   - "OwnerHandoffServiceProtocol and durable OwnerHandoffService"
   - "BotService"
-  - "ManagedBotServiceProtocol"
   - "BotCreateContext"
   - "BotCreateDeploymentMode"
   - "PreparedBotCreate"
@@ -464,12 +453,11 @@ real credential/device acceptance. See the
 
 ### Unified recycle and coding-only backup
 
-Only confirmed-fastdisk coding Bots use the durable recycle worker in
-`core/bot_dormant/recycle_task.py`. Non-coding and non-fastdisk coding Bots use
-the original synchronous recycle path without a queue/journal state. Internal
-manual operations and OpenAPI share this engine-owned admission decision and the
-existing activation service. Neutral state/contracts live in
-`engines/restart_contract.py`.
+All supported personal managed-cloud Bots use the single durable recycle worker
+in `core/bot_dormant/recycle_task.py` and its pinned runtime beside the shared
+facade. Neutral state/contracts live in `engines/restart_contract.py`. Submission,
+operation queries, provider release confirmation, audit completion and activation
+are identical for fastdisk coding, non-fastdisk coding and non-coding Bots.
 
 `EngineProvisioningStrategy.prepare_recycle` defaults to a no-op: non-coding Bots
 never run the fastdisk probe, backup helper or failure-switch reader.
@@ -479,13 +467,12 @@ helper and switch. Coding-specific backup vetoes are translated at this boundary
 for the shared worker; backup implementation never moves into generic lifecycle code.
 
 ARCA SDK primitives retain the existing `ArcaRecycleTransport` host import and DI
-seam; BaaS/local release retains the existing `BaasRecycleRuntime`. Captured targets
-are rechecked before release so a replacement does not inherit an old task.
-After backup, a successful release call proceeds to transactional completion:
-Bot RECYCLED, binding RELEASED and operation SUCCEEDED. Backup blocking or a release
-failure leaves Bot state unchanged and marks only the operation FAILED. There is
-no extra physical-state confirmation and no new NEEDS_CONFIRMATION result.
-Existing legacy operations are neither automatically replayed nor repaired.
+seam. BaaS/local release uses the narrow `BaasRecycleRuntime` capability and persisted
+`physical_targets`, including stopped/released inventory rows. Every exact provider
+identity must be confirmed absent. Logical deletion, successful workflows, empty
+inventory or stopped containers cannot substitute for physical proof. The existing
+600-second observation budget ends unresolved release as `NEEDS_CONFIRMATION`,
+without repeating destroy or freezing/unbinding the Bot.
 
 All engines honor the same recycle journal and resource-release/admission lock.
 Deletion holds it across lifecycle recheck, grant withdrawal, release, Passport

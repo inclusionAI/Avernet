@@ -231,42 +231,26 @@ See the [approved feature scope and validation handoff](specs/2026-11-18-task-es
 and its [file ownership manifest](specs/2026-11-18-task-escort-readonly/ownership-manifest.json).
 ## Conversation session origins
 
-The conversation sidebar sends `f_user_id=<current Human>` for the current
-user's sessions on owned, collaborating and friend Bots. Backend uses that
-subject only to select an independent runtime for Caller-mode Bots; owner-mode
-Bots retain their shared runtime. The frontend does not call `caller-context`
-to choose a chat runtime. `user_id` remains the authenticated actor, `owner_id`
-continues to locate the Bot, and service conversations still send `stage=online`.
-Old clients that omit `f_user_id` keep the operator-console behavior.
-
-AgentCoding Bots are the engine-specific exception: their mine/others/collab
-lists omit `f_user_id`, request raw paginated sessions and classify each session
-in the frontend with the AgentCoding ID rules (member-task is `collab`, BCS-CLI
-is `others`, a missing creator is `mine`, and recognized other creators are
-`others`). This preserves AgentCoding's synthetic identities. For other managed
-and collaborating Bots, the “他人发起” view uses Backend
-`sessions?source=others`. All views render flat lists ordered by the loaded
+The conversation sidebar uses Backend `sessions?source=mine|others` for managed
+and collaborating Bots. Both sources render flat lists ordered by the loaded
 sessions' modified time descending (creation time is the fallback). Later
 windows are merged, deduplicated by session ID and sorted again; this is not a
 global sort over sessions that have not been loaded.
 
-The current user's view keeps ordinary page-number pagination on the selected
-subject runtime. “他人发起” source queries keep `page=1`, send the authenticated
-Human as `user_id`, the real Bot owner as `owner_id`, and preserve runtime stage,
-instance and session-key filters. Continuation uses `next_cursor`, never the
-cumulative `total` or the number of returned items. A short/empty scan window
-with `has_more=true` exposes “继续加载” rather than a false empty state; no
-automatic unbounded scan runs in the browser. Filter revisions and user
-generations reject stale responses.
+Source queries keep `page=1`, send the authenticated Human as `user_id`, the
+real Bot owner as `owner_id`, and preserve runtime stage, instance and session-key
+filters. Continuation uses `next_cursor`, never the cumulative `total` or the
+number of returned items. A short/empty scan window with `has_more=true` exposes
+“继续加载” rather than a false empty state; no automatic unbounded scan runs in
+the browser. Filter revisions and user generations reject stale responses.
 
 Others remain read-only: history uses the current operator, not `f_user_id` or an
 impersonated Owner. Favorites and friend Bots retain their separate existing
-flows; old `friend=` deep links retain the legacy friend view. AgentCoding's
-visibility policy is applied before its raw sessions are classified. For other
-engines, deploy Backend source-window support before this frontend:
-missing/mismatched source metadata produces an explicit unsupported error
-instead of presenting an unfiltered list as “mine”. See the
-[Backend contract](../backend/docs/openapi-v1/engine-surface.md).
+flows; old `friend=` deep links retain the legacy friend view. Coding Bot
+visibility policy remains applied without reclassifying Backend source results.
+Deploy Backend source-window support before this frontend: missing/mismatched
+source metadata produces an explicit unsupported error instead of presenting an
+unfiltered list as “mine”. See the [Backend contract](../backend/docs/openapi-v1/engine-surface.md).
 ## Lab tasks
 
 The [Lab task list](src/pages/Lab/Tasks/index.tsx) searches displayed task titles within
@@ -427,55 +411,3 @@ authorization succeeds. An empty submitted architecture-domain value is ignored.
 Only the whitelist actions for the architectural ext request are supported; the
 creation flow does not emit workspace or cron initialization. Regression tests
 cover action resolution, the ext request, and the authorization-completion path.
-
-## Community followed-author view
-
-The [follow list](src/components/Community/CommunityPersonalCenter/FollowList.tsx)
-separates followed Humans and Bots into compact identity cards. Selecting one
-keeps its profile and server-supplied statistics in a desktop sidebar beside
-its topics. The profile column is 200px and the topic column takes the remaining
-width; when the content area is narrower than 640px, they stack. Topic rows omit
-redundant author avatars. “返回我的关注列表” restores the identity cards and their
-pagination. The community search and publish controls remain visible in “我的”;
-Enter on a nonempty topic search opens the topic list.
-The [topic header](src/components/Community/CommunityTopicDetail/TopicDetailHeader.tsx)
-places delete/close controls on the title row below the breadcrumb. The detail
-header omits topic tags and the decorative poll icon; status and poll results
-remain visible. Delete confirmation uses the primary “确定” button; cancel does not delete.
-Regression coverage is in [PersonalCenter.test.tsx](test/components/Community/PersonalCenter.test.tsx)
-and [CommunityTopicDetail.test.tsx](test/components/Community/CommunityTopicDetail.test.tsx).
-
-## Community replies
-
-[Topic details](src/components/Community/CommunityTopicDetail/index.tsx) load
-adjacent batches at the scroll edges instead of showing page-navigation buttons.
-Previously loaded floors stay visible. A link to a specific reply opens its
-batch, and scrolling up can load earlier floors without displacing the current
-reading position. A failed batch can be retried without losing loaded floors.
-The community's top-level tabs reuse the Bot Management tab component.
-The reply counter uses the topic's total (including nested replies) when known.
-With no cached total it counts the server's root-floor total plus loaded nested
-replies. A successful direct or nested reply increments the displayed count;
-failed submissions do not change it.
-The interaction bar is outside the scrolling area. Closing replies does not
-hide likes, favorites or the reply count. Notice topics have no extra badge in
-the detail header and support direct replies, not nested replies.
-“我的回帖” lists the signed-in user's replied-to topics using the same row as
-“All Posts”. Browsing History and the other activity lists use the same
-borderless row layout. “我的回帖” collapses multiple replies to the same topic on each activity
-page; the activity API still paginates reply records. Rows open the topic itself.
-
-## Optional Coding Bot restart preparation
-
-`AppCapabilities.prepareCodingBotRestart` is an optional asynchronous preparation
-hook for ordinary cloud Coding Bot restart. It receives bot, owner and caller
-identities and returns extra restart configuration; rejection prevents submission.
-A deployment that returns a `template_config` must also provide
-`submitCodingBotRestart`, which routes the engine-owned `extra_configs` envelope to a
-backend contract that persists it before restart. Rejection aborts without a
-fallback restart. Both hooks must not poll themselves, bypass identity permissions,
-or target published service instances. Local restart, non-Coding engines,
-engine-only refresh and restart-publication are excluded. Without an extension,
-confirmation-only restart behavior is unchanged. See
-[capability types](src/capabilities/types.ts) and
-[workshop service](src/services/botWorkshop/botWorkshopService.ts).

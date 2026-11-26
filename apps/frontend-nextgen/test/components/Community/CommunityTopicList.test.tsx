@@ -57,7 +57,7 @@ describe('CommunityTopicList', () => {
     const { props } = renderList();
     expect(screen.getByText(topic.title)).toBeInTheDocument();
     expect(screen.getByText('协作助手')).toBeInTheDocument();
-    expect(screen.getByText('#讨论')).toBeInTheDocument();
+    expect(screen.getByText('讨论')).toBeInTheDocument();
     expect(screen.getByLabelText('回复 3')).toBeInTheDocument();
     expect(screen.getByLabelText('点赞 7')).toBeInTheDocument();
     expect(screen.getByText(/最新回复/)).toBeInTheDocument();
@@ -66,7 +66,7 @@ describe('CommunityTopicList', () => {
     expect(props.onOpen).toHaveBeenCalledWith(topic);
   });
 
-  test('列表 Human 作者头像使用清晰的 24px 尺寸', () => {
+  test('列表 Human 作者头像使用清晰的 32px 尺寸', () => {
     renderList({
       topics: [
         {
@@ -81,7 +81,7 @@ describe('CommunityTopicList', () => {
       ],
     });
 
-    expect(screen.getByAltText('张三')).toHaveStyle({ width: '24px', height: '24px' });
+    expect(screen.getByAltText('张三')).toHaveStyle({ width: '32px', height: '32px' });
   });
 
   test('列表作者头像支持悬停查看资料和关注', async () => {
@@ -147,22 +147,21 @@ describe('CommunityTopicList', () => {
     expect(pollIcon.querySelector('svg')).toHaveClass('lucide-chart-line');
     expect(screen.getByText(topic.title).compareDocumentPosition(pollIcon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    const typeLabel = screen.getByText('#投票');
-    expect(typeLabel.nextElementSibling).toHaveTextContent(topic.title);
+    const typeLabel = screen.getByText('投票').parentElement;
     expect(typeLabel?.querySelector('svg')).not.toBeInTheDocument();
   });
 
   test('分享和求助主题类型标签不显示图标，仅投票保留专属图标', () => {
     const { unmount } = renderList({ topics: [{ ...topic, status: 'open', topicType: 'share', isHot: true }] });
-    const shareLabel = screen.getByText('#分享');
+    const shareLabel = screen.getByText('分享').parentElement;
     expect(shareLabel?.querySelector('svg')).not.toBeInTheDocument();
-    expect(screen.getByText('#分享')).toBeInTheDocument();
+    expect(screen.getByText('分享')).toBeInTheDocument();
     unmount();
 
     renderList({ topics: [{ ...topic, status: 'closed', topicType: 'help' }] });
-    const helpLabel = screen.getByText('#求助');
+    const helpLabel = screen.getByText('已解决').closest('article')?.querySelector('span.bg-muted');
     expect(helpLabel?.querySelector('svg')).not.toBeInTheDocument();
-    expect(screen.getAllByText('#求助')).toHaveLength(1);
+    expect(screen.getAllByText('求助')).toHaveLength(1);
   });
 
   test('已关闭求助显示已解决而不是普通已结帖', () => {

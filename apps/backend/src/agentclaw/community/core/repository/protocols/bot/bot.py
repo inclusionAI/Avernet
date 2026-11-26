@@ -10,7 +10,7 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.render_screen.models import (
@@ -687,13 +687,9 @@ class TemplateRepository(Protocol):
 
     @abstractmethod
     def update_by_bot_id(
-        self, bot_id: str, update_data: Dict[str, Any], *,
-        validator: Callable[[Dict[str, Any]], None] | None = None,
+        self, bot_id: str, update_data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """Update template by bot_id.
-
-        An optional domain validator runs against the existing ext while holding
-        the row lock, before mutation. A refusal rolls back the write.
 
         Args:
             bot_id: Bot ID

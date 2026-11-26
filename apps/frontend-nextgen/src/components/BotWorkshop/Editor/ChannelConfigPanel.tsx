@@ -6,7 +6,6 @@ import { Switch } from '@/components/ui/Switch';
 import type { BotChannel, BotChannelInput, ChannelBindingMode } from '@/domain/botAdvancedConfig';
 import { CircleHelp, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { serviceBotStageLabel } from '@/domain/botWorkshop';
 import { ChannelFormModal } from './ChannelFormModal';
 
 export function ChannelConfigPanel({
@@ -101,7 +100,7 @@ export function ChannelConfigPanel({
                 </div>
                 <Badge tone="neutral">
                   {showPluginStage
-                    ? serviceBotStageLabel[channel.stage ?? 'draft']
+                    ? { draft: '草稿', verify: '预发', online: '线上' }[channel.stage ?? 'draft']
                     : '草稿态'}
                 </Badge>
                 <span className="truncate">

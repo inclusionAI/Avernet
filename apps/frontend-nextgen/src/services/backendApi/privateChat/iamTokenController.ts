@@ -18,6 +18,10 @@ export interface BotIamTokenChatContext {
    * (openspec add-servicebot-iam-device-uuid)。门控=非 teclaw + 已选实例,
    * 不按运行态/Caller 模式门控。编排层的注入条件见 botChatProvider.fetchIamToken。 */
   deviceUuid?: string;
+  /** Caller 模式 Bot(call_type === 'caller')的运行时目标(openspec add-iam-caller-runtime-target):
+   * service=Bot 的服务实例池(我管理的/我协作的服务 Bot 会话,实例仍由 stage/device_uuid 定位);
+   * caller_instance=当前用户的独立 Caller 实例(好友 Bot 会话)。非 Caller Bot 不传即不带。 */
+  callerRuntimeTarget?: 'service' | 'caller_instance';
 }
 
 /** 获取当前登录用户的 IAM Token，用于 OpenClaw WebSocket 请求身份鉴权。 */
@@ -50,6 +54,11 @@ export async function getBotIamToken(
         ...(entityId ? { entity_id: entityId } : {}),
         ...(stage ? { stage } : {}),
         ...(chatContext?.deviceUuid ? { device_uuid: chatContext.deviceUuid } : {}),
+        // TODO(2026-11-19): 后端 iam_token 接口的 caller_runtime_target 参数暂未就绪,
+        // 先不携带;接口上线后取消下方注释恢复携带(openspec add-iam-caller-runtime-target)。
+        // ...(chatContext?.callerRuntimeTarget
+        //   ? { caller_runtime_target: chatContext.callerRuntimeTarget }
+        //   : {}),
         ...(chatContext?.friendUserId
           ? {
               owner_id: chatContext.ownerId ?? entityId,

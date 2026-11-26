@@ -666,10 +666,7 @@ def test_cancel_missing_favorite_returns_idempotent_success(client, favorite_ser
     assert body["data"]["changed"] is False
 
 
-@pytest.mark.parametrize("draft_publication_error_code", [None, "SC_SECURITY_CHECK_FAILED"])
-def test_list_space_skills_maps_page_and_forwards_search(
-    client, skill_query_service, draft_publication_error_code
-):
+def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_service):
     timestamp = datetime(2026, 8, 20, 3, 40)
     skill_query_service.list_space_skills.return_value = (
         1,
@@ -689,7 +686,6 @@ def test_list_space_skills_maps_page_and_forwards_search(
                     "revision_id": "22222222-2222-4222-8222-222222222222",
                 },
                 "active_publication": None,
-                "draft_publication_error_code": draft_publication_error_code,
                 "actor": {
                     "skill_role": None,
                     "permissions": {
@@ -742,7 +738,6 @@ def test_list_space_skills_maps_page_and_forwards_search(
                     "revision_id": "22222222-2222-4222-8222-222222222222",
                 },
                 "active_publication": None,
-                "draft_publication_error_code": draft_publication_error_code,
                 "actor": {
                     "skill_role": None,
                     "permissions": {

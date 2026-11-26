@@ -44,7 +44,6 @@ from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_runtime_engine_for_bot,
 )
 from agentclaw.community.core.devices.errors import DeviceFileSystemReadOnlyError
-from agentclaw.community.core.devices.services.device_context import DeviceOfflineError, DeviceConnectionUnavailableError
 from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError,
 )
@@ -333,10 +332,8 @@ async def download_file(
     try:
         content = await file_svc.read_file(
             entity_id=eid, bot_id=ebid, engine_type=eeng, path=path,
-            publish_id=publish_id, device_uuid=device_uuid, enforce_download_limit=True, checked=True,
+            publish_id=publish_id, device_uuid=device_uuid, enforce_download_limit=True,
         )
-    except (DeviceOfflineError, DeviceConnectionUnavailableError) as e:
-        raise HTTPException(status_code=503, detail="Device temporarily unavailable") from e
     except FileTooLargeError as e:
         raise HTTPException(status_code=413, detail=str(e))
     except ValueError as e:
@@ -393,10 +390,8 @@ async def preview_file(
     try:
         content = await file_svc.read_file(
             entity_id=eid, bot_id=ebid, engine_type=eeng, path=path,
-            publish_id=publish_id, device_uuid=device_uuid, checked=True,
+            publish_id=publish_id, device_uuid=device_uuid,
         )
-    except (DeviceOfflineError, DeviceConnectionUnavailableError) as e:
-        raise HTTPException(status_code=503, detail="Device temporarily unavailable") from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if content is None:

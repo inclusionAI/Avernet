@@ -68,7 +68,9 @@ export interface ChatBotView {
   /** 团队空间 Bot 写接口必须显式携带实体 owner，不能由登录用户推断。 */
   isTeamBot?: boolean;
   /** 目录 DTO 的 call_type 透传(历史兼容):新版 openapi_v1 目录接口族不下发该字段,
-   *  恒 undefined;前端不再以此字段作任何判据,保留仅为类型兼容。 */
+   *  IAM/文件链 Caller 判据已运行时化(GET /caller-context 聚合 bot_call_type,见
+   *  botChatProvider.resolveCallerRuntimeTarget / useBotSessionFilesFeature);不要再以
+   *  此字段作判据——恒 undefined,判据死参数事故的根因。 */
   callType?: string;
 }
 
@@ -108,18 +110,6 @@ export interface BotModelView {
   badge?: BotModelBadge;
 }
 
-export interface BotSessionScopeOptions {
-  /** “对话”本人会话使用 subject scope；Bot 工坊运维链路显式关闭。 */
-  subjectScoped?: boolean;
-}
-
-export interface BotSessionCreateOptions extends BotSessionScopeOptions {
-  friendlyErrors?: boolean;
-  /** Caller 首次分配已受理时，在同一幂等创建链路内等待运行时就绪。 */
-  waitForCallerRuntime?: boolean;
-  signal?: AbortSignal;
-}
-
 const COMPOUND_ID_RE = /^.+:.+$/;
 
 export function splitBotId(botId: string): { realBotId: string; ownerId?: string } {
@@ -143,12 +133,11 @@ export function resolveChatRuntimeStage(bot: ChatBotView): BotIamTokenStage {
   return bot.runtimeStage ?? (bot.botType === 'service' ? 'online' : 'draft');
 }
 
-/** 支持“按实例取数”的 Bot：服务 Bot、非好友、非 TEClaw、非已知 Caller 模式。 */
+/** 支持“按实例取数”的 Bot：服务 Bot、非好友、非 TEClaw。 */
 export function supportsConversationInstanceScope(bot: ChatBotView): boolean {
   return (
     bot.botType?.toLowerCase() === 'service' &&
     !bot.isFriendBot &&
-    bot.callType?.toLowerCase() !== 'caller' &&
     bot.engine?.toLowerCase() !== 'teclaw'
   );
 }
@@ -161,13 +150,8 @@ export function buildConversationSessionRequestRange(
   return { deviceUuid, stage: resolveChatRuntimeStage(bot) };
 }
 
-/**
- * 对话栏目本人会话的统一请求范围。
- * user_id 是经网关校验的操作者；f_user_id 是会话主体。当前产品不开放接管，
- * 两者始终归一为同一登录 Human。后端仅在 Caller 模式下据此切到独立实例，
- * owner 模式仍保持共享运行时；旧客户端不传 f_user_id 时继续走运维控制台链路。
- */
-export function withConversationSubjectParams<T extends { user_id: string; owner_id?: string; stage?: BotIamTokenStage }>(
+/** 服务 Bot 请求才显式指定阶段；非服务 Bot 依赖后端默认环境，并移除旧筛选条件中的 stage。 */
+export function withFriendBotRequestParams<T extends { user_id: string; owner_id?: string; stage?: BotIamTokenStage }>(
   bot: ChatBotView,
   userId: string,
   params: T,
@@ -181,51 +165,8 @@ export function withConversationSubjectParams<T extends { user_id: string; owner
     ...baseParams,
     ...(bot.botType === 'service' ? { stage } : {}),
     ...((bot.isFriendBot || bot.isTeamBot) && bot.ownerId ? { owner_id: bot.ownerId } : {}),
-    f_user_id: resolveUserId(userId),
+    ...(bot.isFriendBot ? { f_user_id: resolveUserId(userId) } : {}),
   };
-}
-
-/** 按产品入口选择运行时参数；关闭 subject scope 时仍保留服务 Bot 的阶段寻址。 */
-export function withBotSessionScope<T extends { user_id: string; owner_id?: string; stage?: BotIamTokenStage }>(
-  bot: ChatBotView,
-  userId: string,
-  params: T,
-  subjectScoped = true,
-): Omit<T, 'stage'> & { stage?: BotIamTokenStage; f_user_id?: string } {
-  if (subjectScoped) return withConversationSubjectParams(bot, userId, params);
-  const { stage: requestedStage, ...baseParams } = params;
-  return {
-    ...baseParams,
-    ...(bot.botType === 'service'
-      ? { stage: requestedStage ?? resolveChatRuntimeStage(bot) }
-      : {}),
-  };
-}
-
-const CALLER_RUNTIME_PREPARING_CODE = 409113;
-const CALLER_RUNTIME_POLL_INTERVAL_MS = 3_000;
-const CALLER_RUNTIME_POLL_TIMEOUT_MS = 150_000;
-
-function isCallerRuntimePreparing(error: unknown): error is BackendRequestError {
-  if (!(error instanceof BackendRequestError) || error.status !== 409) return false;
-  const code = (error.data as { code?: unknown } | null)?.code;
-  return Number(code) === CALLER_RUNTIME_PREPARING_CODE;
-}
-
-function waitForCallerRuntime(signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
-  return new Promise((resolve, reject) => {
-    let timer: ReturnType<typeof setTimeout>;
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new DOMException('Aborted', 'AbortError'));
-    };
-    timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, CALLER_RUNTIME_POLL_INTERVAL_MS);
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
 }
 
 function toDomainError(e: unknown): DomainError {
@@ -459,41 +400,32 @@ export const botSessionService = {
     pageSize = BOT_SESSION_PAGE_SIZE,
     sessionKey = '',
     range?: ConversationSessionRequestRange,
-    subjectScoped = true,
   ): Promise<DomainResult<BotSessionPageView>> {
     try {
       // session_key 原样透传(空条件省略),由 backendRequest 负责查询串编码。
-      const baseParams = {
+      const params = withFriendBotRequestParams(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
         page,
         page_size: pageSize,
         ...(sessionKey ? { session_key: sessionKey } : {}),
         ...(range ? { device_uuid: range.deviceUuid, ...(range.stage ? { stage: range.stage } : {}) } : {}),
-      };
-      const params = subjectScoped
-        ? withConversationSubjectParams(bot, userId, baseParams)
-        : baseParams;
+      });
       const resp = await listBotSessions(bot.realBotId, params);
       const items = (resp.data?.items ?? []).map((s) => toSessionView(s, bot.botId));
-      const total = resp.data?.total ?? items.length;
-      return { ok: true, data: { items, total, hasMore: page * pageSize < total } };
+      return { ok: true, data: { items, total: resp.data?.total ?? items.length } };
     } catch (e) {
       return { ok: false, error: toDomainError(e) };
     }
   },
-  async listSessions(
-    bot: ChatBotView,
-    userId: string,
-    subjectScoped = true,
-  ): Promise<DomainResult<BotChatSessionView[]>> {
+  async listSessions(bot: ChatBotView, userId: string): Promise<DomainResult<BotChatSessionView[]>> {
     try {
-      const params = withBotSessionScope(bot, userId, {
+      const params = withFriendBotRequestParams(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
         page: 1,
         page_size: 50,
-      }, subjectScoped);
+      });
       const resp = await listBotSessions(bot.realBotId, params);
       const items = (resp.data?.items ?? []).map((s) => toSessionView(s, bot.botId));
       return { ok: true, data: items };
@@ -505,36 +437,16 @@ export const botSessionService = {
     bot: ChatBotView,
     userId: string,
     title: string = '新会话',
-    options?: BotSessionCreateOptions,
+    options?: { friendlyErrors?: boolean },
   ): Promise<DomainResult<BotChatSessionView>> {
     try {
-      const params = withBotSessionScope(bot, userId, {
+      const params = withFriendBotRequestParams(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
-      }, options?.subjectScoped !== false);
-      const startedAt = Date.now();
-      let resp;
-      while (true) {
-        try {
-          resp = options?.friendlyErrors || options?.signal || options?.waitForCallerRuntime
-            ? await createBotSession(
-                bot.realBotId,
-                params,
-                { title },
-                options?.signal,
-                options?.friendlyErrors ? '创建会话失败，请稍后重试' : undefined,
-              )
-            : await createBotSession(bot.realBotId, params, { title });
-          break;
-        } catch (error) {
-          const canPoll = options?.waitForCallerRuntime === true
-            && isCallerRuntimePreparing(error)
-            && Date.now() - startedAt + CALLER_RUNTIME_POLL_INTERVAL_MS <= CALLER_RUNTIME_POLL_TIMEOUT_MS;
-          if (!canPoll) throw error;
-          if (error.toastKey) useErrorNotifyStore.getState().cancel(error.toastKey);
-          await waitForCallerRuntime(options.signal);
-        }
-      }
+      });
+      const resp = options?.friendlyErrors
+        ? await createBotSession(bot.realBotId, params, { title }, undefined, '创建会话失败，请稍后重试')
+        : await createBotSession(bot.realBotId, params, { title });
       const s = resp.data;
       if (!s) throw new Error('创建会话失败');
       return { ok: true, data: toSessionView(s, bot.botId) };
@@ -560,7 +472,7 @@ export const botSessionService = {
     options?: { silentNotFound?: boolean },
   ): Promise<DomainResult<BotChatSessionView>> {
     try {
-      const params = withConversationSubjectParams(bot, userId, {
+      const params = withFriendBotRequestParams(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
         ...(range ? {
@@ -586,7 +498,7 @@ export const botSessionService = {
       await deleteBotSession(
         bot.realBotId,
         sessionId,
-        withConversationSubjectParams(bot, userId, {
+        withFriendBotRequestParams(bot, userId, {
           user_id: resolveUserId(userId),
           owner_id: bot.ownerId,
         }),
@@ -603,7 +515,7 @@ export const botSessionService = {
     title: string,
   ): Promise<DomainResult<BotChatSessionView>> {
     try {
-      const params = withConversationSubjectParams(bot, userId, { user_id: resolveUserId(userId) });
+      const params = withFriendBotRequestParams(bot, userId, { user_id: resolveUserId(userId) });
       const resp = await updateBotSession(bot.realBotId, sessionId, params, { title });
       if (!resp.data) throw new Error('更新会话标题失败');
       return { ok: true, data: toSessionView(resp.data, bot.botId) };
@@ -611,17 +523,12 @@ export const botSessionService = {
       return { ok: false, error: toDomainError(e) };
     }
   },
-  async clearContext(
-    bot: ChatBotView,
-    userId: string,
-    sessionId: string,
-    subjectScoped = true,
-  ): Promise<DomainResult<null>> {
+  async clearContext(bot: ChatBotView, userId: string, sessionId: string): Promise<DomainResult<null>> {
     try {
       await deleteBotSessionMessages(
         bot.realBotId,
         sessionId,
-        withBotSessionScope(bot, userId, { user_id: resolveUserId(userId) }, subjectScoped),
+        withFriendBotRequestParams(bot, userId, { user_id: resolveUserId(userId) }),
       );
       return { ok: true, data: null };
     } catch (e) {
@@ -635,7 +542,7 @@ export const botSessionService = {
     favorite: boolean,
   ): Promise<DomainResult<boolean>> {
     try {
-      const params = withConversationSubjectParams(bot, userId, { user_id: resolveUserId(userId) });
+      const params = withFriendBotRequestParams(bot, userId, { user_id: resolveUserId(userId) });
       const resp = favorite
         ? await favoriteBotSession(bot.realBotId, sessionId, params)
         : await unfavoriteBotSession(bot.realBotId, sessionId, params);
@@ -650,19 +557,15 @@ export const botSessionService = {
     page = 1,
     pageSize = BOT_SESSION_PAGE_SIZE,
     range?: ConversationSessionRequestRange,
-    subjectScoped = true,
   ): Promise<DomainResult<BotSessionPageView>> {
     try {
-      const baseParams = {
+      const params = withFriendBotRequestParams(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
         page,
         page_size: pageSize,
         ...(range ? { device_uuid: range.deviceUuid, ...(range.stage ? { stage: range.stage } : {}) } : {}),
-      };
-      const params = subjectScoped
-        ? withConversationSubjectParams(bot, userId, baseParams)
-        : baseParams;
+      });
       const resp = await listFavoriteSessions(bot.realBotId, params);
       const items = (resp.data?.items ?? []).map((s) => toSessionView(s, bot.botId, true));
       return { ok: true, data: { items, total: resp.data?.total ?? items.length } };
@@ -681,22 +584,20 @@ export const botSessionService = {
     page = 1,
     pageSize = BOT_MESSAGE_PAGE_SIZE,
     range?: ConversationSessionRequestRange,
-    subjectScoped = true,
   ): Promise<BotMessagePageView> {
-    const baseParams = {
-      user_id: resolveUserId(userId),
-      owner_id: bot.ownerId,
-      page,
-      page_size: pageSize,
-      ...(range ? {
-        device_uuid: range.deviceUuid,
-        ...(range.stage ? { stage: range.stage } : {}),
-      } : {}),
-    };
     const resp = await listBotSessionMessages(
       bot.realBotId,
       sessionId,
-      subjectScoped ? withConversationSubjectParams(bot, userId, baseParams) : baseParams,
+      withFriendBotRequestParams(bot, userId, {
+        user_id: resolveUserId(userId),
+        owner_id: bot.ownerId,
+        page,
+        page_size: pageSize,
+        ...(range ? {
+          device_uuid: range.deviceUuid,
+          ...(range.stage ? { stage: range.stage } : {}),
+        } : {}),
+      }),
     );
     const items = (resp.data?.items ?? []) as BotMessageDto[];
     return {
@@ -710,18 +611,14 @@ export const botSessionService = {
     return page.messages;
   },
 
-  async listModels(
-    bot: ChatBotView,
-    userId: string,
-    subjectScoped = true,
-  ): Promise<DomainResult<BotModelView[]>> {
+  async listModels(bot: ChatBotView, userId: string): Promise<DomainResult<BotModelView[]>> {
     try {
-      const params = withBotSessionScope(bot, userId, {
+      const params = withFriendBotRequestParams(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
         page: 1,
         page_size: 50,
-      }, subjectScoped);
+      });
       const resp = await listBotModels(bot.realBotId, params);
       return { ok: true, data: (resp.data?.items ?? []).map(toModelView) };
     } catch (e) {
@@ -734,12 +631,9 @@ export const botSessionService = {
     userId: string,
     sessionId: string,
     model: string,
-    subjectScoped = true,
   ): Promise<DomainResult<BotChatSessionView>> {
     try {
-      const params = withBotSessionScope(
-        bot, userId, { user_id: resolveUserId(userId) }, subjectScoped,
-      );
+      const params = withFriendBotRequestParams(bot, userId, { user_id: resolveUserId(userId) });
       const resp = await updateBotSession(bot.realBotId, sessionId, params, { model });
       if (!resp.data) throw new Error('更新会话模型失败');
       return { ok: true, data: toSessionView(resp.data, bot.botId) };

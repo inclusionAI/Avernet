@@ -478,11 +478,7 @@ describe('useConversationSessions session filters', () => {
     createSession.mockResolvedValue({ ok: true, data: sessionOf('s-new', managedBot.bot.botId) });
     await act(async () => result.current.createSession(managedBot.bot.botId));
 
-    expect(createSession).toHaveBeenCalledWith(managedBot.bot, '327325', undefined, {
-      friendlyErrors: true,
-      signal: expect.any(AbortSignal),
-      waitForCallerRuntime: true,
-    });
+    expect(createSession).toHaveBeenCalledWith(managedBot.bot, '327325', undefined, { friendlyErrors: true });
     // 过滤中的列表不能混入不匹配的新会话。
     expect(
       useConversationStore

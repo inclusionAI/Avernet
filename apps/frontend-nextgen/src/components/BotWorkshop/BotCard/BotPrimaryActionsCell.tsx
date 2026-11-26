@@ -69,7 +69,7 @@ const BotPrimaryActionsCell: React.FC<BotPrimaryActionsCellProps> = ({
 }) => {
   if (bot.lifecycle === 'deploying') return null;
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
-  const editLabel = isServiceVerification(bot) ? '试运行验证' : '编辑';
+  const editLabel = isServiceVerification(bot) ? '预发验证' : '编辑';
   // Coding Bot 在 Bot 管理页展示「去使用」；任务实例随管理类操作
   // 收口在「三个点」气泡菜单，普通库存操作（查看/编辑/日志）不展示。
   const showInventoryActions = !isAgentCodingBot;

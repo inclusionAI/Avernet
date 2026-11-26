@@ -43,8 +43,7 @@ class RecycleBotService:
         self._passport = passport_plugin
         self._recycle_services = recycle_services
 
-    def submit(self, *, bot_id, owner_id, owner_name=None, request_id="",
-               source="openapi", reason=None):
+    def submit(self, *, bot_id, owner_id, owner_name=None, request_id=""):
         bot = self._bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
         if not bot:
             raise BotNotFoundError("Bot not found")
@@ -52,23 +51,9 @@ class RecycleBotService:
         if self._recycle_services is None:
             from agentclaw.community.core.bot_management.engines.restart_contract import RecycleUnavailable
             raise RecycleUnavailable("Recycle queue unavailable")
-        metadata = {} if source == "openapi" and reason is None else {
-            "source": source, "reason": reason,
-        }
-        result = self._recycle_services.operations().submit(
+        return self._recycle_services.operations().submit(
             bot_id=bot_id, owner_id=owner_id, owner_name=owner_name, request_id=request_id,
-            **metadata,
         )
-        if result.pop("_synchronous", False):
-            completed = self.recycle(
-                bot_id=bot_id, owner_id=owner_id, owner_name=owner_name,
-            )
-            return {
-                **completed.__dict__,
-                "operation_id": None,
-                "phase": None,
-            }
-        return result
 
     def get_operation(self, *, bot_id, owner_id, operation_id):
         if self._recycle_services is None:
@@ -182,16 +167,6 @@ class ManagedRecycleRuntime:
             "sandbox_id": props.get("sandbox_id"),
             "bot_uuid": props.get("bot_uuid") or binding.device_id,
         }
-
-    def should_queue(self, bot):
-        ctx, strategy = resolve_restart_strategy(bot)
-        return strategy.should_async_recycle(
-            ctx,
-            binding_id=bot.get("binding_id"),
-            device_service_provider=self.devices,
-            restart_dependencies=self.dependencies,
-            operation_id="recycle-admission",
-        )
 
     def prepare(self, bot, record, save):
         if self.target(bot) != record["target"]:

@@ -90,6 +90,13 @@ export interface BotRequestParams {
    * Bot（服务 Bot + 非好友 + 非 teclaw）且已选实例时携带；缺省完全不出现该键。
    */
   device_uuid?: string;
+  /**
+   * Caller 模式 Bot 的运行时定位（openspec add-session-files-caller-runtime-target，
+   * 与 IAM 换签同参数）。`service` = 按 stage(+device_uuid)选择服务 Bot 实例（我管理的/
+   * 我协作的 Bot 会话）；`caller_instance` = 当前用户的独立 Caller 实例（好友 Bot 会话）。
+   * 仅 `call_type === 'caller'` 的 Bot 由装配层注入；缺省完全不出现该键。
+   */
+  caller_runtime_target?: 'service' | 'caller_instance';
 }
 
 const base = (botId: string, sessionId: string) =>

@@ -9,8 +9,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 export interface BotBrowseRow {
   botId: string;
   botName: string;
-  avatarUrl?: string;
-  engine?: string;
   note: string;
   enabled: boolean;
   saving: boolean;
@@ -61,8 +59,6 @@ export function useBotBrowseConfig(): UseBotBrowseConfigResult {
       return {
         botId: bot.realBotId,
         botName: bot.displayName || bot.realBotId,
-        avatarUrl: bot.avatarUrl,
-        engine: bot.engine,
         note: sub?.note ?? '',
         enabled: Boolean(sub),
         saving: meta[bot.realBotId]?.saving ?? false,

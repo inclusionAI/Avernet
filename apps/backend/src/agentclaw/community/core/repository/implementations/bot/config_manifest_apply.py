@@ -137,7 +137,6 @@ class BotConfigManifestApplyRepository(BotConfigManifestApplyRepositoryProtocol)
                     *self._match(env=env, entity_id=entity_id, bot_id=bot_id),
                     self._Apply.apply_id == apply_id,
                 )
-                .with_for_update()
                 .one_or_none()
             )
             if row is None:
@@ -154,8 +153,6 @@ class BotConfigManifestApplyRepository(BotConfigManifestApplyRepositoryProtocol)
                     bot_id,
                 )
                 return None
-            if row.status != "RUNNING":
-                return row.to_record()
             row.status = status
             row.report = report
             row.finished_at = datetime.now()

@@ -162,24 +162,9 @@ Independent Caller sessions are authorized by the authenticated subject's existi
 successful instance binding, selected only after Bot access and online publication
 checks. Lists, details, history, connection, favorites, rename, deletion and history
 clearing do not read or write the Backend-owned session index. Reads never create,
-restart or upgrade an instance. Missing instances yield an empty list. Reads of
-already allocated `init` instances query their registered publication and reuse
-the lifecycle's binding/instance writeback; no new allocation is started. Pending
-connections return `need_poll`, while failed instances retain their unavailable
-behavior. An inspecting owner's IAM is never installed as the friend's Caller.
-Caller health-status APIs remain read-only and do not reconcile publishing.
-Exact operations confirm the session exists in
+restart or upgrade an instance. Missing instances yield an empty list; pending or
+failed instances remain pending. Exact operations confirm the session exists in
 that fixed runtime; supplied keys cannot select another user's container.
-
-OpenAPI conversation routes use `f_user_id` as the session subject. When it
-equals the authenticated `user_id`, the owner/collaborator gate runs first. A
-Caller-mode service Bot then delegates sessions, connection, IAM/session-file
-authorization and session mutations to that Human's ExpertChat runtime; an
-owner-mode Bot stays on the existing shared runtime and applies the established
-engine-side current-user session filter for both owners and collaborators. If the operator gate does
-not admit the Human, the established BCN friend authorization remains the only
-fallback. Omitting `f_user_id` preserves the legacy operator path, and a
-different subject remains limited to the existing owner-inspection policy.
 
 Runtime lists accept all nonempty session IDs, including ordinary, cron and
 subagent sessions, without a user filter. Results are deduplicated, sorted by

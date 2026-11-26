@@ -6,11 +6,6 @@ export type BotDeployment = 'local' | 'cloud';
 export type BotServiceMode = 'non-service' | 'service';
 export type BotLifecycle = 'draft' | 'deploying' | 'prestable' | 'running' | 'offline' | 'failed' | 'unknown';
 export type BotRuntimeStage = 'draft' | 'verify' | 'online';
-export const serviceBotStageLabel: Record<BotRuntimeStage, string> = {
-  draft: '草稿',
-  verify: '试运行',
-  online: '正式运行',
-};
 export type BotCompleteness = 'complete' | 'partial';
 
 export interface BotLock {
@@ -73,7 +68,7 @@ export interface BotDomain {
   healthyInstances?: number;
   totalInstances?: number;
   lock?: BotLock;
-  /** 服务 Bot 评测入口是否可见；随评测门禁白名单实时查询结果刷新，同时控制发起评测和历史评测记录入口。 */
+  /** 服务 Bot 草稿态发起评测入口是否可见；随评测门禁白名单实时查询结果刷新。 */
   evalGateVisible?: boolean;
   /** 当前用户是否有该服务 Bot 的编辑权限；控制历史评测记录入口。 */
   canOpenEvalHistory?: boolean;
@@ -266,37 +261,13 @@ export type BotCopyResult =
 export type BotCopyAuthorization = BotCreateAuthorization;
 
 /**
- * 复制入口可用性。非 openclaw 引擎不展示(与后端 `_COPYABLE_ENGINES={"openclaw"}` 一致);
- * openclaw 引擎按 Bot 类型分流裁决,前置门(权限/锁)优先于 lifecycle 文案。
- *
- * - 个人 Bot(`serviceMode !== 'service'`):仅 owner 可复制;非 owner 展示置灰「仅Bot Owner可复制」。
- * - 服务 Bot(`serviceMode === 'service'`):
- *   - 无操作权限(`actions` 仅剩 view/chat)→ 置灰「无 Bot 操作权限,请先申请」(对齐
- *     `getBotCollaborationMode` 的协作身份口径,普通空间成员落此档)。
- *   - owner 且无协作者(`hasCollaborators` 非 true)→ 免锁直放行:无协作者时锁表短路,
- *     owner 永远读不到 lock,与后端「无协作者 owner 免锁」一致。
- *   - 其余情形必须本人持锁(`lock.status === 'mine'`)才放行;他人持锁 → 置灰「Bot 正被他人编辑,请稍后再试」;
- *     无人持锁 → 置灰「请先获取锁」。
- * - 通过前置门后,lifecycle 处于 deploying/failed/unknown → 置灰现有中文阻断原因;其余放行。
+ * 复制入口可用性。openclaw 引擎一律展示复制按钮,按权限与生命周期区分可用性:
+ * - 非 openclaw 引擎:不展示(与后端 `_COPYABLE_ENGINES={"openclaw"}` 一致)。
+ * - 无 edit 权限(非 owner 且 actions 不含 edit):展示但置灰,tooltip 用后端 `disabled_actions.edit`
+ *   直给文案(典型「Bot editor permission required」,与 edit disabled action 一致);缺失走兜底「当前不可复制」。
+ * - 有权限但 lifecycle 处于 deploying/failed/unknown:展示但置灰,给现有中文阻断原因。
+ * - 其余(draft/prestable/running/offline):展示且可点击。
  */
-const COPY_LIFECYCLE_BLOCKED: Partial<Record<BotLifecycle, string>> = {
-  deploying: 'Bot 部署中,无法复制',
-  failed: 'Bot 创建失败,无法复制',
-  unknown: 'Bot 状态未知,无法复制',
-};
-
-/** 操作权限信号:`actions` 除 view/chat 外是否还有动作(owner/已批准协作者落此)。与 `getBotCollaborationMode` 同口径。 */
-const NON_STANDING_ACTIONS = new Set(['view', 'chat']);
-
-function copyAvailabilityFromLifecycle(
-  bot: BotDomain,
-): { visible: boolean; enabled: boolean; disabledReason?: string } {
-  const reason = COPY_LIFECYCLE_BLOCKED[bot.lifecycle];
-  return reason
-    ? { visible: true, enabled: false, disabledReason: reason }
-    : { visible: true, enabled: true };
-}
-
 export function canCopyBot(
   bot: BotDomain,
   currentUserId?: string,
@@ -305,33 +276,25 @@ export function canCopyBot(
   enabled: boolean;
   disabledReason?: string;
 } {
-  if (bot.runtime?.engine !== 'openclaw') return { visible: false, enabled: false };
-  const isOwner = Boolean(currentUserId && bot.ownerId === currentUserId);
-
-  // 个人 Bot(非服务):仅 owner 可复制。
-  if (bot.serviceMode !== 'service') {
-    if (!isOwner) {
-      return { visible: true, enabled: false, disabledReason: '仅Bot Owner可复制' };
-    }
-    return copyAvailabilityFromLifecycle(bot);
+  const engineAllowsCopy = bot.runtime?.engine === 'openclaw';
+  const canEdit = Boolean(
+    currentUserId && (bot.ownerId === currentUserId || bot.actions.includes('edit')),
+  );
+  if (!engineAllowsCopy) return { visible: false, enabled: false };
+  const blockedReasons: Partial<Record<BotLifecycle, string>> = {
+    deploying: 'Bot 部署中,无法复制',
+    failed: 'Bot 创建失败,无法复制',
+    unknown: 'Bot 状态未知,无法复制',
+  };
+  if (!canEdit) {
+    return {
+      visible: true,
+      enabled: false,
+      disabledReason: bot.disabledActions?.edit ?? '当前不可复制',
+    };
   }
-
-  // 服务 Bot:先验操作权限,再验锁,最后 lifecycle。
-  const hasOperationPermission = bot.actions.some((action) => !NON_STANDING_ACTIONS.has(action));
-  if (!hasOperationPermission) {
-    return { visible: true, enabled: false, disabledReason: '无 Bot 操作权限,请先申请' };
-  }
-  // owner + 无协作者:锁表短路读不到 lock,免锁直放行(与后端 owner 免锁一致)。
-  if (isOwner && !bot.hasCollaborators) {
-    return copyAvailabilityFromLifecycle(bot);
-  }
-  // 多人协作下复制要求本人持锁(只读判断,不在此抢锁)。
-  const lock = bot.lock;
-  if (lock?.status === 'mine') return copyAvailabilityFromLifecycle(bot);
-  if (lock?.status === 'other') {
-    return { visible: true, enabled: false, disabledReason: 'Bot 正被他人编辑,请稍后再试' };
-  }
-  return { visible: true, enabled: false, disabledReason: '请先获取锁' };
+  const reason = blockedReasons[bot.lifecycle];
+  return reason ? { visible: true, enabled: false, disabledReason: reason } : { visible: true, enabled: true };
 }
 
 export type BotAction =
@@ -368,8 +331,8 @@ export type BotPublishRestartStage = 'prestable' | 'online';
 
 /** 重启发布阶段 → 用户可读环境名。 */
 export const restartPublishStageLabel: Record<BotPublishRestartStage, string> = {
-  prestable: serviceBotStageLabel.verify,
-  online: serviceBotStageLabel.online,
+  prestable: '预发',
+  online: '线上',
 };
 
 /**

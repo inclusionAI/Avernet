@@ -58,9 +58,6 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
 from agentclaw.community.di.modules.infrastructure.community.task_runner_integration import (
     BcsTokenProviderImpl,
 )
-from agentclaw.community.core.task.task_discovery.frontend_url import (
-    ConfigFrontendUrlProvider,
-)
 from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
     CallbackDataEnricher,
 )
@@ -150,10 +147,7 @@ class _StubService:
         self._node_status: dict[tuple[str, str], Status] = {}
         self._node_planned_by: dict[tuple[str, str], str] = {}
         self._execution_config: dict = {}
-        self._node_profiles: dict[tuple[str, str], dict] = {}
-        self.dispatch_result = None
         self.intake_result: TaskIntakeResult | None = None
-        self.owner_user_id: str | None = None
 
     def set_node_status(self, task_id, node_id, status) -> None:
         self._node_status[(task_id, node_id)] = status
@@ -164,18 +158,12 @@ class _StubService:
     def set_node_planned_by(self, task_id, node_id, origin_node_id) -> None:
         self._node_planned_by[(task_id, node_id)] = origin_node_id
 
-    def set_node_profile(self, task_id, node_id, **profile) -> None:
-        self._node_profiles[(task_id, node_id)] = profile
-
     def get_task_dashboard(self, task_id, node_id=None) -> TaskExecutionGraph:
-        graph_extend_props = {"execution_config": self._execution_config}
-        if self.owner_user_id:
-            graph_extend_props["owner_user_id"] = self.owner_user_id
         g = TaskExecutionGraph(
             run_id=1,
             loop_round=0,
             status=Status.PENDING,
-            extend_props=graph_extend_props,
+            extend_props={"execution_config": self._execution_config},
         )
         for (tid, nid), st in list(self._node_status.items()):
             if tid == task_id:
@@ -183,13 +171,6 @@ class _StubService:
                 if self._execution_config.get("intake_session_id"):
                     node.run_info.assignee = "bot-1"
                     node.run_info.extend_props["relay_token"] = "run-1"
-                profile = self._node_profiles.get((tid, nid))
-                if profile:
-                    if profile.get("run_mode"):
-                        node.run_info.run_mode = profile["run_mode"]
-                    if profile.get("assignee"):
-                        node.run_info.assignee = profile["assignee"]
-                    node.run_info.extend_props.update(profile.get("extend_props") or {})
                 planned_by = self._node_planned_by.get((tid, nid))
                 if planned_by:
                     node.run_info.extend_props["relay_planned_by"] = planned_by
@@ -233,7 +214,7 @@ class _StubService:
 
     async def dispatch_node(self, task_id, node_id):
         self.callback.calls.append(("dispatch_node", (task_id, node_id)))
-        return self.dispatch_result or SimpleNamespace(node_id=node_id)
+        return SimpleNamespace(node_id=node_id)
 
     async def intake(self, command, context):
         self.callback.calls.append(("intake", (command, context)))
@@ -286,11 +267,6 @@ class _StubTaskModule(Module):
     @provider
     def svc(self) -> TaskServiceProtocol:
         return _StubService()  # type: ignore[return-value]
-
-    @singleton
-    @provider
-    def frontend_url_provider(self) -> ConfigFrontendUrlProvider:
-        return ConfigFrontendUrlProvider(static_url="https://teamclaw.test")
 
     @singleton
     @provider

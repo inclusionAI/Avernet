@@ -26,24 +26,6 @@ describe('useMyTaskTasks enabled gate', () => {
     expect(result.current.taskRecords).toEqual([]);
   });
 
-  it('把搜索关键字传输给服务端任务列表查询', async () => {
-    mockedListMyTasks.mockResolvedValueOnce({
-      code: 0,
-      message: 'ok',
-      data: { items: [], total: 0, page: 1, pageSize: 10 },
-    });
-
-    const { result } = renderHook(() => useMyTaskTasks('900003', 1, 10, 'all', true, 'primary'));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(mockedListMyTasks).toHaveBeenCalledWith({
-      user_id: '900003',
-      status: undefined,
-      keyword: 'primary',
-      page: 1,
-      page_size: 10,
-    });
-  });
-
   it('身份切换后忽略旧用户任务请求的晚返回结果', async () => {
     let resolveRequest: ((value: ListMyTaskResult) => void) | undefined;
     mockedListMyTasks.mockReturnValueOnce(

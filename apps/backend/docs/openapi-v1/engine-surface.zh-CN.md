@@ -151,16 +151,6 @@ Bot owner、BCN 确认好友关系有效、ExpertChat 的后端会话索引确�
   创建路径上，返回的会话会报出实际生效的 `cwd`（不建模工作目录的引擎报空），
   所以应答说得清到底发生了哪一种。真正会被静默丢弃的是给*已建立*的会话改绑目录，
   那仍然是 422。_2026-09-03 决定。_
-- **会话主体按引擎策略寻址，不按引擎名称写分支。** online Caller 模式服务 Bot
-  携带 `f_user_id` 时，注册策略要求独立 Caller 运行时的引擎（OpenClaw、Hermes
-  与默认策略）路由到该 Human 的独立实例；在已发布服务运行时内部隔离调用者的
-  TeClaw 保持按 stage 绑定寻址，并使用其注册的 session-key codec。创建、列表、
-  详情、消息、模型和文件等会话操作共用同一能力投影，避免各接口路由规则漂移。
-- **第一次创建独立 Caller 运行时可能仍在置备。** 此时
-  `POST …/{bot_id}/sessions` 返回 HTTP `409`、业务码 `409113`、消息
-  `Caller runtime is preparing`，并携带 `Retry-After: 3`。该次请求尚未创建会话，
-  可以安全重试；客户端应做有界轮询。普通设备未就绪仍保持原有 `409000` 契约，
-  不应被当作这一状态转换自动重试。
 - **`cwd` 由设备侧把关，不由 Backend 把关。** 会话目录就是 agent 的运行目录，而
   `claude_code` 引擎下的 agent 以 bypassPermissions 运行——因此该值会被约束到设备
   自己配置的工作区根（`AICODING_CWD_ALLOW_ROOTS` / `CONTAINER_WORKSPACE_BASE`），

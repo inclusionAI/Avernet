@@ -1,13 +1,12 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import type { CommunityTopic, CreateCommunityReplyDraft, InteractionSummary } from '@/domain/community/types';
+import { Heart, MessageSquare, User } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
 import { cn } from '@/utils/cn';
-import { Heart, MessageSquare } from 'lucide-react';
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { CommunityAuthorAvatar } from '../CommunityAuthorAvatar';
-import { CommunityBody } from '../CommunityBody';
 import { formatDateTime, type CommunityThreadReply, type ReplyElementRegistrar } from './model';
-import { type ReplyComposerTarget } from './ReplyComposer';
+import { ReplyComposer, type ReplyComposerTarget } from './ReplyComposer';
 import { ThreadReply } from './ThreadReply';
 
 interface FloorProps {
@@ -43,7 +42,7 @@ interface FloorProps {
   authorFollowLoading?: (author: CommunityTopic['author']) => boolean;
   authorFollowed?: (author: CommunityTopic['author']) => boolean;
   canReply?: boolean;
-  onReplyTarget?: (target: ReplyComposerTarget) => void;
+  replySaving?: boolean;
   onSubmitReply?: (payload: CreateCommunityReplyDraft) => Promise<boolean>;
 }
 
@@ -79,32 +78,22 @@ export function Floor({
   authorFollowLoading,
   authorFollowed,
   canReply = false,
-  onReplyTarget,
+  replySaving = false,
   onSubmitReply,
 }: FloorProps) {
-  const pollMain = floor === 0 && topic.topicType === 'poll';
-  const [pollExpanded, setPollExpanded] = useState(true);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const [bodyExpanded, setBodyExpanded] = useState(false);
-  const [overflows, setOverflows] = useState(false);
-  useLayoutEffect(() => {
-    const node = bodyRef.current;
-    if (!node || floor !== 0) return;
-    setBodyExpanded(false);
-    setPollExpanded(true);
-    const measure = () => setOverflows(node.scrollHeight > 104);
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [floor, body, topic.id]);
+  const [replyTarget, setReplyTarget] = useState<ReplyComposerTarget | null>(null);
   const replyStats = postId ? getReplyLikeSummary?.(postId) : undefined;
   const viewerReplyStats = postId ? getReplyViewerSummary?.(postId) : undefined;
   const likeCount = replyStats?.likeCount ?? 0;
   const liked = (viewerReplyStats?.likeCount ?? 0) > 0;
   const visibleThreadReplies = expanded ? threadReplies : threadReplies.slice(0, 2);
   const childListId = postId ? `${postId}-children` : undefined;
+
+  const submitReply = async (payload: CreateCommunityReplyDraft) => {
+    const succeeded = await onSubmitReply?.(payload);
+    if (succeeded) setReplyTarget(null);
+    return succeeded === true;
+  };
 
   return (
     <article
@@ -128,10 +117,11 @@ export function Floor({
           tone={floor === 0 ? 'primary' : 'neutral'}
           className={
             floor === 0
-              ? 'rounded bg-primary/10 px-1.5 text-[10px] text-primary'
+              ? 'gap-1 rounded bg-foreground px-1.5 py-0.5 text-[10px] text-background'
               : 'h-6 rounded px-2 py-0.5 text-[10px]'
           }
         >
+          {floor === 0 ? <User className="size-3" aria-hidden /> : null}
           {floor === 0 ? '楼主' : `${floor}楼`}
         </Badge>
         {replyToPostId ? (
@@ -139,52 +129,15 @@ export function Floor({
             {typeof replyToFloorNo === 'number' ? `回复 ${replyToFloorNo}楼` : '回复原回复'}
           </Badge>
         ) : null}
-        {pollMain && <span className="text-xs text-muted-foreground">{formatDateTime(createdAt)}</span>}
-        {floor === 0 &&
-          currentUserId &&
-          !topic.isMine &&
-          !(author.type === 'human' && author.id === currentUserId) &&
-          followAuthor && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="ml-auto border-primary/30 text-primary"
-              aria-label="关注楼主"
-              aria-pressed={authorFollowed?.(author) === true}
-              loading={authorFollowLoading?.(author)}
-              onClick={() => void followAuthor(author)}
-            >
-              {authorFollowed?.(author) ? '已关注' : '＋ 关注'}
-            </Button>
-          )}
         {floor > 0 && helpful ? <Badge tone="success">有帮助</Badge> : null}
       </div>
-      <div className={floor === 0 ? 'mt-3' : 'mt-2 pl-[44px]'}>
-        <div className={'min-w-0'}>
-          {floor === 0 ? (
-            <>
-              <div ref={bodyRef} className={(pollMain ? pollExpanded : bodyExpanded) ? undefined : 'max-h-[104px] overflow-hidden'}>
-                <CommunityBody body={body} />
-              </div>
-              {overflows && !pollMain && (
-                <Button
-                  variant="link"
-                  size="sm"
-                  className="px-0"
-                  aria-expanded={bodyExpanded}
-                  onClick={() => setBodyExpanded((v) => !v)}
-                >
-                  {bodyExpanded ? '收起' : '展开'}
-                </Button>
-              )}
-            </>
-          ) : (
-            <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{body}</p>
-          )}
+      <div className="mt-2 pl-[44px] pr-[44px]">
+        <div className="min-h-[120px]">
+          <p className="m-0 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{body}</p>
         </div>
-        {(!pollMain || pollExpanded) && contentExtra}
+        {contentExtra}
         {topicActionRow ? (
-          <div className={pollMain ? "flex flex-wrap items-baseline gap-3" : undefined}>{topicActionRow}{pollMain && <Button variant="link" size="sm" className="px-0" aria-expanded={pollExpanded} onClick={() => setPollExpanded(v => !v)}>{pollExpanded ? "收起" : "展开"}</Button>}</div>
+          topicActionRow
         ) : (
           <div className="mt-2 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -194,7 +147,7 @@ export function Floor({
                   size="sm"
                   className="h-auto min-h-0 gap-1 px-0 text-xs font-normal text-muted-foreground"
                   aria-label="回复"
-                  onClick={() => onReplyTarget?.({ postId, authorName: author.displayName, preview: body })}
+                  onClick={() => setReplyTarget({ postId, authorName: author.displayName })}
                 >
                   <MessageSquare className="size-3.5" aria-hidden />
                   回复
@@ -210,7 +163,9 @@ export function Floor({
                   onClick={() => postId && onLike?.(postId)}
                   className={cn(
                     'h-auto min-h-0 gap-1 px-0 text-xs font-normal transition-colors',
-                    liked ? 'text-destructive hover:text-destructive' : 'text-muted-foreground hover:text-foreground',
+                    liked
+                      ? 'text-destructive hover:text-destructive'
+                      : 'text-muted-foreground hover:text-foreground',
                   )}
                 >
                   <Heart className={cn('size-3.5', liked && 'fill-current')} aria-hidden />
@@ -233,7 +188,7 @@ export function Floor({
           </div>
         )}
         {threadReplies.length > 0 ? (
-          <div id={childListId} aria-label="楼中楼回复" className="mt-3 space-y-2 rounded-lg bg-muted/40 p-3">
+          <div id={childListId} aria-label="楼中楼回复" className="mt-3 space-y-2 border-l border-divider pl-3">
             {visibleThreadReplies.map(({ reply, targetAuthorName, targetPostId }) => (
               <ThreadReply
                 key={reply.id}
@@ -253,7 +208,7 @@ export function Floor({
                 liked={(getReplyViewerSummary?.(reply.id)?.likeCount ?? 0) > 0}
                 likePending={replyLikePending?.(reply.id) === true}
                 onLike={onLike}
-                onReply={onReplyTarget}
+                onReply={setReplyTarget}
               />
             ))}
             {threadReplies.length > 2 ? (
@@ -268,6 +223,18 @@ export function Floor({
                 {expanded ? '收起 ▴' : `查看全部 ${threadReplies.length} 条回复 ▾`}
               </Button>
             ) : null}
+          </div>
+        ) : null}
+        {canReply && replyTarget && onSubmitReply ? (
+          <div className="mt-3">
+            <ReplyComposer
+              topic={topic}
+              submitLabel="回复楼层"
+              saving={replySaving}
+              replyTo={replyTarget}
+              onSubmit={submitReply}
+              onCancel={() => setReplyTarget(null)}
+            />
           </div>
         ) : null}
       </div>

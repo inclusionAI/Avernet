@@ -251,10 +251,6 @@ class EngineProvisioningStrategy(ABC):
         """Default engines have no backup policy, probe, helper or configuration read."""
         return None
 
-    def should_async_recycle(self, ctx: BotProvisioningContext, **kwargs) -> bool:
-        """Return whether recycle needs the durable backup/release worker."""
-        return False
-
     def assert_lifecycle_mutable(self, ctx: BotProvisioningContext, bot: dict) -> None:
         """Personal Bots honor the same in-flight recycle operation across engines."""
         if ctx.bot_type != "personal":
@@ -373,10 +369,6 @@ class EngineProvisioningStrategy(ABC):
         Unsupported engines should no-op so the core restart path remains
         engine-agnostic and backward compatible.
         """
-
-    def restart_config_error_is_fatal(self, error: Exception) -> bool:
-        """Declare mandatory write refusals without changing legacy optional inputs."""
-        return False
 
     @abstractmethod
     def refresh_restart_authorization(

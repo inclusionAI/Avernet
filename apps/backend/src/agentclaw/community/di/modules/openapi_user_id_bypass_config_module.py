@@ -44,7 +44,7 @@ KEY = "user_id_bypass"
 PROTECTED_ENVS = frozenset({"pre", "prod"})
 
 #: ``bot_access_check`` shares the block; its own module validates it.
-_ALLOWED_KEYS = frozenset({KEY, "bot_access_check", "bot_operations"})
+_ALLOWED_KEYS = frozenset({KEY, "bot_access_check"})
 
 
 def _block() -> dict[str, Any]:

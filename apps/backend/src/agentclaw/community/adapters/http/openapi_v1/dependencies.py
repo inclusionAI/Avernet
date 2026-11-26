@@ -54,8 +54,8 @@ from starlette.requests import HTTPConnection
 from starlette.status import WS_1008_POLICY_VIOLATION
 
 from agentclaw.community.adapters.http.openapi_v1.admission import (
+    ADMISSION,
     ADMITTING_MODES,
-    admission_for,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
 from agentclaw.community.core.gateway_principal import (
@@ -257,7 +257,7 @@ def _admits_application(connection: HTTPConnection) -> bool:
     if path is None:
         return False
     method = connection.scope.get("method") or "WEBSOCKET"
-    return admission_for((method, path)) in ADMITTING_MODES
+    return ADMISSION.get((method, path)) in ADMITTING_MODES
 
 
 async def require_user_and_app_principal(

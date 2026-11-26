@@ -102,7 +102,7 @@ async def test_service_layout_probe_rejects_unreadable_legacy_repo(tmp_path: Pat
         _skills_layout_context = RuntimeLayoutContext(home=tmp_path)
 
     with patch(
-        "engine.community.plugins.skills_pool.service_layout_probe.os.scandir",
+        "engine.community.plugins.openclaw.service_layout_probe.os.scandir",
         side_effect=PermissionError,
     ) as scandir:
         build_probe = await Port().probe_pool_layout(

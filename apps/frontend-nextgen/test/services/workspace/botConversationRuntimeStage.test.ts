@@ -5,7 +5,7 @@ import {
   buildConversationSessionRequestRange,
   resolveChatRuntimeStage,
   supportsConversationInstanceScope,
-  withConversationSubjectParams,
+  withFriendBotRequestParams,
   type ChatBotView,
 } from '@/services/workspace/botSessionService';
 
@@ -44,7 +44,7 @@ beforeEach(() => {
 test.each(cases)('%s resolves the correct runtime', (_name, override, stage) => {
   const bot = { ...base, ...override };
   expect(resolveChatRuntimeStage(bot)).toBe(stage);
-  const params = withConversationSubjectParams(bot, 'human_viewer', { user_id: 'viewer' });
+  const params = withFriendBotRequestParams(bot, 'human_viewer', { user_id: 'viewer' });
   expect(params.stage).toBe(bot.botType === 'service' ? stage : undefined);
   expect(Object.hasOwn(params, 'stage')).toBe(bot.botType === 'service');
 });
@@ -73,7 +73,7 @@ test.each(cases)('%s uses the same stage on all conversation requests', async (_
     expect(Object.hasOwn(options?.params ?? {}, 'stage')).toBe(bot.botType === 'service');
     const ownerParams = bot.isTeamBot || bot.isFriendBot ? { owner_id: 'entity' } : {};
     expect(options?.params).toMatchObject(ownerParams);
-    expect(options?.params?.f_user_id).toBe('viewer');
+    expect(options?.params?.f_user_id).toBe(bot.isFriendBot ? 'viewer' : undefined);
   }
 });
 
@@ -89,14 +89,14 @@ test.each(['isTeamBot', 'isFriendBot'] as const)(
 );
 
 test('my Bot preserves an explicitly selected request stage', () => {
-  expect(withConversationSubjectParams(base, 'viewer', { user_id: 'viewer', stage: 'verify' })).toMatchObject({
+  expect(withFriendBotRequestParams(base, 'viewer', { user_id: 'viewer', stage: 'verify' })).toMatchObject({
     stage: 'verify',
   });
 });
 
 test('non-service team Bots omit even stale explicit instance-range stages', () => {
   const bot = { ...base, isTeamBot: true, botType: undefined };
-  expect(withConversationSubjectParams(bot, 'viewer', { user_id: 'viewer', stage: 'verify' })).not.toHaveProperty('stage');
+  expect(withFriendBotRequestParams(bot, 'viewer', { user_id: 'viewer', stage: 'verify' })).not.toHaveProperty('stage');
 });
 
 test.each(['service', 'personal'])(
@@ -189,7 +189,6 @@ test('buildConversationSessionRequestRange derives stage and supportsConversatio
   );
   expect(range).toEqual({ deviceUuid: 'device-1', stage: 'online' });
   expect(supportsConversationInstanceScope({ ...base, runtimeStage: 'online' as const })).toBe(true);
-  expect(supportsConversationInstanceScope({ ...base, callType: 'caller' })).toBe(false);
   expect(supportsConversationInstanceScope({ ...base, isFriendBot: true })).toBe(false);
   expect(supportsConversationInstanceScope({ ...base, engine: 'teclaw' })).toBe(false);
 });

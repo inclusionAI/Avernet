@@ -1,19 +1,13 @@
 import { EvalFileInput } from '@/components/BotWorkshop/ServiceBotEvaluation/EvalFileInput';
-import { StandardEvaluationFlowResultBanner } from '@/components/BotWorkshop/ServiceBotEvaluation/StandardEvaluationFlowResultBanner';
 import { StandardEvaluationFlowSteps } from '@/components/BotWorkshop/ServiceBotEvaluation/StandardEvaluationFlowSteps';
-import {
-  evaluationStatusLabel,
-  evaluationStatusTone,
-} from '@/components/BotWorkshop/ServiceBotEvaluation/evaluationStatus';
+import { evaluationStatusLabel, evaluationStatusTone } from '@/components/BotWorkshop/ServiceBotEvaluation/evaluationStatus';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
-import { notifyError, notifySuccess, notifyWarning } from '@/components/ui/notify';
 import { useStandardEvaluationFlow } from '@/hooks/useStandardEvaluationFlow';
 import { EVALUATION_GOAL_INPUT_ENABLED } from '@/services/botWorkshop/standardEvaluationWorkflow';
 import { ExternalLink, RefreshCw } from 'lucide-react';
-import { useEffect } from 'react';
 
 interface RestartEvaluationPanelProps {
   botId: string;
@@ -22,7 +16,6 @@ interface RestartEvaluationPanelProps {
   enabled?: boolean;
   canStart?: boolean;
   onFinished?: () => void;
-  onViewHistory?: () => void;
 }
 
 const MASA_AGENT_EVALUATION_URL = 'https://masa.alipay.com/evaluation/agent/projects';
@@ -34,7 +27,6 @@ export function RestartEvaluationPanel({
   enabled = true,
   canStart = true,
   onFinished,
-  onViewHistory,
 }: RestartEvaluationPanelProps) {
   const {
     sampleSets,
@@ -56,7 +48,6 @@ export function RestartEvaluationPanel({
     environment,
     evaluationTask,
     reportUrl,
-    flowResult,
     error,
     startEvaluation,
     retryStep,
@@ -70,28 +61,14 @@ export function RestartEvaluationPanel({
     onFinished,
   });
 
-  useEffect(() => {
-    if (!flowResult) return;
-
-    if (flowResult.kind === 'success') {
-      notifySuccess('评测流程已完成');
-    } else if (flowResult.kind === 'completed_but_not_passed') {
-      notifyWarning('评测完成，但结果未通过');
-    } else if (flowResult.kind === 'interrupted') {
-      notifyError(flowResult.message || '评测流程中断', { title: '评测流程失败' });
-    } else if (flowResult.kind === 'running_in_background') {
-      notifyWarning('评测仍在后台执行，结果将同步到评测记录');
-    } else {
-      notifySuccess('节点重试成功');
-    }
-  }, [flowResult]);
-
-  const sampleSetGuideVisible = Boolean(sampleSetError) || (!sampleSetLoading && sampleSets.length === 0);
+  const sampleSetGuideVisible =
+    Boolean(sampleSetError) || (!sampleSetLoading && sampleSets.length === 0);
 
   const goalItems = sampleSets.map((item) => ({
     id: item.uuid,
     label: `${item.name}（${item.sample_count} 条）`,
   }));
+
 
   return (
     <div className="space-y-6">
@@ -100,8 +77,7 @@ export function RestartEvaluationPanel({
           <div>
             <h2 className="m-0 text-sm font-semibold text-foreground">重新发起评测</h2>
             <p className="m-0 mt-1 text-xs leading-5 text-muted-foreground">
-              适合需要重新发起评测并重新编排执行的链路。环境编排由 TeamClaw 后端完成。节点：创建评测环境 →
-              确认评测样本集 → 评测执行 → 评测报告 → 评测结果保存。
+              适合需要重新发起评测并重新编排执行的链路。环境编排由 TeamClaw 后端完成。节点：创建评测环境 → 确认评测样本集 → 评测执行 → 评测报告 → 评测结果保存。
             </p>
           </div>
         </div>
@@ -114,7 +90,9 @@ export function RestartEvaluationPanel({
                 : 'border-border bg-muted/20 text-muted-foreground'
             }`}
           >
-            <p className="m-0 font-medium">{sampleSetError || '暂未获取到评测样本集。'}</p>
+            <p className="m-0 font-medium">
+              {sampleSetError || '暂未获取到评测样本集。'}
+            </p>
             <p className="m-0 break-words">
               请前往 MASA 平台智能体评测专区完成智能体注册。注册时，评测模式请选择
               <strong className="font-semibold">【评测环境 Eval 区】</strong>。
@@ -175,11 +153,7 @@ export function RestartEvaluationPanel({
               <label className="text-xs font-medium text-muted-foreground" htmlFor="goal-type">
                 评测目标格式
               </label>
-              <Select
-                value={goalType}
-                onValueChange={(value) => setGoalType(value as typeof goalType)}
-                disabled={running}
-              >
+              <Select value={goalType} onValueChange={(value) => setGoalType(value as typeof goalType)} disabled={running}>
                 <SelectTrigger id="goal-type" className="h-9 text-sm">
                   <SelectValue />
                 </SelectTrigger>
@@ -221,9 +195,6 @@ export function RestartEvaluationPanel({
             </Badge>
           ) : null}
         </div>
-        {flowResult ? (
-          <StandardEvaluationFlowResultBanner result={flowResult} reportUrl={reportUrl} onViewHistory={onViewHistory} />
-        ) : null}
         <StandardEvaluationFlowSteps
           steps={steps}
           running={running}
@@ -280,13 +251,13 @@ export function RestartEvaluationPanel({
             </a>
           </div>
         ) : null}
-        {error && !flowResult ? (
+        {error ? (
           <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
             {error}
           </div>
         ) : null}
         <p className="m-0 text-xs leading-5 text-muted-foreground">
-          评测结果用于校验服务 Bot 是否可以提交试运行。
+          评测结果保存节点将统一写入 TeamClaw 门禁数据结构，作为服务 Bot 推进预发发布的卡点检查。
         </p>
       </section>
     </div>

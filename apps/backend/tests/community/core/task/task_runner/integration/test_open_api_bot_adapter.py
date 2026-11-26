@@ -1,6 +1,5 @@
 import asyncio
 import json
-from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -8,7 +7,6 @@ import pytest
 from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
     OpenApiAuthError, OpenApiBadRequestError, OpenApiBotAdapter, OpenApiError, OpenApiServerError, OpenApiTimeoutError, parse_bot_id,
 )
-from agentclaw.community.core.task.task_harness.runtime_probe import TaskRuntimeLivenessProbe
 from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotError
 
 
@@ -569,71 +567,3 @@ def test_runtime_status_rejects_malformed_or_wrong_session(data):
     adapter = _adapter(lambda request: httpx.Response(200, json={"code": 0, "data": data}))
     with pytest.raises((OpenApiError, ValueError)):
         _run(adapter.get_session_runtime_status("s"))
-
-
-@pytest.mark.parametrize("failure", [
-    401, 403, 404, 405, 503, "timeout", "business", "malformed", "wrong_session", "not_found",
-])
-def test_runtime_status_failures_fall_back_through_real_adapter(failure):
-    calls = []
-
-    def handler(request):
-        calls.append(request.url.path)
-        assert request.url.params["bot_id"] == "b:u"
-        assert request.url.params["lifecycle_stage"] == "draft"
-        if request.url.path == "/openapi/v1/sessions/runtime/status":
-            if isinstance(failure, int):
-                return httpx.Response(failure, json={"message": "unavailable"})
-            if failure == "timeout":
-                raise httpx.ReadTimeout("status unavailable", request=request)
-            if failure == "business":
-                return httpx.Response(200, json={"code": 50001, "data": None})
-            if failure == "malformed":
-                return httpx.Response(200, text="invalid JSON")
-            return httpx.Response(200, json={"code": 0, "data": {
-                "session_id": "wrong" if failure == "wrong_session" else "s1",
-                "found": False, "reason": "UNSUPPORTED_ENGINE",
-            }})
-        assert request.url.path == "/openapi/v1/sessions/s1/messages"
-        return httpx.Response(200, json={"code": 0, "data": {"messages": [{"id": "m1"}]}})
-
-    node = SimpleNamespace(run_info=SimpleNamespace(
-        assignee="b", extend_props={
-            "session_id": "s1", "assignee_owner_id": "u", "lifecycle_stage": "draft",
-        },
-    ))
-    result = _run(TaskRuntimeLivenessProbe(bot=_adapter(handler)).probe(node))
-    assert calls == ["/openapi/v1/sessions/runtime/status", "/openapi/v1/sessions/s1/messages"]
-    assert result.state == "active"
-    assert result.source == "openapi_bot.session_fallback"
-    assert result.baseline_reset
-    assert not result.progressed
-
-
-@pytest.mark.parametrize("failure", [None, 404, "business", "malformed"])
-def test_runtime_status_logs_metadata_without_response_body_or_credentials(caplog, failure):
-    caplog.set_level("INFO")
-    private_marker = "private-response-content-must-not-be-logged"
-
-    def handler(request):
-        if failure == "malformed":
-            return httpx.Response(200, text=private_marker)
-        data = {"session_id": "s1", "found": False, "reason": "UNSUPPORTED_ENGINE"}
-        return httpx.Response(failure if isinstance(failure, int) else 200, json={
-            "code": 50001 if failure == "business" else 0, "data": data, "message": private_marker,
-        })
-
-    adapter = _adapter(handler)
-    if failure is None:
-        result = _run(adapter.get_session_runtime_status("s1", bot_id="b:u", lifecycle_stage="draft"))
-        assert not result.found
-        assert "found=False reason=UNSUPPORTED_ENGINE" in caplog.text
-    else:
-        with pytest.raises((OpenApiError, ValueError)):
-            _run(adapter.get_session_runtime_status("s1", bot_id="b:u", lifecycle_stage="draft"))
-        assert "runtime_status failed" in caplog.text
-    assert "session=s1 bot=b:u stage=draft" in caplog.text
-    assert "http_status=" in caplog.text
-    assert private_marker not in caplog.text
-    assert _Key.api_key not in caplog.text
-    assert _Key.cookie not in caplog.text

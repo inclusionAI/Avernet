@@ -13,9 +13,9 @@ logical desired/retired snapshot 与 Backend 选定的 `source_layout`。Engine
 新入口缺失时，只有标准 route miss 加同目标 Engine health 匹配才能进入旧
 Mapping/DeviceSync 兼容路线，超时、5xx、普通 404 或 501 不会触发第二次写协议。
 
-## 服务构建探测
+## OpenClaw 服务构建探测
 
-OpenClaw 和 AICoding 服务产物构建可在 `/api/skills/layout/probe` 请求中设置
+OpenClaw 服务产物构建可在 `/api/skills/layout/probe` 请求中设置
 `for_service_build=true`。缺少 Pool 准备标记时，Engine 可以返回
 `source_layout=legacy` 的文件系统证据，且 `preparation_id=null`。该结果仅供
 Legacy 服务产物构建使用。Center 挂载可读时才声明 V3 能力，Backend 仍按冻结的

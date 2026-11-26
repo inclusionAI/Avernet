@@ -84,16 +84,6 @@ class LinkPatch(BaseModel):
     )
 
 
-def _validate_link_resource_id(resource_id: str) -> None:
-    """Reject IDs that cannot be represented by supported resource stores."""
-    try:
-        value = int(resource_id)
-    except ValueError:
-        raise HTTPException(422, detail="Invalid link resource identifier") from None
-    if not -(1 << 63) <= value <= (1 << 64) - 1:
-        raise HTTPException(422, detail="Invalid link resource identifier")
-
-
 def _link(resource) -> dict[str, Any]:
     return {"id": str(resource.id), "name": resource.name, **resource.attributes}
 
@@ -169,7 +159,6 @@ async def update_link(
 ):
     """Update an owner-scoped link and its Yuque permissions."""
     bots.get_bot(bot_id, owner_id)
-    _validate_link_resource_id(resource_id)
     try:
         item = await links.update(
             bot_id, owner_id, resource_id, body.model_dump(exclude_unset=True)
@@ -191,7 +180,6 @@ async def delete_link(
 ):
     """Delete an owner-scoped link and synchronize remaining permissions."""
     bots.get_bot(bot_id, owner_id)
-    _validate_link_resource_id(resource_id)
     await links.delete(bot_id, owner_id, resource_id)
     return deleted(request)
 

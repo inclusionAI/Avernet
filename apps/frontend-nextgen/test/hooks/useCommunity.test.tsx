@@ -297,7 +297,7 @@ describe('useCommunity', () => {
     expect(result.current.selectedTopic).toEqual(topic);
     expect(mockedService.listReplies).toHaveBeenCalledWith(topic.id, { page: 1, pageSize: COMMUNITY_REPLY_PAGE_SIZE });
     expect(result.current.replies).toEqual([reply]);
-    expect(result.current.lastReplyPage).toBe(1);
+    expect(result.current.replyPage).toBe(1);
 
     await act(async () => {
       await result.current.closeTopic();
@@ -306,29 +306,6 @@ describe('useCommunity', () => {
     expect(result.current.selectedTopic).toMatchObject({ status: 'closed', canClose: false });
     expect(result.current.topics[0]).toMatchObject({ status: 'closed', canClose: false });
     expect(notifySuccess).toHaveBeenCalledWith('主题已结帖');
-  });
-
-  test('成功评论和楼中楼各增加一次帖子计数，失败不增加', async () => {
-    const listed = { ...topic, replyCount: 12 };
-    mockedService.listTopics.mockResolvedValue({ items: [listed], total: 1 });
-    mockedService.getTopic.mockResolvedValue({ ...topic, replyCount: undefined });
-    const { result } = renderHook(() => useCommunity());
-    await flushDebouncedLoad();
-    await act(async () => { await result.current.openTopic(listed); });
-    expect(result.current.selectedTopic?.replyCount).toBe(12);
-
-    await act(async () => { expect(await result.current.createReply({ body: '我的评论' })).toBe(true); });
-    expect(result.current.selectedTopic?.replyCount).toBe(13);
-    await act(async () => {
-      expect(await result.current.createReply({ body: '楼中楼', replyToPostId: reply.id })).toBe(true);
-    });
-    expect(result.current.selectedTopic?.replyCount).toBe(14);
-    expect(result.current.topics[0].replyCount).toBe(14);
-
-    mockedService.createReply.mockRejectedValueOnce(new Error('提交失败'));
-    await act(async () => { expect(await result.current.createReply({ body: '失败的评论' })).toBe(false); });
-    expect(result.current.selectedTopic?.replyCount).toBe(14);
-    expect(result.current.topics[0].replyCount).toBe(14);
   });
 
   test('未知作者主体现无法结帖（canClose 由 author_id 派生为 false → 守卫拦截，不发起结帖）', async () => {
@@ -473,7 +450,7 @@ describe('useCommunity', () => {
     });
   });
 
-  test('滚动加载下一批回帖时追加而不替换已有楼层', async () => {
+  test('goToReplyPage 切换回帖分页', async () => {
     mockedService.getTopic.mockResolvedValue(topic);
     const { result } = renderHook(() => useCommunity());
     await flushDebouncedLoad();
@@ -482,7 +459,7 @@ describe('useCommunity', () => {
     await act(async () => {
       await result.current.openTopic(topic);
     });
-    mockedService.listReplies.mockResolvedValueOnce({ items: [{ ...reply, id: 'reply-2' }], total: 25 });
+    mockedService.listReplies.mockResolvedValueOnce({ items: [reply], total: 25 });
 
     await act(async () => {
       await result.current.goToReplyPage(2);
@@ -491,9 +468,7 @@ describe('useCommunity', () => {
       page: 2,
       pageSize: COMMUNITY_REPLY_PAGE_SIZE,
     });
-    expect(result.current.firstReplyPage).toBe(1);
-    expect(result.current.lastReplyPage).toBe(2);
-    expect(result.current.replies.map(({ id }) => id)).toEqual([reply.id, 'reply-2']);
+    expect(result.current.replyPage).toBe(2);
   });
 
   test('求助作者标记有帮助后刷新当前回复页并提示，关闭状态也允许操作', async () => {
@@ -507,17 +482,16 @@ describe('useCommunity', () => {
     await act(async () => {
       await result.current.openTopic(closedHelpTopic);
     });
-    mockedService.listReplies.mockResolvedValueOnce({ items: [{ ...reply, id: 'reply-2' }], total: 25 });
     await act(async () => {
       await result.current.goToReplyPage(2);
     });
     await act(async () => {
-      expect(await result.current.setPostHelpful('reply-2', true)).toBe(true);
+      expect(await result.current.setPostHelpful(reply.id, true)).toBe(true);
     });
 
     expect(mockedService.setPostHelpful).toHaveBeenCalledWith(
       closedHelpTopic.id,
-      'reply-2',
+      reply.id,
       'HUMAN',
       closedHelpTopic.author.id,
       true,

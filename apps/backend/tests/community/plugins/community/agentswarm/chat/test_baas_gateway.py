@@ -19,7 +19,6 @@ import asyncio
 import json
 import threading
 import time
-from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -282,15 +281,13 @@ class TestDeadlineAndCancellation:
             transport.chat(BOT_ID, "x", owner_id=OWNER, tenant=TENANT, timeout_seconds=0.05)
 
     def test_caller_deadline_shorter_than_default_is_honoured(self):
-        transport = _make(_blocking_transport(), default_timeout=30.0)
-        transport._chat_once = AsyncMock(
-            side_effect=ChatTimeoutError("caller deadline reached")
-        )
+        transport = _make(_blocking_transport(), recv_slice_seconds=0.01)
+        started = time.monotonic()
 
         with pytest.raises(ChatTimeoutError):
             transport.chat(BOT_ID, "x", owner_id=OWNER, tenant=TENANT, timeout_seconds=0.05)
 
-        assert transport._chat_once.await_args.kwargs["timeout_seconds"] == 0.05
+        assert time.monotonic() - started < 2.0
 
     def test_cancellation_returns_empty_and_closes(self):
         cancel = threading.Event()

@@ -102,14 +102,12 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 > stage-addressed answer describes the addressed binding's current instance,
 > not the fleet.
 >
-> `f_user_id` addresses the Human session subject while `user_id` remains the
-> authenticated actor. A self subject first passes the normal owner/collaborator
-> gate: Caller-mode service Bots delegate to that Human's independent ExpertChat
-> runtime, while owner-mode Bots retain the existing shared runtime. A Human who
-> is not an operator may still use the established BCN friend exception. Omission
-> preserves the legacy operator-console path; a different subject keeps the
-> existing owner-inspection restriction. BCN supplies authorization only; it
-> does not store or execute sessions, messages, or runtime state.
+> A BCN-authorized human friend is the deliberate exception to the operator
+> rule. For that caller these same public contracts delegate to Backend's
+> existing Expert Chat service, remain draft-only, and are scoped by its
+> owned-session index. BCN supplies authorization only; it does not store or
+> execute sessions, messages, or runtime state. The legacy Expert Chat routes
+> remain mounted unchanged during migration.
 
 | Method | Public path | Engine route | Notes |
 |---|---|---|---|
@@ -124,14 +122,12 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 | PUT | `…/{bot_id}/sessions/{session_id}/favorite` | `PUT /api/session-favorites/{encoded_session_id}` | idempotently favorite → `Envelope[SessionFavorite]` |
 | DELETE | `…/{bot_id}/sessions/{session_id}/favorite` | `DELETE /api/session-favorites/{encoded_session_id}` | idempotently unfavorite → `Envelope[SessionFavorite]` |
 
-### Subject-scoped session files
+### Friend session files
 
-Non-TeClaw conversation subjects support the same session-file lifecycle:
-upload intent, upload completion, materialization status, listing, content
-reads, and deletion. Owner/collaborator Caller requests address their own
-independent instance; owner-mode requests keep the shared runtime. This does not
-turn subject identity into an operator grant. Each friend fallback request
-rechecks the live BCN friendship and Backend-owned session;
+Non-TeClaw friend Bots support the same session-file lifecycle as an owner or
+explicit member collaborator: upload intent, upload completion, materialization
+status, listing, content reads, and deletion. This is not an operator grant.
+Each friend request rechecks the live BCN friendship and Backend-owned session;
 upload and deletion additionally require
 `caller_runtime_target=caller_instance`, so they cannot target the Bot owner's
 service runtime. Existing upload clients may omit `f_user_id`: Backend attempts
@@ -233,21 +229,6 @@ Example: `GET /openapi/v1/bots/example/sessions?owner_id=owner&user_id=reader&st
   or 501 to `EngineUpstreamError` — the request is safely refused, but the
   status under-describes it. Narrowing that mapping is a separate change.
   _Decided 2026-09-03._
-- **A conversation subject selects an engine strategy, not an engine-name
-  branch.** When `f_user_id` is present on an online Caller-mode service Bot,
-  engines whose registered provisioning strategy requires an independent
-  Caller runtime (OpenClaw, Hermes and the default strategy) route the session
-  to that Human's instance. Engines that isolate callers inside the published
-  service runtime (TeClaw) stay on the stage binding and use their registered
-  session-key codec. This same capability projection applies to every session
-  operation, so create, list, detail, messages, models and files cannot drift
-  into different routing rules.
-- **A first independent Caller runtime may still be provisioning.** In that
-  case `POST …/{bot_id}/sessions` returns HTTP `409`, envelope code `409113`,
-  message `Caller runtime is preparing`, and `Retry-After: 3`. The request has
-  not created a session and can be retried safely. Clients should poll with a
-  bounded wait; ordinary device-not-ready failures retain the existing
-  `409000` contract and must not be treated as this transition.
 
 ### engine (4) — engine `/api/engine`
 

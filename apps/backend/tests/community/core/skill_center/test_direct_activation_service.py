@@ -880,34 +880,3 @@ async def test_record_only_skips_the_runtime_where_the_default_reports_it_pendin
     assert record_only["runtime_projection"]["status"] == "SKIPPED"
     assert record_only["runtime_projection"]["reason"] == "RUNTIME_NOT_REQUIRED"
     assert [c["server_code"] for c in repository.install_mcp_calls] == ["github", "github"]
-
-
-@pytest.mark.asyncio
-async def test_manifest_unchanged_direct_claim_retries_its_mcp_projection():
-    from agentclaw.community.core.skill_center.mcp_apply_policy import manifest_mcp_install_scope
-    class UnchangedRepository(_Repository):
-        def claim_apply_mcp(self, **kwargs):
-            return DesiredStateMutation({}, False, CapabilityDesiredState(set(), {}, {}))
-
-    runtime = _ScopeRecordingRuntime()
-    service = _service(repository=UnchangedRepository(), runtime=runtime)
-    service._mcp_center.get_mcp_detail = lambda code: {"server_code": code}
-    with manifest_mcp_install_scope():
-        await service.claim_apply_mcp(
-            server_code="mcp.weather", config=None, bot_id="bot-1",
-            owner_id="true-owner", actor_id="true-owner", apply_id="apply-1",
-        )
-    assert runtime.scopes == [ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.weather"}))]
-
-
-@pytest.mark.asyncio
-async def test_non_manifest_unchanged_direct_claim_does_not_reproject():
-    class UnchangedRepository(_Repository):
-        def claim_apply_mcp(self, **kwargs):
-            return DesiredStateMutation({}, False, CapabilityDesiredState(set(), {}, {}))
-
-    runtime = _ScopeRecordingRuntime()
-    service = _service(repository=UnchangedRepository(), runtime=runtime)
-    await service.claim_apply_mcp(server_code="mcp.weather", config=None, bot_id="bot-1",
-                                  owner_id="true-owner", actor_id="true-owner", apply_id="genome")
-    assert runtime.scopes == []

@@ -128,7 +128,6 @@ remain the authoritative topic sources.
 | Need | Existing source |
 | --- | --- |
 | API behavior | [OpenAPI v1 guide](docs/openapi-v1/README.md), [session-lock errors](docs/session-lock-api.md), and the owning contract/schema. |
-| Trusted application Bot management | [Managed Bot operations](docs/openapi-v1/managed-bot-operations.md): template discovery, guarded snapshot writes, restart and progress. |
 | Subsystem knowledge | [Manifest](docs/bot-config-manifest/README.zh-CN.md), [Bot evolution](docs/bot-evolution/README.md), and the relevant core boundary. |
 | Operations and failure handling | The flow/diagnostic links above and their referenced runbooks. |
 | A change's intent, tradeoffs or verification history | The relevant topic under `specs/`, selected by issue or source history. |

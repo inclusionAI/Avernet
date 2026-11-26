@@ -114,7 +114,6 @@ class ManifestCreationSeam(Protocol):
         spec: dict[str, Any],
         iframe_url: str | None,
         redirect_url: str | None,
-        permission_subject: str | None = None,
     ) -> None:
         """Hand the creation to its durable job."""
         ...

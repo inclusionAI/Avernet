@@ -9,7 +9,6 @@ from typing import Any
 
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.services.device_context import ConnInfoBuildError
-from agentclaw.community.core.devices.services.device_read_errors import raise_if_unavailable
 from agentclaw.community.core.devices.services.baas_conn_info import (
     build_baas_conn_info_for_http,
 )
@@ -42,7 +41,6 @@ class TeclawConnInfoBuilder:
                 device_uuid=device_uuid,
             )
         except Exception as e:
-            raise_if_unavailable(e)
             raise ConnInfoBuildError(
                 f"TeclawConnInfoBuilder: get_ws_info failed for binding={binding.id}: {e}"
             ) from e

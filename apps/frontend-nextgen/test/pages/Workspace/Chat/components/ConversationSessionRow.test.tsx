@@ -5,7 +5,7 @@
 import { ConversationSessionRow } from '@/pages/Workspace/Chat/components/ConversationSessionRow';
 import type { ConversationSessionAction } from '@/services/workspace/conversationSessionActionService';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const session = {
@@ -110,8 +110,8 @@ describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () =>
   });
 });
 
-describe('ConversationSessionRow 固定右侧操作区（hover 不改变标题宽度）', () => {
-  it('无常驻星标的非收藏交互行静态使用 pr-[80px]，hover 不再切换右内边距', () => {
+describe('ConversationSessionRow 长标题让位（文字不与 hover 图标互叠）', () => {
+  it('静默态保持基础 pr-2；hover/聚焦/触屏/菜单开启让至「…」左界（右界 96px）', () => {
     render(
       <ConversationSessionRow
         session={session}
@@ -122,13 +122,18 @@ describe('ConversationSessionRow 固定右侧操作区（hover 不改变标题�
       />,
     );
     const button = screen.getByRole('button', { name: '对话会话' });
-    // 标题宽度保持不变：右侧一直保留完整操作区，不随 hover 切换右内边距。
-    expect(button).toHaveClass('pl-2', 'pr-[80px]');
-    expect(button).not.toHaveClass('pr-2');
-    expect(button).not.toHaveClass('group-hover/row:pr-[80px]');
+    // 静默态图标全隐：右内边距维持基础 8px（文字右界 = mr-4 + pr-2 = 24px）。
+    expect(button).toHaveClass('pl-2', 'pr-2');
+    // 让位通道与图标自身显现条件同构；菜单开启期由 trigger data-state=open 承接（鼠标离行仍钉住可见）。
+    expect(button).toHaveClass(
+      'group-hover/row:pr-[80px]',
+      'group-focus-within/row:pr-[80px]',
+      '[@media(hover:none)]:pr-[80px]',
+      'group-has-[[data-state=open]]/row:pr-[80px]',
+    );
   });
 
-  it('收藏或选中的常驻星标行预留时间槽，hover 不再切换右内边距', () => {
+  it('收藏行星标常驻 → 常驻让位 pr-[52px]（右界 60px）；hover 期连「…」让足 pr-[88px]', () => {
     const { rerender } = render(
       <ConversationSessionRow
         session={{ ...session, favorite: true }}
@@ -139,14 +144,15 @@ describe('ConversationSessionRow 固定右侧操作区（hover 不改变标题�
       />,
     );
     const button = screen.getByRole('button', { name: '对话会话' });
-    expect(button).toHaveClass('pr-[104px]');
+    // 常驻让位替换基础 pr-2（twMerge 取后者）；hover 档覆盖非收藏档 pr-80。
+    expect(button).toHaveClass('pr-[52px]');
     expect(button).not.toHaveClass('pr-2');
-    expect(button).not.toHaveClass('group-hover/row:pr-[104px]');
+    expect(button).toHaveClass('group-hover/row:pr-[88px]');
+    expect(button).not.toHaveClass('group-hover/row:pr-[80px]');
 
-    // 选中且未收藏：星标同样常驻，因此同样需要时间槽，且右边界与收藏行对齐。
+    // 选中且未收藏：星标同样常驻 → 常驻让位 pr-[44px]（mr-4 → 右界同为 60px）。
     rerender(<ConversationSessionRow session={session} selected onSelect={jest.fn()} onToggleFavorite={jest.fn()} />);
-    expect(button).toHaveClass('pr-[88px]');
-    expect(button).not.toHaveClass('pr-[80px]');
+    expect(button).toHaveClass('pr-[44px]');
     expect(button).not.toHaveClass('pr-2');
   });
 
@@ -159,99 +165,8 @@ describe('ConversationSessionRow 固定右侧操作区（hover 不改变标题�
   });
 });
 
-describe('ConversationSessionRow AgentCoding 长标题 Tooltip', () => {
-  beforeEach(() => {
-    Object.defineProperty(globalThis, 'ResizeObserver', {
-      configurable: true,
-      value: class ResizeObserverMock {
-        observe() {}
-        unobserve() {}
-        disconnect() {}
-      },
-    });
-    HTMLElement.prototype.hasPointerCapture = jest.fn(() => false);
-    HTMLElement.prototype.setPointerCapture = jest.fn();
-    HTMLElement.prototype.releasePointerCapture = jest.fn();
-    HTMLElement.prototype.scrollIntoView = jest.fn();
-  });
-
-  it('标题真实溢出时，延迟悬浮展示完整标题', async () => {
-    const longTitle = '执行一次非常长非常长非常长会被截断的默认 workflow';
-    Object.defineProperty(HTMLSpanElement.prototype, 'clientWidth', {
-      configurable: true,
-      get: () => 60,
-    });
-    Object.defineProperty(HTMLSpanElement.prototype, 'scrollWidth', {
-      configurable: true,
-      get: () => 160,
-    });
-    try {
-      render(
-        <ConversationSessionRow
-          session={{ ...session, title: longTitle }}
-          selected={false}
-          onSelect={jest.fn()}
-          showFullTitleTooltip
-        />,
-      );
-      const title = screen.getByText(longTitle);
-      fireEvent.focus(title);
-      await waitFor(() => {
-        expect(screen.getAllByText(longTitle)).toHaveLength(2);
-      });
-      const tooltip = screen.getByRole('tooltip');
-      expect(tooltip).toHaveTextContent(longTitle);
-      expect(tooltip).toHaveClass(
-        'max-w-[min(400px,calc(100vw-32px))]',
-        'whitespace-pre-wrap',
-        'break-words',
-        '[overflow-wrap:anywhere]',
-      );
-    } finally {
-      delete (HTMLSpanElement.prototype as { clientWidth?: number }).clientWidth;
-      delete (HTMLSpanElement.prototype as { scrollWidth?: number }).scrollWidth;
-    }
-  });
-
-  it('普通行不启用 AgentCoding 专属长标题 Tooltip', () => {
-    const longTitle = '普通 Bot 不弹出完整标题';
-    Object.defineProperty(HTMLSpanElement.prototype, 'clientWidth', {
-      configurable: true,
-      get: () => 30,
-    });
-    Object.defineProperty(HTMLSpanElement.prototype, 'scrollWidth', {
-      configurable: true,
-      get: () => 160,
-    });
-    try {
-      render(<ConversationSessionRow session={{ ...session, title: longTitle }} selected={false} onSelect={jest.fn()} />);
-      fireEvent.focus(screen.getByText(longTitle));
-      expect(screen.getAllByText(longTitle)).toHaveLength(1);
-      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
-    } finally {
-      delete (HTMLSpanElement.prototype as { clientWidth?: number }).clientWidth;
-      delete (HTMLSpanElement.prototype as { scrollWidth?: number }).scrollWidth;
-    }
-  });
-
-  it('未发生真实溢出时不展示标题悬浮框', () => {
-    const longTitle = '未截断的 Coding 会话标题';
-    render(
-      <ConversationSessionRow
-        session={{ ...session, title: longTitle }}
-        selected={false}
-        onSelect={jest.fn()}
-        showFullTitleTooltip
-      />,
-    );
-    fireEvent.focus(screen.getByText(longTitle));
-    expect(screen.getAllByText(longTitle)).toHaveLength(1);
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
-  });
-});
-
 describe('ConversationSessionRow 相对时间（2026-10-22 体验精修）', () => {
-  it('无星标时时间回到原右缘；hover/聚焦/触屏/菜单开启仅淡出让位图标', () => {
+  it('静默态右缘轻提示相对时间（gmtModified），hover/聚焦/触屏/菜单开启让位图标', () => {
     const gmtModified = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
     render(
       <ConversationSessionRow
@@ -264,59 +179,12 @@ describe('ConversationSessionRow 相对时间（2026-10-22 体验精修）', () 
     // 3 小时前的相对时间口径 + 11px 弱化 hint 色 + 静默可见。
     const time = screen.getByText('3 小时前');
     expect(time).toHaveClass('text-[11px]', 'text-content-hint');
-    // 固定 pr 只影响标题右界；时间从布局流移出，回到按钮原右缘独立淡出。
-    expect(screen.getByRole('button', { name: '对话会话' })).not.toHaveClass(
-      'group-hover/row:pr-[80px]',
-      'group-hover/row:pr-[88px]',
-    );
+    // 让位触发集与星标显隐同构（方向相反）：图标出现时时间退场。
     expect(time).toHaveClass(
-      'absolute',
-      'right-2',
-      'top-1/2',
-      '-translate-y-1/2',
-      'pointer-events-none',
-      'transition-opacity',
-      'duration-150',
-      'ease-out',
       'group-hover/row:opacity-0',
       'group-focus-within/row:opacity-0',
       'group-has-[[data-state=open]]/row:opacity-0',
     );
-    expect(time).not.toHaveClass('group-hover/row:max-w-0');
-    expect(time).not.toHaveClass('group-hover/row:ml-0');
-  });
-
-
-  it('已收藏或选中的常驻星标与时间分层显示，不让时间压到星标右侧', () => {
-    const gmtModified = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
-    const { rerender } = render(
-      <ConversationSessionRow
-        session={{ ...session, favorite: true, gmtModified }}
-        selected={false}
-        onSelect={jest.fn()}
-        onToggleFavorite={jest.fn()}
-      />,
-    );
-    let time = screen.getByText('3 小时前');
-    let starSlot = screen.getByRole('button', { name: '取消收藏' }).parentElement as HTMLElement;
-    // 常驻星标行：时间位于星标左侧（right-[52px]），星标仍在原 right-7 槽位。
-    expect(time).toHaveClass('absolute', 'right-[52px]');
-    expect(starSlot).toHaveClass('absolute', 'right-7');
-
-    rerender(
-      <ConversationSessionRow
-        session={{ ...session, gmtModified }}
-        selected
-        onSelect={jest.fn()}
-        onToggleFavorite={jest.fn()}
-      />,
-    );
-    time = screen.getByText('3 小时前');
-    starSlot = screen.getByRole('button', { name: '收藏会话' }).parentElement as HTMLElement;
-    // 非收藏但选中：星标也常驻；时间结合非收藏行 mr 锚到同一行内 60px 位置。
-    expect(time).toHaveClass('absolute', 'right-[44px]');
-    expect(starSlot).toHaveClass('absolute', 'right-7');
-    expect(screen.getByRole('button', { name: '对话会话' })).toHaveClass('pr-[88px]');
   });
 
   it('Browse-only 行无操作入口时，hover 不改标题右界且时间常驻原位显示', () => {
@@ -327,24 +195,22 @@ describe('ConversationSessionRow 相对时间（2026-10-22 体验精修）', () 
     expect(button).toHaveClass('pr-2');
     expect(button).not.toHaveClass('group-hover/row:pr-[80px]');
     expect(button).not.toHaveClass('group-hover/row:pr-[88px]');
-    // 时间没有 hover 退场档，也不进入右侧绝对定位槽，位置和可见性保持不变。
+    // 时间没有 hover 退场档，位置和可见性保持不变。
     const time = screen.getByText('3 小时前');
-    expect(time).not.toHaveClass('absolute', 'right-2');
-    expect(time).not.toHaveClass('group-hover/row:max-w-0');
-    expect(time).not.toHaveClass('group-focus-within/row:max-w-0');
+    expect(time).not.toHaveClass('group-hover/row:opacity-0');
+    expect(time).not.toHaveClass('group-focus-within/row:opacity-0');
   });
 
   it('gmtModified 缺失不渲染时间节点；只读行时间常驻不参与让位', () => {
     render(<ConversationSessionRow session={session} selected={false} onSelect={jest.fn()} />);
     expect(screen.queryByText('刚刚')).not.toBeInTheDocument();
-    // 只读行右侧无图标区，时间常驻在普通布局流中，不参与 hover 让位。
+    // 只读行右侧无图标区，时间常驻（无 opacity-0 让位档）。
     const gmtModified = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     render(
       <ConversationSessionRow session={{ ...session, gmtModified }} selected={false} readOnly onSelect={jest.fn()} />,
     );
     const time = screen.getByText('5 分钟前');
-    expect(time).not.toHaveClass('absolute');
-    expect(time).not.toHaveClass('group-hover/row:max-w-0');
+    expect(time).not.toHaveClass('group-hover/row:opacity-0');
   });
 });
 

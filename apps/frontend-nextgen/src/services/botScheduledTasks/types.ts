@@ -1,7 +1,6 @@
-import { serviceBotStageLabel } from '@/domain/botWorkshop';
 import type { BotEditorRoutineInput } from '@/domain/botEditor';
 export type RoutineStage = 'draft' | 'verify' | 'online';
-export const stageNames: Record<RoutineStage, string> = { ...serviceBotStageLabel, draft: '草稿态' };
+export const stageNames: Record<RoutineStage, string> = { draft: '草稿态', verify: '预发', online: '运行中' };
 export interface RoutineTarget {
   runtime_stage?: RoutineStage | null;
   device_uuid?: string | null;
@@ -215,7 +214,7 @@ export function validateCreateTarget(
   if (context.bot_type !== 'service') return {};
   if (context.caller_mode === undefined) throw new Error('尚未确认 Bot 的 Caller 配置，请刷新后重试');
   if (!form.runtime_stage) throw new Error('请选择生效环境');
-  if (context.caller_mode && form.runtime_stage !== 'online') throw new Error('Caller 模式仅支持正式运行环境');
+  if (context.caller_mode && form.runtime_stage !== 'online') throw new Error('Caller 模式仅支持运行中环境');
   const mode = routineInstanceMode(context, form.runtime_stage);
   if (mode === 'multiple' && selectedCreateInstances(context, form).length === 0)
     throw new Error('请选择当前环境中已确认的运行实例');

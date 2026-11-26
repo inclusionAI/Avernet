@@ -19,11 +19,8 @@ import httpx
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.devices.errors import DeviceFileSystemReadOnlyError
 from agentclaw.community.core.devices.services.device_filesystem import DeviceFileSystem
-from agentclaw.community.core.devices.services.device_read_errors import raise_if_unavailable
-from agentclaw.community.core.devices.services.device_context import DeviceOfflineError
 from agentclaw.community.core.devices.services.baas_invoke_transport import (
     BaasTransport,
-    DesktopBaasInvokeTransport,
     is_not_directory_error,
 )
 
@@ -81,8 +78,6 @@ class BaasDeviceFileSystem(DeviceFileSystem):
     bot-class-agnostic (personal + service bots).
     """
 
-    missing_directory_is_authoritative = True
-
     def __init__(
         self,
         *,
@@ -94,23 +89,6 @@ class BaasDeviceFileSystem(DeviceFileSystem):
         self._path_mapper = path_mapper
         # for logging only
         self._bot_uuid: str = conn_info.get("paas_device_id", "")
-
-    async def read_file_checked(self, file_path: str, *, enforce_download_limit: bool = False) -> bytes | None:
-        try:
-            return await self.read_file(file_path, enforce_download_limit=enforce_download_limit)
-        except httpx.HTTPStatusError as error:
-            if isinstance(self._transport, DesktopBaasInvokeTransport) and error.response.status_code == 404:
-                try:
-                    payload = error.response.json()
-                except ValueError:
-                    payload = None
-                detail = payload.get("detail") if isinstance(payload, dict) else None
-                if isinstance(detail, dict) and detail.get("error") == "NO_DEVICES_FOUND":
-                    raise DeviceOfflineError("Device is offline") from error
-            raise
-        except Exception as error:
-            raise_if_unavailable(error)
-            raise
 
     async def read_file(
         self,

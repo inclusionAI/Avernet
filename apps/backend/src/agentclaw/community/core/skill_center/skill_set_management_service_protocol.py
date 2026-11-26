@@ -27,7 +27,7 @@ class SkillSetManagementServiceProtocol(Protocol):
         """Read raw planning facts without reconciling Installation."""
         ...
 
-    async def replace_apply_skill_sets(self, *, scope: BotCapabilityScope, actor_id: str, sets: tuple[ResolvedSkillSetWrite, ...], remove_names: tuple[str, ...], default_change: DefaultExclusionChange, platform_default_codes: frozenset[str], project: bool, retry_mcp_codes: frozenset[str] = frozenset()) -> SkillSetApplyResult:
+    async def replace_apply_skill_sets(self, *, scope: BotCapabilityScope, actor_id: str, sets: tuple[ResolvedSkillSetWrite, ...], remove_names: tuple[str, ...], default_change: DefaultExclusionChange, platform_default_codes: frozenset[str], project: bool) -> SkillSetApplyResult:
         """Replace the planned names and exclusion keys in one relationship UoW."""
         ...
 

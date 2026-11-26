@@ -19,9 +19,6 @@ from agentclaw.community.core.models.space_skill import (
     SkillSpaceBinding,
     SkillVersion,
 )
-from agentclaw.community.core.repository.implementations.skill_center.space_skill_read import (
-    SpaceSkillReadRepository,
-)
 from agentclaw.community.core.repository.implementations.skill_center.space_skill_draft import (
     SpaceSkillDraftRepository,
 )
@@ -271,10 +268,6 @@ def test_failed_publication_lineage_prevents_whole_skill_deletion():
     )
 
     assert result["deleted_scope"] == "DRAFT"
-    total, items = SpaceSkillReadRepository(db).list_skills(
-        space_id=space_id, actor_id="owner-1", env="test", keyword=None, offset=0, limit=1
-    )
-    assert (total, items) == (0, [])
     with db.orm_session() as session:
         skill = session.query(Skill).filter_by(id=skill_id).one()
         assert skill.draft_status is None

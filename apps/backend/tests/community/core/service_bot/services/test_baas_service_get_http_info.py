@@ -21,10 +21,6 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasServiceError,
     HttpConnectionInfo,
 )
-from agentclaw.community.core.service_bot.baas_service_errors import (
-    BaasNoActiveDevicesError,
-    BaasTransientServiceError,
-)
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 
 
@@ -144,26 +140,6 @@ def test_get_http_info_404_raises(baas_service, http):
     http.set_response("get", _err_resp(404, {"error": "bot_not_found", "message": "Bot not found"}))
 
     with pytest.raises(BaasServiceError, match="404"):
-        baas_service.get_http_info(bind_id=42, port=20010, path="/x")
-
-
-@pytest.mark.parametrize("error_code", ["NO_ACTIVE_DEVICES", "NO_DEVICES_FOUND"])
-def test_get_http_info_structured_offline_is_typed(baas_service, http, error_code):
-    http.set_response("get", _err_resp(404, {"detail": {"error": error_code}}))
-    with pytest.raises(BaasNoActiveDevicesError):
-        baas_service.get_http_info(bind_id=42, port=20010, path="/x")
-
-
-def test_get_http_info_service_failure_is_transient(baas_service, http):
-    http.set_response("get", _err_resp(503, {"detail": "unavailable"}))
-    with pytest.raises(BaasTransientServiceError):
-        baas_service.get_http_info(bind_id=42, port=20010, path="/x")
-
-
-def test_get_http_info_transport_failure_is_transient(baas_service):
-    baas_service._http = MagicMock()
-    baas_service._http.get.side_effect = httpx.ConnectError("offline")
-    with pytest.raises(BaasTransientServiceError):
         baas_service.get_http_info(bind_id=42, port=20010, path="/x")
 
 

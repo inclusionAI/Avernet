@@ -4,33 +4,16 @@ import { sortConversationSessions } from '@/domain/conversation/sessionOrder';
 import { isCollabCodingSessionId } from '@/domain/conversation/codingSessionOwnership';
 import { listBotSessions } from '@/services/backendApi/bots/privateBotSessionController';
 import {
-  botSessionService, mapBotSessionSummary, resolveChatRuntimeStage, resolveUserId,
+  mapBotSessionSummary, resolveChatRuntimeStage, resolveUserId,
   type BotSessionPageView, type ChatBotView,
 } from './botSessionService';
 import type { DomainResult } from './identityService';
 
 /** 仅管理/协作 Bot 使用；好友 Bot 继续走原 f_user_id 链路，不混用 source。 */
 export async function listConversationSource(
-  bot: ChatBotView, userId: string, source: 'mine' | 'others', page: number, pageSize: number,
+  bot: ChatBotView, userId: string, source: 'mine' | 'others', pageSize: number,
   sessionKey: string, range?: ConversationSessionRequestRange, cursor?: string | null,
 ): Promise<DomainResult<BotSessionPageView>> {
-  // “我发起”直接按当前 Human 的 conversation subject 查询。Caller Bot 由后端
-  // 路由到独立实例，owner-mode Bot 保持共享运行时；无需 caller-context 探测。
-  if (source === 'mine') {
-    const result = await botSessionService.listSessionsPage(
-      bot, userId, page, pageSize, sessionKey, range,
-    );
-    if (!result.ok) return result;
-    const hidden = bot.isAgentCodingBot
-      ? getCapabilities().getCodingBotConversationHost().value?.isSessionHidden
-      : undefined;
-    return { ok: true, data: {
-      ...result.data,
-      items: sortConversationSessions(result.data.items.filter(
-        (item) => !hidden?.(item) && !(bot.isAgentCodingBot && isCollabCodingSessionId(item.sessionId)),
-      )),
-    } };
-  }
   try {
     const response = await listBotSessions(bot.realBotId, {
       user_id: resolveUserId(userId), owner_id: bot.ownerId,

@@ -109,7 +109,6 @@ from agentclaw.community.adapters.http.openapi_v1.errors_genome import (
     GENOME_ENVELOPE_ERROR_CODES,
     GENOME_ENVELOPE_ERRORS,
 )
-from agentclaw.community.adapters.http.openapi_v1.errors_managed_bots import MANAGED_BOT_HTTP_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials import (
     SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
 )
@@ -222,7 +221,6 @@ from agentclaw.community.core.caller_identity.contracts import (
     CallerMcpSyncError,
 )
 from agentclaw.community.core.engine_runtime.errors import (
-    EngineCallerRuntimePreparingError,
     EngineBotTypeNotSupportedError,
     EngineHistoryDepthExceededError,
     EngineSessionCursorError,
@@ -440,7 +438,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # asked for; both ids are on the warning line in ``principal.py``.
     UserIdMismatchError: (403, "Forbidden"),
     BotAccessCheckForbiddenError: (403, "Forbidden"),
-    **MANAGED_BOT_HTTP_ERRORS,
     SpaceAccessDeniedError: (403, "Forbidden"),
     SpaceNotFoundError: (404, "Not found"),
     SpaceMemberInvalidError: (400, "Invalid space member"),
@@ -761,7 +758,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ),
     # Retryable: cold, dormant or restarting. Distinct from 404 (the bot IS the
     # caller's) and from 500 (nothing is broken).
-    EngineCallerRuntimePreparingError: (409, "Caller runtime is preparing"),
     EngineDeviceNotReadyError: (409, "Bot device is not ready"),
     # NOT retryable as-is: the named stage has no live runtime (nothing
     # validating for verify, nothing released for online, or a published stage
@@ -901,7 +897,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
 # small, explicit override table lets a category expose a stable actionable
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
-    EngineCallerRuntimePreparingError: 409113,
     PersonalSpaceDeletionError: SpaceErrorCode.PERSONAL_SPACE_NOT_DELETABLE,
     SpaceNotEmptyError: SpaceErrorCode.SPACE_NOT_EMPTY,
     SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
@@ -992,6 +987,5 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
                 request,
                 code=ENVELOPE_ERROR_CODES.get(error_type),
                 data=error_data(exc),
-                headers={"Retry-After": "3"} if isinstance(exc, EngineCallerRuntimePreparingError) else None,
             )
     return None

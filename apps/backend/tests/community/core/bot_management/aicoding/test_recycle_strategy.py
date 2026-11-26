@@ -20,7 +20,6 @@ from agentclaw.community.core.bot_management.engines.restart_contract import (
 )
 from agentclaw.community.core.bot_management.engines.registry import (
     assert_lifecycle_mutable,
-    resolve_restart_strategy,
 )
 
 
@@ -46,100 +45,6 @@ def facade(engine):
         recycle_services=RecycleServices(operations=factory),
     )
     return bot, service, bots, passport, audit, factory, operations
-
-
-def test_default_engine_strategy_does_not_request_async_recycle():
-    ctx, strategy = resolve_restart_strategy({
-        "bot_id": "b", "owner_id": "u", "bot_type": "personal",
-        "active_engine": "openclaw",
-    })
-
-    assert strategy.should_async_recycle(ctx) is False
-
-
-def test_aicoding_recycle_admission_reuses_fastdisk_detector_only(monkeypatch):
-    from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
-    from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
-        AicodingProvisioningStrategy,
-    )
-
-    devices = MagicMock()
-    devices.get_device.return_value = SimpleNamespace(
-        device_id="device-1", device_provider="local", device_props={}, status="ACTIVE",
-    )
-    devices.exec_shell_new.return_value = SimpleNamespace(exit_code=0, stdout="{}")
-    detected = MagicMock(side_effect=lambda execute, **_: (execute("probe"), True)[1])
-    monkeypatch.setattr(restart_backup, "_detect_fastdisk", detected)
-    config = MagicMock()
-    strategy = AicodingProvisioningStrategy(
-        "claude_code", common_config_provider=lambda: config,
-    )
-    ctx = SimpleNamespace(bot_id="b", owner_id="u")
-
-    assert strategy.should_async_recycle(
-        ctx,
-        binding_id=1,
-        device_service_provider=lambda: devices,
-        operation_id="admission-op",
-    ) is True
-    detected.assert_called_once()
-    config.assert_not_called()
-    devices.exec_shell_new.assert_called_once()
-
-
-def test_aicoding_recycle_detection_failure_falls_back_to_sync(monkeypatch):
-    from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
-    from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
-        AicodingProvisioningStrategy,
-    )
-
-    devices = MagicMock()
-    devices.get_device.return_value = SimpleNamespace(
-        device_id="device-1", device_provider="local", device_props={}, status="ACTIVE",
-    )
-    monkeypatch.setattr(
-        restart_backup, "_detect_fastdisk", MagicMock(side_effect=RuntimeError("probe")),
-    )
-    config = MagicMock()
-    strategy = AicodingProvisioningStrategy(
-        "aicoding", common_config_provider=lambda: config,
-    )
-    ctx = SimpleNamespace(bot_id="b", owner_id="u")
-
-    assert strategy.should_async_recycle(
-        ctx,
-        binding_id=1,
-        device_service_provider=lambda: devices,
-    ) is False
-    config.assert_not_called()
-
-
-def test_sync_recycle_marker_runs_original_recycle_without_queue():
-    _, service, bots, passport, _, factory, operations = facade("openclaw")
-    operations.submit.return_value = {
-        "_synchronous": True,
-        "bot_id": "b",
-        "owner_id": "u",
-        "status": "ACTIVE",
-        "changed": True,
-    }
-    result = service.submit(bot_id="b", owner_id="u")
-
-    assert result == {
-        "bot_id": "b",
-        "owner_id": "u",
-        "status": "RECYCLED",
-        "changed": True,
-        "operation_id": None,
-        "phase": None,
-    }
-    factory.assert_called_once()
-    operations.submit.assert_called_once()
-    bots.stop_bot.assert_called_once()
-    bots.update_status.assert_called_once_with(
-        bot_id="b", user_id="u", status="RECYCLED"
-    )
-    passport.freeze_agent_passport.assert_called_once()
 
 
 @pytest.mark.parametrize("engine", ["openclaw", "hermes", "unregistered", "aicoding", "claude_code"])

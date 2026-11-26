@@ -8,7 +8,6 @@ draft by default), and device-wide — see ``engine_runtime/gating.py`` and
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Path, Request
@@ -32,9 +31,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.friend_chat import (
     FriendUserIdQuery,
-)
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.backend import (
-    resolve_session_backend,
+    authorize_friend_chat,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -51,7 +48,6 @@ from agentclaw.community.api.human_bot_friendship_service import (
     HumanBotFriendshipServiceProtocol,
 )
 from agentclaw.community.core.engine_runtime.errors import EngineResourceNotFoundError
-from agentclaw.community.core.engine_runtime.models import BotFacts
 from agentclaw.community.di import Injected
 from agentclaw.community.utils.runtime_list_timing import mark
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
@@ -80,39 +76,6 @@ def _map_model(data: dict[str, Any]) -> Model:
     )
 
 
-async def _resolve_model_facts(
-    *, relay: EngineRuntimeRelayProtocol, friendships: HumanBotFriendshipServiceProtocol,
-    expert: ExpertChatServiceProtocol, request: Request, bot_id: str, user_id: str,
-    owner_id: str, stage: RuntimeStage, device_uuid: str | None,
-    friend_user_id: str | None,
-) -> tuple[BotFacts, RuntimeStage, str | None]:
-    """Authorize a conversation subject while keeping model reads on Bot runtime."""
-    if friend_user_id is None:
-        return await resolve_operable_bot(
-            relay, bot_id, caller_id=user_id, owner_id=owner_id,
-            stage=stage.value, surface="models",
-        ), stage, device_uuid
-    facts = await resolve_session_backend(
-        relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id,
-        friend_user_id=friend_user_id, stage=stage, device_uuid=device_uuid,
-    )
-    if facts is not None:
-        return facts, stage, device_uuid
-    resolved_stage = RuntimeStage(await asyncio.to_thread(
-        expert.resolve_chat_stage, bot_id, owner_id, stage.value,
-    ))
-    # Models are Bot configuration, not session-owned state.  After the subject
-    # boundary is authorized, read them from the canonical service runtime.
-    facts = await resolve_operable_bot(
-        relay, bot_id, caller_id=owner_id, owner_id=owner_id,
-        stage=resolved_stage.value, surface="models",
-    )
-    # A subject-scoped Caller/friend session is fixed by its ExpertChat
-    # binding.  A stale shared-runtime instance selector must not override it.
-    return facts, resolved_stage, None
-
-
 @router.get("", response_model=Envelope[Page[Model]])
 @envelope_errors
 async def list_models(
@@ -132,10 +95,26 @@ async def list_models(
 ) -> Envelope[Page[Model]]:
     """List the models this bot's engine can route to."""
     mark("handler")
-    facts, stage, device_uuid = await _resolve_model_facts(
-        relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
-        device_uuid=device_uuid, friend_user_id=f_user_id,
+    if f_user_id is not None:
+        if device_uuid is not None:
+            raise EngineResourceNotFoundError("instance selection is unavailable for friend chat")
+        resolved_stage = await authorize_friend_chat(
+            request=request,
+            bot_id=bot_id,
+            caller_id=user_id,
+            owner_id=owner_id,
+            friend_user_id=f_user_id,
+            friendships=friendships,
+            expert=expert, stage=stage.value,
+        )
+        stage = RuntimeStage(resolved_stage)
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=owner_id if f_user_id is not None else user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="models",
     )
     result = await relay.call(
         bot_id=bot_id,
@@ -189,10 +168,26 @@ async def get_model(
     # A model id never contains a dot segment.
     if any(part in ("..", ".") for part in model_id.split("/")):
         raise EngineResourceNotFoundError("invalid model id")
-    facts, stage, device_uuid = await _resolve_model_facts(
-        relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
-        device_uuid=device_uuid, friend_user_id=f_user_id,
+    if f_user_id is not None:
+        if device_uuid is not None:
+            raise EngineResourceNotFoundError("instance selection is unavailable for friend chat")
+        resolved_stage = await authorize_friend_chat(
+            request=request,
+            bot_id=bot_id,
+            caller_id=user_id,
+            owner_id=owner_id,
+            friend_user_id=f_user_id,
+            friendships=friendships,
+            expert=expert, stage=stage.value,
+        )
+        stage = RuntimeStage(resolved_stage)
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=owner_id if f_user_id is not None else user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="models",
     )
     result = await relay.call(
         bot_id=bot_id,

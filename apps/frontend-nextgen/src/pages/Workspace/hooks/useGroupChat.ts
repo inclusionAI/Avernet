@@ -1,16 +1,21 @@
 import type { SessionView } from '@/domain/collaboration';
-import { collectParticipantBots } from '@/services/bcs/collabSenderBots';
 import { useTaskPreflightAssistant } from '@/hooks/useTaskPreflightAssistant';
 import { chatBridge } from '@/services/workspace/chatBridge';
+import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
 import type { GroupChatState } from '@/services/workspace/groupChatProvider';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useChat, useChatBridge, type ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { BridgeInputRef, ChatMessage, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender/types';
-import { useMemo, useRef, useState, type RefObject } from 'react';
+import { useCallback, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 import { prependUniqueMessages } from './groupChatHistoryUtils';
-import { buildActorEcho, buildGroupChatBridgeRequest } from './groupChatRequestBuilder';
+import {
+  buildActorEcho,
+  buildEchoAttachments,
+  buildGroupChatBridgeRequest,
+  buildGroupUserMessageExtra,
+} from './groupChatRequestBuilder';
 import { useGroupBootstrapProcessing } from './useGroupBootstrapProcessing';
 import { useGroupChatDisplayStatus } from './useGroupChatDisplayStatus';
 import { useGroupChatHistorySync } from './useGroupChatHistorySync';
@@ -18,10 +23,8 @@ import { useGroupChatInteractions } from './useGroupChatInteractions';
 import { useGroupChatPanelCleanup } from './useGroupChatPanelCleanup';
 import { useGroupChatProvider } from './useGroupChatProvider';
 import { useGroupChatRunControl } from './useGroupChatRunControl';
-import { useGroupChatSendActions } from './useGroupChatSendActions';
 import { useCancelledGroupChatMessages } from './useCancelledGroupChatMessages';
 import { useProviderStateSubscriptions } from './useProviderStateSubscriptions';
-import { useSenderBotCdnSync } from './useSenderBotCdnSync';
 import { useViewScopeChangedNotice } from './useViewScopeChangedNotice';
 import { useWsReconnectNonce } from './useWsReconnectNonce';
 
@@ -45,9 +48,6 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
   const historyRefreshNonce = useWorkspaceStore((s) => s.historyRefreshNonce);
   const sessionId = session?.sessionId ?? null;
   const groupId = session?.groupId ?? null;
-  // 副屏 CDN 参与者预注册源：Bot 成员的 live 回复渲染时同步查 CDN map，历史窗口里未发过言的
-  // 成员 Bot 靠此提前入桶（历史批量注册在 useManifestHistoryLoader，增量在 useSenderBotCdnSync）。
-  const participantBots = useMemo(() => collectParticipantBots(session?.participants ?? []), [session]);
 
   const panelRef = useRef<PanelHandle>(null);
   // 主屏输入框 ref（SenderRef）：经 useChatBridge.setInputRef 注册到全局桥,卡片填输入框时
@@ -74,9 +74,6 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
     panelRef,
   });
   const removeCancelledMessages = useCancelledGroupChatMessages(chat.setMessages);
-  // 副屏 CDN 增量补注册：live 新消息发送方 + 会话参与者原始集合（内部自行归并；历史批量注册在
-  // useManifestHistoryLoader，参与者已由 participantBots 并入其临界区注册）。
-  useSenderBotCdnSync(sessionId, chat.messages, session?.participants);
   const runControl = useGroupChatRunControl(provider, sessionId, removeCancelledMessages);
   // 显示状态合成（Spec AC-1/AC-2，就绪绑定消息可见性；进入信号/自动重连由合成 hook 自治管理）。
   const displayStatus = useGroupChatDisplayStatus({
@@ -122,7 +119,6 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
     provider,
     sessionId,
     historyRefreshNonce,
-    preRegisterBots: participantBots,
     setMessages: chat.setMessages,
     onEnterOutcome: displayStatus.onEnterOutcome,
   });
@@ -134,14 +130,27 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
     mergePersistedHistory: true,
   });
 
-  // 发送/副屏提交动作（send / submitPanelMessage / submitTaskExecutionMessage，
-  // 拆至 useGroupChatSendActions 控制 hook ≤250 行门禁，回显映射经同一构造器保持一致）。
-  const { send, submitPanelMessage, submitTaskExecutionMessage } = useGroupChatSendActions({
-    chat,
-    provider,
-    sessionId,
-    activeIdentity,
-  });
+  const send = (text: string, mentions?: string[], attachments?: SessionMessageAttachment[]) => {
+    const hasText = text.trim().length > 0;
+    const hasAttachments = !!attachments && attachments.length > 0;
+    // 输出中不阻塞发送：SDK 经 supportsConcurrentRequests 直发 provider.request，
+    // 消息进入后端投递队列依次消费（拥塞控制归属后端）。
+    if (!provider?.liveEnabled || !sessionId || (!hasText && !hasAttachments)) return;
+    const trimmed = text.trim();
+    // 本地回显附件：share_url 用于跨端/免鉴权分发，`<img>` 本地回显改走会话内容地址避免分享域名/CORS 加载失败。
+    // 与桥路径 buildGroupChatBridgeRequest 共用 buildEchoAttachments/buildGroupUserMessageExtra（O3 回显一致）。
+    const echoAttachments = buildEchoAttachments(sessionId, attachments);
+    chat.onRequest({
+      content: trimmed,
+      sessionId,
+      ...(mentions && mentions.length > 0 ? { mentions } : {}),
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      userMessage: {
+        content: trimmed,
+        extra: buildGroupUserMessageExtra(echoAttachments, buildActorEcho(activeIdentity)),
+      },
+    });
+  };
 
   const reconnect = async () => {
     if (!provider?.liveEnabled) return;
@@ -190,6 +199,29 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
       setIsLoadingMoreHistory(false);
     }
   };
+  const submitPanelMessage = useCallback(
+    (content: string) => {
+      if (sessionId && provider?.liveEnabled)
+        chat.onRequest(
+          buildGroupChatBridgeRequest(sessionId, content, { isInject: true }, buildActorEcho(activeIdentity)),
+        );
+    },
+    [activeIdentity, chat, sessionId, provider],
+  );
+  const submitTaskExecutionMessage = useCallback(
+    (content: string, holderId: string) => {
+      if (sessionId && provider?.liveEnabled)
+        chat.onRequest(
+          buildGroupChatBridgeRequest(
+            sessionId,
+            content,
+            { isInject: false, botUuid: holderId },
+            buildActorEcho(activeIdentity),
+          ),
+        );
+    },
+    [activeIdentity, chat, sessionId, provider],
+  );
   return {
     chat,
     panelRef,

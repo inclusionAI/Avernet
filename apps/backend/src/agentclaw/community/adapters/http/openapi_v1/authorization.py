@@ -69,7 +69,6 @@ from agentclaw.community.core.bot_collaborator.models import (
 from fastapi import APIRouter, Depends
 from fastapi.routing import APIRoute
 
-from .admission import apply_admission, admission_checked_handler
 from .authorization_rules import (
     AUTHORIZATION,
     EDIT_LOCK,
@@ -152,8 +151,6 @@ class PublicAPIRoute(APIRoute):
 
     This runs at *decoration* time — when ``@router.get(...)`` constructs the
     route — which is earlier than assembly and earlier than the first request.
-    Admission attaches the configured mode's gate; it never
-    replaces the authorization table's permission decision.
     """
 
     def __init__(self, path: str, endpoint: Callable[..., Any], **kwargs: Any) -> None:
@@ -197,11 +194,7 @@ class PublicAPIRoute(APIRoute):
                 },
             )
             kwargs["responses"] = responses
-        apply_admission(path, kwargs)
         super().__init__(path, endpoint, **kwargs)
-
-    def get_route_handler(self) -> Callable[..., Any]:
-        return admission_checked_handler(self.path, self.methods, super().get_route_handler())
 
 
 def _rule_for(path: str, methods: Any) -> Authorization:

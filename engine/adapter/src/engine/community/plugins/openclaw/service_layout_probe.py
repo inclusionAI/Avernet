@@ -1,4 +1,4 @@
-"""Read-only evidence for publishing from a stable Legacy Skills layout."""
+"""Read-only evidence for publishing from a stable OpenClaw Legacy layout."""
 
 from __future__ import annotations
 
@@ -27,13 +27,12 @@ from engine.community.plugins.skills_pool.inspection_types import (
 
 def inspect_legacy_service_layout(
     *,
-    engine: str,
     context: RuntimeLayoutContext,
     contract_version: str,
     is_mounted: Callable[[Path], bool],
 ) -> RuntimeLayoutInspection | None:
     layout = resolve_filesystem_skill_layout(
-        LayoutIdentity(engine, contract_version), context
+        LayoutIdentity("openclaw", contract_version), context
     )
     try:
         for marker in (layout.marker, layout.active_marker):

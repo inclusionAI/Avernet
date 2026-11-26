@@ -115,21 +115,26 @@ def test_rollback_lease_excludes_new_local_edits() -> None:
     assert guard.release(rollback_lease)
 
 
-def test_legacy_edit_bypasses_existing_pool_cache_lock() -> None:
+def test_non_pool_edit_excludes_mutations_from_another_worker() -> None:
     cache = _Cache()
-    guard = _guard(
-        cache=cache,
-        layout_repository=_Layouts(),
-        participation_resolver=_Participation(participates=False, label="legacy_layout_state"),
+    layouts = _Layouts()
+    participation = _Participation(participates=False, label="legacy_layout_state")
+    first_worker = _guard(
+        cache=cache, layout_repository=layouts, participation_resolver=participation
     )
-    key = guard._key(scope=SCOPE)
-    existing_token = cache.acquire_lock(key)
-    assert existing_token is not None
+    second_worker = _guard(
+        cache=cache, layout_repository=layouts, participation_resolver=participation
+    )
 
-    lease = guard.acquire_for_edit(scope=SCOPE)
-    assert lease.token is None
-    assert guard.release(lease)
-    assert cache.release_lock(key, existing_token)
+    lease = first_worker.acquire_for_edit(scope=SCOPE)
+    try:
+        with pytest.raises(SkillsPoolEditBusyError):
+            second_worker.acquire_for_edit(scope=SCOPE)
+        assert second_worker.acquire_for_rollback(scope=SCOPE) is None
+    finally:
+        assert first_worker.release(lease)
+
+
 
 
 def test_lock_identity_includes_entity_for_reused_bot_ids() -> None:
@@ -246,7 +251,7 @@ async def test_legacy_bot_still_serializes_ordinary_edits() -> None:
 
     assert guard.release(first)
     second = await waiting
-    assert second.token is None
+    assert second.token is not None
     assert guard.release(second)
 
 

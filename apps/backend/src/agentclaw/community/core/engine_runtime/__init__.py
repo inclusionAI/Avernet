@@ -2,7 +2,6 @@
 
 from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
-    EngineCallerRuntimePreparingError,
     EngineCapabilityUnsupportedError,
     EngineDeviceNotReadyError,
     EngineHistoryDepthExceededError,
@@ -27,7 +26,6 @@ __all__ = [
     "ConnectionResult",
     "EngineConnectionService",
     "EngineBotTypeNotSupportedError",
-    "EngineCallerRuntimePreparingError",
     "EngineCapabilityUnsupportedError",
     "EngineDeviceNotReadyError",
     "EngineHistoryDepthExceededError",
