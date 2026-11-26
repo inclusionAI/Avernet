@@ -9,7 +9,8 @@ import { productionRunSql, trialRunSql, productionRunsSql, isTrialRun, type RunP
  * No dependency on ClawFlow; shares the same database schema.
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
-import type { ExecutionRecordFlowRun } from "../../shared/execution-record.js";
+import type { ExecutionRecordFlowRun, ExecutionRecordWorkflow } from "../../shared/execution-record.js";
+import { ExecutionRecordWorkflowRepository, isMissingExecutionRecordWorkflowAssociation } from "./execution-record-workflow-repository.js";
 import { FanoutStateRepository } from "./fanout-state-repository.js";
 import { RunLogRepository } from "./run-log-repository.js";
 import { registerParentRelatedRun, type ParentRelation } from '../services/parent-related-run-registration.js';
@@ -19,6 +20,14 @@ function isMissingEvolutionAnalysisStatusColumn(message: string): boolean {
   return normalized.includes("unknown column 'evolution_analysis_status'")
     || normalized.includes("no such column: evolution_analysis_status");
 }
+
+/** Internal selection for execution-record guards; state is never part of the callback DTO. */
+export type ExecutionRecordSnapshot = ExecutionRecordFlowRun & {
+  state_json: string | null;
+  workflow_version: number | null;
+  workflow_deploy_number: number | null;
+  workflow_snapshot_json: string | null;
+};
 
 export type FlowRunRow = {
   id: number;
@@ -259,18 +268,28 @@ export class FlowRunRepository {
     }
   }
 
-  /** Callback-field snapshot. Never reads credentials; database failures must propagate. */
-  async findExecutionRecordByFlowIdStrict(flowId: string): Promise<ExecutionRecordFlowRun | null> {
-    const rows = await this.db.query<ExecutionRecordFlowRun>(
+  /** Callback fields plus same-snapshot internal state. Never reads credentials; failures propagate. */
+  async findExecutionRecordByFlowIdStrict(flowId: string): Promise<ExecutionRecordSnapshot | null> {
+    const select = (association: string) => this.db.query<ExecutionRecordSnapshot>(
       `SELECT id, flow_id, workflow_id, workflow_title, status, params_json, input_json,
               result_json, node_count, succeeded_count, failed_count, total_duration_ms,
               total_token_usage, triggered_by, identity_key, current_phase, started_at,
               completed_at, NULL AS credentials_json, origin_session_key, origin_session_id,
-              origin_bot_id, user_id, plugin_version, gmt_create, gmt_modified
+              origin_bot_id, user_id, plugin_version, gmt_create, gmt_modified, state_json,
+              workflow_version, workflow_deploy_number, ${association}
        FROM flow_runs WHERE flow_id = ?`,
       [flowId],
     );
-    return rows[0] ?? null;
+    try { return (await select("workflow_snapshot_json"))[0] ?? null; }
+    catch (error) {
+      if (!isMissingExecutionRecordWorkflowAssociation(error)) throw error;
+      return (await select("NULL AS workflow_snapshot_json"))[0] ?? null;
+    }
+  }
+
+  /** Call only after token, identity and same-snapshot structural guards. */
+  readExecutionRecordWorkflow(run: ExecutionRecordSnapshot): Promise<ExecutionRecordWorkflow> {
+    return new ExecutionRecordWorkflowRepository(this.db).read(run);
   }
 
   isTrialRun(flowId: string): Promise<boolean> { return isTrialRun(this.db, flowId); }

@@ -3,6 +3,7 @@ import { createRunBaasRouter, computeAvailableInterventions } from "./run-baas-r
 import type { RunSubworkflowsReader } from "../contracts/run-subworkflows.js";
 import { createRunReadRouter } from "../services/run-read-http.js";
 import { registerRunExecutionRecord } from "./run-execution-record.js";
+import type { AppConfigRepository } from "../repositories/app-config-repository.js";
 
 /**
  * Runs API routes — reads from flow_runs, node_executions, flow_events.
@@ -78,7 +79,9 @@ function toSafeRunFields(run: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
-interface RunsRouterOptions {
+export interface RunsRouterOptions {
+  /** Dedicated service-token configuration from cm_app_config; absent configuration fails closed. */
+  executionRecordConfigRepo?: Pick<AppConfigRepository, "findByKey"> | null;
   /** Enable only on mounts with verified per-run view authorization. */
   exposeRuntimeMetadata?: boolean;
 }
@@ -101,7 +104,10 @@ export function createRunsRouter(
   const exposeRuntimeMetadata = options.exposeRuntimeMetadata === true;
   const effectiveRunSubviews = runSubviews ?? (facadeRepo && 'listRuns' in facadeRepo ? facadeRepo : null);
   const effectiveFacadeRepo = facadeRepo && !('listRuns' in facadeRepo) ? facadeRepo : null;
-  registerRunExecutionRecord(router, flowRunRepo, nodeExecRepo, botPermRepo, effectiveRunSubviews);
+  registerRunExecutionRecord(router, flowRunRepo, nodeExecRepo, {
+    executionRecordConfigRepo: options.executionRecordConfigRepo,
+    restrictFanoutPayloads: Boolean(effectiveRunSubviews),
+  });
   router.use(createRunReadRouter(flowRunRepo, nodeExecRepo, eventRepo, botPermRepo, workflowSpecRepo,
     executionStepLogRepo, effectiveRunSubviews, exposeRuntimeMetadata));
   router.use(createRunBaasRouter(flowRunRepo, eventRepo, effectiveFacadeRepo));

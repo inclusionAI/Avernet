@@ -28,6 +28,7 @@ describe("execution record projection", () => {
     expect(repo.findExecutionRecordsByFlowIdStrict).toHaveBeenCalledWith("flow", false);
     expect(result).toEqual({
       workflow_id: "workflow", flow_id: "flow", status: "running",
+      workflow_yaml: null, workflow_snapshot: { status: "unresolved", reason: "LEGACY_MISSING" },
       ext_info: { flow_runs: run, node_executions: [node] },
     });
     expect(unsafeRun.credentials_json).toBe("private-credential");
@@ -45,6 +46,23 @@ describe("execution record projection", () => {
     const repo = { findExecutionRecordsByFlowIdStrict: vi.fn().mockResolvedValue([{ ...node, output_json: "stored" }]) };
     const result = await readExecutionRecord(run, repo, false);
     expect(result.ext_info.node_executions).toEqual([node]);
+  });
+
+  it("adds explicit top-level executed workflow metadata without extending the callback projections", async () => {
+    const workflow = {
+      workflow_yaml: "id: workflow\nnodes: []\n",
+      workflow_snapshot: { status: "resolved" as const, snapshot: {
+        kind: "deployment" as const, workflowId: "workflow", workflowVersion: 1, deployNumber: 2, configDigest: "a".repeat(64),
+      } },
+      state_json: "must not leak", credentials_json: "must not leak",
+    };
+    const repo = { findExecutionRecordsByFlowIdStrict: vi.fn().mockResolvedValue([node]) };
+    const result = await readExecutionRecord(run, repo, false, workflow);
+    expect(result.workflow_yaml).toBe(workflow.workflow_yaml);
+    expect(result.workflow_snapshot).toEqual(workflow.workflow_snapshot);
+    expect(result.ext_info).toEqual({ flow_runs: run, node_executions: [node] });
+    expect(Object.keys(result).sort()).toEqual(["workflow_id", "flow_id", "status", "workflow_yaml", "workflow_snapshot", "ext_info"].sort());
+    expect(JSON.stringify(result)).not.toContain("must not leak");
   });
 
   it("propagates database errors instead of converting them into an empty snapshot", async () => {

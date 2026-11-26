@@ -11,6 +11,8 @@ import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/
 import { FlowRunRepository } from "../../repositories/flow-run-repository.js";
 import { NodeExecutionRepository } from "../../repositories/node-execution-repository.js";
 import { createRunsRouter } from "../runs.js";
+import { AppConfigRepository } from "../../repositories/app-config-repository.js";
+import { executionRecordTokenHeaders, executionRecordUnauthorized, executionRecordLegacyWorkflow, seedExecutionRecordToken } from "./execution-record-token.fixture.js";
 
 const secret = "<execution-record-credential-must-not-leak>";
 const flow = {
@@ -45,6 +47,7 @@ describe("GET /api/runs/:flowId/execution-record", () => {
   const db = new SqliteDatabase(raw);
   const flowRepo = new FlowRunRepository(db);
   const nodeRepo = new NodeExecutionRepository(db);
+  const options = { executionRecordConfigRepo: new AppConfigRepository(db) };
   const directory = { listBots: vi.fn(async (_actor: string, _status: "active" | "all"): Promise<DirectoryBot[]> => []) };
   const permissionRepo = new BotWorkflowPermissionRepository(db, directory);
   let server: Server;
@@ -56,15 +59,15 @@ describe("GET /api/runs/:flowId/execution-record", () => {
       .run(...Object.values(values));
   }
 
-  function grant(ownerId: string, botId: string | null = null) {
+  function grant(ownerId: string, botId: string | null = null, canView = 1) {
     insert("bot_workflow_permissions", {
       bot_id: botId, bot_owner_id: ownerId, workflow_id: "fixture-workflow", env: "fixture",
-      can_view: 1, can_execute: 0, can_edit: 0, gmt_create: 1, gmt_modified: 1,
+      can_view: canView, can_execute: 0, can_edit: 0, gmt_create: 1, gmt_modified: 1,
     });
   }
 
   function read(suffix = "", mount = "/api/runs", headers: Record<string, string> = {}, flowId = "fixture-flow") {
-    return fetch(`${baseUrl}${mount}/${flowId}/execution-record${suffix}`, { headers });
+    return fetch(`${baseUrl}${mount}/${flowId}/execution-record${suffix}`, { headers: { ...executionRecordTokenHeaders, ...headers } });
   }
 
   beforeAll(async () => {
@@ -76,7 +79,7 @@ describe("GET /api/runs/:flowId/execution-record", () => {
         triggered_by TEXT, identity_key TEXT, current_phase TEXT, started_at INTEGER, completed_at INTEGER,
         credentials_json TEXT, origin_session_key TEXT, origin_session_id TEXT, origin_bot_id TEXT,
         user_id TEXT, plugin_version TEXT, gmt_create INTEGER, gmt_modified INTEGER,
-        state_json TEXT, engine TEXT, workflow_version INTEGER, workflow_deploy_number INTEGER
+        state_json TEXT, engine TEXT, workflow_version INTEGER, workflow_deploy_number INTEGER, workflow_snapshot_json TEXT
       );
       CREATE TABLE node_executions (
         id INTEGER PRIMARY KEY, flow_id TEXT, workflow_id TEXT, node_id TEXT, executor_type TEXT,
@@ -91,16 +94,17 @@ describe("GET /api/runs/:flowId/execution-record", () => {
         can_view INTEGER, can_execute INTEGER, can_edit INTEGER, gmt_create INTEGER, gmt_modified INTEGER
       );
     `);
+    seedExecutionRecordToken(raw);
     const app = express();
     app.set("query parser", "extended");
     app.use((req, _res, next) => { req.isAdmin = req.header("x-test-admin") === "true"; next(); });
-    app.use("/api/runs", createRunsRouter(flowRepo, nodeRepo, null, null, null));
-    app.use("/secure/runs", createRunsRouter(flowRepo, nodeRepo, null, null, null, null, permissionRepo));
-    app.use("/missing-flow/runs", createRunsRouter(null, nodeRepo, null, null, null));
-    app.use("/missing-nodes/runs", createRunsRouter(flowRepo, null, null, null, null));
+    app.use("/api/runs", createRunsRouter(flowRepo, nodeRepo, null, null, null, null, null, null, null, null, null, options));
+    app.use("/secure/runs", createRunsRouter(flowRepo, nodeRepo, null, null, null, null, permissionRepo, null, null, null, null, options));
+    app.use("/missing-flow/runs", createRunsRouter(null, nodeRepo, null, null, null, null, null, null, null, null, null, options));
+    app.use("/missing-nodes/runs", createRunsRouter(flowRepo, null, null, null, null, null, null, null, null, null, null, options));
     const simpleApp = express();
     simpleApp.set("query parser", "simple");
-    simpleApp.use("/runs", createRunsRouter(flowRepo, nodeRepo, null, null, null));
+    simpleApp.use("/runs", createRunsRouter(flowRepo, nodeRepo, null, null, null, null, null, null, null, null, null, options));
     app.use("/simple", simpleApp);
     server = app.listen(0, "127.0.0.1");
     await once(server, "listening");
@@ -108,11 +112,11 @@ describe("GET /api/runs/:flowId/execution-record", () => {
   });
 
   beforeEach(() => {
-    directory.listBots.mockResolvedValue([]);
+    directory.listBots.mockReset().mockResolvedValue([]);
     raw.exec("DELETE FROM flow_runs; DELETE FROM node_executions; DELETE FROM bot_workflow_permissions;");
     insert("flow_runs", {
       ...flow, credentials_json: JSON.stringify({ token: secret }), state_json: secret, engine: "private-engine",
-      workflow_version: 7, workflow_deploy_number: 12,
+      workflow_version: null, workflow_deploy_number: null,
     });
     insert("node_executions", { ...node, output_json: ' { "output" : true } ', resolved_prompt: secret, version: 7 });
     insert("node_executions", { ...node, id: 12, attempt: 2, started_at: 100, status: "succeeded", output_json: "second-output" });
@@ -137,6 +141,7 @@ describe("GET /api/runs/:flowId/execution-record", () => {
     expect(text).not.toContain(secret);
     expect(text).not.toContain("private-engine");
     expect(JSON.parse(text)).toEqual({
+      ...executionRecordLegacyWorkflow,
       workflow_id: "fixture-workflow", flow_id: "fixture-flow", status: "succeeded",
       ext_info: { flow_runs: flow, node_executions: [node, nullNode, { ...node, id: 12, attempt: 2, started_at: 100, status: "succeeded" }] },
     });
@@ -151,7 +156,8 @@ describe("GET /api/runs/:flowId/execution-record", () => {
     expect(body.ext_info.node_executions.every((row: object) => !Object.hasOwn(row, "output_json"))).toBe(true);
     const flowSql = queries.mock.calls.find(([sql]) => /FROM flow_runs\b/.test(sql))?.[0];
     expect(flowSql).toMatch(/NULL\s+AS\s+credentials_json/i);
-    expect(flowSql?.replace(/NULL\s+AS\s+credentials_json/i, "")).not.toMatch(/credentials_json|SELECT\s+\*|state_json|\bengine\b/i);
+    expect(flowSql).toMatch(/\bstate_json\b/);
+    expect(flowSql?.replace(/NULL\s+AS\s+credentials_json/i, "")).not.toMatch(/credentials_json|SELECT\s+\*|\bengine\b/i);
     const nodeSql = queries.mock.calls.find(([sql]) => /FROM node_executions\b/.test(sql))?.[0];
     expect(nodeSql).toBeDefined();
     expect(nodeSql).not.toMatch(/output_json|SELECT\s+\*|\bLIMIT\b/i);
@@ -251,85 +257,63 @@ describe("GET /api/runs/:flowId/execution-record", () => {
     expect(await response.json()).toEqual({ error: "Service Unavailable", message: "Database not configured" });
   });
 
-  it("keeps isolated deployments readable without an actor", async () => {
+  it("authenticates isolated deployments by token alone without an actor", async () => {
     expect((await read("?botOwnerId=someone-else")).status).toBe(200);
   });
 
-  it("requires an actor when permissions are configured, ignoring query owner identity", async () => {
+  it("requires a token when permissions are configured, ignoring query owner identity", async () => {
     grant("owner-A");
     const lookup = vi.spyOn(db, "query");
-    const response = await read("?botOwnerId=owner-A", "/secure/runs");
+    const response = await read("?botOwnerId=owner-A", "/secure/runs", { authorization: "" });
     expect(response.status).toBe(401);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ error: "Unauthorized", message: "User identity required" });
-    expect(lookup).not.toHaveBeenCalled();
+    expect(await response.json()).toEqual(executionRecordUnauthorized);
+    expect(lookup.mock.calls.every(([sql]) => /FROM cm_app_config\b/.test(sql))).toBe(true);
   });
 
-  it("denies a workflow without grants and does not trust query botOwnerId", async () => {
-    grant("owner-A");
-    const scope = vi.spyOn(permissionRepo, "resolveRunViewScope");
-    const response = await read("?botOwnerId=owner-A&botId=bot-A", "/secure/runs", { "x-user-id": "denied-user" });
-    expect(response.status).toBe(403);
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(scope).toHaveBeenCalledWith("fixture-workflow", "denied-user");
-    expect(await response.json()).toEqual({ error: "Forbidden", message: "No view permission for this run" });
-  });
-
-  it("accepts all scope through the shared actor resolver including raw cookies", async () => {
-    grant("reader");
-    expect((await read("", "/secure/runs", { "x-staff-id": " reader " })).status).toBe(200);
-    expect((await read("", "/secure/runs", { cookie: "staff_id=reader" })).status).toBe(200);
-  });
-
-  it("preserves the inherited Bot owner rather than substituting the actor or query owner", async () => {
-    grant("owner-A", "bot-A");
-    directory.listBots.mockResolvedValue([{
-      botId: "bot-A", displayBotId: "bot-A", ownerId: "owner-A", status: "active", source: "fixture",
-    }]);
-    const headers = { "x-user-id": "collaborator" };
-    expect((await read("?botOwnerId=owner-B", "/secure/runs", headers)).status).toBe(200);
-    expect(directory.listBots).toHaveBeenCalledWith("collaborator", "all");
-    raw.prepare("UPDATE flow_runs SET origin_bot_id = 'bot-A:owner-B' WHERE flow_id = ?").run("fixture-flow");
-    expect((await read("?botOwnerId=owner-A", "/secure/runs", headers)).status).toBe(403);
-    directory.listBots.mockResolvedValue([]);
-    raw.prepare("UPDATE flow_runs SET origin_bot_id = 'bot-A:owner-A' WHERE flow_id = ?").run("fixture-flow");
-    expect((await read("", "/secure/runs", headers)).status).toBe(403);
-  });
-
-  it("does not read node payloads for a denied run", async () => {
-    const queries = vi.spyOn(db, "query");
-    expect((await read("?includeNodeOutput=true", "/secure/runs", { "x-user-id": "reader" })).status).toBe(403);
-    expect(queries.mock.calls.some(([sql]) => /FROM node_executions\b/.test(sql))).toBe(false);
-  });
-
-  it("lets server-authorized administrators bypass actor and permission lookup", async () => {
-    const scope = vi.spyOn(permissionRepo, "resolveRunViewScope");
-    const response = await read("", "/secure/runs", { "x-test-admin": "true" });
+  it.each(["no grant", "explicit deny"])("reads ordinary records with %s without resolving permissions", async kind => {
+    if (kind === "explicit deny") grant("reader", null, 0);
+    const scope = vi.spyOn(permissionRepo, "resolveRunViewScope").mockRejectedValue(new Error("Must not resolve view ACL"));
+    directory.listBots.mockRejectedValue(new Error("Must not read Bot directory"));
+    const response = await read("?botOwnerId=owner-A&botId=bot-A&includeNodeOutput=true", "/secure/runs", { "x-user-id": "reader" });
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json();
+    expect(body.ext_info.flow_runs).toEqual(flow);
+    expect(body.ext_info.node_executions[0].output_json).toBe(' { "output" : true } ');
+    expect(scope).not.toHaveBeenCalled();
+    expect(directory.listBots).not.toHaveBeenCalled();
+  });
+
+  it("does not accept staff headers or raw cookies in place of a token", async () => {
+    const scope = vi.spyOn(permissionRepo, "resolveRunViewScope");
+    expect((await read("", "/secure/runs", { "x-staff-id": " reader ", authorization: "" })).status).toBe(401);
+    expect((await read("", "/secure/runs", { cookie: "staff_id=reader", authorization: "" })).status).toBe(401);
+    expect(scope).not.toHaveBeenCalled();
+    expect(directory.listBots).not.toHaveBeenCalled();
+  });
+
+  it("does not let server-authorized administrators bypass token verification", async () => {
+    const scope = vi.spyOn(permissionRepo, "resolveRunViewScope");
+    const response = await read("", "/secure/runs", { "x-test-admin": "true", authorization: "" });
+    expect(response.status).toBe(401);
     expect(scope).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["bot-A:owner-A", 200], ["bot-A:owner-B", 403], ["bot-A:owner-A:extra", 403],
-    ["bot-AA:owner-A", 403], ["bot-A", 403], [null, 403], ["", 403],
-  ])("enforces exact Bot+owner isolation for origin %s", async (origin, expectedStatus) => {
-    grant("owner-A", "bot-A");
-    raw.prepare("UPDATE flow_runs SET origin_bot_id = ? WHERE flow_id = ?").run(origin, "fixture-flow");
-    const response = await read("?botOwnerId=owner-B", "/secure/runs", { "x-user-id": "owner-A" });
-    expect(response.status).toBe(expectedStatus);
-  });
+  it.each(["bot-A:owner-A", "bot-A:owner-B", "bot-A:owner-A:extra", "bot-AA:owner-A", "bot-A", null, ""])(
+    "does not enforce Bot+owner view scope for ordinary origin %s", async origin => {
+      grant("owner-A", "bot-A");
+      const scope = vi.spyOn(permissionRepo, "resolveRunViewScope");
+      raw.prepare("UPDATE flow_runs SET origin_bot_id = ? WHERE flow_id = ?").run(origin, "fixture-flow");
+      const response = await read("?botOwnerId=owner-B", "/secure/runs", { "x-user-id": "owner-A" });
+      expect(response.status).toBe(200);
+      expect((await response.json()).ext_info.flow_runs.origin_bot_id).toBe(origin);
+      expect(scope).not.toHaveBeenCalled();
+      expect(directory.listBots).not.toHaveBeenCalled();
+    },
+  );
 
-  it.each([
-    ["bot-A:owner-A", 200], ["bot-A:owner-B", 200], ["bot-AA:owner-A", 403],
-    ["bot-A:", 403], ["bot-A:   ", 403], ["bot-A", 403], [null, 403], ["", 403],
-  ])("limits wildcard owner grants to the Bot ID colon prefix for %s", async (origin, expectedStatus) => {
-    grant("*", "bot-A");
-    raw.prepare("UPDATE flow_runs SET origin_bot_id = ? WHERE flow_id = ?").run(origin, "fixture-flow");
-    expect((await read("", "/secure/runs", { "x-user-id": "reader" })).status).toBe(expectedStatus);
-  });
-
-  it.each(["flow_runs", "node_executions", "bot_workflow_permissions"])("returns a safe 500, not 404 or empty success, on %s read failure", async table => {
-    grant("reader");
+  it.each(["flow_runs", "node_executions"])("returns a safe 500, not 404 or empty success, on %s read failure", async table => {
     raw.exec(`ALTER TABLE ${table} RENAME TO unavailable_table`);
     try {
       const response = await read("", "/secure/runs", { "x-user-id": "reader" });
@@ -341,8 +325,32 @@ describe("GET /api/runs/:flowId/execution-record", () => {
     }
   });
 
+  it("does not depend on the permission table for execution-record reads", async () => {
+    raw.exec("ALTER TABLE bot_workflow_permissions RENAME TO unavailable_permissions");
+    try {
+      expect((await read("", "/secure/runs", { "x-user-id": "reader" })).status).toBe(200);
+      expect(directory.listBots).not.toHaveBeenCalled();
+    } finally {
+      raw.exec("ALTER TABLE unavailable_permissions RENAME TO bot_workflow_permissions");
+    }
+  });
+
+  it("rejects a selected/request flow identity mismatch even on an isolated mount before reading nodes", async () => {
+    const original = flowRepo.findExecutionRecordByFlowIdStrict.bind(flowRepo);
+    vi.spyOn(flowRepo, "findExecutionRecordByFlowIdStrict").mockImplementationOnce(async flowId => {
+      const run = await original(flowId);
+      if (!run) throw new Error("Expected seeded run");
+      return { ...run, flow_id: "different-flow" };
+    });
+    const nodes = vi.spyOn(nodeRepo, "findExecutionRecordsByFlowIdStrict");
+    const response = await read();
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "Conflict", message: "Run identity changed; retry the request" });
+    expect(nodes).not.toHaveBeenCalled();
+  });
+
   it("does not leak SQL or credentials even if the database exception contains them", async () => {
-    vi.spyOn(db, "query").mockRejectedValue(new Error(`SELECT credentials_json FROM flow_runs; ${secret}`));
+    vi.spyOn(flowRepo, "findExecutionRecordByFlowIdStrict").mockRejectedValue(new Error(`SELECT credentials_json FROM flow_runs; ${secret}`));
     const response = await read();
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual(safeFailure);

@@ -2,14 +2,28 @@ import type {
   ExecutionRecord,
   ExecutionRecordFlowRun,
   ExecutionRecordNodeExecution,
+  ExecutionRecordWorkflow,
 } from "../../shared/execution-record.js";
+import type { ExecutionRecordSnapshot } from "../repositories/flow-run-repository.js";
+import { readFanoutMap } from "./fanout-state-reader.js";
 import type { NodeExecutionRepository } from "../repositories/node-execution-repository.js";
 
-/** Read nodes only after the caller has authorized the requested run. Errors propagate. */
+/** Structural payload guard only: never consult actor-dependent workflow/run view permissions. */
+export function isFanoutExecutionRecord(run: Pick<ExecutionRecordSnapshot, "flow_id" | "state_json">): boolean {
+  // Validate root/map shape and embedded flow identity using the same persisted selection.
+  const map = readFanoutMap(run);
+  // A nonempty map is denied even if its group entries are malformed; do not read child payloads.
+  if (Object.keys(map).length > 0) return true;
+  const state: unknown = run.state_json ? JSON.parse(run.state_json) : null;
+  return state !== null && typeof state === "object" && Object.hasOwn(state, "fanoutOrigin");
+}
+
+/** Read nodes only after the caller has checked identity and structural payload guards. Errors propagate. */
 export async function readExecutionRecord(
   run: ExecutionRecordFlowRun,
   nodeExecRepo: Pick<NodeExecutionRepository, "findExecutionRecordsByFlowIdStrict">,
   includeNodeOutput = false,
+  workflow: ExecutionRecordWorkflow = { workflow_yaml: null, workflow_snapshot: { status: "unresolved", reason: "LEGACY_MISSING" } },
 ): Promise<ExecutionRecord> {
   const rows = await nodeExecRepo.findExecutionRecordsByFlowIdStrict(run.flow_id, includeNodeOutput);
   // Explicit projections prevent future repository columns from expanding this contract.
@@ -71,6 +85,8 @@ export async function readExecutionRecord(
     workflow_id: run.workflow_id,
     flow_id: run.flow_id,
     status: run.status,
+    workflow_yaml: workflow.workflow_yaml,
+    workflow_snapshot: workflow.workflow_snapshot,
     ext_info: { flow_runs: flowRun, node_executions: nodes },
   };
 }

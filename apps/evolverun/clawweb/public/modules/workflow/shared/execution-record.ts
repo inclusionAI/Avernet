@@ -1,3 +1,5 @@
+import type { WorkflowSnapshotBinding } from "@avernet/clawweb-shared/server/contracts/workflow-snapshot";
+
 /**
  * GET /api/runs/:flowId/execution-record — current persisted execution snapshot.
  * This is not historical callback replay: status is the stored run.status verbatim
@@ -5,7 +7,14 @@
  * Fields follow the HTTP callback buildExtInfo allowlist; JSON text stays unparsed.
  * All node attempts are returned, ordered by started_at DESC, id DESC, with no cap.
  */
-export interface ExecutionRecord {
+export interface ExecutionRecordWorkflow {
+  /** Executed configuration only. Structured specs yield equivalent YAML, not original source bytes. */
+  workflow_yaml: string | null;
+  /** Provenance of that configuration; unavailable history is never replaced with the current draft. */
+  workflow_snapshot: WorkflowSnapshotBinding;
+}
+
+export interface ExecutionRecord extends ExecutionRecordWorkflow {
   workflow_id: string;
   flow_id: string;
   status: string;
