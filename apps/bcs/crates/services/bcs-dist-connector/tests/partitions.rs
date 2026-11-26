@@ -318,3 +318,27 @@ async fn a_stalled_member_list_does_not_hold_the_drain_past_its_deadline() {
     assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 });
     assert!(members.dead.lock().unwrap().contains(&"conn-03".to_owned()), "retired on time");
 }
+
+#[tokio::test]
+async fn after_a_dropped_run_the_engine_is_not_ready_and_a_drain_stops_at_once() {
+    let mut rig = Rig::new().await;
+    let _members = members(&mut rig);
+    let _events = rig.agent.start_stream();
+    rig.worker.create().await;
+    rig.worker.notify().await;
+    let source = rig.start();
+    until("accepted", || async { rig.phase().await == "accepted" }).await;
+    let peer = rig.start_as("conn-07");
+    until("peer ready", || async { peer.engine.snapshot().await.unwrap().ready }).await;
+    source.task.abort();
+    let _ = (&mut { source.task }).await;
+    let snapshot = source.engine.snapshot().await.unwrap();
+    assert!(!snapshot.ready, "a dropped run is not ready");
+    // Renewals stopped: the actor is stopped at once and nothing is offered,
+    // since this instance is about to read `Dead`.
+    let started = tokio::time::Instant::now();
+    let outcome = source.engine.drain(Duration::from_secs(5)).await.unwrap();
+    assert!(started.elapsed() < Duration::from_secs(1), "took {:?}", started.elapsed());
+    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 2 });
+    assert!(rig.peers.offers.lock().unwrap().is_empty());
+}

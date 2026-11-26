@@ -203,22 +203,21 @@ impl ConnectorEngine {
     ///
     /// `Ok` after a drain; `Err` when the start fails (registration refused or
     /// not confirmed in time, command feed unavailable) or the registration is
-    /// lost later (`membership_lost`). On the way out it clears `ready` and
-    /// `looping` and wakes `drain`, which waits for `looping` to turn false.
+    /// lost later (`membership_lost`). On the way out (also when the future
+    /// is dropped) it clears `ready` and `looping` and wakes `drain`, which
+    /// waits for `looping` to turn false.
     pub async fn run(&self) -> Result<(), RuntimeError> {
         self.inner.looping.store(true, Ordering::SeqCst);
-        // Silences the heartbeat unless the loop ended for a drain: a failed
-        // process, or one whose `run` future was dropped (its task aborted),
+        // `Exit` ends the run the same way on every path. It silences the
+        // heartbeat unless the loop ended for a drain: a failed process, or
+        // one whose `run` future was dropped (its task aborted) or panicked,
         // stops renewing, so it becomes `Dead` and its partitions and calls
         // move on. After a drain the heartbeat keeps going until the drain
         // retires the registration.
-        let mut silence = Silence { inner: &self.inner, armed: true };
+        let mut exit = Exit { inner: &self.inner, armed: true };
         let result = self.run_loop().await;
-        silence.armed = result.is_err();
-        drop(silence);
-        self.inner.ready.store(false, Ordering::SeqCst);
-        self.inner.looping.store(false, Ordering::SeqCst);
-        self.inner.wake.notify_waiters();
+        exit.armed = result.is_err();
+        drop(exit);
         result
     }
 
@@ -750,17 +749,23 @@ fn silence_heartbeat(inner: &Inner) {
     }
 }
 
-/// Silences the heartbeat when dropped while `armed` (see `run`).
-struct Silence<'a> {
+/// The end of `run`, the same on every path (return, error, panic, or the
+/// `run` future dropped): clears `ready` and `looping`, wakes a waiting
+/// drain, and while `armed` silences the heartbeat, unless a drain is
+/// already running (it keeps the registration alive until it retires it).
+struct Exit<'a> {
     inner: &'a Inner,
     armed: bool,
 }
 
-impl Drop for Silence<'_> {
+impl Drop for Exit<'_> {
     fn drop(&mut self) {
-        if self.armed {
+        if self.armed && !self.inner.draining.load(Ordering::SeqCst) {
             silence_heartbeat(self.inner);
         }
+        self.inner.ready.store(false, Ordering::SeqCst);
+        self.inner.looping.store(false, Ordering::SeqCst);
+        self.inner.wake.notify_waiters();
     }
 }
 
@@ -846,7 +851,16 @@ impl DistRuntimeControlPort for ConnectorEngine {
             actor.poke.notify_one();
         }
         let deadline = Instant::now() + grace;
-        let calls_until = deadline - inner.config.handoff_reserve.min(grace / 2);
+        // Renewals already stopped (the main loop failed or was dropped
+        // before this drain): this instance is about to read `Dead`, so its
+        // calls are stopped at once and nothing is offered (a peer's store
+        // needs a live source).
+        let silenced = inner.quiet.load(Ordering::SeqCst);
+        let calls_until = if silenced {
+            Instant::now()
+        } else {
+            deadline - inner.config.handoff_reserve.min(grace / 2)
+        };
         // First the main loop must leave its iteration: a claim in flight may
         // still take a call. Then the held calls get the rest of the grace.
         // Short waits instead of one long one: a wake-up can be missed.
@@ -887,6 +901,7 @@ impl DistRuntimeControlPort for ConnectorEngine {
         // then move only once this instance is `Dead`.
         let gate_until = deadline.checked_sub(inner.config.peer_timeout).unwrap_or(deadline);
         let left = match tokio::time::timeout_at(gate_until, inner.claim_gate.write()).await {
+            Ok(_) if silenced => self.owned_partitions().1.len(),
             Ok(_quiet_claims) => self.hand_off(deadline).await,
             Err(_) => {
                 tracing::warn!("a claim is still running; partitions are not handed over");
