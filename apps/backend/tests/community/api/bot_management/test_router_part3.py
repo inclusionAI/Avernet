@@ -246,12 +246,12 @@ class TestUpdateEngineConfig:
         import logging
 
         from agentclaw.community.core.devices.services.device_context import (
-            DeviceConnectionUnavailableError,
+            DeviceOfflineError,
         )
 
         tc, svc = engine_cfg_client
-        svc.write_bot_config.side_effect = DeviceConnectionUnavailableError(
-            "Device connection is temporarily unavailable for binding=1394158"
+        svc.write_bot_config.side_effect = DeviceOfflineError(
+            "No active device for binding=1394158"
         )
         with caplog.at_level(logging.INFO, logger="start"):
             resp = tc.put("/api/bots/default/engine-config", json={"k": "v"})
@@ -264,6 +264,73 @@ class TestUpdateEngineConfig:
         ]
         assert records
         assert all(record.levelno == logging.INFO for record in records)
+
+    def test_write_connection_unavailable_logged_as_distinct_warning(
+        self, engine_cfg_client, caplog
+    ):
+        """An upstream timeout/5xx is not provider-confirmed offline; keep the
+        503 contract but do not log it into the offline ticket cluster."""
+        import logging
+
+        from agentclaw.community.core.devices.services.device_context import (
+            DeviceConnectionUnavailableError,
+        )
+
+        tc, svc = engine_cfg_client
+        svc.write_bot_config.side_effect = DeviceConnectionUnavailableError(
+            "Device connection is temporarily unavailable for binding=1394158"
+        )
+        with caplog.at_level(logging.INFO, logger="start"):
+            resp = tc.put("/api/bots/default/engine-config", json={"k": "v"})
+
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 503
+        assert body["data"] is None
+        assert body["message"] == "Bot 设备暂时不可用，请稍后重试"
+        records = [
+            record
+            for record in caplog.records
+            if "bot_router.update_engine_config" in record.message
+        ]
+        assert records
+        assert all(record.levelno == logging.WARNING for record in records)
+        assert all("device offline" not in record.message for record in records)
+        assert all(
+            "device request unavailable" in record.message for record in records
+        )
+
+    def test_write_runtime_binding_changed_logged_as_distinct_warning(
+        self, engine_cfg_client, caplog
+    ):
+        """A runtime-binding race must not be logged as provider-confirmed
+        offline; keep the 503 contract with an accurate diagnostic."""
+        import logging
+
+        from agentclaw.community.core.devices.services.device_context import (
+            RuntimeBindingChangedError,
+        )
+
+        tc, svc = engine_cfg_client
+        svc.write_bot_config.side_effect = RuntimeBindingChangedError(
+            "expected runtime binding changed"
+        )
+        with caplog.at_level(logging.INFO, logger="start"):
+            resp = tc.put("/api/bots/default/engine-config", json={"k": "v"})
+
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 503
+        assert body["data"] is None
+        records = [
+            record
+            for record in caplog.records
+            if "bot_router.update_engine_config" in record.message
+        ]
+        assert records
+        assert all(record.levelno == logging.WARNING for record in records)
+        assert all("device request unavailable" in record.message for record in records)
+        assert all("runtime binding change" in record.message for record in records)
 
 
 class TestGetEngineConfig:
@@ -409,6 +476,73 @@ class TestGetEngineConfig:
         ]
         assert records
         assert all(record.levelno == logging.INFO for record in records)
+
+    def test_connection_unavailable_logged_as_distinct_warning(
+        self, engine_cfg_client, caplog
+    ):
+        """An upstream timeout/5xx is not provider-confirmed offline; keep the
+        503 contract but do not log it into the offline ticket cluster."""
+        import logging
+
+        from agentclaw.community.core.devices.services.device_context import (
+            DeviceConnectionUnavailableError,
+        )
+
+        tc, svc = engine_cfg_client
+        svc.read_bot_config.side_effect = DeviceConnectionUnavailableError(
+            "Device connection is temporarily unavailable for binding=1394158"
+        )
+        with caplog.at_level(logging.INFO, logger="start"):
+            resp = tc.get("/api/bots/default/engine-config")
+
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 503
+        assert body["data"] is None
+        assert body["message"] == "Bot 设备暂时不可用，请稍后重试"
+        records = [
+            record
+            for record in caplog.records
+            if "bot_router.get_engine_config" in record.message
+        ]
+        assert records
+        assert all(record.levelno == logging.WARNING for record in records)
+        assert all("device offline" not in record.message for record in records)
+        assert all(
+            "device request unavailable" in record.message for record in records
+        )
+
+    def test_runtime_binding_changed_logged_as_distinct_warning(
+        self, engine_cfg_client, caplog
+    ):
+        """A runtime-binding race must not be logged as provider-confirmed
+        offline; keep the 503 contract with an accurate diagnostic."""
+        import logging
+
+        from agentclaw.community.core.devices.services.device_context import (
+            RuntimeBindingChangedError,
+        )
+
+        tc, svc = engine_cfg_client
+        svc.read_bot_config.side_effect = RuntimeBindingChangedError(
+            "expected runtime binding changed"
+        )
+        with caplog.at_level(logging.INFO, logger="start"):
+            resp = tc.get("/api/bots/default/engine-config")
+
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 503
+        assert body["data"] is None
+        records = [
+            record
+            for record in caplog.records
+            if "bot_router.get_engine_config" in record.message
+        ]
+        assert records
+        assert all(record.levelno == logging.WARNING for record in records)
+        assert all("device request unavailable" in record.message for record in records)
+        assert all("runtime binding change" in record.message for record in records)
 
 
 class TestUpdateBotExtForOthers:
