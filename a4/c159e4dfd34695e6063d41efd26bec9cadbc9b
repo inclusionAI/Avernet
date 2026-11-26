@@ -1,0 +1,20 @@
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/run-detail-runtime-metadata.test.ts
+  s_bf4e2e6d9e5d71::t_751230f1e60f1a 81-84
+  s_bf4e2e6d9e5d71::t_a3ccafdad47838 28,36,114-115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a4c159e4dfd34695e6063d41efd26bec9cadbc9b",
+  "prompts": {},
+  "sessions": {
+    "s_bf4e2e6d9e5d71": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21664-cdb1-7cd1-b9a8-ed4efbd69d3e",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
