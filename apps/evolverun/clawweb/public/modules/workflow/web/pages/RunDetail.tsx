@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useId } from 'react'
+import { useState, useCallback, useEffect, useMemo, useId, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchJson } from '@avernet/clawweb-shared/web/api/client'
 import { parseRunSnapshot } from './runSnapshot'
@@ -7,9 +7,8 @@ import { useFlowRun, useDbWorkflow, useEvolveDiagnoses, useEvolveSuggestions, us
 import RunSummaryHeader from '../components/RunSummaryHeader'
 import NodeExecutionList from '../components/NodeExecutionList'
 import SubworkflowLinks, { SubworkflowProvider, UnattributedSubworkflowLinks } from '../components/SubworkflowLinks'
-import RunDagView from '../components/RunDagView'
+import RunDagSection from '../components/RunDagSection'
 import ErrorState from '../components/ErrorState'
-import SimpleRunLogsPanel from '../components/SimpleRunLogsPanel'
 import AnalysisModal from '../components/AnalysisModal'
 import InterventionPanel from '../components/InterventionPanel'
 import AnalyzeRunBotModal from '../components/AnalyzeRunBotModal'
@@ -25,7 +24,7 @@ import { useFlowApprovals } from '@avernet/clawweb-shared/web/api/hooks'
 import type { ApprovalCardSummary } from '@avernet/clawweb-shared/web/api/client'
 import type { SubworkflowGroupRef } from '../api/run-subworkflows'
 
-type TabId = 'nodes' | 'logs' | 'dag' | 'archive'
+type TabId = 'nodes' | 'archive'
 
 const ANALYSIS_STATUS_LABEL: Record<string, { label: string; cls: string }> = {
   analyzing: { label: '分析中', cls: 'bg-amber-50 text-amber-700' },
@@ -81,6 +80,8 @@ function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false, h
   const workspaceView = searchParams.get('workspaceView')
   const [activeTab, setActiveTab] = useState<TabId>('nodes')
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [locateRequest, setLocateRequest] = useState<{ nodeId: string; requestId: number }>()
+  const locateSequence = useRef(0)
   const [analyzingNode, setAnalyzingNode] = useState<NodeExecution | null>(null)
   const [analyzeModalOpen, setAnalyzeModalOpen] = useState(false)
   const [autoHealRun, setAutoHealRun] = useState<FlowRun | null>(null)
@@ -129,6 +130,7 @@ function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false, h
 
 
   const handleNodeSelect = useCallback((nodeId: string) => {
+    setLocateRequest(undefined)
     setSelectedNodeId((prev) => (prev === nodeId ? null : nodeId))
   }, [])
 
@@ -191,6 +193,15 @@ function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false, h
   }, [nodes])
 
 
+  const handleDagNodeSelect = useCallback((nodeId: string) => {
+    setSelectedNodeId(nodeId)
+    setActiveTab('nodes')
+    setLocateRequest({ nodeId, requestId: ++locateSequence.current })
+  }, [])
+  const missingLocatedNode = locateRequest && !nodes.some(node => node.node_id === locateRequest.nodeId)
+    ? locateRequest.nodeId
+    : null
+
   if (runError) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -227,6 +238,19 @@ function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false, h
       ) : run ? (
         <>
           <RunSummaryHeader readOnly={readOnly} run={run} nodeCount={nodeProgress.total} succeededCount={nodeProgress.succeeded} failedCount={nodeProgress.failed} onAutoHeal={(selected) => setAutoHealRun(selected)} onApproval={() => setApprovalCard(pendingApprovals[0] ?? approvalCards[0])} pendingApprovalCount={pendingApprovals.length} />
+
+          <div className="mt-5">
+            <RunDagSection
+              specNodes={specNodes}
+              nodeStatusMap={nodeStatusMap}
+              onNodeClick={handleDagNodeSelect}
+              selectedNodeId={selectedNodeId ?? undefined}
+              readOnly={readOnly}
+              snapshotError={snapshotError}
+              definitionError={workflowQuery.isError}
+              onRetryDefinition={() => void workflowQuery.refetch()}
+            />
+          </div>
 
           {!readOnly && <div className="mt-4">
             <InterventionPanel
@@ -289,18 +313,20 @@ function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false, h
               onResolved={() => void approvalsQuery.refetch()}
             />
           )}
-          <div className="mt-5 border-b border-slate-200">
-            <nav className="-mb-px flex gap-5" aria-label="运行详情视图">
-              <TabButton active={activeTab === 'nodes'} onClick={() => setActiveTab('nodes')} label="节点" />
-              <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} label="日志" />
-              <TabButton active={activeTab === 'dag'} onClick={() => setActiveTab('dag')} label="DAG" />
-              <TabButton active={activeTab === 'archive'} onClick={() => setActiveTab('archive')} label="运行档案" />
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-x-6 border-b border-border">
+            <nav className="-mb-px flex gap-6" aria-label="运行详情视图">
+              <TabButton active={activeTab === 'nodes'} onClick={() => { setLocateRequest(undefined); setActiveTab('nodes') }} label="节点" />
+              <TabButton active={activeTab === 'archive'} onClick={() => { setLocateRequest(undefined); setActiveTab('archive') }} label="运行档案" />
             </nav>
+            <p className="py-2 text-[11px] text-muted-foreground">日志统一至「运行档案 → 运行过程 → 运行日志」</p>
           </div>
 
           <div className="mt-4">
             {activeTab === 'nodes' && (
               <div className="space-y-4">
+                {missingLocatedNode && <p role="status" className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground [overflow-wrap:anywhere]">
+                  节点「{missingLocatedNode}」尚无执行记录；不会推断输入、输出或执行结果。
+                </p>}
                 <SubworkflowProvider flowId={flowId}>
                 <NodeExecutionList
                   readOnly={readOnly}
@@ -309,6 +335,7 @@ function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false, h
                   nodes={nodes}
                   onSelectNode={handleNodeSelect}
                   selectedNodeId={selectedNodeId ?? undefined}
+                  locateRequest={locateRequest}
                   workflowSpec={workflowSpec}
                   onAnalyze={handleAnalyze}
                   onApproval={(node) => {
@@ -328,30 +355,6 @@ function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false, h
                 />
                 </SubworkflowProvider>
               </div>
-            )}
-
-            {activeTab === 'logs' && (
-              <SimpleRunLogsPanel flowId={flowId ?? ''} nodes={nodes.map((n) => ({ node_id: n.node_id, node_title: n.node_title }))} />
-            )}
-
-            {activeTab === 'dag' && readOnly && snapshotError && (
-              <p role="status" className="text-sm text-muted-foreground">无法确认本次运行的历史 DAG：可信运行快照不可用或无权访问。</p>
-            )}
-            {activeTab === 'dag' && readOnly && !snapshotError && !specNodes && (
-              <p role="status" className="text-sm text-muted-foreground">正在加载本次运行的静态 DAG 快照…</p>
-            )}
-            {activeTab === 'dag' && (!readOnly || (!snapshotError && !!specNodes)) && (
-              <>
-                {readOnly && <p className="mb-2 text-xs text-muted-foreground">静态 DAG，来自运行登记时绑定的快照，不含动态节点；尚未验证其与引擎实际执行配置一致。</p>}
-                <RunDagView
-                  specNodes={specNodes ?? []}
-                  nodeStatusMap={nodeStatusMap}
-                  onNodeClick={(nodeId) => {
-                    setSelectedNodeId(nodeId)
-                    setActiveTab('nodes')
-                  }}
-                />
-              </>
             )}
 
             {activeTab === 'archive' && (
@@ -427,8 +430,8 @@ function EvolutionAnalysisPanel({
   }
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white px-4 py-3.5" aria-label="进化分析">
-      <div className="flex items-start justify-between gap-4">
+    <section className="min-w-0 rounded-2xl border border-border bg-card px-5 py-4 shadow-sm" aria-label="进化分析">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-sm font-medium text-slate-900">进化分析</h3>
@@ -446,7 +449,7 @@ function EvolutionAnalysisPanel({
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex max-w-full flex-wrap items-center gap-2">
           {!readOnly && analyzing && (
             <button
               type="button"
@@ -461,7 +464,7 @@ function EvolutionAnalysisPanel({
             type="button"
             onClick={onReanalyze}
             disabled={analyzing}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-60 ${flowSuggestions.length > 0 ? 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-60 ${flowSuggestions.length > 0 ? 'border border-border bg-card text-muted-foreground hover:bg-muted' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
           >
             {analyzing ? '分析中...' : hasAnalyzed ? '重新分析' : '分析'}
           </button>}
@@ -473,7 +476,7 @@ function EvolutionAnalysisPanel({
           {!readOnly && flowSuggestions.length > 0 && !analysis && (
             <Link
               to={evolutionUrl()}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+              className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
             >
               查看建议
             </Link>
@@ -537,7 +540,7 @@ function EvolutionAnalysisPanel({
             renderOptimizeLink={(diagnosis) => !readOnly && diagnosis.proposal ? (
               <Link
                 to={evolutionUrl(diagnosis)}
-                className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
               >
                 查看建议
               </Link>
@@ -556,11 +559,13 @@ function EvolutionAnalysisPanel({
 function TabButton({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
   return (
     <button
+      type="button"
+      aria-current={active ? 'page' : undefined}
       onClick={onClick}
-      className={`border-b-2 px-1 py-3 text-sm font-medium transition-colors ${
+      className={`rounded-t-sm border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
         active
-          ? 'border-blue-600 text-blue-600'
-          : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+          ? 'border-primary text-primary'
+          : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'
       }`}
     >
       {label}

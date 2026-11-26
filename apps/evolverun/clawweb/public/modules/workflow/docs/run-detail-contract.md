@@ -150,10 +150,12 @@ Regression coverage lives in
 ## Workbench run archive presentation
 
 The archive panel is a read-only presentation of the existing run-archive
-response. It retains availability for `failed`, `cancelled`, and `timeout`
-runs; other or missing run statuses show a neutral availability message without
-requesting an archive. It does not introduce an endpoint, analysis action, approval decision,
-patch application, or deployment operation. Its five sections are overview,
+response. Every existing authorized run can request its archive, regardless of
+runtime status (including active, successful, skipped, and unknown statuses).
+The frontend does not use run status as an archive-availability gate; loading,
+errors, partial data, and empty data retain their actual collection meaning.
+It does not introduce an endpoint, analysis action, approval decision, patch
+application, or deployment operation. Its five sections are overview,
 process, error details, AI diagnosis, and suggested YAML. Navigation and detail
 share the main row; archive metadata occupies a separate footer below it.
 
@@ -170,12 +172,52 @@ share the main row; archive metadata occupies a separate footer below it.
   shows supplied operations; it does not fabricate a before/after YAML diff
   without the original document. Copy and download operate locally and report
   failure without claiming that a patch was applied.
-- Both log entries remain: the run detail's top-level **日志** view uses
-  timeline events with source `run_log`; the archive's **运行过程 → 运行日志**
-  view uses the archive response's `runLogs`. These may overlap. Neither entry
-  implies a distinct live stream or immutable snapshot contract.
+- The run detail has one logs entry: **运行档案 → 运行过程 → 运行日志**,
+  using the archive response's `runLogs`. The redundant top-level **日志** tab
+  is removed, not the shared timeline component or its other consumers. The
+  archive is not a distinct live stream or an immutable snapshot contract.
+- Active runs (`pending`, `queued`, `running`, `waiting`, `blocked`, and
+  `postActionsRunning`) explicitly describe their archive as currently collected
+  evidence that may change. A manual read-only refresh uses the existing query,
+  keeps the selected section, prevents repeated clicks while fetching, and
+  retains previous data with an error on refresh failure. No automatic analysis
+  or mutation is triggered.
 - Missing or invalid timestamps and durations render as unavailable rather than
   invalid dates; a recorded zero duration remains zero. Empty collections and
   filters with no matches provide an explanation instead of a blank pane.
 
 Regression coverage lives in `web/components/__tests__/RunArchivePanel*.test.tsx`.
+
+
+## Workbench run-detail layout and node location
+
+The main detail keeps the complete run summary, followed by an always-visible
+DAG above intervention, approval records, and evolution analysis. The remaining
+bottom views are **节点** and **运行档案**. Intervention/session content, approval
+cards and their existing detail/actions, analysis progress/results/actions,
+node details, and subworkflow views retain their original data and permission
+conditions. The top approval action does not replace the middle approval cards:
+records remain visible whenever the existing approval query returns them,
+including processed approvals in completed runs.
+
+A failed live workflow-definition read shows an explicit error and a read-only
+retry, not a permanent loading indicator or a topology inferred from executions.
+
+DAG activation switches to **节点**, expands the matching execution record, and
+requests focus, centered scrolling, and visual emphasis scoped to that list
+instance. Repeated activation of the same node locates it again without
+collapsing it. Ordinary row expansion does not trigger a DAG scroll request.
+Keyboard focus within the DAG must bring an off-canvas node into view without
+changing the user's zoom or activating the node; Enter/Space activate it once.
+A definition node without a collected execution record produces an explicit
+unavailable message, not an invented record or input/output. Parent and nested
+child lists with equal node IDs must never target one another.
+
+Historical child DAGs retain the trusted run-snapshot boundary: unavailable,
+denied, or revalidating snapshots do not fall back to the current mutable
+workflow definition. All child read-only protections remain in force.
+
+Layout and integration regressions live in
+`web/pages/__tests__/RunDetailLayout.test.tsx`,
+`web/pages/__tests__/RunDetailHistoricalDag.test.tsx`, and the corresponding
+DAG/node-location component tests. No HTTP schema or storage change is required.

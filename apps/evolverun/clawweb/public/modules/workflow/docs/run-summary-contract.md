@@ -82,3 +82,17 @@ authorized ancestors, same-workflow cross-Bot/owner denials, read failures, and
 credential exclusion. Component and utility tests cover legacy/internal-state guards, semantic surfaces,
 encoded lineage navigation, read-only actions, and cached-navigation
 confirmation reset.
+
+
+## Summary presentation
+
+The header groups the existing fields into run identity, execution context,
+launch input/lineage, and execution metrics. This is a layout change, not a
+projection or authorization change. Workflow/version, creator, originating Bot
+and plugin version, runtime metadata, traffic marker (`env`), independent tag,
+start/duration, Token usage, and success/failure/total progress remain visible
+under the same data conditions. Skipped nodes are not painted as successful.
+Input text and stored original launch parameters remain independent readable
+previews; authorized parent and root links remain independently available.
+The layout preserves all existing action conditions, read-only rules, and
+flow-ID-scoped destructive confirmations.

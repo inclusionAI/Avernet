@@ -82,25 +82,50 @@ describe('RunArchivePanel navigation and honest summary', () => {
     expect(screen.queryByText(/^(?:本次)?运行(?:已)?成功[。！!]?$/)).not.toBeInTheDocument()
   })
 
-  it.each([
-    ['succeeded', 'loading', /成功|succeeded/i],
-    ['succeeded', 'error', /成功|succeeded/i],
-    ['running', 'loading', /运行中|执行中|running/i],
-    ['running', 'error', /运行中|执行中|running/i],
-    [undefined, 'loading', /未记录|未知|未提供/],
-    [undefined, 'error', /未记录|未知|未提供/],
-  ] as const)('keeps ineligible status %s neutral even with a %s hook result', (runStatus, hookState, statusLabel) => {
-    useRunArchive.mockReturnValue({
-      data: undefined, isLoading: hookState === 'loading', isError: hookState === 'error',
-      error: hookState === 'error' ? new Error('Synthetic archive not applicable') : null,
-    })
-    const { container } = render(<RunArchivePanel flowId={ARCHIVE_FLOW_ID} runStatus={runStatus} />)
-    expect(useRunArchive).not.toHaveBeenCalled()
-    expect(screen.queryByRole('navigation', { name: /运行档案分区/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(screen.queryByText(/(?:加载|正在加载).*运行档案|加载.*(?:失败|错误)|Synthetic archive not applicable/)).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /当前状态.*(?:不提供|不支持|无).*档案|(?:不提供|不支持).*运行档案/ })).toBeVisible()
-    expect(container).toHaveTextContent(statusLabel)
+  it.each(['succeeded', 'running', 'waiting', 'pending', 'queued', 'blocked', 'postActionsRunning', 'failed', 'cancelled', 'timeout', 'skipped', 'custom-state', undefined, null])('loads archive for status %s without a frontend status gate', runStatus => {
+    renderArchive(createArchiveFixture(), runStatus)
+    expect(useRunArchive).toHaveBeenCalledWith(ARCHIVE_FLOW_ID)
+    expect(screen.getByRole('navigation', { name: /运行档案分区/ })).toBeVisible()
+    expect(screen.queryByText(/当前状态不提供运行档案/)).not.toBeInTheDocument()
+  })
+
+  it.each(['succeeded', 'running', undefined] as const)('shows real loading and errors for status %s', runStatus => {
+    useRunArchive.mockReturnValue({ data: undefined, isLoading: true, isError: false, refetch: vi.fn() })
+    const view = render(<RunArchivePanel flowId={ARCHIVE_FLOW_ID} runStatus={runStatus} />)
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载运行档案')
+    useRunArchive.mockReturnValue({ data: undefined, isLoading: false, isError: true, error: new Error('Synthetic archive unavailable'), refetch: vi.fn() })
+    view.rerender(<RunArchivePanel flowId={ARCHIVE_FLOW_ID} runStatus={runStatus} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('Synthetic archive unavailable')
+    expect(screen.getByRole('button', { name: '重新加载档案' })).toBeVisible()
+  })
+
+  it.each(['pending', 'queued', 'running', 'waiting', 'blocked', 'postActionsRunning'])('explains that %s evidence may keep changing', runStatus => {
+    renderArchive(createArchiveFixture(), runStatus)
+    expect(screen.getByRole('status')).toHaveTextContent(/运行尚未结束.*采集完成不代表运行结束/)
+  })
+
+  it('uses the archived flow status when the parent has not supplied one', () => {
+    render(<RunArchivePanel flowId={ARCHIVE_FLOW_ID} />)
+    expect(screen.getByRole('navigation', { name: /运行档案分区/ })).toBeVisible()
+    expect(screen.getByText(/^运行状态$/).parentElement).toHaveTextContent(/失败/)
+  })
+
+  it('refreshes read-only evidence, retains navigation and prevents repeated clicks while fetching', async () => {
+    const refetch = vi.fn()
+    const user = userEvent.setup()
+    useRunArchive.mockReturnValue({ data: createArchiveFixture(), isLoading: false, isFetching: false, isError: false, refetch })
+    const view = render(<RunArchivePanel flowId={ARCHIVE_FLOW_ID} runStatus="running" />)
+    await user.click(screen.getByRole('button', { name: '运行过程', exact: true }))
+    await user.click(screen.getByRole('button', { name: '刷新运行档案' }))
+    expect(refetch).toHaveBeenCalledTimes(1)
+    useRunArchive.mockReturnValue({ data: createArchiveFixture(), isLoading: false, isFetching: true, isError: false, refetch })
+    view.rerender(<RunArchivePanel flowId={ARCHIVE_FLOW_ID} runStatus="running" />)
+    expect(screen.getByRole('button', { name: '刷新运行档案' })).toBeDisabled()
+    expect(screen.getByRole('heading', { level: 2, name: '运行过程' })).toBeVisible()
+    useRunArchive.mockReturnValue({ data: createArchiveFixture(), isLoading: false, isFetching: false, isError: true, refetch })
+    view.rerender(<RunArchivePanel flowId={ARCHIVE_FLOW_ID} runStatus="running" />)
+    expect(screen.getByRole('alert')).toHaveTextContent('保留上次已加载数据')
+    expect(screen.getByRole('heading', { level: 2, name: '运行过程' })).toBeVisible()
   })
 
   it('treats zero collected failed nodes as missing evidence, and offers a usable next step', async () => {
