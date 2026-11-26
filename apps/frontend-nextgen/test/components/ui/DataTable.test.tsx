@@ -133,6 +133,27 @@ describe('DataTable 行交互与键盘导航', () => {
     expect(dataRows()[0]).not.toHaveAttribute('role');
     expect(screen.getAllByRole('row')).toHaveLength(3);
   });
+
+  it('行内拖选文字未清空时,click 不触发行跳转(如选中 BotId 复制后松开)', () => {
+    const onRowClick = jest.fn();
+    render(<DataTable columns={columns} rows={rows} getRowKey={getRowKey} onRowClick={onRowClick} />);
+
+    const firstRow = dataRows()[0];
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(firstRow);
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    fireEvent.click(firstRow);
+    expect(onRowClick).not.toHaveBeenCalled();
+
+    // 清空选区后 click 恢复正常跳转
+    selection.removeAllRanges();
+    fireEvent.click(firstRow);
+    expect(onRowClick).toHaveBeenCalledWith(rows[0]);
+    selection.removeAllRanges();
+  });
 });
 
 describe('DataTable 列对齐', () => {

@@ -1,12 +1,14 @@
 import { BotEditLockAction } from '@/components/BotWorkshop/BotCard/BotEditLockAction';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { IconButton } from '@/components/ui/IconButton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { engineVersionTooltip, engineVersionUiState } from '@/domain/botEngineVersion';
 import type { BotEngineVersionState } from '@/hooks/useBotEngineVersions';
 import type { BotDomain } from '@/services/botWorkshop';
 import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
+import { Check, Copy } from 'lucide-react';
 import React from 'react';
 
 export interface BotInfoCellProps {
@@ -33,6 +35,19 @@ const BotInfoCell: React.FC<BotInfoCellProps> = ({
   React.useEffect(() => {
     if (highlighted) cell.current?.scrollIntoView?.({ block: 'center' });
   }, [highlighted]);
+  const [copied, setCopied] = React.useState(false);
+  // 反馈回退的定时器在卸载时清掉，避免卸载后 setState 与悬挂定时器
+  const copiedResetTimer = React.useRef<number | undefined>(undefined);
+  React.useEffect(() => () => window.clearTimeout(copiedResetTimer.current), []);
+  const copyBotId = React.useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(bot.entityKey);
+      setCopied(true);
+      copiedResetTimer.current = window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // 复制失败不打断列表浏览，用户仍可选中 BotId 手动复制
+    }
+  }, [bot.entityKey]);
   const avatarUrl = bot.avatarUrl || generateBotAvatar(bot.id || bot.name);
   const engineUpdatable =
     engineVersionState?.kind === 'ready' && engineVersionUiState(engineVersionState.observation) === 'updatable';
@@ -91,6 +106,23 @@ const BotInfoCell: React.FC<BotInfoCellProps> = ({
               </TooltipTrigger>
               <TooltipContent>{bot.entityKey}</TooltipContent>
             </Tooltip>
+            <IconButton
+              label={copied ? 'BotId 已复制' : '复制 BotId'}
+              size="sm"
+              className="h-5 w-5 text-muted-foreground"
+              aria-label={copied ? 'BotId 已复制' : `复制 BotId：${bot.entityKey}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                void copyBotId();
+              }}
+              icon={
+                copied ? (
+                  <Check aria-hidden className="size-3 text-success" />
+                ) : (
+                  <Copy aria-hidden className="size-3" />
+                )
+              }
+            />
             <span className="inline-flex shrink-0">
               <BotEditLockAction bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />
             </span>
