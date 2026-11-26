@@ -4,7 +4,7 @@ import { TaskEscortDemoPanel } from '@/components/Workspace/TaskEscortDemo';
 import { INITIAL_NODES } from '@/components/Workspace/TaskEscortDemo/model';
 import { serializeWorkflow } from '@/components/Workspace/TaskEscortDemo/yaml';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 
@@ -46,7 +46,7 @@ it('uses the stable drawer API, simulated metrics and keyboard-navigable primary
   const dialog = screen.getByRole('dialog', { name: /任务护航/ });
   expect(dialog).toHaveAttribute('id', 'task-escort-demo-panel');
   expect(dialog).not.toHaveAttribute('aria-modal', 'true');
-  expect(screen.getByText(/全部为模拟数据/)).toBeInTheDocument();
+  expect(dialog).toHaveAccessibleDescription('演示沙盒 · 所有运行记录、指标与节点状态均为虚构');
   expect(screen.getByRole('button', { name: '关闭任务护航' })).toHaveFocus();
   expect(screen.getByRole('region', { name: '模拟运行指标' })).toHaveTextContent('80.0%');
   const tabs = within(screen.getByRole('group', { name: '任务护航视图' }));
@@ -58,6 +58,139 @@ it('uses the stable drawer API, simulated metrics and keyboard-navigable primary
   await user.click(tabs.getByRole('button', { name: '运行概览' }));
   await user.click(screen.getByRole('button', { name: '节点分析' }));
   expect(screen.getByText('2640 ms')).toBeInTheDocument();
+});
+
+it('removes only the requested header and selector labels in overview and editor, with valid dialog references', async () => {
+  const warn = jest.spyOn(console, 'warn');
+  try {
+    const user = await openDemo();
+    const dialog = screen.getByRole('dialog', { name: '任务护航' });
+    const assertChrome = () => {
+      const header = within(dialog.querySelector('header')!);
+      expect(header.getByRole('heading', { name: '任务护航' })).toBeInTheDocument();
+      expect(header.queryByText('DEMO')).not.toBeInTheDocument();
+      expect(screen.queryByText('全部为模拟数据 · 不调用后台，不触发真实运行或部署')).not.toBeInTheDocument();
+      expect(screen.queryByText('本地交互演示 · 与真实工作流隔离')).not.toBeInTheDocument();
+      expect(screen.queryByText('5 节点 · 示意编排')).not.toBeInTheDocument();
+      const selector = screen.getByRole('combobox', { name: '切换工作流' });
+      expect(selector).toHaveTextContent('OneModel 攻防工作流');
+      expect(selector).toHaveTextContent('onemodel-risk-defense');
+      expect(selector.parentElement).not.toHaveTextContent('v0.8.2-demo');
+      expect(screen.getByText('当前 Bot · 演示 Bot')).toBeInTheDocument();
+      expect(dialog).toHaveAccessibleDescription('演示沙盒 · 所有运行记录、指标与节点状态均为虚构');
+      for (const attribute of ['aria-labelledby', 'aria-describedby']) {
+        const ids = dialog.getAttribute(attribute)?.split(/\s+/);
+        expect(ids?.length).toBeGreaterThan(0);
+        ids?.forEach((id) => expect(document.getElementById(id)).toBeInTheDocument());
+      }
+    };
+    assertChrome();
+    expect(screen.getByText('演示快照 · 2026-11-18 14:30（模拟，非实时）')).toBeInTheDocument();
+    expect(screen.getByText('仅模拟数据 · 列表筛选不影响概览')).toBeInTheDocument();
+    expect(screen.getByText('仅展示内置 DEMO 记录，不读取真实运行历史。')).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: '模拟运行记录' })).toHaveTextContent('v0.8.2-demo');
+    await user.click(screen.getByRole('combobox', { name: '切换工作流' }));
+    expect(screen.getByRole('option', { name: /OneModel 攻防工作流/ })).toBeInTheDocument();
+    expect(screen.getByText('模拟权限 · 仅展示可查看项')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: '编辑器' }));
+    assertChrome();
+    expect(screen.getByText('示意编排 · 5 节点精简示例，并非线上完整工作流复刻')).toBeInTheDocument();
+    expect(screen.getByText(/不会运行、部署或发送任何数据/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'YAML' }));
+    expect(screen.getByRole('textbox', { name: '工作流 YAML · DEMO' })).toBeInTheDocument();
+    expect(warn.mock.calls.flat().join(' ')).not.toMatch(/Missing.*Description|aria-describedby/);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+function expectDedicatedRunDetail(runId: string) {
+  const main = screen.getByRole('main');
+  const detail = within(main).getByRole('region', { name: '模拟运行详情' });
+  expect(main.firstElementChild).toBe(detail);
+  expect(main.scrollTop).toBe(0);
+  const title = within(detail).getByRole('heading', { name: `运行详情 · ${runId}` });
+  expect(title).toHaveFocus();
+  expect(screen.queryByRole('heading', { name: '工作流运行概览' })).not.toBeInTheDocument();
+  for (const name of ['模拟运行指标', '模拟实时状态分布', '模拟运行趋势', '运行风险摘要']) {
+    expect(screen.queryByRole('region', { name })).not.toBeInTheDocument();
+  }
+  expect(screen.queryByRole('group', { name: '运行分析视图' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('table', { name: '模拟运行记录' })).not.toBeInTheDocument();
+  expect(within(detail).getByText('DEMO')).toBeInTheDocument();
+  return detail;
+}
+
+it.each([
+  {
+    target: 'RUN ID',
+    buttonName: 'demo-run-1011',
+    runId: 'demo-run-1011',
+    keyword: '1011',
+    status: '等待中',
+  },
+  {
+    target: 'right 查看',
+    buttonName: '查看运行 demo-run-1006',
+    runId: 'demo-run-1006',
+    keyword: '1006',
+    status: '失败',
+  },
+])('opens $target as a focused, top-level detail for the exact run and returns to the filtered list', async ({
+  buttonName, runId, keyword, status,
+}) => {
+  const user = await openDemo();
+  await user.click(screen.getByRole('combobox', { name: '概览时间范围' }));
+  await user.click(screen.getByRole('option', { name: '最近 7 天' }));
+  await user.click(screen.getByRole('combobox', { name: '运行状态筛选' }));
+  await user.click(screen.getByRole('option', { name: status }));
+  await user.type(screen.getByRole('textbox', { name: '运行关键词' }), keyword);
+  const metrics = screen.getByRole('region', { name: '模拟运行指标' }).textContent;
+  const table = within(screen.getByRole('table', { name: '模拟运行记录' }));
+  expect(table.getByRole('button', { name: runId })).not.toBe(
+    table.getByRole('button', { name: `查看运行 ${runId}` }),
+  );
+  screen.getByRole('main').scrollTop = 480;
+  await user.click(table.getByRole('button', { name: buttonName }));
+  const detail = expectDedicatedRunDetail(runId);
+  await user.click(within(detail).getByRole('button', { name: '返回列表' }));
+  expect(screen.queryByRole('region', { name: '模拟运行详情' })).not.toBeInTheDocument();
+  expect(screen.getByRole('combobox', { name: '概览时间范围' })).toHaveTextContent('最近 7 天');
+  expect(screen.getByRole('combobox', { name: '运行状态筛选' })).toHaveTextContent(status);
+  expect(screen.getByRole('textbox', { name: '运行关键词' })).toHaveValue(keyword);
+  const restored = within(screen.getByRole('table', { name: '模拟运行记录' }));
+  expect(restored.getAllByRole('row')).toHaveLength(2);
+  expect(restored.getByRole('button', { name: runId })).toBeInTheDocument();
+  expect(screen.getByText('1 条演示记录')).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: '模拟运行指标' }).textContent).toBe(metrics);
+});
+
+it('opens the RUN ID button with the keyboard', async () => {
+  const user = await openDemo();
+  act(() => screen.getByRole('button', { name: 'demo-run-1012' }).focus());
+  await user.keyboard('{Enter}');
+  const detail = expectDedicatedRunDetail('demo-run-1012');
+  expect(detail).toHaveTextContent('此执行路径仅用于展示运行详情，不代表真实执行结果');
+});
+
+it('opens the risk summary run in the same dedicated detail, independently of list filters', async () => {
+  const user = await openDemo();
+  await user.click(screen.getByRole('combobox', { name: '运行状态筛选' }));
+  await user.click(screen.getByRole('option', { name: '失败' }));
+  await user.type(screen.getByRole('textbox', { name: '运行关键词' }), '1006');
+  await user.click(screen.getByRole('button', { name: '节点分析' }));
+  screen.getByRole('main').scrollTop = 360;
+  await user.click(
+    within(screen.getByRole('region', { name: '运行风险摘要' })).getByRole('button', { name: '查看运行' }),
+  );
+  const detail = expectDedicatedRunDetail('demo-run-1011');
+  expect(detail).toHaveTextContent('不会通知真实审批人');
+  await user.click(within(detail).getByRole('button', { name: '返回列表' }));
+  expect(screen.getByRole('combobox', { name: '运行状态筛选' })).toHaveTextContent('失败');
+  expect(screen.getByRole('textbox', { name: '运行关键词' })).toHaveValue('1006');
+  expect(screen.getByRole('table', { name: '模拟运行记录' })).toHaveTextContent('demo-run-1006');
+  expect(screen.getByRole('button', { name: '运行列表' })).toHaveAttribute('aria-pressed', 'true');
 });
 
 it('filters status/keywords without changing overview metrics and handles an empty result', async () => {
@@ -94,11 +227,14 @@ it('uses terminal-only success rates and includes failed, terminated and cancell
 it('opens a run detail then locates its node in the editor', async () => {
   const user = await openDemo();
   await user.click(screen.getByRole('button', { name: '查看运行 demo-run-1011' }));
-  const detail = screen.getByRole('region', { name: '模拟运行详情' });
+  const detail = expectDedicatedRunDetail('demo-run-1011');
   expect(detail).toHaveTextContent('不会通知真实审批人');
   await user.click(within(detail).getByRole('button', { name: '在编辑器定位人工审批' }));
   expect(screen.getByRole('textbox', { name: '节点名称' })).toHaveValue('人工审批');
   expect(screen.getByRole('button', { name: '选择节点 人工审批' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: '选择节点 人工审批' })).toHaveFocus();
+  expect(screen.getByRole('main').scrollTop).toBe(0);
+  expect(screen.queryByRole('region', { name: '模拟运行详情' })).not.toBeInTheDocument();
 });
 
 it('supports risk-to-editor navigation, node search, canvas zoom and synchronized draft editing', async () => {
