@@ -32,6 +32,7 @@ REQUIRED_FILES = (
     "html/baas/index.html",
     "bcs/e2e.log",
     "bcs/oauth_e2e.json",
+    "bcs/agent_invoke_e2e.json",
     "bcs/cobertura.xml",
     "bcs/coverage.txt",
     "bcs/summary.json",
@@ -208,12 +209,41 @@ def validate_oauth_e2e(reports_dir: Path, errors: list[str]) -> None:
         errors.append("BCS OAuth E2E did not exercise the external provider boundary")
 
 
+def validate_agent_invoke_e2e(reports_dir: Path, errors: list[str]) -> None:
+    report = load_json(reports_dir / "bcs/agent_invoke_e2e.json", errors)
+    if report.get("status") != "passed" or report.get("process_exit") != 0:
+        errors.append("BCS AgentInvoke E2E did not pass and shut down cleanly")
+    required = {"startup-isolation", "lifecycle:api", "lifecycle:openapi",
+                "authentication-validation:api", "authentication-validation:openapi",
+                "governance", "active-pending-quotas", "queued-revoke-and-dispatch"}
+    scenarios = report.get("scenarios")
+    if not isinstance(scenarios, list) or not required.issubset(
+        s for s in scenarios if isinstance(s, str)
+    ):
+        errors.append("BCS AgentInvoke E2E missing required live-process scenarios")
+    calls = report.get("peer_deliveries")
+    if not isinstance(calls, int) or isinstance(calls, bool) or calls < 5:
+        errors.append("BCS AgentInvoke E2E did not exercise real A2A peer deliveries")
+    operations = report.get("operations")
+    if not isinstance(operations, list):
+        operations = []
+    observed = {(o.get("method"), o.get("path"), o.get("status"))
+                for o in operations if isinstance(o, dict)}
+    for prefix in ("/api/v1", "/openapi/v1"):
+        for method, suffix, status in [("POST", "/grants", 201), ("POST", "/requests", 201),
+                                      ("GET", "/degrees", 200), ("GET", "/audit", 200),
+                                      ("POST", "/invocations", 202), ("POST", "/invocations", 403)]:
+            if (method, prefix + "/collaboration/agent-invoke" + suffix, status) not in observed:
+                errors.append(f"BCS AgentInvoke E2E missing {prefix} {method} {suffix} {status}")
+
+
 def validate_bcs_artifacts(
     reports_dir: Path,
     args: argparse.Namespace,
     errors: list[str],
 ) -> tuple[float, float, float, float]:
     validate_oauth_e2e(reports_dir, errors)
+    validate_agent_invoke_e2e(reports_dir, errors)
     bcs_dir = reports_dir / "bcs"
     summary = load_json(bcs_dir / "summary.json", errors)
     totals = get_nested(summary, ("data",))

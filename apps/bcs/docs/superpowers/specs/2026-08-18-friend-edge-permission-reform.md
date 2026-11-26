@@ -3673,6 +3673,15 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - 本次接入修订的本地验证：`bcs-edge-permission-store` 完整 nextest 为 231 passed / 2 ignored（既有 MySQL suites，本机未执行）；CI tooling 68/68 通过；现有 `authority_mysql` 目标编译检查通过。新增 populated-schema aggregate 内包含全部 31 个争用场景，仍不代替真实 MySQL 或 E2E。
 - 已核实提交 `55b3876818` 的 Singlebox run `45723053416` 因增量覆盖失败：308/4937 = 6.24%，要求 >65%；总体行 60.18%（要求 >=54%）、方法 54.36%（要求 >=48%）、HTTP endpoint 183/183 和 CLI 67/67 均达标。新增 AgentInvoke 管理/查询/事务/策略路径大多零命中，不能用单测覆盖率或旧 SHA 单测成功代替。需补真实 HTTP→application→SQL→A2A fake-target 故事及隔离的可信 synthetic producer；不降阈值、不从生产分母剔除代码、不把 domain 单测 profiles 混入 E2E。
 
+### public-local 可信 synthetic publisher 与真实进程 E2E（完整 Singlebox 仍待远端）
+
+- 仅在已有 required-features `bcs-caller-e2e` companion 中链接 `tests/agent_invoke_e2e/host.rs`；普通 `bcs` 二进制没有该 CLI/发布路由，也不改变默认 `None`/关闭态行为。fixture 启动要求 actual local env、loopback bind、SQLite、显式非零 feed 端口与每进程随机 capability；非 local、非 loopback、零端口、缺失/短 capability 五种启动均在创建 DB 前拒绝。发布 HTTP 只绑定 loopback，并验证独立于 Gateway principal 的随机 capability。
+- fixture 使用真实 SQL `BcsServer::new_with_infrastructure` composition root；facts/delegations/gates 通过既有可信 store publication 契约写入同一 DB。仅这三个外部可信边界可被 synthetic fixture 控制；管理命令、查询和 Agent 调用全部由独立 Python 进程经真实 HTTP 发起，HS256 principal 经过真实 verifier，Bot 来自正常 Provider registration，目标是公开 A2A HTTP+JSON/SSE fake peer。没有任意 SQL 写接口、直接 Core/application 调用、导入 unit contract harness 或将单测 profiles 混入 E2E。
+- public-local loopback 实跑为 **319 次 HTTP/feed 断言、5 次真实 A2A peer 派发**，覆盖两个 V1 前缀的 grant/request/approve/reject/cancel/revoke、历史回执/重放冲突、exact/list/degree/audit/keyset、单向源/目标权限、签名 Bot 身份、错误 code/tenant/未认证/自报资格拒绝、默认关闭、资格失效/恢复不复活、显式治理委托/撤销、active/pending 配额。另通过真实管理 API 暂停 Direct queue，观察已入队，再确认 revoke 后恢复调度得到持久化失败终态且 peer 无新请求；正向 queue 派发也真实执行。
+- 接入既有 caller companion coverage wrapper，复用既有 instrumented binary/profile pool 与 join-before-aggregation 顺序，不新增 workflow、容器、数据库或生产 feature flag。单独 `agent_invoke_e2e.json` 在启动前先置 failed，随 canonical Singlebox artifacts 复制/索引；verifier 要求两个前缀的真实成功/拒绝操作、完整场景、peer 派发与干净退出。缺失/stale/空报告、漏镜像前缀或无 peer evidence 必须失败，不仅检查文件存在。
+- 本轮验证：product/companion `cargo check` 与 companion build 通过；上述真实 loopback 故事及其 artifact verifier 通过；直接受影响的 companion/parallel-pipeline/artifact-verifier 回归 19/19 通过。Singlebox shell 的 10 个 stub 场景在本机以系统 Python 和物理临时路径适配后通过（未启动产品栈）；原入口直接运行受缺失 backend venv/`/var` 与 `/private/var` 别名影响，未为此修改生产脚本。完整 CI tooling sweep 为 303 passed、146 subtests passed、2 failed：未修改的 refactory workflow 触发分支断言，以及读取已不存在的 `singlebox/ci/pre_push.sh` 的旧路径断言。明确记录，不能宣称完整工具链全绿。
+- 这里的 local loopback E2E 成功不等于完整 Singlebox gate 通过。提交 `5d6d42ec0e` 的 BCS job `139604943526`（run `45728632629`）已真实通过复用 MySQL schema 的全部场景，包括 `deterministic-races scenarios=31` 与 `shared-schema legacy-rows=unchanged`；同 SHA Singlebox run `45728632599` 仍因 321/4991 = 6.43%（要求 >65%）失败。新故事的完整 changed-line 分母/命中和阈值必须在新提交的远端重新测量；不降阈值、不排除生产实现、不把这次 local 故事当生产 inventory/capability 或宿主验收。5.5/4.5 继续保留未完成项。
+
 ### 原 27 项研发与验收跟踪（保留完整范围）
 
 将原 change 的 27 项跟踪合并到本 spec，不恢复独立 change 目录。仅在整项有实现与对应证据时勾选，不把 SQL core、静态检查或旧 SHA 的绿灯折算成 HTTP/host/E2E 完成。当前 15/27 项已有实现与对应回归证据；剩余项包含未完研发和真实 MySQL、并发、宿主、E2E/发布验收，不是都已转为运维事项。每次提交的具体命令、分母和新 SHA checks 记录在 PR Validation，不能继承前一 SHA 的结论。
@@ -3680,7 +3689,7 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 #### 1. 评审与启用前置
 
 - [ ] 1.1 完整审批矩阵/NULL-only/单向非传递范围评审记录；命名已按用户要求改为 AgentInvoke，但不将命名修正等同于其余评审。
-- [ ] 1.2 确认 trusted inventory、binding/eligibility generation 与新鲜度/失效契约，以及 public local fake 和宿主 provider owners；端口/关闭态 durable feed 已有，生产 producer/capability 尚缺。
+- [ ] 1.2 确认 trusted inventory、binding/eligibility generation 与新鲜度/失效契约，以及 public local fake 和宿主 provider owners；端口/关闭态 durable feed 和隔离 synthetic publisher 已有，生产 producer/capability 与 owners 验收尚缺。
 - [ ] 1.3 完整评审域隔离、配额、审计留存与 HTTP 暴露面；当前 UNIQUE(env) 独占物理 namespace、显式有限限额已实现，不能声称所有部署场景和留存策略已确认。
 - [x] 1.4 实施时 fetch/note authoritative origin/dev、feature HEAD 与实际 reader/kind/route/test driver 基线，不将 feature 或旧 SHA 测试当成生产/current-head 证明。
 
@@ -3707,7 +3716,7 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - [x] 4.2 request/grant/approve/reject/cancel/revoke、receipt/state conflict/error 映射已由 application + 真实 SQLite store 实现；资格预读不持写事务锁，unknown commit 恢复无第二次 mutation。HTTP 挂载/真实 MySQL分别归 4.3/3.5。
 - [ ] 4.3 独立 routes/DTO/OpenAPI 与逐端点验证/响应/鉴权已有真实 V1 router 实现；SDK 尚未补齐，整项不勾选，HTTP 默认不启用生产能力。
 - [x] 4.4 统一 operation-aware interceptor hook 已接入真实 Direct A2A inline/queue 与最终 before_send；exact operation/originator/current qualification generation、Provider 上界和旧 friend/public/organization 隔离有真实 SQL→scheduler/transport 及撤权回归。可信外部 ingress 与生产 composition 仍分别归 4.1/4.5，不以内部入口代替。
-- [ ] 4.5 SQL composition root 的显式 extension/validated limits、共享 SQL/interceptor/HTTP 与默认关闭挂载已补；真实/假资格 producer、consumer capability 和宿主验收仍需完成，不伪造 host capability 或启用生产 writer。
+- [ ] 4.5 SQL composition root 的显式 extension/validated limits、共享 SQL/interceptor/HTTP 与默认关闭挂载已补；隔离 companion 的假资格 producer 与真实 loopback HTTP/SQL/A2A 故事已补，真实资格 producer、consumer capability 和宿主验收仍需完成，不伪造 host capability 或启用生产 writer。
 
 #### 5. 分层回归与发布证据
 
@@ -3715,7 +3724,7 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - [ ] 5.2 完整管理/运行 consumer 与 repo conformance、Memory/SQLite/真实 MySQL 同语义及实际 port 命中；已有共享 lifecycle/facts/snapshot 和 native DB outcome harness，query consumer 已有真实 SQLite，真实 MySQL 与完整其余 consumer 验收仍需补齐。
 - [x] 5.3 每个新 GET/create/request/approve/reject/cancel/revoke/list/degree（及 audit）endpoint 独立 HTTP contract，覆盖 401/403/404/400/409/429/503 与真实 application port hit；真实 SQLite 路由场景和完整 adapter legacy 回归已实现。recording error injection 仅证明 delivery 映射，不代替 5.4/5.5。
 - [x] 5.4 真实 DB + Notify/barrier 的 approve/cancel、approve/revoke、旧 key/regrant、双向配额/pending、同 key 和六类 command rollback/commit-unknown 的 31 场景已在双独立 SQLite connection 及提交 55b3876818 的真实 MySQL 执行通过；失败方完整 durable rows 不变、无自动 mutation retry。最新 head CI/宿主/全 E2E 仍分别跟踪，不把该旧 SHA 绿灯当当前 checks。
-- [ ] 5.5 production-domain synthetic Singlebox HTTP→application→DB→A2A fake-target E2E 与 changed-line gate；不以单测调用 domain 方法冒充 E2E。
+- [ ] 5.5 production-domain synthetic HTTP→application→DB→A2A fake-target loopback 故事已实现并接入现有 Singlebox companion；完整远端 Singlebox 实跑与 changed-line gate 尚待通过，不以单测调用 domain 方法冒充 E2E。
 - [ ] 5.6 完整受影响 architecture/boundary/module/HTTP/legacy/authority 与扩展 gates；已通过限定范围检查不代表全架构 baseline 绿灯。
 - [ ] 5.7 reader/SDK/runtime 接收兼容、迁移后 writer 启用、关闭/回滚/保留历史演练，以及 current-SHA CI 和 host 集成记录；未获部署授权不操作生产。
 

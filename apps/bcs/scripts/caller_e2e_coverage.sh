@@ -11,6 +11,7 @@ case "${1:-}" in
   --run-only) ;; # Supervisor already built both targets from this checkout.
   *) echo "usage: $0 [--run-only]" >&2; exit 2 ;;
 esac
+printf '%s\n' '{"status":"failed","scenarios":[],"operations":[]}' > "$bcs_dir/target/cov-e2e/agent_invoke_e2e.json"
 for binary in bcs-caller-e2e bcs-a2a-grpc-peer; do
   if [[ ! -x "$cov_runtime/debug/$binary" ]]; then
     echo "missing instrumented caller companion executable: $binary" >&2
@@ -33,6 +34,13 @@ LLVM_PROFILE_FILE="$cov_runtime/grpc-binding-%m-%p.profraw" \
     --binary "$cov_runtime/debug/bcs-caller-e2e" \
     --grpc-peer-binary "$cov_runtime/debug/bcs-a2a-grpc-peer" \
     --diagnostics-dir "${BCS_E2E_DIAGNOSTICS_DIR:-$bcs_dir/target/cov-e2e/grpc-binding}"
+
+# Isolated trusted inventory fixture, but business commands and dispatch use the
+# real signed public HTTP/application/SQL/A2A chain. Shares only coverage profiles.
+LLVM_PROFILE_FILE="$cov_runtime/agent-invoke-%m-%p.profraw" \
+  python3 "$bcs_dir/scripts/e2e-test/agent_invoke_story.py" \
+    --binary "$cov_runtime/debug/bcs-caller-e2e" \
+    --report "$bcs_dir/target/cov-e2e/agent_invoke_e2e.json"
 
 # The Linux rustls platform verifier reads the process-local SSL_CERT_FILE.
 if [[ "$(uname -s)" == Linux ]]; then

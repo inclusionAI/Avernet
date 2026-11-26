@@ -31,6 +31,20 @@ def _write_bcs_reports(reports_dir: Path, endpoint_overall: str) -> None:
         "checks": [{"path": "/auth/url", "status": 200}],
         "provider_calls": {"authorize": 1, "exchange": 1, "userinfo": 1},
     }))
+    operations = [
+        {"method": method, "path": prefix + "/collaboration/agent-invoke" + suffix, "status": status}
+        for prefix in ("/api/v1", "/openapi/v1")
+        for method, suffix, status in [("POST", "/grants", 201), ("POST", "/requests", 201),
+                                      ("GET", "/degrees", 200), ("GET", "/audit", 200),
+                                      ("POST", "/invocations", 202), ("POST", "/invocations", 403)]
+    ]
+    (bcs_dir / "agent_invoke_e2e.json").write_text(json.dumps({
+        "status": "passed", "process_exit": 0, "peer_deliveries": 5,
+        "scenarios": ["startup-isolation", "lifecycle:api", "lifecycle:openapi",
+                      "authentication-validation:api", "authentication-validation:openapi",
+                      "governance", "active-pending-quotas", "queued-revoke-and-dispatch"],
+        "operations": operations,
+    }))
     (bcs_dir / "summary.json").write_text(
         '{"data":[{"totals":{"lines":{"covered":45,"count":100},'
         '"functions":{"covered":40,"count":100}}}]}\n',
@@ -130,3 +144,30 @@ def test_default_bcs_thresholds_are_inclusive(tmp_path: Path, monkeypatch):
         errors: list[str] = []
         VERIFIER.validate_bcs_artifacts(tmp_path, args, errors)
         assert errors == expected_errors
+
+
+def test_agent_invoke_report_rejects_stale_empty_or_no_transport_evidence(tmp_path):
+    _write_bcs_reports(tmp_path, '<overall covered="1" total="1"/>')
+    path = tmp_path / "bcs/agent_invoke_e2e.json"
+    valid = json.loads(path.read_text())
+    for field, value in [("status", "failed"), ("process_exit", 9), ("scenarios", []),
+                         ("peer_deliveries", 0), ("peer_deliveries", True), ("operations", [])]:
+        path.write_text(json.dumps({**valid, field: value}))
+        errors = []
+        VERIFIER.validate_agent_invoke_e2e(tmp_path, errors)
+        assert errors, field
+    path.unlink()
+    errors = []
+    VERIFIER.validate_agent_invoke_e2e(tmp_path, errors)
+    assert errors, "missing live evidence must fail"
+
+
+def test_agent_invoke_requires_each_public_prefix_independently(tmp_path):
+    _write_bcs_reports(tmp_path, '<overall covered="1" total="1"/>')
+    path = tmp_path / "bcs/agent_invoke_e2e.json"
+    report = json.loads(path.read_text())
+    report["operations"] = [o for o in report["operations"] if o["path"].startswith("/api/v1")]
+    path.write_text(json.dumps(report))
+    errors = []
+    VERIFIER.validate_agent_invoke_e2e(tmp_path, errors)
+    assert any("/openapi/v1" in error for error in errors)
