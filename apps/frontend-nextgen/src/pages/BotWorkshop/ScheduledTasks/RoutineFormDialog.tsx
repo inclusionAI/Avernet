@@ -23,7 +23,7 @@ import {
 } from '@/services/botScheduledTasks/types';
 import { useEffect, useRef, useState } from 'react';
 import { RoutineCronPreview } from './RoutineCronPreview';
-import { RoutineInstanceMultiSelect } from './RoutineInstanceMultiSelect';
+import { RoutineInstanceFixedSelect, RoutineInstanceMultiSelect } from './RoutineInstanceMultiSelect';
 import { useRoutineModels } from './useRoutineModels';
 
 /** 弹窗内的小节标题：与详情页分组称呼一致，弱化为眉题而不是大块标题。 */
@@ -159,38 +159,15 @@ export function RoutineFormDialog({
                   </Select>
                 </div>
                 {instanceMode === 'multiple' && !original && (
-                  <div className="space-y-1 text-sm">
-                    <span>运行实例</span>
-                    <RoutineInstanceMultiSelect
-                      value={form.device_uuids || []}
-                      options={instanceIds}
-                      disabled={!editable || saving}
-                      onChange={(device_uuids) => setForm({ ...form, device_uuids })}
-                    />
-                  </div>
+                  <RoutineInstanceMultiSelect
+                    value={form.device_uuids || []}
+                    options={instanceIds}
+                    disabled={!editable || saving}
+                    onChange={(device_uuids) => setForm({ ...form, device_uuids })}
+                  />
                 )}
                 {instanceMode === 'multiple' && original && (
-                  <div className="space-y-1 text-sm">
-                    <span>运行实例</span>
-                    <Select
-                      value={form.device_uuid || ''}
-                      disabled={Boolean(original) || !editable || saving}
-                      onValueChange={(device_uuid) => setForm({ ...form, device_uuid })}
-                    >
-                      <SelectTrigger aria-label="运行实例">
-                        <SelectValue placeholder="请选择运行实例" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[...new Set([...instanceIds, ...(original?.device_uuid ? [original.device_uuid] : [])])].map(
-                          (uid) => (
-                            <SelectItem key={uid} value={uid}>
-                              {uid}
-                            </SelectItem>
-                          ),
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <RoutineInstanceFixedSelect value={form.device_uuid} options={instanceIds} />
                 )}
                 {!original && targetError && (
                   <p className="text-xs text-destructive sm:col-span-2" role="status">
