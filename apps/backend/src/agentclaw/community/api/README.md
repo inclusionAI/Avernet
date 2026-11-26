@@ -113,6 +113,7 @@ provides:
   - SkillVersionMaterializerProtocol
   - SpaceSkillPublicationServiceProtocol
   - SpaceManagementServiceProtocol
+  - AICodingWorkItemsServiceProtocol
   - SkillCenterPublicationGatewayProtocol
   - SkillCenterReferenceServiceProtocol
   - SkillCenterSyncServiceProtocol
@@ -238,6 +239,7 @@ internal_dependencies:
   - agentclaw.community.core.aicoding.architect_rebind_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.aicoding.data_proxy_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.aicoding.workitem_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.aicoding.work_items_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.aicoding.workspace_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_app_grant.bot_app_grant_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_message_feedback.service_protocol  # Protocol defined in its owning core module, re-exported here
