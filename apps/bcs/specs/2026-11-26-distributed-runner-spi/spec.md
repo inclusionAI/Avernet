@@ -18,7 +18,7 @@ Meanwhile, single-process BCS already supports **Direct A2A** and three group co
 - Define the **Gateway ↔ Worker** mode-agnostic session/task contracts (`SessionTarget`, `CollaborationMode`, `ModeConfigEnvelope`, protocol-free `DispatchSpec`, `CorrelationKey`, `ModeLocal` interactions, and authenticated `HumanReply`).
 - Define the **Worker ↔ Runner** Core API (`DistRunnerCoreService`) and strongly typed Mode Plugin SPI (`CollaborationModeRunner`), routed by an in-worker `RunnerRegistry`.
 - Define the **migration design** for bringing **Direct A2A** (`CollaborationMode::DirectA2a`) and **Structured Collaboration** (`CollaborationMode::StateMachine`) onto the distributed Worker plane while reusing shared pure workflow compilation/progression logic.
-- Preserve clean schema and SPI seams for long-term support of **Free Chat** (`CollaborationMode::Chat`), **Manager-Worker** (`CollaborationMode::ManagerWorker`), and future extension modes (`CollaborationMode::Custom(String)`) without implementing multi-active-task scheduling prematurely in Phase 1.
+- Preserve clean mode-routing seams for long-term support of **Free Chat** (`CollaborationMode::Chat`) and **Manager-Worker** (`CollaborationMode::ManagerWorker`) without adding unused multi-active-task fields in Phase 1.
 
 ### Non-Goals
 
@@ -36,11 +36,11 @@ This spec builds on `github/dev` commit `ad8f91fd57`, referencing [distributed c
 
 | ID | Topic | Decision |
 | --- | --- | --- |
-| **D1** | **Task definition, concurrency seam & per-Agent occupancy** | 1. **No historical task state in `Checkpoint`**: completed tasks are archived to `ResultStore` / `TaskFeed` and retired from `Checkpoint`; no cross-task `SessionCarryover` is added.<br>2. **Unified `Task` boundary**: one external request triggering one collaboration convergence turn/run equals one `Task` (`tid`).<br>3. **Storage seam now, single-active-task Worker scheduling in Phase 1**: evolve `Checkpoint.runner_state` (`format_version = 2`, fresh namespace) to `runner_states: BTreeMap<Tid, RunnerState>` so future concurrent modes (`Chat`) require no further Checkpoint format bump, while **Phase 1 `WorkerProcessor` keeps single-active-task scheduling (`effective_max_active_tasks = 1`)** matching both `DirectA2a` and `StateMachine` (deferring multi-`Running`-task scheduling and intra-session occupancy views until `Chat` lands). No static per-Session dispatch quota is introduced. Track lightweight `unresolved_dispatches: BTreeMap<Did, ActiveDispatchOccupancy>` (surviving task finalization/retirement until definitive remote termination or confirmed `NotSent`) to gate `DirectA2a` (`required_idle_agents_on_start`) so two tasks never concurrently share the same downstream `(sid, AgentId)`. |
-| **D2** | **Gateway ↔ Worker alignment & strong typing** | 1. Define `CollaborationMode { DirectA2a, Chat, ManagerWorker, StateMachine, Custom(String) }` + `mode_version: u32`, aligned 1:1 with single-process `DirectA2a` and `GroupStrategy`.<br>2. **Gateway core/adapters stay mode-agnostic**: `bcs-dist-gateway-http`, `bcs-app-dist-gateway`, and `bcs-dist-gateway` validate only `SessionTarget { DirectAgent(AgentId), Group(GroupId) }` and forward the opaque `FrozenSessionProposal` produced by `DistSessionDirectoryPort`; adding new modes requires zero changes to Gateway HTTP/application/core crates (only the Directory resolver and new Runner plugin handle mode metadata).<br>3. **Worker routes with strong typing**: an internal `RunnerRegistry` in `bcs-dist-worker` dispatches on `(CollaborationMode, mode_version)` to strongly typed `CollaborationModeRunner` plugins and caches parsed configs internally by `(mode, mode_version, digest)` without leaking type-erased config handles (`dyn Any`) into `bcs-service-api`. |
-| **D3** | **LLM Judge boundary & error isolation (MVP)** | Make `DistRunnerCoreService::reduce` and `CollaborationModeRunner::reduce_task` `async`. In the MVP, `GroupFsmRunner` invokes an injected `Arc<dyn JudgeEvaluatorPort>` (`LlmJudgeService`) inside `reduce_task` under a bounded per-call timeout (`min(judge_timeout, remaining_task_budget)`), keeping `StartDispatch`, `DispatchBoard`, and `Connector` 100% dedicated to external Agent calls.<br>**Error & replay contract**: `Err(RunnerError)` triggers Session isolation in [risk.rs](../../crates/services/bcs-dist-worker/src/processor/risk.rs) and is reserved strictly for corrupt state, unsupported format/version, or invalid config. Any `JudgeEvaluatorPort` timeout, 5xx, transport error, or invalid/undeclared `outcome` **must** be caught inside `GroupFsmRunner` and returned as `Ok(Decision)` (retrying the `bot_task` attempt when `attempt < max_attempts` or emitting `FinishTask(Failed)`). Crashes before `Checkpoint` commit may re-evaluate the uncommitted turn (matching single-process `CollaborationRuntime`); once committed, `outcome` is persisted in `RunnerState` and outbox replay never re-runs `reduce_task`. |
-| **D4** | **Human interaction contract** | All contract edits are scoped strictly to `bcs-dist-*` crates; single-process `bcs-collaboration-runtime` behavior is untouched. `Interaction` replaces required `did: Did` with `origin: ModeLocal \| Dispatch { did }` and adds `prompt: Option<String>` (to populate A2A `TaskStatus.message`). Both `InputBody::HumanReply` and `RunnerInput::HumanReply` add Gateway-authenticated `responder: PrincipalId` so `GroupFsmRunner` can verify `assignee` constraints on `kind: human_input` nodes. |
-| **D5** | **Downstream protocol decoupling (zero `DispatchExecution` schema change)** | Phase 1 distributed Connector supports A2A Agents (standard HTTP/gRPC and registered custom bindings via `bcs-a2a-binding-api`); future phases add stateless HTTP Provider Bots inside Connector; stateful WebSocket plugin Bots are excluded.<br>Gateway ↔ Worker `SessionSpec` and `DispatchSpec` carry only logical `AgentId` and wake `PoolId` (removing `AgentBinding` and `DownstreamCapabilities`). `DispatchExecution` requires **no** frozen binding snapshot field: stateful remote task identity across Connector failovers is already anchored by `DispatchExecution.remote` (`RemoteTaskRef`), while Connector resolves the current endpoint, binding, capabilities, and active credentials by `AgentId` from the Agent registry so routine credential rotation or endpoint rollouts do not break in-flight `send_input`, `query`, `subscribe`, or `cancel` operations. |
+| **D1** | **Task boundary, single-slot Phase 1 & event-driven cancel fence** | 1. **No historical task state in `Checkpoint`**: completed tasks are archived to `ResultStore` / `TaskFeed` and retired from `Checkpoint`; no cross-task `SessionCarryover` is added.<br>2. **Unified `Task` boundary**: one external request triggering one collaboration convergence turn/run equals one `Task` (`tid`).<br>3. **Keep single-slot `runner_state` in Phase 1**: both `DirectA2a` and `StateMachine` run at most one active task per `Session`, so `Checkpoint.runner_state: Option<ActiveRunnerState>` and existing `Running`-promotion `DeadlineKind::Task` semantics stay unchanged (multi-active-task structures are deferred until `Chat` lands).<br>4. **Event-driven cancel fence + generation fallback for `DirectA2a`**: `Checkpoint` (`format_version = 2`) adds `downstream_generation: u64` and `pending_cancel_did: Option<Did>`. Normal completions and confirmed aborts (where Connector delivers terminal `AgentEventKind::Error("canceled")` / `Final` to `SessionInbox`) keep `downstream_generation` unchanged, preserving multi-turn conversation history on `"{sid}:{downstream_generation}"`. Only when a canceled/timed-out dispatch fails to deliver terminal confirmation within `DeadlineKind::CancelGrace` (hung or cancel-unsupported remote agent) does Worker increment `downstream_generation` to abandon the stuck downstream context before starting the next queued task. |
+| **D2** | **Gateway ↔ Worker alignment & `sid`-scoped config caching** | 1. Define `CollaborationMode { DirectA2a, Chat, ManagerWorker, StateMachine }` + `mode_version: u32`, aligned 1:1 with single-process `DirectA2a` and `GroupStrategy`.<br>2. **Gateway core/adapters stay mode-agnostic**: `bcs-dist-gateway-http`, `bcs-app-dist-gateway`, and `bcs-dist-gateway` validate only `SessionTarget { DirectAgent { agent }, Group { group } }` and forward the opaque `FrozenSessionProposal` produced by `DistSessionDirectoryPort`; adding new modes requires zero changes to Gateway HTTP/application/core crates.<br>3. **Worker routes with strong typing & per-`sid` `Slot` caching**: an internal `RunnerRegistry` in `bcs-dist-worker` dispatches on `(CollaborationMode, mode_version)` to `CollaborationModeRunner` plugins via a private object-safe adapter. Validated mode config is cached per held `sid` on Worker's `Slot` (bound to that session's immutable `SessionSpec`, `authorized_agents`, and `limits`, and dropped on lease release) rather than shared across sessions by template digest. |
+| **D3** | **LLM Judge boundary & error isolation (MVP)** | Make `DistRunnerCoreService::reduce` and `CollaborationModeRunner::reduce_task` `async` (updating the phase-one `"no IO"` doc comment on `dist_runner.rs` accordingly). In the MVP, `GroupFsmRunner` invokes an injected `Arc<dyn JudgeEvaluatorPort>` (`LlmJudgeService`, matching existing `services/bcs-collaboration-runtime` precedent without importing transport frameworks) inside `reduce_task` under a bounded per-call timeout (`min(judge_timeout, remaining_task_budget)`), keeping `StartDispatch`, `DispatchBoard`, and `Connector` 100% dedicated to external Agent calls.<br>**Error & replay contract**: `Err(RunnerError)` triggers Session isolation in [risk.rs](../../crates/services/bcs-dist-worker/src/processor/risk.rs) and is reserved strictly for corrupt state, unsupported format/version, or invalid config. Any `JudgeEvaluatorPort` timeout, 5xx, transport error, or invalid/undeclared `outcome` **must** be caught inside `GroupFsmRunner` and returned as `Ok(Decision)` (retrying the `bot_task` attempt when `attempt < max_attempts` or emitting `FinishTask(Failed)`). Crashes before `Checkpoint` commit may re-evaluate the uncommitted turn (matching single-process `CollaborationRuntime`); once committed, `outcome` is persisted in `RunnerState` and outbox replay never re-runs `reduce_task`. |
+| **D4** | **Human interaction contract** | All contract edits are scoped strictly to `bcs-dist-*` crates; single-process `bcs-collaboration-runtime` behavior is untouched. `Interaction` replaces required `did: Did` with `origin: ModeLocal \| Dispatch { did }` (`#[serde(tag = "kind")]`) and adds `prompt: Option<String>` (to populate A2A `TaskStatus.message`). Both `InputBody::HumanReply` and `RunnerInput::HumanReply` add Gateway-authenticated `responder: PrincipalId` so `GroupFsmRunner` can verify `assignee` constraints on `kind: human_input` nodes. |
+| **D5** | **Downstream protocol decoupling (zero `DispatchExecution` schema change)** | Phase 1 distributed Connector supports A2A Agents (standard HTTP/gRPC and registered custom bindings via `bcs-a2a-binding-api`); future phases add stateless HTTP Provider Bots inside Connector; stateful WebSocket plugin Bots are excluded.<br>Gateway ↔ Worker `SessionSpec` and `DispatchSpec` carry only logical `AgentId` and wake `PoolId` (removing `AgentBinding` and `DownstreamCapabilities`). `DispatchExecution` and `RemoteTaskRef` stay unchanged: remote task identity across Connector failovers is anchored by `RemoteTaskRef`, while Connector resolves the current registered endpoint, capabilities, and active credentials by `AgentId` from the Agent registry. The MVP assumes a logical `AgentId`'s registered entry points to one logical Agent service (supporting credential rotation and ingress domain updates backed by the same task store); mid-flight cutover to a disjoint stateful backend is out of scope for the MVP. |
 | **D6** | **Minimal input set, logical steps & physical evaluation cap** | Keep the 4 external `InputBody` / `RunnerInput` variants (`User`/`Start`, `HumanReply`, `Cancel`, `Agent`) plus internal `Timeout`.<br>Separate **logical business steps** from **physical reduction protection**: `TaskProgress.evaluations` increments by `1` before every `reduce` call against a generous `SessionLimits.max_task_evaluations` safety cap (preventing runaway streaming Agents from issuing unbounded CAS commits), while `TaskProgress.logical_steps` advances by `Decision.logical_steps_delta` (`>= 1` on node/attempt activations, `0` on streaming `Delta`/`Tool`). `logical_steps + logical_steps_delta > max_task_steps` is enforced **after `reduce` returns and before candidate commit**, discarding the uncommitted candidate and finalizing via `finalize_independently(Failed, "TaskStepLimitExceeded")`. |
 
 ## 3. Layered Architecture & Crate Ownership
@@ -66,11 +66,11 @@ flowchart TB
     end
 
     subgraph WorkerPlane["Worker Plane (bcs-dist-worker)"]
-        PROC["WorkerProcessor (Phase 1 Single-Running Slot + Occupancy Gate)"]
+        PROC["WorkerProcessor (Single-Running Slot + Cancel Fence)"]
         ROUTER["RunnerRegistry (In-Worker Module)"]
         R_A2A["bcs-direct-a2a-runner"]
         R_FSM["bcs-group-fsm-runner"]
-        R_FUTURE["Future: Chat / ManagerWorker / Custom Runners"]
+        R_FUTURE["Future: Chat / ManagerWorker Runners"]
         PLAN["bcs-collaboration-plan (Shared Pure Compiler & Progression)"]
         JUDGE["JudgeEvaluatorPort (LlmJudgeService)"]
     end
@@ -103,12 +103,12 @@ flowchart TB
 
 | Crate | Layer | Responsibility |
 | --- | --- | --- |
-| `crates/contracts/bcs-dist-model` | Contracts | `SessionTarget`, `CollaborationMode`, `ModeConfigEnvelope`, `AuthorizedAgent`, protocol-free `DispatchSpec`, `CorrelationKey` (across dispatch and display/output), `InteractionOrigin`, `HumanReply.responder` |
-| `crates/service-api/bcs-service-api` | Service API | `core::dist_runner` (`DistRunnerCoreService`, `CollaborationModeRunner` SPI, `ModeSessionPolicy`, `EvaluationContext`, `Decision`), `port::dist_agent` (`DistSessionDirectoryPort`) |
+| `crates/contracts/bcs-dist-model` | Contracts | `SessionTarget`, `CollaborationMode`, `ModeConfigEnvelope`, `AuthorizedAgent`, protocol-free `DispatchSpec`, `CorrelationKey` (across dispatch and display/output), `InteractionOrigin`, `HumanReply.responder`, `DeadlineKind::CancelGrace` |
+| `crates/service-api/bcs-service-api` | Service API | `core::dist_runner` (`DistRunnerCoreService`, `CollaborationModeRunner` SPI, `TypedDecision`, `EvaluationContext`, `Decision`), `port::dist_agent` (`DistSessionDirectoryPort`, `FrozenSessionProposal`, `DirectoryError`) |
 | `crates/services/bcs-collaboration-plan` | Core Service (Pure) | Zero-IO workflow validation, v1/v2 `fixed_loop` compiler, snapshot hash verification, and reachability/join/upstream filtering shared with `bcs-collaboration-runtime` |
 | `crates/services/bcs-direct-a2a-runner` | Core Service | `CollaborationMode::DirectA2a` (`mode_version = 1`) implementation |
 | `crates/services/bcs-group-fsm-runner` | Core Service | `CollaborationMode::StateMachine` (`mode_version = 1`) implementation with injected `JudgeEvaluatorPort` |
-| `crates/services/bcs-dist-worker` | Core Service | Internal `RunnerRegistry` (routing + private config cache by digest), `runner_states` map storage seam (Phase 1 single-active-task scheduling), `unresolved_dispatches` occupancy gate, `CorrelationKey` display handling, `ModeLocal` interaction checks, post-`reduce` `logical_steps_delta` & pre-`reduce` `max_task_evaluations` enforcement |
+| `crates/services/bcs-dist-worker` | Core Service | Internal `RunnerRegistry` + per-`sid` `Slot` config caching, `DirectA2a` event-driven `pending_cancel_did` / `downstream_generation` fence, `CorrelationKey` display handling, `ModeLocal` interaction checks, post-`reduce` `logical_steps_delta` & pre-`reduce` `max_task_evaluations` enforcement |
 
 Concrete store providers (`DocumentCas`, `StrictLease`, `ZSet`), SQL archive providers (`bcs-db-api`), LLM providers (`bcs-llm-api`), and custom A2A transport bindings (`bcs-a2a-binding-api`) are wired only at the deployment composition root.
 
@@ -130,14 +130,13 @@ pub enum SessionTarget {
     Group { group: GroupId },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CollaborationMode {
     DirectA2a,
     Chat,
     ManagerWorker,
     StateMachine,
-    Custom(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -157,8 +156,6 @@ pub struct AuthorizedAgent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionLimits {
-    /// Deployment ceiling on concurrent Running tasks in one Session (Phase 1 Worker enforces 1; > 1 reserved for future Chat).
-    pub max_active_tasks: NonZeroU32,
     pub max_queued_tasks: u32,
     /// Bounds logical business progressions (`Decision.logical_steps_delta`).
     pub max_task_steps: u32,
@@ -218,7 +215,7 @@ pub struct DisplayUnit {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "origin", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InteractionOrigin {
     ModeLocal,
     Dispatch { did: Did },
@@ -272,18 +269,20 @@ pub enum InputBody {
 }
 ```
 
-### 4.2 `Checkpoint` v2 Multi-Task & Per-Agent Occupancy Ledger
+### 4.2 `Checkpoint` v2 & Event-Driven Cancel Fence
 
 Per [bcs-service-api/CONTEXT.md](../../crates/service-api/bcs-service-api/CONTEXT.md), the distributed runtime has not yet been enabled for production traffic; `Checkpoint.format_version` advances to `2` in a fresh distributed namespace (no in-place migration of prototype test-runner records; older format versions fail closed with `UnsupportedFormat`).
 
-In [session.rs](../../crates/service-api/bcs-service-api/src/port/repo/distributed/session.rs):
+In [session.rs](../../crates/service-api/bcs-service-api/src/port/repo/distributed/session.rs) and `bcs-dist-model/src/runner.rs`:
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ActiveDispatchOccupancy {
-    pub tid: Tid,
-    pub agent: AgentId,
-    pub expires_at: TimestampMillis,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DeadlineKind {
+    Task { tid: Tid },
+    Dispatch { tid: Tid, did: Did },
+    Snapshot { tid: Tid },
+    CancelGrace { did: Did }, // Worker-internal; never recorded in deadline_history or sent to Runner
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -305,9 +304,10 @@ pub struct Checkpoint {
     pub commit_seq: CommitSeq,
     pub consumed: Option<InboxPos>,
     pub tasks: VecDeque<TaskProgress>,
-    pub runner_states: BTreeMap<Tid, RunnerState>,
+    pub runner_state: Option<ActiveRunnerState>,
     pub dispatch_seq: BTreeMap<Did, DispatchSequence>,
-    pub unresolved_dispatches: BTreeMap<Did, ActiveDispatchOccupancy>,
+    pub downstream_generation: u64,
+    pub pending_cancel_did: Option<Did>,
     pub deadlines: Vec<Deadline>,
     pub deadline_history: BTreeMap<DeadlineId, Deadline>,
     pub view_drafts: BTreeMap<Tid, TaskContent>,
@@ -316,30 +316,24 @@ pub struct Checkpoint {
 }
 ```
 
-- **Phase 1 single-active-task scheduling & storage seam**: `Checkpoint.runner_states` uses `BTreeMap<Tid, RunnerState>` so future concurrent modes (`Chat`) require no Checkpoint format migration, while Phase 1 `WorkerProcessor` keeps `running_tasks <= 1` (`effective_max_active_tasks = 1`), preserving existing single-slot preparation and 1 MiB Checkpoint capacity bounds. When a task completes or is terminated independently (`finalize_independently`), `runner_states.remove(&tid)` is cleared; entries in `unresolved_dispatches` for that `tid` **survive** both `finalize_independently` and `retire_published` until remote termination is resolved.
-- **Task start gate & same-Agent occupancy wait (no Session dispatch quota)**:
-  - No static Session-wide dispatch quota or per-task dispatch reservation is enforced; per-task `max_task_steps`, `max_task_evaluations`, and `task_timeout_millis` bound single-task activity.
-  - When a `User` input admits a task into `Checkpoint.tasks` as `TaskPhase::Queued`, Worker immediately installs `DeadlineKind::Task { tid }` at `now + spec.limits.task_timeout_millis` (covering both queue wait and active execution). If that deadline fires while the task is still `Queued` (for example, waiting on an unresolved prior dispatch), Worker finalizes the queued task via `finalize_independently(Failed, "TaskTimeout")` without starting any dispatch.
-  - A `Queued` task transitions to `Running` only when:
-    1. `running_tasks == 0` in Phase 1 (generalizing to `running_tasks < spec.limits.max_active_tasks.min(policy.max_active_tasks)` when `Chat` enables concurrent tasks), and
-    2. every `agent` in `policy.required_idle_agents_on_start` (`[agent]` for `DirectA2a`; empty `[]` for `StateMachine`) has **no** entry in `unresolved_dispatches`.
-  - **Resolution of `unresolved_dispatches`**: an entry is inserted on committed `CreateDispatch` (with `expires_at = spec.deadline + cancel_supervision_grace`) and removed only when Worker receives a terminal `InputBody::Agent` (`Final` / `Error`), observes `DispatchPort::get(did)` in `DispatchPhase::Ended` with definitive non-running state (`outcome` in `{Completed, Failed, Canceled}` or `cancellation == NotSent && remote.is_none()`), or `now >= expires_at` after Connector supervision expiry. If `DispatchPhase::Ended` reports `outcome == Some(DispatchOutcome::Unknown)` (uncertain remote cancel), the entry remains until `expires_at` (while any waiting `Queued` task fails closed on its own `DeadlineKind::Task`), preventing concurrent requests on a shared downstream `sid` while remote execution is uncertain. When a `Queued` task is blocked on `unresolved_dispatches`, Worker re-polls blocking `did`s via `DispatchPort::get` on bounded intervals to promote the task once cleared.
+- **Preserved single-slot & `Task` deadline semantics**: Phase 1 keeps `runner_state: Option<ActiveRunnerState>` and installs `DeadlineKind::Task { tid }` only when a `Queued` task promotes to `Running` (queue waiting never consumes active execution timeout budget and never creates duplicate task deadline IDs).
+- **Event-driven cancel fence for shared-context modes (`DirectA2a`)**:
+  - Only modes declaring `shares_session_downstream_context() == true` (`DirectA2a`; `false` for `StateMachine`) use `pending_cancel_did` and `downstream_generation`.
+  - **Normal completion**: when a `DirectA2a` task finishes after receiving terminal `AgentEventKind::Final` or `Error`, `pending_cancel_did` stays `None` and `downstream_generation` is unchanged, so subsequent turns reuse `"{sid}:{downstream_generation}"` with full downstream conversation memory.
+  - **Abort / timeout with open dispatch**: if a `DirectA2a` task terminates (`finalize_independently` on Cancel/TaskTimeout/StepLimit/EvalLimit/OutputQuota, or `CancelDispatch + FinishTask` on `DeadlineKind::Dispatch`) before its `did` has delivered a terminal `Final`/`Error` event, Worker sets `pending_cancel_did = Some(did)` and installs `DeadlineKind::CancelGrace { did }` at `now + cancel_grace_millis` (e.g., `5_000 ms`). While `pending_cancel_did.is_some()`, `Queued` tasks remain queued (`DeadlineKind::Task` not yet started).
+  - **Normal abort wakeup (preserves session context)**: per [control.rs](../../crates/services/bcs-dist-connector/src/control.rs) and [call.rs](../../crates/services/bcs-dist-connector/src/call.rs), Connector durably admits a key `InputBody::Agent` (`Error("agent_canceled")` or `Final`) to `SessionInbox` on every `ConfirmedCanceled`, `AlreadyFinished`, and `NotSent` termination. In `prepare.rs`, **before** dropping inputs for finalized/retired `tid`s, Worker checks whether an incoming terminal `InputBody::Agent` (`Final` or `Error`) matches `pending_cancel_did`; if so, it clears `pending_cancel_did = None` and removes `DeadlineKind::CancelGrace` **without incrementing `downstream_generation`**, immediately unblocking the next `Queued` task on the **same** downstream `"{sid}:{downstream_generation}"` context with zero polling.
+  - **Hung-agent fallback (abandons stuck context)**: only if the remote agent hangs or rejects cancellation (`CancelObservation::Rejected` / persistent `OutcomeUnknown`) so no terminal `AgentEvent` arrives before `DeadlineKind::CancelGrace { did }` fires in Worker's durable timer loop, Worker clears `pending_cancel_did = None` and increments `downstream_generation = downstream_generation.saturating_add(1)`, explicitly switching subsequent tasks to `"{sid}:{gen+1}"` so two requests never collide on a still-running downstream context.
 
 ## 5. Worker ↔ Runner API & Mode Plugin SPI
 
 ### 5.1 Core Service API (`bcs_service_api::core::dist_runner`)
 
 ```rust
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModeSessionPolicy {
-    pub max_active_tasks: NonZeroU32,
-    pub required_idle_agents_on_start: Vec<AgentId>,
-}
-
 pub struct EvaluationContext<'a> {
     pub spec: &'a SessionSpec,
     pub resolved_mode_config: &'a serde_json::Value,
     pub tid: &'a Tid,
+    pub downstream_generation: u64,
     pub now: TimestampMillis,
 }
 
@@ -406,11 +400,12 @@ pub struct Decision {
 
 #[async_trait]
 pub trait DistRunnerCoreService: Send + Sync {
+    /// Validates `spec` + `resolved_mode_config` and returns whether this mode shares session-level downstream context.
     fn validate_session(
         &self,
         spec: &SessionSpec,
         resolved_mode_config: &serde_json::Value,
-    ) -> Result<ModeSessionPolicy, RunnerError>;
+    ) -> Result<bool, RunnerError>;
 
     async fn init(&self, context: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError>;
 
@@ -423,13 +418,21 @@ pub trait DistRunnerCoreService: Send + Sync {
 }
 ```
 
-`RunnerRegistry` lives inside `bcs-dist-worker`, implements `DistRunnerCoreService`, routes by `(spec.mode_envelope.mode, spec.mode_envelope.mode_version)`, and caches parsed typed configs internally by `(mode, mode_version, spec.mode_envelope.digest)` without exposing type erasure (`dyn Any`) in `bcs-service-api`.
+`RunnerRegistry` lives inside `bcs-dist-worker`, implements `DistRunnerCoreService`, and routes by `(spec.mode_envelope.mode, spec.mode_envelope.mode_version)` through a private object-safe blanket adapter (wrapping `CollaborationModeRunner` serialization and `STATE_FORMAT_VERSION` checks without exposing a second public `ErasedRunner` trait in `bcs-service-api`). Loaded `resolved_mode_config` and per-session parsed configs are cached on Worker's per-`sid` `Slot` (bound to that `sid`'s frozen `SessionSpec` and dropped when the session lease is released), never shared across sessions by template digest.
 
 ### 5.2 Mode Plugin SPI (`CollaborationModeRunner`)
 
-Each collaboration mode plugin owns its strongly typed `Config`, `State`, concurrency declaration, and start-time idle-agent requirement:
+Each collaboration mode plugin owns its strongly typed `Config` and `State`:
 
 ```rust
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypedDecision<S> {
+    pub next_state: S,
+    pub logical_steps_delta: u32,
+    pub actions: Vec<ActionIntent>,
+    pub next_deadlines: Vec<Deadline>,
+}
+
 #[async_trait]
 pub trait CollaborationModeRunner: Send + Sync {
     type Config: Send + Sync + Debug + 'static;
@@ -441,6 +444,12 @@ pub trait CollaborationModeRunner: Send + Sync {
     }
     const STATE_FORMAT_VERSION: u32 = 1;
 
+    /// `true` for modes sharing downstream `context_id` across sequential tasks in one Session (`DirectA2a`);
+    /// `false` when dispatches isolate `downstream_context` per `did` (`StateMachine`).
+    fn shares_session_downstream_context(&self) -> bool {
+        false
+    }
+
     fn parse_and_validate_config(
         &self,
         raw: &serde_json::Value,
@@ -448,21 +457,12 @@ pub trait CollaborationModeRunner: Send + Sync {
         limits: &SessionLimits,
     ) -> Result<Self::Config, RunnerError>;
 
-    fn max_active_tasks(&self, _config: &Self::Config) -> NonZeroU32 {
-        NonZeroU32::MIN // Default 1 for DirectA2a and StateMachine
-    }
-
-    /// Agents whose prior unresolved dispatches in this Session must terminate before starting a new task
-    /// (`[agent]` for `DirectA2a` sharing downstream `sid`; empty by default for isolated-context or dynamic modes).
-    fn required_idle_agents_on_start(&self, _config: &Self::Config) -> Vec<AgentId> {
-        Vec::new()
-    }
-
     async fn init_task(
         &self,
         spec: &SessionSpec,
         config: &Self::Config,
         tid: &Tid,
+        downstream_generation: u64,
         now: TimestampMillis,
     ) -> Result<Self::State, RunnerError>;
 
@@ -471,6 +471,7 @@ pub trait CollaborationModeRunner: Send + Sync {
         spec: &SessionSpec,
         config: &Self::Config,
         tid: &Tid,
+        downstream_generation: u64,
         state: &Self::State,
         inputs: &[RunnerInput],
         now: TimestampMillis,
@@ -483,6 +484,24 @@ pub trait CollaborationModeRunner: Send + Sync {
 Generalizes [DistGroupDirectoryPort](../../crates/service-api/bcs-service-api/src/port/dist_agent.rs):
 
 ```rust
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrozenSessionProposal {
+    pub target: SessionTarget,
+    pub mode_envelope: ModeConfigEnvelope,
+    pub authorized_agents: Vec<AuthorizedAgent>,
+    pub limits: SessionLimits,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DirectoryError {
+    #[error("session target not found or not accessible")]
+    NotFound,
+    #[error("session directory unavailable")]
+    Unavailable,
+    #[error("frozen mode config revision or digest mismatch")]
+    InvalidRevision,
+}
+
 #[async_trait]
 pub trait DistSessionDirectoryPort: Send + Sync {
     async fn resolve(
@@ -503,10 +522,10 @@ pub trait DistSessionDirectoryPort: Send + Sync {
 
 ### 6.1 Direct A2A (`CollaborationMode::DirectA2a`, `mode_version = 1`)
 
-- **Admission, Freeze & Same-Agent Occupancy Gate**: `DistSessionDirectoryPort::resolve(scope, SessionTarget::DirectAgent { agent })` reuses existing Bot visibility/friendship/organization checks and freezes `ModeConfigEnvelope { mode: DirectA2a, mode_version: 1, payload: Inline(DirectA2aConfig) }` with `authorized_agents = [AuthorizedAgent { agent, pool }]`; `DirectA2aRunner` reports `max_active_tasks = 1` and `required_idle_agents_on_start = [agent]`. If a prior task timed out or was canceled while its remote dispatch is still unresolved, the next task remains `Queued` until `unresolved_dispatches` clears that `agent` (or fails closed via `finalize_independently(Failed, "TaskTimeout")` when its `DeadlineKind::Task` expires).
+- **Admission, Freeze & Cancel Fence**: `DistSessionDirectoryPort::resolve(scope, SessionTarget::DirectAgent { agent })` reuses existing Bot visibility/friendship/organization checks and freezes `ModeConfigEnvelope { mode: DirectA2a, mode_version: 1, payload: Inline(DirectA2aConfig) }` with `authorized_agents = [AuthorizedAgent { agent, pool }]`; `DirectA2aRunner` declares `shares_session_downstream_context() = true`. Normal turns and confirmed aborts (cleared via Connector's terminal `AgentEvent` in `SessionInbox`) keep `downstream_generation` unchanged so prior conversation history is preserved; only unconfirmed hung cancels expiring `DeadlineKind::CancelGrace` increment `downstream_generation`.
 - **Execution Semantics**:
-  - `Start`: creates `did = "{tid}.agent.1"`, emits `StartDispatch { agent, source: CorrelationKey("agent"), downstream_context: Some(sid.0), request }` so multi-turn tasks in the same `Session` share downstream conversation continuity without concurrent `sid` overlap, registers dispatch deadline, and reports `logical_steps_delta = 1`.
-  - Streaming (`Delta` / `Tool` / `Snapshot` / `Thinking`): first text chunk emits `Show(Upsert)`, subsequent chunks emit `Show(AppendText)` with `logical_steps_delta = 0`; `Thinking` uses Worker's rate-limited ephemeral path.
+  - `Start`: creates `did = "{tid}.agent.1"`, emits `StartDispatch { agent, source: CorrelationKey("agent"), downstream_context: Some(format!("{}:{}", sid.0, downstream_generation)), request }`, registers dispatch deadline, and reports `logical_steps_delta = 1`.
+  - Streaming (`Delta` / `Tool` / `Snapshot` / `Thinking`): per [events.rs](../../crates/external-clients/bcs-a2a-http/src/dist_agent/events.rs), `Delta` events with `append == true` on an already-created artifact emit `Show(AppendText)`; initial or replacement `Delta` events (`append == false`) and recovery `Snapshot` reconciliations emit `Show(Upsert)` so non-incremental updates never duplicate text (`logical_steps_delta = 0`); `Thinking` uses Worker's rate-limited ephemeral path.
   - Remote interaction (`InputRequired` / `AuthRequired`): emits `SetStatus` with `Interaction { origin: Dispatch { did }, prompt }`; valid `HumanReply` emits `ContinueDispatch` with monotonic `seq`.
   - Completion & Failure: `Final` performs a full `Upsert` on the primary artifact slot followed by `FinishTask(Completed)`. Definitive `Error` immediately finishes with `FinishTask(Failed)` without fabricating a second business attempt (`NotSent` transport retries remain inside Connector).
 
@@ -520,17 +539,17 @@ pub trait DistSessionDirectoryPort: Send + Sync {
   - **Bot nodes (`kind: bot_task`)**: deterministic activation in `execution_node_id` order; emits `StartDispatch { agent, source: CorrelationKey(execution_node_id), did: "{tid}.node.{hash}.{attempt}", downstream_context: Some(did.0) }`.
   - **Native human nodes (`kind: human_input`)**: emits no `StartDispatch`; transitions to `SetStatus(InputRequired)` with `Interaction { origin: ModeLocal, prompt }`. On `RunnerInput::HumanReply`, verifies `responder` against the frozen `assignee` constraint (when present) and deadline before advancing.
   - **MVP Internal Judge**: when a judged node receives a valid non-empty artifact or human reply, `GroupFsmRunner` calls its injected `JudgeEvaluatorPort` inside `reduce_task().await` under `min(judge_timeout, remaining_task_budget)`. Valid `outcome` values advance downstream Ready nodes in the same `Ok(Decision)`. Timeouts, 5xx errors, or undeclared outcomes are caught and mapped to `Ok(Decision)` as node-attempt failures (retrying `bot_task` if `attempt < max_attempts`, else `FinishTask(Failed)`), never returning `Err(RunnerError)`.
-  - **Timeout & Retry**: on `bot_task` timeout with `attempt < max_attempts`, emits `CancelDispatch(old_did)` and `StartDispatch(new_did)` in one decision without waiting for `ConfirmedCanceled`; `old_did` stays in `Checkpoint.unresolved_dispatches` until terminal supervision completes, while `new_did` runs in its own isolated `downstream_context`. `human_input` nodes have fixed `max_attempts = 1`.
+  - **Timeout & Retry**: on `bot_task` timeout with `attempt < max_attempts`, emits `CancelDispatch(old_did)` and `StartDispatch(new_did)` in one decision without waiting for `ConfirmedCanceled`; `new_did` runs immediately in its own isolated `downstream_context` without recording cross-task cancel fence state. `human_input` nodes have fixed `max_attempts = 1`.
   - **Coexistence**: single-process `bcs-collaboration-runtime` and distributed `GroupFsmRunner` remain isolated by deployment/admission; no dual-writing of legacy state-machine tables and no live mid-run engine switching.
 
-## 7. Long-Term Extensibility (`Chat`, `ManagerWorker`, `Custom`)
+## 7. Long-Term Extensibility (`Chat`, `ManagerWorker`)
 
 | Capability | `DirectA2a` (Phase 1) | `StateMachine` (Phase 1) | `Chat` (Future) | `ManagerWorker` (Future) |
 | --- | --- | --- | --- | --- |
-| `SessionTarget` | `DirectAgent(bot)` | `Group(id)` | `Group(id)` | `Group(id)` |
-| `max_active_tasks` | `1` | `1` | `> 1` (configurable) | `1` or `> 1` |
-| Downstream `context_id` | Shared per session (`sid`) | Isolated per dispatch (`did`) | Shared per session (`sid`) | Manager `sid` / Worker per-subtask |
-| Same-`(Session, Agent)` concurrency protection | `max_active_tasks = 1` + `required_idle_agents_on_start` wait on `unresolved_dispatches` | Avoided by per-`did` isolated `downstream_context` | Future: check `unresolved_dispatches` in Worker/Runner when `Chat` lands | Future: Manager `sid` serialized; Worker isolated per subtask |
+| `SessionTarget` | `DirectAgent { agent }` | `Group { group }` | `Group { group }` | `Group { group }` |
+| Active tasks per Session | `1` (`Option<ActiveRunnerState>`) | `1` (`Option<ActiveRunnerState>`) | Future: `1` or multi-slot when `Chat` lands | `1` (or multi-slot if needed) |
+| Downstream `context_id` | `"{sid}:{downstream_generation}"` | Isolated per dispatch (`did`) | Shared per session | Manager per session / Worker per subtask |
+| Same-`(Session, Agent)` concurrency protection | Single active task + event-driven `pending_cancel_did` fence (`CancelGrace` fallback rotates `downstream_generation`) | Avoided by per-`did` isolated `downstream_context` | Future: defined with `Chat` runner design | Future: Manager serialized; Worker isolated per subtask |
 | Dispatch pattern | 1 `Agent` | Static DAG/Loop fan-out & join | Dynamic `@mention` / `Driver` fan-out | Manager + dynamic Worker fan-out via A2A events |
 | Gateway HTTP/app/core changes | Implemented once | Implemented once | **None** (Directory + Runner plugin only) | **None** (Directory + Runner plugin only) |
 
@@ -539,8 +558,8 @@ pub trait DistSessionDirectoryPort: Send + Sync {
 | Slice | Scope | Exit Criteria |
 | --- | --- | --- |
 | **Step 1** | Extract `crates/services/bcs-collaboration-plan` | Existing `bcs-collaboration-runtime` regression suites (`definition_validation`, `fixed_loop_compiler`, `fixed_loop_snapshot`, `fixed_loop_context`, `runtime_progression`) pass with zero behavior drift. |
-| **Step 2** | Evolve `bcs-dist-model`, `bcs-service-api`, and `bcs-dist-worker` (including in-worker `RunnerRegistry`) | `runner_states` map storage seam (Phase 1 single-active-task scheduling), `unresolved_dispatches` occupancy gate + `Queued` task deadline, `CorrelationKey` across dispatch/display, protocol-free `DispatchSpec`, `ModeLocal` interactions, `RunnerInput::HumanReply.responder`, `async DistRunnerCoreService`, post-`reduce` `logical_steps_delta`, and `max_task_evaluations` pass unit and conformance tests. |
-| **Step 3** | Implement `bcs-direct-a2a-runner` and `DistSessionDirectoryPort` | End-to-end Gateway → Inbox → Worker → Connector integration tests pass for streaming, `InputRequired`/`ContinueDispatch`, cancel, timeout, and post-cancel/post-timeout `unresolved_dispatches` gating + wait-timeout on shared `sid`. |
+| **Step 2** | Evolve `bcs-dist-model`, `bcs-service-api`, and `bcs-dist-worker` (including in-worker `RunnerRegistry`) | Per-`sid` `Slot` config caching, `DirectA2a` event-driven `pending_cancel_did` / `CancelGrace` / `downstream_generation` fence, `CorrelationKey` across dispatch/display, protocol-free `DispatchSpec`, `ModeLocal` interactions, `RunnerInput::HumanReply.responder`, `async DistRunnerCoreService`, post-`reduce` `logical_steps_delta`, and `max_task_evaluations` pass unit and conformance tests. |
+| **Step 3** | Implement `bcs-direct-a2a-runner` and `DistSessionDirectoryPort` | End-to-end Gateway → Inbox → Worker → Connector integration tests pass for streaming (`append` vs replacement/`Snapshot` `Upsert`), `InputRequired`/`ContinueDispatch`, normal abort preserving `downstream_generation`, and hung-cancel `CancelGrace` rotating `downstream_generation`. |
 | **Step 4** | Implement `bcs-group-fsm-runner` | Pure Runner and Worker integration tests cover DAG, fan-out/join, parallel same-Agent `downstream_context` isolation, v1/v2 fixed loops, internal Judge branching and transient Judge error retry (verifying no Session quarantine), native `human_input` responder checks, and timeout retry, plus differential checks against `bcs-collaboration-runtime`. |
 | **Step 5** | Production runtime composition & acceptance | Composition root wires `DirectA2aRunner`, `GroupFsmRunner`, real Agent registry resolver, shared SQL archive, and `JudgeEvaluatorPort`; passes architecture checks and store contract suites. |
 
