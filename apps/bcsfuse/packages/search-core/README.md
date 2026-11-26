@@ -166,8 +166,14 @@ Catalog hosts may opt into separate normal settings with `request_retrieval_defa
 `update_retrieval` accepts flat retrieval switches, deadlines, result/admission limits,
 empty-result fallback and embedding singleflight. Missing keys reset to that host's
 startup defaults; invalid updates retain the last valid snapshot. `update` then accepts
-only `retrieval` permissions (missing keys allow); request switches override normal
+`retrieval` permissions (missing keys allow); request switches override normal
 defaults, never emergency denials. Cache configuration remains independent.
 Requests retain one immutable snapshot. Hosts not opting in retain the existing
 emergency policy contract, including TC. Platform subscription and host-specific
 timeout defaults belong to the host composition.
+
+Existing emergency payloads containing `retrieval` may retain known legacy policy
+fields: deadlines, limits, cache and empty-result fallback are ignored, while the
+three emergency permissions still apply. Normal settings remain owned by
+`update_retrieval` and cache settings by `update_cache`. Unknown fields or invalid
+permission values reject the update and retain the last valid snapshot.

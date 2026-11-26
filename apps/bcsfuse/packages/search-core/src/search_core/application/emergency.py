@@ -224,11 +224,22 @@ class EmergencyControl:
 
     def _update_emergency_switches(self, raw):
         try:
-            config = (
-                EmergencyConfig.model_validate_json(raw)
-                if isinstance(raw, str)
-                else EmergencyConfig.model_validate(raw)
-            )
+            values = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(values, dict) and "retrieval" in values:
+                # Old hosts published limits and deadlines with permissions.
+                # Ignore those known fields, without losing emergency denials.
+                values = {
+                    key: value
+                    for key, value in values.items()
+                    if key == "retrieval" or key not in EmergencyPolicy.model_fields
+                }
+                if isinstance(values["retrieval"], dict):
+                    values["retrieval"] = {
+                        key: value
+                        for key, value in values["retrieval"].items()
+                        if key != "empty_result_fallback_enabled"
+                    }
+            config = EmergencyConfig.model_validate(values)
             switches = config.retrieval.model_dump()
             if not switches["keyword_enabled"] and not switches["vector_enabled"]:
                 switches["rerank_enabled"] = False
@@ -268,7 +279,7 @@ class EmergencyControl:
         try:
             values = json.loads(raw) if isinstance(raw, str) else raw
             if not isinstance(values, dict):
-                raise ValueError("retrieval configuration must be an object")
+                raise TypeError("retrieval configuration must be an object")
             defaults = self._startup_policy.model_dump(exclude={"cache", "retrieval"})
             defaults.update(self._startup_request_defaults.model_dump())
             config = RetrievalConfig.model_validate({**defaults, **values})
