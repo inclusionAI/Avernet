@@ -33,6 +33,10 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 前端接入会话收藏能力时，请参考
 **[`session-favorites.zh-CN.md`](session-favorites.zh-CN.md)**。
 
+AICoding 专属公共产品接口请参考
+**[`aicoding-openapi-guidelines.zh-CN.md`](aicoding-openapi-guidelines.zh-CN.md)**。
+它们是 OCB 自己定义的产品契约，不是 Track C 的 Engine 透传。
+
 ---
 
 ## 全局视角（请先读这一节）

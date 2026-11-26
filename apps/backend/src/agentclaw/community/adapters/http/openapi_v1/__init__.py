@@ -251,6 +251,7 @@ from .render_screens import router as render_screens_router
 from .repository_catalog import router as repository_catalog_router
 from .routines import router as routines_router
 from .routines.owner_router import router as routines_owner_router
+from .aicoding.work_items import router as aicoding_work_items_router
 from .skills import (
     publish_status_router as skill_publish_status_router,
     readme_router as skill_readme_router,
@@ -321,6 +322,14 @@ _MIXED_GROUPS = [
 # retiring addresses. See "Mount order" above. Splitting them across lists is
 # about which *response table* each gets; it does not change that they all
 # precede `bots`.
+# Self-service literals under the bots namespace: no caller-selectable
+# user_id query. The surface convention still publishes the standard user-scoped
+# 403, and each router records its real application admission in
+# ``admission.py``.
+_SELF_SERVICE_SUBGROUPS = [
+    aicoding_work_items_router,
+]
+
 _OPEN_SUBGROUPS = [
     managed_bots_router,
     classification_router,
@@ -620,6 +629,10 @@ def build_public_router() -> APIRouter:
         responses=USER_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )
+    for router in _SELF_SERVICE_SUBGROUPS:
+        public.include_router(
+            router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+        )
     for router in _GROUPS_WITHOUT_CALLER_SCOPE + _MIXED_GROUPS:
         public.include_router(
             router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH

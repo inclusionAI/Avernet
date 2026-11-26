@@ -411,6 +411,13 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/{bot_id}/routines",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    # The Coding work-items snapshot is a human self-service UI aggregate. It
+    # would be unsafe to let an app name the signed user and indirectly read
+    # every Bot it did not receive a grant for.
+    (
+        "GET",
+        "/openapi/v1/bots/aicoding/work-items",
+    ): AdmissionMode.REFUSED,
     # The owner-level aggregate lists the named user's fleet, not one bot —
     # gated on a live delegation like the ceiling (see owner_router).
     ("GET", "/openapi/v1/bots/routines/all"): AdmissionMode.USER_GATED,
