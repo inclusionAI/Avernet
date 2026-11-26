@@ -42,3 +42,9 @@ if [[ "$(uname -s)" == Linux ]]; then
 else
   echo "A2A test-user HTTPS story requires the Linux process-local CA store"
 fi
+
+# Type compatibility through existing admission/direct HTTP APIs. Only the
+# isolated story database receives trusted fixture rows; no public writer API.
+LLVM_PROFILE_FILE="$cov_runtime/agent-edge-%m-%p.profraw" \
+  python3 "$bcs_dir/scripts/e2e-test/agent_edge_compatibility_story.py" \
+    --binary "$cov_runtime/debug/bcs-caller-e2e"
