@@ -77,6 +77,27 @@ def test_status_keeps_operation_failure_and_warning_under_successful_query(opera
     assert response.json()['data']['items'][0]['ext']['aicoding']['restart']['status'] == 'FAILED'
 
 
+@pytest.mark.parametrize('metadata', [
+    {},
+    {'template_version_id': None, 'template_status': None},
+    {'template_version_id': 7, 'template_status': 'pre_published'},
+    {'template_version_id': 7, 'template_status': 'prod_released'},
+])
+def test_discovery_returns_optional_snapshot_release_metadata_with_the_existing_envelope(operations_client, metadata):
+    client, service = operations_client
+    service.query.return_value = {'total': 1, 'items': [{
+        'bot_id': 'bot', 'owner_id': 'owner', 'engine': 'aicoding',
+        'env': 'dev', 'status': 'ACTIVE', 'stage': 'draft', **metadata,
+    }]}
+    response = client.post('/openapi/v1/bots/template-queries', headers=headers(), json={'template_key': 'coding'})
+    assert response.status_code == 200
+    assert response.json()['code'] == 200000
+    row = response.json()['data']['items'][0]
+    assert row['template_status'] == metadata.get('template_status')
+    assert row['template_version_id'] == metadata.get('template_version_id')
+    assert 'template_config' not in row
+
+
 def test_unknown_app_or_human_is_refused_before_target_lookup(operations_client):
     client, service = operations_client
     response = client.post('/openapi/v1/bots/restart-for-others',
