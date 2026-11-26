@@ -1,0 +1,35 @@
+apps/backend/src/agentclaw/community/core/skill_center/README.md
+  s_9ca10eec47a20b::t_d8ea41375a749d 326-332
+apps/backend/src/agentclaw/community/core/skill_center/services/track_latest.py
+  s_9ca10eec47a20b::t_47670c5ca071a7 170,179
+  s_9ca10eec47a20b::t_d8ea41375a749d 180
+apps/backend/src/agentclaw/community/core/skill_center/runtime_projection_contract.py
+  s_9ca10eec47a20b::t_47670c5ca071a7 462-463
+apps/backend/tests/community/core/skill_center/test_bot_runtime_projector_timing.py
+  s_9ca10eec47a20b::t_d8ea41375a749d 304-307
+  s_9ca10eec47a20b::t_eecb6efe1e1bf2 23-24,72-74,271-303,308-314
+apps/backend/src/agentclaw/community/core/skill_center/services/bot_runtime_projector.py
+  s_9ca10eec47a20b::t_d8ea41375a749d 184-186,656-659
+  s_9ca10eec47a20b::t_47670c5ca071a7 23,208,251,254,258-260,272-273,597-598,655,660
+apps/backend/src/agentclaw/community/core/mcp/services/cli_passport_scope.py
+  s_9ca10eec47a20b::t_47670c5ca071a7 355-366
+apps/backend/tests/community/core/skill_center/test_track_latest.py
+  s_9ca10eec47a20b::t_eecb6efe1e1bf2 280-281,284-288,292,309,311-312
+  s_9ca10eec47a20b::t_d8ea41375a749d 310,405-406,410
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eaf0d6d1a145588107edef71e04cf8357e8e9cbb",
+  "prompts": {},
+  "sessions": {
+    "s_9ca10eec47a20b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a215ef-5beb-7cc1-bb0e-316b80acffa5",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
