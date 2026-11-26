@@ -607,9 +607,27 @@ describe('useCollaborationPrivacy 检测进入审批边沿静默刷新协作数�
       status: 'ready',
       identity: { userId: '900004', displayName: '真实用户', online: true },
     });
+    const approvingOverview: CollaborationPrivacyOverview = {
+      ...overviewWithBots,
+      bots: [
+        makeBot('bot-1', 'Bot A'),
+        {
+          ...makeBot('bot-2', 'Bot B'),
+          pendingPublications: {
+            user: {
+              id: 'puid-1',
+              audience: 'user',
+              target: { scope: 'all', organizationPaths: [] },
+              submittedAt: '2026-11-26T09:30:00.000Z',
+              approvalUrl: 'https://approval.example.com/order/puid-1',
+            },
+          },
+        },
+      ],
+    };
     const loadOverview = jest
       .spyOn(collaborationPrivacyService, 'loadOverview')
-      .mockResolvedValue(overviewWithBots);
+      .mockResolvedValue(approvingOverview);
     jest.spyOn(riskController, 'getCurrentBotPublicRiskCheck').mockResolvedValue({
       code: 20000,
       data: {
@@ -632,7 +650,61 @@ describe('useCollaborationPrivacy 检测进入审批边沿静默刷新协作数�
     // 初次加载 + approving 边沿的静默刷新各一次，且静默刷新不翻转 loading。
     await waitFor(() => expect(loadOverview).toHaveBeenCalledTimes(2));
     expect(result.current.loading).toBe(false);
-    expect(result.current.overview).toEqual(overviewWithBots);
+    expect(result.current.overview).toEqual(approvingOverview);
+  });
+
+  /** 带 friend_ext 审批投影的 approving 场景：投影 id 由 pendingId 控制，等待 risk 进入 approving。 */
+  async function renderApprovingWithProjection(pendingId: string) {
+    mockedUseHumanIdentity.mockReturnValue({
+      status: 'ready',
+      identity: { userId: '900004', displayName: '真实用户', online: true },
+    });
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue({
+      ...overviewWithBots,
+      bots: [
+        {
+          ...makeBot('bot-1', 'Bot A'),
+          pendingPublications: {
+            user: {
+              id: pendingId,
+              audience: 'user',
+              target: { scope: 'all', organizationPaths: [] },
+              submittedAt: '2026-11-26T09:30:00.000Z',
+              approvalUrl: `https://approval.example.com/order/${pendingId}`,
+            },
+          },
+        },
+      ],
+    });
+    jest.spyOn(riskController, 'getCurrentBotPublicRiskCheck').mockResolvedValue({
+      code: 20000,
+      data: {
+        risk_check_id: 'risk-1',
+        phase: 'APPROVING',
+        security_status: 'PASS',
+        detail_url: null,
+        auto_poll_paused: false,
+        auto_poll_until: null,
+        next_action_at: null,
+        target: { public_scope: 'user', visibility: 'protected', view_depts: [] },
+        error_reason: null,
+        invalidation_reason: null,
+        approval_puid: 'puid-current',
+      },
+    } as never);
+    const { result } = renderHook(() => useCollaborationPrivacy({ fixedBotId: 'bot-1' }));
+    await waitFor(() => expect(result.current.userRisk.uiState.kind).toBe('approving'));
+    return { result };
+  }
+
+  it('approving 时从 friend_ext 投影派生审批外链（puid 与当前审批一致）', async () => {
+    const { result } = await renderApprovingWithProjection('puid-current');
+    expect(result.current.userRisk.approvalUrl).toBe('https://approval.example.com/order/puid-current');
+  });
+
+  it('friend_ext 投影 puid 与当前审批不一致时不透出审批外链', async () => {
+    const { result } = await renderApprovingWithProjection('puid-stale');
+    expect(result.current.userRisk.approvalUrl).toBeNull();
   });
 });
 

@@ -3,6 +3,7 @@
 import { Button } from '@/components/ui/Button';
 import { getRiskFailurePresentation } from '@/domain/collaborationPrivacy/botPublicRisk';
 import type { BotPublicRiskCheckRecord } from '@/services/collaborationPrivacy/botPublicRiskService';
+import { history } from '@umijs/max';
 import { Check, Lock, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 
 // 公开流程两步胶囊:「检测 → 审批」本身是有序步骤,用 step 条编码当前所处环节。
@@ -18,12 +19,15 @@ const stepPending = `${stepTone} bg-muted/70 text-muted-foreground`;
 export function RiskInFlightBanner({
   kind,
   record,
+  approvalUrl,
   currentScopeNote,
   onRefreshState,
   refreshing = false,
 }: {
   kind: 'checking' | 'advancing' | 'approving';
   record: BotPublicRiskCheckRecord | null;
+  /** approving 时当前审批的 friend_ext 投影外链——与行级「查看审批进度」同一来源；缺失回退工单中心。 */
+  approvalUrl?: string | null;
   currentScopeNote: string;
   onRefreshState?: () => void;
   refreshing?: boolean;
@@ -50,7 +54,28 @@ export function RiskInFlightBanner({
           <li className={kind === 'approving' ? stepActive : stepPending}>公开工单审批</li>
         </ol>
         <div className="mt-3 border-t border-primary/15 pt-2.5 text-xs">
-          {record?.detail_url ? (
+          {kind === 'approving' ? (
+            // 审批中阶段检测单不再是关注对象；入口与行级（RelationCard）语义对齐：
+            // 优先同一审批的 friend_ext 投影外链，无投影时回退工单中心。
+            approvalUrl ? (
+              <a
+                href={approvalUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-primary hover:opacity-80"
+              >
+                查看审批进度
+              </a>
+            ) : (
+              <button
+                type="button"
+                className="font-medium text-primary hover:opacity-80"
+                onClick={() => history.push('/ticket-center')}
+              >
+                查看审批进度
+              </button>
+            )
+          ) : record?.detail_url ? (
             <a
               href={record.detail_url}
               target="_blank"
@@ -64,7 +89,11 @@ export function RiskInFlightBanner({
           ) : null}
           {onRefreshState ? (
             <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-muted-foreground">若长时间停留在检测中，可手动刷新同步最新结论。</span>
+              <span className="text-muted-foreground">
+                {kind === 'approving'
+                  ? '审批结论由回调推进，若长时间未出结果，可手动刷新同步最新状态。'
+                  : '若长时间停留在检测中，可手动刷新同步最新结论。'}
+              </span>
               <Button
                 variant="ghost"
                 size="sm"

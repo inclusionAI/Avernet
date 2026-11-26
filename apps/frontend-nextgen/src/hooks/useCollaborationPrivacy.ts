@@ -170,6 +170,18 @@ export function useCollaborationPrivacy({
     },
     [risk.create, risk.isRefreshing],
   );
+  // 审批中外链：取 risk 记录同一笔审批的 friend_ext 投影（审批边沿静默刷新后写入
+  // pendingPublications），判定与 RelationCard 的 pendingApproval 同构——仅 approving
+  // 且投影属于当前审批（puid 为空或与 pending.id 一致）时透出，供「查看审批进度」
+  // 入口（弹窗在途卡与行级）共用同一审批工单地址。
+  const riskSourceBot = publicationBot ?? visibleBots[0];
+  const pendingUserApproval =
+    risk.uiState.kind === 'approving' ? riskSourceBot?.pendingPublications.user : undefined;
+  const riskApprovalUrl =
+    pendingUserApproval?.approvalUrl &&
+    (!risk.currentRecord?.approval_puid || pendingUserApproval.id === risk.currentRecord.approval_puid)
+      ? pendingUserApproval.approvalUrl
+      : null;
   const retryIntent = getRiskRetryIntent(risk.uiState);
   const blockedRiskApprovalPuid = retryIntent ? risk.currentRecord?.approval_puid : null;
   const retryCurrent =
@@ -213,6 +225,7 @@ export function useCollaborationPrivacy({
     userRisk: {
       uiState: risk.uiState,
       record: risk.currentRecord,
+      approvalUrl: riskApprovalUrl,
       isCreating: risk.isCreating,
       refreshCurrent: risk.refreshCurrent,
       isRefreshing: risk.isRefreshing,
