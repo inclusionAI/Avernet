@@ -127,19 +127,21 @@ class Story:
         provider = self.request('POST', '/providers', {'name': 'Agent invocation source',
             'webhook_url': self.peer.base + '/must-not-deliver', 'auth': {'mode': 'agentpass'},
             'protocol_version': '2.0'}, actor=None)
+        admin = provider['provider_admin_token']
         source = self.request('POST', f"/providers/{provider['provider_id']}/bots", {
             'name': 'Invocation source', 'provider_bot_ref': 'invoke-source-code', 'owners': [self.source_owner]},
-            token=provider['provider_admin_token'], actor=None)
+            token=admin, actor=None)
         self.source = source['bot_uuid']
         provider = self.request('POST', '/providers', {'name': 'Agent invocation target',
             'webhook_url': self.peer.base + '/legacy-must-not-deliver',
             'auth': {'mode': 'static_bearer'}, 'protocol_version': '2.0'}, actor=None)
+        admin = provider['provider_admin_token']
         self.targets = []
         for index in range(5):
             bot = self.request('POST', f"/providers/{provider['provider_id']}/bots", {
                 'name': f'Invocation target {index}', 'provider_bot_ref': f'invoke-target-{index}',
                 'owners': [self.owner], 'agent_card': self.peer.card},
-                token=provider['provider_admin_token'], actor=None)
+                token=admin, actor=None)
             self.targets.append(bot['bot_uuid'])
         self.target = self.targets[0]
         assert self.sql('SELECT agent_code FROM bcs_bots WHERE bot_uuid=?', (self.source,)) == [('invoke-source-code',)]
