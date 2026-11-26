@@ -20,6 +20,7 @@ from gateway.community.core.app import AppRegistrar
 from gateway.community.core.authn import Authenticator
 from gateway.community.core.baas_migration import BaasKeyMigrator
 from gateway.community.core.forwarding import Forwarding
+from gateway.community.core.rate_limiting import AdmissionController
 from gateway.community.spi.principal_signer import PrincipalSigner
 
 from ._authn import build_authenticator
@@ -37,6 +38,7 @@ from ._credential_issuance import (
 from ._database import initialize_database
 from ._forwarding import build_forwarding
 from ._principal_signer import build_principal_signer
+from ._rate_limiting import build_admission
 
 _container: ApplicationContainer | None = None
 
@@ -49,6 +51,9 @@ class BootstrapResult:
     access_key_issuer: AccessKeyIssuer
     app_registrar: AppRegistrar
     baas_key_migrator: BaasKeyMigrator
+    #: Present only when rate limiting is enabled; ``None`` leaves the forward
+    #: path untouched (no admission step), preserving existing behaviour.
+    admission: AdmissionController | None
 
     _container: ApplicationContainer = field(repr=False)
 
@@ -85,16 +90,26 @@ class BootstrapResult:
         import asyncio
 
         plugins = self._container.plugins()
-        db = plugins.database()
-        if hasattr(db, "close"):
+
+        def _run_close(coro_fn) -> None:
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    loop.create_task(db.close())
+                    loop.create_task(coro_fn())
                 else:
-                    loop.run_until_complete(db.close())
+                    loop.run_until_complete(coro_fn())
             except RuntimeError:
                 pass
+
+        db = plugins.database()
+        if hasattr(db, "close"):
+            _run_close(db.close)
+
+        # Release the rate-limiter's backend client (async close) if one is wired.
+        limiter = plugins.rate_limiter()
+        if limiter is not None and hasattr(limiter, "close"):
+            _run_close(limiter.close)
+
         shutdown_services(self._container)
 
 
@@ -119,6 +134,10 @@ def bootstrap_app() -> BootstrapResult:
     access_key_issuer = build_access_key_issuer(db, principal_signer)
     app_registrar = build_app_registrar(db)
     baas_key_migrator = build_baas_key_migrator(db)
+    admission = build_admission(
+        user_config=container.user_config(),
+        limiter=container.plugins().rate_limiter(),
+    )
     return BootstrapResult(
         authenticator=authenticator,
         forwarding=forwarding,
@@ -126,6 +145,7 @@ def bootstrap_app() -> BootstrapResult:
         access_key_issuer=access_key_issuer,
         app_registrar=app_registrar,
         baas_key_migrator=baas_key_migrator,
+        admission=admission,
         _container=container,
     )
 
@@ -158,6 +178,7 @@ __all__ = [
     "Provide",
     "bootstrap_app",
     "build_access_key_issuer",
+    "build_admission",
     "build_app_registrar",
     "build_authenticator",
     "build_baas_key_migrator",

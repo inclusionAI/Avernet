@@ -52,6 +52,23 @@ class CacheRedisConfig(ConfigSchema):
     socket_connect_timeout: float = Field(default=5.0, gt=0)
 
 
+class RateLimitRedisConfig(ConfigSchema):
+    """Redis rate-limiter provider connection settings.
+
+    Only used when ``plugins.rate_limiter`` is ``redis``. The timeouts are small
+    and bounded on purpose: the limiter fails open, so a slow backend should give
+    up quickly and forward rather than add latency to every request. A dedicated
+    ``url`` (separate DB or instance) keeps rate-limit keys off the shared cache's
+    eviction pressure.
+    """
+
+    config_section = "rate_limit_redis"
+    url: str = "redis://localhost:6379/0"
+    socket_timeout: float = Field(default=0.25, gt=0)
+    socket_connect_timeout: float = Field(default=0.25, gt=0)
+    key_prefix: str = Field(default="ratelimit", min_length=1)
+
+
 class DatabaseSectionConfig(ConfigSchema):
     """Top-level ``database`` section — connection params for the selected plugin.
 
@@ -89,6 +106,7 @@ class PluginConfig(ConfigSchema):
     secret: str = Field(default="community", min_length=1)
     authn: AuthnPluginConfig = Field(default_factory=AuthnPluginConfig)
     database: str = Field(default="sqlite", min_length=1)
+    rate_limiter: str = Field(default="noop", min_length=1)
     secret_aliyun_kms: dict = Field(default_factory=dict)
 
 

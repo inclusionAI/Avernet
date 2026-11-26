@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -178,6 +178,53 @@ class CorsConfig(BaseModel):
         return patterns
 
 
+class RateLimitPolicyConfig(BaseModel):
+    """A single token-bucket budget: sustained ``rate`` (QPS) and ``burst`` size.
+
+    ``rate`` and ``burst`` are *not* the historical RPM/RPD request-quota fields
+    found elsewhere in the product — they are a per-second rate and a bucket
+    capacity in requests. They are named and typed explicitly so the two are
+    never conflated. ``rate`` must be > 0 and ``burst`` must be >= 1 request; a
+    budget that can admit nothing is refused at config load, not at runtime.
+    """
+
+    model_config = {"extra": "forbid"}
+    rate: float = Field(gt=0, description="Sustained admissions per second.")
+    burst: int = Field(ge=1, description="Bucket capacity in requests (>= 1).")
+
+
+class RateLimitConfig(BaseModel):
+    """Per-application distributed rate limiting (``user_config.rate_limit``).
+
+    Disabled by default, so existing deployments are unaffected. When
+    ``enabled`` is true a ``default`` budget is required (every application gets
+    one); ``overrides`` replaces it for specific applications, keyed by
+    ``"<tenant>:<app_id>"``. ``namespace`` isolates buckets between deployments
+    that share one storage backend.
+
+    The provider is selected separately via ``plugins.rate_limiter`` and is
+    required when enabled — there is no silent fallback to unlimited or
+    process-local limiting (that check lives in the composition root, which fails
+    startup when enabled with no provider).
+    """
+
+    model_config = {"extra": "forbid"}
+    enabled: bool = False
+    namespace: str = Field(default="default", min_length=1)
+    default: RateLimitPolicyConfig | None = None
+    overrides: dict[str, RateLimitPolicyConfig] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _require_default_when_enabled(self) -> RateLimitConfig:
+        if self.enabled and self.default is None:
+            raise ValueError(
+                "rate_limit.enabled is true but rate_limit.default is unset: "
+                "configure rate_limit.default.rate and rate_limit.default.burst "
+                "(no implicit unlimited default is applied)."
+            )
+        return self
+
+
 class PluginConfig(BaseSettings):
     """Plugin selection config for gateway DI container.
 
@@ -198,6 +245,10 @@ class PluginConfig(BaseSettings):
     secret: str = Field(default="community", min_length=1)
     authn: AuthnPluginConfig = Field(default_factory=AuthnPluginConfig)
     database: str = Field(default="sqlite", min_length=1)
+    # Rate-limit storage provider. ``noop`` means "no provider wired"; a
+    # deployment that enables rate limiting must select a real provider
+    # (``redis`` here, or an enterprise option registered via plugin_registry).
+    rate_limiter: str = Field(default="noop", min_length=1)
     secret_aliyun_kms: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -212,6 +263,7 @@ class UserConfig(BaseModel):
     identity_strategies: dict[str, list[str]] = Field(default_factory=dict)
     route_security: dict[str, dict[str, str]] = Field(default_factory=dict)
     cors: CorsConfig = Field(default_factory=CorsConfig)
+    rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     upstreams: dict[str, Any] = Field(default_factory=dict)
 
     def get(self, key: str, default: Any = None) -> Any:
