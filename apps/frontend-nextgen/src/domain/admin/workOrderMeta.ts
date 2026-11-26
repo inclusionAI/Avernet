@@ -33,6 +33,9 @@ export const WORK_ORDER_TYPE_META: Record<string, WorkOrderTypeMeta> = {
   BOT_MEMBER_ADDED: { label: '通知', tone: 'blue', category: 'NOTICE' },
   HUMAN2BOT_FRIEND_REVIEWED: { label: '审批类', tone: 'green', category: 'NOTICE' },
   BOT2BOT_FRIEND_REVIEWED: { label: '审批类', tone: 'green', category: 'NOTICE' },
+  // bot-friend-roster：Owner 移除好友的系统通知（非审批结果,走普通通知蓝兜底）。
+  HUMAN2BOT_FRIEND_REMOVED: { label: '通知', tone: 'blue', category: 'NOTICE' },
+  BOT2BOT_FRIEND_REMOVED: { label: '通知', tone: 'blue', category: 'NOTICE' },
   HUMAN2BOT_PUBLIC_ORDER_CREATED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },
   HUMAN2BOT_PUBLIC_ORDER_COMPLETED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },
   BOT2BOT_PUBLIC_ORDER_CREATED: { label: '公开工单', tone: 'purple', category: 'NOTICE' },

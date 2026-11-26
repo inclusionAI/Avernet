@@ -214,8 +214,9 @@ def test_fanout_enqueues_one_level_triggered_task_per_candidate_bot() -> None:
 
 
 class _Reader:
-    def __init__(self, *, active: bool) -> None:
+    def __init__(self, *, active: bool, has_dependencies: bool = True) -> None:
         self.active = active
+        self.has_dependencies = has_dependencies
         self.calls = 0
 
     def active_skill_assets(self, **_kwargs):
@@ -229,7 +230,7 @@ class _Reader:
                 git_path="center://public-weather",
                 skill_uuid="00000000-0000-4000-8000-000000000010",
                 sc_version_number="3.0.0",  # execution-time latest, not V2 payload
-                mcp_dependencies=({"code": "mcp.v3"},),
+                mcp_dependencies=({"code": "mcp.v3"},) if self.has_dependencies else (),
             ),
         )
 
@@ -277,13 +278,19 @@ def _pending_result(code: str) -> RuntimeProjectionResult:
     )
 
 
-def test_bot_task_rereads_latest_and_projects_skill_plus_dependency_delta_once() -> None:
-    reader = _Reader(active=True)
+@pytest.mark.parametrize("has_dependencies", [False, True])
+def test_bot_task_rereads_latest_and_projects_relevant_domains(has_dependencies) -> None:
+    reader = _Reader(active=True, has_dependencies=has_dependencies)
     projector = _Projector()
+    latest = _Latest() if has_dependencies else MagicMock()
+    if not has_dependencies:
+        latest.list_published_versions.return_value = (
+            PublishedTrackLatestVersion(skill_version_id=102, metadata_json='{"mcp_dependencies":[]}'),
+        )
     handler = BotTrackLatestReconcileTaskHandler(
         reader=reader,
         projector=projector,
-        latest=_Latest(),
+        latest=latest,
         recovery=MagicMock(),
         env_provider=lambda: "pre",
     )
@@ -300,9 +307,10 @@ def test_bot_task_rereads_latest_and_projects_skill_plus_dependency_delta_once()
             "owner_id": "owner-a",
             "scope": ProjectionScope(
                 skills=True,
-                mcp=True,
-                claimed_mcp=frozenset({"mcp.v3"}),
-                released_mcp=frozenset({"mcp.v1"}),
+                mcp=has_dependencies,
+                passport_if_changed=True,
+                claimed_mcp=frozenset({"mcp.v3"} if has_dependencies else ()),
+                released_mcp=frozenset({"mcp.v1"} if has_dependencies else ()),
             ),
         }
     ]
@@ -395,11 +403,12 @@ def test_bot_task_hands_center_wait_to_skill_recovery_without_full_domain_retry(
     recovery.ensure.assert_called_once_with(owner_id="owner-a", bot_id="bot-a")
 
 
-def test_bot_task_keeps_retrying_when_mcp_projection_is_pending() -> None:
+@pytest.mark.parametrize("code", ["MCP_RUNTIME_UNAVAILABLE", "PASSPORT_RUNTIME_UNAVAILABLE"])
+def test_bot_task_keeps_retrying_when_capability_projection_is_pending(code) -> None:
     projector = _Projector()
 
     async def project(**_kwargs):
-        return _pending_result("MCP_RUNTIME_UNAVAILABLE")
+        return _pending_result(code)
 
     projector.project = project
     recovery = MagicMock()

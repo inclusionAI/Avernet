@@ -459,6 +459,8 @@ class ProjectionScope:
     claim_all_mcp: bool = False
     #: A separate platform authorization update remains due after a device receipt.
     passport: bool = False
+    #: Reconcile against the live authorization scope before writing Passport.
+    passport_if_changed: bool = False
 
     @property
     def requires_device_delivery(self) -> bool:

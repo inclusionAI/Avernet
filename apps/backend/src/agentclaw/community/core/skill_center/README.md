@@ -323,6 +323,13 @@ before crossing the exact-version boundary.
 
 The catalogue Gateway, Space Publication, SC Public Reference, materialized-only
 Sync, and Track Latest application modules now consume the typed seams above.
+Track Latest repairs Skill delivery with a Skill-only projection when the
+tracked Skill has no current or historical MCP dependencies. When dependencies
+need reconciliation, the task compares the current Passport grants with the
+complete desired MCP and CLI grants by code and execution identity before
+writing Passport. Each retry reads the current grants again, so an incomplete
+authorization write remains eligible for repair.
+
 `TrackLatestPublishedVersionListener` is the single required EventBus bridge
 from the unified at-least-once PUBLISHED event to durable fanout. Publication
 still owns no Track Latest policy or task type, and Reference/Sync still own no

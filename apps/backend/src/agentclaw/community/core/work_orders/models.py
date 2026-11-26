@@ -148,6 +148,14 @@ class WorkOrderEventType(StrEnum):
         "BOT2BOT_FRIEND_REVIEWED", NotificationCategory.NOTICE,
         "Bot 好友申请已处理", "Bot 好友申请已有处理结果。",
     )
+    HUMAN2BOT_FRIEND_REMOVED = (
+        "HUMAN2BOT_FRIEND_REMOVED", NotificationCategory.NOTICE,
+        "你已被移出 Bot 好友名单", "一个 Bot 的管理者已解除与你的好友关系。",
+    )
+    BOT2BOT_FRIEND_REMOVED = (
+        "BOT2BOT_FRIEND_REMOVED", NotificationCategory.NOTICE,
+        "你的 Bot 已被移出好友名单", "一个 Bot 的管理者已解除与你的 Bot 的好友关系。",
+    )
     HUMAN_GROUP_MENTIONED = (
         "HUMAN_GROUP_MENTIONED", NotificationCategory.NOTICE,
         "你被 @ 了", "群聊中有消息 @ 了你。",

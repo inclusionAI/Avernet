@@ -20,6 +20,7 @@ from agentclaw.community.core.mcp.services.passport_scope import (
 from agentclaw.community.core.mcp.services.cli_passport_scope import (
     build_passport_resource_scope,
     extract_passport_mcp_items,
+    passport_grants_match,
 )
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilitySnapshot,
@@ -180,7 +181,9 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         if scope.passport and not scope.requires_device_delivery:
             if not isinstance(plan, ResolvedCapabilityPlan):
                 raise SkillSetRuntimeReconcileError()
-            return await self._with_passport_receipt(plan, RuntimeProjectionResult.converged())
+            return await self._with_passport_receipt(
+                plan, RuntimeProjectionResult.converged(), scope=scope,
+            )
 
         self._registry.for_engine(plan.engine).validate_plan(
             skill_assets=plan.projection.skill_assets,
@@ -202,7 +205,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         )
         if scope.mcp or scope.passport:
             assert isinstance(plan, ResolvedCapabilityPlan)
-            return await self._with_passport_receipt(plan, result)
+            return await self._with_passport_receipt(plan, result, scope=scope)
         logger.info(
             "[BotRuntimeProjector] Passport update skipped, scope declares "
             "no MCP change: bot_id=%s, engine=%s",
@@ -245,14 +248,18 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             scope=scope,
             service_factory=self._factory,
         )
-        return await self._with_passport_receipt(plan, result)
+        return await self._with_passport_receipt(plan, result, scope=scope)
 
     async def _with_passport_receipt(
-        self, plan: ResolvedCapabilityPlan, result: RuntimeProjectionResult,
+        self, plan: ResolvedCapabilityPlan, result: RuntimeProjectionResult, *, scope: ProjectionScope,
     ) -> RuntimeProjectionResult:
         try:
             # Keep the worker's delivery lease heartbeat live during Passport I/O.
-            passport_codes = await asyncio.to_thread(self._apply_passport_projection, plan=plan)
+            passport_codes = await asyncio.to_thread(
+                self._apply_passport_projection,
+                plan=plan,
+                only_if_changed=scope.passport_if_changed,
+            )
         except Exception:
             logger.exception(
                 "[BotRuntimeProjector] Passport projection unavailable "
@@ -264,6 +271,8 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                 code="PASSPORT_RUNTIME_UNAVAILABLE", reason="MCP 授权配置尚未完成同步",
             )
             return replace(RuntimeProjectionResult.combine(result, pending), passport_updated=False)
+        if passport_codes is None:
+            return result
         return replace(result, passport_updated=True, passport_mcp_codes=passport_codes)
 
     def _resolve_plan(
@@ -587,8 +596,9 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         self,
         *,
         plan: ResolvedCapabilityPlan,
-    ) -> frozenset[str]:
-        """Declare the Bot's complete MCP/CLI scope to the authorization service.
+        only_if_changed: bool = False,
+    ) -> frozenset[str] | None:
+        """Return the written MCP codes or None when the write is skipped.
 
         Not a runtime write, and deliberately not part of
         ``EngineRuntimeProjection``: the Passport is the platform's
@@ -644,6 +654,12 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                     mcp_identity_modes=plan.identity_modes,
                     additional_cli_items=plan.effective_cli_items,
                 )
+                if only_if_changed and passport_grants_match(passport, resource_scope):
+                    logger.info(
+                        "agentpass_runtime_scope_unchanged bot_id=%s engine_type=%s",
+                        plan.bot_id, plan.engine,
+                    )
+                    return None
                 stage = "update"
                 verify_passport_write()
                 self._passport.update_passport(
