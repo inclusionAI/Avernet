@@ -179,7 +179,9 @@ GET /api/aicoding/sessions?user_id=<caller>&session_kind=user&limit=<scan_limit>
 5. OCB 按 `(bot_id, owner_id, session_key)` 去重，保留 `updated_at_ms` 最新一条。
 6. 聚合排序使用 `updated_at_ms` desc，再按 Bot/owner/session key 稳定排序。
 7. 不新增 `until_ms`。
-8. 会话详情不在本列表返回。用户点开任务后走既有 DDF 详情查询，避免列表接口被大量详情查询放大。
+8. OCB 的跨 Bot fan-out 有并发上限；这不截断 Bot 数量，也不改变最终聚合语义，
+   只限制同一请求内同时探测的 Bot 数。
+9. 会话详情不在本列表返回。用户点开任务后走既有 DDF 详情查询，避免列表接口被大量详情查询放大。
 
 Partial 语义：
 
