@@ -104,6 +104,23 @@ def test_internal_todo_routes_are_registered() -> None:
 
 
 @pytest.mark.unit
+def test_internal_todo_routes_precede_legacy_task_id_route() -> None:
+    """Static Todo names must not be consumed by ``/{task_id}`` lookup."""
+    from agentclaw.community.adapters.http.app import app
+    from tests.community.framework.coverage_gate import _walk_apiroutes
+
+    paths = [
+        path
+        for path, route in _walk_apiroutes(app.routes)
+        if route.methods & {"GET"}
+    ]
+    todo_index = paths.index("/api/v1/collaboration/tasks/todos")
+    task_index = paths.index("/api/v1/collaboration/tasks/{task_id}")
+
+    assert todo_index < task_index
+
+
+@pytest.mark.unit
 def test_internal_list_todos_uses_authenticated_staff_id() -> None:
     service = MagicMock(spec=TodoServiceProtocol)
     service.list_todos.return_value = TodoPage(total=1, items=(_todo(),))

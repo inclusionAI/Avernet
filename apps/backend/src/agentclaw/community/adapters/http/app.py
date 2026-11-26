@@ -911,10 +911,11 @@ app.include_router(feedback_internal_read_router)  # /api/v1/collaboration/tasks
 app.include_router(channel_router)
 app.include_router(quality_router)
 app.include_router(bot_message_feedback_router)
+# Static collaboration routes must precede the legacy Task ``/{task_id}`` wildcard.
+mount_collaboration_routers(app)
 app.include_router(task_internal_router)
 app.include_router(task_callback_router)
 app.include_router(task_router)
-mount_collaboration_routers(app)
 app.include_router(work_orders_http_router)
 app.include_router(agentswarm_router_module.router)
 agentswarm_router_module.register_exception_handlers(app)
