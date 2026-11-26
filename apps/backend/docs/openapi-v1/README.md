@@ -1252,7 +1252,7 @@ Eight of those thirty — `approvals`, `connection`, `engine`, `identity`,
 retiring addresses**. Bot-first addressing moved every bot-scoped component out
 of that segment. The tenant-level Skill Workbench status route now keeps
 `skills` current at this level, so once the deprecated addresses are removed the
-list is the twenty that remain:
+list is the twenty-two that remain:
 
 ```text
 aicoding  all  authorized  authorized-apps  catalog  ceiling  check-name  collaborations  loadtest  local  logs  market  metadata  mcp  skills

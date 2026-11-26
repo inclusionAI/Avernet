@@ -1,5 +1,6 @@
 """Tests for the user-level Agent Coding work-items aggregation endpoint."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -17,6 +18,7 @@ from agentclaw.community.core.aicoding.work_item_bots import (
     WorkItemsBotLister,
     WorkItemsBotTarget,
 )
+from agentclaw.community.core.aicoding.services import work_items_service
 from agentclaw.community.core.aicoding.services.work_items_service import (
     AICodingWorkItemsService,
 )
@@ -236,7 +238,9 @@ def test_engine_error_is_partial_and_keeps_other_bot_items(test_injector, mock_u
 
     async def invoke(conn_info, method, path, params=None, timeout=None):
         if conn_info["type"] == "bad":
-            raise DeviceAdapterHTTPStatusError(500, "relay down")
+            raise DeviceAdapterHTTPStatusError(
+                500, "secret_token=secret Authorization: Bearer abc"
+            )
         return {
             "success": True,
             "data": [_session("user:315629:ok", "1794000000000Z", "running")],
@@ -255,7 +259,99 @@ def test_engine_error_is_partial_and_keeps_other_bot_items(test_injector, mock_u
     summaries = {summary["bot_id"]: summary for summary in payload["bots"]}
     assert summaries["bad-bot"]["status"] == "error"
     assert summaries["bad-bot"]["error_code"] == "ENGINE_HTTP_500"
+    assert summaries["bad-bot"]["error_message"] == (
+        "Engine session list returned HTTP 500"
+    )
     assert summaries["ok-bot"]["status"] == "ok"
+    assert "secret_token" not in response.text
+    assert "Bearer abc" not in response.text
+
+
+def test_relay_error_details_are_not_exposed(test_injector, mock_user):
+    lister = MagicMock(spec=WorkItemsBotLister)
+    lister.list_bot_targets.return_value = [_target()]
+    resolver = _resolver()
+    transport = _transport(
+        {
+            "success": False,
+            "message": "SESSION_LIST_TIMEOUT: secret_token=secret",
+        }
+    )
+    client = _client(test_injector, mock_user, lister, resolver, transport)
+
+    response = client.get("/api/v1/aicoding/work-items")
+
+    assert response.status_code == 200
+    summary = response.json()["data"]["bots"][0]
+    assert summary["status"] == "error"
+    assert summary["error_code"] == "SESSION_LIST_TIMEOUT"
+    assert summary["error_message"] == "Engine session list failed"
+    assert "secret_token" not in response.text
+
+
+def test_malformed_engine_response_is_an_isolated_bot_error(test_injector, mock_user):
+    lister = MagicMock(spec=WorkItemsBotLister)
+    lister.list_bot_targets.return_value = [_target()]
+    resolver = _resolver()
+    transport = _transport(["not-an-envelope"])
+    client = _client(test_injector, mock_user, lister, resolver, transport)
+
+    response = client.get("/api/v1/aicoding/work-items")
+
+    assert response.status_code == 200
+    summary = response.json()["data"]["bots"][0]
+    assert summary["status"] == "error"
+    assert summary["error_code"] == "ENGINE_MALFORMED_RESPONSE"
+    assert summary["error_message"] == (
+        "Engine session list returned an invalid response"
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_probe_error_text_is_not_returned(monkeypatch):
+    class FailingClient:
+        def __init__(self, *args, **kwargs):
+            return None
+
+        async def __aenter__(self):
+            raise RuntimeError("secret_token=secret Authorization: Bearer abc")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    monkeypatch.setattr(work_items_service.httpx, "AsyncClient", FailingClient)
+
+    result = await work_items_service._probe_local({})
+
+    assert result == {"success": False, "message": "ENGINE_PROBE_ERROR"}
+
+
+def test_fanout_remains_bounded_and_concurrent(test_injector, mock_user):
+    targets = [_target(f"bot-{index}", f"Bot {index}") for index in range(20)]
+    lister = MagicMock(spec=WorkItemsBotLister)
+    lister.list_bot_targets.return_value = targets
+
+    active = 0
+    max_active = 0
+
+    async def invoke(conn_info, method, path, params=None, timeout=None):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return {"success": True, "data": []}
+
+    resolver = _resolver()
+    transport = _transport(side_effect=invoke)
+    client = _client(test_injector, mock_user, lister, resolver, transport)
+
+    response = client.get("/api/v1/aicoding/work-items")
+
+    assert response.status_code == 200
+    assert len(response.json()["data"]["bots"]) == len(targets)
+    assert max_active <= 12
+    assert max_active > 1
 
 
 def test_invalid_source_token_is_rejected(test_injector, mock_user):
