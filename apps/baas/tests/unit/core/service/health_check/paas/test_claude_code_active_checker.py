@@ -16,11 +16,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from secbaas.community.core.service.health_check.paas import (
+    _claude_code_alive_probe as probe_mod,
+)
 from secbaas.community.core.service.health_check.paas._arca_paas_health_provider import (
     ClaudeCodeActiveHealthChecker,
 )
-from secbaas.community.core.service.health_check.paas import _claude_code_alive_probe as probe_mod
-
 
 BOUND_KEY = "user:350612:session:d181d444-ea25-41d5-b0b6-477897beff8f:agent:bot1"
 BOUND_UUID = "d181d444-ea25-41d5-b0b6-477897beff8f"
@@ -28,10 +29,8 @@ BOUND_UUID = "d181d444-ea25-41d5-b0b6-477897beff8f"
 
 def _utc(days_ago: int) -> str:
     """RFC3339 UTC 时间戳：2026-11-26T00:00:00Z 往前 days_ago 天。"""
-    base = datetime.datetime(2026, 11, 26, 0, 0, 0, tzinfo=datetime.timezone.utc)
-    return (base - datetime.timedelta(days=days_ago)).isoformat().replace(
-        "+00:00", "Z"
-    )
+    base = datetime.datetime(2026, 11, 26, 0, 0, 0, tzinfo=datetime.UTC)
+    return (base - datetime.timedelta(days=days_ago)).isoformat().replace("+00:00", "Z")
 
 
 def _fmt_utc(raw: str) -> str:
@@ -76,8 +75,9 @@ def _make_jsonl(cc_dir, relpath: str, mtime_epoch: float) -> None:
     os.utime(path, (mtime_epoch, mtime_epoch))
 
 
-def _job(name: str, enabled: bool = True, bound_key: str | None = None,
-         message: str = "") -> dict:
+def _job(
+    name: str, enabled: bool = True, bound_key: str | None = None, message: str = ""
+) -> dict:
     return {
         "id": "cron-1",
         "name": name,
@@ -116,7 +116,9 @@ class TestProbe:
         sessions_dir = tmp_path / "sessions"
         cc_dir.mkdir()
         sessions_dir.mkdir()
-        _make_cron_tasks(sessions_dir, [_job("MemoryOS每日知识诊断_bot1", bound_key=BOUND_KEY)])
+        _make_cron_tasks(
+            sessions_dir, [_job("MemoryOS每日知识诊断_bot1", bound_key=BOUND_KEY)]
+        )
         _make_sessions_db(
             sessions_dir,
             [
@@ -139,7 +141,9 @@ class TestProbe:
         sessions_dir = tmp_path / "sessions"
         cc_dir.mkdir()
         sessions_dir.mkdir()
-        _make_cron_tasks(sessions_dir, [_job("MemoryOS每日知识诊断_bot1", bound_key=BOUND_KEY)])
+        _make_cron_tasks(
+            sessions_dir, [_job("MemoryOS每日知识诊断_bot1", bound_key=BOUND_KEY)]
+        )
         now = time.time()
         three_days_ago = now - 3 * 86400
         _make_jsonl(
@@ -222,9 +226,7 @@ class TestProbe:
             sessions_dir,
             [_job("MemoryOS每日知识诊断_bot1", enabled=False, bound_key=BOUND_KEY)],
         )
-        _make_sessions_db(
-            sessions_dir, [(BOUND_KEY, _utc(40), _utc(39), "user")]
-        )
+        _make_sessions_db(sessions_dir, [(BOUND_KEY, _utc(40), _utc(39), "user")])
 
         result = probe_mod.probe(cc_dir=str(cc_dir), sessions_dir=str(sessions_dir))
 
@@ -350,7 +352,7 @@ class TestClaudeCodeActiveHealthChecker:
     def test_build_cmd_payload_compiles(self) -> None:
         """base64 载荷解码后是语法合法的探测脚本。"""
         cmd = ClaudeCodeActiveHealthChecker._build_cmd()
-        b64 = cmd[len("echo "): -len(" | base64 -d | python3 -")]
+        b64 = cmd[len("echo ") : -len(" | base64 -d | python3 -")]
         source = base64.b64decode(b64).decode("utf-8")
         compile(source, "claude_code_alive_probe", "exec")
         assert "def probe" in source
@@ -386,8 +388,10 @@ class TestClaudeCodeActiveHealthChecker:
         assert result.error is None
         assert result.timeout is False
         # 下发的命令就是探测脚本（base64 -> 裸 python3）
-        sent_cmd = mock_facade.execute_command.call_args.kwargs.get("cmd") or \
-            mock_facade.execute_command.call_args.args
+        sent_cmd = (
+            mock_facade.execute_command.call_args.kwargs.get("cmd")
+            or mock_facade.execute_command.call_args.args
+        )
         assert sent_cmd == ClaudeCodeActiveHealthChecker._build_cmd()
 
     @pytest.mark.asyncio

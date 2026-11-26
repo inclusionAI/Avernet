@@ -145,9 +145,7 @@ def _latest_cc_jsonl(cc_dir: str, excluded_uuids: list[str]) -> str:
                 found = True
     if not found:
         return ""
-    return (
-        datetime.datetime.fromtimestamp(latest_mtime).strftime("%Y-%m-%d %H:%M:%S")
-    )
+    return datetime.datetime.fromtimestamp(latest_mtime).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _latest_session_time(db_path: str, bound_keys: list[str]) -> str:
@@ -160,22 +158,18 @@ def _latest_session_time(db_path: str, bound_keys: list[str]) -> str:
         return ""
     try:
         con = sqlite3.connect(
-            "file:%s?mode=ro" % db_path, uri=True, timeout=_SQLITE_TIMEOUT_S
+            f"file:{db_path}?mode=ro", uri=True, timeout=_SQLITE_TIMEOUT_S
         )
         try:
             if bound_keys:
                 placeholders = ",".join("?" * len(bound_keys))
                 sql = (
                     "SELECT max(updated_at) FROM sessions "
-                    "WHERE session_kind='user' AND session_key NOT IN (%s)"
-                    % placeholders
+                    f"WHERE session_kind='user' AND session_key NOT IN ({placeholders})"
                 )
                 row = con.execute(sql, bound_keys).fetchone()
             else:
-                sql = (
-                    "SELECT max(updated_at) FROM sessions "
-                    "WHERE session_kind='user'"
-                )
+                sql = "SELECT max(updated_at) FROM sessions WHERE session_kind='user'"
                 row = con.execute(sql).fetchone()
         finally:
             con.close()
