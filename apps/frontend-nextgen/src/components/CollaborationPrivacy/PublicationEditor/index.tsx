@@ -60,10 +60,13 @@ interface PublicationEditorProps {
    * checking/advancing/approving → 已发起终态锁定，并提供「刷新状态」入口（§2.2 手动刷新：
    * 检测超时后端暂停自动轮询时可主动同步最新结论）；failed/attention → 失败提示 + 可编辑重发，
    * 失败时可用原公开目标重新申请；可刷新的失败态提供原安全单刷新。
+   * approvalUrl：approving 时当前审批的 friend_ext 投影外链（与行级「查看审批进度」同一来源），
+   * 缺失时在途卡回退工单中心入口。
    */
   risk?: {
     uiState: BotPublicRiskUiState;
     record: BotPublicRiskCheckRecord | null;
+    approvalUrl?: string | null;
     isCreating: boolean;
     refreshCurrent?: () => void;
     isRefreshing?: boolean;
@@ -180,6 +183,7 @@ export function PublicationEditor({
             <RiskInFlightBanner
               kind={riskKind === 'approving' ? 'approving' : riskKind === 'advancing' ? 'advancing' : 'checking'}
               record={riskActive.record}
+              approvalUrl={riskActive.approvalUrl}
               currentScopeNote={`${visibilityScopeLabels[initialConfig.scope]}${
                 initialConfig.scope === 'restricted' ? `（${initialConfig.organizationPaths.length} 个组织范围）` : ''
               }`}
