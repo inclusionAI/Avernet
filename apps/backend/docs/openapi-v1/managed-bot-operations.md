@@ -1,11 +1,13 @@
 # Managed Bot operations
 
-These application-only operations require a verified application identity on the
+These trusted-application operations require a verified application identity on the
 deployment's `openapi.bot_operations.allowed_apps` list. Each entry must contain
 exact `env`, `tenant`, and `app_name` strings. The empty default refuses everyone.
 The existing Owner/delegated-grant restart and status routes are unchanged.
-Mixed application-and-user principals are refused even when the application is
-listed; these operations are for backend application credentials only.
+An additional verified user identity does not change application admission: both
+application-only and mixed application-and-user callers use the same application
+allowlist. User-only callers and unapproved applications remain refused. This
+policy applies only to the four operations below, not other OpenAPI routes.
 
 | POST path under `/openapi/v1/bots` | Purpose |
 | --- | --- |
@@ -19,6 +21,12 @@ of the calling human's identity. The trusted caller must enforce its own operato
 authorization before issuing a restart. The stored template association, tenant,
 environment and current Owner remain checked on this side. Desktop and separately
 managed local runtimes are not supported. Published runtimes are read-only.
+
+The `managed_bot_application_admission` log event records the admission result,
+environment, tenant, application name and whether a verified user identity is
+present. It does not log credentials, the signed principal token or configuration
+snapshots. The additional user identity is not proof of permission to restart a
+target; the trusted application still owns operator authorization.
 
 Restart and batch status accept only Bots whose persisted `active_engine` is
 `claude_code` or `aicoding`. Both operations declare `AdmissionMode.ENGINE_CODING`

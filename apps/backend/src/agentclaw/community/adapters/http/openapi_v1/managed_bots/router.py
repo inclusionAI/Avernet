@@ -33,6 +33,7 @@ from agentclaw.community.di import Injected
 from agentclaw.community.di.openapi_bot_operations_config import (
     OpenApiBotOperationsConfig,
 )
+from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
 from .schemas import (
@@ -46,12 +47,16 @@ from .schemas import (
 )
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
+logger = get_logger()
 
 
 def _trust(principal: Principal, config: OpenApiBotOperationsConfig) -> None:
-    if caller_names_a_user(principal) or not config.allows(
-        env=get_current_env(), tenant=principal.tenant, app_name=caller_app_name(principal),
-    ):
+    env = get_current_env()
+    app_name = caller_app_name(principal)
+    allowed = config.allows(env=env, tenant=principal.tenant, app_name=app_name)
+    logger.info('event=managed_bot_application_admission allowed=%s env=%s tenant=%s app_name=%s has_user_identity=%s',
+                allowed, env, principal.tenant, app_name, caller_names_a_user(principal))
+    if not allowed:
         raise BotOperationsForbiddenError('calling application is not approved for Bot operations')
 
 
