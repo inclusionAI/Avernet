@@ -1,0 +1,39 @@
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/workflow-planner-lease-repository.ts
+  s_118944da3d52d1::t_1c7eb81e9b63a0 12,16-18,25,37,41
+  s_118944da3d52d1::t_dae5f6a5090129 42-43,46-47
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/maintenance-lease.test.ts
+  s_118944da3d52d1::t_4177eaac5b5392 1-83,86-88,91,93-95
+  s_a6cf0b4901b3a8::t_4cc84fbfb60522 84-85,89-90,92
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-service.test.ts
+  s_118944da3d52d1::t_4177eaac5b5392 603-624
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/workflow-planner-lease.test.ts
+  s_118944da3d52d1::t_4177eaac5b5392 47-73
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  s_118944da3d52d1::t_43fb348b47ad26 40-57
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/index.ts
+  s_118944da3d52d1::t_5f051bf138609e 17,20,24-25,28,69-102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dd390ecf874721d0a441cd3cf6117c438fc39bf1",
+  "prompts": {},
+  "sessions": {
+    "s_118944da3d52d1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212f1-f5c7-71d1-9784-e0e8a73b9f55",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    },
+    "s_a6cf0b4901b3a8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a211d3-b312-7363-b8f8-a812788340a7",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
