@@ -48,6 +48,7 @@ async function readJson<T>(url: string, signal?: AbortSignal): Promise<T> {
 export class MockCollaborationSquareAdapter implements CollaborationSquareGateway {
   private bots: PublicBot[] = [];
   private groups: PublicGroup[] = [];
+  private friendRequestSeq = 0;
 
   async listBots(_query?: PublicBotSearchQuery, _context?: HumanBotActionContext, signal?: AbortSignal) {
     return (await this.listBotPage(_query, _context, signal)).items;
@@ -108,7 +109,11 @@ export class MockCollaborationSquareAdapter implements CollaborationSquareGatewa
     }
     const next: BotRelationshipStatus = botId === 'sample-product-bot' ? 'applying' : 'friend';
     bot.relationshipStatus = next;
-    return { status: next };
+    // Mock 侧同样透传新建申请单号，保证「重新申请」连续重试的本地单号刷新动线可演练。
+    return {
+      status: next,
+      ...(next === 'applying' ? { pendingRequestId: `mock-request-${++this.friendRequestSeq}` } : {}),
+    };
   }
 
   async cancelBotFriendRequest(_requestId: string) {

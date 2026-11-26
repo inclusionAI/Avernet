@@ -134,21 +134,44 @@ describe('CollaborationSquareApiAdapter getBotProfile（BCS 摘要 + 可选 Back
 
 describe('CollaborationSquareApiAdapter 好友申请', () => {
   it.each([
-    ['pending', 'applying'],
-    ['approved', 'friend'],
-    ['public_no_edge', 'none'],
+    ['pending', { status: 'applying', pendingRequestId: 'request-1' }],
+    ['approved', { status: 'friend' }],
+    ['public_no_edge', { status: 'none' }],
   ] as const)('maps Friend Connection request status %s to %s', async (status, expected) => {
     mockedCreateFriendConnectionRequest.mockResolvedValue({
       code: 20100,
       data: { request_ids: ['request-1'], edge_ids: [], status, auto_accepted: status === 'approved' },
     });
 
-    await expect(new CollaborationSquareApiAdapter().requestBotFriendship('bot-1', humanContext)).resolves.toEqual({
-      status: expected,
-    });
+    await expect(new CollaborationSquareApiAdapter().requestBotFriendship('bot-1', humanContext)).resolves.toEqual(
+      expected,
+    );
     expect(mockedCreateFriendConnectionRequest).toHaveBeenCalledWith({
       to_actor: { type: 'bot', id: 'bot-1' },
       from_actor: { type: 'human', id: '900003' },
+    });
+  });
+
+  it('透传 pending 申请响应中的 request_ids[0] 作为 pendingRequestId', async () => {
+    mockedCreateFriendConnectionRequest.mockResolvedValue({
+      code: 20100,
+      data: { request_ids: [' request-new-2 '], edge_ids: [], status: 'pending', auto_accepted: false },
+    });
+
+    await expect(new CollaborationSquareApiAdapter().requestBotFriendship('bot-1', humanContext)).resolves.toEqual({
+      status: 'applying',
+      pendingRequestId: 'request-new-2',
+    });
+  });
+
+  it('pending 响应缺少申请单号时按协议异常拒绝，避免保留无法取消的旧单号', async () => {
+    mockedCreateFriendConnectionRequest.mockResolvedValue({
+      code: 20100,
+      data: { request_ids: ['  '], edge_ids: [], status: 'pending', auto_accepted: false },
+    });
+
+    await expect(new CollaborationSquareApiAdapter().requestBotFriendship('bot-1', humanContext)).rejects.toMatchObject({
+      code: 'protocol_error',
     });
   });
 
@@ -160,7 +183,7 @@ describe('CollaborationSquareApiAdapter 好友申请', () => {
 
     await expect(
       new CollaborationSquareApiAdapter().requestBotFriendship('default', humanContext, 'explicit-bot-uuid'),
-    ).resolves.toEqual({ status: 'applying' });
+    ).resolves.toEqual({ status: 'applying', pendingRequestId: 'request-1' });
     expect(mockedCreateFriendConnectionRequest).toHaveBeenCalledWith({
       to_actor: { type: 'bot', id: 'explicit-bot-uuid' },
       from_actor: { type: 'human', id: '900003' },
@@ -175,7 +198,7 @@ describe('CollaborationSquareApiAdapter 好友申请', () => {
 
     await expect(
       new CollaborationSquareApiAdapter().requestBotFriendship('20260410_kt9ermvn', humanContext, '20260410_kt9ermvn:431368'),
-    ).resolves.toEqual({ status: 'applying' });
+    ).resolves.toEqual({ status: 'applying', pendingRequestId: 'request-1' });
     expect(mockedCreateFriendConnectionRequest).toHaveBeenCalledWith({
       to_actor: { type: 'bot', id: '20260410_kt9ermvn:431368' },
       from_actor: { type: 'human', id: '900003' },
@@ -193,7 +216,7 @@ describe('CollaborationSquareApiAdapter 好友申请', () => {
         type: 'bot',
         id: 'bot-xyz',
       }),
-    ).resolves.toEqual({ status: 'applying' });
+    ).resolves.toEqual({ status: 'applying', pendingRequestId: 'request-1' });
     expect(mockedCreateFriendConnectionRequest).toHaveBeenCalledWith({
       to_actor: { type: 'bot', id: 'bot-1' },
       from_actor: { type: 'bot', id: 'bot-xyz' },
