@@ -43,7 +43,6 @@ from agentclaw.community.core.bot_management.bot_service_protocol import (
     BotServiceProtocol,
 )
 from agentclaw.community.core.common_config.service import CommonConfigService
-from agentclaw.community.core.caller_identity.contracts import CallerIdentityStage
 from agentclaw.community.core.caller_identity.protocols import (
     CallerIdentityTokenExchangeProtocol,
     CallerRuntimeUpdaterProtocol,
@@ -68,18 +67,18 @@ from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasNoActiveDevicesError,
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import (
-    _BOT_GONE_ERROR_CODES,
+    BOT_GONE_ERROR_CODES,
     BotBuildService,
-)
-from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
-    service_publish_extra_envs,
-    service_publish_template_config,
 )
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     PublishImagePolicyResolver,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.core.expert_chat.services.bot_lookup import ExpertChatBotLookupMixin
+from agentclaw.community.core.expert_chat.services.caller_container_provisioning import (
+    assemble_container_publish_env,
+    exchange_caller_identity,
+)
 from agentclaw.community.core.bot_management.addressing import BotAddressResolver
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -735,21 +734,14 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
             ConnectionError: release_async failed or returned no bot_uuid (D5).
         """
         # Align with the service-bot publish/restart/rollback path: load the
-        # bot through ``BotService.get_bot`` so ``template_config`` (the frozen
-        # template snapshot stored in ``ac_templates.ext``) is attached, then
-        # forward the same engine-owned ``extra_envs`` + sandbox
-        # ``template_config`` + skills-manifest ``ext_info`` to BaaS.
-        # Without ``template_config`` the aicoding strategy's
-        # ``build_extra_envs`` emits no ``GIT_ADDRESSES`` /
-        # ``AIX_DEVFLOW_INFO`` / ``RELAY_DEFAULT_*``.
+        # bot through ``BotService.get_bot`` so ``template_config`` (the
+        # frozen template snapshot stored in ``ac_templates.ext``) is
+        # attached, then forward the same environment contract to BaaS (see
+        # ``assemble_container_publish_env`` for the env rationale).
         bot_info = self._load_service_bot(bot_id, owner_id)
         publish_ext = publish_ext or {}
-        skills_env = service_publish_extra_envs(publish_ext, bot_info)
-        sandbox_template_config = service_publish_template_config(bot_info)
-        ext_info = (
-            {"skills_manifest": publish_ext["skills_manifest"]}
-            if publish_ext.get("skills_manifest") is not None
-            else None
+        skills_env, sandbox_template_config, ext_info = (
+            assemble_container_publish_env(bot_info, publish_ext)
         )
         try:
             result = await self._bot_build_service.release_async(
@@ -824,24 +816,19 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
 
         ``upgrade_async`` keeps ``bot_uuid``; when BaaS confirms the target
         is gone (structured ``success=False`` with ``error_code`` in
-        ``_BOT_GONE_ERROR_CODES``) it falls back to ``create_bot``
+        ``BOT_GONE_ERROR_CODES``) it falls back to ``create_bot``
         (``_create_container``) and returns a new ``bot_uuid``. Returns the
         baas publish order — ``{bot_uuid, publish_id, binding_id?}`` — for
         the caller to poll once via ``get_publish_progress`` and persist the
         trail (``baas_publish``) to the instance ext.
         """
-        # Same alignment as ``_create_container``: carry the engine-owned envs
-        # + sandbox template_config + skills-manifest ``ext_info`` so a
-        # recycled caller container is reprovisioned with the very same
-        # environment contract as a fresh one (and as the publish/restart path).
+        # Same alignment as ``_create_container``: a recycled caller
+        # container is reprovisioned with the very same environment
+        # contract as a fresh one (``assemble_container_publish_env``).
         bot_info = self._load_service_bot(bot_id, owner_id)
         publish_ext = publish_ext or {}
-        skills_env = service_publish_extra_envs(publish_ext, bot_info)
-        sandbox_template_config = service_publish_template_config(bot_info)
-        ext_info = (
-            {"skills_manifest": publish_ext["skills_manifest"]}
-            if publish_ext.get("skills_manifest") is not None
-            else None
+        skills_env, sandbox_template_config, ext_info = (
+            assemble_container_publish_env(bot_info, publish_ext)
         )
         try:
             await prepare_instance_restart(bot=bot_info, device_id=bot_uuid, target_runtime=self._baas)
@@ -860,7 +847,7 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
             )
             if (
                 result.get("success") is False
-                and result.get("error_code") in _BOT_GONE_ERROR_CODES
+                and result.get("error_code") in BOT_GONE_ERROR_CODES
             ):
                 # BaaS confirms the target is gone: heal within this request
                 # via a fresh first release instead of the dead ``bot_uuid``
@@ -986,44 +973,18 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
 
         Called after the container is successfully pulled (status == "SUCCESS").
         Failures are logged but do not interrupt the container startup flow.
-
-        Args:
-            iam_token: IAM token for authentication.
-            user_id: The caller's user ID.
-            bot_id: The bot ID.
-            owner_id: The bot owner's ID.
-            publish_id: The service bot publish record ID.
-            binding_id: The device binding ID (optional).
-            force_runtime_refresh: Reinstall after provisioning even if expiry is not later.
+        The implementation lives in
+        ``caller_container_provisioning.exchange_caller_identity``.
         """
-        exchange_kwargs = {"force_runtime_refresh": True} if force_runtime_refresh else {}
-        logger.info(
-            "[ExpertChatInstance] Caller identity exchange requested: bot=%s owner=%s user=%s binding_id=%s force_runtime_refresh=%s",
-            bot_id, owner_id, user_id, binding_id, force_runtime_refresh,
+        await exchange_caller_identity(
+            caller_identity=self._caller_identity,
+            token_provider=self._token_provider,
+            runtime_updater=self._runtime_updater,
+            iam_token=iam_token,
+            user_id=user_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            publish_id=publish_id,
+            binding_id=binding_id,
+            force_runtime_refresh=force_runtime_refresh,
         )
-        try:
-            await asyncio.to_thread(
-                self._caller_identity.exchange_caller_identity,
-                iam_token=iam_token,
-                caller_user_id=user_id,
-                bot_id=bot_id,
-                owner_user_id=owner_id,
-                token_provider=self._token_provider,
-                runtime_updater=self._runtime_updater,
-                stage=CallerIdentityStage.ONLINE.value,
-                publish_id=publish_id,
-                entity_id=owner_id,
-                binding_id=binding_id,
-                is_test_exchange=False,
-                **exchange_kwargs,
-            )
-            logger.info(
-                "[ExpertChatInstance] Caller identity exchange succeeded: bot=%s owner=%s user=%s binding_id=%s force_runtime_refresh=%s",
-                bot_id, owner_id, user_id, binding_id, force_runtime_refresh,
-            )
-        except Exception as e:
-            # Log error but do not interrupt container startup
-            logger.error(
-                "[ExpertChatInstance] Caller identity exchange failed: bot=%s owner=%s user=%s binding_id=%s force_runtime_refresh=%s error_type=%s",
-                bot_id, owner_id, user_id, binding_id, force_runtime_refresh, type(e).__name__,
-            )

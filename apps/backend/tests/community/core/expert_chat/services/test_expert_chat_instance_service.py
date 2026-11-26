@@ -787,7 +787,7 @@ class TestCallerBotGoneSelfHeal:
 
     @pytest.mark.asyncio
     async def test_upgrade_device_not_found_also_falls_back(self):
-        """DEVICE_NOT_FOUND (same _BOT_GONE_ERROR_CODES) heals identically."""
+        """DEVICE_NOT_FOUND (same BOT_GONE_ERROR_CODES) heals identically."""
         svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, *_ = _make_service()
         self._wire_selfheal(instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service)
         bot_build_service.upgrade_async = AsyncMock(
@@ -904,12 +904,18 @@ class TestCallerBotGoneSelfHeal:
         new_uuid = self._wire_selfheal(instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service)
         stale_ext = {"bot_uuid": BOT_UUID, "version": 5, "baas_publish_id": 96079, "binding_id": 999}
         polled_ext = {"bot_uuid": BOT_UUID, "version": 5, "binding_id": 999}
-        fresh_ext = {"bot_uuid": new_uuid, "version": 1, "binding_id": BINDING_ID}
+        fresh_ext = {"bot_uuid": new_uuid, "version": 1, "binding_id": BINDING_ID, "baas_publish_id": 777}
+        fresh_row = {"id": 1, "status": "success", "ext": dict(fresh_ext)}
+        # HEAD reads the row six times: entry, post-poll, heal-round entry,
+        # heal-round post-poll, then the heal round's and the outer frame's
+        # failure-bookkeeping re-reads (``_failure_record_ext``).
         instance_repo.get_instance = MagicMock(side_effect=[
             {"id": 1, "status": "init", "ext": stale_ext},
             {"id": 1, "status": "success", "ext": polled_ext},
             {"id": 1, "status": "success", "ext": polled_ext},
-            {"id": 1, "status": "success", "ext": fresh_ext},
+            fresh_row,
+            fresh_row,
+            fresh_row,
         ])
         baas.get_ws_info_by_bot_uuid = MagicMock(side_effect=[self._gone(), self._gone()])
 
@@ -920,6 +926,17 @@ class TestCallerBotGoneSelfHeal:
         status_writes = [c.kwargs.get("status") for c in instance_repo.update_instance.call_args_list if c.kwargs.get("status")]
         assert "failed" in status_writes
         bot_build_service.release_async.assert_called_once()
+        # The failure record is built from a re-read of the persisted row, so
+        # the second bot-gone must not clobber the replacement's identifiers.
+        failed_writes = [
+            c for c in instance_repo.update_instance.call_args_list
+            if c.kwargs.get("status") == "failed"
+        ]
+        assert failed_writes, "failure bookkeeping must run"
+        last = failed_writes[-1].kwargs
+        assert last["ext"]["bot_uuid"] == self.NEW_UUID
+        assert last["ext"]["binding_id"] == BINDING_ID
+        assert last["ext"]["baas_publish_id"] == 777
 
     @pytest.mark.asyncio
     async def test_retry_failure_keeps_replacement_ext(self):
@@ -2111,7 +2128,7 @@ class TestCallerIdentityExchange:
         baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
         instance_repo.update_instance = MagicMock(return_value=True)
 
-        with patch("agentclaw.community.core.expert_chat.services.expert_chat_instance_service.logger") as mock_logger:
+        with patch("agentclaw.community.core.expert_chat.services.caller_container_provisioning.logger") as mock_logger:
             result = await svc.get_caller_connection(
                 USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
             )
@@ -2145,7 +2162,7 @@ class TestCallerIdentityExchange:
         # Make exchange_caller_identity raise an exception
         caller_identity.exchange_caller_identity = MagicMock(side_effect=RuntimeError("outbound-private-secret"))
 
-        with patch("agentclaw.community.core.expert_chat.services.expert_chat_instance_service.logger") as mock_logger:
+        with patch("agentclaw.community.core.expert_chat.services.caller_container_provisioning.logger") as mock_logger:
             result = await svc.get_caller_connection(
                 USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
             )
