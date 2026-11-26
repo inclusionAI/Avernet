@@ -70,88 +70,46 @@ class TemplateBotRepository(TemplateBotRepositoryProtocol):
         )
 
     def _rows(self, session: Session, template_key: str) -> Subquery:
-        base = [
-            BotModel.bot_id.label('bot_id'),
-            BotModel.owner_id.label('owner_id'),
-            BotModel.owner_name.label('owner_name'),
-            BotModel.bot_name.label('bot_name'),
-            BotModel.active_engine.label('engine'),
-            BotModel.bot_type.label('bot_type'),
-            BotModel.env.label('env'),
-            BotModel.status.label('status'),
-        ]
-        draft = (
+        env = get_current_env()
+        stages = union_all(*(select(literal(name).label('name')) for name in ('draft', 'online', 'prestable'))).subquery()
+        stage = func.coalesce(stages.c.name, 'draft')
+        latest_online = _latest_id(BotModel.id, 'success', env, BotModel)
+        latest_verify = _latest_id(BotModel.id, 'validating', env, BotModel)
+        publication_id = case(
+            (stages.c.name == 'online', latest_online),
+            (stages.c.name == 'prestable', func.coalesce(latest_verify, latest_online)),
+        )
+        verify_binding, _ = _binding_projection(session, BotPublishModel.ext, 'verify')
+        online_binding, _ = _binding_projection(session, BotPublishModel.ext, 'online')
+        retained = exists(select(1).where(
+            EntityDeviceBinding.id == verify_binding,
+            EntityDeviceBinding.env == env,
+            EntityDeviceBinding.status == 'ACTIVE',
+        ).correlate(BotPublishModel))
+        return (
             select(
-                *base,
-                literal('draft').label('stage'),
-                literal(None).label('publication_id'),
+                BotModel.bot_id, BotModel.owner_id, BotModel.owner_name, BotModel.bot_name,
+                BotModel.active_engine.label('engine'), BotModel.bot_type, BotModel.env, BotModel.status,
+                stage.label('stage'), BotPublishModel.id.label('publication_id'),
                 _version_id(session, TemplateModel.ext).label('template_version_id'),
                 _json_text(session, TemplateModel.ext, '$.template_version').label('template_version'),
                 _json_text(session, TemplateModel.ext, '$.bot_template_config.status').label('template_status'),
             )
+            .select_from(BotModel)
             .join(TemplateModel, TemplateModel.bot_id == BotModel.bot_id)
-            .where(self._scope(session, template_key))
-        )
-        statements = [draft]
-        for stage, binding_stage, status in [('prestable', 'verify', 'validating'), ('online', 'online', 'success')]:
-            publication = BotPublishModel
-            binding, _ = _binding_projection(session, publication.ext, binding_stage)
-            expected_status = [
-                publication.status == status,
-                publication.id == _latest_id(BotModel.id, status, get_current_env(), BotModel),
-            ]
-            if stage == 'prestable':
-                validating = exists(
-                    select(1).where(
-                        BotPublishModel.source_bot_pk == BotModel.id,
-                        BotPublishModel.env == get_current_env(),
-                        BotPublishModel.status == 'validating',
-                    ).correlate(BotModel)
-                )
-                retained = exists(
-                    select(1).where(
-                        EntityDeviceBinding.id == binding,
-                        EntityDeviceBinding.env == get_current_env(),
-                        EntityDeviceBinding.status == 'ACTIVE',
-                    ).correlate(publication)
-                )
-                expected = or_(
-                    and_(*expected_status),
-                    and_(
-                        ~validating,
-                        retained,
-                        publication.status == 'success',
-                        publication.id == _latest_id(BotModel.id, 'success', get_current_env(), BotModel),
-                    ),
-                )
-            else:
-                expected = and_(*expected_status)
-            statements.append(
-                select(
-                    *base,
-                    literal(stage).label('stage'),
-                    publication.id.label('publication_id'),
-                    _version_id(session, publication.ext, '$.template_config.template_version_id').label(
-                        'template_version_id'
-                    ),
-                    _json_text(session, publication.ext, '$.template_config.template_version').label(
-                        'template_version'
-                    ),
-                    _json_text(session, publication.ext, '$.template_config.bot_template_config.status').label(
-                        'template_status'
-                    ),
-                )
-                .join(TemplateModel, TemplateModel.bot_id == BotModel.bot_id)
-                .join(publication, publication.source_bot_pk == BotModel.id)
-                .where(
-                    self._scope(session, template_key),
-                    BotModel.bot_type == 'service',
-                    publication.env == get_current_env(),
-                    binding.is_not(None),
-                    expected,
-                )
+            .outerjoin(stages, BotModel.bot_type == 'service')
+            .outerjoin(BotPublishModel, BotPublishModel.id == publication_id)
+            .where(
+                self._scope(session, template_key), BotModel.status.in_(('ACTIVE', 'FAILED')),
+                or_(
+                    stage == 'draft',
+                    and_(stage == 'online', online_binding.is_not(None)),
+                    and_(stage == 'prestable', verify_binding.is_not(None),
+                         or_(BotPublishModel.status == 'validating', retained)),
+                ),
             )
-        return union_all(*statements).subquery()
+            .subquery()
+        )
 
     def query(
         self,
@@ -175,16 +133,20 @@ class TemplateBotRepository(TemplateBotRepositoryProtocol):
                 filters.append(rows.c.stage == stage)
             if outdated_before is not None:
                 filters.append(rows.c.template_version_id < outdated_before)
-            total = session.execute(select(func.count()).select_from(rows).where(*filters)).scalar_one()
-            statement = (
-                select(rows)
-                .where(*filters)
-                .order_by(rows.c.owner_id, rows.c.bot_id, rows.c.stage, rows.c.publication_id)
-                .offset(offset)
-                .limit(limit)
-            )
-            items = session.execute(statement).mappings().all()
-            return {'total': total, 'items': [dict(item) for item in items]}
+            ordering = (rows.c.owner_id, rows.c.bot_id, rows.c.stage, rows.c.publication_id)
+            numbered = select(
+                rows, func.row_number().over(order_by=ordering).label('row_no'),
+                func.count().over().label('total'),
+            ).where(*filters).subquery()
+            page = select(numbered).where(or_(
+                numbered.c.row_no.between(offset + 1, offset + limit),
+                and_(numbered.c.row_no == 1, numbered.c.total <= offset),
+            )).order_by(numbered.c.row_no)
+            records = session.execute(page).mappings().all()
+            return {
+                'total': records[0]['total'] if records else 0,
+                'items': [{key: record[key] for key in rows.c.keys()} for record in records if record['row_no'] > offset],
+            }
 
     def snapshot(self, *, bot_id: str, owner_id: str, template_key: str) -> dict[str, Any] | None:
         with self.db.orm_session() as session:

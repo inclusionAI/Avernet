@@ -1,4 +1,5 @@
 import json
+import re
 from unittest.mock import Mock
 
 import pytest
@@ -32,7 +33,7 @@ def test_query_is_scoped_filtered_and_display_safe():
     assert repository.query(template_key='coding', offset=0, limit=20, outdated_before=8)['total'] == 1
 
 
-def test_service_publications_do_not_borrow_draft_snapshot_version():
+def test_service_publications_display_the_source_bots_saved_version():
     db = Database()
     bot_pk = seed(db, bot_type='service')
     with db.orm_session() as session:
@@ -44,8 +45,8 @@ def test_service_publications_do_not_borrow_draft_snapshot_version():
     assert result['total'] == 3
     stages = {item['stage']: item for item in result['items']}
     assert stages['draft']['template_version_id'] == 7
-    assert stages['prestable']['template_version_id'] is None
-    assert stages['online']['template_version_id'] is None
+    assert stages['prestable']['template_version_id'] == 7
+    assert stages['online']['template_version_id'] == 7
     assert stages['online']['publication_id'] is not None
     assert all(item['template_status'] is None for item in result['items'])
 
@@ -71,7 +72,7 @@ def test_discovery_reads_optional_saved_release_status_without_requiring_a_versi
     assert 'private' not in json.dumps(result)
 
 
-def test_publication_template_status_comes_from_its_own_snapshot_not_the_bot_stage():
+def test_all_stages_display_the_saved_template_status_even_if_publication_metadata_differs():
     db = Database()
     bot_pk = seed(db, bot_type='service')
     with db.orm_session() as session:
@@ -91,7 +92,28 @@ def test_publication_template_status_comes_from_its_own_snapshot_not_the_bot_sta
                 })))
     result = TemplateBotRepository(db).query(template_key='coding', offset=0, limit=20)
     stages = {item['stage']: item['template_status'] for item in result['items']}
-    assert stages == {'draft': 'pre_published', 'prestable': 'prod_released', 'online': 'pre_published'}
+    assert stages == dict.fromkeys(('draft', 'prestable', 'online'), 'pre_published')
+    assert TemplateBotRepository(db).query(template_key='coding', offset=0, limit=1, outdated_before=7)['total'] == 0
+
+
+def test_retained_verify_stage_uses_the_online_publication_until_a_new_validation_exists():
+    db = Database()
+    source = seed(db, bot_type='service')
+    with db.orm_session() as session:
+        session.add(EntityDeviceBinding(id=3, entity_id='owner', entity_type='user', device_id='verify',
+            device_provider='arca', env='dev', status='ACTIVE', applied_by='owner'))
+        session.add(BotPublishModel(source_bot_pk=source, source_bot_id='bot', publish_bot_id='bot',
+            name='Example', owner_id='owner', status='success', env='dev', permission_owner='owner',
+            ext=json.dumps({'binding': {'verify': 3, 'online': 4}})))
+    repository = TemplateBotRepository(db)
+    for offset, stage in enumerate(('draft', 'online', 'prestable')):
+        page = repository.query(template_key='coding', search='bot', outdated_before=8, offset=offset, limit=1)
+        assert page['total'] == 3
+        assert [row['stage'] for row in page['items']] == [stage]
+    with db.orm_session() as session:
+        session.add(BotPublishModel(source_bot_pk=source, source_bot_id='bot', publish_bot_id='bot',
+            name='Example', owner_id='owner', status='validating', env='dev', permission_owner='owner', ext='{}'))
+    assert repository.query(template_key='coding', stage='prestable', offset=0, limit=1) == {'total': 0, 'items': []}
 
 
 def test_discovery_projects_release_status_without_per_bot_queries_or_full_snapshots():
@@ -110,9 +132,23 @@ def test_discovery_projects_release_status_without_per_bot_queries_or_full_snaps
     assert result['total'] == 20
     assert len(result['items']) == 20
     assert all(item['template_status'] == 'prod_released' for item in result['items'])
-    assert len(statements) == 2
+    assert len(statements) == 1
+    assert len(re.findall(r'\b(?:FROM|JOIN) ac_templates\b', statements[0], re.IGNORECASE)) == 1
     assert 'template_config' not in result['items'][0]
     assert 'hidden' not in json.dumps(result)
+
+
+def test_only_visible_source_bots_count_towards_pages_without_hiding_restart_observations():
+    db = Database()
+    for status in ('ACTIVE', 'FAILED', 'PENDING', 'RECYCLED', 'REACTIVATING', 'RELEASED'):
+        seed(db, status, status=status)
+    seed(db, 'deleted', is_delete=1)
+    repository = TemplateBotRepository(db)
+    for offset, expected in [(0, ['ACTIVE']), (1, ['FAILED']), (2, []), (20, [])]:
+        result = repository.query(template_key='coding', offset=offset, limit=1)
+        assert result['total'] == 2
+        assert [row['bot_id'] for row in result['items']] == expected
+    assert repository.statuses(template_key='coding', targets=[('PENDING', 'owner')])[0]['status'] == 'PENDING'
 
 
 def test_legacy_bot_without_a_saved_template_key_is_not_attached_to_a_template():

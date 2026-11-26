@@ -1,11 +1,10 @@
 import inspect
-import logging
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from fastapi_injector import attach_injector, get_injector_instance
+from fastapi_injector import attach_injector
 from injector import Injector
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
@@ -163,11 +162,11 @@ def test_sensitive_snapshot_response_cannot_be_cached(operations_client):
     ('status-for-others', {'template_key': 'coding', 'bots': [{'bot_id': 'bot', 'owner_id': 'owner'}]}),
 ])
 @pytest.mark.parametrize('identity', [
+    {'user_id': 'human'},
     {'tenant': None},
     {'user_id': None, 'tenant': 'untrusted-tenant'},
-    {'user_id': 'human', 'tenant': 'untrusted-tenant'},
 ])
-def test_managed_operations_reject_human_only_and_untrusted_application_identities(
+def test_managed_operations_reject_human_mixed_and_untrusted_application_identities(
     operations_client, operation, payload, identity,
 ):
     client, service = operations_client
@@ -186,61 +185,10 @@ def test_managed_operations_reject_human_only_and_untrusted_application_identiti
     ('restart-for-others', {'template_key': 'coding', 'bot_id': 'bot', 'owner_id': 'owner'}),
     ('status-for-others', {'template_key': 'coding', 'bots': [{'bot_id': 'bot', 'owner_id': 'owner'}]}),
 ])
-@pytest.mark.parametrize('user_id', [None, 'human'])
-def test_managed_operations_admit_the_allowlisted_application_with_or_without_user(
-    operations_client, operation, payload, user_id,
-):
+def test_managed_operations_admit_the_allowlisted_application_only_identity(operations_client, operation, payload):
     client, _ = operations_client
-    response = client.post('/openapi/v1/bots/' + operation,
-        headers={PRINCIPAL_HEADER: mint(user_id=user_id)}, json=payload)
+    response = client.post('/openapi/v1/bots/' + operation, headers=headers(), json=payload)
     assert response.status_code == 200
-    assert response.json()['code'] == 200000
-
-
-@pytest.mark.parametrize('operation,payload', [
-    ('template-queries', {'template_key': 'coding'}),
-    ('template-config-for-others', {'template_key': 'coding', 'bot_id': 'bot', 'owner_id': 'owner'}),
-    ('restart-for-others', {'template_key': 'coding', 'bot_id': 'bot', 'owner_id': 'owner'}),
-    ('status-for-others', {'template_key': 'coding', 'bots': [{'bot_id': 'bot', 'owner_id': 'owner'}]}),
-])
-@pytest.mark.parametrize('user_id', [None, 'human'])
-@pytest.mark.parametrize('allowed_apps', [
-    frozenset(),
-    frozenset({('other-env', 'acme-tenant', 'bot-logs-test-app')}),
-    frozenset({('dev', 'other-tenant', 'bot-logs-test-app')}),
-    frozenset({('dev', 'acme-tenant', 'other-app')}),
-])
-def test_additional_user_never_bypasses_application_environment_or_tenant_trust(
-    operations_client, operation, payload, user_id, allowed_apps,
-):
-    client, service = operations_client
-    get_injector_instance(client.app).binder.bind(
-        OpenApiBotOperationsConfig, to=OpenApiBotOperationsConfig(allowed_apps))
-    response = client.post('/openapi/v1/bots/' + operation,
-        headers={PRINCIPAL_HEADER: mint(user_id=user_id)}, json=payload)
-    assert response.status_code == 403
-    assert response.json()['code'] == 403000
-    assert not service.mock_calls
-
-
-@pytest.mark.parametrize('approved', [True, False])
-@pytest.mark.parametrize('user_id', [None, 'human'])
-def test_managed_application_admission_logs_identity_shape_without_principal_token(
-    operations_client, caplog, approved, user_id,
-):
-    client, _ = operations_client
-    caplog.set_level(logging.INFO, logger='start')
-    if not approved:
-        get_injector_instance(client.app).binder.bind(OpenApiBotOperationsConfig, to=OpenApiBotOperationsConfig())
-    token = mint(user_id=user_id)
-    response = client.post('/openapi/v1/bots/template-queries',
-        headers={PRINCIPAL_HEADER: token}, json={'template_key': 'coding'})
-    assert response.status_code == (200 if approved else 403)
-    assert 'event=managed_bot_application_admission' in caplog.text
-    assert f'allowed={approved}' in caplog.text
-    assert f'has_user_identity={user_id is not None}' in caplog.text
-    assert 'app_name=bot-logs-test-app' in caplog.text
-    assert token not in caplog.text
 
 
 @pytest.mark.parametrize('receipt_id,expected_operation', [(None, None), ('different', None), ('old', 'old')])
@@ -267,16 +215,14 @@ def test_submission_only_reports_the_operation_explicitly_identified_by_lifecycl
 
 @pytest.mark.parametrize('operation', ['restart-for-others', 'status-for-others'])
 @pytest.mark.parametrize('engine', ['claude_code', 'aicoding'])
-@pytest.mark.parametrize('user_id', [None, 'human'])
-def test_managed_engine_gate_accepts_both_coding_engines(operations_client, operation, engine, user_id):
+def test_managed_engine_gate_accepts_both_coding_engines(operations_client, operation, engine):
     client, service = operations_client
     service.statuses.return_value[0]['active_engine'] = engine
     payload = {'template_key': 'coding', 'bot_id': 'bot', 'owner_id': 'owner'}
     if operation == 'status-for-others':
         payload = {'template_key': 'coding', 'bots': [{'bot_id': 'bot', 'owner_id': 'owner'}]}
 
-    response = client.post('/openapi/v1/bots/' + operation,
-        headers={PRINCIPAL_HEADER: mint(user_id=user_id)}, json=payload)
+    response = client.post('/openapi/v1/bots/' + operation, headers=headers(), json=payload)
 
     assert response.status_code == 200
     service.statuses.assert_called_once_with(template_key='coding', targets=[('bot', 'owner')])
@@ -287,10 +233,7 @@ def test_managed_engine_gate_accepts_both_coding_engines(operations_client, oper
 @pytest.mark.parametrize('operation', ['restart-for-others', 'status-for-others'])
 @pytest.mark.parametrize('engine', ['openclaw', 'teclaw', 'unknown', '', None, 'AICODING'])
 @pytest.mark.parametrize('with_snapshot', [False, True])
-@pytest.mark.parametrize('user_id', [None, 'human'])
-def test_managed_engine_gate_refuses_other_or_unknown_engines(
-    operations_client, operation, engine, with_snapshot, user_id,
-):
+def test_managed_engine_gate_refuses_other_or_unknown_engines(operations_client, operation, engine, with_snapshot):
     client, service = operations_client
     service.statuses.return_value[0]['active_engine'] = engine
     payload = {'template_key': 'coding', 'bot_id': 'bot', 'owner_id': 'owner'}
@@ -302,8 +245,7 @@ def test_managed_engine_gate_refuses_other_or_unknown_engines(
             'confirmed_template_update': 'true', 'expected_template_config_hash': 'a' * 64,
         }
 
-    response = client.post('/openapi/v1/bots/' + operation,
-        headers={PRINCIPAL_HEADER: mint(user_id=user_id)}, json=payload)
+    response = client.post('/openapi/v1/bots/' + operation, headers=headers(), json=payload)
 
     assert response.status_code == 501
     assert response.json()['code'] == 501000

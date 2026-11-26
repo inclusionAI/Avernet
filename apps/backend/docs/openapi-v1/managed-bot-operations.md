@@ -1,13 +1,11 @@
 # Managed Bot operations
 
-These trusted-application operations require a verified application identity on the
+These application-only operations require a verified application identity on the
 deployment's `openapi.bot_operations.allowed_apps` list. Each entry must contain
 exact `env`, `tenant`, and `app_name` strings. The empty default refuses everyone.
 The existing Owner/delegated-grant restart and status routes are unchanged.
-An additional verified user identity does not change application admission: both
-application-only and mixed application-and-user callers use the same application
-allowlist. User-only callers and unapproved applications remain refused. This
-policy applies only to the four operations below, not other OpenAPI routes.
+Mixed application-and-user principals are refused even when the application is
+listed; these operations are for backend application credentials only.
 
 | POST path under `/openapi/v1/bots` | Purpose |
 | --- | --- |
@@ -21,12 +19,6 @@ of the calling human's identity. The trusted caller must enforce its own operato
 authorization before issuing a restart. The stored template association, tenant,
 environment and current Owner remain checked on this side. Desktop and separately
 managed local runtimes are not supported. Published runtimes are read-only.
-
-The `managed_bot_application_admission` log event records the admission result,
-environment, tenant, application name and whether a verified user identity is
-present. It does not log credentials, the signed principal token or configuration
-snapshots. The additional user identity is not proof of permission to restart a
-target; the trusted application still owns operator authorization.
 
 Restart and batch status accept only Bots whose persisted `active_engine` is
 `claude_code` or `aicoding`. Both operations declare `AdmissionMode.ENGINE_CODING`
@@ -105,19 +97,14 @@ Each status batch uses one exact-address, tenant, environment and template-scope
 query. It projects readiness and public restart fields without loading complete
 template snapshots, raw Bot configuration or device properties.
 
-Discovery filters before count/pagination in the database and projects only
-display fields. It does not load whole snapshots or probe containers. Platform
-environment differs from service stage: verification is `prestable`, production
-publication is `online`, and the editable source is `draft`. A publication's
-version is unknown unless that publication recorded its own snapshot version;
-it never inherits the draft version. No schema migration or cache is required.
+Discovery lists non-deleted source Bots in `ACTIVE` or `FAILED` state, scoped to the
+requested template and deployment. This visibility rule does not apply to snapshot
+reads or restart status polling. For service Bots, `draft`, `prestable` and `online`
+are distinct rows; only the draft can be restarted through these operations.
 
-Each discovery row also includes optional `template_status`, the template's
-saved publication status in that runtime's own snapshot. Draft rows read
-`bot_template_config.status`; published rows read their publication's saved
-`template_config.bot_template_config.status`. This is independent of the Bot's
-runtime `status` and service `stage`. Missing or non-string metadata returns
-`null`, including legacy rows with no version. Published rows never borrow draft
-metadata or infer status from their stage. The existing query projects this one
-JSON field without extra joins, per-Bot queries or full snapshot reads. This does
-not change version filtering, comparison, restart progress or restart eligibility.
+All stages of a Bot display the same saved template version ID, label and optional
+`template_status` (`bot_template_config.status`) from the source Bot's template record.
+This is not the running container version or the service publication's own version.
+Legacy metadata can be null. Search, stage and outdated filters apply before total
+and pagination; an out-of-range page still returns the filtered total. Discovery
+returns display fields only, without per-Bot reads or container probes.
