@@ -35,12 +35,13 @@ def exercise(story, peer, database):
     card = copy.deepcopy(peer.card)
     card["capabilities"]["streaming"] = False
     peer.mode = "poll_message"
+    admin = provider["provider_admin_token"]
     bots = []
     for owner in owners:
         bot = story.request("POST", f"/a2a/providers/{slug}/bots", {
             "provider_bot_ref": "edge-" + uuid.uuid4().hex,
             "owners": [owner], "agent_card": card,
-        }, token=provider["provider_admin_token"], status=201)
+        }, token=admin, status=201)
         story.request("PUT", f"/bots/{bot['bot_id']}/visibility", {"visibility": "protected"}, owner=owner)
         bots.append(bot)
     a, b, c = [bot["bot_id"] for bot in bots]
@@ -58,9 +59,10 @@ def exercise(story, peer, database):
             "actor": source, "originator": source, "env": env}), status=status)
 
     def send(index, target, status):
+        runtime = bots[index]["bot_runtime_token"]
         return story.request("POST", f"/bots/{target}/chat-async", {
             "message": "A2A question directed edge", "timeout_ms": 10_000,
-        }, token=bots[index]["bot_runtime_token"], owner=owners[index], status=status)
+        }, token=runtime, owner=owners[index], status=status)
 
     assert not admission(a, b)["allowed"]
     send(0, b, 403)
@@ -82,10 +84,11 @@ def exercise(story, peer, database):
     for index, target in [(1, a), (0, c), (2, a)]:
         send(index, target, 403)
     accepted = send(0, b, 202)
+    runtime = bots[0]["bot_runtime_token"]
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         run = story.request("GET", f"/chat/runs/{accepted['run_id']}?wait_ms=500",
-                            token=bots[0]["bot_runtime_token"])
+                            token=runtime)
         if run["is_terminal"]:
             assert run["state"] == "completed"
             assert run["response"]["content"] == "A2A-ANSWER-1"
