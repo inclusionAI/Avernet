@@ -1,5 +1,6 @@
-"""OpenAPI delete exercises the real BaaS file adapter without reading bytes."""
+"""OpenAPI delete exercises the real device file adapters without reading bytes."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -26,7 +27,7 @@ from agentclaw.community.core.services.resource_file_service import ResourceFile
         ({"name": "sql", "is_dir": False}, 200, 200, "/api/file/remove", BaasDeviceFileSystem),
         ({"name": "sql.bak", "is_dir": True}, 200, 404, None, BaasDeviceFileSystem),
         (None, 404, 404, None, BaasDeviceFileSystem),
-        (None, 500, 500, None, BaasDeviceFileSystem),
+        (None, 500, 502, None, BaasDeviceFileSystem),
         ({"name": "sql"}, 200, 502, None, BaasDeviceFileSystem),
         ({"name": "sql", "is_dir": 2}, 200, 502, None, BaasDeviceFileSystem),
         (None, 500, 502, None, TeclawDeviceFileSystem),
@@ -84,10 +85,15 @@ async def test_delete_uses_one_parent_listing(entry, listing_status, status, del
         assert result.data.deleted
         records.delete_file_record.assert_awaited_once_with(path="scripts/sql")
     else:
-        if status == 500:
-            with pytest.raises(httpx.HTTPStatusError) as error:
-                await delete()
-            assert error.value.response.status_code == status
+        if listing_status == 500 and file_system is BaasDeviceFileSystem:
+            response = await delete()
+            assert response.status_code == status
+            assert json.loads(response.body) == {
+                "code": 502000,
+                "message": "Upstream service error",
+                "data": None,
+                "request_id": "",
+            }
         else:
             with pytest.raises(HTTPException) as error:
                 await delete()
