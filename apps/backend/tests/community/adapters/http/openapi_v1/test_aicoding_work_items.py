@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
@@ -70,6 +72,15 @@ def _build_client(*, principal: dict, response: dict, targets=None) -> TestClien
     attach_injector(app, Injector([_Module()]))
     app.dependency_overrides[require_principal] = lambda: principal
     mount_public_error_handlers(app)
+
+    # The assembled application also answers handler-raised HTTPException values
+    # with the public Envelope; mount the real handler so invalid-token tests do
+    # not assert against FastAPI's bare local default.
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    from agentclaw.community.adapters.http.app import _http_exception_handler
+
+    app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     return TestClient(app)
 
 
@@ -135,6 +146,77 @@ def test_public_route_defaults_are_optional():
         "run_status": None,
     }
     assert payload["data"]["scan_limit"] == 50
+
+
+@pytest.mark.parametrize("raw", ["mine,all", "mine,others,collab,unknown"])
+def test_public_route_rejects_invalid_source_tokens(raw):
+    client = _build_client(
+        principal={"user_id": "315629"},
+        response={"success": True, "data": []},
+        targets=[],
+    )
+
+    response = client.get(
+        "/openapi/v1/bots/aicoding/work-items",
+        params={"source": raw},
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["code"] == 400000
+    assert payload["message"] == "Bad Request"
+    assert payload["data"] is None
+
+
+@pytest.mark.parametrize("raw", ["non_idle,idle", "running,unknown"])
+def test_public_route_rejects_invalid_run_status_tokens(raw):
+    client = _build_client(
+        principal={"user_id": "315629"},
+        response={"success": True, "data": []},
+        targets=[],
+    )
+
+    response = client.get(
+        "/openapi/v1/bots/aicoding/work-items",
+        params={"run_status": raw},
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["code"] == 400000
+    assert payload["message"] == "Bad Request"
+    assert payload["data"] is None
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"since_ms": "not-a-number"},
+        {"since_ms": "0"},
+        {"since_ms": "-1"},
+        {"limit": "not-a-number"},
+        {"limit": "0"},
+        {"limit": "-1"},
+        {"limit": "201"},
+    ],
+)
+def test_public_route_rejects_invalid_numeric_queries(params):
+    client = _build_client(
+        principal={"user_id": "315629"},
+        response={"success": True, "data": []},
+        targets=[],
+    )
+
+    response = client.get(
+        "/openapi/v1/bots/aicoding/work-items",
+        params=params,
+    )
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["code"] == 422000
+    assert payload["message"] == "Invalid request"
+    assert payload["data"] is None
 
 
 def test_public_route_refuses_an_app_only_caller():

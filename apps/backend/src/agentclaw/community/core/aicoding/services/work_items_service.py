@@ -9,6 +9,7 @@ new Relay versions, and never let one bad Bot fail the whole snapshot.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
@@ -38,6 +39,7 @@ from agentclaw.community.core.devices.services.device_context import (
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
+from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
     DeviceAdapterHTTPStatusError,
@@ -49,6 +51,18 @@ _SESSIONS_PATH = "/api/aicoding/sessions"
 _WORK_ITEMS_TIMEOUT = 5.0
 _LOCAL_ENGINE_URL = "http://127.0.0.1:20003"
 _DEFAULT_SCAN_LIMIT = 50
+_WORK_ITEMS_FANOUT_CONCURRENCY = 12
+_ENGINE_ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]*")
+_SAFE_ERROR_MESSAGES = {
+    "RESOLVE_ERROR": "Engine binding could not be resolved",
+    "ENGINE_MALFORMED_RESPONSE": "Engine session list returned an invalid response",
+    "ENGINE_HTTP_404": "Engine session list endpoint not found",
+    "ENGINE_TIMEOUT": "Engine session list timed out",
+    "ENGINE_SESSION_LIST_FAILED": "Engine session list failed",
+    "ENGINE_PROBE_ERROR": "Engine session list failed",
+}
+
+logger = get_logger()
 
 
 class _ProbeResult:
@@ -99,12 +113,13 @@ class AICodingWorkItemsService(AICodingWorkItemsServiceProtocol):
             run_status_filter=run_status_filter,
         )
 
-        probes = await asyncio.gather(
-            *(
-                self._probe_bot(target, current_user_id, relay_params)
-                for target in targets
-            )
-        )
+        semaphore = asyncio.Semaphore(_WORK_ITEMS_FANOUT_CONCURRENCY)
+
+        async def probe(target: WorkItemsBotTarget) -> _ProbeResult:
+            async with semaphore:
+                return await self._probe_bot(target, current_user_id, relay_params)
+
+        probes = await asyncio.gather(*(probe(target) for target in targets))
 
         items: list[WorkItem] = []
         for probe in probes:
@@ -148,7 +163,15 @@ class AICodingWorkItemsService(AICodingWorkItemsServiceProtocol):
         except DeviceNotBoundError:
             return _ProbeResult("unavailable", [])
         except (UnknownProviderError, ConnInfoBuildError) as exc:
-            return _ProbeResult("error", [], "RESOLVE_ERROR", str(exc))
+            logger.warning(
+                "[work_items] resolve failed bot=%s owner=%s error_type=%s",
+                target.bot_id,
+                target.owner_id,
+                type(exc).__name__,
+            )
+            return _ProbeResult(
+                "error", [], "RESOLVE_ERROR", _safe_error_message("RESOLVE_ERROR")
+            )
 
         try:
             if ctx.provider == "local":
@@ -161,19 +184,41 @@ class AICodingWorkItemsService(AICodingWorkItemsServiceProtocol):
                     params=params,
                     timeout=_WORK_ITEMS_TIMEOUT,
                 )
-            data = result.get("data", []) if isinstance(result, dict) else None
+            if not isinstance(result, dict):
+                logger.warning(
+                    "[work_items] malformed response bot=%s owner=%s",
+                    target.bot_id,
+                    target.owner_id,
+                )
+                return _ProbeResult(
+                    "error",
+                    [],
+                    "ENGINE_MALFORMED_RESPONSE",
+                    _safe_error_message("ENGINE_MALFORMED_RESPONSE"),
+                )
+
+            data = result.get("data", [])
             if result.get("success") is not True or not isinstance(data, list):
                 message = str(
                     result.get("message")
                     or result.get("error")
                     or "Engine session list failed"
                 )
-                code, separator, detail = message.partition(":")
+                code, separator, _ = message.partition(":")
+                candidate = (code if separator else message).strip()
+                error_code = (
+                    candidate
+                    if _ENGINE_ERROR_CODE.fullmatch(candidate)
+                    else "ENGINE_SESSION_LIST_FAILED"
+                )
+                logger.warning(
+                    "[work_items] relay returned failure bot=%s owner=%s code=%s",
+                    target.bot_id,
+                    target.owner_id,
+                    error_code,
+                )
                 return _ProbeResult(
-                    "error",
-                    [],
-                    code.strip() if separator else "ENGINE_SESSION_LIST_FAILED",
-                    detail.strip() if separator else message,
+                    "error", [], error_code, _safe_error_message(error_code)
                 )
             sessions = [
                 _map_work_item(target, current_user_id, session) for session in data
@@ -183,13 +228,54 @@ class AICodingWorkItemsService(AICodingWorkItemsServiceProtocol):
                 [session for session in sessions if session is not None],
             )
         except DeviceAdapterEndpointNotFoundError as exc:
-            return _ProbeResult("error", [], "ENGINE_HTTP_404", str(exc))
+            logger.warning(
+                "[work_items] endpoint not found bot=%s owner=%s error_type=%s",
+                target.bot_id,
+                target.owner_id,
+                type(exc).__name__,
+            )
+            return _ProbeResult(
+                "error",
+                [],
+                "ENGINE_HTTP_404",
+                _safe_error_message("ENGINE_HTTP_404"),
+            )
         except DeviceAdapterHTTPStatusError as exc:
-            return _ProbeResult("error", [], f"ENGINE_HTTP_{exc.status_code}", str(exc))
+            logger.warning(
+                "[work_items] HTTP %s from relay bot=%s owner=%s",
+                exc.status_code,
+                target.bot_id,
+                target.owner_id,
+            )
+            return _ProbeResult(
+                "error",
+                [],
+                f"ENGINE_HTTP_{exc.status_code}",
+                _safe_error_message(f"ENGINE_HTTP_{exc.status_code}"),
+            )
         except DeviceAdapterTimeoutError as exc:
-            return _ProbeResult("error", [], "ENGINE_TIMEOUT", str(exc))
+            logger.warning(
+                "[work_items] timeout from relay bot=%s owner=%s error_type=%s",
+                target.bot_id,
+                target.owner_id,
+                type(exc).__name__,
+            )
+            return _ProbeResult(
+                "error", [], "ENGINE_TIMEOUT", _safe_error_message("ENGINE_TIMEOUT")
+            )
         except Exception as exc:
-            return _ProbeResult("error", [], "ENGINE_SESSION_LIST_FAILED", str(exc))
+            logger.warning(
+                "[work_items] probe failed bot=%s owner=%s error_type=%s",
+                target.bot_id,
+                target.owner_id,
+                type(exc).__name__,
+            )
+            return _ProbeResult(
+                "error",
+                [],
+                "ENGINE_SESSION_LIST_FAILED",
+                _safe_error_message("ENGINE_SESSION_LIST_FAILED"),
+            )
 
 
 def _relay_params(
@@ -243,17 +329,17 @@ async def _probe_local(params: dict[str, Any]) -> dict[str, Any]:
         if response.status_code != 200:
             return {
                 "success": False,
-                "message": (
-                    f"ENGINE_HTTP_{response.status_code}: engine returned "
-                    f"HTTP {response.status_code}"
-                ),
+                "message": f"ENGINE_HTTP_{response.status_code}",
             }
         result = response.json()
         if not isinstance(result, dict):
             return {"success": False, "message": "ENGINE_MALFORMED_RESPONSE"}
         return result
     except Exception as exc:
-        return {"success": False, "message": f"ENGINE_PROBE_ERROR: {exc}"}
+        logger.warning(
+            "[work_items] local probe failed error_type=%s", type(exc).__name__
+        )
+        return {"success": False, "message": "ENGINE_PROBE_ERROR"}
 
 
 def _map_work_item(
@@ -380,6 +466,14 @@ def _timestamp_ms(raw: str) -> int:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return int(parsed.timestamp() * 1000)
+
+
+def _safe_error_message(error_code: str) -> str:
+    if error_code.startswith("ENGINE_HTTP_"):
+        status_code = error_code.removeprefix("ENGINE_HTTP_")
+        if status_code.isdigit():
+            return f"Engine session list returned HTTP {status_code}"
+    return _SAFE_ERROR_MESSAGES.get(error_code, "Engine session list failed")
 
 
 __all__ = ["AICodingWorkItemsService"]
