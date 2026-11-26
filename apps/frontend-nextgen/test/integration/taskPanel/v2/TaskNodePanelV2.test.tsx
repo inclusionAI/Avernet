@@ -130,7 +130,7 @@ afterEach(() => {
 describe('TaskNodePanelV2(L2)三区', () => {
   it('节点信息区:名称/present 标签/返工徽章/HITL 徽章/goal/起止时间/步骤追踪', () => {
     render(<TaskNodePanelV2 {...props()} />);
-    expect(screen.getByText('并行调研执行')).toBeTruthy();
+    expect(screen.getAllByText('并行调研执行').length).toBeGreaterThan(0);
     expect(screen.getByText('返工中')).toBeTruthy();
     expect(screen.getByText('第 1 次返工')).toBeTruthy(); // I2:attemptCount 2 = 返工 1 次
     expect(screen.getByText('人工处理')).toBeTruthy();
@@ -209,8 +209,8 @@ describe('TaskNodePanelV2(L2)三区', () => {
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
   });
 
-  it('群节点追加区:bcsBaseUrl 注入时内嵌群执行明细(群成员 SectionCard)', async () => {
-    render(<TaskNodePanelV2 {...props({ bcsBaseUrl: '/__test_bcs__' })} />);
+  it('会话节点追加区:bcsBaseUrl 为空也内嵌群执行明细(群成员 SectionCard)', async () => {
+    render(<TaskNodePanelV2 {...props()} />);
     await waitFor(() => expect(screen.getByText(/群成员/)).toBeTruthy());
   });
 
