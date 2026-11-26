@@ -176,14 +176,13 @@ class QualityTaskRepository(
         """Update the status of a quality task by ID.
 
         The standard-eval driver is spawned per pod, so several drivers can
-        persist the same task state within the same second. Behind
-        rowcount-based proxies (ZDAS in front of OceanBase) such a no-op
-        UPDATE reports 0 changed rows and the identity-checked ORM flush
-        turns that into ``StaleDataError`` — killing every racing driver
-        (CDO: ``expected to update 1 row(s); 0 were matched`` on
-        ``ac_bot_quality_task``). Issue the write as a Core UPDATE and read
-        the row back instead: the racing write stays idempotent and callers
-        still observe the persisted state.
+        persist the same task state within the same second. Behind the
+        production DB proxy such a no-op UPDATE reports 0 changed rows and
+        the identity-checked ORM flush turns that into ``StaleDataError`` —
+        killing every racing driver (CDO: ``expected to update 1 row(s); 0
+        were matched`` on ``ac_bot_quality_task``). Issue the write as a
+        Core UPDATE and read the row back instead: the racing write stays
+        idempotent and callers still observe the persisted state.
         """
         with self._db.orm_session() as session:
             row = (

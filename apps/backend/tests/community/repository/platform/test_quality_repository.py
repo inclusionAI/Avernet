@@ -712,7 +712,7 @@ class TestQualityTaskRepository:
     #
     # The standard-eval driver is spawned per pod, so several drivers can
     # persist the same quality-task state within the same second. Behind
-    # rowcount-based proxies (ZDAS in front of OceanBase) the resulting
+    # the production rowcount-based DB proxy the resulting
     # no-op UPDATE reports 0 changed rows and an identity-checked ORM flush
     # turns that into StaleDataError, killing the driver (CDO:
     # "UPDATE statement on table 'ac_bot_quality_task' expected to update
@@ -753,7 +753,7 @@ class TestQualityTaskRepository:
     def test_update_status_row_unreachable_mid_update_does_not_raise(self, db):
         """A row unreachable between guard SELECT and UPDATE must not raise.
 
-        Behind rowcount-based proxies (ZDAS in front of OceanBase) a twin
+        Behind the production rowcount-based DB proxy a twin
         driver making the guarded row unreachable at write time yields a
         0-matched UPDATE; the identity-checked ORM flush turned that into
         ``StaleDataError`` and killed the driver. The Core UPDATE path must
