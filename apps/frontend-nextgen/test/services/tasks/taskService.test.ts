@@ -1,10 +1,17 @@
 import { executeTask } from '@/services/backendApi/tasks/taskController';
+import { listExecutableWorkflows, listWorkflows } from '@/services/backendApi/workflows/workflowController';
 import type { TaskComposerContext, TaskComposerForm } from '@/services/tasks/taskMapper';
-import { executeTaskService } from '@/services/tasks/taskService';
+import { executeTaskService, fetchWorkflows } from '@/services/tasks/taskService';
 import { useTaskStore } from '@/stores/taskStore';
 
 jest.mock('@/services/backendApi/tasks/taskController', () => ({
   executeTask: jest.fn(),
+}));
+
+jest.mock('@/services/backendApi/workflows/workflowController', () => ({
+  getWorkflowDetail: jest.fn(),
+  listWorkflows: jest.fn(),
+  listExecutableWorkflows: jest.fn(),
 }));
 
 const mockedExecuteTask = executeTask as unknown as jest.Mock;
@@ -102,5 +109,57 @@ describe('executeTaskService orchestration mode mapping', () => {
 
     expect(record.task_info.execution_config.orchestration_mode).toBeUndefined();
     expect(record.task_info.execution_config.root_node_id).toBeUndefined();
+  });
+});
+
+describe('fetchWorkflows executable asset scope', () => {
+  const rows = [{ workflowId: 'workflow-1', title: 'Executable workflow', packId: null, updatedAt: 1 }];
+
+  beforeEach(() => {
+    jest.mocked(listExecutableWorkflows).mockReset();
+    jest.mocked(listWorkflows).mockReset();
+  });
+
+  it('uses the shared executable helper with a bare Bot and supplied owner', async () => {
+    jest.mocked(listExecutableWorkflows).mockResolvedValue(rows);
+
+    await expect(fetchWorkflows(' owner-1 ', ' bot-main ')).resolves.toBe(rows);
+
+    expect(listExecutableWorkflows).toHaveBeenCalledWith('owner-1', 'bot-main');
+    expect(listWorkflows).not.toHaveBeenCalled();
+  });
+
+  it('uses the composite asset owner, not the collaborating requester, without changing task context', async () => {
+    jest.mocked(listExecutableWorkflows).mockResolvedValue(rows);
+    const collaboratorContext = { ...context, ownerUserId: 'viewer-1', ownerBotId: 'b:real-owner' };
+
+    await expect(fetchWorkflows(collaboratorContext.ownerUserId, collaboratorContext.ownerBotId)).resolves.toBe(rows);
+
+    expect(listExecutableWorkflows).toHaveBeenCalledWith('real-owner', 'b');
+    expect(collaboratorContext).toMatchObject({ ownerUserId: 'viewer-1', ownerBotId: 'b:real-owner' });
+    expect(listWorkflows).not.toHaveBeenCalled();
+  });
+
+  it('propagates the actual failure instead of retrying a view/all list or returning fixtures', async () => {
+    const failure = new Error('Executable workflow request failed');
+    jest.mocked(listExecutableWorkflows).mockRejectedValue(failure);
+
+    await expect(fetchWorkflows('viewer-1', 'b:real-owner')).rejects.toBe(failure);
+
+    expect(listExecutableWorkflows).toHaveBeenCalledTimes(1);
+    expect(listWorkflows).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['', 'b'],
+    ['   ', 'b:real-owner'],
+    ['viewer-1', ''],
+    ['viewer-1', '   '],
+    ['viewer-1', ':real-owner'],
+    ['viewer-1', 'b:'],
+  ])('rejects an incomplete scope (%j, %j) without a request', async (owner, botId) => {
+    await expect(fetchWorkflows(owner, botId)).rejects.toThrow();
+    expect(listExecutableWorkflows).not.toHaveBeenCalled();
+    expect(listWorkflows).not.toHaveBeenCalled();
   });
 });

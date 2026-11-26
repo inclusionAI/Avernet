@@ -6,6 +6,7 @@ import {
   type UseChatHeaderPanelsOptions,
 } from '@/pages/Workspace/Chat/hooks/useChatHeaderPanels';
 import { TaskEscortDemoPage } from '@/pages/Demo/TaskEscort';
+import type { TaskComposerContext } from '@/services/tasks/taskMapper';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom/jest-globals';
@@ -38,6 +39,23 @@ jest.mock('@/components/Workspace/TaskEscortDemo', () => {
     },
   };
 });
+
+// 实时聊天入口只检查上下文透传；服务加载与可访问性由 TaskEscortPanel 套件验证。
+const mockLivePanel = jest.fn<(props: { context: TaskComposerContext | null }) => void>();
+jest.mock('@/components/Workspace/TaskEscortPanel', () => ({
+  TaskEscortPanel: (props: { open: boolean; context: TaskComposerContext | null; onOpenChange: (open: boolean) => void }) => {
+    mockLivePanel(props);
+    return props.open ? (
+      <section id="task-escort-demo-panel" aria-label="实时任务护航面板">
+        <button type="button" onClick={() => props.onOpenChange(false)}>关闭实时护航</button>
+      </section>
+    ) : null;
+  },
+}));
+const taskComposerContext: TaskComposerContext = {
+  sourceType: 'bot', ownerUserId: 'viewer-101', ownerBotId: 'collaborator-bot:asset-owner-202',
+  mainSessionId: 'task-session', mainSessionName: '任务会话', parentTaskId: null,
+};
 
 function makeSession(overrides: Partial<BotChatSessionView> = {}): BotChatSessionView {
   return {
@@ -243,35 +261,39 @@ describe('任务护航聊天入口', () => {
     const { result } = renderHook(() => useChatHeaderPanels(options));
     const base = result.current;
     const session = makeSession();
-    const { rerender } = render(<ConversationHeaderPanels headerPanels={{ ...base, openPanel: 'history' }} session={session} />);
+    const { rerender } = render(<ConversationHeaderPanels headerPanels={{ ...base, openPanel: 'history' }} session={session} taskComposerContext={taskComposerContext} />);
     const sidebar = screen.getByLabelText('历史消息面板');
     expect(sidebar).not.toHaveStyle({ width: '0px' });
-    rerender(<ConversationHeaderPanels headerPanels={{ ...base, openPanel: 'escort' }} session={session} />);
+    rerender(<ConversationHeaderPanels headerPanels={{ ...base, openPanel: 'escort' }} session={session} taskComposerContext={taskComposerContext} />);
     expect(screen.getByLabelText('历史消息面板')).toBe(sidebar);
     expect(sidebar).toHaveStyle({ width: '0px' });
     expect(screen.queryByLabelText('会话详情面板')).not.toBeInTheDocument();
-    expect(screen.getByRole('region', { name: '护航演示面板' })).toBeInTheDocument();
-    rerender(<ConversationHeaderPanels headerPanels={{ ...base, openPanel: 'detail' }} session={session} />);
+    expect(screen.getByRole('region', { name: '实时任务护航面板' })).toBeInTheDocument();
+    rerender(<ConversationHeaderPanels headerPanels={{ ...base, openPanel: 'detail' }} session={session} taskComposerContext={taskComposerContext} />);
     expect(screen.getByLabelText('会话详情面板')).not.toHaveStyle({ width: '0px' });
-    expect(screen.queryByRole('region', { name: '护航演示面板' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '实时任务护航面板' })).not.toBeInTheDocument();
   });
 
-  it('面板装配收起不卸载演示草稿，Bot / session key 变化后隔离草稿', () => {
+  it('原样透传 composer 上下文而不从 session/URL 推断身份，关闭使用同一回调', () => {
     const { options } = makeOptions();
     const { result } = renderHook(() => useChatHeaderPanels(options));
-    const base = { ...result.current, openPanel: 'escort' as const };
-    const session = makeSession();
-    const { rerender } = render(<ConversationHeaderPanels headerPanels={base} session={session} />);
-    fireEvent.change(screen.getByRole('textbox', { name: '演示草稿' }), { target: { value: '未保存示例流程' } });
-    rerender(<ConversationHeaderPanels headerPanels={{ ...base, openPanel: null }} session={session} />);
-    expect(screen.queryByRole('textbox', { name: '演示草稿' })).not.toBeInTheDocument();
-    rerender(<ConversationHeaderPanels headerPanels={base} session={session} />);
-    expect(screen.getByRole('textbox', { name: '演示草稿' })).toHaveValue('未保存示例流程');
-    rerender(<ConversationHeaderPanels headerPanels={base} session={makeSession({ botId: 'demo-bot-b' })} />);
-    expect(screen.getByRole('textbox', { name: '演示草稿' })).toHaveValue('初始演示草稿');
-    fireEvent.change(screen.getByRole('textbox', { name: '演示草稿' }), { target: { value: '另一个 Bot 的草稿' } });
-    rerender(<ConversationHeaderPanels headerPanels={base} session={makeSession({ sessionId: 'demo-session-b' })} />);
-    expect(screen.getByRole('textbox', { name: '演示草稿' })).toHaveValue('初始演示草稿');
+    const closePanel = jest.fn();
+    const base = { ...result.current, openPanel: 'escort' as const, closePanel };
+    const session = makeSession({ botId: 'session-bot:other-owner' });
+    window.history.replaceState(null, '', '/workspace/chat?userId=forged&ownerId=forged');
+    const { rerender } = render(<ConversationHeaderPanels headerPanels={base} session={session} taskComposerContext={taskComposerContext} />);
+    expect(mockLivePanel.mock.calls.at(-1)?.[0].context).toBe(taskComposerContext);
+    expect(screen.queryByRole('region', { name: '护航演示面板' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '关闭实时护航' }));
+    expect(closePanel).toHaveBeenCalledTimes(1);
+    rerender(<ConversationHeaderPanels headerPanels={{ ...base, openPanel: null }} session={session} taskComposerContext={taskComposerContext} />);
+    expect(screen.queryByRole('region', { name: '实时任务护航面板' })).not.toBeInTheDocument();
+    expect(mockLivePanel.mock.calls.at(-1)?.[0].context).toBe(taskComposerContext);
+    const nextContext = { ...taskComposerContext, ownerUserId: 'viewer-303', ownerBotId: 'bot-b:owner-b' };
+    rerender(<ConversationHeaderPanels headerPanels={base} session={session} taskComposerContext={nextContext} />);
+    expect(mockLivePanel.mock.calls.at(-1)?.[0].context).toBe(nextContext);
+    rerender(<ConversationHeaderPanels headerPanels={base} session={session} taskComposerContext={null} />);
+    expect(mockLivePanel.mock.calls.at(-1)?.[0].context).toBeNull();
   });
 
   it('独立宿主支持品牌注入，复用同一入口并保留本地草稿与只读聊天', () => {

@@ -79,6 +79,7 @@ export interface ConversationInteractiveChatModel {
   inputRef: RefObject<SenderRef | null>;
   /** 任务发起编排(+ 号菜单装配)。 */
   taskExecution: UseTaskExecutionResult;
+  taskComposerContext: TaskComposerContext | null;
   taskComposerDisabled: boolean;
   taskComposerDisabledReason: string | null;
   /** 模型选择器装配(全量 Bot + 请求身份)。 */
@@ -221,6 +222,7 @@ export function useConversationInteractiveChat(
     chatBridge,
     inputRef,
     taskExecution,
+    taskComposerContext,
     taskComposerDisabled: !taskComposerContext,
     taskComposerDisabledReason: !taskComposerContext ? '请先选择一个 Bot 会话' : null,
     chatBots: options.chatBots,

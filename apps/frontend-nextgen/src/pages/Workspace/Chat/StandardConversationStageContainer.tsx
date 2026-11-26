@@ -104,7 +104,7 @@ export function StandardConversationStageContainer({
   // /file 等面板唤起后切会话:输入清空/失效 chip/Escape 收起子面板。
   useSessionSwitchReset(session?.sessionId ?? null, interactiveModel.fileFeature.senderRef);
 
-  // 头部六图标域编排：收藏会话/会话管理/历史消息/资源管理/任务护航 DEMO/副屏。
+  // 头部六图标域编排：收藏会话/会话管理/历史消息/资源管理/任务护航/副屏。
   const headerPanels = useChatHeaderPanels({
     bot,
     historyReady: botChat.historyReady,
@@ -151,6 +151,7 @@ export function StandardConversationStageContainer({
       headerPanels={headerPanels}
       session={interactiveModel.selectedSession}
       botName={bot?.displayName}
+      taskComposerContext={interactiveModel.taskComposerContext}
     />
   );
 

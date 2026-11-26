@@ -84,12 +84,18 @@ export async function executeTaskService({ form, ctx, apiBaseUrl }: ExecuteTaskA
 }
 
 /**
- * 加载 workflow 列表（按 ownerUserId + ownerBotId）。
- * 直连 clawweb /api/workflows（见 config 代理）；botOwnerId 透传 ownerUserId，controller 会把
- * ownerBotId（形如 "default:146836"）裁成裸 botId 再下发，避免与 botOwnerId 拼重复。不走 mock。
+ * 加载当前认证用户可执行的 workflow 列表，不回退到 view/all/mock。
+ * ownerUserId 是任务请求者，不一定是协作 Bot 的资产所有者；与 ChatBotView 的复合 ID 约定一致，
+ * 优先从 botId:ownerId 拆出真实资产 owner，裸 Bot ID 才沿用传入 owner。此范围不改变认证或任务上下文。
  */
 export async function fetchWorkflows(ownerUserId: string, botId: string): Promise<WorkflowListItem[]> {
-  return listExecutableWorkflows(ownerUserId, botId);
+  const requesterId = ownerUserId.trim();
+  const scopedBotId = botId.trim();
+  const separator = scopedBotId.indexOf(':');
+  const bareBotId = (separator < 0 ? scopedBotId : scopedBotId.slice(0, separator)).trim();
+  const botOwnerId = separator < 0 ? requesterId : scopedBotId.slice(separator + 1).trim();
+  if (!requesterId || !bareBotId || !botOwnerId) throw new Error('缺少 Bot 或所有者，无法加载可执行工作流');
+  return listExecutableWorkflows(botOwnerId, bareBotId);
 }
 
 /** 解析工作流触发命令：取 facade.command，失败兜底 workflowId 自身。 */
