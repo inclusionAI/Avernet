@@ -17,6 +17,19 @@ registration form displays these messages and offers a read retry, without
 showing raw HTTP bodies or reusing a previous Bot's Skill list. Unknown errors
 still reach the normal server error handler and are not relabeled as offline.
 
+## Registration links
+
+`/evolve/skills?register=1` opens the Skill registration dialog. Add `botId` and
+`botEnv` to preselect a Bot from the current caller's accessible Bot list.
+The existing Bot prefill rules apply, including `ownerId` (or `entityId`) for
+`default` Bots and ambiguous ownership. For example,
+`/evolve/skills?register=1&botId=bot-1&botEnv=prod&skillId=skill-1` also preselects
+the optional `skillId` after loading that Bot's available local Skills.
+
+Invalid or inaccessible targets display a message and allow manual selection.
+Opening a link only fills the form; registration requires the user's submit.
+Closing the dialog removes its query parameters and preserves unrelated ones.
+
 ## Optional registration space
 
 Skill and Stage registration default to no space: omitting `spaceId`, passing

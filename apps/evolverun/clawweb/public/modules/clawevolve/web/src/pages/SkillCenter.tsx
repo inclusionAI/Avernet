@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, type EvolveSkillAsset } from '../api/client'
 import { useEvolveAdminScope } from '../features/evolve/admin-scope'
 import { useClientUser } from '../hooks/useClientUser'
@@ -9,17 +9,23 @@ import { formatStepTime, primaryButton } from './evolve/helpers'
 import SkillTaskLaunchDialog, { type SkillTaskAction } from '../components/SkillTaskLaunchDialog'
 import { spaceLabel } from '../components/SpaceSelector'
 import SkillRegistrationDialog from '../components/SkillRegistrationDialog'
+import { evolveBotOptionKey } from '../components/evolveBotIdentity'
+import { resolveEvolveBotPrefill } from '../components/evolveBotPrefill'
 import SkillListPagination, { skillListPageSize } from '../components/SkillListPagination'
 
 export default function SkillCenter() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useClientUser()
   const { enabled: adminMode, ownerUserId } = useEvolveAdminScope()
   const [launch, setLaunch] = useState<{ asset: EvolveSkillAsset; action: SkillTaskAction } | null>(null)
   const [assets, setAssets] = useState<EvolveSkillAsset[]>([])
   const [bots, setBots] = useState<DirectoryBot[]>([])
-  const [showRegister, setShowRegister] = useState(false)
-  const [botsLoading, setBotsLoading] = useState(false)
+  const showRegister = searchParams.get('register') === '1'
+  const registrationQuery = searchParams.toString()
+  const [registrationBot, setRegistrationBot] = useState<{ query: string; key: string } | null>(null)
+  const initialBotKey = registrationBot?.query === registrationQuery ? registrationBot.key : ''
+  const [botsLoading, setBotsLoading] = useState(true)
   const [botsError, setBotsError] = useState('')
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
@@ -46,19 +52,43 @@ export default function SkillCenter() {
     if (!showRegister) return
     let active = true
     setBots([])
+    setRegistrationBot(null)
     setBotsError('')
     setBotsLoading(true)
     const request = user?.userId ? api.bots.list({ ownerId: user.userId, status: 'all' }) : Promise.resolve({ bots: [] as DirectoryBot[] })
-    void request.then(result => { if (active) setBots(result.bots) })
+    void request.then(result => {
+      if (!active) return
+      const prefill = new URLSearchParams(registrationQuery).has('botId')
+        ? resolveEvolveBotPrefill(registrationQuery, result.bots) : {}
+      setBots(result.bots)
+      setRegistrationBot({ query: registrationQuery, key: prefill.bot ? evolveBotOptionKey(prefill.bot) : '' })
+      setBotsError(prefill.error ?? '')
+    })
       .catch(reason => { if (active) setBotsError(reason instanceof Error ? reason.message : 'Bot 列表加载失败') })
       .finally(() => { if (active) setBotsLoading(false) })
     return () => { active = false }
-  }, [showRegister, user?.userId])
+  }, [showRegister, user?.userId, registrationQuery])
+
+  const openRegistration = () => {
+    setSearchParams(current => {
+      const next = new URLSearchParams(current)
+      next.set('register', '1')
+      return next
+    })
+  }
+
+  const closeRegistration = () => {
+    setSearchParams(current => {
+      const next = new URLSearchParams(current)
+      for (const key of ['register', 'botId', 'botEnv', 'ownerId', 'entityId', 'skillId']) next.delete(key)
+      return next
+    }, { replace: true })
+  }
 
   const filtered = assets.filter((asset) => [asset.name, asset.description, asset.spaceName, asset.ownerId, asset.botId, asset.botName].some((value) => value?.toLowerCase().includes(query.trim().toLowerCase())))
   const visiblePage = Math.min(page, Math.max(1, Math.ceil(filtered.length / skillListPageSize)))
   return <div className="w-full px-3 py-6 sm:px-4 lg:px-5">
-    <PageTitle title="技能管理" description="登记技能，查看版本内容，并发起诊断、加固或优化任务。" action={<button onClick={() => setShowRegister(true)} className={primaryButton}><Icon name="plus" />登记 Skill</button>} />
+    <PageTitle title="技能管理" description="登记技能，查看版本内容，并发起诊断、加固或优化任务。" action={<button onClick={openRegistration} className={primaryButton}><Icon name="plus" />登记 Skill</button>} />
     <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
         <span className="rounded-md bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700">全部技能</span>
@@ -84,8 +114,8 @@ export default function SkillCenter() {
     </section>
     {error && !showRegister && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
     {launch && <SkillTaskLaunchDialog key={`${launch.asset.assetId}:${launch.action}`} asset={launch.asset} action={launch.action} returnTo="/evolve/skills" onClose={() => setLaunch(null)} />}
-    {showRegister && <SkillRegistrationDialog bots={bots} botsLoading={botsLoading} botsError={botsError} onClose={() => setShowRegister(false)} onRegistered={asset => {
-      setShowRegister(false)
+    {showRegister && <SkillRegistrationDialog key={registrationQuery} bots={bots} botsLoading={botsLoading} botsError={botsError}
+      initialBotKey={initialBotKey} initialSkillId={searchParams.get('skillId')?.trim() ?? ''} onClose={closeRegistration} onRegistered={asset => {
       navigate(`/evolve/skills/${encodeURIComponent(asset.assetId)}`)
     }} />}
   </div>
