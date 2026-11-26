@@ -757,11 +757,11 @@ async fn stale_lifecycle_capabilities_preserve_card_owned_name() {
     }).await.unwrap();
     db.execute(DbStatement::new("UPDATE bcs_bots SET name='Card Name', agent_card='{\"name\":\"Card Name\"}' WHERE bot_uuid='card-owned'")).await.unwrap();
     repo.update_capabilities("card-owned", BotCapabilities {
-        name: Some("Stale Name".into()), summary: Some("Updated summary".into()), ..Default::default()
+        name: Some("Stale Name".into()), summary: Some("Bot's updated summary".into()), ..Default::default()
     }).await.unwrap();
     let rows = db.query(DbStatement::new("SELECT name, bot_info FROM bcs_bots WHERE bot_uuid='card-owned'")).await.unwrap();
     let name: String = bcs_db_api::db_get_column(&rows[0], "name").unwrap();
     let info: String = bcs_db_api::db_get_column(&rows[0], "bot_info").unwrap();
     assert_eq!(name, "Card Name");
-    assert_eq!(serde_json::from_str::<serde_json::Value>(&info).unwrap()["summary"], "Updated summary");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&info).unwrap()["summary"], "Bot's updated summary");
 }
