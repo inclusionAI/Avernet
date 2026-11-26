@@ -15,7 +15,7 @@ vi.mock('@avernet/clawweb-shared/web/api/hooks', () => ({
   useFlowApprovals: () => ({ data: { items: [] }, isLoading: false, refetch: vi.fn() }),
 }))
 
-// Unrelated panes are isolated; RunDetail, RunArchivePanel, and SimpleRunLogsPanel stay real.
+// Unrelated panes are isolated; RunDetail and RunArchivePanel stay real.
 vi.mock('../RunSummaryHeader', () => ({ default: () => <div>运行摘要</div> }))
 vi.mock('../SubworkflowLinks', () => ({
   default: () => null,
@@ -59,8 +59,8 @@ beforeEach(() => {
   hooks.useRunEvolutionAnalysis.mockReturnValue({ data: null, isLoading: false, isError: false, refetch: vi.fn() })
 })
 
-describe('RunArchivePanel integration with the unchanged run detail page', () => {
-  it('keeps both the top-level Logs entry and the archive-local Run Logs entry usable', async () => {
+describe('RunArchivePanel integration with run detail', () => {
+  it('uses the archive as the sole run-detail logs entry without requesting the old timeline', async () => {
     const user = userEvent.setup()
     render(
       <MemoryRouter initialEntries={[`/runs/${ARCHIVE_FLOW_ID}`]}>
@@ -68,20 +68,15 @@ describe('RunArchivePanel integration with the unchanged run detail page', () =>
       </MemoryRouter>,
     )
     const runNav = screen.getByRole('navigation', { name: /运行详情视图/ })
-    await user.click(within(runNav).getByRole('button', { name: /^日志$/ }))
-    expect(screen.getByText('Top-level live log marker')).toBeVisible()
-    expect(hooks.useRunTimeline).toHaveBeenCalledWith(ARCHIVE_FLOW_ID)
-
+    expect(within(runNav).queryByRole('button', { name: /^日志$/ })).not.toBeInTheDocument()
+    expect(within(runNav).queryByRole('button', { name: /^DAG$/ })).not.toBeInTheDocument()
     await user.click(within(runNav).getByRole('button', { name: /运行档案/ }))
     await user.click(within(screen.getByRole('navigation', { name: /运行档案分区/ })).getByRole('button', { name: /运行过程/ }))
     await user.click(within(screen.getByRole('navigation', { name: /运行过程视图/ })).getByRole('button', { name: /运行日志/ }))
     expect(screen.getByText(/Synthetic startup marker/)).toBeVisible()
     expect(screen.getByText(/Synthetic error marker/)).toBeVisible()
     expect(hooks.useRunArchive).toHaveBeenCalledWith(ARCHIVE_FLOW_ID)
-    expect(within(runNav).getByRole('button', { name: /^日志$/ })).toBeVisible()
-
-    await user.click(within(runNav).getByRole('button', { name: /^日志$/ }))
-    expect(screen.getByText('Top-level live log marker')).toBeVisible()
-    expect(screen.queryByText(/Synthetic startup marker/)).not.toBeInTheDocument()
+    expect(within(runNav).queryByRole('button', { name: /^日志$/ })).not.toBeInTheDocument()
+    expect(hooks.useRunTimeline).not.toHaveBeenCalled()
   })
 })

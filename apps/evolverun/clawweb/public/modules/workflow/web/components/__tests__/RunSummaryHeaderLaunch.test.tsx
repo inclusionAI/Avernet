@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useNavigate, useParams } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -35,19 +35,23 @@ function renderHeader(props: Partial<Props> = {}) {
   </MemoryRouter>)
 }
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  for (const mutation of Object.values(mutations)) mutation.isPending = false
+})
 
 describe('RunSummaryHeader launch details integration', () => {
-  it('shows launch data and lineage while retaining metadata order, progress and token usage', () => {
+  it('shows independent launch data and lineage alongside grouped metadata, progress and token usage', () => {
     renderHeader({ succeededCount: 2, failedCount: 0 })
     expect(screen.getByRole('region', { name: '输入文本内容' })).toHaveTextContent('启动时的需求')
     expect(screen.getByRole('region', { name: '原始启动参数内容' })).toHaveTextContent('original')
     expect(screen.getByRole('link', { name: '查看父运行 parent-run' })).toHaveAttribute('href', '/runs/parent-run?from=workspace')
-    expect(screen.getAllByRole('term').map(term => term.textContent).slice(-5)).toEqual([
-      '耗时', '开始时间', 'device_id', 'BOT_TYPE', 'STAGE',
+    const context = within(screen.getByRole('region', { name: '执行上下文' }))
+    expect(context.getAllByRole('term').map(term => term.textContent)).toEqual([
+      '运行引擎', '流量标识', '标签', 'device_id', 'BOT_TYPE', 'STAGE',
     ])
     expect(screen.getByText('2 成功 / 0 失败 / 4 总计')).toBeInTheDocument()
-    expect(screen.getByText('Token 用量: 120')).toBeInTheDocument()
+    expect(screen.getByText('Token 用量', { selector: 'dt' }).parentElement?.querySelector('dd')).toHaveTextContent('120')
   })
 
   it('keeps metadata columns shrinkable and long Bot/engine/ID values wrappable', () => {
@@ -56,15 +60,14 @@ describe('RunSummaryHeader launch details integration', () => {
     const { container } = renderHeader({ run: { ...run, origin_bot_id: botId, engine } })
     for (const term of screen.getAllByRole('term')) {
       expect(term.parentElement).toHaveClass('min-w-0')
-      if (['流量标识', '标签'].includes(term.textContent ?? '')) {
-        expect(term.parentElement?.querySelector('dd')).toHaveClass('truncate')
-      } else {
+      if (term.textContent !== 'Token 用量') {
         expect(term.parentElement?.querySelector('dd')).toHaveClass('break-words', '[overflow-wrap:anywhere]')
       }
     }
-    expect(screen.getByText(`${botId} / 1.0`)).toBeInTheDocument()
+    expect(screen.getByText(botId, { exact: false, selector: 'dd' })).toBeInTheDocument()
+    expect(screen.getByText('plugin_version · 1.0')).toBeInTheDocument()
     expect(screen.getByText(engine)).toBeInTheDocument()
-    expect(container.querySelector('dl')).toHaveClass('lg:grid-cols-7')
+    expect(container.querySelector('dl')).toHaveClass('grid-cols-2', 'sm:grid-cols-4')
   })
 
   it('keeps launch details and markers visible while readOnly hides every action', () => {
@@ -124,6 +127,115 @@ describe('RunSummaryHeader launch details integration', () => {
     expect(screen.queryByRole('button', { name: '🩹 修复' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /审批/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '🗑 删除' })).toBeInTheDocument()
+  })
+})
+
+
+describe('RunSummaryHeader action contract', () => {
+  it.each([
+    { status: 'running', abort: true, heal: false, approval: false },
+    { status: 'waiting', abort: true, heal: true, approval: true },
+    { status: 'blocked', abort: true, heal: true, approval: false },
+    { status: 'pending', abort: true, heal: false, approval: false },
+    { status: 'queued', abort: true, heal: false, approval: false },
+    { status: 'postActionsRunning', abort: true, heal: false, approval: false },
+    { status: 'failed', abort: false, heal: true, approval: false },
+    { status: 'succeeded', abort: false, heal: false, approval: false },
+    { status: 'cancelled', abort: false, heal: false, approval: false },
+    { status: 'timeout', abort: false, heal: false, approval: false },
+    { status: 'skipped', abort: false, heal: false, approval: false },
+  ])('retains the original action gates for $status', ({ status, abort, heal, approval }) => {
+    // Runtime legacy statuses can be wider than the shared NodeStatus union.
+    renderHeader({ run: { ...run, status: status as Props['run']['status'] }, onApproval: vi.fn(), pendingApprovalCount: 2 })
+    const actions = within(screen.getByRole('group', { name: '运行操作' }))
+    expect(actions.queryAllByRole('button', { name: '⛔ 中止' })).toHaveLength(abort ? 1 : 0)
+    expect(actions.queryAllByRole('button', { name: '🩹 修复' })).toHaveLength(heal ? 1 : 0)
+    expect(actions.queryAllByRole('button', { name: /审批/ })).toHaveLength(approval ? 1 : 0)
+    expect(actions.getByRole('button', { name: '🔄 重跑' })).toBeInTheDocument()
+    expect(actions.getByRole('button', { name: '🗑 删除' })).toBeInTheDocument()
+    for (const mutation of Object.values(mutations)) expect(mutation.mutate).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { count: 0, callback: true, visible: false },
+    { count: 1, callback: false, visible: false },
+    { count: 1, callback: true, visible: true },
+    { count: 2, callback: true, visible: true },
+  ])('requires both a pending approval and its callback ($count, $callback)', ({ count, callback, visible }) => {
+    renderHeader({ pendingApprovalCount: count, onApproval: callback ? vi.fn() : undefined })
+    const buttons = screen.queryAllByRole('button', { name: /审批/ })
+    expect(buttons).toHaveLength(visible ? 1 : 0)
+    if (visible) expect(buttons[0].querySelector('span')?.textContent ?? '').toBe(count > 1 ? String(count) : '')
+  })
+
+  it('keeps mutation pending protections on rerun and confirmed destructive actions', async () => {
+    const user = userEvent.setup()
+    const view = renderHeader()
+    await user.click(screen.getByRole('button', { name: '⛔ 中止' }))
+    await user.click(screen.getByRole('button', { name: '🗑 删除' }))
+    for (const mutation of Object.values(mutations)) mutation.isPending = true
+    view.rerender(<MemoryRouter><RunSummaryHeader run={run} nodeCount={4} /></MemoryRouter>)
+    expect(screen.getByTitle('重跑：重新发送原始命令到 Bot')).toBeDisabled()
+    expect(screen.getByRole('button', { name: '中止中…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '删除中…' })).toBeDisabled()
+    for (const mutation of Object.values(mutations)) expect(mutation.mutate).not.toHaveBeenCalled()
+  })
+})
+
+describe('RunSummaryHeader launch layout and safe projection', () => {
+  it('keeps independent previews, bounded scrolling and read-only expansion for both sources', async () => {
+    const user = userEvent.setup()
+    const message = '长输入文本'.repeat(300)
+    const params = { original: 'long-original-value'.repeat(100) }
+    renderHeader({ readOnly: true, run: { ...run, input_json: JSON.stringify({ message }), params_json: JSON.stringify(params) } })
+    const input = screen.getByRole('region', { name: '输入文本内容' })
+    const original = screen.getByRole('region', { name: '原始启动参数内容' })
+    expect(input.parentElement?.parentElement).toBe(original.parentElement?.parentElement)
+    expect(input.parentElement?.parentElement).toHaveClass('grid-cols-1', 'sm:grid-cols-2', 'lg:grid-cols-1', 'xl:grid-cols-2')
+    expect(screen.queryByRole('group', { name: '运行操作' })).not.toBeInTheDocument()
+    const expandInput = screen.getByRole('button', { name: '展开输入文本' })
+    expect(expandInput).toHaveAttribute('aria-controls', input.id)
+    expandInput.focus()
+    await user.keyboard('{Enter}')
+    expect(input).toHaveClass('max-h-96', 'overflow-auto')
+    expect(original).toHaveClass('max-h-28', 'overflow-auto')
+    await user.click(screen.getByRole('button', { name: '展开原始启动参数' }))
+    expect(original).toHaveClass('max-h-96')
+    await user.click(screen.getByRole('button', { name: '收起输入文本' }))
+    expect(input).toHaveClass('max-h-28')
+    expect(original).toHaveClass('max-h-96')
+    expect(input.textContent).toBe(message)
+    expect(JSON.parse(original.textContent!)).toEqual(params)
+    for (const mutation of Object.values(mutations)) expect(mutation.mutate).not.toHaveBeenCalled()
+  })
+
+  it('uses the original helper for command fallback and rejects state envelopes and retry params', () => {
+    const { container } = renderHeader({
+      readOnly: true,
+      run: {
+        ...run, input_json: JSON.stringify({ command: '/workflow start recorded', params: { secret: 'retry-secret' } }),
+        params_json: '{"_clawmind_state":{"secret":"state-secret"}}',
+        parent_flow_id: undefined, root_flow_id: undefined,
+      },
+    })
+    expect(screen.getByRole('region', { name: '已存储命令内容' })).toHaveTextContent('/workflow start recorded')
+    expect(screen.getByText('flow_runs.input_json · command')).toBeInTheDocument()
+    expect(screen.getByText('仅有执行状态，未记录原始启动参数')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '原始启动参数内容' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('父运行未记录')).toHaveTextContent('—')
+    expect(screen.getByLabelText('根运行未记录')).toHaveTextContent('—')
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/retry-secret|state-secret|_clawmind_state/)
+  })
+
+  it('retains authorized encoded lineage links, the router basename and only workspace provenance', () => {
+    const parent = 'parent/中文 ?#%&='
+    const root = 'javascript:alert(1)//example'
+    render(<MemoryRouter basename="/task-escort" initialEntries={['/task-escort/runs/current?from=workspace&analysisId=old&unsafe=1']}>
+      <RunSummaryHeader run={{ ...run, parent_flow_id: parent, root_flow_id: root }} nodeCount={4} readOnly />
+    </MemoryRouter>)
+    expect(screen.getByRole('link', { name: `查看父运行 ${parent}` })).toHaveAttribute('href', `/task-escort/runs/${encodeURIComponent(parent)}?from=workspace`)
+    expect(screen.getByRole('link', { name: `查看根运行 ${root}` })).toHaveAttribute('href', `/task-escort/runs/${encodeURIComponent(root)}?from=workspace`)
   })
 })
 

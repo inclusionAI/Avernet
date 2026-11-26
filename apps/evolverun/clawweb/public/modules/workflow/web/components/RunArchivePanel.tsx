@@ -12,23 +12,7 @@ import SuggestedYamlSection from './run-archive/SuggestedYamlSection'
 type RunArchivePanelProps = { flowId: string; runStatus?: string | null }
 
 export default function RunArchivePanel({ flowId, runStatus }: RunArchivePanelProps) {
-  const eligible = runStatus === 'failed' || runStatus === 'cancelled' || runStatus === 'timeout'
-  if (!eligible) {
-    return (
-      <section aria-label="运行档案可用性" className="rounded-xl border border-border bg-card p-6 text-center">
-        <h2 className="text-base font-semibold text-foreground">当前状态不提供运行档案</h2>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          运行档案仅对失败（failed）、已中止（cancelled）和超时（timeout）的运行提供。
-          当前运行状态：{runStatus?.trim() || '未记录'}。
-        </p>
-      </section>
-    )
-  }
-  return <EligibleRunArchive flowId={flowId} runStatus={runStatus} />
-}
-
-function EligibleRunArchive({ flowId, runStatus }: RunArchivePanelProps) {
-  const { data, isLoading, isError, error, refetch } = useRunArchive(flowId)
+  const { data, isLoading, isFetching, isError, error, refetch } = useRunArchive(flowId)
   if (isLoading) {
     return (
       <div role="status" className="space-y-3 rounded-xl border border-border bg-card p-6">
@@ -59,6 +43,7 @@ function EligibleRunArchive({ flowId, runStatus }: RunArchivePanelProps) {
       data={data}
       runStatus={runStatus}
       refreshFailed={isError}
+      refreshing={isFetching}
       onRetry={() => void refetch()}
     />
   )
@@ -72,10 +57,11 @@ const SECTIONS: Array<{ id: SectionId; label: string; description: string }> = [
   { id: 'yaml', label: '建议 YAML', description: '审阅真实建议内容与 Patch 操作；不会自动应用，也不会补造原始 YAML。' },
 ]
 
-function ArchiveWorkbench({ data, runStatus, refreshFailed, onRetry }: {
+function ArchiveWorkbench({ data, runStatus, refreshFailed, refreshing, onRetry }: {
   data: RunArchiveData
   runStatus?: string | null
   refreshFailed: boolean
+  refreshing?: boolean
   onRetry: () => void
 }) {
   const [section, setSection] = useState<SectionId>('overview')
@@ -90,6 +76,8 @@ function ArchiveWorkbench({ data, runStatus, refreshFailed, onRetry }: {
     setFocusRequest(request => request + 1)
   }
   const current = SECTIONS.find(item => item.id === section)!
+  const currentStatus = runStatus?.trim() || data.flowRun?.status
+  const active = typeof currentStatus === 'string' && ['pending', 'queued', 'running', 'waiting', 'blocked', 'postActionsRunning'].includes(currentStatus)
   const hints: Record<SectionId, string> = {
     overview: data.archive.status === 'partial' ? '部分采集' : '采集概况',
     process: `${data.nodeExecutions.length} 执行 · ${data.flowEvents.length} 事件 · ${data.runLogs.length} 日志`,
@@ -107,8 +95,17 @@ function ArchiveWorkbench({ data, runStatus, refreshFailed, onRetry }: {
             <p className="mt-1 text-xs text-muted-foreground">执行证据 · 错误线索 · 修改建议</p>
           </div>
         </div>
-        <Badge className={data.archive.status === 'partial' ? 'bg-warning/10 text-warning-foreground' : 'bg-primary/10 text-primary'}>{data.archive.status === 'partial' ? '部分采集 · partial' : '采集完成 · completed'}</Badge>
+        <div className="flex flex-wrap items-center gap-3">
+          <Badge className={data.archive.status === 'partial' ? 'bg-warning/10 text-warning-foreground' : 'bg-primary/10 text-primary'}>{data.archive.status === 'partial' ? '部分采集 · partial' : '采集完成 · completed'}</Badge>
+          <button type="button" onClick={onRetry} disabled={refreshing} aria-label="刷新运行档案"
+            className="rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-wait disabled:opacity-60">
+            {refreshing ? '刷新中…' : '刷新档案'}
+          </button>
+        </div>
       </header>
+      {active && <p role="status" className="mx-4 mt-4 rounded-lg border border-primary/15 bg-primary/5 px-4 py-3 text-xs leading-6 text-muted-foreground sm:mx-5">
+        运行尚未结束，这里展示本次已采集的数据，内容可能继续变化。采集完成不代表运行结束，可通过「刷新档案」查看更新。
+      </p>}
       {refreshFailed && (
         <div role="alert" className="m-4 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
           档案刷新失败，以下保留上次已加载数据。
