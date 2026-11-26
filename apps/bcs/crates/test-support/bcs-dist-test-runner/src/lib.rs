@@ -151,6 +151,8 @@ pub fn participant() -> ParticipantBinding {
             subscribe: true,
             resume_events: true,
             cancel: true,
+            isolated_memory: true,
+            persistent_dedupe: true,
         },
     }
 }
@@ -191,6 +193,7 @@ pub fn initial() -> Checkpoint {
         deadline_history: Default::default(),
         view_drafts: Default::default(),
         last_event_id: None,
+        feed_publications: Vec::new(),
         outbox: None,
     }
 }

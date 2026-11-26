@@ -109,8 +109,17 @@ check_r25_2_boundary_impls_have_entries() {
 }
 
 check_r25_3_conformance_discoverable() {
-  local listed
-  listed=$(cargo test --workspace --no-fail-fast -- --list 2>/dev/null || true)
+  local listed rc=0 log
+  log=$(mktemp /tmp/r25-test-list.XXXXXX)
+  # Do not swallow cargo errors: a build failure must surface here, not
+  # silently produce an empty listing that looks like "no conformance tests".
+  listed=$(cargo test --workspace --no-fail-fast -- --list 2>"$log") || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo "FAIL [R25.3]: cargo test --workspace --no-fail-fast -- --list exited $rc; stderr tail (full log: $log):"
+    tail -n 40 "$log" | sed 's/^/  /'
+    return 1
+  fi
+  rm -f "$log"
   if echo "$listed" | rg -q 'conformance_'; then
     echo "PASS [R25.3]: cargo test discovers conformance_ tests"
     return 0

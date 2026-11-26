@@ -54,6 +54,16 @@ impl DbArchiveStore {
 /// exact stored bytes; JSON callers must freeze those bytes before publication.
 pub use bcs_dist_encoding::blob_reference;
 
+/// The immutable reference under which one task's `FinalTaskRecord` bytes are
+/// archived (`result:` object key derived from scope and Tid). Shared by
+/// `save_final`, the per-task archive (plan T4) and terminal proofs, so all
+/// three name the exact same object for one task.
+pub fn result_blob_reference(record: &FinalTaskRecord) -> Result<BlobRef, StoreError> {
+    validate_record(record)?;
+    let bytes = serde_json::to_vec(record).map_err(|_| invalid("archive_encoding"))?;
+    Ok(blob_reference(&result_key(&record.scope, &record.tid)?, &bytes))
+}
+
 #[async_trait]
 impl BlobStorePort for DbArchiveStore {
     async fn put_immutable(
@@ -206,7 +216,7 @@ fn validate_key(key: &str) -> Result<(), StoreError> {
     }
     Ok(())
 }
-fn validate_record(record: &FinalTaskRecord) -> Result<(), StoreError> {
+pub(crate) fn validate_record(record: &FinalTaskRecord) -> Result<(), StoreError> {
     if record.schema_version != 1 {
         return Err(StoreError::UnsupportedFormat {
             format: record.schema_version,
@@ -221,7 +231,7 @@ fn validate_record(record: &FinalTaskRecord) -> Result<(), StoreError> {
     KeyLayout::shard_of(&record.sid)?;
     Ok(())
 }
-fn object_hash(key: &str) -> String {
+pub(crate) fn object_hash(key: &str) -> String {
     hex_of(&digest_fields(&[key.as_bytes()])).into()
 }
 fn invalid(code: &str) -> StoreError {

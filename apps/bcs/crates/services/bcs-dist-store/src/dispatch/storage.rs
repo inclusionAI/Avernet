@@ -114,7 +114,7 @@ impl StoreDispatch {
         {
             Some(d) => {
                 format(d.value.schema_version)?;
-                Ok((Some(d.version), d.value))
+                Ok((Some(d.version), d.value.normalized()))
             }
             None => Ok((None, Journal::default())),
         }

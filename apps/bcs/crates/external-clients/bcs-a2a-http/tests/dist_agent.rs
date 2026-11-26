@@ -87,8 +87,8 @@ struct Fixed {
 
 #[async_trait]
 impl DistAgentResolver for Fixed {
-    async fn resolve(&self, target: &AgentBinding) -> Result<ResolvedAgent, String> {
-        assert_eq!(target.credential_ref.0, "cred://agent-analyst/v3");
+    async fn resolve(&self, authority: &CallAuthority) -> Result<ResolvedAgent, String> {
+        assert_eq!(authority.binding.credential_ref.0, "cred://agent-analyst/v3");
         let mut failures = self.failures.lock().unwrap();
         if *failures > 0 {
             *failures -= 1;
@@ -134,9 +134,37 @@ async fn fixture_with(extensions: Vec<String>) -> (A2aDistAgentClient, Arc<Agent
     (client_for(format!("http://{address}/rpc"), extensions, 0), agent)
 }
 
+/// The trusted authority of one fixture operation (plan T6): the dispatch
+/// round, node and attempt the call is made for.
+fn authority(operation: CallOperation, remote: Option<RemoteTaskRef>) -> CallAuthority {
+    CallAuthority {
+        round: "s0042.d1.fsm:1".into(),
+        node: NodeId("n2".into()),
+        attempt: 1,
+        binding: target(),
+        operation,
+        remote_ref: remote,
+    }
+}
+
+fn start_authority() -> CallAuthority {
+    authority(CallOperation::Start, None)
+}
+
+fn input_authority() -> CallAuthority {
+    authority(CallOperation::Continue, Some(remote()))
+}
+
+fn observer_authority(operation: CallOperation) -> CallAuthority {
+    authority(operation, Some(remote()))
+}
+
 fn request(id: &str) -> StableSendRequest {
     StableSendRequest {
         request_id: RequestId(id.into()),
+        node: NodeId("n2".into()),
+        attempt: 1,
+        frozen_history: None,
         context_id: None,
         payload: Payload::Inline(json!({"parts": [{"text": "compare the quarters"}]})),
     }
@@ -216,7 +244,7 @@ async fn a_start_is_sent_once_with_a_stable_message_id_and_mapped_to_events() {
             status("TASK_STATE_COMPLETED", None),
         ]),
     );
-    let outcome = client.start(&target(), request("s0042.d1:start")).await;
+    let outcome = client.start(&start_authority(), request("s0042.d1:start")).await;
     let SendOutcome::Accepted { remote: accepted, events } = outcome else {
         panic!("{}", name(&outcome));
     };
@@ -233,13 +261,18 @@ async fn a_start_is_sent_once_with_a_stable_message_id_and_mapped_to_events() {
 
     let events = collect(events.unwrap()).await;
     // A working status without content produces nothing.
-    assert_eq!(kinds(&events), vec!["snapshot", "delta", "thinking", "final"]);
+    assert_eq!(kinds(&events), vec!["snapshot", "delta", "thinking", "snapshot"]);
     assert_eq!(payload(&events[0])["task"]["id"], "rt-1");
     assert_eq!(payload(&events[1])["artifact"]["artifactId"], "a-1");
     assert_eq!(payload(&events[1])["append"], true);
     assert_eq!(payload(&events[1])["last_chunk"], false);
     assert_eq!(payload(&events[2])["message"]["parts"][0]["text"], "comparing");
     assert_eq!(payload(&events[3]), json!({"state": "completed"}));
+    assert_eq!(
+        events[3].as_ref().unwrap().kind,
+        AgentEventKind::Snapshot,
+        "a stream Completed is a stop fact, not the product Final (plan T6)"
+    );
     let first = events[0].as_ref().unwrap();
     assert_eq!((first.remote.clone(), &first.event_id, &first.cursor), (remote(), &None, &None));
     assert_eq!(agent.count(), 1, "no retry inside the adapter");
@@ -249,7 +282,7 @@ async fn a_start_is_sent_once_with_a_stable_message_id_and_mapped_to_events() {
 async fn a_direct_message_answer_completes_the_call() {
     let (client, agent) = fixture().await;
     agent.on("SendStreamingMessage", Answer::Sse(vec![json!({"message": agent_message("42")})]));
-    let outcome = client.start(&target(), request("r-1")).await;
+    let outcome = client.start(&start_authority(), request("r-1")).await;
     let SendOutcome::Completed { result: Payload::Inline(result) } = outcome else {
         panic!("{}", name(&outcome));
     };
@@ -262,7 +295,7 @@ struct Unary(String);
 
 #[async_trait]
 impl DistAgentResolver for Unary {
-    async fn resolve(&self, _: &AgentBinding) -> Result<ResolvedAgent, String> {
+    async fn resolve(&self, _: &CallAuthority) -> Result<ResolvedAgent, String> {
         Ok(ResolvedAgent {
             interface: A2aInterface {
                 url: self.0.clone(),
@@ -288,7 +321,7 @@ async fn a_non_streaming_interface_is_sent_to_with_the_unary_operation() {
     let client = A2aDistAgentClient::new(Arc::new(resolver), OutboundUrlGuard::new(false, true), None);
 
     agent.on("SendMessage", Answer::Result(json!({"task": task("TASK_STATE_WORKING")})));
-    let outcome = client.start(&target(), request("s0042.d1:start")).await;
+    let outcome = client.start(&start_authority(), request("s0042.d1:start")).await;
     let SendOutcome::Accepted { remote: accepted, events } = outcome else {
         panic!("{}", name(&outcome));
     };
@@ -301,14 +334,14 @@ async fn a_non_streaming_interface_is_sent_to_with_the_unary_operation() {
     assert_eq!(kinds(&collect(events.unwrap()).await), vec!["snapshot"]);
 
     agent.on("SendMessage", Answer::Result(json!({"message": agent_message("42")})));
-    let outcome = client.send_input(&target(), &remote(), request("s0042.d1:in:1")).await;
+    let outcome = client.send_input(&input_authority(), &remote(), request("s0042.d1:in:1")).await;
     assert_eq!(agent.call(1)["params"]["message"]["taskId"], "rt-1");
     assert!(matches!(outcome, SendOutcome::Completed { .. }), "{}", name(&outcome));
 
     agent.on("SendMessage", Answer::Rpc(-32601));
-    assert_eq!(name(&client.start(&target(), request("r-3")).await), "rejected:a2a_method_not_found");
+    assert_eq!(name(&client.start(&start_authority(), request("r-3")).await), "rejected:a2a_method_not_found");
     agent.on("SendMessage", Answer::Http(503));
-    assert!(name(&client.start(&target(), request("r-4")).await).starts_with("unknown:"));
+    assert!(name(&client.start(&start_authority(), request("r-4")).await).starts_with("unknown:"));
     assert_eq!(agent.count(), 4, "no retry inside the adapter");
 }
 
@@ -316,7 +349,7 @@ async fn a_non_streaming_interface_is_sent_to_with_the_unary_operation() {
 async fn an_input_continues_the_remote_task() {
     let (client, agent) = fixture().await;
     agent.on("SendStreamingMessage", Answer::Sse(vec![status("TASK_STATE_WORKING", None), status("TASK_STATE_COMPLETED", None)]));
-    let outcome = client.send_input(&target(), &remote(), request("s0042.d1:in:1")).await;
+    let outcome = client.send_input(&input_authority(), &remote(), request("s0042.d1:in:1")).await;
     let SendOutcome::Accepted { remote: accepted, events } = outcome else {
         panic!("{}", name(&outcome));
     };
@@ -325,7 +358,7 @@ async fn an_input_continues_the_remote_task() {
     assert_eq!(message["messageId"], "s0042.d1:in:1");
     assert_eq!(message["taskId"], "rt-1");
     assert_eq!(message["contextId"], "ctx-1");
-    assert_eq!(kinds(&collect(events.unwrap()).await), vec!["final"]);
+    assert_eq!(kinds(&collect(events.unwrap()).await), vec!["snapshot"]);
 }
 
 #[tokio::test]
@@ -340,7 +373,7 @@ async fn terminal_and_question_states_carry_our_state_word() {
     ];
     for (state, kind, expected) in cases {
         agent.on("SendStreamingMessage", Answer::Sse(vec![json!({"task": task("TASK_STATE_SUBMITTED")}), status(state, None)]));
-        let SendOutcome::Accepted { events, .. } = client.start(&target(), request("r")).await else {
+        let SendOutcome::Accepted { events, .. } = client.start(&start_authority(), request("r")).await else {
             panic!("not accepted");
         };
         let events = collect(events.unwrap()).await;
@@ -352,7 +385,7 @@ async fn terminal_and_question_states_carry_our_state_word() {
         "SendStreamingMessage",
         Answer::Sse(vec![status("TASK_STATE_INPUT_REQUIRED", Some(agent_message("A or B?")))]),
     );
-    let SendOutcome::Accepted { events, .. } = client.start(&target(), request("r")).await else {
+    let SendOutcome::Accepted { events, .. } = client.start(&start_authority(), request("r")).await else {
         panic!("not accepted");
     };
     let events = collect(events.unwrap()).await;
@@ -369,7 +402,7 @@ async fn tool_records_need_the_negotiated_extension() {
 
     let (client, agent) = fixture_with(vec![extension.to_owned()]).await;
     agent.on("SendStreamingMessage", Answer::Sse(stream.clone()));
-    let SendOutcome::Accepted { events, .. } = client.start(&target(), request("r")).await else {
+    let SendOutcome::Accepted { events, .. } = client.start(&start_authority(), request("r")).await else {
         panic!("not accepted");
     };
     let events = collect(events.unwrap()).await;
@@ -383,7 +416,7 @@ async fn tool_records_need_the_negotiated_extension() {
     let mut repeated = stream.clone();
     repeated.push(repeated[1].clone());
     agent.on("SendStreamingMessage", Answer::Sse(repeated));
-    let SendOutcome::Accepted { events, .. } = client.start(&target(), request("r")).await else {
+    let SendOutcome::Accepted { events, .. } = client.start(&start_authority(), request("r")).await else {
         panic!("not accepted");
     };
     assert_eq!(kinds(&collect(events.unwrap()).await), vec!["snapshot", "tool"]);
@@ -391,7 +424,7 @@ async fn tool_records_need_the_negotiated_extension() {
     // Not negotiated: the record is dropped, not relayed as thinking.
     let (client, agent) = fixture().await;
     agent.on("SendStreamingMessage", Answer::Sse(stream));
-    let SendOutcome::Accepted { events, .. } = client.start(&target(), request("r")).await else {
+    let SendOutcome::Accepted { events, .. } = client.start(&start_authority(), request("r")).await else {
         panic!("not accepted");
     };
     assert_eq!(kinds(&collect(events.unwrap()).await), vec!["snapshot"]);
@@ -407,7 +440,7 @@ async fn tool_v2_records_need_the_negotiated_extension() {
 
     let (client, agent) = fixture_with(vec![extension.to_owned()]).await;
     agent.on("SendStreamingMessage", Answer::Sse(stream.clone()));
-    let SendOutcome::Accepted { events, .. } = client.start(&target(), request("r")).await else {
+    let SendOutcome::Accepted { events, .. } = client.start(&start_authority(), request("r")).await else {
         panic!("not accepted");
     };
     let events = collect(events.unwrap()).await;
@@ -419,14 +452,14 @@ async fn tool_v2_records_need_the_negotiated_extension() {
     let mut repeated = stream.clone();
     repeated.push(repeated[1].clone());
     agent.on("SendStreamingMessage", Answer::Sse(repeated));
-    let SendOutcome::Accepted { events, .. } = client.start(&target(), request("r")).await else {
+    let SendOutcome::Accepted { events, .. } = client.start(&start_authority(), request("r")).await else {
         panic!("not accepted");
     };
     assert_eq!(kinds(&collect(events.unwrap()).await), vec!["snapshot", "tool"]);
 
     let (client, agent) = fixture().await;
     agent.on("SendStreamingMessage", Answer::Sse(stream));
-    let SendOutcome::Accepted { events, .. } = client.start(&target(), request("r")).await else {
+    let SendOutcome::Accepted { events, .. } = client.start(&start_authority(), request("r")).await else {
         panic!("not accepted");
     };
     assert_eq!(kinds(&collect(events.unwrap()).await), vec!["snapshot"]);
@@ -458,7 +491,7 @@ async fn complete_rejections_are_distinct_from_uncertain_outcomes() {
     ];
     for (answer, expected) in cases {
         agent.on("SendStreamingMessage", answer);
-        assert_eq!(name(&client.start(&target(), request("r")).await), expected);
+        assert_eq!(name(&client.start(&start_authority(), request("r")).await), expected);
     }
     assert_eq!(agent.count(), 14, "one request per send: never retried");
 }
@@ -468,20 +501,20 @@ async fn a_send_that_never_left_the_process_is_not_sent() {
     // The target cannot be resolved.
     let (_, agent) = fixture().await;
     let unresolved = client_for("http://127.0.0.1:9/rpc".into(), Vec::new(), 1);
-    assert_eq!(name(&unresolved.start(&target(), request("r")).await), "not_sent:target_unresolved");
+    assert_eq!(name(&unresolved.start(&start_authority(), request("r")).await), "not_sent:target_unresolved");
 
     // The address is refused by the outbound policy.
     let resolver = Fixed { url: "http://127.0.0.1:9/rpc".into(), extensions: Vec::new(), failures: Mutex::new(0) };
     let blocked = A2aDistAgentClient::new(Arc::new(resolver), OutboundUrlGuard::new(true, false), None);
-    assert_eq!(name(&blocked.start(&target(), request("r")).await), "not_sent:address_rejected");
+    assert_eq!(name(&blocked.start(&start_authority(), request("r")).await), "not_sent:address_rejected");
 
     // Nothing listens on the port: the connection was never established.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     drop(listener);
     let refused = client_for(format!("http://{address}/rpc"), Vec::new(), 0);
-    assert_eq!(name(&refused.start(&target(), request("r")).await), "not_sent:not_connected");
-    assert_eq!(name(&refused.send_input(&target(), &remote(), request("r")).await), "not_sent:not_connected");
+    assert_eq!(name(&refused.start(&start_authority(), request("r")).await), "not_sent:not_connected");
+    assert_eq!(name(&refused.send_input(&input_authority(), &remote(), request("r")).await), "not_sent:not_connected");
     assert_eq!(agent.count(), 0);
 }
 
@@ -496,7 +529,7 @@ async fn a_server_that_closes_after_reading_the_request_is_unknown() {
         }
     });
     let client = client_for(format!("http://{address}/rpc"), Vec::new(), 0);
-    assert_eq!(name(&client.start(&target(), request("r")).await), "unknown:transport");
+    assert_eq!(name(&client.start(&start_authority(), request("r")).await), "unknown:transport");
 }
 
 #[tokio::test]
@@ -504,15 +537,15 @@ async fn a_request_that_cannot_be_expressed_is_rejected_without_a_call() {
     let (client, agent) = fixture().await;
     let mut by_reference = request("r");
     by_reference.payload = Payload::Ref(BlobRef { key: "k".into(), digest: Digest("d".into()) });
-    assert_eq!(name(&client.start(&target(), by_reference).await), "rejected:request_by_reference");
+    assert_eq!(name(&client.start(&start_authority(), by_reference).await), "rejected:request_by_reference");
     let mut number = request("r");
     number.payload = Payload::Inline(json!(7));
-    assert_eq!(name(&client.start(&target(), number).await), "rejected:request_invalid");
+    assert_eq!(name(&client.start(&start_authority(), number).await), "rejected:request_invalid");
     // Plain text is accepted as one text part.
     let mut text = request("r");
     text.payload = Payload::Inline(json!("hello"));
     agent.on("SendStreamingMessage", Answer::Sse(vec![json!({"task": task("TASK_STATE_WORKING")})]));
-    assert_eq!(name(&client.start(&target(), text).await), "accepted");
+    assert_eq!(name(&client.start(&start_authority(), text).await), "accepted");
     assert_eq!(agent.call(0)["params"]["message"]["parts"], json!([{"text": "hello"}]));
     assert_eq!(agent.count(), 1);
 }
@@ -529,29 +562,30 @@ async fn a_task_query_returns_the_state_and_the_payload_it_stands_for() {
     agent.on("GetTask", Answer::Http(503));
 
     let by_task = || RemoteQuery::ByTask(remote());
-    let QueryOutcome::Found { remote: found, status, snapshot: Payload::Inline(snapshot) } = client.query(&target(), by_task()).await else {
+    let QueryOutcome::Found { remote: found, status, snapshot: Payload::Inline(snapshot) } = client.query(&observer_authority(CallOperation::Query), by_task()).await else {
         panic!("not found");
     };
     assert_eq!((found, status), (remote(), TaskStatus::Working));
     assert_eq!(snapshot["task"]["id"], "rt-1");
     assert_eq!(agent.call(0)["params"]["id"], "rt-1");
 
-    let QueryOutcome::Found { status, snapshot: Payload::Inline(snapshot), .. } = client.query(&target(), by_task()).await else {
+    let QueryOutcome::Found { status, snapshot: Payload::Inline(snapshot), .. } = client.query(&observer_authority(CallOperation::Query), by_task()).await else {
         panic!("not found");
     };
     assert_eq!(status, TaskStatus::Completed);
     assert_eq!(snapshot["state"], "completed");
     assert_eq!(snapshot["artifacts"][0]["artifactId"], "a-1", "a whole task carries the complete result");
 
-    assert_eq!(client.query(&target(), by_task()).await, QueryOutcome::NotFound);
+    assert_eq!(client.query(&observer_authority(CallOperation::Query), by_task()).await, QueryOutcome::NotFound);
     // A bare HTTP failure of a JSON-RPC call is not an agent answer at all.
     assert_eq!(
-        client.query(&target(), by_task()).await,
+        client.query(&observer_authority(CallOperation::Query), by_task()).await,
         QueryOutcome::Unavailable { code: "a2a_invalid_agent_response".into() }
     );
-    // A2A cannot look a task up by message id.
+    // Standard A2A has no by-request lookup: only a negotiated extension
+    // answers (plan T6).
     assert_eq!(
-        client.query(&target(), RemoteQuery::ByRequest(RequestId("r".into()))).await,
+        client.query(&observer_authority(CallOperation::Query), RemoteQuery::ByRequest(RequestId("r".into()))).await,
         QueryOutcome::Unsupported
     );
     assert_eq!(agent.count(), 4);
@@ -561,21 +595,21 @@ async fn a_task_query_returns_the_state_and_the_payload_it_stands_for() {
 async fn subscribe_follows_the_task_and_reports_read_failures_by_code() {
     let (client, agent) = fixture().await;
     agent.on("SubscribeToTask", Answer::Sse(vec![json!({"task": task("TASK_STATE_WORKING")}), status("TASK_STATE_COMPLETED", None)]));
-    let events = collect(client.subscribe(&target(), &remote(), None).await.unwrap()).await;
-    assert_eq!(kinds(&events), vec!["snapshot", "final"]);
+    let events = collect(client.subscribe(&observer_authority(CallOperation::Subscribe), &remote(), None).await.unwrap()).await;
+    assert_eq!(kinds(&events), vec!["snapshot", "snapshot"]);
     assert_eq!(agent.call(0)["params"]["id"], "rt-1");
 
     agent.on("SubscribeToTask", Answer::Http(503));
-    let error = client.subscribe(&target(), &remote(), None).await.err().unwrap();
+    let error = client.subscribe(&observer_authority(CallOperation::Subscribe), &remote(), None).await.err().unwrap();
     assert_eq!(error.code, "http_503");
     let unresolved = client_for("http://127.0.0.1:9/rpc".into(), Vec::new(), 1);
-    assert_eq!(unresolved.subscribe(&target(), &remote(), None).await.err().unwrap().code, "target_unresolved");
+    assert_eq!(unresolved.subscribe(&observer_authority(CallOperation::Subscribe), &remote(), None).await.err().unwrap().code, "target_unresolved");
 }
 
 #[tokio::test]
 async fn cancel_keeps_accepted_confirmed_finished_and_unknown_apart() {
     let (client, agent) = fixture().await;
-    let cancel = || async { client.cancel(&target(), &remote(), RequestId("cancel-1".into())).await };
+    let cancel = || async { client.cancel(&observer_authority(CallOperation::Cancel), &remote(), RequestId("cancel-1".into())).await };
 
     agent.on("CancelTask", Answer::Result(task("TASK_STATE_CANCELED")));
     assert_eq!(cancel().await, CancelOutcome::ConfirmedCanceled);
@@ -608,7 +642,7 @@ async fn cancel_keeps_accepted_confirmed_finished_and_unknown_apart() {
 #[tokio::test]
 async fn the_credential_is_not_in_debug_output() {
     let resolved = Fixed { url: "http://127.0.0.1:9/rpc".into(), extensions: Vec::new(), failures: Mutex::new(0) }
-        .resolve(&target())
+        .resolve(&start_authority())
         .await
         .unwrap();
     let debug = format!("{resolved:?}");

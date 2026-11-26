@@ -85,16 +85,33 @@ impl StoreDispatch {
             let entry = if let Some(index) = root.directory.iter().position(|d| d.did == *did) {
                 index
             } else {
+                if budget
+                    .io(&key, self.document(did))
+                    .await?
+                    .is_some()
+                {
+                    // A did whose directory row was reclaimed by a shard
+                    // batch: the retained dispatch document stays the
+                    // authority. Late writes apply against its receipts and
+                    // terminal evidence; no discovery row is re-created, so
+                    // the reclaimed capacity is never re-consumed.
+                    return Ok(());
+                }
                 if !matches!(intent.kind, EffectKind::CreateDispatch { .. }) {
                     return Err(unavailable("dispatch_missing"));
                 }
                 if root.directory.len() >= self.config.max_dispatches {
                     return Err(unavailable("dispatch_history_capacity"));
                 }
+                let seq = std::cmp::max(root.next_seq, 1);
+                root.next_seq = seq
+                    .checked_add(1)
+                    .ok_or_else(|| invalid("dispatch_directory_exhausted"))?;
                 root.directory.push(Directory {
                     did: did.clone(),
                     receipts: 0,
                     bytes: 0,
+                    seq,
                 });
                 root.directory.len() - 1
             };
@@ -165,6 +182,9 @@ impl StoreDispatch {
                                     confirmed_input_through: None,
                                     cancellation: CancelObservation::NotSent,
                                     outcome: None,
+                                    send_proof: None,
+                                    verification: None,
+                                    quarantined: None,
                                 },
                             },
                             receipts: vec![],

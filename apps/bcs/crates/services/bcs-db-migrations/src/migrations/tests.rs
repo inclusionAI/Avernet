@@ -275,6 +275,10 @@ async fn fresh_sqlite_migrations_create_human_output_metadata() -> DbResult<()> 
             (45, "message_activity_indexes".to_string(), "sqlite".to_string()),
             (46, "configured_catalog_labels".to_string(), "sqlite".to_string()),
             (47, "dist_immutable_objects".to_string(), "sqlite".to_string()),
+            (48, "fsm_node_history".to_string(), "sqlite".to_string()),
+            (49, "fsm_workflow_revision".to_string(), "sqlite".to_string()),
+            (50, "fsm_task_artifacts".to_string(), "sqlite".to_string()),
+            (51, "fsm_task_artifact_pins".to_string(), "sqlite".to_string()),
         ]
     );
     Ok(())
@@ -285,7 +289,7 @@ async fn sqlite_migration_plan_reports_all_versions() -> DbResult<()> {
     let db = LocalSqliteDbPlugin::new()?;
 
     let report = check_sqlite_migrations(&db).await?;
-    assert_eq!(report.pending_versions.len(), 47);
+    assert_eq!(report.pending_versions.len(), 51);
     assert_eq!(report.pending_versions[0].version, 1);
     assert_eq!(report.pending_versions[0].name, "init_schema");
     assert!(report.pending_versions[0].statements.is_empty());
@@ -748,6 +752,10 @@ async fn sqlite_migrations_are_idempotent() -> DbResult<()> {
             (45, "message_activity_indexes".to_string(), "sqlite".to_string()),
             (46, "configured_catalog_labels".to_string(), "sqlite".to_string()),
             (47, "dist_immutable_objects".to_string(), "sqlite".to_string()),
+            (48, "fsm_node_history".to_string(), "sqlite".to_string()),
+            (49, "fsm_workflow_revision".to_string(), "sqlite".to_string()),
+            (50, "fsm_task_artifacts".to_string(), "sqlite".to_string()),
+            (51, "fsm_task_artifact_pins".to_string(), "sqlite".to_string()),
         ]
     );
     Ok(())

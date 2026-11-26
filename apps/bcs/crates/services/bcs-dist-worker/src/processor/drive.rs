@@ -42,6 +42,11 @@ impl WorkerProcessor {
         }
         self.refresh_control(slot).await?;
         self.reconcile_control_fence(slot)?;
+        // The strict-group publication follower lane (plan T7 slice 2):
+        // deliver sealed feed obligations in stable ID order — never a
+        // synchronous precondition of any transition below — and let its
+        // bounded housekeeping commit retire proven obligations.
+        self.sweep_feed_publications(slot).await?;
         if slot.risk_outcome.is_some() {
             self.finish_risk(slot).await?;
             return Ok(());
@@ -306,7 +311,19 @@ impl WorkerProcessor {
             .as_ref()
             .ok_or_else(|| err("settlement_missing"))?
             .clone();
-        let release = slot.input.is_none()
+        // A Done-phase strict task still owns an open terminal-authority
+        // window (plan T7 slice 2): the spine must close it before the
+        // session may yield residency. Parked windows would strand the
+        // round's own commit.
+        let done_window_open = slot
+            .acquired
+            .envelope
+            .checkpoint
+            .tasks
+            .iter()
+            .any(|task| matches!(task.phase, TaskPhase::Done));
+        let release = !done_window_open
+            && slot.input.is_none()
             && (slot.commits_since_yield >= self.config.max_commits_per_turn
                 || request.next_check.is_none_or(|at| at > (self.ports.now)()));
         match self.io(self.runtime.scheduling.settle(request)).await? {

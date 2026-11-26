@@ -138,6 +138,31 @@ impl StoreTaskFeed {
     }
 }
 
+
+impl StoreTaskFeed {
+    /// Accepted-cut read filter: a strict session discloses only its licensed
+    /// round's task. Guessable pre-writes, superseded rounds and everything
+    /// before the license behave exactly like a nonexistent resource; the
+    /// per-Tid terminal proof transfer (T4) later relaxes the lookup for
+    /// completed rounds. One bounded document read.
+    pub(super) async fn round_viewable(&self, sid: &Sid, tid: &Tid) -> Result<bool, StoreError> {
+        let license =
+            crate::group_admission::probe_strict_license(&self.stores.documents, &self.layout, sid)
+                .await?;
+        if let Some(license) = license {
+            return Ok(license.tid == *tid);
+        }
+        // No license yet: a strict session still staging its pre-writes
+        // discloses nothing, generic sessions behave exactly as before.
+        let staged = crate::group_admission::probe_strict_staging(
+            &self.stores.documents,
+            &self.layout,
+            sid,
+        )
+        .await?;
+        Ok(!staged)
+    }
+}
 impl StoreTaskFeed {
     async fn restore_task(
         &self,
@@ -149,6 +174,11 @@ impl StoreTaskFeed {
                 return Ok(None);
             };
             let task = stored.value;
+            if !self.round_viewable(&task.sid, tid).await? {
+                // Unlicensed strict pre-write or a superseded round: identical
+                // to a resource that never existed.
+                return Ok(None);
+            }
             self.projection
                 .validate_limits(&task.output_limits)
                 .map_err(|_| invalid("task_limits"))?;
@@ -239,6 +269,9 @@ impl StoreTaskFeed {
         if task.value.sid != cursor.sid {
             return Ok(ResumeCheck::InvalidScope);
         }
+        if !self.round_viewable(&task.value.sid, &cursor.tid).await? {
+            return Ok(ResumeCheck::InvalidScope);
+        }
         if self.has_gap(&task.value, after).await? {
             return Ok(ResumeCheck::Gap);
         }
@@ -314,6 +347,9 @@ impl StoreTaskFeed {
             let tid = Tid(member.member.clone());
             if let Some(task) = self.task(scope, &tid).await? {
                 let task = task.value;
+                if !self.round_viewable(&task.sid, &tid).await? {
+                    continue;
+                }
                 if filter.sid.as_ref().is_none_or(|sid| *sid == task.sid)
                     && (filter.statuses.is_empty()
                         || filter.statuses.contains(&task.content.status))
@@ -366,6 +402,9 @@ impl TaskReaderPort for StoreTaskFeed {
             self.projection
                 .validate_task_limits(&stored.value, &stored.value.output_limits)
                 .map_err(|_| invalid("task_snapshot_limits"))?;
+            if !self.round_viewable(&stored.value.sid, tid).await? {
+                return Ok(None);
+            }
         }
         Ok(stored.map(|stored| stored.value))
     }

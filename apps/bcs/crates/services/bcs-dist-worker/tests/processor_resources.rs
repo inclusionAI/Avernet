@@ -541,6 +541,8 @@ async fn inadmissible_physical_profile_or_binding_never_creates_a_task() {
                     subscribe: true,
                     resume_events: true,
                     cancel: true,
+                    isolated_memory: true,
+                    persistent_dedupe: true,
                 },
             });
         } else {

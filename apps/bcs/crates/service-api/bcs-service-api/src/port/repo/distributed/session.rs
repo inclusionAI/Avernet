@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use bcs_dist_model::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
+use std::num::NonZeroU64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -101,6 +102,43 @@ pub struct CommittedBatch {
     pub effects: Vec<Effect>,
 }
 
+/// One split-out durable feed publication obligation of a strict FSM-group
+/// round (plan T7/˜slice 14): the sealed identity, binding and exact content
+/// of an `AppendEvents` or `PublishSnapshot` effect that left the blocking
+/// session outbox. Registered with the authoritative commit itself — the
+/// entries ride the sealed candidate and its whole-checkpoint digest — they
+/// survive round retirement and checkpoint compaction until proven complete,
+/// so an independent bounded publisher can deliver them cross-checkpoint
+/// through the paired first-write permission with no current-head lookup.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeedPublication {
+    pub schema_version: u32,
+    pub sid: Sid,
+    pub tid: Tid,
+    /// The licensed round's scope and group (the archive seam's row
+    /// identity of the registered task).
+    pub scope: TaskScope,
+    pub group: GroupId,
+    /// The licensed round's generation (bound `Sid/generation/Tid`).
+    pub generation: NonZeroU64,
+    /// Sealed commit identity of the registering candidate. `commit_digest`
+    /// joins the whole-checkpoint digest through the fixed empty-string
+    /// representation (like `CommittedBatch::content_digest`) and holds the
+    /// sealed value everywhere else, including effect completion identity.
+    pub commit_id: CommitId,
+    pub commit_digest: Digest,
+    pub consumed: Option<InboxPos>,
+    /// Stable delivery identity and order: `(effect.commit, effect.index)`
+    /// of the sealed candidate. Cross-checkpoint verifiable against this
+    /// entry without reading historical checkpoints.
+    pub effect: EffectId,
+    pub content_digest: Digest,
+    /// The exact sealed effect. Only `AppendEvents` and `PublishSnapshot`
+    /// obligations live here; every other effect kind stays in the blocking
+    /// outbox.
+    pub kind: EffectKind,
+}
+
 /// State, consumed and outbox are ONE atomic commit. No ephemeral delivery receipt.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Checkpoint {
@@ -118,6 +156,12 @@ pub struct Checkpoint {
     pub view_drafts: BTreeMap<Tid, TaskContent>,
     pub last_event_id: Option<EventId>,
     pub outbox: Option<CommittedBatch>,
+    /// Paired feed publication obligations split out of the blocking outbox
+    /// (strict FSM-group sources only). Appended with the sealed candidate;
+    /// retirement and compaction retain entries whose completion is not yet
+    /// proven.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub feed_publications: Vec<FeedPublication>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

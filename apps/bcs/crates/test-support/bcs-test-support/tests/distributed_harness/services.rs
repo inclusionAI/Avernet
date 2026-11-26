@@ -162,6 +162,7 @@ async fn gateway_harness_checks_idempotency_task_identity_and_access_denial() ->
         caller: CallerContext::Public,
     };
     let request = SubmitInput {
+        source: CreationSource::Rpc,
         group: spec().group,
         message_id: RequestId("request-a".into()),
         session: Some(owner().sid),
@@ -188,23 +189,31 @@ async fn gateway_harness_checks_idempotency_task_identity_and_access_denial() ->
             )
             .expect(
                 "DistGatewayService::get_task",
-                (&caller, &request.group, input().tid),
+                (&caller, &request.group, input().tid, CreationSource::Rpc),
                 Ok::<_, GatewayError>(task_view()),
             )
             .expect(
                 "DistGatewayService::get_task",
-                (&unauthorized, &request.group, input().tid),
+                (&unauthorized, &request.group, input().tid, CreationSource::Rpc),
                 denied,
             );
         let another = GroupId(format!("{}-another", request.group.0));
         let script = if leaks {
             script
         } else {
-            script.expect(
-                "DistGatewayService::get_task",
-                (&caller, &another, input().tid),
-                Err::<TaskView, _>(GatewayError::NotFound),
-            )
+            script
+                .expect(
+                    "DistGatewayService::get_task",
+                    (&caller, &another, input().tid, CreationSource::Rpc),
+                    Err::<TaskView, _>(GatewayError::NotFound),
+                )
+                // A resource of one source is never reached through another
+                // entrance (plan T8): the script refuses the cross-source read.
+                .expect(
+                    "DistGatewayService::get_task",
+                    (&caller, &request.group, input().tid, CreationSource::GroupA2a),
+                    Err::<TaskView, _>(GatewayError::NotFound),
+                )
         };
         let test =
             dist_gateway_service_contract_tests(&script, &caller, &unauthorized, request.clone());
@@ -280,6 +289,9 @@ async fn runtime_harnesses_require_draining_state_after_drain() -> ContractResul
 async fn agent_harness_keeps_uncertain_send_and_cancel_distinct_from_failure() -> ContractResult {
     let first = StableSendRequest {
         request_id: RequestId("not-sent".into()),
+        node: NodeId("n2".into()),
+        attempt: 1,
+        frozen_history: None,
         context_id: None,
         payload: payload(),
     };
@@ -298,18 +310,26 @@ async fn agent_harness_keeps_uncertain_send_and_cancel_distinct_from_failure() -
                 code: "timeout".into(),
             }
         };
+        // The harness's own contract authority: the port is asked under the
+        // round, node, attempt and binding of the dispatch it serves. A
+        // cancel acts on the accepted remote task of that same dispatch
+        // (the tuple Task 13's RED pinned as ground truth).
+        let start = contract_authority(&target());
+        let mut cancel = contract_authority(&target());
+        cancel.operation = CallOperation::Cancel;
+        cancel.remote_ref = Some(remote());
         let script = Script::default()
             .expect(
                 "DistAgentClientPort::start",
-                (target(), &first),
+                (&start, &first),
                 SendOutcome::NotSent {
                     code: "pre-send".into(),
                 },
             )
-            .expect("DistAgentClientPort::start", (target(), &second), response)
+            .expect("DistAgentClientPort::start", (&start, &second), response)
             .expect(
                 "DistAgentClientPort::cancel",
-                (target(), remote(), &cancellation),
+                (&cancel, remote(), &cancellation),
                 CancelOutcome::OutcomeUnknown {
                     code: "timeout".into(),
                 },
@@ -379,5 +399,198 @@ async fn directory_harness_checks_frozen_definition_and_workflow_revision() -> C
         }
         script.done();
     }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// plan W: the workflow-revision harness self-test. A deliberately violating
+// in-memory fixture proves the restart/no-fallback vector is not vacuous:
+// when a provider "repairs" a deleted pinned revision by falling back to the
+// newest publication, the harness rejects it.
+// ---------------------------------------------------------------------------
+use harness::workflow_revision::{
+    publish_v2_restart_loads_pinned_v1, RevisionDamage, WorkflowPublication,
+    WorkflowRevisionFixture,
+};
+
+struct InMemoryPublication {
+    reference: WorkflowRef,
+    publication: WorkflowPublication,
+    // Mutated by the Corrupted damage; digest checks then fail honestly.
+    definition: bcs_domain::collaboration::StateMachineDefinition,
+}
+
+#[derive(Default)]
+struct FallbackState {
+    rows: Vec<InMemoryPublication>,
+    pointer: Option<WorkflowRef>,
+    counter: u64,
+}
+
+struct FallbackDirectoryFixture {
+    state: std::sync::Arc<std::sync::Mutex<FallbackState>>,
+    fallback_to_newest: bool,
+}
+
+/// Deterministic content identity over the publication's serialized bytes.
+fn memory_digest(publication: &WorkflowPublication) -> Digest {
+    let definition = serde_json::to_string(&publication.definition)
+        .expect("fixture definition serializes");
+    let participants = serde_json::to_string(&publication.participants)
+        .expect("fixture participants serialize");
+    let limits = serde_json::to_string(&publication.limits)
+        .expect("fixture limits serialize");
+    Digest(format!("sha256:{definition}|{participants}|{limits}"))
+}
+
+struct FallbackDirectory {
+    state: std::sync::Arc<std::sync::Mutex<FallbackState>>,
+    fallback_to_newest: bool,
+}
+
+#[async_trait]
+impl DistGroupDirectoryPort for FallbackDirectory {
+    async fn resolve(
+        &self,
+        _scope: &TaskScope,
+        group: &GroupId,
+    ) -> Result<FrozenGroupDefinition, GroupDirectoryError> {
+        let state = self.state.lock().unwrap();
+        let reference = state.pointer.clone().ok_or(GroupDirectoryError::NotFound)?;
+        let row = state
+            .rows
+            .iter()
+            .find(|row| row.reference == reference)
+            .ok_or(GroupDirectoryError::InvalidRevision)?;
+        Ok(FrozenGroupDefinition {
+            group: group.clone(),
+            workflow: reference,
+            participants: row.publication.participants.clone(),
+            limits: row.publication.limits.clone(),
+        })
+    }
+
+    async fn load_workflow(
+        &self,
+        _scope: &TaskScope,
+        reference: &WorkflowRef,
+    ) -> Result<bcs_domain::collaboration::StateMachineDefinition, GroupDirectoryError> {
+        let state = self.state.lock().unwrap();
+        let Some(row) = state.rows.iter().find(|row| row.reference == *reference) else {
+            // Deliberate violation under test: a missing pinned revision is
+            // "repaired" with the newest publication instead of failing
+            // closed.
+            if self.fallback_to_newest
+                && let Some(newest) = state.rows.last()
+            {
+                return Ok(newest.definition.clone());
+            }
+            return Err(GroupDirectoryError::InvalidRevision);
+        };
+        // Byte integrity: the stored (possibly tampered) definition must
+        // still hash to the reference digest, or the load fails closed.
+        let mut bytes = row.publication.clone();
+        bytes.definition = row.definition.clone();
+        if memory_digest(&bytes).0 != reference.digest.0 {
+            return Err(GroupDirectoryError::InvalidRevision);
+        }
+        Ok(row.definition.clone())
+    }
+}
+
+#[async_trait]
+impl WorkflowRevisionFixture for FallbackDirectoryFixture {
+    async fn publish(
+        &self,
+        _scope: &TaskScope,
+        group: &GroupId,
+        definition_id: &str,
+        publication: &WorkflowPublication,
+    ) -> Result<(WorkflowRef, IdempotentWrite), StoreError> {
+        let mut state = self.state.lock().unwrap();
+        state.counter += 1;
+        let reference = WorkflowRef {
+            definition_id: definition_id.to_owned(),
+            revision: state.counter.to_string(),
+            digest: memory_digest(publication),
+        };
+        state.rows.push(InMemoryPublication {
+            publication: publication.clone(),
+            definition: publication.definition.clone(),
+            reference: reference.clone(),
+        });
+        state.pointer = Some(reference.clone());
+        let _ = group;
+        Ok((reference, IdempotentWrite::Applied))
+    }
+
+    async fn publish_with_fault(
+        &self,
+        _fault: harness::workflow_revision::PublishFault,
+        _scope: &TaskScope,
+        _group: &GroupId,
+        _definition_id: &str,
+        _publication: &WorkflowPublication,
+    ) -> Result<(WorkflowRef, IdempotentWrite), StoreError> {
+        panic!("the restart vector does not use fault injection")
+    }
+
+    async fn directory(&self, _generation: u64) -> std::sync::Arc<dyn DistGroupDirectoryPort> {
+        std::sync::Arc::new(FallbackDirectory {
+            state: self.state.clone(),
+            fallback_to_newest: self.fallback_to_newest,
+        })
+    }
+
+    async fn damage(
+        &self,
+        _scope: &TaskScope,
+        _group: &GroupId,
+        reference: &WorkflowRef,
+        damage: RevisionDamage,
+    ) {
+        let mut state = self.state.lock().unwrap();
+        match damage {
+            RevisionDamage::Deleted => {
+                state.rows.retain(|row| &row.reference != reference);
+            }
+            RevisionDamage::Corrupted => {
+                if let Some(row) = state.rows.iter_mut().find(|row| &row.reference == reference) {
+                    row.definition = serde_json::from_value(serde_json::json!({"tampered": true}))
+                        .expect("tampered definition parses");
+                }
+            }
+            RevisionDamage::OldFormat => {
+                panic!("the restart vector does not use old-format damage")
+            }
+        }
+    }
+
+    async fn try_overwrite_same_revision(
+        &self,
+        _scope: &TaskScope,
+        _group: &GroupId,
+        _reference: &WorkflowRef,
+        _publication: &WorkflowPublication,
+    ) -> harness::workflow_revision::SameRevisionWrite {
+        panic!("the restart vector does not use the overwrite hook")
+    }
+}
+
+#[tokio::test]
+async fn workflow_revision_harness_rejects_fallback_after_object_loss() -> ContractResult {
+    let fixture = FallbackDirectoryFixture {
+        state: std::sync::Arc::new(std::sync::Mutex::new(FallbackState::default())),
+        fallback_to_newest: true,
+    };
+    let violation = publish_v2_restart_loads_pinned_v1(&fixture);
+    rejects(violation, "never a fallback").await;
+    // The same fixture without the fallback passes: the deleted pinned
+    // revision fails closed as InvalidRevision.
+    let faithful = FallbackDirectoryFixture {
+        state: std::sync::Arc::new(std::sync::Mutex::new(FallbackState::default())),
+        fallback_to_newest: false,
+    };
+    publish_v2_restart_loads_pinned_v1(&faithful).await?;
     Ok(())
 }

@@ -14,6 +14,8 @@ pub fn caps() -> DownstreamCapabilities {
         subscribe: true,
         resume_events: false,
         cancel: true,
+        isolated_memory: false,
+        persistent_dedupe: false,
     }
 }
 
@@ -59,6 +61,9 @@ pub fn created() -> DispatchView {
             confirmed_input_through: None,
             cancellation: CancelObservation::NotSent,
             outcome: None,
+            send_proof: None,
+            verification: None,
+            quarantined: None,
         },
     }
 }

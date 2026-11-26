@@ -16,7 +16,11 @@ pub(super) struct OccupiedSlot {
 }
 
 impl StoreInboxProducer {
-    pub(super) async fn advance(&self, key: &str, new: bool) -> Result<AdmitOutcome, StoreError> {
+    pub(super) async fn advance(
+        &self,
+        key: &str,
+        new: bool,
+    ) -> Result<super::producer::AdmissionResult, StoreError> {
         let mut budget = EqBudget::new();
         let mut publish_hint = new;
         let mut helped_slot = false;
@@ -37,7 +41,12 @@ impl StoreInboxProducer {
                     {
                         let _ = self.hint(&receipt.sid, Some(self.inner.clock.now())).await;
                     }
-                    return Ok(outcome);
+                    return Ok(super::producer::AdmissionResult::Outcome(outcome));
+                }
+                Progress::Staged => {
+                    // No decision, no Start entry, no hint: a staged strict
+                    // record stays private until its checkpoint license.
+                    return Ok(super::producer::AdmissionResult::Staged);
                 }
                 Progress::Full(slot) => {
                     // One foreign admission per call. A retry chooses another slot;
@@ -95,6 +104,7 @@ impl StoreInboxProducer {
                     generation: c.generation,
                     start: c.start(),
                     decision: None,
+                    strict: c.strict.is_some(),
                 },
             );
             let size = serde_json::to_vec(&s)
@@ -158,6 +168,7 @@ impl StoreInboxProducer {
                     }
                     return Ok(());
                 }
+                Progress::Staged => return Ok(()),
                 // Another writer is progressing this admission; recheck capacity.
                 Progress::Retry => return Ok(()),
                 Progress::Full(_) => return Err(unknown(key)),

@@ -77,6 +77,8 @@ async fn thinking_is_delivered_once_without_runner_snapshot_or_usage_changes() {
             subscribe: true,
             resume_events: true,
             cancel: true,
+            isolated_memory: true,
+            persistent_dedupe: true,
         },
     });
     let tid = f.admit_for(definition, "thinking").await;
@@ -181,6 +183,8 @@ async fn thinking_above_the_inline_threshold_does_not_block_the_session() {
             subscribe: true,
             resume_events: true,
             cancel: true,
+            isolated_memory: true,
+            persistent_dedupe: true,
         },
     });
     let mut initial = metadata();

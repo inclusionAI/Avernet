@@ -31,6 +31,21 @@ pub struct DownstreamCapabilities {
     pub subscribe: bool,
     pub resume_events: bool,
     pub cancel: bool,
+    /// Memory-isolation evidence for the bound target (0.1.2): the target
+    /// operates in a verified isolated memory domain, or shared global memory
+    /// is disabled. Fail-closed serde default: a payload written without the
+    /// field (0.1.1 and earlier) reads as `false` — isolation unverified —
+    /// so publication gates reject it rather than inferring it.
+    #[serde(default)]
+    pub isolated_memory: bool,
+    /// Negotiated persistent dedupe (0.1.3, plan T6): the target durably
+    /// guarantees, for a recorded proof's guarantee window, that re-sending
+    /// a request id it already accepted returns the same task instead of
+    /// running a second one. `idempotent_start`/`idempotent_input` alone are
+    /// only declared idempotency without that guarantee, and a strict source
+    /// must not resend on them. Fail-closed serde default like the others.
+    #[serde(default)]
+    pub persistent_dedupe: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

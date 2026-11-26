@@ -1,8 +1,14 @@
 //! Admission use cases: a user message, a reply to an open question, a cancel.
+//!
+//! Every request names its entrance ([`CreationSource`]); identities are
+//! derived in that source's namespace and a session presented from another
+//! entrance stays invisible (plan T8 source isolation): the check reads the
+//! creation source durably encoded in the session identity itself, never
+//! caller or group equality.
 
 use crate::error::{admit_error, core_error};
 use crate::identity::*;
-use crate::{DistGateway, invalid, scope_of};
+use crate::{CreationSource, Derivation, DistGateway, GatewayError, invalid, scope_of};
 use bcs_dist_model::*;
 use bcs_service_api::application::dist_gateway::*;
 use bcs_service_api::core::dist_gateway::{AdmitTaskCommand, CoreAdmission, DistGatewayCoreError};
@@ -10,6 +16,15 @@ use bcs_service_api::port::dist_agent::{FrozenGroupDefinition, GroupDirectoryErr
 use serde_json::json;
 
 const SCHEMA_VERSION: u32 = 1;
+
+/// The entrance that owns the session this request addresses: the session's
+/// durable namespace must say the same, or the resource stays invisible.
+fn check_source(sid: &Sid, source: CreationSource) -> Result<(), GatewayError> {
+    if creation_source_of_sid(sid)? != source {
+        return Err(GatewayError::NotFound);
+    }
+    Ok(())
+}
 
 pub(crate) async fn submit(
     gateway: &DistGateway,
@@ -21,15 +36,17 @@ pub(crate) async fn submit(
     if request.group.0.is_empty() {
         return Err(invalid("group_missing"));
     }
+    let derived = Derivation::of(request.source);
     let command = match (&request.session, &request.task) {
-        (_, Some(tid)) => reply(gateway, &scope, &request, tid).await?,
+        (_, Some(tid)) => reply(gateway, &scope, &request, tid, derived).await?,
         (Some(sid), None) => {
             parse_session(sid)?;
+            check_source(sid, request.source)?;
             gateway.check_group(&scope, sid, &request.group).await?;
-            new_task(gateway, &scope, &request, sid.clone(), None)
+            new_task(&scope, &request, sid.clone(), None, derived)
         }
         (None, None) => {
-            let sid = session_id(&scope, &request.group, &request.message_id, gateway.config.shard_count);
+            let sid = (derived.session)(&scope, &request.group, &request.message_id, gateway.config.shard_count);
             let spec = match new_spec(gateway, &scope, &request.group, &sid).await {
                 Ok(spec) => Some(spec),
                 // A retry of a first message whose session is already frozen
@@ -41,7 +58,7 @@ pub(crate) async fn submit(
                     _ => return Err(error),
                 },
             };
-            new_task(gateway, &scope, &request, sid, spec)
+            new_task(&scope, &request, sid, spec, derived)
         }
     };
     let CoreAdmission(receipt) = gateway
@@ -59,7 +76,9 @@ pub(crate) async fn cancel(
 ) -> Result<AdmissionReceipt, GatewayError> {
     let scope = scope_of(caller)?;
     check_request_id(&request.request_id)?;
+    let derived = Derivation::of(request.source);
     let sid = session_of_task(&request.tid)?;
+    check_source(&sid, request.source)?;
     gateway.check_group(&scope, &sid, &request.group).await?;
     let body = InputBody::Cancel {
         reason: request.reason.clone(),
@@ -67,7 +86,7 @@ pub(crate) async fn cancel(
     let command = AdmitTaskCommand {
         input: InputEnvelope {
             schema_version: SCHEMA_VERSION,
-            input_id: cancel_input_id(&scope, &request.tid, &sid, &request.request_id),
+            input_id: (derived.cancel_input)(&scope, &request.tid, &sid, &request.request_id),
             business_digest: content_digest(&json!({
                 "kind": "cancel",
                 "tid": request.tid.0,
@@ -118,17 +137,17 @@ async fn new_spec(
 
 /// A user message that starts a task, in a new (`spec` set) or existing session.
 fn new_task(
-    _gateway: &DistGateway,
     scope: &TaskScope,
     request: &SubmitInput,
     sid: Sid,
     spec: Option<FrozenGroupDefinition>,
+    derived: Derivation,
 ) -> AdmitTaskCommand {
-    let tid = task_id(&sid, &request.message_id);
+    let tid = (derived.task)(&sid, &request.message_id);
     AdmitTaskCommand {
         input: InputEnvelope {
             schema_version: SCHEMA_VERSION,
-            input_id: user_input_id(scope, &request.group, &sid, &request.message_id),
+            input_id: (derived.user_input)(scope, &request.group, &sid, &request.message_id),
             business_digest: content_digest(&json!({
                 "kind": "user",
                 "group": request.group.0,
@@ -152,8 +171,10 @@ async fn reply(
     scope: &TaskScope,
     request: &SubmitInput,
     tid: &Tid,
+    derived: Derivation,
 ) -> Result<AdmitTaskCommand, GatewayError> {
     let sid = session_of_task(tid)?;
+    check_source(&sid, request.source)?;
     if request.session.as_ref().is_some_and(|given| given != &sid) {
         return Err(invalid("task_not_in_session"));
     }
@@ -173,7 +194,7 @@ async fn reply(
     Ok(AdmitTaskCommand {
         input: InputEnvelope {
             schema_version: SCHEMA_VERSION,
-            input_id: reply_input_id(scope, tid, &sid, &request.message_id),
+            input_id: (derived.reply_input)(scope, tid, &sid, &request.message_id),
             business_digest: content_digest(&json!({
                 "kind": "human_reply",
                 "tid": tid.0,

@@ -207,6 +207,14 @@ impl BcsError {
 /// Result type alias for BCS errors.
 pub type Result<T> = std::result::Result<T, BcsError>;
 
+/// Plan T9: a group A2A wiring failure is a startup-grade configuration
+/// error — the process refuses to start rather than degrading at runtime.
+impl From<crate::server::group_a2a_wiring::GroupA2aWiringError> for BcsError {
+    fn from(error: crate::server::group_a2a_wiring::GroupA2aWiringError) -> Self {
+        BcsError::InvalidConfig(error.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

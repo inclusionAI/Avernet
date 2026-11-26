@@ -202,6 +202,15 @@ impl KeyLayout {
         format!("{PREFIX}:{}:{}", self.cluster, self.namespace)
     }
 
+    /// The verification queue index (plan T7): one namespace-wide ordered
+    /// set whose members are dispatch ids scored by their next due time.
+    /// A repairable index over the authoritative dispatch state, never an
+    /// ownership source; every key is identical in every provider that
+    /// shares this layout.
+    pub fn verify_queue(&self) -> String {
+        format!("{}:verify-queue", self.namespace_identity())
+    }
+
     /// Stable task listing, ordered lexicographically by immutable tid.
     pub fn tasks(&self, scope: &bcs_dist_model::TaskScope) -> Result<String, StoreError> {
         segment(&scope.tenant.0)?;
@@ -270,6 +279,33 @@ impl KeyLayout {
             id.0.as_bytes(),
         ]);
         Ok(format!("{}:admission:{}", self.namespace_identity(), crate::identity::hex_of(&digest)))
+    }
+
+    /// One durable strict-group request intent row, keyed by the trusted
+    /// request identity (scope, group, request_id) — never by the server
+    /// assigned Sid/Tid, so message-key retries always find the same row.
+    pub fn group_request(
+        &self,
+        scope: &bcs_dist_model::TaskScope,
+        group: &bcs_dist_model::GroupId,
+        request_id: &bcs_dist_model::RequestId,
+    ) -> Result<String, StoreError> {
+        segment(&scope.tenant.0)?;
+        segment(&scope.principal.0)?;
+        segment(&group.0)?;
+        segment(&request_id.0)?;
+        let digest = crate::identity::digest_fields(&[
+            b"group_request:v1",
+            scope.tenant.0.as_bytes(),
+            scope.principal.0.as_bytes(),
+            group.0.as_bytes(),
+            request_id.0.as_bytes(),
+        ]);
+        Ok(format!(
+            "{}:group-request:{}",
+            self.namespace_identity(),
+            crate::identity::hex_of(&digest)
+        ))
     }
 
     /// Retained for source compatibility with old tests and migration tools.

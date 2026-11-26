@@ -9,11 +9,15 @@
 
 pub mod admission;
 pub mod dispatch;
+pub mod group_round;
 pub mod inbox;
+pub mod node_history;
 pub mod output;
 pub mod runtime_safety;
 pub mod services;
 pub mod state;
+pub mod task_archive;
 pub mod task_feed;
+pub mod workflow_revision;
 
 pub type ContractResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;

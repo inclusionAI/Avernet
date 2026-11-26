@@ -1,6 +1,7 @@
 //! Durable DispatchBoard over public document, index and stream plugins.
 mod control;
 mod journal;
+mod reclaim;
 mod scan;
 mod scan_scheduler;
 mod storage;
@@ -153,12 +154,26 @@ struct Directory {
     did: Did,
     receipts: usize,
     bytes: usize,
+    /// Stable monotonic per-shard key. Rows never change key, deletes never
+    /// move other rows, and scan cursors address the directory by key, not
+    /// array position. 0 marks a legacy row persisted before keys existed.
+    #[serde(default)]
+    seq: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Journal {
     schema_version: u32,
     directory: Vec<Directory>,
     pending: Vec<Intent>,
+    /// Next stable directory key of the shard (exclusive). Survives an
+    /// emptied directory so reclaim can never re-key a removed did.
+    #[serde(default)]
+    next_seq: u64,
+    /// Reclaim cursor: highest stable key a reclaim batch already examined.
+    /// Batches only examine strictly greater keys and wrap to 0 when a batch
+    /// runs past the directory end without exhausting its bounds.
+    #[serde(default)]
+    reclaim_next: u64,
 }
 impl Default for Journal {
     fn default() -> Self {
@@ -166,7 +181,36 @@ impl Default for Journal {
             schema_version: 1,
             directory: vec![],
             pending: vec![],
+            next_seq: 1,
+            reclaim_next: 0,
         }
+    }
+}
+impl Journal {
+    /// The protected normalization funnel for legacy journals: zero-key rows
+    /// (persisted before stable keys) receive fresh monotone keys, and the
+    /// shard key counter stays strictly above every row. Never re-keys a row
+    /// that already has one, so normalization is idempotent and safe at any
+    /// read point; the normalized value persists with the next journal write.
+    fn normalized(mut self) -> Self {
+        let mut next = self
+            .next_seq
+            .max(1)
+            .max(
+                self.directory
+                    .iter()
+                    .map(|entry| entry.seq)
+                    .max()
+                    .unwrap_or(0),
+            );
+        for entry in &mut self.directory {
+            if entry.seq == 0 {
+                entry.seq = next;
+                next = next.saturating_add(1);
+            }
+        }
+        self.next_seq = next;
+        self
     }
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

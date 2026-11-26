@@ -18,8 +18,12 @@ impl HeldDispatchPort for Held {
     async fn refresh(&mut self) -> Result<DispatchView, HolderError> {
         self.script.call("refresh", ())
     }
-    async fn begin_send(&mut self, operation: SendOperation) -> Result<SendPermit, HolderError> {
-        self.script.call("begin_send", (operation,))
+    async fn begin_send(
+        &mut self,
+        operation: SendOperation,
+        proof: SendProof,
+    ) -> Result<SendPermit, HolderError> {
+        self.script.call("begin_send", (operation, proof))
     }
     async fn record_acceptance(
         &mut self,
@@ -81,6 +85,8 @@ async fn dispatch_creation_and_cancel_keep_the_committed_identity() -> ContractR
                 terminal_evidence: None,
                 view: dispatch_view(),
                 revision: Revision("dispatch-1".into()),
+                verification: None,
+                quarantined: None,
             })),
         )
         .expect(

@@ -251,6 +251,8 @@ impl Host {
                 blobs: self.archive.clone(),
                 results: self.archive.clone(),
                 dispatch: self.dispatch.clone(),
+                rounds: None,
+                archives: None,
                 now: Arc::new(|| SystemClock.now()),
             },
             ProcessorConfig::default(),

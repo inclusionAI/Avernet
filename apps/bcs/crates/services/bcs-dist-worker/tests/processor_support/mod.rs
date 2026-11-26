@@ -327,6 +327,8 @@ impl Fixture {
             lose_append: AtomicBool::new(false),
             append_calls: AtomicUsize::new(0),
             fail_session: Default::default(),
+            fail_publish: Default::default(),
+            conflict_session: Default::default(),
             append_requests: Default::default(),
             pause_failure: AtomicBool::new(false),
             failure_entered: tokio::sync::Notify::new(),
@@ -399,6 +401,8 @@ impl Fixture {
                 blobs: blobs.clone(),
                 results: archive.clone(),
                 dispatch: dispatch.clone(),
+                rounds: None,
+                archives: None,
                 now: {
                     let c = clock.clone();
                     Arc::new(move || c.now())
@@ -571,6 +575,8 @@ impl Fixture {
                 blobs: self.blobs.clone(),
                 results: self.archive.clone(),
                 dispatch: self.dispatch.clone(),
+                rounds: None,
+                archives: None,
                 now: {
                     let c = self.clock.clone();
                     Arc::new(move || c.now())

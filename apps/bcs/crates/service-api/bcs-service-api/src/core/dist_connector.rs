@@ -93,8 +93,10 @@ pub enum ResumeStep {
 /// whether the agent accepted it (it may have).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UncertainSend {
-    /// The agent declares the send idempotent: send again with the same request id.
-    /// The resends are bounded; when they run out the send is unresolved.
+    /// A negotiated persistent dedupe durably answers a repeated request
+    /// id with the same task inside the recorded proof's window (plan T6):
+    /// send again with the same request id. The resends are bounded; when
+    /// they run out the send is unresolved.
     Resend,
     /// The agent can be asked by request id.
     /// It is asked a few times, never sent to again; "not found" is no proof
@@ -104,6 +106,25 @@ pub enum UncertainSend {
     /// Start: the call is marked unresolved (B17). Input: the input is
     /// blocked; the call itself stays followed.
     Unresolved,
+}
+
+/// What a holder re-checks before it may rely on the target's dedupe for a
+/// resend of a possibly-sent request (plan T6). All inputs come from durable
+/// records or re-verified resolution; `None` fails closed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DedupeRecheck<'a> {
+    /// The proof durably written with the send intent of an earlier
+    /// attempt, read from the dispatch. `None` if no attempt recorded one.
+    pub recorded: Option<&'a SendProof>,
+    /// The proof this attempt would write now.
+    pub current: &'a SendProof,
+    /// Trusted wall-clock now; `None` when the current time cannot be
+    /// trusted, which voids any window decision.
+    pub now: Option<TimestampMillis>,
+    /// The domain the target's credential resolves to under the current
+    /// grants. `None` (resolution not performed) fails closed: an
+    /// unverified resolution never authorizes a dedupe resend.
+    pub resolved_domain: Option<&'a str>,
 }
 
 /// How to follow a remote task that is already accepted.
@@ -150,17 +171,41 @@ pub trait DistConnectorCoreService: Send + Sync {
     /// Request id of the human reply `seq`, stable like the start's.
     /// Example: `<did>:in:<seq>`, e.g. `d-42:in:2`.
     fn input_request_id(&self, did: &Did, seq: InputSeq) -> RequestId;
-    /// How to resolve a start that may have reached the agent:
-    /// `idempotent_start` → `Resend`, else `query_by_request` → `AskAgent`,
-    /// else `Unresolved`.
-    fn uncertain_start(&self, capabilities: &DownstreamCapabilities) -> UncertainSend;
-    /// How to resolve a reply that may have reached the agent:
-    /// `idempotent_input` → `Resend`, else `Unresolved` (never `AskAgent`).
-    fn uncertain_input(&self, capabilities: &DownstreamCapabilities) -> UncertainSend;
+    /// How to resolve a start whose outcome is unknown: inside the recorded
+    /// proof's window a negotiated persistent dedupe allows the resend;
+    /// declared idempotency alone never does.
+    fn uncertain_start(
+        &self,
+        capabilities: &DownstreamCapabilities,
+        recheck: &DedupeRecheck<'_>,
+    ) -> UncertainSend;
+    /// Inputs follow the same dedupe discipline; there is no by-request
+    /// fallback for a continuation.
+    fn uncertain_input(
+        &self,
+        capabilities: &DownstreamCapabilities,
+        recheck: &DedupeRecheck<'_>,
+    ) -> UncertainSend;
     /// How to follow an accepted task: `subscribe` → `Subscribe` (with
     /// `query_first` = `query_by_task`), else `query_by_task` → `Poll`, else
     /// `Unresolved`.
     fn reattach(&self, capabilities: &DownstreamCapabilities) -> Reattach;
+    /// The durable proof of one send attempt (plan T6): written with the
+    /// send intent, before any network I/O of the attempt.
+    fn send_proof(
+        &self,
+        spec: &DispatchSpec,
+        operation: ProofOperation,
+        canonical_body: &[u8],
+        config_digest: Digest,
+    ) -> SendProof;
+    /// The Final payload of a Completed task snapshot, after verifying the
+    /// complete result: an ordered, duplicate-free, budget-fitting artifact
+    /// checklist (or a direct message answer with parts), plus the result
+    /// content digest the Runner re-verifies. An incomplete snapshot is
+    /// only a stop fact: `Err` keeps the stop evidence and publishes no
+    /// product Final from it.
+    fn completed_result(&self, snapshot: &Payload) -> Result<Payload, &'static str>;
     /// Advances the cursor by one and builds the report. For key events the
     /// interaction of `kind` is replaced by the derived one.
     fn report(

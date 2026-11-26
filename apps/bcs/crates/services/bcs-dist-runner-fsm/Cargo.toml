@@ -1,0 +1,23 @@
+[package]
+name = "bcs-dist-runner-fsm"
+description = "Deterministic strict-FSM round reducer and shared workflow publication validator"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+bcs-dist-model = { workspace = true }
+bcs-domain = { workspace = true }
+bcs-service-api = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+
+[lints]
+workspace = true

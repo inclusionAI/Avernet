@@ -37,6 +37,7 @@ fn initial() -> Checkpoint {
         deadline_history: Default::default(),
         view_drafts: Default::default(),
         last_event_id: None,
+        feed_publications: Vec::new(),
         outbox: None,
     }
 }

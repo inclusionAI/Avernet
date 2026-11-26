@@ -99,6 +99,17 @@ impl JsonRpcClient {
         let (id, request) = self.request(method, params)?;
         crate::subscribe::post_stream_with_rpc(&self.http, &self.url, &request, Some(id)).await
     }
+    /// One JSON-RPC call of a negotiated extension (plan T6): method and
+    /// params verbatim over the same binding, no retries. Typed operations
+    /// above remain the only way to reach the standard A2A methods.
+    pub async fn call_extension<R: DeserializeOwned>(
+        &self,
+        method: &str,
+        params: &Value,
+    ) -> Result<R, A2AError> {
+        self.call(method, params).await
+    }
+
     pub async fn send_message(
         &self,
         request: &a2a::SendMessageRequest,

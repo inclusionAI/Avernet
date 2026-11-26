@@ -3,6 +3,10 @@
 //! Used by a blocking send and by cancel. The stored view is returned as is
 //! (no folding of later events), so after the awaited event shows up in the
 //! event stream the task is re-read until its view covers that event.
+//!
+//! The group surface asks the same wait for its own blocking budget: the
+//! stored view is returned with `waited_out = true` when the budget expired,
+//! and the task itself keeps running (plan T8: a 504 answer, not a cancel).
 
 use crate::error::core_error;
 use crate::identity::session_of_task;
@@ -52,12 +56,25 @@ pub(crate) async fn wait_task(
 ) -> Result<TaskView, GatewayError> {
     let scope = scope_of(caller)?;
     let sid = session_of_task(&request.tid)?;
+    gateway.check_source(&sid, request.source)?;
     gateway.check_group(&scope, &sid, &request.group).await?;
+    let (view, _) = wait_view(gateway, &scope, request).await?;
+    Ok(view)
+}
+
+/// One bounded wait: `(view, waited_out)`. `waited_out` means the budget for
+/// this wait expired before the awaited state was seen — the current view is
+/// returned and the task continues; its final state stays reachable later.
+pub(crate) async fn wait_view(
+    gateway: &DistGateway,
+    scope: &TaskScope,
+    request: WaitTask,
+) -> Result<(TaskView, bool), GatewayError> {
     let deadline = Instant::now() + request.timeout;
     let restore = || async {
         gateway
             .core
-            .restore_task(&scope, &request.tid)
+            .restore_task(scope, &request.tid)
             .await
             .map_err(core_error)
     };
@@ -65,20 +82,20 @@ pub(crate) async fn wait_task(
     // Find the awaited event in the event stream.
     let awaited = loop {
         if view_matches(&cut.view, &request) {
-            return Ok(cut.view);
+            return Ok((cut.view, false));
         }
         let Some(cursor) = cut.cursor.clone() else {
-            return Ok(cut.view);
+            return Ok((cut.view, false));
         };
         let mut follow = gateway.core.follow_task(scope.clone(), cursor);
         let found = loop {
             match timeout_at(deadline, follow.next()).await {
                 // Timeout: the current view is the answer.
-                Err(_) => return restore().await.map(|cut| cut.view),
-                Ok(None) => return restore().await.map(|cut| cut.view),
+                Err(_) => return restore().await.map(|cut| (cut.view, true)),
+                Ok(None) => return restore().await.map(|cut| (cut.view, false)),
                 // The input is admitted either way: a failed read of the event
                 // stream ends the wait with the current view, like a timeout.
-                Ok(Some(Err(_))) => return restore().await.map(|cut| cut.view),
+                Ok(Some(Err(_))) => return restore().await.map(|cut| (cut.view, true)),
                 Ok(Some(Ok(CoreFollowItem::Gap))) => break None,
                 Ok(Some(Ok(CoreFollowItem::Events { events, .. }))) => {
                     if let Some(event) = events.iter().find(|e| event_matches(e, request.until)) {
@@ -93,7 +110,7 @@ pub(crate) async fn wait_task(
             // spin when it keeps being unusable.
             None => {
                 if Instant::now() + gateway.config.snapshot_cover_retry >= deadline {
-                    return restore().await.map(|cut| cut.view);
+                    return restore().await.map(|cut| (cut.view, true));
                 }
                 sleep(gateway.config.snapshot_cover_retry).await;
                 cut = restore().await?;
@@ -105,8 +122,11 @@ pub(crate) async fn wait_task(
     loop {
         cut = restore().await?;
         let covered = cut.cursor.is_none() || cut.view.covered_through >= Some(awaited);
-        if covered || Instant::now() + gateway.config.snapshot_cover_retry > cover_deadline {
-            return Ok(cut.view);
+        if covered {
+            return Ok((cut.view, false));
+        }
+        if Instant::now() + gateway.config.snapshot_cover_retry > cover_deadline {
+            return Ok((cut.view, true));
         }
         sleep(gateway.config.snapshot_cover_retry).await;
     }

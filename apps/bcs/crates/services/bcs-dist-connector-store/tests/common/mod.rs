@@ -402,6 +402,8 @@ pub fn dispatch_spec(did: &Did) -> DispatchSpec {
             subscribe: true,
             resume_events: false,
             cancel: true,
+            isolated_memory: false,
+            persistent_dedupe: false,
         },
         request: Payload::Inline(serde_json::json!({"parts": [{"text": "compare"}]})),
         deadline: TimestampMillis(NOW + 300_000),
@@ -441,6 +443,22 @@ pub fn input_op(seq: u64) -> SendOperation {
     SendOperation::Input {
         seq: InputSeq(seq),
         request_id: RequestId(format!("{DID}:in:{seq}")),
+    }
+}
+
+/// Fixture send proof: the durable proof written with a send intent. The
+/// store persists and returns it; contents only matter to connector
+/// takeover decisions, which construct their own via the rules.
+pub fn proof(operation: &SendOperation) -> SendProof {
+    SendProof {
+        dedupe_domain: "fixture-domain".into(),
+        guarantee_deadline: TimestampMillis(i64::MAX),
+        operation: match operation {
+            SendOperation::Start { request_id } => ProofOperation::Start { request_id: request_id.clone() },
+            SendOperation::Input { seq, request_id } => ProofOperation::Input { seq: *seq, request_id: request_id.clone() },
+        },
+        body_digest: Digest("sha256:fixture-body".into()),
+        config_digest: Digest("sha256:fixture-config".into()),
     }
 }
 
@@ -533,6 +551,7 @@ pub fn outcome_name(outcome: &ClaimOutcome) -> &'static str {
         ClaimOutcome::HeldByOther(_) => "held_by_other",
         ClaimOutcome::Ended => "ended",
         ClaimOutcome::NotFound => "not_found",
+        ClaimOutcome::Verification => "verification",
     }
 }
 
@@ -585,6 +604,9 @@ impl WorkerFixture {
                 confirmed_input_through: None,
                 cancellation: CancelObservation::NotSent,
                 outcome: None,
+                send_proof: None,
+                verification: None,
+                quarantined: None,
             },
         };
         let outcome = self

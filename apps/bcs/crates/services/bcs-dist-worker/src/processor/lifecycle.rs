@@ -1,7 +1,7 @@
 //! Runner-independent terminal transitions share the ordinary archive protocol.
 use super::{
     effects::CompletedEffects,
-    transitions::{install_effects, next_checkpoint},
+    transitions::{install_effects, next_checkpoint, terminal_authority_state},
 };
 use bcs_dist_encoding::{digest_fields, hex_of};
 use bcs_dist_model::*;
@@ -56,12 +56,18 @@ pub(super) fn finalize_independently(
         terminal_event_id: None,
         terminal_published: false,
     });
-    if candidate
+    // Independent finals of a licensed round keep the frozen authority
+    // markers; the spine owns them until the cold proof transferred.
+    if let Some(previous) = before
         .runner_state
         .as_ref()
-        .is_some_and(|state| state.tid == metadata.tid)
+        .filter(|state| state.tid == metadata.tid)
     {
-        candidate.runner_state = None;
+        candidate.runner_state = terminal_authority_state(Some(previous))
+            .map(|state| TaskRunnerState {
+                tid: metadata.tid.clone(),
+                state,
+            });
     }
     let mut effects = Vec::new();
     for (did, _) in candidate

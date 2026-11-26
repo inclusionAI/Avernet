@@ -18,6 +18,14 @@ pub(super) fn payload() -> Value {
 fn framed_payload() -> Value {
     json!({"kind":"inline","value":"x".repeat(1022)})
 }
+/// The dispatch request's inline-body extremum gives back the serialized
+/// bytes of the phase-one capability contract fields (`isolated_memory`,
+/// `persistent_dedupe`, plan T6/0.1.3): a dispatch spec frame now carries
+/// both keys on the wire, and the fixed phase-one outbox budget must still
+/// seal with all 32 extremal dispatch effects in flight.
+fn dispatch_payload() -> Value {
+    json!({"kind":"inline","value":"x".repeat(996)})
+}
 fn scope() -> TaskScope {
     TaskScope {
         tenant: TenantId(identity(3)),
@@ -31,7 +39,7 @@ pub(super) fn snapshot() -> Result<TaskSnapshot, StoreError> {
     serde_json::from_value(json!({"schema_version":1,"scope":scope(),"sid":identity(1),"tid":identity(2),"content":content(),"output_limits":PHASE_ONE_OUTPUT_LIMITS,"output_usage":{"cumulative_bytes":8_388_608u64},"snapshot_event_id":{"commit":u64::MAX,"index":u32::MAX},"source_commit":u64::MAX,"created_at":i64::MIN,"updated_at":i64::MIN})).map_err(|_| invalid("capacity_shape"))
 }
 fn dispatch(i: usize) -> Result<EffectKind, StoreError> {
-    serde_json::from_value(json!({"kind":"create_dispatch","spec":{"schema_version":1,"sid":identity(1),"tid":identity(2),"did":identity(i+100),"node":identity(5),"attempt":u32::MAX,"target":{"agent":identity(6),"binding_version":identity(7),"credential_ref":identity(8)},"pool":identity(9),"capabilities":{"idempotent_start":false,"idempotent_input":false,"query_by_request":false,"query_by_task":false,"subscribe":false,"resume_events":false,"cancel":false},"request":framed_payload(),"deadline":i64::MIN}})).map_err(|_| invalid("capacity_shape"))
+    serde_json::from_value(json!({"kind":"create_dispatch","spec":{"schema_version":1,"sid":identity(1),"tid":identity(2),"did":identity(i+100),"node":identity(5),"attempt":u32::MAX,"target":{"agent":identity(6),"binding_version":identity(7),"credential_ref":identity(8)},"pool":identity(9),"capabilities":{"idempotent_start":false,"idempotent_input":false,"query_by_request":false,"query_by_task":false,"subscribe":false,"resume_events":false,"cancel":false},"request":dispatch_payload(),"deadline":i64::MIN}})).map_err(|_| invalid("capacity_shape"))
 }
 pub(super) fn owner() -> SessionOwnership {
     SessionOwnership {

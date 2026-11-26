@@ -53,6 +53,15 @@ impl StoreTaskFeed {
                     if task.sid != state.cursor.sid {
                         return Err(invalid("follow_scope"));
                     }
+                    if !state
+                        .store
+                        .round_viewable(&task.sid, &state.cursor.tid)
+                        .await?
+                    {
+                        // Unlicensed strict pre-write: same answer as a task
+                        // that never existed.
+                        return Err(invalid("follow_task_missing"));
+                    }
                     state
                         .store
                         .projection

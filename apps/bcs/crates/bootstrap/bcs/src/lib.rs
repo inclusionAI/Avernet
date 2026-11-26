@@ -174,7 +174,7 @@ pub mod logging;
 // Re-exports
 pub use config::{
     AuthSdkConfig, BcsConfig, BotAuthorityConfig, CacheConfig, DatabaseConfig, DatabaseType, DingTalkAccountConfig,
-    GatewayPrincipalConfig, InviteConfig, LlmConfig, LlmProviderType,
+    GatewayPrincipalConfig, GroupA2aConfig, InviteConfig, LlmConfig, LlmProviderType,
     LoggingConfig, MessageHistoryConfig, MetricsConfig, MetricsMode, RedisCacheConfig,
     SecurityGatewayProviderConfig, StructuredOutputMode, TelemetryConfig, UserDirectoryConfig,
     UserDirectoryProviderConfig,

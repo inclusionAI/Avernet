@@ -20,10 +20,15 @@ pub mod command;
 pub mod dispatch;
 pub mod error;
 pub mod evidence;
+pub mod group_admission;
+pub mod group_artifact;
+pub mod group_terminal;
 pub mod identity;
 pub mod inbox;
 pub mod layout;
+pub mod node_history;
 pub mod task_feed;
+pub mod workflow_revision;
 pub mod version;
 
 pub mod coordination;

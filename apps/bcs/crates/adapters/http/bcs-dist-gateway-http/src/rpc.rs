@@ -14,6 +14,7 @@ use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bcs_dist_model::*;
+use bcs_service_api::application::dist_gateway::CreationSource;
 use bcs_service_api::application::dist_gateway::*;
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
@@ -172,6 +173,7 @@ impl Call<'_> {
         }
         let message = &request.message;
         Ok(SubmitInput {
+            source: CreationSource::Rpc,
             group: self.group.clone(),
             message_id: RequestId(message.message_id.clone()),
             session: message.context_id.clone().map(Sid),
@@ -188,13 +190,13 @@ impl Call<'_> {
         // A message to an existing task answers its open question: remember what
         // the task showed before, so the wait does not stop on that question.
         let before = match &input.task {
-            Some(tid) => gw.get_task(self.caller, &self.group, tid).await.map_err(gateway)?.covered_through,
+            Some(tid) => gw.get_task(self.caller, &self.group, tid, CreationSource::Rpc).await.map_err(gateway)?.covered_through,
             None => None,
         };
         let receipt = gw.submit(self.caller, input).await.map_err(gateway)?;
         let configuration = request.configuration.as_ref();
         let view = if configuration.and_then(|c| c.return_immediately) == Some(true) {
-            gw.get_task(self.caller, &self.group, &receipt.tid).await
+            gw.get_task(self.caller, &self.group, &receipt.tid, CreationSource::Rpc).await
         } else {
             let wait = WaitTask {
                 group: self.group.clone(),
@@ -202,6 +204,7 @@ impl Call<'_> {
                 until: WaitUntil::InputOrFinal,
                 after: before,
                 timeout: self.state.config.blocking_send_wait,
+                source: CreationSource::Rpc,
             };
             gw.wait_task(self.caller, wait).await
         }
@@ -219,7 +222,7 @@ impl Call<'_> {
         // shows that question, and ends on a newer one.
         let answered = match &input.task {
             Some(tid) => Some(
-                gw.get_task(self.caller, &self.group, tid)
+                gw.get_task(self.caller, &self.group, tid, CreationSource::Rpc)
                     .await
                     .map_err(gateway)?
                     .covered_through,
@@ -231,6 +234,7 @@ impl Call<'_> {
             group: self.group.clone(),
             tid: receipt.tid,
             mode: SubscribeMode::Snapshot,
+            source: CreationSource::Rpc,
         };
         let items = gw.subscribe(self.caller, subscribe).await.map_err(gateway)?;
         Ok(Answer::Stream(stream::response(
@@ -246,7 +250,7 @@ impl Call<'_> {
         let view = self
             .state
             .gateway
-            .get_task(self.caller, &self.group, &Tid(request.id))
+            .get_task(self.caller, &self.group, &Tid(request.id), CreationSource::Rpc)
             .await
             .map_err(gateway)?;
         result(&mapping::task(&view, TaskShape::history(request.history_length)))
@@ -267,6 +271,7 @@ impl Call<'_> {
             group: self.group.clone(),
             tid,
             mode,
+            source: CreationSource::Rpc,
         };
         let items = self
             .state
@@ -308,6 +313,7 @@ impl Call<'_> {
             tid: tid.clone(),
             request_id: RequestId(request_id),
             reason: None,
+            source: CreationSource::Rpc,
         };
         gw.cancel(self.caller, cancel).await.map_err(gateway)?;
         let wait = WaitTask {
@@ -316,6 +322,7 @@ impl Call<'_> {
             until: WaitUntil::Final,
             after: None,
             timeout: self.state.config.cancel_wait,
+            source: CreationSource::Rpc,
         };
         let view = gw.wait_task(self.caller, wait).await.map_err(gateway)?;
         result(&mapping::task(&view, TaskShape::FULL))

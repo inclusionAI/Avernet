@@ -48,7 +48,7 @@
 use super::{DistAgentResolver, ResolvedAgent};
 use crate::grpc_mesh::GrpcMeshConfig;
 use async_trait::async_trait;
-use bcs_dist_model::AgentBinding;
+use bcs_service_api::port::dist_agent::CallAuthority;
 use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::types::a2a_bot::{A2aBinding, A2aInterface, A2aUpdateMode, http_interface_address_allowed};
 use serde::Deserialize;
@@ -226,9 +226,14 @@ fn resolved(
 
 #[async_trait]
 impl DistAgentResolver for YamlAgentResolver {
-    async fn resolve(&self, target: &AgentBinding) -> Result<ResolvedAgent, String> {
+    /// Lookup keyed by the agent of the operation's approved binding (plan
+    /// T6: resolutions come through the `CallAuthority` of one operation,
+    /// so a revocation or a rebinding of that binding answers here). The
+    /// registry is static, so the authority's node, attempt and round are
+    /// not interpreted yet.
+    async fn resolve(&self, authority: &CallAuthority) -> Result<ResolvedAgent, String> {
         self.agents
-            .get(&target.agent.0)
+            .get(&authority.binding.agent.0)
             .cloned()
             .ok_or_else(|| "agent_not_registered".to_owned())
     }

@@ -60,6 +60,9 @@ pub struct SupervisorReport {
     pub discovered: usize,
     pub visited: usize,
     pub notified: usize,
+    /// Verification-mode dispatches routed to the verification queue
+    /// index instead of a normal hint (plan T7).
+    pub routed: usize,
     pub returned: usize,
     pub settled: usize,
     pub deferred: usize,
@@ -74,6 +77,10 @@ struct Facts {
     holder: Option<Instance>,
     deadline: TimestampMillis,
     terminal: Option<TerminalDispatchEvidence>,
+    /// The verification handoff in force (plan T7): a due dispatch in
+    /// verification mode is routed to the verification queue, never to a
+    /// normal execution hint.
+    verification: Option<VerificationHandoff>,
 }
 #[derive(Clone)]
 enum Phase {
@@ -264,6 +271,7 @@ impl DispatchSupervisor {
         while let Some(r) = results.next().await {
             total.visited += r.visited;
             total.notified += r.notified;
+            total.routed += r.routed;
             total.returned += r.returned;
             total.settled += r.settled;
             total.deferred += r.deferred;

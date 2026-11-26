@@ -40,6 +40,26 @@ pub struct AppendAgentEvent {
     pub event: AgentEvent,
 }
 
+/// The strict-round identity bound to one staged admission record: the
+/// request id of the licensed round plus its checkpoint generation. The
+/// record's Start feed entry is delivered only when the session's
+/// checkpoint license names exactly these fields and the record's task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StrictRoundIdentity {
+    pub request_id: String,
+    pub generation: u64,
+}
+
+/// Terminal state of one strict-round staging visit: a durable staged
+/// record still waiting for its checkpoint license (pre-writes are durable
+/// repairs and stay private), or the delivered admission outcome of a
+/// record whose license already covers it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StrictRoundStage {
+    Staged,
+    Delivered(AdmitOutcome),
+}
+
 #[async_trait]
 pub trait InboxProducerPort: Send + Sync {
     /// Read the single scoped admission document. A record is not a success
@@ -73,6 +93,26 @@ pub trait InboxProducerPort: Send + Sync {
     /// Intermediate events only; retry keeps (did, holder epoch, seq) unchanged.
     /// Success also requires activation, even if no notification can be delivered.
     async fn append_stream(&self, request: AppendAgentEvent) -> Result<InboxPos, StoreError>;
+
+    /// Stage (or reconcile) the durable inbox record of one strict-group
+    /// round: the record's pre-writes are durable repairs, and its Start
+    /// feed entry is delivered only when the session's checkpoint license
+    /// names exactly this request id, generation and the record's task. The
+    /// request may carry the frozen `create_session` pre-write of a fresh
+    /// session; a store must retain the first identity it ever staged — a
+    /// reconciliation pass built without the pre-write adopts the record's
+    /// staged one instead of answering a content conflict. The default
+    /// refusal keeps unconfigured stores honest: a strict round never
+    /// reaches a generic admission record through this path.
+    async fn stage_strict_round(
+        &self,
+        _request: AdmitRequest,
+        _round: StrictRoundIdentity,
+    ) -> Result<StrictRoundStage, StoreError> {
+        Err(StoreError::NotApplied {
+            code: "strict_round_staging_unconfigured".into(),
+        })
+    }
 }
 
 /// Ephemeral acknowledgement identity; not serializable or a recovery cursor.

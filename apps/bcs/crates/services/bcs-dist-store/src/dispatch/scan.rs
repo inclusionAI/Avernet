@@ -1,16 +1,45 @@
+use super::reclaim::RECLAIM_REMOVE_BOUND;
 use super::*;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct Scan {
+    /// The cursor's explicit durable format marker. It is deliberately NOT
+    /// the JSON key `schema_version`: the store codec only ever reads and
+    /// writes `schema_version: 1` documents, while the scan cursor has TWO
+    /// durable formats — legacy index cursors (`next`/`cut`) and the stable
+    /// key cursor written since this slice. 0 decodes from both a fresh
+    /// never-written shard and any legacy cursor document (unknown JSON
+    /// fields are ignored); 2 is the current stable-key format.
+    #[serde(default, rename = "cursor_version")]
     schema_version: u32,
-    next: usize,
-    cut: usize,
+    /// Stable-key cursor: the highest directory key whose work finished in
+    /// the current round. The next step works the first row with a strictly
+    /// greater key inside the round bound.
+    #[serde(default)]
+    lower: u64,
+    /// Per-round upper bound: the highest directory key existing at arm
+    /// time (the key counter minus one). Rows appended later carry greater
+    /// keys and are only discovered by subsequent rounds.
+    #[serde(default)]
+    upper: u64,
+    /// Directory keys the walk of the previous round proved ended with
+    /// transferred proof and no obligations. Re-validated and spliced out by
+    /// the next round's arm (bounded by [`RECLAIM_REMOVE_BOUND`]).
+    #[serde(default)]
+    candidates: Vec<u64>,
     pending: usize,
     round: u64,
     work: Option<Work>,
 }
+/// Cursor version 1 held `cut`/`next` array indexes into a shrinkable
+/// directory (serialized under `schema_version`); version 2 is the stable
+/// key cursor (serialized as `cursor_version`).
+const CURSOR_VERSION: u32 = 2;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Work {
     did: Did,
+    /// Stable key of the directory row this work item was taken from.
+    #[serde(default)]
+    seq: u64,
     intent: Option<Intent>,
     phase: Phase,
     due: Option<TimestampMillis>,
@@ -96,10 +125,30 @@ impl StoreDispatch {
         let stored = self.read::<Scan>(&key).await?;
         let version = stored.as_ref().map(|s| s.version);
         let mut scan = stored.map(|s| s.value).unwrap_or_default();
-        if scan.schema_version != 0 {
-            format(scan.schema_version)?;
+        match scan.schema_version {
+            // No current cursor format marker (0): a never-written shard
+            // (absent default) OR a legacy `cut`/`next` index cursor. The
+            // legacy positions were indexes into a directory that reclaim
+            // can shrink, so no stable-key equivalence may be guessed: arm a
+            // fresh round under the current version and drop any in-flight
+            // work item — its durable obligations remain in the journal —
+            // making the re-scan idempotent inside this protected write.
+            // (Legacy documents decode into this arm: they carry no
+            // `cursor_version`, so the renamed field defaults to 0.)
+            0 => {
+                scan = Scan {
+                    schema_version: CURSOR_VERSION,
+                    pending: scan.pending,
+                    round: scan.round,
+                    lower: 0,
+                    upper: 0,
+                    candidates: vec![],
+                    work: None,
+                };
+            }
+            v if v == CURSOR_VERSION => {}
+            v => return Err(StoreError::UnsupportedFormat { format: v }),
         }
-        scan.schema_version = 1;
         let mut item = None;
         let mut finished = false;
         if let Some(work) = scan.work.as_mut() {
@@ -129,44 +178,88 @@ impl StoreDispatch {
                         if doc.value.due.is_some_and(|due| due.0 <= now.0) {
                             item = Some(work.did.clone());
                         }
+                        if Self::reclaimable(&doc.value)
+                            && scan.candidates.len() < RECLAIM_REMOVE_BOUND
+                            && !scan.candidates.contains(&work.seq)
+                        {
+                            // The walk's own read proved the row ended with
+                            // transferred proof and no obligations: hand it to
+                            // the next arm's bounded splice.
+                            scan.candidates.push(work.seq);
+                        }
                         work.due = doc.value.due;
                         work.phase = Phase::Hint;
                     } else {
-                        scan.next += 1;
+                        // The item's row is NOT deleted — stable keys make
+                        // rotation index-free, and a reclaim-removed row
+                        // simply no longer matches the window.
+                        scan.lower = work.seq;
                         scan.work = None;
-                        finished = scan.next >= scan.cut;
+                        finished = scan.lower >= scan.upper;
                     }
                 }
                 Phase::Hint => {
                     let _ = self.hint_due(shard, &work.did, work.due).await;
-                    scan.next += 1;
+                    scan.lower = work.seq;
                     scan.work = None;
-                    finished = scan.next >= scan.cut;
+                    finished = scan.lower >= scan.upper;
                 }
             }
         } else {
-            let (_, root) = self.journal(shard).await?;
-            if root.directory.is_empty() {
+            let (journal_version, journal) = self.journal(shard).await?;
+            if journal.directory.is_empty() {
                 return Ok(Step {
                     item: None,
                     finished: true,
                     round: scan.round,
                 });
             }
-            if scan.cut == 0 || scan.next >= scan.cut {
-                scan.cut = root.directory.len();
-                scan.next = 0;
+            let root = if scan.lower >= scan.upper {
+                // A new round first splices out the bounded candidate set the
+                // previous walk proved reclaimable (≤ RECLAIM_REMOVE_BOUND
+                // re-validating document reads, one journal CAS at most,
+                // deferred on contention), then fixes this round's upper
+                // bound to rows that exist now.
                 scan.round = scan
                     .round
                     .checked_add(1)
                     .ok_or_else(|| invalid("dispatch_scan_exhausted"))?;
-            }
-            let did = root
+                let armed = self
+                    .splice_reclaim_candidates(shard, journal_version, journal, &scan.candidates)
+                    .await?;
+                scan.candidates = armed.leftover;
+                scan.lower = 0;
+                scan.upper = armed.journal.next_seq.saturating_sub(1);
+                armed.journal
+            } else {
+                journal
+            };
+            let entry = root
                 .directory
-                .get(scan.next)
-                .ok_or_else(|| invalid("dispatch_directory_rollback"))?
-                .did
-                .clone();
+                .iter()
+                .find(|entry| entry.seq > scan.lower && entry.seq <= scan.upper);
+            let Some(entry) = entry else {
+                // No row remains in the round window (every unprocessed row
+                // was reclaimed, or the arm met a now-emptied directory):
+                // mark the round exhausted DURABLY so the NEXT step arms a
+                // fresh round — stable keys make re-arming idempotent.
+                scan.lower = scan.upper;
+                return if self.write(&key, version, &scan).await? {
+                    Ok(Step {
+                        item: None,
+                        finished: true,
+                        round: scan.round,
+                    })
+                } else {
+                    Ok(Step {
+                        item: None,
+                        finished: false,
+                        round: scan.round,
+                    })
+                };
+            };
+            let did = entry.did.clone();
+            let seq = entry.seq;
             let intent = if root.pending.is_empty() {
                 None
             } else {
@@ -181,6 +274,7 @@ impl StoreDispatch {
             };
             scan.work = Some(Work {
                 did,
+                seq,
                 intent,
                 phase,
                 due: None,

@@ -1,6 +1,17 @@
 use crate::ids::*;
-use crate::{ArtifactUpdate, OutputLimits, OutputUsage};
+use crate::{ArtifactUpdate, OutputLimits, OutputUsage, RoundPart};
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroU32;
+
+/// One ordered artifact part of a task's terminal products. The part order is
+/// the caller's stable publication order; identity is unique per
+/// `(tid, artifact_id)` and never renumbered by storage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactPart {
+    pub artifact_id: ArtifactId,
+    pub order: NonZeroU32,
+    pub part: RoundPart,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

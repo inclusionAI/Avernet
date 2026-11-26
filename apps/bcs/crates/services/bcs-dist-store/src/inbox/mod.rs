@@ -23,6 +23,7 @@ mod validation;
 
 pub use listener::{ListenerState, read_listener};
 pub use producer::{InboxProducerConfig, StoreInboxProducer};
+pub use state::StrictRound;
 
 use bcs_dist_model::TimestampMillis;
 

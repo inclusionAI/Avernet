@@ -69,6 +69,35 @@ pub(super) async fn visit(
                 }
             }
             Phase::Notify(facts) => {
+                // Verification mode (plan T7): no normal execution hint is
+                // posted. The Supervisor repairs the verification queue
+                // index from the authoritative state — the repair path for
+                // a crash between the handoff CAS and the index write —
+                // and the call keeps its bounded re-check cadence.
+                if facts.verification.is_some() {
+                    let next = next_at(now, config.recheck_interval);
+                    let at = if facts.deadline.0 > now.0 {
+                        TimestampMillis(next.0.min(facts.deadline.0))
+                    } else {
+                        next
+                    };
+                    let due = facts
+                        .verification
+                        .as_ref()
+                        .map(|handoff| handoff.next_due)
+                        .unwrap_or(at);
+                    let due = TimestampMillis(due.0.min(at.0));
+                    match ports.dispatch.index_verification(&job.did, due).await {
+                        Ok(()) => {
+                            report.routed += 1;
+                        }
+                        Err(_) => report.failures += 1,
+                    };
+                    return Ok(Phase::Settle {
+                        revision: facts.revision,
+                        at,
+                    });
+                }
                 match ports.dispatch.notify(&facts.pool, &job.did).await {
                     Ok(()) => report.notified += 1,
                     Err(_) => report.failures += 1,

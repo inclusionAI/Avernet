@@ -36,11 +36,11 @@ async fn conformance_store_held_dispatch() {
     let worker = WorkerFixture::new(&store);
     worker.create().await;
     let mut held = acquire(&queue(&store), &instance("conn-03")).await;
-    held.begin_send(start_op()).await.unwrap();
+    held.begin_send(start_op(), proof(&start_op())).await.unwrap();
     held.record_acceptance(accepted(start_op())).await.unwrap();
     // The Connector persists the send before observing remote acceptance.
     worker.push(pending(1)).await;
-    held.begin_send(input_op(1)).await.unwrap();
+    held.begin_send(input_op(1), proof(&input_op(1))).await.unwrap();
     held_dispatch_port_contract_tests(held.as_mut(), &worker, committed_input(1), accepted(input_op(1)))
         .await
         .unwrap();

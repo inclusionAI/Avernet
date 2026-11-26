@@ -6,6 +6,7 @@ mod effects;
 mod encoding;
 mod lifecycle;
 mod references;
+mod terminal;
 mod transitions;
 
 #[cfg(test)]
@@ -24,6 +25,7 @@ mod drive;
 mod engine;
 mod observations;
 mod prepare;
+mod publication;
 mod replay;
 mod risk;
 mod thinking;
