@@ -161,7 +161,9 @@ def test_legacy_center_uses_fresh_v3_evidence_and_center_delivery_only() -> None
         bot=_bot(),
         layout_observation=_observation(center_mount_status="NOT_READY"),
     )
-    manifest = builder.finalize(captured=captured, bot=_bot())
+    manifest = builder.finalize(
+        captured=captured, delivered_center_skills=captured.center_skills, bot=_bot(),
+    )
 
     assert captured.active_runtime_path.endswith("/workspace/skills")
     assert [item.corpus for item in captured.shared_corpora] == ["center"]
@@ -176,7 +178,9 @@ def test_pool_ignores_stale_persisted_probe_and_freezes_repo_then_center() -> No
     builder = _builder(_pool_state(), _Reader((), ()))
 
     captured = builder.capture(bot=_bot(), layout_observation=_observation())
-    manifest = builder.finalize(captured=captured, bot=_bot())
+    manifest = builder.finalize(
+        captured=captured, delivered_center_skills=captured.center_skills, bot=_bot(),
+    )
 
     assert [item.corpus for item in captured.shared_corpora] == ["repo", "center"]
     assert [item["corpus"] for item in manifest["shared_corpora"]] == [
@@ -234,7 +238,9 @@ def test_center_capability_drift_fails_finalize() -> None:
     captured = builder.capture(bot=_bot(), layout_observation=_observation())
 
     with pytest.raises(ServiceSkillsManifestError) as raised:
-        builder.finalize(captured=captured, bot=_bot())
+        builder.finalize(
+            captured=captured, delivered_center_skills=captured.center_skills, bot=_bot(),
+        )
 
     assert raised.value.code is ServiceArtifactBuildErrorCode.CAPABILITY_CHANGED
 
@@ -372,14 +378,24 @@ def test_legacy_center_build_without_pool_preparation(
     builder = _builder(
         _legacy_state(), _Reader((asset,), (asset,)), _Store(ready=store_ready)
     )
-    if expected_error is not None:
+    if expected_error is ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_UNAVAILABLE:
         with pytest.raises(ServiceSkillsManifestError) as raised:
             builder.capture(bot=bot, layout_observation=observed)
         assert raised.value.code is expected_error
         return
 
     captured = builder.capture(bot=bot, layout_observation=observed)
-    manifest = builder.finalize(captured=captured, bot=bot)
+    if expected_error is ServiceArtifactBuildErrorCode.CENTER_STORE_NOT_READY:
+        with pytest.raises(ServiceSkillsManifestError) as raised:
+            builder.finalize(
+                captured=captured, delivered_center_skills=captured.center_skills, bot=bot,
+            )
+        assert raised.value.code is expected_error
+        return
+
+    manifest = builder.finalize(
+        captured=captured, delivered_center_skills=captured.center_skills, bot=bot,
+    )
     assert manifest["active_layout"] == "legacy"
     assert manifest["center_skills"][0]["sc_version_number"] == "1.0.0"
     assert [item["corpus"] for item in manifest["shared_corpora"]] == ["center"]
