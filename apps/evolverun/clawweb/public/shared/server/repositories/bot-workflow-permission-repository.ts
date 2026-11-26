@@ -380,6 +380,42 @@ export class BotWorkflowPermissionRepository implements RunViewPermissions {
     return { restrictedIds, viewableIds };
   }
 
+  /**
+   * Get executable permission IDs for a user. Unlike execute runtime checks, web
+   * task-list visibility unions direct user grants with exact-Bot inheritance.
+   *
+   * Execute visibility is deny-by-default even when the permission table is
+   * empty; view lists retain their unrestricted compatibility path. The result is
+   * intentionally independent of an asset `botOwnerId`; callers must intersect
+   * it with the selected Bot scope when one is present.
+   */
+  async getExecuteIdsForOwner(ownerId: string): Promise<{ restrictedIds: Set<string>; executableIds: Set<string> }> {
+    const restrictedRows = await this.db.query<Pick<BotWorkflowPermissionRow, "workflow_id">>(
+      "SELECT DISTINCT workflow_id FROM bot_workflow_permissions",
+      [],
+    );
+    const restrictedIds = new Set(restrictedRows.map((r) => r.workflow_id));
+    const executableIds = new Set<string>();
+    if (restrictedIds.size === 0) return { restrictedIds, executableIds };
+
+    const executeRows = await this.db.query<Pick<BotWorkflowPermissionRow, "workflow_id">>(
+      `SELECT DISTINCT workflow_id FROM bot_workflow_permissions
+       WHERE can_execute = 1
+         AND (
+           (bot_owner_id = ? AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*'))
+           OR (bot_owner_id = ? AND bot_id IS NOT NULL AND bot_id != '')
+           OR (bot_owner_id = '*' AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*'))
+         )`,
+      [ownerId, ownerId],
+    );
+    for (const row of executeRows) executableIds.add(row.workflow_id);
+    for (const row of await this.inheritedGrants(ownerId)) {
+      if (row.can_execute === 1) executableIds.add(row.workflow_id);
+    }
+
+    return { restrictedIds, executableIds };
+  }
+
   /** Asset filtering only, NOT authorization. Zero-valued Bot grants must not
    * override a user's separate grant when listing workflows in a Bot context.
    */
@@ -387,7 +423,7 @@ export class BotWorkflowPermissionRepository implements RunViewPermissions {
     const rows = await this.db.query<{ workflow_id: string }>(
       `SELECT DISTINCT workflow_id FROM bot_workflow_permissions
        WHERE (bot_owner_id = ? AND (bot_id IS NULL OR bot_id = '' OR bot_id = '*' OR bot_id = ?))
-          OR (bot_owner_id = '*' AND (bot_id = ? OR bot_id = '*'))`,
+          OR (bot_owner_id = '*' AND (bot_id = ? OR bot_id = '*' OR bot_id IS NULL OR bot_id = ''))`,
       [ownerId, botId, botId],
     );
     return new Set(rows.map(row => row.workflow_id));

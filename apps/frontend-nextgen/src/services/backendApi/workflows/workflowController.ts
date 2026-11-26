@@ -25,18 +25,29 @@ export interface WorkflowSpec {
 
 const BASE = '/api/workflows';
 
-export async function listWorkflows(botOwnerId?: string, botId?: string): Promise<WorkflowListItem[]> {
+type WorkflowListPermission = 'view' | 'execute';
+
+async function requestWorkflows(botOwnerId: string | undefined, botId: string | undefined, permission: WorkflowListPermission): Promise<WorkflowListItem[]> {
   // ownerBotId 形如 "default:146836"（botId:ownerUserId）。后端把 botId 与 botOwnerId 拼接成完整标识查询，
   // 故 botId 必须取冒号前的裸值；botOwnerId 单独透传 ownerUserId。若 botId 仍带 :146836 后缀会拼重复。
   const bareBotId = botId?.trim().split(':')[0] || undefined;
   const params: Record<string, string> = {};
   if (botOwnerId) params.botOwnerId = botOwnerId;
   if (bareBotId) params.botId = bareBotId;
+  if (permission === 'execute') params.permission = permission;
   const data = await backendRequest<WorkflowListItem[]>(BASE, {
     method: 'GET',
     params: Object.keys(params).length > 0 ? params : undefined,
   });
   return Array.isArray(data) ? data : [];
+}
+
+export async function listWorkflows(botOwnerId?: string, botId?: string): Promise<WorkflowListItem[]> {
+  return requestWorkflows(botOwnerId, botId, 'view');
+}
+
+export async function listExecutableWorkflows(botOwnerId?: string, botId?: string): Promise<WorkflowListItem[]> {
+  return requestWorkflows(botOwnerId, botId, 'execute');
 }
 
 export function getWorkflowDetail(workflowId: string): Promise<WorkflowSpec> {

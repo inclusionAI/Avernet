@@ -8,7 +8,7 @@
 import { executeTask } from '@/services/backendApi/tasks/taskController';
 import {
   getWorkflowDetail,
-  listWorkflows,
+  listExecutableWorkflows,
   type WorkflowListItem,
 } from '@/services/backendApi/workflows/workflowController';
 import { useTaskStore } from '@/stores/taskStore';
@@ -89,7 +89,7 @@ export async function executeTaskService({ form, ctx, apiBaseUrl }: ExecuteTaskA
  * ownerBotId（形如 "default:146836"）裁成裸 botId 再下发，避免与 botOwnerId 拼重复。不走 mock。
  */
 export async function fetchWorkflows(ownerUserId: string, botId: string): Promise<WorkflowListItem[]> {
-  return listWorkflows(ownerUserId, botId);
+  return listExecutableWorkflows(ownerUserId, botId);
 }
 
 /** 解析工作流触发命令：取 facade.command，失败兜底 workflowId 自身。 */
