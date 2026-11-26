@@ -146,3 +146,36 @@ read-only projection of the existing approval APIs; it does not add fields to
 Regression coverage lives in
 `web/components/__tests__/ApprovalNodeDetails.test.tsx` and
 `web/components/__tests__/NodeExecutionListApproval.test.tsx`.
+
+## Workbench run archive presentation
+
+The archive panel is a read-only presentation of the existing run-archive
+response. It retains availability for `failed`, `cancelled`, and `timeout`
+runs; other or missing run statuses show a neutral availability message without
+requesting an archive. It does not introduce an endpoint, analysis action, approval decision,
+patch application, or deployment operation. Its five sections are overview,
+process, error details, AI diagnosis, and suggested YAML. Navigation and detail
+share the main row; archive metadata occupies a separate footer below it.
+
+- Run status and archive aggregation status are independent. A `completed`
+  archive is not a successful run; `partial` archives retain their collection
+  errors. Execution records are counted as collected records, not inferred
+  workflow nodes. Unknown or absent node status is not counted as success.
+- An empty failed-node list means no failed execution was collected, not that
+  the run or its business outcome succeeded. Missing analysis, skipped or failed
+  analysis, and an analysis with no diagnoses are distinct unavailable/empty
+  states, not proof that no repair is needed.
+- Missing suggested YAML does not mean the workflow requires no changes. A
+  supplied YAML document or patch proposal is only a preview. The patch view
+  shows supplied operations; it does not fabricate a before/after YAML diff
+  without the original document. Copy and download operate locally and report
+  failure without claiming that a patch was applied.
+- Both log entries remain: the run detail's top-level **日志** view uses
+  timeline events with source `run_log`; the archive's **运行过程 → 运行日志**
+  view uses the archive response's `runLogs`. These may overlap. Neither entry
+  implies a distinct live stream or immutable snapshot contract.
+- Missing or invalid timestamps and durations render as unavailable rather than
+  invalid dates; a recorded zero duration remains zero. Empty collections and
+  filters with no matches provide an explanation instead of a blank pane.
+
+Regression coverage lives in `web/components/__tests__/RunArchivePanel*.test.tsx`.
