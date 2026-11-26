@@ -7,7 +7,7 @@ import type { AuthorizedRunListQuery, AuthorizedRunList, RunListMetadata, RunIde
 export class RunSubworkflowsRepository implements RunSubworkflowsStore {
   constructor(private readonly db: IDatabase) {}
 
-  /** Only the two optional projection columns may be omitted on old schemas;
+  /** Only optional metadata/lineage projection columns may be omitted on old schemas;
    * every other storage error propagates. */
   private async metadataQuery<T>(columns: readonly string[], suffix: string, params: unknown[]): Promise<T[]> {
     let projection = [...columns];
@@ -15,7 +15,7 @@ export class RunSubworkflowsRepository implements RunSubworkflowsStore {
       try { return await this.db.query<T>(`SELECT ${projection.join(", ")} ${suffix}`, params); }
       catch (error) {
         const message = error instanceof Error ? error.message.toLowerCase() : '';
-        const missing = ['evolution_analysis_status', 'ordinary_run_marker'].find(column => projection.includes(column)
+        const missing = ['evolution_analysis_status', 'ordinary_run_marker', 'parent_flow_id', 'root_flow_id'].find(column => projection.includes(column)
           && (message === `no such column: ${column}` || message === `unknown column '${column}' in 'field list'`
             || message === `unknown column '${column}'`));
         if (!missing) throw error;
@@ -81,7 +81,8 @@ export class RunSubworkflowsRepository implements RunSubworkflowsStore {
         'input_json', 'result_json', 'params_json', 'node_count', 'succeeded_count', 'failed_count',
         'total_duration_ms', 'total_token_usage', 'started_at', 'completed_at', 'triggered_by', 'current_phase',
         'workflow_version', 'workflow_deploy_number', 'origin_session_key', 'origin_session_id', 'id', 'identity_key',
-        'user_id', 'plugin_version', 'engine', 'gmt_create', 'gmt_modified', 'evolution_analysis_status', 'ordinary_run_marker'
+        'user_id', 'plugin_version', 'engine', 'gmt_create', 'gmt_modified', 'evolution_analysis_status', 'ordinary_run_marker',
+        'parent_flow_id', 'root_flow_id'
       ],
        `FROM flow_runs WHERE flow_id = ?`, [flowId]);
     return rows[0] ?? null;
