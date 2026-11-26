@@ -25,6 +25,7 @@ def test_query_is_scoped_filtered_and_display_safe():
     assert result['total'] == 1
     item = result['items'][0]
     assert (item['bot_id'], item['template_version_id'], item['stage']) == ('bot', 7, 'draft')
+    assert item['template_status'] is None
     assert 'SECRET' not in json.dumps(result)
     assert repository.query(template_key='other', offset=0, limit=20)['total'] == 0
     assert repository.query(template_key='coding', offset=0, limit=20, outdated_before=7)['total'] == 0
@@ -46,6 +47,81 @@ def test_service_publications_do_not_borrow_draft_snapshot_version():
     assert stages['prestable']['template_version_id'] is None
     assert stages['online']['template_version_id'] is None
     assert stages['online']['publication_id'] is not None
+    assert all(item['template_status'] is None for item in result['items'])
+
+
+@pytest.mark.parametrize('metadata,expected_status', [
+    ({}, None),
+    ({'template_version_id': None, 'bot_template_config': None}, None),
+    ({'bot_template_config': {'status': 'pre_published'}}, 'pre_published'),
+    ({'template_version_id': 7, 'bot_template_config': {'status': 'prod_released'}}, 'prod_released'),
+    ({'bot_template_config': {'status': 1}}, None),
+    ({'bot_template_config': {'status': {'private': 'hidden'}}}, None),
+])
+def test_discovery_reads_optional_saved_release_status_without_requiring_a_version(metadata, expected_status):
+    db = Database()
+    seed(db)
+    with db.orm_session() as session:
+        session.query(TemplateModel).update({'ext': json.dumps({'template_key': 'coding', **metadata})})
+    result = TemplateBotRepository(db).query(template_key='coding', offset=0, limit=20)
+    assert result['total'] == 1
+    assert result['items'][0]['template_status'] == expected_status
+    assert result['items'][0]['template_version_id'] == metadata.get('template_version_id')
+    assert 'template_config' not in result['items'][0]
+    assert 'private' not in json.dumps(result)
+
+
+def test_publication_template_status_comes_from_its_own_snapshot_not_the_bot_stage():
+    db = Database()
+    bot_pk = seed(db, bot_type='service')
+    with db.orm_session() as session:
+        session.query(TemplateModel).update({'ext': json.dumps({
+            'template_key': 'coding', 'template_version_id': 7,
+            'bot_template_config': {'status': 'pre_published'},
+        })})
+        for lifecycle_status, binding, template_status in [
+            ('validating', {'verify': 3}, 'prod_released'),
+            ('success', {'online': 4}, 'pre_published'),
+        ]:
+            session.add(BotPublishModel(source_bot_pk=bot_pk, source_bot_id='bot',
+                publish_bot_id='bot', name='Example', owner_id='owner', status=lifecycle_status,
+                env='dev', permission_owner='owner', ext=json.dumps({
+                    'binding': binding, 'template_config': {'template_version_id': 6,
+                        'bot_template_config': {'status': template_status}},
+                })))
+    result = TemplateBotRepository(db).query(template_key='coding', offset=0, limit=20)
+    stages = {item['stage']: item['template_status'] for item in result['items']}
+    assert stages == {'draft': 'pre_published', 'prestable': 'prod_released', 'online': 'pre_published'}
+
+
+def test_discovery_projects_release_status_without_per_bot_queries_or_full_snapshots():
+    db = Database()
+    for index in range(20):
+        seed(db, f'bot-{index}')
+    with db.orm_session() as session:
+        session.query(TemplateModel).update({'ext': json.dumps({
+            'template_key': 'coding', 'template_version_id': 7,
+            'bot_template_config': {'status': 'prod_released', 'private': 'hidden'},
+        })})
+    statements = []
+    event.listen(db.engine, 'before_cursor_execute', lambda _conn, _cursor, statement, _params, _context, _many:
+                 statements.append(statement))
+    result = TemplateBotRepository(db).query(template_key='coding', offset=0, limit=20)
+    assert result['total'] == 20
+    assert len(result['items']) == 20
+    assert all(item['template_status'] == 'prod_released' for item in result['items'])
+    assert len(statements) == 2
+    assert 'template_config' not in result['items'][0]
+    assert 'hidden' not in json.dumps(result)
+
+
+def test_legacy_bot_without_a_saved_template_key_is_not_attached_to_a_template():
+    db = Database()
+    seed(db)
+    with db.orm_session() as session:
+        session.query(TemplateModel).update({'ext': '{"custom":"kept"}'})
+    result = TemplateBotRepository(db).query(template_key='coding', offset=0, limit=20)
+    assert result == {'total': 0, 'items': []}
 
 
 def test_snapshot_requires_exact_owner_template_and_environment():

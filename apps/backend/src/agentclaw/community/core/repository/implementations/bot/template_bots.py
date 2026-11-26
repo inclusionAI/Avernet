@@ -87,6 +87,7 @@ class TemplateBotRepository(TemplateBotRepositoryProtocol):
                 literal(None).label('publication_id'),
                 _version_id(session, TemplateModel.ext).label('template_version_id'),
                 _json_text(session, TemplateModel.ext, '$.template_version').label('template_version'),
+                _json_text(session, TemplateModel.ext, '$.bot_template_config.status').label('template_status'),
             )
             .join(TemplateModel, TemplateModel.bot_id == BotModel.bot_id)
             .where(self._scope(session, template_key))
@@ -135,6 +136,9 @@ class TemplateBotRepository(TemplateBotRepositoryProtocol):
                     ),
                     _json_text(session, publication.ext, '$.template_config.template_version').label(
                         'template_version'
+                    ),
+                    _json_text(session, publication.ext, '$.template_config.bot_template_config.status').label(
+                        'template_status'
                     ),
                 )
                 .join(TemplateModel, TemplateModel.bot_id == BotModel.bot_id)

@@ -111,3 +111,13 @@ environment differs from service stage: verification is `prestable`, production
 publication is `online`, and the editable source is `draft`. A publication's
 version is unknown unless that publication recorded its own snapshot version;
 it never inherits the draft version. No schema migration or cache is required.
+
+Each discovery row also includes optional `template_status`, the template's
+saved publication status in that runtime's own snapshot. Draft rows read
+`bot_template_config.status`; published rows read their publication's saved
+`template_config.bot_template_config.status`. This is independent of the Bot's
+runtime `status` and service `stage`. Missing or non-string metadata returns
+`null`, including legacy rows with no version. Published rows never borrow draft
+metadata or infer status from their stage. The existing query projects this one
+JSON field without extra joins, per-Bot queries or full snapshot reads. This does
+not change version filtering, comparison, restart progress or restart eligibility.
