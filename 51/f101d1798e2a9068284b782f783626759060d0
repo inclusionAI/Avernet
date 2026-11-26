@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/service_bot/services/deploy/arca_snapshot_producer.py
+  s_7b1b7bb2628d01::t_55d2fbbd118ccf 17,193-194,201-202,226-235,242-249
+apps/backend/tests/community/core/service_bot/services/deploy/test_service_artifact_fresh_layout.py
+  s_7b1b7bb2628d01::t_d23494890f2b96 195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "51f101d1798e2a9068284b782f783626759060d0",
+  "prompts": {},
+  "sessions": {
+    "s_7b1b7bb2628d01": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b1-ee57-74e3-bb35-6e7830e4a3d8",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
