@@ -1,0 +1,19 @@
+apps/frontend-nextgen/test/pages/BotWorkshop/RoutineFormDialog.targetError.test.tsx
+  s_fdf2a0ea5d90fc::t_e96d7ce6799d77 88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7a1b440d614a92002b6c9aff7d395f1eefabcfe0",
+  "prompts": {},
+  "sessions": {
+    "s_fdf2a0ea5d90fc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2139d-64fb-7a71-901f-98915583e8f7",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
