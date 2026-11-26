@@ -233,6 +233,23 @@ describe('公开设置「好友名单」section', () => {
 });
 
 describe('管理好友抽屉', () => {
+  it('抽屉取 nested 层级,高于父 Modal 遮罩,移除确认框仍在抽屉之上', async () => {
+    renderDialog();
+    await waitFor(() => expect(screen.getByText('好友用户 2 · 好友 Bot 1')).toBeInTheDocument());
+    await openDrawer();
+
+    // 抽屉遮罩与内容都取 nested Token(父 Modal 为 --z-dialog,低一级)。
+    const nested = Array.from(document.querySelectorAll('body *')).filter((node) =>
+      node.classList?.contains('z-[var(--z-nested-drawer)]'),
+    );
+    expect(nested).toHaveLength(2);
+    expect(document.querySelector('[class*="z-[var(--z-drawer)]"]')).toBeNull();
+
+    fireEvent.click(screen.getAllByRole('button', { name: '移除' })[0]);
+    const alert = await screen.findByRole('alertdialog');
+    expect(alert.className).toContain('z-[var(--z-critical-dialog)]');
+  });
+
   it('两页签渲染全量列表,搜索按名字与 id 过滤且只影响当前页签', async () => {
     renderDialog();
     await waitFor(() => expect(screen.getByText('好友用户 2 · 好友 Bot 1')).toBeInTheDocument());

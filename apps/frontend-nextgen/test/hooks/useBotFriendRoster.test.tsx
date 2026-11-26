@@ -230,6 +230,90 @@ describe('useBotFriendRoster', () => {
     });
     expect(result.current.removingIds).toEqual([]);
   });
+
+  it('keeps both successful results when the two types retry concurrently', async () => {
+    // 回归:两个类型共用序号时,后发的 bot 重试会作废先发的 human 重试,
+    // human 即使成功也被丢弃(仍显示失败/空计数)。
+    jest.spyOn(botFriendConversationService, 'loadDirectory').mockResolvedValue(
+      directory({
+        human: sectionFailure('BOT_FRIEND_USERS_LOAD_FAILED'),
+        bot: sectionFailure('BOT_FRIEND_BOTS_LOAD_FAILED'),
+      }),
+    );
+    const resolvers: Partial<
+      Record<'human' | 'bot', (value: DomainResult<BotFriendPage<BotIdentityFriendView>>) => void>
+    > = {};
+    jest
+      .spyOn(botFriendConversationService, 'loadSection')
+      .mockImplementation(
+        (_botUuid: string, type: 'human' | 'bot') =>
+          new Promise<DomainResult<BotFriendPage<BotIdentityFriendView>>>((resolve) => {
+            resolvers[type] = resolve;
+          }),
+      );
+
+    const { result } = renderHook(() => useBotFriendRoster(BOT_UUID));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.counts).toEqual({ users: null, bots: null });
+
+    let humanRetry: Promise<void> = Promise.resolve();
+    let botRetry: Promise<void> = Promise.resolve();
+    act(() => {
+      humanRetry = result.current.reload('human');
+    });
+    act(() => {
+      botRetry = result.current.reload('bot');
+    });
+
+    // bot 后发先至,human 的成功结果随后落地——两者都必须保留。
+    await act(async () => {
+      resolvers.bot?.(
+        sectionOk([
+          friendView({
+            actorType: 'bot',
+            actorId: 'bot-friend:9',
+            queryId: 'bot-friend:9',
+            displayName: '好友 Bot',
+          }),
+        ]),
+      );
+      await botRetry;
+    });
+    await act(async () => {
+      resolvers.human?.(sectionOk([friendView()]));
+      await humanRetry;
+    });
+
+    expect(result.current.sections?.human.ok).toBe(true);
+    expect(result.current.sections?.bot.ok).toBe(true);
+    expect(result.current.counts).toEqual({ users: 1, bots: 1 });
+  });
+
+  it('drops an in-flight directory response after the Bot identity switches', async () => {
+    let resolveStale: (value: BotFriendDirectoryResult) => void = () => undefined;
+    const stale = new Promise<BotFriendDirectoryResult>((resolve) => {
+      resolveStale = resolve;
+    });
+    const fresh = directory({ human: sectionOk([]), bot: sectionOk([]) });
+    jest
+      .spyOn(botFriendConversationService, 'loadDirectory')
+      .mockImplementationOnce(() => stale)
+      .mockResolvedValue(fresh);
+
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) => useBotFriendRoster(id),
+      { initialProps: { id: 'bot-a:1' } },
+    );
+    rerender({ id: 'bot-b:2' });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.counts).toEqual({ users: 0, bots: 0 });
+
+    // 旧 Bot 的响应后到,绝不能覆盖新 Bot 的名单。
+    await act(async () => {
+      resolveStale(directory());
+    });
+    expect(result.current.counts).toEqual({ users: 0, bots: 0 });
+  });
 });
 
 describe('useBotFriendRoster fetch-all regression (real service)', () => {
@@ -313,5 +397,52 @@ describe('useBotFriendRoster fetch-all regression (real service)', () => {
     expect(result.current.counts.users).toBeNull();
     // 另一类型不受影响。
     expect(result.current.counts.bots).toBe(0);
+  });
+
+  it('resolves names for >100 friends through ≤100-id detail batches', async () => {
+    // 回归:BCS /bots/query 契约限制 bot_ids ≤100。一次性提交全部 id 会被拒绝,
+    // 详情 Map 为空 → 所有好友退化为原始 id,按姓名搜索失效。
+    const total = 101;
+    listFriendConnectionsMock.mockImplementation(async (params: {
+      target_type?: string;
+      page?: number;
+    }) => {
+      if (params.target_type === 'bot') {
+        return { code: 20000, message: 'OK', data: { items: [], total: 0, page: 1, page_size: 100 } };
+      }
+      const page = params.page ?? 1;
+      const start = (page - 1) * 100;
+      const size = Math.min(100, total - start);
+      const ids = Array.from({ length: size }, (_, index) => `${start + index + 1}`);
+      return relationEnvelope(ids, total, page);
+    });
+    const batchSizes: number[] = [];
+    queryCollaborationBotsMock.mockImplementation(async (params: { bot_ids: string[] }) => {
+      batchSizes.push(params.bot_ids.length);
+      if (params.bot_ids.length > 100) throw new Error('bot_ids maxItems exceeded');
+      return {
+        code: 20000,
+        message: 'OK',
+        request_id: 'details',
+        data: {
+          items: params.bot_ids.map((id) => ({
+            bot_id: id,
+            kind: 'human',
+            name: `同事${id.replace('human_', '')}`,
+            status: 'online',
+          })),
+        },
+      };
+    });
+
+    const { result } = renderHook(() => useBotFriendRoster(BOT_UUID));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const items = result.current.sections?.human.ok ? result.current.sections.human.data.items : [];
+    expect(items).toHaveLength(total);
+    expect(batchSizes).toHaveLength(2);
+    expect(batchSizes.every((size) => size <= 100)).toBe(true);
+    // 第二批(第 101 个好友)也解析到姓名,姓名搜索可命中。
+    expect(filterFriendViewsByKeyword(items, '同事101').map((view) => view.actorId)).toEqual(['101']);
   });
 });

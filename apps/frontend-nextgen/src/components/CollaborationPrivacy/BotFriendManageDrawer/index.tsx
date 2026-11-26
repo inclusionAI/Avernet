@@ -106,7 +106,9 @@ export function BotFriendManageDrawer({ open, onOpenChange, roster }: BotFriendM
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent side="right" size="md" bodyClassName="flex flex-col gap-4">
+      {/* 管理好友抽屉挂在仍在打开的「公开设置」Modal 内：取 nested 层级，
+          否则父 Modal 遮罩（--z-dialog）会盖住抽屉导致无法交互。 */}
+      <DrawerContent layer="nested" side="right" size="md" bodyClassName="flex flex-col gap-4">
         <DrawerHeader>
           <DrawerTitle>管理好友</DrawerTitle>
         </DrawerHeader>
