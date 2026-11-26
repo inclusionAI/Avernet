@@ -141,13 +141,16 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
       [...params, query.pageSize, (query.page - 1) * query.pageSize]);
     const page = rows.map(row => ({ row, value: JSON.parse(row.config_json) }));
     const phaseReports = query.includePresentation
-      ? await this.phaseReportRefs(this.db, page.filter(({ value }) => value.artifactStorage === 2).map(({ row }) => row.task_id))
-      : new Map<string, ArtifactRef[]>();
+      ? await this.phaseReportOutputs(this.db, page.filter(({ value }) => value.artifactStorage === 2).map(({ row }) => row.task_id))
+      : new Map<string, string[]>();
     // The opt-in projection reads phase reports without hydrating the tool audit.
     const items = await Promise.all(page.map(async ({ row, value }) => {
       const details = value.artifactStorage === 2 ? await this.get(value.detailsRef) as { judgment?: RecoveryStoredTask['judgment'] } : value;
-      const presentation = query.includePresentation ? presentRecoveryTask(value, details.judgment,
-        value.artifactStorage === 2 ? await this.readPhaseEvents(phaseReports.get(row.task_id) ?? []) : value.timeline ?? []) : {};
+      // A partial set of phase events cannot establish the task's first or last event.
+      const events = query.includePresentation && value.artifactStorage === 2
+        ? await this.readPhaseEvents(phaseReports.get(row.task_id) ?? []).catch(() => [])
+        : value.timeline ?? [];
+      const presentation = query.includePresentation ? presentRecoveryTask(value, details.judgment, events) : {};
       return { taskId: value.taskId as string, botId: value.request.target.bot_id as string, entityId: value.request.target.entity_id as string,
         env: value.request.target.env as string, sessionKey: value.request.session_key as string,
         status: value.status as RecoveryStoredTask['status'], phase: value.phase as RecoveryStoredTask['phase'],
@@ -159,25 +162,26 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     // Preserve the business result in JSON while the scheduler still owns a permit.
     return task.effectResumeSlot && ["completed", "failed", "canceled"].includes(task.status) ? "settling" : task.status;
   }
-  private async phaseReportRefs(db: IDatabase, taskIds: string[]): Promise<Map<string, ArtifactRef[]>> {
-    const refs = new Map<string, ArtifactRef[]>();
-    if (!taskIds.length) return refs;
+  private async phaseReportOutputs(db: IDatabase, taskIds: string[]): Promise<Map<string, string[]>> {
+    const reports = new Map<string, string[]>();
+    if (!taskIds.length) return reports;
     const placeholders = taskIds.map(() => "?").join(", ");
     const rows = await db.query<{ task_id: string; output_json: string }>(
       `SELECT task_id, output_json FROM ce_steps WHERE task_id IN (${placeholders}) AND step_type LIKE 'session_recovery%' AND output_json IS NOT NULL ORDER BY step_no`,
       taskIds);
     for (const row of rows) {
-      const ref = JSON.parse(row.output_json);
-      if (!ref.objectKey) continue;
-      const task = refs.get(row.task_id) ?? [];
-      task.push(ref);
-      refs.set(row.task_id, task);
+      const task = reports.get(row.task_id) ?? [];
+      task.push(row.output_json);
+      reports.set(row.task_id, task);
     }
-    return refs;
+    return reports;
   }
-  private async readPhaseEvents(refs: ArtifactRef[]): Promise<RecoveryTimelineEvent[]> {
+  private async readPhaseEvents(outputs: string[]): Promise<RecoveryTimelineEvent[]> {
     const events: RecoveryTimelineEvent[] = [];
-    for (const ref of refs) events.push(...(await this.get(ref) as { events: RecoveryTimelineEvent[] }).events);
+    for (const output of outputs) {
+      const ref = JSON.parse(output) as ArtifactRef;
+      if (ref.objectKey) events.push(...(await this.get(ref) as { events: RecoveryTimelineEvent[] }).events);
+    }
     return events;
   }
   private eventRemark(eventId: string): string { return `session-recovery-event:${createHash("sha256").update(eventId).digest("hex")}`; }
@@ -313,8 +317,8 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     const { pending_results: _legacyQueue, resultDelivery: _legacyDelivery, stoppedResultDelivery: _legacyStopped, ...businessDetails } = details as typeof details & Record<string, unknown>;
     const task = { ...state, ...businessDetails, timeline: legacy ? [...value.timeline ?? []] : [], evidence: details.evidence ?? [] } as RecoveryStoredTask;
     if (!legacy) {
-      const refs = await this.phaseReportRefs(db, [value.taskId]);
-      task.timeline.push(...await this.readPhaseEvents(refs.get(value.taskId) ?? []));
+      const reports = await this.phaseReportOutputs(db, [value.taskId]);
+      task.timeline.push(...await this.readPhaseEvents(reports.get(value.taskId) ?? []));
     }
     const audit = new AgentToolCallRepository(db, "session_recovery");
     const interventionCalls: AgentToolCall[] = [];
