@@ -12,10 +12,16 @@ export type SpaceBot = {
   botType?: string | null;
   hasServiceBot?: boolean;
   unambiguousEnvironment?: boolean;
+  /** Exact directory identity for host consumers that persist per-Bot settings. */
+  directoryId?: string;
+  entityId?: string;
+  ownerVerified?: boolean;
 };
 export type TeamclawBotDirectory = (input: {
   identity: RequestIdentity;
   space: AccessibleSpace;
+  target?: Pick<SpaceBot, 'ownerId' | 'botId' | 'env'>;
+  includeDirectoryIdentity?: boolean;
 }) => Promise<SpaceBot[]>;
 export type TeamclawScope = {
   identity: RequestIdentity;

@@ -4,6 +4,8 @@ import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
 import { CHECK_VERSION, DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError, type BotCheck, type DiagnosisEvent, type DiagnosisItem,
   type DiagnosisPage, type DiagnosisQuery, type MonitoringStore, type MonitoringTarget, type ResolvedReport, type MonitoringWindow } from "../services/monitoring/contracts.js";
 import { parseCheck, parseDiagnosis } from "../services/monitoring/validation.js";
+import { buildRecoveryTarget } from "../services/monitoring/session-recovery-trigger.js";
+import type { RecoveryRequest } from "../services/repair/session-recovery/contracts.js";
 import { CHECKS_TABLE, DIAGNOSES_TABLE, verifyMonitoringSchema } from "./monitoring-schema-check.js";
 
 import { target, targetKey, targetParams, targetWhere } from '../services/monitoring/target.js';
@@ -83,6 +85,25 @@ export class MonitoringRepository implements MonitoringStore {
   }
   async summaries(targets: readonly MonitoringTarget[], window: MonitoringWindow) {
     return this.run(() => readMonitoringSummaries(this.db, targets.map(target), window));
+  }
+  /** Resolve the report for an already-authorized recovery task. */
+  async diagnosisForRecovery(request: RecoveryRequest) {
+    return this.run(async () => {
+      const rows = await this.db.query(
+        `SELECT ${columns.join(', ')} FROM ${DIAGNOSES_TABLE} WHERE event_id = ? AND bot_id = ? AND env = ?`,
+        [request.event_id, request.target.bot_id, request.target.env],
+      );
+      for (const row of rows) {
+        const event = eventFromRow(row);
+        const recoveryTarget = buildRecoveryTarget(event);
+        if (event.eventId !== request.event_id || event.sessionKey !== request.session_key
+          || recoveryTarget?.bot_id !== request.target.bot_id || recoveryTarget.entity_id !== request.target.entity_id
+          || recoveryTarget.env !== request.target.env || recoveryTarget.engine !== request.target.engine) continue;
+        const { diagnosisId, decision, diagnosedAt, handlerName, businessProblemCategory, businessDiagnosis, systemDiagnosis } = event;
+        return { diagnosisId, decision, diagnosedAt, handlerName, businessProblemCategory, businessDiagnosis, systemDiagnosis };
+      }
+      return null;
+    });
   }
   async listCheckedTargets(): Promise<MonitoringTarget[]> {
     return this.run(async () => {

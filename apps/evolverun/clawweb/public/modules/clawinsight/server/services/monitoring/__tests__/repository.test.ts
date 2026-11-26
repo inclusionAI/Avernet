@@ -11,6 +11,7 @@ import { resolved, testTarget } from "./identity-fixtures.js";
 import { database } from "./test-database.js";
 import { DIAGNOSIS_V3_VERSION } from "../contracts.js";
 import { runtimeIdentity } from "./runtime-identity-fixture.js";
+import type { RecoveryRequest } from "../../repair/session-recovery/contracts.js";
 const fixture = (name: string) =>
   JSON.parse(
     readFileSync(
@@ -30,6 +31,18 @@ afterEach(async () => { await db?.close(); if (dir) rmSync(dir, { recursive: tru
 const insert = (event = alert) => repo.insertDiagnosis(resolved(parseDiagnosis(event, event.eventId)), now);
 const list = (query = {}, bot = "mock-bot-te") => repo.listDiagnoses(testTarget(bot), parseQuery(query));
 describe("monitoring real SQL persistence (no HTTP listener)", () => {
+  it("projects the diagnosis only when the event belongs to the same recovery Bot and session", async () => {
+    const event = { ...alert, env: "prod", sessionKey: "agent:main:example" };
+    const wire = parseDiagnosis(event, event.eventId);
+    await repo.insertDiagnosis({ wire, target: { botId: event.botId, entityId: event.entityId, env: event.env } }, now);
+    const request: RecoveryRequest = { event_id: event.eventId, delivery_key: "delivery", diagnosis: "", tc_fault_label: null,
+      session_key: event.sessionKey, target: { bot_id: event.botId, entity_id: event.entityId, env: "prod", engine: "TE" } };
+    const projection = await repo.diagnosisForRecovery(request);
+    expect(projection).toMatchObject({ diagnosisId: event.eventId, businessDiagnosis: event.businessDiagnosis, systemDiagnosis: event.systemDiagnosis });
+    expect(projection).not.toHaveProperty("runtimeIdentity");
+    expect(await repo.diagnosisForRecovery({ ...request, session_key: "agent:main:different" })).toBeNull();
+    expect(await repo.diagnosisForRecovery({ ...request, target: { ...request.target, entity_id: "different" } })).toBeNull();
+  });
   it("filters before pagination and derives choices independently of selected filters", async () => {
     for (let i = 0; i < 25; i++) await insert({ ...alert, eventId: `filter-${i}`, diagnosisId: `filter-${i}`, businessProblemCategory: "外部服务异常", businessProblemSubtype: i % 2 ? "请求超时" : "数据获取失败" });
     await insert({ ...alert, eventId: "other", diagnosisId: "other", businessProblemCategory: "任务执行异常", businessProblemSubtype: "执行路径缺失" });

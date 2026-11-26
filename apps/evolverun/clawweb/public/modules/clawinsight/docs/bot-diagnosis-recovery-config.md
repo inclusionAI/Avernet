@@ -99,6 +99,21 @@ Existing paused ordinary Owner notices remain paused.
   Eligibility uses the existing directory's `bot_type` and `active_engine` fields.
   Service Bots using either supported engine require platform evaluation before
   enablement. Desktop Bots and engines other than OpenClaw/TE are unsupported. Single-Bot owner writes to these Bots return 403.
+- TeamClaw settings can supply a canonical numeric `spaceId` string on
+  `GET /api/insight/v1/monitoring/bot-options` or in the existing
+  `POST /api/insight/v1/monitoring/configurations` single/bulk bodies.
+  The Host validates live space membership and exact Bot assignment.
+  Space options include `canConfigure` and a disabled reason where applicable.
+  This settings scope does not include diagnosis history or monitoring counters.
+  Only the Bot Owner and explicit Bot collaborators who currently belong
+  to the space can change a supported Bot's switches. Membership alone,
+  including a space administrator role, does not grant Bot edits.
+  A scoped bulk write covers the configurable production Bots in that space,
+  regardless of search or pagination. The Host checks assignment and
+  collaborator standing again before each write. The same per-Bot record,
+  switch restrictions and version checks apply. Without `spaceId` the
+  existing owner-only scope remains in effect. Hosts without a space
+  provider reject scoped requests and keep serving the original endpoints.
 - An authenticated ClawInsight or global administrator can read or replace a single Bot's
   full configuration within the existing tenant and target-environment scope via `GET` or `PUT`
   `/api/insight/v1/monitoring/configurations/:botRef`. Both return

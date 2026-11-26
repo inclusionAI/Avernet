@@ -12,6 +12,7 @@ import { sessionReadCoverage } from "../../services/repair/session-recovery/sess
 import { createAgentExecutionStep } from "../../services/repair/common/agent-execution.js";
 import { parseEffectResumeConfig } from "../../services/repair/session-recovery/effect-resume.js";
 import { trajectoryIndexReads } from "../../services/repair/session-recovery/bootstrap-evidence.js";
+import { presentRecoveryTask } from "../../services/repair/session-recovery/task-list.js";
 
 export type { RecoveryStoredTask } from "../../services/repair/session-recovery/task-contracts.js";
 export type RecoveryArtifactStore = Required<Pick<ObjectStore, "getObject" | "putObject">>;
@@ -135,23 +136,49 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     if (query.status) { where.push("JSON_EXTRACT(config_json, '$.status') = ?"); params.push(query.status); }
     const clause = where.join(' AND ');
     const [count] = await this.db.query<{ total: number }>(`SELECT COUNT(*) AS total FROM ce_tasks WHERE ${clause}`, params);
-    const rows = await this.db.query<{ config_json: string; gmt_create: number | string }>(
-      `SELECT config_json, gmt_create FROM ce_tasks WHERE ${clause} ORDER BY id DESC LIMIT ? OFFSET ?`,
+    const rows = await this.db.query<{ task_id: string; config_json: string; gmt_create: number | string }>(
+      `SELECT task_id, config_json, gmt_create FROM ce_tasks WHERE ${clause} ORDER BY id DESC LIMIT ? OFFSET ?`,
       [...params, query.pageSize, (query.page - 1) * query.pageSize]);
-    // Only the requested page's details are needed. Do not hydrate tool audits or timelines for a list.
-    const items = await Promise.all(rows.map(async row => {
-      const value = JSON.parse(row.config_json);
+    const page = rows.map(row => ({ row, value: JSON.parse(row.config_json) }));
+    const phaseReports = query.includePresentation
+      ? await this.phaseReportRefs(this.db, page.filter(({ value }) => value.artifactStorage === 2).map(({ row }) => row.task_id))
+      : new Map<string, ArtifactRef[]>();
+    // The opt-in projection reads phase reports without hydrating the tool audit.
+    const items = await Promise.all(page.map(async ({ row, value }) => {
       const details = value.artifactStorage === 2 ? await this.get(value.detailsRef) as { judgment?: RecoveryStoredTask['judgment'] } : value;
+      const presentation = query.includePresentation ? presentRecoveryTask(value, details.judgment,
+        value.artifactStorage === 2 ? await this.readPhaseEvents(phaseReports.get(row.task_id) ?? []) : value.timeline ?? []) : {};
       return { taskId: value.taskId as string, botId: value.request.target.bot_id as string, entityId: value.request.target.entity_id as string,
         env: value.request.target.env as string, sessionKey: value.request.session_key as string,
         status: value.status as RecoveryStoredTask['status'], phase: value.phase as RecoveryStoredTask['phase'],
-        effect: details.judgment?.effect ?? 'unknown' as const, createdAt: row.gmt_create };
+        effect: details.judgment?.effect ?? 'unknown' as const, createdAt: row.gmt_create, ...presentation };
     }));
     return { items, page: query.page, pageSize: query.pageSize, total: Number(count?.total ?? 0) };
   }
   private storageStatus(task: RecoveryStoredTask): string {
     // Preserve the business result in JSON while the scheduler still owns a permit.
     return task.effectResumeSlot && ["completed", "failed", "canceled"].includes(task.status) ? "settling" : task.status;
+  }
+  private async phaseReportRefs(db: IDatabase, taskIds: string[]): Promise<Map<string, ArtifactRef[]>> {
+    const refs = new Map<string, ArtifactRef[]>();
+    if (!taskIds.length) return refs;
+    const placeholders = taskIds.map(() => "?").join(", ");
+    const rows = await db.query<{ task_id: string; output_json: string }>(
+      `SELECT task_id, output_json FROM ce_steps WHERE task_id IN (${placeholders}) AND step_type LIKE 'session_recovery%' AND output_json IS NOT NULL ORDER BY step_no`,
+      taskIds);
+    for (const row of rows) {
+      const ref = JSON.parse(row.output_json);
+      if (!ref.objectKey) continue;
+      const task = refs.get(row.task_id) ?? [];
+      task.push(ref);
+      refs.set(row.task_id, task);
+    }
+    return refs;
+  }
+  private async readPhaseEvents(refs: ArtifactRef[]): Promise<RecoveryTimelineEvent[]> {
+    const events: RecoveryTimelineEvent[] = [];
+    for (const ref of refs) events.push(...(await this.get(ref) as { events: RecoveryTimelineEvent[] }).events);
+    return events;
   }
   private eventRemark(eventId: string): string { return `session-recovery-event:${createHash("sha256").update(eventId).digest("hex")}`; }
   async listForEvent(eventId: string, ownerId: string, isAdmin: boolean): Promise<RecoveryStoredTask[]> {
@@ -285,10 +312,9 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     const details = legacy ? { ...value, interventionAuditComplete: undefined } : await this.get(detailsRef) as Pick<RecoveryStoredTask, "plan" | "judgment" | "delivery" | "evidence" | "interventionAuditComplete">;
     const { pending_results: _legacyQueue, resultDelivery: _legacyDelivery, stoppedResultDelivery: _legacyStopped, ...businessDetails } = details as typeof details & Record<string, unknown>;
     const task = { ...state, ...businessDetails, timeline: legacy ? [...value.timeline ?? []] : [], evidence: details.evidence ?? [] } as RecoveryStoredTask;
-    const steps = legacy ? [] : await db.query<{ output_json: string }>("SELECT output_json FROM ce_steps WHERE task_id = ? AND step_type LIKE 'session_recovery%' AND output_json IS NOT NULL ORDER BY step_no", [value.taskId]);
-    for (const step of steps) {
-      const ref = JSON.parse(step.output_json);
-      if (ref.objectKey) task.timeline.push(...(await this.get(ref) as { events: RecoveryTimelineEvent[] }).events);
+    if (!legacy) {
+      const refs = await this.phaseReportRefs(db, [value.taskId]);
+      task.timeline.push(...await this.readPhaseEvents(refs.get(value.taskId) ?? []));
     }
     const audit = new AgentToolCallRepository(db, "session_recovery");
     const interventionCalls: AgentToolCall[] = [];

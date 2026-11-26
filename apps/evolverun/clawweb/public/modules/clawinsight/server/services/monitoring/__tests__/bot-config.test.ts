@@ -384,3 +384,59 @@ it('does not retrofit enrollment defaults onto existing historical JSON', async 
   await configureBots(configs, directory, refs, principal, { botRef: refs.encode(target, 'one'), enabled: true, version: 1 });
   expect(await configs.find(target)).toMatchObject({ diagnosisEnabled: true, recoveryEnabled: true, configJson: '{}', version: 2 });
 });
+
+it('scopes options, versions and writes to the space and the current Bot grant', async () => {
+  const member = { ...principal, isClawInsightAdmin: false };
+  await bot('own');
+  await bot('collaborating', 'prod', '002', 'collab-entity');
+  await bot('view-only', 'prod', '003');
+  await bot('outside');
+  await bot('service', 'prod', '002', 'service-directory-entity');
+  await bot('desktop', 'prod', '001', '001');
+  await db.exec("UPDATE ac_bots SET bot_type='desktop' WHERE bot_id='desktop'");
+  await db.exec("UPDATE ac_bots SET bot_type='service' WHERE bot_id='service'");
+  const roster = (await directory.search({ principal, scope: 'all', q: '', limit: 50, after: null })).items;
+  const listBots = vi.fn(async (_principal, spaceId: string) =>
+    roster.filter(row => spaceId === '123' ? row.botId !== 'outside' : row.botId === 'outside'));
+  let retainedGrant = true;
+  const configurableBot = vi.fn(async (_principal, _spaceId, row: typeof roster[number]) =>
+    row.botId === 'own' || (row.botId === 'collaborating' && retainedGrant) ? row : null);
+  const browser = createMonitoringBrowserService(new MonitoringRepository(db), directory, refs, scope, Date.now,
+    configs, undefined, undefined, { listBots, configurableBot });
+  const get = (botId: string) => roster.find(row => row.botId === botId)!;
+  await configs.replaceConfiguration(get('collaborating'), { ...switches(0, false), configJson: '{"tag":"keep"}' });
+  await configs.setSwitches(get('service'), switches(0));
+
+  const options = await browser.options(member, { scope: 'mine', env: 'prod', spaceId: '123', limit: '10' });
+  expect(options.items.map(row => [row.botId, row.canConfigure])).toEqual([
+    ['desktop', false], ['service', false], ['view-only', false], ['collaborating', true], ['own', true],
+  ]);
+  expect(options.items[0]).toMatchObject({ botType: 'desktop', configurationDisabledReason: '桌面 Bot 暂不支持' });
+  expect(options.items[1]).toMatchObject({ configuration: { recoveryEnabled: true, version: 1 } });
+  expect(options.items[3]).toMatchObject({ configuration: { recoveryEnabled: false, version: 1 } });
+  const page = await browser.options(member, { env: 'prod', spaceId: '123', limit: '1' });
+  await expect(browser.options(member, { env: 'prod', spaceId: '456', limit: '1', cursor: page.nextCursor! }))
+    .rejects.toMatchObject({ code: 'INVALID_EVENT' });
+  expect((await browser.options(member, { env: 'prod', spaceId: '123', q: 'collaborating', limit: '1' })).items)
+    .toEqual([expect.objectContaining({ botId: 'collaborating' })]);
+
+  const set = (botId: string, version: number, spaceId?: string) =>
+    browser.configure!(member, { botRef: refs.encode(get(botId), 'one'), enabled: true, version, ...(spaceId && { spaceId }) });
+  await expect(set('outside', 0, '123')).rejects.toMatchObject({ code: 'BOT_NOT_FOUND' });
+  await expect(set('view-only', 0, '123')).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  await expect(set('desktop', 0, '123')).rejects.toMatchObject({ code: 'FORBIDDEN', message: '桌面 Bot 暂不支持' });
+  await expect(set('collaborating', 1)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  await expect(set('collaborating', 0, '123')).rejects.toMatchObject({ code: 'EVENT_CONFLICT' });
+  await expect(set('collaborating', 1, '123')).resolves.toEqual({ updated: 1, failed: [] });
+  expect(await configs.find(get('collaborating'))).toMatchObject({
+    diagnosisEnabled: true, recoveryEnabled: true, version: 2, configJson: '{"tag":"keep"}',
+  });
+
+  retainedGrant = false;
+  await expect(browser.configure!(member, { all: true, enabled: false, spaceId: '123' })).resolves.toEqual({ updated: 1, failed: [] });
+  expect(await configs.find(get('own'))).toMatchObject({ recoveryEnabled: false });
+  expect(await configs.find(get('collaborating'))).toMatchObject({ recoveryEnabled: true, version: 2 });
+  expect(await configs.find(get('service'))).toMatchObject({ recoveryEnabled: true, version: 1 });
+  expect(await configs.find(get('outside'))).toBeNull();
+  expect(await configs.find(get('desktop'))).toBeNull();
+});

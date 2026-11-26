@@ -1,8 +1,9 @@
 import { validateRecoveryTeamConfiguration } from "../repair/session-recovery/bot-configuration.js";
 import type { RecoveryAppConfigStore } from "../repair/session-recovery/configuration-contracts.js";
 import { MonitoringError } from './contracts.js';
+import { parseSpaceId } from './browser-validation.js';
 import { validBotConfiguration, type BotDiagnosisRecoveryConfig, type BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
-import type { DirectoryBot, MonitoringBotDirectory, MonitoringPrincipal, MonitoringReferences } from './directory-contracts.js';
+import type { DirectoryBot, MonitoringBotDirectory, MonitoringPrincipal, MonitoringReferences, MonitoringSpaceSettings } from './directory-contracts.js';
 
 export type BotEnabledNotifier = (bots: readonly DirectoryBot[]) => Promise<void>;
 
@@ -51,14 +52,16 @@ export async function replaceBotConfiguration(store: BotDiagnosisRecoveryConfigS
   return saved;
 }
 
-/** Only current owners may write, including when the caller can read all Bots. */
+/** Legacy writes remain owner-only. Scoped writes additionally consult the host's live Editor policy. */
 export async function configureBots(store: BotDiagnosisRecoveryConfigStore | undefined, directory: MonitoringBotDirectory,
-  references: MonitoringReferences, principal: MonitoringPrincipal, input: unknown, onBotEnabled?: BotEnabledNotifier) {
+  references: MonitoringReferences, principal: MonitoringPrincipal, input: unknown, onBotEnabled?: BotEnabledNotifier, spaceSettings?: MonitoringSpaceSettings) {
   if (!store) throw new MonitoringError('NOT_READY', '诊断监控配置尚未就绪。');
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new MonitoringError('INVALID_EVENT', '配置参数无效。');
   const value = input as Record<string, unknown>;
   const all = value.all === true;
-  if (typeof value.enabled !== 'boolean' || Object.keys(value).some(k => !(all ? ['all', 'enabled'] : ['botRef', 'enabled', 'version']).includes(k))
+  const spaceId = parseSpaceId(value.spaceId);
+  if (spaceId && !spaceSettings) throw new MonitoringError('NOT_READY', '空间 Bot 设置尚未就绪。');
+  if (typeof value.enabled !== 'boolean' || Object.keys(value).some(k => !(all ? ['all', 'enabled', 'spaceId'] : ['botRef', 'enabled', 'version', 'spaceId']).includes(k))
     || !all && (typeof value.botRef !== 'string' || !Number.isSafeInteger(value.version) || Number(value.version) < 0)) {
     throw new MonitoringError('INVALID_EVENT', '配置参数无效。');
   }
@@ -66,7 +69,7 @@ export async function configureBots(store: BotDiagnosisRecoveryConfigStore | und
   const failed: string[] = [];
   const enabledBots: DirectoryBot[] = [];
   const write = async (bot: DirectoryBot, version: number, previous?: BotDiagnosisRecoveryConfig | null) => {
-    if (bot.ownerId !== principal.staffId) throw new MonitoringError('FORBIDDEN', '仅 Bot 所有者可以修改配置。');
+    if (!spaceId && bot.ownerId !== principal.staffId) throw new MonitoringError('FORBIDDEN', '仅 Bot 所有者可以修改配置。');
     if (bot.env !== 'prod') throw new MonitoringError('FORBIDDEN', '仅支持生产环境 Bot 的诊断自愈配置。');
     const disabledReason = botConfigurationDisabledReason(bot);
     if (disabledReason) throw new MonitoringError('FORBIDDEN', disabledReason);
@@ -83,7 +86,35 @@ export async function configureBots(store: BotDiagnosisRecoveryConfigStore | und
     updated++;
   };
   try {
-    if (!all) {
+    if (spaceId && spaceSettings) {
+      const roster = (await spaceSettings.listBots(principal, spaceId))
+        .filter(bot => principal.allowedTargetEnvs.includes(bot.env));
+      if (!all) {
+        const target = references.decode(value.botRef as string, principal.tenant);
+        const bot = roster.find(candidate => candidate.botId === target.botId
+          && candidate.entityId === target.entityId && candidate.env === target.env);
+        if (!bot) throw new MonitoringError('BOT_NOT_FOUND', 'Bot 不存在或无权访问。');
+        if (bot.env !== 'prod') throw new MonitoringError('FORBIDDEN', '仅支持生产环境 Bot 的诊断自愈配置。');
+        const disabledReason = botConfigurationDisabledReason(bot);
+        if (disabledReason) throw new MonitoringError('FORBIDDEN', disabledReason);
+        const current = await spaceSettings.configurableBot(principal, spaceId, bot);
+        if (!current) throw new MonitoringError('FORBIDDEN', '仅 Bot 所有者和已获编辑权限的协作者可以修改配置。');
+        await write(current, Number(value.version));
+      } else {
+        const eligible = roster.filter(bot => bot.env === 'prod' && !botConfigurationDisabledReason(bot));
+        for (let offset = 0; offset < eligible.length; offset += 50) {
+          const batch = eligible.slice(offset, offset + 50);
+          const configs = await store.findMany(batch);
+          for (let i = 0; i < batch.length; i++) {
+            const bot = batch[i];
+            try {
+              const current = await spaceSettings.configurableBot(principal, spaceId, bot);
+              if (current && !botConfigurationDisabledReason(current)) await write(current, configs[i]?.version ?? 0, configs[i]);
+            } catch { failed.push(references.encode(bot, principal.tenant)); }
+          }
+        }
+      }
+    } else if (!all) {
       const bot = await directory.get(references.decode(value.botRef as string, principal.tenant), principal);
       if (!bot) throw new MonitoringError('BOT_NOT_FOUND', 'Bot 不存在或无权访问。');
       await write(bot, Number(value.version));

@@ -6,6 +6,13 @@ export function queryKeys(query: Record<string, unknown>, keys: readonly string[
     throw new MonitoringError('INVALID_EVENT', '不支持此查询参数。');
   }
 }
+export function parseSpaceId(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !/^[1-9][0-9]{0,19}$/.test(value)) {
+    throw new MonitoringError('INVALID_EVENT', '空间标识无效。');
+  }
+  return value;
+}
 export function parseWindow(query: Record<string, unknown>, now: number): MonitoringWindow {
   if (query.start === undefined && query.end === undefined) {
     const day = Math.floor((now + 8 * 3600_000) / 86400_000) * 86400_000 - 8 * 3600_000;

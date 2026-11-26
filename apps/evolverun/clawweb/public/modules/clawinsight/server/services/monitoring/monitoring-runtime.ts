@@ -5,7 +5,7 @@ import { getRepositories, type IDatabase } from '@avernet/clawweb-shared/server/
 import { MonitoringRepository } from '../../repositories/monitoring-repository.js';
 import { BotDiagnosisRecoveryConfigRepository } from '../../repositories/bot-diagnosis-recovery-config-repository.js';
 import { type MonitoringApi, type MonitoringRecoveryTrigger, MonitoringError } from './contracts.js';
-import type { DirectoryScope, LegacyReportBinding, MonitoringBotDirectory, MonitoringBrowserApi, MonitoringPrincipal } from './directory-contracts.js';
+import type { DirectoryScope, LegacyReportBinding, MonitoringBotDirectory, MonitoringBrowserApi, MonitoringPrincipal, MonitoringSpaceSettings } from './directory-contracts.js';
 import { createMonitoringService } from './monitoring-service.js';
 import { createMonitoringBrowserService } from './monitoring-browser-service.js';
 import { createTargetResolver } from './target-resolver.js';
@@ -21,6 +21,7 @@ export type MonitoringIntegration = {
   bindings?: readonly LegacyReportBinding[];
   recovery?: MonitoringRecoveryTrigger;
   onBotEnabled?: BotEnabledNotifier;
+  spaceSettings?: MonitoringSpaceSettings;
   principal: (request: Request) => Promise<MonitoringPrincipal>;
 };
 let configuredIntegration: MonitoringIntegration | null = null;
@@ -54,7 +55,7 @@ export function createMonitoringRuntime(
       const resolver = createTargetResolver(integration.directory, integration.scope, integration.bindings);
       const references = createMonitoringReferences(now);
       assembled = { integration, service: createMonitoringService(repository, resolver, now, integration.recovery),
-        browser: createMonitoringBrowserService(repository, integration.directory, references, integration.scope, now, new BotDiagnosisRecoveryConfigRepository(getDb()), new AppConfigRepository(getDb()), integration.onBotEnabled) };
+        browser: createMonitoringBrowserService(repository, integration.directory, references, integration.scope, now, new BotDiagnosisRecoveryConfigRepository(getDb()), new AppConfigRepository(getDb()), integration.onBotEnabled, integration.spaceSettings) };
       return assembled;
     } catch (error) {
       if (error instanceof MonitoringError) throw error;
