@@ -664,6 +664,58 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).not.toContain('刷新状态');
   });
 
+  test('审批中在途卡入口为审批进度而非检测工单', () => {
+    // 检测通过进入 APPROVING 后，检测单已完成使命：入口须切换为「查看审批进度」，
+    // 与行级（RelationCard）共用同一审批工单外链（friend_ext 投影），不再透出检测工单链接。
+    const approvingRecord = {
+      risk_check_id: 'rk-20',
+      phase: 'APPROVING',
+      security_status: 'PASS',
+      detail_url: 'https://example.test/risk/rk-20',
+      auto_poll_paused: false,
+      auto_poll_until: '2026-11-26T09:36:28',
+      next_action_at: null,
+      target: { public_scope: 'user', visibility: 'public', view_depts: [] },
+      error_reason: null,
+      invalidation_reason: null,
+      approval_puid: 'antprocess-agentclaw_botpublic_risk-rk-20',
+    };
+    const renderApproving = (approvalUrl?: string | null) =>
+      renderWithPortals(
+        <PublicationEditor
+          open
+          audience="user"
+          initialConfig={{ scope: 'all', organizationPaths: [] }}
+          risk={{
+            uiState: { kind: 'approving', record: approvingRecord },
+            record: approvingRecord,
+            approvalUrl,
+            isCreating: false,
+            refreshCurrent: jest.fn(),
+            isRefreshing: false,
+          }}
+          onSearch={jest.fn()}
+          onClose={jest.fn()}
+          onSubmit={jest.fn()}
+        />,
+      );
+
+    const withUrl = renderApproving('https://approval.example.com/order/rk-20');
+    expect(withUrl).toContain('公开工单审批进行中');
+    expect(withUrl).toContain('查看审批进度');
+    expect(withUrl).toContain('<a');
+    expect(withUrl).toContain('href="https://approval.example.com/order/rk-20"');
+    expect(withUrl).toContain('target="_blank"');
+    expect(withUrl).toContain('rel="noopener noreferrer"');
+    expect(withUrl).not.toContain('查看检测工单');
+    expect(withUrl).not.toContain('https://example.test/risk/rk-20');
+
+    // 无 friend_ext 投影外链时回退工单中心入口，与行级 fallback 语义一致。
+    const withoutUrl = renderApproving(null);
+    expect(withoutUrl).toContain('查看审批进度');
+    expect(withoutUrl).not.toContain('查看检测工单');
+  });
+
   test('Bot 可见性和好友审批编辑器使用单选组语义', () => {
     const publicationHtml = renderWithPortals(
       <PublicationEditor
