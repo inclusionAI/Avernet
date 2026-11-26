@@ -62,7 +62,7 @@ const beijingTime = new Intl.DateTimeFormat('zh-CN', {
 });
 
 export function recoveryTime(value?: string | number | null) {
-  if (value == null || value === '') return '—';
+  if (value === undefined || value === null || value === '') return '—';
   const time = new Date(value);
   return Number.isNaN(time.getTime()) ? '—' : beijingTime.format(time);
 }
