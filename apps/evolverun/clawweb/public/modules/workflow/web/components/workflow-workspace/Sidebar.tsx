@@ -52,7 +52,7 @@ export default function Sidebar({ activeView, onViewChange, isAdmin, hasWorkflow
     <div className={`border-b border-border ${compact ? 'px-3' : 'px-4'} py-4`}>
       <div className="flex items-center gap-3">
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-base text-primary-foreground shadow-sm">✦</span>
-        <div className={compact ? 'sr-only' : undefined}><h2 className="text-sm font-semibold tracking-tight text-slate-950">任务护航</h2><p className="mt-0.5 text-[10px] uppercase tracking-[0.16em] text-slate-400">TASK GUARD</p></div>
+        <div className={compact ? 'sr-only' : undefined}><h2 className="text-sm font-semibold tracking-tight text-slate-950">任务护航</h2><p className="mt-0.5 text-[10px] tracking-[0.16em] text-slate-400">运行观察</p></div>
       </div>
     </div>
     <div className={`relative min-h-0 flex-1 overflow-y-auto ${compact ? 'px-2' : 'px-3'} py-4`}>

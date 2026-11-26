@@ -449,7 +449,13 @@ function EvolutionAnalysisPanel({
             </p>
           )}
         </div>
-        <div className="flex max-w-full flex-wrap items-center gap-2">
+<div className="flex max-w-full flex-wrap items-center gap-2">
+          <Link
+            to={evolutionUrl()}
+            className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+          >
+            查看相关问题
+          </Link>
           {!readOnly && analyzing && (
             <button
               type="button"

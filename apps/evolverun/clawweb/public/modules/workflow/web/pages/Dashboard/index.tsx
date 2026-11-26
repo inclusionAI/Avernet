@@ -152,7 +152,7 @@ export default function DashboardPage({ embedded = false }: { embedded?: boolean
             <h1 className="text-xl font-semibold tracking-tight text-slate-950">管理员数据大盘</h1>
             {DEMO && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200">示例数据</span>}
           </div>
-          <p className="mt-1 text-sm text-slate-500">全局运行健康、护航进展与风险工作流</p>
+          <p className="mt-1 text-sm text-slate-500">全局运行统计口径（仅管理员可见），聚焦运行健康、护航待办与风险工作流；单个工作流的运行状态请查看「运行概览」</p>
         </div>
         <TimeRangeSelector value={timeRange} onChange={setTimeRange} />
       </div>

@@ -615,7 +615,7 @@ function OverviewContent({ workflow }: OverviewTabProps) {
           </div>
         ) : runs.length === 0 ? (
           <div className="p-6">
-            <EmptyState title={hasFilters ? '没有匹配的运行' : '暂无运行'} description={hasFilters ? '请调整筛选条件或重置筛选' : '该工作流尚未执行过'} />
+            <EmptyState title={hasFilters ? '没有匹配的运行' : '暂无运行'} description={hasFilters ? '请调整筛选条件或重置筛选' : '运行记录由执行引擎执行工作流后产生，执行一次工作流后即可在此查看'} />
           </div>
         ) : (
           <div className="overflow-x-auto">
