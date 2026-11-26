@@ -1,0 +1,221 @@
+apps/backend/tests/community/core/devices/services/test_baas_publish_task_handlers.py
+  s_885ffb973587a3::t_105edf448c5060 751-752,769,792-796
+  s_885ffb973587a3::t_11c6b5591b3721 797
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationSessionCreation.ts
+  s_885ffb973587a3::t_105edf448c5060 23,31-32,83-84,130-134,206
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/create_with_manifest.py
+  s_885ffb973587a3::t_105edf448c5060 97-99,164-166,219,264,272-275
+apps/frontend-nextgen/test/pages/Workspace/Chat/ConversationSessionPlaceholder.test.tsx
+  s_885ffb973587a3::t_105edf448c5060 251-255
+apps/frontend-nextgen/test/services/workspace/botModelCache.test.ts
+  s_885ffb973587a3::t_105edf448c5060 33-39
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/dormant/router.py
+  s_885ffb973587a3::t_105edf448c5060 28,50,109-111,115-118,124-127,135-136,138-140,149-157,167-172,223-225,227-228
+apps/frontend-nextgen/src/services/botWorkshop/excludeTree.ts
+  s_885ffb973587a3::t_105edf448c5060 16-26,32-33,42
+apps/backend/tests/community/core/bot_dormant/test_ops_service.py
+  s_885ffb973587a3::t_105edf448c5060 54-89
+engine/adapter/src/engine/community/api/transport/a2a/router.py
+  s_885ffb973587a3::t_105edf448c5060 55-60
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessions.test.tsx
+  s_885ffb973587a3::t_105edf448c5060 400-404
+apps/backend/src/agentclaw/community/core/engine_runtime/errors.py
+  s_885ffb973587a3::t_105edf448c5060 29-37,129
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotModels.ts
+  s_885ffb973587a3::t_105edf448c5060 35,37-38,58,70,77-79,88
+apps/frontend-nextgen/src/services/botWorkshop/protectedPaths.ts
+  s_885ffb973587a3::t_105edf448c5060 1-81
+apps/backend/tests/community/adapters/http/openapi_v1/dormant/test_dormant_handlers.py
+  s_885ffb973587a3::t_105edf448c5060 157-172,409-410,422-423,427
+apps/backend/src/agentclaw/community/di/modules/bot_dormant_module.py
+  s_885ffb973587a3::t_105edf448c5060 190,195,269-274,282-283
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/recycle_strategy.py
+  s_885ffb973587a3::t_105edf448c5060 11-23,25-26,40-127
+apps/frontend-nextgen/src/hooks/useExcludeFileTree.ts
+  s_885ffb973587a3::t_105edf448c5060 8,27-28,43,119-126,129-130,133,158
+apps/frontend-nextgen/test/pages/BotWorkshop/DebugChatStage.test.tsx
+  s_885ffb973587a3::t_105edf448c5060 73,77-78
+apps/backend/docs/openapi-v1/README.md
+  s_885ffb973587a3::t_105edf448c5060 1373,1448-1463,1476,1480-1483,1492-1498,1500,1502-1504,1515-1516
+apps/frontend-nextgen/test/pages/Workspace/hooks/useDebugChatClearContext.test.tsx
+  s_885ffb973587a3::t_105edf448c5060 17
+apps/backend/src/agentclaw/community/core/service_bot/README.md
+  s_885ffb973587a3::t_105edf448c5060 13-22
+engine/adapter/src/engine/community/api/tests/transport/test_runtime_status_a2a.py
+  s_885ffb973587a3::t_105edf448c5060 1-251
+apps/backend/tests/community/acceptance/bot_dormant/test_dormant_lifecycle.py
+  s_885ffb973587a3::t_105edf448c5060 4-5,8,85-86,88-90,180-246,248-249,252-253,260,265-269,271,284,309-389
+apps/frontend-nextgen/src/components/BotWorkshop/CopyBotModal/index.tsx
+  s_885ffb973587a3::t_105edf448c5060 73,232
+apps/backend/src/agentclaw/community/adapters/http/task/task_read_routes.py
+  s_885ffb973587a3::t_105edf448c5060 140,155
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/router.py
+  s_885ffb973587a3::t_105edf448c5060 81,153-156
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/config_manifest.py
+  s_885ffb973587a3::t_105edf448c5060 55-57,144-146,199-202
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/collaborator.py
+  s_885ffb973587a3::t_105edf448c5060 12,18
+apps/backend/src/agentclaw/community/core/bot_dormant/notify_log.py
+  s_885ffb973587a3::t_105edf448c5060 4-5,45-75
+  s_885ffb973587a3::t_4f888f60769f48 76
+apps/backend/tests/community/core/bot_dormant/test_notify_log.py
+  s_885ffb973587a3::t_105edf448c5060 4-7,35-91
+apps/backend/tests/community/core/bot_dormant/test_decide.py
+  s_885ffb973587a3::t_105edf448c5060 12-14,24,26,40-41,44,57-66,166,190-194,198,212-264,501-502,505,507-508,512-513,515-528,530-533,535-552,554-560,594-595,597-598,600-603,606-610,613-614,616-618,620-621,623-624,630-631,633-634,636-660,664-665,668,670,672-678
+apps/backend/docs/plans/2026-11-07-openapi-recycle-async.md
+  s_885ffb973587a3::t_105edf448c5060 7,14,61,67,83,88-91,93,97,112,133,137-147
+apps/backend/src/agentclaw/community/di/modules/openapi_user_id_bypass_config_module.py
+  s_885ffb973587a3::t_105edf448c5060 47
+apps/backend/tests/community/http/test_copy_retry.py
+  s_885ffb973587a3::t_105edf448c5060 68-71,73-75,161-229
+apps/frontend-nextgen/src/services/workspace/botModelCache.ts
+  s_885ffb973587a3::t_105edf448c5060 15-19,21,24-28,33,36-39
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.identity.test.tsx
+  s_885ffb973587a3::t_105edf448c5060 73-79,83-85,100-102,104,110-113
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/source_bot_access.py
+  s_885ffb973587a3::t_105edf448c5060 9-21,33,62-79,81-85,91,93-97,99-100,106-110
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_885ffb973587a3::t_105edf448c5060 236-261
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/recycle.py
+  s_885ffb973587a3::t_105edf448c5060 8,18-20,49-50,55,192-193,204,207,214-216,218,222-232
+apps/backend/tests/community/http/test_copy_route.py
+  s_885ffb973587a3::t_105edf448c5060 39,92-97,139,160,167,205,227,255,280,295,308,320,340,356-452,455,466,476,489,499,501-502,504-505,510-511,516-518,526,554,574-576,588
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/containers/router.py
+  s_885ffb973587a3::t_105edf448c5060 8,86-88
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/dormant/schemas.py
+  s_885ffb973587a3::t_105edf448c5060 57,73,77
+apps/backend/docs/openapi-v1/engine-surface.zh-CN.md
+  s_885ffb973587a3::t_105edf448c5060 154-163
+apps/backend/tests/community/core/task/task_runner/test_relay_prompt.py
+  s_885ffb973587a3::t_105edf448c5060 84-86
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotModels.test.tsx
+  s_885ffb973587a3::t_105edf448c5060 84
+apps/frontend-nextgen/src/components/BotWorkshop/CopyBotModal/ExcludeFileTree.tsx
+  s_885ffb973587a3::t_105edf448c5060 2-7,22-23,31-45,53,82,89,117-124,127-131,154-167
+apps/backend/src/agentclaw/community/adapters/http/task/relay_routes.py
+  s_885ffb973587a3::t_105edf448c5060 22,32-34,115,127-133,135-138
+apps/backend/src/agentclaw/community/core/bot_dormant/README.md
+  s_885ffb973587a3::t_105edf448c5060 44-47,55-58,60-62,66-98
+apps/backend/src/agentclaw/community/core/bot_management/README.md
+  s_885ffb973587a3::t_105edf448c5060 467-472,482-488
+apps/backend/docs/openapi-v1/engine-surface.md
+  s_885ffb973587a3::t_105edf448c5060 236-250
+apps/backend/tests/community/di/test_openapi_user_id_bypass_config_provider.py
+  s_885ffb973587a3::t_105edf448c5060 35-37,185-221
+  s_885ffb973587a3::t_dde136b410ef00 222-223
+apps/backend/tests/community/http/test_source_bot_access.py
+  s_885ffb973587a3::t_105edf448c5060 7,25-28,33-35,39-52,70-71,74-77,84-85,87-90,94-96,98-101,109-112,121-124,131-132,148-151,173,189
+apps/backend/src/agentclaw/community/core/bot_dormant/recycle_task.py
+  s_885ffb973587a3::t_105edf448c5060 89,95-97,99-102,118,122,126,155-170,184-185,350-355,357-363,365-366,401-403,405,410
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/conftest.py
+  s_885ffb973587a3::t_105edf448c5060 137,146,163,298,317
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/backend.py
+  s_885ffb973587a3::t_105edf448c5060 48-51
+apps/backend/tests/community/adapters/http/task/router_test_support.py
+  s_885ffb973587a3::t_105edf448c5060 61-63,153-154,156,167-169,171-173,178,186-192,236,290-293
+  s_885ffb973587a3::t_808829d4d0cd31 294
+apps/backend/tests/community/endpoints/test_bot_dormant_ops_router.py
+  s_885ffb973587a3::t_105edf448c5060 71-83,98-100,103,213-275
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatPanel.tsx
+  s_885ffb973587a3::t_105edf448c5060 83-86,92-95,102,120-122
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessionFilters.test.tsx
+  s_885ffb973587a3::t_105edf448c5060 481-485
+apps/backend/tests/community/core/bot_dormant/test_internal_endpoints.py
+  s_885ffb973587a3::t_105edf448c5060 14,31-32,44-47,73-77,261-264,279,281-282,474-540
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/copy.py
+  s_885ffb973587a3::t_105edf448c5060 77-79,428,437-443,465-477,491-512,647-649,773-782,784-785,795,806-813,858-860,877
+apps/backend/src/agentclaw/community/core/devices/services/baas_publish_task_handlers.py
+  s_885ffb973587a3::t_105edf448c5060 499-504
+apps/backend/specs/2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md
+  s_885ffb973587a3::t_105edf448c5060 551,1441,1457
+apps/backend/src/agentclaw/community/core/engine_runtime/models.py
+  s_885ffb973587a3::t_105edf448c5060 63-67,103-126,128-131,133-135
+apps/backend/src/agentclaw/community/core/bot_dormant/service.py
+  s_885ffb973587a3::t_105edf448c5060 31,297-300
+apps/backend/src/agentclaw/community/core/repository/implementations/task/task_info_repository.py
+  s_885ffb973587a3::t_105edf448c5060 132-133,135,143
+apps/backend/tests/community/adapters/http/task/test_relay_handoff_display.py
+  s_885ffb973587a3::t_105edf448c5060 1-147
+apps/backend/tests/community/adapters/http/task/test_router.py
+  s_885ffb973587a3::t_105edf448c5060 3,12,191-197,200-297
+  s_885ffb973587a3::t_8e8587fdc5ca46 298
+apps/backend/tests/community/core/bot_management/aicoding/test_recycle_strategy.py
+  s_885ffb973587a3::t_105edf448c5060 23,51-142
+  s_885ffb973587a3::t_349e02c549683e 143-144
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  s_885ffb973587a3::t_105edf448c5060 231,775,907,998
+apps/backend/tests/community/http/test_copy_skill_sets_endpoint.py
+  s_885ffb973587a3::t_105edf448c5060 80-85,91,112
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_relay_dispatch.py
+  s_885ffb973587a3::t_105edf448c5060 5-7,31-40,48-175
+apps/backend/src/agentclaw/community/core/bot_dormant/ops_service.py
+  s_885ffb973587a3::t_105edf448c5060 85,87-103,130-153,179
+apps/frontend-nextgen/src/pages/Workspace/hooks/useDebugChatClearContext.ts
+  s_885ffb973587a3::t_105edf448c5060 14
+apps/frontend-nextgen/test/botCopyAvailability.test.ts
+  s_885ffb973587a3::t_105edf448c5060 2,4-9,11,16,18,59-61,65,68,71-84,88-89,92,94-161,166,170-176,180-195,205-206,214,216-219,225,229-230,232-237,239,242
+apps/frontend-nextgen/test/services/workspace/botSessionService.test.ts
+  s_885ffb973587a3::t_105edf448c5060 333-408
+engine/adapter/src/engine/community/api/transport/a2a/kernel.py
+  s_885ffb973587a3::t_105edf448c5060 62,67,163-191
+  s_885ffb973587a3::t_0964fc5a24dccd 192
+apps/frontend-nextgen/src/domain/botWorkshop.ts
+  s_885ffb973587a3::t_105edf448c5060 269-280,282-299,308-332,334
+apps/backend/tests/community/adapters/http/openapi_v1/test_user_delegated_creation.py
+  s_885ffb973587a3::t_105edf448c5060 93-95,282
+apps/backend/tests/community/repository/task/test_task_info_repository.py
+  s_885ffb973587a3::t_105edf448c5060 84-101,106-109,114-116,118-120,124-140,143-160
+apps/backend/tests/community/adapters/http/openapi_v1/test_container_endpoints.py
+  s_885ffb973587a3::t_105edf448c5060 5-8,18-22,92-173
+  s_885ffb973587a3::t_840c8bea30fac0 174-175
+apps/backend/specs/2026-09-23-task-cli/end-to-end-relay-design.md
+  s_885ffb973587a3::t_105edf448c5060 162,228,262,455,522
+apps/backend/src/agentclaw/community/core/bot_dormant/bot_dormant_service_protocol.py
+  s_885ffb973587a3::t_105edf448c5060 4,54,56-59,61-64,67-68
+apps/backend/src/agentclaw/community/core/engine_runtime/__init__.py
+  s_885ffb973587a3::t_105edf448c5060 5,30
+apps/backend/tests/community/core/engine_runtime/test_models.py
+  s_885ffb973587a3::t_105edf448c5060 1-34
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  s_885ffb973587a3::t_105edf448c5060 21,81-82,251,253,278,283,644-652,673-681
+apps/backend/src/agentclaw/community/core/bot_management/engines/provisioning.py
+  s_885ffb973587a3::t_105edf448c5060 254-257
+apps/backend/src/agentclaw/community/core/task/task_runner/client/relay_prompt.py
+  s_885ffb973587a3::t_105edf448c5060 127-130
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_sessions.py
+  s_885ffb973587a3::t_105edf448c5060 1005-1071
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  s_885ffb973587a3::t_105edf448c5060 111-122,188-230,485-489,491,496,508,511,514-537,614-619,624,713-717,719,724,737,740-742
+engine/adapter/src/engine/community/api/session/runtime_status.py
+  s_885ffb973587a3::t_105edf448c5060 1,15,61-77
+apps/backend/tests/community/endpoints/test_config_manifest_source_matrix.py
+  s_885ffb973587a3::t_105edf448c5060 186
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotChat.ts
+  s_885ffb973587a3::t_105edf448c5060 30,48-49
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/router.py
+  s_885ffb973587a3::t_105edf448c5060 289,310
+apps/backend/src/agentclaw/community/adapters/http/bot_dormant/router.py
+  s_885ffb973587a3::t_105edf448c5060 7-11,185,195-196,202-203,205-210,225-244
+  s_885ffb973587a3::t_d92383c89813fa 245-246
+apps/backend/tests/community/core/bot_management/aicoding/test_recycle_task.py
+  s_885ffb973587a3::t_105edf448c5060 13,63,177-203,248-251,253-264,266-267,270-285,287,393,406-408,410,443,662-665,668,673-677,679,722-804
+apps/backend/src/agentclaw/community/core/bot_dormant/recycle_service.py
+  s_885ffb973587a3::t_105edf448c5060 46-47,55-58,60,62-71,186-194
+  s_885ffb973587a3::t_83bb3db0c4da78 195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f115d228353f21a1f98b2c9d0ddafd3205e6a3f1",
+  "prompts": {},
+  "sessions": {
+    "s_885ffb973587a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17742-1085-7833-94e1-041d70172b63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

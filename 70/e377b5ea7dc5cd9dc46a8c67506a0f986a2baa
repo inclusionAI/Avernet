@@ -1,0 +1,31 @@
+apps/backend/tests/community/adapters/http/task/test_router.py
+  s_885ffb973587a3::t_b98574cbfe1fe0 254-298
+apps/backend/src/agentclaw/community/adapters/http/task/relay_routes.py
+  s_885ffb973587a3::t_5e9c216033e93e 130
+  s_885ffb973587a3::t_4e45ac467f9dc5 129,132
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_relay_dispatch.py
+  s_885ffb973587a3::t_1e3f6f572d7eee 126
+  s_885ffb973587a3::t_4e45ac467f9dc5 110-123,130-142,146
+  s_885ffb973587a3::t_1860f9502ad94b 143-145
+  s_885ffb973587a3::t_cc3d16514075e4 70-72
+  s_885ffb973587a3::t_2834ddc25f08cb 150-152,167
+apps/backend/tests/community/adapters/http/task/router_test_support.py
+  s_885ffb973587a3::t_ec9fdd36cf29c8 156
+  s_885ffb973587a3::t_fe6956b05cb0f1 171-173,178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "70e377b5ea7dc5cd9dc46a8c67506a0f986a2baa",
+  "prompts": {},
+  "sessions": {
+    "s_885ffb973587a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17742-1085-7833-94e1-041d70172b63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
