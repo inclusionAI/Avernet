@@ -53,41 +53,33 @@ impl HttpClient {
         connection_error: &'static str,
         guard: &mut crate::digest::DigestGuard,
     ) -> Result<reqwest::Response, A2AError> {
-        let mut request = match request.build() {
-            Ok(request) => request,
-            Err(_) => {
-                guard.finish_err(crate::digest::RESULT_TRANSPORT_ERROR, "TRANSPORT_ERROR");
-                return Err(A2AError::internal(connection_error));
-            }
-        };
+        let result = self.send_inner(request, connection_error, guard).await;
+        guard.observe_err(result)
+    }
+
+    async fn send_inner(
+        &self,
+        request: RequestWithDefaults<reqwest::RequestBuilder>,
+        connection_error: &'static str,
+        guard: &mut crate::digest::DigestGuard,
+    ) -> Result<reqwest::Response, A2AError> {
+        let mut request = request.build().map_err(|_| A2AError::internal(connection_error))?;
+        guard.set_req_bytes(request.body().and_then(|body| body.as_bytes()).map_or(0, |b| b.len()));
         if let Some((identity, provider_id)) = &self.identity {
             let origin = request.url().origin().ascii_serialization();
             let target = OutboundTarget { provider_id, origin: &origin };
-            let credential = match identity.credential_for(&target) {
-                Ok(credential) => credential,
-                Err(error) => {
-                    guard.finish_err(crate::digest::RESULT_AUTH_REJECTED, "IDENTITY_ERROR");
-                    return Err(A2AError::internal(match error {
-                        CredentialError::DestinationRejected => DESTINATION_REJECTED,
-                        _ => CREDENTIAL_UNAVAILABLE,
-                    }));
-                }
-            };
+            let credential = identity.credential_for(&target).map_err(|error| {
+                A2AError::internal(match error {
+                    CredentialError::DestinationRejected => DESTINATION_REJECTED,
+                    _ => CREDENTIAL_UNAVAILABLE,
+                })
+            })?;
             match credential {
-                Some(credential) => {
-                    if let Err(err) = apply(&mut request, credential) {
-                        guard.finish_err(crate::digest::RESULT_AUTH_REJECTED, "IDENTITY_ERROR");
-                        return Err(err);
-                    }
-                }
-                None if self.require_identity => {
-                    guard.finish_err(crate::digest::RESULT_AUTH_REJECTED, "IDENTITY_ERROR");
-                    return Err(A2AError::internal(CREDENTIAL_UNAVAILABLE));
-                }
+                Some(credential) => apply(&mut request, credential)?,
+                None if self.require_identity => return Err(A2AError::internal(CREDENTIAL_UNAVAILABLE)),
                 None => {}
             }
         } else if self.require_identity {
-            guard.finish_err(crate::digest::RESULT_AUTH_REJECTED, "IDENTITY_ERROR");
             return Err(A2AError::internal(CREDENTIAL_UNAVAILABLE));
         }
         // A required identity is scoped to the pre-release test submission.
@@ -97,17 +89,12 @@ impl HttpClient {
         // a connect failure becomes `NOT_CONNECTED` (certainly not sent), any
         // other failure the generic `connection_error` (outcome unknown).
         let (result, correlation) = self.transport.execute_traced_with_correlation(request).await;
-        if let Some(correlation) = correlation {
-            guard.set_log_correlation(&correlation);
-        }
-        let mut response = match result {
-            Ok(response) => response,
-            Err(error) => {
-                let (rc, ec) = crate::digest::classify_reqwest_error(&error);
-                guard.finish_err(rc, ec);
-                return Err(crate::transport_error::send_failure(&error, connection_error));
-            }
-        };
+        if let Some(correlation) = correlation { guard.set_log_correlation(&correlation); }
+        let mut response = result.map_err(|error| {
+            let (rc, ec) = crate::digest::classify_reqwest_error(&error);
+            guard.finish_err(rc, ec);
+            crate::transport_error::send_failure(&error, connection_error)
+        })?;
         if let Some(diagnostic) = diagnostic {
             response.extensions_mut().insert(diagnostic);
         }

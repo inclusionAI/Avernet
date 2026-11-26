@@ -30,6 +30,7 @@
 //! 21. ttfb_ms       - response-header latency in integer milliseconds (`-1` if unreceived)
 //! 22. stream_events - decoded SSE `StreamResponse` event count (`0` for SYNC)
 
+use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 use std::time::Instant;
 
 pub const A2A_HTTP_CLIENT_DIGEST_TARGET: &str = "bcs_a2a_http_client_digest";
@@ -59,10 +60,7 @@ pub(crate) enum Protocol {
 
 impl Protocol {
     fn as_str(self) -> &'static str {
-        match self {
-            Self::HttpJson => "HTTP+JSON",
-            Self::JsonRpc => "JSONRPC",
-        }
+        match self { Self::HttpJson => "HTTP+JSON", Self::JsonRpc => "JSONRPC" }
     }
 }
 
@@ -74,10 +72,7 @@ pub(crate) enum InvokeType {
 
 impl InvokeType {
     fn as_str(self) -> &'static str {
-        match self {
-            Self::Sync => "SYNC",
-            Self::Stream => "STREAM",
-        }
+        match self { Self::Sync => "SYNC", Self::Stream => "STREAM" }
     }
 }
 
@@ -95,7 +90,7 @@ pub(crate) struct DigestGuard {
     target_path: String,
     tenant: String,
     req_bytes: usize,
-    resp_bytes: usize,
+    resp_bytes: Arc<AtomicUsize>,
     http_status: u16,
     ttfb_ms: i64,
     headers_received: bool,
@@ -112,7 +107,6 @@ pub(crate) struct DigestStart<'a> {
     pub canonical_path: Option<String>,
     pub tenant: Option<&'a str>,
     pub context: &'a A2aCallContext,
-    pub req_bytes: usize,
 }
 
 impl DigestGuard {
@@ -131,8 +125,8 @@ impl DigestGuard {
             target_host,
             target_path,
             tenant: params.tenant.unwrap_or("").to_owned(),
-            req_bytes: params.req_bytes,
-            resp_bytes: 0,
+            req_bytes: 0,
+            resp_bytes: Arc::new(AtomicUsize::new(0)),
             http_status: 0,
             ttfb_ms: -1,
             headers_received: false,
@@ -141,6 +135,8 @@ impl DigestGuard {
             finished: false,
         }
     }
+
+    pub(crate) fn set_req_bytes(&mut self, bytes: usize) { self.req_bytes = bytes; }
 
     pub(crate) fn set_log_correlation(&mut self, correlation: &bcs_tracing_api::LogCorrelation) {
         let [(_, trace_id), (_, span_id)] = correlation.fields();
@@ -151,35 +147,50 @@ impl DigestGuard {
     pub(crate) fn record_headers(&mut self, status: u16) {
         self.http_status = status;
         self.headers_received = true;
-        self.ttfb_ms = elapsed_ms_i64(self.started);
+        self.ttfb_ms = i64::try_from(self.started.elapsed().as_millis()).unwrap_or(i64::MAX);
     }
 
-    pub(crate) fn add_resp_bytes(&mut self, bytes: usize) {
-        self.resp_bytes = self.resp_bytes.saturating_add(bytes);
+    pub(crate) fn resp_bytes_counter(&self) -> Arc<AtomicUsize> { Arc::clone(&self.resp_bytes) }
+
+    pub(crate) fn add_resp_bytes(&self, bytes: usize) {
+        self.resp_bytes.fetch_add(bytes, Ordering::Relaxed);
     }
 
     pub(crate) fn inc_stream_events(&mut self) {
         self.stream_events = self.stream_events.saturating_add(1);
     }
 
-    pub(crate) fn finish_ok(&mut self) {
-        self.emit(RESULT_OK, "");
-    }
+    pub(crate) fn finish_ok(&mut self) { self.emit(RESULT_OK, ""); }
 
     pub(crate) fn finish_err(&mut self, result_code: &'static str, error_code: &str) {
         self.emit(result_code, error_code);
     }
 
+    pub(crate) fn observe<T>(&mut self, result: Result<T, a2a::A2AError>) -> Result<T, a2a::A2AError> {
+        match &result { Ok(_) => self.finish_ok(), Err(error) => self.finish_a2a_error(error) }
+        result
+    }
+
+    pub(crate) fn observe_err<T>(&mut self, result: Result<T, a2a::A2AError>) -> Result<T, a2a::A2AError> {
+        if let Err(error) = &result { self.finish_a2a_error(error); }
+        result
+    }
+
+    fn finish_a2a_error(&mut self, error: &a2a::A2AError) {
+        if self.finished { return; }
+        let (rc, ec) = classify_a2a_error(self.protocol, self.headers_received, self.http_status, error);
+        self.emit(rc, &ec);
+    }
+
     fn emit(&mut self, result_code: &'static str, error_code: &str) {
-        if self.finished {
-            return;
-        }
+        if self.finished { return; }
         self.finished = true;
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
         let duration_ms = self.started.elapsed().as_millis();
         let success = if result_code == RESULT_OK { "Y" } else { "N" };
+        let resp_bytes = self.resp_bytes.load(Ordering::Relaxed);
         let line = format!(
-            "{timestamp},{},{},{},{},{},{},{},{},{},{},{},{},{success},{result_code},{},{},{},{},{duration_ms},{},{}",
+            "{timestamp},{},{},{},{},{},{},{},{},{},{},{},{},{success},{result_code},{},{},{},{resp_bytes},{duration_ms},{},{}",
             sanitize_csv_field(&self.trace_id),
             sanitize_csv_field(&self.span_id),
             sanitize_csv_field(&self.request_id),
@@ -195,21 +206,10 @@ impl DigestGuard {
             self.http_status,
             sanitize_csv_field(error_code),
             self.req_bytes,
-            self.resp_bytes,
             self.ttfb_ms,
             self.stream_events,
         );
         tracing::info!(target: A2A_HTTP_CLIENT_DIGEST_TARGET, "{line}");
-    }
-}
-
-fn extract_correlation(correlation: Option<&bcs_tracing_api::LogCorrelation>) -> (String, String) {
-    match correlation {
-        Some(correlation) => {
-            let [(_, trace_id), (_, span_id)] = correlation.fields();
-            (trace_id.to_owned(), span_id.to_owned())
-        }
-        None => (String::new(), String::new()),
     }
 }
 
@@ -225,24 +225,26 @@ impl Drop for DigestGuard {
     }
 }
 
+fn extract_correlation(correlation: Option<&bcs_tracing_api::LogCorrelation>) -> (String, String) {
+    match correlation {
+        Some(c) => { let [(_, tid), (_, sid)] = c.fields(); (tid.to_owned(), sid.to_owned()) }
+        None => (String::new(), String::new()),
+    }
+}
+
 pub(crate) fn rest_canonical_path(base_url: &str, suffix: &str) -> String {
     let (_, base_path) = split_host_and_path(base_url);
-    let trimmed = base_path.trim_end_matches('/');
-    format!("{trimmed}{suffix}")
+    format!("{}{suffix}", base_path.trim_end_matches('/'))
 }
 
 pub(crate) fn split_host_and_path(raw: &str) -> (String, String) {
-    match reqwest::Url::parse(raw) {
-        Ok(url) => {
-            let host = match (url.host_str(), url.port()) {
-                (Some(host), Some(port)) => format!("{host}:{port}"),
-                (Some(host), None) => host.to_owned(),
-                (None, _) => String::new(),
-            };
-            (host, url.path().to_owned())
-        }
-        Err(_) => (String::new(), String::new()),
-    }
+    let Ok(url) = reqwest::Url::parse(raw) else { return (String::new(), String::new()); };
+    let host = match (url.host_str(), url.port()) {
+        (Some(host), Some(port)) => format!("{host}:{port}"),
+        (Some(host), None) => host.to_owned(),
+        (None, _) => String::new(),
+    };
+    (host, url.path().to_owned())
 }
 
 pub(crate) fn classify_http_status(status: u16) -> &'static str {
@@ -255,24 +257,47 @@ pub(crate) fn classify_http_status(status: u16) -> &'static str {
     }
 }
 
-pub(crate) fn classify_rest_http_error(status: u16, error: &a2a::A2AError) -> (&'static str, String) {
-    let result_code = classify_http_status(status);
-    let error_code = if error.code != a2a::error_code::INTERNAL_ERROR {
-        a2a::error_reason(error.code).to_owned()
-    } else {
-        format!("HTTP_{status}")
-    };
-    (result_code, error_code)
-}
-
-pub(crate) fn classify_jsonrpc_rpc_error(status: u16, rpc_code: i32) -> (&'static str, String) {
-    let result_code = match status {
-        401 | 403 => RESULT_AUTH_REJECTED,
-        429 => RESULT_RATE_LIMITED,
-        408 | 504 => RESULT_TIMEOUT,
-        _ => RESULT_PROTOCOL_ERROR,
-    };
-    (result_code, rpc_code.to_string())
+fn classify_a2a_error(
+    protocol: Protocol,
+    headers_received: bool,
+    status: u16,
+    error: &a2a::A2AError,
+) -> (&'static str, String) {
+    if crate::http_client::identity_failure(error).is_some() {
+        return (RESULT_AUTH_REJECTED, "IDENTITY_ERROR".into());
+    }
+    if error.message.contains("timed out") || error.message.contains("timeout") {
+        return (RESULT_TIMEOUT, "TIMEOUT".into());
+    }
+    if error.message == "A2A JSON-RPC failure" {
+        let rc = match status {
+            401 | 403 => RESULT_AUTH_REJECTED,
+            429 => RESULT_RATE_LIMITED,
+            408 | 504 => RESULT_TIMEOUT,
+            _ => RESULT_PROTOCOL_ERROR,
+        };
+        return (rc, error.code.to_string());
+    }
+    if headers_received && !(200..300).contains(&status) {
+        let ec = if error.code != a2a::error_code::INTERNAL_ERROR
+            && error.code != a2a::error_code::INVALID_AGENT_RESPONSE
+        {
+            a2a::error_reason(error.code).to_owned()
+        } else {
+            format!("HTTP_{status}")
+        };
+        return (classify_http_status(status), ec);
+    }
+    match error.code {
+        a2a::error_code::INTERNAL_ERROR => (RESULT_TRANSPORT_ERROR, "TRANSPORT_ERROR".into()),
+        a2a::error_code::INVALID_AGENT_RESPONSE => (
+            RESULT_SERVER_OR_PARSE_ERROR,
+            if protocol == Protocol::JsonRpc { "INVALID_ENVELOPE" } else { "INVALID_RESPONSE" }.into(),
+        ),
+        a2a::error_code::PARSE_ERROR => (RESULT_SERVER_OR_PARSE_ERROR, "PARSE_ERROR".into()),
+        a2a::error_code::INVALID_PARAMS => (RESULT_SERVER_OR_PARSE_ERROR, "INVALID_PARAMS".into()),
+        code => (RESULT_SERVER_OR_PARSE_ERROR, a2a::error_reason(code).to_owned()),
+    }
 }
 
 pub(crate) fn classify_reqwest_error(error: &reqwest::Error) -> (&'static str, &'static str) {
@@ -285,18 +310,10 @@ pub(crate) fn classify_reqwest_error(error: &reqwest::Error) -> (&'static str, &
     }
 }
 
-fn elapsed_ms_i64(started: Instant) -> i64 {
-    i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX)
-}
-
 pub(crate) fn sanitize_csv_field(value: &str) -> String {
     value
         .chars()
-        .map(|ch| match ch {
-            ',' | '\n' | '\r' | '\t' => ' ',
-            ch if ch.is_control() => ' ',
-            ch => ch,
-        })
+        .map(|ch| if matches!(ch, ',' | '\n' | '\r' | '\t') || ch.is_control() { ' ' } else { ch })
         .collect()
 }
 
@@ -311,66 +328,47 @@ mod tests {
 
     impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Capture {
         fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
-            if event.metadata().target() != A2A_HTTP_CLIENT_DIGEST_TARGET {
-                return;
-            }
+            if event.metadata().target() != A2A_HTTP_CLIENT_DIGEST_TARGET { return; }
             #[derive(Default)]
             struct Msg(String);
             impl tracing::field::Visit for Msg {
                 fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-                    if field.name() == "message" {
-                        self.0 = format!("{value:?}");
-                    }
+                    if field.name() == "message" { self.0 = format!("{value:?}"); }
                 }
                 fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-                    if field.name() == "message" {
-                        self.0 = value.to_owned();
-                    }
+                    if field.name() == "message" { self.0 = value.to_owned(); }
                 }
             }
             let mut msg = Msg::default();
             event.record(&mut msg);
-            if let Ok(mut lines) = self.0.lock() {
-                lines.push(msg.0);
-            }
+            if let Ok(mut lines) = self.0.lock() { lines.push(msg.0); }
         }
     }
 
     #[test]
     fn split_host_and_path_strips_credentials_query_and_fragment() {
         let (host, path) = split_host_and_path("https://user:secret@agent.example.com:8443/a2a/v1?token=abc#frag");
-        assert_eq!(host, "agent.example.com:8443");
-        assert_eq!(path, "/a2a/v1");
-        assert!(!host.contains("secret"));
-        assert!(!path.contains("abc"));
+        assert_eq!((host.as_str(), path.as_str()), ("agent.example.com:8443", "/a2a/v1"));
+        assert_eq!(split_host_and_path("not a url"), (String::new(), String::new()));
         assert_eq!(rest_canonical_path("https://agent.example.com/a2a/", "/tasks/{id}:cancel"), "/a2a/tasks/{id}:cancel");
     }
 
     #[test]
     fn guard_emits_exactly_once_with_22_sanitized_columns() {
         let capture = Capture::default();
-        let subscriber = tracing_subscriber::registry().with(capture.clone());
-        let dispatch = tracing::Dispatch::new(subscriber);
+        let dispatch = tracing::Dispatch::new(tracing_subscriber::registry().with(capture.clone()));
         let parent_ids = bcs_tracing_api::LogCorrelation::new("sofa_trace_id", "trace-parent", "sofa_rpc_id", "0").unwrap();
         let child_ids = bcs_tracing_api::LogCorrelation::new("sofa_trace_id", "trace-parent", "sofa_rpc_id", "0.1").unwrap();
         tracing::dispatcher::with_default(&dispatch, || {
-            let ctx = A2aCallContext {
-                bot_id: "bot,1".into(),
-                provider_id: "prv\n1".into(),
-                run_id: "run-1".into(),
-            };
+            let ctx = A2aCallContext { bot_id: "bot,1".into(), provider_id: "prv\n1".into(), run_id: "run-1".into() };
             let mut guard = bcs_tracing_api::with_log_correlation(Some(parent_ids), || {
                 DigestGuard::start(DigestStart {
-                    protocol: Protocol::HttpJson,
-                    invoke_type: InvokeType::Sync,
-                    method: "SendMessage",
-                    url: "https://u:p@agent.example.com:443/a2a?q=1",
-                    canonical_path: Some("/a2a/message:send".into()),
-                    tenant: Some("tenant,a"),
-                    context: &ctx,
-                    req_bytes: 128,
+                    protocol: Protocol::HttpJson, invoke_type: InvokeType::Sync, method: "SendMessage",
+                    url: "https://u:p@agent.example.com:443/a2a?q=1", canonical_path: Some("/a2a/message:send".into()),
+                    tenant: Some("tenant,a"), context: &ctx,
                 })
             });
+            guard.set_req_bytes(128);
             guard.set_log_correlation(&child_ids);
             guard.record_headers(200);
             guard.add_resp_bytes(256);
@@ -381,57 +379,44 @@ mod tests {
         assert_eq!(lines.len(), 1);
         let cols: Vec<&str> = lines[0].split(',').collect();
         assert_eq!(cols.len(), A2A_HTTP_CLIENT_DIGEST_COLUMNS, "line: {}", lines[0]);
-        assert_eq!(cols[1], "trace-parent");
-        assert_eq!(cols[2], "0.1");
-        assert_eq!(cols[4], "run-1");
-        assert_eq!(cols[5], "HTTP+JSON");
-        assert_eq!(cols[6], "SYNC");
-        assert_eq!(cols[7], "SendMessage");
-        assert_eq!(cols[8], "agent.example.com");
-        assert_eq!(cols[9], "/a2a/message:send");
-        assert_eq!(cols[10], "prv 1");
-        assert_eq!(cols[11], "bot 1");
-        assert_eq!(cols[12], "tenant a");
-        assert_eq!(cols[13], "Y");
-        assert_eq!(cols[14], "00");
-        assert_eq!(cols[15], "200");
-        assert_eq!(cols[16], "");
-        assert_eq!(cols[17], "128");
-        assert_eq!(cols[18], "256");
-        assert_eq!(cols[21], "0");
+        assert_eq!((cols[1], cols[2], cols[4], cols[5], cols[6], cols[7]), ("trace-parent", "0.1", "run-1", "HTTP+JSON", "SYNC", "SendMessage"));
+        assert_eq!((cols[8], cols[9], cols[10], cols[11], cols[12]), ("agent.example.com", "/a2a/message:send", "prv 1", "bot 1", "tenant a"));
+        assert_eq!((cols[13], cols[14], cols[15], cols[16], cols[17], cols[18], cols[21]), ("Y", "00", "200", "", "128", "256", "0"));
+    }
+
+    #[test]
+    fn classify_a2a_error_covers_identity_timeout_rpc_http_and_parse_variants() {
+        assert_eq!(classify_a2a_error(Protocol::HttpJson, false, 0, &a2a::A2AError::internal("A2A application credential unavailable")), (RESULT_AUTH_REJECTED, "IDENTITY_ERROR".into()));
+        assert_eq!(classify_a2a_error(Protocol::HttpJson, false, 0, &a2a::A2AError::internal("A2A Task request timed out")), (RESULT_TIMEOUT, "TIMEOUT".into()));
+        assert_eq!(classify_a2a_error(Protocol::JsonRpc, true, 401, &a2a::A2AError::new(-32001, "A2A JSON-RPC failure")), (RESULT_AUTH_REJECTED, "-32001".into()));
+        assert_eq!(classify_a2a_error(Protocol::JsonRpc, true, 429, &a2a::A2AError::new(-32001, "A2A JSON-RPC failure")), (RESULT_RATE_LIMITED, "-32001".into()));
+        assert_eq!(classify_a2a_error(Protocol::JsonRpc, true, 504, &a2a::A2AError::new(-32001, "A2A JSON-RPC failure")), (RESULT_TIMEOUT, "-32001".into()));
+        assert_eq!(classify_a2a_error(Protocol::HttpJson, true, 504, &a2a::A2AError::internal("A2A HTTP 504")), (RESULT_TIMEOUT, "HTTP_504".into()));
+        assert_eq!(classify_a2a_error(Protocol::HttpJson, true, 200, &a2a::A2AError::invalid_agent_response()), (RESULT_SERVER_OR_PARSE_ERROR, "INVALID_RESPONSE".into()));
+        assert_eq!(classify_a2a_error(Protocol::HttpJson, true, 200, &a2a::A2AError::parse_error("bad")), (RESULT_SERVER_OR_PARSE_ERROR, "PARSE_ERROR".into()));
+        assert_eq!(classify_a2a_error(Protocol::HttpJson, false, 0, &a2a::A2AError::invalid_params("bad")), (RESULT_SERVER_OR_PARSE_ERROR, "INVALID_PARAMS".into()));
+        assert_eq!(classify_a2a_error(Protocol::HttpJson, true, 200, &a2a::A2AError::invalid_request("big")), (RESULT_SERVER_OR_PARSE_ERROR, "INVALID_REQUEST".into()));
+        assert_eq!(classify_a2a_error(Protocol::HttpJson, true, 200, &a2a::A2AError::internal("interrupted")), (RESULT_TRANSPORT_ERROR, "TRANSPORT_ERROR".into()));
     }
 
     #[test]
     fn stream_drop_distinguishes_received_events_from_empty_cancellation() {
         let capture = Capture::default();
-        let subscriber = tracing_subscriber::registry().with(capture.clone());
-        let dispatch = tracing::Dispatch::new(subscriber);
+        let dispatch = tracing::Dispatch::new(tracing_subscriber::registry().with(capture.clone()));
         tracing::dispatcher::with_default(&dispatch, || {
             let ctx = A2aCallContext::default();
             {
                 let mut g1 = DigestGuard::start(DigestStart {
-                    protocol: Protocol::JsonRpc,
-                    invoke_type: InvokeType::Stream,
-                    method: "SendStreamingMessage",
-                    url: "http://127.0.0.1:8080/rpc",
-                    canonical_path: None,
-                    tenant: None,
-                    context: &ctx,
-                    req_bytes: 64,
+                    protocol: Protocol::JsonRpc, invoke_type: InvokeType::Stream, method: "SendStreamingMessage",
+                    url: "http://127.0.0.1:8080/rpc", canonical_path: None, tenant: None, context: &ctx,
                 });
                 g1.record_headers(200);
                 g1.inc_stream_events();
             }
             {
                 let mut g2 = DigestGuard::start(DigestStart {
-                    protocol: Protocol::JsonRpc,
-                    invoke_type: InvokeType::Stream,
-                    method: "SubscribeToTask",
-                    url: "http://127.0.0.1:8080/rpc",
-                    canonical_path: None,
-                    tenant: None,
-                    context: &ctx,
-                    req_bytes: 64,
+                    protocol: Protocol::JsonRpc, invoke_type: InvokeType::Stream, method: "SubscribeToTask",
+                    url: "http://127.0.0.1:8080/rpc", canonical_path: None, tenant: None, context: &ctx,
                 });
                 g2.record_headers(200);
             }

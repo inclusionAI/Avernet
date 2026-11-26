@@ -1,8 +1,5 @@
 //! REST resource-path encoding and bounded Task snapshots. Models are SDK types.
-use crate::digest::{
-    DigestGuard, RESULT_SERVER_OR_PARSE_ERROR, RESULT_TIMEOUT,
-    classify_reqwest_error, classify_rest_http_error,
-};
+use crate::digest::DigestGuard;
 use crate::http_client::HttpClient;
 use a2a::{A2AError, Task, TypedDetail};
 
@@ -17,53 +14,23 @@ pub(super) async fn task_response(http: &HttpClient, request: bcs_network_tracin
 }
 
 pub(super) async fn json_response<T:serde::de::DeserializeOwned>(http: &HttpClient, request: bcs_network_tracing::RequestWithDefaults<reqwest::RequestBuilder>, mut guard: DigestGuard) -> Result<T, A2AError> {
-    match tokio::time::timeout(std::time::Duration::from_secs(15), async {
+    let result = tokio::time::timeout(std::time::Duration::from_secs(15), async {
         let request = request.map(|request| request.header("A2A-Version", "1.0"));
         let mut response = http.send_observed(request, "A2A Task request interrupted", &mut guard).await?;
         let status = response.status();
         guard.record_headers(status.as_u16());
         let mut body = Vec::new();
-        loop {
-            match response.chunk().await {
-                Ok(Some(chunk)) => {
-                    guard.add_resp_bytes(chunk.len());
-                    if body.len().saturating_add(chunk.len()) > 8 * 1024 * 1024 {
-                        guard.finish_err(RESULT_SERVER_OR_PARSE_ERROR, "SIZE_LIMIT");
-                        return Err(A2AError::invalid_request("Task snapshot exceeds size limit"));
-                    }
-                    body.extend_from_slice(&chunk);
-                }
-                Ok(None) => break,
-                Err(err) => {
-                    let (rc, ec) = classify_reqwest_error(&err);
-                    guard.finish_err(rc, ec);
-                    return Err(A2AError::internal("A2A Task response incomplete"));
-                }
-            }
+        while let Some(chunk) = response.chunk().await.map_err(|_|A2AError::internal("A2A Task response incomplete"))? {
+            guard.add_resp_bytes(chunk.len());
+            if body.len().saturating_add(chunk.len()) > 8 * 1024 * 1024 { return Err(A2AError::invalid_request("Task snapshot exceeds size limit")); }
+            body.extend_from_slice(&chunk);
         }
         if !status.is_success() {
-            let err = http_error(status.as_u16(), &body);
-            let (rc, ec) = classify_rest_http_error(status.as_u16(), &err);
-            guard.finish_err(rc, &ec);
-            return Err(err);
+            return Err(http_error(status.as_u16(), &body));
         }
-        match serde_json::from_slice(&body) {
-            Ok(parsed) => {
-                guard.finish_ok();
-                Ok(parsed)
-            }
-            Err(_) => {
-                guard.finish_err(RESULT_SERVER_OR_PARSE_ERROR, "PARSE_ERROR");
-                Err(A2AError::parse_error("invalid Task snapshot"))
-            }
-        }
-    }).await {
-        Ok(result) => result,
-        Err(_) => {
-            guard.finish_err(RESULT_TIMEOUT, "TIMEOUT");
-            Err(A2AError::internal("A2A Task request timed out"))
-        }
-    }
+        serde_json::from_slice(&body).map_err(|_|A2AError::parse_error("invalid Task snapshot"))
+    }).await.map_err(|_|A2AError::internal("A2A Task request timed out")).and_then(|res| res);
+    guard.observe(result)
 }
 
 /// ProtoJSON Status wraps details in `error`; accept the SDK's legacy flat

@@ -5,10 +5,7 @@
 //! interface. No automatic Card discovery or transport fallback occurs here.
 
 use bcs_network_tracing::ClientWithDefaults;
-use crate::digest::{
-    A2aCallContext, DigestGuard, DigestStart, InvokeType, Protocol, RESULT_SERVER_OR_PARSE_ERROR,
-    rest_canonical_path,
-};
+use crate::digest::{A2aCallContext, DigestGuard, DigestStart, InvokeType, Protocol, rest_canonical_path};
 use crate::http_client::HttpClient;
 
 pub struct RestClient {
@@ -19,21 +16,13 @@ pub struct RestClient {
 }
 
 impl RestClient {
-    pub fn with_call_context(mut self, context: A2aCallContext) -> Self {
-        self.context = context;
-        self
-    }
+    pub fn with_call_context(mut self, context: A2aCallContext) -> Self { self.context = context; self }
 
-    fn start_digest(&self, invoke_type: InvokeType, method: &'static str, url: &str, suffix: &str, tenant: Option<&str>, req_bytes: usize) -> DigestGuard {
+    fn start_digest(&self, invoke_type: InvokeType, method: &'static str, url: &str, suffix: &str, tenant: Option<&str>) -> DigestGuard {
         DigestGuard::start(DigestStart {
-            protocol: Protocol::HttpJson,
-            invoke_type,
-            method,
-            url,
+            protocol: Protocol::HttpJson, invoke_type, method, url,
             canonical_path: Some(rest_canonical_path(&self.base_url, suffix)),
-            tenant,
-            context: &self.context,
-            req_bytes,
+            tenant, context: &self.context,
         })
     }
 
@@ -42,20 +31,8 @@ impl RestClient {
         let mut request=request.clone();
         if let Some(tenant)=&self.tenant {request.tenant=Some(tenant.clone());}
         let url=format!("{}/message:send",self.base_url.trim_end_matches('/'));
-        let body = match serde_json::to_vec(&request) {
-            Ok(body) => body,
-            Err(_) => {
-                let mut guard = self.start_digest(InvokeType::Sync, "SendMessage", &url, "/message:send", self.tenant.as_deref(), 0);
-                guard.finish_err(RESULT_SERVER_OR_PARSE_ERROR, "INVALID_PARAMS");
-                return Err(a2a::A2AError::invalid_params("invalid SendMessageRequest"));
-            }
-        };
-        let guard = self.start_digest(InvokeType::Sync, "SendMessage", &url, "/message:send", self.tenant.as_deref(), body.len());
-        crate::client_json::json_response(
-            &self.http,
-            self.http.transport.request(|http| http.post(url).header(reqwest::header::CONTENT_TYPE, "application/json").body(body)),
-            guard,
-        ).await
+        let guard = self.start_digest(InvokeType::Sync, "SendMessage", &url, "/message:send", self.tenant.as_deref());
+        crate::client_json::json_response(&self.http, self.http.transport.request(|http| http.post(url).json(&request)), guard).await
     }
 
     /// Share the bounded REST/SSE decoder with subscriptions. The pinned SDK's
@@ -65,30 +42,15 @@ impl RestClient {
         let mut request = request.clone();
         if let Some(tenant) = &self.tenant { request.tenant = Some(tenant.clone()); }
         let url = format!("{}/message:stream", self.base_url.trim_end_matches('/'));
-        let body = match serde_json::to_vec(&request) {
-            Ok(body) => body,
-            Err(_) => {
-                let mut guard = self.start_digest(InvokeType::Stream, "SendStreamingMessage", &url, "/message:stream", self.tenant.as_deref(), 0);
-                guard.finish_err(RESULT_SERVER_OR_PARSE_ERROR, "INVALID_PARAMS");
-                return Err(a2a::A2AError::invalid_params("invalid SendMessageRequest"));
-            }
-        };
-        let guard = self.start_digest(InvokeType::Stream, "SendStreamingMessage", &url, "/message:stream", self.tenant.as_deref(), body.len());
-        crate::subscribe::post_stream(&self.http, &url, body, guard).await
+        let guard = self.start_digest(InvokeType::Stream, "SendStreamingMessage", &url, "/message:stream", self.tenant.as_deref());
+        crate::subscribe::post_stream(&self.http, &url, &request, guard).await
     }
 
     /// Keep opaque IDs inside one path segment. The pinned SDK concatenates
     /// raw IDs, which can escape a Bot route when they contain slashes.
     pub async fn get_task(&self, request: &a2a::GetTaskRequest) -> Result<a2a::Task, a2a::A2AError> {
-        let tenant = self.tenant.as_deref().or(request.tenant.as_deref());
-        let mut guard = self.start_digest(InvokeType::Sync, "GetTask", &self.base_url, "/tasks/{id}", tenant, 0);
-        let url = match crate::client_json::task_url(&self.base_url, &request.id, "") {
-            Ok(url) => url,
-            Err(err) => {
-                guard.finish_err(RESULT_SERVER_OR_PARSE_ERROR, "INVALID_PARAMS");
-                return Err(err);
-            }
-        };
+        let mut guard = self.start_digest(InvokeType::Sync, "GetTask", &self.base_url, "/tasks/{id}", self.tenant.as_deref().or(request.tenant.as_deref()));
+        let url = guard.observe_err(crate::client_json::task_url(&self.base_url, &request.id, ""))?;
         let mut query = Vec::new();
         if let Some(length) = request.history_length { query.push(("historyLength", length.to_string())); }
         if let Some(tenant) = self.tenant.as_ref().or(request.tenant.as_ref()) { query.push(("tenant", tenant.clone())); }
@@ -96,56 +58,22 @@ impl RestClient {
     }
 
     pub async fn cancel_task(&self, request: &a2a::CancelTaskRequest) -> Result<a2a::Task, a2a::A2AError> {
+        let mut guard = self.start_digest(InvokeType::Sync, "CancelTask", &self.base_url, "/tasks/{id}:cancel", self.tenant.as_deref().or(request.tenant.as_deref()));
+        let url = guard.observe_err(crate::client_json::task_url(&self.base_url, &request.id, ":cancel"))?;
         let mut request = request.clone();
         if let Some(tenant) = &self.tenant { request.tenant = Some(tenant.clone()); }
-        let url = match crate::client_json::task_url(&self.base_url, &request.id, ":cancel") {
-            Ok(url) => url,
-            Err(err) => {
-                let mut guard = self.start_digest(InvokeType::Sync, "CancelTask", &self.base_url, "/tasks/{id}:cancel", self.tenant.as_deref(), 0);
-                guard.finish_err(RESULT_SERVER_OR_PARSE_ERROR, "INVALID_PARAMS");
-                return Err(err);
-            }
-        };
-        let body = match serde_json::to_vec(&request) {
-            Ok(body) => body,
-            Err(_) => {
-                let mut guard = self.start_digest(InvokeType::Sync, "CancelTask", &url, "/tasks/{id}:cancel", self.tenant.as_deref(), 0);
-                guard.finish_err(RESULT_SERVER_OR_PARSE_ERROR, "INVALID_PARAMS");
-                return Err(a2a::A2AError::invalid_params("invalid CancelTaskRequest"));
-            }
-        };
-        let guard = self.start_digest(InvokeType::Sync, "CancelTask", &url, "/tasks/{id}:cancel", self.tenant.as_deref(), body.len());
-        crate::client_json::task_response(
-            &self.http,
-            self.http.transport.request(|http| http.post(url).header(reqwest::header::CONTENT_TYPE, "application/json").body(body)),
-            guard,
-        ).await
+        crate::client_json::task_response(&self.http, self.http.transport.request(|http| http.post(url).json(&request)), guard).await
     }
 
     /// Rust SDK 0.2.9 uses GET plus legacy fallback. The pinned 1.0.1
     /// binding requires POST. All request/event models remain SDK types.
     pub async fn subscribe_to_task(&self, request: &a2a::SubscribeToTaskRequest)
         -> Result<futures::stream::BoxStream<'static, Result<a2a::StreamResponse, a2a::A2AError>>, a2a::A2AError> {
+        let mut guard = self.start_digest(InvokeType::Stream, "SubscribeToTask", &self.base_url, "/tasks/{id}:subscribe", self.tenant.as_deref().or(request.tenant.as_deref()));
         let mut request = request.clone();
         if let Some(tenant) = &self.tenant { request.tenant = Some(tenant.clone()); }
-        let url = match crate::client_json::task_url(&self.base_url, &request.id, ":subscribe") {
-            Ok(url) => url,
-            Err(err) => {
-                let mut guard = self.start_digest(InvokeType::Stream, "SubscribeToTask", &self.base_url, "/tasks/{id}:subscribe", self.tenant.as_deref(), 0);
-                guard.finish_err(RESULT_SERVER_OR_PARSE_ERROR, "INVALID_PARAMS");
-                return Err(err);
-            }
-        };
-        let body = match serde_json::to_vec(&request) {
-            Ok(body) => body,
-            Err(_) => {
-                let mut guard = self.start_digest(InvokeType::Stream, "SubscribeToTask", &url, "/tasks/{id}:subscribe", self.tenant.as_deref(), 0);
-                guard.finish_err(RESULT_SERVER_OR_PARSE_ERROR, "INVALID_PARAMS");
-                return Err(a2a::A2AError::invalid_params("invalid SubscribeToTaskRequest"));
-            }
-        };
-        let guard = self.start_digest(InvokeType::Stream, "SubscribeToTask", &url, "/tasks/{id}:subscribe", self.tenant.as_deref(), body.len());
-        crate::subscribe::post_stream(&self.http, &url, body, guard).await
+        let url = guard.observe_err(crate::client_json::task_url(&self.base_url, &request.id, ":subscribe"))?;
+        crate::subscribe::post_stream(&self.http, &url, &request, guard).await
     }
 }
 
