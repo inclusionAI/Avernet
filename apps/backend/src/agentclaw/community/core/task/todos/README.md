@@ -53,7 +53,15 @@ should model human review as an explicit Human stage rather than relying on an
 implicit acceptance step. Legacy acceptance events and routes remain documented
 below only for compatibility.
 
-A and B run in the same process in the production composition root, so the adapter calls `ContextCollabServiceProtocol` directly rather than making an internal HTTP self-call. The creator remains the Human principal while Bot runtime addressing uses the Bot record owner. The default ContextCollab status projection keeps its existing northbound field set; the Todo in-process adapter explicitly requests event payloads for its richer interaction projection. ContextCollab execution is a Task-core executor, not a deployment Plugin. New Todo runs reuse Task's existing `OpenApiBotPort` and owner-granted BaaS `allowed-bots` authorization without modifying `TaskExecutor` or introducing a shared Task/Todo abstraction. Optional BCS ports are retained only to resume and inspect historical group-backed Todo Contexts.
+A and B run in the same process in the production composition root, so the adapter calls `ContextCollabServiceProtocol` directly rather than making an internal HTTP self-call. The creator remains the Human principal while Bot runtime addressing uses the Bot record owner. The default ContextCollab status projection keeps its existing northbound field set; the Todo in-process adapter obtains payloads through the authorized L4 `get_events` API for its richer interaction projection, not a status-query payload flag. ContextCollab execution is a Task-core executor, not a deployment Plugin. New Todo runs reuse Task's existing `OpenApiBotPort` and owner-granted BaaS `allowed-bots` authorization without modifying `TaskExecutor` or introducing a shared Task/Todo abstraction. Optional BCS ports are retained only to resume and inspect historical group-backed Todo Contexts.
+
+`TodoContextRuntime` owns run/resume/refresh orchestration in the Todo consumer.
+It reads the independent L4 Task and L6 creation facts, then records runtime
+handles through canonical L4 event append and version fences. Combined creation
+uses L6 `create_collaboration`; `executor_owner_id` is persisted as optional L6
+runtime-addressing metadata, not as Task accountability or a resource Grant.
+The legacy `team_todo_execution` machine treats `done` as a completed execution
+round that Human feedback may resume; Todo acceptance remains product-owned.
 
 `TodoCollaborationPort` is an internal Task/Todo consumer boundary, not a globally replaceable Plugin API. `InProcessTodoCollaborationAdapter` is the production composition and delegates to the same-process `ContextCollabServiceProtocol`; it is fixed by `TaskTodoBindings` rather than selected by deployment Profile. The deterministic fake lives under Todo tests and is not shipped or registered as a local plugin.
 
@@ -218,6 +226,7 @@ internal_dependencies:
   - agentclaw.community.core.errors
   - agentclaw.community.core.repository.protocols
   - agentclaw.community.core.spaces
+  - agentclaw.community.core.task.context_collab
   - agentclaw.community.core.task.todos
   - agentclaw.community.di.todo_config
   - agentclaw.community.kernel.lifecycle

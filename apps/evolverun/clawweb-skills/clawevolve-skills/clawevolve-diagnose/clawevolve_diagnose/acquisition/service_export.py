@@ -18,6 +18,7 @@ import urllib.request
 from .. import logger
 from ..models import SessionRow
 from .sessions import parse_jsonl_file, session_locator_from_path
+from .service_export_files import is_session_transcript, _is_main_agent_source, _version_rank
 
 
 EXPORT_API_VERSION = "session-export/v1"
@@ -730,6 +731,10 @@ def _select_and_persist_sessions(
         record = {"archivePath": archive_path, "sessionId": str(item.get("sessionId") or ""), "status": "candidate"}
         if raw_sessions_dir is not None:
             record["rawPath"] = str(raw_sessions_dir / source.name)
+        if not is_session_transcript(item, source):
+            record.update(status="skipped", reason="session_attachment")
+            audit.append(record)
+            continue
         if not _is_main_agent_source(item):
             record.update(status="skipped", reason="non_main_agent")
             audit.append(record)
@@ -904,23 +909,6 @@ def _validate_export_response(value: dict[str, Any], expected_scope: str = "bot"
         raise ServiceSessionExportError("SESSION_EXPORT_INVALID_API_VERSION")
     if value.get("exportScope") != expected_scope:
         raise ServiceSessionExportError("SESSION_EXPORT_INVALID_SCOPE")
-
-
-def _is_main_agent_source(item: dict[str, Any]) -> bool:
-    aliases = [item.get("sourceAlias")]
-    duplicates = item.get("duplicateAliases")
-    if isinstance(duplicates, list):
-        aliases.extend(duplicates)
-    for alias in aliases:
-        text = str(alias or "").replace("\\", "/").rstrip("/")
-        if re.search(r"(?:^|/)agent/main$", text) or text.startswith("agent:main:"):
-            return True
-    return False
-
-
-def _version_rank(item: dict[str, Any], path: Path) -> tuple[int, str]:
-    deleted = bool(item.get("isDeletedArchive")) or ".jsonl.deleted." in path.name
-    return (0 if deleted else 1, path.name)
 
 
 def _session_id_from_filename(filename: str) -> str:

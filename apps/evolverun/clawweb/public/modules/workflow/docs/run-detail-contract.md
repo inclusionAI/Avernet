@@ -5,7 +5,53 @@ Owner: `@avernet/workflow`. `GET /runs/:flowId` relative to the host API mount
 and other authorized HTTP clients, not an engine Plugin API.
 
 A successful response keeps the existing `{ run, nodes, availableInterventions }`
-envelope. Runtime metadata is off by default and all three fields are omitted
+envelope. For launch-input display semantics, optional lineage presentation,
+and authorized lineage projection, see [run summary](run-summary-contract.md).
+
+## Authorized lineage — read behavior v2 (2026-11-26)
+
+This additive revision supersedes blanket lineage omission **only** for
+reader-backed, authorized ordinary detail. It adds no endpoint, opt-in flag,
+header, query parameter, or wire-version field. The safe base projection still
+strips `parent_flow_id` and `root_flow_id`; the detail service may add them back
+only when an inspection exists and is neither managed, restricted, nor a
+sensitive fanout child.
+
+Each candidate comes exclusively from that inspected run's stored column.
+For each valid non-null value, the service independently calls the existing
+`RunSubworkflowsReader.inspectRun` with the same actor and requested ancestor
+ID. It returns the ID only if the resulting `run.flow_id` exactly matches that
+ID, including case and Unicode. The ancestor's own workflow and Bot/owner
+permissions apply, even when it shares the child's workflow. Equal parent/root
+IDs share one lookup per response; ancestor lineage is not recursively traversed.
+
+- Explicit SQL `NULL` remains `null` on eligible detail. Absent columns or
+  invalid stored IDs are omitted, not inferred or repaired. Valid IDs follow
+  the [stored lineage contract](flow-run-lineage.md) and are returned unchanged.
+- Only `FanoutReadError` with `forbidden` or `not_found` omits the corresponding
+  ancestor field. Other authorization, invalid-state, unavailable, and storage
+  failures propagate to the existing HTTP error handler; they must not produce
+  a successful detail response with silently missing lineage.
+- Readerless/default detail, managed or restricted fanout detail, sensitive
+  children, and all list projections retain lineage redaction. A reader-backed
+  public mount is eligible without the separate runtime-metadata option.
+- The reader selects no credentials, performs no engine/internal HTTP fetch,
+  and never uses client-provided parameters as ancestor IDs. Existing
+  `Cache-Control: private, no-store` applies to reader-backed responses.
+
+A returned ID or rendered link is descriptive metadata, **not a permission
+grant or proof of ancestry**. Destination navigation must authorize the actor
+again; access can be revoked between reads.
+
+`server/routes/__tests__/run-detail-launch-input.test.ts` exercises real
+`RunSubworkflowsService`/repository HTTP reads against migrated SQLite and
+legacy column layouts, including independent ancestor denials, exact identity,
+credential exclusion, and error propagation. Focused service and repository
+suites are `run-launch-lineage.test.ts` and `run-subworkflows-lineage.test.ts`.
+
+## Runtime metadata
+
+Runtime metadata is off by default and all three fields are omitted
 on the standalone public mount. A host may set `exposeRuntimeMetadata: true`
 in the 12th and final `createRunsRouter` argument, after the existing 11th
 `runSubviews` argument (`null` when no reader is supplied). A host may opt in
@@ -42,8 +88,10 @@ absent. The existing readerless response fields and status are unchanged.
 
 ## Compatibility
 
-These fields are additive and detail-only on opted-in mounts. The default
-response and [run list](run-list-contract.md) are unchanged.
+Runtime metadata fields are additive and detail-only on opted-in mounts.
+Authorized lineage v2 is separately additive and ordinary-reader-detail-only;
+it does not require the runtime-metadata opt-in. Readerless/default detail and
+the [run list](run-list-contract.md) are unchanged.
 Where already present, `run.hasCredentials` still reports whether the stored
 column is neither null nor the empty string; it does not indicate valid JSON
 or the presence of metadata. No storage or deployment migration is required.

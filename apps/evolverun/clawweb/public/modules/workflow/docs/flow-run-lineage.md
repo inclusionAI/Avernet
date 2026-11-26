@@ -57,9 +57,33 @@ replace the original values. Exact replays remain valid after mutable child
 execution state has advanced. These guarantees do not turn the legacy plain
 run-creation endpoint into a general upsert API.
 
-This does not expand public workbench or permission-filtered fanout observation
-projections. Access to a child does not establish access to its parent/root;
-see [run list](run-list-contract.md) and [run detail](run-detail-contract.md).
+## Public reads — read behavior v2 (2026-11-26)
+
+The public [detail contract](run-detail-contract.md) adds lineage only to
+reader-backed authorized ordinary detail: an inspection must exist and must
+not be managed, restricted, or a sensitive fanout child. The base safe
+projection still redacts both columns. The additional domain projection reads
+candidates only from that inspection's stored columns, then independently
+calls the existing reader's `inspectRun(actor, id)` for each valid non-null
+ancestor ID. Its returned `run.flow_id` must exactly equal the requested ID.
+Equal parent/root IDs share one lookup; ancestors are not recursively traversed.
+
+Access to a child does not establish ancestor access, even within the same
+workflow: each ancestor's workflow and Bot/owner rules still apply. Only
+forbidden/not-found ancestors are omitted independently. All other read or
+authorization failures reach the existing HTTP error handler, not a false
+successful response. Explicit nulls stay null; absent/invalid fields are
+omitted. Valid strings are returned unchanged, never taken from client
+parameters, state, or launch input.
+
+Readerless/default detail, fanout managed/restricted/sensitive views, and
+[run lists](run-list-contract.md) retain redaction. There is no client opt-in,
+credential selection, or engine/internal fetch bypass. This is an additive
+read-contract revision, not a new endpoint, wire-version field, registration
+change, or permission grant. A displayed parent/root link must undergo the
+destination's authorization again and is not proof of ancestry. Optional-column
+compatibility permits legacy public reads without fabricating values; it does
+not relax engine registration or schema-readiness requirements below.
 
 ## HTTP callbacks
 
@@ -123,5 +147,9 @@ Build first so package self-imports resolve current artifacts rather than stale
 `modules/workflow/server/routes/internal/__tests__/flow-run-lineage*.test.ts`
 (relative to `public/`). They cover pre-applied schema, null/exact-value
 round trips, invalid input, lifecycle immutability, and registration replay.
-Public list/detail tests pin omission of ancestor IDs; the host's existing
-authentication and authorization boundaries remain necessary.
+Public list and readerless/fanout detail tests pin omission of ancestor IDs;
+`server/routes/__tests__/run-detail-launch-input.test.ts` adds real SQLite and
+reader-backed HTTP coverage for authorized ordinary detail, exact values,
+legacy optional columns, ancestor denials, and failure propagation. Focused
+helper/repository tests pin deduplication and missing-column error handling.
+The host's existing authentication and authorization boundaries remain necessary.

@@ -17,20 +17,22 @@ export function RunDetail({
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
+    const main = heading.current?.closest('main');
+    if (main) main.scrollTop = 0;
     heading.current?.focus({ preventScroll: true });
   }, [run.id]);
   const active = nodes.findIndex((node) => node.id === run.node);
   const nodeName = nodes[active]?.name ?? run.node;
   return (
-    <section aria-label="模拟运行详情" className="p-3.5">
+    <section aria-label="模拟运行详情" className="rounded-xl border border-border bg-card p-3.5">
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
           <ArrowLeft className="size-3.5" aria-hidden />
           返回列表
         </Button>
-        <h3 ref={heading} tabIndex={-1} className="font-mono text-xs font-medium outline-none">
-          {run.id}
-        </h3>
+        <h2 ref={heading} tabIndex={-1} className="text-sm font-semibold outline-none">
+          运行详情 · <span className="font-mono text-xs font-medium">{run.id}</span>
+        </h2>
         <DemoBadge />
         <StatusBadge status={run.status} />
       </div>
