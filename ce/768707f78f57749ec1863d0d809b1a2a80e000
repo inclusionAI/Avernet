@@ -1,0 +1,45 @@
+apps/bcs/crates/bootstrap/bcs/tests/bootstrap_auth_boundaries.rs
+  s_7d114ded8fc0da::t_f38d9a96535a07 5
+apps/bcs/crates/bootstrap/bcs/tests/bot_authority_migration.rs
+  s_7d114ded8fc0da::t_8b4dfb70cfe09d 276-277
+apps/bcs/crates/services/bcs-db-migrations/CONTEXT.md
+  s_7d114ded8fc0da::t_a631cf40520519 9,16,57
+apps/bcs/crates/services/bcs-db-migrations/src/lib.rs
+  s_7d114ded8fc0da::t_b4919a63c9eff0 294-296,304-305
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/catalog_labels_tests.rs
+  s_7d114ded8fc0da::t_243565a7c142c5 26
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests.rs
+  s_7d114ded8fc0da::t_23c7a307ec9809 119-282,288
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests/bot_provider_storage.rs
+  s_7d114ded8fc0da::t_1f94de57c82e08 9,48,99,128,130
+apps/bcs/crates/services/bcs-edge-permission-store/CONTEXT.md
+  s_7d114ded8fc0da::t_bce4253142c6ba 172-173
+apps/bcs/crates/services/bcs-edge-permission-store/tests/authority_mysql.rs
+  s_7d114ded8fc0da::t_87c98b11e2ae87 548
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_a2a_chat/edge_grant.rs
+  s_7d114ded8fc0da::t_301c7edb55a4c5 57-64,68-94
+apps/bcs/crates/tools/bcs-admin/src/migrate_human_input_index_tests.rs
+  s_7d114ded8fc0da::t_3cac90b4d15200 40
+apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs
+  s_7d114ded8fc0da::t_086a471262fa28 60,62,66,193,195
+apps/bcs/docs/superpowers/specs/2026-08-18-friend-edge-permission-reform.md
+  s_7d114ded8fc0da::t_d7de3f8027df2e 3621,3629-3631,3636,3640-3671
+apps/bcs/scripts/e2e-test/agent_edge_compatibility_story.py
+  s_7d114ded8fc0da::t_9493156f27cdbb 101-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ce768707f78f57749ec1863d0d809b1a2a80e000",
+  "prompts": {},
+  "sessions": {
+    "s_7d114ded8fc0da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b4-ef36-7703-9562-0f40ee69f61b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,87 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-service.test.ts
+  s_118944da3d52d1::t_4177eaac5b5392 603-624
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/index.ts
+  s_118944da3d52d1::t_45db591b08cacf 2
+apps/evolverun/clawweb/public/shared/server/__tests__/database-init.test.ts
+  s_118944da3d52d1::t_1d2b92051517c5 34
+apps/evolverun/clawweb/public/shared/server/services/__tests__/distributed-lock.test.ts
+  s_118944da3d52d1::t_97bed88b7a3c4b 1-137
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_a6cf0b4901b3a8::t_f44bceb580ba7a 403
+apps/evolverun/clawweb/public/shared/server/db/dialect.ts
+  s_118944da3d52d1::t_cab4eef2d8caa8 31-33,127,275
+apps/evolverun/clawweb/public/shared/server/__tests__/schema-aistudio-train.test.ts
+  s_118944da3d52d1::t_da9370e51acaff 3,35-36,65-66
+apps/evolverun/clawweb/public/shared/server/db/migrations-registry.ts
+  s_118944da3d52d1::t_fcbc8a3c5bbe3b 4,10
+  s_118944da3d52d1::t_db4d2f51e644fa 17-20
+apps/evolverun/clawweb/public/shared/server/repositories/__tests__/distributed-lock.test.ts
+  s_118944da3d52d1::t_97bed88b7a3c4b 1-122
+apps/evolverun/clawweb/public/shared/server/__tests__/managed-migrations.test.ts
+  s_118944da3d52d1::t_da9370e51acaff 8,69,87-98
+  s_118944da3d52d1::t_f75b40bbdaae61 296,314,419
+  s_118944da3d52d1::t_43a07711eb194b 288
+  s_118944da3d52d1::t_c767da7e6c30c4 99
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  s_118944da3d52d1::t_45db591b08cacf 603-604,616,624,627,649,671-672,678,681,688,692,695,702,706,724,729
+apps/evolverun/clawweb/public/shared/server/repositories/distributed-lock-repository.ts
+  s_118944da3d52d1::t_1e26416bab33b5 83,87,90
+  s_118944da3d52d1::t_fcbc8a3c5bbe3b 1-82,84-86,88-89,91-110
+apps/evolverun/clawweb/public/shared/server/schema-distributed-lock.ts
+  s_118944da3d52d1::t_da9370e51acaff 57
+  s_118944da3d52d1::t_fcbc8a3c5bbe3b 1-56,58-92
+apps/evolverun/clawweb/public/shared/README.md
+  s_118944da3d52d1::t_1d2b92051517c5 1-79
+apps/evolverun/clawweb/public/shared/server/__tests__/distributed-lock-schema.test.ts
+  s_118944da3d52d1::t_db4d2f51e644fa 5,49-55
+  s_118944da3d52d1::t_d43fb2752a0de2 1-4,6-48,56
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  s_118944da3d52d1::t_1d2b92051517c5 42-63
+  s_118944da3d52d1::t_43fb348b47ad26 40-41,64-68
+apps/evolverun/clawweb/scripts/sql/distributed-locks-v158.mysql.sql
+  s_118944da3d52d1::t_c5a2cf7147e5ac 1-30
+apps/evolverun/clawweb/public/shared/server/services/distributed-lock.ts
+  s_118944da3d52d1::t_fcbc8a3c5bbe3b 1-75
+apps/evolverun/clawweb/public/shared/server/__tests__/distributed-lock-fixture.ts
+  s_118944da3d52d1::t_97bed88b7a3c4b 1-29
+apps/evolverun/clawweb/public/shared/server/repositories/__tests__/distributed-lock.mysql.test.ts
+  s_118944da3d52d1::t_9b35ceef6b81e5 1-98,109
+  s_118944da3d52d1::t_d43fb2752a0de2 99-108
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/index.ts
+  s_118944da3d52d1::t_5f051bf138609e 22,26-27,72,75,98-100
+  s_a6cf0b4901b3a8::t_60802dea68624d 90-91,97
+  s_118944da3d52d1::t_c171c45c73cf2e 8-9,71,73-74,76-89,92-96
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/maintenance-lease.test.ts
+  s_118944da3d52d1::t_4177eaac5b5392 1-4,8-11,16-17,19-22,32,34-36,38,44-45,48-49,54,57,65,76-77,84-85
+  s_a6cf0b4901b3a8::t_f7dfd96797af23 12-15,47,86,100
+  s_118944da3d52d1::t_2096fa637e02c1 5-7,18,23-31,33,37,39-43,46,50-53,55-56,58-64,66-75,79-83,87-99
+  s_118944da3d52d1::t_45db591b08cacf 78
+apps/evolverun/clawweb/public/shared/server/__tests__/flow-run-lineage-migration.test.ts
+  s_118944da3d52d1::t_d43fb2752a0de2 42,58
+apps/evolverun/clawweb/public/app/clawweb/server/README.md
+  s_118944da3d52d1::t_1d2b92051517c5 41-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d32aea5c847f3f7d8ca2131dfab65a3c9770c686",
+  "prompts": {},
+  "sessions": {
+    "s_118944da3d52d1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212f1-f5c7-71d1-9784-e0e8a73b9f55",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": null
+    },
+    "s_a6cf0b4901b3a8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a211d3-b312-7363-b8f8-a812788340a7",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

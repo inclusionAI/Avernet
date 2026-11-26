@@ -1,0 +1,16 @@
+apps/bcsfuse/packages/search-core/src/search_core/application/emergency.py
+  h_d4a0e6dd5fd9c5 115-126
+apps/bcsfuse/packages/search-core/tests/test_retrieval_config.py
+  h_d4a0e6dd5fd9c5 14,38-41,187-200
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7368b51d33131640db9e8d9c6b565ca783cd26c9",
+  "prompts": {},
+  "humans": {
+    "h_d4a0e6dd5fd9c5": {
+      "author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
