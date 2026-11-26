@@ -3521,7 +3521,7 @@ MySQL `ux_profile_bot_env_default (bot_id,env,is_default,status)` 允许两条 `
 2. 新增 fallible `list_runtime_grants_checked`：自定义实现默认 unavailable；SQL/Memory 明确实现，查询/未知 kind/坏 JSON/坏形状整体失败，不把部分结果或空集合当成功。SQL 中 rules/policy data 必须真正为 NULL，不接受空串或 JSON `null`；身份匹配保持 byte-exact。
 3. 通用 admission 与既有 AuthzContext 只消费旧 profile/rules，不将 AgentInvoke 候选转换为 default-profile grant。已有 PublicDefault 等独立授权保持原语义，不冒称命中了本类型。
 4. 旧 friend request 的 get/approve/reject/cancel/list 仅处理 Connect，并在幂等/approved writeback 之前拦截其他 kind；原好友精确撤销不影响同一对上的 AgentInvoke 边。
-5. 领域结构验证、DB mapping、真实 SQLite 应用回归及 Memory/SQLite 共享 conformance 覆盖新名称与上述隔离；MySQL driver 需要独立空测试库和完整迁移链，ignored 不算实际验证通过。
+5. 领域结构验证、DB mapping、真实 SQLite 应用回归及 Memory/SQLite 共享 conformance 覆盖新名称与上述隔离；MySQL 用例复用既有 edge-authority gate 的已迁移 schema，不新增按 grant kind 划分的数据库；ignored 不算实际验证通过。
 
 本次已继续实现独立的 Rust 管理/运行鉴权契约、纯策略、application 编排和 synthetic 本地生命周期驱动；**当时持久化 SQL 生命周期、注册 HTTP 管理 API、治理查询和生产调用接入尚未完成**（后续 SQL core 进度见文末）。本地驱动不是真实资格源、SQL 事务或生产放行证据；不得将受信 repo insert/upsert 暴露为管理接口，也不得仅凭 canonical shape 启用生产调用。
 
@@ -3553,7 +3553,7 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - 新 `AgentInvokeFactRepoPort` 只用于受信宿主发布身份/资格代次、revision 与有界租约，没有公共 serde/HTTP DTO。`read_fact` 可返回过期事实供 publisher CAS 恢复，不能直接用作运行放行；调用者仍须实现原契约要求的唯一注册绑定与实时失效 fencing。输入看似合法不代表该 Bot 确实已注册。
 - 本阶段最初以 scope revision、fact revision 和 typed audit 共用一个三步事务；下文 SQL command 增补已扩展为包含注册锁和持久失效的十二步事务。代次不倒退；资格/active/hidden 变化或 lease 过期后，恢复必须推进 eligibility generation。同一 expected revision 的并发写只有一个成功。opaque backend 错误保守返回 commit unknown，不自动重试；明确超时由 DbPlugin 约定回滚后返回 unavailable。此阶段尚未实现完整 grant lifecycle 的幂等回执恢复；现已补充 SQL core，见文末。
 - 此阶段最初 publish 为两个点查加三个 transaction statement；当前成本见文末十二步事务。正常 read_fact 仍是两个点查。scope 校验及 publish CAS 会在同域 publisher 间争用，当前无自动重试、后台扫描或正向缓存；此阶段不据 SQLite 小样本声称 MySQL 扩展性。
-- 本地验证只使用真实 SQLite：完整迁移链、重复打开、关闭态与 namespace 冲突、严格解码/身份、有限租约、单调代次、资格丢失/恢复、审计失败整体回滚、确定性并发和文件重启持久化；plugin call 计数验证上述固定成本。MySQL reader/fact gate 显式接入远端 CI 的独立空 MySQL 8.4 数据库，运行完整迁移链；本机不启动 Colima，ignored 不算通过，远端结果必须按提交 SHA 单独报告。
+- 本地验证只使用真实 SQLite：完整迁移链、重复打开、关闭态与 namespace 冲突、严格解码/身份、有限租约、单调代次、资格丢失/恢复、审计失败整体回滚、确定性并发和文件重启持久化；plugin call 计数验证上述固定成本。MySQL reader/fact 用例并入既有 edge-authority gate，复用其完整迁移后的 MySQL 8.4 数据库；本机不启动 Colima，ignored 不算通过，远端结果必须按提交 SHA 单独报告。
 - 本阶段结束时 SQL grant/request 命令与审批同提交 fencing 尚未完成（现已补充 SQL core，见文末）；治理 GET/list/degree、HTTP/SDK、实际 dispatch 和 host 集成仍未完成。不能以新增 schema、unit 覆盖率或关闭态 fact publisher 代替真实 HTTP→DB→A2A E2E。
 
 
@@ -3564,7 +3564,7 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - 管理读取为一个六 statement 的只读事务：锁 scope、按 Rust byte-order 分别锁两个 Bot 点、读 pair、读精确请求、读当前严格角色/authority audit epoch。分别点锁而非依赖 combined IN + ORDER BY 推断 InnoDB 加锁顺序。Human 角色只来自 initialized、完整 canonical owner 图和当前存活 Human，无 legacy created_by auto-claim；fence 同时包括实际 Human 注册行 ID，不能把同名重建当同一绑定。
 - 原申请者来自精确 kind/scope/pair 的 permission_request + typed metadata，不借用审批者的 source 权限；Human 原申请者读取当前 source role，Governance 原申请者需要当前 exact principal/pair 的 Request 委托。未知/坏/重复 action、hash 命中但完整 principal 不符整体失败。管理快照中的过期事实投影为 inactive，但不抹掉 target owner 的止损角色。
 - Governance 最多另做两个精确主键查询，再重读 scope revision；发布者必须同事务推进 scope revision，若释放锁到委托读取间发生发布则返回 conflict，不能拼装跨代快照。普通 Human 管理为六个 SQL statement，最坏两类 governance 为九个；正常六 statement 返回 scope 1 + Bot 2 + pair 1 + request 0..1 + authority 1 行。owner COUNT / authority MAX 子查询仍走有界 actor/pair 条件，不等于 MySQL rows-examined/锁竞争或 EXPLAIN 已验证。
-- 共享 snapshot conformance 同时运行 synthetic local 和真实 SQL reader，并调用真实 invocation application；补充确定性 Notify 交错、实际 SQL/返回行数、源资格丢失恢复、原申请者失权、治理委托和注册重建回归。MySQL 同组 snapshot consumer 已加入现有远端独立空库 gate；本地 ignored 不算实际 MySQL 通过。
+- 共享 snapshot conformance 同时运行 synthetic local 和真实 SQL reader，并调用真实 invocation application；补充确定性 Notify 交错、实际 SQL/返回行数、源资格丢失恢复、原申请者失权、治理委托和注册重建回归。MySQL 同组 snapshot consumer 并入既有 edge-authority gate 的同一已迁移数据库；本地 ignored 不算实际 MySQL 通过。
 - **这些是读取与预检，不是写提交授权，也不是生产 host provider。** 后续 SQL command 必须在写事务重新验证所有 Bot/Human/资格/治理/authority fences、当前 requester 代次和配额，再原子写 edge/request/audit/receipt。宿主必须在绑定/资格变化确认前持久发布失效；仅有注册行或手动 set_enabled 不能替代宿主能力与 reader 清单证明。现有 legacy request creator/decider 宽度等写端存储约束也必须显式解决，不能截断 principal、塞进 message 或修改已提交的 048/050 migration。
 - 本 reader 阶段结束时 SQL 六类 command 尚未完成（现已补充 SQL core，见文末）；治理 GET/list/degree、HTTP/SDK、实际 dispatch 与 host/E2E 仍未完成。当前更强的 SQL reader 和 unit 行覆盖率不能作为这些项目的完成证明。
 
@@ -3580,7 +3580,7 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - trusted fact publication 自动绑定实际注册行；注册 ID 改变必须推进 binding generation，同 ID identity revision 改变必须推进 binding 或 eligibility generation。运行读取校验事实、当前物理注册和批准三者的绑定。发布失效同事务撤销 incident approved edges、推进 approval version、写逐 edge audit；资格恢复不复活旧批准。
 - 当前 publish 成本是 **2 次外部 SELECT + 12-step transaction**：scope CAS、注册点锁、fact CAS、outbound/inbound 各四步（overflow guard / audit / metadata / edge）、publication audit。失效分两个定向索引范围，MySQL 使用 FORCE INDEX/STRAIGHT_JOIN，SQLite 使用 INDEXED BY/CROSS JOIN，不做全 scope 双向 OR 扫描。工作量随 incident approved edges 增长；小图与 statement 数上界不能证明大图成本或 MySQL EXPLAIN。普通 snapshot 仍六条、最坏 governance 九条；command 测试约束总 statement ≤48、write plan ≤32 step、每 statement ≤512 binds，runtime 仍一条 pair SQL。
 - trusted `AgentInvokeGovernanceRepoPort` 在一条事务中发布 scoped delegation、scope/delegation revision 和 audit。issuer 是 trusted publisher，不将 subject 伪装成自发委托 issuer；无公共 serde/HTTP 入口。delegation 移除恢复不能恢复旧 pending request 的 requester epoch。
-- 真实 SQLite 共享 local driver 的十组 lifecycle scenarios，并增加治理 feed contract；原子性测试覆盖 grant/request audit failure 全回滚、commit ack 丢失恢复、预检后失权被事务 guard 阻断、Human/registration/delegation ABA、文件重启、实际 SQL/binds 上界。远端独立空 MySQL gate 复用相同十组生命周期和治理 feed，运行完整迁移链到 v51；本机不启动 Colima/MySQL，ignored 不算通过。
+- 真实 SQLite 共享 local driver 的十组 lifecycle scenarios，并增加治理 feed contract；原子性测试覆盖 grant/request audit failure 全回滚、commit ack 丢失恢复、预检后失权被事务 guard 阻断、Human/registration/delegation ABA、文件重启、实际 SQL/binds 上界。远端既有 edge-authority MySQL gate 复用相同十组生命周期和治理 feed，使用同一完整迁移后的数据库；本机不启动 Colima/MySQL，ignored 不算通过。
 - **仍未完成且不能启用生产 writer 的研发内容**：现有 registry 的绑定/hidden/retire/restore 等写端自动推进 identity revision 和 trusted fact 发布、host capability proof、治理 GET/list/degree 与 keyset/access authorization、HTTP DTO/routes/OpenAPI/SDK、trusted ingress 唯一 Bot identity resolution、operation-aware dispatch hook、真实 HTTP→DB→A2A fake E2E 和 Singlebox changed-line gate。测试中手动推进 revision 不是生产接入证据；普通 online/offline、owner transfer、无关 metadata 不应盲目触发资格撤权。
 - SQL core 阶段最初对 opaque `DbError::Backend` 保守返回 CommitUnknown；后续 typed outcome 契约与 bundled executor 实现见下文。默认 writer/runtime 保持关闭，不将本轮 SQL core、单测覆盖率或 lint-only hook 等同于研发整体完成、生产放行或 E2E 验收。
 
@@ -3601,7 +3601,7 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 - Human 当前 owner/manager 可查其受控 Bot 的出入关系；普通 Agent 不可因有调用权限读取管理图。Governance 必须显式 peer + exact-pair Query delegation，不能扩成整 Bot 图；degree 揭示两向，要求双向 Query 委托。audit 必须给 peer；Human 可查 self-pair 的 qualification audit。资格丢失及 writer/runtime 关闭不阻断已授权控制人查询历史，缺失 counterpart registration 不伪造资格或展示字段。
 - store 先做一次 point-only 权限预检，阻止无权调用触发 aggregate；真正返回前在 scope/anchor/Human 锁与数据同一只读事务内重读 authority、纯 Core 重新授权，scope ID/revision 不一致报 Conflict。预检不是返回权限证明。无写入、audit append、revision increment、正向 cache 或逐边外部 inventory/N+1。
 - Human page/exact 总计 6 statements，degree 9；Governance 分别 5/8。degree 用两条 distinct approved peer aggregate + 两条 pending aggregate，同一事务，`count_basis=StoredApproved`，不声称等于实时可调用权限。metadata/canonical shape/scope/version/kind/status 和非法 Agent endpoint 损坏整体失败，不用零度或部分页掩盖；单 statement binds≤64、data rows≤101。
-- 新增 **SQLite 050 / MySQL 052**，统一加入 request pair、audit pair/time、audit pair/action/time 三个索引；旧 049/051 及所有历史 SQL/checksum 不变。SQLite 完整迁移升级、旧数据/history 保留、DDL/history 原子回滚及静态 MySQL key budget 有测试；真实 MySQL 当前 SHA 仍交远端独立空库 gate 验证。
+- 新增 **SQLite 050 / MySQL 052**，统一加入 request pair、audit pair/time、audit pair/action/time 三个索引；旧 049/051 及所有历史 SQL/checksum 不变。SQLite 完整迁移升级、旧数据/history 保留、DDL/history 原子回滚及静态 MySQL key budget 有测试；真实 MySQL 当前 SHA 仍交远端既有 edge-authority gate 验证。
 - 共享 query application/repo/policy 三套 conformance 使用真实 lifecycle 数据；SQLite 补 110-peer 最大分页与 query/bind/EXPLAIN、Notify 预检后失权、scope torn revision、历史读取、audit 同毫秒游标/无写、坏 owner/delegation/request/lookahead/error 回归。远端原有 MySQL selector 增加 application/repo query harness，并对实际捕获 SQL 做 7 个 hinted index EXPLAIN；小 fixture、固定 statement 数或 SQLite 结果不是 MySQL 大图 rows-examined/锁争用证明。
 - 本地不启动 Colima/MySQL/Singlebox；普通单测、插桩覆盖率、ignored MySQL、远端当前 SHA 和真实 E2E 分开记录。新 query 尚未注册 HTTP/SDK，也不补齐 registry 生命周期 producers/host、trusted ingress、统一 dispatch 或 Singlebox changed-line gate。
 
@@ -3646,7 +3646,7 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 
 ### 后续实现增补：真实 SQL 的确定性交错与事务结果矩阵
 
-- 新增 31 个共享 SQL 场景，每个在本地由独立可发现的 SQLite 测试执行；目录一致性断言逐一比较完整场景，而非只比较测试总数。相同场景加入既有 disposable EMPTY MySQL selector，不另起数据库/旁路工作流，本机不启动 MySQL 或 Colima。
+- 新增 31 个共享 SQL 场景，每个在本地由独立可发现的 SQLite 测试执行；目录一致性断言逐一比较完整场景，而非只比较测试总数。相同场景并入既有 edge-authority MySQL selector，在它完成迁移与原有 64 场景后继续执行，不另起数据库/旁路工作流，本机不启动 MySQL 或 Colima。
 - SQLite 每场景使用同一临时文件上的两个独立 plugin/connection，两个 application 均已完成真实 SQL pre-read 和完整事务计划后，Notify 才按指定顺序释放 writer。分别证明 approve/cancel、approve/revoke 的两个提交顺序；出边/入边额度、pending 出/入额度及同 pair pending 唯一性的两个获胜方；scope/version CAS 拒绝 stale plan。不是用 tokio::join! 的参数顺序假设谁先提交，也不声称测试了未实际观察的数据库锁调度。
 - 失败方必须得到真实 native NotCommitted/Conflict，且只尝试一次事务；检查 12 张相关表的完整 scoped durable rows 与获胜提交后的快照逐行一致，包含实体/metadata 版本、pending、原 receipt、audit JSON、facts/authority/scope，而非仅计数。显式释放容量后，未成功 key 以原 payload 再提交成功；没有测试侧自动重试掩盖失败。
 - 旧批准 key 在新批准事务暂停期间只能回放 revoked current state、不能调用；新批准提交后仍保留旧 original grant/action，current 引用新版本。相同 key 两个预构建事务、相同 key 不同 payload，以及实际 COMMIT 已完成但首个调用确认尚未返回时第二 worker 的同 key恢复均单独验证，最多一次批准变更。
@@ -3665,6 +3665,13 @@ reader/SDK/宿主必须先支持新枚举再开放后续 writer；未知类型�
 
 - 2026-11-26，提交 `55b387681822a79c0a2be5e2bb4e29a03d3723e3` 的 BCS run `45723053506` / job `139586023456` 完成 SUCCESS。真实 disposable MySQL 执行了 indices 0..30 的全部共享场景，日志具有 `agent-invoke-mysql-gate=deterministic-races scenarios=31 native-outcomes=verified`，同一 contract 为 1 passed / 0 failed / 0 ignored；不是本地 ignored 或仅 selector 编译。
 - 原 5.4 所列 SQL/Notify 争用与六类 command 事务结果矩阵据此已有 SQLite 与原生 MySQL 两套执行证明。该 source/test 增量与最新 bootstrap 装配代码分开：新 head 的全部 CI、外部宿主/OceanBase、inventory freshness/多 worker 撤销确认、SDK/Singlebox 和 rollout 仍需各自证明，不能继承该 SHA 的绿灯。
+
+### 2026-11-26 测试接入修订与 Singlebox 缺口
+
+- 按评审意见撤回本 PR 对 `.github/workflows/unit-tests.yml` 的全部修改：不新增 AgentInvoke 专用 MySQL service、空库、端口或 selector。AgentInvoke reader/facts、十组生命周期、治理查询、身份、31 个交错/事务结果和实际 registry writer 场景在既有 `authority_mysql_conformance` 内继续执行，复用已完成完整迁移和原有 64 个 authority 场景的同一 schema/连接池。原 64 场景清单和失败传播不变；任一新增场景失败都会使同一 gate 失败，不将移除独立 selector 变成跳过测试。
+- 共享场景入口不建库、不重放 migration、不清空旧表。新增默认执行的 SQLite populated-schema 回归：先运行原 `EdgeGrantRepoPort` contract，再在同一库运行上述 AgentInvoke 场景，并逐行比较旧 env 的 edge/profile 数据未变化。真实 MySQL 的接入修改仍须由新 SHA 的远端 gate 实际执行验收，本机不启动 Colima/MySQL。
+- 本次接入修订的本地验证：`bcs-edge-permission-store` 完整 nextest 为 231 passed / 2 ignored（既有 MySQL suites，本机未执行）；CI tooling 68/68 通过；现有 `authority_mysql` 目标编译检查通过。新增 populated-schema aggregate 内包含全部 31 个争用场景，仍不代替真实 MySQL 或 E2E。
+- 已核实提交 `55b3876818` 的 Singlebox run `45723053416` 因增量覆盖失败：308/4937 = 6.24%，要求 >65%；总体行 60.18%（要求 >=54%）、方法 54.36%（要求 >=48%）、HTTP endpoint 183/183 和 CLI 67/67 均达标。新增 AgentInvoke 管理/查询/事务/策略路径大多零命中，不能用单测覆盖率或旧 SHA 单测成功代替。需补真实 HTTP→application→SQL→A2A fake-target 故事及隔离的可信 synthetic producer；不降阈值、不从生产分母剔除代码、不把 domain 单测 profiles 混入 E2E。
 
 ### 原 27 项研发与验收跟踪（保留完整范围）
 

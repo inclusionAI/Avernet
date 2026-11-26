@@ -186,7 +186,7 @@ mod second { #[test] #[ignore] fn ambiguous() { panic!("must not execute"); } }
                 packages[tomllib.loads(manifest.read_text())['package']['name']] = manifest.parent
         workflow = (ROOT / '.github/workflows/unit-tests.yml').read_text().split('\n  engine:', 1)[0]
         selections = re.findall(r'ci_contract_test.py --package (\S+) --binary (\S+) --test (\w+)', workflow)
-        self.assertEqual(len(selections), 15)
+        self.assertEqual(len(selections), 14)
         for package, binary, test in selections:
             with self.subTest(package=package, binary=binary, test=test):
                 source_root = packages[package]
@@ -197,19 +197,21 @@ mod second { #[test] #[ignore] fn ambiguous() { panic!("must not execute"); } }
                     matches.extend(re.findall(r'#\[ignore[^\]]*\]\s*(?:async\s+)?fn\s+(' + re.escape(test) + r')\s*\(', source.read_text()))
                 self.assertEqual(matches, [test])
 
-    def test_agent_invoke_contract_owns_a_disposable_database(self) -> None:
+    def test_agent_invoke_contract_reuses_existing_edge_authority_database(self) -> None:
         workflow = (ROOT / '.github/workflows/unit-tests.yml').read_text()
-        service = workflow.split('      mysql_agent_invoke:', 1)[1].split('    env:\n      CARGO_TERM_COLOR:', 1)[0]
-        self.assertIn('image: mysql:8.4', service)
-        self.assertIn('MYSQL_DATABASE: bcs_agent_invoke', service)
-        self.assertIn('3312:3306', service)
-        credential = '${{ github.run_id }}-${{ github.run_attempt }}'
-        self.assertIn(f'MYSQL_PASSWORD: {credential}', service)
-        step = workflow.split('      - name: Run Agent invocation MySQL reader and durable facts contracts', 1)[1].split('      - name:', 1)[0]
-        self.assertIn(f'mysql://bcs:{credential}@127.0.0.1:3312/bcs_agent_invoke', step)
-        self.assertIn('--binary conformance_agent_invoke_mysql --test agent_invoke_repo_contract_mysql', step)
-        self.assertNotIn('continue-on-error', step)
-        self.assertIn("if: steps.changes.outputs.skip-bcs != 'true'", step)
+        self.assertNotIn('mysql_agent_invoke:', workflow)
+        self.assertNotIn('bcs_agent_invoke', workflow)
+        self.assertIn('--binary authority_mysql --test authority_mysql_conformance', workflow)
+        tests = BCS / 'crates/services/bcs-edge-permission-store/tests'
+        entry = (tests / 'authority_mysql.rs').read_text()
+        self.assertIn('agent_invoke::run(database.plugin.clone(), bcs_db_api::DbSqlFlavor::Mysql).await;', entry)
+        self.assertLess(entry.index('database.apply_full_migration_chain()'), entry.index('agent_invoke::run('))
+        self.assertLess(entry.index('agent_invoke::run('), entry.index('database.close()'))
+        shared = (tests / 'support/agent_invoke_migrated.rs').read_text()
+        self.assertNotIn('open_empty()', shared)
+        self.assertNotIn('apply_full_migration_chain()', shared)
+        self.assertIn('races::cases()', shared)
+        self.assertIn('registry::run(db.clone(), flavor)', shared)
 
     def test_workflow_runs_ci_tooling_regressions(self) -> None:
         workflow = (ROOT / '.github/workflows/unit-tests.yml').read_text()
@@ -219,7 +221,7 @@ mod second { #[test] #[ignore] fn ambiguous() { panic!("must not execute"); } }
         workflow = (ROOT / '.github/workflows/unit-tests.yml').read_text()
         bcs_job = workflow.split('\n  engine:', 1)[0]
         self.assertIn('bash scripts/ci_test.sh --coverage --reuse-build', bcs_job)
-        self.assertEqual(bcs_job.count('python3 scripts/ci_contract_test.py'), 15)
+        self.assertEqual(bcs_job.count('python3 scripts/ci_contract_test.py'), 14)
         self.assertNotIn('run: cargo test ', bcs_job)
         for inventory in ['edge-authority scenarios=64', 'provider-lifecycle scenarios=30',
                           'group-authorization scenarios=9', 'session-authorization scenarios=6']:
