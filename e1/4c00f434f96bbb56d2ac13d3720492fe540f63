@@ -1,0 +1,25 @@
+apps/backend/docs/openapi-v1/README.md
+  s_9e36e09e5dbdc6::t_ecfa533a08ff2b 1926-1927
+apps/backend/docs/openapi-v1/README.zh-CN.md
+  s_9e36e09e5dbdc6::t_b062d4571b2267 1033-1034
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/resources/router.py
+  s_9e36e09e5dbdc6::t_3919eff72fb841 208,210,212-218,221,223-235,266-276,306-307,330-336
+apps/backend/tests/community/adapters/http/openapi_v1/resources/test_list_workspace_path.py
+  s_9e36e09e5dbdc6::t_01b113a6c5f22c 1-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e14c00f434f96bbb56d2ac13d3720492fe540f63",
+  "prompts": {},
+  "sessions": {
+    "s_9e36e09e5dbdc6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20c40-35fa-7b63-a937-b9f3623a79af",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

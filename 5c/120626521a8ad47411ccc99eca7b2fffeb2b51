@@ -1,0 +1,109 @@
+apps/bcs/api-contracts/a2a/agent_card_management/v1/README.md
+  s_94c42a5933ce17::t_75187ce4f1cb64 1-52
+apps/bcs/api-contracts/a2a/agent_card_management/v1/agent_card_management.proto
+  s_94c42a5933ce17::t_720d47c1cfb465 1-604
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/management.rs
+  s_94c42a5933ce17::t_5ee979335ef4b5 15,25-32,43-44,54-55,59-71,92-134,181-188,196,221,248-249
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/mod.rs
+  s_94c42a5933ce17::t_46d3bc8a26ed77 21
+apps/bcs/crates/adapters/http/bcs-api-http/tests/a2a_catalog_sync.rs
+  s_94c42a5933ce17::t_4d8260a087c554 49,71,85-88,101-114,119-120
+apps/bcs/crates/adapters/http/bcs-api-http/tests/a2a_routes.rs
+  s_94c42a5933ce17::t_fa8e244d7374cb 41-44,66-69,90-97,102-105,185,203-208,303-323
+apps/bcs/crates/adapters/http/bcs-api-http/tests/agentcard_warning.rs
+  s_94c42a5933ce17::t_b657a9a03e1fa0 27-30
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_management.rs
+  s_94c42a5933ce17::t_edff6b9d683f12 20-26,42-43,53-54,87,122,298,307-312,317
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_card_routes.rs
+  s_94c42a5933ce17::t_8c226ed4238567 6,13,17-20,34-36,44-54,286-303
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_management_errors.rs
+  s_94c42a5933ce17::t_1defe3f174302f 49-52,231
+apps/bcs/crates/application/bcs-app-a2a-bot/src/lib.rs
+  s_94c42a5933ce17::t_a0d1bff97d8949 53,78,106,110-113,123-124,126,131,133,148,151,204-205,209,211
+apps/bcs/crates/application/bcs-app-a2a-bot/src/management.rs
+  s_94c42a5933ce17::t_b4625a3413cacd 23-26,29-55,172,212,216,254-257,276-310
+apps/bcs/crates/application/bcs-app-a2a-bot/src/names.rs
+  s_94c42a5933ce17::t_2e575aa484d885 40
+apps/bcs/crates/application/bcs-app-a2a-bot/src/registration.rs
+  s_94c42a5933ce17::t_6e0acbf061c93b 4,28,33,38
+apps/bcs/crates/application/bcs-app-a2a-bot/src/v1.rs
+  s_94c42a5933ce17::t_264971c3a3ab32 75,134,162-175,220
+apps/bcs/crates/application/bcs-app-a2a-bot/src/v1/error_message.rs
+  s_94c42a5933ce17::t_09695b0f787ff4 15,120-123
+apps/bcs/crates/application/bcs-app-a2a-bot/src/v1/error_message/tests.rs
+  s_94c42a5933ce17::t_1b330324baca95 132
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_a2a_configuration.rs
+  s_94c42a5933ce17::t_4e6394a8b62d69 66,141,227
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_a2a_v1.rs
+  s_94c42a5933ce17::t_6618c5c8ea4d08 25,116,137
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_provider_a2a_registration.rs
+  s_94c42a5933ce17::t_ed27bfc9217213 150,194
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/card_admission.rs
+  s_94c42a5933ce17::t_f864207a17b031 47
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/catalog_label_updates.rs
+  s_94c42a5933ce17::t_706161619c86bc 52,100
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/catalog_labels.rs
+  s_94c42a5933ce17::t_0196d2558d1275 12
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/catalog_notifications.rs
+  s_94c42a5933ce17::t_5b7e8a8fec73df 21,64,100
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/provider_name_updates.rs
+  s_94c42a5933ce17::t_0375dc1f7bf11d 17,47
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/public_management.rs
+  s_94c42a5933ce17::t_90ea948cbf898d 34,61,312-404
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/public_management_by_id.rs
+  s_94c42a5933ce17::t_8967351de0093a 166,193
+apps/bcs/crates/application/v1/bcs-app-register/src/lib.rs
+  s_94c42a5933ce17::t_c549f76c565c20 162
+apps/bcs/crates/contracts/bcs-domain/src/a2a_management.rs
+  s_94c42a5933ce17::t_acf2bfad7cd9e3 23
+apps/bcs/crates/service-api/bcs-service-api/src/application/a2a_bot.rs
+  s_94c42a5933ce17::t_f991d6760374fa 47-48,55-56,70-80,85-89
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/a2a.rs
+  s_94c42a5933ce17::t_4c1ef7a99c095a 22,42-51,65
+apps/bcs/crates/service-api/bcs-service-api/src/types/a2a_bot.rs
+  s_94c42a5933ce17::t_c7bf233adbd3ee 3,8-39,67-70,93
+apps/bcs/crates/service-api/bcs-service-api/src/types/catalog_labels.rs
+  s_94c42a5933ce17::t_322115ce0e1949 54,133,141
+apps/bcs/crates/services/bcs-bot-store/src/a2a.rs
+  s_94c42a5933ce17::t_59d606bdbe78e3 95,137,146,152,157-182,187-197,200,271-273,279,281
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_a2a_storage.rs
+  s_94c42a5933ce17::t_5735dc40c7375e 11,20-32
+apps/bcs/crates/services/bcs-bot-store/tests/provider_initial_managers_mysql/registration.rs
+  s_94c42a5933ce17::t_7e80e9188a0e3a 16-28
+apps/bcs/crates/services/bcs-bot-store/tests/support/a2a_mysql_cases.rs
+  s_94c42a5933ce17::t_97cccd3472f789 14-27
+apps/bcs/crates/services/bcs-bot/src/core/a2a_provider_registration.rs
+  s_94c42a5933ce17::t_65e270b0553416 45-71,104,107,118-119
+apps/bcs/crates/services/bcs-bot/src/core/provider_registration.rs
+  s_94c42a5933ce17::t_c53647e6f391dd 289-292
+apps/bcs/crates/services/bcs-bot/tests/a2a_discovery.rs
+  s_94c42a5933ce17::t_0637c18ebdd922 38-50
+apps/bcs/crates/services/bcs-bot/tests/provider_webhook_parts/a2a_abort.rs
+  s_94c42a5933ce17::t_6d1bbf32627e92 12,19-29,53,60-72
+apps/bcs/crates/services/bcs-fusion/src/core/card_sync.rs
+  s_94c42a5933ce17::t_f9235f67378ce3 95,258,260
+apps/bcs/crates/test-support/bcs-test-support/src/contract/bot_registration_chain.rs
+  s_94c42a5933ce17::t_be321d6187a794 53
+docs/bcn-a2a-api-reference.zh-CN.md
+  s_94c42a5933ce17::t_51468ee9549645 227,230-231,238,242
+docs/bcn-a2a-integration-guide.zh-CN.md
+  s_94c42a5933ce17::t_550e2db3d98c59 195,208-209
+docs/bcn-provider-agent-card-api-v0.1.zh-CN.md
+  s_94c42a5933ce17::t_d191fdcdd51aed 9,53-56,68-73,200-204,257,316,322,332-352,413
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5c120626521a8ad47411ccc99eca7b2fffeb2b51",
+  "prompts": {},
+  "sessions": {
+    "s_94c42a5933ce17": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20d69-010f-7df2-957c-de77c2ec3c63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

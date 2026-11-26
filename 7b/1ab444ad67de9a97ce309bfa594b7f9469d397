@@ -1,0 +1,23 @@
+apps/backend/src/agentclaw/community/core/devices/services/baas_publish_poller.py
+  s_27802bf2e1b024::t_ac5e6c1a4c46c0 152,161
+apps/backend/src/agentclaw/community/core/devices/services/baas_publish_task_handlers.py
+  s_27802bf2e1b024::t_68e1a3f8767a85 276,290
+apps/backend/tests/community/core/devices/services/test_baas_publish_task_handlers.py
+  s_27802bf2e1b024::t_e3c6b39cc4d666 683,716,813,820,856,910,2385
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7b1ab444ad67de9a97ce309bfa594b7f9469d397",
+  "prompts": {},
+  "sessions": {
+    "s_27802bf2e1b024": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a117-d240-7ca3-8227-68fedcb56672",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

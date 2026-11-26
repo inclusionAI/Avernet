@@ -1,0 +1,80 @@
+apps/backend/src/agentclaw/corp/plugins/prod/passport.py
+  h_5b2ec9c12c4d18 752
+apps/backend/tests/corp/plugins/prod/test_passport_renewal_lineage.py
+  h_5b2ec9c12c4d18 1-30
+apps/frontend-nextgen/src/internal/conversationInstance/instanceScopeCapability.ts
+  h_5b2ec9c12c4d18 36,40
+apps/frontend-nextgen/src/internal/conversationInstance/instanceScopeService.ts
+  h_5b2ec9c12c4d18 14,16-18,84-87,101
+apps/frontend-nextgen/src/internal/help/releaseNoteService.ts
+  h_5b2ec9c12c4d18 46-70,93
+apps/frontend-nextgen/src/internal/help/releaseNotesCapability.ts
+  h_5b2ec9c12c4d18 2-3,29,32
+apps/frontend-nextgen/src/internal/market/controllers/CapabilitySetController.ts
+  h_5b2ec9c12c4d18 44,47,52,55,63,66,94,97
+apps/frontend-nextgen/src/internal/market/controllers/SkillCenterReferenceController.ts
+  h_5b2ec9c12c4d18 45,51,73,79,86
+apps/frontend-nextgen/src/internal/market/hooks/referenceFlow.ts
+  h_5b2ec9c12c4d18 72,192,235,268,358,413
+apps/frontend-nextgen/src/internal/market/hooks/useAddToCapabilitySet.ts
+  h_5b2ec9c12c4d18 88,124,133,156,178,204,224
+apps/frontend-nextgen/src/internal/market/hooks/useSkillCenterReferences.ts
+  h_5b2ec9c12c4d18 20,53,76-79,97
+apps/frontend-nextgen/src/internal/market/mappers.ts
+  h_5b2ec9c12c4d18 246
+apps/frontend-nextgen/src/internal/market/service.ts
+  h_5b2ec9c12c4d18 295,297,314,323,333,336,511,521,540,550
+apps/frontend-nextgen/src/internal/market/types.ts
+  h_5b2ec9c12c4d18 163,193
+apps/frontend-nextgen/src/internal/productGuide/components/GuideAssistantPanel.tsx
+  h_5b2ec9c12c4d18 6-8
+apps/frontend-nextgen/src/internal/productGuide/components/WelcomeGuideModal.tsx
+  h_5b2ec9c12c4d18 3-4,16-17,42-49,51-66,68-70
+apps/frontend-nextgen/src/internal/productGuide/config/guideConfigTypes.ts
+  h_5b2ec9c12c4d18 121
+apps/frontend-nextgen/src/internal/productGuide/config/resolveGuideConfig.ts
+  h_5b2ec9c12c4d18 171
+apps/frontend-nextgen/src/internal/productGuide/productGuideService.ts
+  h_5b2ec9c12c4d18 5-8,14-17,35-36,38-43,48-52
+apps/frontend-nextgen/test/components/CollaborationSquare/SquareNavigation.test.tsx
+  h_5b2ec9c12c4d18 13,32,47-55
+apps/frontend-nextgen/test/hooks/useReleaseNotes.test.ts
+  h_5b2ec9c12c4d18 30,32,39,47,55,61-63,66,68-70,75,80,82-86,89-90,93-94,99-162,174-175,178,184,188,193-195
+apps/frontend-nextgen/test/internal/conversationInstance/instanceScopeService.test.ts
+  h_5b2ec9c12c4d18 17,19,30,65-68,78-95,178-188,256
+apps/frontend-nextgen/test/internal/help/releaseNoteService.test.ts
+  h_5b2ec9c12c4d18 19,24,30-31,36-57
+apps/frontend-nextgen/test/internal/market/controllers/CapabilitySetController.test.ts
+  h_5b2ec9c12c4d18 78,83
+apps/frontend-nextgen/test/internal/market/hooks/useAddToCapabilitySet.test.tsx
+  h_5b2ec9c12c4d18 149-168,175,251
+apps/frontend-nextgen/test/internal/market/scReferenceService.test.ts
+  h_5b2ec9c12c4d18 70,86,101
+apps/frontend-nextgen/test/internal/market/service.test.ts
+  h_5b2ec9c12c4d18 472,485,515,542,554
+apps/frontend-nextgen/test/internal/market/useSkillCenterReferences.test.ts
+  h_5b2ec9c12c4d18 256,263,425,439,446,449,453,532,535,603,608
+apps/frontend-nextgen/test/internal/productGuide/GuideAssistantPanel.test.tsx
+  h_5b2ec9c12c4d18 107
+apps/frontend-nextgen/test/internal/productGuide/WelcomeGuideModal.test.tsx
+  h_5b2ec9c12c4d18 10,16-25,42,49-50,55,63,73,85,97,118,125-187
+apps/frontend-nextgen/test/internal/productGuide/productGuideService.test.ts
+  h_5b2ec9c12c4d18 2-6,27,29,32-33,36-40,43-44,46-47
+apps/frontend-nextgen/test/internal/productGuide/resolveGuideConfig.test.ts
+  h_5b2ec9c12c4d18 156-158
+apps/frontend-nextgen/test/shell/HelpMenu.test.tsx
+  h_5b2ec9c12c4d18 4,18-19,25,54,70-76
+submodules/avernet
+  h_5b2ec9c12c4d18 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "614f1f1c6d596171858c4217348bfa2b4b2dd594",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

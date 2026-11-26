@@ -1,0 +1,14 @@
+apps/bcs/docs/superpowers/specs/2026-08-18-friend-edge-permission-reform.md
+  h_12dd6d063428b2 3630,3633-3638
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a00c778c17614316a08e543ca011c2ae9dc2804f",
+  "prompts": {},
+  "humans": {
+    "h_12dd6d063428b2": {
+      "author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+apps/backend/tests/community/core/apply_engine/test_device_port_forwarding.py
+  s_3d36bb45bb2a35::t_894a9a052c5b3b 52,104,117,200-215
+  s_3d36bb45bb2a35::t_ec16f456cc3484 216-217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cc353ee3e0f18ac8a2a54bdd7cc30e2b0a856adb",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

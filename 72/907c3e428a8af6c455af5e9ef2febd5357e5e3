@@ -1,0 +1,114 @@
+apps/backend/tests/community/core/task/context_collab/test_l1_delivery_mock.py
+  h_059e888e5e4e82 1-157
+apps/gateway/configs/application.yaml
+  h_059e888e5e4e82 198-200,540-546
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_publish.py
+  h_059e888e5e4e82 1-312
+apps/backend/src/agentclaw/community/core/gateway_principal/verifier.py
+  h_059e888e5e4e82 44-45,354-376
+  s_334bf30502b931::t_894ce3e2a16380 377-378
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_a2a_ingress.py
+  h_059e888e5e4e82 1-257
+apps/gateway/tests/unit/core/authn/test_route_security.py
+  h_059e888e5e4e82 642-655
+apps/backend/src/agentclaw/community/di/modules/context_collab_products.py
+  h_059e888e5e4e82 1-18
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a_schemas.py
+  h_059e888e5e4e82 1-163
+apps/backend/src/agentclaw/community/core/gateway_principal/__init__.py
+  h_059e888e5e4e82 45,71
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  h_059e888e5e4e82 18-20,109-149,151-152,154-164,364-414,418-435,452-455
+  s_334bf30502b931::t_ae21c131219004 150,153,415-417,456
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_read.py
+  h_059e888e5e4e82 1-355
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/dispatch.py
+  h_059e888e5e4e82 1-184
+apps/backend/specs/README.md
+  h_059e888e5e4e82 15-16,145-152
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/a2a_wire.py
+  h_059e888e5e4e82 1-273
+apps/backend/src/agentclaw/community/di/modules/task_commission_method_ops_adapter.py
+  h_059e888e5e4e82 1-130
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service_api.py
+  h_059e888e5e4e82 1-216
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/views.py
+  h_059e888e5e4e82 1-37
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/README.md
+  h_059e888e5e4e82 1-218
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/envelope.py
+  h_059e888e5e4e82 1-144
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/bridge.py
+  h_059e888e5e4e82 1-84
+apps/backend/tests/community/factories/task_commission.py
+  h_059e888e5e4e82 1-41
+apps/backend/src/agentclaw/community/core/gateway_principal/README.md
+  h_059e888e5e4e82 45,119-127
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_work.py
+  h_059e888e5e4e82 1-367
+apps/backend/tests/community/di/test_task_module.py
+  h_059e888e5e4e82 44-106,374-511
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_l6.py
+  h_059e888e5e4e82 1-264
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a.py
+  h_059e888e5e4e82 1-144
+apps/gateway/tests/unit/core/forwarding/test_commission_a2a_routing.py
+  h_059e888e5e4e82 1-27
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service.py
+  h_059e888e5e4e82 1-608
+apps/backend/specs/2026-11-13-context-collab-task-commission-product/plan.md
+  h_059e888e5e4e82 1-127
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_dispatch_bridge.py
+  h_059e888e5e4e82 1-248
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_protocol_integration.py
+  h_059e888e5e4e82 1-470
+apps/backend/specs/2026-11-13-context-collab-l1-interoperate-deliver/plan.md
+  h_059e888e5e4e82 1-68
+apps/backend/src/agentclaw/community/adapters/http/app.py
+  h_059e888e5e4e82 148,899-900,902
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/publication.py
+  h_059e888e5e4e82 1-66
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_method_lifecycle.py
+  h_059e888e5e4e82 1-271
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/profile.py
+  h_059e888e5e4e82 1-118
+apps/backend/tests/community/core/task/context_collab/test_l1_wire_objects.py
+  h_059e888e5e4e82 1-328
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a_auth.py
+  h_059e888e5e4e82 1-23
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/common.py
+  h_059e888e5e4e82 1-382
+apps/backend/src/agentclaw/community/api/task/task_commission_service.py
+  h_059e888e5e4e82 1-13
+apps/backend/specs/2026-11-13-context-collab-task-commission-product/spec.md
+  h_059e888e5e4e82 1-186
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/delivery.py
+  h_059e888e5e4e82 1-279
+apps/backend/tests/community/endpoints/test_task_commission_a2a_endpoints.py
+  h_059e888e5e4e82 1-84
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 1-352
+apps/backend/specs/2026-11-13-context-collab-l1-interoperate-deliver/spec.md
+  h_059e888e5e4e82 1-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "72907c3e428a8af6c455af5e9ef2febd5357e5e3",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  },
+  "sessions": {
+    "s_334bf30502b931": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1a1c3744-d6a7-4919-9ef1-27dea14caefc",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/initial_layout.py
+  h_9d7cfd405752f5 12-14,44-62
+apps/backend/tests/community/adapters/http/openapi_v1/spaces/test_deletion_contract.py
+  h_9d7cfd405752f5 226-260
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1484c6f44e161267acc62101dcbb1636780ee00e",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

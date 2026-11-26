@@ -1,0 +1,115 @@
+apps/bcs/crates/plugin-api/bcs-store-api/tests/types.rs
+  s_a9c87caa3de52e::t_570c220e705591 1,3-11,13-52
+  s_a9c87caa3de52e::t_9a8c2940aae598 2,12
+apps/bcs/crates/test-support/bcs-test-support/Cargo.toml
+  s_a9c87caa3de52e::t_a7f1fa5b644a5d 40
+apps/bcs/crates/plugin-api/README.md
+  s_a9c87caa3de52e::t_a594732c22b364 19-23
+apps/bcs/README.md
+  s_a9c87caa3de52e::t_a594732c22b364 18,144
+apps/bcs/crates/plugin-api/bcs-store-api/src/common.rs
+  s_a9c87caa3de52e::t_e0f38dbb15820f 1-71,73-76
+  s_a9c87caa3de52e::t_adac05ba322c93 72
+apps/bcs/crates/plugin-api/bcs-store-api/src/zset.rs
+  s_a9c87caa3de52e::t_e0f38dbb15820f 1-17,19-65,67-68
+  s_a9c87caa3de52e::t_85c3e686f10a0e 18,66
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/json.rs
+  s_a9c87caa3de52e::t_efac11899aa3e1 90-109
+  s_a9c87caa3de52e::t_8e2a5865261cd6 1-89,110-195
+docs/plans/2026-11-16-bcs-store-api.md
+  s_a9c87caa3de52e::t_e28b7ee50a5040 62-90
+  s_a9c87caa3de52e::t_73a3696816cddb 1-61
+  s_a9c87caa3de52e::t_90eeea0c22ccfd 91-92
+apps/bcs/Cargo.toml
+  s_a9c87caa3de52e::t_570c220e705591 80,345
+apps/bcs/crates/test-support/bcs-test-support/tests/support/store/json.rs
+  s_a9c87caa3de52e::t_efac11899aa3e1 98-110
+  s_a9c87caa3de52e::t_099f3b8d45ed64 1-18,20-64,66-73,75-81,83-90,92-97,111-147
+  s_a9c87caa3de52e::t_006594b7439ae3 19,65,74,82,91
+apps/bcs/crates/test-support/bcs-test-support/tests/conformance_store.rs
+  s_a9c87caa3de52e::t_d913eac791ba11 17,27,35,97-103,105-112,117,123-125,131-133
+  s_a9c87caa3de52e::t_efac11899aa3e1 15,20-21,24-25,32-33,37-38,41-42,45-46,49-50,53-54,57-58,60,70-71,74,77-78,81,84-85,88,91,93,96,114,135-150
+  s_a9c87caa3de52e::t_dfe46c8b2e4357 1-14,16,18-19,22-23,26,28-31,34,36,39-40,43-44,47-48,51-52,55-56,59,61-69,72-73,75-76,79-80,82-83,86-87,89-90,92,94-95,104,113,115-116,118-122,126-130,134
+apps/bcs/crates/plugin-api/bcs-store-api/README.md
+  s_a9c87caa3de52e::t_a594732c22b364 1-199,202-203,206-230
+  s_a9c87caa3de52e::t_e28b7ee50a5040 204-205
+  s_a9c87caa3de52e::t_ab9296c66fd21e 200-201
+apps/bcs/crates/plugin-api/bcs-store-api/Cargo.toml
+  s_a9c87caa3de52e::t_570c220e705591 1-16
+apps/bcs/crates/test-support/bcs-test-support/tests/support/store/zset.rs
+  s_a9c87caa3de52e::t_099f3b8d45ed64 1-22,24-32,34-37,39-44,46-50,52-55,57-59,61,63-64,66-69,71-106,108-113,115,117-121,124-126,137-138,140-147,149-159
+  s_a9c87caa3de52e::t_efac11899aa3e1 127-136,139
+  s_a9c87caa3de52e::t_6f79351a5347c0 23,33,38,45,51,56,60,62,65,70,107,114,116,122-123,148
+apps/bcs/crates/plugin-api/bcs-store-api/src/kv.rs
+  s_a9c87caa3de52e::t_e0f38dbb15820f 1-26,28-34,36-45
+  s_a9c87caa3de52e::t_402fc2763ac783 27,35
+apps/bcs/crates/plugin-api/bcs-store-api/src/error.rs
+  s_a9c87caa3de52e::t_e0f38dbb15820f 1-32
+apps/bcs/crates/plugin-api/bcs-store-api/src/stream.rs
+  s_a9c87caa3de52e::t_e0f38dbb15820f 1-9,11-15,17-27,29-34,38-54,56-68,70-75,77-81,83-106,108-116,118-125,127-136,138-146,148-161,163-164
+  s_a9c87caa3de52e::t_117144fcf77295 35-37
+  s_a9c87caa3de52e::t_2bbe7bc5a263d2 10
+  s_a9c87caa3de52e::t_c17aaabda90ffd 16
+  s_a9c87caa3de52e::t_13bb58be2b3bbd 28
+  s_a9c87caa3de52e::t_3c1011b7d3bc09 55
+  s_a9c87caa3de52e::t_7cb70f674415d8 69
+  s_a9c87caa3de52e::t_18ab30bf8adf8e 76
+  s_a9c87caa3de52e::t_bc545c9d6deba3 82
+  s_a9c87caa3de52e::t_61f22f7d11862f 107
+  s_a9c87caa3de52e::t_373aa6163f192d 117
+  s_a9c87caa3de52e::t_c6fb0dcd35127f 126
+  s_a9c87caa3de52e::t_208875a1014b85 137
+  s_a9c87caa3de52e::t_a9110b64afcab1 147
+  s_a9c87caa3de52e::t_3f1b89ba1afa35 162
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/mod.rs
+  s_a9c87caa3de52e::t_a7f1fa5b644a5d 3-4
+apps/bcs/crates/plugin-api/bcs-store-api/src/lib.rs
+  s_a9c87caa3de52e::t_e0f38dbb15820f 1-16
+apps/bcs/crates/plugin-api/bcs-store-api/CONTEXT.md
+  s_a9c87caa3de52e::t_a594732c22b364 1-35
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/zset.rs
+  s_a9c87caa3de52e::t_a4036181ead055 42,54,60,77,87,94-95,98,105,111,117,127,137,145-153,159,165,168-169,173,175,184
+  s_a9c87caa3de52e::t_e2f9664730bb23 1-41,43-53,55-59,61-76,78-86,88-93,96-97,99-104,106-110,112-116,118-126,128-136,138-144,154-158,160-164,166-167,170-172,174,176-183,185
+apps/bcs/crates/plugin-api/bcs-store-api/src/json.rs
+  s_a9c87caa3de52e::t_e0f38dbb15820f 1-41,43-51,53-54
+  s_a9c87caa3de52e::t_de034e8972a7c3 42,52
+apps/bcs/crates/test-support/bcs-test-support/tests/support/store/kv.rs
+  s_a9c87caa3de52e::t_099f3b8d45ed64 1-10,12-29,32-53,55,63-68,70-76,78-86,88-111,113-141,144-146
+  s_a9c87caa3de52e::t_9096c99c40d9b3 11,30-31,54,56-62,69,77,87,112,142-143
+apps/bcs/crates/test-support/bcs-test-support/tests/support/store/mod.rs
+  s_a9c87caa3de52e::t_099f3b8d45ed64 1-4,6-14,16-26,29-34,36-54,56-58,60-100,103,105-146,148-174
+  s_a9c87caa3de52e::t_efac11899aa3e1 27-28,101-102
+  s_a9c87caa3de52e::t_469f3931f16b54 5,15,35,55,59,104,147
+apps/bcs/Cargo.lock
+  s_a9c87caa3de52e::t_7e5458cec5b802 2428-2436,2495
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/kv.rs
+  s_a9c87caa3de52e::t_3a3c83037efbfa 1-188
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/mod.rs
+  s_a9c87caa3de52e::t_1c69b7bb3b5a1b 1-36
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/stream.rs
+  s_a9c87caa3de52e::t_712fd8c775b0c7 1-264
+apps/bcs/crates/test-support/bcs-test-support/tests/support/store/stream.rs
+  s_a9c87caa3de52e::t_fca3a6e6192c15 1-292
+apps/bcs/scripts/ci/check-deps.sh
+  s_a9c87caa3de52e::t_6d30a562b1d8c0 52
+apps/bcs/scripts/ci/check-store-boundaries.sh
+  s_a9c87caa3de52e::t_a2bce8f58283db 32,44,49
+apps/bcs/scripts/ci/tests/store_api_boundary.sh
+  s_a9c87caa3de52e::t_69b8e3f8addfed 1-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f69e82fa7ce0f7977d37f0e8a7bbc8a9a937aefb",
+  "prompts": {},
+  "sessions": {
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

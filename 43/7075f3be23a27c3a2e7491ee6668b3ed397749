@@ -1,0 +1,22 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/run-detail-contract.md
+  h_bb3ca6fb13c5df 62-100
+apps/evolverun/clawweb/public/modules/workflow/web/components/ApprovalNodeDetails.tsx
+  h_bb3ca6fb13c5df 1-129
+apps/evolverun/clawweb/public/modules/workflow/web/components/NodeExecutionList.tsx
+  h_bb3ca6fb13c5df 13,485-487
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ApprovalNodeDetails.test.tsx
+  h_bb3ca6fb13c5df 1-406
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/NodeExecutionListApproval.test.tsx
+  h_bb3ca6fb13c5df 1-280
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "437075f3be23a27c3a2e7491ee6668b3ed397749",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

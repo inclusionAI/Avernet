@@ -1,0 +1,40 @@
+apps/backend/tests/community/core/bot_public/test_risk_repository.py
+  s_4b3bb5e3f4e05a::t_a526c63dde5842 3,15,22,276-304
+apps/frontend-nextgen/src/hooks/useBotPublicRisk.ts
+  s_4b3bb5e3f4e05a::t_a526c63dde5842 157
+  s_4b3bb5e3f4e05a::t_e0dd044750d488 62-67,84-88,90-95,100,110,152,161
+apps/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py
+  s_4b3bb5e3f4e05a::t_cddc0baffb71d3 53,396,565-566,569-576
+apps/backend/src/agentclaw/community/core/bot_public/services/publication_actions.py
+  s_4b3bb5e3f4e05a::t_797d3e7819cd63 9,444-446
+apps/backend/src/agentclaw/community/core/bot_public_risk/advance.py
+  s_4b3bb5e3f4e05a::t_8459721275e7b6 13,102-107,110-114,234-239,258-260
+apps/backend/src/agentclaw/community/core/bot_public_risk/legacy_approval.py
+  s_4b3bb5e3f4e05a::t_2a1197807591b2 1-56
+apps/backend/src/agentclaw/community/core/bot_public_risk/repository.py
+  s_4b3bb5e3f4e05a::t_c0f6025fa4918b 30,33,184-191
+apps/backend/tests/community/core/bot_public/test_bot_public_service.py
+  s_4b3bb5e3f4e05a::t_6b2aa47ab8f072 3377-3397
+apps/backend/tests/community/core/bot_public/test_risk_advance.py
+  s_4b3bb5e3f4e05a::t_5e9555492fb9b8 334-390
+apps/frontend-nextgen/test/hooks/useCollaborationPrivacy.test.tsx
+  s_4b3bb5e3f4e05a::t_b6d951072ff8cf 640,672,685,687,692-693
+docs/adr/0027-bot-publication-risk-is-the-application-state.md
+  s_4b3bb5e3f4e05a::t_749bcff2d25f26 28-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4dd474ac8ac1d3f7153333e333544f10363ad33d",
+  "prompts": {},
+  "sessions": {
+    "s_4b3bb5e3f4e05a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212ee-6dfd-7652-9c5d-c1f683ce868a",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

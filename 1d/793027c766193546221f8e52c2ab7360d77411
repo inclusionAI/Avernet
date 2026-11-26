@@ -1,0 +1,65 @@
+apps/backend/src/agentclaw/community/core/devices/services/teclaw_device_sync.py
+  s_3d36bb45bb2a35::t_3700f471dd69b6 45,334
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_sync.py
+  s_3d36bb45bb2a35::t_53c5d5be0143eb 13,110,118,124
+apps/backend/tests/community/core/skill_center/test_capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_c2b604c7c95ee7 629-673
+  s_3d36bb45bb2a35::t_53c5d5be0143eb 7,41-42,289,549-550,622
+  s_3d36bb45bb2a35::t_123468191f5452 584-621,623-628
+apps/backend/src/agentclaw/community/core/repository/protocols/capability_projection.py
+  s_3d36bb45bb2a35::t_36bc599a7c35ee 13-14,43,54-55,57
+  s_3d36bb45bb2a35::t_3700f471dd69b6 44
+apps/backend/src/agentclaw/community/core/devices/services/runtime_write_checkpoint.py
+  s_3d36bb45bb2a35::t_3700f471dd69b6 1-37
+apps/backend/src/agentclaw/community/core/skills_pool/runtime.py
+  s_3d36bb45bb2a35::t_3700f471dd69b6 16,105,636,843,864-865
+  s_3d36bb45bb2a35::t_f3434af9000933 455-457,463,497,501-504
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_3d36bb45bb2a35::t_c2b604c7c95ee7 430-435,437-452
+apps/backend/tests/community/repository/skill_center/test_capability_projection.py
+  s_3d36bb45bb2a35::t_f65abbb69bf176 104-105
+  s_3d36bb45bb2a35::t_53c5d5be0143eb 12,26-33,76-77,85,103,118,124,141,146-147,152,155,168,180,200,211,240,248,290,303-304
+apps/backend/tests/community/core/devices/test_teclaw_device_sync.py
+  s_3d36bb45bb2a35::t_c2b604c7c95ee7 459-477
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/capability_projection.py
+  s_3d36bb45bb2a35::t_36bc599a7c35ee 26-30,80,87,89,126,165,274,286,302-303,323-326
+apps/backend/tests/community/core/devices/test_mcp_device_transport.py
+  s_3d36bb45bb2a35::t_c2b604c7c95ee7 325-338
+apps/backend/src/agentclaw/community/core/devices/services/mcp_device_transport.py
+  s_3d36bb45bb2a35::t_3700f471dd69b6 13,76,80,98
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_set_projection.py
+  s_3d36bb45bb2a35::t_3700f471dd69b6 7,75-77
+apps/backend/src/agentclaw/community/core/skill_center/services/runtime_projections/skill_runtime_delivery.py
+  s_3d36bb45bb2a35::t_f3434af9000933 484-490
+apps/backend/src/agentclaw/community/core/skill_center/capability_projection_receipt.py
+  s_3d36bb45bb2a35::t_53c5d5be0143eb 60-63,73
+  s_3d36bb45bb2a35::t_36bc599a7c35ee 1-59,64-72,74-135
+apps/backend/tests/community/core/skill_center/services/runtime_projections/test_skill_runtime_delivery.py
+  s_3d36bb45bb2a35::t_f3434af9000933 643-666
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_3700f471dd69b6 9,17,55-57,263,269-281,283-285,295-299,302-304,306-317,319
+  s_3d36bb45bb2a35::t_53c5d5be0143eb 322
+  s_3d36bb45bb2a35::t_36bc599a7c35ee 27,224,231,239,261,282,324-327,329
+apps/backend/tests/community/core/devices/test_baas_device_sync.py
+  s_3d36bb45bb2a35::t_d54e9fa3dfbee8 335-349
+apps/backend/tests/community/core/skills_pool/test_runtime.py
+  s_3d36bb45bb2a35::t_4de07494a6455a 786-800
+apps/backend/tests/community/di/test_capability_projection_recovery.py
+  s_3d36bb45bb2a35::t_e86452394f2244 10,40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1d793027c766193546221f8e52c2ab7360d77411",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/core/task/task_runner/client/relay_prompt.py
+  s_d23d2dd74fff18::t_f8ea22afb315dc 37-38,132-139
+apps/backend/tests/community/core/task/task_runner/test_relay_prompt.py
+  s_d23d2dd74fff18::t_2b803b22cea8fe 84-91,272-273,288-289,305
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "11292a1d7c4c1f956b2d8e5a785598b99b5cd943",
+  "prompts": {},
+  "sessions": {
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

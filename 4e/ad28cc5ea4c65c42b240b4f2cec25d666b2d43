@@ -1,0 +1,71 @@
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_upload_service.py
+  s_3d36bb45bb2a35::t_93446289ae26ff 561,783
+  s_3d36bb45bb2a35::t_3c2282a27c077c 11-14,35-38,46,58,74,86-100,111-126,146,160-162,238-257,262,273-276,283-322,324-328,330-359,361-377,379-398,400-445,447-455,457-481,483-492,547-548,565-567,692,788-791,885-887,894-899
+apps/backend/src/agentclaw/community/core/repository/protocols/skill_center.py
+  s_3d36bb45bb2a35::t_93446289ae26ff 434,439-450
+  s_3d36bb45bb2a35::t_240138dd4c96d3 451
+apps/backend/src/agentclaw/community/core/models/__init__.py
+  s_3d36bb45bb2a35::t_0325cd43837477 28-30
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/skill.py
+  s_3d36bb45bb2a35::t_93446289ae26ff 63-75,187,951,959-960,978-984
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_delete_service.py
+  s_3d36bb45bb2a35::t_3c2282a27c077c 25,108-110,176,183-188
+apps/backend/tests/community/core/skill_center/test_local_skill_package_batch.py
+  s_3d36bb45bb2a35::t_3c2282a27c077c 1-144
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_batch.py
+  s_3d36bb45bb2a35::t_3c2282a27c077c 1-96
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/local_skill_package_dispatch.py
+  s_3d36bb45bb2a35::t_93446289ae26ff 1-56
+apps/backend/tests/community/core/skill_center/test_local_skill_upload_service.py
+  s_3d36bb45bb2a35::t_3c2282a27c077c 83-91,435-437,749,763
+apps/backend/tests/community/core/skill_center/test_local_skill_delete_service.py
+  s_3d36bb45bb2a35::t_3c2282a27c077c 68-70
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities_write.py
+  s_3d36bb45bb2a35::t_81e3ba8e536412 10,14-18,83,132-146,148-160,162,165,329,331-335,351
+apps/backend/src/agentclaw/community/core/apply_engine/orchestrator.py
+  s_3d36bb45bb2a35::t_946a67248eed13 39,42,216-219,227,239,275
+apps/backend/src/agentclaw/community/core/apply_engine/registry.py
+  s_3d36bb45bb2a35::t_7c02c95774f871 98-100,105-116,123
+apps/backend/src/agentclaw/community/core/apply_engine/skill_package_upload.py
+  s_3d36bb45bb2a35::t_30c20db1587cbe 21,25-26,36,68-75
+apps/backend/src/agentclaw/community/core/models/local_skill_package_dispatch.py
+  s_3d36bb45bb2a35::t_0a6a9b555ba96f 1-27
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_3d36bb45bb2a35::t_6e8b547cf0c94e 186-187
+apps/backend/src/agentclaw/community/core/skill_center/errors.py
+  s_3d36bb45bb2a35::t_09c1ff127c9395 108-115
+apps/backend/src/agentclaw/community/core/skill_center/local_skill_upload_service_protocol.py
+  s_3d36bb45bb2a35::t_9de4a75c860ec4 9-11,37-41
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_package_runtime.py
+  s_3d36bb45bb2a35::t_fc0ce4c028a10f 10,18,29,42-53,74-82,84,90-98,100-104,122,126,134,152,160,168-169,193,196,206,216-218
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_security_handoff.py
+  s_3d36bb45bb2a35::t_16d6bca2f8a5d7 1-141
+apps/backend/src/agentclaw/community/core/skill_center/sql/2026_11_22_local_skill_package_dispatch.sql
+  s_3d36bb45bb2a35::t_293d70b8286961 1-15
+apps/backend/src/agentclaw/community/core/skill_center/sql/2026_11_22_local_skill_package_dispatch_postgresql.sql
+  s_3d36bb45bb2a35::t_dc17969febdc9e 1-17
+apps/backend/src/agentclaw/community/core/skills_pool/edit_guard.py
+  s_3d36bb45bb2a35::t_b1a22160dc177a 260-271
+apps/backend/src/agentclaw/community/di/modules/local_skill_upload_module.py
+  s_3d36bb45bb2a35::t_854260142d5559 58,118,132
+apps/backend/tests/community/core/skills_pool/test_edit_guard.py
+  s_3d36bb45bb2a35::t_c7b4423cbdd29d 112-131,246
+engine/adapter/README.md
+  s_3d36bb45bb2a35::t_a66f7b9c3e17e0 32-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4ead28cc5ea4c65c42b240b4f2cec25d666b2d43",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+apps/backend/specs/2026-09-23-task-cli/end-to-end-relay-design.md
+  s_885ffb973587a3::t_9d9e5bc4181bf9 162,228,262,455,522
+apps/backend/tests/community/adapters/http/task/test_router.py
+  s_885ffb973587a3::t_da82fd7d0e4b5d 3
+  s_885ffb973587a3::t_ec8e24022ec752 12,191-197,200-216,218-252
+  s_885ffb973587a3::t_c4a9609b29b4fb 217
+  s_885ffb973587a3::t_e32c361c2d41c5 253
+apps/backend/specs/2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md
+  s_885ffb973587a3::t_9d9e5bc4181bf9 551,1441,1457
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_relay_dispatch.py
+  s_885ffb973587a3::t_ec8e24022ec752 80-103
+  s_885ffb973587a3::t_da82fd7d0e4b5d 122-131
+  s_885ffb973587a3::t_e44c7697ea07cb 5-7,31-40,48-79,104-121,132-136
+apps/backend/tests/community/adapters/http/task/router_test_support.py
+  s_885ffb973587a3::t_e44c7697ea07cb 61-63,286-289
+  s_885ffb973587a3::t_ec8e24022ec752 153-154,166-168,182-188,232
+  s_885ffb973587a3::t_aa5777b99bc18d 290
+apps/backend/src/agentclaw/community/core/task/task_runner/client/relay_prompt.py
+  s_885ffb973587a3::t_6bf6918e15d995 128-130
+  s_885ffb973587a3::t_f60b485e9be016 127
+apps/backend/tests/community/core/task/task_runner/test_relay_prompt.py
+  s_885ffb973587a3::t_6bf6918e15d995 84-86
+apps/backend/src/agentclaw/community/adapters/http/task/relay_routes.py
+  s_885ffb973587a3::t_c4a9609b29b4fb 127-134,136-138
+  s_885ffb973587a3::t_e44c7697ea07cb 22,32-34,115,139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9cde0e0e3ffbb9782c647077b6ed76384c6c50ff",
+  "prompts": {},
+  "sessions": {
+    "s_885ffb973587a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17742-1085-7833-94e1-041d70172b63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

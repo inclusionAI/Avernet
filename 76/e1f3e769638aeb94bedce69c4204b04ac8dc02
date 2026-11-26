@@ -1,0 +1,38 @@
+apps/backend/tests/community/core/skills_pool/test_reconcile_task.py
+  s_3d36bb45bb2a35::t_d12dcb30ce7389 447,586-603,618,715,742,765
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_upload_service.py
+  s_3d36bb45bb2a35::t_cefee735826c49 252-257,321,482-483,543,567,785
+apps/backend/tests/community/core/skill_center/test_local_skill_package_batch.py
+  s_3d36bb45bb2a35::t_dd6bcae8fea0ce 13-19,22-25,84,86,119,126-131,157-186,189-205,209-247
+  s_3d36bb45bb2a35::t_606418321bce52 187-188,206-208
+apps/backend/src/agentclaw/community/core/skills_pool/reconcile_task.py
+  s_3d36bb45bb2a35::t_d12dcb30ce7389 24-27,103,111,128-143
+apps/backend/src/agentclaw/community/di/modules/skills_pool_module.py
+  s_3d36bb45bb2a35::t_d12dcb30ce7389 227,235
+apps/backend/src/agentclaw/community/core/skill_center/sql/2026_11_22_local_skill_package_dispatch_sqlite.sql
+  s_3d36bb45bb2a35::t_dd6bcae8fea0ce 1-17
+apps/backend/src/agentclaw/community/core/repository/protocols/skill_center.py
+  s_3d36bb45bb2a35::t_00e92ff08be2cb 435
+apps/backend/tests/community/core/skills_pool/test_reconcile_service.py
+  s_3d36bb45bb2a35::t_d12dcb30ce7389 11-12,2534,2727
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/skill.py
+  s_3d36bb45bb2a35::t_00e92ff08be2cb 952,960,979,982
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_3d36bb45bb2a35::t_809b1c5d92627a 186
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "76e1f3e769638aeb94bedce69c4204b04ac8dc02",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

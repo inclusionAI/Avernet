@@ -1,0 +1,18 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/bot-config-service.ts
+  h_b601d8706f5d44 4,7-20,25,37-41,46,57-58,63-64,70,73-94,97-98
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/monitoring-browser-service.ts
+  h_b601d8706f5d44 6,12,68,76
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/monitoring-runtime.ts
+  h_b601d8706f5d44 13,23,57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9be3fbed389c5f0e0fe96169db85e60399d2f159",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

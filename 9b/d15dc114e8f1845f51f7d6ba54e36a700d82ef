@@ -1,0 +1,43 @@
+apps/bcs/specs/README.md
+  s_94c42a5933ce17::t_c16802afdb9d9e 60-61
+docs/specs/2026-11-24-agentcard-identity-status/design.md
+  s_94c42a5933ce17::t_086d30a89d6678 1-112
+docs/specs/2026-11-24-agentcard-identity-status/groupcard-impact.md
+  s_94c42a5933ce17::t_79990830bff351 1-71
+docs/specs/2026-11-24-agentcard-identity-status/plan.md
+  s_94c42a5933ce17::t_e7c4b3814fff09 1-42
+docs/specs/2026-11-24-agentcard-identity-status/proposal.md
+  s_94c42a5933ce17::t_9f88c3e7230c50 1-34
+docs/specs/2026-11-24-agentcard-identity-status/requirements/agentcard-catalog-state-sync/spec.md
+  s_94c42a5933ce17::t_25cb6e52599a02 1-65
+docs/specs/2026-11-24-agentcard-identity-status/requirements/agentcard-management-state/spec.md
+  s_94c42a5933ce17::t_51b1e9cbe7633d 1-72
+docs/specs/2026-11-24-agentcard-identity-status/requirements/agentcard-platform-identity/spec.md
+  s_94c42a5933ce17::t_2c0e8fe48a1358 1-135
+docs/specs/2026-11-24-agentcard-identity-status/requirements/agentcard-rest-model-contract/spec.md
+  s_94c42a5933ce17::t_7279ac2e608eac 1-57
+docs/specs/2026-11-24-agentcard-identity-status/research.md
+  s_94c42a5933ce17::t_eb4f58a4159f8a 1-128
+docs/specs/2026-11-24-agentcard-identity-status/spec.md
+  s_94c42a5933ce17::t_b967c318db6a67 1-256
+docs/specs/2026-11-24-agentcard-identity-status/tasks.md
+  s_94c42a5933ce17::t_51c1b49fa2855d 1-52
+docs/specs/2026-11-24-agentcard-identity-status/validation.md
+  s_94c42a5933ce17::t_f38033b7f14fd9 1-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9bd15dc114e8f1845f51f7d6ba54e36a700d82ef",
+  "prompts": {},
+  "sessions": {
+    "s_94c42a5933ce17": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20d69-010f-7df2-957c-de77c2ec3c63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

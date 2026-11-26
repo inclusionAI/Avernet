@@ -1,0 +1,36 @@
+apps/backend/tests/community/core/task/context_collab/test_l5_method_e2e.py
+  h_059e888e5e4e82 1-434
+apps/backend/tests/community/core/task/context_collab/test_l5_open_method_policies.py
+  h_059e888e5e4e82 1-243
+apps/backend/tests/community/core/task/context_collab/test_layer_operations.py
+  h_059e888e5e4e82 1-341
+apps/backend/tests/community/core/task/context_collab/test_method_authorization.py
+  h_059e888e5e4e82 1-365
+apps/backend/tests/community/core/task/context_collab/test_method_binding.py
+  h_059e888e5e4e82 1-457
+apps/backend/tests/community/core/task/context_collab/test_method_composition.py
+  h_059e888e5e4e82 1-397
+apps/backend/tests/community/core/task/context_collab/test_method_g4_conformance.py
+  h_059e888e5e4e82 1-424
+apps/backend/tests/community/core/task/context_collab/test_method_lifecycle_service.py
+  h_059e888e5e4e82 1-779
+apps/backend/tests/community/core/task/context_collab/test_method_profiles.py
+  h_059e888e5e4e82 1-111
+apps/backend/tests/community/core/task/context_collab/test_method_service_api.py
+  h_059e888e5e4e82 1-542
+apps/backend/tests/community/core/task/context_collab/test_method_store.py
+  h_059e888e5e4e82 1-318
+apps/backend/tests/community/core/task/context_collab/test_network_profiles.py
+  h_059e888e5e4e82 5,37-40,46-55,58-60,178-179,188-189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "44bd7b565f36c755f593636909fe98561915d904",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

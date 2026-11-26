@@ -1,0 +1,22 @@
+apps/bcs/specs/2026-11-18-group-collaboration-runner-phase2/spec.md
+  s_0730f4b1dc32cc::t_034f013940287a 41,68,102,197,213-214,276
+  s_0730f4b1dc32cc::t_95c361f7b24464 462,494-497
+  s_0730f4b1dc32cc::t_9c7eafbabcee13 365,369,377-388,390-403,406,417,420-422
+  s_0730f4b1dc32cc::t_a8a280c4c05fbf 389,430,457,459-461,463,465,477,483
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f7ccedb2f112e954e941e976c9fbe89cae7dd7a0",
+  "prompts": {},
+  "sessions": {
+    "s_0730f4b1dc32cc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea8a-f549-7c23-a211-5859e5a259fe",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

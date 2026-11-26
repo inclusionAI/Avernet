@@ -1,0 +1,16 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/auto-heal-unified-host.test.ts
+  h_5f06d4d8b4bdd5 17
+submodules/avernet
+  h_5f06d4d8b4bdd5 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b004cbfe9699f01072ccd06e954c50d2ce4d485f",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

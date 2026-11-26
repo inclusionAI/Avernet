@@ -1,0 +1,50 @@
+apps/bcs/crates/adapters/http/bcs-api-http/tests/agentcard_warning.rs
+  s_5b44cec08841c4::t_bf07b6f563da18 1-123
+apps/bcs/crates/application/bcs-app-a2a-bot/CONTEXT.md
+  s_5b44cec08841c4::t_ee481d8ec835b1 114-119
+apps/bcs/crates/auxiliary/bcs-observability/src/business_warning.rs
+  s_5b44cec08841c4::t_d33fa8808a7951 1-146
+apps/bcs/crates/auxiliary/bcs-observability/src/lib.rs
+  s_5b44cec08841c4::t_2ef01bce5e36d7 7
+apps/bcs/crates/auxiliary/bcs-observability/src/business_warning_tests.rs
+  s_5b44cec08841c4::t_811fadfdf585f0 1-105
+apps/bcs/crates/application/bcs-app-a2a-bot/src/v1.rs
+  s_5b44cec08841c4::t_0cfb37ab93f508 50-56
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/management.rs
+  s_5b44cec08841c4::t_e0ac08e1c56ac4 80,227
+apps/bcs/Cargo.lock
+  s_5b44cec08841c4::t_e563c25318003f 571,580,584,614
+apps/bcs/crates/adapters/http/bcs-api-http/CONTEXT.md
+  s_5b44cec08841c4::t_feaacac824dafb 176-185
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_5b44cec08841c4::t_6d62ecefe4a770 322-331
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/transport.rs
+  s_5b44cec08841c4::t_1a53e888213232 83-92,97,111-122
+apps/bcs/crates/application/bcs-app-a2a-bot/Cargo.toml
+  s_5b44cec08841c4::t_9a132af3045e35 16
+apps/bcs/crates/adapters/http/bcs-api-http/Cargo.toml
+  s_5b44cec08841c4::t_2019da424764d5 20,38-39
+apps/bcs/crates/auxiliary/bcs-observability/CONTEXT.md
+  s_5b44cec08841c4::t_ebb2cd5c74a5ba 83-96
+apps/bcs/crates/bootstrap/bcs/src/logging.rs
+  s_5b44cec08841c4::t_24bd4ef0e7de6b 52-61,150,164-166,194,572,907,945
+  s_5b44cec08841c4::t_3ea208661323ef 893-906,908-944
+apps/bcs/docs/observability/request-operation-logging.md
+  s_5b44cec08841c4::t_382d8b918623bb 158-196
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a8fe90a0ce18e3da685a3c7163558b58c2e627bf",
+  "prompts": {},
+  "sessions": {
+    "s_5b44cec08841c4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bc3-1a1a-7d92-9cc9-503e72584124",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

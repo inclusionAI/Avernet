@@ -1,0 +1,23 @@
+apps/bcs/scripts/caller_e2e_coverage.sh
+  s_7d114ded8fc0da::t_9dafc1918f5743 45-50
+apps/bcs/scripts/e2e-test/agent_edge_compatibility_story.py
+  s_7d114ded8fc0da::t_c2f521229a96e5 1-162
+singlebox/ci/tests/test_singlebox_companion_coverage.py
+  s_7d114ded8fc0da::t_d45d9894466a72 168-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a7d56e37e2b56f2c5d0bd2de7940a35e6fea54b8",
+  "prompts": {},
+  "sessions": {
+    "s_7d114ded8fc0da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b4-ef36-7703-9562-0f40ee69f61b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

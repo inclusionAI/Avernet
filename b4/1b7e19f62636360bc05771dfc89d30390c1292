@@ -1,0 +1,39 @@
+apps/backend/tests/corp/plugins/prod/test_caller_credential_facade.py
+  s_5c173f6b8a3b51::t_df79b1c14ac574 376,382,396,398-399,404,427-465
+  s_5c173f6b8a3b51::t_bc7310b8eac53b 423,466-471
+  s_5c173f6b8a3b51::t_3c79615f9e73cb 321-364,378-381,383,387-388,400-403
+  s_5c173f6b8a3b51::t_a7f78974787d9b 365-367,373-375
+  s_5c173f6b8a3b51::t_cc80ad0d9e6cb6 377
+  s_5c173f6b8a3b51::t_90962972068c41 384-386
+  s_5c173f6b8a3b51::t_089651cb90ac3e 389-391,393-395
+  s_5c173f6b8a3b51::t_35986eba33439f 397
+  s_5c173f6b8a3b51::t_781595bc2eab1f 405-407,420-422
+  s_5c173f6b8a3b51::t_802d3070ac1540 424-426
+apps/backend/src/agentclaw/corp/plugins/prod/passport_addressing.py
+  s_5c173f6b8a3b51::t_7acfe032089cf1 74-77
+apps/backend/src/agentclaw/corp/plugins/prod/caller_credential.py
+  s_5c173f6b8a3b51::t_7acfe032089cf1 42,61-70,116-144,147-152,154,158,163,165-166,168-171,177-179,181-182,184-187,191,193-194,196-199,211,213-214,216-219,234-241
+  s_5c173f6b8a3b51::t_96a86e6afe0c72 153
+  s_5c173f6b8a3b51::t_53972dd62973e0 167
+  s_5c173f6b8a3b51::t_e810bd51d36903 183
+  s_5c173f6b8a3b51::t_17dc698df46542 195
+  s_5c173f6b8a3b51::t_83cb97d99acb13 215
+apps/backend/src/agentclaw/corp/plugins/prod/passport.py
+  s_5c173f6b8a3b51::t_7acfe032089cf1 157-172
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b41b7e19f62636360bc05771dfc89d30390c1292",
+  "prompts": {},
+  "sessions": {
+    "s_5c173f6b8a3b51": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce92-ae83-7ee3-a7cd-2cd2e1135dca",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

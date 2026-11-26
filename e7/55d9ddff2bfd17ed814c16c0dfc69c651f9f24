@@ -1,0 +1,39 @@
+apps/backend/src/agentclaw/community/core/session_resources/README.md
+  s_f364df1c07a1e6::t_9a74f898137ada 44-59
+apps/backend/src/agentclaw/community/core/session_resources/materialization.py
+  s_f364df1c07a1e6::t_ea4fc925319391 6,29,119-125,158-159
+apps/backend/tests/community/core/session_resources/test_materialization.py
+  s_f364df1c07a1e6::t_1a00024e2e3c36 3,5-7,210-270
+apps/frontend-nextgen/src/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.tsx
+  s_f364df1c07a1e6::t_c25499148a762e 4,28,41
+apps/frontend-nextgen/src/services/backendApi/bots/botSessionFileController.ts
+  s_f364df1c07a1e6::t_8ed2d60775afe8 28-29
+apps/frontend-nextgen/src/services/workspace/botSessionFileService.ts
+  s_f364df1c07a1e6::t_7c7fe31d42d1b2 58
+apps/frontend-nextgen/src/services/workspace/sessionFileUtils.ts
+  s_f364df1c07a1e6::t_1c55d18778b543 309-325
+apps/frontend-nextgen/src/stores/botSessionFileStore.ts
+  s_f364df1c07a1e6::t_93d0278502f24b 11
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel.test.tsx
+  s_f364df1c07a1e6::t_3fba3d61323389 39-52
+apps/frontend-nextgen/test/services/workspace/botSessionFileService.test.ts
+  s_f364df1c07a1e6::t_c8b72c45458586 230-242
+apps/frontend-nextgen/test/services/workspace/botSessionFileTime.test.ts
+  s_f364df1c07a1e6::t_8e3b014df8cd91 1-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e755d9ddff2bfd17ed814c16c0dfc69c651f9f24",
+  "prompts": {},
+  "sessions": {
+    "s_f364df1c07a1e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02001-8e2d-7e92-859e-df38c4b298ac",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

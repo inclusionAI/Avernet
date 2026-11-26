@@ -1,0 +1,19 @@
+apps/backend/tests/community/adapters/http/bot_public/test_risk_routes.py
+  s_befd386ce20825::t_df317314594aec 118-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "94fcc36d1a63f999aec35ce9f01b4af51bf8f276",
+  "prompts": {},
+  "sessions": {
+    "s_befd386ce20825": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e54-391f-7460-a1a1-4f8e39166a4f",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

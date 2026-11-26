@@ -1,0 +1,21 @@
+apps/backend/tests/community/adapters/http/openapi_v1/resources/test_list_workspace_path.py
+  s_fdf2a0ea5d90fc::t_4da923bfeae841 24-29,33,75-86
+apps/backend/tests/community/adapters/http/openapi_v1/resources/test_delete_workspace_path.py
+  s_fdf2a0ea5d90fc::t_4da923bfeae841 1,3,30,88-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "13c60972a851104e66ce87346492b8a437b040fe",
+  "prompts": {},
+  "sessions": {
+    "s_fdf2a0ea5d90fc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2139d-64fb-7a71-901f-98915583e8f7",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

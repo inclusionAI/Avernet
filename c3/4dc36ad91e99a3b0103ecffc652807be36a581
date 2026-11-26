@@ -1,0 +1,61 @@
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_bots.rs
+  s_fc73a782e73675::t_eba32bdec8306c 35,64
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/translation.rs
+  s_fc73a782e73675::t_9cf003ea0568a8 108-120
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/translation_tests.rs
+  s_fc73a782e73675::t_64e9a5d06ed8fd 33-55
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_card_routes.rs
+  s_fc73a782e73675::t_aab8e9b71d1065 13,78,348-364
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/legacy_group_event_subscription_contract.rs
+  s_fc73a782e73675::t_9bef0bf98675d4 309-347
+apps/bcs/crates/application/bcs-app-a2a-bot/CONTEXT.md
+  s_fc73a782e73675::t_fe44fb4844295d 22-25
+apps/bcs/crates/application/bcs-app-a2a-bot/src/lib.rs
+  s_fc73a782e73675::t_6ee489a492cbd9 76-113,189-192
+apps/bcs/crates/application/bcs-app-a2a-bot/src/management.rs
+  s_fc73a782e73675::t_c86832e869d0d2 174,197-198
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/catalog_label_updates.rs
+  s_fc73a782e73675::t_e096bb55b1510b 1-127
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/catalog_labels.rs
+  s_fc73a782e73675::t_ea9b56c624758f 42,44,46
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/public_management.rs
+  s_fc73a782e73675::t_e314fb750c97b7 316-318
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/public_management_by_id.rs
+  s_fc73a782e73675::t_285ac8ecbe6334 176-201
+apps/bcs/crates/bootstrap/bcs/tests/integration_catalog_labels.rs
+  s_fc73a782e73675::t_7754a3d08994ce 128-153
+apps/bcs/crates/service-api/bcs-service-api/src/application/a2a_bot.rs
+  s_fc73a782e73675::t_24b6bb99e72151 6-7,12,64
+apps/bcs/docs/catalog-labels.md
+  s_fc73a782e73675::t_e547caef7fe2f6 50,75-80,100-101,105-106
+apps/bcs/specs/2026-11-19-configured-catalog-labels/README.md
+  s_fc73a782e73675::t_3bcb72e5a15384 23,36
+apps/bcs/specs/2026-11-19-configured-catalog-labels/design.md
+  s_fc73a782e73675::t_2235e3d0baba45 53,60,86
+apps/bcs/specs/2026-11-19-configured-catalog-labels/proposal.md
+  s_fc73a782e73675::t_f099cd7d5b966d 10-11
+apps/bcs/specs/2026-11-19-configured-catalog-labels/requirements/card-catalog-label-management/spec.md
+  s_fc73a782e73675::t_ffe520ddff6cf7 4,6,8
+apps/bcs/specs/2026-11-19-configured-catalog-labels/requirements/full-catalog-label-publication/spec.md
+  s_fc73a782e73675::t_ba4749d7c10c3e 26
+apps/bcs/specs/2026-11-19-configured-catalog-labels/tasks.md
+  s_fc73a782e73675::t_158fa13d53d6af 50,53-61
+apps/bcs/specs/2026-11-19-configured-catalog-labels/validation.md
+  s_fc73a782e73675::t_0386c835c4339d 174-317
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c34dc36ad91e99a3b0103ecffc652807be36a581",
+  "prompts": {},
+  "sessions": {
+    "s_fc73a782e73675": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f47e-75e4-72b0-a716-aea1ec929edb",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

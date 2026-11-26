@@ -1,0 +1,18 @@
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/client.rs
+  h_fa66fe7c023b4b 1240-1284,1389-1393
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/triple_pojo/channel.rs
+  h_fa66fe7c023b4b 1328-1332
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/triple_pojo_channel.rs
+  h_fa66fe7c023b4b 493-537
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "12cdaae0b25d142c7f3533da4d98011700d1cfa4",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

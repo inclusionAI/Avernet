@@ -1,0 +1,27 @@
+apps/backend/src/agentclaw/community/core/task/task_runner/client/semantic_keyword_bot_discover.py
+  s_4efef845bd857d::t_71fa6efd71de43 45
+apps/backend/src/agentclaw/community/core/task/task_runner/client/catalog_keyword_discover.py
+  s_4efef845bd857d::t_8c923edaa920c4 67,96
+  s_4efef845bd857d::t_b9c4a7e647f885 71
+  s_4efef845bd857d::t_dadf47ce2dca65 97,147
+apps/backend/tests/community/core/task/task_runner/integration/test_semantic_keyword_bot_discover.py
+  s_4efef845bd857d::t_8f61ffa1a061ef 319
+apps/backend/tests/community/core/task/task_runner/integration/test_task_search_viewer.py
+  s_4efef845bd857d::t_8f61ffa1a061ef 143-145,151,238
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fd77228357d9e066c8fd3ba5cdae031575c75df5",
+  "prompts": {},
+  "sessions": {
+    "s_4efef845bd857d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a181bc-3434-7bf3-a0d5-19c01487b59e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

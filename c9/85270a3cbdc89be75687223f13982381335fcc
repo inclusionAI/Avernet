@@ -1,0 +1,113 @@
+apps/backend/specs/caller-refresh-db-lock-20261116/001-spec-output.md
+  s_d23d2dd74fff18::t_f8762e2ca15398 1-5
+apps/backend/src/agentclaw/corp/configs/application-dev.yaml
+  s_d23d2dd74fff18::t_3151b7293ab500 432
+apps/backend/src/agentclaw/corp/configs/application-prepub.yaml
+  s_d23d2dd74fff18::t_a6913d0c9043f9 575
+apps/backend/src/agentclaw/corp/configs/application-prod.yaml
+  s_d23d2dd74fff18::t_bbcee8cd04d747 575
+apps/backend/src/agentclaw/corp/core/caller_identity/README.md
+  s_d23d2dd74fff18::t_4212d5c85f776b 43-45,76-80,93,95-100
+apps/backend/src/agentclaw/corp/core/caller_identity/scheduled_refresh.py
+  s_d23d2dd74fff18::t_5694d39037adc6 83-85,136-137,139-168,171-175,181
+apps/backend/src/agentclaw/corp/core/caller_identity/scheduled_refresh_lifecycle.py
+  s_d23d2dd74fff18::t_7eb6fd83b205f5 29-30,95,115
+apps/backend/src/agentclaw/corp/core/default_env_bot/default_env_bot_service.py
+  s_d23d2dd74fff18::t_2cdb7fc69cdc2a 278
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/identity.py
+  s_d23d2dd74fff18::t_e63c67c8be98b9 127,129
+apps/backend/tests/corp/core/caller_identity/test_due_caller_refresh.py
+  s_d23d2dd74fff18::t_53ea1f21c7f9c1 2,121-223
+apps/backend/tests/corp/core/caller_identity/test_scheduled_refresh_lifecycle.py
+  s_d23d2dd74fff18::t_8c91d5c4a42baf 27,42,67-68,70-71,78,91
+apps/backend/tests/corp/core/config/test_corp_overlay_merge.py
+  s_d23d2dd74fff18::t_3466bad9ea8e8d 44,274
+apps/backend/tests/corp/core/default_env_bot/test_default_env_bot_service.py
+  s_d23d2dd74fff18::t_d256660d3e98f3 648
+apps/backend/tests/corp/plugins/prod/test_scheduled_caller.py
+  s_d23d2dd74fff18::t_bdfd67e08e1c99 192-193,211,310,325,430
+apps/frontend-nextgen/config/internal/runtime/config.ts
+  s_d23d2dd74fff18::t_0373b956ceccdf 35-41,210-212,216-217,222-228,242-243
+apps/frontend-nextgen/config/internal/runtime/qiankun.ts
+  s_d23d2dd74fff18::t_829c907ffc1f56 4-7,9-17,22,25-27,35
+apps/frontend-nextgen/scripts/public-tests.list
+  s_d23d2dd74fff18::t_867baeb60fa7a0 27,29-42,55-58,214-215,230-242,246-262
+apps/frontend-nextgen/src/extensions/internal.ts
+  s_d23d2dd74fff18::t_4c4cf92a4707ec 33,37-40,171-179,563-565,580,583-588
+apps/frontend-nextgen/src/internal/agentCoding/CodingBotEmbeddedStage.tsx
+  s_d23d2dd74fff18::t_bf94bd31f4048e 9,16,19,30,33,163,166,168-169,172-174,177-180
+apps/frontend-nextgen/src/internal/agentCoding/agentcodingMicroAppMetadata.ts
+  s_d23d2dd74fff18::t_ebc6b99326cefa 2,5-7,9-12,14-35,38
+apps/frontend-nextgen/src/internal/agentCoding/aixcodingSessionActionRegistry.ts
+  s_d23d2dd74fff18::t_e99537775d7251 5-12,18-21,52,153-203
+apps/frontend-nextgen/src/internal/agentCoding/preloadAgentcodingMicroApp.ts
+  s_d23d2dd74fff18::t_e424dc0f5c0e7c 1-12,16-52,54-57,59-60,63-66,68,70
+apps/frontend-nextgen/src/internal/market/components/McpDetailPage.tsx
+  s_d23d2dd74fff18::t_b40356b16f166f 20,205-218
+apps/frontend-nextgen/src/internal/market/components/McpMarketPanel.tsx
+  s_d23d2dd74fff18::t_8f70430cb16c79 9,108-133,135
+apps/frontend-nextgen/src/internal/market/constants.ts
+  s_d23d2dd74fff18::t_bc889ba2693e38 21-28,33,42-46
+apps/frontend-nextgen/src/internal/market/hooks/useMarketMcps.ts
+  s_d23d2dd74fff18::t_c73697913e3bbd 5,70-77,123,130,135,148,167,184,218,228
+apps/frontend-nextgen/src/internal/market/mappers.ts
+  s_d23d2dd74fff18::t_23285721c0d8c9 208-209
+apps/frontend-nextgen/src/internal/market/service.ts
+  s_d23d2dd74fff18::t_c820ae205d2496 224-227
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilityPickerModal.openCore.test.tsx
+  s_d23d2dd74fff18::t_748be7e9560a7e 22
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilityPickerModal.search.test.tsx
+  s_d23d2dd74fff18::t_7aa13e5dd95622 7-11
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilityPickerModal.test.tsx
+  s_d23d2dd74fff18::t_005c2acc3ede46 11-12,93-95,110,140-142,159-160,164
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilitySetManager.pickerDetail.test.tsx
+  s_d23d2dd74fff18::t_4d9b1cb041a6ee 14-15
+apps/frontend-nextgen/test/domain/conversation/types.test.ts
+  s_d23d2dd74fff18::t_cb6f47e92e8c52 40-41,55
+apps/frontend-nextgen/test/internal/agentCoding/aixcodingSessionActionRegistry.test.ts
+  s_d23d2dd74fff18::t_343e45f9de4739 73-83
+apps/frontend-nextgen/test/internal/agentCoding/internalRouteMetas.test.ts
+  s_d23d2dd74fff18::t_592adfe932828f 1-30
+apps/frontend-nextgen/test/internal/agentCoding/preloadAgentcodingMicroApp.test.ts
+  s_d23d2dd74fff18::t_a035947faebfee 5-14,17-28,30-33,39-42,45-139,142-163
+apps/frontend-nextgen/test/internal/market/components/McpDetailPage.test.tsx
+  s_d23d2dd74fff18::t_d722522fcb2c93 243-262
+apps/frontend-nextgen/test/internal/market/components/McpMarketPanel.test.tsx
+  s_d23d2dd74fff18::t_72bb78d6775b31 77,84-93,120-122,183-185,187-190
+apps/frontend-nextgen/test/internal/market/hooks/useMarketMcps.test.tsx
+  s_d23d2dd74fff18::t_f8aed3120c41ae 236,239,241,249-254
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/CodingBotEmbeddedStage.localDevelopment.test.tsx
+  s_d23d2dd74fff18::t_f07c5c80019e24 7-8,32,34,36-38,41-97
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationOriginFilter.test.tsx
+  s_d23d2dd74fff18::t_a00593dadf6152 48-91,165,167,169,171,173
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSidebarSessionFilters.test.tsx
+  s_d23d2dd74fff18::t_271ac0b47e93c3 89,311-335
+apps/gateway/configs/application-prepub.yaml
+  s_d23d2dd74fff18::t_7f4d2598c28ce7 24
+apps/gateway/configs/application-prod.yaml
+  s_d23d2dd74fff18::t_230d6879e50c34 25
+apps/gateway/src/gateway/enterprise/plugins/authn/user_xoneid/_identity_client.py
+  s_d23d2dd74fff18::t_c1f155288dfe71 32,90,134-166
+apps/gateway/tests/test_gateway_cors_config.py
+  s_d23d2dd74fff18::t_2eb45d538f1296 59-62,116-131
+apps/gateway/tests/unit/plugins/authn/user_xoneid/test_resolver.py
+  s_d23d2dd74fff18::t_1511aa1b6cbebd 115-149
+submodules/avernet
+  s_d23d2dd74fff18::t_49825b21ffdb82 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c985270a3cbdc89be75687223f13982381335fcc",
+  "prompts": {},
+  "sessions": {
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

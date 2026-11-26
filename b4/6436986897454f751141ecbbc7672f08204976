@@ -1,0 +1,19 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/owner-card.test.ts
+  s_5ef1731c09cbff::t_317f728b4b3a15 32,44,47,57,90,145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b46436986897454f751141ecbbc7672f08204976",
+  "prompts": {},
+  "sessions": {
+    "s_5ef1731c09cbff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2115b-7a5e-7ae1-9948-0eb0373f7158",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

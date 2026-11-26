@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/scripts/ci/tests/ci-ref-selection.test.mjs
+  h_5f06d4d8b4bdd5 113-116,120-121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "31ec86a394e9dc3f24d4d97d61d28e92eb8bc0c2",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+apps/frontend-nextgen/src/services/myTask.ts
+  s_785ac12e5de367::t_be6ba6c4af51f3 9-13
+apps/frontend-nextgen/src/hooks/useTaskSwitcherTasks.ts
+  s_785ac12e5de367::t_e8c03cf7a4993f 7
+apps/frontend-nextgen/test/hooks/useTaskSwitcherTasks.test.tsx
+  s_785ac12e5de367::t_559a7ce2f0f22e 26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ff0021dc0812d26ff2062c7a6110acf7c7eef970",
+  "prompts": {},
+  "sessions": {
+    "s_785ac12e5de367": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "09473ff1-a2db-4cd4-a9a5-e59dc77ed3e2",
+        "model": "antchat/GLM-5.2"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

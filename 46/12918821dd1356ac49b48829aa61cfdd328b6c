@@ -1,0 +1,45 @@
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/BotGeneralConfigDialogBody.tsx
+  s_4b3bb5e3f4e05a::t_c0e7de1448278d 105
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/useUserRiskStatus.ts
+  s_4b3bb5e3f4e05a::t_50798b68a23408 7,9-10,26,33-35,39
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/RiskFlowBanners.tsx
+  s_4b3bb5e3f4e05a::t_dca0dd9db62016 4,90,96-97,103-104,106-107,112-134,136-143,145
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/index.tsx
+  s_4b3bb5e3f4e05a::t_c5689f2bd99719 62,70,199-200,253
+apps/frontend-nextgen/src/components/CollaborationPrivacy/RelationCard/index.tsx
+  s_4b3bb5e3f4e05a::t_a2031415f09eb7 18-29,41-54,56,60-69,76,96,101,103,111,114
+apps/frontend-nextgen/src/domain/collaborationPrivacy/botPublicRisk.ts
+  s_4b3bb5e3f4e05a::t_a8974489110561 46-92
+apps/frontend-nextgen/src/hooks/useCollaborationPrivacy.ts
+  s_4b3bb5e3f4e05a::t_62f486188de799 9,155-183,193,196-203,208,214,225
+apps/frontend-nextgen/src/services/backendApi/collaboration/collaborationBotPublicRiskController.ts
+  s_4b3bb5e3f4e05a::t_9d30451ccbaaac 51-52
+apps/frontend-nextgen/src/services/collaborationPrivacy/collaborationPrivacyService.ts
+  s_4b3bb5e3f4e05a::t_fea2f0c51599db 114-117,119-124
+apps/frontend-nextgen/test/collaborationPrivacyComponents.test.tsx
+  s_4b3bb5e3f4e05a::t_029a3ef610c393 513,521,523-563,592
+apps/frontend-nextgen/test/collaborationPrivacyService.test.ts
+  s_4b3bb5e3f4e05a::t_037d4edea6f2bf 275-302
+apps/frontend-nextgen/test/components/CollaborationPrivacy/BotGeneralConfigDialog.test.tsx
+  s_4b3bb5e3f4e05a::t_ebf2bd0af83838 636-682
+apps/frontend-nextgen/test/domain/collaborationPrivacy/botPublicRisk.test.ts
+  s_4b3bb5e3f4e05a::t_583567e93ca2a5 6,102-126
+apps/frontend-nextgen/test/hooks/useCollaborationPrivacy.test.tsx
+  s_4b3bb5e3f4e05a::t_f9c14d2aea766e 638-694
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4612918821dd1356ac49b48829aa61cfdd328b6c",
+  "prompts": {},
+  "sessions": {
+    "s_4b3bb5e3f4e05a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212ee-6dfd-7652-9c5d-c1f683ce868a",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+apps/frontend-nextgen/assets/task-panel/src/panel/groupDisplay.ts
+  h_5b2ec9c12c4d18 20-30,34-35,74,89
+apps/frontend-nextgen/assets/task-panel/test/panel/groupDisplay.coverage.test.ts
+  h_5b2ec9c12c4d18 68,72-73,83
+apps/frontend-nextgen/assets/task-panel/test/panel/groupDisplay.routing.test.tsx
+  h_5b2ec9c12c4d18 1-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "45d5cf8c40d4888944f73f2c5ceb7dd213ac43ac",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

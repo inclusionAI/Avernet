@@ -1,0 +1,22 @@
+apps/backend/tests/community/core/task/context_collab/group_profile_support.py
+  h_059e888e5e4e82 1-248
+apps/backend/tests/community/core/task/context_collab/test_group_guards.py
+  h_059e888e5e4e82 1-288
+apps/backend/tests/community/core/task/context_collab/test_group_lifecycle.py
+  h_059e888e5e4e82 1-685
+apps/backend/tests/community/core/task/context_collab/test_group_profile.py
+  h_059e888e5e4e82 1-329
+apps/backend/tests/community/core/task/context_collab/test_single_profile.py
+  h_059e888e5e4e82 1-992
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4fe4e7091feac5af11dc3daf28d0776d6d16eeb4",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

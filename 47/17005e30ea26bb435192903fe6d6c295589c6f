@@ -1,0 +1,14 @@
+apps/backend/specs/2026-11-09-bbs-context-collaboration-protocol/spec.md
+  h_059e888e5e4e82 12,24,32-33,79-80,112,147,155,163,188,272,276,286,303,371,406,408,411,414-416,420,438,517,571,577,581,636,656,668,674,676,678,680-684,686-691,693,695-718,756,761,811,822,845,861,863,877-879,944,952,954,966
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4717005e30ea26bb435192903fe6d6c295589c6f",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

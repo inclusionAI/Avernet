@@ -1,0 +1,23 @@
+apps/backend/src/agentclaw/corp/plugins/prod/caller_credential.py
+  s_5c173f6b8a3b51::t_6905b868f67722 8,212-215
+apps/backend/specs/dingtalk-caller-token/002-code-report.md
+  s_5c173f6b8a3b51::t_c2b60aad485202 14-15
+apps/backend/tests/corp/plugins/prod/test_caller_credential_facade.py
+  s_5c173f6b8a3b51::t_9ae678f3896b39 472-498
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d13ee8b4d7325f2f79d0ed69cccc0a4a6af417de",
+  "prompts": {},
+  "sessions": {
+    "s_5c173f6b8a3b51": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce92-ae83-7ee3-a7cd-2cd2e1135dca",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

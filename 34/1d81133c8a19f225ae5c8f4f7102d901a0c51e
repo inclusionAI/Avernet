@@ -1,0 +1,81 @@
+apps/bcs/crates/plugin-api/bcs-db-api/CONTEXT.md
+  s_7d114ded8fc0da::t_4c441c331e9b43 61-83
+apps/bcs/crates/plugin-api/bcs-db-api/src/lib.rs
+  s_7d114ded8fc0da::t_8ae65b57b72ecd 34-39,504-526
+apps/bcs/crates/plugin-api/bcs-db-api/src/transaction_outcome.rs
+  s_7d114ded8fc0da::t_35545122122903 1-166
+apps/bcs/crates/plugins/bcs-db-local/CONTEXT.md
+  s_7d114ded8fc0da::t_aada8721c13b47 53-61
+apps/bcs/crates/plugins/bcs-db-local/src/lib.rs
+  s_7d114ded8fc0da::t_7dc8df9cc8430c 18-19,280,289-294
+apps/bcs/crates/plugins/bcs-db-local/src/transaction_outcome.rs
+  s_7d114ded8fc0da::t_1accca40624665 1-129
+apps/bcs/crates/plugins/bcs-db-local/tests/conformance_transaction_outcome.rs
+  s_7d114ded8fc0da::t_2dfa261f31ebd9 1-21
+apps/bcs/crates/plugins/bcs-db-local/tests/transaction_commit.rs
+  s_7d114ded8fc0da::t_3c5f8c59109c35 23-57
+apps/bcs/crates/plugins/bcs-db-mysql/CONTEXT.md
+  s_7d114ded8fc0da::t_8ee7bd44538e02 54-64
+apps/bcs/crates/plugins/bcs-db-mysql/src/lib.rs
+  s_7d114ded8fc0da::t_f345a49e83df79 17,102,108-120
+apps/bcs/crates/plugins/bcs-db-mysql/src/manager.rs
+  s_7d114ded8fc0da::t_23fe7bf9d79f6b 1-2
+apps/bcs/crates/plugins/bcs-db-mysql/src/manager/transaction_outcome.rs
+  s_7d114ded8fc0da::t_52d1a8a9bf99fb 1-94
+apps/bcs/crates/plugins/bcs-db-mysql/src/transaction_outcome.rs
+  s_7d114ded8fc0da::t_7a443b4d61bfb5 1-74
+apps/bcs/crates/plugins/bcs-db-mysql/tests/conformance_db_plugin.rs
+  s_94c42a5933ce17::t_b5d43952e1df45 37
+apps/bcs/crates/services/bcs-edge-permission-store/CONTEXT.md
+  s_7d114ded8fc0da::t_f6446a85595ba1 227-229,311-315,318-324
+apps/bcs/crates/services/bcs-edge-permission-store/src/agent_invoke/commands/mod.rs
+  s_94c42a5933ce17::t_cb9a7c447fd419 181
+apps/bcs/crates/services/bcs-edge-permission-store/src/agent_invoke/delegation.rs
+  s_94c42a5933ce17::t_4047ba44040802 141
+apps/bcs/crates/services/bcs-edge-permission-store/src/agent_invoke/facts.rs
+  s_94c42a5933ce17::t_a9ac23a0685f9d 252
+apps/bcs/crates/services/bcs-edge-permission-store/src/agent_invoke/mod.rs
+  s_94c42a5933ce17::t_456acd64dc9a66 17,164-170,173
+apps/bcs/crates/services/bcs-edge-permission-store/src/agent_invoke/scope.rs
+  s_94c42a5933ce17::t_473bd7039ca156 58
+apps/bcs/crates/services/bcs-edge-permission-store/src/agent_invoke/tests.rs
+  s_94c42a5933ce17::t_d2a5adf3bab8fb 33-42
+apps/bcs/crates/services/bcs-edge-permission-store/tests/agent_invoke_facts.rs
+  s_94c42a5933ce17::t_0ac03d7cbc9f08 146,154
+apps/bcs/crates/services/bcs-edge-permission-store/tests/agent_invoke_sql_atomicity.rs
+  s_7d114ded8fc0da::t_a384cf387ff9c6 150,586-641
+apps/bcs/crates/test-support/bcs-test-support/CONTEXT.md
+  s_7d114ded8fc0da::t_343427f01332c8 12-15
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/db_transaction_outcome.rs
+  s_7d114ded8fc0da::t_e0ee2873524fec 1-168
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/mod.rs
+  s_7d114ded8fc0da::t_c069b1aaa60d18 3-4
+apps/bcs/crates/test-support/legacy_log_capture.rs
+  s_7d114ded8fc0da::t_3bb26ef8944e91 50-51
+apps/bcs/docs/superpowers/specs/2026-08-18-friend-edge-permission-reform.md
+  s_7d114ded8fc0da::t_bdc8627d0cd2e4 3584-3643
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "341d81133c8a19f225ae5c8f4f7102d901a0c51e",
+  "prompts": {},
+  "sessions": {
+    "s_7d114ded8fc0da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b4-ef36-7703-9562-0f40ee69f61b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    },
+    "s_94c42a5933ce17": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20d69-010f-7df2-957c-de77c2ec3c63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
