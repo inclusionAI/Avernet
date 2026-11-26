@@ -41,10 +41,14 @@ class VersionedProfileRef:
 
 @dataclass(frozen=True)
 class MethodRelationTemplate:
-    """An explicit L5 relation between two required Method Profiles."""
+    """A directed L5 relation between required Method Profiles.
 
-    parent_method: str
-    child_method: str
+    Endpoints do not imply hierarchy; ``relation`` defines their semantics.
+    For NEST only, the source contains the target Method.
+    """
+
+    source_method: str
+    target_method: str
     relation: CompositionRelation
 
 

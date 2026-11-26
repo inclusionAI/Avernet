@@ -48,6 +48,9 @@ from agentclaw.community.core.task.context_collab.l5_methods.publication import 
     OpenPublicationProfile,
     DesignatedOpenAdmission,
 )
+from agentclaw.community.core.task.context_collab.l6_products.relation_storage import (
+    from_legacy_relation_fields,
+)
 
 COMPOSITION_TYPES = (
     *WORKFLOW_TYPES,
@@ -119,12 +122,12 @@ def validate_configuration(composition, stages, execution):
             or type(relation.relation) is not CompositionRelation
         ):
             raise Invalid("invalid Method relation")
-        if relation.parent_method not in kinds or relation.child_method not in kinds:
+        if relation.source_method not in kinds or relation.target_method not in kinds:
             raise Invalid("relation endpoint is not a selected Method")
         validate_composition(
-            relation.parent_method, relation.relation, relation.child_method
+            relation.source_method, relation.relation, relation.target_method
         )
-        pairs.append((relation.parent_method, relation.child_method))
+        pairs.append((relation.source_method, relation.target_method))
     if len(set(pairs)) != len(pairs) or detect_cycle(pairs):
         raise Invalid("duplicate or cyclic Method relations")
     if len(kinds) > 1 and {k for pair in pairs for k in pair} != set(kinds):
@@ -158,6 +161,6 @@ def decode_profile(data: dict) -> ProductProfile:
     return ProductProfile(
         data["id"],
         data["name"],
-        decode_composition(data["composition"]),
+        decode_composition(from_legacy_relation_fields(data["composition"])),
         data["stages"],
     )

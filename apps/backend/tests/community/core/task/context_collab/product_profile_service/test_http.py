@@ -280,3 +280,36 @@ def test_http_interaction_retries_replay_and_changed_uuid_content_conflicts(
         == 200
     )
     assert h.repository.get_collet(h.collet.id).revision == before.revision + 2
+
+
+@pytest.mark.parametrize("endpoint_names", ["directed", "legacy", "mixed"])
+def test_http_composition_uses_source_and_target(client, runtime, endpoint_names):
+    composition = encode_composition(runtime.composition)
+    composition["required_methods"].append(
+        {
+            "type": "MethodTemplate",
+            "profile": {"type": "MethodProfile", "method": "Open", "version": "0.2"},
+            "policy": None,
+        }
+    )
+    relation = {
+        "type": "MethodRelationTemplate",
+        "source_method": "Swarm",
+        "target_method": "Open",
+        "relation": "support",
+    }
+    if endpoint_names == "legacy":
+        relation["parent_method"] = relation.pop("source_method")
+        relation["child_method"] = relation.pop("target_method")
+    elif endpoint_names == "mixed":
+        relation.update(parent_method="Swarm", child_method="Open")
+    composition["relations"] = [relation]
+    response = client.post(
+        BASE + "/profiles",
+        json={"name": "composed", "composition": composition, "stages": runtime.stages},
+    )
+    if endpoint_names == "directed":
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["composition"] == composition
+    else:
+        assert response.status_code == 422, response.text

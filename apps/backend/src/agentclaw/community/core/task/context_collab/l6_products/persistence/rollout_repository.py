@@ -222,8 +222,8 @@ class SqlProductRuntimeRepository:
                     MethodCompositionEdge(
                         f"product-v2:{cid}:edge:{i}",
                         f"product-v2:{cid}",
-                        by_kind[r.parent_method],
-                        by_kind[r.child_method],
+                        by_kind[r.source_method],
+                        by_kind[r.target_method],
                         r.relation,
                         CompositionEdgeState.ACTIVE,
                         "",
@@ -365,7 +365,7 @@ class SqlProductRuntimeRepository:
             and e.collab_context_id == f"product-v2:{row.id}"
         }
         expected_relations = {
-            (r.parent_method, r.child_method, r.relation)
+            (r.source_method, r.target_method, r.relation)
             for r in profile.composition.relations
         }
         if (

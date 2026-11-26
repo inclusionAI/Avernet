@@ -51,6 +51,10 @@ from agentclaw.community.core.task.context_collab.l6_products.participant_scope 
 from agentclaw.community.core.task.context_collab.l6_products.validation import (
     validate_product_profile,
 )
+from agentclaw.community.core.task.context_collab.l6_products.relation_storage import (
+    from_legacy_relation_fields,
+    to_legacy_relation_fields,
+)
 
 SCHEMA_VERSION = 1
 MAX_DEFINITION_BYTES = 1024 * 1024
@@ -109,9 +113,12 @@ def decode_profile(value: str) -> LegacyProductConfiguration:
         ):
             raise ContextCollabValidationError("unknown ProductProfile storage schema")
         profile = decode(
-            data["definition"], LegacyProductConfiguration, _TYPES, get_profile
+            from_legacy_relation_fields(data["definition"]),
+            LegacyProductConfiguration,
+            _TYPES,
+            get_profile,
         )
-        if encode(profile) != data["definition"]:
+        if to_legacy_relation_fields(encode(profile)) != data["definition"]:
             raise ContextCollabValidationError(
                 "noncanonical or normalized ProductProfile input"
             )
@@ -127,7 +134,10 @@ def decode_profile(value: str) -> LegacyProductConfiguration:
 
 def encode_profile(profile: LegacyProductConfiguration) -> str:
     value = json.dumps(
-        {"schema_version": SCHEMA_VERSION, "definition": encode(profile)},
+        {
+            "schema_version": SCHEMA_VERSION,
+            "definition": to_legacy_relation_fields(encode(profile)),
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),

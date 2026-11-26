@@ -334,16 +334,16 @@ def test_execution_http_requires_single_reference_not_open_reference(admitted_ru
 
 
 @pytest.mark.parametrize(
-    "invalid", ["missing", "unknown_endpoint", "wrong_parent", "duplicate", "cycle"]
+    "invalid", ["missing", "unknown_endpoint", "wrong_source", "duplicate", "cycle"]
 )
 def test_profile_rejects_ambiguous_or_invalid_composition(invalid):
     profile = _create_product_profile()
     relation = profile.composition.relations[0]
     relations = {
         "missing": (),
-        "unknown_endpoint": (replace(relation, child_method="Group"),),
-        "wrong_parent": (
-            replace(relation, parent_method="Open", child_method="Single"),
+        "unknown_endpoint": (replace(relation, target_method="Group"),),
+        "wrong_source": (
+            replace(relation, source_method="Open", target_method="Single"),
         ),
         "duplicate": (relation, relation),
         "cycle": (

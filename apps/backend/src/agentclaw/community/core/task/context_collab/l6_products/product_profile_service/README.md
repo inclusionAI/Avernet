@@ -112,6 +112,28 @@ HTTP base: `/api/v1/collaboration/task/products`. Routes are `POST /profiles`,
 and `GET /stages/{id}/messages`. Auth context and tenant/environment are not body
 fields. Inline configuration and feedback bodies are redacted in error logs.
 
+### Directed Method relation endpoints
+
+`MethodRelationTemplate(source_method, target_method, relation)` describes a
+source → target edge, not a generic parent/child relationship. `relation` owns
+its meaning: for `NEST`, the source Method contains the target Method. Other
+relations do not acquire containment semantics from their endpoint names.
+
+Python callers and new HTTP composition objects use `source_method` and
+`target_method`; remove the old `parent_method`/`child_method` keywords. Public
+composition input rejects old, mixed and unknown fields. Persisted v2 Profile
+reads alone translate the exact old tagged relation shape before strict decoding;
+new writes use the new names, and reads never rewrite stored history. Ambiguous,
+partial or unknown legacy shapes are rejected. No SQL DDL change is needed for
+this endpoint rename. Existing L5 `parent_binding`/`child_binding` edge fields,
+edge identities, direction and runtime snapshots are unchanged. Retained v1
+storage also preserves its canonical bytes and digests; see [its storage
+contract](../PROFILE-STORAGE.md).
+
+Deploy compatible v2 readers before enabling new composition writes; old readers
+cannot consume the new endpoint keys. Rollback requires stopping new writers and
+retaining a compatible reader, not rewriting immutable configurations.
+
 ## Runtime and authority
 
 [SwarmStagesPolicy](../../l5_methods/method_policies.py) selects execution/evidence

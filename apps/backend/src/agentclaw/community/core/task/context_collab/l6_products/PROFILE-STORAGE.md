@@ -43,6 +43,18 @@ ProductInstance JSON continues to pin its exact `profile_ref` unchanged.
   L5 policy value. The commission module identity-reexports it; its policy
   semantics and existing class checks are unchanged.
 
+### Method relation endpoint compatibility
+
+The Python `MethodRelationTemplate` now names directed endpoints `source_method`
+and `target_method`; the relation kind determines their meaning. Schema v1
+continues to store `parent_method` and `child_method` through an explicit
+storage-only adapter, preserving canonical JSON, SHA-256, immutable publication
+replay and existing edge IDs. Its decoder rejects new/mixed/partial/unknown
+schema-v1 field shapes rather than silently normalizing a different definition.
+This does not restore old constructor keywords or change the L5 edge wire.
+New v2 HTTP/authoring uses only the new names; its persisted legacy reads are
+scoped to the [v2 storage contract](product_profile_service/README.md#directed-method-relation-endpoints).
+
 ## Explicit import and cutover
 
 1. Stop writers during the application's storage cutover and apply the DDL.

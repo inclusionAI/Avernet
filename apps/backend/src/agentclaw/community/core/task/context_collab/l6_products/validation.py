@@ -170,7 +170,7 @@ def _validate_relations(definition: LegacyProductConfiguration) -> None:
         )
     pairs: list[tuple[str, str]] = []
     for item in relations:
-        if item.parent_method not in methods or item.child_method not in methods:
+        if item.source_method not in methods or item.target_method not in methods:
             raise ContextCollabValidationError(
                 "Method relation endpoint is not required"
             )
@@ -178,8 +178,8 @@ def _validate_relations(definition: LegacyProductConfiguration) -> None:
             raise ContextCollabValidationError(
                 "Method relation requires CompositionRelation"
             )
-        validate_composition(item.parent_method, item.relation, item.child_method)
-        pairs.append((item.parent_method, item.child_method))
+        validate_composition(item.source_method, item.relation, item.target_method)
+        pairs.append((item.source_method, item.target_method))
     if len(set(pairs)) != len(pairs) or detect_cycle(pairs):
         raise ContextCollabValidationError("duplicate or cyclic Method relations")
     if relations and {name for pair in pairs for name in pair} != methods:
