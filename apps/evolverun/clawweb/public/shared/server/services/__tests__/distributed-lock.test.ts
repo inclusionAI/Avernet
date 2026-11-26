@@ -93,8 +93,9 @@ it('waits for an in-flight renewal before releasing the current database version
   expect(await f.b.claim(lockOptions)).not.toBeNull();
 });
 
-it('never revives an abandoned callback when a delayed renewal receipt eventually arrives', async () => {
+it.each([false, true])('never revives an abandoned callback on a delayed renewal receipt, with takeover=%s', async takeover => {
   const f = await fixture(), done = deferred(), receipt = deferred(), renew = f.a.renew.bind(f.a);
+  const release = vi.spyOn(f.a, 'release');
   let handle!: DistributedLease;
   vi.spyOn(f.a, 'renew').mockImplementation(async record => {
     const result = await renew(record); await receipt.promise; return result;
@@ -106,8 +107,17 @@ it('never revives an abandoned callback when a delayed renewal receipt eventuall
   await advance(f, 20_000);
   await advance(f, 100_001);
   expect(() => handle.assertHeld()).toThrow(DistributedLeaseLostError);
+  let nextOwner: string | null = null;
+  if (takeover) {
+    f.clock.now += 20_000;
+    nextOwner = (await f.b.claim(lockOptions))!.ownerToken;
+  }
   done.resolve(); receipt.resolve(); await running;
   expect(() => handle.assertHeld()).toThrow(DistributedLeaseLostError);
+  expect(release).toHaveBeenCalledOnce();
+  await expect(release.mock.results[0].value).resolves.toBe(!takeover);
+  expect(await f.db.query('SELECT owner_token FROM clawweb_distributed_locks')).toEqual([{ owner_token: nextOwner }]);
+  if (!takeover) expect(await f.b.claim(lockOptions)).not.toBeNull();
 });
 
 it('propagates acquisition errors without executing the callback', async () => {
