@@ -1,0 +1,41 @@
+apps/bcsfuse/packages/search-core/src/search_core/providers/keyword.py
+  s_20c3b110241190::t_337b0a9a3f5792 174-195,203,215
+  s_20c3b110241190::t_df48075367984c 196-202
+apps/bcsfuse/packages/search-core/src/search_core/application/search.py
+  s_20c3b110241190::t_b4a59f2fff23ec 55,59,217-225
+apps/bcsfuse/packages/search-core/src/search_core/application/card_metadata.py
+  s_20c3b110241190::t_337b0a9a3f5792 47-49,52,60,103
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/catalog.py
+  s_20c3b110241190::t_df48075367984c 21-24,281-284
+  s_20c3b110241190::t_337b0a9a3f5792 85,278-280,285
+  s_20c3b110241190::t_b4a59f2fff23ec 296
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_index.py
+  s_20c3b110241190::t_337b0a9a3f5792 128-135
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_20c3b110241190::t_110754b43bfbfe 241-248
+apps/bcsfuse/packages/search-core/src/search_core/application/default_candidates.py
+  s_20c3b110241190::t_df48075367984c 86,97,114-115,120-121,133-135
+  s_20c3b110241190::t_337b0a9a3f5792 4,96,98-113,116-119,122-132,136-139
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/http.py
+  s_20c3b110241190::t_b4a59f2fff23ec 36,47
+apps/bcsfuse/packages/search-core/tests/test_filtered_index_fallback.py
+  s_20c3b110241190::t_df48075367984c 37-42,44-46,51-53
+  s_20c3b110241190::t_b4a59f2fff23ec 5-11,14,21-22,55-61
+  s_20c3b110241190::t_110754b43bfbfe 1-4,12-13,15-20,23-36,43,47-50,54,62-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b6321472ec831ebc971e77e02e2d12a24a5eb2e9",
+  "prompts": {},
+  "sessions": {
+    "s_20c3b110241190": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18bb2-2a7d-74a3-9f9b-e05b95d7b339",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+apps/evolverun/clawweb/public/shared/server/services/__tests__/distributed-lock.test.ts
+  h_b601d8706f5d44 96,98,110-114,117-120
+apps/evolverun/clawweb/public/shared/server/services/distributed-lock.ts
+  h_b601d8706f5d44 42-43,45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5abc5bafdd459d6eb7840c928c88d5774a10f640",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

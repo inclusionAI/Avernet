@@ -1,0 +1,29 @@
+apps/backend/tests/community/core/apply_engine/test_registered_capability_delivery.py
+  s_b7f94a3bd241d6::t_8e92607b5e2769 207-231,234-242
+  s_b7f94a3bd241d6::t_f919760e2958dd 232-233
+  s_b7f94a3bd241d6::t_575597c1df7e9c 47-49
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities_plan.py
+  s_b7f94a3bd241d6::t_67c7e9d77876a4 108-112
+apps/backend/tests/community/core/bot_config_manifest/creation/test_creation_ordering_teclaw.py
+  s_b7f94a3bd241d6::t_94cfff4cc71315 289-318,320-334
+  s_b7f94a3bd241d6::t_337cde6888d237 59,87-89,91,133-135,148,150,165,168,185,216-217
+  s_b7f94a3bd241d6::t_f919760e2958dd 149,319
+apps/backend/tests/community/core/apply_engine/_registered_capability_world.py
+  s_b7f94a3bd241d6::t_be0c476d12f830 33,68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ed87675bc27953b37b63985cc19735873bbb6ea8",
+  "prompts": {},
+  "sessions": {
+    "s_b7f94a3bd241d6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bc8-03e3-7f13-8458-ae13b209eb0e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

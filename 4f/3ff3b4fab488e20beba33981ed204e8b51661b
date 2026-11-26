@@ -1,0 +1,19 @@
+apps/backend/tests/community/adapters/http/openapi_v1/spaces/test_contract.py
+  s_b4a410c26bfee0::t_6c0858b169a103 669-672,692,745
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4f3ff3b4fab488e20beba33981ed204e8b51661b",
+  "prompts": {},
+  "sessions": {
+    "s_b4a410c26bfee0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20d78-0d46-7682-840e-1bc8039aa13a",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+apps/bcs/crates/services/bcs-dist-worker/tests/lifecycle.rs
+  s_b033c54cc00da7::t_468132388806fd 27-29
+  s_b033c54cc00da7::t_8bfc16f51f3d3b 8,16,18-26,30-69
+apps/bcs/crates/services/bcs-dist-worker/src/runtime.rs
+  s_b033c54cc00da7::t_e2dc14f5c18584 188-221
+  s_b033c54cc00da7::t_468132388806fd 357
+  s_b033c54cc00da7::t_e91ac04f6cd61f 187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4b693d4f8485b9f80d6dea12eb53c9fb702626a6",
+  "prompts": {},
+  "sessions": {
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

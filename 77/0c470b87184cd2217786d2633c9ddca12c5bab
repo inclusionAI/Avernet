@@ -1,0 +1,41 @@
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/build_stage.py
+  s_30131f6595b5d5::t_ec7ce07bd3b592 63,172
+apps/backend/src/agentclaw/community/core/skill_center/services/runtime_layout_probe.py
+  s_30131f6595b5d5::t_6b47c6c3c9d964 19,223
+apps/backend/src/agentclaw/community/core/workspace/skill_layout.py
+  s_30131f6595b5d5::t_711bd4d04f59cf 62
+apps/backend/tests/community/core/service_bot/services/deploy/test_service_artifact_fresh_layout.py
+  s_30131f6595b5d5::t_e8a52073ff1eef 292,302,305-313,321,328,331-333,339,343,346,349-370,377,381-382,389
+apps/backend/tests/community/core/service_bot/services/publish_flow/test_build_stage_layout_probe.py
+  s_7b1b7bb2628d01::t_f35b0bece4a9a7 72,75,80,106,118,132,146-147,149,158
+engine/adapter/src/engine/community/plugins/aicoding/layout_pool.py
+  s_30131f6595b5d5::t_1bcd09a115ba42 9,33-35,44,46,53-62
+engine/adapter/src/engine/community/plugins/aicoding/tests/test_pool_layout.py
+  s_7b1b7bb2628d01::t_4ca5925397a24b 6,136-172
+engine/adapter/src/engine/community/plugins/openclaw/_skills.py
+  s_7b1b7bb2628d01::t_e9706a138bebaa 48-50,138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "770c470b87184cd2217786d2633c9ddca12c5bab",
+  "prompts": {},
+  "sessions": {
+    "s_30131f6595b5d5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e7f9-9388-7702-95ad-bebd50450d5d",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_7b1b7bb2628d01": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b1-ee57-74e3-bb35-6e7830e4a3d8",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+apps/frontend-nextgen/test/shell/SidebarNavList.test.tsx
+  h_bb3ca6fb13c5df 25,28,31,36,39-40,102,139-140
+  h_bb3ca6fb13c5df 56
+apps/frontend-nextgen/src/shell/SidebarNavList.tsx
+  h_bb3ca6fb13c5df 41-43,50,85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "826e01d3c7a401d51f2af31a61ac9ce753d907a7",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

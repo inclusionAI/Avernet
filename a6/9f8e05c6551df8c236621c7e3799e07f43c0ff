@@ -1,0 +1,19 @@
+apps/backend/tests/community/framework/coverage_baseline.txt
+  s_7ab90fcb7b0ff0::t_b3de380a003c9a 496-551
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a69f8e05c6551df8c236621c7e3799e07f43c0ff",
+  "prompts": {},
+  "sessions": {
+    "s_7ab90fcb7b0ff0": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0270308e-3f7f-424f-a1b3-a2e6113a5268",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+.gitmodules
+  s_d23d2dd74fff18::t_3890005a0e570b 4
+apps/frontend-nextgen/config/config.local.ts
+  s_d23d2dd74fff18::t_e2e3a6029121bf 132-133
+submodules/avernet
+  s_d23d2dd74fff18::t_6573abda963e0f 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5a20225d476f7dec87511903854a8fae087cff1c",
+  "prompts": {},
+  "sessions": {
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

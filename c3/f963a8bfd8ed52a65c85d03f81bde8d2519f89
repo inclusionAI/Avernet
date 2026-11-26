@@ -1,0 +1,29 @@
+apps/backend/specs/service-bot-release-audit-single-table/001-spec-output.md
+  s_7c6be7001ef8fd::t_623ef839d678c0 5
+apps/backend/tests/community/core/agentswarm/test_coverage_gaps.py
+  s_7c6be7001ef8fd::t_623ef839d678c0 1094-1097,1109
+apps/backend/tests/community/core/bot_management/test_owner_handoff.py
+  s_7c6be7001ef8fd::t_623ef839d678c0 132
+apps/backend/tests/community/repository/publishing/test_bot_publish_unified.py
+  s_7c6be7001ef8fd::t_623ef839d678c0 70,561,983-985
+apps/backend/tests/community/core/bot_knowledge/test_stage_selection.py
+  s_7c6be7001ef8fd::t_623ef839d678c0 265
+apps/backend/tests/community/adapters/http/openapi_v1/inventory/test_inventory_handlers.py
+  s_7c6be7001ef8fd::t_623ef839d678c0 338
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c3f963a8bfd8ed52a65c85d03f81bde8d2519f89",
+  "prompts": {},
+  "sessions": {
+    "s_7c6be7001ef8fd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d2d4-adef-74d1-8694-5ea4bddc1ac0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

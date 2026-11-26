@@ -1,0 +1,32 @@
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_open_swarm.py
+  h_059e888e5e4e82 1-590
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end_swarm.py
+  h_059e888e5e4e82 1-340
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_l6.py
+  h_059e888e5e4e82 1-401
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_method_lifecycle.py
+  h_059e888e5e4e82 1-278
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_method_topology.py
+  h_059e888e5e4e82 1-385
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_open_single.py
+  h_059e888e5e4e82 1-527
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_protocol_integration.py
+  h_059e888e5e4e82 1-496
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_publish.py
+  h_059e888e5e4e82 1-330
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_read.py
+  h_059e888e5e4e82 1-381
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_work.py
+  h_059e888e5e4e82 1-336
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e43f4854b7f01ae66d1514bc479ba84f18643588",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

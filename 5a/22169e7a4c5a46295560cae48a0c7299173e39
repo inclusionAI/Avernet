@@ -1,0 +1,25 @@
+apps/bcsfuse/tests/alipay/test_tr_discover.py
+  s_9e428ec8192673::t_a4209adf61db26 479,523,529
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_9e428ec8192673::t_9c430cdfb08532 78,224
+apps/bcsfuse/tr/java/pom.xml
+  s_9e428ec8192673::t_4c5b643a91798f 9
+apps/bcsfuse/tr/rpc.proto
+  s_9e428ec8192673::t_c2f94617783833 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5a22169e7a4c5a46295560cae48a0c7299173e39",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

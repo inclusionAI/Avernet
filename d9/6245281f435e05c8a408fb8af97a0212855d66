@@ -1,0 +1,28 @@
+apps/backend/docs/diagnostics/bot-runtime.md
+  s_93e57698d97141::t_6af4716d9def9b 22-23
+apps/backend/src/agentclaw/corp/plugins/prod/passport.py
+  s_93e57698d97141::t_29b40e1d80b75c 227-229,836,841-842
+apps/backend/tests/corp/plugins/test_passport_status_and_requests.py
+  s_93e57698d97141::t_4464667b807b29 92,296-317
+  s_93e57698d97141::t_318c5e679bb4d8 2,5-6
+  s_93e57698d97141::t_eaeb652600688c 7,318-349
+  s_93e57698d97141::t_4e1f1a675245d8 115
+  s_93e57698d97141::t_eb7b67afbef86c 101-114
+  s_93e57698d97141::t_c5668b85b66516 350-351
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d96245281f435e05c8a408fb8af97a0212855d66",
+  "prompts": {},
+  "sessions": {
+    "s_93e57698d97141": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ef3e-f4ae-7802-a6a4-0a337e29a026",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": null
+    }
+  }
+}

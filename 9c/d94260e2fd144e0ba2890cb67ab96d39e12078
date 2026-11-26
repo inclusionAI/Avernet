@@ -1,0 +1,77 @@
+apps/backend/src/agentclaw/corp/configs/application-prepub.yaml
+  s_fc1557df5d7924::t_890392085dcc1c 61-65
+apps/backend/src/agentclaw/corp/configs/application-prod.yaml
+  s_fc1557df5d7924::t_6c294de7f5de58 65-69
+apps/bcs-internal/bcn-configs/agentbase-sofarpc.toml
+  s_fc1557df5d7924::t_2a181f0d73d67b 5-8,10-17,20-23
+apps/bcs-internal/configs/agentbase-sofarpc.toml
+  s_fc1557df5d7924::t_9a6899cb47317d 5-8,10-17,20-23
+apps/bcs-internal/contracts/alipayagentbase/README.md
+  s_fc1557df5d7924::t_5d60fec5de354a 40-41,45-46,48-50
+apps/bcs-internal/contracts/alipayagentbase/SOURCE-BASELINE.md
+  s_fc1557df5d7924::t_d381412e78321a 11-13,17-18
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/README.md
+  s_fc1557df5d7924::t_65d0bba63423dd 53-59
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/client.rs
+  s_fc1557df5d7924::t_105ed47f3bbd09 20-24,236-241,245,248-258,355-357,362-364,366,1033-1036,1058-1060,1083-1084,1094-1100,1105,1110,1117-1153
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/config.rs
+  s_fc1557df5d7924::t_9a9841f86bfb7b 6-12,35-48,50-60,62-64,66-70,83,85-88,201-205,209-211,213-221,244-246,248-264,266-271,291-331,389-432,465-467,469-470,472-483,485,487-514
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/contract.rs
+  s_fc1557df5d7924::t_e3b98d457ac5a9 131,134-137
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/identity.rs
+  s_fc1557df5d7924::t_d295a97e183170 28-33
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/config_fail_closed.rs
+  s_fc1557df5d7924::t_628d6c93f0de65 66,111-137,139-157,159-249,427-438,440-447,449
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/identity_pins.rs
+  s_fc1557df5d7924::t_5e2f84e6f92e39 36-39
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/consumer.rs
+  s_fc1557df5d7924::t_b693998ef56ce3 267-277
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/triple_pojo/channel.rs
+  s_fc1557df5d7924::t_a6c7a03be05f60 131-136,217-222,228-233,1131-1135
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a/catalog_sync.rs
+  s_fc1557df5d7924::t_3b7ab6201d16c2 40
+apps/bcs-internal/docs/sofa-rpc/alipayagentbase-a2a-remote-server-contract.md
+  s_fc1557df5d7924::t_ae5a94f3bd8670 25-31,35,75-77
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  s_fc1557df5d7924::t_0495684b4af296 193-210
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  s_fc1557df5d7924::t_ca54b8da1f09d0 361-362,366,369-373
+apps/frontend-nextgen/src/internal/market/hooks/useAddToCapabilitySet.ts
+  s_fc1557df5d7924::t_ef4bc918dfc6ff 6,163
+apps/frontend-nextgen/src/internal/market/policy.ts
+  s_fc1557df5d7924::t_1160f6d0998dac 1-2,89-108
+apps/frontend-nextgen/test/internal/market/policy.test.ts
+  s_fc1557df5d7924::t_64876f6b0010ad 10,98-123
+docs/plans/2026-11-04-agentswarm-baas-chat-transport.md
+  s_fc1557df5d7924::t_5594ad7bca08c1 1-1075
+simulator/modules/baas/config/application-dev.yaml
+  s_fc1557df5d7924::t_4f30ce8783f9da 29-38,47
+simulator/modules/baas/manifest/pod.yaml
+  s_fc1557df5d7924::t_10fdcc60560c99 159-165
+simulator/modules/baas/sql/seed.sql
+  s_fc1557df5d7924::t_6b3457e3bbacb6 67-102
+simulator/modules/backend/config/application-local-k8s.yaml
+  s_fc1557df5d7924::t_f5fdfb7a32f61a 118-121
+simulator/modules/proxy/manifest/pod.yaml
+  s_fc1557df5d7924::t_61dd95a77ddea2 40-48
+simulator/scripts/up.sh
+  s_fc1557df5d7924::t_76eb1be4d96497 320-327
+simulator/scripts/verify-proxypass-key.sh
+  s_fc1557df5d7924::t_f085164a2103f2 1-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9cd94260e2fd144e0ba2890cb67ab96d39e12078",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/core/ports/skill_package_upload_port.py
+  s_3d36bb45bb2a35::t_276a09466ab92d 37-39,43-92,130-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8afd7a5575c8b8a2e96e0999bd481440546f1424",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

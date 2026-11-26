@@ -1,0 +1,19 @@
+apps/backend/tests/community/plugins/community/agentswarm/test_bot_authorization.py
+  s_d23d2dd74fff18::t_851bc19e2eadc5 21-24,31-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a1d8eb4b6346b3c80a356f971e8176775a7bc48c",
+  "prompts": {},
+  "sessions": {
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

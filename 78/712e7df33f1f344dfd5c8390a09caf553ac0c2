@@ -1,0 +1,40 @@
+apps/backend/tests/community/core/task/context_collab/swarm_profile_support.py
+  h_059e888e5e4e82 1-392
+apps/backend/tests/community/core/task/context_collab/swarm_workflow_support.py
+  h_059e888e5e4e82 1-319
+apps/backend/tests/community/core/task/context_collab/test_swarm_driver_wake.py
+  h_059e888e5e4e82 1-97
+apps/backend/tests/community/core/task/context_collab/test_swarm_execution_api.py
+  h_059e888e5e4e82 1-650
+apps/backend/tests/community/core/task/context_collab/test_swarm_execution_revisions.py
+  h_059e888e5e4e82 1-158
+apps/backend/tests/community/core/task/context_collab/test_swarm_guards.py
+  h_059e888e5e4e82 1-190
+apps/backend/tests/community/core/task/context_collab/test_swarm_lifecycle.py
+  h_059e888e5e4e82 1-553
+apps/backend/tests/community/core/task/context_collab/test_swarm_profile.py
+  h_059e888e5e4e82 1-339
+apps/backend/tests/community/core/task/context_collab/test_swarm_stage_dependencies.py
+  h_059e888e5e4e82 1-110
+apps/backend/tests/community/core/task/context_collab/test_swarm_workflow_artifacts.py
+  h_059e888e5e4e82 1-224
+apps/backend/tests/community/core/task/context_collab/test_swarm_workflow_definition.py
+  h_059e888e5e4e82 1-93
+apps/backend/tests/community/core/task/context_collab/test_swarm_workflow_dispatch.py
+  h_059e888e5e4e82 1-258
+apps/backend/tests/community/core/task/context_collab/test_swarm_workflow_planning.py
+  h_059e888e5e4e82 1-71
+apps/backend/tests/community/core/task/context_collab/test_workflow_resolution.py
+  h_059e888e5e4e82 1-162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "78712e7df33f1f344dfd5c8390a09caf553ac0c2",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

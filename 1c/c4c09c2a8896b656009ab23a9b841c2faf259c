@@ -1,0 +1,34 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/cross-instance-run-tools.md
+  h_bb3ca6fb13c5df 125-137
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/flow-retry-cancellation-race.test.ts
+  h_bb3ca6fb13c5df 1-83
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/flow-retry-request-repository.test.ts
+  h_bb3ca6fb13c5df 7,14,36
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/retry-epoch.test.ts
+  h_bb3ca6fb13c5df 153,156-162,175,178,183-187,221,224-229
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/run-cancellation.test.ts
+  h_bb3ca6fb13c5df 1-113
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-retry-request-repository.ts
+  h_bb3ca6fb13c5df 41-47,58-93,95,116-117,125-126
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-repository.ts
+  h_bb3ca6fb13c5df 145-146,192-200,485,489,511,527,537,545,548,641-668,676
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/cancellation.test.ts
+  h_bb3ca6fb13c5df 1-192
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/retry-resume.test.ts
+  h_bb3ca6fb13c5df 64-65,68,70-74
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/retry-requests.ts
+  h_bb3ca6fb13c5df 7,49-53
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/runs.ts
+  h_bb3ca6fb13c5df 459-462,637-641
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1cc4c09c2a8896b656009ab23a9b841c2faf259c",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

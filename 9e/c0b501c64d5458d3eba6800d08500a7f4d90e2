@@ -1,0 +1,18 @@
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/client.rs
+  h_fa66fe7c023b4b 48-50,409-411,431,445,622,651-662,1244
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/mapping.rs
+  h_fa66fe7c023b4b 23-35,212-259,316,331,404-438,449-465,470-471,475-490,493-520,524-532,535-540,544,547-993,1334,1344-1346,1357,1734,2090,2101,2113,2121,2124,2133,2136,2146,2149,2159,2169,2184,2194,2204,2219,2228,2230,2240,2242,2253,2255
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/dto_mapping.rs
+  h_fa66fe7c023b4b 1,10-13,15,110,188,283,311,314,326,328,345,358,373,390,421-517
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9ec0b501c64d5458d3eba6800d08500a7f4d90e2",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
