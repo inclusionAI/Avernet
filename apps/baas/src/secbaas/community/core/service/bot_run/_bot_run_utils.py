@@ -86,9 +86,13 @@ def resolve_user_id(
     1. 个人 bot（bot_type == "personal"）直接使用 entity_id
     2. metadata.sender_options.from = owner 时，取 binding_info.entity_id
     3. metadata.sender_options.from 为自定义值（非 owner 的非空字符串）时，直接作为 user_id
-    4. context.app_type == 'bot' 时，从 context.app_id（格式 bot_id:entity_id）解析 entity_id
-    5. 否则取 context.app_id
-    6. 最后 fallback 到 bot_id
+    4. metadata 携带 caller 身份 user_id（入口统一键，见
+       ``CALLER_METADATA_USER_ID_KEY``）时直接使用——外部平台（如守护配置）
+       经 OpenAPI/BCN 代某位使用者投递消息时，会话必须归属该使用者，否则会落到
+       API 应用名下，对方在「我的互动」里看不到该会话
+    5. context.app_type == 'bot' 时，从 context.app_id（格式 bot_id:entity_id）解析 entity_id
+    6. 否则取 context.app_id
+    7. 最后 fallback 到 bot_id
 
     Args:
         metadata: 会话元数据
@@ -112,8 +116,15 @@ def resolve_user_id(
         if from_field and from_field != "owner":
             return from_field
 
-    # 3. 当 app_type == 'bot' 时，app_id 格式为 bot_id:entity_id，取 entity_id 部分
-    # 4. 否则取 context.app_id
+    # 4. caller 身份：外部平台代发消息时声明的真实使用者
+    caller_user_id = metadata.get(CALLER_METADATA_USER_ID_KEY)
+    if caller_user_id is not None:
+        normalized_caller_user_id = str(caller_user_id).strip()
+        if normalized_caller_user_id:
+            return normalized_caller_user_id
+
+    # 5. 当 app_type == 'bot' 时，app_id 格式为 bot_id:entity_id，取 entity_id 部分
+    # 6. 否则取 context.app_id
     if context:
         if context.app_type == "bot" and context.app_id:
             parts = context.app_id.split(":", 1)
@@ -122,7 +133,7 @@ def resolve_user_id(
         if context.app_id:
             return context.app_id
 
-    # 5. 最后 fallback 到 bot_id
+    # 7. 最后 fallback 到 bot_id
     return bot_id
 
 
