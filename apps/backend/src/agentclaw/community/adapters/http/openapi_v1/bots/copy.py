@@ -484,6 +484,7 @@ def submit_copy(
     # composition.
     from agentclaw.community.core.bot_management.services.bot_service import (
         generate_bot_id,
+        validate_bot_name,
     )
 
     dst_bot_id = generate_bot_id(owner_id, bot_repo)
@@ -512,6 +513,16 @@ def submit_copy(
     )
     space_id = getattr(current_space, "numeric_id", None)
 
+    # Validate the dst name up front — the same ``validate_bot_name`` plain
+    # create runs ahead of Passport (``create_authorization``). Copy otherwise
+    # reaches the manifest async flow whose ``submit_copy`` had no name check:
+    # an invalid name was accepted here, persisted the manifest and applied
+    # AgentPassport, then the async ``create_bot`` task failed its
+    # ``validate_bot_name`` deep inside, retried to the deadline, ended
+    # TIMED_OUT, and the dst ``ac_bots`` row was never written — the FE's detail
+    # poll 404ed forever (pre-prod: 20261126_6nn8w1xw / ko1k9i2y / ibrhyqz9).
+    # ``BotCopyRequest.bot_name`` is required, so it is never None here.
+    validated_bot_name = validate_bot_name(body.bot_name)
     # Pre-flight platform validation (quota / reserved-engine / name) before
     # Passport or any manifest is spent — the same call ordinary creation makes
     # ahead of its passport step. Copy reuses the manifest-creation flow, whose
@@ -526,7 +537,7 @@ def submit_copy(
         user_id=owner_id,
         bot_id=dst_bot_id,
         engine_type=engine,
-        bot_name=body.bot_name,
+        bot_name=validated_bot_name,
         space_id=space_id,
         space_quota=True,
     )

@@ -30,6 +30,7 @@ from fastapi.testclient import TestClient
 from agentclaw.community.adapters.http.openapi_v1 import (
     PUBLIC_API_PREFIX,
 )
+from tests.community.adapters.http.openapi_v1.conftest import public_document
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     ERROR_RESPONSES,
     USER_SCOPED_ERROR_RESPONSES,
@@ -48,7 +49,6 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
-from tests.community.adapters.http.openapi_v1.conftest import public_document
 
 _CALLER = "u-42"
 #: What the seam sees when no bypass is configured — the shipped default.
@@ -70,13 +70,12 @@ def probe_app() -> FastAPI:
     re-implemented, so deleting that wiring fails here instead of leaving these
     green against a local copy of it.
     """
-    from fastapi.exceptions import RequestValidationError
-
     from agentclaw.community.adapters.http.app import (
         _principal_error_handler,
         _user_id_mismatch_handler,
         _validation_error_handler,
     )
+    from fastapi.exceptions import RequestValidationError
 
     app = FastAPI()
 
@@ -450,29 +449,6 @@ _NO_USER_DIMENSION = {
         "get",
         f"{PUBLIC_API_PREFIX}/collaboration/task/context_collab/{{collab_context_id}}",
     ),
-    # Automatic Dima import execution is tenant-scoped. Any authenticated
-    # caller that can read a rule may inspect progress, create rule-bound Todos,
-    # and persist checkpoints; no Human actor is selected on these operations.
-    (
-        "get",
-        f"{PUBLIC_API_PREFIX}/collaboration/tasks/todos/sources/dima/auto-import-rules/active",
-    ),
-    (
-        "get",
-        f"{PUBLIC_API_PREFIX}/collaboration/tasks/todos/sources/dima/auto-import-rules/{{rule_id}}",
-    ),
-    (
-        "get",
-        f"{PUBLIC_API_PREFIX}/collaboration/tasks/todos/sources/dima/auto-import-rules/{{rule_id}}/progress",
-    ),
-    (
-        "post",
-        f"{PUBLIC_API_PREFIX}/collaboration/tasks/todos/sources/dima/auto-import-rules/{{rule_id}}/checkpoints",
-    ),
-    (
-        "post",
-        f"{PUBLIC_API_PREFIX}/collaboration/tasks/todos/sources/dima/auto-import-rules/{{rule_id}}/todos",
-    ),
 }
 # Read-only operations that accept a user_id as a caller-selected filter rather
 # than as the authenticated user's acting scope. They still require the query
@@ -499,6 +475,9 @@ _AUTHENTICATED_SELF = {
         "post",
         f"{PUBLIC_API_PREFIX}/collaboration/tasks/bot-grants/reconcile",
     ),
+    # Human self-service work-items snapshot: all user scoping comes from the
+    # signed principal, and an app-only caller cannot act for that human.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/aicoding/work-items"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/spaces/{{space_id}}/join-requests"),
     # README resolves the acting user from the verified principal; callers do
     # not get a second, steerable user_id query parameter.
@@ -698,12 +677,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # Bot-addressed operation: path 233 -> 234. Read-only Caller status adds one
 # Bot-path operation: path 234 -> 235. Bot MCP config read and update add two
 # Bot-path operations: path 235 -> 237. Dedicated recycle operation query
-# adds one OWNER-only Bot-path read: path 237 -> 238. The seven Dima
-# auto-import rule/progress operations plus rule-bound Todo creation are
-# Space-scoped rather than Bot-addressed, even though create and update accept
-# a Bot in the body. Combined with the four account-level operations already
-# present on this release branch, none grows 181 -> 189.
-_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 189}
+# adds one OWNER-only Bot-path read: path 237 -> 238. The four template
+# self-service operations have no Bot dimension: none 177 -> 181. The Agent
+# Coding work-items snapshot adds one more no-Bot aggregate: none 181 -> 182.
+_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 182}
 
 
 def _schema() -> dict:
@@ -934,10 +911,8 @@ def test_the_pinned_number_of_operations_take_it():
     # user-scoped: 329 -> 334. The three Dima Todo source reads are Human-scoped
     # and explicitly user-scoped: 334 -> 337. Bot MCP config read and update
     # both name the acting user: 337 -> 339. Dedicated recycle operation query
-    # adds one OWNER-only read: 339 -> 340. Dima auto-import rule management
-    # adds three Human-scoped operations; its five execution operations are
-    # tenant-scoped and live in _NO_USER_DIMENSION: 340 -> 343.
-    assert len(taking) == 343
+    # adds one OWNER-only read: 339 -> 340.
+    assert len(taking) == 340
 
 
 def test_the_exempt_operations_take_none():

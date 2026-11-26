@@ -130,7 +130,7 @@ from agentclaw.community.adapters.http.enums.router import router as enums_route
 from agentclaw.community.adapters.http.mcp import router as mcp_router  # noqa: E402
 from agentclaw.community.adapters.http.cron import router as cron_router  # noqa: E402
 from agentclaw.community.adapters.http.cron.cron_noauth_router import router as cron_noauth_router  # noqa: E402
-from agentclaw.community.adapters.http.aicoding import notify_router  # noqa: E402
+from agentclaw.community.adapters.http.aicoding import register_routers as register_aicoding_routers  # noqa: E402
 from agentclaw.community.adapters.http.aicoding.architect_rebind_router import router as architect_rebind_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_management import router as bot_management_router  # noqa: E402
 from agentclaw.community.adapters.http.digital_employee import router as digital_employee_router  # noqa: E402
@@ -969,7 +969,7 @@ app.include_router(batch_sync.router)
 app.include_router(installations_internal.internal_router)
 app.include_router(cron_router)
 app.include_router(cron_noauth_router)
-app.include_router(notify_router)
+register_aicoding_routers(app)
 # Harness Engineering: patch template management & diagnosis
 app.include_router(harness_router)
 # Economy Governance: notification & audit

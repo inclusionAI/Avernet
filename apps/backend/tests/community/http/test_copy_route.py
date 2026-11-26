@@ -28,6 +28,9 @@ from agentclaw.community.core.bot_management.bot_quota import (
     BotQuotaScope,
     BotQuotaSnapshot,
 )
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotNameInvalidError,
+)
 from agentclaw.community.core.spaces.models import SpaceType
 
 _OWNER = "u1"
@@ -351,6 +354,31 @@ def test_submit_copy_rejects_over_quota_before_passport_or_manifest_side_effects
     passport.apply_agent_passport.assert_not_called()
     bot_script_service = mocks[2]
     bot_script_service.get_body.assert_not_called()
+
+
+def test_submit_copy_rejects_invalid_bot_name_before_passport_or_manifest_side_effects():
+    # The dst name is validated up front — ``validate_bot_name``, the same call
+    # plain create runs ahead of Passport (``create_authorization``). Copy
+    # otherwise reaches the manifest async flow whose ``submit_copy`` had no name
+    # check: an invalid name was accepted, persisted the manifest and applied
+    # AgentPassport, then the async ``create_bot`` task failed its
+    # ``validate_bot_name`` deep inside, retried to the deadline, ended
+    # TIMED_OUT, and the dst ``ac_bots`` row was never written (FE detail poll
+    # 404ed forever — pre-prod 20261126_6nn8w1xw / ko1k9i2y / ibrhyqz9).
+    mocks = _mocks()
+    bot_repo, bot_copy_repo, _bot_script_service, manifest_seam, passport, _, _, bot_service, _, _ = mocks
+    bot_repo.get_by_id_and_owner.return_value = _source_bot()
+
+    with pytest.raises(BotNameInvalidError):
+        _call({"bot_name": "copied v1.2"}, {}, mocks=mocks)  # '.' is rejected
+
+    # No side effect: no manifest, no Passport identity, no ledger row, and the
+    # platform pre-flight (quota/dup-name) never runs for a name already invalid.
+    bot_copy_repo.insert.assert_not_called()
+    manifest_seam.persist.assert_not_called()
+    manifest_seam.start_job.assert_not_called()
+    passport.apply_agent_passport.assert_not_called()
+    bot_service.check_create_bot_preflight.assert_not_called()
 
 
 def test_submit_copy_personal_source_resolves_caller_personal_space():

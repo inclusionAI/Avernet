@@ -123,6 +123,9 @@ from agentclaw.community.core.service_bot.services.bot_process import (
     PersonalBotProcess,
     ServiceBotProcess,
 )
+from agentclaw.community.plugin_api.service_bot_release_audit import ServiceBotReleaseAuditPlugin
+from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugins.community.service_bot_release_audit import DatabaseServiceBotReleaseAudit
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
 from agentclaw.community.core.service_bot.services.service_artifact_lineage_reader import (
     ServiceArtifactLineageReader,
@@ -275,19 +278,14 @@ class ServiceBotModule(Module):
         )
 
     def configure(self, binder: Binder) -> None:
+        # Audit writes share the publication repository transaction in every profile.
+        binder.bind(ServiceBotReleaseAuditPlugin, to=DatabaseServiceBotReleaseAudit, scope=singleton)
         binder.bind(WorkspacePathFactory, to=WorkspacePathFactory, scope=singleton)
         # Offloads an oversized config_artifact out of the ac_bot_publish.ext
         # TEXT column into object storage; injected into the repo below.
         binder.bind(
             ConfigArtifactOffloader,
             to=ConfigArtifactOffloader,
-            scope=singleton,
-        )
-        # Single unified ORM impl — runs on prod OceanBase and SQLite
-        # via the injected DatabasePlugin (@inject ctor).
-        binder.bind(
-            BotPublishRepositoryProtocol,
-            to=UnifiedBotPublishRepository,
             scope=singleton,
         )
         binder.bind(
@@ -302,6 +300,16 @@ class ServiceBotModule(Module):
             to=OrmPublishOperationRepository,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    @inject
+    def publication_repository(
+        self, db: DatabasePlugin, offload: ConfigArtifactOffloader,
+        audit: ServiceBotReleaseAuditPlugin,
+    ) -> BotPublishRepositoryProtocol:
+        # Configured publication writes always get the selected audit Plugin.
+        return UnifiedBotPublishRepository(db, offload, audit)
 
     @singleton
     @provider

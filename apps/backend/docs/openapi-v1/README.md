@@ -45,6 +45,10 @@ ruling lives in a companion reference: **[`engine-surface.md`](engine-surface.md
 ([简体中文](engine-surface.zh-CN.md)). This README stays the single status board;
 that file holds the inventory.
 
+AICoding-owned public product interfaces are governed by
+**[`aicoding-openapi-guidelines.zh-CN.md`](aicoding-openapi-guidelines.zh-CN.md)**.
+They are OCB-defined contracts, not Track C engine passthrough.
+
 ---
 
 ## The big picture (read this first)
@@ -1237,21 +1241,21 @@ literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
-all  approvals  authorized  authorized-apps  catalog  ceiling  check-name  copy  collaborations  connection  engine  identity
+aicoding  all  approvals  authorized  authorized-apps  catalog  ceiling  check-name  copy  collaborations  connection  engine  identity
 loadtest  local  logs  market  metadata  mcp  models  resources  routines  service-envs  sessions  skills  spaces
 source-credentials  with-manifest  work-order-notifications  work-orders
 template-queries  template-config-for-others  restart-for-others  status-for-others
 ```
 
-Eight of those twenty-seven — `approvals`, `connection`, `engine`, `identity`,
+Eight of those thirty — `approvals`, `connection`, `engine`, `identity`,
 `models`, `resources`, `routines`, and `sessions` — are held **only by the
 retiring addresses**. Bot-first addressing moved every bot-scoped component out
 of that segment. The tenant-level Skill Workbench status route now keeps
 `skills` current at this level, so once the deprecated addresses are removed the
-list is the nineteen that remain:
+list is the twenty-two that remain:
 
 ```text
-all  authorized  authorized-apps  catalog  ceiling  check-name  collaborations  loadtest  local  logs  market  metadata  mcp  skills
+aicoding  all  authorized  authorized-apps  catalog  ceiling  check-name  collaborations  loadtest  local  logs  market  metadata  mcp  skills
 source-credentials  spaces  with-manifest  work-order-notifications  work-orders
 template-queries  template-config-for-others  restart-for-others  status-for-others
 ```

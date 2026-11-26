@@ -16,6 +16,8 @@ import {
   botCollaborationRepairService,
   type CollaborationRepairReport,
 } from '@/services/botWorkshop/botCollaborationRepairService';
+import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
+import { externalBotToGeneralConfig } from '@/services/botWorkshop/externalBotService';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import { collaborationPrivacyService } from '@/services/collaborationPrivacy';
@@ -130,14 +132,18 @@ const rowBot = (overrides: Record<string, unknown> = {}) =>
     ...overrides,
   }).item;
 
-function renderDialog(options: { ownerId?: string; isExternalBot?: boolean } = {}) {
+function renderDialog(options: { ownerId?: string; isExternalBot?: boolean; accessRelation?: 'owner' | 'manager' } = {}) {
+  const targetId = options.isExternalBot ? 'bot_external' : BOT_UUID;
   jest
     .spyOn(collaborationPrivacyService, 'loadOverview')
-    .mockResolvedValue(overviewWithBot(makeBot(BOT_UUID)));
+    .mockResolvedValue(overviewWithBot(makeBot(targetId)));
   return render(
     <BotGeneralConfigDialog
-      bot={rowBot(options.ownerId ? { owner_id: options.ownerId } : {})}
+      bot={options.isExternalBot
+        ? externalBotToGeneralConfig({ id: targetId, name: '外部助手' })
+        : rowBot(options.ownerId ? { owner_id: options.ownerId } : {})}
       isExternalBot={options.isExternalBot}
+      externalBotAccessRelation={options.accessRelation}
       onClose={jest.fn()}
     />,
   );
@@ -205,7 +211,7 @@ describe('公开设置「好友名单」section', () => {
     const rosterSpy = jest.spyOn(rosterModule, 'useBotFriendRoster');
     renderDialog();
 
-    await waitFor(() => expect(screen.getByText('好友用户 2 · 好友 Bot 1')).toBeInTheDocument());
+    expect(await screen.findByText('好友用户 2 · 好友 Bot 1')).toHaveClass('text-xs');
     expect(screen.getByRole('heading', { level: 4, name: '好友名单' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '管理好友' })).toBeInTheDocument();
     expect(rosterSpy).toHaveBeenCalledWith(BOT_UUID);
@@ -225,14 +231,62 @@ describe('公开设置「好友名单」section', () => {
   });
 
   it('外部 Bot 变体对 Owner 同样渲染该分区', async () => {
-    renderDialog({ isExternalBot: true });
+    renderDialog({ isExternalBot: true, accessRelation: 'owner' });
 
-    await waitFor(() => expect(screen.getByText('好友用户 2 · 好友 Bot 1')).toBeInTheDocument());
-    expect(screen.getByRole('heading', { level: 4, name: '好友名单' })).toBeInTheDocument();
+    expect(await screen.findByText('好友用户 2 · 好友 Bot 1')).toBeInTheDocument();
+    await openDrawer();
+    expect(listFriendConnectionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ actor_id: 'bot_external' }),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it.each(['manager', undefined] as const)('外部 Bot 的非 Owner 关系 %s 不加载好友名单', async (accessRelation) => {
+    renderDialog({ isExternalBot: true, accessRelation });
+
+    expect(await screen.findByText('参与协作群聊')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '好友名单' })).not.toBeInTheDocument();
+    expect(listFriendConnectionsMock).not.toHaveBeenCalled();
   });
 });
 
 describe('管理好友抽屉', () => {
+  it('抽屉顶部左侧有标题和独立分隔线，右侧关闭按钮只关闭抽屉', async () => {
+    renderDialog();
+    await openDrawer();
+
+    const title = screen.getByRole('heading', { name: '管理好友' });
+    expect(title).toHaveClass('text-base');
+    expect(title.parentElement).toHaveClass('border-b');
+    fireEvent.click(screen.getByRole('button', { name: '关闭抽屉' }));
+    expect(screen.queryByRole('dialog', { name: '管理好友' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '管理好友' })).toBeInTheDocument();
+  });
+
+  it('好友 Bot 优先展示 query 头像，缺失头像时使用 Bot 管理的默认头像，用户头像不变', async () => {
+    roster.bots.push({ actor: { type: 'bot', id: 'bot-no-avatar:9' } });
+    queryCollaborationBotsMock.mockResolvedValue({
+      code: 20000,
+      message: 'OK',
+      data: {
+        items: [
+          { bot_id: 'human_447147', kind: 'human', name: '风太', avatar_url: '/human.png' },
+          { bot_id: 'bot-friend:9', kind: 'bot', name: '协作小助', avatar_url: '/bot.png' },
+          { bot_id: 'bot-no-avatar:9', kind: 'bot', name: '默认头像小助', avatar_url: null },
+        ],
+      },
+    });
+    renderDialog();
+    expect(await screen.findByText('好友用户 2 · 好友 Bot 2')).toBeInTheDocument();
+    await openDrawer();
+
+    expect(screen.getByLabelText('风太')).toHaveTextContent('风');
+    expect(screen.queryByRole('img', { name: '风太' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '好友 Bot' }));
+    expect(screen.getByRole('img', { name: '协作小助' })).toHaveAttribute('src', '/bot.png');
+    expect(screen.getByRole('img', { name: '默认头像小助' })).toHaveAttribute('src', generateBotAvatar('bot-no-avatar'));
+  });
+
   it('抽屉取 nested 层级,高于父 Modal 遮罩,移除确认框仍在抽屉之上', async () => {
     renderDialog();
     await waitFor(() => expect(screen.getByText('好友用户 2 · 好友 Bot 1')).toBeInTheDocument());

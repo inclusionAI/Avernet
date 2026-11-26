@@ -71,6 +71,8 @@ class RetryOpsMixin:
         self,
         publish_id: int,
         operator: str,
+        *,
+        audit_operator_id: str | None = None,
     ) -> PublishFlowResult:
         """Retry a failed publish flow.
 
@@ -99,7 +101,8 @@ class RetryOpsMixin:
             PublishFlowServiceError: Status does not support retry or rollback failed
         """
         logger.info(
-            f"[PublishFlowService.retry] called: publish_id={publish_id}, operator={operator}"
+            f"[PublishFlowService.retry] called: publish_id={publish_id}, operator={operator}, "
+            f"audit_operator_id={operator if audit_operator_id is None else audit_operator_id}"
         )
 
         # Step 1: Query the publish record
@@ -152,6 +155,7 @@ class RetryOpsMixin:
                 source_status=PublishStatus.FAILED,
                 ext=ext,
                 expected_ext=expected_ext,
+                audit_operator_id=operator if audit_operator_id is None else audit_operator_id,
             )
         except Exception as e:
             raise PublishFlowServiceError(
@@ -199,6 +203,7 @@ class RetryOpsMixin:
         the record out of its *_PUB wait state; execute_restart's runner still gives
         crash-safe idempotent issuance (adopt-by-query on a user re-retry)."""
         stage = self._determine_restart_stage(rollback_status)
+        audit_change_id = self._get_latest_ext(publish_id).get("_release_audit_change_id")
         try:
             restart_result = await self.execute_restart(
                 publish_id=publish_id, stage=stage.value, operator=operator,
@@ -225,8 +230,15 @@ class RetryOpsMixin:
         else:
             # The restart never submitted → clear the retry flag so a stray poll does
             # not keep redirecting to a restart-sync that will never find a workflow.
+            def _record_submission_failure(latest_ext: dict) -> None:
+                if audit_change_id and latest_ext.get("_release_audit_change_id") != audit_change_id:
+                    return
+                self._clear_retry_flag(latest_ext)
+                if audit_change_id:
+                    latest_ext["_release_audit_submit_failed"] = audit_change_id
+
             self._mutate_and_update_ext(
-                publish_id=publish_id, mutator=self._clear_retry_flag
+                publish_id=publish_id, mutator=_record_submission_failure
             )
         return PublishFlowResult(
             publish_id=publish_id,
