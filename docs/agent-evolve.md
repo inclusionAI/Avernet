@@ -14,6 +14,7 @@ For Chinese documentation, see [agent-evolve.zh-CN.md](agent-evolve.zh-CN.md).
 - [Reading a task result](#reading-a-task-result)
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
+- [Server workspace, validation, and workflow safety](../apps/evolverun/clawweb/README.md)
 
 ## Product overview
 

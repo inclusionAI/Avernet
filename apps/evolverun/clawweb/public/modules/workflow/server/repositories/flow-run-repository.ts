@@ -1,3 +1,5 @@
+import { completeFlowRun } from './flow-run-completion.js';
+import { writeTimeoutFailure, type CompletionOutcome } from './flow-run-timeout-write.js';
 import { normalizeFlowRunLineage } from '../services/flow-run-lineage.js';
 import { normalizeFlowRunMarkers } from '../services/flow-run-markers.js';
 import { OrdinaryRunRequestService } from '../services/ordinary-run-request.js';
@@ -468,8 +470,9 @@ export class FlowRunRepository {
   async incrementNodeCount(flowId: string, field: "succeeded_count" | "failed_count"): Promise<boolean> {
     try {
       const now = this.db.dialect.now();
+      // Completion owns the final counts; late node events must not change them.
       const result = await this.db.exec(
-        `UPDATE flow_runs SET ${field} = ${field} + 1, gmt_modified = ? WHERE flow_id = ?`,
+        `UPDATE flow_runs SET ${field} = ${field} + 1, gmt_modified = ? WHERE flow_id = ? AND completed_at IS NULL AND LOWER(TRIM(status)) NOT IN ('succeeded', 'failed', 'cancelled', 'canceled')`,
         [now, flowId],
       );
       return result.affectedRows > 0;
@@ -480,68 +483,17 @@ export class FlowRunRepository {
     }
   }
 
+  /** Compatibility API: accepted duplicate timeouts remain successful boolean writes. */
   async updateCompletion(flowId: string, completion: FlowRunCompletion): Promise<boolean> {
-    const now = this.db.dialect.now();
-    // Build SET clause dynamically: only include fields when explicitly provided.
-    // result_json: undefined = preserve existing (e.g. on success, keep last node result);
-    //              null/string = overwrite (e.g. on failure, write structured error info).
-    const sets: string[] = [
-      "status = ?", "total_duration_ms = ?",
-      "total_token_usage = ?", "current_phase = ?", "completed_at = ?", "gmt_modified = ?",
-    ];
-    const values: unknown[] = [
-      completion.status,
-      completion.totalDurationMs ?? null,
-      completion.totalTokenUsage ?? null,
-      completion.currentPhase ?? null,
-      completion.completedAt,
-      now,
-    ];
-    if (completion.resultJson !== undefined) {
-      sets.push("result_json = ?");
-      values.push(completion.resultJson);
-    }
-    if (completion.inputJson !== undefined) {
-      sets.push("input_json = ?");
-      values.push(completion.inputJson);
-    }
-    // Reconcile succeeded/failed counts from caller-provided values (final truth)
-    // or fall back to node_executions sub-query for accurate reconciliation.
-    if (completion.succeededCount !== undefined) {
-      sets.push("succeeded_count = ?");
-      values.push(completion.succeededCount);
-    } else {
-      sets.push("succeeded_count = (SELECT COUNT(*) FROM node_executions WHERE flow_id = ? AND status IN ('succeeded', 'skipped'))");
-      values.push(flowId);
-    }
-    if (completion.failedCount !== undefined) {
-      sets.push("failed_count = ?");
-      values.push(completion.failedCount);
-    } else {
-      sets.push("failed_count = (SELECT COUNT(*) FROM node_executions WHERE flow_id = ? AND status = 'failed')");
-      values.push(flowId);
-    }
-    values.push(flowId);
-    // New and legacy clients use the original completion contract. Explicit
-    // epochs remain supported for already deployed clients during upgrade.
-    const epochGuard = completion.retryEpoch === undefined ? '' : ` AND COALESCE(retry_epoch, 0) = ?
-       AND status <> 'succeeded'
-       AND (COALESCE(retry_epoch, 0) = 0 OR status <> 'failed' OR completed_at IS NULL)`;
-    if (completion.retryEpoch !== undefined) values.push(completion.retryEpoch);
-    const result = await this.db.exec(
-      `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled')${epochGuard}`,
-      values,
-    );
-    return result.affectedRows > 0;
+    return await this.updateCompletionOutcome(flowId, completion) !== 'rejected';
   }
 
-  /**
-   * Atomically mark a flow failed only when it is not already terminal.
-   * Backs PUT /runs/:flowId/fail-if-running — the engine's timeout watchdog
-   * calls this before reaping so that exactly one engine process sharing
-   * this DB wins the transition (affectedRows > 0). gmt_modified is left to
-   * the DB (ON UPDATE CURRENT_TIMESTAMP / trg_flow_runs_update).
-   */
+  /** Routes distinguish an actual transition from an idempotent timeout acknowledgement. */
+  updateCompletionOutcome(flowId: string, completion: FlowRunCompletion): Promise<CompletionOutcome> {
+    return completeFlowRun(this.db, flowId, completion);
+  }
+
+  /** The dedicated watchdog path always requires saved policy and elapsed evidence. */
   async markFailedIfRunning(flowId: string, fields: {
     reason: string;
     currentPhase: string;
@@ -549,16 +501,16 @@ export class FlowRunRepository {
     completedAt: number;
     retryEpoch?: number;
   }): Promise<boolean> {
-    const result = await this.db.exec(
-      `UPDATE flow_runs SET status = 'failed', result_json = ?, current_phase = ?, total_duration_ms = ?, completed_at = ?
-       WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled', 'canceled')${fields.retryEpoch === undefined ? '' : ' AND COALESCE(retry_epoch, 0) = ?'}`,
-      [fields.reason, fields.currentPhase, fields.totalDurationMs ?? null, fields.completedAt, flowId,
-        ...(fields.retryEpoch === undefined ? [] : [fields.retryEpoch])],
-    );
-    return result.affectedRows > 0;
+    return await writeTimeoutFailure(this.db, flowId, { ...fields, resultJson: fields.reason }, completedAt => ({
+      sets: ["status = 'failed'", 'result_json = ?', 'current_phase = ?', 'total_duration_ms = ?', 'completed_at = ?'],
+      values: [fields.reason, fields.currentPhase, fields.totalDurationMs ?? null, completedAt],
+    })) === 'updated';
   }
 
   async updateStatus(flowId: string, status: string, retryEpoch?: number): Promise<boolean> {
+    // Old watchdogs call TaskFlow.fail -> adapter.updateStatus before completion.
+    // With no failure evidence this path cannot safely distinguish that write.
+    if (typeof status !== 'string' || !status || status !== status.trim().toLowerCase() || status === 'failed') return false;
     const now = this.db.dialect.now();
     if (retryEpoch === undefined) {
       if (status === 'running') {
