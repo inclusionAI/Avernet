@@ -490,6 +490,12 @@ _AUTHENTICATED_SELF = {
         f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/personal-center/activities",
     ),
 }
+#: Authenticated-self routes that cannot return the standard owner-mismatch
+#: 403. They take no caller-selectable ``user_id`` and are mounted with the
+#: base response table instead of ``USER_SCOPED_ERROR_RESPONSES``.
+_AUTHENTICATED_SELF_WITHOUT_403 = {
+    ("get", f"{PUBLIC_API_PREFIX}/bots/aicoding/work-items"),
+}
 #: Bot Logs is excluded for a different reason and must stay that way — see the
 #: "Naming the end user" note in ``openapi_v1/__init__.py``. Its own ``user_id``
 #: is a filter over other people's traces, not the caller's scope.
@@ -1010,7 +1016,16 @@ def test_the_403_is_documented_on_exactly_the_user_scoped_operations():
     for path, method, operation in _operations(_schema()):
         documented = "403" in operation["responses"]
         expected = _user_scoped(path, method) or (method, path) in _AUTHENTICATED_SELF or path.rsplit('/', 1)[-1] in {'template-queries', 'template-config-for-others', 'restart-for-others', 'status-for-others'}
+        expected = expected and (method, path) not in _AUTHENTICATED_SELF_WITHOUT_403
         assert documented is expected, f"{method.upper()} {path}"
+
+
+def test_aicoding_work_items_is_self_service_without_owner_mismatch_403():
+    """The route is user-scoped, but the user cannot be named on the wire."""
+    schema = _schema()
+    operation = schema["paths"][f"{PUBLIC_API_PREFIX}/bots/aicoding/work-items"]["get"]
+    assert _param(operation, USER_ID_QUERY) is None
+    assert "403" not in operation["responses"]
 
 
 def _request_body_models(schema: dict) -> set[str]:
