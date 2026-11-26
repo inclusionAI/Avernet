@@ -18,7 +18,6 @@ from agentclaw.community.core.aicoding.work_item_bots import (
     WorkItemsBotLister,
     WorkItemsBotTarget,
 )
-from agentclaw.community.core.aicoding.services import work_items_service
 from agentclaw.community.core.aicoding.services.work_items_service import (
     AICodingWorkItemsService,
 )
@@ -308,22 +307,29 @@ def test_malformed_engine_response_is_an_isolated_bot_error(test_injector, mock_
 
 
 @pytest.mark.asyncio
-async def test_local_probe_error_text_is_not_returned(monkeypatch):
-    class FailingClient:
-        def __init__(self, *args, **kwargs):
-            return None
+async def test_local_probe_transport_error_text_is_not_returned():
+    bot_lister = MagicMock(spec=WorkItemsBotLister)
+    bot_lister.list_bot_targets.return_value = [_target()]
+    resolver = _resolver(_ctx(provider="local", conn_info={"type": "local"}))
+    transport = _transport(
+        side_effect=RuntimeError("secret_token=secret Authorization: Bearer abc")
+    )
+    service = AICodingWorkItemsService(bot_lister, resolver, transport)
 
-        async def __aenter__(self):
-            raise RuntimeError("secret_token=secret Authorization: Bearer abc")
+    data = await service.get_work_items(
+        current_user_id="315629",
+        source_filter=None,
+        since_ms=None,
+        run_status_filter=None,
+        scan_limit=50,
+    )
 
-        async def __aexit__(self, exc_type, exc, tb):
-            return None
-
-    monkeypatch.setattr(work_items_service.httpx, "AsyncClient", FailingClient)
-
-    result = await work_items_service._probe_local({})
-
-    assert result == {"success": False, "message": "ENGINE_PROBE_ERROR"}
+    assert data.partial is True
+    assert data.bots[0].status == "error"
+    assert data.bots[0].error_code == "ENGINE_SESSION_LIST_FAILED"
+    assert data.bots[0].error_message == "Engine session list failed"
+    assert "secret_token" not in data.model_dump_json()
+    assert "Bearer abc" not in data.model_dump_json()
 
 
 def test_fanout_remains_bounded_and_concurrent(test_injector, mock_user):

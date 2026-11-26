@@ -323,9 +323,9 @@ _MIXED_GROUPS = [
 # about which *response table* each gets; it does not change that they all
 # precede `bots`.
 # Self-service literals under the bots namespace: no caller-selectable
-# user_id query. The surface convention still publishes the standard user-scoped
-# 403, and each router records its real application admission in
-# ``admission.py``.
+# user_id query. These routes derive the acting human from the signed
+# principal, so they cannot answer the standard owner-mismatch 403 and mount
+# with the base error table. Admission stays declared in ``admission.py``.
 _SELF_SERVICE_SUBGROUPS = [
     aicoding_work_items_router,
 ]
@@ -631,7 +631,7 @@ def build_public_router() -> APIRouter:
     )
     for router in _SELF_SERVICE_SUBGROUPS:
         public.include_router(
-            router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+            router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
         )
     for router in _GROUPS_WITHOUT_CALLER_SCOPE + _MIXED_GROUPS:
         public.include_router(

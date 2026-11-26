@@ -95,6 +95,7 @@ def test_public_route_uses_signed_user_and_standard_envelope():
                 "title": "s1",
                 "gmt_modified": "1794000000000Z",
                 "run_status": "running",
+                "ext_info": {"dimaItemId": "internal-item-id"},
             }
         ],
     }
@@ -119,6 +120,7 @@ def test_public_route_uses_signed_user_and_standard_envelope():
     assert payload["code"] == 200000
     assert payload["message"] == "OK"
     assert payload["data"]["items"][0]["session_key"] == ("user:315629:s1:agent:bot-1")
+    assert "ext_info" not in payload["data"]["items"][0]
     assert payload["data"]["bots"][0]["status"] == "ok"
     assert payload["data"]["scan_limit"] == 50
     assert payload["data"]["filters"] == {
