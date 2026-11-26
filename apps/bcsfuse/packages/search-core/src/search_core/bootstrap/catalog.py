@@ -25,6 +25,7 @@ from search_core.application.default_candidates import (
 from search_core.application.emergency import (
     EmergencyControl,
     EmergencyPolicy,
+    RetrievalSwitches,
 )
 from search_core.bootstrap.http import create_search_app
 from search_core.catalog.updates import CardUpdates
@@ -84,6 +85,7 @@ def create_catalog_search_app(
     filtered_candidate_reader=None,
     http_app_factory=create_search_app,
     allow_document_mapping=False,
+    request_retrieval_defaults: RetrievalSwitches | None = None,
 ):
     """All dependencies are injected; host owns and closes model/index clients.
 
@@ -275,6 +277,7 @@ def create_catalog_search_app(
         ),
         build_retrieval,
         build_variants=build_variants,
+        request_defaults=request_retrieval_defaults,
     )
     fallback = None
     if filtered_candidate_reader is not None:
@@ -344,7 +347,7 @@ def create_catalog_search_app(
         else:
             try:
                 await calls["probe"].call(
-                    check_index, emergency.current.policy.retrieval
+                    check_index, emergency.snapshot().policy.retrieval
                 )
             except Exception as error:  # noqa: BLE001 - report provider failures as readiness diagnostics
                 events.record(
