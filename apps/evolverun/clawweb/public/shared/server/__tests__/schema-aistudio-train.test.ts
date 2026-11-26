@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { distributedLockMigrations } from '../schema-distributed-lock.js';
 import { aistudioTrainMigrations } from '../schema-aistudio-train.js';
 import { workflowSnapshotMigrations } from '../schema-workflow-snapshot.js';
 import { readFileSync } from 'node:fs';
@@ -31,6 +32,8 @@ describe('AIStudio schema migration', () => {
       // Provision later additive columns before the snapshot: retired IDs themselves must still be no-DDL.
       raw.exec("CREATE TABLE flow_runs(id INTEGER PRIMARY KEY,gmt_modified INTEGER,parent_flow_id VARCHAR(255) DEFAULT NULL,root_flow_id VARCHAR(255) DEFAULT NULL);");
       raw.exec("CREATE TRIGGER trg_flow_runs_update AFTER UPDATE ON flow_runs FOR EACH ROW BEGIN UPDATE flow_runs SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END;");
+      // Provision later additive schema before asserting retired migrations are no-DDL.
+      await distributedLockMigrations[0].migrate!(db);
       const schema=raw.prepare('SELECT * FROM sqlite_master ORDER BY name').all();
       await runMigrations(db,'sqlite');
       expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({v:Math.max(...allMigrations.map(m => m.version))});
@@ -59,6 +62,8 @@ describe('AIStudio schema migration', () => {
       // Provision later additive columns before the snapshot: retired IDs themselves must still be no-DDL.
       raw.exec("CREATE TABLE flow_runs(id INTEGER PRIMARY KEY,gmt_modified INTEGER,parent_flow_id VARCHAR(255) DEFAULT NULL,root_flow_id VARCHAR(255) DEFAULT NULL);");
       raw.exec("CREATE TRIGGER trg_flow_runs_update AFTER UPDATE ON flow_runs FOR EACH ROW BEGIN UPDATE flow_runs SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END;");
+      // Provision later additive schema before asserting retired migrations are no-DDL.
+      await distributedLockMigrations[0].migrate!(db);
       const schema=raw.prepare('SELECT * FROM sqlite_master ORDER BY name').all();
       const ledger=raw.prepare('SELECT * FROM schema_version ORDER BY id').all();
       await runMigrations(db,'sqlite');

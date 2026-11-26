@@ -38,3 +38,10 @@ helper does not configure an external asset store or start business services.
 
 See [Task Guard API logging](../../../modules/workflow/server/routes/README.md)
 for workflow API severity, exception stacks, and the non-Task-Guard boundary.
+
+## Shared background coordination
+
+The [Shared database lease service](../../../shared/README.md) owns reusable
+cross-instance background-work coordination and its independent v158 lock table.
+Session recovery adopts it through public assembly; deployment must provision
+the table before rolling out consumers.
