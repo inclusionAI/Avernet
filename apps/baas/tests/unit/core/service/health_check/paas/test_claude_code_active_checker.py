@@ -358,6 +358,9 @@ class TestClaudeCodeActiveHealthChecker:
         assert "def probe" in source
         assert "lastSessionTime" in source
         assert "BUILTIN_CRON_NAME_PREFIXES" in source
+        # 架构规则: 私有模块不带 __main__，入口由 checker 拼接
+        assert "__main__" not in source
+        assert source.rstrip().endswith("print(json.dumps(probe()))")
 
     @pytest.mark.asyncio
     async def test_check_live(self) -> None:

@@ -395,10 +395,15 @@ class ClaudeCodeActiveHealthChecker:
         """生成沙箱执行命令：探测模块源码 base64 后用裸 python3 执行。
 
         base64 下发避免探测脚本与多层 shell 的引号转义冲突。
+        探测模块按架构规则不携带 ``__main__`` 入口（私有模块不可执行），
+        入口调用在此拼接：``python3 -`` 顺序执行模块定义后运行 ``probe()``。
         """
         if cls._probe_cmd_cache is None:
             source = inspect.getsource(_claude_code_alive_probe)
-            encoded = base64.b64encode(source.encode("utf-8")).decode("ascii")
+            entrypoint = "\nprint(json.dumps(probe()))\n"
+            encoded = base64.b64encode((source + entrypoint).encode("utf-8")).decode(
+                "ascii"
+            )
             cls._probe_cmd_cache = f"echo {encoded} | base64 -d | python3 -"
         return cls._probe_cmd_cache
 

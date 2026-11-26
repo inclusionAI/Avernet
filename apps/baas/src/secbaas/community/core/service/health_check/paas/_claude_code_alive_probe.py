@@ -224,7 +224,3 @@ def probe(
         "builtinEnabledCount": int(cron_state["builtin_enabled_count"]),
         "builtinBoundExcluded": len(cron_state["bound_keys"]),
     }
-
-
-if __name__ == "__main__":
-    print(json.dumps(probe()))
