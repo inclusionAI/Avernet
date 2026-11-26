@@ -87,7 +87,9 @@ class BotHttp:
         self.client, self.credentials = client, credentials
         self._data_origin, self._data_key, self._data_tenant = data_origin.rstrip("/"), data_key, data_tenant
 
-    async def request(self, bot, method, suffix, *, params=None, body=None, raw=False):
+    async def request(
+        self, bot, method, suffix, *, params=None, body=None, raw=False, timeout: float | None = None
+    ):
         # suffix is adapter-owned, never a caller-supplied URL.
         if (
             (suffix and not suffix.startswith("/"))
@@ -130,6 +132,8 @@ class BotHttp:
                 params={**safe_params, "user_id": credential.acting_user_id, "entity_id": bot.entity_id},
                 json=body,
             )
+        if timeout is not None:
+            request.extensions["timeout"] = httpx.Timeout(timeout).as_dict()
         try:
             response = await self.client.send(
                 request,
@@ -294,7 +298,9 @@ class HttpGenome:
             raise PlatformHttpError("workspace snapshot exceeds bound")
         return files
 
-    async def commit_patch(self, bot, patch, run_id, strategy_ref, allowed_genes, created_by):
+    async def commit_patch(
+        self, bot, patch, run_id, strategy_ref, allowed_genes, created_by, *, mutation_scope=None
+    ):
         # The upstream service derives provenance from its verified caller; never
         # spoof created_by as a principal header or user_id.
         data = await self.http.request(
@@ -303,7 +309,16 @@ class HttpGenome:
             "/genome/revisions",
             body={
                 "status": "candidate",
-                "run": {"run_id": run_id, "strategy": strategy_ref, "allowed_genes": list(allowed_genes)},
+                "run": {
+                    "run_id": run_id,
+                    "strategy": strategy_ref,
+                    "allowed_genes": list(allowed_genes),
+                    **(
+                        {"mutation_scope": mutation_scope.model_dump(mode="json")}
+                        if mutation_scope is not None
+                        else {}
+                    ),
+                },
                 "patch": patch.to_json(),
             },
         )

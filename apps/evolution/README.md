@@ -5,14 +5,27 @@ Canonical Python 包为 `avernet_evolution`，不依赖 Backend 的 Python 包�
 历史规格仍在 [bot-evolution](../backend/docs/bot-evolution/README.zh-CN.md)；
 本次迁移记录和验收边界见 [migration report](../../docs/specs/2026-11-17-evolution-service-migration/report.md)。
 
-**当前状态（2026-11-18）：独立控制面、持久化恢复和 Bot RSI UI 已实现；旧版 Simulator 隔离 Worker 已执行，02脱敏会话快照读取成功，但旧示例候选被 Genome 以 `already_recorded` 拒绝。新版 `identity-hardening@1.1.0` 已按独立镜像部署并通过离线测试，尚未从真实 Bot 前端触发新版 Run；不能宣称新版候选、Ledger 或 01–06 端到端验收成功。**
-以上是历史运行记录；本次源码已改为复用 Gateway 登录和 Backend Bot 权限，
-不再通过浏览器直连 Evolution 或开发登录桥接。新链路尚未部署，不能据此宣称
-远端登录、用户名称显示或真实任务验收已修复。
+**Source closeout (2026-11-26):** Bot-scoped model inference, frozen mutation
+scope, protected final strategy output and explicit human promotion authorization
+are implemented. Authorization records `basis=human`; a separate Backend Apply
+settles delivery without changing the original evaluation verdict. See the
+[manual authorization decision](../../docs/adr/0027-human-promotion-authorization-is-not-evaluation.md)
+and [fresh-Bot checklist](../backend/docs/flows/bot-evolution-control.md#fresh-bot-local-skill-checklist).
+This is source/test status, not confirmation that all running images are current
+or that sandbox benchmarks pass. Real public/business benchmark evaluation is
+still a separate integration.
+
+Historical deployment evidence (2026-11-18), preserved in the migration report:
+the old isolated Simulator Worker read redacted sessions, but its example candidate
+was refused as `already_recorded`; the then-new strategy had not been accepted
+end to end. That historical observation does not describe today's deployment.
+The current source uses Gateway login and Backend Bot permissions, not a browser
+talking directly to Evolution or a development login bridge.
 `local` 是明确的测试夹具，不是真实 Bot、聊天导出、LLM、Agent Swarm 或远端沙箱。
 `production` 必须提供经过评审的 Platform 插件，缺失时启动失败，不回退本地夹具。
 07–09 见下文「判定、门禁与评审面」：目前只有规则型验证 + 门禁决策 + 评审 API，
-**apply 未启用**，`accept` / `needs_review` 都不代表 bot 已经改变。
+**普通自动晋升 Apply 未启用**，`accept` / `needs_review` 都不代表 bot 已经改变。
+显式人工干预授权与 Apply 见下文，不伪造评测通过。
 
 ## Context Boundary
 
@@ -31,6 +44,7 @@ consumes:
   - ExperienceQueryFactory
   - KillSwitchesPort
   - JobWorkerSandbox
+  - Models
 internal_dependencies: []
 ```
 
@@ -49,7 +63,7 @@ Bot 聊天「+ → RSI任务」/ API 客户端
   → Backend 薄适配：权威 BotRef / 实际提交者 + 60秒内部授权回执
   → 独立 Evolution HTTP：验证服务回执及请求范围（不再次登录用户）
   → Binding 校验 / ETag → 提交 Run / 幂等键
-  → 冻结 parent、策略版本、参数、预算 → 原子持久化 Run + Job
+  → 冻结 parent、策略版本、参数、预算及可选 mutation_scope → 原子持久化 Run + Job
   → Runner：回收过期租约 → 调度触发器 → 派发
   → local: InProcessHost / production: ContainerHost → 隔离 JobWorker
   → Job claim / fencing / heartbeat → async run(ctx) -> RunSummary
@@ -59,8 +73,8 @@ Bot 聊天「+ → RSI任务」/ API 客户端
 ```
 
 - **Evolution 拥有**：Binding、触发器、Run/Job/Operation、工作区元信息、预算、
-  Strategy Registry、SDK、Ledger 及执行证据。现有 Verification 代码仅迁出，独立
-  组合根不接入评测/晋升流程。
+  Strategy Registry、SDK、Ledger 及执行证据。平台提供 Verification 时，组合根
+  接入验证、门禁和评审；不提供时候选保持 pending；人工交付另需显式注入 `manual_delivery`。
 - **Backend/平台拥有**：Bot 配置、Genome 内容/修订与发布晋升；引擎拥有会话导出、
   实际文件投影和运行环境。不得从新服务导入 `agentclaw.*` 偷接平台内部实现。
 - **Agent Swarm**：可作为 `ctx.operations` 的子操作执行提供者；本次没有把
@@ -78,7 +92,7 @@ Bot 聊天「+ → RSI任务」/ API 客户端
 | `src/avernet_evolution/core/evolution_run/` | Run/Job、存储、调度、宿主、SDK 上下文、Worker 协议 |
 | `src/avernet_evolution/core/evolution_strategy/` | 策略注册、契约校验、现有示例策略 |
 | `src/avernet_evolution/core/evolution_ledger/` | 实验记录 |
-| `src/avernet_evolution/core/evolution_verify/` | 已有验证模型/实现，当前独立组合根不启用 |
+| `src/avernet_evolution/core/evolution_verify/` | 验证、配对比较与判定；由 Platform 显式提供验证器 |
 | `src/avernet_evolution/adapters/` | 用户控制 HTTP 与内部 Worker HTTP，分别维护契约 |
 | `src/avernet_evolution/plugins/` | Worker HTTP 客户端、独立 worker 入口及现有运行时适配器 |
 | `config.py`, `bootstrap.py`, `composition.py`, `plugin_api.py` | 配置、生命周期、显式组合与平台接缝 |
@@ -172,6 +186,7 @@ Backend 配置与故障边界见 [Bot RSI 控制入口](../backend/docs/flows/bo
 | `GET /runs/{run_id}` | → `{run}` |
 | `POST /runs/{run_id}:cancel` | `{reason?}` → 取消结果 |
 | `GET /runs/{run_id}/candidates` | → `{candidates}`（本次候选判定 pending） |
+| `GET /runs/{run_id}/strategy-output` | → `{output: object 或 null}`，当前 attempt 的脱敏最终提案；不等于候选提交结果 |
 | `GET /runs/{run_id}/evidence?after=0` | → `{jobs, events, next_cursor}`，不返回 token |
 
 策略目录使用上述 Bot 路径下的 `/strategies`。独立服务保留旧无 Bot 路径别名以兼容
@@ -199,7 +214,7 @@ Backend 配置与故障边界见 [Bot RSI 控制入口](../backend/docs/flows/bo
 状态（2026-11-24）：07 有可运行的**规则型**执行器（`plugins/verifiers/rules.py`：读
 revision 文件、按用例打分；simulator 只负责选用），08 只做决策，09 的报告/队列/
 approve/reject 已可调用。
-**apply 仍未启用**：revision 目前只捕获 persona 等部分文件，不是 bot 的完整快照；
+**普通自动晋升 apply 仍未启用**：revision 目前只捕获 persona 等部分文件，不是 bot 的完整快照；
 `promote()` 显式拒绝 apply；approve 只记录人工决定，不写回 bot 或移动 `active`。
 
 | 方法 / 后缀 | 输入 → 输出 |
@@ -226,6 +241,20 @@ approve/reject 已可调用。
 密钥扫描）。接 LLM judge 或真实 rollout 时替换这几个回调即可，
 `compare.py` / `policy.py` / 门禁 / 09 接口都不用改；同时要把 `agreement` 接上，
 否则 T2+ 候选的“多评分器集成”要求不会被执行。
+
+通用更新路径见 [Mutation Scope / Run 冻结](src/avernet_evolution/core/evolution_run/README.md#frozen-mutation-scope)、
+[BehaviorRefinement 接入](src/avernet_evolution/core/evolution_strategy/README.md#opt-in-generic-refinement) 和
+[按 Gene/方法组合验证](src/avernet_evolution/core/evolution_verify/README.md#gene-method-composition)。
+同一新策略版本由 Binding 选择 Persona、Local Skill 或联合范围，仅更新已有内容；
+不改写旧策略/Binding/Run。后端和 Evolution 各自校验实际 patch。平台尚须注入真实模型
+及独立质量评测，仓库测试不等于真实 Bot 验收，也不涉及 SkillSet 或 Apply。
+
+可选参考策略 `SkillCandidateSmoke` 以近七天会话的 episode id 为证据，
+仅提交固定样例 `skill.add`，不安装或激活 Skill。部署方独立注册策略、固定 Worker digest，
+并显式启用 `build_rule_verifier(..., include_skill_candidate=True)` 后，Binding 可选择
+`skill-candidate-file@1`；它只验证该样例的文件内容，不代表实际 Bot 回复质量。
+既有 `rules-file@1` 保持不变；应把 `allowed_genes` 限制为目标 Skill 路径、保持
+`auto_promote_ceiling: null`。此通路不包含 SkillSet 进化、发布或 Apply。
 
 数据落在与 Run 同一个 SQLite：`evolution_verdict` 按 `(run_id, candidate_id, profile)` 幂等，
 终态永不改写；`evolution_gate_decision` 与 `evolution_review_item` 按 `(run_id, candidate_id)`
@@ -415,3 +444,73 @@ apps/evolution/.venv/bin/python apps/evolution/scripts/evolution_events.py \
 内置通道用例还覆盖 Run 重开、候选和规则验证。这是合成身份、临时数据库、关闭 consumer 的隔离测试，不证明宿主登录、镜像组装或
 真实 Platform 已部署。企业宿主应保留自己的构建/配置/只读检查脚本；公共仓不引入企业
 端点、浏览器 Cookie 或机器状态。仅打开 UI 开关或安装本包不能作为真实任务执行证明。
+
+### Platform model provider
+
+`Platform.models` optionally supplies the SDK `Models.complete` contract to both
+in-process contexts and isolated job calls. Model credentials and routing remain
+in the trusted platform; Workers receive only completion output and billed cost.
+Missing providers fail explicitly rather than falling back to a fixture.
+Deployments can use `LocalVerificationService.profile_candidate_cases_for` to add
+candidate-aware composed profiles alongside unchanged historical rule profiles.
+
+
+#### Bot-owned inference and explicit overrides
+
+`HttpBotModels` implements `Models` through the private Backend callback. Both
+in-process and isolated Worker calls run inside the **persisted Run** data scope
+(Bot, actual operator, Run, parent, strategy). Worker input cannot select another
+Bot or export its credentials. Each callback rechecks current owner, ADMIN
+permission and mutability, then relays to the Bot runtime's stateless inference.
+Missing/unsupported capabilities fail; there is no automatic manual/fixture
+fallback. The Bot's current configured default is used, not a chat-session model.
+
+Deployment assembly chooses one source:
+
+- `bot` (recommended default): no deployment model Secret. Optional explicit
+  `provider/model` selects one of that Bot's configured models; it continues using
+  the Bot's own routing and credentials. A deployment-pinned model cannot be
+  overridden by Worker input.
+- `manual` (explicit opt-in): deployment-owned HTTPS base URL, model, key-file,
+  timeout and internal call charge. This can use the same approved configuration
+  as an external test client; the script itself is not an HTTP server. Endpoint
+  and credentials remain outside public Git and Worker Pods.
+
+The public SDK does not prescribe the host's config-file schema. The Simulator
+assembly defaults a missing/empty `models` object to `bot`; an explicit `manual`
+object retains the earlier manual schema. Neither source accepts mixed fields.
+Manual deployment settings are not Binding parameters or UI-supplied API keys.
+
+Successful completions account actual upstream tokens and a deployment-defined
+conservative per-call USD charge, **not** a provider invoice calculation. Model
+RPCs use a separate 260s Worker deadline; ordinary RPCs retain 30s and concurrent
+heartbeats continue. Bot inference uses native 180s / Backend 200s / bridge 210s
+limits. A valid completion does not establish candidate quality or permit Apply.
+
+See [Engine wire/support contract](../../engine/adapter/docs/model-completion-api.md)
+and [Backend callback](../backend/docs/flows/bot-evolution-control.md#bot-model-completion-callback).
+Coverage: `tests/unit/plugins/test_model_http.py`,
+`tests/unit/plugins/test_job_model_timeout.py`, `tests/test_model_wiring.py`, plus
+Backend's `test_evolution_models.py`. Live image/Secret readiness and real Bot
+acceptance must be recorded separately from these isolated tests.
+
+## 人工晋升授权与显式 Apply（非评测通过）
+
+依据 [ADR 0027](../../docs/adr/0027-human-promotion-authorization-is-not-evaluation.md)，
+人工测试/干预可代替 pending / inconclusive 的本次评测授权，但不能覆盖 reject、
+已知新增失败、已记录/当前 floor 失败、incident、冻结/kill、现场漂移或过期 parent。
+没有 scanner 时如实记录 `not_run`。原 verdict / gate / risk-review 不改写。
+
+- `POST /candidates/{candidate_id}:authorize-promotion`：当前 ADMIN，必填 reason、
+  revision_id、parent_revision_id 和 `Idempotency-Key`，只原子写授权及审计。
+- `POST /candidates/{candidate_id}:apply`：原授权人当前仍有 ADMIN，传 authorization_id；
+  再检查准确候选后，经 purpose-bound Backend 回调启动既有 Genome Promotion / Apply。
+- `GET /candidates/{candidate_id}` 的 `manual_promotion` 返回授权及 Backend 权威交付状态。
+  响应丢失时复用同一请求恢复；不能换 key 重复授权，只有明确 apply_failed 后才允许新授权。
+- 平台工厂显式注入 `Platform.manual_delivery=HttpManualDelivery(bridge)` 才启用；
+  不向策略/Worker 暴露。Backend 需先增量迁移 nullable authorization 列。
+- 授权不修改真实 Bot 或 refs；结算成功/partial 才 CAS 移动 active/previous。
+  partial 不代表全部交付成功；失败不前移基线。普通 approve 仍仅记录风险评审。
+
+正常 RSI 自动化仍需独立沙箱执行公共/业务 benchmark、得到真实反馈再走评测门禁。
+本入口不实现该评测，不把人工授权记录成 accept，也不以单测宣称真实 Bot 已验收。

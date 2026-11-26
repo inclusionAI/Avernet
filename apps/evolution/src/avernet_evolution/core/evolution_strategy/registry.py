@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from avernet_genome.mutation_scope import parse_scope
+
 from .catalog import DEFAULT_CATALOG, Catalog, Engine
 from .conformance import KIT_VERSION, run_conformance
 from .errors import StrategyNotFound, VersionExists
@@ -175,6 +177,9 @@ def _with_definition_digests(
         registration.runtime,
         needs,
         registration.params_schema,
+        parse_scope(registration.mutation_capability)
+        if registration.mutation_capability is not None
+        else None,
     )
 
 
@@ -185,6 +190,7 @@ def _fingerprint(registration: StrategyRegistration, definitions: tuple[AgentDef
         registration.runtime,
         tuple(sorted((key, repr(value)) for key, value in registration.needs.items())),
         registration.params_schema and repr(registration.params_schema),
+        registration.mutation_capability,
         tuple((definition.name, definition.engine, definition.digest) for definition in definitions),
     )
 

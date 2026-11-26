@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from avernet_genome.models import BotRef
+from avernet_genome.mutation_scope import Scope, parse_scope
 
 from .budget import Budget
 from .enums import EventName, RiskCeiling
@@ -89,6 +90,7 @@ class Binding:
     params: dict[str, Any] = field(default_factory=dict)
     auto_promote_ceiling: RiskCeiling | None = RiskCeiling.T1
     rollout: Rollout | None = None
+    mutation_scope: Scope | None = None
 
     @property
     def strategy_id(self) -> str:
@@ -107,8 +109,13 @@ class Binding:
             problems.append("binding id must not be empty")
         if "@" not in self.strategy or not self.strategy_id or not self.strategy_version:
             problems.append(f"{prefix}: strategy must be '<id>@<version>'")
-        if not self.allowed_genes:
-            problems.append(f"{prefix}: allowed_genes must not be empty")
+        if not self.allowed_genes and self.mutation_scope is None:
+            problems.append(f"{prefix}: allowed_genes or mutation_scope must not be empty")
+        if self.mutation_scope is not None:
+            try:
+                parse_scope(self.mutation_scope)
+            except ValueError as exc:
+                problems.append(f"{prefix}: mutation_scope {exc}")
         if self.parent != "active":
             problems.append(f"{prefix}: parent must be 'active' in this iteration")
         if not self.verification_profile:

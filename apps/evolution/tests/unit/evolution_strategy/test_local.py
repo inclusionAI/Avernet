@@ -84,6 +84,44 @@ def test_to_patch_adds_a_missing_persona_file() -> None:
     assert patch.ops[0].type == "CLAUDE.md"
 
 
+@pytest.mark.parametrize(
+    ("workspace_path", "member"),
+    [("skills/editor/SKILL.md", "SKILL.md"), ("skills/editor/notes/how%20to.md", "notes/how to.md")],
+)
+def test_to_patch_edits_a_skill_member_by_package_relative_path(workspace_path: str, member: str) -> None:
+    parent = _parent({workspace_path: "original\n"})
+    ctx = build_context(parent=parent)
+    ws = run(ctx.workspace.materialise(parent.id, key="edit-skill"))
+    run(ws.write(workspace_path, b"replacement\n"))
+    patch = run(ws.to_patch(rationale="edit a skill member")).to_json()
+    [op] = patch["ops"]
+    assert op["op"] == "skill.update"
+    assert op["name"] == "editor"
+    [change] = op["file_diffs"]
+    assert change["path"] == member
+    assert "-original\n+replacement\n" in change["diff"]
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_to_patch_adds_a_skill_member_by_package_relative_path(existing: bool) -> None:
+    skill_md = "---\nname: editor\ndescription: Edit drafts.\n---\n"
+    path = "skills/editor/SKILL.md"
+    parent = _parent({path: skill_md} if existing else {})
+    ctx = build_context(parent=parent)
+    ws = run(ctx.workspace.materialise(parent.id, key="add-skill-file"))
+    if not existing:
+        run(ws.write(path, skill_md.encode()))
+    run(ws.write("skills/editor/notes/how%20to.md", b"new notes\n"))
+    patch = run(ws.to_patch(rationale="add skill notes")).to_json()
+    [op] = patch["ops"]
+    assert op["op"] == ("skill.update" if existing else "skill.add")
+    assert op["name"] == "editor"
+    expected = {"notes/how to.md": "new notes\n"}
+    if not existing:
+        expected["SKILL.md"] = skill_md
+    assert op["files"] == expected
+
+
 def test_to_patch_refuses_an_unchanged_workspace() -> None:
     parent = _parent({"persona/SOUL.md": "original\n"})
     ctx = build_context(parent=parent)

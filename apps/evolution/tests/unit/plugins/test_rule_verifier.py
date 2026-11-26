@@ -121,3 +121,34 @@ async def test_grader_reads_the_observed_snapshot_not_another_bots_rollout() -> 
     second = await service.execute(other, CANDIDATE, case, 1)
     assert (await service.grade(case, first)).score == 1.0
     assert (await service.grade(case, second)).score == 0.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("variant", ["valid", "other-file", "bad-header", "secret", "unchanged"])
+async def test_skill_profile_is_opt_in_and_reads_only_sample(variant) -> None:
+    from avernet_evolution.core.evolution_strategy.strategies.skill_candidate import SKILL_FILE, SKILL_TEXT
+    from avernet_evolution.plugins.verifiers import SKILL_CANDIDATE_PROFILE
+
+    persona = "## Core Truths\n" + "\n".join(RULE_VALIDATION_MARKERS)
+    parent = {"persona/AGENTS.md": persona.encode()}
+    child = dict(parent)
+    if variant == "other-file":
+        child["skills/unrelated/SKILL.md"] = SKILL_TEXT.encode()
+    elif variant == "bad-header":
+        child[SKILL_FILE] = SKILL_TEXT.replace("name:", "invalid:").encode()
+    elif variant == "secret":
+        child[SKILL_FILE] = (SKILL_TEXT + "\nBEGIN PRIVATE KEY\n").encode()
+    else:
+        child[SKILL_FILE] = SKILL_TEXT.encode()
+        if variant == "unchanged":
+            parent[SKILL_FILE] = child[SKILL_FILE]
+    genome = _Genome({PARENT: parent, CANDIDATE: child})
+    assert SKILL_CANDIDATE_PROFILE not in build_rule_verifier(genome).profiles
+    service = build_rule_verifier(genome, include_skill_candidate=True)
+    await service.verify(_ref(), "rules-file@1")
+    await service.verify(_ref(), SKILL_CANDIDATE_PROFILE)
+    persona_verdict = await service.settle(CANDIDATE, "rules-file@1", run_id="run_1")
+    skill_verdict = await service.settle(CANDIDATE, SKILL_CANDIDATE_PROFILE, run_id="run_1")
+    assert persona_verdict.status is VerdictStatus.REJECT
+    assert skill_verdict.status is (VerdictStatus.ACCEPT if variant == "valid" else VerdictStatus.REJECT)
+    assert skill_verdict.splits["validation"].cases == 3

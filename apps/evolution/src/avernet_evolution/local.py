@@ -135,9 +135,17 @@ class LocalGenome:
             for entry in revision.spec.persona
         }
 
-    async def commit_patch(self, bot, patch, run_id, strategy_ref, allowed_genes, created_by):
+    async def commit_patch(
+        self, bot, patch, run_id, strategy_ref, allowed_genes, created_by, *, mutation_scope=None
+    ):
         self._check(bot)
-        problems = check_allowed_genes(patch, list(allowed_genes), self.policy.pins)
+        from avernet_genome.mutation_scope import mutation_problems
+
+        problems = (
+            mutation_problems(patch, mutation_scope)
+            if mutation_scope is not None
+            else check_allowed_genes(patch, list(allowed_genes), self.policy.pins)
+        )
         if problems:
             raise ValueError("; ".join(problems))
         key = run_id + ":" + sha256_digest(canonicalize(patch.to_json()))

@@ -17,6 +17,7 @@ from typing import Any
 
 from avernet_genome.canonical import tree_digest
 from avernet_genome.gene_paths import covers, op_gene_path, overlaps
+from avernet_genome.mutation_scope import Scope, parse_scope
 from avernet_genome.patch_models import GenomePatch
 
 from .catalog import DEFAULT_CATALOG, Catalog, Engine
@@ -99,6 +100,7 @@ class StrategyRegistration:
     runtime: Runtime
     needs: dict[str, dict[str, Any]] = field(default_factory=dict)
     params_schema: dict[str, Any] | None = None
+    mutation_capability: Scope | None = None
 
     def definition_refs(self) -> dict[str, AgentDefinitionRef]:
         """``needs["agents@1"].definitions`` parsed into typed refs."""
@@ -190,6 +192,11 @@ def validate_registration(
     if not SEMVER.match(registration.version):
         problems.append(f"version {registration.version!r} is not semver")
     problems.extend(registration.runtime.problems())
+    if registration.mutation_capability is not None:
+        try:
+            parse_scope(registration.mutation_capability)
+        except ValueError as exc:
+            problems.append(f"mutation_capability: {exc}")
 
     for key, arguments in registration.needs.items():
         entry = catalog.get(key)
@@ -315,4 +322,7 @@ def registration_from_json(payload: dict[str, Any]) -> StrategyRegistration:
         runtime=runtime,
         needs=needs,
         params_schema=params_schema,
+        mutation_capability=(
+            parse_scope(payload["mutation_capability"]) if "mutation_capability" in payload else None
+        ),
     )

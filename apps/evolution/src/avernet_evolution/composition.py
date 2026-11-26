@@ -237,6 +237,7 @@ async def compose(settings: Settings, platform: Platform) -> Runtime:
             budget=budget,
             ledger=ledger,
             verifier=verifier,
+            models=platform.models,
         )
 
         async def context(run, **kwargs):
@@ -275,6 +276,20 @@ async def compose(settings: Settings, platform: Platform) -> Runtime:
                 verifier=verifier,
                 heartbeat_s=settings.heartbeat_s,
                 experience_provider=None,
+                models_provider=platform.models,
+            )
+        manual = None
+        if platform.manual_delivery is not None:
+            from .core.evolution_promote.manual import ManualPromotionService
+            from .core.evolution_promote.manual_store import ManualAuthorizationStore
+
+            manual = ManualPromotionService(
+                store=ManualAuthorizationStore(store.conn),
+                runs=runs,
+                genome=platform.genome,
+                delivery=platform.manual_delivery,
+                checks=promotion,
+                kills=platform.kills,
             )
         scheduler = TriggerScheduler(store=store, runs=runs, genome=platform.genome, kills=platform.kills)
         runner = EvolutionRunner(
@@ -302,6 +317,7 @@ async def compose(settings: Settings, platform: Platform) -> Runtime:
                 verification=verifier,
                 promotion=promotion,
                 genome=platform.genome,
+                manual=manual,
             ),
             channel,
             runner,

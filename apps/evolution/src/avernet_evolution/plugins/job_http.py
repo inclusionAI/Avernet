@@ -63,15 +63,16 @@ class HttpWorkerTransport:
             self._client = httpx.AsyncClient(timeout=30.0)
         return self._client
 
-    async def _post(self, path: str, payload: dict[str, Any]) -> Any:
-        response = await self._http().post(f"{self._endpoint}{path}", json=payload)
+    async def _post(self, path: str, payload: dict[str, Any], *, timeout: float | None = None) -> Any:
+        options = {} if timeout is None else {"timeout": timeout}
+        response = await self._http().post(f"{self._endpoint}{path}", json=payload, **options)
         if response.status_code == 401:
             raise PermissionError(f"job protocol rejected the caller: {path}")
         if response.status_code >= 400:
             rejected = _rejection(response)
             if rejected is not None:
                 raise rejected
-            raise RuntimeError(f"job protocol error {response.status_code}: {response.text}")
+            raise RuntimeError(f"job protocol error {response.status_code}")
         return response
 
     async def claim(self, worker_id: str, token: str, strategy_refs: list[str]) -> dict[str, Any] | None:
@@ -106,7 +107,7 @@ class HttpWorkerTransport:
         if response.status_code == 401:
             raise PermissionError("job protocol rejected the caller: verdict")
         if response.status_code >= 400:
-            raise RuntimeError(f"job protocol error {response.status_code}: {response.text}")
+            raise RuntimeError(f"job protocol error {response.status_code}")
         return response.json()
 
     async def complete(self, job_id: str, fencing_token: str, summary: dict[str, Any]) -> None:
@@ -156,6 +157,9 @@ class HttpWorkerTransport:
                 model=model,
                 max_tokens=max_tokens,
             ),
+            # Inference may outlast the ordinary 30s RPC deadline. Heartbeats
+            # use a separate request and retain their short default timeout.
+            timeout=260.0,
         )
         return response.json()
 
@@ -191,7 +195,7 @@ class HttpWorkerTransport:
         if response.status_code == 401:
             raise PermissionError("job protocol rejected the caller: operation")
         if response.status_code >= 400:
-            raise RuntimeError(f"job protocol error {response.status_code}: {response.text}")
+            raise RuntimeError(f"job protocol error {response.status_code}")
         return response.json()
 
     async def operation_cancel(self, job_id: str, fencing_token: str, operation_id: str) -> dict[str, Any]:
@@ -216,5 +220,5 @@ class HttpWorkerTransport:
         if response.status_code == 401:
             raise PermissionError("job protocol rejected the caller: artifact")
         if response.status_code >= 400:
-            raise RuntimeError(f"job protocol error {response.status_code}: {response.text}")
+            raise RuntimeError(f"job protocol error {response.status_code}")
         return response.json()["artifact_id"]

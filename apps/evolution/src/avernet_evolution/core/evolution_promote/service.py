@@ -24,7 +24,7 @@ __all__ = [
     "VerdictPending",
 ]
 
-_APPLY_DISABLED = "promotion apply is disabled until a revision captures the bot's complete state"
+_APPLY_DISABLED = "risk review is record-only; explicit human authorization and Apply are a separate control-plane operation"
 
 
 class VerdictPending(RuntimeError):
@@ -32,7 +32,7 @@ class VerdictPending(RuntimeError):
 
 
 class PromotionNotReady(RuntimeError):
-    """08 的 apply 侧尚未启用：revision 还不是 bot 的完整快照。"""
+    """候选尚不满足晋升条件，或调用了只记录风险评审的入口。"""
 
 
 class CandidateNotFound(KeyError):

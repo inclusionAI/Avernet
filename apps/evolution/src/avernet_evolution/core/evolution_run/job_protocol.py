@@ -139,6 +139,9 @@ class JobChannel:
             "attempt": job.attempt,
             "parent_revision": run.parent_revision,
             "allowed_genes": list(run.allowed_genes),
+            "mutation_scope": run.mutation_scope.model_dump(mode="json")
+            if run.mutation_scope is not None
+            else None,
             "params": dict(run.params),
             "granted": list(run.granted),
             "budget": dict(run.budget_max),
@@ -271,7 +274,8 @@ class JobChannel:
         provider = self.models
         if provider is None:
             raise NotImplementedError("no models provider configured")
-        completion = await provider.complete(messages=messages, model=model, max_tokens=max_tokens)
+        with data_scope(run_data_scope(run)):
+            completion = await provider.complete(messages=messages, model=model, max_tokens=max_tokens)
         usage = BudgetUsage.of(
             usd=completion.cost_usd,
             tokens=getattr(completion, "tokens", 0),

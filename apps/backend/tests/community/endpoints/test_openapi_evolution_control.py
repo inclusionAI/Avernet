@@ -1,4 +1,4 @@
-"""Nine RSI controls exercise the shared login/Bot gates and real internal relay."""
+"""RSI controls exercise the shared login/Bot gates and real internal relay."""
 
 from agentclaw.community.adapters.http.openapi_v1.authorization_rules_evolution import (
     BASE,

@@ -156,6 +156,7 @@ export interface RsiCandidateReport {
   flags: string[];
   gate: RsiGate | null;
   review: RsiReview | null;
+  manual_promotion?: RsiManualPromotion | null;
 }
 export interface RsiReviewItem extends RsiReview {
   candidate_id: string;
@@ -199,8 +200,119 @@ export interface GenomeBaseline {
 }
 /** 基因组侧的显式冷启动建基线：只记录当前配置，不 apply；需要 ADMIN。 */
 export const initializeGenomeBaseline = (scope: RsiScope) =>
-  request<GenomeBaseline>(
+  request<GenomeBaseline>(scope, `/openapi/v1/bots/${encodeURIComponent(scope.botId)}/genome/baseline:initialize`, {
+    method: 'POST',
+  });
+
+/** Display-only, redacted final response; not prompts or model hidden reasoning. */
+export interface RsiStrategyOutput {
+  schema_version: 1;
+  attempt: number;
+  outcome: 'not_called' | 'no_changes' | 'changes_proposed' | 'invalid_proposal' | 'cancelled';
+  reason: string;
+  rationale: string;
+  edits: { path: string; content: string; changed: boolean }[];
+  raw_output: string;
+  raw_output_truncated: boolean;
+}
+export const getRsiStrategyOutput = (scope: RsiScope, runId: string) =>
+  request<{ output: RsiStrategyOutput | null }>(
     scope,
-    `/openapi/v1/bots/${encodeURIComponent(scope.botId)}/genome/baseline:initialize`,
-    { method: 'POST' },
+    `${base(scope)}/runs/${encodeURIComponent(runId)}/strategy-output`,
   );
+
+/** Genome operations keep the same authenticated Bot scope as RSI; promotion is not RSI approval. */
+export interface GenomeRef {
+  name: string;
+  revision: string;
+  labels: string[];
+}
+export interface GenomeDrift {
+  active: string;
+  observed: string;
+}
+export interface GenomeDiff {
+  revision: string;
+  against: string;
+  changes: { gene: string; kind: 'added' | 'removed' | 'modified'; diff: string | null }[];
+  risk_tier: string;
+  rewrite_flags: string[];
+}
+export interface GenomeCapture {
+  id: string;
+  status: 'draft' | 'candidate' | 'accepted' | 'rejected' | 'promoted' | 'archived';
+  created: boolean;
+}
+export interface GenomePromotion {
+  id: string;
+  revision: string;
+  from_revision: string | null;
+  status: 'pending' | 'applying' | 'applied' | 'applied_partial' | 'apply_failed';
+  apply_id: string | null;
+  apply_detail: string;
+  reason: string;
+  created_at: string;
+}
+export const isGenomePromotionTerminal = (status: GenomePromotion['status']) =>
+  ['applied', 'applied_partial', 'apply_failed'].includes(status);
+const genomeBase = (scope: RsiScope) => `/openapi/v1/bots/${encodeURIComponent(scope.botId)}/genome`;
+export const getGenomeRefs = (scope: RsiScope) => request<{ refs: GenomeRef[] }>(scope, `${genomeBase(scope)}/refs`);
+export const getGenomeDrift = (scope: RsiScope) =>
+  request<{ drift: GenomeDrift | null }>(scope, `${genomeBase(scope)}/drift`);
+/** Capture records content only. It does not move active or make a candidate promotable. */
+export const captureGenomeRevision = (scope: RsiScope) =>
+  request<GenomeCapture>(scope, `${genomeBase(scope)}/revisions:capture`, { method: 'POST' });
+export const getGenomeDiff = (scope: RsiScope, revision: string, against: string) =>
+  request<GenomeDiff>(scope, `${genomeBase(scope)}/revisions/${encodeURIComponent(revision)}/diff`, {
+    params: { against },
+  });
+export const promoteGenomeRevision = (
+  scope: RsiScope,
+  revision: string,
+  expectedRevision: string,
+  reason: string,
+) =>
+  request<GenomePromotion>(scope, `${genomeBase(scope)}/promotions`, {
+    method: 'POST',
+    data: { revision, expected_revision: expectedRevision, reason },
+  });
+export const getGenomePromotion = (scope: RsiScope, id: string) =>
+  request<GenomePromotion>(scope, `${genomeBase(scope)}/promotions/${encodeURIComponent(id)}`);
+export const listGenomePromotions = (scope: RsiScope) =>
+  request<{ items: GenomePromotion[]; total: number }>(scope, `${genomeBase(scope)}/promotions`, {
+    params: { page_no: 1, page_size: 20 },
+  });
+
+/** Human authorization is separate from the original evaluation verdict and from delivery. */
+export interface RsiHumanAuthorization {
+  id: string;
+  basis: 'human';
+  candidate_id: string;
+  run_id: string;
+  revision_id: string;
+  parent_revision_id: string;
+  strategy: string;
+  actor: string;
+  user_id: string;
+  reason: string;
+  authorized_at: string;
+  checks_at_authorization: { verdict: string; floor: string; floor_problems: string[] };
+}
+export interface RsiManualPromotion {
+  authorization: RsiHumanAuthorization | null;
+  promotion?: GenomePromotion | null;
+}
+export interface RsiAuthorizationRequest {
+  revision_id: string;
+  parent_revision_id: string;
+  reason: string;
+}
+export const authorizeRsiPromotion = (
+  scope: RsiScope, candidateId: string, key: string, body: RsiAuthorizationRequest,
+) => request<RsiManualPromotion>(scope, `${base(scope)}/candidates/${encodeURIComponent(candidateId)}:authorize-promotion`, {
+  method: 'POST', headers: { 'Idempotency-Key': key }, data: body,
+});
+export const applyRsiCandidate = (scope: RsiScope, candidateId: string, authorizationId: string) =>
+  request<RsiManualPromotion>(scope, `${base(scope)}/candidates/${encodeURIComponent(candidateId)}:apply`, {
+    method: 'POST', data: { authorization_id: authorizationId },
+  });

@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from avernet_genome.canonical import canonicalize, sha256_digest
+from avernet_genome.gene_paths import split as split_gene_path
+from avernet_genome.mutation_scope import FrozenMutationScope
 from avernet_genome.patch_models import GenomePatch
 from avernet_genome.text_diff import unified_diff
 
@@ -42,6 +44,14 @@ SKILL_PREFIX = "skills/"
 RESOURCE_PREFIX = "resources/"
 
 
+def _skill_member(path: str) -> tuple[str, str]:
+    """Map a canonical workspace path to a skill name and package-relative member."""
+    _, (name, *members) = split_gene_path(path)
+    if not members or any("/" in segment for segment in (name, *members)):
+        raise ValueError(f"not a skill member path: {path!r}")
+    return name, "/".join(members)
+
+
 def candidate_id_of(candidate: Candidate) -> str:
     """The candidate id: content hash of the patch (03-strategy.zh-CN.md §2.6)."""
     return sha256_digest(canonicalize(candidate.patch.to_json()))
@@ -55,6 +65,10 @@ class StaticRevision:
     seq: str
     files: dict[str, str] = field(default_factory=dict)
     spec: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def paths(self) -> tuple[str, ...]:
+        return tuple(sorted(self.files))
 
     async def read(self, path: str) -> bytes:
         try:
@@ -105,8 +119,7 @@ class LocalWorkspace:
                 )
                 continue
             if path.startswith(SKILL_PREFIX):
-                relative = path[len(SKILL_PREFIX) :]
-                name = relative.split("/", 1)[0]
+                name, relative = _skill_member(path)
                 added_skills.setdefault(name, {})[relative] = self._files[path].decode("utf-8")
                 continue
             if path.startswith(RESOURCE_PREFIX):
@@ -122,9 +135,7 @@ class LocalWorkspace:
                 continue
             raise NotImplementedError(f"local to_patch cannot remove {path}")
         base_skill_names = {
-            path[len(SKILL_PREFIX) :].split("/", 1)[0]
-            for path in self._base_files
-            if path.startswith(SKILL_PREFIX)
+            _skill_member(path)[0] for path in self._base_files if path.startswith(SKILL_PREFIX)
         }
         for name, files in added_skills.items():
             ops.append(
@@ -146,11 +157,11 @@ class LocalWorkspace:
             before = self._base_files[path].decode("utf-8")
             after = self._files[path].decode("utf-8")
             if path.startswith(SKILL_PREFIX):
-                relative = path[len(SKILL_PREFIX) :]
+                name, relative = _skill_member(path)
                 ops.append(
                     {
                         "op": "skill.update",
-                        "name": relative.split("/", 1)[0],
+                        "name": name,
                         "file_diffs": [{"path": relative, "diff": unified_diff(before, after)}],
                     }
                 )
@@ -401,6 +412,7 @@ class LocalContext:
     experience: Any
     agents: Any
     evaluation: Any
+    mutation_scope: FrozenMutationScope | None = None
 
     def requires(self, capability: str) -> None:
         if capability not in self.granted:
@@ -424,6 +436,7 @@ def build_context(
     operations: Any | None = None,
     log: Any | None = None,
     artifacts: Any | None = None,
+    mutation_scope: FrozenMutationScope | None = None,
 ) -> LocalContext:
     """Assemble a local context; undeclared capabilities refuse on use."""
 
@@ -431,6 +444,7 @@ def build_context(
     return LocalContext(
         run_id=run_id,
         params=dict(params or {}),
+        mutation_scope=mutation_scope,
         attempt=attempt,
         granted=granted,
         parent=parent,

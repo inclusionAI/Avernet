@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from statistics import mean, pstdev
 
 from .enums import Split
@@ -45,9 +45,9 @@ def paired_delta(candidate: Sequence[RolloutRecord], baseline: Sequence[RolloutR
 def newly_failing(
     candidate: Sequence[RolloutRecord],
     baseline: Sequence[RolloutRecord],
-    threshold: float,
+    threshold: float | Mapping[str, float],
 ) -> list[str]:
-    """父版本通过、候选不通过的用例（必过划分的阻断依据）。"""
+    """父版本通过、候选不通过的用例；组合方法按 case 保留阈值，浮点入参兼容旧调用。"""
 
     def passed(rollouts: Sequence[RolloutRecord]) -> dict[str, bool]:
         grouped: dict[str, list[float]] = {}
@@ -55,7 +55,10 @@ def newly_failing(
             score = _score(rollout)
             if score is not None:
                 grouped.setdefault(rollout.case_id, []).append(score)
-        return {case: mean(scores) >= threshold for case, scores in grouped.items()}
+        return {
+            case: mean(scores) >= (threshold[case] if isinstance(threshold, Mapping) else threshold)
+            for case, scores in grouped.items()
+        }
 
     parent, subject = passed(baseline), passed(candidate)
     return sorted(case for case, ok in parent.items() if ok and subject.get(case) is False)
@@ -67,7 +70,7 @@ def compare_split(
     baseline: Sequence[RolloutRecord],
     *,
     confidence: float = 0.95,
-    pass_threshold: float = 0.8,
+    pass_threshold: float | Mapping[str, float] = 0.8,
 ) -> SplitResult:
     """一个划分的聚合：配对均值差、置信区间、胜率与新失败用例。"""
 

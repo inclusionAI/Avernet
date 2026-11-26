@@ -1,7 +1,7 @@
 """门禁（08 §4.4）：把最终判定转成 auto_promote / needs_review / not_promotable。
 
-切片二只做决策，不移动 `active`：revision 的完整性（全量 bot 快照）补齐之前，
-真正 apply 会把 bot 覆盖成不完整状态。
+本模块只做风险决策，不移动 `active`。人工晋升授权与显式 Apply 由独立控制面服务负责，
+不能把风险评审批准当作评测通过或交付完成。
 """
 
 from __future__ import annotations

@@ -138,6 +138,7 @@ CREATE TABLE `ac_genome_promotion` (
   `actor_id`         varchar(1100) NOT NULL,
   `actor_run_id`     varchar(64)   DEFAULT NULL COMMENT 'the evolution run, for strategy_run',
   `reason`           varchar(1024) NOT NULL,
+  `authorization` text DEFAULT NULL COMMENT 'immutable human authorization JSON; NULL for normal promotion',
   `status`           varchar(16)   NOT NULL COMMENT 'pending/applying/applied/applied_partial/apply_failed',
   `apply_id`         varchar(32)   DEFAULT NULL COMMENT 'the apply run delivering it, once started',
   `apply_detail`     varchar(1024) NOT NULL DEFAULT '' COMMENT 'one line on how the delivery went',

@@ -153,6 +153,7 @@ class OpenClawEngine(BaseEngine):
             Capability.WEB_SHELL_OPEN,
         },
         limited={
+            Capability.MODEL_COMPLETE: "Stateless text inference: configured HTTPS OpenAI-compatible API-key providers only",
             Capability.MCP_START: "通过 mcporter 命令启动",
             Capability.MCP_STOP: "通过 mcporter 命令停止",
         },

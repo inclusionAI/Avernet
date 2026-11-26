@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
-from agentclaw.community.core.content_store import canonical_tree_bytes
 from agentclaw.community.core.bot_genome.canonical import canonicalize
 from agentclaw.community.core.bot_genome.diff import diff_specs, unified_diff
 from agentclaw.community.core.bot_genome.spec_models import (
@@ -17,6 +15,8 @@ from agentclaw.community.core.bot_genome.spec_models import (
     ResourceEntry,
 )
 from agentclaw.community.core.bot_genome.text_edits import apply_unified_diff
+from agentclaw.community.core.content_store import canonical_tree_bytes
+
 from tests.community.core.bot_genome.example_blobs import (
     MEMORY_BOT,
     SUPPORT_BOT,
@@ -226,7 +226,10 @@ def test_human_only_genes_are_t3_and_overrides_raise() -> None:
         ("x\na", "y\na\n"),
         ("x\na\n", "y\na"),
         ("a\nb\nc\nd\ne\nf\ng\nh\ni\nj", "X\nb\nc\nd\ne\nf\ng\nh\ni\nj\n"),
-        ("a\x00<no newline>\nq\n", "a\x00<no newline>\nq"),  # a line may contain anything but a newline
+        (
+            "a\x00<no newline>\nq\n",
+            "a\x00<no newline>\nq",
+        ),  # a line may contain anything but a newline
     ],
 )
 def test_a_trailing_newline_flip_on_a_context_line_round_trips(before: str, after: str) -> None:
@@ -246,3 +249,40 @@ def test_a_skill_that_gains_a_file_beside_a_description_tweak_is_not_description
         canonical_tree_bytes([("SKILL.md", tweaked), ("scripts/check.py", check_py), ("evil.py", b"import os\n")])
     )
     assert _diff(a, b, blobs).risk_tier == "T2"
+
+
+def test_added_and_removed_local_skill_show_reviewable_member_diffs_without_changing_tier() -> (
+    None
+):
+    blobs = BlobDir()
+    a = spec_of(SUPPORT_BOT)
+    b = spec_of(SUPPORT_BOT)
+    skill = b.skills[0].model_copy(
+        update={
+            "name": "new-sample",
+            "digest": blobs.put(
+                canonical_tree_bytes(
+                    [
+                        (
+                            "SKILL.md",
+                            b"---\nname: new-sample\ndescription: Test.\n---\n# Reply check\n",
+                        ),
+                        ("assets/example.bin", b"\xff\xfe"),
+                    ]
+                )
+            ),
+        }
+    )
+    b.skills.append(skill)
+    added = _diff(a, b, blobs)
+    removed = _diff(b, a, blobs)
+    assert added.risk_tier == removed.risk_tier == "T2"
+    for diff, kind in ((added, "added"), (removed, "removed")):
+        assert [(c.gene, c.kind) for c in diff.changes] == [
+            ("skills/new-sample", kind),
+            ("skills/new-sample/SKILL.md", kind),
+            ("skills/new-sample/assets/example.bin", kind),
+        ]
+        assert diff.changes[0].diff is None and diff.changes[2].diff is None
+    assert "+# Reply check" in added.changes[1].diff
+    assert "-# Reply check" in removed.changes[1].diff

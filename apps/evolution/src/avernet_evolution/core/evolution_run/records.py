@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from avernet_genome.models import BotRef
+from avernet_genome.mutation_scope import FrozenMutationScope
 
 from .budget import BudgetUsage
 from .enums import EndReason, OperationKind, OperationStatus, RunStatus
@@ -64,6 +65,7 @@ class Run:
     summary: dict[str, Any] | None = None
     cancel_requested: bool = False
     auto_promote_ceiling: str | None = None  # legacy runs and explicit human review default to None
+    mutation_scope: FrozenMutationScope | None = None  # None is the legacy path-only contract
 
     @property
     def budget(self):

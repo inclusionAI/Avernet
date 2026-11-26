@@ -10,6 +10,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 
 from avernet_genome.models import BotRef
+from avernet_genome.mutation_scope import FrozenMutationScope
 
 from .records import Run
 
@@ -22,6 +23,8 @@ class DataScope:
     parent: str | None = None
     strategy: str | None = None
     genes: tuple[str, ...] = ()
+    mutation_scope: FrozenMutationScope | None = None
+    promotion_authorization_id: str | None = None  # control-only; never copied from Run/Worker data
 
 
 current_data_scope: ContextVar[DataScope | None] = ContextVar("evolution_data_scope", default=None)
@@ -46,4 +49,5 @@ def run_data_scope(run: Run) -> DataScope | None:
         parent=run.parent_revision,
         strategy=run.strategy_ref,
         genes=tuple(run.allowed_genes),
+        mutation_scope=run.mutation_scope,
     )

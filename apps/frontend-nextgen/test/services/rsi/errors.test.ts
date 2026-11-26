@@ -1,3 +1,4 @@
+import { RsiRequestKeyError } from '@/utils/rsiRequestKey';
 import { rsiErrorMessage } from '@/services/rsi/errors';
 
 test('503 explains the deployment gap without claiming an unknown submission failed', () => {
@@ -33,4 +34,18 @@ test('inaccessible Bot is distinguished from a missing Genome baseline', () => {
   });
   expect(rsiErrorMessage(error('evolution_app_not_granted'), 'fallback')).toContain('检查 evolution 应用');
   expect(rsiErrorMessage(error('no_genome_baseline'), 'fallback')).toContain('没有基因组基线');
+});
+
+test('Genome errors do not promise an idempotent retry or misattribute a Backend failure to Evolution', () => {
+  const { genomeErrorMessage } = require('@/services/rsi/errors');
+  const auth = genomeErrorMessage(Object.assign(new Error('private'), { status: 401 }), 'fallback');
+  expect(auth).toContain('401'); expect(auth).not.toContain('幂等');
+  expect(genomeErrorMessage(Object.assign(new Error('private'), { status: 503 }), 'Genome state unknown'))
+    .toBe('Genome state unknown');
+});
+
+
+test('only a typed pre-request failure is reported as unsent', () => {
+  expect(rsiErrorMessage(new RsiRequestKeyError(), 'unknown')).toContain('本次操作尚未发送');
+  expect(rsiErrorMessage(new TypeError('crypto.randomUUID is not a function'), 'unknown')).toBe('unknown');
 });

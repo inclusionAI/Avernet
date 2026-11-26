@@ -15,8 +15,14 @@ from agentclaw.community.core.bot_genome import contract
 from agentclaw.community.core.bot_genome.canonical import is_canonical_gene_path
 from agentclaw.community.core.bot_genome.errors import Reason
 from agentclaw.community.core.bot_genome.gene_paths import covers, op_gene_path, overlaps
-from agentclaw.community.core.bot_genome.patch_models import FileEdit, GenomePatch, PatchOp
+from agentclaw.community.core.bot_genome.patch_models import (
+    FileEdit,
+    GenomePatch,
+    PatchOp,
+    SkillUpdate,
+)
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy
+from avernet_genome.gene_paths import skill_path
 
 __all__ = [
     "EVIDENCE_OPTIONAL",
@@ -75,7 +81,11 @@ def _needs_evidence(op: PatchOp) -> bool:
 
 
 def policy_reasons(
-    ops: Iterable[PatchOp], policy: GenomePolicy, *, allowed_genes: Iterable[str] | None = None
+    ops: Iterable[PatchOp],
+    policy: GenomePolicy,
+    *,
+    allowed_genes: Iterable[str] | None = None,
+    member_updates: bool = False,
 ) -> list[Reason]:
     """Every op's gene path must be covered by ``mutable_genes``, overlap no pin, and, for a run, be in
     ``allowed_genes``.
@@ -84,17 +94,37 @@ def policy_reasons(
     allowed = None if allowed_genes is None else tuple(allowed_genes)
     reasons = []
     for index, op in enumerate(ops):
-        gene = op_gene_path(op)
-        location = f"ops[{index}]"
-        if not any(covers(rule, gene) for rule in mutable):
-            reasons.append(
-                Reason("gene_not_mutable", location, f"{gene!r} is not covered by the policy's mutable_genes")
-            )
-        pinned = [pin for pin in pins if overlaps(pin, gene)]
-        if pinned:
-            reasons.append(Reason("pinned_item", location, f"{gene!r} overlaps the pin {pinned[0]!r}"))
-        if allowed is not None and not any(covers(rule, gene) for rule in allowed):
-            reasons.append(Reason("gene_not_allowed", location, f"{gene!r} is not covered by the run's allowed_genes"))
+        genes = [op_gene_path(op)]
+        if member_updates and isinstance(op, SkillUpdate):
+            genes = [skill_path(op.name, diff.path) for diff in op.file_diffs or ()]
+            genes.extend(skill_path(op.name, name) for name in op.files or {})
+        for gene in genes:
+            location = f"ops[{index}]"
+            if not any(covers(rule, gene) for rule in mutable):
+                reasons.append(
+                    Reason(
+                        "gene_not_mutable",
+                        location,
+                        f"{gene!r} is not covered by the policy's mutable_genes",
+                    )
+                )
+            pinned = [pin for pin in pins if overlaps(pin, gene)]
+            if pinned:
+                reasons.append(
+                    Reason(
+                        "pinned_item",
+                        location,
+                        f"{gene!r} overlaps the pin {pinned[0]!r}",
+                    )
+                )
+            if allowed is not None and not any(covers(rule, gene) for rule in allowed):
+                reasons.append(
+                    Reason(
+                        "gene_not_allowed",
+                        location,
+                        f"{gene!r} is not covered by the run's allowed_genes",
+                    )
+                )
     return reasons
 
 

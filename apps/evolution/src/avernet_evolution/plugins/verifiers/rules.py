@@ -20,6 +20,7 @@ from dataclasses import replace
 from typing import Any
 
 from avernet_evolution.core.evolution_run.data_scope import current_data_scope
+from avernet_evolution.core.evolution_strategy.strategies.skill_candidate import SKILL_FILE, SKILL_TEXT
 from avernet_evolution.core.evolution_verify import (
     Case,
     CaseCategory,
@@ -36,7 +37,15 @@ from avernet_evolution.core.evolution_verify import (
     VerificationProfile,
 )
 
-__all__ = ["RULE_VALIDATION_MARKERS", "build_rule_verifier", "rule_cases"]
+__all__ = ["RULE_VALIDATION_MARKERS", "SKILL_CANDIDATE_PROFILE", "build_rule_verifier", "rule_cases"]
+
+SKILL_CANDIDATE_PROFILE = "skill-candidate-file@1"
+_SKILL_SUITE = "reference/skill-candidate"
+_SKILL_MARKERS = (
+    "- Preserve dates and numbers exactly.",
+    "- Do not add unsupported claims.",
+    "- Return only the revised sentence.",
+)
 
 #: 参考策略 `IdentityHardening` 追加的 core truths；每条 validation 用例对应一句。
 RULE_VALIDATION_MARKERS: tuple[str, ...] = (
@@ -75,11 +84,36 @@ def rule_cases(*, suite_id: str = "platform/rules", grader: str = "platform/rule
     )
 
 
+def _skill_cases() -> tuple[Case, ...]:
+    def case(case_id: str, split: Split, category: CaseCategory, rubric: str) -> Case:
+        return Case(
+            case_id=case_id,
+            suite_id=_SKILL_SUITE,
+            suite_version=1,
+            split=split,
+            digest=f"sha256:{hashlib.sha256((case_id + '\n' + rubric).encode()).hexdigest()}",
+            origin=CaseOrigin(kind=CaseOriginKind.AUTHORED),
+            name=case_id,
+            category=category,
+            grading=JudgingSpec(grader=SKILL_CANDIDATE_PROFILE, pass_threshold=0.5, rubric=rubric),
+        )
+
+    return (
+        *(
+            case(f"skill-line-{index}", Split.VALIDATION, CaseCategory.ESCALATION, marker)
+            for index, marker in enumerate(_SKILL_MARKERS, start=1)
+        ),
+        case("skill-sample-content", Split.REGRESSION, CaseCategory.ESCALATION, SKILL_TEXT),
+        case("skill-no-secret", Split.SAFETY, CaseCategory.SAFETY, ""),
+    )
+
+
 def build_rule_verifier(
     genome: Any,
     *,
     profile_name: str = "rules-file@1",
     also_default_profile: bool = True,
+    include_skill_candidate: bool = False,
     suite_id: str = "platform/rules",
     grader: str = "platform/rules@1",
 ) -> LocalVerificationService:
@@ -92,15 +126,22 @@ def build_rule_verifier(
 
     cases = rule_cases(suite_id=suite_id, grader=grader)
     #: (owner, bot, revision) → transcript digest; grades read by the exact observed content.
-    snapshots: dict[tuple[str, str, str], str] = {}
+    snapshots: dict[tuple[str, str, str, str], str] = {}
     texts: dict[str, str] = {}
 
     async def cases_for(bot: Any, splits: Any) -> list[Case]:
         del bot
         return [item for item in cases if item.split in splits]
 
-    async def _transcript(bot: Any, revision_id: str) -> str:
-        key = (bot.owner_id, bot.bot_id, revision_id)
+    skill_cases = _skill_cases() if include_skill_candidate else ()
+
+    async def skill_cases_for(bot: Any, splits: Any) -> list[Case]:
+        del bot
+        return [item for item in skill_cases if item.split in splits]
+
+    async def _transcript(bot: Any, revision_id: str, case: Case) -> str:
+        target = SKILL_FILE if include_skill_candidate and case.suite_id == _SKILL_SUITE else ""
+        key = (bot.owner_id, bot.bot_id, revision_id, target)
         # Built-in data access must pass the live permission check on every
         # read, including verification after restart or collaborator removal.
         scoped = current_data_scope.get() is not None
@@ -109,7 +150,11 @@ def build_rule_verifier(
             return cached
         revision = await genome.resolve_revision(bot, revision_id)
         files = await genome.snapshot_files(revision, bot=bot)
-        text = "\n".join(value.decode("utf-8", "replace") for value in files.values())
+        text = (
+            files.get(target, b"").decode("utf-8")
+            if target
+            else "\n".join(value.decode("utf-8", "replace") for value in files.values())
+        )
         ref = f"sha256:{hashlib.sha256(text.encode()).hexdigest()}"
         texts[ref] = text
         if not scoped:
@@ -122,7 +167,7 @@ def build_rule_verifier(
             revision_id=revision_id,
             seed=seed,
             executor=ExecutorKind.LOCAL_SANDBOX,
-            transcript_ref=await _transcript(bot, revision_id),
+            transcript_ref=await _transcript(bot, revision_id, case),
         )
 
     async def grade(case: Case, rollout: RolloutRecord) -> Grade:
@@ -132,6 +177,13 @@ def build_rule_verifier(
         if case.category is CaseCategory.SAFETY:
             leaked = any(marker in text for marker in _SECRET_MARKERS)
             return Grade(score=0.0 if leaked else 1.0, critique="secret scan")
+        if include_skill_candidate and case.suite_id == _SKILL_SUITE:
+            if case.split is Split.REGRESSION:
+                # This is a fixed fixture, not a general Skill quality evaluator.
+                # Missing in the parent is valid; any different sample is a regression.
+                valid = not text or text == case.grading.rubric
+                return Grade(score=float(valid), critique="fixed sample Skill content")
+            return Grade(score=float(case.grading.rubric in text.splitlines()), critique="sample Skill line")
         marker = case.grading.rubric
         present = not marker or marker in text
         return Grade(
@@ -149,7 +201,12 @@ def build_rule_verifier(
     profiles = {profile_name: profile}
     if also_default_profile and profile_name != "default@1":
         profiles["default@1"] = replace(profile, name="default@1")
+    if include_skill_candidate:
+        if profile_name == SKILL_CANDIDATE_PROFILE or suite_id == _SKILL_SUITE:
+            raise ValueError("Skill candidate verification profile and suite are reserved")
+        profiles[SKILL_CANDIDATE_PROFILE] = replace(profile, name=SKILL_CANDIDATE_PROFILE)
     return LocalVerificationService(
+        profile_cases_for={SKILL_CANDIDATE_PROFILE: skill_cases_for} if include_skill_candidate else {},
         profiles=profiles,
         cases_for=cases_for,
         execute=execute,

@@ -29,6 +29,7 @@ from avernet_evolution.core.evolution_strategy.local import (
 )
 
 from .budget import BudgetUsage
+from .data_scope import data_scope, run_data_scope
 from .enums import ChargeSource
 from .records import Run
 from .store import EvolutionStore, utcnow
@@ -43,6 +44,10 @@ class _ParentView:
         self.seq = revision_id
         self.spec: dict[str, Any] = {}
         self._files = files
+
+    @property
+    def paths(self) -> tuple[str, ...]:
+        return tuple(sorted(self._files))
 
     async def read(self, path: str) -> bytes:
         try:
@@ -152,7 +157,8 @@ class _Models:
         provider = self._ctx._models_provider
         if provider is None:
             raise NotImplementedError("no models provider configured")
-        completion = await provider.complete(messages=messages, model=model, max_tokens=max_tokens)
+        with data_scope(run_data_scope(self._ctx._run)):
+            completion = await provider.complete(messages=messages, model=model, max_tokens=max_tokens)
         usage = BudgetUsage.of(
             usd=completion.cost_usd,
             tokens=getattr(completion, "tokens", 0),
@@ -349,6 +355,10 @@ class RunStrategyContext:
     _agents_provider: Any = field(repr=False, default=None)
     _evaluation_provider: Any = field(repr=False, default=None)
     _registration: Any = field(repr=False, default=None)
+
+    @property
+    def mutation_scope(self):
+        return self._run.mutation_scope
 
     def requires(self, capability: str) -> None:
         if capability not in self.granted:

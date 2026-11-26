@@ -1,29 +1,26 @@
 /** RSI 07–09：验证判定、门禁决策与人工评审的展示和操作面。 */
+import { RsiManualPromotion } from '@/components/rsi/RsiManualPromotion';
+import { RevisionDiff } from '@/components/rsi/GenomeDiff';
 import { Badge, type BadgeTone } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { rsiErrorMessage } from '@/services/rsi/errors';
+import { createRsiRequestKey } from '@/utils/rsiRequestKey';
 import {
   approveRsiCandidate,
   getRsiCandidateReport,
   rejectRsiCandidate,
   type RsiCandidate,
   type RsiCandidateReport,
-  type RsiEvidence,
   type RsiReviewDecision,
 } from '@/services/rsi/service';
 import type { RsiScope } from '@/types/rsi';
 import { useState } from 'react';
+export { RsiEventTimeline } from '@/components/rsi/RsiEventTimeline';
 
-const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 const shortHash = (value: string) => {
   const hex = value.replace(/^sha256:/, '');
   return value.startsWith('sha256:') ? `sha256:${hex.slice(0, 12)}…` : value;
 };
-const timeOf = (iso: string) => {
-  const parsed = new Date(iso);
-  return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleTimeString();
-};
-
 export const verdictTone = (verdict: string): BadgeTone =>
   verdict === 'accept' ? 'success' : verdict === 'reject' ? 'error' : verdict === 'inconclusive' ? 'warning' : 'neutral';
 export const gateTone = (outcome: string): BadgeTone =>
@@ -31,47 +28,6 @@ export const gateTone = (outcome: string): BadgeTone =>
 const checkTone = (status: string): BadgeTone =>
   status === 'pass' ? 'success' : status === 'fail' ? 'error' : status === 'soft' ? 'warning' : 'neutral';
 
-const EVENT_KIND_LABEL: Record<string, string> = {
-  'verdict.finalized': '验证判定落定',
-  'gate.decided': '门禁决策',
-  'review.decided': '评审结论',
-  'candidate.persisted': '候选已记录',
-  'candidate.rejected': '候选被拒绝',
-  'ledger.submission.persisted': '实验台账已记录',
-};
-const eventTone = (kind: string): BadgeTone =>
-  kind === 'verdict.finalized' ? 'primary' : kind === 'gate.decided' ? 'purple' : kind === 'review.decided' ? 'success' : 'neutral';
-
-/** 执行证据时间线：结构化呈现，原始 JSON 折叠保留。 */
-export function RsiEventTimeline({ events }: { events: RsiEvidence['events'] }) {
-  if (!events.length) return <p className="text-xs text-muted-foreground">暂无证据事件。</p>;
-  return (
-    <div className="space-y-1">
-      <ol className="space-y-1">
-        {events.map((event) => (
-          <li key={event.id} className="rounded border border-input p-1.5 text-xs">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-muted-foreground">{timeOf(event.at)}</span>
-              <Badge tone={eventTone(event.kind)}>{EVENT_KIND_LABEL[event.kind] ?? event.kind}</Badge>
-              <span className="font-mono text-[11px] text-muted-foreground">{event.kind}</span>
-              <span className="ml-auto text-[11px] text-muted-foreground">{event.authority}</span>
-            </div>
-            {event.details !== null && event.details !== undefined && pretty(event.details) !== '{}' ? (
-              <details className="mt-1">
-                <summary className="cursor-pointer text-[11px] text-muted-foreground">详情</summary>
-                <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-1.5 text-[11px]">{pretty(event.details)}</pre>
-              </details>
-            ) : null}
-          </li>
-        ))}
-      </ol>
-      <details>
-        <summary className="cursor-pointer text-[11px] text-muted-foreground">原始 JSON</summary>
-        <pre className="mt-1 max-h-80 overflow-auto rounded bg-muted p-2 text-xs">{pretty(events)}</pre>
-      </details>
-    </div>
-  );
-}
 
 function SplitTable({ report }: { report: RsiCandidateReport }) {
   if (!report.splits.length) return <p className="text-xs text-muted-foreground">判定未落定，暂无分片数据。</p>;
@@ -135,7 +91,7 @@ function ReviewBlock({
     return (
       <div className="space-y-2">
         <p className="text-xs">
-          评审单 <Badge tone="warning">open</Badge>，批准只记录人工结论；apply 未启用，不会改动 Bot 或 active 基线。
+          评审单 <Badge tone="warning">open</Badge>，批准只记录风险评审，不改 Bot；实际晋升请使用独立的人工授权与 Apply。
         </p>
         <textarea
           className="w-full rounded-md border border-input bg-background p-2 text-xs"
@@ -192,7 +148,7 @@ export function RsiCandidateCard({
 
   const decide = (action: 'approve' | 'reject') =>
     act(async () => {
-      const key = keys[action] ?? crypto.randomUUID();
+      const key = keys[action] ?? createRsiRequestKey();
       setKeys((prev) => ({ ...prev, [action]: key }));
       const fn = action === 'approve' ? approveRsiCandidate : rejectRsiCandidate;
       const result = await fn(scope, candidate.candidate_id, key, reason.trim());
@@ -247,6 +203,11 @@ export function RsiCandidateCard({
               </ul>
             </div>
           ) : null}
+          <div className="space-y-2">
+            <h5 className="font-medium">实际版本 Diff（候选相对固定父版本）</h5>
+            <p className="text-muted-foreground">来自已记录快照，不是模型建议；展示差异不表示已通过验证或已 Apply。</p>
+            <RevisionDiff scope={scope} revision={report.revision_id} against={report.parent_revision_id} />
+          </div>
           {report.rationale ? <p className="break-all text-muted-foreground">策略说明：{report.rationale}</p> : null}
           <div>
             <h5 className="font-medium">
@@ -279,8 +240,9 @@ export function RsiCandidateCard({
               <p className="text-muted-foreground">判定落定后才会进行门禁决策。</p>
             )}
           </div>
+          <RsiManualPromotion scope={scope} report={report} />
           <div>
-            <h5 className="font-medium">评审（09）</h5>
+            <h5 className="font-medium">风险评审（09，仅记录）</h5>
             <ReviewBlock
               report={report}
               decision={decision}

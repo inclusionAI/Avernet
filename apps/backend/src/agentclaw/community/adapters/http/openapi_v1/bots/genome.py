@@ -11,9 +11,6 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Path, Query, Request, Response
-from fastapi.exceptions import RequestValidationError
-
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -32,7 +29,6 @@ from agentclaw.community.core.bot_genome.baseline import ensure_active_baseline
 from agentclaw.community.core.bot_genome.canonical import NotCanonicalizable, canonicalize, loads_strict
 from agentclaw.community.core.bot_genome.errors import LimitExceeded
 from agentclaw.community.core.bot_genome.limits import MAX_UPLOAD_BYTES
-from agentclaw.community.core.bot_genome.spec_models import GenomePolicy
 from agentclaw.community.core.bot_genome.models import (
     BotRef,
     GenomeRef,
@@ -46,7 +42,10 @@ from agentclaw.community.core.bot_genome.models import (
     RevisionStatus,
     RunScope,
 )
+from agentclaw.community.core.bot_genome.spec_models import GenomePolicy
 from agentclaw.community.di import Injected
+from fastapi import APIRouter, Depends, Path, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
 
 from .config_manifest_support import audit_actor, manifest_target
 from .schemas_genome import (
@@ -308,6 +307,7 @@ async def commit_genome_patch(
             strategy=body.run.strategy,
             allowed_genes=tuple(body.run.allowed_genes),
             step=body.run.step,
+            mutation_scope=body.run.mutation_scope,
         )
     actor = _actor(actor_id, caller, run=run)
     recorded = await registry.commit_patch(
@@ -475,7 +475,10 @@ async def set_genome_policy(
 
 
 @router.get(
-    "/refs", response_model=Envelope[GenomeRefsPayload], responses=USER_SCOPED_403, operation_id="list_bot_genome_refs"
+    "/refs",
+    response_model=Envelope[GenomeRefsPayload],
+    responses=USER_SCOPED_403,
+    operation_id="list_bot_genome_refs",
 )
 @envelope_errors
 async def list_genome_refs(

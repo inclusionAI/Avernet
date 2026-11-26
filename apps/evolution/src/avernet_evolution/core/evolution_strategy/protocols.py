@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
+from avernet_genome.mutation_scope import FrozenMutationScope
 from avernet_genome.patch_models import GenomePatch
 
 from avernet_evolution.core.evolution_strategy.models import (
@@ -26,6 +27,9 @@ class GenomeRevisionView(Protocol):
     seq: str
     spec: dict[str, Any]
 
+    @property
+    def paths(self) -> tuple[str, ...]: ...
+
     async def read(self, path: str) -> bytes: ...
     async def lineage(self, depth: int = 10) -> list[str]: ...
 
@@ -36,7 +40,7 @@ class Workspace(Protocol):
 
     async def read(self, path: str) -> bytes: ...
     async def write(self, path: str, content: bytes) -> None: ...
-    async def to_patch(self) -> GenomePatch: ...
+    async def to_patch(self, *, rationale: str, evidence: tuple[str, ...] = ()) -> GenomePatch: ...
 
 
 class WorkspaceFactory(Protocol):
@@ -105,6 +109,7 @@ class StrategyContext(Protocol):
     params: dict[str, Any]
     attempt: int
     granted: list[str]
+    mutation_scope: FrozenMutationScope | None
 
     parent: GenomeRevisionView
     workspace: WorkspaceFactory

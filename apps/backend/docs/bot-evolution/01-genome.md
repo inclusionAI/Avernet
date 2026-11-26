@@ -1447,7 +1447,7 @@ class GeneChangeKind(StrEnum):
 class GeneChange:
     gene: str                        # gene path (§2.1), e.g. "persona/SOUL.md"
     kind: GeneChangeKind
-    diff: str | None = None          # unified diff for modified text files; None otherwise
+    diff: str | None = None          # unified diff for modified text files or added/removed local Skill package members; None for unavailable text
 
 @dataclass(frozen=True)
 class GenomeDiff:
@@ -1473,6 +1473,7 @@ class RunScope:
     strategy: str                    # "<id>@<version>": recorded as the candidate's actor
     allowed_genes: list[str]         # what the run's binding lets it change
     step: str | None = None          # the strategy's own label for the step
+    mutation_scope: FrozenMutationScope | None = None  # optional update-only Run authorization
 
 class GenomeRegistryProtocol(Protocol):          # core/bot_genome/genome_registry_protocol.py
     # --- revisions -------------------------------------------------------
@@ -1978,3 +1979,18 @@ is [#3212](https://github.com/inclusionAI/Avernet/issues/3212).
 Related: DR-1 was accepted in RSI-01 ([ADR 0019](../../../../docs/adr/0019-bot-genome-is-the-unit-of-evolution.md)), unblocking RSI-02 (schema and patch
 format), RSI-03 (Registry in Backend), and RSI-04 (direct delivery of a
 compiled revision); see [work-items.md](work-items.md).
+
+## Optional update-only Run authorization
+
+`RunScope.mutation_scope` carries concrete canonical targets, retained pins and
+`operations: ["update"]`. It is optional Run metadata, not part of the hashed
+Genome spec or patch. Omission preserves historical path-only `allowed_genes`;
+a present empty scope grants nothing. Scoped Runs update existing Persona and
+local-origin Skill packages only, not SkillSet, Center/repo Skills or lifecycle
+add/remove. Registry independently validates base ownership and every changed
+Skill member before writes, in addition to normal policy/evidence/spec checks.
+
+Selectors, intersection, freezing and compatibility are owned by the
+[Evolution Run contract](../../../evolution/src/avernet_evolution/core/evolution_run/README.md#frozen-mutation-scope).
+The [control flow](../flows/bot-evolution-control.md) describes callback trust;
+this extension does not authorize Apply or change existing revision hashes.

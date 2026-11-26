@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from avernet_genome.models import BotRef
+from avernet_genome.mutation_scope import parse_scope, scope_json
 
 from avernet_evolution.core.evolution_strategy import ConformanceState, check_params
 
@@ -137,6 +138,10 @@ class BindingsService:
 
         # 8. params 通过注册记录的 params_schema
         registration = getattr(registered, "registration", None)
+        if binding.mutation_scope is not None and (
+            registration is None or registration.mutation_capability is None
+        ):
+            problems.append(f"{prefix}: mutation_scope requires a strategy mutation_capability")
         if registration is not None:
             problems.extend(
                 f"{prefix}: params {problem}" for problem in check_params(registration, binding.params)
@@ -182,7 +187,8 @@ def _binding_from_document(entry: dict[str, Any]) -> Binding:
         strategy=entry["strategy"],
         trigger=trigger,
         parent=entry.get("parent", "active"),
-        allowed_genes=list(entry["allowed_genes"]),
+        allowed_genes=list(entry.get("allowed_genes", [])),
+        mutation_scope=parse_scope(entry["mutation_scope"]) if "mutation_scope" in entry else None,
         verification_profile=entry["verification_profile"],
         budget=Budget(
             max_usd=budget["max_usd"],
@@ -209,6 +215,11 @@ def _binding_document(binding: Binding) -> dict[str, Any]:
         "trigger": trigger,
         "parent": binding.parent,
         "allowed_genes": list(binding.allowed_genes),
+        **(
+            {"mutation_scope": scope_json(binding.mutation_scope)}
+            if binding.mutation_scope is not None
+            else {}
+        ),
         "verification_profile": binding.verification_profile,
         "budget": {
             "max_usd": binding.budget.max_usd,

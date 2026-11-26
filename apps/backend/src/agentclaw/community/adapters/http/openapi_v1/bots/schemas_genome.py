@@ -11,13 +11,13 @@ answer only.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Literal
-
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from agentclaw.community.core.bot_genome.patch_models import GenomePatch
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec
+from avernet_genome.mutation_scope import FrozenMutationScope
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -25,8 +25,8 @@ def _as_utc(value: datetime) -> datetime:
     value.
     """
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 #: A persisted UTC timestamp, serialized RFC 3339 with a `Z` suffix (the contract's `created_at` rule).
@@ -177,6 +177,9 @@ class RunScopePayload(BaseModel):
         description="The strategy the run executes, `<id>@<version>`, e.g. `clawevolve/bot-evolution@2.0.0`; recorded "
         "as the candidate's `created_by.actor`.",
     )
+    mutation_scope: FrozenMutationScope | None = Field(
+        default=None, description="Frozen Run update authorization; null retains the legacy allowed_genes contract."
+    )
     allowed_genes: list[str] = Field(
         description='Gene paths the run\'s binding lets it change, e.g. `["persona", "skills/refund-policy"]`; every '
         "op of the patch must fall under one of them, or the patch is refused with `gene_not_allowed`."
@@ -221,7 +224,8 @@ class GeneChangePayload(BaseModel):
         description="`added`, `removed`, or `modified` (the key stayed, the value changed)."
     )
     diff: str | None = Field(
-        default=None, description="A unified diff (hunks only) for a modified UTF-8 text file; null otherwise."
+        default=None,
+        description="A unified diff (hunks only) for a modified UTF-8 text file or an added/removed local Skill package member, within the size limit; null otherwise.",
     )
 
 
@@ -329,9 +333,13 @@ class PromotionPayload(BaseModel):
 class GenomeDriftPayload(BaseModel):
     """Observed hashes only; this operation records no revision and moves no ref."""
 
-    active: str
-    observed: str
+    active: str = Field(description="Active baseline revision digest used for the comparison.")
+    observed: str = Field(description="Digest of the Bot's currently observed state; differs when drift exists.")
 
 
 class GenomeDriftResult(BaseModel):
-    drift: GenomeDriftPayload | None
+    """Read-only drift observation, without recording content or moving refs."""
+
+    drift: GenomeDriftPayload | None = Field(
+        description="Observed mismatch, or null when no drift or no active baseline exists."
+    )

@@ -57,3 +57,29 @@ class ReviewBody(BaseModel):
         default=False,
         description="Promote even though `active` moved since verification; audited and not yet applied.",
     )
+
+
+class AuthorizePromotionBody(BaseModel):
+    """Authorize the exact reviewed snapshot, without changing its verdict."""
+
+    model_config = ConfigDict(extra="forbid")
+    revision_id: str = Field(
+        pattern=r"^sha256:[0-9a-f]{64}$", description="Exact candidate revision confirmed by the operator."
+    )
+    parent_revision_id: str = Field(
+        pattern=r"^sha256:[0-9a-f]{64}$", description="Frozen parent; stale override is forbidden."
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=1000,
+        description="Human authorization reason; no secrets or private conversation text.",
+    )
+
+
+class ApplyCandidateBody(BaseModel):
+    """Apply only an existing immutable human authorization."""
+
+    model_config = ConfigDict(extra="forbid")
+    authorization_id: str = Field(
+        pattern=r"^[0-9a-f]{32}$", description="Existing authorization for this exact candidate."
+    )

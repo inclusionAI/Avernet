@@ -11,12 +11,14 @@ from typing import Any, Protocol
 
 from avernet_genome.models import BotRef
 
+from .core.evolution_promote.manual_contract import ManualDelivery
 from .core.evolution_run.ports import (
     ExperienceQueryFactory,
     GenomePort,
     GovernancePort,
     KillSwitchesPort,
 )
+from .core.evolution_strategy.protocols import Models
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,10 @@ class Platform:
     worker_image: str = ""
     #: 07 验证服务（平台所有）。None 时作业协议对候选一律回答 pending。
     verification: Any = None
+    # None is supported for strategies that do not call models. Credentials stay
+    # inside the trusted platform provider, never in a Worker environment.
+    models: Models | None = None
+    manual_delivery: ManualDelivery | None = None  # absent deployments remain read-only for promotion
 
     async def close(self) -> None:
         """Override to release provider resources after runner shutdown."""

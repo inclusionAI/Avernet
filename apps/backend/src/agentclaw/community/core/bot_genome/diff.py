@@ -3,7 +3,8 @@
 ``diff_specs(a, b)`` reports every gene that ``b`` (the revision) has
 added, removed or modified against ``a``, with a unified diff for a modified
 UTF-8 text file (persona files, file resources, members of a directory or a
-local skill, memory items, an MCP override, the script). Its tier is the
+local skill, memory items, an MCP override, the script). Added and removed
+local Skill packages also expose member-level text diffs for review. Its tier is the
 tier a patch making the same changes would get (README §6.3): each change
 is judged as the op that makes it, the rewrite measure runs on each modified
 text file, and the policy's overrides lift by overlap. Changes no patch can
@@ -16,7 +17,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from agentclaw.community.core.content_store import decode_tree_bytes
 from agentclaw.community.core.bot_genome import contract, gene_paths
 from agentclaw.community.core.bot_genome.canonical import loads_strict
 from agentclaw.community.core.bot_genome.limits import MAX_DIFF_BYTES
@@ -31,6 +31,7 @@ from agentclaw.community.core.bot_genome.patch.risk import (
 )
 from agentclaw.community.core.bot_genome.spec_models import GenomePolicy, GenomeSpec, LocalSkill, MemorySpec
 from agentclaw.community.core.bot_genome.text_edits import description_only
+from agentclaw.community.core.content_store import decode_tree_bytes
 
 __all__ = ["diff_specs", "unified_diff"]
 
@@ -56,7 +57,9 @@ class _Differ:
         return text if len(text.encode("utf-8")) <= MAX_DIFF_BYTES else None
 
     def _json_diff(self, before: Any, after: Any) -> str:
-        dump = lambda value: json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"  # noqa: E731
+        dump = lambda value: (
+            json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+        )
         return unified_diff(dump(before), dump(after))
 
     def _file(self, gene: str, before: bytes, after: bytes) -> None:
@@ -109,9 +112,13 @@ class _Differ:
             if name not in old:
                 self.changes.append(GeneChange(gene, ChangeKind.ADDED))
                 self.touched.append(OpTouch("skill.add", gene))
+                if isinstance(new[name], LocalSkill):
+                    self._skill_package_members(name, new[name], ChangeKind.ADDED)
             elif name not in new:
                 self.changes.append(GeneChange(gene, ChangeKind.REMOVED))
                 self.touched.append(OpTouch("skill.remove", gene))
+                if isinstance(old[name], LocalSkill):
+                    self._skill_package_members(name, old[name], ChangeKind.REMOVED)
             elif old[name] != new[name]:
                 self.changes.append(GeneChange(gene, ChangeKind.MODIFIED))
                 before, after = old[name], new[name]
@@ -128,6 +135,22 @@ class _Differ:
                 else:
                     self.files[gene] = FileChange(None, None, text=False)  # a change of kind: a replacement
                     self.touched.append(OpTouch("skill.update", gene, (gene,)))
+
+    def _skill_package_members(
+        self, name: str, skill: LocalSkill, kind: ChangeKind
+    ) -> None:
+        members = decode_tree_bytes(self.content.read(skill.digest)) or []
+        for path, content in sorted(members):
+            before, after = (
+                (b"", content) if kind == ChangeKind.ADDED else (content, b"")
+            )
+            self.changes.append(
+                GeneChange(
+                    gene_paths.skill_path(name, path),
+                    kind,
+                    self._text_diff(before, after),
+                )
+            )
 
     def resources(self) -> None:
         old = {gene_paths.resource_path(e.path): e for e in self.a.resources}

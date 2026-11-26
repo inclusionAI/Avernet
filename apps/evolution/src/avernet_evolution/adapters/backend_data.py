@@ -4,13 +4,21 @@ Use a separate derived key and JWT purpose from Backend control receipts and
 Gateway principals. Neither browser nor worker credentials are accepted.
 """
 
+import hashlib
 import hmac
 import time
 
 import jwt
+from avernet_genome.canonical import canonicalize
+from avernet_genome.mutation_scope import FrozenMutationScope
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..core.evolution_run.data_scope import DataScope
+
+
+def mutation_scope_digest(scope: FrozenMutationScope | None) -> str | None:
+    return None if scope is None else hashlib.sha256(canonicalize(scope.model_dump(mode="json"))).hexdigest()
+
 
 PREFIX = "/api/internal/evolution-data/v1/bots"
 HEADER = "X-Avernet-Evolution-Data"
@@ -28,10 +36,12 @@ class DataProof(BaseModel):
     owner_id: str = Field(min_length=1)
     user_id: str = Field(min_length=1)
     request_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    promotion_authorization_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
     run: str | None = None
     parent: str | None = None
     strategy: str | None = None
     genes: list[str] = Field(default_factory=list)
+    mutation_scope_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 def _data_key(key: str) -> bytes:
@@ -48,10 +58,12 @@ def issue_data_proof(key: str, tenant: str, scope: DataScope, request_hash: str)
         owner_id=scope.bot.owner_id,
         user_id=scope.user_id,
         request_hash=request_hash,
+        promotion_authorization_id=scope.promotion_authorization_id,
         run=scope.run_id,
         parent=scope.parent,
         strategy=scope.strategy,
         genes=list(scope.genes),
+        mutation_scope_digest=mutation_scope_digest(scope.mutation_scope),
     )
     now = int(time.time())
     return jwt.encode(

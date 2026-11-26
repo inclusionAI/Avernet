@@ -116,3 +116,45 @@ def test_strategy_needs_experience() -> None:
     ctx = build_context(parent=StaticRevision(id="sha256:" + "a" * 64, seq="r1"), granted=["candidates@1"])
     with pytest.raises(CapabilityNotGranted):
         run_once(_strategy(), ctx)
+
+
+@pytest.mark.asyncio
+async def test_skill_candidate_only_adds_sample_with_session_evidence() -> None:
+    from avernet_evolution.core.evolution_strategy.strategies.skill_candidate import (
+        SKILL_NAME,
+        SKILL_TEXT,
+        SkillCandidateSmoke,
+    )
+
+    ctx = _ctx(_strategy())
+    result = await SkillCandidateSmoke().run(ctx)
+    assert result.metrics == {"candidates_submitted": 1.0}
+    [candidate] = ctx.candidates.seen
+    [op] = candidate.patch.ops
+    assert (op.op, op.name, op.files) == ("skill.add", SKILL_NAME, {"SKILL.md": SKILL_TEXT})
+    assert candidate.patch.base == ctx.parent.id
+    assert candidate.evidence == ("episode:ep_91", "episode:ep_92")
+    assert set(ctx.parent.files) == {"persona/SOUL.md"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["no-evidence", "cancelled", "already-exists"])
+async def test_skill_candidate_skips_ineligible_parent(reason) -> None:
+    from avernet_evolution.core.evolution_strategy.strategies.skill_candidate import (
+        SKILL_FILE,
+        SkillCandidateSmoke,
+    )
+
+    class EmptyExperience:
+        async def sessions(self, **kwargs):
+            return [{"episode_id": "invalid id"}, {"not_an_episode": True}]
+
+    ctx = _ctx(_strategy())
+    if reason == "no-evidence":
+        ctx.experience = EmptyExperience()
+    elif reason == "cancelled":
+        ctx.cancelled.cancel()
+    else:
+        ctx.parent.files[SKILL_FILE] = "existing skill"
+    await SkillCandidateSmoke().run(ctx)
+    assert not ctx.candidates.seen

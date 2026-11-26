@@ -24,6 +24,7 @@ from agentclaw.community.core.bot_genome.models import (
 )
 from agentclaw.community.core.bot_genome.patch_models import GenomePatch
 from agentclaw.community.core.content_store import decode_tree_bytes
+from avernet_genome.mutation_scope import FrozenMutationScope
 
 __all__ = ["RegistryGenomePort"]
 
@@ -84,6 +85,8 @@ class RegistryGenomePort:
         strategy_ref: str,
         allowed_genes: tuple[str, ...],
         created_by: str,
+        *,
+        mutation_scope: FrozenMutationScope | None = None,
     ) -> str:
         recorded = await self.registry.commit_patch(
             bot,
@@ -93,7 +96,10 @@ class RegistryGenomePort:
             ),
             status=RevisionStatus.CANDIDATE,
             run=RunScope(
-                run_id=run_id, strategy=strategy_ref, allowed_genes=allowed_genes
+                run_id=run_id,
+                strategy=strategy_ref,
+                allowed_genes=allowed_genes,
+                mutation_scope=mutation_scope,
             ),
         )
         return recorded.revision.revision.id

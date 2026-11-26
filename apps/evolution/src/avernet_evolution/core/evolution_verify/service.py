@@ -85,6 +85,18 @@ class LocalVerificationService:
     evaluation_scope: Callable[[CandidateRef], AbstractContextManager[None]] = field(
         default=lambda _: nullcontext(), repr=False
     )
+    #: Profiles can select a distinct case source; legacy/train callers use cases_for.
+    profile_cases_for: dict[str, Callable[[Any, Sequence[Split]], Awaitable[Sequence[Case]]]] = field(
+        default_factory=dict, kw_only=True
+    )
+    #: Platform-only composition can inspect the candidate to select applicable suites.
+    candidate_cases_for: Callable[[CandidateRef, Sequence[Split]], Awaitable[Sequence[Case]]] | None = field(
+        default=None, kw_only=True, repr=False
+    )
+    #: Select candidate-aware suites by frozen profile without changing legacy suites.
+    profile_candidate_cases_for: dict[
+        str, Callable[[CandidateRef, Sequence[Split]], Awaitable[Sequence[Case]]]
+    ] = field(default_factory=dict, kw_only=True, repr=False)
     _verdicts: dict[tuple[str, str, str], Verdict] = field(default_factory=dict, repr=False)
     _delivering: set[tuple[str, str, str]] = field(default_factory=set, repr=False)
     _evaluations: dict[str, Evaluation] = field(default_factory=dict, repr=False)
@@ -261,7 +273,13 @@ class LocalVerificationService:
 
     async def _evaluate(self, candidate: CandidateRef, profile: VerificationProfile) -> Verdict:
         bot = _bot(candidate)
-        cases = list(await self.cases_for(bot, profile.splits))
+        cases_for = self.profile_cases_for.get(profile.name, self.cases_for)
+        candidate_cases = self.profile_candidate_cases_for.get(profile.name, self.candidate_cases_for)
+        cases = list(
+            await candidate_cases(candidate, profile.splits)
+            if candidate_cases is not None
+            else await cases_for(bot, profile.splits)
+        )
         sanity_case = next((c for c in cases if c.category.value == "sanity"), None)
         sanity = SanityResult.NOT_RUN
         if sanity_case is not None:
@@ -330,13 +348,12 @@ class LocalVerificationService:
                         deltas.append(records[0].grade.score - records[1].grade.score)
                 if deltas:
                     seed_means.append(mean(deltas))
-            threshold = split_cases[0].grading.pass_threshold
             splits[split] = compare_split(
                 split,
                 subject_records,
                 baseline_records,
                 confidence=profile.validation.confidence,
-                pass_threshold=threshold,
+                pass_threshold={case.case_id: case.grading.pass_threshold for case in split_cases},
             )
             per_seed[split] = seed_means
             all_rollouts.extend(subject_records)

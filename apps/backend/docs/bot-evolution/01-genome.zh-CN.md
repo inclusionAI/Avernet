@@ -1289,7 +1289,7 @@ class GeneChangeKind(StrEnum):
 class GeneChange:
     gene: str                        # gene path (§2.1), e.g. "persona/SOUL.md"
     kind: GeneChangeKind
-    diff: str | None = None          # unified diff for modified text files; None otherwise
+    diff: str | None = None          # unified diff for modified text files or added/removed local Skill package members; None for unavailable text
 
 @dataclass(frozen=True)
 class GenomeDiff:
@@ -1315,6 +1315,7 @@ class RunScope:
     strategy: str                    # "<id>@<version>"：记录为候选的 actor
     allowed_genes: list[str]         # 运行的绑定允许其改动的基因
     step: str | None = None          # 策略自己给该步骤的标签
+    mutation_scope: FrozenMutationScope | None = None  # 可选的仅更新授权
 
 class GenomeRegistryProtocol(Protocol):          # core/bot_genome/genome_registry_protocol.py
     # --- revisions -------------------------------------------------------
@@ -1798,3 +1799,15 @@ Bot 的 verify 或 online 阶段见 [#3212](https://github.com/inclusionAI/Avern
 RSI-02（模式与补丁格式）、RSI-03（Backend 中的注册表）和 RSI-04
 （已编译修订版的直接投递）因此可以开始；见
 [work-items.zh-CN.md](work-items.zh-CN.md)。
+
+## 可选的仅更新 Run 授权
+
+`RunScope.mutation_scope` 携带具体 canonical targets、pins 和 `operations: ["update"]`，
+属于 Run 元数据，不进入 Genome spec 或 patch 内容哈希。缺省保留历史 `allowed_genes`
+路径授权；存在但为空时不授权任何操作。新范围仅支持已有 Persona 和 Local Skill 包更新，
+不授权 SkillSet、Center/repo Skill、整个包新增/删除。Registry 在写入前根据 base spec
+独立核对归属，并逐一校验 Skill 变更成员；原 policy、证据、schema 和结果校验不变。
+
+选择器、交集解析、冻结和兼容语义见
+[Evolution Run 契约](../../../evolution/src/avernet_evolution/core/evolution_run/README.md#frozen-mutation-scope)，
+回调信任见[控制链路](../flows/bot-evolution-control.md)。此扩展不授权 Apply，也不改变历史修订哈希。

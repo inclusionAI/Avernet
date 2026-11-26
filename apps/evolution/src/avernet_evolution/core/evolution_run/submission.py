@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from avernet_genome.mutation_scope import mutation_problems
+
 from avernet_evolution.core.evolution_strategy import Candidate, check_allowed_genes
 
 from .budget import BudgetUsage
@@ -39,7 +41,11 @@ async def submit_candidate(
     patch = candidate.patch
     if patch.base != run.parent_revision:
         raise ValueError(f"patch base {patch.base!r} is not the run's parent revision")
-    problems = check_allowed_genes(patch, list(run.allowed_genes), [])
+    problems = (
+        mutation_problems(patch, run.mutation_scope)
+        if run.mutation_scope is not None
+        else check_allowed_genes(patch, list(run.allowed_genes), [])
+    )
     if problems:
         raise ValueError("; ".join(problems))
 
@@ -74,6 +80,7 @@ async def submit_candidate(
                     run.strategy_ref,
                     tuple(run.allowed_genes),
                     run.strategy_ref,
+                    **({"mutation_scope": run.mutation_scope} if run.mutation_scope is not None else {}),
                 )
         except CandidateRejected as exc:
             store.events.append(

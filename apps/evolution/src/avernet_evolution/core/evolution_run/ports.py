@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Any, Protocol
 
 from avernet_genome.models import BotRef, GenomeRevision
+from avernet_genome.mutation_scope import FrozenMutationScope
 from avernet_genome.patch_models import GenomePatch
 
 from avernet_evolution.core.evolution_strategy.protocols import ExperienceQuery
@@ -87,6 +88,8 @@ class GenomePort(Protocol):
         strategy_ref: str,
         allowed_genes: tuple[str, ...],
         created_by: str,
+        *,
+        mutation_scope: FrozenMutationScope | None = None,
     ) -> str:
         """Record a candidate and its run ref; return its revision id.
 

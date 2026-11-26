@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS evolution_run (
   binding_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, body_hash TEXT NOT NULL,
   strategy TEXT NOT NULL, strategy_version TEXT NOT NULL,
   parent_ref TEXT NOT NULL, parent_revision TEXT NOT NULL,
-  allowed_genes TEXT NOT NULL, verification_profile TEXT NOT NULL, auto_promote_ceiling TEXT,
+  mutation_scope TEXT, allowed_genes TEXT NOT NULL, verification_profile TEXT NOT NULL, auto_promote_ceiling TEXT,
   params TEXT NOT NULL, budget_max TEXT NOT NULL, granted TEXT NOT NULL,
   agent_definitions TEXT NOT NULL, status TEXT NOT NULL, attempt INTEGER NOT NULL,
   max_attempts INTEGER NOT NULL, budget_used TEXT NOT NULL, candidate_count INTEGER NOT NULL,
@@ -116,6 +116,10 @@ class EvolutionStore(JobStoreMixin):
             row["name"] for row in self.conn.execute("PRAGMA table_info(evolution_run)")
         }:
             self.conn.execute("ALTER TABLE evolution_run ADD COLUMN auto_promote_ceiling TEXT")
+        if "mutation_scope" not in {
+            row["name"] for row in self.conn.execute("PRAGMA table_info(evolution_run)")
+        }:
+            self.conn.execute("ALTER TABLE evolution_run ADD COLUMN mutation_scope TEXT")
         self.conn.commit()
 
     def put_artifact(self, run_id: str, name: str, content: bytes) -> str:
@@ -142,6 +146,14 @@ class EvolutionStore(JobStoreMixin):
         if row is None:
             raise KeyError("artifact not found in this run")
         return bytes(row["content"])
+
+    def latest_named_artifact(self, run_id: str, name: str) -> bytes | None:
+        """Read a fixed-name, Run-scoped artifact without exposing unrelated blobs."""
+        row = self.conn.execute(
+            "SELECT content FROM evolution_artifact WHERE run_id=? AND name=? ORDER BY rowid DESC LIMIT 1",
+            (run_id, name),
+        ).fetchone()
+        return bytes(row["content"]) if row is not None else None
 
     # -- bindings -------------------------------------------------------
     def get_bindings(self, owner_id: str, bot_id: str) -> dict[str, Any] | None:
@@ -280,6 +292,9 @@ class EvolutionStore(JobStoreMixin):
             "parent_ref": run.parent_ref,
             "parent_revision": run.parent_revision,
             "allowed_genes": _json(run.allowed_genes),
+            "mutation_scope": run.mutation_scope.model_dump_json()
+            if run.mutation_scope is not None
+            else None,
             "verification_profile": run.verification_profile,
             "auto_promote_ceiling": run.auto_promote_ceiling,
             "params": _json(run.params),

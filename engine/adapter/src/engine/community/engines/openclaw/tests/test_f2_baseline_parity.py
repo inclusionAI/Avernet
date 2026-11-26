@@ -9,7 +9,7 @@ adapters in Group E. The impl-identity assertions in `test_engine.py`
 cutover; the assertions here must NOT.
 
 Captured invariants (reviewer S2):
-  (a) `_CAPABILITIES` byte-identical (full supported + limited golden snapshot)
+  (a) `_CAPABILITIES` exact snapshot, including explicitly added contracts
   (b) `token_pool` property still exposed (the OpenClaw WS server consumes it)
   (c) `on_connection_open` / `on_connection_close` forward to the pool refcount
   (d) `initialize()` / `shutdown()` ordering: monitor stop → pool shutdown → close
@@ -113,7 +113,11 @@ GOLDEN_SUPPORTED = frozenset({
     Capability.CLI_ACLI_LIST,
     Capability.CLI_ACLI_OPERATION_GET,
 })
-GOLDEN_LIMITED = frozenset({Capability.MCP_START, Capability.MCP_STOP})
+GOLDEN_LIMITED = frozenset({
+    Capability.MCP_START,
+    Capability.MCP_STOP,
+    Capability.MODEL_COMPLETE,  # additive stateless inference, restricted provider/auth contract
+})
 
 
 def _fake_client() -> MagicMock:
@@ -131,6 +135,9 @@ class TestCapabilityParity:
     def test_limited_capabilities_match_golden(self):
         caps = OpenClawEngine(client=_fake_client()).capabilities
         assert set(caps.limited.keys()) == set(GOLDEN_LIMITED)
+        assert caps.limited[Capability.MODEL_COMPLETE] == (
+            "Stateless text inference: configured HTTPS OpenAI-compatible API-key providers only"
+        )
 
     def test_capabilities_available_as_class_attribute(self):
         # The capabilities-inspection path (manager.py:210-219) reads

@@ -48,3 +48,9 @@ Design: [`apps/backend/docs/bot-evolution/08-promotion.md`](../../apps/backend/d
   dominant failure mode reported for self-improving agents.
 - **Always require human approval.** Rejected as default: blocks low-risk
   memory updates; kept available as an owner policy.
+
+## Amendment (2026-11-26)
+
+[ADR 0027](0027-human-promotion-authorization-is-not-evaluation.md) adds an explicit human testing/intervention authorization
+without changing the verification verdict. Normal automated promotion remains
+evaluation-gated; platform-only delivery and safety/provenance constraints remain.

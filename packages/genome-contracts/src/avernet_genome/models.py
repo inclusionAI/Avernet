@@ -17,6 +17,7 @@ from typing import Any, NamedTuple, Protocol
 
 from avernet_genome.errors import LimitExceeded
 from avernet_genome.limits import MAX_AUDIT_ACTOR_CHARS
+from avernet_genome.mutation_scope import FrozenMutationScope
 from avernet_genome.spec_models import GenomePolicy, GenomeSpec
 
 
@@ -180,6 +181,7 @@ class RunScope:
     strategy: str
     allowed_genes: tuple[str, ...]
     step: str | None = None
+    mutation_scope: FrozenMutationScope | None = None
 
     def __post_init__(self) -> None:
         """Runs on construction: refuses a run id or strategy the contract cannot record, for in-process callers too."""

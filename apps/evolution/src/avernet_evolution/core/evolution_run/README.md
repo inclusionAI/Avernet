@@ -117,3 +117,59 @@ regressions. Preserve wire compatibility; do not restore Backend-owned execution
 - Backend retains only platform integration and explicitly invoked acceptance
   assembly. See its [acceptance guide](../../../../../backend/src/agentclaw/community/di/evolution_acceptance/README.md) for Registry/Engine smoke
   prerequisites and limitations, not production startup instructions.
+
+## Frozen mutation scope
+
+A new strategy version may declare `mutation_capability`. Its Binding can select
+Persona-only, Local Skill-only, or both with `mutation_scope`, for example:
+
+```json
+{
+  "mutation_scope": [
+    {"gene": "persona", "include": ["SOUL.md"], "operations": ["update"]},
+    {"gene": "skills", "origin": "local", "include": "all", "exclude": ["frozen-helper"], "operations": ["update"]}
+  ]
+}
+```
+
+This is a fragment of a Binding; strategy, profile, trigger and budget are still
+required. Selectors contain raw entry names, not gene paths. Whole-package
+add/remove, SkillSet, Center and repo Skill mutation are not in this contract.
+`allowed_genes` may be omitted for a scope-only Binding; when nonempty it remains
+an additional ceiling. A legacy registration without a capability cannot accept
+an explicit selector. Its old Bindings/Runs continue using path-only checks.
+
+At submit, resolve capability ∩ Binding ∩ existing parent inventory/ownership ∩
+parent/platform mutable policy, minus pins. An empty result refuses before budget
+reservation or enqueue. The Run stores concrete `targets`, `pins` and
+`operations: ["update"]`; its `allowed_genes` mirrors those targets. Later Binding
+edits, new Skills or a moved `active` cannot expand that Run. API/claim/worker and
+restart preserve the same frozen scope. SQLite startup adds a nullable column;
+old rows remain `NULL` and are neither reinterpreted nor backfilled.
+
+Submission checks every op/member before candidate reservation. Registry repeats
+policy/scope/parent ownership checks before writing any content or revision.
+The built-in Backend callback binds the frozen scope digest into its signed
+DataProof; dropping or replacing it refuses with 403, even if the request body
+itself has a valid fingerprint. This adds no Worker-held signing credentials.
+
+Evidence: `tests/unit/evolution_run/test_mutation_scope.py`,
+`tests/unit/test_mutation_scope.py`, `tests/test_scope_identity.py`, and the
+[Backend cross-service matrix](../../../../../backend/tests/community/adapters/http/openapi_v1/test_evolution_mutation_scope.py).
+These use synthetic data and do not establish deployment or Bot quality.
+
+## Protected final strategy output
+
+`GET /openapi/v1/bots/{bot_id}/evolution/runs/{run_id}/strategy-output` returns
+`{output: StrategyOutput | null}` with schema owned by
+[`evolution_strategy/output.py`](../evolution_strategy/output.py). It shares Bot
+read authorization with Run details and verifies Run ownership **before** reading
+artifact bytes. It reads only the fixed output name for the Run's current attempt,
+never arbitrary artifacts or a previous attempt's proposal. No DB migration or
+new Worker capability is needed; existing durable `artifacts.put` is used.
+
+The response is `Cache-Control: no-store`. Output content is separate from
+metadata-only `/evidence` and event logs. `null` means no output was persisted for
+this attempt, **not** that the model chose not to change anything. Historical
+outputs cannot be reconstructed. Corrupt stored output produces a safe read error,
+not an empty proposal or an error echoing the private artifact.

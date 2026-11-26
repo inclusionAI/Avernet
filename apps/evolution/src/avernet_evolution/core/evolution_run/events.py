@@ -48,6 +48,7 @@ _KINDS = frozenset(
         "verdict.finalized",
         "gate.decided",
         "review.decided",
+        "promotion.human_authorized",
     }
 )
 _FIELDS = frozenset(
@@ -69,6 +70,9 @@ _FIELDS = frozenset(
         "risk_tier",
         "review_status",
         "actor",
+        "authorization_id",
+        "basis",
+        "parent",
     }
 )
 
@@ -112,6 +116,12 @@ class ExecutionEvents:
                 details=details,
                 once=once,
             )
+
+    def write_human_authorized(self, *, run_id: str, details: dict[str, Any]) -> None:
+        """Authorization and audit append are one caller-owned transaction."""
+        if not self.conn.in_transaction:
+            raise RuntimeError("human authorization evidence requires a transaction")
+        self._write("promotion.human_authorized", run_id=run_id, details=details)
 
     def write_review_decided(self, run_id: str, candidate_id: str, *, status: str, actor: str) -> None:
         """Append approval evidence in the caller's state/idempotency transaction."""

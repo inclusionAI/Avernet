@@ -1,3 +1,5 @@
+import { RsiRequestKeyError } from '@/utils/rsiRequestKey';
+
 /** Keep deployment failures explicit without exposing raw upstream messages. */
 /** 后端信封里的领域错误码（无则 null），供调用方按码分流。 */
 export function rsiDomainCode(error: unknown): string | null {
@@ -7,11 +9,12 @@ export function rsiDomainCode(error: unknown): string | null {
 }
 
 export function rsiErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof RsiRequestKeyError) return error.message;
   if (error instanceof Error && error.message.startsWith('当前会话未解析出用户身份')) {
     return error.message;
   }
   if (error instanceof Error && 'status' in error && error.status === 401) {
-    return '登录凭证未被服务接受（401）。请在当前浏览器、当前站点重新登录后核对任务记录；重试会复用原幂等键。';
+    return '登录凭证未被服务接受（401）。请在当前浏览器、当前站点重新登录后核对操作记录。';
   }
   if (error instanceof Error && 'status' in error && error.status === 403) {
     return '当前身份无权操作此 Bot（403）。请核对登录账号与 Bot 归属，不要反复提交。';
@@ -41,5 +44,14 @@ export function rsiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && 'status' in error && error.status === 503) {
     return '独立 Evolution 服务未接通或暂不可用，当前无法确认任务状态。请检查部署与路由，不要重复创建任务。';
   }
+  return fallback;
+}
+
+/** Genome is served by Backend; a 503 must not be mislabeled as an Evolution outage. */
+export function genomeErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && (
+    error.message.startsWith('当前会话未解析出用户身份') ||
+    ('status' in error && (error.status === 401 || error.status === 403))
+  )) return rsiErrorMessage(error, fallback);
   return fallback;
 }

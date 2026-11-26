@@ -21,8 +21,8 @@ provides:
   - An in-process test platform (StaticRevision, LocalWorkspace, build_context, run_once)
 consumes:
   - avernet_genome.patch_models   # GenomePatch, ops, text edits
-  - avernet_genome.gene_paths  # canonical op targets and policy path matching
-  - avernet_genome.diff           # unified_diff for to_patch()
+  - avernet_genome.gene_paths  # canonical targets, matching, and Skill member path decoding
+  - avernet_genome.text_diff   # unified_diff for to_patch()
   - avernet_genome.canonical      # canonicalize + sha256_digest (candidate id)
 internal_dependencies: []
 ```
@@ -100,6 +100,16 @@ resource operations and `memory.set_mode`). Allowed paths must cover the target;
 pins reject overlap in either direction, so removing a parent cannot bypass a
 pinned descendant. Registry still enforces the authoritative policy at commit.
 
+For local Skill text edits, the workspace uses canonical paths such as
+`skills/quality-check/notes/how%20to.md`. `to_patch()` uses the corresponding
+package-relative path `notes/how to.md` in the `skill.update` file diff. The
+operation targets the package. Legacy path-only Bindings therefore grant
+`skills/quality-check`, not `skills/quality-check/SKILL.md`. Scoped Runs instead
+validate every changed member and can retain a member-only policy grant such as
+`skills/quality-check/SKILL.md`. Changes are made against
+a Skill already present in the parent snapshot; materialising the workspace does
+not install or activate it. Include evidence when submitting a Skill patch.
+
 The in-memory registry (`InMemoryStrategyRegistry`) implements the §9 protocol:
 `register`/`get`/`list`/`check_engine`/`agent_definition`/`set_enabled`. Registration stores
 each agent definition by content digest, derives the engines, and—when a strategy factory
@@ -145,6 +155,7 @@ skipped; the overall status is `pending` until every check can run.
 | Strategy | What it does | Doc |
 |---|---|---|
 | `IdentityHardening` | Reads recent sessions, appends uncovered core truths to an identity file, submits a candidate | New in this package |
+| `BehaviorRefinement` | One bounded model proposal over existing authorized Markdown, with recent session evidence; Persona and Local Skill targets come from frozen scope | Opt-in, new version only |
 | `CorrectionFixer` | Diagnoses corrected episodes with one model call, adds train cases, runs its own agent to fix files, submits only when the train score improves | §11.1 |
 
 ## Current gaps against 03-strategy.zh-CN.md
@@ -164,3 +175,78 @@ skipped; the overall status is `pending` until every check can run.
 | `06-evolution-run` run service, job leases, budget accounting | implemented in sibling `evolution_run`; see app guide for deployment gaps |
 
 The independent runtime supplies a real `StrategyContext`; `build_context` remains a test fixture, not production readiness proof.
+
+## Opt-in generic refinement
+
+`strategies.BehaviorRefinement` uses `ctx.mutation_scope` and `ctx.parent.paths`.
+It reads only authorized existing `.md` files, requests at most 20 recent sessions
+and one model completion, and submits at most one patch. No evidence, no changes
+or cancellation produces no candidate. Oversized context, malformed JSON,
+duplicate or unauthorized paths refuse; scripts, new files and lifecycle changes
+are never proposed. Recent sessions are evidence, **not attested executions of
+the parent revision**. The prompt preserves Skill identity/front matter and
+unrelated constraints; Registry still checks resulting package metadata.
+
+Register a **new** immutable version in the deployment Platform (do not replace
+an old registration/image or rewrite its Bindings):
+
+```python
+from avernet_evolution.core.evolution_strategy import registration_from_json
+
+record = registration_from_json(
+    {
+        "id": "reference/behavior-refinement",
+        "version": "1.0.0",
+        "runtime": {"kind": "job_worker", "image": digest_pinned_worker_image},
+        "needs": {"experience.sessions@1": {}, "models@1": {}},
+        "mutation_capability": [
+            {"gene": "persona", "include": "all", "operations": ["update"]},
+            {"gene": "skills", "origin": "local", "include": "all", "operations": ["update"]},
+        ],
+    }
+)
+await platform.registry.register(record, {})
+```
+
+`digest_pinned_worker_image` is the actual built image `…@sha256:<digest>`,
+not a mutable tag. Bake this mapping into that image:
+
+```text
+EVOLUTION_WORKER_STRATEGIES=reference/behavior-refinement@1.0.0=avernet_evolution.core.evolution_strategy.strategies:BehaviorRefinement
+```
+
+The three per-job environment variables remain unchanged; this mapping is image
+configuration, not a new runtime secret or sandbox injection. The deployment must
+also supply `Platform.models` (wired to both in-process and isolated Job calls),
+session export and independent
+[composed verification](../evolution_verify/README.md#gene-method-composition).
+Use a new manual Binding with `auto_promote_ceiling: null` and an explicit profile.
+Changing only its scope chooses Persona-only, Local Skill-only or both without
+changing strategy code. Nothing registers this strategy by default or enables
+Apply. Local fixtures and conformance do not establish real behavioral quality.
+
+### Final proposal observability
+
+The observable `BehaviorRefinement` implementation writes a display-only artifact
+`behavior-refinement-output-attempt-{attempt}.json` using `ctx.artifacts` before
+candidate submission. Deploy it as a **new immutable strategy version** (for example
+`1.0.3` after `1.0.2`) with a new pinned Worker image digest. Do not replace old
+version images, rewrite existing Bindings or rerun historical Runs automatically.
+
+Schema `1` (`output.py`) contains `attempt`, `outcome`, `reason`, `rationale`,
+proposed `edits` (`path`, full replacement `content`, `changed`), final `raw_output`
+and `raw_output_truncated`. Raw final text is bounded to 64,000 characters;
+structured edits retain the proposal limits (20 files, 24,000 characters each).
+It does not separately record prompts, hidden reasoning or input session payloads;
+final model text may still echo sensitive input and must be treated accordingly. Recognizable
+credentials and contact details are conservatively redacted from display copies;
+this is not complete DLP. Candidate content is not rewritten by this redaction.
+
+Outcomes distinguish `not_called` (no authorized Markdown / session evidence),
+`no_changes` (`empty_edits` / `identical_content`), `changes_proposed`,
+`invalid_proposal`, and `cancelled`. Invalid model responses are saved before a
+safe validation failure. Artifact persistence failures propagate and prevent a
+successful return. `changes_proposed` is **not** a submission/verification verdict:
+workspace validation, cancellation or candidate submission can still fail. Read
+the Run summary/status and candidate list for the actual outcome. Model-call or
+input failures before a final response may have no output artifact.

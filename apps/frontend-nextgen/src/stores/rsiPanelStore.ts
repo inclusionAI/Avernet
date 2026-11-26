@@ -1,4 +1,5 @@
 /** Presentation only. A Bot's RSI runs are shared across its chat sessions. */
+import { createRsiRequestKey } from '@/utils/rsiRequestKey';
 import type { RsiScope } from '@/types/rsi';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
@@ -29,9 +30,7 @@ export const useRsiPanelStore = create<RsiPanelState>()(
         const scopeKey = rsiScopeKey(scope);
         const existing = get().attempts[scopeKey];
         if (existing) return existing;
-        // randomUUID is secure-context-only; HTTP Simulator still exposes getRandomValues.
-        const bytes = crypto.getRandomValues(new Uint8Array(16));
-        const key = `rsi-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+        const key = createRsiRequestKey();
         const attempt = { key, bindingId };
         set({ attempts: { ...get().attempts, [scopeKey]: attempt } });
         return attempt;

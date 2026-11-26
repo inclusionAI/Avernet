@@ -23,6 +23,8 @@ from agentclaw.community.utils.gateway_principal_config import (
 )
 from avernet_evolution.adapters.backend_access import HEADER, fingerprint, issue_grant
 from avernet_evolution.control_contract import (
+    ApplyCandidateBody,
+    AuthorizePromotionBody,
     BindingsBody,
     CancelBody,
     ReviewBody,
@@ -86,7 +88,10 @@ async def relay(request, bot, user_id, caller, config, clients) -> Response:
     suffix = route_path.removeprefix(BASE)
     tenant = get_current_avernet_tenant()
     operator = user_id if config.builtin_data_tenant == tenant and not caller.is_application else None
-    if operator is not None and request.method == "POST" and suffix == "/runs":
+    manual_action = suffix in {"/candidates/{candidate_id}:authorize-promotion", "/candidates/{candidate_id}:apply"}
+    if manual_action and operator is None:
+        raise BotAccessRefusedError("human built-in operator required")
+    if operator is not None and request.method == "POST" and (suffix == "/runs" or manual_action):
         level = await resolve_bot_permission(
             request, bot_id=bot.bot_id, caller_id=operator, owner_id=bot.entity_id,
             explicit=True, resolved_bot=bot,
@@ -241,6 +246,13 @@ async def candidates(owner_id: OwnerIdDep, run_id: RunId, reply: Reply):
     return await reply()
 
 
+@router.get("/runs/{run_id}/strategy-output", response_model=Envelope[dict[str, Any]])
+async def strategy_output(owner_id: OwnerIdDep, run_id: RunId, reply: Reply):
+    response = await reply()
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @router.get("/runs/{run_id}/evidence", response_model=Envelope[dict[str, Any]])
 async def evidence(
     owner_id: OwnerIdDep,
@@ -306,4 +318,16 @@ async def reject_candidate(
     payload: ReviewBody,
     reply: Reply,
 ):
+    return await reply()
+
+
+@router.post("/candidates/{candidate_id}:authorize-promotion", response_model=Envelope[dict[str, Any]])
+async def authorize_promotion(owner_id: OwnerIdDep, candidate_id: CandidateId,
+                              payload: AuthorizePromotionBody, reply: Reply):
+    return await reply()
+
+
+@router.post("/candidates/{candidate_id}:apply", response_model=Envelope[dict[str, Any]])
+async def apply_candidate(owner_id: OwnerIdDep, candidate_id: CandidateId,
+                          payload: ApplyCandidateBody, reply: Reply):
     return await reply()

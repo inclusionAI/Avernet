@@ -199,6 +199,15 @@ class GenomePromotionRepositoryProtocol(Protocol):
     def insert(self, row: GenomePromotionRow) -> GenomePromotionRow: ...
 
     @abstractmethod
+    def insert_once(self, row: GenomePromotionRow) -> tuple[GenomePromotionRow, bool]:
+        """Atomically claim a promotion ID. Return existing scoped row, False on replay.
+
+        A collision outside this Bot scope is an error, never an existing row.
+        Only the caller receiving True may start delivery.
+        """
+        ...
+
+    @abstractmethod
     def mark_applying(
         self, *, env: str, entity_id: str, bot_id: str, promotion_id: str, apply_id: str
     ) -> Optional[GenomePromotionRow]:

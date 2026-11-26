@@ -10,37 +10,69 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from avernet_evolution.adapters.backend_access import fingerprint
-from avernet_evolution.adapters.backend_data import HEADER, PREFIX, DataProof, verify_data_proof
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from fastapi.exceptions import RequestValidationError
-from fastapi.routing import APIRoute
-
+from agentclaw.community.api.bot_genome_promotion_service import (
+    GenomePromotionServiceProtocol,
+    ManualPromotionAuthorization,
+)
 from agentclaw.community.api.bot_genome_registry_service import GenomeRegistryProtocol
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_genome.canonical import canonicalize, loads_strict
 from agentclaw.community.core.bot_genome.errors import LimitExceeded
-from agentclaw.community.core.bot_genome.models import BotRef, Provenance, ProvenanceKind, RevisionStatus, RunScope
-from agentclaw.community.core.bot_management.addressing import BotAddressResolver, ResolvedBotContext
+from agentclaw.community.core.bot_genome.models import (
+    BotRef,
+    Provenance,
+    ProvenanceKind,
+    RevisionStatus,
+    RunScope,
+)
+from agentclaw.community.core.bot_management.addressing import (
+    BotAddressResolver,
+    ResolvedBotContext,
+)
 from agentclaw.community.core.bot_management.owner_handoff.contracts import HandoffError
-from agentclaw.community.core.bot_management.owner_handoff.guard import assert_bot_mutable
+from agentclaw.community.core.bot_management.owner_handoff.guard import (
+    assert_bot_mutable,
+)
+from agentclaw.community.core.engine_runtime.errors import EngineUpstreamError
 from agentclaw.community.core.engine_runtime.models import BotFacts
 from agentclaw.community.core.engine_runtime.session_key import SessionKeyCodecRegistry
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.di import Injected
 from agentclaw.community.di.evolution_control_config import EvolutionControlConfig
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
-from agentclaw.community.utils.gateway_principal_config import get_principal_verifier_config
+from agentclaw.community.utils.gateway_principal_config import (
+    get_principal_verifier_config,
+)
+from avernet_evolution.adapters.backend_access import fingerprint
+from avernet_evolution.adapters.backend_data import (
+    HEADER,
+    PREFIX,
+    DataProof,
+    mutation_scope_digest,
+    verify_data_proof,
+)
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 
 from .bot_access import resolve_bot_permission
 from .bots import genome
-from .bots.schemas_genome import GenomeDriftPayload, GenomeDriftResult, RecordPatchRequest
+from .bots.schemas_genome import (
+    GenomeDriftPayload,
+    GenomeDriftResult,
+    RecordPatchRequest,
+)
 from .contracts import BotIdPath, PageParams
 from .engine_runtime.enums import RuntimeStage
 from .engine_runtime.gating import resolve_operable_bot
-from .engine_runtime.sessions.router import SessionIdPath, list_operator_messages, list_operator_sessions
+from .engine_runtime.sessions.router import (
+    SessionIdPath,
+    list_operator_messages,
+    list_operator_sessions,
+)
 from .responses import envelope, mapped_error_response, unmapped_error_response
+from .schemas_evolution_models import CompletionRequest, CompletionResult
 
 # The signed JSON callback is bounded before parsing (also for chunked requests).
 _MAX_BODY = 5 * 1024 * 1024
@@ -147,6 +179,30 @@ _Stage = Literal["draft", "online"]
 _FirstPage = Annotated[int, Query(ge=1, le=1)]
 
 
+_Promotions = Annotated[GenomePromotionServiceProtocol, Injected(GenomePromotionServiceProtocol)]
+
+
+@router.get("/genome/manual-promotions/{authorization_id}")
+async def manual_promotion(authorization_id: str, request: Request, access: _Authorized, promotions: _Promotions):
+    if access.proof.promotion_authorization_id != authorization_id:
+        raise _refused()
+    return envelope(genome._promotion(promotions.get_promotion(access.bot, authorization_id)), request)
+
+
+@router.post("/genome/manual-promotions")
+async def manual_promotion_apply(request: Request, access: _Authorized, promotions: _Promotions):
+    access.require_run()
+    try:
+        auth = ManualPromotionAuthorization.model_validate(loads_strict(access.body.decode("utf-8")))
+    except (ValueError, TypeError, RecursionError):
+        raise HTTPException(422, "Invalid manual authorization") from None
+    proof = access.proof
+    if (auth.id, auth.user_id, auth.run_id, auth.parent_revision_id, auth.strategy) != (
+            proof.promotion_authorization_id, proof.user_id, proof.run, proof.parent, proof.strategy):
+        raise _refused()
+    return envelope(genome._promotion(await promotions.promote_manual(access.bot, auth)), request)
+
+
 @router.get("/genome/drift")
 async def drift(request: Request, access: _Authorized, registry: _Registry):
     observed = await registry.drift(access.bot)
@@ -166,7 +222,9 @@ async def content(digest: genome.DigestPath, access: _Authorized, registry: _Reg
 
 
 @router.post("/genome/revisions", status_code=201)
-async def record_candidate(request: Request, response: Response, access: _Authorized, registry: _Registry):
+async def record_candidate(
+    request: Request, response: Response, access: _Authorized, registry: _Registry
+):
     access.require_run()
     proof = access.proof
     try:
@@ -182,17 +240,26 @@ async def record_candidate(request: Request, response: Response, access: _Author
         != (proof.run, proof.strategy, proof.genes, proof.parent)
     ):
         raise _refused()
-    run = RunScope(proposed.run_id, proposed.strategy, tuple(proposed.allowed_genes))
+    if mutation_scope_digest(proposed.mutation_scope) != proof.mutation_scope_digest:
+        raise HTTPException(
+            status_code=403, detail="candidate mutation scope differs from frozen Run"
+        )
+    run = RunScope(
+        proposed.run_id,
+        proposed.strategy,
+        tuple(proposed.allowed_genes),
+        mutation_scope=proposed.mutation_scope,
+    )
     principal = Provenance(ProvenanceKind.STRATEGY_RUN, run.strategy, run_id=run.run_id, principal=proof.user_id)
     recorded = await registry.commit_patch(access.bot, body.patch, created_by=principal, status=RevisionStatus.CANDIDATE, run=run)
     return envelope(genome.recorded_payload(recorded, response), request)
 
 
-async def _runtime(access: _Access, relay: EngineRuntimeRelayProtocol, stage: str) -> BotFacts:
+async def _runtime(access: _Access, relay: EngineRuntimeRelayProtocol, stage: str, *, surface: str = "sessions") -> BotFacts:
     access.require_run()
     facts = await resolve_operable_bot(
         relay, access.address.bot_id, caller_id=access.proof.user_id, owner_id=access.address.entity_id,
-        stage=stage, surface="sessions",
+        stage=stage, surface=surface,
     )
     if facts.bot_id != access.address.bot_id or facts.owner_id != access.address.current_owner_id:
         raise _refused()
@@ -229,3 +296,28 @@ async def messages(
         request, relay, codecs, access.address.bot_id, access.address.entity_id, facts, RuntimeStage(stage),
         session_id, PageParams(page, page_size),
     )
+
+
+@router.post("/models:complete")
+async def complete_model(
+    request: Request, access: _Authorized, relay: _Relay, stage: _Stage = "draft",
+):
+    # POST authorization requires a live ADMIN operator; require a persisted
+    # Run too. URLs, headers, keys, session IDs and tools are not accepted.
+    facts = await _runtime(access, relay, stage, surface="models")
+    try:
+        body = CompletionRequest.model_validate(loads_strict(access.body.decode("utf-8")))
+    except (ValueError, TypeError, RecursionError):
+        raise HTTPException(422, "Invalid Evolution model request") from None
+    result = await relay.call(
+        bot_id=access.address.bot_id, owner_id=access.address.entity_id, facts=facts,
+        stage=stage, method="POST", path="/api/engine/models:complete",
+        body=body.model_dump(), timeout=200,
+    )
+    try:
+        completion = CompletionResult.model_validate(result.data)
+        if body.model is not None and completion.model != body.model:
+            raise ValueError("model mismatch")
+    except ValueError:
+        raise EngineUpstreamError("invalid engine model completion response") from None
+    return envelope(completion, request)

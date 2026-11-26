@@ -9,6 +9,8 @@ import hashlib
 import json
 from dataclasses import asdict
 
+from avernet_genome.mutation_scope import scope_json
+
 
 def _encode(value):
     if isinstance(value, bytes):
@@ -26,8 +28,13 @@ async def validate_identities(store, platform, signing_key: bytes, *, control_sc
         registration = record.registration
         ref = f"{registration.id}@{registration.version}"
         refs.add(ref)
+        registration_json = asdict(registration)
+        # Preserve the exact pre-scope identity for old registered versions.
+        registration_json.pop("mutation_capability")
+        if registration.mutation_capability is not None:
+            registration_json["mutation_capability"] = scope_json(registration.mutation_capability)
         material = {
-            "registration": asdict(registration),
+            "registration": registration_json,
             "definitions": [asdict(item) for item in record.definitions],
             "worker_image": (
                 registration.runtime.image

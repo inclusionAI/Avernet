@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from avernet_genome.models import BotRef
+from avernet_genome.mutation_scope import FrozenMutationScope, resolve_scope
 
 from avernet_evolution.core.evolution_strategy import DEFAULT_CATALOG
 
@@ -123,12 +124,27 @@ class RunService:
             return run.id
 
         parent = await self.genome.resolve_revision(bot, binding.parent)
+        scope = None
+        if registered.registration.mutation_capability is not None:
+            platform_policy = await self.bindings.governance.policy(bot)
+            scope = resolve_scope(
+                parent.spec,
+                parent.policy,
+                registered.registration.mutation_capability,
+                binding.mutation_scope,
+                tuple(binding.allowed_genes),
+                platform_mutable=tuple(platform_policy.mutable_genes),
+                platform_pins=tuple(platform_policy.pins),
+            )
+            if not scope.targets:
+                raise BindingCheckFailed(["mutation_scope resolves to no authorized existing targets"])
         run = self._build_run(
             bot,
             binding,
             run_id,
             idempotency_key,
             trigger,
+            mutation_scope=scope,
             parent_revision=parent.revision.id,
             params=_merged_params(binding, params),
             budget=_effective_budget(binding, budget),
@@ -161,6 +177,7 @@ class RunService:
         params: dict,
         budget: Budget,
         registered: Any,
+        mutation_scope: FrozenMutationScope | None = None,
         status: RunStatus = RunStatus.QUEUED,
         end_reason: EndReason | None = None,
         ended_at: datetime | None = None,
@@ -180,7 +197,10 @@ class RunService:
             strategy_version=binding.strategy_version,
             parent_ref=binding.parent,
             parent_revision=parent_revision,
-            allowed_genes=list(binding.allowed_genes),
+            allowed_genes=list(mutation_scope.targets)
+            if mutation_scope is not None
+            else list(binding.allowed_genes),
+            mutation_scope=mutation_scope,
             verification_profile=binding.verification_profile,
             auto_promote_ceiling=(
                 binding.auto_promote_ceiling.name if binding.auto_promote_ceiling is not None else None

@@ -561,6 +561,16 @@ class GenomePromotionRepository(GenomePromotionRepositoryProtocol):
             session.refresh(orm)
             return orm.to_record()
 
+    def insert_once(self, row: GenomePromotionRow) -> tuple[GenomePromotionRow, bool]:
+        try:
+            return self.insert(row), True
+        except IntegrityError:
+            previous = self.get(env=row.env, entity_id=row.entity_id, bot_id=row.bot_id,
+                                promotion_id=row.promotion_id)
+            if previous is None:
+                raise
+            return previous, False
+
     def mark_applying(
         self, *, env: str, entity_id: str, bot_id: str, promotion_id: str, apply_id: str
     ) -> Optional[GenomePromotionRow]:

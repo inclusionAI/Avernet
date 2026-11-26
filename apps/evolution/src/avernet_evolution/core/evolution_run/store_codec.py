@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from avernet_genome.models import BotRef
+from avernet_genome.mutation_scope import FrozenMutationScope
 
 from .budget import BudgetUsage
 from .enums import EndReason, OperationKind, OperationStatus, RunStatus
@@ -89,6 +90,9 @@ def _run_from_row(row: sqlite3.Row) -> Run:
         parent_ref=row["parent_ref"],
         parent_revision=row["parent_revision"],
         allowed_genes=_load(row["allowed_genes"]),
+        mutation_scope=FrozenMutationScope.model_validate_json(row["mutation_scope"])
+        if row["mutation_scope"] is not None
+        else None,
         verification_profile=row["verification_profile"],
         auto_promote_ceiling=row["auto_promote_ceiling"],
         params=_load(row["params"]),

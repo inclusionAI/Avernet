@@ -79,7 +79,7 @@ class PlatformBotStateReader(BotStateReader):
         capabilities: BotCapabilityStateReaderProtocol,
         skill_factory: SkillServiceFactoryProtocol,
         resource_services: ResourceServiceFactoryProtocol,
-        resource_files: "ResourceFileService",
+        resource_files: ResourceFileService,
         activation: DirectActivationServiceProtocol,
         mcp_config: MCPConfigServiceProtocol,
         scripts: BotStartupScriptServiceProtocol,
@@ -123,23 +123,38 @@ class PlatformBotStateReader(BotStateReader):
         supplied, _codes = self._activation.set_supplied_capabilities(
             bot_id=bot.bot_id, owner_id=bot.owner_id, actor_id=bot.owner_id
         )
-        for asset in self._capabilities.active_skill_assets(bot_id=bot.bot_id, owner_id=bot.owner_id):
+        for asset in self._capabilities.active_skill_assets(
+            bot_id=bot.bot_id, owner_id=bot.owner_id
+        ):
             if asset.name in supplied:
                 continue  # a skill set's, not the bot's own: outside the revision as it is outside an apply
             locator = str(asset.git_path or "")
             if locator.startswith(LOCAL_PREFIX):
-                _, storage = self._skill_factory.local_skill_package_storage_for_locator(
-                    entity_id=bot.entity_id,
-                    owner_id=bot.owner_id,
-                    bot_id=bot.bot_id,
-                    engine_type=bot.engine_type,
-                    entity_type=bot.entity_type,
-                    is_desktop=bot.bot_type == "desktop",
-                    is_teclaw=self._is_teclaw(bot.engine_type),
-                    locator=locator,
-                    skill_name=asset.name,
-                )
-                files = await storage.read_package_files()
+                try:
+                    storage = (
+                        self._skill_factory.local_skill_package_storage_for_locator(
+                            entity_id=bot.entity_id,
+                            owner_id=bot.owner_id,
+                            bot_id=bot.bot_id,
+                            engine_type=bot.engine_type,
+                            entity_type=bot.entity_type,
+                            is_desktop=bot.bot_type == "desktop",
+                            is_teclaw=self._is_teclaw(bot.engine_type),
+                            locator=locator[len(LOCAL_PREFIX) :],
+                            skill_name=asset.name,
+                        )
+                    )
+                    files = await storage.read_package_files()
+                except (ValueError, OSError) as exc:
+                    raise CaptureRefused(
+                        [
+                            Reason(
+                                "skill_package",
+                                f"skills/{asset.name}",
+                                "Local Skill package cannot be read",
+                            )
+                        ]
+                    ) from exc
                 captured.append(
                     CapturedSkill(
                         asset.name, SkillOrigin.LOCAL, files=tuple(CapturedFile(path, data) for path, data in files)

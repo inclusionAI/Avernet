@@ -1,14 +1,15 @@
+import { GenomeBaselinePanel } from '@/components/rsi/GenomeBaselinePanel';
+import { RsiReviewQueue, RsiRunList } from '@/components/rsi/RsiRunNavigation';
+import { RsiRunDetails } from '@/components/rsi/RsiRunDetails';
 import { Button } from '@/components/ui/Button';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { rsiDomainCode, rsiErrorMessage } from '@/services/rsi/errors';
 import {
-  cancelRsiRun,
   getRsiBindings,
-  initializeGenomeBaseline,
   getRsiCandidates,
   getRsiEvidence,
   getRsiReviewQueue,
-  isRsiTerminal,
+  initializeGenomeBaseline,
   listRsiRuns,
   listRsiStrategies,
   putRsiBindings,
@@ -20,20 +21,12 @@ import {
   type RsiRun,
   type RsiStrategy,
 } from '@/services/rsi/service';
-import { RsiCandidateCard, RsiEventTimeline } from '@/components/rsi/RsiReview';
 import { rsiScopeKey, useRsiPanelStore, type RsiScope } from '@/stores/rsiPanelStore';
 import { X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const field = 'w-full rounded-md border border-input bg-background p-2 text-sm';
 const pretty = (value: unknown) => JSON.stringify(value, null, 2);
-
-export function RsiPanel({ scope, enabled }: { scope?: RsiScope; enabled: boolean }) {
-  const opened = useRsiPanelStore((state) => state.scope);
-  if (!enabled || !scope || !opened || rsiScopeKey(scope) !== rsiScopeKey(opened)) return null;
-  // Key prevents late reads and drafts from a different Bot leaking into this one.
-  return <RsiPanelBody key={rsiScopeKey(scope)} scope={opened} />;
-}
 
 function RsiPanelBody({ scope }: { scope: RsiScope }) {
   const wide = useMediaQuery('(min-width: 1280px)');
@@ -192,6 +185,7 @@ function RsiPanelBody({ scope }: { scope: RsiScope }) {
           </p>
         ) : null}
         {baselineNote ? <p className="text-xs text-muted-foreground">{baselineNote}</p> : null}
+        <GenomeBaselinePanel scope={scope} />
         <section className="space-y-2" aria-label="RSI配置">
           <h3 className="font-medium">策略与绑定</h3>
           <p className="text-xs text-muted-foreground">
@@ -242,7 +236,7 @@ function RsiPanelBody({ scope }: { scope: RsiScope }) {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            示例须按策略修改 allowed_genes、params 和预算；保存使用 ETag，冲突时不会覆盖别人的修改。
+            示例默认仅允许 persona，不是本地 Skill 的现成配置。修改 Skill 时须按注册能力配置 allowed_genes / mutation_scope、params 和预算；保存使用 ETag，冲突时不会覆盖别人的修改。
           </p>
           <label className="block text-sm" htmlFor="rsi-binding">
             运行绑定
@@ -271,92 +265,23 @@ function RsiPanelBody({ scope }: { scope: RsiScope }) {
             </p>
           ) : null}
         </section>
-        {reviewQueue && reviewQueue.total > 0 ? (
-          <section className="space-y-2" aria-label="RSI评审队列">
-            <h3 className="font-medium">待评审（{reviewQueue.total}）</h3>
-            {reviewQueue.items.map((item) => (
-              <Button
-                key={`${item.run_id}:${item.candidate_id}`}
-                variant="outline"
-                onClick={() => setRunId(item.run_id)}
-                className="h-auto w-full flex-col items-start gap-0 whitespace-normal rounded-md p-2 text-left text-xs"
-              >
-                <span className="block font-mono">
-                  {item.candidate_id.slice(0, 19)}… · {item.risk_tier}
-                </span>
-                <span className="text-muted-foreground">
-                  {item.strategy}@{item.strategy_version} · Run {item.run_id}
-                </span>
-              </Button>
-            ))}
-            <p className="text-xs text-muted-foreground">选中对应运行后展开候选报告即可审批。</p>
-          </section>
-        ) : null}
+        <RsiReviewQueue queue={reviewQueue} onSelect={setRunId} />
         <section className="space-y-2" aria-label="RSI运行记录">
           <h3 className="font-medium">
             最近运行（{runs.length}/{total}）
           </h3>
-          {runs.map((run) => (
-            <Button
-              key={run.id}
-              variant="outline"
-              onClick={() => setRunId(run.id)}
-              className={`h-auto w-full flex-col items-start gap-0 whitespace-normal rounded-md p-2 text-left text-xs ${
-                run.id === runId ? 'border-primary bg-primary/10' : 'border-input'
-              }`}
-            >
-              <span className="block">
-                {run.id} · {run.status} · attempt {run.attempt}
-              </span>
-              <span className="text-muted-foreground">
-                {run.binding_id} · candidate {run.candidate_count}
-              </span>
-            </Button>
-          ))}
-          {selected ? (
-            <>
-              <p className="break-all text-xs text-muted-foreground">
-                parent：{selected.parent_revision}
-                <br />
-                结束原因：{selected.end_reason ?? '—'}
-              </p>
-              {!isRsiTerminal(selected.status) ? (
-                <Button
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() =>
-                    void act(async () => {
-                      await cancelRsiRun(scope, selected.id);
-                    })
-                  }
-                >
-                  取消运行
-                </Button>
-              ) : null}
-              <h4 className="text-sm font-medium">执行证据（最多500条，保留 authority 来源）</h4>
-              <RsiEventTimeline events={evidence?.events ?? []} />
-              <details>
-                <summary className="cursor-pointer text-xs text-muted-foreground">Job / Worker / Lease</summary>
-                <pre className="mt-1 overflow-x-auto rounded bg-muted p-2 text-xs">{pretty(evidence?.jobs ?? [])}</pre>
-              </details>
-              <h4 className="text-sm font-medium">候选版本（pending 不等于通过）</h4>
-              {(candidates ?? []).length ? (
-                (candidates ?? []).map((candidate) => (
-                  <RsiCandidateCard
-                    key={candidate.candidate_id}
-                    scope={scope}
-                    candidate={candidate}
-                    act={act}
-                    busy={busy}
-                  />
-                ))
-              ) : (
-                <p className="text-xs text-muted-foreground">该运行暂无候选。</p>
-              )}
-            </>
-          ) : null}
+          <RsiRunList runs={runs} selectedId={runId} onSelect={setRunId} />
+          {selected ? <RsiRunDetails scope={scope} selected={selected} evidence={evidence}
+            candidates={candidates} act={act} busy={busy} /> : null}
         </section>
       </div>
     </aside>
   );
+}
+
+export function RsiPanel({ scope, enabled }: { scope?: RsiScope; enabled: boolean }) {
+  const opened = useRsiPanelStore((state) => state.scope);
+  if (!enabled || !scope || !opened || rsiScopeKey(scope) !== rsiScopeKey(opened)) return null;
+  // Key prevents late reads and drafts from a different Bot leaking into this one.
+  return <RsiPanelBody key={rsiScopeKey(scope)} scope={opened} />;
 }

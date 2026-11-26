@@ -11,6 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from avernet_genome.mutation_scope import FrozenMutationScope
+
 from avernet_evolution.core.evolution_run.errors import CandidateRejected
 from avernet_evolution.core.evolution_strategy import (
     Budget,
@@ -241,6 +243,9 @@ class Worker:
                 parent=parent,
                 run_id=grant["run_id"],
                 params=grant.get("params") or {},
+                mutation_scope=FrozenMutationScope.model_validate(grant["mutation_scope"])
+                if grant.get("mutation_scope") is not None
+                else None,
                 attempt=grant.get("attempt", 1),
                 granted=grant.get("granted") or [],
                 budget=Budget(

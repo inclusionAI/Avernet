@@ -665,3 +665,109 @@ Backend 四个旧 core 目录共44个模块别名、220行。别名指向 canoni
   Gateway回归首次使用系统Python缺PyYAML，换已有Backend虚拟环境重跑通过；未安装依赖。
 - 新增Python文件Ruff/format、shell语法、两个overlay的YAML解析、diff空白检查通过。
   没有运行镜像构建、nginx实际启动或全仓CI；runtime entrypoint仍需部署验证。
+
+
+## 补充：2026-11-26 人工晋升授权收口与新 Bot 冷启动 Review
+
+本节记录当前工作树的源码、隔离测试和推送准备，不替代上文的历史证据。
+本轮未新建或修改真实 Bot，未重新部署镜像，未提交、暂存或推送代码。
+工作树包含此前已积累的模型回调、Mutation Scope、策略输出、基线管理和人工授权改动；
+以下回归覆盖这些相关改动，不将整份差异归为本轮新增。
+
+### 人工链路及本轮收口
+
+遵循 [ADR 0027](../../adr/0027-human-promotion-authorization-is-not-evaluation.md)：
+人工判断只形成不可变的 `basis=human` 授权，不把 `pending` / `inconclusive` 变成
+`accept`，也不修改原有门禁和评审记录。授权与 Apply 是两次明确操作，Worker 没有
+交付能力；原授权人须以当前 ADMIN 权限执行 Apply。
+
+- 补齐授权后才出现失败的回归：拒绝判定、新失败用例、已记录和实时静态检查失败、
+  incident、暂停、冻结及已终止评审不能在 Apply 时被绕过。
+- 补齐失败交付的原授权重放、新授权和并发重试断言；持久化的授权 ID 只认领一次
+  promotion，重放不能再启动 Apply，原评测结论保持不变。
+- 补齐 durable pending claim 在服务重建后的恢复测试。先恢复已有交付回执，再处理
+  成功交付本身改变的 parent / drift；不以重新生成 ID 掩盖未知结果。
+- 前端理由长度与 HTTP 的 1000 字符限制对齐，编辑理由后须重新确认。终态文案明确
+  为历史结算回执，不宣称它代表当前 active 或现场；部分交付也不宣称功能验收成功。
+- 增加旧库 nullable authorization 列的一次性增量 SQL 和 SQLite 数据保留测试。
+  新 schema 已包含该列，`create_all` 不能迁移旧表。MySQL / PostgreSQL 尚未执行验证。
+- 更新 Engine `MODEL_COMPLETE` 能力的精确 limited golden 及限制说明断言，保持原有
+  精确集合检查，没有扩大允许集或删除门禁。测试中的敏感内容注入开关改用明确的
+  语义名称，避免被提交扫描器误判为凭据赋值；没有增加扫描豁免。
+
+### 新 Bot Review 结论与前置条件
+
+隔离的真实签名 HTTP 流程从无基线的合成 Bot 初始化，覆盖候选、授权、Apply 和 refs
+结算，没有发现必须依赖某个历史 Bot ID、Skill 名或人工修改数据库的源码前置条件。
+**这不是新建真实 Bot 的端到端部署验收。** 操作顺序和完整通用 Binding 示例归属
+[新 Bot Local Skill 清单](../../../apps/backend/docs/flows/bot-evolution-control.md#fresh-bot-local-skill-checklist)。
+
+关键卡点：
+
+1. Backend、Evolution、Worker、前端和实际 Bot Engine 必须匹配；仅升级 Evolution
+   无法给旧 Engine 增加模型能力。内部回调、平台 `manual_delivery` 和旧库 schema 均须准备。
+2. Local Skill 先通过正常 API 上传并激活，捕获时确认为 local-origin 的直绑包。
+   SkillSet、Center 和 repository 来源不是这个编辑入口的对象。
+3. 尽量先完成 Bot 初始化，再建立初始基线。`BOOTSTRAP.md` 的合法运行时删除仍是
+   真实 drift，不增加特例忽略；后续上传、会话写入导致的变化须显式对齐基线。
+4. 页面默认 Binding 仅授权 Persona。Local Skill 须选择已注册、具备相应能力的新策略
+   版本，并显式填写 Skill 范围；能力、Binding、父版本 inventory / policy 取交集。
+5. 当前 Bot 模型复用受 [Engine 推理契约](../../../engine/adapter/docs/model-completion-api.md)
+   约束：HTTPS OpenAI-compatible、`openai-completions`、字面量 API key / Bearer。
+   JSON5、环境 secret 引用、OAuth、自定义 headers 等不能假定可用；手动模型配置走
+   部署/provider 接缝，不把端点或凭据塞入 Binding params。
+6. 没有足够会话、可编辑文件或模型认为不必改动时，无 candidate 是合法结果，不能为
+   验收强制生成。交付后仍须核对 live Skill、active / previous 和 drift，并独立做行为验证。
+
+### 已执行验证
+
+各组范围存在重叠，不能相加为独立测试总数。均为源码 / 夹具验证，不访问真实 Bot。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| Evolution 官方 `scripts/ci_test.sh --all`，清除 Backend PYTHONPATH | 451 passed、1 warning；Ruff 和 177 个文件 format 检查通过 |
+| Backend 人工授权、Genome 交付和增量迁移最终专项 | 32 passed、18 warnings |
+| Backend 最终 Genome / RSI 控制、模型、范围、策略输出、签名回调和完整应用端点合跑 | 579 passed、21 warnings；包含需回环的真实子进程集成及新增人工授权测试 |
+| Engine 模型 API、OpenClaw 推理、能力 golden 最终专项 | 42 passed、2 warnings |
+| Frontend `check:open-core` 和 `npm run ci` | 814 suites / 6816 tests passed；guardrails、类型、lint 和生产构建完成 |
+| 当前工作树 Python SAST 阻断规则，显式源文件清单 | 104 个文件通过；未把忽略的虚拟环境纳入扫描 |
+| 拟提交差异的凭据扫描、源文件行数和空白检查 | 无凭据命中；128 个源文件均不超过 1000 行；`git diff --check` 通过 |
+| 文档与 Binding 示例 | 变更知识页本地链接目标存在；新 Bot JSON 用生产 Binding codec 解析并通过 shape 检查，实际注册和 provider 校验仍须部署确认 |
+
+前端当前主机 Node 为 24.22.0，尚未以 CI / Docker 固定的 Node 22 复验。
+前端及较早 Evolution 外层记录脚本在实际校验完成后因 zsh 保留变量 `status` 返回错误；
+测试 / 构建结论来自完整日志，不把该包装脚本当作成功退出。最终 Evolution 已用正确的
+退出码包装重新执行并成功。第一次目录级 SAST 误把忽略的 `.venv` 扫入，产生第三方
+告警，不能作为变更范围结果；已改用上述显式源文件清单复验，没有修改门禁规则。
+
+### 全量门禁失败与未验证项
+
+没有绕过、放宽或删改这些门禁，也没有用专项通过冒充完整 CI 通过：
+
+- Backend 全量官方 CI 在 collection 阶段失败：未改动的 BBS 测试导入 schema 中不存在的
+  `HelpConfigRequest`，尚未进入完整测试 / 覆盖率判定。
+- Backend 架构 + HTTP gate 为 479 passed、1 failed：未改动且 HEAD 已有的
+  `openapi_v1/engine_runtime/sessions/router.py` 为 1003 行，命中大小门禁。
+- Engine 官方全量首跑为 4419 passed、2 failed、5 deselected。其中本改动新增能力的
+  golden 漏项已修复并由 42 项专项通过；另一个未改动的 ACLI restart 清理测试中，
+  遗留子进程 `wait(timeout=5)` 超时，单独复跑仍失败。完整 Engine CI 尚未重新通过。
+- 当前改动仍未提交，基于 Git committed range 的 changed-line coverage 不能作为本次
+  工作树覆盖率证明。Singlebox 共享栈覆盖率 / E2E、Node 22、真实新 Bot、镜像构建及
+  新旧数据库服务端部署验证未执行；后续提交后仍须运行正式 push gates。
+- durable claim 后、取得 Apply ID 前进程崩溃可能留下 pending。当前是安全地返回已有
+  claim、不重复写入；旧的五分钟 stale cleanup 依赖后续 promotion 成功启动，不是
+  自动 watchdog。恢复前须核对实际 Apply 和锁，不能删记录 / 清锁 / 换键强行执行。
+- 沙箱中运行公开或业务 benchmark 的真实自动评测接线仍未实现。人工入口只用于测试
+  和干预，不能作为自动化 RSI 完成或策略质量提升的证据。
+
+### 知识归属与推送准备
+
+可复用结论已更新到 [Evolution README](../../../apps/evolution/README.md)、
+[Bot 控制与交付流程](../../../apps/backend/docs/flows/bot-evolution-control.md)、
+[Genome schema / 交付边界](../../../apps/backend/src/agentclaw/community/core/bot_genome/README.md)。
+本节仅追加实际结果，不覆盖先前部署记录。
+
+推送准备采用显式文件清单，排除本地模型端点辅助脚本、凭据和运行记录；私有日志和
+PR 草稿不入仓。仓库 pre-push hook 保持启用。当前状态是**源码收口完成、完整推送门禁
+存在上述阻塞**，尚不具备宣称所有 gates 通过的条件。等待用户进一步指令，不自动
+暂存、提交、创建 PR 或推送，也不自行扩展到 BBS / ACLI 等无关业务修复。

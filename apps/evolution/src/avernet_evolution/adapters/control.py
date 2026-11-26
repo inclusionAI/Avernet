@@ -5,12 +5,20 @@ import secrets
 from http import HTTPStatus
 from typing import Any
 
+from avernet_genome.mutation_scope import scope_json
 from fastapi import APIRouter, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
-from ..control_contract import BindingsBody, CancelBody, ReviewBody, RunBody
+from ..control_contract import (
+    ApplyCandidateBody,
+    AuthorizePromotionBody,
+    BindingsBody,
+    CancelBody,
+    ReviewBody,
+    RunBody,
+)
 from ..core.evolution_run.api import error_envelope
 from ..core.evolution_run.data_scope import DataScope, data_scope
 
@@ -177,6 +185,15 @@ def build_control_router(runtime, *, backend_access=None) -> APIRouter:
         access = await grant(request, bot_id)
         return response(request, await runtime.api.run_candidates(access.bot, run_id))
 
+    @router.get(BASE + "/runs/{run_id}/strategy-output")
+    async def strategy_output(request: Request, bot_id: str, run_id: str):
+        access = await grant(request, bot_id)
+        return response(
+            request,
+            await runtime.api.strategy_output(access.bot, run_id),
+            headers={"Cache-Control": "no-store"},
+        )
+
     @router.get(BASE + "/runs/{run_id}/evidence")
     async def evidence(request: Request, bot_id: str, run_id: str, after: int = Query(0, ge=0)):
         access = await grant(request, bot_id)
@@ -240,6 +257,43 @@ def build_control_router(runtime, *, backend_access=None) -> APIRouter:
             ),
         )
 
+    @router.post(BASE + "/candidates/{candidate_id}:authorize-promotion")
+    async def authorize_promotion(
+        request: Request, bot_id: str, candidate_id: str, payload: AuthorizePromotionBody
+    ):
+        access = await grant(request, bot_id, True)
+        if access.operator_user_id is None:
+            raise PermissionError("human operator required")
+        key = request.headers.get("idempotency-key", "")
+        if not key.strip() or len(key) > 200:
+            return response(request, status=400)
+        with data_scope(DataScope(access.bot, access.operator_user_id)):
+            data = await runtime.api.authorize_promotion(
+                access.bot,
+                candidate_id,
+                revision=payload.revision_id,
+                parent=payload.parent_revision_id,
+                reason=payload.reason,
+                actor=access.actor,
+                user_id=access.operator_user_id,
+                key=key,
+            )
+        return response(request, data)
+
+    @router.post(BASE + "/candidates/{candidate_id}:apply")
+    async def apply_candidate(request: Request, bot_id: str, candidate_id: str, payload: ApplyCandidateBody):
+        access = await grant(request, bot_id, True)
+        if access.operator_user_id is None:
+            raise PermissionError("human operator required")
+        with data_scope(DataScope(access.bot, access.operator_user_id)):
+            data = await runtime.api.apply_candidate(
+                access.bot,
+                candidate_id,
+                authorization_id=payload.authorization_id,
+                user_id=access.operator_user_id,
+            )
+        return response(request, data)
+
     @router.get(BASE + "/strategies")
     @router.get("/openapi/v1/evolution/strategies", include_in_schema=False)
     async def strategies(request: Request, bot_id: str):
@@ -257,6 +311,7 @@ def build_control_router(runtime, *, backend_access=None) -> APIRouter:
                         "conformance": r.conformance.status.value,
                         "needs": r.registration.needs,
                         "params_schema": r.registration.params_schema,
+                        "mutation_capability": scope_json(r.registration.mutation_capability),
                     }
                     for r in records
                 ]

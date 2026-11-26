@@ -57,7 +57,11 @@ principal; the row records the actor. A revision, like an apply, speaks only
 for the bot's Direct skills and MCP servers: capture leaves out what the bot's
 skill sets supply (the platform's default MCP servers included), and the apply
 neither counts nor removes it. A Center skill is delivered by name and a
-shared-repository skill by path (`SharedSkillPort`). No Manifest document is
+shared-repository skill by path (`SharedSkillPort`). Capture reads Direct Local
+Skill packages through the Skill factory using the recorded locator without its
+`local://` scheme; resolution and package reads retain the factory's Bot-scoped
+path validation. An invalid or unreadable package refuses capture and drift
+observation rather than silently omitting the skill. No Manifest document is
 written by anything in this package; the `/config-manifest` endpoints keep
 working as before and are unrelated. Promoting a service bot's verify or
 online stage through the publish pipeline is inclusionAI/Avernet#3212.
@@ -193,3 +197,53 @@ Null includes an absent active baseline; consumers requiring a parent must also
 resolve active. Observation failures propagate; they are not "no drift".
 This operation records no content/revision, moves no refs and starts no apply.
 It is an additive Service API delivery operation for isolated Evolution providers.
+
+For an added or removed local Skill package, `diff` includes the package and its
+member paths, with bounded UTF-8 text hunks against an empty file; binary or
+oversized member diffs are null. This is a read-only review projection; the
+package operation retains its existing risk tier and policy checks.
+
+## Frozen Run mutation authorization
+
+`RunScope.mutation_scope` optionally carries the shared `FrozenMutationScope`
+(`avernet_genome.mutation_scope`). This is Run authorization metadata, outside
+Genome/patch content hashes. `None` preserves legacy `allowed_genes` behavior;
+a present empty scope grants nothing. Scope is frozen by Evolution from strategy
+capability, Binding, existing parent inventory/ownership and policy, not inferred
+by Registry from a strategy name.
+
+Registry independently checks the patch's base spec: only existing Persona and
+local-origin Skill updates are permitted, with **every** `skill.update` member
+checked against allowed targets and pins. Whole-Skill add/remove and other gene
+operations refuse. The existing shape, evidence, policy and result-spec checks
+still apply before content/revision writes. Scope does not grant publication,
+activation, ref movement or Apply. The built-in callback verifies a signed scope
+digest as well as current operator access; a caller cannot drop/expand scope.
+
+See the [Run contract](../../../../../../evolution/src/avernet_evolution/core/evolution_run/README.md#frozen-mutation-scope),
+[Registry rejection tests](../../../../../tests/community/core/bot_genome/test_mutation_scope.py)
+and [three-scope cross-service tests](../../../../../tests/community/adapters/http/openapi_v1/test_evolution_mutation_scope.py).
+The latter uses synthetic snapshots/model/file assertions and manual review,
+not real Bot quality or a deployed Worker.
+
+## Explicit human RSI promotion
+
+[ADR 0027](../../../../../../../docs/adr/0027-human-promotion-authorization-is-not-evaluation.md)
+adds `promote_manual` for an exact strategy-run candidate, not an evaluation pass.
+Backend validates the immutable authorization and candidate provenance, current
+ADMIN operator, live drift and frozen parent, then uses the existing DirectApplier.
+The authorization ID claims the delivery once; replay returns that promotion and
+never restarts Apply. `authorization` is immutable JSON, NULL for normal promotions.
+Fresh schema creation already includes this nullable column. Existing databases
+must back up and check column presence before applying
+[`sql/2026_11_26_manual_promotion.sql`](sql/2026_11_26_manual_promotion.sql) once;
+ORM `create_all` does not upgrade existing tables. The additive standard SQL is
+intended for MySQL/PostgreSQL/SQLite; the regression test executes it on an
+existing SQLite table and preserves old rows/NULL values. Actual MySQL and
+PostgreSQL migration execution remains deployment validation, not test evidence.
+Do not rerun the migration on a schema that already has the column.
+The settler permits this authorized candidate to become promoted only after Apply
+success/partial, retaining CAS and original verdict. `applied_partial` advances refs
+but retains incomplete-delivery evidence; `apply_failed` never advances refs.
+Tests: `tests/community/core/bot_genome/test_manual_promotion.py` and the signed
+HTTP test `tests/community/adapters/http/openapi_v1/test_evolution_manual_promotion.py`.

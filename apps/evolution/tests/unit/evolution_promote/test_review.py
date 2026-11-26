@@ -111,7 +111,7 @@ async def test_approve_records_the_decision_and_reports_apply_is_disabled() -> N
     assert result.review.decided_at is not None
     # apply 侧未启用：不编造 promotion_id，只给出明确原因。
     assert result.review.promotion_id is None
-    assert "complete state" in (result.promotion_note or "")
+    assert "record-only" in (result.promotion_note or "")
 
     with pytest.raises(AlreadyDecided):
         _decide(service, ReviewStatus.APPROVED, "sha256:c1", reason="again", actor="user_17")

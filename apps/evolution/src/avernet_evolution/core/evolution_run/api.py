@@ -24,6 +24,7 @@ from avernet_evolution.core.evolution_promote.report import (
     split_summaries,
 )
 from avernet_evolution.core.evolution_promote.service import CandidateNotFound
+from avernet_evolution.core.evolution_strategy.output import StrategyOutput, output_artifact_name
 
 from .bindings import Binding, ManualTrigger
 from .bindings_service import BindingsService
@@ -80,6 +81,7 @@ class EvolutionApi:
         verification: Any = None,
         promotion: Any = None,
         genome: Any = None,
+        manual: Any = None,
     ) -> None:
         self.bindings = bindings
         self.runs = runs
@@ -89,6 +91,7 @@ class EvolutionApi:
         self.verification = verification
         self.promotion = promotion
         self.genome = genome
+        self.manual = manual
 
     # -- §14.1 bindings -------------------------------------------------
     async def get_bindings(self, bot: BotRef) -> dict[str, Any]:
@@ -186,6 +189,20 @@ class EvolutionApi:
             ]
         }
 
+    async def strategy_output(self, bot: BotRef, run_id: str) -> dict[str, Any]:
+        """Sensitive final output: check Run ownership before reading any bytes."""
+        run = await self.runs.get(bot, run_id)
+        content = self.runs.store.latest_named_artifact(run_id, output_artifact_name(run.attempt))
+        if content is None:
+            return {"output": None}
+        try:
+            output = StrategyOutput.model_validate_json(content)
+        except ValueError:
+            raise ValueError("stored strategy output is invalid") from None
+        if output.attempt != run.attempt:
+            raise ValueError("strategy output attempt mismatch")
+        return {"output": output.model_dump()}
+
     async def run_evidence(self, bot: BotRef, run_id: str, *, after: int = 0) -> dict[str, Any]:
         """Metadata-only evidence, after authorization and Run ownership checks."""
         await self.runs.get(bot, run_id)
@@ -257,7 +274,47 @@ class EvolutionApi:
                 }
             ),
             "review": review_json(review),
+            "manual_promotion": await self.manual.state(bot, candidate_id) if self.manual else None,
         }
+
+    async def authorize_promotion(
+        self,
+        bot: BotRef,
+        candidate_id: str,
+        *,
+        revision: str,
+        parent: str,
+        reason: str,
+        actor: str,
+        user_id: str,
+        key: str,
+    ):
+        from ..evolution_promote.service import PromotionNotReady
+
+        candidate, run = self._locate(bot, candidate_id)
+        if self.manual is None:
+            raise PromotionNotReady("human promotion delivery is not configured")
+        if candidate["revision"] != revision or run["parent_revision"] != parent:
+            raise PromotionNotReady("the confirmed candidate/parent differs from the recorded Run")
+        return await self.manual.authorize(
+            bot,
+            candidate_id,
+            run_id=run["run_id"],
+            revision=revision,
+            parent=parent,
+            reason=reason,
+            actor=actor,
+            user_id=user_id,
+            key=key,
+        )
+
+    async def apply_candidate(self, bot: BotRef, candidate_id: str, *, authorization_id: str, user_id: str):
+        from ..evolution_promote.service import PromotionNotReady
+
+        self._locate(bot, candidate_id)
+        if self.manual is None:
+            raise PromotionNotReady("human promotion delivery is not configured")
+        return await self.manual.apply(bot, candidate_id, authorization_id=authorization_id, user_id=user_id)
 
     async def review_queue(
         self,
@@ -440,6 +497,10 @@ def _run_json(run) -> dict[str, Any]:
         "status": run.status.value,
         "attempt": run.attempt,
         "parent_revision": run.parent_revision,
+        "allowed_genes": list(run.allowed_genes),
+        "mutation_scope": run.mutation_scope.model_dump(mode="json")
+        if run.mutation_scope is not None
+        else None,
         "candidate_count": run.candidate_count,
         "budget_used": run.budget_used.as_dict(),
         "created_at": run.created_at.isoformat(),
