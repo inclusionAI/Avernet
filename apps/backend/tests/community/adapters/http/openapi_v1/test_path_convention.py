@@ -92,6 +92,9 @@ def _segments(path: str) -> list[str]:
 #: remove the ability to query across bots.
 _BOT_FREE = frozenset(
     {
+        # The Agent Coding work-items snapshot aggregates the named fleet and
+        # addresses no single Bot.
+        "aicoding",
         "all",
         "authorized",
         # The user-level delegation: the same resource name as the bot-scoped

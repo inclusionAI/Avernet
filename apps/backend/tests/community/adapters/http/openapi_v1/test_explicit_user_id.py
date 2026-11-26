@@ -269,6 +269,8 @@ def _without_request_id(response) -> dict:
     body = dict(response.json())
     body.pop("request_id", None)
     return body
+
+
 # ── the published document ──────────────────────────────────────────────────
 #: The operations that take no ``user_id``, and why each one cannot.
 #:
@@ -472,6 +474,9 @@ _AUTHENTICATED_SELF = {
         "post",
         f"{PUBLIC_API_PREFIX}/collaboration/tasks/bot-grants/reconcile",
     ),
+    # Human self-service work-items snapshot: all user scoping comes from the
+    # signed principal, and an app-only caller cannot act for that human.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/aicoding/work-items"),
     ("post", f"{PUBLIC_API_PREFIX}/bots/spaces/{{space_id}}/join-requests"),
     # README resolves the acting user from the verified principal; callers do
     # not get a second, steerable user_id query parameter.
@@ -671,8 +676,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # Bot-addressed operation: path 233 -> 234. Read-only Caller status adds one
 # Bot-path operation: path 234 -> 235. Bot MCP config read and update add two
 # Bot-path operations: path 235 -> 237. Dedicated recycle operation query
-# adds one OWNER-only Bot-path read: path 237 -> 238.
-_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 177}
+# adds one OWNER-only Bot-path read: path 237 -> 238. The Agent Coding work-items snapshot adds one more no-Bot aggregate: none 177 -> 178.
+_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 178}
 
 
 def _schema() -> dict:

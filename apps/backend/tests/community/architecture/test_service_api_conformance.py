@@ -69,6 +69,12 @@ from agentclaw.community.api.engine_session_files import EngineSessionFilesProto
 from agentclaw.community.core.session_resources.engine_files import (
     EngineSessionFilesService,
 )
+from agentclaw.community.api.work_items_service import (
+    AICodingWorkItemsServiceProtocol,
+)
+from agentclaw.community.core.aicoding.services.work_items_service import (
+    AICodingWorkItemsService,
+)
 from agentclaw.community.api.mcp_scoped_config_service import (
     MCPScopedConfigServiceProtocol,
 )
@@ -421,6 +427,7 @@ from agentclaw.community.core.task.todos.services.todo_template_service import (
 _PAIRS = [
     (TodoTemplateManagementServiceProtocol, TodoTemplateService),
     (EngineSessionFilesProtocol, EngineSessionFilesService),
+    (AICodingWorkItemsServiceProtocol, AICodingWorkItemsService),
     (BotOverviewServiceProtocol, BotOverviewService),
     (ConversationKnowledgeServiceProtocol, ConversationKnowledgeService),
     (BotKnowledgeServiceProtocol, BotKnowledgeService),
