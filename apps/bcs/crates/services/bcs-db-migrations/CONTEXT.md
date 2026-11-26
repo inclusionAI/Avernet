@@ -6,14 +6,14 @@
   then versioned migrations, then index creation
   (`run_sqlite_bootstrap_tables`, `run_sqlite_versioned_migrations`,
   `run_sqlite_bootstrap_indexes`).
-- The versioned SQLite migration chain (versions 1..50) with per-migration
+- The versioned SQLite migration chain (versions 1..46) with per-migration
   SHA-256 checksums, applied-history validation, repair conditions for legacy
   local databases, and the `bcs_schema_migrations` record bookkeeping.
 - Migration state inspection (`check_sqlite_migrations`) and the apply-report
   summary (`SqliteMigrationReport` / `SqliteMigrationPlan` /
   `run_sqlite_migrations_with_report`), plus `sqlite_target_version()` and
   `sqlite_migration_count()` for CLI reporting.
-- The full behavior test suite (65 tests) that previously registered 30 times
+- The full behavior test suite (54 tests) that previously registered 30 times
   across the workspace via `#[path]` source includes; they now run once here.
 
 ## Allowed dependencies
@@ -54,7 +54,7 @@
 
 ## Tests
 
-- `cargo test -p bcs-db-migrations` — 65 tests, including fresh empty-DB
+- `cargo test -p bcs-db-migrations` — 54 tests, including fresh empty-DB
   init, legacy-database upgrades (pre-existing records / partial steps),
   repeated-startup idempotency, checksum-mismatch and write-failure error
   propagation, cross-dialect migration-content mirrors.
@@ -66,19 +66,3 @@ SQLite 046 / MySQL 048 add the public distributed runtime immutable archive.
 SQLite upgrade tests preserve the prior history and retained object bytes across
 restarts. The MySQL table shape is statically checked; real MySQL/OceanBase
 acceptance is not implied by those checks.
-
-
-## Frozen AgentInvoke-era migration history
-
-SQLite 048–050 / MySQL 050–052 and their registered names/checksums are retained
-byte-for-byte because they have already been committed. They add historical
-metadata/fact/request/audit tables, identity-fence columns, indexes and legacy
-column-width changes. This schema is inert in the phase-one implementation:
-no management/facts/runtime-capability service writes or consumes those tables.
-AgentInvoke type compatibility uses the existing `edge_grants` table only and
-does not require a row in those historical metadata tables or a dedicated flag.
-
-The migration runner and bootstrap DDL are not rewritten. Existing fresh-chain,
-retained-data, checksum, index and atomic SQLite history-write regressions stay
-in place; native MySQL full-chain testing uses the existing authority fixture.
-SQLite/static tests do not substitute for real MySQL execution.

@@ -169,8 +169,8 @@ remains for compatibility. `is_authorized` fails closed on read errors.
 Friend list/default-profile predicates and kind-scoped revocation stay separate.
 
 No management, facts, governance, eligibility-generation, audit or invocation
-store is provided. The historical migration tables remain inert. Conformance
-runs on memory, SQLite and the existing native MySQL authority test fixture;
+store is provided. No new tables, columns, indexes or migrations are needed.
+Conformance runs on memory, SQLite and the existing native MySQL authority test fixture;
 no separate empty database or CI selector is needed.
 
 Cost: one indexed pair SELECT for checked edge reads, no external calls, cache,

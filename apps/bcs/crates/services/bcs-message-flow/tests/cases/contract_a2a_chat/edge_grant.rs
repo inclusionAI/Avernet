@@ -54,10 +54,42 @@ async fn agent_edge_consumed_by_existing_direct_chat_without_friend_or_profile()
         assert_eq!(delivery.frames().await.len(), 1, "must reach the existing physical delivery port");
         let profiles = db.query(DbStatement::new("SELECT COUNT(*) AS n FROM permission_profiles")).await.unwrap();
         assert_eq!(bcs_db_api::db_get_column::<u64>(&profiles[0], "n").unwrap(), 0);
-        // Inert, committed historical schema is not a qualification dependency.
-        let scopes = db.query(DbStatement::new("SELECT COUNT(*) AS n FROM agent_invoke_scopes")).await.unwrap();
-        assert_eq!(bcs_db_api::db_get_column::<u64>(&scopes[0], "n").unwrap(), 0);
+        // Phase one installs no independent authorization/governance schema.
+        let tables = db.query(DbStatement::new(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name GLOB 'agent_invoke_*'"
+        )).await.unwrap();
+        assert!(tables.is_empty());
+        let columns = db.query(DbStatement::new("PRAGMA table_info(bcs_bots)")).await.unwrap();
+        assert!(!columns.iter().any(|row|
+            bcs_db_api::db_get_column::<String>(row, "name").unwrap() == "agent_invoke_identity_revision"));
     }
+}
+
+#[tokio::test]
+async fn new_kind_reuses_existing_schema_and_preserves_legacy_rows_and_history() {
+    let (_service, _delivery, _registry, grants, db) = fixture("protected").await;
+    let legacy_id = grants.insert_grant(EdgeGrant {
+        grant_kind: GrantKind::Rules, grant_ref_id: 17,
+        rules: Some(serde_json::json!([])),
+        ..edge("bot-source", "bot-target", GrantKind::Rules)
+    }).await.unwrap();
+    let legacy_sql = format!("SELECT * FROM edge_grants WHERE id = {legacy_id}");
+    let history_sql = "SELECT * FROM bcs_schema_migrations ORDER BY version";
+    let schema_sql = "SELECT type, name, sql FROM sqlite_master WHERE type IN ('table', 'index') ORDER BY type, name";
+    let before_legacy = db.query(DbStatement::new(&legacy_sql)).await.unwrap();
+    let before_history = db.query(DbStatement::new(history_sql)).await.unwrap();
+    let before_schema = db.query(DbStatement::new(schema_sql)).await.unwrap();
+
+    grants.insert_grant(edge("bot-source", "bot-target", GrantKind::AgentInvoke)).await.unwrap();
+    bcs_db_migrations::run_sqlite_migrations(db.as_ref()).await.unwrap();
+
+    assert_eq!(db.query(DbStatement::new(legacy_sql)).await.unwrap(), before_legacy);
+    assert_eq!(db.query(DbStatement::new(history_sql)).await.unwrap(), before_history);
+    assert_eq!(db.query(DbStatement::new(schema_sql)).await.unwrap(), before_schema);
+    let active = grants.list_runtime_grants_checked("bot-source", "bot-target", "dev").await.unwrap();
+    assert_eq!(active.len(), 2);
+    assert!(active.iter().any(|grant| grant.grant_kind == GrantKind::AgentInvoke));
+    assert!(active.iter().any(|grant| grant.grant_kind == GrantKind::Rules && grant.grant_ref_id == 17));
 }
 
 #[tokio::test]

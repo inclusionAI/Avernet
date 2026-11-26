@@ -98,7 +98,10 @@ def exercise(story, peer, database):
         raise AssertionError("Existing direct call did not complete")
     assert len(peer.requests) == 1 and peer.legacy_requests == 0
     with sqlite3.connect(database) as db:
-        assert db.execute("SELECT COUNT(*) FROM agent_invoke_scopes").fetchone()[0] == 0
+        assert not db.execute("SELECT name FROM sqlite_master WHERE type='table' "
+                              "AND name GLOB 'agent_invoke_*'").fetchall()
+        assert "agent_invoke_identity_revision" not in {
+            row[1] for row in db.execute("PRAGMA table_info(bcs_bots)")}
         assert db.execute("SELECT COUNT(*) FROM edge_grants WHERE from_id=? AND to_id=? "
                           "AND grant_kind='permission_profile'", (a, b)).fetchone()[0] == 0
         # Malformed fixture data must fail the real read, not partially allow.
