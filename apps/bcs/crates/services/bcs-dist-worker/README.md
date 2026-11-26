@@ -182,8 +182,8 @@ establish phase-one production capacity.
 The [lifecycle](tests/processor_lifecycle.rs),
 [finalization](tests/processor_finalization.rs),
 [snapshot policy](tests/processor_snapshots.rs),
-[publication race](tests/processor_snapshot_race.rs), and
-[quota lifecycle](tests/processor_quota_lifecycle.rs) integration tests compose the
+[publication race](tests/processor_snapshots/publication_race.rs), and
+[quota lifecycle](tests/processor_lifecycle/quota.rs) integration tests compose the
 public Worker and storage providers with the conformance model and SQLite. They
 verify consumed control inputs, frozen archive retries, committed cancellation,
 remote Unknown supervision after local termination, publication coverage during

@@ -16,7 +16,7 @@ use std::{
     time::Duration,
 };
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn first_invalid_decision_closes_admission_and_finishes_every_accepted_task_without_rerunning()
  {
     let runner = Arc::new(InvalidRunner {
@@ -89,7 +89,7 @@ async fn first_invalid_decision_closes_admission_and_finishes_every_accepted_tas
         matches!(f.processor.resume(&spec().scope,request).await.unwrap(),ControlOutcome::AlreadyApplied(ref c) if matches!(c.control.mode,ControlMode::Normal))
     );
 }
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn unsupported_runner_state_is_blocked_without_fabricating_task_failure() {
     let runner = Arc::new(InvalidRunner {
         calls: AtomicUsize::new(0),
@@ -123,7 +123,7 @@ async fn unsupported_runner_state_is_blocked_without_fabricating_task_failure() 
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn undecodable_checkpoint_is_blocked_by_successor_without_replacing_business_body() {
     use bcs_store_api::document::DocumentStorePlugin;
     let runner = Arc::new(FinishingRunner::default());
@@ -165,7 +165,7 @@ async fn undecodable_checkpoint_is_blocked_by_successor_without_replacing_busine
     assert_eq!(runner.calls.load(Ordering::SeqCst), 0);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn lost_failure_reply_and_takeover_keep_the_same_isolation_and_do_not_rerun_runner() {
     let runner = Arc::new(InvalidRunner {
         calls: AtomicUsize::new(0),
@@ -231,7 +231,7 @@ async fn lost_failure_reply_and_takeover_keep_the_same_isolation_and_do_not_reru
     assert_eq!(f.snapshot(&tid).await.content.status, TaskStatus::Rejected);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn isolation_fences_an_already_prepared_ordinary_candidate_and_closes_it_independently() {
     let runner = Arc::new(FinishingRunner::default());
     let f = Fixture::new(runner.clone()).await;
@@ -282,7 +282,7 @@ async fn isolation_fences_an_already_prepared_ordinary_candidate_and_closes_it_i
     assert_eq!(runner.calls.load(Ordering::SeqCst), 1);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_registered_deadline_occurrence_cannot_be_rearmed_by_returning_its_same_identity() {
     let runner = Arc::new(DeadlineRunner(AtomicUsize::new(0)));
     let f = Fixture::new(runner.clone()).await;
@@ -298,7 +298,7 @@ async fn a_registered_deadline_occurrence_cannot_be_rearmed_by_returning_its_sam
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn changed_business_body_at_the_same_head_is_blocked_without_overwriting_evidence() {
     use bcs_store_api::document::DocumentStorePlugin;
     let runner = Arc::new(FinishingRunner::default());
@@ -340,7 +340,7 @@ async fn changed_business_body_at_the_same_head_is_blocked_without_overwriting_e
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn successful_effect_history_does_not_freeze_the_clock_for_a_future_deadline() {
     let runner = Arc::new(FutureDeadlineRunner(AtomicUsize::new(0)));
     let f = Fixture::new(runner.clone()).await;
@@ -362,7 +362,7 @@ async fn successful_effect_history_does_not_freeze_the_clock_for_a_future_deadli
     assert_eq!(runner.0.load(Ordering::SeqCst), 2);
     assert_eq!(f.snapshot(&tid).await.content.status, TaskStatus::Completed);
 }
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn takeover_of_a_pending_replay_after_transient_failure_keeps_the_episode_identity() {
     let runner = Arc::new(FinishingRunner::default());
     let f = Fixture::new(runner.clone()).await;
@@ -430,7 +430,7 @@ async fn takeover_of_a_pending_replay_after_transient_failure_keeps_the_episode_
     assert_eq!(attempt.identity, pending.identity);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn isolation_discards_a_frozen_decision_waiting_on_a_ref_before_authorized_resume() {
     use bcs_service_api::port::dist_runtime::DistWorkerIsolationControlPort;
     let bytes = serde_json::to_vec(&serde_json::json!({"done":true})).unwrap();
@@ -506,7 +506,7 @@ async fn isolation_discards_a_frozen_decision_waiting_on_a_ref_before_authorized
     ));
     assert_eq!(runner.calls.load(Ordering::SeqCst), 1);
 }
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn quarantine_and_takeover_after_archive_preserve_the_first_frozen_completed_result() {
     let runner = Arc::new(FinishingRunner {
         text: 70000,
@@ -562,7 +562,7 @@ async fn quarantine_and_takeover_after_archive_preserve_the_first_frozen_complet
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn succeeded_uncommitted_runner_keeps_its_frozen_time_across_old_outbox_replay() {
     let runner = Arc::new(FutureDeadlineRunner(AtomicUsize::new(0)));
     let f = Fixture::new(runner.clone()).await;
@@ -630,7 +630,7 @@ async fn succeeded_uncommitted_runner_keeps_its_frozen_time_across_old_outbox_re
         attempt.identity
     );
 }
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn unknown_replay_begin_superseded_by_isolation_uses_a_fresh_authorized_episode() {
     let runner = Arc::new(FinishingRunner::default());
     let f = Fixture::new(runner).await;
@@ -700,7 +700,7 @@ async fn unknown_replay_begin_superseded_by_isolation_uses_a_fresh_authorized_ep
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn historical_success_after_a_racing_isolation_never_authorizes_the_ordinary_candidate() {
     let runner = Arc::new(FinishingRunner::default());
     let f = Fixture::new(runner.clone()).await;
@@ -727,7 +727,7 @@ async fn historical_success_after_a_racing_isolation_never_authorizes_the_ordina
     assert_eq!(runner.calls.load(Ordering::SeqCst), 1);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn historical_begin_reply_after_isolation_does_not_call_runner() {
     let runner = Arc::new(FinishingRunner::default());
     let f = Fixture::new(runner.clone()).await;
@@ -744,7 +744,7 @@ async fn historical_begin_reply_after_isolation_does_not_call_runner() {
     assert_eq!(runner.calls.load(Ordering::SeqCst), 0);
     assert_eq!(f.snapshot(&tid).await.content.status, TaskStatus::Rejected);
 }
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn historical_replay_begin_reply_after_blocking_does_not_call_effect_ports() {
     let runner = Arc::new(FinishingRunner::default());
     let f = Fixture::new(runner).await;

@@ -355,7 +355,11 @@ async fn group_input_validation_happens_before_http() {
     let cli = Cli::new().await;
     for (tag, needle) in [("missing-separator", "expected BOT_UUID=TAG"), ("=tag", "must not be empty"),
         ("bot-worker=", "must not be empty"), ("unknown=tag", "is not a group participant")] {
-        cli.fail(&[], &["create-group", "--driver", "bot-source", "--participants", "bot-worker", "--participant-tag", tag], needle);
+        let output = cli.command(&[], &["create-group", "--driver", "bot-source", "--participants", "bot-worker", "--participant-tag", tag])
+            .assert().failure().code(1).get_output().clone();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(needle), "tag={tag}: {stderr}");
+        if tag == "unknown=tag" { assert!(stderr.contains("unknown"), "{stderr}"); }
     }
     cli.fail(&[], &["create-group", "--participants", "bot-worker"], "--driver");
     cli.fail(&[], &["create-group", "--driver", "bot-source", "--manager", "bot-source", "--participants", "bot-worker"], "cannot be used with");
@@ -388,8 +392,10 @@ async fn group_get_status_terminate_and_add_member_render_real_responses() {
     let args = ["terminate-group", "--group", "group-a"];
     assert_eq!(serde_json::from_str::<Value>(&stdout(&cli.ok(&["--json"], &args))).unwrap(), terminated);
     assert_eq!(stdout(&cli.ok(&["--no-json"], &args)), "✓ Group terminated:\n  Group: group-a\n  Status: completed\n");
-    assert_eq!(stdout(&cli.ok(&[], &["add-member", "--group", "group-a", "--bot-uuid", "bot-worker"])),
-        "✓ Member added to group:\n  Group: group-a\n  Bot: bot-worker\n  Role: worker\n");
+    // Use the saved session, not an ambient token, for this authenticated write.
+    let output = cli.command(&[], &["add-member", "--group", "group-a", "--bot-uuid", "bot-worker"])
+        .env_remove("BCN_BOT_TOKEN").assert().success().get_output().clone();
+    assert_eq!(stdout(&output), "✓ Member added to group:\n  Group: group-a\n  Bot: bot-worker\n  Role: worker\n");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -1,13 +1,12 @@
 //! Rule 25 driver: runs the shared conformance
 //! harnesses against the REAL [`MemoryBotRepo`]:
 //! - the FULL `BotAuthorityRepoPort` contract on the
-//!   memory projection (the exact same fixture body
-//!   `memory_authority.rs` drives),
+//!   memory projection,
 //! - the `PermissionProfileRepoPort` contract on the
 //!   same shared memory state (the registration profile
 //!   projection the runtime consumers share).
 
-#[path = "memory_authority_fixture.rs"]
+#[path = "support/memory_authority_fixture.rs"]
 mod memory_authority_fixture;
 
 use std::sync::Arc;

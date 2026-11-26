@@ -1,5 +1,5 @@
 use super::{
-    Cli, Commands, NetworkEnv, TempDir, Write, detect_network_env, discover_token,
+    Cli, Commands, NetworkEnv, TempDir, detect_network_env, discover_token,
     is_localhost_url, json, load_optional_session_info, normalize_bcs_ws_url,
     resolve_bcs_url, safe_remove_var, safe_set_var, serial, write_session_file,
 };
@@ -88,375 +88,55 @@ fn test_normalize_bcs_ws_url_keeps_existing_ws_endpoints() {
     );
 }
 
-/// Test token discovery priority: CLI arg > env var > session file
-#[test]
-fn test_token_discovery_priority_cli_first() {
-    // CLI arg should take highest priority
-    let explicit_token = "explicit-token-123";
-    let result = discover_token(Some(explicit_token));
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), explicit_token);
-}
-
-/// Test token discovery from BCN_BOT_TOKEN environment variable
+/// In static-token mode: explicit argument > environment > saved session > empty.
 #[test]
 #[serial]
-fn test_token_discovery_from_env_var() {
+fn token_discovery_precedence() {
     let temp_dir = TempDir::new().unwrap();
-    let data_dir = temp_dir.path().to_path_buf();
-
-    // Save original env
-    let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
-    let original_token = std::env::var("BCN_BOT_TOKEN").ok();
-
-    // Set test env vars
-    safe_set_var("BOT_DATA_DIR", &data_dir);
-    safe_set_var("BCN_BOT_TOKEN", "env-token-456");
-
-    // No explicit token, should use env var
-    let result = discover_token(None);
-
-    // Restore env
-    if let Some(orig) = original_data_dir {
-        safe_set_var("BOT_DATA_DIR", orig);
-    } else {
-        safe_remove_var("BOT_DATA_DIR");
+    let _env = EnvVars::apply(&[
+        ("BOT_DATA_DIR", Some(temp_dir.path().to_str().unwrap())),
+        ("BCN_BOT_TOKEN", None),
+        ("BCN_AUTH_MODE", None),
+        ("BCN_ACTOR_BOT_ID", None),
+    ]);
+    assert_eq!(discover_token(None).unwrap(), "");
+    assert_eq!(discover_token(Some("cli-token")).unwrap(), "cli-token");
+    {
+        let _token = EnvVars::apply(&[("BCN_BOT_TOKEN", Some("env-token"))]);
+        assert_eq!(discover_token(None).unwrap(), "env-token");
     }
-    if let Some(orig) = original_token {
-        safe_set_var("BCN_BOT_TOKEN", orig);
-    } else {
-        safe_remove_var("BCN_BOT_TOKEN");
-    }
+    write_session_file(&temp_dir, json!({"token": "file-token", "bot_uuid": "bot-test"}));
+    assert_eq!(discover_token(None).unwrap(), "file-token");
 
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), "env-token-456");
-}
-
-/// Test token discovery from session file
-#[test]
-#[serial]
-fn test_token_discovery_from_session_file() {
-    let temp_dir = TempDir::new().unwrap();
-    let data_dir = temp_dir.path().to_path_buf();
-    let bcs_dir = data_dir.join(".bcs");
-    std::fs::create_dir_all(&bcs_dir).unwrap();
-
-    // Write session file
-    let session_file = bcs_dir.join("session.json");
-    let session_content = json!({
-        "bot_uuid": "bot-test-789",
-        "token": "file-token-789",
-        "bcs_url": "ws://localhost:21000/ws/bot"
-    });
-    let mut file = std::fs::File::create(&session_file).unwrap();
-    file.write_all(
-        serde_json::to_string_pretty(&session_content)
-            .unwrap()
-            .as_bytes(),
-    )
-    .unwrap();
-
-    // Save original env
-    let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
-    let original_token = std::env::var("BCN_BOT_TOKEN").ok();
-
-    // Set test data dir, clear BCN_BOT_TOKEN
-    safe_set_var("BOT_DATA_DIR", &data_dir);
-    safe_remove_var("BCN_BOT_TOKEN");
-
-    // No explicit token, no env var, should use session file
-    let result = discover_token(None);
-
-    // Restore env
-    if let Some(orig) = original_data_dir {
-        safe_set_var("BOT_DATA_DIR", orig);
-    } else {
-        safe_remove_var("BOT_DATA_DIR");
-    }
-    if let Some(orig) = original_token {
-        safe_set_var("BCN_BOT_TOKEN", orig);
-    }
-
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), "file-token-789");
-}
-
-/// Test token discovery priority: CLI arg overrides env var
-#[test]
-#[serial]
-fn test_token_cli_overrides_env() {
-    let temp_dir = TempDir::new().unwrap();
-    let data_dir = temp_dir.path().to_path_buf();
-
-    // Save original env
-    let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
-    let original_token = std::env::var("BCN_BOT_TOKEN").ok();
-
-    safe_set_var("BOT_DATA_DIR", &data_dir);
-    safe_set_var("BCN_BOT_TOKEN", "env-token");
-
-    // Explicit token should override env var
-    let result = discover_token(Some("cli-token"));
-
-    // Restore env
-    if let Some(orig) = original_data_dir {
-        safe_set_var("BOT_DATA_DIR", orig);
-    } else {
-        safe_remove_var("BOT_DATA_DIR");
-    }
-    if let Some(orig) = original_token {
-        safe_set_var("BCN_BOT_TOKEN", orig);
-    } else {
-        safe_remove_var("BCN_BOT_TOKEN");
-    }
-
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), "cli-token");
-}
-
-/// Test token discovery priority: env var overrides session file
-#[test]
-#[serial]
-fn test_token_env_overrides_file() {
-    let temp_dir = TempDir::new().unwrap();
-    let data_dir = temp_dir.path().to_path_buf();
-    let bcs_dir = data_dir.join(".bcs");
-    std::fs::create_dir_all(&bcs_dir).unwrap();
-
-    // Write session file
-    let session_file = bcs_dir.join("session.json");
-    let session_content = json!({
-        "bot_id": "bot-test",
-        "token": "file-token",
-        "bcs_url": "ws://localhost:21000/ws/bot"
-    });
-    let mut file = std::fs::File::create(&session_file).unwrap();
-    file.write_all(
-        serde_json::to_string_pretty(&session_content)
-            .unwrap()
-            .as_bytes(),
-    )
-    .unwrap();
-
-    // Save original env
-    let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
-    let original_token = std::env::var("BCN_BOT_TOKEN").ok();
-
-    safe_set_var("BOT_DATA_DIR", &data_dir);
-    safe_set_var("BCN_BOT_TOKEN", "env-token");
-
-    // Env var should override session file
-    let result = discover_token(None);
-
-    // Restore env
-    if let Some(orig) = original_data_dir {
-        safe_set_var("BOT_DATA_DIR", orig);
-    } else {
-        safe_remove_var("BOT_DATA_DIR");
-    }
-    if let Some(orig) = original_token {
-        safe_set_var("BCN_BOT_TOKEN", orig);
-    } else {
-        safe_remove_var("BCN_BOT_TOKEN");
-    }
-
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), "env-token");
-}
-
-/// Test token discovery returns an empty token when no source is available,
-/// allowing the CLI to proceed without authentication.
-#[test]
-#[serial]
-fn test_token_not_found_returns_empty() {
-    let temp_dir = TempDir::new().unwrap();
-    let data_dir = temp_dir.path().to_path_buf();
-
-    // Save original env
-    let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
-    let original_token = std::env::var("BCN_BOT_TOKEN").ok();
-
-    // Set empty environment (no token anywhere)
-    safe_set_var("BOT_DATA_DIR", &data_dir);
-    safe_remove_var("BCN_BOT_TOKEN");
-
-    // Should succeed with an empty token (no auth)
-    let result = discover_token(None);
-
-    // Restore env
-    if let Some(orig) = original_data_dir {
-        safe_set_var("BOT_DATA_DIR", orig);
-    } else {
-        safe_remove_var("BOT_DATA_DIR");
-    }
-    if let Some(orig) = original_token {
-        safe_set_var("BCN_BOT_TOKEN", orig);
-    }
-
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), "");
+    let _token = EnvVars::apply(&[("BCN_BOT_TOKEN", Some("env-token"))]);
+    assert_eq!(discover_token(None).unwrap(), "env-token");
+    assert_eq!(discover_token(Some("cli-token")).unwrap(), "cli-token");
 }
 
 #[test]
 #[serial]
 fn test_resolve_bcs_url_from_session_file() {
     let temp_dir = TempDir::new().unwrap();
-    write_session_file(
-        &temp_dir,
-        json!({
-            "bot_uuid": null,
-            "token": "session-token",
-            "bcs_url": "ws://localhost:21000/ws/bot"
-        }),
-    );
-
-    let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
-    let original_url = std::env::var("MOLTIS_BCS_URL").ok();
-    let original_base_url = std::env::var("BCS_API_BASE_URL").ok();
-
-    safe_set_var("BOT_DATA_DIR", temp_dir.path());
-    safe_remove_var("MOLTIS_BCS_URL");
-    safe_remove_var("BCS_API_BASE_URL");
-
-    let cli = Cli {
-        url: None,
-        cookie: None,
-        log_level: "info".to_string(),
-        json: false,
-        no_json: true,
-        #[cfg(debug_assertions)]
-        debug: false,
-        command: Commands::Health,
-    };
-    let resolved = resolve_bcs_url(&cli).unwrap();
-
-    if let Some(value) = original_data_dir {
-        safe_set_var("BOT_DATA_DIR", value);
-    } else {
-        safe_remove_var("BOT_DATA_DIR");
-    }
-    if let Some(value) = original_url {
-        safe_set_var("MOLTIS_BCS_URL", value);
-    } else {
-        safe_remove_var("MOLTIS_BCS_URL");
-    }
-    if let Some(value) = original_base_url {
-        safe_set_var("BCS_API_BASE_URL", value);
-    } else {
-        safe_remove_var("BCS_API_BASE_URL");
-    }
-
-    assert_eq!(resolved, "http://localhost:21000");
+    write_session_file(&temp_dir, json!({"token": "session-token", "bcs_url": "ws://localhost:21000/ws/bot"}));
+    let _env = EnvVars::apply(&[
+        ("BOT_DATA_DIR", Some(temp_dir.path().to_str().unwrap())),
+        ("MOLTIS_BCS_URL", None), ("BCS_API_BASE_URL", None),
+    ]);
+    assert_eq!(resolve_bcs_url(&health_cli()).unwrap(), "http://localhost:21000");
 }
 
 #[test]
 #[serial]
 fn test_resolve_bcs_url_uses_distribution_default_or_local() {
-    let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
-    let original_url = std::env::var("MOLTIS_BCS_URL").ok();
-    let original_base_url = std::env::var("BCS_API_BASE_URL").ok();
-    let original_agentclaw_env = std::env::var("AGENTCLAW_ENV").ok();
-
-    safe_remove_var("BOT_DATA_DIR");
-    safe_remove_var("MOLTIS_BCS_URL");
-    safe_remove_var("BCS_API_BASE_URL");
-    safe_remove_var("AGENTCLAW_ENV");
-
-    let cli = Cli {
-        url: None,
-        cookie: None,
-        log_level: "info".to_string(),
-        json: false,
-        no_json: true,
-        #[cfg(debug_assertions)]
-        debug: false,
-        command: Commands::Health,
-    };
-    let result = resolve_bcs_url(&cli);
-    // Self-referential on purpose: the expectation derives from this build's compiled
-    // defaults, so public builds pin only the localhost fallback here.
-    let expected = bcs_cli::resolve_compiled_distribution_default_url()
-        .unwrap()
-        .unwrap_or_else(|| "http://127.0.0.1:21000".to_string());
-
-    if let Some(value) = original_data_dir {
-        safe_set_var("BOT_DATA_DIR", value);
-    } else {
-        safe_remove_var("BOT_DATA_DIR");
+    for distribution in [None, Some("pre")] {
+        let _env = EnvVars::apply(&[
+            ("BOT_DATA_DIR", None), ("MOLTIS_BCS_URL", None),
+            ("BCS_API_BASE_URL", None), ("AGENTCLAW_ENV", distribution),
+        ]);
+        let expected = bcs_cli::resolve_compiled_distribution_default_url()
+            .unwrap().unwrap_or_else(|| "http://127.0.0.1:21000".to_string());
+        assert_eq!(resolve_bcs_url(&health_cli()).unwrap(), expected, "distribution: {distribution:?}");
     }
-    if let Some(value) = original_url {
-        safe_set_var("MOLTIS_BCS_URL", value);
-    } else {
-        safe_remove_var("MOLTIS_BCS_URL");
-    }
-    if let Some(value) = original_base_url {
-        safe_set_var("BCS_API_BASE_URL", value);
-    } else {
-        safe_remove_var("BCS_API_BASE_URL");
-    }
-    if let Some(value) = original_agentclaw_env {
-        safe_set_var("AGENTCLAW_ENV", value);
-    } else {
-        safe_remove_var("AGENTCLAW_ENV");
-    }
-
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), expected);
-}
-
-#[test]
-#[serial]
-fn test_resolve_bcs_url_uses_pre_distribution_default_or_local() {
-    let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
-    let original_url = std::env::var("MOLTIS_BCS_URL").ok();
-    let original_base_url = std::env::var("BCS_API_BASE_URL").ok();
-    let original_agentclaw_env = std::env::var("AGENTCLAW_ENV").ok();
-
-    safe_remove_var("BOT_DATA_DIR");
-    safe_remove_var("MOLTIS_BCS_URL");
-    safe_remove_var("BCS_API_BASE_URL");
-    safe_set_var("AGENTCLAW_ENV", "pre");
-
-    let cli = Cli {
-        url: None,
-        cookie: None,
-        log_level: "info".to_string(),
-        json: false,
-        no_json: true,
-        #[cfg(debug_assertions)]
-        debug: false,
-        command: Commands::Health,
-    };
-    let result = resolve_bcs_url(&cli);
-    // Self-referential on purpose: the expectation derives from this build's compiled
-    // defaults, so public builds pin only the localhost fallback here.
-    let expected = bcs_cli::resolve_compiled_distribution_default_url()
-        .unwrap()
-        .unwrap_or_else(|| "http://127.0.0.1:21000".to_string());
-
-    if let Some(value) = original_data_dir {
-        safe_set_var("BOT_DATA_DIR", value);
-    } else {
-        safe_remove_var("BOT_DATA_DIR");
-    }
-    if let Some(value) = original_url {
-        safe_set_var("MOLTIS_BCS_URL", value);
-    } else {
-        safe_remove_var("MOLTIS_BCS_URL");
-    }
-    if let Some(value) = original_base_url {
-        safe_set_var("BCS_API_BASE_URL", value);
-    } else {
-        safe_remove_var("BCS_API_BASE_URL");
-    }
-    if let Some(value) = original_agentclaw_env {
-        safe_set_var("AGENTCLAW_ENV", value);
-    } else {
-        safe_remove_var("AGENTCLAW_ENV");
-    }
-
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), expected);
 }
 
 #[tokio::test]

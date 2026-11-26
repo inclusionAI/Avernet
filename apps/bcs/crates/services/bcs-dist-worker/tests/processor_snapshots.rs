@@ -1,4 +1,6 @@
 #![allow(clippy::unwrap_used, reason = "snapshot policy integration assertions")]
+#[path = "processor_snapshots/publication_race.rs"]
+mod publication_race;
 mod lifecycle_support;
 mod processor_support;
 mod support;
@@ -22,13 +24,13 @@ async fn append_and_settle(
         if checkpoint
             .dispatch_seq
             .get(&dispatch_id(tid))
-            .is_some_and(|p| p.sequence == InputSeq(seq))
+            .is_some_and(|progress| progress.sequence == InputSeq(seq))
+            && p.observations().await.unwrap().pending_outboxes == 0
         {
-            drive(f, p, 20).await;
             return;
         }
     }
-    panic!("delta {seq} was not committed");
+    panic!("delta {seq} did not commit and finish effect replay");
 }
 fn text(view: TaskView) -> String {
     let Payload::Inline(raw) = view.content.snapshot else {
@@ -69,12 +71,6 @@ async fn count_policy_publishes_at_128_committed_deltas_without_clock_progress()
     assert!(progress.pending_bytes < 65_536);
     assert_eq!(f.snapshot(&tid).await.snapshot_event_id, first_cut);
     append_and_settle(&f, &p, &tid, 128, "x").await;
-    for _ in 0..100 {
-        if output.publications().len() == 2 {
-            break;
-        }
-        drive(&f, &p, 1).await;
-    }
     assert_eq!(output.publications().len(), 2);
     assert_eq!(f.snapshot(&tid).await, output.publications()[1].snapshot);
     assert_eq!(f.checkpoint().await.tasks[0].publication.pending_events, 0);

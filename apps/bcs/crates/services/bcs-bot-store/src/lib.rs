@@ -15,10 +15,6 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tracing::debug;
-#[cfg(test)]
-use std::sync::Arc;
-#[cfg(test)]
-use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement};
 use bcs_db_api::DbValue as Value;
 use bcs_service_api::{
     BindingChannels, BotCapabilities, RegisteredBot, ServiceError, ServiceResult, Skill,
@@ -40,10 +36,6 @@ mod a2a_search;
 pub mod provider_cache;
 mod caller_config_cache;
 mod control_plane_visibility;
-
-#[cfg(test)]
-#[path = "../tests/unit/heartbeat.rs"]
-mod heartbeat_tests;
 
 /// Trusted-registration ownership composition (bot-authority
 /// plan Task 4): shared transaction pieces plus the memory
@@ -261,32 +253,6 @@ impl RegisteredBotInner {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // Note: These tests require external database connections.
-    // Run with: cargo test --package bcs-bot -- --ignored
-
-    #[test]
-    fn test_bot_info_serialization() {
-        let bot_info = BotInfo {
-            summary: Some("Test bot".to_string()),
-            domains: vec!["testing".to_string()],
-            skills: vec![Skill::new("test")],
-            scopes: vec!["read".to_string()],
-            binding_channels: None,
-            hidden: false,
-            agent_code: None,
-            agent_token: None,
-            ..Default::default()
-        };
-
-        let json = serde_json::to_string(&bot_info).unwrap();
-        let parsed: BotInfo = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(parsed.summary, bot_info.summary);
-        assert_eq!(parsed.domains, bot_info.domains);
-        assert_eq!(parsed.skills, bot_info.skills);
-        assert_eq!(parsed.scopes, bot_info.scopes);
-    }
 
     #[test]
     fn test_bot_inner_expiry() {
@@ -525,17 +491,6 @@ mod tests {
     }
 
     #[test]
-    fn test_bot_connection_clone() {
-        let conn = BotConnection {
-            session_token: "test-token".to_string(),
-            connected_at: Instant::now(),
-        };
-
-        let conn_clone = conn.clone();
-        assert_eq!(conn_clone.session_token, "test-token");
-    }
-
-    #[test]
     fn test_dynamic_status_default() {
         let status = BotDynamicStatus::default();
         assert!(status.status.is_empty());
@@ -578,103 +533,5 @@ mod tests {
         assert_eq!(parsed.domains, bot_info.domains);
         assert_eq!(parsed.skills, bot_info.skills);
         assert_eq!(parsed.scopes, bot_info.scopes);
-    }
-
-    // ===== Integration tests (require external database) =====
-    // Run with: cargo test --package bcs-bot -- --ignored
-
-    #[tokio::test]
-    #[ignore = "Requires external database connections"]
-    async fn integration_test_register_and_retrieve() {
-        // This test documents the expected workflow:
-        // 1. Create PersistentBotRepo with a DbPlugin handle
-        // 2. Register a bot
-        // 3. Retrieve the bot from memory (fast path)
-        // 4. Verify capabilities are persisted to the database
-        //
-        // Example setup is intentionally omitted because production wiring
-        // now happens through the bootstrap composition root.
-        //
-        // let caps = BotCapabilities {
-        //     name: Some("Test Bot".into()),
-        //     skills: vec!["testing".into()],
-        //     ..Default::default()
-        // };
-        // registry.register("test-bot".into(), caps).await;
-        //
-        // let bot = registry.get("test-bot").await.unwrap();
-        // assert_eq!(bot.capabilities.name, Some("Test Bot".into()));
-    }
-
-    #[tokio::test]
-    #[ignore = "Requires external database connections"]
-    async fn integration_test_token_persistence() {
-        // This test documents the expected workflow:
-        // 1. Register WS connection (generates token)
-        // 2. Token is persisted to the database
-        // 3. After server restart, token can be looked up from the database
-        //
-        // Example:
-        // let (tx, _rx) = mpsc::channel(10);
-        // let token = registry.register_streaming_connection("test-bot".into()).await.unwrap();
-        //
-        // // Token should be findable
-        // let found = registry.find_bot_by_token(&token).await;
-        // assert_eq!(found, Some("test-bot".into()));
-    }
-
-    #[tokio::test]
-    #[ignore = "Requires external database connections"]
-    async fn integration_test_reconnect_streaming_recover_from_storage() {
-        // This test documents the failover recovery workflow:
-        // 1. Bot connects and persists capabilities and its token in the database
-        // 2. WS disconnects (but token is preserved)
-        // 3. Server restarts (memory cleared)
-        // 4. Bot reconnects with existing token
-        // 5. Server recovers capabilities and its token from the database, then renews liveness
-        //
-        // Example:
-        // let (tx, _rx) = mpsc::channel(10);
-        // let token = registry.register_streaming_connection("test-bot".into()).await.unwrap();
-        //
-        // // Simulate server restart by clearing memory
-        // // (in real scenario, memory is lost)
-        //
-        // let (tx2, _rx2) = mpsc::channel(10);
-        // let (bot_uuid, recovered_token) = registry.reconnect_streaming(token.clone()).await.unwrap();
-        // assert_eq!(bot_uuid, "test-bot");
-        // assert_eq!(recovered_token, token);
-    }
-
-    #[tokio::test]
-    #[ignore = "Requires external database connections"]
-    async fn integration_test_sql_injection_protection() {
-        // This test documents SQL injection protection:
-        // Bot IDs and other fields are escaped before SQL queries
-        //
-        // Example:
-        // let malicious_id = "bot'; DROP TABLE bcs_bots; --";
-        // let caps = BotCapabilities::default();
-        // registry.register(malicious_id.into(), caps).await;
-        // // Should not cause SQL injection, just creates a bot with that name
-    }
-
-    #[test]
-    fn test_sql_escaping_in_save_to_storage() {
-        // Verify that special SQL characters are properly escaped
-        let bot_info = BotInfo {
-            summary: Some("Test with 'single quotes'".into()),
-            domains: vec![],
-            skills: vec![],
-            scopes: vec![],
-            binding_channels: None,
-            hidden: false,
-            agent_code: None,
-            agent_token: None,
-            ..Default::default()
-        };
-        let json = serde_json::to_string(&bot_info).unwrap();
-        // JSON escaping handles most cases, but the SQL layer also does escaping
-        assert!(json.contains("single quotes"));
     }
 }

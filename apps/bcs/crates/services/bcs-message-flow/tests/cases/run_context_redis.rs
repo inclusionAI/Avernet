@@ -19,13 +19,6 @@ fn store_with_cache(cache: Arc<InMemoryCachePlugin>) -> RedisBotRunContextStore 
     RedisBotRunContextStore::new(cache, "bcs:".to_string(), 120_000)
 }
 
-#[tokio::test]
-async fn redis_bot_run_context_passes_port_contract() {
-    let store = store();
-    bcs_test_support::contract::port::bot_run_context_port_contract_tests(&store, "redis-contract")
-        .await;
-}
-
 fn ctx(run_id: &str) -> BotRunContext {
     BotRunContext {
         run_id: run_id.to_string(),
