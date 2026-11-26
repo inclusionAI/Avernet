@@ -226,8 +226,9 @@ impl ConnectorEngine {
     ///    round, then point the feed at the owned partitions if they changed;
     /// 4. `reap` finished and dead actors and retry orphans;
     /// 5. at capacity, read no hints: wait for an actor to finish (or
-    ///    `receive_timeout`) and start over. Other Connectors read the hints
-    ///    meanwhile, so load spreads by who has room (pull-based);
+    ///    `receive_timeout`) and start over. The hints of this process's
+    ///    partitions wait in their streams meanwhile: only the owner reads a
+    ///    partition, and a live owner is not displaced (no rebalancing);
     /// 6. otherwise read up to `free` hints, interruptible by `stop`;
     /// 7. handle each hint (claim, act, ack); on a read error, back off.
     ///
@@ -276,7 +277,7 @@ impl ConnectorEngine {
             // `let … else`: when `free` is zero (or does not fit a u32) the
             // `else` block runs and must leave this pass with `continue`.
             let Some(free) = u32::try_from(free).ok().and_then(NonZeroU32::new) else {
-                // At capacity: read no hints, other Connectors take them.
+                // At capacity: read no hints; they wait in the streams.
                 // An actor that ends sends `wake`; the timeout covers a missed
                 // wake-up and keeps renewals and drain checks going.
                 let _ = tokio::time::timeout(config.receive_timeout, inner.wake.notified()).await;

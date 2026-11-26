@@ -40,7 +40,8 @@ pub struct ConnectorConfig {
     /// The command-stream pool this Connector serves.
     pub pool: PoolId,
     /// Calls held at once (live actors). At the limit the engine reads no
-    /// hints at all, so other Connectors take them: pull-based load balancing.
+    /// hints at all; the hints of its partitions wait until an actor ends
+    /// (only the owner reads a partition, and owners are not rebalanced).
     pub max_active_calls: usize,
     /// How often a held call's dispatch is re-read for replies and cancels
     /// (the actor's tick, B14). Each call uses its own value spread over

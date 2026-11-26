@@ -89,6 +89,11 @@ index is per instance, so a new holder cannot find the calls it should look at.
 ## Out of scope
 
 - Rebalancing partitions onto newly started Connectors while owners are
-  healthy (same as the Worker).
+  healthy (same as the Worker). Consequence: capacity does not spread by
+  itself. A Connector that starts first claims every partition, and a later
+  one owns none until an owner drains or dies; while the owner is at
+  `max_active_calls`, new calls of its partitions wait although other
+  Connectors have room. Before this change any Connector with room read the
+  hints. Rebalancing is an open decision.
 - Changing the partition count of a running deployment.
 - Telling the Worker about unresolved calls (D2).
