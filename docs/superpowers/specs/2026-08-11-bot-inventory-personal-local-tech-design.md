@@ -310,46 +310,46 @@ def assert_local_create(engine: str, space_kind: str) -> ComboDecision:
 
 ```python
 class BotInventoryService:
-    def list_items(
-        self,
-        *,
-        owner_id: str,
-        space: BusinessSpaceRef | None,
-        keyword: str | None,
-        engine: str | None,
-        deploy_mode: DeployMode | None,
-        page: int,
-        page_size: int,
-    ) -> tuple[list[BotInventoryItem], int]:
-        cloud_rows = []
-        if deploy_mode in (None, DeployMode.CLOUD):
-            result = self._bot.list_bots_by_conditions(
-                owner_id=owner_id,
-                bot_name=keyword,
-                engine=engine,
-                status=None,
-                page=1,
-                page_size=min(page * page_size, 200),
-            )
-            cloud_rows = [r for r in result["items"] if r.get("bot_type") == "personal"]
+  def list_items(
+          self,
+          *,
+          owner_id: str,
+          space: BusinessSpaceRef | None,
+          keyword: str | None,
+          engine: str | None,
+          deploy_mode: DeployMode | None,
+          page: int,
+          page_size: int,
+  ) -> tuple[list[BotInventoryItem], int]:
+    cloud_rows = []
+    if deploy_mode in (None, DeployMode.CLOUD):
+      result = self._bot.list_bots_by_conditions(
+        owner_id=owner_id,
+        bot_name=keyword,
+        engine=engine,
+        status=None,
+        page=1,
+        page_size=min(page * page_size, 200),
+      )
+      cloud_rows = [r for r in result["items"] if r.get("bot_type") == "personal"]
 
-        local_rows = []
-        if deploy_mode in (None, DeployMode.LOCAL):
-            local_rows = self._desktop.list_user_bots(owner_id)
-            if keyword:
-                local_rows = [r for r in local_rows if keyword in (r.get("bot_name") or "")]
-            if engine:
-                local_rows = [r for r in local_rows if (r.get("active_engine") or r.get("engine_type")) == engine]
+    local_rows = []
+    if deploy_mode in (None, DeployMode.LOCAL):
+      local_rows = self._desktop.list_user_bots(owner_id)
+      if keyword:
+        local_rows = [r for r in local_rows if keyword in (r.get("bot_name") or "")]
+      if engine:
+        local_rows = [r for r in local_rows if (r.get("active_engine") or r.get("engine_type")) == engine]
 
-        cards = [self._to_cloud_card(r, owner_id) for r in cloud_rows]
-        cards += [self._to_local_card(r, owner_id) for r in local_rows]
-        if space is not None:
-            cards = [c for c in cards if c.space and c.space.space_id == space.space_id]
+    cards = [self._to_cloud_card(r, owner_id) for r in cloud_rows]
+    cards += [self._to_local_card(r, owner_id) for r in local_rows]
+    if space is not None:
+      cards = [c for c in cards if c.to_space and c.to_space.space_id == space.space_id]
 
-        cards.sort(key=lambda c: (c.deploy_mode.value, c.bot_name, c.bot_id))
-        total = len(cards)
-        start = (page - 1) * page_size
-        return cards[start : start + page_size], total
+    cards.sort(key=lambda c: (c.deploy_mode.value, c.bot_name, c.bot_id))
+    total = len(cards)
+    start = (page - 1) * page_size
+    return cards[start: start + page_size], total
 ```
 
 > P0 允许内存 merge + 分页；必须设置源查询上限，避免一次拉全量。后续若规模变大，再把各源升级为 cursor 聚合。

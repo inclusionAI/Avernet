@@ -1,11 +1,4 @@
-"""G1 授权接缝:结构授权协议与 P1 默认实现(spec §13)。
-
-P1 只做结构校验(``StructuralContextCollabAuthorizer``),外部
-Membership / Grant / Policy Authority 的真实授权留给 P2,通过
-``ContextCollabAuthorizerProtocol`` 接缝替换,不改服务层。
-身份匹配规则:P1 不建 Principal/Agent 注册表,principal 以
-``principal_id``、executor 以 ``agent_id`` 与认证 ActorContext 比对。
-"""
+"""G1 structural authorization seam for Collet/Task/Event operations."""
 
 from __future__ import annotations
 
@@ -14,78 +7,163 @@ from typing import Protocol, Sequence, runtime_checkable
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.collet_creation import (
+    ColletCreationAuthorizer,
+    StructuralColletCreationAuthorizer,
+)
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
-    ContextSpec,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
+    bound_executor_refs,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
+    Task,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    METHOD_COMPOSITION_WIRES,
     MethodKind,
 )
-from agentclaw.community.core.task.context_collab.service_api import ActorContext
+from agentclaw.community.core.task.context_collab.l6_products.instance import (
+    ProductInstance,
+)
 
 VISIBILITY_PUBLIC = "public"
 VISIBILITY_WORKSPACE = "workspace"
 VISIBILITY_PRIVATE = "private"
 
+TOP_LEVEL_METHOD_KINDS = frozenset(
+    {
+        MethodKind.SINGLE.value,
+        MethodKind.SWARM.value,
+        MethodKind.OPEN.value,
+    }
+) | METHOD_COMPOSITION_WIRES
+
 
 @runtime_checkable
-class ContextCollabAuthorizerProtocol(Protocol):
-    """授权接缝;服务层只依赖本协议,不依赖具体实现。"""
+class ContextCollabAuthorizerProtocol(ColletCreationAuthorizer, Protocol):
+    def check_create(
+        self, *, method_kind: str, executor_ref, actor: ActorContext
+    ) -> None: ...
 
-    def check_create(self, spec: ContextSpec, actor: ActorContext) -> None: ...
-    def check_append(self, collet: Collet, command, actor: ActorContext) -> None: ...
-    def filter_visible_events(self, collet: Collet, events: Sequence[EventRecord],
-                              actor: ActorContext) -> list[EventRecord]: ...
+    def check_append(
+        self,
+        collet: Collet,
+        task: Task | None,
+        creation_facts: dict,
+        product_instance: ProductInstance | None,
+        command,
+        actor: ActorContext,
+    ) -> None: ...
+
+    def filter_visible_events(
+        self,
+        collet: Collet,
+        task: Task | None,
+        creation_facts: dict,
+        product_instance: ProductInstance | None,
+        events: Sequence[EventRecord],
+        actor: ActorContext,
+    ) -> list[EventRecord]: ...
 
 
-def _is_principal(collet: Collet, actor: ActorContext) -> bool:
-    # 身份取自创建参数(context_spec 恒在),不经 current_snapshot(可空)。
-    return (
-        actor.actor.principal_id
-        == collet.context_spec.principal_ref.principal_id
+def _is_principal(task: Task | None, actor: ActorContext) -> bool:
+    return task is not None and actor.actor == task.principal_ref
+
+
+def _is_executor(task: Task | None, actor: ActorContext) -> bool:
+    return task is not None and any(
+        actor.actor.principal_type == ref.agent_type
+        and actor.actor.principal_id == ref.agent_id
+        for ref in task.executor_refs
     )
 
 
-def _is_executor(collet: Collet, actor: ActorContext) -> bool:
-    executor = collet.context_spec.executor_ref
-    return executor is not None and actor.actor.principal_id == executor.agent_id
+def _is_public_open_message(creation_facts: dict, command) -> bool:
+    return (
+        creation_facts.get("method_kind") == "Open + Group"
+        and command.event_kind == "user_interaction.posted"
+        and command.primitive_type == "Message"
+        and command.visibility == VISIBILITY_PUBLIC
+    )
 
 
-class StructuralContextCollabAuthorizer(ContextCollabAuthorizerProtocol):
-    """P1 默认实现(spec §13):仅结构校验。
+class StructuralContextCollabAuthorizer(
+    StructuralColletCreationAuthorizer, ContextCollabAuthorizerProtocol
+):
+    """P1 structural rules; external membership/grants remain a replaceable seam."""
 
-    - ``check_create``:method=Single 时 ``executor_ref`` 不得为 None
-      (principal/executor 引用非空已在 value object 校验);
-    - ``check_append``:actor 必须是 principal 或 executor;
-    - ``filter_visible_events``:public 永远可见,workspace 仅
-      principal/executor 可见,private 仅 principal 可见;visibility
-      为 NULL 的部分行按 private 处理(fail-safe)。
-    """
-
-    def check_create(self, spec: ContextSpec, actor: ActorContext) -> None:
-        if spec.method_kind == MethodKind.SINGLE.value and spec.executor_ref is None:
+    def check_create(
+        self, *, method_kind: str, executor_ref, actor: ActorContext
+    ) -> None:
+        if method_kind not in TOP_LEVEL_METHOD_KINDS:
+            raise ContextCollabValidationError(
+                f"top-level method_kind must be one of {sorted(TOP_LEVEL_METHOD_KINDS)}, "
+                f"got: {method_kind!r}; "
+                "bare Group may only enter via a nested method bind"
+            )
+        if method_kind == MethodKind.SINGLE.value and executor_ref is None:
             raise ContextCollabValidationError(
                 "method_kind 'Single' requires a non-null executor_ref"
             )
 
-    def check_append(self, collet: Collet, command, actor: ActorContext) -> None:
-        # P1 结构规则只看认证 actor;command 保留给 P2 策略引用。
-        if _is_principal(collet, actor) or _is_executor(collet, actor):
+    def check_append(
+        self,
+        collet: Collet,
+        task: Task | None,
+        creation_facts: dict,
+        product_instance: ProductInstance | None,
+        command,
+        actor: ActorContext,
+    ) -> None:
+        if product_instance is not None and (
+            actor.actor.principal_type in {"bot", "service"}
+            or _is_executor(task, actor)
+        ):
+            product_instance.participant_scope.require(
+                AgentRef(actor.actor.principal_type, actor.actor.principal_id)
+            )
+        if (
+            _is_principal(task, actor)
+            or _is_executor(task, actor)
+            or _is_public_open_message(creation_facts, command)
+        ):
             return
         raise ContextCollabValidationError(
-            "only the principal or the executor may append events to "
-            f"collab_context {collet.collab_context_id!r}"
+            "only the principal, executor, or an Open+Group public-message contributor "
+            f"may append events to collab_context {collet.collet_id!r}"
         )
 
     def filter_visible_events(
-        self, collet: Collet, events: Sequence[EventRecord],
+        self,
+        collet: Collet,
+        task: Task | None,
+        creation_facts: dict,
+        product_instance: ProductInstance | None,
+        events: Sequence[EventRecord],
         actor: ActorContext,
     ) -> list[EventRecord]:
-        is_principal = _is_principal(collet, actor)
-        is_executor = _is_executor(collet, actor)
+        is_principal = (
+            _is_principal(task, actor)
+            if task is not None
+            else actor.actor == collet.initiator_ref
+        )
+        is_executor = (
+            _is_executor(task, actor)
+            if task is not None
+            else AgentRef(actor.actor.principal_type, actor.actor.principal_id)
+            in bound_executor_refs(events)
+        )
         visible: list[EventRecord] = []
         for record in events:
             if record.visibility == VISIBILITY_PUBLIC:
@@ -95,9 +173,7 @@ class StructuralContextCollabAuthorizer(ContextCollabAuthorizerProtocol):
             ):
                 visible.append(record)
             elif (
-                record.visibility == VISIBILITY_PRIVATE
-                or record.visibility is None
+                record.visibility == VISIBILITY_PRIVATE or record.visibility is None
             ) and is_principal:
-                # visibility=NULL(外部部分行)按 private 处理:收紧不泄露。
                 visible.append(record)
         return visible

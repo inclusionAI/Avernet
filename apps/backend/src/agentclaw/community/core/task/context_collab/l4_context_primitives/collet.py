@@ -1,31 +1,36 @@
-"""L4 Collet:协作上下文聚合根及其快照(spec §3.4)。
+"""L4 bounded collaboration context; independent from work and method state.
 
-``ContextSpec`` 承载创建请求中长期保留的引用与目标;``CurrentSnapshot``
-是 Collet 的当前读写快照(不是第二权威状态);``ProgressSnapshot`` 保存
-GET 查询投影使用的任务进度计数;``Collet`` 聚合根只持有快照与版本,事件
-事实一律由 Event record 承载。本模块只有纯值对象,不做任何 IO。
+Identity, scope and lifecycle remain independent of Work and upper-layer
+composition. New records include description/audit metadata; metadata-less
+representations remain readable without inventing their missing audit history.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from hashlib import sha256
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
-    AgentRef,
     PrincipalRef,
 )
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
-    ResourceRef,
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
-    MethodKind,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.artifact import (
+    Artifact,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
-    TaskStatus,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet_metadata import (
+    COLLET_METADATA_KEYS,
+    ColletMetadata,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.resource_binding import (
+    ResourceBinding,
 )
 
 
@@ -35,18 +40,6 @@ def _required_str(data: dict, key: str, owner: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ContextCollabValidationError(
             f"{owner}.{key} must be a non-empty string, got: {value!r}"
-        )
-    return value
-
-
-def _optional_str(data: dict, key: str, owner: str) -> str | None:
-    """从 dict 中取出可空字符串字段;缺失或 ``None`` 返回 ``None``。"""
-    value = data.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise ContextCollabValidationError(
-            f"{owner}.{key} must be a non-empty string or null, got: {value!r}"
         )
     return value
 
@@ -61,182 +54,215 @@ def _required_dict(data: dict, key: str, owner: str) -> dict:
     return value
 
 
-def _method_kind_from_dict(data: dict, owner: str) -> str:
-    """校验并返回 ``MethodKind`` 合法字符串;未知 wire 值抛校验错误。"""
-    return MethodKind.from_wire(_required_str(data, "method_kind", owner)).value
+class ColletState(str, Enum):
+    """Collet 大写机器状态词汇(spec §4)。
 
-
-def _principal_ref_from_dict(data: dict, owner: str) -> PrincipalRef:
-    return PrincipalRef.from_dict(_required_dict(data, "principal_ref", owner))
-
-
-def _executor_ref_from_dict(data: dict, owner: str) -> AgentRef | None:
-    """取可空执行 Agent 引用;``None`` / 缺失表示当前没有指定执行 Agent。"""
-    value = data.get("executor_ref")
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        raise ContextCollabValidationError(
-            f"{owner}.executor_ref must be an object or null, got: {value!r}"
-        )
-    return AgentRef.from_dict(value)
-
-
-@dataclass
-class ContextSpec:
-    """创建请求中长期保留的协作上下文参数(spec §9.2)。
-
-    ``executor_ref`` 为 ``None`` 表示方法未指定执行 Agent(公开讨论即如此);
-    ``resource_refs`` 是外部资源引用元组,不复制资源正文;``product_kind`` /
-    ``workflow_kind`` 是可选的 L6 Profile 引用,不建平行权威类型。
+    与独立 ``Task.status`` 的 ``TaskStatus`` 小写词汇是两套闭合
+    词汇:前者服务 G4 ``collet_lifecycle`` 状态机(见
+    ``g4_contracts_consistency.context_state_machines``),后者仍是
+    独立 Task 的状态。两套词汇不互相渗透/schema 不互认。
     """
 
-    space: SpaceRef
-    principal_ref: PrincipalRef
-    method_kind: str
-    executor_ref: AgentRef | None
-    objective: str
-    resource_refs: tuple[ResourceRef, ...]
-    product_kind: str | None
-    workflow_kind: str | None
-    executor_owner_id: str | None = None
+    CREATED = "CREATED"
+    ACTIVE = "ACTIVE"
+    SUSPENDED = "SUSPENDED"
+    COMPLETED = "COMPLETED"
+    ARCHIVED = "ARCHIVED"
 
-    @classmethod
-    def from_dict(cls, data: dict) -> "ContextSpec":
-        raw_refs = data.get("resource_refs")
-        if not isinstance(raw_refs, list):
-            raise ContextCollabValidationError(
-                f"ContextSpec.resource_refs must be a list, got: {raw_refs!r}"
-            )
-        return cls(
-            space=SpaceRef.from_dict(_required_dict(data, "space", "ContextSpec")),
-            principal_ref=_principal_ref_from_dict(data, "ContextSpec"),
-            method_kind=_method_kind_from_dict(data, "ContextSpec"),
-            executor_ref=_executor_ref_from_dict(data, "ContextSpec"),
-            objective=_required_str(data, "objective", "ContextSpec"),
-            resource_refs=tuple(
-                ResourceRef.from_dict(item) for item in raw_refs
-            ),
-            product_kind=_optional_str(data, "product_kind", "ContextSpec"),
-            workflow_kind=_optional_str(data, "workflow_kind", "ContextSpec"),
-            executor_owner_id=_optional_str(
-                data, "executor_owner_id", "ContextSpec"
-            ),
-        )
 
-    def to_dict(self) -> dict:
-        data = {
-            "space": self.space.to_dict(),
-            "principal_ref": self.principal_ref.to_dict(),
-            "method_kind": self.method_kind,
-            "executor_ref": (
-                self.executor_ref.to_dict() if self.executor_ref else None
-            ),
-            "objective": self.objective,
-            "resource_refs": [ref.to_dict() for ref in self.resource_refs],
-            "product_kind": self.product_kind,
-            "workflow_kind": self.workflow_kind,
+# Known fields are closed for both legacy and current representations.
+_COLLET_KEYS = (
+    frozenset(
+        {
+            "collet_id",
+            "initiator_ref",
+            "state",
+            "scope",
+            "version",
+            "artifacts",
+            "resources",
         }
-        if self.executor_owner_id is not None:
-            data["executor_owner_id"] = self.executor_owner_id
-        return data
-
-
-@dataclass
-class ProgressSnapshot:
-    """任务进度计数与当前事件引用;GET 查询投影,不是权威状态。"""
-
-    percent: int = 0
-    completed_count: int = 0
-    active_count: int = 0
-    blocked_count: int = 0
-    current_event_id: str | None = None
-
-    def to_dict(self) -> dict:
-        return {
-            "percent": self.percent,
-            "completed_count": self.completed_count,
-            "active_count": self.active_count,
-            "blocked_count": self.blocked_count,
-            "current_event_id": self.current_event_id,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "ProgressSnapshot":
-        """从快照 JSON 恢复进度;缺省计数按 0 处理。"""
-        if not isinstance(data, dict):
-            raise ContextCollabValidationError(
-                f"ProgressSnapshot must be an object, got: {data!r}"
-            )
-        return cls(
-            percent=data.get("percent", 0),
-            completed_count=data.get("completed_count", 0),
-            active_count=data.get("active_count", 0),
-            blocked_count=data.get("blocked_count", 0),
-            current_event_id=data.get("current_event_id"),
-        )
-
-
-@dataclass
-class CurrentSnapshot:
-    """Collet 的当前读写快照(spec §3.4.2)。
-
-    ``status`` 必须是 ``TaskStatus`` 合法字符串;``method_kind`` 必须是
-    ``MethodKind`` 合法字符串;两者在 ``from_dict`` 时校验。
-    """
-
-    objective: str
-    status: str
-    principal_ref: PrincipalRef
-    executor_ref: AgentRef | None
-    method_kind: str
-    progress: ProgressSnapshot
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "CurrentSnapshot":
-        raw_status = _required_str(data, "status", "CurrentSnapshot")
-        if raw_status not in (status.value for status in TaskStatus):
-            raise ContextCollabValidationError(
-                f"unknown status value: {raw_status!r}"
-            )
-        return cls(
-            objective=_required_str(data, "objective", "CurrentSnapshot"),
-            status=raw_status,
-            principal_ref=_principal_ref_from_dict(data, "CurrentSnapshot"),
-            executor_ref=_executor_ref_from_dict(data, "CurrentSnapshot"),
-            method_kind=_method_kind_from_dict(data, "CurrentSnapshot"),
-            progress=ProgressSnapshot.from_dict(
-                _required_dict(data, "progress", "CurrentSnapshot")
-            ),
-        )
-
-    def to_dict(self) -> dict:
-        return {
-            "objective": self.objective,
-            "status": self.status,
-            "principal_ref": self.principal_ref.to_dict(),
-            "executor_ref": (
-                self.executor_ref.to_dict() if self.executor_ref else None
-            ),
-            "method_kind": self.method_kind,
-            "progress": self.progress.to_dict(),
-        }
+    )
+    | COLLET_METADATA_KEYS
+    | {"etag"}
+)
+_COLLET_STATES = frozenset({state.value for state in ColletState})
 
 
 @dataclass
 class Collet:
-    """L4 协作上下文聚合根。
+    """L4 bounded context, not a Task or a product execution snapshot.
 
-    持有聚合标识、创建主体引用(``actor_ref``,与初始 task.created 事件的
-    actor_ref 同值;可空容忍外部部分行)、创建参数、当前快照与聚合版本;
-    事件事实由 ``ac_context_collab_event`` 表(见
-    ``event_envelope.EventRecord``)承载,快照由事件改写,不在此复制事件历史。
+    scope is an optional legacy L3 governance anchor, NOT the union of
+    accessible Spaces, Resources or Grants. version is the aggregate revision.
+    Missing metadata denotes a legacy representation only; every repository
+    creation writes complete metadata.
+    The existing authenticated-actor initiator convention remains unchanged.
+    artifacts contains L4 Artifact values and defaults to empty; runtime reporting
+    and Task-to-Collet aggregation do not populate it yet. Empty artifacts are
+    omitted from the representation to preserve existing shapes and ETags.
+    resources contains L4 ResourceBinding values, not resource bodies or Grants.
+    It defaults to empty and is omitted when empty. Explicit Collet creation can
+    supply it; existing event-based binding facts do not populate it automatically.
     """
 
-    collab_context_id: str
-    actor_ref: PrincipalRef | None
-    context_spec: ContextSpec
-    # 可空:允许外部写入只有 spec 的聚合行;P1 创建路径总是写满。
-    current_snapshot: CurrentSnapshot | None
-    current_event_id: str | None
-    context_version: int
+    collet_id: str
+    initiator_ref: PrincipalRef
+    state: ColletState
+    scope: SpaceRef | None
+    version: int
+    metadata: ColletMetadata | None = None
+    artifacts: tuple[Artifact, ...] = ()
+    resources: tuple[ResourceBinding, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.artifacts, tuple) or any(
+            not isinstance(artifact, Artifact) for artifact in self.artifacts
+        ):
+            raise ContextCollabValidationError(
+                "Collet.artifacts must be a tuple of L4 Artifact values"
+            )
+        if not isinstance(self.resources, tuple) or any(
+            not isinstance(resource, ResourceBinding) for resource in self.resources
+        ):
+            raise ContextCollabValidationError(
+                "Collet.resources must be a tuple of L4 ResourceBinding values"
+            )
+
+    @property
+    def revision(self) -> int:
+        """Common-contract spelling; version remains the compatible wire field."""
+        return self.version
+
+    @property
+    def title(self) -> str | None:
+        return self.metadata.title if self.metadata else None
+
+    @property
+    def description(self) -> str | None:
+        return self.metadata.description if self.metadata else None
+
+    @property
+    def created_at(self) -> datetime | None:
+        return self.metadata.created_at if self.metadata else None
+
+    @property
+    def created_by(self) -> PrincipalRef | None:
+        return self.metadata.created_by if self.metadata else None
+
+    @property
+    def updated_at(self) -> datetime | None:
+        return self.metadata.updated_at if self.metadata else None
+
+    @property
+    def updated_by(self) -> PrincipalRef | None:
+        return self.metadata.updated_by if self.metadata else None
+
+    @property
+    def etag(self) -> str:
+        """Derived strong tag for this representation, not another stored revision."""
+        canonical = json.dumps(
+            self._representation(),
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return '"' + sha256(canonical.encode("utf-8")).hexdigest() + '"'
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Collet":
+        """Decode legacy or complete current metadata; reject partial/unknown fields."""
+        if not isinstance(data, dict):
+            raise ContextCollabValidationError(
+                f"Collet must be an object, got: {data!r}"
+            )
+        unknown = set(data) - _COLLET_KEYS
+        if unknown:
+            raise ContextCollabValidationError(
+                f"Collet has unknown top-level keys: {sorted(unknown)}; "
+                f"allowed keys: {sorted(_COLLET_KEYS)}"
+            )
+        raw_state = data.get("state")
+        if not isinstance(raw_state, str) or raw_state not in _COLLET_STATES:
+            raise ContextCollabValidationError(f"unknown state value: {raw_state!r}")
+        raw_version = data.get("version")
+        if (
+            isinstance(raw_version, bool)
+            or not isinstance(raw_version, int)
+            or raw_version < 1
+        ):
+            raise ContextCollabValidationError(
+                f"Collet.version must be an integer >= 1, got: {raw_version!r}"
+            )
+        metadata_fields = set(data) & COLLET_METADATA_KEYS
+        metadata = (
+            ColletMetadata.from_dict({key: data[key] for key in metadata_fields})
+            if metadata_fields
+            else None
+        )
+        if "etag" in data and metadata is None:
+            raise ContextCollabValidationError("Collet.etag requires complete metadata")
+        artifacts = data.get("artifacts", [])
+        if not isinstance(artifacts, list) or any(
+            not isinstance(artifact, dict) for artifact in artifacts
+        ):
+            raise ContextCollabValidationError(
+                "Collet artifacts must be a list of objects"
+            )
+        resources = data.get("resources", [])
+        if not isinstance(resources, list) or any(
+            not isinstance(resource, dict) for resource in resources
+        ):
+            raise ContextCollabValidationError(
+                "Collet resources must be a list of objects"
+            )
+        collet = cls(
+            collet_id=_required_str(data, "collet_id", "Collet"),
+            initiator_ref=PrincipalRef.from_dict(
+                _required_dict(data, "initiator_ref", "Collet")
+            ),
+            state=ColletState(raw_state),
+            scope=(
+                SpaceRef.from_dict(data["scope"])
+                if data.get("scope") is not None
+                else None
+            ),
+            version=raw_version,
+            metadata=metadata,
+            artifacts=tuple(Artifact.from_dict(artifact) for artifact in artifacts),
+            resources=tuple(
+                ResourceBinding.from_dict(resource) for resource in resources
+            ),
+        )
+        if "etag" in data and data["etag"] != collet.etag:
+            raise ContextCollabValidationError(
+                "Collet.etag does not match representation"
+            )
+        return collet
+
+    def _representation(self) -> dict:
+        return {
+            "collet_id": self.collet_id,
+            "initiator_ref": self.initiator_ref.to_dict(),
+            "state": self.state.value,
+            "scope": self.scope.to_dict() if self.scope is not None else None,
+            "version": self.version,
+            **(
+                {"artifacts": [artifact.to_dict() for artifact in self.artifacts]}
+                if self.artifacts
+                else {}
+            ),
+            **(
+                {"resources": [resource.to_dict() for resource in self.resources]}
+                if self.resources
+                else {}
+            ),
+            **(self.metadata.to_dict() if self.metadata is not None else {}),
+        }
+
+    def to_dict(self) -> dict:
+        data = self._representation()
+        # Old representations preserve their exact shape; no fabricated audit.
+        if self.metadata is not None:
+            data["etag"] = self.etag
+        return data

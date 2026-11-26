@@ -38,7 +38,7 @@ class EventRecord:
     parent_event: str | None
     event_kind: str
     # 可空列(spec 作者裁决):Message | Task | Activity;外部部分行可为 NULL
-    # (读路径照常投影;统计仅排除 Message,NULL 参与计数)。
+    # (读路径照常投影;不把事件当作 Task 计数)。
     primitive_type: str | None
     # 以下同为可空列(spec 作者裁决):允许外部写入部分字段的事件行;
     # P1 追加路径总是写满这些值。
@@ -48,8 +48,17 @@ class EventRecord:
     context_version_after: int | None
     occurred_at: datetime
 
+    # Explicit L4 Work subject; absent on messages and pre-Task legacy events.
+    task_ref: str | None = None
+    task_version_after: int | None = None
+
     def to_envelope(self) -> "EventEnvelope":
-        """适配为 ACCS 公共合同信封;字段映射见 spec §3.4.1。"""
+        """Export the existing Collet-aggregate envelope mapping.
+
+        Local Task subject/revision columns are not serialized by this adapter;
+        this is not a lossless Task-authority replication format. A receiver
+        must not reconstruct independent Task state from this envelope alone.
+        """
         return EventEnvelope(
             event_id=self.event_id,
             event_type=self.event_kind,

@@ -12,6 +12,9 @@ Use the [repository knowledge standard](../../../docs/agents/knowledge-standard.
 
 ## Existing change records
 
+- [2026-11-23-context-collab-swarm-workflow-mode](2026-11-23-context-collab-swarm-workflow-mode/spec.md): database-backed, versioned ProductProfiles with embedded Swarm DAGs, named artifact handoffs and random eligible Agent selection. Implemented locally; 708 target tests pass. Broad regression/full CI retain reproducible baseline failures; see [delivery evidence](2026-11-23-context-collab-swarm-workflow-mode/delivery.md) for cutover prerequisites and unverified integration/deployment.
+- [2026-11-13-context-collab-l6-product-contracts](2026-11-13-context-collab-l6-product-contracts/spec.md): executable versioned composition and pinned instance contracts; see record for verification and scope limits.
+
 These entries are task-specific records. Inspect their individual status, evidence and target version; their presence does not establish current authority or deployment. Explicitly adopted contracts retain their authority until replaced.
 
 - [2026-07-09-teclaw-artifact-oss-offload](2026-07-09-teclaw-artifact-oss-offload/)
@@ -140,6 +143,14 @@ These entries are task-specific records. Inspect their individual status, eviden
 - [2026-11-09-bbs-help-task-upgrade](2026-11-09-bbs-help-task-upgrade/)
 - [2026-11-09-catalog-search-budget](2026-11-09-catalog-search-budget/)
 - [2026-11-10-openapi-iam-session-key](2026-11-10-openapi-iam-session-key/)
+- [2026-11-13-context-collab-l1-interoperate-deliver](2026-11-13-context-collab-l1-interoperate-deliver/)
+- [2026-11-13-context-collab-task-commission-product](2026-11-13-context-collab-task-commission-product/)
+- [2026-11-12-context-collab-l6-product-forms](2026-11-12-context-collab-l6-product-forms/)
+- [2026-11-12-context-collab-bbs-public-discussion-product](2026-11-12-context-collab-bbs-public-discussion-product/)
+- [2026-11-12-context-collab-l4-creation-event-facts](2026-11-12-context-collab-l4-creation-event-facts/)
+- [2026-11-12-context-collab-l4-resource-binding](2026-11-12-context-collab-l4-resource-binding/)
+- [2026-11-12-context-collab-l4-collet-accs-alignment](2026-11-12-context-collab-l4-collet-accs-alignment/)
+- [2026-11-12-context-collab-l5-method-objects](2026-11-12-context-collab-l5-method-objects/)
 - [admin-caller-to-owner](admin-caller-to-owner/)
 - [admin-cross-owner-call-type](admin-cross-owner-call-type/)
 - [app-caller-connection](app-caller-connection/)
@@ -173,3 +184,5 @@ These entries are task-specific records. Inspect their individual status, eviden
 - [2026-10-13-openapi-id-and-cron-errors.md](2026-10-13-openapi-id-and-cron-errors.md)
 - [2026-10-18-default-skill-withdrawal.md](2026-10-18-default-skill-withdrawal.md)
 - [2026-11-05-routine-run-conversation.md](2026-11-05-routine-run-conversation.md)
+
+- [2026-11-23 Swarm execution and interactions](2026-11-23-swarm-execution-interactions/spec.md)
