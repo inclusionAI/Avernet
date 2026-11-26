@@ -1,0 +1,52 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/run-detail-contract.md
+  h_bb3ca6fb13c5df 153-158,175-184,190-223
+apps/evolverun/clawweb/public/modules/workflow/docs/run-summary-contract.md
+  h_bb3ca6fb13c5df 85-98
+apps/evolverun/clawweb/public/modules/workflow/web/components/NodeExecutionList.tsx
+  h_bb3ca6fb13c5df 1,74-78,85-86,95,141,163,177,188-201,236,238-241,244-255,348
+apps/evolverun/clawweb/public/modules/workflow/web/components/RunArchivePanel.tsx
+  h_bb3ca6fb13c5df 15,46,60,64,79-80,98-104,106-108
+apps/evolverun/clawweb/public/modules/workflow/web/components/RunDagSection.tsx
+  h_bb3ca6fb13c5df 1-139
+apps/evolverun/clawweb/public/modules/workflow/web/components/RunDagView.tsx
+  h_bb3ca6fb13c5df 1,7-8,10-13,18-28,31,43-51,54,57,62-66,69-120,122,124,126-127,133-155,157,161-162,165,167-171,174-183,185-186,188-193,198-207,211-216,221-222,226-231,233-234,239-241,247,251-252,258,260,265-267,269-280,282-289
+apps/evolverun/clawweb/public/modules/workflow/web/components/RunLaunchDetails.tsx
+  h_bb3ca6fb13c5df 16-21,25,27-29,45,57,69,74
+apps/evolverun/clawweb/public/modules/workflow/web/components/RunMarkers.tsx
+  h_bb3ca6fb13c5df 22,26
+apps/evolverun/clawweb/public/modules/workflow/web/components/RunSummaryHeader.tsx
+  h_bb3ca6fb13c5df 9,22-25,89-106,108-111,117,130,137,147,158,168,173,183,190,199,206-227,231-244,246-262,266,271-280,283-284,286
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/NodeExecutionListLocate.test.tsx
+  h_bb3ca6fb13c5df 1-270
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunArchivePanel.integration.test.tsx
+  h_bb3ca6fb13c5df 18,62-63,71-72,79-80
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunArchivePanel.test.tsx
+  h_bb3ca6fb13c5df 85-128
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunDagSection.test.tsx
+  h_bb3ca6fb13c5df 1-176
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunDagView.test.tsx
+  h_bb3ca6fb13c5df 1-318
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunMarkers.integration.test.tsx
+  h_bb3ca6fb13c5df 195-196,198-200,202-204,206-207,209-210,212-213
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunSummaryHeader.test.tsx
+  h_bb3ca6fb13c5df 7-9,34,38,46-49,51,54-55,58-60,62-78,80-95,99-140,144-145,148-204
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunSummaryHeaderLaunch.test.tsx
+  h_bb3ca6fb13c5df 1,38-41,44,49-51,54,63,67-68,70,134-242
+apps/evolverun/clawweb/public/modules/workflow/web/pages/RunDetail.tsx
+  h_bb3ca6fb13c5df 1,10,27,83-84,133,196-204,242-254,316-319,321,327-329,338,433-434,452,467,479,543,562-563,565,567-568
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/RunDetailLayout.test.tsx
+  h_bb3ca6fb13c5df 1-111
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/RunDetailSubworkflow.test.tsx
+  h_bb3ca6fb13c5df 24,54-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "058955922048f6e1d4f5eb228b9f8f6d58fc4366",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
