@@ -37,6 +37,35 @@ Bootstrap publishes `planProtocol.allowedOperations` from the same definition us
 
 Owner waiting and effect waiting have separate deadlines. Owner expiry releases the execution while preserving the business task. A later decision creates a new execution for that task; an in-window decision continues the current execution. Effect waiting resumes the paused phase after reading new records, without resending initial advice. Old execution reports cannot overwrite new execution state.
 
+### Maintenance coordination
+
+The host schedules recovery maintenance every 60 seconds. The public assembly
+uses the [Shared database lease service](../../../shared/README.md) and independent
+`clawweb_distributed_locks` table. Only the holder for the control-plane environment,
+scene `session_recovery_maintenance`, tenant `__global__`, resource `scan`, enters
+the original scan. Unclaimed contenders never query `ce_tasks`. The lease lasts
+120 seconds and renews every 20 seconds. Database time governs ownership and the
+minimum 60-second acquisition interval measured from the scan start; quick release
+does not let a staggered replica immediately repeat the scan.
+
+A lost lease stops subsequent pages and maintenance actions. Renewal and release
+both check the acquisition token and current version in SQL. The original SQL,
+task selection, pagination and business decisions remain unchanged. No Workflow
+repository, journal, new index on task tables, or separate maintenance queue is
+used. Provision schema v158 before rollout; absent or incompatible lock schema
+fails closed without request-path DDL or unlocked fallback.
+
+Repair's existing fixed logger, field whitelist and output paths are unchanged.
+Each acquired scan emits `scan_started` / `scan_completed` using `stateVersion`
+for its acquisition revision, `environment`, and `elapsedMs` on completion.
+Instance/PID/timestamp remain supplied by the existing logger. Completion is
+recorded before lease release; skipped contenders remain silent. Failures retain
+the existing bounded redaction and error fields.
+Task-level row locks, versions and execution leases remain necessary for callbacks,
+user operations and takeover overlap. Result reporting and execution monitoring keep
+their separate schedules. Newly created tasks and Owner confirmations still dispatch
+directly; persisted retry deadlines and other maintenance work wait for a later scan.
+
 ### Automatic effect resumption
 
 The existing recovery maintenance scan resumes the same task and observation phase.

@@ -28,6 +28,9 @@ export interface Dialect {
   /** Current timestamp value in the database-native form. */
   now(): string | number;
 
+  /** SQL expression for authoritative Unix milliseconds, evaluated by the database. */
+  readonly nowMsSql: string;
+
   /** Convert an epoch second value to the database-native form. */
   epochToDb(ts: number | null | undefined): unknown;
 
@@ -121,6 +124,7 @@ export const sqliteDialect: Dialect = {
   quote: (identifier) => `"${identifier}"`,
 
   now: () => Math.floor(Date.now() / 1000),
+  nowMsSql: "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)",
 
   epochToDb: (ts) => ts ?? null,
 
@@ -268,6 +272,7 @@ function prefixIndexColumns(
 
 export const mysqlDialect: Dialect = {
   name: "mysql",
+  nowMsSql: "CAST(UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3)) * 1000 AS SIGNED)",
   driver: "mysql2",
 
   quote: (identifier) => `\`${identifier.replace(/`/g, "``")}\``,

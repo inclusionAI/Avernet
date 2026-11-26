@@ -5,6 +5,7 @@ import { migrations } from '../schema.js';
 import { workflowSnapshotMigrations } from '../schema-workflow-snapshot.js';
 import { flowRunLinkMysqlUpgradeDdl } from '../schema-flow-run-links.js';
 import { ordinaryRunRequestDdl } from '../schema-ordinary-run-request.js';
+import { distributedLockDdl } from '../schema-distributed-lock.js';
 
 type Migration = (typeof migrations)[number];
 
@@ -65,6 +66,7 @@ function createDb(dbType: 'mysql' | 'zdas', options: {
       ...workflowSnapshotMigrations.flatMap(m => m.sql.map(ddl => dialectFor(dbType).renderDdl(ddl))),
       probes.ordinaryCallback, probes.healingCallback, tagAlter, flowRunLinkMysqlUpgradeDdl,
       `${dialectFor(dbType).renderDdl(ordinaryRunRequestDdl)} ENGINE=InnoDB`,
+      dialectFor(dbType).renderDdl(distributedLockDdl) + (dbType === 'mysql' ? ' ENGINE=InnoDB' : ''),
       'ALTER TABLE flow_runs ADD COLUMN ordinary_run_marker VARCHAR(64) DEFAULT NULL',
       'ALTER TABLE ordinary_run_requests ADD COLUMN parent_run_marker VARCHAR(64) DEFAULT NULL',
       'ALTER TABLE ordinary_run_requests ADD COLUMN child_run_marker VARCHAR(64) DEFAULT NULL',
@@ -81,6 +83,19 @@ function createDb(dbType: 'mysql' | 'zdas', options: {
     if (sql === 'SELECT MAX(version) as v FROM schema_version') {
       if (!options.canDdl) throw new Error('Unexpected schema_version read');
       return [{ v: options.current ?? 0 }] as T[];
+    }
+    if (sql.includes("TABLE_NAME = 'clawweb_distributed_locks'")) {
+      if (sql.includes('information_schema.TABLES')) return [{ engine: 'InnoDB' }] as T[];
+      if (sql.includes('information_schema.COLUMNS')) return [
+        ...Object.entries({ lock_id: 64, environment: 16, scene: 64, tenant_id: 128, resource_key: 256, owner_token: 64 })
+          .map(([name, capacity]) => ({ name, capacity, data_type: 'varchar', is_nullable: name === 'owner_token' ? 'YES' : 'NO', extra: '' })),
+        ...['id', 'lease_ms', 'expires_at_ms', 'next_acquire_at_ms', 'version', 'created_at_ms', 'updated_at_ms']
+          .map(name => ({ name, data_type: 'bigint', is_nullable: 'NO', extra: name === 'id' ? 'auto_increment' : '' })),
+      ] as T[];
+      if (sql.includes('information_schema.STATISTICS')) return [
+        { name: 'PRIMARY', column_name: 'id', sub_part: null, seq: 1 },
+        { name: 'uk_clawweb_distributed_lock', column_name: 'lock_id', sub_part: null, seq: 1 },
+      ] as T[];
     }
     if (sql.includes("TABLE_NAME = 'workflow_evolution_analysis_runs'") && sql.includes('information_schema.TABLES')) return [] as T[];
     if (sql.includes("TABLE_NAME = 'workflow_deploy_history'") && sql.includes("COLUMN_NAME = 'tag_name'") && sql.includes('information_schema.COLUMNS')) return [{ IS_NULLABLE: 'NO' }] as T[];
@@ -270,7 +285,7 @@ it('defers v151 on an explicit ALTER permission denial without applying or recor
     const second = createDb('mysql', { canDdl: true, current: 150 });
     const originalQuery = second.db.query;
     second.db.query = async <T>(sql: string, params?: unknown[]): Promise<T[]> => {
-      if (sql.includes('COLUMN_NAME AS name')) return (params?.[0] === 'flow_runs'
+      if (sql.includes('COLUMN_NAME AS name') && sql.includes('TABLE_NAME = ?')) return (params?.[0] === 'flow_runs'
         ? ['ordinary_run_marker'] : ['parent_run_marker', 'child_run_marker']).map(name =>
           ({ name, data_type: 'varchar', max_length: 64, is_nullable: 'YES', column_default: null })) as T[];
       return originalQuery<T>(sql, params);
@@ -278,7 +293,7 @@ it('defers v151 on an explicit ALTER permission denial without applying or recor
     const originalExec = second.db.exec;
     second.db.exec = async (sql, params) => sql === later.sql[0] ? { affectedRows: 1 } : originalExec(sql, params);
     await runMigrations(second.db, 'mysql');
-    expect(second.exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params?.[0]).filter(version => Number(version) >= 151)).toEqual([151, 152, 155, 156]);
+    expect(second.exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params?.[0]).filter(version => Number(version) >= 151)).toEqual([151, 152, 155, 156, 158]);
   } finally { mutableMigrations.pop(); }
 });
 
@@ -296,7 +311,7 @@ it('defers v150 on explicit table CREATE denial, blocks higher versions, and res
     second.db.exec = async (sql, params) => sql === later.sql[0] ? { affectedRows: 1 } : exec(sql, params);
     await runMigrations(second.db, 'mysql');
     expect(second.exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params?.[0])
-      .filter(version => Number(version) >= 150)).toEqual([150, 151, 152, 155, 156]);
+      .filter(version => Number(version) >= 150)).toEqual([150, 151, 152, 155, 156, 158]);
   } finally { mutableMigrations.pop(); }
 });
 
@@ -401,7 +416,7 @@ it.each(['missing', 'nullable', 'narrow', 'engine', 'prefix'])
       repaired.db.exec = async (sql, params) => sql === later.sql[0] ? { affectedRows: 1 } : execute(sql, params);
       await runMigrations(repaired.db, 'mysql');
       expect(repaired.exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params?.[0])
-        .filter(version => Number(version) >= 150)).toEqual([150, 151, 152, 155, 156]);
+        .filter(version => Number(version) >= 150)).toEqual([150, 151, 152, 155, 156, 158]);
     } finally { mutableMigrations.pop(); }
   });
 

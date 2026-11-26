@@ -31,6 +31,7 @@ vi.mock("../schema-ordinary-run-request.js", async original => ({
   ordinaryRunRequestMigrations: [],
 }));
 
+vi.mock("../schema-distributed-lock.js", () => ({ distributedLockMigrations: [] }));
 vi.mock("../schema-aistudio-train.js", () => ({ aistudioTrainMigrations: [] }));
 
 import { closeDatabase, initDatabase } from "../db.js";

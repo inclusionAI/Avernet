@@ -39,7 +39,7 @@ it('registers v157 exactly once after snapshots, ordinary migrations and retired
   expect(assembled.filter(m => m.version === 157)).toEqual([migration]);
   expect(collectMigrations().filter(m => m.version === 157)).toEqual([migration]);
   expect(allMigrations.filter(m => m.version === 157)).toEqual([migration]);
-  expect(allMigrations.at(-1)).toBe(migration);
+  expect(allMigrations.findIndex(m => m.version === 157)).toBeGreaterThan(allMigrations.findIndex(m => m.version === 156));
   expect(migration.selfHealing).toBeUndefined();
   expect(aistudioTrainMigrations.map(m => [m.version, m.sql, m.migrate])).toEqual([[155, [], undefined], [156, [], undefined]]);
 });
@@ -55,7 +55,7 @@ it('boots a fresh temporary SQLite file through the real registry and records li
     await runMigrations(db, 'sqlite');
     expect(exec.mock.calls.some(([sql]) => /ADD COLUMN (parent_flow_id|root_flow_id)/.test(sql))).toBe(false);
     expect(raw.prepare('SELECT COUNT(*) AS n FROM schema_version WHERE version=157').get()).toEqual({ n: 1 });
-    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 157 });
+    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: Math.max(...allMigrations.map(m => m.version)) });
   });
 });
 
