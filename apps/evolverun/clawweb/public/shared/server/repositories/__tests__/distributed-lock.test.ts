@@ -120,3 +120,24 @@ it.each([{ tenantId: '' }, { scene: 'x'.repeat(65) }, { leaseMs: 0 }, { leaseMs:
     await expect(f.a.claim({ ...lockOptions, ...invalid })).rejects.toThrow('Invalid distributed lock');
     expect(query).not.toHaveBeenCalled(); expect(exec).not.toHaveBeenCalled();
   });
+
+it('preserves creation time and refreshes the standard audit timestamp on claim, renewal and release', async () => {
+  const f = await fixture();
+  let lease = (await f.a.claim(lockOptions))!;
+  const [created] = await f.db.query<{ gmt_create: number; gmt_modified: number; db_now: number }>(
+    'SELECT gmt_create, gmt_modified, unixepoch() AS db_now FROM clawweb_distributed_locks');
+  expect(created.gmt_create).toBeGreaterThan(0);
+  expect(created.gmt_modified).toBeGreaterThanOrEqual(created.gmt_create);
+  expect(created.gmt_modified).toBeLessThanOrEqual(created.db_now);
+  for (const action of ['renew', 'release', 'claim'] as const) {
+    await f.db.exec('UPDATE clawweb_distributed_locks SET gmt_create = 1, gmt_modified = 1');
+    if (action === 'renew') lease = await f.a.renew(lease);
+    else if (action === 'release') expect(await f.a.release(lease)).toBe(true);
+    else expect(await f.b.claim(lockOptions)).not.toBeNull();
+    const [row] = await f.db.query<{ gmt_create: number; gmt_modified: number; db_now: number }>(
+      'SELECT gmt_create, gmt_modified, unixepoch() AS db_now FROM clawweb_distributed_locks');
+    expect(row.gmt_create).toBe(1);
+    expect(row.gmt_modified).toBeGreaterThan(1);
+    expect(row.gmt_modified).toBeLessThanOrEqual(row.db_now);
+  }
+});

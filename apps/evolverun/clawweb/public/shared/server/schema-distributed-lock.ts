@@ -13,13 +13,14 @@ export const distributedLockDdl = `CREATE TABLE IF NOT EXISTS clawweb_distribute
   expires_at_ms BIGINT NOT NULL DEFAULT 0 COMMENT '数据库时钟下的租约截止时间',
   next_acquire_at_ms BIGINT NOT NULL DEFAULT 0 COMMENT '数据库时钟下最早再次获取时间',
   version BIGINT NOT NULL DEFAULT 0 COMMENT '每次成功写入递增的版本',
-  created_at_ms BIGINT NOT NULL COMMENT '数据库创建时间毫秒',
-  updated_at_ms BIGINT NOT NULL COMMENT '数据库最后修改时间毫秒',
+  gmt_create INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '记录创建时间',
+  gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()) COMMENT '记录修改时间',
   UNIQUE INDEX uk_clawweb_distributed_lock (lock_id)
 ) COMMENT='ClawWeb公共分布式租约锁'`;
 
 const strings = { lock_id: 64, environment: 16, scene: 64, tenant_id: 128, resource_key: 256, owner_token: 64 };
-const numbers = ['id', 'lease_ms', 'expires_at_ms', 'next_acquire_at_ms', 'version', 'created_at_ms', 'updated_at_ms'];
+const numbers = ['id', 'lease_ms', 'expires_at_ms', 'next_acquire_at_ms', 'version'];
+const timestamps = ['gmt_create', 'gmt_modified'];
 const incompatible = () => new Error('Incompatible clawweb_distributed_locks schema; provision scripts/sql/distributed-locks-v158.mysql.sql');
 
 /** No repair or DDL here: a partial table or truncated unique index cannot arbitrate locks. */
@@ -33,7 +34,7 @@ export async function assertDistributedLockSchema(db: IDatabase): Promise<void> 
       if (!c || c.hidden !== 0 || c.pk !== 0 || /INT/i.test(c.type) || !/CHAR|TEXT/i.test(c.type)
         || c.notnull !== (name === 'owner_token' ? 0 : 1)) throw incompatible();
     }
-    for (const name of numbers) {
+    for (const name of [...numbers, ...timestamps]) {
       const c = columns.find(column => column.name === name);
       if (!c || c.hidden !== 0 || c.type.toUpperCase() !== 'INTEGER'
         || (name === 'id' ? c.pk !== 1 : c.notnull !== 1 || c.pk !== 0)) throw incompatible();
@@ -58,9 +59,9 @@ export async function assertDistributedLockSchema(db: IDatabase): Promise<void> 
       || c.is_nullable !== (name === 'owner_token' ? 'YES' : 'NO')
       || /\bGENERATED\b/i.test(c.extra) || c.generation_expression) throw incompatible();
   }
-  for (const name of numbers) {
+  for (const name of [...numbers, ...timestamps]) {
     const c = columns.find(column => column.name === name);
-    if (!c || c.data_type.toLowerCase() !== 'bigint' || c.is_nullable !== 'NO'
+    if (!c || c.data_type.toLowerCase() !== (timestamps.includes(name) ? 'timestamp' : 'bigint') || c.is_nullable !== 'NO'
       || /\bGENERATED\b/i.test(c.extra) || c.generation_expression
       || (name === 'id' && !/\bauto_increment\b/i.test(c.extra))) throw incompatible();
   }

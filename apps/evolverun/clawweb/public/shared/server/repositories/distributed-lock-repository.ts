@@ -64,12 +64,13 @@ export class DistributedLockRepository {
     const lockId = createHash('sha256').update(JSON.stringify(
       [options.environment, options.scene, options.tenantId, options.resourceKey])).digest('hex');
     const now = this.db.dialect.nowMsSql;
+    const modified = this.db.dbType === 'sqlite' ? 'unixepoch()' : 'CURRENT_TIMESTAMP';
     let row = await this.get(lockId);
     if (!row) {
       try {
         await this.db.exec('INSERT INTO clawweb_distributed_locks '
-          + '(lock_id, environment, scene, tenant_id, resource_key, created_at_ms, updated_at_ms) '
-          + 'VALUES (?, ?, ?, ?, ?, ' + now + ', ' + now + ')',
+          + '(lock_id, environment, scene, tenant_id, resource_key) '
+          + 'VALUES (?, ?, ?, ?, ?)',
         [lockId, options.environment, options.scene, options.tenantId, options.resourceKey]);
       } catch (error) {
         if (!duplicate(error, this.db) || !await this.get(lockId)) throw error;
@@ -82,7 +83,7 @@ export class DistributedLockRepository {
     if (!Number.isSafeInteger(version) || version < 0 || version >= Number.MAX_SAFE_INTEGER) throw new Error('Invalid distributed lock version');
     const ownerId = randomUUID();
     const result = await this.db.exec('UPDATE clawweb_distributed_locks SET owner_token = ?, lease_ms = ?, expires_at_ms = '
-      + now + ' + ?, next_acquire_at_ms = ' + now + ' + ?, version = version + 1, updated_at_ms = ' + now
+      + now + ' + ?, next_acquire_at_ms = ' + now + ' + ?, version = version + 1, gmt_modified = ' + modified
       + ' WHERE lock_id = ? AND version = ? AND expires_at_ms <= ' + now + ' AND next_acquire_at_ms <= ' + now,
     [ownerId, options.leaseMs, options.leaseMs, options.minIntervalMs ?? 0, lockId, version]);
     if (result.affectedRows === 0) return null;
@@ -91,8 +92,9 @@ export class DistributedLockRepository {
   }
   async renew(lease: DistributedLockRecord): Promise<DistributedLockRecord> {
     const now = this.db.dialect.nowMsSql;
+    const modified = this.db.dbType === 'sqlite' ? 'unixepoch()' : 'CURRENT_TIMESTAMP';
     const result = await this.db.exec('UPDATE clawweb_distributed_locks SET expires_at_ms = ' + now
-      + ' + lease_ms, version = version + 1, updated_at_ms = ' + now
+      + ' + lease_ms, version = version + 1, gmt_modified = ' + modified
       + ' WHERE lock_id = ? AND owner_token = ? AND version = ? AND expires_at_ms > ' + now,
     [lease.lockId, lease.ownerToken, lease.version]);
     if (result.affectedRows !== 1) throw new DistributedLeaseLostError();
@@ -100,8 +102,9 @@ export class DistributedLockRepository {
   }
   async release(lease: DistributedLockRecord): Promise<boolean> {
     const now = this.db.dialect.nowMsSql;
+    const modified = this.db.dbType === 'sqlite' ? 'unixepoch()' : 'CURRENT_TIMESTAMP';
     const result = await this.db.exec('UPDATE clawweb_distributed_locks SET owner_token = NULL, expires_at_ms = 0, '
-      + 'version = version + 1, updated_at_ms = ' + now
+      + 'version = version + 1, gmt_modified = ' + modified
       + ' WHERE lock_id = ? AND owner_token = ? AND version = ? AND expires_at_ms > ' + now,
     [lease.lockId, lease.ownerToken, lease.version]);
     if (result.affectedRows > 1) throw new Error('Distributed lock release updated an unexpected number of rows');

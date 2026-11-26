@@ -24,7 +24,8 @@ background scans explicitly use `__global__`, never a newly generated tenant.
 
 Each row also stores a fresh `owner_token`, the acquisition's `lease_ms`,
 `expires_at_ms`, optional cooldown `next_acquire_at_ms`, increasing `version`,
-and database-clock `created_at_ms` / `updated_at_ms`. Rows are retained on
+and database-clock `gmt_create` / `gmt_modified` audit timestamps (MySQL
+`TIMESTAMP`, SQLite epoch seconds). Rows are retained on
 release: clear ownership/expiry but preserve cooldown and version.
 
 ### Ownership and time
