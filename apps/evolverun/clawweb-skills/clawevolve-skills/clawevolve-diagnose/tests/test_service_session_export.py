@@ -490,3 +490,51 @@ def test_service_export_treats_missing_session_files_as_empty_input(
     acquisition = json.loads((tmp_path / "diagnose" / "input" / "session-source" / "acquisition-manifest.json").read_text())
     assert acquisition["selectedCount"] == 0
     assert acquisition["warning"] == "SESSION_FILE_NOT_FOUND"
+
+
+@pytest.mark.parametrize("with_kind", [True, False], ids=["ais-base", "legacy"])
+@pytest.mark.parametrize("parse_content", [True, False], ids=["parsed", "agent-locator"])
+@pytest.mark.parametrize("deleted_only", [True, False], ids=["deleted-only", "live-preferred"])
+def test_export_attachments_never_replace_transcripts(
+    tmp_path: Path, with_kind: bool, parse_content: bool, deleted_only: bool,
+) -> None:
+    session_id = "session-1"
+    transcript = _session_bytes(session_id, "2026-11-24T07:37:14Z", "review this document")
+    files = [
+        ("sessions/session-1.jsonl.deleted.2026-11-25", transcript, "/agent/main"),
+        ("sessions/session-1.trajectory.jsonl", b'{"type":"session.started","ts":123}\n', "/agent/main"),
+        ("sessions/session-1.trajectory-path.json", b'{"path":"external/trace"}\n', "/agent/main"),
+        ("sessions/session-1.trajectory.jsonl.deleted.2026-11-25", b'{"ts":123}\n', "/agent/main"),
+    ]
+    if not deleted_only:
+        files.append(("sessions/session-1.jsonl", transcript, "/agent/main"))
+    archive = _archive(tmp_path, files)
+    extracted = tmp_path / "extracted"
+    extracted.mkdir()
+    manifest = _safe_extract_and_validate(archive, extracted)
+    for item in manifest["files"]:
+        item["sessionId"] = session_id
+        if with_kind:
+            name = item["sourceFileName"]
+            item["kind"] = "trajectoryPath" if name.endswith(".json") else "trajectory" if ".trajectory." in name else "raw"
+    persisted = tmp_path / "sessions"
+    persisted.mkdir()
+    rows, audit = _select_and_persist_sessions(
+        manifest=manifest, extracted=extracted, sessions_dir=persisted,
+        max_sessions=10, since="2026-11-21T00:00:00Z", until="2026-11-25T23:59:59Z",
+        parse_content=parse_content,
+    )
+    assert [row.session_id for row in rows] == [session_id]
+    assert Path(rows[0].path).read_bytes() == transcript
+    assert (".deleted." in Path(rows[0].path).name) == deleted_only
+    assert sum(entry.get("reason") == "session_attachment" for entry in audit["entries"]) == 3
+    assert not any(entry.get("reason") == "missing_time" for entry in audit["entries"])
+    assert sum(entry.get("reason") == "superseded_session_version" for entry in audit["entries"]) == (0 if deleted_only else 1)
+    # Attachments remain available in the extracted evidence; only candidate selection changes.
+    assert (extracted / "sessions/session-1.trajectory.jsonl").read_bytes() == files[1][1]
+
+
+@pytest.mark.parametrize("kind", ["trajectory", "trajectoryPath", "unknown"])
+def test_export_explicit_attachment_kind_is_not_inferred_as_raw(tmp_path: Path, kind: str) -> None:
+    path = tmp_path / "looks-like-session.jsonl"
+    assert not service_export.is_session_transcript({"kind": kind}, path)
