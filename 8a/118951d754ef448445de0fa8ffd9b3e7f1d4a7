@@ -1,0 +1,48 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-service.test.ts
+  s_bf4e2e6d9e5d71::t_4d12867b584d58 98,107,112-113,116,127-131,141,143
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/user-handoff.test.ts
+  s_bf4e2e6d9e5d71::t_d0991b7b1f4ec9 96,98,106-107,110
+  s_bf4e2e6d9e5d71::t_0e6033ae2406d8 100-103
+apps/evolverun/clawweb/public/modules/clawevolve/server/routes/evolve.ts
+  s_bf4e2e6d9e5d71::t_4d12867b584d58 873,875
+  s_bf4e2e6d9e5d71::t_d0991b7b1f4ec9 874
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/effect-resume.test.ts
+  s_bf4e2e6d9e5d71::t_0e6033ae2406d8 258-259
+  s_bf4e2e6d9e5d71::t_900be49dcd8094 228-257,260-290
+  s_bf4e2e6d9e5d71::t_bc7f713b828ba3 83,86-100
+apps/evolverun/clawweb/public/modules/clawevolve/server/repositories/__tests__/evolve-repository-access.test.ts
+  s_bf4e2e6d9e5d71::t_ba5ebc4d319650 159-171
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/session-recovery-task-repository.ts
+  s_bf4e2e6d9e5d71::t_d0991b7b1f4ec9 43,47-48,123-125,182-185,242
+  s_bf4e2e6d9e5d71::t_7a1732b1ba5dfb 350
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  s_bf4e2e6d9e5d71::t_d0991b7b1f4ec9 617,664,788
+  s_bf4e2e6d9e5d71::t_1daf6553982602 613
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  s_bf4e2e6d9e5d71::t_d0991b7b1f4ec9 401
+apps/evolverun/clawweb/public/modules/clawevolve/server/routes/__tests__/evolve.test.ts
+  s_bf4e2e6d9e5d71::t_900be49dcd8094 5391-5397,5399-5405
+  s_bf4e2e6d9e5d71::t_4d12867b584d58 5398
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  s_bf4e2e6d9e5d71::t_4d12867b584d58 57-76
+apps/evolverun/clawweb/public/modules/clawevolve/server/repositories/evolve-repository.ts
+  s_bf4e2e6d9e5d71::t_ba5ebc4d319650 1617-1630
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-contracts.ts
+  s_bf4e2e6d9e5d71::t_d0991b7b1f4ec9 179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8a118951d754ef448445de0fa8ffd9b3e7f1d4a7",
+  "prompts": {},
+  "sessions": {
+    "s_bf4e2e6d9e5d71": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21664-cdb1-7cd1-b9a8-ed4efbd69d3e",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,192 @@
+apps/backend/docs/openapi-v1/README.md
+  h_5b2ec9c12c4d18 48-51,1244,1250,1255,1258
+apps/backend/docs/openapi-v1/README.zh-CN.md
+  h_5b2ec9c12c4d18 36-39
+apps/backend/docs/openapi-v1/aicoding-openapi-guidelines.zh-CN.md
+  h_5b2ec9c12c4d18 1-261
+apps/backend/docs/openapi-v1/engine-surface.md
+  h_5b2ec9c12c4d18 61-65
+apps/backend/docs/openapi-v1/engine-surface.zh-CN.md
+  h_5b2ec9c12c4d18 56-59
+apps/backend/specs/service-bot-release-audit-single-table/001-spec-output.md
+  h_5b2ec9c12c4d18 1-40
+apps/backend/sql/2026_11_13_service_bot_release_audit.sql
+  h_5b2ec9c12c4d18 1-31
+apps/backend/src/agentclaw/community/adapters/http/aicoding/__init__.py
+  h_5b2ec9c12c4d18 1-6,8-15
+apps/backend/src/agentclaw/community/adapters/http/aicoding/work_items_router.py
+  h_5b2ec9c12c4d18 1-82
+apps/backend/src/agentclaw/community/adapters/http/app.py
+  h_5b2ec9c12c4d18 133,972
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py
+  h_5b2ec9c12c4d18 259,330-337,641-644
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_routes.py
+  h_5b2ec9c12c4d18 414-420
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/aicoding/__init__.py
+  h_5b2ec9c12c4d18 1-5
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/aicoding/work_items.py
+  h_5b2ec9c12c4d18 1-121
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules.py
+  h_5b2ec9c12c4d18 650-652
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/copy.py
+  h_5b2ec9c12c4d18 487,516-525,540
+apps/backend/src/agentclaw/community/adapters/http/service_bot/router_publish.py
+  h_5b2ec9c12c4d18 825,1282,1423
+apps/backend/src/agentclaw/community/api/README.md
+  h_5b2ec9c12c4d18 116,244
+apps/backend/src/agentclaw/community/api/work_items_service.py
+  h_5b2ec9c12c4d18 1-17
+apps/backend/src/agentclaw/community/core/aicoding/README.md
+  h_5b2ec9c12c4d18 8,13-14,33,37
+apps/backend/src/agentclaw/community/core/aicoding/services/work_items_service.py
+  h_5b2ec9c12c4d18 1-479
+apps/backend/src/agentclaw/community/core/aicoding/work_item_bots.py
+  h_5b2ec9c12c4d18 1-194
+apps/backend/src/agentclaw/community/core/aicoding/work_items_models.py
+  h_5b2ec9c12c4d18 1-172
+apps/backend/src/agentclaw/community/core/aicoding/work_items_service_protocol.py
+  h_5b2ec9c12c4d18 1-29
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  h_5b2ec9c12c4d18 2132
+apps/backend/src/agentclaw/community/core/repository/README.md
+  h_5b2ec9c12c4d18 415-416
+apps/backend/src/agentclaw/community/core/repository/implementations/publishing/bot_publish.py
+  h_5b2ec9c12c4d18 54,60-63,79-80,83-85,107,138-139,485-486,488,501-508,519-520,525,546-553,574,589-595,608,614,633-640
+apps/backend/src/agentclaw/community/core/repository/implementations/publishing/release_audit.py
+  h_5b2ec9c12c4d18 1-159
+apps/backend/src/agentclaw/community/core/repository/protocols/publishing.py
+  h_5b2ec9c12c4d18 350-351,373-374,414
+apps/backend/src/agentclaw/community/core/service_bot/README.md
+  h_5b2ec9c12c4d18 76-77,382-421
+apps/backend/src/agentclaw/community/core/service_bot/services/bot_publish_service.py
+  h_5b2ec9c12c4d18 213-214,224,317,319,357-358,373-376,392-393,415,919,1015,1261-1262,1335-1337,1394-1395,1456,1522-1523,1526,1630
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_approval_service.py
+  h_5b2ec9c12c4d18 743
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/ext_state.py
+  h_5b2ec9c12c4d18 102-103,111-112,125-126,140
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/progress_sync_mixin.py
+  h_5b2ec9c12c4d18 792-793,796-803,806-807
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/retry_ops_mixin.py
+  h_5b2ec9c12c4d18 74-75,104-105,158,206,233-239,241
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow_service.py
+  h_5b2ec9c12c4d18 372-373,398-399,420-421,428-431,772-773,781
+apps/backend/src/agentclaw/community/core/service_bot/services/service_publication_facade.py
+  h_5b2ec9c12c4d18 499,782,799
+apps/backend/src/agentclaw/community/di/modules/aicoding_module.py
+  h_5b2ec9c12c4d18 53-62,105-112,120-127
+apps/backend/src/agentclaw/community/di/modules/service_bot_module.py
+  h_5b2ec9c12c4d18 126-128,281-282,304-313
+apps/backend/src/agentclaw/community/kernel/service_bot_release_audit.py
+  h_5b2ec9c12c4d18 1-66
+apps/backend/src/agentclaw/community/plugin_api/README.md
+  h_5b2ec9c12c4d18 28
+apps/backend/src/agentclaw/community/plugin_api/release_audit_models.py
+  h_5b2ec9c12c4d18 1-46
+apps/backend/src/agentclaw/community/plugin_api/service_bot_release_audit.py
+  h_5b2ec9c12c4d18 1-29
+apps/backend/src/agentclaw/community/plugins/community/service_bot_release_audit.py
+  h_5b2ec9c12c4d18 1-85
+apps/backend/src/agentclaw/community/plugins/local/README.md
+  h_5b2ec9c12c4d18 18
+apps/backend/src/agentclaw/community/plugins/local/service_bot_release_audit.py
+  h_5b2ec9c12c4d18 1-9
+apps/backend/tests/community/adapters/http/openapi_v1/inventory/test_inventory_handlers.py
+  h_5b2ec9c12c4d18 328
+apps/backend/tests/community/adapters/http/openapi_v1/test_aicoding_work_items.py
+  h_5b2ec9c12c4d18 1-233
+apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py
+  h_5b2ec9c12c4d18 33,78,478-480,680-683,914-915
+apps/backend/tests/community/adapters/http/openapi_v1/test_path_convention.py
+  h_5b2ec9c12c4d18 95-97
+apps/backend/tests/community/adapters/http/service_bot/test_router_publish_coverage.py
+  h_5b2ec9c12c4d18 351,564-566,632-634
+apps/backend/tests/community/api/aicoding/test_work_items_router.py
+  h_5b2ec9c12c4d18 1-387
+apps/backend/tests/community/architecture/test_service_api_conformance.py
+  h_5b2ec9c12c4d18 72-77,434
+apps/backend/tests/community/contracts/test_service_bot_release_audit.py
+  h_5b2ec9c12c4d18 1-55
+apps/backend/tests/community/core/aicoding/test_work_item_bot_lister.py
+  h_5b2ec9c12c4d18 1-111
+apps/backend/tests/community/core/service_bot/services/test_bot_publish_service.py
+  h_5b2ec9c12c4d18 440,4082-4129
+apps/backend/tests/community/core/service_bot/services/test_publish_approval_service.py
+  h_5b2ec9c12c4d18 800
+apps/backend/tests/community/core/service_bot/services/test_publish_flow_service.py
+  h_5b2ec9c12c4d18 4079-4080,4113-4114,5381-5400
+apps/backend/tests/community/core/service_bot/services/test_service_publication_facade.py
+  h_5b2ec9c12c4d18 706,989
+apps/backend/tests/community/endpoints/test_aicoding_work_items.py
+  h_5b2ec9c12c4d18 1-63
+apps/backend/tests/community/endpoints/test_openapi_aicoding_work_items.py
+  h_5b2ec9c12c4d18 1-110
+apps/backend/tests/community/http/test_copy_route.py
+  h_5b2ec9c12c4d18 31-33,359-383
+apps/backend/tests/community/plugins/test_service_bot_release_audit.py
+  h_5b2ec9c12c4d18 1-137
+apps/backend/tests/community/repository/publishing/test_bot_publish_unified.py
+  h_5b2ec9c12c4d18 58,983-990
+apps/backend/tests/community/repository/publishing/test_release_audit_production.py
+  h_5b2ec9c12c4d18 1-572
+apps/frontend-nextgen/README.md
+  h_5b2ec9c12c4d18 30-40
+apps/frontend-nextgen/src/components/BotWorkshop/CopyBotModal/CopyBotFormFields.tsx
+  h_5b2ec9c12c4d18 7,43,55,59,66
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/CreateBotFormFields.tsx
+  h_5b2ec9c12c4d18 9,69,129,133,145
+apps/frontend-nextgen/src/components/BotWorkshop/ExternalBotPanel.tsx
+  h_5b2ec9c12c4d18 160
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotFriendManageDrawer/index.tsx
+  h_5b2ec9c12c4d18 19,59-63,116-124,126-181
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/BotGeneralConfigDialogBody.tsx
+  h_5b2ec9c12c4d18 35,41,43-44,68-69,81,83,208-209
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/index.tsx
+  h_5b2ec9c12c4d18 14,19-20
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/useUserRiskStatus.ts
+  h_5b2ec9c12c4d18 34-35
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/RiskFlowBanners.tsx
+  h_5b2ec9c12c4d18 6,22,29-30,57-78,92-96
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/index.tsx
+  h_5b2ec9c12c4d18 63-64,69,186
+apps/frontend-nextgen/src/components/CollaborationPrivacy/RelationCard/index.tsx
+  h_5b2ec9c12c4d18 4,28,42,49,95-109,111,113-114,116,118-133
+apps/frontend-nextgen/src/components/CollaborationPrivacy/settingsSections.tsx
+  h_5b2ec9c12c4d18 145,163
+apps/frontend-nextgen/src/domain/collaborationPrivacy/botPublicRisk.ts
+  h_5b2ec9c12c4d18 70-73
+apps/frontend-nextgen/src/hooks/useCollaborationPrivacy.ts
+  h_5b2ec9c12c4d18 173-184,228
+apps/frontend-nextgen/src/services/backendApi/collaboration/collaborationBotController.ts
+  h_5b2ec9c12c4d18 26-27
+apps/frontend-nextgen/src/services/botWorkshop/externalBotService.ts
+  h_5b2ec9c12c4d18 12,46-48
+apps/frontend-nextgen/src/services/workspace/botFriendConversationService.ts
+  h_5b2ec9c12c4d18 16,28,177-179
+apps/frontend-nextgen/src/utils/botName.ts
+  h_5b2ec9c12c4d18 1-18
+apps/frontend-nextgen/test/collaborationPrivacyComponents.test.tsx
+  h_5b2ec9c12c4d18 667-718
+apps/frontend-nextgen/test/components/BotWorkshop/ExternalBotPanel.test.tsx
+  h_5b2ec9c12c4d18 2,14,16,27,30,34-37
+apps/frontend-nextgen/test/components/CollaborationPrivacy/BotFriendRoster.test.tsx
+  h_5b2ec9c12c4d18 19-20,135-136,139,142-144,146,214,234,236-249,254-289
+apps/frontend-nextgen/test/components/CollaborationPrivacy/BotGeneralConfigDialog.test.tsx
+  h_5b2ec9c12c4d18 654,689-691
+apps/frontend-nextgen/test/hooks/useCollaborationPrivacy.test.tsx
+  h_5b2ec9c12c4d18 610-627,630,653-707
+apps/frontend-nextgen/test/services/botWorkshop/externalBotService.test.ts
+  h_5b2ec9c12c4d18 26,37,49-50
+apps/frontend-nextgen/test/utils/botName.test.ts
+  h_5b2ec9c12c4d18 1-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fa17232a994d0ea278d6a76dc81115f934a854ab",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
