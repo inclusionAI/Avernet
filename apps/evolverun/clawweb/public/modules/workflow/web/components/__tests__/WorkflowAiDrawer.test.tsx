@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { stringify as stringifyYaml } from 'yaml'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
-import { generateWorkflowAiDraft, workflowSpecSignature, type WorkflowAiDraft } from '../../services/workflow-ai-draft'
+import { generateWorkflowAiDraft, WorkflowAiCandidateError, workflowSpecSignature, type WorkflowAiDraft } from '../../services/workflow-ai-draft'
+import { describeWorkflowAiError, WorkflowAiRecoveryError } from '../../services/workflow-ai-lifecycle'
 import WorkflowAiDrawer from '../WorkflowAiDrawer'
 
 vi.mock('../../hooks/useWorkflowAiCapabilities', () => ({ useWorkflowAiCapabilities: () => ({ value: { available: true }, loading: false, retry: vi.fn() }) }))
@@ -138,6 +139,50 @@ describe('WorkflowAiDrawer', () => {
     view.rerender(<WorkflowAiDrawer {...p} spec={null} />)
     fireEvent.change(prompt(), { target: { value: '添加检查' } })
     expect(submit()).toBeDisabled()
+  })
+
+  it.each([
+    'BAAS_GENERATION_FAILED', 'BAAS_GENERATION_TIMEOUT', 'BAAS_GENERATION_CANCELLED',
+    'BAAS_SESSION_UNAVAILABLE', 'BAAS_RESULT_PERSISTENCE_FAILED',
+  ])('reports terminal %s with its original draft ID and retries only on explicit action', async code => {
+    generate.mockRejectedValueOnce(new WorkflowAiCandidateError(describeWorkflowAiError(code, 'original-draft')))
+    const p = props()
+    render(<WorkflowAiDrawer {...p} />)
+    fireEvent.change(prompt(), { target: { value: '调整复核' } })
+    fireEvent.click(submit())
+    expect(await screen.findByRole('alert')).toHaveTextContent(code)
+    expect(screen.getByRole('alert')).toHaveTextContent('草稿任务 ID：original-draft')
+    expect(screen.getByRole('alert').parentElement).toHaveAttribute('aria-live', 'polite')
+    expect(screen.queryByRole('button', { name: '应用草稿到当前 Editor' })).not.toBeInTheDocument()
+    expect(generate).toHaveBeenCalledOnce()
+    const failedRequestId = generate.mock.calls[0][4]!.requestId
+    fireEvent.click(screen.getByRole('button', { name: '重试生成' }))
+    await screen.findByText('已调整复核提示词')
+    expect(generate).toHaveBeenCalledTimes(2)
+    expect(generate.mock.calls[1][4]!.requestId).not.toBe(failedRequestId)
+    expect(p.onApply).not.toHaveBeenCalled()
+  })
+
+  it('recovers an operational failure with the same signed receipt instead of offering a new generation', async () => {
+    generate.mockImplementationOnce(async (_mode, _prompt, _source, _signal, attempt) => {
+      Object.assign(attempt!, { draftId: 'original-draft', receipt: 'original-signed-receipt', submitted: true })
+      throw new WorkflowAiRecoveryError('生成服务暂时不可用', attempt!)
+    })
+    const p = props()
+    render(<WorkflowAiDrawer {...p} />)
+    fireEvent.change(prompt(), { target: { value: '调整复核' } })
+    fireEvent.click(submit())
+    expect(await screen.findByRole('alert')).toHaveTextContent('生成服务暂时不可用')
+    expect(screen.queryByRole('button', { name: '重试生成' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重试准备请求' })).not.toBeInTheDocument()
+    expect(generate).toHaveBeenCalledOnce()
+    const originalAttempt = generate.mock.calls[0][4]
+    fireEvent.click(screen.getByRole('button', { name: '恢复查询本次请求' }))
+    await screen.findByText('已调整复核提示词')
+    expect(generate).toHaveBeenCalledTimes(2)
+    expect(generate.mock.calls[1][4]).toBe(originalAttempt)
+    expect(generate.mock.calls[1][4]).toMatchObject({ draftId: 'original-draft', receipt: 'original-signed-receipt', submitted: true })
+    expect(p.onApply).not.toHaveBeenCalled()
   })
 
   it('reports pre-prepare errors inline and explicitly retries preparation for the same request without applying a failed response', async () => {

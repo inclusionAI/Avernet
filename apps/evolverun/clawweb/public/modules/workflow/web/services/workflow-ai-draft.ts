@@ -125,7 +125,7 @@ export async function generateWorkflowAiDraft(
           const submitted = await wait(workflowAiApi.generate(baseline.id, { ...input, receipt: attempt.receipt! }, requestSignal))
           requestSignal.throwIfAborted()
           if (submitted?.draftId !== attempt.draftId) throw new Error('服务器返回的 AI 草稿任务 ID 不匹配')
-          if (submitted.status === 'failed') throw new WorkflowAiCandidateError(describeWorkflowAiError(submitted.error) || 'BaaS 明确拒绝本次请求；未接受草稿')
+          if (submitted.status === 'failed') throw new WorkflowAiCandidateError(describeWorkflowAiError(submitted.error, submitted.draftId) || 'BaaS 明确拒绝本次请求；未接受草稿')
           if (!['pending', 'running', 'dispatch_uncertain'].includes(submitted.status)) throw new Error('AI 草稿服务返回未知提交状态')
         } catch (cause) {
           requestSignal.throwIfAborted()
@@ -145,9 +145,9 @@ export async function generateWorkflowAiDraft(
       requestSignal.throwIfAborted()
       assertTask(task, baseline.id, attempt, digest)
       if (task.status === 'running' && task.error) {
-        throw new WorkflowAiRecoveryError(`原任务查询暂不可用；请恢复查询同一任务，不会重新生成。${describeWorkflowAiError(task.error)}`, attempt)
+        throw new WorkflowAiRecoveryError(`原任务查询暂不可用；请恢复查询同一任务，不会重新生成。${describeWorkflowAiError(task.error, task.draftId)}`, attempt)
       }
-      if (task.status === 'failed') throw new WorkflowAiCandidateError(describeWorkflowAiError(task.error) || 'AI 草稿生成失败，请调整需求后重试')
+      if (task.status === 'failed') throw new WorkflowAiCandidateError(describeWorkflowAiError(task.error, task.draftId) || 'AI 草稿生成失败，请调整需求后重试')
       if (task.status === 'cancelled') throw new WorkflowAiCandidateError('AI 草稿已取消本地等待并阻止应用；取消不会持久记录，BaaS 无支持的停止接口，远端任务可能继续，原工作流未修改')
       if (task.status === 'completed') {
         const parsed = candidateCheck(() => parseWorkflowAiYaml(task.result?.yaml ?? '', baseline))
