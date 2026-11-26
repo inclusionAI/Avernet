@@ -1,0 +1,22 @@
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineInstanceMultiSelect.tsx
+  s_9fdbd8840b051d::t_6810737f9d6882 3,6,8-18,33-81,83-85
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineFormDialog.tsx
+  s_9fdbd8840b051d::t_1bc26cf81c813c 26
+  s_9fdbd8840b051d::t_5b150011098f65 162-167,170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ad68c3357ecab7e43731b093dc3693ed16fc9a16",
+  "prompts": {},
+  "sessions": {
+    "s_9fdbd8840b051d": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "b4b38dfb-6918-41f1-8487-6e997adab48d",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
