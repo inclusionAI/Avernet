@@ -89,8 +89,9 @@ function createDb(dbType: 'mysql' | 'zdas', options: {
       if (sql.includes('information_schema.COLUMNS')) return [
         ...Object.entries({ lock_id: 64, environment: 16, scene: 64, tenant_id: 128, resource_key: 256, owner_token: 64 })
           .map(([name, capacity]) => ({ name, capacity, data_type: 'varchar', is_nullable: name === 'owner_token' ? 'YES' : 'NO', extra: '' })),
-        ...['id', 'lease_ms', 'expires_at_ms', 'next_acquire_at_ms', 'version', 'created_at_ms', 'updated_at_ms']
+        ...['id', 'lease_ms', 'expires_at_ms', 'next_acquire_at_ms', 'version']
           .map(name => ({ name, data_type: 'bigint', is_nullable: 'NO', extra: name === 'id' ? 'auto_increment' : '' })),
+        ...['gmt_create', 'gmt_modified'].map(name => ({ name, data_type: 'timestamp', is_nullable: 'NO', extra: '' })),
       ] as T[];
       if (sql.includes('information_schema.STATISTICS')) return [
         { name: 'PRIMARY', column_name: 'id', sub_part: null, seq: 1 },

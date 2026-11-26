@@ -56,6 +56,15 @@ describe.skipIf(!socketPath)('distributed lease MySQL concurrency', () => {
 
   it('retains the auto-increment primary key and validates the full unique index', async () => {
     await assertDistributedLockSchema(db);
+    const columns = await db.query<{ Field: string; Type: string; Null: string; Default: string; Extra: string }>(
+      'SHOW COLUMNS FROM clawweb_distributed_locks');
+    for (const name of ['gmt_create', 'gmt_modified']) {
+      const column = columns.find(c => c.Field === name)!;
+      expect(column.Type).toBe('timestamp');
+      expect(column.Null).toBe('NO');
+      expect(column.Default.toUpperCase()).toMatch(/^CURRENT_TIMESTAMP(?:\(\))?$/);
+      if (name === 'gmt_modified') expect(column.Extra.toLowerCase()).toContain('on update current_timestamp');
+    }
     const a = new DistributedLockRepository(db), b = new DistributedLockRepository(db);
     const first = (await a.claim(options))!;
     const before = await db.query('SELECT id FROM clawweb_distributed_locks');
@@ -63,6 +72,27 @@ describe.skipIf(!socketPath)('distributed lease MySQL concurrency', () => {
     const next = (await b.claim(options))!;
     expect(next.ownerToken).not.toBe(first.ownerToken);
     expect(await db.query('SELECT id FROM clawweb_distributed_locks')).toEqual(before);
+  });
+
+  it('keeps creation time while claim, renewal and release update standard TIMESTAMP audit fields', async () => {
+    const a = new DistributedLockRepository(db);
+    let lease = (await a.claim(options))!;
+    const [created] = await db.query<{ created: number; modified: number; db_now: number }>(
+      'SELECT UNIX_TIMESTAMP(gmt_create) AS created, UNIX_TIMESTAMP(gmt_modified) AS modified, UNIX_TIMESTAMP() AS db_now FROM clawweb_distributed_locks');
+    expect(created.created).toBeGreaterThan(0);
+    expect(created.modified).toBeGreaterThanOrEqual(created.created);
+    expect(created.modified).toBeLessThanOrEqual(created.db_now);
+    for (const action of ['renew', 'release', 'claim'] as const) {
+      await db.exec('UPDATE clawweb_distributed_locks SET gmt_create = FROM_UNIXTIME(1), gmt_modified = FROM_UNIXTIME(1)');
+      if (action === 'renew') lease = await a.renew(lease);
+      else if (action === 'release') expect(await a.release(lease)).toBe(true);
+      else expect(await a.claim(options)).not.toBeNull();
+      const [row] = await db.query<{ created: number; modified: number; db_now: number }>(
+        'SELECT UNIX_TIMESTAMP(gmt_create) AS created, UNIX_TIMESTAMP(gmt_modified) AS modified, UNIX_TIMESTAMP() AS db_now FROM clawweb_distributed_locks');
+      expect(row.created).toBe(1);
+      expect(row.modified).toBeGreaterThan(1);
+      expect(row.modified).toBeLessThanOrEqual(row.db_now);
+    }
   });
 
   it('uses database expiry and rejects a stale holder after takeover', async () => {

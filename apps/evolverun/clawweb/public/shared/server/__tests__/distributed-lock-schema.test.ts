@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { readFileSync } from 'node:fs';
 import { afterEach, expect, it, vi } from 'vitest';
 import { SqliteDatabase, runMigrations, allMigrations } from '../db.js';
 import { dialectFor } from '../db/dialect.js';
@@ -20,13 +21,19 @@ it.each(['sqlite', 'mysql', 'zdas'] as const)('renders an auto-increment id and 
   expect(ddl).toMatch(type === 'sqlite' ? /id INTEGER PRIMARY KEY AUTOINCREMENT/ : /id BIGINT PRIMARY KEY AUTO_INCREMENT/);
   expect(ddl).toMatch(/UNIQUE\s*(?:INDEX\s+\w+\s*)?\(lock_id\)/i);
   expect(ddl).not.toMatch(/lock_id\s*\(\d+\)/);
-  expect(ddl).not.toMatch(/ce_tasks|workflow_repair_release_records/);
+  expect(ddl).not.toMatch(/ce_tasks|workflow_repair_release_records|created_at_ms|updated_at_ms/);
+  for (const name of ['gmt_create', 'gmt_modified']) {
+    expect(ddl).toContain(type === 'sqlite' ? `${name} INTEGER NOT NULL DEFAULT (unixepoch())`
+      : `${name} TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP`);
+  }
+  if (type !== 'sqlite') expect(ddl).toContain('gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
 });
 
-it.each(['auto-increment', 'unique-key'] as const)('rejects a complete-looking table missing its %s guarantee', async missing => {
+it.each(['auto-increment', 'unique-key', 'gmt_create', 'gmt_modified'] as const)('rejects a complete-looking table missing its %s guarantee', async missing => {
   const db = new SqliteDatabase(new Database(':memory:')); databases.push(db);
   const ddl = missing === 'auto-increment' ? distributedLockDdl.replace('AUTOINCREMENT', '')
-    : distributedLockDdl.replace(',\n  UNIQUE INDEX uk_clawweb_distributed_lock (lock_id)', '');
+    : missing === 'unique-key' ? distributedLockDdl.replace(',\n  UNIQUE INDEX uk_clawweb_distributed_lock (lock_id)', '')
+    : distributedLockDdl.replace(new RegExp(`  ${missing}[^\\n]+\\n`), '');
   await db.exec(db.dialect.renderDdl(ddl));
   await expect(assertDistributedLockSchema(db)).rejects.toThrow('Incompatible clawweb_distributed_locks');
 });
@@ -53,4 +60,9 @@ it('rejects a duplicate lock migration version instead of executing an ambiguous
   registrations.push({ ...registrations[0] });
   try { expect(() => collectMigrations()).toThrow('Conflicting distributed lock migration version 158'); }
   finally { registrations.pop(); }
+});
+
+it('keeps the operator MySQL provisioning SQL aligned with the canonical schema', () => {
+  const sql = readFileSync(new URL('../../../../scripts/sql/distributed-locks-v158.mysql.sql', import.meta.url), 'utf8');
+  expect(sql).toContain(dialectFor('mysql').renderDdl(distributedLockDdl) + ' ENGINE=InnoDB;');
 });

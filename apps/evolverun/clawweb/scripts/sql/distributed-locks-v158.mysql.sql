@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS clawweb_distributed_locks (
   expires_at_ms BIGINT NOT NULL DEFAULT 0 COMMENT '数据库时钟下的租约截止时间',
   next_acquire_at_ms BIGINT NOT NULL DEFAULT 0 COMMENT '数据库时钟下最早再次获取时间',
   version BIGINT NOT NULL DEFAULT 0 COMMENT '每次成功写入递增的版本',
-  created_at_ms BIGINT NOT NULL COMMENT '数据库创建时间毫秒',
-  updated_at_ms BIGINT NOT NULL COMMENT '数据库最后修改时间毫秒',
+  gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
+  gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '记录修改时间',
   UNIQUE INDEX uk_clawweb_distributed_lock (lock_id)
 ) COMMENT='ClawWeb公共分布式租约锁' ENGINE=InnoDB;
 
