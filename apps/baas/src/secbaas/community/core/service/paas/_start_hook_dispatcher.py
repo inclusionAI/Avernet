@@ -378,12 +378,58 @@ def _execute_wrapper_script(
     )
 
 
+def _arm_callback_watchdog(
+    *,
+    device_uuid: str,
+    publish_id: int | None,
+    timeout_seconds: int,
+    tenant: str,
+    callback_handler: DeviceCallbackHandler,
+) -> None:
+    """Arm a server-side deadline for the async start-hook callback.
+
+    The wrapper reports results only after the hook process exits; a hook
+    that hangs or is silently killed inside the device therefore never
+    produces a callback and the device record stays PROCESSING forever while
+    the publish waits for batch callbacks (observed in production as
+    publish stuck ACTIVE with progress=100%). If no callback has landed by
+    the deadline, report a FAILED callback through the regular failure path.
+    The callback handler is idempotent: when the real callback already
+    landed, the watchdog callback is ignored ("no PROCESSING record").
+    """
+
+    def _on_timeout() -> None:
+        message = (
+            f"Start hook watchdog: no callback within {timeout_seconds}s "
+            f"(device={device_uuid}, publish_id={publish_id or 0})"
+        )
+        logger.error(message)
+        _report_failure(
+            device_uuid=device_uuid,
+            publish_id=publish_id,
+            exit_code=None,
+            stdout=None,
+            stderr=message,
+            tenant=tenant,
+            callback_handler=callback_handler,
+        )
+
+    timer = threading.Timer(timeout_seconds, _on_timeout)
+    timer.name = f"hook-watchdog-{device_uuid[:8]}"
+    timer.daemon = True
+    timer.start()
+    logger.info(
+        f"Start hook watchdog armed for device {device_uuid}: "
+        f"timeout={timeout_seconds}s"
+    )
+
+
 def dispatch_start_hook(
     tenant: str,
     device_uuid: str,
     provider_device_id: str,
     rendered_hook: str,
-    hook_timeout: int,  # noqa: ARG001 - kept for API compatibility
+    hook_timeout: int,
     facade: PaasServiceFacade,
     callback_handler: DeviceCallbackHandler,
     publish_id: int | None = None,
@@ -397,14 +443,20 @@ def dispatch_start_hook(
     4. Handles all state transition logic via callback
 
     This function only handles wrapper dispatch failures. All hook
-    execution results are reported via the HTTP callback mechanism.
+    execution results are reported via the HTTP callback mechanism. On
+    successful dispatch it also arms a server-side watchdog for
+    ``hook_timeout`` seconds: a hook that hangs or dies silently inside the
+    device never produces a callback, and without the watchdog the device
+    record would stay PROCESSING forever (publish stuck awaiting batches).
 
     Args:
         tenant: The tenant name
         device_uuid: The device UUID
         provider_device_id: The PaaS device ID
         rendered_hook: The hook script content (already rendered)
-        hook_timeout: Timeout for hook execution (unused, kept for compatibility)
+        hook_timeout: Seconds to wait for the wrapper callback before the
+            watchdog reports a FAILED callback; values <= 0 disable the
+            watchdog (legacy behavior)
         publish_id: Optional publish ID for tracking
         facade: PaasServiceFacade instance
         callback_handler: Device callback handler for failure reporting
@@ -461,6 +513,14 @@ def dispatch_start_hook(
                     f"Wrapper dispatched for {device_uuid}: "
                     f"stdout={stdout[:100]}, wrapper will send callback"
                 )
+                if hook_timeout and hook_timeout > 0:
+                    _arm_callback_watchdog(
+                        device_uuid=device_uuid,
+                        publish_id=publish_id,
+                        timeout_seconds=hook_timeout,
+                        tenant=tenant,
+                        callback_handler=callback_handler,
+                    )
 
         except Exception as e:
             # Unexpected exception during dispatch

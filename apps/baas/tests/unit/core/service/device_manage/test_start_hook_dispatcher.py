@@ -5,6 +5,7 @@ Covers:
 - _get_callback_server: env-based URL selection (dev/pre/prod)
 - _report_failure: callback dispatch on wrapper failure
 - dispatch_start_hook: threading, wrapper dispatch, error paths
+- _arm_callback_watchdog: server-side deadline for missing wrapper callbacks
 """
 
 from __future__ import annotations
@@ -333,6 +334,142 @@ class TestDispatchStartHook:
             mock_report.assert_called_once()
             assert mock_report.call_args.kwargs["device_uuid"] == "device-001"
             assert "Connection failed" in mock_report.call_args.kwargs["stderr"]
+
+
+# ============== callback watchdog ==============
+
+
+class TestCallbackWatchdog:
+    """Server-side deadline for wrapper callbacks that never arrive."""
+
+    def _dispatch_with_mock_thread(self, *, hook_timeout: int):
+        """Run dispatch_start_hook synchronously with Thread mocked, return mocks."""
+        with (
+            patch(
+                "secbaas.community.core.service.paas._start_hook_dispatcher._execute_wrapper_script",  # noqa: E501
+                return_value={"exit_code": 0, "stdout": "ok", "stderr": ""},
+            ) as mock_exec,
+            patch(
+                "secbaas.community.core.service.paas._start_hook_dispatcher._get_callback_server",
+                return_value="https://example.com",
+            ),
+            patch(
+                "secbaas.community.core.service.paas._start_hook_dispatcher.threading.Thread",
+            ) as mock_thread,
+            patch(
+                "secbaas.community.core.service.paas._start_hook_dispatcher.threading.Timer",
+            ) as mock_timer,
+        ):
+            mock_thread_instance = MagicMock()
+            mock_thread.return_value = mock_thread_instance
+            mock_timer_instance = MagicMock()
+            mock_timer.return_value = mock_timer_instance
+
+            dispatch_start_hook(
+                tenant="test-tenant",
+                device_uuid="device-001",
+                provider_device_id="provider-001",
+                rendered_hook="echo test",
+                hook_timeout=hook_timeout,
+                facade=MagicMock(),
+                callback_handler=_test_callback_handler(),
+                publish_id=123,
+            )
+
+            thread_target = mock_thread.call_args.kwargs["target"]
+            thread_target()
+
+        return mock_exec, mock_thread, mock_timer, mock_timer_instance
+
+    def test_dispatch_success_arms_watchdog(self):
+        """Successful wrapper dispatch should arm the callback watchdog."""
+        _, _, mock_timer, mock_timer_instance = self._dispatch_with_mock_thread(
+            hook_timeout=300
+        )
+
+        mock_timer.assert_called_once_with(300, mock_timer.call_args[0][1])
+        assert mock_timer_instance.daemon is True
+        mock_timer_instance.start.assert_called_once()
+
+    def test_watchdog_disabled_for_non_positive_timeout(self):
+        """hook_timeout<=0 keeps the legacy behavior (no watchdog)."""
+        _, _, mock_timer, _ = self._dispatch_with_mock_thread(hook_timeout=0)
+
+        mock_timer.assert_not_called()
+
+    def test_dispatch_failure_does_not_arm_watchdog(self):
+        """Failed dispatch already reports synchronously; no watchdog timer."""
+        with (
+            patch(
+                "secbaas.community.core.service.paas._start_hook_dispatcher._execute_wrapper_script",
+                return_value={"exit_code": 1, "stdout": "", "stderr": "error"},
+            ),
+            patch(
+                "secbaas.community.core.service.paas._start_hook_dispatcher._get_callback_server",
+                return_value="https://example.com",
+            ),
+            patch(
+                "secbaas.community.core.service.paas._start_hook_dispatcher._report_failure",
+            ),
+            patch(
+                "secbaas.community.core.service.paas._start_hook_dispatcher.threading.Thread",
+            ) as mock_thread,
+            patch(
+                "secbaas.community.core.service.paas._start_hook_dispatcher.threading.Timer",
+            ) as mock_timer,
+        ):
+            mock_thread_instance = MagicMock()
+            mock_thread.return_value = mock_thread_instance
+
+            dispatch_start_hook(
+                tenant="test-tenant",
+                device_uuid="device-001",
+                provider_device_id="provider-001",
+                rendered_hook="echo test",
+                hook_timeout=300,
+                facade=MagicMock(),
+                callback_handler=_test_callback_handler(),
+                publish_id=123,
+            )
+
+            thread_target = mock_thread.call_args.kwargs["target"]
+            thread_target()
+
+            mock_timer.assert_not_called()
+
+    def test_watchdog_timeout_reports_failed_callback(self):
+        """Watchdog expiry goes through _report_failure with a timeout message."""
+        from secbaas.community.core.service.paas._start_hook_dispatcher import (
+            _arm_callback_watchdog,
+        )
+
+        with (
+            patch(
+                "secbaas.community.core.service.paas._start_hook_dispatcher.threading.Timer",
+            ) as mock_timer,
+            patch(
+                "secbaas.community.core.service.paas._start_hook_dispatcher._report_failure",
+            ) as mock_report,
+        ):
+            mock_timer_instance = MagicMock()
+            mock_timer.return_value = mock_timer_instance
+
+            _arm_callback_watchdog(
+                device_uuid="device-001",
+                publish_id=123,
+                timeout_seconds=300,
+                tenant="test-tenant",
+                callback_handler=_test_callback_handler(),
+            )
+
+            mock_timer.assert_called_once()
+            on_timeout = mock_timer.call_args[0][1]
+            on_timeout()
+
+            mock_report.assert_called_once()
+            assert mock_report.call_args.kwargs["device_uuid"] == "device-001"
+            assert mock_report.call_args.kwargs["publish_id"] == 123
+            assert "no callback within 300s" in mock_report.call_args.kwargs["stderr"]
 
 
 # ============== _report_failure ==============
