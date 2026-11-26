@@ -167,6 +167,7 @@ class BotTrackLatestReconcileTaskHandler:
                 env=self._env_provider(), skill_id=skill_id
             )
         )
+        reconcile_dependencies = bool(delta.claimed_mcp or delta.released_mcp)
         before = await self._projector.snapshot_skill_mappings(
             bot_id=bot_id, owner_id=owner_id
         )
@@ -175,7 +176,8 @@ class BotTrackLatestReconcileTaskHandler:
             owner_id=owner_id,
             scope=ProjectionScope(
                 skills=True,
-                mcp=True,
+                mcp=reconcile_dependencies,
+                passport_if_changed=True,
                 claimed_mcp=delta.claimed_mcp,
                 released_mcp=delta.released_mcp,
             ),

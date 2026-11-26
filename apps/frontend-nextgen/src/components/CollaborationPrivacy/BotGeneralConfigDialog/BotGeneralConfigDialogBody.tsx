@@ -15,6 +15,7 @@ import { PublicationEditor } from '@/components/CollaborationPrivacy/Publication
 import { ScopeViewer } from '@/components/CollaborationPrivacy/ScopeViewer';
 import {
   BotAbilitySettings,
+  BotFriendListSettings,
   BotVisibilitySettings,
   FriendApprovalSettings,
   PublishApprovalSettings,
@@ -203,6 +204,14 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
                 onViewFriendApprovalScope={privacy.openFriendScopeViewer}
               />
             </div>
+            {/* 好友名单(bot-friend-roster):严格 Owner 判定(userId 非空且等于
+                行数据 ownerId);只在已解析出协作 Bot UUID(targetBot.id)时挂载——
+                绝不传后端行 bot.id。外部 Bot 变体同样渲染(CF-1 已确认同权)。 */}
+            {Boolean(userId && bot.ownerId === userId) ? (
+              <div className={sectionCardClass}>
+                <BotFriendListSettings botUuid={targetBot.id} />
+              </div>
+            ) : null}
             {showCollaborationAbilitySettings ? (
               <div className={sectionCardClass}>
                 <BotAbilitySettings

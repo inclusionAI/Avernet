@@ -185,7 +185,7 @@ describe('RunSummaryHeader env/tag wiring', () => {
     { name: 'mixed null tag', fields: { env: 'test', tag: null }, env: 'test', tag: '未记录' },
     { name: 'raw strings', fields: { env: '', tag: '  raw-tag  ' }, env: '', tag: '  raw-tag  ' },
   ])('shows separate env/tag fields for $name responses', ({ fields, env, tag }) => {
-    render(<RunSummaryHeader run={makeRun('detail-run', fields)} nodeCount={1} />)
+    render(<RunSummaryHeader run={makeRun('detail-run', fields)} nodeCount={1} />, { wrapper: MemoryRouter })
     const summary = screen.getByRole('region', { name: '运行摘要' })
     expect(within(summary).getByText('流量标识', { selector: 'dt' }).nextElementSibling?.textContent).toBe(env)
     expect(within(summary).getByText('标签', { selector: 'dt' }).nextElementSibling?.textContent).toBe(tag)
@@ -194,7 +194,7 @@ describe('RunSummaryHeader env/tag wiring', () => {
 
   it('keeps long tag text inert and bounded in read-only details', () => {
     const run = makeRun('read-only-run', { env: 'test', tag: longTag, status: 'waiting' })
-    const { container } = render(<RunSummaryHeader run={run} nodeCount={1} readOnly onApproval={vi.fn()} pendingApprovalCount={1} />)
+    const { container } = render(<RunSummaryHeader run={run} nodeCount={1} readOnly onApproval={vi.fn()} pendingApprovalCount={1} />, { wrapper: MemoryRouter })
     const tag = screen.getByTitle(longTag)
     expect(tag.textContent).toBe(longTag)
     expect(tag).toHaveClass('truncate')

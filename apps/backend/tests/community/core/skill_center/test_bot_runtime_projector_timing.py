@@ -20,6 +20,8 @@ from agentclaw.community.core.skill_center.capability_state_contract import BotC
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
     ResolvedCapabilityPlan,
+    RuntimeProjectionResult,
+    RuntimeProjectionStatus,
 )
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeProjectionResolver,
@@ -66,6 +68,9 @@ class _Reader:
 class _Projection:
     def validate_plan(self, **_kwargs) -> None:
         return None
+
+    async def apply(self, **_kwargs) -> RuntimeProjectionResult:
+        return RuntimeProjectionResult.converged()
 
 
 class _Registry:
@@ -263,3 +268,48 @@ def test_concurrent_employee_draft_removal_keeps_new_passport_grant(world, monke
 
     assert passport.update_passport.call_count == 2
     assert [item["mcp_code"] for item in scope["mcps"]] == ["new-tool"]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_retries_failed_passport_write_then_skips_matching_grants():
+    projector = _projector()
+    passport = Mock()
+    projector._passport = passport
+    passport.query_passport_clis.return_value = [
+        {"cli_code": "cli.current", "identity_mode": "caller"},
+    ]
+    current = {
+        "mcps": [{"mcp_code": "mcp.stale", "identity_mode": "owner"}],
+        "clis": [],
+    }
+
+    def save_scope(*, resource_scope, **_kwargs):
+        current.update(mcps=resource_scope["mcp_items"], clis=resource_scope["cli_items"])
+
+    passport.query_agent_passport.side_effect = lambda *_: current
+    passport.update_passport.side_effect = RuntimeError("temporary write failure")
+    scope = ProjectionScope(skills=True, mcp=True, passport_if_changed=True)
+
+    first = await projector.project(bot_id="bot-1", owner_id="owner-1", scope=scope)
+    assert first.status is RuntimeProjectionStatus.PENDING
+    assert first.passport_updated is False
+    assert [issue.code for issue in first.issues] == ["PASSPORT_RUNTIME_UNAVAILABLE"]
+
+    passport.update_passport.side_effect = save_scope
+    retry = await projector.project(bot_id="bot-1", owner_id="owner-1", scope=scope)
+    assert retry.status is RuntimeProjectionStatus.CONVERGED
+    assert retry.passport_updated is True
+    assert retry.passport_mcp_codes == frozenset()
+    assert current == {
+        "mcps": [],
+        "clis": [{
+            "cli_code": "cli.current", "identity_mode": "caller",
+            "cli_name": None, "cli_desc": None,
+        }],
+    }
+
+    same = await projector.project(bot_id="bot-1", owner_id="owner-1", scope=scope)
+    assert same.status is RuntimeProjectionStatus.CONVERGED
+    assert same.passport_updated is None
+    assert passport.update_passport.call_count == 2
+    assert passport.query_agent_passport.call_count == 3

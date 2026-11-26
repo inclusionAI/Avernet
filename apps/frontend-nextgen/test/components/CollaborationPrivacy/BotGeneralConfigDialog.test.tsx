@@ -33,6 +33,24 @@ jest.mock('@/services/backendApi/collaboration/collaborationBotPublicRiskControl
   getBotPublicRiskCheck: jest.fn(),
   refreshBotPublicRiskCheck: jest.fn(),
 }));
+// 好友名单(bot-friend-roster)分区已进 Owner 弹窗:本套件不断言其行为,
+// 只需把它的网络边缘封成空名单,避免真实的分页/详情请求。
+jest.mock('@/services/backendApi/collaboration/collaborationFriendConnectionController', () => ({
+  listFriendConnections: jest.fn(async () => ({
+    code: 20000,
+    message: 'OK',
+    data: { items: [], total: 0, page: 1, page_size: 100 },
+    request_id: 'relations',
+  })),
+}));
+jest.mock('@/services/backendApi/collaboration/collaborationBotController', () => ({
+  queryCollaborationBots: jest.fn(async () => ({
+    code: 20000,
+    message: 'OK',
+    data: { items: [] },
+    request_id: 'details',
+  })),
+}));
 
 const mockCapabilities = jest.fn();
 jest.mock('@/capabilities', () => ({ getCapabilities: () => mockCapabilities() }));
@@ -260,9 +278,9 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
 
     await waitFor(() => expect(screen.getByText('参与协作群聊')).toBeInTheDocument());
 
-    // 组序：发布审批为首组，其后 Bot 可见性 / Bot 好友审批 / 协作能力。
+    // 组序：发布审批为首组，其后 Bot 可见性 / Bot 好友审批 / 好友名单（bot-friend-roster，Owner 可见）/ 协作能力。
     const sectionTitles = screen.getAllByRole('heading', { level: 4 }).map((heading) => heading.textContent);
-    expect(sectionTitles).toEqual(['发布审批', 'Bot 可见性', 'Bot 好友审批', '协作能力']);
+    expect(sectionTitles).toEqual(['发布审批', 'Bot 可见性', 'Bot 好友审批', '好友名单', '协作能力']);
 
     const approvalSwitch = await screen.findByRole('switch', { name: '关闭共同编辑者发布需 Owner 审批' });
     fireEvent.click(approvalSwitch);

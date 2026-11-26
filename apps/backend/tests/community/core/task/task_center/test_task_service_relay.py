@@ -7,12 +7,20 @@ import pytest
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
+    AcceptanceCriteria,
     BotCandidate,
+    Context,
+    Goal,
     NodeAction,
+    RuntimeInfo,
+    Status,
+    TaskExecutionGraph,
+    TaskNode,
     TaskReportCommand,
     TaskReportEventType,
     TaskReportResult,
     TaskReportStatus,
+    TaskSpec,
 )
 from agentclaw.community.core.task.task_center.task_service_relay import (
     TaskServiceRelayMixin,
@@ -143,6 +151,46 @@ async def test_search_bots_skips_temporary_duty_fallback_in_pre(monkeypatch) -> 
     _, _, _, payload, _ = service._graph.events[-1]
     assert payload["candidate_source"] == "search"
     assert payload["fallback_candidate_count"] == 0
+
+
+def test_build_relay_root_instruction_uses_task_graph_source_channel() -> None:
+    root = TaskNode(
+        node_id="task-1",
+        task_id="task-1",
+        status=Status.RUNNING,
+        task_spec=TaskSpec(
+            context=Context(title="分析任务"),
+            goal=Goal(
+                objective="完成任务",
+                acceptances=[AcceptanceCriteria(id="a1", description="输出结论")],
+            ),
+        ),
+        run_info=RuntimeInfo(),
+        node_run_graph=None,
+    )
+    root.run_info.extend_props["relay_token"] = "generation-1"
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.RUNNING,
+        tasks=[root],
+        task_id="task-1",
+        extend_props={
+            "execution_config": {
+                "orchestration_mode": "relay",
+                "source_channel": "dingtalk",
+            },
+            "runtime_profile": {"allowed_run_modes": ["single_bot", "coop_group"]},
+        },
+    )
+    service = _Service()
+    service._api_base_url = "https://backend.example"
+    service._graph = SimpleNamespace(query_task_dashboard=lambda _: graph)
+
+    instruction = service._build_relay_root_execution_instruction("task-1")
+
+    assert "source_channel=dingtalk；" in instruction
+    assert "relay_token=generation-1" in instruction
 
 
 # ===== report():上报即落轨迹(写时发射,读侧不再依赖投影重建) =====

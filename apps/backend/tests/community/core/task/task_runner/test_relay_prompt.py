@@ -81,13 +81,14 @@ def test_relay_prompt_forbids_dispatch_for_terminal_and_bbs_plans() -> None:
     assert "S6 只有在 target_node_id 非空且 bbs_publish_pending=false" in prompt
     assert "task_completed=true、task_hung=true 或 bbs_publish_pending=true" in prompt
     assert "不得调用 dispatch" in prompt
-    assert "成功响应中的 data.handoff_display 是当前棒 S6 用户可见交接卡片的数据" in prompt
-    assert "当且仅当 source_channel=dingtalk 且 data.handoff_display 非空时" in prompt
-    assert "必须先完成本棒 `## 【本棒执行结论】` 普通会话回复" in prompt
-    assert "回复完成后再通过 Runtime message 工具单独投递一次该模板卡片" in prompt
-    assert "不调用 message 工具" in prompt
-    assert "继续保持普通会话回复逻辑不变" in prompt
-    assert "不得在会话回复与旁路消息之间重复发送" in prompt
+    assert "成功响应中的 data.handoff_display 是当前棒 S6 用户可见交接进度的数据" in prompt
+    assert "本棒 `## 【本棒执行结论】` 的结尾必须输出 **交接进度**" in prompt
+    assert "所有用户入口渠道使用同一输出格式" in prompt
+    assert "交接进度仅使用 data.handoff_display.subject" in prompt
+    assert "collaborator_name 与 entry_url 两个字段都缺失时，只输出本棒结论" in prompt
+    assert "source_channel=dingtalk 且" not in prompt
+    assert "message 工具" not in prompt
+    assert "旁路消息" not in prompt
     assert "HTTP 422 表示契约非法" in prompt
     assert "HTTP 409 表示状态冲突或执行代次失效" in prompt
     assert "禁止换 event_id 或 token" in prompt
@@ -268,8 +269,8 @@ def test_relay_prompt_injects_task_source_channel() -> None:
     )
 
     assert "source_channel=dingtalk" in prompt
-    assert "该值是任务入口捕获的用户原始消息渠道" in prompt
-    assert "不是当前 BCS 运行会话渠道" in prompt
+    assert "该值是任务入口上下文" in prompt
+    assert "不参与用户可见回复分支" in prompt
 
 
 def test_relay_prompt_treats_missing_source_channel_as_unknown() -> None:
@@ -284,8 +285,8 @@ def test_relay_prompt_treats_missing_source_channel_as_unknown() -> None:
     )
 
     assert "source_channel=unknown" in prompt
-    assert "source_channel=dingtalk 且" in prompt
-    assert "不调用 message 工具" in prompt
+    assert "source_channel=dingtalk 且" not in prompt
+    assert "message 工具" not in prompt
 
 
 def test_relay_prompt_injects_non_dingtalk_source_channel() -> None:
@@ -301,4 +302,4 @@ def test_relay_prompt_injects_non_dingtalk_source_channel() -> None:
     )
 
     assert "source_channel=webchat" in prompt
-    assert "source_channel=dingtalk 且" in prompt
+    assert "source_channel=dingtalk 且" not in prompt

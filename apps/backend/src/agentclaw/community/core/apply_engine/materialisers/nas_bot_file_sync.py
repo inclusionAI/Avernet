@@ -171,9 +171,15 @@ class NasBotFileSyncPort(BotFileSyncPort):
             # off the same build plan publish reads — one source of truth.
             *(f"--exclude={rule}" for rule in build_plan.rsync_excludes),
             # The caller's manifest excludes, already governed literal-relative
-            # paths by ``normalize_build_ignore_path``. Anchored to the source
-            # root so the rule names a path, not a basename anywhere in the tree.
-            *(f"--exclude=/{rule}" for rule in excludes),
+            # paths by ``normalize_build_ignore_path``. The paths are authored
+            # relative to the workspace namespace (``build_plan.workspace_subdir``),
+            # e.g. ``1124.pdf`` resolves under ``<root>/workspace/1124.pdf`` — not
+            # the engine root. Anchoring ``/{rule}`` to the transfer root (``<root>``)
+            # would look for ``<root>/1124.pdf`` and never match, so the rule would
+            # be silently a no-op and the file copied. Anchor under the workspace
+            # subdir instead so the rule names a path, not a basename anywhere in
+            # the tree, and actually matches the authored path.
+            *(f"--exclude=/{build_plan.workspace_subdir}/{rule}" for rule in excludes),
             f"{source_path}/",
             f"{target_path}/",
         ]
