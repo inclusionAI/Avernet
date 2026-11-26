@@ -67,6 +67,10 @@ export function getRiskFailurePresentation(
     case 'CONFIG_CHANGED':
       return {
         label: '配置已变更',
+        rowSummary: {
+          title: '本次公开未生效',
+          description: 'Bot 配置已变更，请按当前配置重新申请。',
+        },
         title: approved ? '配置已变更，本次公开未生效' : '配置已变更，请重新申请',
         description: approved
           ? '审批已通过，但期间 Bot 配置（如 MCP 或其他资源）发生变更。为保障安全，本次公开已被拦截，请按当前配置重新申请。'

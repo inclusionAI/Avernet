@@ -651,7 +651,7 @@ describe('内部 Bot 协作能力修复行（AC-23/24/27/28/34）', () => {
     await waitFor(() => expect(mockRiskRefresh).toHaveBeenCalledWith('bot-1:900004', '900004', 'rk-1'));
   });
 
-  it('已拦截的风险申请覆盖旧审批投影，去处理可打开可见性编辑器', async () => {
+  it('配置变更时说明公开未生效，并从外层提示进入重申编辑器', async () => {
     mockCapabilities.mockReturnValue({
       ...mockCapabilities(),
       getRestrictedPublicationScopeEnabled: () => ({ value: false }),
@@ -686,8 +686,9 @@ describe('内部 Bot 协作能力修复行（AC-23/24/27/28/34）', () => {
 
     render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
 
-    const action = await screen.findByRole('button', { name: '去处理' });
-    expect(screen.getByText('配置已变更')).toBeInTheDocument();
+    const action = await screen.findByRole('button', { name: '查看并重新申请' });
+    const summary = screen.getByText('本次公开未生效').closest('[role="status"]');
+    expect(summary).toHaveTextContent('Bot 配置已变更，请按当前配置重新申请。');
     expect(screen.queryByText('待审批')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '查看审批进度' })).not.toBeInTheDocument();
     fireEvent.click(action);
