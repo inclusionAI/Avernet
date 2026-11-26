@@ -65,14 +65,16 @@ describe('collaboration privacy accessible UI', () => {
     const hookSource = readFileSync(path.join(process.cwd(), 'src/hooks/useCollaborationPrivacy.ts'), 'utf8');
     // 动作编排拆至子 Hook 后,notify/文案契约由主 Hook + 子 Hook 共同履行。
     const actionsSource = readFileSync(path.join(process.cwd(), 'src/hooks/useCollaborationPrivacyActions.ts'), 'utf8');
+    const userRiskSource = readFileSync(path.join(process.cwd(), 'src/hooks/useCollaborationPrivacyUserRisk.ts'), 'utf8');
+    const privacySources = `${hookSource}\n${actionsSource}\n${userRiskSource}`;
     const helperSource = readFileSync(path.join(process.cwd(), 'src/hooks/collaborationPrivacyHelpers.ts'), 'utf8');
 
     expect(dialogSource).not.toContain('PageMessage');
     // 错误/成功经统一 notify 入口（全局上方居中、错误 6s、可关），页面 Hook 不单独设置位置。
     expect(hookSource).not.toContain("position: 'top-center'");
-    expect(hookSource).toContain("from '@/components/ui/notify'");
-    expect(hookSource + actionsSource).toContain('notifyError');
-    expect(hookSource + actionsSource).toContain('notifySuccess');
+    expect(privacySources).toContain("from '@/components/ui/notify'");
+    expect(privacySources).toContain('notifyError');
+    expect(privacySources).toContain('notifySuccess');
     expect(hookSource).toContain('publicationSuccessMessage(config)');
     expect(helperSource).toContain('Bot 可见性已更新为不可见，当前立即生效');
     expect(helperSource).toContain('可见性变更申请已提交，当前可见性保持不变');
