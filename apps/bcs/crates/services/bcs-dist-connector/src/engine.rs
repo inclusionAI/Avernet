@@ -810,8 +810,9 @@ impl DistRuntimeControlPort for ConnectorEngine {
     ///
     /// The work runs once, on a task of its own, started by the first call
     /// with that call's `grace`; every call (concurrent or later) waits for
-    /// it and gets its outcome. Cancelling a caller therefore neither cuts
-    /// the shutdown short nor lets it run twice.
+    /// it and gets its outcome, so a later call's own `grace` is ignored.
+    /// Cancelling a caller therefore neither cuts the shutdown short nor
+    /// lets it run twice.
     async fn drain(&self, grace: Duration) -> Result<DrainOutcome, RuntimeError> {
         self.drain_once(grace).await
     }

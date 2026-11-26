@@ -63,7 +63,8 @@ impl DistConnectorRuntimeService for ConnectorRuntimeFacade {
 
     /// Stops claiming, lets held calls stop at a safe point, hands the
     /// partitions over and retires, within `grace` (see
-    /// `ConnectorEngine::drain`).
+    /// `ConnectorEngine::drain`). Only the first drain's `grace` counts: a
+    /// later call waits for that same shutdown and returns its outcome.
     async fn drain(&self, grace: Duration) -> Result<DrainOutcome, RuntimeError> {
         if grace > MAX_GRACE {
             return Err(RuntimeError {

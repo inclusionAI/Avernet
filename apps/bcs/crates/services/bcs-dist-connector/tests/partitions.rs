@@ -434,3 +434,23 @@ async fn rounds_with_healthy_owners_do_not_read_the_member_list() {
     settle().await;
     assert_eq!(members.member_reads.load(Ordering::SeqCst), reads);
 }
+
+#[tokio::test]
+async fn a_panicking_shutdown_still_stops_the_calls_and_retires() {
+    use std::sync::atomic::Ordering;
+    let mut rig = Rig::new().await;
+    let members = members(&mut rig);
+    let _events = rig.agent.start_stream();
+    rig.worker.create().await;
+    rig.worker.notify().await;
+    let running = rig.start();
+    until("accepted", || async { rig.phase().await == "accepted" }).await;
+    members.panic_on_draining.store(true, Ordering::SeqCst);
+    let error = running.engine.drain(Duration::from_secs(5)).await.unwrap_err();
+    assert_eq!(error.code, "drain_failed");
+    assert_eq!(running.engine.snapshot().await.unwrap().active_work, 0, "its call stopped");
+    assert!(members.dead.lock().unwrap().contains(&"conn-03".to_owned()), "retired");
+    let after = members.renewals.load(Ordering::SeqCst);
+    settle().await;
+    assert_eq!(members.renewals.load(Ordering::SeqCst), after, "no renewal after retiring");
+}

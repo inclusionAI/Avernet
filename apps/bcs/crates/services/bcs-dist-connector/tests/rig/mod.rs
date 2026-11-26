@@ -573,6 +573,8 @@ pub struct Members {
     pub members_delay_ms: std::sync::atomic::AtomicU64,
     /// How many times `members` was called.
     pub member_reads: std::sync::atomic::AtomicUsize,
+    /// While set, `set_draining` panics.
+    pub panic_on_draining: std::sync::atomic::AtomicBool,
 }
 
 impl Members {
@@ -614,6 +616,7 @@ impl MembershipPort for Members {
         &self,
         lease: &bcs_service_api::port::repo::distributed::ownership::MembershipLease,
     ) -> Result<bcs_service_api::port::repo::distributed::ownership::Renewal, StoreError> {
+        assert!(!self.panic_on_draining.load(std::sync::atomic::Ordering::SeqCst), "set_draining panics");
         for record in self.records.lock().unwrap().iter_mut() {
             if record.instance == lease.instance {
                 record.draining = true;

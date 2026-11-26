@@ -25,7 +25,20 @@ impl ConnectorEngine {
                 Some(job) => job.clone(),
                 None => {
                     let engine = self.clone();
-                    let task = tokio::spawn(async move { engine.shut_down(grace).await });
+                    let task = tokio::spawn(async move {
+                        // A panic in the shutdown must still end with the
+                        // calls stopped and the registration retired: no
+                        // caller (or later drain) would finish it otherwise.
+                        match std::panic::AssertUnwindSafe(engine.shut_down(grace)).catch_unwind().await {
+                            Ok(outcome) => outcome,
+                            Err(_) => {
+                                tracing::error!("drain panicked; stopping the calls and retiring");
+                                engine.stop_actors().await;
+                                engine.retire().await;
+                                Err(failed("drain_failed"))
+                            }
+                        }
+                    });
                     let job: Shutdown = async move { task.await.unwrap_or_else(|_| Err(failed("drain_failed"))) }
                         .boxed()
                         .shared();
