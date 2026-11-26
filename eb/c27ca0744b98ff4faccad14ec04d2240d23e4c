@@ -1,0 +1,42 @@
+apps/bcs/crates/bootstrap/bcs/src/server/a2a_wiring.rs
+  h_10f6235a5d078a 29
+apps/bcs/crates/bootstrap/bcs/src/server/resource_builders.rs
+  h_10f6235a5d078a 665
+apps/bcs/crates/external-clients/bcs-a2a-http/src/card.rs
+  h_10f6235a5d078a 56
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery.rs
+  h_10f6235a5d078a 164-165,337,432-435
+apps/bcs/crates/external-clients/bcs-a2a-http/src/dist_agent/events.rs
+  h_10f6235a5d078a 128,130,132,201-202
+apps/bcs/crates/external-clients/bcs-a2a-http/src/dist_agent/mod.rs
+  h_10f6235a5d078a 232,234,245,247-250,447-448
+apps/bcs/crates/external-clients/bcs-a2a-http/src/dist_agent/yaml_registry.rs
+  h_10f6235a5d078a 60
+apps/bcs/crates/external-clients/bcs-a2a-http/src/projection.rs
+  h_10f6235a5d078a 58-61
+apps/bcs/crates/external-clients/bcs-a2a-http/src/tools.rs
+  h_10f6235a5d078a 6-8,12-13,18-19,23-37,51-59,63-83
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/card_contract.rs
+  h_10f6235a5d078a 91
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/conformance_a2a_delivery.rs
+  h_10f6235a5d078a 74-97,490-508
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/dist_agent.rs
+  h_10f6235a5d078a 400-434
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/tools_contract.rs
+  h_10f6235a5d078a 2,6-9,18-22,68-93
+docs/bcn-a2a-api-reference.zh-CN.md
+  h_10f6235a5d078a 733,735-738,905
+docs/specs/a2a/extensions/tools/v2.md
+  h_10f6235a5d078a 1-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ebc27ca0744b98ff4faccad14ec04d2240d23e4c",
+  "prompts": {},
+  "humans": {
+    "h_10f6235a5d078a": {
+      "author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

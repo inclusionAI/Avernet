@@ -1,0 +1,14 @@
+apps/bcs/scripts/e2e-test/a2a_story.py
+  h_10f6235a5d078a 26,30,33-34,192,202,210-214,216,251,255-263,656-657
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e07d3bf57fd021c75d65b3ab73a5665a71f4494f",
+  "prompts": {},
+  "humans": {
+    "h_10f6235a5d078a": {
+      "author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
