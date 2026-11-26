@@ -130,3 +130,30 @@ it('DAG programmatic Drawer returns Escape focus to its node opener and stays wi
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: previousWidth });
   }
 });
+
+it('DAG fit changes the real canvas scale and empty executions stay unreported rather than pending', () => {
+  render(
+    <RunDagView
+      workflow={{
+        id: 'wf',
+        version: null,
+        nodes: [
+          { id: 'a', title: 'No execution', executor: null, dependsOn: [] },
+          { id: 'b', title: 'Dependency', executor: null, dependsOn: ['a'] },
+        ],
+      }}
+      nodes={[]}
+      runVersion={null}
+    />,
+  );
+  const expand = screen.getByRole('button', { name: '展开 DAG 画布' });
+  const viewport = document.getElementById(expand.getAttribute('aria-controls')!)!;
+  Object.defineProperty(viewport, 'clientWidth', { configurable: true, value: 390 });
+  Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 330 });
+  fireEvent.click(screen.getByRole('button', { name: '适应 DAG 画布' }));
+  const scale = (390 - 24) / 499;
+  expect(screen.getByLabelText('DAG 缩放比例')).toHaveTextContent(`${Math.round(scale * 100)}%`);
+  expect(viewport.querySelector('.relative')).toHaveStyle({ transform: `scale(${scale})` });
+  fireEvent.click(screen.getByRole('button', { name: 'DAG 节点 No execution' }));
+  expect(screen.getByText(/接口未提供该节点的实际执行记录/)).toBeInTheDocument();
+});

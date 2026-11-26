@@ -146,3 +146,127 @@ describe('overview protocol and validation', () => {
     await expect(service.archive('wf', 'r1', {})).rejects.toThrow(/运行/);
   });
 });
+
+it('maps detail-only verified launch/lineage/projection fields with display redaction before domain state', async () => {
+  const service = createOverviewService();
+  request
+    .mockResolvedValueOnce({
+      run: {
+        ...run,
+        input_json:
+          '{"message":"token=unsafe-input","command":"/stored","params":{"late":"never-fallback"},"iamToken":"unsafe"}',
+        params_json: '{"target":"original","nested":[{"iamToken":"unsafe-param","system_context":{"unsafe":true}}]}',
+        parent_flow_id: 'parent',
+        root_flow_id: 'root',
+        device_id: ' device ',
+        bot_type: 'public',
+        stage: 'verify',
+        credentials_json: '{"CLIENT_ID":"never-parse"}',
+        state_json: 'never-retain',
+        arbitrary: 'never-retain',
+        hasCredentials: true,
+      },
+      nodes: [],
+    })
+    .mockResolvedValueOnce([
+      { ...node, system_context_json: 'never-retain', input_json: '{"api_key":"unsafe-node","business":0}' },
+    ]);
+  const detail = await service.runDetail('wf', 'r1', { user_id: 'alice' });
+  expect(detail.run).toEqual(
+    expect.objectContaining({
+      parentRunId: 'parent',
+      rootRunId: 'root',
+      deviceId: ' device ',
+      botType: 'public',
+      stage: 'verify',
+      launchInput: expect.objectContaining({ text: '[包含敏感配置的文本已隐藏]' }),
+      launchParams: expect.objectContaining({ text: expect.stringContaining('original') }),
+    }),
+  );
+  const serialized = JSON.stringify(detail);
+  expect(serialized).not.toMatch(/unsafe|never-retain|never-parse|never-fallback/);
+  expect(detail.nodes[0].context).toBeNull();
+  expect(detail.nodes[0].input).toContain('[已隐藏]');
+  request.mockResolvedValueOnce({
+    runs: [{ ...run, input_json: '"not-list-data"', device_id: 'detail-only' }],
+    total: 1,
+  });
+  const list = await service.runs({ workflowId: 'wf' });
+  expect(list.runs[0]).not.toHaveProperty('launchInput');
+  expect(list.runs[0]).not.toHaveProperty('deviceId');
+  expect(
+    request.mock.calls.every(
+      ([, options]) => options.method === 'GET' && !options.headers && !('exposeRuntimeMetadata' in options.params),
+    ),
+  ).toBe(true);
+});
+
+it('redacts run evidence before retaining node token objects, log bodies and archive runtime sections', async () => {
+  const service = createOverviewService();
+  request
+    .mockResolvedValueOnce({ run, nodes: [] })
+    .mockResolvedValueOnce([{ ...node, token_usage_json: '{"totalTokens":8,"iamToken":"node-token-secret"}' }]);
+  const detail = await service.runDetail('wf', 'r1', {});
+  expect(detail.nodes[0].tokens).toContain('8');
+  expect(detail.nodes[0].tokens).not.toContain('node-token-secret');
+  request.mockResolvedValueOnce({
+    data: {
+      flowId: 'r1',
+      events: [{ id: 'log', source: 'run_log', detail: '{"business":"retained","iamToken":"log-token-secret"}' }],
+    },
+  });
+  expect(JSON.stringify(await service.logs('r1', {}))).not.toContain('log-token-secret');
+  request.mockResolvedValueOnce({
+    data: {
+      archive: { flowId: 'r1' },
+      flowRun: {
+        flow_id: 'r1',
+        workflow_id: 'wf',
+        credentials_json: 'archive-credential-secret',
+        state_json: 'internal-state-value',
+      },
+      nodeExecutions: [
+        {
+          system_context_json: 'internal-system-value',
+          output_json: '{"result":"real","apiKey":"nested-output-secret"}',
+        },
+      ],
+      analysis: {
+        source: 'archive',
+        status: 'completed',
+        diagnoses: [{ iamToken: 'diagnostic-secret', evidence: 'actual diagnosis' }],
+      },
+    },
+  });
+  const archive = await service.archive('wf', 'r1', {});
+  expect(JSON.stringify(archive)).not.toMatch(
+    /archive-credential-secret|internal-state-value|internal-system-value|nested-output-secret|diagnostic-secret/,
+  );
+  expect(JSON.stringify(archive)).toContain('actual diagnosis');
+});
+
+it('allows numeric token metrics, not credential strings disguised as token metrics', async () => {
+  const service = createOverviewService();
+  request.mockResolvedValueOnce({ run, nodes: [] }).mockResolvedValueOnce([
+    {
+      ...node,
+      token_usage_json:
+        '{"totalTokens":"disguised-credential-value","inputTokens":3,"outputTokens":5,"nested":"{\\"\\u0069amToken\\":\\"escaped-credential-value\\"}"}',
+      output_json: '{"business":"actual-output","credentials_json":"output-credential-value"}',
+      resolved_prompt: 'authorization=prompt-credential-value',
+      progress_message: 'system_context=progress-credential-value',
+      credentials_json: 'unmapped-credential-value',
+      state_json: 'unmapped-state-value',
+    },
+  ]);
+  const detail = await service.runDetail('wf', 'r1', {});
+  const serialized = JSON.stringify(detail);
+  expect(serialized).not.toMatch(
+    /disguised-credential-value|escaped-credential-value|output-credential-value|prompt-credential-value|progress-credential-value|unmapped-credential-value|unmapped-state-value/,
+  );
+  expect(detail.nodes[0].tokens).toContain('"inputTokens":3');
+  expect(detail.nodes[0].tokens).toContain('"outputTokens":5');
+  expect(detail.nodes[0].output).toContain('actual-output');
+  for (const key of ['credentials_json', 'state_json', 'hasCredentials', 'arbitrary'])
+    expect(detail.run).not.toHaveProperty(key);
+});

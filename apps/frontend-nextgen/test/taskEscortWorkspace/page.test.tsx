@@ -86,7 +86,7 @@ const items = [
 
 beforeEach(() => {
   jest.clearAllMocks();
-  Object.assign(mockScope, { key: 'user-a:space-a', ready: true, loading: false, error: undefined });
+  Object.assign(mockScope, { key: 'user-a:space-a', userId: 'user-a', ready: true, loading: false, error: undefined });
   read.mockResolvedValue(rows);
   history.replace('/evolution-factory/task-escort');
 });
@@ -205,16 +205,86 @@ it.each(['403 forbidden', '工作流列表格式无效'])(
   },
 );
 
-it('empty metadata blocks leaves, while global dashboard never requires a fake workflow', async () => {
+it.each(items)(
+  '%s shows introduction for a successfully loaded empty collection without mounting readers',
+  async (id) => {
+    read.mockResolvedValue([]);
+    history.replace(`/evolution-factory/task-escort?view=${id}&period=30d&demo=1&keep=yes#detail`);
+    const before = history.location;
+    render(<TaskEscortPage />);
+    expect(await screen.findByRole('heading', { name: /让任务执行有迹可循/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '创建第一个工作流' })).toBeEnabled();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('parity-leaf')).not.toBeInTheDocument();
+    expect(Dashboard).not.toHaveBeenCalled();
+    expect(history.location).toBe(before);
+    expect(screen.queryByRole('button', { name: /示例|演示/ })).not.toBeInTheDocument();
+  },
+);
+
+it('the default Dashboard introduces empty collections and opens only the real creation dialog', async () => {
   read.mockResolvedValue([]);
-  history.replace('/evolution-factory/task-escort?view=runs');
   render(<TaskEscortPage />);
-  expect(await screen.findByText('暂无可访问的工作流')).toBeInTheDocument();
-  expect(screen.queryByTestId('parity-leaf')).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '数据大盘' }));
-  expect(screen.getByRole('heading', { name: '数据大盘' })).toBeInTheDocument();
-  expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  fireEvent.click(await screen.findByRole('button', { name: '创建第一个工作流' }));
+  expect(screen.getByRole('dialog', { name: '新建工作流' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '空白工作流' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '基于已有工作流' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'AI 生成' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '取消' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(history.location.search).toBe('');
 });
+
+it('Dashboard distinguishes pending, failed, successfully empty and revoked identity without empty flashes', async () => {
+  let resolve!: (value: typeof rows) => void;
+  read.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const { rerender } = render(<TaskEscortPage />);
+  expect(screen.getByRole('status')).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: /让任务执行有迹可循/ })).not.toBeInTheDocument();
+  expect(Dashboard).not.toHaveBeenCalled();
+  await act(async () => resolve([]));
+  fireEvent.click(screen.getByRole('button', { name: '创建第一个工作流' }));
+  Object.assign(mockScope, { ready: false, loading: true });
+  rerender(<TaskEscortPage />);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: /让任务执行有迹可循/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('status')).toBeInTheDocument();
+  Object.assign(mockScope, { loading: false, error: '身份不可用' });
+  rerender(<TaskEscortPage />);
+  expect(screen.getByText('身份不可用')).toBeInTheDocument();
+  Object.assign(mockScope, { error: undefined });
+  rerender(<TaskEscortPage />);
+  expect(screen.getByText('工作区尚未就绪')).toBeInTheDocument();
+  expect(screen.queryByText('暂无可访问的工作流')).not.toBeInTheDocument();
+  Object.assign(mockScope, { ready: true });
+  read.mockRejectedValueOnce(new Error('403 forbidden'));
+  rerender(<TaskEscortPage />);
+  expect(await screen.findByText('403 forbidden')).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: /让任务执行有迹可循/ })).not.toBeInTheDocument();
+  expect(Dashboard).not.toHaveBeenCalled();
+  read.mockResolvedValueOnce([]);
+  fireEvent.click(screen.getByRole('button', { name: '重试读取' }));
+  expect(await screen.findByRole('heading', { name: /让任务执行有迹可循/ })).toBeInTheDocument();
+});
+
+it.each(['missing', ''])(
+  'Dashboard retains invalid explicit selection workflowId=%j even on an empty list',
+  async (id) => {
+    read.mockResolvedValue([]);
+    history.replace(`/evolution-factory/task-escort?workflowId=${id}&keep=yes#detail`);
+    render(<TaskEscortPage />);
+    expect(await screen.findByText(/所选工作流不存在或当前身份无权访问/)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /让任务执行有迹可循/ })).not.toBeInTheDocument();
+    expect(Dashboard).not.toHaveBeenCalled();
+    expect(history.location.search).toContain('keep=yes');
+    expect(history.location.hash).toBe('#detail');
+  },
+);
 
 it('identity loading/failure blocks reads and retries the existing scope adapter', async () => {
   history.replace('/evolution-factory/task-escort?view=editor');
