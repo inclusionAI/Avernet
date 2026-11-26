@@ -22,9 +22,10 @@ logger = get_logger()
 
 def _observe(database, publish_id: int, *, status: str, ext: str | None,
              actor: str | None, source_status: str | None, created: bool = False,
-             new_change_id: str | None = None, audit: ServiceBotReleaseAuditPlugin | None) -> None:
+             new_change_id: str | None = None, audit: ServiceBotReleaseAuditPlugin | None) -> str:
     """Observe only after native commit, in a separately owned transaction."""
     started = monotonic()
+    outcome = "skipped"
     try:
         with database.transactional_orm_session() as session:
             row = session.query(BotPublishModel).filter(
@@ -33,19 +34,23 @@ def _observe(database, publish_id: int, *, status: str, ext: str | None,
             ).first()
             if row is None:
                 logger.info("release_audit.stale publish_id=%s status=%s", publish_id, status)
-                return
+                return "skipped"
             if created:
                 if audit is None:
                     raise RuntimeError("publication audit plugin required")
                 audit.create(session, _snapshot(session, row, actor, before=None, desired="draft", terminal=True))
+                outcome = "success"
             else:
-                _record_transition(session, row, source_status=source_status, actor=actor,
-                                   new_change_id=new_change_id, audit=audit)
+                applied = _record_transition(session, row, source_status=source_status, actor=actor,
+                                             new_change_id=new_change_id, audit=audit)
+                outcome = "success" if applied else "skipped"
+        return outcome
     except Exception as exc:
         logger.warning(
             "release_audit.skipped publish_id=%s status=%s exception_type=%s elapsed_ms=%.2f",
             publish_id, status, type(exc).__name__, (monotonic() - started) * 1000,
         )
+        return "failed"
 
 
 def _start_stage(status: str, source_status: str | None, actor: str | None) -> str | None:
@@ -110,43 +115,60 @@ def _snapshot(session: Session, row, actor: str, *, before: str | None,
     )
 
 
+def _log_call(operation: str, publish_id: int, outcome: str, started: float) -> None:
+    try:
+        logger.info("release_audit.%s.finished publish_id=%s outcome=%s elapsed_ms=%.2f",
+                    operation, publish_id, outcome, (monotonic() - started) * 1000)
+    except Exception:
+        # Optional timing diagnostics must not change publication behavior.
+        pass
+
+
 def record_created(database, publish_id: int, *, ext: str | None, actor: str | None,
                    audit: ServiceBotReleaseAuditPlugin | None) -> None:
-    if actor is not None:
-        _observe(database, publish_id, status="draft", ext=ext, actor=actor,
-                 source_status=None, created=True, audit=audit)
+    started, outcome = monotonic(), "failed"
+    try:
+        outcome = "skipped" if actor is None else _observe(
+            database, publish_id, status="draft", ext=ext, actor=actor,
+            source_status=None, created=True, audit=audit)
+    finally:
+        _log_call("record_created", publish_id, outcome, started)
 
 
 def record_transition(database, publish_id: int, *, status: str, ext: str | None,
                       source_status: str | None, actor: str | None, new_change_id: str | None,
                       audit: ServiceBotReleaseAuditPlugin | None) -> None:
-    _observe(database, publish_id, status=status, ext=ext, source_status=source_status,
-             actor=actor, new_change_id=new_change_id, audit=audit)
+    started, outcome = monotonic(), "failed"
+    try:
+        outcome = _observe(database, publish_id, status=status, ext=ext, source_status=source_status,
+                           actor=actor, new_change_id=new_change_id, audit=audit)
+    finally:
+        _log_call("record_transition", publish_id, outcome, started)
 
 
 def _record_transition(session: Session, row, *, source_status: str | None,
                        actor: str | None, new_change_id: str | None,
-                       audit: ServiceBotReleaseAuditPlugin | None) -> None:
+                       audit: ServiceBotReleaseAuditPlugin | None) -> bool:
     status = row.status
     ext = json.loads(row.ext) if row.ext else {}
     start_stage = _start_stage(status, source_status, actor)
     if start_stage:
         if not new_change_id or ext.get(_CHANGE_KEY) != new_change_id:
-            return
+            return False
         snapshot = _snapshot(session, row, actor, before=source_status, desired=start_stage,
                              terminal=False, change_id=new_change_id)
         if audit is None:
             raise RuntimeError("publication audit plugin required")
         audit.create(session, snapshot)
-        return
+        return True
     change_id = ext.get(_CHANGE_KEY)
     submission_failed = change_id is not None and ext.get("_release_audit_submit_failed") == change_id
     if not change_id or (not submission_failed and status not in {"validating", "success", "failed", "released"}):
-        return
+        return False
     if (ext.get("_release_audit_wait_restart") == change_id
             and status == "success" and not submission_failed
             and ext.get("_release_audit_restart_completed") != change_id):
-        return
+        return False
     expected_stage = None if submission_failed else {"validating": "verify", "success": "online"}.get(status)
     result = "failed" if status == "failed" or submission_failed else "cancelled" if status == "released" else "succeeded"
     if audit is None:
@@ -154,6 +176,6 @@ def _record_transition(session: Session, row, *, source_status: str | None,
     # COSEC: restore only the tenant frozen in this trusted publication's change
     # metadata, never a tenant supplied by a completion request.
     with avernet_tenant_scope(ext.get(_TENANT_KEY, get_current_avernet_tenant())):
-        audit.complete(session, change_id=change_id, publish_id=row.id, env=row.env,
-                       expected_stage=expected_stage, finish_status=result,
-                       final_publish_status=status, finished_at=datetime.now(timezone.utc))
+        return audit.complete(session, change_id=change_id, publish_id=row.id, env=row.env,
+                              expected_stage=expected_stage, finish_status=result,
+                              final_publish_status=status, finished_at=datetime.now(timezone.utc))
