@@ -121,6 +121,29 @@ class _NoOpLockService:
         yield _NoOpLock()
 
 
+class _NoopChangeFlowObserver:
+    """ChangeFlow observer stand-in used when no observer is wired.
+
+    Mirrors ``_NoOpLockService``: core must not import plugins, so a local
+    no-op keeps DefaultPublishService constructible without a DI-provided
+    observer. The DI container always injects the configured Selector impl
+    (community NoopChangeFlowObserver / enterprise ProdChangeFlowObserver),
+    so this default only guards direct test construction.
+    """
+
+    async def on_register(self, ctx: Any) -> str | None:  # noqa: ARG002
+        return None
+
+    async def on_pre_check(self, ctx: Any) -> None:  # noqa: ARG002
+        return None
+
+    async def on_batch_result(self, ctx: Any) -> None:  # noqa: ARG002
+        return None
+
+    async def on_publish_terminal(self, ctx: Any) -> None:  # noqa: ARG002
+        return None
+
+
 def _extra_config_to_publish_config(
     extra_config: dict[str, Any] | None,
 ) -> PublishConfig | None:
@@ -200,9 +223,11 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         bot_service: BotManageService,
         device_service: DeviceService,
         lock_service: PublishLockService | None = None,
+        cf_observer: Any | None = None,
     ) -> None:
         """Initialize with injected dependencies."""
         self._lock_service: PublishLockService = lock_service or _NoOpLockService()
+        self._cf_observer: Any = cf_observer or _NoopChangeFlowObserver()
         self._bot_repo = bot_repo
         self._device_repo = device_repo
         self._rel_repo = rel_repo

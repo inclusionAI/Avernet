@@ -130,6 +130,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         CoreServiceContainer,
         config=config,
         secret_plugin=plugins.secret_plugin,
+        changeflow_plugin=plugins.changeflow_plugin,
         auth_plugin=plugins.auth_plugin,
         arca_sandbox_plugin_factory=plugins.arca_sandbox_plugin_factory,
         desktop_sandbox_plugin=plugins.desktop_sandbox_plugin,

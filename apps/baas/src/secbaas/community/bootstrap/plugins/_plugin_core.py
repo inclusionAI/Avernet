@@ -22,6 +22,7 @@ from dependency_injector import containers, providers
 from secbaas.community.api.device_manage import K8sCredentials
 from secbaas.community.plugins.auth.oauth import OAuthPlugin
 from secbaas.community.plugins.auth.stub import StubAuthPlugin
+from secbaas.community.plugins.changeflow.noop import NoopChangeFlowObserver
 from secbaas.community.plugins.bot.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.bot_service import (
     AiohttpBotServicePlugin,
@@ -302,6 +303,11 @@ class PluginContainer(containers.DeclarativeContainer):
     eval_session_log = providers.Selector(
         config.plugins.eval_env,
         stub=providers.Singleton(NoopEvalSessionLog),
+    )
+
+    changeflow_plugin = providers.Selector(
+        config.plugins.changeflow,
+        stub=providers.Singleton(NoopChangeFlowObserver),
     )
 
 

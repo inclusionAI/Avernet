@@ -200,6 +200,8 @@ class PluginConfig(ConfigSchema):
     cache: str = Field(default="stub", pattern=r"^(redis|stub)$")
     bot_service: str = Field(default="stub", pattern=r"^(real|local|stub)$")
 
+    changeflow: str = Field(default="stub", pattern=r"^(real|stub)$")
+
     engine_adapter: str = Field(default="stub", pattern=r"^(real|stub)$")
     file_transfer: str = Field(default="stub", pattern=r"^(real|stub)$")
     session_file_url_projector: str = Field(
