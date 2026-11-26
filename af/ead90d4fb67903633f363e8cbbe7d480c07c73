@@ -21,7 +21,7 @@ apps/bcs/scripts/build_e2e_companions.sh
 singlebox/ci/tests/test_verify_singlebox_coverage_artifacts.py
   s_b033c54cc00da7::t_ab9ff93c9c88ae 34-47,147-174
 apps/bcs/crates/bootstrap/bcs/CONTEXT.md
-  s_b033c54cc00da7::t_5c1caad39dfa32 322-330
+  s_b033c54cc00da7::t_5c1caad39dfa32 312,322-330,323-330
 apps/bcs/specs/2026-11-18-worker-runtime-phase1/spec.md
   s_b033c54cc00da7::t_6d0367c4923e74 394-403
 apps/bcs/crates/bootstrap/bcs/Cargo.toml
