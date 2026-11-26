@@ -147,6 +147,7 @@ from agentclaw.community.di.modules.task.context_collab_runtime import (
     ContextCollabRuntimeModule,
 )
 from agentclaw.community.di.modules.task.swarm_runtime import SwarmRuntimeModule
+from agentclaw.community.di.task_fixed_search import fixed_pre_candidate_search
 from agentclaw.community.di.modules.task.task_commission_authorization import (
     TaskMethodOpsAuthorizer,
 )
@@ -986,5 +987,12 @@ class TaskModule(Module):
             SemanticKeywordBotDiscover,
         )
 
+        fixed_discover = fixed_pre_candidate_search()
+        if fixed_discover is not None:
+            logger.info(
+                "[task][task-module] pre fixed candidate search enabled candidates=%s",
+                [item.get("bot_id") for item in fixed_discover.candidates],
+            )
+            return fixed_discover
         keyword_discover = CatalogKeywordBotDiscover(bot_public)  # type: ignore[arg-type]
         return SemanticKeywordBotDiscover(keyword_discover, semantic_discover)
