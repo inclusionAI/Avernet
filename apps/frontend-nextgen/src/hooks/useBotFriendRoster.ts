@@ -46,24 +46,49 @@ export function useBotFriendRoster(botUuid: string): BotFriendRoster {
   const [loading, setLoading] = useState(true);
   const [removingIds, setRemovingIds] = useState<string[]>([]);
   const [removeError, setRemoveError] = useState<DomainError | null>(null);
-  // 单调序号：botUuid 切换后丢弃过期响应；移除在途集合用 ref 保持 removeFriend 引用稳定。
-  const requestSeq = useRef(0);
+  // 请求序号按类型分别维护：两种类型的重试互不作废（并发重试 human/bot 时
+  // 各自的成功结果都要落地）。整目录重拉同时推进两个类型的序号，后发先至
+  // 的旧结果不会覆盖新结果。botUuid 切换用 generation 一次性作废所有在途
+  // 响应（含单类型重试），旧 Bot 的名单绝不串到新 Bot。
+  const requestSeq = useRef<{ all: number; human: number; bot: number }>({
+    all: 0,
+    human: 0,
+    bot: 0,
+  });
+  const identityRef = useRef({ botUuid, generation: 0 });
+  if (identityRef.current.botUuid !== botUuid) {
+    identityRef.current = { botUuid, generation: identityRef.current.generation + 1 };
+  }
+  // 移除在途集合用 ref 保持 removeFriend 引用稳定。
   const removingRef = useRef<Set<string>>(new Set());
 
   const reload = useCallback(
     async (type?: BotFriendActorType) => {
-      const seq = ++requestSeq.current;
+      const generation = identityRef.current.generation;
+      const isCurrentIdentity = () => identityRef.current.generation === generation;
       if (!type) {
+        const allSeq = ++requestSeq.current.all;
+        const humanSeq = ++requestSeq.current.human;
+        const botSeq = ++requestSeq.current.bot;
         setLoading(true);
         const result = await botFriendConversationService.loadDirectory(botUuid);
-        if (seq === requestSeq.current) {
-          setSections(result);
-          setLoading(false);
-        }
+        if (!isCurrentIdentity() || allSeq !== requestSeq.current.all) return;
+        const applyHuman = humanSeq === requestSeq.current.human;
+        const applyBot = botSeq === requestSeq.current.bot;
+        setSections((prev) => {
+          // 首装期没有可合并的旧段，或两段都未被重试抢占时，直接落全量结果。
+          if (!prev || (applyHuman && applyBot)) return result;
+          return {
+            human: applyHuman ? result.human : prev.human,
+            bot: applyBot ? result.bot : prev.bot,
+          };
+        });
+        setLoading(false);
         return;
       }
+      const seq = ++requestSeq.current[type];
       const section = await botFriendConversationService.loadSection(botUuid, type);
-      if (seq !== requestSeq.current) return;
+      if (!isCurrentIdentity() || seq !== requestSeq.current[type]) return;
       setSections((prev) =>
         prev
           ? {

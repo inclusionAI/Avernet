@@ -10,10 +10,18 @@ const DrawerClose = DialogPrimitive.Close;
 
 type DrawerSide = 'left' | 'right' | 'bottom';
 type DrawerSize = 'sm' | 'md' | 'lg' | 'full';
+/**
+ * 抽屉基础层级。`nested` 用于抽屉挂在一个已打开的 Modal/抽屉内：两者都
+ * Portal 到 body，React 嵌套不会抬升实际层级，父层遮罩会盖住抽屉内容；
+ * 因此叠加层必须显式取更高的 Token。`nested` 仍低于
+ * `--z-critical-dialog`，抽屉内的二次确认框/气泡保持可见可点。
+ */
+type DrawerLayer = 'base' | 'nested';
 
 interface DrawerContentProps extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
   side?: DrawerSide;
   size?: DrawerSize;
+  layer?: DrawerLayer;
   showOverlay?: boolean;
   showClose?: boolean;
   closeLabel?: string;
@@ -36,6 +44,7 @@ const DrawerContent = React.forwardRef<React.ElementRef<typeof DialogPrimitive.C
       children,
       side = 'right',
       size = 'md',
+      layer = 'base',
       showOverlay = true,
       showClose = true,
       closeLabel = '关闭抽屉',
@@ -45,15 +54,19 @@ const DrawerContent = React.forwardRef<React.ElementRef<typeof DialogPrimitive.C
     ref,
   ) => {
     const isBottom = side === 'bottom';
+    const layerClass = layer === 'nested' ? 'z-[var(--z-nested-drawer)]' : 'z-[var(--z-drawer)]';
     return (
       <DialogPrimitive.Portal>
         {showOverlay ? (
-          <DialogPrimitive.Overlay className="fixed inset-0 z-[var(--z-drawer)] bg-black/40 backdrop-blur-sm" />
+          <DialogPrimitive.Overlay
+            className={cn('fixed inset-0 bg-black/40 backdrop-blur-sm', layerClass)}
+          />
         ) : null}
         <DialogPrimitive.Content
           ref={ref}
           className={cn(
-            'fixed z-[var(--z-drawer)] flex flex-col border-border bg-background text-foreground shadow-xl outline-none',
+            'fixed flex flex-col border-border bg-background text-foreground shadow-xl outline-none',
+            layerClass,
             isBottom
               ? 'inset-x-0 bottom-0 rounded-t-xl border-t'
               : `inset-y-0 ${side === 'left' ? 'left-0 border-r' : 'right-0 border-l'} ${sizeClasses[side][size]}`,
