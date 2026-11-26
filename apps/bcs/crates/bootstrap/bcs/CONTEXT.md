@@ -86,6 +86,12 @@ Bot/session/message IDs, message text, Provider keys or credentials enter monito
 The scheduler shutdown waits for sampling to stop; the process LoggingGuard
 subsequently flushes the shared logging workers when runtime shutdown completes.
 
+Outbound A2A HTTP+JSON and JSON-RPC calls emit fixed-column digest records to
+tracing target `bcs_a2a_http_client_digest`, routed through the existing
+`logging.outputs` pipeline to `a2a-http-client-digest.log` with `LogOutputFormat::Raw`
+and excluded from console and wildcard file outputs. Older explicit output lists
+auto-register `a2a-http-client-digest` beside `main` via `effective_outputs`.
+
 Delivery wiring also injects the existing message_history.new_participant_visible_limit
 into read-only delivery authorization; no new config key or schema is introduced.
 

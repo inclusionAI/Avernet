@@ -28,6 +28,8 @@ mod correlation;
 
 pub(crate) const DELIVERY_MONITOR_TARGET: &str = "bcs_message_delivery_monitor";
 const DELIVERY_MONITOR_OUTPUT: &str = "message-delivery";
+pub(crate) const A2A_HTTP_CLIENT_DIGEST_TARGET: &str = "bcs_a2a_http_client_digest";
+const A2A_HTTP_CLIENT_DIGEST_OUTPUT: &str = "a2a-http-client-digest";
 static DELIVERY_MONITOR_DROPS: OnceLock<tracing_appender::non_blocking::ErrorCounter> = OnceLock::new();
 static DELIVERY_MONITOR_ERRORS: AtomicU64 = AtomicU64::new(0);
 
@@ -35,18 +37,36 @@ pub(crate) fn delivery_monitor_statistics() -> (usize, u64) {
     (DELIVERY_MONITOR_DROPS.get().map_or(0, |counter| counter.dropped_lines()), DELIVERY_MONITOR_ERRORS.load(Ordering::Relaxed))
 }
 
-/// Older explicit output lists predate the monitor. Register its normal logging
-/// output beside the main/first file unless the operator supplied one explicitly.
+/// Older explicit output lists predate dedicated raw logs. Register their normal
+/// logging outputs beside the main/first file unless supplied explicitly.
 pub(crate) fn effective_outputs(config: &LoggingConfig) -> Vec<LogOutputConfig> {
     let mut outputs = config.outputs.clone();
+    let base_path = outputs
+        .iter()
+        .find(|output| output.name == "main")
+        .or(outputs.first())
+        .map_or_else(|| "./logs".into(), |output| output.path.clone());
+    let base_keep_days = outputs
+        .iter()
+        .find(|output| output.name == "main")
+        .or(outputs.first())
+        .map_or(7, |output| output.max_keep_days);
     if !outputs.iter().any(|output| output.name == DELIVERY_MONITOR_OUTPUT) {
-        let base = outputs.iter().find(|output| output.name == "main").or(outputs.first());
         outputs.push(LogOutputConfig {
             name: DELIVERY_MONITOR_OUTPUT.into(),
-            path: base.map_or_else(|| "./logs".into(), |output| output.path.clone()),
+            path: base_path.clone(),
             file: "message-delivery.log".into(), level: "info".into(), rotation: "daily".into(),
             format: LogOutputFormat::Raw, targets: vec![DELIVERY_MONITOR_TARGET.into()],
-            max_keep_days: base.map_or(7, |output| output.max_keep_days),
+            max_keep_days: base_keep_days,
+        });
+    }
+    if !outputs.iter().any(|output| output.name == A2A_HTTP_CLIENT_DIGEST_OUTPUT) {
+        outputs.push(LogOutputConfig {
+            name: A2A_HTTP_CLIENT_DIGEST_OUTPUT.into(),
+            path: base_path,
+            file: "a2a-http-client-digest.log".into(), level: "info".into(), rotation: "daily".into(),
+            format: LogOutputFormat::Raw, targets: vec![A2A_HTTP_CLIENT_DIGEST_TARGET.into()],
+            max_keep_days: base_keep_days,
         });
     }
     if !outputs.iter().any(|output| output.name == "business-warning") {
@@ -149,6 +169,7 @@ fn build_env_filter_with_overlay(config: &LoggingConfig, rust_log: Option<&str>)
     // Dedicated positional records must not leak to console, even with RUST_LOG.
     directives.push("bcs_business_warning=off".into());
     directives.push(format!("{DELIVERY_MONITOR_TARGET}=off"));
+    directives.push(format!("{A2A_HTTP_CLIENT_DIGEST_TARGET}=off"));
     EnvFilter::new(directives.join(","))
 }
 
@@ -163,6 +184,9 @@ fn build_output_targets_filter(output: &LogOutputConfig) -> Targets {
     }
     if output.name == "business-warning" {
         return Targets::new().with_target("bcs_business_warning", LevelFilter::WARN);
+    }
+    if output.name == A2A_HTTP_CLIENT_DIGEST_OUTPUT {
+        return Targets::new().with_target(A2A_HTTP_CLIENT_DIGEST_TARGET, level);
     }
     // Wildcard DEBUG outputs exclude profiling unless the target is named.
     let mut filter = Targets::new().with_target("bcs_reply_profile", LevelFilter::OFF);
@@ -190,8 +214,10 @@ fn build_output_targets_filter(output: &LogOutputConfig) -> Targets {
         }
     }
 
-    filter.with_target(DELIVERY_MONITOR_TARGET, LevelFilter::OFF)
+    filter
+        .with_target(DELIVERY_MONITOR_TARGET, LevelFilter::OFF)
         .with_target("bcs_business_warning", LevelFilter::OFF)
+        .with_target(A2A_HTTP_CLIENT_DIGEST_TARGET, LevelFilter::OFF)
 }
 
 /// Get today's date string in local time (YYYY-MM-DD).
@@ -360,9 +386,12 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) -> LoggingGuard {
 
             let filter = build_output_targets_filter(output);
             let output_timer = timer_for_output(&output.name, &timer, &millisecond_timer);
-            // Preserve the monitor's positional contract even for a legacy
-            // explicit output that omitted format (which otherwise defaults text).
-            let format = if output.name == DELIVERY_MONITOR_OUTPUT { LogOutputFormat::Raw } else { output.format };
+            // Preserve positional CSV contracts even for explicit outputs that omitted format.
+            let format = if matches!(output.name.as_str(), DELIVERY_MONITOR_OUTPUT | A2A_HTTP_CLIENT_DIGEST_OUTPUT) {
+                LogOutputFormat::Raw
+            } else {
+                output.format
+            };
             match format {
                 LogOutputFormat::Raw => Some(
                     tracing_subscriber::fmt::layer()
@@ -520,6 +549,7 @@ mod tests {
             assert_eq!(console.enabled(probe!("bcs_reply_profile", Level::DEBUG)), explicit);
             assert!(console.enabled(probe!("ordinary_test", Level::DEBUG)));
             assert!(!console.enabled(probe!(DELIVERY_MONITOR_TARGET, Level::INFO)));
+            assert!(!console.enabled(probe!(A2A_HTTP_CLIENT_DIGEST_TARGET, Level::INFO)));
             let mut output = config.outputs[0].clone();
             output.name = "main".into(); output.level = "debug".into();
             output.targets = vec!["*".into()];
@@ -528,6 +558,7 @@ mod tests {
             assert_eq!(targets.would_enable("bcs_reply_profile", &Level::DEBUG), explicit);
             assert!(targets.would_enable("ordinary_test", &Level::DEBUG));
             assert!(!targets.would_enable(DELIVERY_MONITOR_TARGET, &Level::INFO));
+            assert!(!targets.would_enable(A2A_HTTP_CLIENT_DIGEST_TARGET, &Level::INFO));
         }
     }
 
@@ -566,11 +597,53 @@ mod tests {
         let mut config = LoggingConfig::default();
         config.outputs.retain(|output| output.name == DELIVERY_MONITOR_OUTPUT);
         config.outputs[0].path = "/configured/logs".into(); config.outputs[0].file = "custom-monitor.log".into();
-        assert_eq!(effective_outputs(&config)[0].file, "custom-monitor.log");
+        let outputs = effective_outputs(&config);
+        assert_eq!(outputs[0].file, "custom-monitor.log");
+        assert_eq!(outputs.len(), 3);
+        assert_eq!(outputs[1].name, A2A_HTTP_CLIENT_DIGEST_OUTPUT);
+        assert_eq!(outputs[1].path, "/configured/logs");
+        assert_eq!(outputs[1].file, "a2a-http-client-digest.log");
+        assert_eq!(outputs[1].format, LogOutputFormat::Raw);
+        assert_eq!(outputs[2].name, "business-warning");
         config.outputs[0].name = "main".into();
         let outputs = effective_outputs(&config);
-        assert_eq!(outputs.len(), 3); assert_eq!(outputs[1].path, "/configured/logs");
+        assert_eq!(outputs.len(), 4);
+        assert_eq!(outputs[1].path, "/configured/logs");
         assert_eq!(outputs[1].file, "message-delivery.log"); assert_eq!(outputs[1].format, LogOutputFormat::Raw);
+        assert_eq!(outputs[2].path, "/configured/logs");
+        assert_eq!(outputs[2].file, "a2a-http-client-digest.log"); assert_eq!(outputs[2].format, LogOutputFormat::Raw);
+        assert_eq!(outputs[3].name, "business-warning");
+    }
+
+    #[test]
+    fn a2a_http_client_digest_uses_raw_layer_and_excludes_other_outputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = LoggingConfig::default();
+        config.outputs.retain(|output| output.name == A2A_HTTP_CLIENT_DIGEST_OUTPUT);
+        let output = &mut config.outputs[0];
+        output.path = dir.path().to_string_lossy().into_owned();
+        let output = output.clone();
+        let mut main = output.clone(); main.name = "main".into(); main.file = "bcs.log".into(); main.targets = vec!["*".into()]; main.format = LogOutputFormat::Text;
+        let (writer, guard) = buffered_writer(RotatingFileWriter::new(dir.path(), &output.file));
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().event_format(RawMessageFormat).with_writer(writer).with_filter(build_output_targets_filter(&output)))
+            .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(RotatingFileWriter::new(dir.path(), &main.file)).with_filter(build_output_targets_filter(&main)))
+            .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(RotatingFileWriter::new(dir.path(), "console.log")).with_filter(build_env_filter_with_overlay(&config, None)));
+        let dispatch = tracing::Dispatch::new(subscriber);
+        let row = "2026-11-26 16:00:00.123,req-1,run-1,HTTP+JSON,SYNC,SendMessage,agent.example.com,/a2a/message:send,prv_1,bot_1,t1,Y,00,200,,128,256,42,15,0";
+        tracing::dispatcher::with_default(&dispatch, || {
+            tracing::info!(target: A2A_HTTP_CLIENT_DIGEST_TARGET, "{row}");
+            tracing::error!("ordinary message");
+        });
+        drop(guard);
+        let digest = fs::read_to_string(dir.path().join("a2a-http-client-digest.log")).unwrap();
+        assert_eq!(digest, format!("{row}\n"));
+        assert!(digest.lines().all(|line| line.split(',').count() == 20));
+        for file in ["bcs.log", "console.log"] {
+            let text = fs::read_to_string(dir.path().join(file)).unwrap();
+            assert!(text.contains("ordinary message"), "{file}: {text:?}");
+            assert!(!text.contains("HTTP+JSON,SYNC,SendMessage"));
+        }
     }
 
     #[test]

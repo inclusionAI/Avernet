@@ -522,11 +522,13 @@ dependencies = [
  "bcs-message-flow",
  "bcs-message-store",
  "bcs-network-tracing",
+ "bcs-observability",
  "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",
  "bcs-test-support",
  "bcs-tracing-api",
+ "chrono",
  "futures",
  "hex",
  "percent-encoding",
@@ -540,6 +542,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

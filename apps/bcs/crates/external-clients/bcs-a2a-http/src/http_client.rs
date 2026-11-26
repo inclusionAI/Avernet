@@ -47,27 +47,47 @@ impl HttpClient {
         self
     }
 
-    pub(super) async fn send(
+    pub(super) async fn send_observed(
         &self,
         request: RequestWithDefaults<reqwest::RequestBuilder>,
         connection_error: &'static str,
+        guard: &mut crate::digest::DigestGuard,
     ) -> Result<reqwest::Response, A2AError> {
-        let mut request = request.build().map_err(|_| A2AError::internal(connection_error))?;
+        let mut request = match request.build() {
+            Ok(request) => request,
+            Err(_) => {
+                guard.finish_err(crate::digest::RESULT_TRANSPORT_ERROR, "TRANSPORT_ERROR");
+                return Err(A2AError::internal(connection_error));
+            }
+        };
         if let Some((identity, provider_id)) = &self.identity {
             let origin = request.url().origin().ascii_serialization();
             let target = OutboundTarget { provider_id, origin: &origin };
-            let credential = identity.credential_for(&target).map_err(|error| {
-                A2AError::internal(match error {
-                    CredentialError::DestinationRejected => DESTINATION_REJECTED,
-                    _ => CREDENTIAL_UNAVAILABLE,
-                })
-            })?;
+            let credential = match identity.credential_for(&target) {
+                Ok(credential) => credential,
+                Err(error) => {
+                    guard.finish_err(crate::digest::RESULT_AUTH_REJECTED, "IDENTITY_ERROR");
+                    return Err(A2AError::internal(match error {
+                        CredentialError::DestinationRejected => DESTINATION_REJECTED,
+                        _ => CREDENTIAL_UNAVAILABLE,
+                    }));
+                }
+            };
             match credential {
-                Some(credential) => apply(&mut request, credential)?,
-                None if self.require_identity => return Err(A2AError::internal(CREDENTIAL_UNAVAILABLE)),
+                Some(credential) => {
+                    if let Err(err) = apply(&mut request, credential) {
+                        guard.finish_err(crate::digest::RESULT_AUTH_REJECTED, "IDENTITY_ERROR");
+                        return Err(err);
+                    }
+                }
+                None if self.require_identity => {
+                    guard.finish_err(crate::digest::RESULT_AUTH_REJECTED, "IDENTITY_ERROR");
+                    return Err(A2AError::internal(CREDENTIAL_UNAVAILABLE));
+                }
                 None => {}
             }
         } else if self.require_identity {
+            guard.finish_err(crate::digest::RESULT_AUTH_REJECTED, "IDENTITY_ERROR");
             return Err(A2AError::internal(CREDENTIAL_UNAVAILABLE));
         }
         // A required identity is scoped to the pre-release test submission.
@@ -76,10 +96,14 @@ impl HttpClient {
         // Keeps whether a connection was established at all (see `transport_error`):
         // a connect failure becomes `NOT_CONNECTED` (certainly not sent), any
         // other failure the generic `connection_error` (outcome unknown).
-        let mut response = self.transport
-            .execute_traced(request)
-            .await
-            .map_err(|error| crate::transport_error::send_failure(&error, connection_error))?;
+        let mut response = match self.transport.execute_traced(request).await {
+            Ok(response) => response,
+            Err(error) => {
+                let (rc, ec) = crate::digest::classify_reqwest_error(&error);
+                guard.finish_err(rc, ec);
+                return Err(crate::transport_error::send_failure(&error, connection_error));
+            }
+        };
         if let Some(diagnostic) = diagnostic {
             response.extensions_mut().insert(diagnostic);
         }

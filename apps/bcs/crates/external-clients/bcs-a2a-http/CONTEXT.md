@@ -231,3 +231,7 @@ before the common delivery driver sees it. No 0.3 aliases, endpoint suffixes or
 binding fallback are introduced. Run persistence records json_rpc separately.
 
 Custom bindings normalize responses through bcs-a2a-binding-api::Client and share the existing task driver. Registration keeps raw Cards; selected opaque routes and fingerprints fence recovery/cancellation across configuration changes.
+
+## HTTP+JSON / JSON-RPC client digest log
+
+`digest` emits one 20-column positional CSV record per outbound `HTTP+JSON` or `JSONRPC` call (`SendMessage`, `SendStreamingMessage`, `GetTask`, `CancelTask`, `SubscribeToTask`) to tracing target `bcs_a2a_http_client_digest`, routed to the dedicated raw `a2a-http-client-digest.log` output. Streaming calls record one final line upon EOF, error, or drop (including `ttfb_ms`, total `duration_ms`, and `stream_events`); dropping after at least one valid event records success (`00`/`Y`), while dropping before any event records cancellation (`07`/`N`). URL credentials, queries, raw task IDs in REST paths, and untrusted remote diagnostic text are excluded from digest fields.
