@@ -72,7 +72,7 @@ async fn v2_wiring_syncs_agents_and_public_groups_and_preserves_search_response(
     }).await.unwrap();
     let card = wait_call(&catalog_state, 0, Method::PUT, "card-agent").await;
     assert_eq!(card["resource_type"], "agent");
-    assert_eq!(card["labels"], json!({"visibility":["protected"],"user_visibility":["protected"]}));
+    assert_eq!(card["labels"], json!({"status":["online"],"visibility":["protected"],"user_visibility":["protected"]}));
     assert!(card["card"].get("visibility").is_none());
     assert_eq!(card["card"]["skills"][0]["name"], "invoices");
     assert!(!card.to_string().contains("test-token"));
@@ -103,7 +103,7 @@ async fn v2_wiring_syncs_agents_and_public_groups_and_preserves_search_response(
             ..Default::default()
         }).await.unwrap();
         let card = wait_call(&catalog_state, from, Method::PUT, "card-agent").await;
-        assert_eq!(card["labels"], json!({"visibility":["protected"],"user_visibility":[user_visibility]}));
+        assert_eq!(card["labels"], json!({"status":["online"],"visibility":["protected"],"user_visibility":[user_visibility]}));
         assert!(!card.to_string().contains("department"));
     }
 
@@ -187,7 +187,7 @@ async fn v2_wiring_syncs_agents_and_public_groups_and_preserves_search_response(
     let from = count(&catalog_state);
     registry.update_visibility("card-agent", "private").await.unwrap();
     let card = wait_call(&catalog_state, from, Method::PUT, "card-agent").await;
-    assert_eq!(card["labels"], json!({"visibility":["private"],"user_visibility":["protected"]}));
+    assert_eq!(card["labels"], json!({"status":["online"],"visibility":["private"],"user_visibility":["protected"]}));
 
     let from = count(&catalog_state);
     state.internal_bot_attributes_service.patch(PatchBotInternalAttributes {
@@ -195,7 +195,7 @@ async fn v2_wiring_syncs_agents_and_public_groups_and_preserves_search_response(
         ..Default::default()
     }).await.unwrap();
     let card = wait_call(&catalog_state, from, Method::PUT, "card-agent").await;
-    assert_eq!(card["labels"], json!({"visibility":["private"],"user_visibility":["private"]}));
+    assert_eq!(card["labels"], json!({"status":["online"],"visibility":["private"],"user_visibility":["private"]}));
 
     // A private friend can collaborate. A non-friend and the caller itself are
     // filtered locally; the legacy context keeps the original candidates.
@@ -286,7 +286,7 @@ async fn v2_sync_has_bounded_retries_and_no_startup_scan() {
         ..Default::default()
     }).await.unwrap();
     let card = wait_call(&catalog_state, from, Method::PUT, "retry-agent").await;
-    assert_eq!(card["labels"], json!({"visibility":["private"],"user_visibility":["private"]}));
+    assert_eq!(card["labels"], json!({"status":["online"],"visibility":["private"],"user_visibility":["private"]}));
 
     // An unchanged existing Agent is not republished on lifecycle restart.
     state.lifecycle.lock().await.shutdown_all().await.unwrap();

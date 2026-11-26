@@ -46,6 +46,10 @@ fn card() -> ManagedA2aCard {
         bot_id: "bot".into(),
         agent_card_url: Some("https://example.org/card".into()),
         agent_card: json!({"name":"订单助手","custom":{"unchanged":true}}),
+        agent_id: None,
+        visibility: bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Protected,
+        status: bcs_service_api::ActorStatus::Online,
+        user_visibility: bcs_service_api::application::v1::UserVisibility::Protected,
     }
 }
 #[async_trait]
@@ -224,6 +228,7 @@ async fn management_codes_preserve_actionable_fields_and_retry_headers() {
         (Code::NotAcceptable, 406),
         (Code::BotNameConflict, 409),
         (Code::SourceAgentConflict, 409),
+        (Code::AgentIdentityConflict, 409),
         (Code::SourceAgentChangeNotAllowed, 409),
         (Code::TargetChanged, 409),
         (Code::CardUrlRequired, 409),

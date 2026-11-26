@@ -63,7 +63,7 @@ async fn fixture() -> Fixture {
     let provider_core = Arc::new(ProviderCore::new(providers.clone(), providers.clone(), providers.clone(), registry).with_a2a_anonymous(true));
     let registered = provider_core.register_provider("Provider".into(), Some("https://example.org/provider".into()), ProviderAuthMode::StaticBearer, "alice".into(), None, None).await.unwrap();
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
-    db.execute(DbStatement::new("CREATE TABLE bcs_bots (name TEXT, bot_info TEXT DEFAULT '{}', bot_uuid TEXT NOT NULL, env TEXT NOT NULL, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, webhook_url TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
+    db.execute(DbStatement::new("CREATE TABLE bcs_bots (name TEXT, bot_info TEXT DEFAULT '{}', bot_uuid TEXT NOT NULL, env TEXT NOT NULL, visibility TEXT NOT NULL DEFAULT 'protected', status TEXT NOT NULL DEFAULT 'online', user_visibility TEXT NOT NULL DEFAULT 'protected', agent_code TEXT, provider_id TEXT, provider_bot_ref TEXT, connection_mode TEXT, webhook_url TEXT, is_deleted INTEGER NOT NULL DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (bot_uuid, env))")).await.unwrap();
     let env = bcs_config::resolve_env_str();
     db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid, env, provider_id, provider_bot_ref, connection_mode) VALUES ('bot', ?, ?, 'remote', 'gateway')", vec![env.clone().into(), registered.provider.provider_id.clone().into()])).await.unwrap();
     for sql in bcs_db_api::split_sql_statements(&[include_str!("../../../../migrations/sqlite/039_bot_a2a.sql"),"ALTER TABLE bcs_bots ADD COLUMN catalog_labels TEXT NULL;"].concat()).into_iter() {
@@ -138,7 +138,7 @@ async fn a2a_core_conformance() {
     use bcs_test_support::contract::a2a_bot::a2a_bot_core_service_contract_tests;
     let f = fixture().await;
     let card = f.fetcher.fetch("https://example.org/card", true).await.unwrap();
-    let record = bcs_service_api::port::repo::a2a_bot::A2aBotRecord { catalog_labels:Default::default(),
+    let record = bcs_service_api::port::repo::a2a_bot::A2aBotRecord { visibility:Default::default(),status:Default::default(),user_visibility:Default::default(),agent_id:None, catalog_labels:Default::default(),
         bot_uuid:"bot".into(), provider_id:f.command.provider_id.clone(), provider_bot_ref:"remote".into(),
         agent_card_url:Some("https://example.org/card".into()), agent_card:card.raw, revision:1,};
     a2a_bot_core_service_contract_tests(f.core.as_ref(), record).await;
@@ -224,7 +224,7 @@ async fn explicit_updates_without_revision_replace_atomically_and_keep_refresh_f
     let second=f.service.configure(command.clone()).await.unwrap();
     assert_eq!(second.revision,2);
     assert_ne!(first.agent_card,second.agent_card);
-    let stale=bcs_service_api::port::repo::a2a_bot::A2aBotRecord {revision:2,..first};
+    let stale=bcs_service_api::port::repo::a2a_bot::A2aBotRecord { visibility:Default::default(),status:Default::default(),user_visibility:Default::default(),agent_id:None,revision:2,..first};
     assert!(!f.cards.compare_and_set(&stale,1).await.unwrap());
     assert_eq!(f.cards.get("bot").await.unwrap(),Some(second.clone()));
     f.fetcher.fail.store(true,Ordering::SeqCst);

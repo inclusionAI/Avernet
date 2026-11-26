@@ -1,7 +1,7 @@
 use super::*;
 use bcs_service_api::{ActorKind, ProviderBotConnectionMode, RegisterProviderBotCommand,
     RegisterProviderBotOutcome, RegisterProviderBotParams};
-use bcs_service_api::types::a2a_bot::A2aRegistrationCard;
+use bcs_service_api::types::a2a_bot::{A2aAgentIdentity, A2aRegistrationCard};
 use bcs_service_api::types::bot_profile::{AvatarChange, ProfileWrite};
 
 fn invalid(message: &str) -> ServiceError {
@@ -25,17 +25,17 @@ impl A2aBotManagement {
         }
         let (agent_card_url,fetched)=self.load_card(&command.provider_id,source).await?;
         self.register_loaded_with_visibility(command,agent_card_url,fetched,now_ms,
-            bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Protected,labels).await
+            bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Protected,A2aAgentIdentity::Omitted,labels).await
     }
     pub(super) async fn register_loaded_with_visibility(&self,mut command:RegisterProviderBotCommand,
         agent_card_url:Option<String>,fetched:bcs_service_api::port::a2a_card::ValidatedA2aCard,now_ms:i64,
         visibility:bcs_service_api::types::a2a_bot::A2aRegistrationVisibility,
-        catalog_labels:bcs_service_api::types::catalog_labels::CatalogLabels)
+        agent_id:A2aAgentIdentity, catalog_labels:bcs_service_api::types::catalog_labels::CatalogLabels)
         ->ServiceResult<RegisterProviderBotOutcome> {
         let registration = self.registration.as_ref().ok_or_else(|| invalid("A2A Provider registration is not configured"))?;
         command.name=bcs_service_api::types::a2a_bot::card_bot_name(&fetched.raw).map_err(invalid)?.into();
         if command.summary.is_none() {command.summary=fetched.raw.get("description").and_then(serde_json::Value::as_str).map(str::to_owned);}
-        let card=A2aRegistrationCard {catalog_labels,visibility,agent_card_url,agent_card:fetched.raw,interface:fetched.interface,registered_at_ms:now_ms};
+        let card=A2aRegistrationCard {catalog_labels,visibility,agent_id,agent_card_url,agent_card:fetched.raw,interface:fetched.interface,registered_at_ms:now_ms};
         let params = RegisterProviderBotParams {webhook_url:None,bot_name:command.name,summary:command.summary,
             owners:command.owners,provider_bot_ref:command.provider_bot_ref,domains:command.domains,
             skills:command.skills,scopes:command.scopes,bot_uuid:command.bot_uuid,connection_mode:command.connection_mode,initial_caller:None};

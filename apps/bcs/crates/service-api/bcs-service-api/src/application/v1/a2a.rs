@@ -19,6 +19,7 @@ pub struct RegisterA2aAgent {
     pub owners: Option<Vec<String>>,
     pub summary: Option<String>,
     pub visibility: A2aRegistrationVisibility,
+    pub agent_id: crate::types::a2a_bot::A2aAgentIdentity,
     pub source: A2aCardInput,
 }
 
@@ -38,6 +39,16 @@ pub struct UpdateA2aAgent {
     pub bot_id: String,
     pub source: A2aCardInput,
     pub visibility: Option<A2aRegistrationVisibility>,
+    pub agent_id: crate::types::a2a_bot::A2aAgentIdentity,
+}
+
+pub struct UpdateA2aAgentMetadata {
+    pub token: String,
+    pub bot_id: String,
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
+    pub status: Option<crate::ActorStatus>,
+    pub visibility: Option<A2aRegistrationVisibility>,
+    pub user_visibility: Option<crate::application::v1::UserVisibility>,
 }
 
 #[async_trait]
@@ -51,6 +62,7 @@ pub trait A2aService: Send + Sync {
     ) -> Result<Vec<ManagedA2aCard>, ApplicationError>;
     async fn get(&self, token: &str, bot_id: &str) -> Result<ManagedA2aCard, ApplicationError>;
     async fn update(&self, command: UpdateA2aAgent) -> Result<ManagedA2aCard, ApplicationError>;
+    async fn update_metadata(&self, command: UpdateA2aAgentMetadata) -> Result<ManagedA2aCard, ApplicationError>;
     async fn refresh(&self, token: &str, bot_id: &str) -> Result<ManagedA2aCard, ApplicationError>;
     async fn register_named(
         &self,

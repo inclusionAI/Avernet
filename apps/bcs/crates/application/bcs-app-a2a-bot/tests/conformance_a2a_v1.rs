@@ -22,7 +22,7 @@ struct Management {
     mutations: AtomicUsize,
 }
 fn card() -> ManagedA2aCard {
-    ManagedA2aCard { catalog_labels:Default::default(),
+    ManagedA2aCard { agent_id:None,visibility:Default::default(),status:Default::default(),user_visibility:Default::default(), catalog_labels:Default::default(),
         provider_bot_ref: "remote".into(),
         provider_name: "orders".into(),
         agent_name: "Agent".into(),
@@ -113,7 +113,7 @@ fn fixture() -> (A2aApiService, Arc<Management>) {
 #[tokio::test]
 async fn conformance_card_use_cases_preserve_sources_visibility_and_machine_errors() {
     let (service, management) = fixture();
-    let create = || RegisterA2aAgent { catalog_labels:Default::default(),
+    let create = || RegisterA2aAgent { agent_id:Default::default(), catalog_labels:Default::default(),
         token: "admin".into(),
         provider_bot_ref: "remote".into(),
         owners: None,
@@ -134,7 +134,7 @@ async fn conformance_card_use_cases_preserve_sources_visibility_and_machine_erro
         "target"
     );
     service
-        .update(UpdateA2aAgent { catalog_labels:Default::default(),
+        .update(UpdateA2aAgent { agent_id:Default::default(), catalog_labels:Default::default(),
             token: "admin".into(),
             bot_id: "target".into(),
             source: A2aCardInput::default(),

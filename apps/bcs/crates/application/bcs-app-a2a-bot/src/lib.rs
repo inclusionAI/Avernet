@@ -50,7 +50,7 @@ impl A2aBotManagement {
         bcs_service_api::types::a2a_card_projection::project_agent_card_capabilities(Some(&card.raw))?;
         Ok((url,card))
     }
-    async fn commit(&self,provider_id:String,bot_uuid:String,source:A2aCardSource,expected:u64,skip_unchanged:bool,labels:bcs_service_api::types::catalog_labels::CatalogLabels)->ServiceResult<A2aBotRecord> {
+    async fn commit(&self,provider_id:String,bot_uuid:String,source:A2aCardSource,expected:u64,skip_unchanged:bool,preserved:A2aBotRecord,labels:bcs_service_api::types::catalog_labels::CatalogLabels)->ServiceResult<A2aBotRecord> {
         let binding=self.core.provider_binding(&provider_id,&bot_uuid).await?;
         let (agent_card_url,card)=self.load_card(&provider_id,source).await?;
         if skip_unchanged {
@@ -75,7 +75,7 @@ impl A2aBotManagement {
         // Labels share the same revision fence as the Card: a newer label-only
         // write supersedes this refresh instead of accepting a stale snapshot.
         self.core.commit_card(A2aBotRecord {catalog_labels:labels,bot_uuid,provider_id,provider_bot_ref:binding.provider_bot_ref,
-            agent_card_url,agent_card:card.raw,revision},expected).await
+            agent_card_url,agent_card:card.raw,revision,visibility:preserved.visibility,status:preserved.status,user_visibility:preserved.user_visibility,agent_id:preserved.agent_id},expected).await
     }
 
     async fn configure_preserving_labels(
@@ -103,10 +103,14 @@ impl A2aBotManagement {
             let revision=expected.checked_add(1)
                 .ok_or_else(||ServiceError::Conflict("A2A revision exhausted".into()))?;
             let next=A2aBotRecord {
-                catalog_labels:current.map(|record|record.catalog_labels).unwrap_or_default(),
+                catalog_labels:current.clone().map(|record|record.catalog_labels).unwrap_or_default(),
                 bot_uuid:command.bot_uuid.clone(),provider_id:command.provider_id.clone(),
                 provider_bot_ref:binding.provider_bot_ref.clone(),
                 agent_card_url:agent_card_url.clone(),agent_card:card.raw.clone(),revision,
+                visibility:current.clone().as_ref().map(|record|record.visibility).unwrap_or_default(),
+                status:current.clone().as_ref().map(|record|record.status).unwrap_or_default(),
+                user_visibility:current.clone().as_ref().map(|record|record.user_visibility).unwrap_or_default(),
+                agent_id:current.clone().and_then(|record|record.agent_id),
             };
             match self.core.commit_card(next,expected).await {
                 Err(ServiceError::Conflict(_)) if command.expected_revision.is_none()=>continue,
@@ -116,15 +120,17 @@ impl A2aBotManagement {
         Err(ServiceError::Conflict("A2A configuration changed concurrently".into()))
     }
     async fn refresh_card(&self,old:A2aBotRecord)->ServiceResult<A2aBotRecord> {
-        let url=old.agent_card_url.ok_or_else(||ServiceError::InvalidOperation {message:"inline Card has no source URL; submit an explicit update".into(),request_id:None})?;
+        let preserved=old.clone();
+        let url=preserved.agent_card_url.clone().ok_or_else(||ServiceError::InvalidOperation {message:"inline Card has no source URL; submit an explicit update".into(),request_id:None})?;
         // Failure never rewrites the last validated snapshot or increments revision.
-        self.commit(old.provider_id,old.bot_uuid,A2aCardSource::Url(url),old.revision,true,old.catalog_labels).await
+        self.commit(preserved.provider_id.clone(),preserved.bot_uuid.clone(),A2aCardSource::Url(url),preserved.revision,true,preserved.clone(),preserved.catalog_labels).await
     }
 }
 #[async_trait]
 impl A2aBotManagementService for A2aBotManagement {
+    async fn update_agent_metadata(&self,command:bcs_service_api::application::a2a_bot::UpdateAgentCardMetadataCommand)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {self.public_update_metadata(command).await}
     async fn update_agent(&self,command:bcs_service_api::application::a2a_bot::UpdateAgentCommand)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
-        self.public_update(&command.provider_admin_token,&command.bot_id,command.source,command.visibility,command.catalog_labels).await
+        self.public_update(&command.provider_admin_token,&command.bot_id,command.source,command.visibility,command.agent_id,command.catalog_labels).await
     }
     async fn register_provider_bot_with_labels(&self,command:bcs_service_api::RegisterProviderBotCommand,source:A2aCardSource,now_ms:i64,
         labels:bcs_service_api::types::catalog_labels::CatalogLabelsInput)->ServiceResult<bcs_service_api::RegisterProviderBotOutcome> {
@@ -139,10 +145,10 @@ impl A2aBotManagementService for A2aBotManagement {
         self.public_get(token,bot_id).await
     }
     async fn update_agent_by_id(&self,token:&str,bot_id:&str,source:A2aCardSource)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
-        self.public_update(token,bot_id,Some(source),None,None).await
+        self.public_update(token,bot_id,Some(source),None,bcs_service_api::types::a2a_bot::A2aAgentIdentity::Omitted,None).await
     }
     async fn update_agent_by_id_with_visibility(&self,token:&str,bot_id:&str,source:Option<A2aCardSource>,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
-        self.public_update(token,bot_id,source,visibility,None).await
+        self.public_update(token,bot_id,source,visibility,bcs_service_api::types::a2a_bot::A2aAgentIdentity::Omitted,None).await
     }
     async fn refresh_agent_by_id(&self,token:&str,bot_id:&str)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
         self.public_refresh(token,bot_id).await
@@ -195,12 +201,14 @@ impl A2aBotManagementService for A2aBotManagement {
         };
         let labels=self.policy.normalize(labels)?;
         if let Some(expected)=command.expected_revision {
-            return self.commit(command.provider_id,command.bot_uuid,command.source,expected,false,labels).await;
+            let preserved=self.core.get_card(&command.bot_uuid).await?.ok_or_else(||ServiceError::BotNotFound(command.bot_uuid.clone()))?;
+            return self.commit(command.provider_id,command.bot_uuid,command.source,expected,false,preserved,labels).await;
         }
         let binding=self.core.provider_binding(&command.provider_id,&command.bot_uuid).await?;
         let (agent_card_url,card)=self.load_card(&command.provider_id,command.source).await?;
+        let preserved=self.core.get_card(&command.bot_uuid).await?.ok_or_else(||ServiceError::BotNotFound(command.bot_uuid.clone()))?;
         self.core.replace_card(A2aBotRecord {catalog_labels:labels,bot_uuid:command.bot_uuid,provider_id:command.provider_id,
-            provider_bot_ref:binding.provider_bot_ref,agent_card_url,agent_card:card.raw,revision:0}).await
+            provider_bot_ref:binding.provider_bot_ref,agent_card_url,agent_card:card.raw,revision:0,visibility:preserved.visibility,status:preserved.status,user_visibility:preserved.user_visibility,agent_id:preserved.agent_id}).await
     }
     async fn refresh(&self,provider_id:&str,token:&str,bot_uuid:&str,_now_ms:i64)->ServiceResult<A2aBotRecord> {
         self.authorize(provider_id,token).await?;self.core.provider_binding(provider_id,bot_uuid).await?;

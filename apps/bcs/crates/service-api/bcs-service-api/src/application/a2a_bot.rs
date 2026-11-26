@@ -44,12 +44,16 @@ pub struct ManagedA2aCard {
     pub provider_bot_ref:String,
     pub provider_name:String, pub agent_name:String, pub bot_id:String,
     pub agent_card_url:Option<String>, pub agent_card:serde_json::Value,
+    pub agent_id:Option<String>, pub visibility:crate::types::a2a_bot::A2aRegistrationVisibility,
+    pub status:crate::ActorStatus, pub user_visibility:crate::application::v1::UserVisibility,
 }
 #[derive(Clone)]
 pub struct RegisterAgentCommand {
     pub catalog_labels: crate::types::catalog_labels::CatalogLabelsInput,
     pub provider_bot_ref:String,
     pub visibility: crate::types::a2a_bot::A2aRegistrationVisibility,
+    /// AgentId declaration; omission/null map to SQL NULL and empty value is preserved.
+    pub agent_id:crate::types::a2a_bot::A2aAgentIdentity,
     /// None, null and an empty list request the Provider's configured default owner.
     pub provider_admin_token:String, pub owners:Option<Vec<String>>, pub summary:Option<String>,
     pub source:crate::types::a2a_bot::A2aCardSource, pub now_ms:i64,
@@ -63,10 +67,26 @@ pub struct UpdateAgentCommand {
     pub visibility: Option<crate::types::a2a_bot::A2aRegistrationVisibility>,
     /// None preserves the latest labels on each CAS attempt; Some(empty) is a valid label-only clear.
     pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
+    pub agent_id: crate::types::a2a_bot::A2aAgentIdentity,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateAgentCardMetadataCommand {
+    pub provider_admin_token: String,
+    pub bot_id: String,
+    pub catalog_labels: Option<crate::types::catalog_labels::CatalogLabelsInput>,
+    pub status: Option<crate::ActorStatus>,
+    pub visibility: Option<crate::types::a2a_bot::A2aRegistrationVisibility>,
+    pub user_visibility: Option<crate::application::v1::UserVisibility>,
 }
 
 #[async_trait]
 pub trait A2aBotManagementService: Send + Sync {
+    async fn update_agent_metadata(&self,_command:UpdateAgentCardMetadataCommand)->ServiceResult<ManagedA2aCard> {
+        Err(crate::ServiceError::A2aManagement(crate::types::a2a_bot::a2a_management::ManagementError::new(
+            crate::types::a2a_bot::a2a_management::ManagementCode::InvalidRequest,"","METADATA_UPDATE_UNAVAILABLE")))
+    }
+
     async fn update_agent(&self, command: UpdateAgentCommand) -> ServiceResult<ManagedA2aCard> {
         if command.catalog_labels.is_none() {
             return self.update_agent_by_id_with_visibility(&command.provider_admin_token,&command.bot_id,command.source,command.visibility).await;

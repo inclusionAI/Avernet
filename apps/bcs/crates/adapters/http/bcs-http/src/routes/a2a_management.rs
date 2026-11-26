@@ -17,6 +17,13 @@ use bcs_service_api::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+fn present_agent_id<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Target {
@@ -32,6 +39,8 @@ struct Registration {
     visibility: bcs_service_api::types::a2a_bot::A2aRegistrationVisibility,
     owners: Option<Vec<String>>,
     summary: Option<String>,
+    #[serde(default, deserialize_with = "present_agent_id")]
+    agent_id: Option<Option<String>>,
     agent_card_url: Option<String>,
     agent_card: Option<Value>,
 }
@@ -41,6 +50,8 @@ struct Update {
     #[serde(default,deserialize_with="bcs_service_api::types::catalog_labels::present_input")]
     catalog_labels:Option<bcs_service_api::types::catalog_labels::CatalogLabelsInput>,
     visibility: Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>,
+    #[serde(default, deserialize_with = "present_agent_id")]
+    agent_id: Option<Option<String>>,
     agent_card_url: Option<String>,
     agent_card: Option<Value>,
 }
@@ -73,6 +84,7 @@ fn message(code: Code) -> &'static str {
         Code::ProviderBotRefConflict => "同一 Provider 下已存在该平台 Agent 标识",
         Code::BotNameConflict => "同一 Provider 下已存在该 Agent 名称",
         Code::SourceAgentConflict => "同一 Provider 下已存在该来源 Agent ID",
+        Code::AgentIdentityConflict => "AgentId 与已登记的身份不一致",
         Code::SourceAgentChangeNotAllowed => "已登记的来源 Agent ID 不可修改或删除",
         Code::TargetChanged => "处理期间目标已发生变化，请重新查询",
         Code::CardUrlRequired => "此 Card 没有来源 URL，请直接提交更新",
@@ -107,6 +119,7 @@ pub(super) fn status(code: Code) -> StatusCode {
         | Code::BotNameConflict
         | Code::SourceAgentConflict
         | Code::SourceAgentChangeNotAllowed
+        | Code::AgentIdentityConflict
         | Code::TargetChanged
         | Code::CardUrlRequired
         | Code::RefreshSuperseded => StatusCode::CONFLICT,
@@ -282,6 +295,7 @@ async fn execute(
                 provider_admin_token: token,
                 owners: input.owners,
                 summary: input.summary,
+                agent_id: bcs_service_api::types::a2a_bot::A2aAgentIdentity::from_present(input.agent_id),
                 source: source(input.agent_card_url, input.agent_card)?,
                 now_ms,
             })
@@ -290,12 +304,17 @@ async fn execute(
     } else if parts.method == axum::http::Method::PUT {
         let input: Update = body(&bytes)?;
         let bot_id = bot_id.as_deref().ok_or_else(||error(Code::InvalidRequest,"bot_id","MISSING_BOT_ID"))?;
-        if input.visibility.is_none() && input.agent_card_url.is_none() && input.agent_card.is_none() && input.catalog_labels.is_none() {
+        if input.visibility.is_none()
+            && input.agent_card_url.is_none()
+            && input.agent_card.is_none()
+            && input.catalog_labels.is_none()
+            && input.agent_id.is_none()
+        {
             return Err(error(Code::InvalidRequest,"","UPDATE_REQUIRED"));
         }
         let source = if input.agent_card_url.is_none() && input.agent_card.is_none() {None}
             else {Some(source(input.agent_card_url,input.agent_card)?)};
-        Ok((StatusCode::OK,ManagementView::Card(service.update_agent(bcs_service_api::application::a2a_bot::UpdateAgentCommand {provider_admin_token:token,bot_id:bot_id.into(),source,visibility:input.visibility,catalog_labels:input.catalog_labels}).await?)))
+        Ok((StatusCode::OK,ManagementView::Card(service.update_agent(bcs_service_api::application::a2a_bot::UpdateAgentCommand {provider_admin_token:token,bot_id:bot_id.into(),source,visibility:input.visibility,catalog_labels:input.catalog_labels,agent_id:bcs_service_api::types::a2a_bot::A2aAgentIdentity::from_present(input.agent_id)}).await?)))
     } else {
         let _: Refresh = body(&bytes)?;
         let bot_id = bot_id.as_deref().ok_or_else(||error(Code::InvalidRequest,"bot_id","MISSING_BOT_ID"))?;
