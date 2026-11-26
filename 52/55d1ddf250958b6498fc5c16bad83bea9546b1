@@ -1,0 +1,66 @@
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_bf4e2e6d9e5d71::t_c1aec67fc3674d 231,403
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  s_bf4e2e6d9e5d71::t_c1aec67fc3674d 65-66,156,164,166,168,170,172
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/effect-resume.test.ts
+  s_bf4e2e6d9e5d71::t_338fc0feab85d2 33,36,48,137,139
+  s_bf4e2e6d9e5d71::t_deeef050f6ece2 247
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/result-reporter.test.ts
+  s_bf4e2e6d9e5d71::t_338fc0feab85d2 76
+  s_bf4e2e6d9e5d71::t_bf876c5f3314c3 12,24,37-75,77-79
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/closed-loop.test.ts
+  s_bf4e2e6d9e5d71::t_338fc0feab85d2 798,881
+  s_bf4e2e6d9e5d71::t_26a4e35fe1563b 115,142,171,211,225,247,263,316,336,353,364,422-423,429,443,490,789,791-792,794,796-797,800-805,807,813,823-825,827,829,831,836-837,844-848,858,861,883
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/session-recovery-task-repository.ts
+  s_bf4e2e6d9e5d71::t_466b18bd044208 238,242
+  s_bf4e2e6d9e5d71::t_a8466a5aac4bd2 7,19-20,68,120,162,188,196-210,217-218,226-235,256-258,260,268,273,284,286-287,317-318
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/effect-recheck.test.ts
+  s_bf4e2e6d9e5d71::t_ec72d1dce445ec 17-18
+  s_bf4e2e6d9e5d71::t_41b7784c97a0eb 68,104,106,135,150
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/result-delivery.test.ts
+  s_bf4e2e6d9e5d71::t_ec72d1dce445ec 20-26,29,31-32,35-37,40-41,43,45-57,59-78
+  s_bf4e2e6d9e5d71::t_bfbe2cb3a09c98 7-8,10-12,15-16,19,79-80,82-88,90-95,97-112,114-121,123-131,133-140,142-152
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/result-reporter.ts
+  s_bf4e2e6d9e5d71::t_d705a71f225d31 52,54,56
+  s_bf4e2e6d9e5d71::t_4b2c0ddfe9a948 3,6-35,49-51,57-68
+apps/evolverun/clawweb/scripts/recovery-effect-recheck/dashboard.mjs
+  s_bf4e2e6d9e5d71::t_c1aec67fc3674d 8
+apps/evolverun/clawweb/public/modules/clawinsight/preview/recovery.ts
+  s_bf4e2e6d9e5d71::t_f85d9cb5c8eec4 27
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/common/__tests__/logging.test.ts
+  s_bf4e2e6d9e5d71::t_96d8c0380d6f4a 116-128
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/card-configuration.test.ts
+  s_bf4e2e6d9e5d71::t_8cca0286cc5e98 17
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/intervention-result.test.ts
+  s_bf4e2e6d9e5d71::t_ead2c8d1831d3c 1,59,65,77,85,97,118,131,146,165,190,195,221,231,244
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/owner-card.test.ts
+  s_bf4e2e6d9e5d71::t_a5a6fae829c027 7
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/simulation.test.ts
+  s_bf4e2e6d9e5d71::t_fad1bc611383ab 1,76,79,89,99,151,162,165,181-182
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-list.test.ts
+  s_bf4e2e6d9e5d71::t_1f4436c7642a33 21
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-service.test.ts
+  s_bf4e2e6d9e5d71::t_0e88b5f5fae5f2 26,28,65,83,92,156,366-367,373-376,420,428-429,436-440,448,451,455,461-462,564,573,579-580,586,591-592
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/user-handoff.test.ts
+  s_bf4e2e6d9e5d71::t_bd33586e297b0a 50,143,203,206,218,249,284,309,633,660,665
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/errors.ts
+  s_bf4e2e6d9e5d71::t_6b10d9360eccdb 4-13
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/result-delivery.ts
+  s_bf4e2e6d9e5d71::t_d2dfdd81a5e8b7 1-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5255d1ddf250958b6498fc5c16bad83bea9546b1",
+  "prompts": {},
+  "sessions": {
+    "s_bf4e2e6d9e5d71": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21664-cdb1-7cd1-b9a8-ed4efbd69d3e",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
