@@ -47,6 +47,7 @@ rate-limit keys are not evicted, or give the limiter a dedicated instance.
 from __future__ import annotations
 
 import math
+from urllib.parse import urlsplit, urlunsplit
 
 from redis import asyncio as redis_asyncio
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -63,6 +64,28 @@ from gateway.community.spi.rate_limiter import (
 )
 
 logger = get_logger("rate_limiter")
+
+
+def _redact_redis_url(url: str) -> str:
+    """Return *url* with any ``user:password@`` authentication stripped.
+
+    A Redis URL may embed credentials (``redis://user:pass@host:6379/0``);
+    logging it verbatim would leak them to log readers and collectors. Host,
+    port and db are kept (useful for operators) and the userinfo is replaced
+    with ``***``. On any parse failure the URL is suppressed entirely rather
+    than risk leaking it.
+    """
+    try:
+        parts = urlsplit(url)
+        if parts.username or parts.password:
+            host = parts.hostname or ""
+            if parts.port is not None:
+                host = f"{host}:{parts.port}"
+            parts = parts._replace(netloc=f"***@{host}")
+        return urlunsplit(parts)
+    except Exception:  # noqa: BLE001 — never let redaction leak the raw URL
+        return "<redacted>"
+
 
 # Atomic token-bucket admission. Returns integers only (Redis truncates Lua
 # number returns), so sub-unit quantities are pre-scaled here and rescaled in
@@ -104,7 +127,18 @@ else
   retry_after_ms = math.ceil((deficit / rate) * 1000.0)
 end
 
-redis.call('HSET', KEYS[1], 'tokens', tokens, 'ts', now_us)
+-- Persist the timestamp as a monotonic high-water mark. Clamping elapsed above
+-- only stops the one request that straddles a backwards clock jump; writing the
+-- lower now_us would let every request after it refill over time already
+-- accounted for before the jump. Keeping max(ts, now_us) means a backwards jump
+-- never lowers the mark, so no extra budget is granted until the clock passes
+-- its previous high-water again.
+local stored_ts = now_us
+if ts > now_us then
+  stored_ts = ts
+end
+
+redis.call('HSET', KEYS[1], 'tokens', tokens, 'ts', stored_ts)
 redis.call('PEXPIRE', KEYS[1], ttl_ms)
 
 return {allowed, retry_after_ms, math.floor(tokens * 1000.0)}
@@ -162,7 +196,7 @@ class RedisTokenBucketRateLimiter(ApplicationRateLimiter):
         self._script = self._redis.register_script(_ADMISSION_LUA)
         logger.info(
             "RedisTokenBucketRateLimiter configured url=%s namespace=%s timeout=%.3fs",
-            url,
+            _redact_redis_url(url),
             namespace,
             socket_timeout,
         )

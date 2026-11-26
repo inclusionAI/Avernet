@@ -15,11 +15,30 @@ from redis.exceptions import RedisError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from gateway.community.plugins.rate_limiter.redis import RedisTokenBucketRateLimiter
+from gateway.community.plugins.rate_limiter.redis._plugin import _redact_redis_url
 from gateway.community.spi.rate_limiter import (
     RateLimiterUnavailableError,
     RateLimitPolicy,
     RateLimitSubject,
 )
+
+
+def test_redact_redis_url_strips_credentials() -> None:
+    # Credentials in the URL must never survive into a log line.
+    assert (
+        _redact_redis_url("redis://user:s3cret@host:6379/0")
+        == "redis://***@host:6379/0"
+    )
+    assert _redact_redis_url("rediss://:tokenonly@host/2") == "rediss://***@host/2"
+    # No credentials -> URL kept as-is (host/port/db are useful to operators).
+    assert _redact_redis_url("redis://localhost:6379/0") == "redis://localhost:6379/0"
+    # A password must not leak through any component of the result.
+    assert "s3cret" not in _redact_redis_url("redis://user:s3cret@host:6379/0")
+    # A URL that fails to parse (here, an out-of-range port) is suppressed
+    # entirely rather than risk leaking credentials it may carry.
+    suppressed = _redact_redis_url("redis://user:s3cret@host:99999/0")
+    assert suppressed == "<redacted>"
+    assert "s3cret" not in suppressed
 
 
 class _FakeRedis:

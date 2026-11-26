@@ -244,6 +244,42 @@ class TestRedisRateLimiterContract(ApplicationRateLimiterContract):
             await raw.aclose()
             await self._close(limiter)
 
+    async def test_backward_clock_jump_does_not_grant_extra_budget(self) -> None:
+        """A backwards server-clock jump must not refill the bucket.
+
+        Regression for the high-water-mark fix: the stored timestamp is kept at
+        ``max(ts, now)``, so an empty bucket whose last update is *ahead* of the
+        current clock (what a rollback leaves behind) stays empty across
+        successive requests instead of refilling over already-accounted time.
+        """
+        import redis.asyncio as redis_async
+
+        limiter = self.make_limiter()
+        policy = RateLimitPolicy(rate=1000.0, burst=1)  # fast refill if it leaks
+        subject = _subject(self.namespace, app_id=77)
+        raw = redis_async.Redis.from_url(_REDIS_URL, decode_responses=False)
+        key = (
+            f"ratelimit:{subject.namespace}:{subject.tenant}"
+            f":{subject.app_id}:{subject.scope}"
+        )
+        try:
+            # Seed an empty bucket whose last-update time is 5s AHEAD of the
+            # server clock — exactly the state a 5s backward clock jump leaves.
+            secs, micros = await raw.time()
+            future_us = (int(secs) * 1_000_000 + int(micros)) + 5_000_000
+            await raw.hset(key, mapping={"tokens": "0", "ts": str(future_us)})
+
+            # Even at 1000 tok/s, two requests a real moment apart must both be
+            # rejected: the stored mark stays ahead, so elapsed stays <= 0.
+            d1 = await limiter.try_acquire(subject, policy)
+            await asyncio.sleep(0.05)
+            d2 = await limiter.try_acquire(subject, policy)
+            assert not d1.allowed
+            assert not d2.allowed
+        finally:
+            await raw.aclose()
+            await self._close(limiter)
+
 
 class TestRedisRateLimiterDependencyFailure:
     """Dependency-failure surfacing needs no live Redis — it points at a dead port."""
