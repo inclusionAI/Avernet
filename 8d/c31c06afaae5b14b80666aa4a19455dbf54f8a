@@ -1,0 +1,21 @@
+apps/bcs/specs/2026-11-26-distributed-runner-spi/spec.md
+  s_31439a3c596ed1::t_6c49d54ee63e26 1-440
+apps/bcs/specs/README.md
+  s_31439a3c596ed1::t_19767468db7f42 20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8dc31c06afaae5b14b80666aa4a19455dbf54f8a",
+  "prompts": {},
+  "sessions": {
+    "s_31439a3c596ed1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a216be-957d-7142-96be-3dcdac37bba5",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
