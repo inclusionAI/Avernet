@@ -15,16 +15,22 @@ function request<T>(url: string, options: BackendRequestOptions = {}) {
 
 export const recoveryApi = {
   list: (
-    params: { page: number; pageSize: number; botId?: string; env?: string; status?: RecoveryStatus },
+    params: {
+      page: number;
+      pageSize: number;
+      botId?: string;
+      env?: string;
+      status?: RecoveryStatus;
+      includePresentation?: 'true';
+    },
     signal?: AbortSignal,
-  ) => request<RecoveryListPage>(`${recoveries}/tasks`, { params: { ...params, includePresentation: 'true' }, signal }),
-  detail: (taskId: string, signal?: AbortSignal) =>
-    request<RecoveryTask>(taskPath(taskId), { params: { includeDiagnosis: 'true' }, signal }),
-  bots: (spaceId: string, q = '', cursor?: string, signal?: AbortSignal) =>
-    request<RecoveryBotOptionsPage>(`${base}/bot-options`, {
-      params: { spaceId, scope: 'mine', q, limit: 20, start: 'all', end: 'all', cursor },
-      signal,
-    }),
+  ) => request<RecoveryListPage>(`${recoveries}/tasks`, { params, signal }),
+  detail: (taskId: string, params: { includeDiagnosis?: 'true' }, signal?: AbortSignal) =>
+    request<RecoveryTask>(taskPath(taskId), { params, signal }),
+  bots: (
+    params: { spaceId: string; scope: 'mine'; q: string; limit: number; start: 'all'; end: 'all'; cursor?: string },
+    signal?: AbortSignal,
+  ) => request<RecoveryBotOptionsPage>(`${base}/bot-options`, { params, signal }),
   configure: (
     spaceId: string,
     input: { botRef: string; version: number; enabled: boolean } | { all: true; enabled: boolean },

@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/Input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { Switch } from '@/components/ui/Switch';
 import type { RecoveryBotOption, RecoveryBotOptionsPage } from '@/domain/recovery/types';
-import { recoveryApi } from '@/services/backendApi/clawinsight/recoveryController';
+import { recoveryService } from '@/services/recovery/recoveryService';
 import { Bot, ChevronDown } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { ErrorBox } from '../shared';
@@ -23,7 +23,7 @@ function useBotOptions(spaceId: string, visible: boolean) {
     setResult(undefined);
     const timer = window.setTimeout(
       () => {
-        recoveryApi.bots(spaceId, search.trim(), cursor, controller.signal).then(
+        recoveryService.bots(spaceId, search.trim(), cursor, controller.signal).then(
           (value) => {
             if (!controller.signal.aborted) setResult(value);
           },
@@ -128,9 +128,10 @@ export function RecoveryBotFilter({
             全部 Bot
           </Button>
           {options.result?.items.map((bot) => (
-            <button
+            <Button
               type="button"
-              className="block w-full min-w-0 rounded-md px-3 py-2 text-left hover:bg-muted"
+              variant="ghost"
+              className="block h-auto w-full min-w-0 rounded-md border-0 px-3 py-2 text-left font-normal hover:bg-muted"
               key={bot.botRef}
               onClick={() => pick(bot)}
             >
@@ -138,7 +139,7 @@ export function RecoveryBotFilter({
               <span className="block truncate text-xs text-muted-foreground">
                 {bot.botId} · {bot.ownerId} · {bot.env}
               </span>
-            </button>
+            </Button>
           ))}
         </div>
         <EmptyOptions options={options} />
@@ -161,13 +162,13 @@ export function RecoverySettings({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  async function save(input: Parameters<typeof recoveryApi.configure>[1]) {
+  async function save(input: Parameters<typeof recoveryService.configure>[1]) {
     if (busy) return;
     setBusy(true);
     setError('');
     setMessage('');
     try {
-      const result = await recoveryApi.configure(spaceId, input);
+      const result = await recoveryService.configure(spaceId, input);
       setMessage(
         result.failed.length
           ? `已更新 ${result.updated} 个 Bot，${result.failed.length} 个未成功，请刷新后重试。`

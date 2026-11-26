@@ -12,7 +12,7 @@ import {
   recoveryTime,
 } from '@/domain/recovery/presentation';
 import type { RecoveryListItem, RecoveryStatus } from '@/domain/recovery/types';
-import { recoveryApi } from '@/services/backendApi/clawinsight/recoveryController';
+import { recoveryService } from '@/services/recovery/recoveryService';
 import { ArrowUpRight, ChevronRight, RefreshCw } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { ErrorBox, FilterSelect, Hint, ListSkeleton, TablePanel, useResource } from '../shared';
@@ -194,7 +194,7 @@ export function RecoveryList({
   const { botId, env, page, pageSize } = filters;
   const taskStatus = filters.status;
   const load = useCallback(
-    () => recoveryApi.list({ botId, env, status: taskStatus, page, pageSize }),
+    () => recoveryService.list({ botId, env, status: taskStatus, page, pageSize }),
     [botId, env, taskStatus, page, pageSize],
   );
   const result = useResource(load);
