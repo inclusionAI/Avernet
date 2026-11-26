@@ -1,0 +1,23 @@
+docs/specs/2026-11-26-kb-space-auto-authorization/tasks.md
+  s_dddd0d1da584ee::t_51cf384b1ad328 1-154
+docs/specs/2026-11-26-kb-space-auto-authorization/spec.md
+  s_dddd0d1da584ee::t_703941aca84eab 1-38
+docs/specs/2026-11-26-kb-space-auto-authorization/plan.md
+  s_dddd0d1da584ee::t_3d88098675eb59 1-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eb2328dedaab504a37c328f6c3adb38ab6b97be5",
+  "prompts": {},
+  "sessions": {
+    "s_dddd0d1da584ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a217be-1ab9-7a02-a7ff-c3c90307ce48",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xingchi.wxc <xingchi.wxc@alipay.com>"
+    }
+  }
+}
