@@ -1,0 +1,94 @@
+apps/frontend-nextgen/docs/task-escort-authoring.md
+  h_bb3ca6fb13c5df 50-53
+apps/frontend-nextgen/docs/task-escort-ui-alignment-20261126.md
+  h_bb3ca6fb13c5df 1-121
+apps/frontend-nextgen/src/domain/taskEscortParity/overviewTypes.ts
+  h_bb3ca6fb13c5df 49-65,67
+apps/frontend-nextgen/src/hooks/taskEscortParity/useTaskEscortWorkspaceContext.ts
+  h_bb3ca6fb13c5df 114-118
+apps/frontend-nextgen/src/pages/TaskEscort/WorkspaceIntroduction.tsx
+  h_bb3ca6fb13c5df 1-177
+apps/frontend-nextgen/src/pages/TaskEscort/index.tsx
+  h_bb3ca6fb13c5df 1,8,15,32,36-38,43-55
+apps/frontend-nextgen/src/pages/TaskEscort/introduction.css
+  h_bb3ca6fb13c5df 1-123
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorAuthoringToolbar.tsx
+  h_bb3ca6fb13c5df 2,27-47,49,62
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/WorkflowEditorPage.tsx
+  h_bb3ca6fb13c5df 94
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/canvas/EditorFlowNode.tsx
+  h_bb3ca6fb13c5df 79,81
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/canvas/nodeCatalog.ts
+  h_bb3ca6fb13c5df 37
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/editor-workspace.css
+  h_bb3ca6fb13c5df 18
+apps/frontend-nextgen/src/pages/TaskEscort/parity/management/ManagementHistory.tsx
+  h_bb3ca6fb13c5df 10,93-142,146-148
+apps/frontend-nextgen/src/pages/TaskEscort/parity/management/ManagementNotifications.tsx
+  h_bb3ca6fb13c5df 63-65,67-72,83,87
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/RunAnalysisCard.tsx
+  h_bb3ca6fb13c5df 1-36
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/RunArchivePanel.tsx
+  h_bb3ca6fb13c5df 4-5,22,33,55,59,62,68-70,83-85
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/RunDagView.tsx
+  h_bb3ca6fb13c5df 3,5,18-21,64-132,134-139,141-176,179-185,213-219,222
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/RunDetail.tsx
+  h_bb3ca6fb13c5df 3,5-6,9,11-12,14,26-27,31-32,39-47,49-58,69-71
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/RunEvidenceValue.tsx
+  h_bb3ca6fb13c5df 1-7
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/RunInterventionCards.tsx
+  h_bb3ca6fb13c5df 1-58
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/RunLaunchDetails.tsx
+  h_bb3ca6fb13c5df 1-106
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/RunSummaryHeader.tsx
+  h_bb3ca6fb13c5df 1-135
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/runPresentation.css
+  h_bb3ca6fb13c5df 1-68
+apps/frontend-nextgen/src/services/backendApi/harnessFlow/overviewController.ts
+  h_bb3ca6fb13c5df 68-77,79
+apps/frontend-nextgen/src/services/taskEscortParity/overviewMapper.ts
+  h_bb3ca6fb13c5df 3,10,34-47,79-86
+apps/frontend-nextgen/src/services/taskEscortParity/overviewService.ts
+  h_bb3ca6fb13c5df 10,12,31,43-46,49-69
+apps/frontend-nextgen/src/services/taskEscortParity/runLaunchDetails.ts
+  h_bb3ca6fb13c5df 1-124
+apps/frontend-nextgen/src/shell/SidebarNavList.tsx
+  h_bb3ca6fb13c5df 41,48,83
+apps/frontend-nextgen/test/shell/SidebarNavList.test.tsx
+  h_bb3ca6fb13c5df 25,28-31,34,39,42-44,60,106,143-144
+apps/frontend-nextgen/test/taskEscortParity/editorPage.test.tsx
+  h_bb3ca6fb13c5df 102-152
+apps/frontend-nextgen/test/taskEscortParity/editorVisualCanvas.test.tsx
+  h_bb3ca6fb13c5df 13,148-191
+apps/frontend-nextgen/test/taskEscortParity/managementPresentation.test.tsx
+  h_bb3ca6fb13c5df 1-182
+apps/frontend-nextgen/test/taskEscortParity/overviewDomain.test.ts
+  h_bb3ca6fb13c5df 63-178
+apps/frontend-nextgen/test/taskEscortParity/overviewService.test.ts
+  h_bb3ca6fb13c5df 149-272
+apps/frontend-nextgen/test/taskEscortParity/overviewView.test.tsx
+  h_bb3ca6fb13c5df 57,159,164,168
+apps/frontend-nextgen/test/taskEscortParity/runDetailHook.test.tsx
+  h_bb3ca6fb13c5df 133-159
+apps/frontend-nextgen/test/taskEscortParity/runPresentation.test.tsx
+  h_bb3ca6fb13c5df 1-229
+apps/frontend-nextgen/test/taskEscortParity/workspaceContext.test.tsx
+  h_bb3ca6fb13c5df 194-258
+apps/frontend-nextgen/test/taskEscortWorkspace/dashboardEntry.test.tsx
+  h_bb3ca6fb13c5df 39,54,61-67,75,80-81,102
+apps/frontend-nextgen/test/taskEscortWorkspace/introduction.test.tsx
+  h_bb3ca6fb13c5df 1-124
+apps/frontend-nextgen/test/taskEscortWorkspace/page.test.tsx
+  h_bb3ca6fb13c5df 89,208-225,228-235,238-288
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f1481e5361ec6af839bd179cfa1e4cbe54aadc6e",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

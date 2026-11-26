@@ -1,0 +1,50 @@
+apps/backend/specs/2026-11-26-context-collab-multi-rollout-method/plan.md
+  h_059e888e5e4e82 1-104
+apps/backend/specs/2026-11-26-context-collab-multi-rollout-method/research.md
+  h_059e888e5e4e82 1-142
+apps/backend/specs/2026-11-26-context-collab-multi-rollout-method/spec.md
+  h_059e888e5e4e82 1-556
+apps/backend/specs/README.md
+  h_059e888e5e4e82 15
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/PROFILE-STORAGE.md
+  h_059e888e5e4e82 46-57
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/README.md
+  h_059e888e5e4e82 34
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/contracts.py
+  h_059e888e5e4e82 44,46-51
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/topology_projection.py
+  h_059e888e5e4e82 80-82,88-89,97,104-105
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/rollout_repository.py
+  h_059e888e5e4e82 225-226,368
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/README.md
+  h_059e888e5e4e82 115-136
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/product_profile_service/configuration.py
+  h_059e888e5e4e82 51-53,125,128,130,164
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/profile_codec.py
+  h_059e888e5e4e82 54-57,116-119,121,137-140
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/relation_storage.py
+  h_059e888e5e4e82 1-37
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/topology.py
+  h_059e888e5e4e82 54-55
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/validation.py
+  h_059e888e5e4e82 173,181-182
+apps/backend/src/agentclaw/community/di/modules/task/task_commission_self_application.py
+  h_059e888e5e4e82 449-450
+apps/backend/tests/community/core/task/context_collab/product_profile_service/test_http.py
+  h_059e888e5e4e82 283-315
+apps/backend/tests/community/core/task/context_collab/product_profile_service/test_method_relation_endpoints.py
+  h_059e888e5e4e82 1-207
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_method_topology.py
+  h_059e888e5e4e82 337,344-346
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "15463d4d457d1d3f0ed287ed810c4b6b990e831b",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
