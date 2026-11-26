@@ -103,7 +103,11 @@ from agentclaw.community.api.engine_config_service import EngineConfigServicePro
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, _get_engine_types
-from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceConnectionUnavailableError,
+    DeviceNotBoundError,
+    DeviceOfflineError,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth import AuthPlugin
@@ -3465,6 +3469,23 @@ async def get_engine_config(
             error_code=409,
             data=None,
         )
+    except (DeviceOfflineError, DeviceConnectionUnavailableError) as e:
+        # The provider confirmed a structured offline contract (BaaS
+        # NO_ACTIVE_DEVICES, an ARCA sandbox being replaced, …). It is an
+        # expected, self-healing state — logging it as ERROR only floods the
+        # alarm/ticket pipeline (see BaasService.get_ws_info's own INFO
+        # contract). Classify it as "temporarily unavailable" like the channel
+        # and file routers do, instead of surfacing a 500 with the internal
+        # exception text.
+        logger.info(
+            f"[bot_router.get_engine_config] device offline, expected self-healing state: bot_id={bot_id}, error={e}"
+        )
+        return ApiResponse(
+            success=False,
+            message="Bot 设备暂时不可用，请稍后重试",
+            error_code=503,
+            data=None,
+        )
     except json.JSONDecodeError as e:
         logger.error(f"[bot_router.get_engine_config] Invalid JSON in config file: {e}")
         return ApiResponse(
@@ -3592,6 +3613,20 @@ async def update_engine_config(
             success=False,
             message=f"Bot不存在: {bot_id}",
             error_code=404,
+            data=None,
+        )
+    except (DeviceOfflineError, DeviceConnectionUnavailableError) as e:
+        # Same expected, self-healing offline state as the read side — the
+        # write first resolves the device the same way, so it can hit the same
+        # structured offline contract. Not a server fault: same 503 + INFO
+        # classification as get_engine_config above.
+        logger.info(
+            f"[bot_router.update_engine_config] device offline, expected self-healing state: bot_id={bot_id}, error={e}"
+        )
+        return ApiResponse(
+            success=False,
+            message="Bot 设备暂时不可用，请稍后重试",
+            error_code=503,
             data=None,
         )
     except Exception as e:
