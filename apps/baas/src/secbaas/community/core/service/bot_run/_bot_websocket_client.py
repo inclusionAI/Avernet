@@ -21,12 +21,15 @@ from urllib.parse import urlsplit
 
 import websockets
 from websockets.asyncio.client import ClientConnection
+from websockets.protocol import State
 
 from secbaas.community.api.bot_interaction import InteractionResolution
 from secbaas.community.http_header import get_http_header_plugin
 from secbaas.community.logger import get_logger
 from secbaas.community.tracer import get_tracer_plugin
 
+from ._chat_errors import ChatRequestError as ChatRequestError
+from ._chat_errors import RequestNotSentError
 from ._interaction_protocol import (
     EngineInteractionResolveExchange,
     build_interaction_resolve_request,
@@ -49,31 +52,6 @@ def _is_loopback_websocket_uri(uri: str) -> bool:
         return ipaddress.ip_address(hostname).is_loopback
     except ValueError:
         return False
-
-
-class ChatRequestError(Exception):
-    """chat.send / chat.inject 响应 ok=False 时抛出。
-
-    当服务器返回的响应中 ok 字段为 False 时（例如会话验证失败、服务不可用），
-    BotWebSocketClient.chat_send / chat_inject 会抛出此异常，避免静默失败。
-
-    Attributes:
-        error_code: 服务器返回的错误码（如 "UNAVAILABLE"），可能为 None
-        error_message: 服务器返回的错误信息，可能为 None
-        retryable: 服务器指示是否可重试，可能为 None
-    """
-
-    def __init__(
-        self,
-        message: str,
-        error_code: str | None = None,
-        error_message: str | None = None,
-        retryable: bool | None = None,
-    ):
-        super().__init__(message)
-        self.error_code = error_code
-        self.error_message = error_message
-        self.retryable = retryable
 
 
 class BotWebSocketClient:
@@ -418,10 +396,16 @@ class BotWebSocketClient:
                         or RuntimeError("WebSocket connection closed unexpectedly")
                     )
             self._pending_requests.clear()
-            # 通知上层连接断开（事件驱动，替代轮询）
+            # 通知上层连接断开（事件驱动，替代轮询），
+            # 携带根因异常摘要使上游错误信息可自解释（正常关闭时无 error）
             if self._disconnect_callback is not None:
                 try:
-                    result = self._disconnect_callback("disconnect", {})
+                    payload: dict[str, Any] = (
+                        {"error": f"{type(close_exc).__name__}: {close_exc}"}
+                        if close_exc is not None
+                        else {}
+                    )
+                    result = self._disconnect_callback("disconnect", payload)
                     if asyncio.iscoroutine(result):
                         # 在 recv_loop 已结束的上下文中调度协程
                         asyncio.ensure_future(result)
@@ -511,7 +495,23 @@ class BotWebSocketClient:
         loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
         self._pending_requests[request_id] = future
-        await self._ws.send(json.dumps(request_frame))
+        # 写出前快照连接状态：websockets 在非 OPEN 状态不写出任何数据，
+        # 用于区分"帧未发出（可安全重放一次）"与"可能已写出（结果未知）"。
+        state_before_send = self._ws.state
+        try:
+            await self._ws.send(json.dumps(request_frame))
+        except websockets.ConnectionClosed as exc:
+            self._discard_pending_request(request_id)
+            if state_before_send is not State.OPEN:
+                raise RequestNotSentError(
+                    f"{method} request not sent: connection already "
+                    f"{state_before_send.name.lower()} ({exc})"
+                ) from exc
+            # 写出过程中连接关闭，帧可能已到达对端：保持结果未知，不重放。
+            raise
+        except BaseException:
+            self._discard_pending_request(request_id)
+            raise
 
         try:
             return await asyncio.wait_for(future, timeout=timeout)
@@ -519,3 +519,9 @@ class BotWebSocketClient:
             raise TimeoutError(f"Request {method} timed out")
         finally:
             self._pending_requests.pop(request_id, None)
+
+    def _discard_pending_request(self, request_id: str) -> None:
+        """移除无人等待的 pending future，避免其异常无人消费。"""
+        future = self._pending_requests.pop(request_id, None)
+        if future is not None and not future.done():
+            future.cancel()

@@ -3,11 +3,11 @@ use async_trait::async_trait;
 
 // Dropping an acquire future during the provider write is also an unknown
 // result. Preserve its reservation without changing the public port contract.
-struct AcquisitionWriteGuard<'a> {
-    store: &'a CoordinationStore,
-    sid: &'a Sid,
-    holder: &'a ShardOwner,
-    definite: bool,
+pub(super) struct AcquisitionWriteGuard<'a> {
+    pub(super) store: &'a CoordinationStore,
+    pub(super) sid: &'a Sid,
+    pub(super) holder: &'a ShardOwner,
+    pub(super) definite: bool,
 }
 impl Drop for AcquisitionWriteGuard<'_> {
     fn drop(&mut self) {
@@ -57,6 +57,10 @@ fn acquired(sid: &Sid, claim: &ShardClaim, envelope: StoredCheckpoint) -> Acquir
 }
 #[async_trait]
 impl SessionStorePort for CoordinationStore {
+    fn checkpoint_capacity(&self) -> Option<SessionCheckpointCapacity> {
+        Some(self.config.checkpoint_capacity)
+    }
+
     fn local_session_capacity(&self) -> Option<usize> {
         Some(self.config.max_cached_sessions)
     }
@@ -89,19 +93,25 @@ impl SessionStorePort for CoordinationStore {
         // and confirmed existence survive errors, especially a missing known
         // checkpoint: forgetting it would make a retry initialize lost state.
         let uncertain = {
-            let mut cache = self.cache.lock().map_err(|_| not_applied("cache_poisoned"))?;
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|_| not_applied("cache_poisoned"))?;
             if let Some(entry) = cache.get_mut(&sid.0) {
-                if entry.holder == claim.owner && matches!(&result, Ok(AcquireOutcome::Acquired(_))) {
+                if entry.holder == claim.owner && matches!(&result, Ok(AcquireOutcome::Acquired(_)))
+                {
                     entry.uncertain_acquisition = false;
                 }
                 entry.uncertain_acquisition
-            } else { false }
+            } else {
+                false
+            }
         };
         let release = match &result {
             Ok(AcquireOutcome::Acquired(_)) | Err(StoreError::OutcomeUnknown { .. }) => false,
             Ok(AcquireOutcome::Fenced) => true,
             Ok(AcquireOutcome::Deferred { .. }) => !uncertain,
-            Err(_) => !uncertain && self.cached(sid)?.is_none(),
+            Err(_) => !uncertain && !self.known_checkpoint(sid)?,
         };
         if release {
             self.release_local(&SessionOwnership {
@@ -198,7 +208,9 @@ impl SessionStorePort for CoordinationStore {
         }
         let sid = &request.owner.sid;
         let key = self.layout.ckpt(sid)?;
-        let mut old = match self.cached(sid)? {
+        let cached = self.cached(sid)?;
+        let mut from_cache = cached.is_some();
+        let mut old = match cached {
             Some(v) => Some(v),
             None => self.checkpoint(sid).await?,
         };
@@ -209,6 +221,7 @@ impl SessionStorePort for CoordinationStore {
             .is_some_and(|v| v.value.checkpoint.commit_seq >= request.candidate.commit_seq)
         {
             old = self.checkpoint(sid).await?;
+            from_cache = false;
         }
         for _ in 0..RETRIES {
             let Some(current) = old else {
@@ -233,11 +246,39 @@ impl SessionStorePort for CoordinationStore {
             if current.value.checkpoint.commit_seq != request.expected_commit_seq {
                 return Ok(CommitOutcome::CommitSeqConflict);
             }
+            let allowed = match (&current.value.control.mode, &request.purpose) {
+                (
+                    bcs_service_api::port::repo::distributed::control::ControlMode::Normal,
+                    CommitPurpose::Ordinary { control_revision },
+                ) => current.value.control.revision == *control_revision,
+                (
+                    bcs_service_api::port::repo::distributed::control::ControlMode::Quarantined {
+                        isolation,
+                    },
+                    CommitPurpose::Isolation { operation_id },
+                ) => isolation.operation_id == *operation_id,
+                _ => false,
+            };
+            if !allowed {
+                // A control facade may use another provider instance. Cached
+                // disagreement is not authoritative proof that this guard lost.
+                if from_cache {
+                    old = self.checkpoint(sid).await?;
+                    from_cache = false;
+                    continue;
+                }
+                return Err(not_applied("session_control_paused"));
+            }
+            preserve_frozen_results(&current.value.checkpoint, &request.candidate)?;
+            let progress = business_progress(&current.value.checkpoint, &request.candidate);
             let mut value = current.value;
             value.checkpoint = request.candidate.clone();
-            value.recovery_attempts.clear();
-            value.recovery.takeover_streak = 0;
-            value.recovery.last_attempt = None;
+            if progress {
+                value.recovery_attempts.clear();
+                value.recovery.takeover_streak = 0;
+                value.recovery.last_attempt = None;
+                value.control.last_business_progress = request.candidate.commit_seq;
+            }
             value.recovery.last_active_at = now();
             if let Some(version) = self
                 .write(&key, Some(current.version), &value, &request.commit_id.0)
@@ -248,6 +289,7 @@ impl SessionStorePort for CoordinationStore {
                 return Ok(CommitOutcome::Committed(proof));
             }
             old = self.checkpoint(sid).await?;
+            from_cache = false;
         }
         Err(not_applied("commit_contention"))
     }
@@ -283,6 +325,9 @@ impl SessionStorePort for CoordinationStore {
         attempt: RequestId,
     ) -> Result<RecoveryUpdate, StoreError> {
         owner_valid(owner)?;
+        if attempt.0.is_empty() || capacity::encoded_bytes(&attempt)? > capacity::MAX_RECOVERY_ID_BYTES {
+            return Err(invalid("recovery_attempt_identity"));
+        }
         let key = self.layout.ckpt(&owner.sid)?;
         for _ in 0..RETRIES {
             let Some(old) = self.checkpoint(&owner.sid).await? else {
@@ -304,6 +349,9 @@ impl SessionStorePort for CoordinationStore {
                 return Err(not_applied("recovery_attempt_limit"));
             }
             value.recovery_attempts.push(attempt.clone());
+            if capacity::encoded_bytes(&value.recovery_attempts)? > capacity::MAX_RECOVERY_ATTEMPTS_BYTES {
+                return Err(not_applied("recovery_attempt_byte_budget"));
+            }
             value.recovery.takeover_streak = value
                 .recovery
                 .takeover_streak
@@ -379,6 +427,7 @@ impl CoordinationStore {
                         },
                     },
                     recovery_attempts: vec![],
+                    control: Default::default(),
                 }
             };
             if old
@@ -392,9 +441,14 @@ impl CoordinationStore {
             }
             envelope.owner = claim.owner.clone();
             let mut attempt = AcquisitionWriteGuard {
-                store: self, sid, holder: &claim.owner, definite: false,
+                store: self,
+                sid,
+                holder: &claim.owner,
+                definite: false,
             };
-            let outcome = self.write(&key, old.map(|x| x.version), &envelope, &sid.0).await;
+            let outcome = self
+                .write(&key, old.map(|x| x.version), &envelope, &sid.0)
+                .await;
             attempt.definite = !matches!(&outcome, Err(StoreError::OutcomeUnknown { .. }));
             drop(attempt);
             if let Some(version) = outcome? {
@@ -425,4 +479,59 @@ impl CoordinationStore {
         }
         Err(not_applied("acquire_contention"))
     }
+}
+
+fn business_progress(before: &Checkpoint, after: &Checkpoint) -> bool {
+    before.tasks != after.tasks
+        || before.runner_state != after.runner_state
+        || before.dispatch_seq != after.dispatch_seq
+        || before.deadlines != after.deadlines
+        || before.deadline_history != after.deadline_history
+        || before.view_drafts != after.view_drafts
+        || before.last_event_id != after.last_event_id
+        || after.outbox.as_ref().is_some_and(|batch| {
+            batch.effects.iter().any(|effect| match &effect.kind {
+                EffectKind::AppendEvents { events, .. } => !events.is_empty(),
+                _ => true,
+            })
+        })
+}
+
+// Both ordinary execution and independent isolation finalization must preserve
+// the first committed result. Done tasks may retire after effect confirmation;
+// a still-present task can never acquire a different immutable result.
+fn preserve_frozen_results(before: &Checkpoint, after: &Checkpoint) -> Result<(), StoreError> {
+    for prior in &before.tasks {
+        if !matches!(
+            prior.phase,
+            TaskPhase::AwaitingResult { .. } | TaskPhase::Done
+        ) {
+            continue;
+        }
+        let Some(next) = after.tasks.iter().find(|task| task.tid == prior.tid) else {
+            if prior.phase == TaskPhase::Done {
+                continue;
+            }
+            return Err(invalid("frozen_task_removed"));
+        };
+        let Some(frozen) = prior.finalization.as_ref() else {
+            return Err(invalid("frozen_result_missing"));
+        };
+        let Some(candidate) = next.finalization.as_ref() else {
+            return Err(invalid("frozen_result_missing"));
+        };
+        if frozen.operation_id != candidate.operation_id
+            || frozen.record != candidate.record
+            || (prior.phase == TaskPhase::Done
+                && (next.phase != TaskPhase::Done
+                    || prior.result_ref != next.result_ref
+                    || frozen.terminal_event_id != candidate.terminal_event_id))
+            || (matches!(prior.phase, TaskPhase::AwaitingResult { .. })
+                && next.phase != prior.phase
+                && next.phase != TaskPhase::Done)
+        {
+            return Err(invalid("frozen_result_changed"));
+        }
+    }
+    Ok(())
 }

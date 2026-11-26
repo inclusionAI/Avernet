@@ -53,5 +53,30 @@ HTTP execution, or business resource transitions.
 The initial fanout/delivery claim UPDATE requests DB transaction early success
 when it affects zero rows. Empty claims execute one SQL statement; nonempty
 claims retain their full atomic transaction, fencing and recovery semantics.
-`src/db.rs` implements the repository contract, with private SQL operations,
-validation and row mapping split under `src/db/`. No schema changes are required.
+`src/db.rs` implements the repository contract, with private SQL operations and
+row mapping split under `src/db/`, and pure input validation shared with the
+memory repository in `src/validation.rs`. No schema changes are required.
+
+## Memory repository layout
+
+`src/memory.rs` owns the in-memory store state, the scope/producer/stream lock
+registry, and the runtime constructors and commit helpers. Its private siblings
+are split by responsibility rather than mirroring `src/db/`:
+`src/memory/repo.rs` holds the single `EventRepoPort` implementation,
+`src/memory/fanout.rs` owns state-level append, causation and target creation,
+`src/memory/delivery.rs` owns delivery due/eligibility/lane ordering plus the
+claim, completion and replay bodies, and `src/memory/retention.rs` owns purge
+eligibility and the retention sweep. The port methods whose bodies live in
+`memory/delivery.rs` or `memory/retention.rs` are thin delegating shells to
+`*_impl` inherent methods; preserve their signature and lock/`.await` order
+when editing. Cross-sibling helpers are `pub(super)`; the public surface stays
+`MemoryEventStore` and its existing public methods.
+
+## Shared input validation
+
+`src/validation.rs` holds the pure input validators used by both the memory and
+SQL repositories. Backend-specific checks stay in their backend: the memory
+repository rejects an empty replacement Subscription id/env before the shared
+replacement predicate, and parses Event timestamps after the shared empty-field
+check. Subscription list limits and retention/skip reasons remain per-backend
+inline checks.

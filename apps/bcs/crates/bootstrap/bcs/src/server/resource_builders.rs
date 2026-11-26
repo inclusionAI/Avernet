@@ -662,6 +662,7 @@ pub(super) fn build_openapi_v1_state(
         .with_provider_registration(provider_registration)
         .with_a2a_cards(Arc::new(bcs_a2a_http::card_fetch::HttpA2aCardFetcher::new(
             outbound_url_guard_from_config(config), vec![bcs_a2a_http::tools::EXTENSION.into(),
+                bcs_a2a_http::tools::EXTENSION_V2.into(),
                 bcs_a2a_http::delivery::DEDUP_EXTENSION.into()],
         ))));
     let collaboration_template_service: Arc<

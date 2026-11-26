@@ -6,7 +6,7 @@ use crate::{DistGateway, invalid, scope_of};
 use bcs_dist_model::*;
 use bcs_service_api::application::dist_gateway::*;
 use bcs_service_api::core::dist_gateway::{AdmitTaskCommand, CoreAdmission, DistGatewayCoreError};
-use bcs_service_api::port::dist_agent::GroupDirectoryError;
+use bcs_service_api::port::dist_agent::{FrozenGroupDefinition, GroupDirectoryError};
 use serde_json::json;
 
 const SCHEMA_VERSION: u32 = 1;
@@ -78,7 +78,7 @@ pub(crate) async fn cancel(
             body,
         },
         create_session: None,
-        create_task: None,
+        start_task: false,
     };
     match gateway.core.admit(&scope, command).await {
         Ok(CoreAdmission(receipt)) => Ok(receipt),
@@ -94,7 +94,7 @@ async fn new_spec(
     scope: &TaskScope,
     group: &GroupId,
     sid: &Sid,
-) -> Result<SessionSpec, GatewayError> {
+) -> Result<FrozenGroupDefinition, GatewayError> {
     let frozen = gateway.groups.resolve(scope, group).await.map_err(|e| match e {
         GroupDirectoryError::NotFound => GatewayError::NotFound,
         GroupDirectoryError::Unavailable => GatewayError::Unavailable {
@@ -112,59 +112,19 @@ async fn new_spec(
             code: "group_directory_mismatch".to_owned(),
         });
     }
-    let shard = sid
-        .0
-        .split_once('.')
-        .and_then(|(head, _)| head.strip_prefix('s'))
-        .and_then(|digits| digits.parse::<u32>().ok())
-        .ok_or_else(|| invalid("session_id_format"))?;
-    let digest = content_digest(&json!({
-        "group": frozen.group,
-        "workflow": frozen.workflow,
-        "participants": frozen.participants,
-        "limits": frozen.limits,
-    }));
-    Ok(SessionSpec {
-        schema_version: SCHEMA_VERSION,
-        sid: sid.clone(),
-        shard: ShardId(shard),
-        scope: scope.clone(),
-        kind: SessionKind::FsmGroup,
-        group: frozen.group,
-        workflow: frozen.workflow,
-        participants: frozen.participants,
-        limits: frozen.limits,
-        digest,
-        created_at: gateway.clock.now(),
-    })
+    let _ = sid;
+    Ok(frozen)
 }
 
 /// A user message that starts a task, in a new (`spec` set) or existing session.
 fn new_task(
-    gateway: &DistGateway,
+    _gateway: &DistGateway,
     scope: &TaskScope,
     request: &SubmitInput,
     sid: Sid,
-    spec: Option<SessionSpec>,
+    spec: Option<FrozenGroupDefinition>,
 ) -> AdmitTaskCommand {
     let tid = task_id(&sid, &request.message_id);
-    let now = gateway.clock.now();
-    let snapshot = TaskSnapshot {
-        schema_version: SCHEMA_VERSION,
-        scope: scope.clone(),
-        sid: sid.clone(),
-        tid: tid.clone(),
-        content: TaskContent {
-            status: TaskStatus::Submitted,
-            interactions: Vec::new(),
-            snapshot: Payload::Inline(serde_json::Value::Null),
-            result_ref: None,
-        },
-        snapshot_event_id: None,
-        source_commit: CommitSeq(0),
-        created_at: now,
-        updated_at: now,
-    };
     AdmitTaskCommand {
         input: InputEnvelope {
             schema_version: SCHEMA_VERSION,
@@ -181,7 +141,7 @@ fn new_task(
             },
         },
         create_session: spec,
-        create_task: Some(snapshot),
+        start_task: true,
     }
 }
 
@@ -228,6 +188,6 @@ async fn reply(
             },
         },
         create_session: None,
-        create_task: None,
+        start_task: false,
     })
 }

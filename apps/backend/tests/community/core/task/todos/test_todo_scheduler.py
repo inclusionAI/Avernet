@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from agentclaw.community.core.task.todos.errors import TodoNotFoundError
 from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
 from agentclaw.community.core.task.todos.scheduler import TodoScheduler
 from agentclaw.community.di.todo_config import TodoSchedulerConfig
@@ -66,10 +67,12 @@ class _Execution:
         self,
         *,
         failures: set[str] | None = None,
+        vanished: set[str] | None = None,
         delay: float = 0,
         refresh_result: TodoStatus = TodoStatus.PENDING_ACCEPTANCE,
     ) -> None:
         self.failures = failures or set()
+        self.vanished = vanished or set()
         self.delay = delay
         self.refresh_result = refresh_result
         self.calls: list[tuple[str, str]] = []
@@ -78,6 +81,8 @@ class _Execution:
         self.calls.append(("dispatch", todo_id))
         if self.delay:
             await asyncio.sleep(self.delay)
+        if todo_id in self.vanished:
+            raise TodoNotFoundError(f"Todo {todo_id} not found")
         if todo_id in self.failures:
             raise RuntimeError(f"dispatch {todo_id} failed")
         return replace(
@@ -88,6 +93,8 @@ class _Execution:
         self.calls.append(("reconcile", todo_id))
         if self.delay:
             await asyncio.sleep(self.delay)
+        if todo_id in self.vanished:
+            raise TodoNotFoundError(f"Todo {todo_id} not found")
         if todo_id in self.failures:
             raise RuntimeError(f"reconcile {todo_id} failed")
         return replace(
@@ -99,6 +106,8 @@ class _Execution:
         self.calls.append(("refresh", todo_id))
         if self.delay:
             await asyncio.sleep(self.delay)
+        if todo_id in self.vanished:
+            raise TodoNotFoundError(f"Todo {todo_id} not found")
         if todo_id in self.failures:
             raise RuntimeError(f"refresh {todo_id} failed")
         return replace(
@@ -223,6 +232,36 @@ async def test_single_todo_failures_do_not_stop_remaining_work():
     result = await scheduler.run_once()
 
     assert result["errors"] == 2
+    assert execution.calls == [
+        ("dispatch", "p1"),
+        ("dispatch", "p2"),
+        ("refresh", "i1"),
+        ("refresh", "i2"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_todo_vanishing_mid_batch_is_skipped_without_counting_as_error():
+    """A Todo listed by this tick can disappear before its per-Todo reload
+    (concurrent cleanup, table migration, zone data switch). Skipping it is
+    expected behavior, not a tick error, and the rest of the batch runs."""
+    repository = _Repository(
+        pending=(
+            _todo("p1", TodoStatus.PENDING),
+            _todo("p2", TodoStatus.PENDING),
+        ),
+        in_progress=(
+            _todo("i1", TodoStatus.IN_PROGRESS),
+            _todo("i2", TodoStatus.IN_PROGRESS),
+        ),
+    )
+    execution = _Execution(vanished={"p1", "i1"})
+    scheduler = TodoScheduler(repository, execution, _Cache(), _config())
+
+    result = await scheduler.run_once()
+
+    assert result["errors"] == 0
+    assert result["processed"] == 4
     assert execution.calls == [
         ("dispatch", "p1"),
         ("dispatch", "p2"),

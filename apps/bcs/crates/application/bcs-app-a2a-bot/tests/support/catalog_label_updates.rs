@@ -49,7 +49,7 @@ impl RacingCore {
         if self.remaining.fetch_update(Ordering::SeqCst,Ordering::SeqCst,|n|n.checked_sub(1)).is_ok() {
             let current=self.inner.get_card(&record.bot_uuid).await?.unwrap();
             let labels=serde_json::from_value(json!({"stage":["running"]})).unwrap();
-            self.inner.commit_card(A2aBotRecord {catalog_labels:labels,revision:current.revision+1,..current.clone()},current.revision).await?;
+            self.inner.commit_card(A2aBotRecord { visibility:Default::default(),status:Default::default(),user_visibility:Default::default(),agent_id:None,catalog_labels:labels,revision:current.revision+1,..current.clone()},current.revision).await?;
         }
         Ok(())
     }
@@ -97,7 +97,7 @@ async fn public_and_legacy_cas_retry_preserve_latest_labels_without_refetching()
             }
             result.unwrap().catalog_labels
         }else{
-            service.update_agent(UpdateAgentCommand {provider_admin_token:"test-admin".into(),bot_id:first.bot_id.clone(),
+            service.update_agent(UpdateAgentCommand { agent_id:Default::default(),provider_admin_token:"test-admin".into(),bot_id:first.bot_id.clone(),
                 source:Some(A2aCardSource::Url("https://example.org/card.json".into())),visibility:None,catalog_labels:labels}).await.unwrap().catalog_labels
         };
         assert_eq!(fetcher.calls.load(Ordering::SeqCst),1,"retry never refetches");

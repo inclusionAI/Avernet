@@ -633,6 +633,53 @@ describe('内部 Bot 协作能力修复行（AC-23/24/27/28/34）', () => {
     await waitFor(() => expect(mockRiskRefresh).toHaveBeenCalledWith('bot-1:900004', '900004', 'rk-1'));
   });
 
+  it('已拦截的风险申请覆盖旧审批投影，去处理可打开可见性编辑器', async () => {
+    mockCapabilities.mockReturnValue({
+      ...mockCapabilities(),
+      getRestrictedPublicationScopeEnabled: () => ({ value: false }),
+    });
+    const pendingBot = makeBot('bot-1:900004');
+    pendingBot.pendingPublications.user = {
+      id: 'WO-1',
+      audience: 'user',
+      target: { scope: 'all', organizationPaths: [] },
+      submittedAt: '',
+      approvalUrl: 'https://approval.example.test/ticket/WO-1',
+    };
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBot(pendingBot));
+    jest.mocked(getCurrentBotPublicRiskCheck).mockResolvedValue({
+      code: 200000,
+      message: 'OK',
+      data: {
+        risk_check_id: 'rk-blocked',
+        phase: 'NEEDS_ATTENTION',
+        security_status: 'PASS',
+        detail_url: null,
+        auto_poll_paused: false,
+        auto_poll_until: null,
+        next_action_at: null,
+        target: { public_scope: 'user', visibility: 'public', view_depts: [] },
+        error_reason: 'CONFIG_CHANGED',
+        invalidation_reason: null,
+        approval_puid: 'WO-1',
+        approval_decision: 'AGREE',
+      },
+    });
+
+    render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
+
+    const action = await screen.findByRole('button', { name: '去处理' });
+    expect(screen.getByText('配置已变更')).toBeInTheDocument();
+    expect(screen.queryByText('待审批')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '查看审批进度' })).not.toBeInTheDocument();
+    fireEvent.click(action);
+
+    const editor = await screen.findByRole('dialog', { name: 'Bot 可见性：对用户' });
+    expect(within(editor).getByText('配置已变更，本次公开未生效')).toBeInTheDocument();
+    expect(within(editor).getByRole('button', { name: '重新申请' })).toBeEnabled();
+    expect(within(editor).queryByRole('button', { name: '刷新状态' })).not.toBeInTheDocument();
+  });
+
   it('审批期行带 pending 投影时「刷新状态」仍可见，双刷后行回正常态（bot-public-risk-check）', async () => {
     // 复刻线上场景：APPROVING 时后端把同一申请写进 BCS friend_ext（status=PROCESSING），
     // 前端即出现 pendingPublications 投影；行级刷新入口不得因此隐藏。

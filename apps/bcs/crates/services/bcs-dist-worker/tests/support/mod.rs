@@ -12,7 +12,6 @@ use bcs_service_api::{
 };
 use bcs_store_api::document::DocumentStorePlugin;
 use bcs_test_support::store_model::Model;
-use serde_json::json;
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
@@ -64,6 +63,7 @@ impl ShardFeedPort for Feed {
             .unwrap()
             .pop_front()
             .unwrap_or(FeedBatch {
+                failures: vec![],
                 sessions: vec![],
                 hints: vec![],
             }))
@@ -177,7 +177,10 @@ impl SessionStorePort for Sessions {
         self.inner.local_session_capacity()
     }
     async fn release_local(&self, owner: &SessionOwnership) -> Result<(), StoreError> {
-        self.release_calls.lock().unwrap().push((owner.sid.clone(), tokio::time::Instant::now()));
+        self.release_calls
+            .lock()
+            .unwrap()
+            .push((owner.sid.clone(), tokio::time::Instant::now()));
         if self.release_unavailable.load(Ordering::SeqCst)
             || self.failed_releases.lock().unwrap().contains(&owner.sid)
         {
@@ -223,7 +226,10 @@ impl SessionStorePort for Sessions {
         target: &ShardClaim,
         id: &RequestId,
     ) -> Result<SessionTransferOutcome, StoreError> {
-        self.transfer_calls.lock().unwrap().push((source.sid.clone(), tokio::time::Instant::now()));
+        self.transfer_calls
+            .lock()
+            .unwrap()
+            .push((source.sid.clone(), tokio::time::Instant::now()));
         if self.hold_transfer.swap(false, Ordering::SeqCst) {
             self.transfer_entered.notify_one();
             self.transfer_release.notified().await;
@@ -283,13 +289,20 @@ impl DistWorkerPeerPort for Peers {
         request: HandoffRequest,
     ) -> Result<HandoffOutcome, RuntimeError> {
         self.requests.lock().unwrap().push(request.clone());
-        self.request_times.lock().unwrap().push((request.clone(), tokio::time::Instant::now()));
+        self.request_times
+            .lock()
+            .unwrap()
+            .push((request.clone(), tokio::time::Instant::now()));
         if self
             .unknown_nodes
             .lock()
             .unwrap()
             .contains(&target.instance.node)
-            || self.unknown_shards.lock().unwrap().contains(&request.from.shard)
+            || self
+                .unknown_shards
+                .lock()
+                .unwrap()
+                .contains(&request.from.shard)
         {
             return Err(RuntimeError {
                 code: "reply_unknown".into(),
@@ -487,12 +500,10 @@ pub fn initial() -> Checkpoint {
         commit_seq: CommitSeq(0),
         consumed: None,
         tasks: Default::default(),
-        runner_state: RunnerState {
-            format_version: 1,
-            value: json!({}),
-        },
+        runner_state: None,
         dispatch_seq: Default::default(),
         deadlines: vec![],
+        deadline_history: Default::default(),
         view_drafts: Default::default(),
         last_event_id: None,
         outbox: None,

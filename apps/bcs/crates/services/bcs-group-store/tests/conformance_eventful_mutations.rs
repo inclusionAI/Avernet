@@ -780,6 +780,57 @@ async fn count_and_filtered_list_projections_match_seeded_rows() {
 }
 
 #[tokio::test]
+async fn find_by_participant_paginated_does_not_project_message_view_scope() {
+    let db = migrated_db().await;
+    let store = sqlite_store(&db, ENV);
+
+    let mut group = GroupBuilder::new("driver").id("scope-paginated").build();
+    group
+        .participants
+        .push(Participant::bot("driver", ParticipantRole::Driver));
+    let mut human = Participant::human("human-1", ParticipantRole::Consultant);
+    human.message_view_scope = MessageViewScope::Participant;
+    group.participants.push(human);
+    store
+        .upsert(group)
+        .await
+        .expect("seed group with a narrowed Human scope");
+
+    // The persisted value is real: both the strict read and the non-paginated
+    // participant find project `message_view_scope`.
+    let strict = sqlite_store(&db, ENV)
+        .try_get("scope-paginated")
+        .await
+        .expect("cold strict read")
+        .expect("group");
+    assert_eq!(
+        participant_of(&strict, "human-1").message_view_scope,
+        MessageViewScope::Participant
+    );
+    let non_paginated = sqlite_store(&db, ENV)
+        .find_by_participant("human-1")
+        .await;
+    assert_eq!(non_paginated.len(), 1);
+    assert_eq!(
+        participant_of(&non_paginated[0], "human-1").message_view_scope,
+        MessageViewScope::Participant
+    );
+
+    // Known quirk, locked not fixed: the paginated SELECT's outer projection
+    // omits `gp2.message_view_scope`, so the missing column falls back to
+    // `Full` even though the membership row persisted `Participant`.
+    let paginated = sqlite_store(&db, ENV)
+        .find_by_participant_paginated("human-1", 0, 10)
+        .await;
+    assert_eq!(paginated.len(), 1);
+    assert_eq!(
+        participant_of(&paginated[0], "human-1").message_view_scope,
+        MessageViewScope::Full,
+        "the paginated find must keep its missing-column fallback"
+    );
+}
+
+#[tokio::test]
 async fn message_counters_round_trip() {
     let db = migrated_db().await;
     let store = sqlite_store(&db, ENV);

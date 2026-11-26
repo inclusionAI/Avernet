@@ -5,6 +5,25 @@
 //! removing delivered inputs is the Worker's job. The Connector never cancels
 //! on its own: it carries out the cancel it finds, and keeps "request
 //! accepted", "confirmed canceled" and "unknown" apart.
+//!
+//! Where the Worker's control lives in `disp`:
+//! - `/control/pending_input`: human replies, each with a `seq` (1, 2, …).
+//!   "Pending" means "in the Worker's queue", not "unconfirmed": only the
+//!   Worker removes entries, so a reply the agent took stays listed until the
+//!   Worker cleans up. The holder sends the entry with `seq =
+//!   confirmed_input_through + 1` (see `rules::next_input`) to the stored
+//!   remote task (B12).
+//! - `/execution/confirmed_input_through`: written by the holder when the
+//!   agent definitely accepted a reply (`confirm_input`).
+//! - `/connector/input_sending`: the holder's durable intent for a reply
+//!   (`begin_send(Input)`), written before the network call (B3).
+//! - `/control/cancel` (Worker) and `/execution/cancellation` (holder, the
+//!   cancel observation): `NotSent` → `Sending` → `RequestAccepted` |
+//!   `ConfirmedCanceled` | `AlreadyFinished` | `Rejected` | `OutcomeUnknown`.
+//!
+//! A failed reply blocks later replies (`input_blocked`) but the call is
+//! still followed and can still be canceled. That differs from an unresolved
+//! START (`Call::unresolved`), where only a cancel is acted on.
 
 use crate::call::{Call, Flow, Stop, held_write};
 use crate::delayed::UnresolvedKind;
@@ -19,6 +38,12 @@ use bcs_service_api::port::repo::distributed::dispatch::{
 
 impl Call {
     /// Forwards the next pending input to the remote task.
+    ///
+    /// Steps: record the send intent; load the payload (it may be a blob);
+    /// send with request id `<did>:in:<seq>` on the stored remote task and
+    /// context; on a definite acceptance confirm the input. Called from the
+    /// tick, at most once per tick, so a retry waits for the next tick.
+    /// Returns without sending when no remote task id is stored yet.
     pub async fn send_input(&mut self, input: PendingInput) -> Flow {
         let did = self.did().clone();
         let target = self.spec().target.clone();
@@ -39,14 +64,17 @@ impl Call {
         match self.held.begin_send(operation.clone()).await {
             Ok(_) => {}
             Err(HolderError::Lost) => return Err(Stop::Lost),
-            // A former holder recorded intent for this input: it may already
-            // be with the agent. Intent is durable; only an idempotent agent
-            // gets it again.
+            // A former holder recorded intent for this input and it is not
+            // confirmed: it may already be with the agent. Intent is durable;
+            // only an idempotent agent gets it again (then the code falls
+            // through and resends it).
             Err(HolderError::InvalidTransition { code }) if code == INPUT_MAYBE_SENT => {
                 if !resend_allowed {
                     return self.block_input(UnresolvedKind::Uncertain, "input_maybe_sent").await;
                 }
             }
+            // A temporary store error or another refusal: nothing was sent,
+            // try again on the next tick.
             Err(error) => {
                 tracing::warn!(did = %did.0, ?error, "input send intent not recorded; next tick");
                 return Ok(());
@@ -102,6 +130,10 @@ impl Call {
         }
     }
 
+    /// Records that the agent definitely accepted input `seq`
+    /// (`confirmed_input_through = seq`, a gap-free prefix) and resets the
+    /// per-input counters and the tick backoff. The entry stays in
+    /// `/control/pending_input` until the Worker removes it.
     async fn confirm(&mut self, seq: InputSeq, operation: SendOperation, remote: RemoteTaskRef) -> Flow {
         let evidence = AcceptanceEvidence { operation, remote };
         held_write!(self, "input confirmation", self.held.confirm_input(seq, evidence.clone()));
@@ -118,6 +150,9 @@ impl Call {
     }
 
     /// The input stays pending and unconfirmed; later inputs wait behind it.
+    /// Reports it through the D2 stub (the Worker is not told today). Unlike
+    /// `mark_unresolved` the call keeps being followed and canceled, and
+    /// `Call::unresolved` is not set.
     async fn block_input(&mut self, kind: UnresolvedKind, code: &str) -> Flow {
         self.input_blocked = true;
         self.report_unresolved(kind, code).await;
@@ -125,6 +160,16 @@ impl Call {
     }
 
     /// Carries out a cancel the Worker wrote, once per observation state.
+    ///
+    /// The stored observation decides: open states (`NotSent`, `Sending`,
+    /// `OutcomeUnknown`) send the cancel; a definite result a former holder
+    /// recorded but did not finish on is finished now; `RequestAccepted` and
+    /// `Rejected` are never sent again. An agent without cancel support gets
+    /// `Rejected { cancel_unsupported }` recorded and no request. Each attempt
+    /// writes `Sending` before
+    /// the request and the answer after it. An `OutcomeUnknown` answer is
+    /// retried on a later tick, spaced by the tick backoff (`retry_after`), so
+    /// the actor does not sleep and keeps serving the call meanwhile.
     pub async fn carry_out_cancel(&mut self, view: &DispatchView) -> Flow {
         let Some(intent) = view.control.cancel.clone() else {
             return Ok(());
@@ -189,6 +234,13 @@ impl Call {
     }
 
     /// The agent had already finished: report its own terminal state.
+    ///
+    /// When the task can be queried, it is read first (at most
+    /// `not_sent_retries` + 1 times, spaced by the tick backoff), so the
+    /// real result is reported rather than an empty one. If the read ends
+    /// the call, done. Otherwise the outcome from the cancel answer is
+    /// reported: `completed` as a final event, `failed` / `canceled` as an
+    /// error event. `finished_reads = u32::MAX` marks the reads as used up.
     async fn end_already_finished(&mut self, finished: FinalDispatchOutcome) -> Flow {
         if self.spec().capabilities.query_by_task && self.finished_reads <= self.config.not_sent_retries {
             // The task's real result (message, artifacts) is preferred over

@@ -11,7 +11,7 @@ use bcs_test_support::{
 use std::time::Duration;
 
 /// Deliberately incorrect adapters prove the portable suite detects the two
-/// TTL implementations that must never advertise StrictLease.
+/// TTL implementations that must never advertise RetainedLease.
 #[derive(Default)]
 struct IncorrectLease {
     model: Model,
@@ -20,6 +20,9 @@ struct IncorrectLease {
     shorten_rejected: bool,
 }
 impl StorePlugin for IncorrectLease {
+    fn pool_observation(&self) -> Option<StorePoolObservation> {
+        self.model.pool_observation()
+    }
     fn supports(&self, capability: StoreCapability) -> bool {
         self.model.supports(capability)
     }
@@ -69,7 +72,7 @@ impl LeaseStorePlugin for IncorrectLease {
 }
 #[tokio::test]
 #[should_panic]
-async fn strict_lease_suite_rejects_disappearing_expiry_evidence() {
+async fn retained_lease_suite_rejects_disappearing_expiry_evidence() {
     let provider = IncorrectLease {
         forget_expired: true,
         ..Default::default()
@@ -82,7 +85,7 @@ async fn strict_lease_suite_rejects_disappearing_expiry_evidence() {
 }
 #[tokio::test]
 #[should_panic]
-async fn strict_lease_suite_rejects_registration_that_refreshes_the_deadline() {
+async fn retained_lease_suite_rejects_registration_that_refreshes_the_deadline() {
     let provider = IncorrectLease {
         refresh_registration: true,
         ..Default::default()
@@ -96,7 +99,7 @@ async fn strict_lease_suite_rejects_registration_that_refreshes_the_deadline() {
 
 #[tokio::test]
 #[should_panic(expected = "expected alive lease")]
-async fn strict_lease_suite_rejects_shortened_deadline_after_condition_failure() {
+async fn retained_lease_suite_rejects_shortened_deadline_after_condition_failure() {
     let provider = IncorrectLease {
         shorten_rejected: true,
         ..Default::default()

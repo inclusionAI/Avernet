@@ -2069,7 +2069,11 @@ class DefaultDeviceService(DeviceService):
                         f"{updated_record.err_msg or 'Unknown error'}"
                         f" | Destroy-phase warnings: {destroy_warnings}"
                     )
-                return device_record_to_response(updated_record)
+                # Explicit outcome: the publish retry orchestrator classifies
+                # NOT_ATTEMPTED as non-retryable and abandons the attempt.
+                return device_record_to_response(
+                    updated_record, DeviceOperationOutcome.COMPLETED
+                )
 
             # Step 11: Check for after_create_cmd_hook
             if (
@@ -2120,7 +2124,9 @@ class DefaultDeviceService(DeviceService):
                 logger.info(
                     f"[update_device] done: device_uuid={device_uuid} status={final_status}"
                 )
-                return device_record_to_response(updated_record)
+                return device_record_to_response(
+                    updated_record, DeviceOperationOutcome.COMPLETED
+                )
 
             # No-hook fast path: set ACTIVE immediately
             repo.update_device(
@@ -2149,7 +2155,9 @@ class DefaultDeviceService(DeviceService):
             logger.info(
                 f"[update_device] done: device_uuid={device_uuid} status={final_status}"
             )
-            return device_record_to_response(updated_record)
+            return device_record_to_response(
+                updated_record, DeviceOperationOutcome.COMPLETED
+            )
 
     async def destroy_device_by_uuid(
         self,

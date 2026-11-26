@@ -224,21 +224,22 @@ BCS 注册及 Card 管理接口使用 `/api/v1/collaboration/a2a/` 前缀，由 
 
 | 操作 | 接口 | 请求 |
 | --- | --- | --- |
-| 注册 | POST /api/v1/collaboration/a2a/agents | owners、可选 summary，以及 agent_card_url 或 agent_card 二选一；Provider 从管理 token 确定 |
+| 注册 | POST /api/v1/collaboration/a2a/agents | owners、可选 summary/agent_id，以及 agent_card_url 或 agent_card 二选一；Provider 从管理 token 确定 |
 | 找回 Bot ID | GET /api/v1/collaboration/a2a/agents?provider_bot_ref=... | token 所属 Provider 下精确匹配平台稳定键 provider_bot_ref，返回 items（0 或 1 项） |
 | 查询 Card | GET /api/v1/collaboration/a2a/agents/{bot_id}/agent-card | 路径：注册返回的 bot_id |
-| 更新 Card | PUT /api/v1/collaboration/a2a/agents/{bot_id}/agent-card | body：完整 Card 来源二选一和/或 visibility；不重复传 bot_id，不传 expected_revision |
+| 更新 Card | PUT /api/v1/collaboration/a2a/agents/{bot_id}/agent-card | body：完整 Card 来源二选一和/或 visibility/agent_id；不重复传 bot_id，不传 expected_revision |
+| 修改管理元数据 | PATCH /api/v1/collaboration/a2a/agents/{bot_id}/agent-card/metadata | catalog_labels、status、visibility、user_visibility 可选；省略保持原值，显式值按整值替换 |
 | 刷新 Card | POST /api/v1/collaboration/a2a/agents/{bot_id}/agent-card:refresh | 空 body 或 {}；要求已有 URL 来源 |
 | 兼容 Provider-name 注册 | POST /api/v1/collaboration/a2a/providers/{provider_name}/bots | provider_bot_ref、owners、可选 summary，以及 agent_card_url 或 agent_card 二选一；返回包含 bot_runtime_token 的原注册结果，包在 v1 data 中 |
 | 调用（旧入口） | POST /a2a/providers/{provider_name}/bots/{provider_bot_ref}/chat-async | 与第 6 节聊天请求相同 |
 | 查询运行（旧入口） | GET /a2a/chat/runs/{run_id} | 支持原运行查询的等待参数 |
 | 取消运行（旧入口） | POST /a2a/chat/runs/{run_id}/cancel | 无业务请求体 |
 
-provider_name 使用小写 ASCII 字母开头的 1～64 位字母、数字、连字符或下划线。agent_name 从 Card.name 获取，允许中文，长度 2～64 个 Unicode 字符，不允许首尾空白或控制字符，区分大小写。公共注册、找回和 Card 管理统一返回 provider_name、provider_bot_ref、agent_name、bot_id、agent_card_url、agent_card，不返回运行凭据；管理请求不传 provider_name 或 bot_name。Card 业务字段和旧入口错误定义见 [v0.1 管理合同](bcn-provider-agent-card-api-v0.1.zh-CN.md)。上表旧入口聊天调用以 provider_bot_ref 精确定位，不使用 Card.name。
+provider_name 使用小写 ASCII 字母开头的 1～64 位字母、数字、连字符或下划线。agent_name 从 Card.name 获取，允许中文，长度 2～64 个 Unicode 字符，不允许首尾空白或控制字符，区分大小写。公共注册、找回和 Card 管理统一返回 provider_name、provider_bot_ref、agent_name、bot_id、agent_id、agent_card_url、agent_card、catalog_labels、visibility、status、user_visibility，不返回运行凭据；管理请求不传 provider_name 或 bot_name。Card 业务字段和旧入口错误定义见 [v0.1 管理合同](bcn-provider-agent-card-api-v0.1.zh-CN.md)。上表旧入口聊天调用以 provider_bot_ref 精确定位，不使用 Card.name。
 
 取消是异步流程：请求后继续查询运行，直到 state 为 cancelled 或其他终态；不能把一次取消响应中的 cancelled=false 当作远端拒绝的充分依据。当前注册适用于 StaticBearer Provider；AgentPass 身份映射仍使用原身份感知注册入口。
 
-显式更新、刷新和注册均原子保存 Card 与 Bot 名称；Card.name 允许重复，Provider/ref 重复注册返回 409。旧 Bot 名称不保留占位，改名和软删除后可复用；改名后管理查询/更新/刷新继续用原 bot_id；Provider chat 调用使用稳定 provider_bot_ref，已有运行仍用 run_id。
+显式更新、刷新和注册均原子保存 Card 与 Bot 名称，并按既有异步机制同步 Fuse 投影；Fuse 标签包含 `status`，不包含 `agent_id`。Card.name 允许重复，Provider/ref 重复注册返回 409；补填或替换非空 AgentId 冲突返回 `AGENT_IDENTITY_CONFLICT`。旧 Bot 名称不保留占位，改名和软删除后可复用；改名后管理查询/更新/刷新继续用原 bot_id；Provider chat 调用使用稳定 provider_bot_ref，已有运行仍用 run_id。
 
 
 ### 4.1 兼容 ID 入口：Provider Admin 注册
@@ -730,9 +731,12 @@ Agent 若通过 SOFARPC Triple 暴露服务，需要与上述标准 protobuf 服
 
 纯文本 Agent 可以跳过本节。扩展必须先在 Card 声明并通过 A2A-Extensions 协商；不兼容的 required 扩展会拒绝接入，未知可选扩展不会被当作 BCS 工具事件解释。
 
-### 8.1 BCS 工具观察扩展 v1
+### 8.1 BCS 工具观察扩展（v1 / v2）
 
-标识及完整约定：[BCS tools v1](specs/a2a/extensions/tools/v1.md)。这是 BCS 自有的版本化 A2A 扩展，不是 A2A 核心定义的 toolcall 事件，也不使用 Gemini CLI RFC 格式。
+标识及完整约定：[BCS tools v1](specs/a2a/extensions/tools/v1.md)、[BCS tools v2](specs/a2a/extensions/tools/v2.md)。这是 BCS 自有的版本化 A2A 扩展，不是 A2A 核心定义的 toolcall 事件，也不使用 Gemini CLI RFC 格式。
+
+- `v1` URI：`https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/tools/v1.md`（使用 `Message.metadata[URI] = {"version":"1"}` 标记，`start` 必填 `args`，`result` 必填 `isError` 与 `result`）
+- `v2` URI：`https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/tools/v2.md`（使用 `Message.extensions` 数组标记 URI，`args`、`isError`、`result` 均按需可选，缺失时不伪造，来源信息放在 `Part.metadata`）
 
 Card 增加以下 `capabilities.extensions` 数组项：
 
@@ -899,7 +903,7 @@ Agent 接受请求后，尽早输出含有效 id 的 Task，再继续长时间�
 
 - [A2A 1.0.1 协议规范](https://a2a-protocol.org/v1.0.1/specification/)：标准对象与绑定；BCN 仅实现本文列出的子集。
 - [Provider 管理注册约定](specs/a2a/provider-admin-registration-v1.md)、[最小 Card 注册与刷新约定](specs/a2a/minimal-card-registration-v1.md)。
-- [BCS 工具观察扩展 v1](specs/a2a/extensions/tools/v1.md)、[Structured Input exec profile v1](specs/a2a/structured-input-exec/v1.md)。
+- [BCS 工具观察扩展 v1](specs/a2a/extensions/tools/v1.md)、[BCS 工具观察扩展 v2](specs/a2a/extensions/tools/v2.md)、[Structured Input exec profile v1](specs/a2a/structured-input-exec/v1.md)。
 - BCN 实现合同：[Provider HTTP DTO](../apps/bcs/crates/contracts/bcs-protocol/src/http/provider.rs)、[聊天运行 HTTP DTO](../apps/bcs/crates/contracts/bcs-protocol/src/http/chat_run.rs)。
 - 当前 A2A 下行绑定与文本规则：[REST client](../apps/bcs/crates/external-clients/bcs-a2a-http/src/client.rs)、[gRPC client](../apps/bcs/crates/external-clients/bcs-a2a-http/src/grpc_client.rs)、[Artifact 文本转换](../apps/bcs/crates/external-clients/bcs-a2a-http/src/text.rs)。
 

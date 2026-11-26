@@ -32,7 +32,7 @@ fn key_names_match_the_catalogue() {
     assert_eq!(l.ckpt(&sid).unwrap(), "bcn:v1:c01:main:s0042:ckpt:s0042.7f3a9c");
     assert_eq!(l.spec(&sid).unwrap(), "bcn:v1:c01:main:s0042:spec:s0042.7f3a9c");
     assert_eq!(l.ev(&sid).unwrap(), "bcn:v1:c01:main:s0042:ev:s0042.7f3a9c");
-    assert_eq!(l.tasks(&sid).unwrap(), "bcn:v1:c01:main:s0042:tasks:s0042.7f3a9c");
+    assert_eq!(l.session_tasks(&sid).unwrap(), "bcn:v1:c01:main:s0042:tasks:s0042.7f3a9c");
     assert_eq!(
         l.task(&Tid("s0042.7f3a9c.b21e".into())).unwrap(),
         "bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e"

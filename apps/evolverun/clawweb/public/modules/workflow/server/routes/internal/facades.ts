@@ -14,7 +14,7 @@ export function createInternalFacadesRouter(facadeRepo: FacadeBindingRepository 
     const { command, workflowId } = req.body as { command?: string; workflowId?: string };
     apiLog("WRITE", "/facades", { command, workflowId });
     if (!facadeRepo) {
-      apiLog("WRITE", "/facades", { command, workflowId, status: 503, error: "Database not configured" });
+      apiLog("WRITE", "/facades", { command, workflowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -42,7 +42,7 @@ export function createInternalFacadesRouter(facadeRepo: FacadeBindingRepository 
       res.json({ success: true, data: row });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("WRITE", "/facades", { command, workflowId, status: 500, error: msg });
+      apiLog("WRITE", "/facades", { command, workflowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -52,7 +52,7 @@ export function createInternalFacadesRouter(facadeRepo: FacadeBindingRepository 
     const command = req.params.command;
     apiLog("DELETE", `/facades/${command}`, { command });
     if (!facadeRepo) {
-      apiLog("DELETE", `/facades/${command}`, { command, status: 503, error: "Database not configured" });
+      apiLog("DELETE", `/facades/${command}`, { command, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -67,7 +67,7 @@ export function createInternalFacadesRouter(facadeRepo: FacadeBindingRepository 
       res.json({ success: true, data: { affected: true } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("DELETE", `/facades/${command}`, { command, status: 500, error: msg });
+      apiLog("DELETE", `/facades/${command}`, { command, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));
@@ -77,7 +77,7 @@ export function createInternalFacadesRouter(facadeRepo: FacadeBindingRepository 
     const workflowId = req.params.workflowId;
     apiLog("DELETE", `/facades/by-workflow/${workflowId}`, { workflowId });
     if (!facadeRepo) {
-      apiLog("DELETE", `/facades/by-workflow/${workflowId}`, { workflowId, status: 503, error: "Database not configured" });
+      apiLog("DELETE", `/facades/by-workflow/${workflowId}`, { workflowId, status: 503, error: "Database not configured" }, undefined, res);
       res.status(503).json({ success: false, error: "Service Unavailable", message: "Database not configured" });
       return;
     }
@@ -87,7 +87,7 @@ export function createInternalFacadesRouter(facadeRepo: FacadeBindingRepository 
       res.json({ success: true, data: { deleted: affectedRows } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      apiLog("DELETE", `/facades/by-workflow/${workflowId}`, { workflowId, status: 500, error: msg });
+      apiLog("DELETE", `/facades/by-workflow/${workflowId}`, { workflowId, status: 500, error: msg }, error, res);
       res.status(500).json({ success: false, error: "Internal Server Error", message: msg });
     }
   }));

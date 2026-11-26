@@ -13,6 +13,8 @@ use bcs_service_api::{
 };
 use std::sync::Arc;
 
+mod error_message;
+
 pub struct A2aApiService {
     management: Arc<dyn A2aBotManagementService>,
 }
@@ -47,23 +49,30 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 pub(crate) fn failure(error: ServiceError) -> ApplicationError {
+    // Preserve typed diagnostics in the failure-only stream before the public
+    // facade selects allowlisted public diagnostics for its response.
+    if let ServiceError::A2aManagement(detail) = &error {
+        let code = serde_json::to_value(detail.code).unwrap_or_default();
+        bcs_observability::business_warning::warn_current(
+            code.as_str().unwrap_or("INTERNAL_ERROR"), &detail.field, detail.reason);
+    }
     match error {
         ServiceError::A2aManagement(error) => {
             let code = serde_json::to_value(error.code)
                 .ok()
                 .and_then(|v| v.as_str().map(str::to_owned))
                 .unwrap_or_else(|| "INTERNAL_ERROR".into());
-            let message = "A2A management request failed";
+            let message = error_message::public_message(&error);
             match error.code {
                 Code::Unauthenticated => ApplicationError::Unauthenticated,
                 Code::PermissionDenied => {
-                    ApplicationError::forbidden_code(code, "Provider access denied")
+                    ApplicationError::forbidden_code(code, message)
                 }
-                Code::BotNotFound => ApplicationError::not_found(code, "Agent not found"),
-                Code::InvalidRequest if error.field.starts_with("catalog_labels") => ApplicationError::invalid(code, format!("{}: {}",error.field,error.reason)),
-                Code::InvalidRequest => ApplicationError::invalid(code, "Invalid A2A request"),
+                Code::BotNotFound => ApplicationError::not_found(code, message),
+                Code::InvalidRequest => ApplicationError::invalid(code, message),
                 Code::ProviderBotRefConflict
                 | Code::BotNameConflict
+                | Code::AgentIdentityConflict
                 | Code::SourceAgentConflict
                 | Code::SourceAgentChangeNotAllowed
                 | Code::TargetChanged
@@ -71,17 +80,17 @@ pub(crate) fn failure(error: ServiceError) -> ApplicationError {
                 | Code::RefreshSuperseded => ApplicationError::conflict(code, message),
                 Code::RequestTooLarge | Code::CardTooLarge => ApplicationError::PayloadTooLarge {
                     code,
-                    message: message.into(),
+                    message,
                 },
                 Code::RateLimited => ApplicationError::QuotaExceeded {
                     code,
-                    message: message.into(),
+                    message,
                 },
                 Code::CardFetchFailed | Code::CardFetchTimeout => {
-                    ApplicationError::bad_gateway(code, "AgentCard fetch failed")
+                    ApplicationError::bad_gateway(code, message)
                 }
                 Code::ServiceUnavailable => {
-                    ApplicationError::unavailable(code, "A2A service unavailable")
+                    ApplicationError::unavailable(code, message)
                 }
                 Code::InternalError => ApplicationError::internal("A2A management failed"),
                 _ => ApplicationError::unprocessable(code, message),
@@ -89,20 +98,20 @@ pub(crate) fn failure(error: ServiceError) -> ApplicationError {
         }
         ServiceError::Unauthorized(_) => ApplicationError::Unauthenticated,
         ServiceError::Forbidden(_) | ServiceError::BotHidden(_) | ServiceError::NotFriends(_) => {
-            ApplicationError::forbidden_code("PERMISSION_DENIED", "A2A access denied")
+            ApplicationError::forbidden_code("PERMISSION_DENIED", "Provider access denied; verify Provider-admin credentials and target ownership")
         }
         ServiceError::BotNotFound(_)
         | ServiceError::BotNotRegistered(_)
         | ServiceError::ProviderNotFound(_)
         | ServiceError::BotNotConnected(_) => {
-            ApplicationError::not_found("BOT_NOT_FOUND", "Agent not found")
+            ApplicationError::not_found("BOT_NOT_FOUND", "Agent not found or unavailable to this Provider")
         }
         ServiceError::Conflict(_) => ApplicationError::conflict(
             "PROVIDER_BOT_REF_CONFLICT",
-            "A2A registration already exists",
+            "provider_bot_ref is already registered; find the existing Agent before updating it",
         ),
         ServiceError::InvalidOperation { .. } => {
-            ApplicationError::invalid("INVALID_REQUEST", "Invalid A2A request")
+            ApplicationError::invalid("INVALID_REQUEST", "Invalid AgentCard management request; check required fields and input formats")
         }
         _ => ApplicationError::internal("A2A operation failed"),
     }
@@ -122,6 +131,7 @@ impl A2aService for A2aApiService {
                 owners: command.owners,
                 summary: command.summary,
                 visibility: command.visibility,
+                agent_id: command.agent_id,
                 source: required_source(command.source)?,
                 now_ms: now_ms(),
             })
@@ -149,6 +159,20 @@ impl A2aService for A2aApiService {
             .update_agent(bcs_service_api::application::a2a_bot::UpdateAgentCommand {
                 provider_admin_token:command.token,bot_id:command.bot_id,
                 source:source(command.source)?,visibility:command.visibility,catalog_labels:command.catalog_labels,
+                agent_id:command.agent_id,
+            })
+            .await
+            .map_err(failure)
+    }
+    async fn update_metadata(&self, command: UpdateA2aAgentMetadata) -> Result<ManagedA2aCard, ApplicationError> {
+        self.management
+            .update_agent_metadata(bcs_service_api::application::a2a_bot::UpdateAgentCardMetadataCommand {
+                provider_admin_token: command.token,
+                bot_id: command.bot_id,
+                catalog_labels: command.catalog_labels,
+                status: command.status,
+                visibility: command.visibility,
+                user_visibility: command.user_visibility,
             })
             .await
             .map_err(failure)
@@ -193,6 +217,7 @@ mod tests {
             Code::BotNotFound,
             Code::InvalidRequest,
             Code::ProviderBotRefConflict,
+            Code::AgentIdentityConflict,
             Code::BotNameConflict,
             Code::SourceAgentConflict,
             Code::SourceAgentChangeNotAllowed,

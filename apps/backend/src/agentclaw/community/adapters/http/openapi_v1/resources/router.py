@@ -649,8 +649,8 @@ async def _read_file_or_404(
         # promoted files, so that loudness is load-bearing and must not be
         # changed at the device. It is only *here* that a 404 stops being a
         # failure and becomes an ordinary answer: this route documents 404 for a
-        # path that is not there. Every other status stays unmapped and surfaces
-        # as a 500, which is what an upstream fault is.
+        # path that is not there. Every other status surfaces as the mapped
+        # upstream 502, which is what an upstream fault is.
         if exc.response.status_code != 404:
             raise
         raise HTTPException(status_code=404, detail="Resource not found") from exc
@@ -773,7 +773,7 @@ async def download_directory(
         # rule as there — only *here* does that 404 stop being an upstream fault
         # and become this route's documented "not found"; a missing directory is
         # an ordinary answer, an empty walk is not. Every other status still
-        # surfaces as a 500, which is what an upstream fault is.
+        # surfaces as the mapped upstream 502, which is what an upstream fault is.
         if exc.response.status_code != 404:
             raise
         raise HTTPException(status_code=404, detail="Resource not found") from exc

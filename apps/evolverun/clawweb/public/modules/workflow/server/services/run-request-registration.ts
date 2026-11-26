@@ -1,3 +1,4 @@
+import { normalizeFlowRunLineage, runLineageMatches } from './flow-run-lineage.js';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { RepairBatchError } from '../contracts/repair-batch.js';
 import type { RepairTrial } from '../contracts/repair-trial.js';
@@ -5,6 +6,7 @@ import { RepairBatchRepository } from '../repositories/repair-batch-repository.j
 import { RepairReleaseRepository } from '../repositories/repair-release-repository.js';
 /** The normal run INSERT owns both request idempotence and purpose registration. */
 export async function registerRunRequest(db: IDatabase, body: Record<string, unknown>, insert: (tx: IDatabase) => Promise<void>): Promise<'created' | 'existing' | null> {
+  normalizeFlowRunLineage({ parentFlowId: body.parent_flow_id, rootFlowId: body.root_flow_id });
   if (!body.run_request_id) {
     const legacy = await registerSavedRun(db, body, insert);
     if (legacy) return legacy;
@@ -32,6 +34,7 @@ export async function registerRunRequest(db: IDatabase, body: Record<string, unk
     const existing = await tx.query<{ flow_id: string }>('SELECT flow_id FROM flow_runs WHERE flow_id = ?', [body.flow_id]);
     if (existing.length) {
       if (!marker.length || JSON.parse(marker[0].body_json).trialId !== request.id || !child && request.flowId !== body.flow_id) denied();
+      if (!await runLineageMatches(tx, String(body.flow_id), body)) denied();
       return 'existing';
     }
     if (child) {
@@ -82,6 +85,7 @@ async function registerSavedRun(db: IDatabase, body: Record<string, unknown>, in
     const current = JSON.parse(latest.body_json) as RepairTrial;
     const existing = await tx.query<{ body_json: string }>("SELECT body_json FROM workflow_repair_release_records WHERE record_id = ? AND record_kind = 'trial_run'", [body.flow_id]);
     if (existing.length) {
+      if (!await runLineageMatches(tx, String(body.flow_id), body)) throw new RepairBatchError('STATE_CONFLICT', 'Flow run lineage conflicts');
       if (JSON.parse(existing[0].body_json).trialId !== id) throw new RepairBatchError('STATE_CONFLICT', '运行身份已被占用');
       return 'existing';
     }

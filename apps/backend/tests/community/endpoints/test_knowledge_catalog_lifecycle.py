@@ -41,16 +41,20 @@ from tests.community.knowledge_management.http_contract import detail
 
 
 class CatalogWire(httpx.MockTransport):
-    def __init__(self, rows):
+    def __init__(self, rows, *, detail_mode=False):
         self.rows, self.calls = rows, []
+        self.detail_mode = detail_mode
         super().__init__(self.answer)
 
     def answer(self, request):
         self.calls.append(request)
         assert request.method == "GET"
-        assert request.url.path == (
-            "/api/v1/knowledge/integrations/tc/spaces/1/knowledge-bases"
-        )
+        prefix = "/api/v1/knowledge/integrations/tc/spaces/1/knowledge-bases"
+        if self.detail_mode:
+            assert request.url.path == prefix + "/kb/catalog-detail"
+            assert dict(request.url.params) == {"actor_staff_no": ACTOR}
+            return httpx.Response(200, json=self.rows[0])
+        assert request.url.path == prefix
         assert dict(request.url.params) == {
             "actor_staff_no": ACTOR,
             "cursor": "previous-page",
@@ -69,7 +73,7 @@ class AcceptingMembershipSink:
         pass
 
 
-def catalog_seed(lifecycle, *, enabled=True):
+def catalog_seed(lifecycle, *, enabled=True, detail_mode=False):
     def seed(world):
         world.injector.binder.bind(
             KnowledgeIntegrationConfig,
@@ -106,9 +110,16 @@ def catalog_seed(lifecycle, *, enabled=True):
                 detail(
                     kb="read-only",
                     can_manage=False,
-                    **(lifecycle | {"can_cancel_delete": False} if lifecycle else {}),
+                    **(
+                        lifecycle
+                        | {"can_cancel_delete": False}
+                        | ({"can_delete": False} if "can_delete" in lifecycle else {})
+                        if lifecycle
+                        else {}
+                    ),
                 ),
-            ]
+            ],
+            detail_mode=detail_mode,
         )
         world.injector.binder.bind(CatalogWire, to=wire)
 
@@ -141,13 +152,23 @@ def lifecycle_page(response, world):
 
 
 for scenario, lifecycle in [
-    ("active", {"status": "active", "delete_at_ms": None, "can_cancel_delete": False}),
+    (
+        "active",
+        {
+            "status": "active",
+            "delete_at_ms": None,
+            "can_cancel_delete": False,
+            "can_delete": True,
+        },
+    ),
+    ("manager_not_owner", {"can_delete": False}),
     (
         "pending_cancellable",
         {
             "status": "pending_delete",
             "delete_at_ms": 1795000000123,
             "can_cancel_delete": True,
+            "can_delete": False,
         },
     ),
     (
@@ -156,6 +177,7 @@ for scenario, lifecycle in [
             "status": "pending_delete",
             "delete_at_ms": 1795000000123,
             "can_cancel_delete": False,
+            "can_delete": False,
         },
     ),
     ("legacy_omitted", {}),
@@ -197,3 +219,50 @@ def closed_profile(response, world):
 )
 def default_sync_profile_remains_closed():
     pass
+
+
+def detail_lifecycle(response, world):
+    _assert_real_composition(response, world)
+    wire = world.get(CatalogWire)
+    assert len(wire.calls) == 1
+    body = response.json()
+    assert body == {**wire.rows[0], "space_name": body["space_name"]}
+
+
+for scenario, metadata in [
+    (
+        "configured_grace",
+        {
+            "status": "active",
+            "delete_at_ms": None,
+            "can_cancel_delete": False,
+            "can_delete": True,
+            "deletion_grace_period_seconds": 60,
+            "delete_preview_at_ms": 1795000060123,
+        },
+    ),
+    (
+        "pending",
+        {
+            "status": "pending_delete",
+            "delete_at_ms": 1795000000123,
+            "can_cancel_delete": True,
+            "can_delete": False,
+            "deletion_grace_period_seconds": 60,
+            "delete_preview_at_ms": None,
+        },
+    ),
+    ("legacy_omitted", {}),
+]:
+    endpoint_test(
+        method="GET",
+        path="/api/knowledge/spaces/{space_id}/knowledge-bases/{kb_id}/catalog-detail",
+        scenario="catalog_detail_deletion_" + scenario,
+        input=CaseInput(
+            path_params={"space_id": 1, "kb_id": "kb"},
+            headers={"x-user-id": ACTOR},
+        ),
+        seed=catalog_seed(metadata, detail_mode=True),
+        expect=ExpectSuccess(status=200),
+        extra_assertions=(detail_lifecycle,),
+    )(lambda: None)

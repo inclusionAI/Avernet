@@ -10,6 +10,7 @@ from threading import Lock
 from uuid import uuid4
 
 search_transport = ContextVar("search_transport", default="")
+search_load_test: ContextVar[bool | None] = ContextVar("search_load_test", default=None)
 _deadline = ContextVar("search_deadline", default=float("inf"))
 _request_id = ContextVar("search_request_id", default="")
 logger = logging.getLogger("search_core.events")
@@ -61,6 +62,19 @@ def failure_reason(error):
     return "dependency_error"
 
 
+def _detail_line(record):
+    if "request_body" not in record:
+        return json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+    # Legacy monitors extract compact '"field":' delimiters from the entire line.
+    # JSON whitespace inside the business body keeps nested keys out of those matches.
+    envelope = {key: value for key, value in record.items() if key != "request_body"}
+    prefix = json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
+    body = json.dumps(
+        record["request_body"], ensure_ascii=False, separators=(",", " : ")
+    )
+    return prefix[:-1] + ',"request_body":' + body + "}"
+
+
 class EventSummaries:
     """Every event is counted; emit first sample, then periodic count summaries.
 
@@ -91,6 +105,12 @@ class EventSummaries:
             "result_cache": stages.get("result_cache_read", {}).get("cache", "skipped"),
             "stage_ms": {name: stage["elapsed_ms"] for name, stage in stages.items()},
         }
+        record.update(summary.get("detail", {}))
+        for key in ("effective_limit", "config_version"):
+            if key in summary:
+                record[key] = summary[key]
+        if "retrieval" in summary:
+            record["effective_retrieval"] = summary["retrieval"]
         if "card_fetch_details" in summary:
             record["card_fetch_details"] = summary["card_fetch_details"]
         record["results"] = results
@@ -197,7 +217,7 @@ class EventSummaries:
                 record = self._steps.get_nowait()
             except Empty:
                 break
-            logger.info(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+            logger.info(_detail_line(record))
 
 
 events = EventSummaries()

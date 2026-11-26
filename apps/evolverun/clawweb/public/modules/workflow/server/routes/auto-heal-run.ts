@@ -1,3 +1,4 @@
+import { captureApiError, errorStack } from "./error-log-format.js";
 /** POST /run only: shared by the public and OCB hosts. See docs/auto-heal-source-run.md. */
 import { Router } from "express";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
@@ -57,6 +58,7 @@ export function createAutoHealRunRouter(deps: AutoHealRunRouterDependencies): Ro
       res.json(result);
     } catch (error) {
       const [status, label] = error instanceof AutoHealRunError ? failures[error.code] : [500, "Internal Server Error"];
+      console[status >= 500 ? "error" : "warn"]("[auto-heal] run failed:", status >= 500 ? captureApiError(res, error) : errorStack(error));
       res.status(status).json({ ok: false, error: label,
         message: error instanceof Error ? error.message : "Auto-heal run failed",
         ...(error instanceof AutoHealRunError && error.code === "token_expired" ? { tokenExpired: true } : {}) });

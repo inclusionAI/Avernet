@@ -3,6 +3,9 @@ use harness::state::*;
 
 fn commit_script() -> (Script, CommitRequest) {
     let request = CommitRequest {
+        purpose: CommitPurpose::Ordinary {
+            control_revision: 0,
+        },
         owner: owner(),
         expected_commit_seq: CommitSeq(7),
         commit_id: proof().commit_id,
@@ -11,9 +14,11 @@ fn commit_script() -> (Script, CommitRequest) {
     };
     let mut competing = request.clone();
     competing.commit_id.0.push_str("-competing");
+    competing.candidate.outbox.as_mut().unwrap().commit_id = competing.commit_id.clone();
     let mut unsealed = request.clone();
     unsealed.owner.owner.epoch = WorkerEpoch(15);
     unsealed.commit_id.0.push_str("-unsealed");
+    unsealed.candidate.outbox.as_mut().unwrap().commit_id = unsealed.commit_id.clone();
     let script = Script::default()
         .expect(
             "SessionStorePort::commit",
@@ -191,7 +196,12 @@ async fn membership_checks_lease_identity_and_drain_transition() -> ContractResu
     let script = Script::default()
         .expect(
             "MembershipPort::register",
-            (instance(), RuntimeRole::Worker, String::from("http://worker.example.test:8080"), Duration::from_secs(60)),
+            (
+                instance(),
+                RuntimeRole::Worker,
+                String::from("http://worker.example.test:8080"),
+                Duration::from_secs(60),
+            ),
             ok(lease.clone()),
         )
         .expect(

@@ -5,8 +5,34 @@
 //! ```
 //!
 //! A command entry is acknowledged only after the claim decision (claimed, or
-//! nothing to do). The command stream is a hint: a repeated or late entry is
-//! harmless, because the claim decides from the dispatch document.
+//! nothing to do) (B2). The command stream is a hint: a repeated or late entry is
+//! harmless, because the claim decides from the dispatch document (B19).
+//!
+//! Where this sits: the Worker writes a `disp` document and appends a hint to
+//! the command stream. This engine reads hints, claims the dispatch, and hands
+//! each held call to one actor (`crate::call::Call`), a spawned task that does
+//! all the work with the agent. The engine itself never talks to the agent.
+//!
+//! Glossary:
+//! - hint: a command-stream entry naming one dispatch (`did`); "go look at
+//!   `disp:<did>`", never an instruction.
+//! - ack: "the claim decision for this hint is made", not "the call is done".
+//!   A hint that is not acked stays in the consumer group's pending list and
+//!   another Connector (or this one) takes it over when it has been idle long
+//!   enough (idle takeover).
+//! - actor: the spawned task that runs one held call for one holder
+//!   generation (holder epoch).
+//! - poke: wake an actor so it re-reads its dispatch at once instead of at
+//!   its next tick.
+//! - resume: re-claim a call this process already holds under a new holder
+//!   generation, because no actor runs it any more.
+//! - orphan: a held call whose actor is gone and whose resume has not
+//!   succeeded yet; retried on every main-loop pass.
+//! - lease: this process's membership registration (who is alive). With the
+//!   default stub membership there is none.
+//!
+//! Locks: `actors`, `lease` and `orphans` are plain `std` mutexes held only for
+//! a map/vector operation, never across an `.await`.
 
 use crate::call::{Call, CallStatus};
 use crate::config::{Backoff, ConnectorConfig, ConnectorPorts};
@@ -29,32 +55,72 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
+/// The engine's record of one running (or just finished) actor.
 struct Actor {
+    /// The holder `{instance, epoch}` the actor's claim created. Used to
+    /// resume the call under a new generation if the actor dies, and to name
+    /// the call on drain.
     holder: Holder,
+    /// Flags the actor sets: `done` (returned normally) and `pending_effect`
+    /// (something unsettled). Read by `reap` and `snapshot`.
     status: Arc<CallStatus>,
+    /// Shared with the actor: `notify_one` here makes the actor tick at once.
     poke: Arc<Notify>,
+    /// The spawned task. `is_finished()` is true once it returned, panicked
+    /// or was aborted; `abort()` cancels it at its next `.await`.
     task: JoinHandle<()>,
 }
 
+/// State shared by every clone of the engine and by the spawned actors.
 struct Inner {
     config: Arc<ConnectorConfig>,
     ports: ConnectorPorts,
+    /// One entry per held call of this process, keyed by dispatch id. An entry
+    /// may belong to a finished task until the next `reap` removes it, so
+    /// "live" always also checks `task.is_finished()`.
     actors: Mutex<HashMap<Did, Actor>>,
+    /// This process's membership registration. `Some` once `register`
+    /// succeeded and never cleared; `None` when it never registered (stub
+    /// membership, or a drain that came before the registration).
     lease: Mutex<Option<MembershipLease>>,
     /// Held calls whose actor died and whose resume has not succeeded yet.
+    /// The `Holder` is the generation to resume from. Retried by `reap`,
+    /// counted by `snapshot`, reported as leftovers by `drain`.
     orphans: Mutex<Vec<(Did, Holder)>>,
+    /// Set by `drain`, never cleared: no new claims from now on.
     draining: AtomicBool,
+    /// Registered and the command feed is open; cleared when the main loop
+    /// returns. `snapshot` reports ready only while not draining as well.
     ready: AtomicBool,
     /// The main loop is running (it may be in the middle of a claim).
     looping: AtomicBool,
+    /// Counter that makes every claim request id of this process unique (see
+    /// `claim_request_id`). `Relaxed` is enough: only uniqueness matters, no
+    /// other memory is ordered by it.
     claims: AtomicU64,
+    /// "Something changed": an actor finished, the main loop exited, or a
+    /// drain started. Sent with `notify_waiters`, which wakes only tasks
+    /// waiting at that moment and stores no permit, so a wake-up can be
+    /// missed. Its waiters (the main loop at capacity, `drain`) therefore
+    /// also wait with a timeout.
     wake: Notify,
     /// Interrupts the main loop's wait for hints when a drain starts.
+    /// Sent only by `drain`, with `notify_one`: if nobody waits yet, one
+    /// permit is stored and the next wait (in the main loop or in
+    /// `register`'s retry backoff) returns at once.
     stop: Notify,
+    /// Serializes the end of `drain` (stop the leftover actors, retire). A
+    /// second, concurrent drain must not retire while the first is still
+    /// waiting for the actors it aborted: those may still act until then.
+    stopping: tokio::sync::Mutex<()>,
 }
 
 /// One Connector process: reads the command feed, claims dispatches and runs
 /// one actor per held call.
+///
+/// Cloning is cheap and every clone is the same engine (shared `Inner`): one
+/// clone runs `run`, another serves `snapshot`/`drain` through
+/// `DistRuntimeControlPort`.
 #[derive(Clone)]
 pub struct ConnectorEngine {
     inner: Arc<Inner>,
@@ -67,6 +133,9 @@ fn failed(code: &str) -> RuntimeError {
 }
 
 impl ConnectorEngine {
+    /// Builds an engine that does nothing yet; `run` starts it. Refuses
+    /// (`connector_config_invalid`) a zero capacity, poll interval or minimum
+    /// backoff, each of which would make a loop spin or never claim.
     pub fn new(config: ConnectorConfig, ports: ConnectorPorts) -> Result<Self, RuntimeError> {
         if config.max_active_calls == 0 || config.poll_interval.is_zero() || config.backoff_min.is_zero() {
             return Err(failed("connector_config_invalid"));
@@ -84,12 +153,19 @@ impl ConnectorEngine {
                 claims: AtomicU64::new(0),
                 wake: Notify::new(),
                 stop: Notify::new(),
+                stopping: tokio::sync::Mutex::new(()),
             }),
         })
     }
 
     /// Runs until `drain` is called or the membership registration is lost.
-    /// Actors of held calls keep running after it returns.
+    /// Actors of held calls keep running after it returns (`drain` stops the
+    /// ones still running at the end of its grace period).
+    ///
+    /// `Ok` after a drain; `Err` when the start fails (registration refused or
+    /// not confirmed in time, command feed unavailable) or the registration is
+    /// lost later (`membership_lost`). On the way out it clears `ready` and
+    /// `looping` and wakes `drain`, which waits for `looping` to turn false.
     pub async fn run(&self) -> Result<(), RuntimeError> {
         self.inner.looping.store(true, Ordering::SeqCst);
         let result = self.run_loop().await;
@@ -99,9 +175,25 @@ impl ConnectorEngine {
         result
     }
 
+    /// The main loop. Start: register membership, open the command feed,
+    /// mark ready. Then each pass:
+    /// 1. stop if draining;
+    /// 2. renew the registration when `membership_renew` has passed; a
+    ///    definite loss ends the loop with `membership_lost`;
+    /// 3. `reap` finished and dead actors and retry orphans;
+    /// 4. at capacity, read no hints: wait for an actor to finish (or
+    ///    `receive_timeout`) and start over. Other Connectors read the hints
+    ///    meanwhile, so load spreads by who has room (pull-based);
+    /// 5. otherwise read up to `free` hints, interruptible by `stop`;
+    /// 6. handle each hint (claim, act, ack); on a read error, back off.
+    ///
+    /// A `?` here (register, open feed) returns the error from `run`: the
+    /// process does not claim anything then.
     async fn run_loop(&self) -> Result<(), RuntimeError> {
         let inner = &self.inner;
         let config = inner.config.clone();
+        // Returns `Ok` without a lease for the stub membership, and `Ok` when
+        // a drain started meanwhile (the draining check below then stops).
         self.register().await?;
         let mut feed = inner
             .ports
@@ -127,11 +219,18 @@ impl ConnectorEngine {
             }
             self.reap().await;
             let free = config.max_active_calls.saturating_sub(self.live());
+            // `let … else`: when `free` is zero (or does not fit a u32) the
+            // `else` block runs and must leave this pass with `continue`.
             let Some(free) = u32::try_from(free).ok().and_then(NonZeroU32::new) else {
                 // At capacity: read no hints, other Connectors take them.
+                // An actor that ends sends `wake`; the timeout covers a missed
+                // wake-up and keeps renewals and drain checks going.
                 let _ = tokio::time::timeout(config.receive_timeout, inner.wake.notified()).await;
                 continue;
             };
+            // `select!` runs both futures and drops the one that did not
+            // finish. When `stop` wins, the `receive` future is dropped
+            // mid-way and `continue` goes back to the draining check.
             // Dropping the wait is safe: the feed keeps its in-flight reads.
             let received = tokio::select! {
                 received = feed.receive(free, config.receive_timeout) => received,
@@ -139,10 +238,14 @@ impl ConnectorEngine {
             };
             match received {
                 Ok(deliveries) => {
+                    // A good read ends an outage: the next error starts again
+                    // from the shortest backoff.
                     backoff = Backoff::new(&config);
                     for delivery in deliveries {
                         if inner.draining.load(Ordering::SeqCst) {
                             // Not acked: another Connector takes it over.
+                            // The unhandled entries stay pending under this
+                            // consumer until their idle takeover.
                             break;
                         }
                         self.handle(feed.as_mut(), delivery).await;
@@ -152,7 +255,8 @@ impl ConnectorEngine {
                     tracing::warn!(?error, "command feed read failed");
                     // Only until the next renewal is due: a feed outage,
                     // even one whose reads fail slowly, must not let this
-                    // instance's registration expire.
+                    // instance's registration expire. The backoff still
+                    // doubles (200 ms up to 5 s by default) across errors.
                     let until_renewal = config.membership_renew.saturating_sub(renewed_at.elapsed());
                     backoff.wait_at_most(until_renewal).await;
                 }
@@ -161,6 +265,20 @@ impl ConnectorEngine {
     }
 
     /// The claim decision for one hint, then the ack.
+    ///
+    /// Claim → act → ack, in that order (B2):
+    /// - `Acquired`: this process now holds the call; start an actor.
+    /// - `OwnedByMe`: this process already holds it. Poke the live actor (the
+    ///   hint usually means a reply or a cancel was written); with no live
+    ///   actor, resume the call under a new generation instead.
+    /// - `HeldByOther`, `Ended`, `NotFound`: nothing to do here. A hint can
+    ///   land on a Connector that does not hold the call, because the
+    ///   consumer group hands each entry to whichever consumer reads first.
+    ///   The owner still sees the reply or cancel at its next tick (B14).
+    ///
+    /// Every `Ok` outcome is acked. An `Err` is not: the hint stays pending
+    /// and comes back through idle takeover, here or on another Connector.
+    /// A hint that fails every time is therefore retried forever.
     async fn handle(&self, feed: &mut dyn CommandFeedPort, delivery: CommandDelivery) {
         let inner = &self.inner;
         let did = delivery.did.clone();
@@ -185,11 +303,19 @@ impl ConnectorEngine {
                 return;
             }
         }
+        // A failed ack only means the hint comes back later; the claim
+        // decision is in the dispatch document, so handling it again is
+        // harmless (B19).
         if let Err(error) = feed.ack(&delivery).await {
             tracing::warn!(did = %did.0, ?error, "command ack failed; the hint will be redelivered");
         }
     }
 
+    /// A request id unique to one claim or resume attempt of this process:
+    /// `<node>:<incarnation>:<did>:<n>`, for example `c01-7:1794370950:d-42:17`,
+    /// where `n` counts the attempts of this process. It names the attempt
+    /// in the claim/resume request; the store in this repository does not
+    /// read it today.
     fn claim_request_id(&self, did: &Did) -> RequestId {
         let me = &self.inner.config.me;
         let n = self.inner.claims.fetch_add(1, Ordering::Relaxed);
@@ -197,6 +323,10 @@ impl ConnectorEngine {
     }
 
     /// Refreshes the actor of `did` now; `false` when no live actor runs it.
+    ///
+    /// `notify_one` stores one permit if the actor is busy, so several pokes
+    /// before it looks collapse into one extra tick. The caller resumes the
+    /// call when this returns `false`.
     fn poke(&self, did: &Did) -> bool {
         let actors = lock(&self.inner.actors);
         match actors.get(did) {
@@ -208,14 +338,29 @@ impl ConnectorEngine {
         }
     }
 
+    /// An actor for `did` exists and its task has not finished.
     fn running(&self, did: &Did) -> bool {
         lock(&self.inner.actors).get(did).is_some_and(|actor| !actor.task.is_finished())
     }
 
     /// Resumes a held call that has no actor. A failure is remembered and
     /// retried by the main loop, so the call is never silently left behind.
+    ///
+    /// `resume_owned` re-claims the call at holder epoch + 1, so any late
+    /// write of the old actor is fenced. Outcomes:
+    /// - `Acquired`: start an actor for the new generation;
+    /// - `OwnedByMe`: an earlier resume already landed (its answer was lost);
+    ///   remember that generation as an orphan, `reap` resumes it next pass;
+    /// - anything else (ended, missing, held by another instance): nothing
+    ///   left to do here;
+    /// - a permanent store error: give up, logged;
+    /// - any other error: remember `previous` as an orphan and retry.
     async fn resume(&self, did: Did, previous: Holder) {
         // Only after the old actor is gone: stop and join it first.
+        // `abort` only requests cancellation (at the task's next `.await`);
+        // awaiting the handle waits until the task is really gone, so the old
+        // actor cannot call the agent or append to the inbox after this.
+        // The `Err` the join returns for an aborted task is expected.
         let old = lock(&self.inner.actors).remove(&did);
         if let Some(old) = old {
             old.task.abort();
@@ -244,6 +389,8 @@ impl ConnectorEngine {
         }
     }
 
+    /// Starts the actor of a freshly claimed call (`held` proves the claim)
+    /// and records it in `actors`.
     async fn spawn(&self, held: Box<dyn HeldDispatchPort>) {
         let inner = self.inner.clone();
         let did = held.view().spec.did.clone();
@@ -266,6 +413,22 @@ impl ConnectorEngine {
             poke.clone(),
         );
         let wake = self.inner.clone();
+        // Checked under the `actors` lock, in the same critical section as
+        // the insert: `drain` sets `draining` before it collects the actors
+        // under this lock, so either it sees this actor and stops it, or
+        // this sees `draining` and starts nothing. A claim or resume that
+        // wins after the drain began therefore never runs here; its call
+        // stays held and is taken over once this instance is `Dead`, like
+        // the actors `drain` stops.
+        let mut actors = lock(&self.inner.actors);
+        if self.inner.draining.load(Ordering::SeqCst) {
+            tracing::info!(did = %did.0, "draining; the call is left held for another Connector");
+            return;
+        }
+        // The `wake` is sent inside the task, after `run` returned: it tells a
+        // main loop waiting at capacity, or a drain, that an actor ended. A
+        // task that is aborted or panics never reaches it; those waiters time
+        // out instead.
         let task = tokio::spawn(async move {
             call.run().await;
             wake.wake.notify_waiters();
@@ -276,13 +439,21 @@ impl ConnectorEngine {
             poke,
             task,
         };
+        actors.insert(did.clone(), actor);
+        drop(actors);
         // Whatever resume was still owed for this call is settled by this actor.
+        // (`retain` keeps the entries for which the test is true, i.e. it
+        // drops this call's orphan entries.)
         lock(&self.inner.orphans).retain(|(orphan, _)| orphan != &did);
-        lock(&self.inner.actors).insert(did, actor);
     }
 
     /// Forgets finished actors; one that died without finishing its run is
     /// resumed under a new holder generation.
+    ///
+    /// Runs on every main-loop pass. "Died" = the task finished but
+    /// `CallStatus.done` is false: it panicked or was aborted, so the call is
+    /// still held with nobody running it. Earlier failed resumes (`orphans`)
+    /// are retried in the same pass.
     async fn reap(&self) {
         let mut crashed = Vec::new();
         {
@@ -299,6 +470,7 @@ impl ConnectorEngine {
         }
         for (did, holder) in &crashed {
             tracing::error!(did = %did.0, "call actor died; resuming under a new generation");
+            // No effect: a leftover that only marks `holder` as used.
             let _ = holder;
         }
         // Earlier failed resumes are tried again together with the new ones.
@@ -314,6 +486,8 @@ impl ConnectorEngine {
         }
     }
 
+    /// Number of actors whose task has not finished: the calls that count
+    /// against `max_active_calls`. Orphans do not count here.
     fn live(&self) -> usize {
         lock(&self.inner.actors)
             .values()
@@ -331,6 +505,16 @@ impl ConnectorEngine {
     /// registration expire under running calls. The retries end with the
     /// registration's lifetime: an applied registration nobody renewed has
     /// expired by then and this incarnation cannot register again.
+    ///
+    /// Outcomes, in short:
+    /// - `Ok`, lease stored: registered (renewed at once if it took retries);
+    /// - `Ok`, no lease: stub membership (`need_contract_not_implemented`),
+    ///   or a drain started before the registration answered;
+    /// - `Err(membership_registration_refused)`: a permanent refusal;
+    /// - `Err(membership_lost)`: not confirmed within `membership_ttl`, or the
+    ///   catch-up renewal found it lost.
+    ///
+    /// A drain interrupts the retry wait through `stop`.
     async fn register(&self) -> Result<(), RuntimeError> {
         let inner = &self.inner;
         let config = &inner.config;
@@ -355,7 +539,10 @@ impl ConnectorEngine {
                 Ok(lease) => {
                     *lock(&inner.lease) = Some(lease.clone());
                     // A drain that arrived while this call was in flight saw
-                    // no lease to mark: mark it now.
+                    // no lease to mark: mark it now. Checked after the lease
+                    // is stored, so either `drain` sees the lease or this
+                    // check sees `draining`; the registration cannot miss
+                    // the mark.
                     if inner.draining.load(Ordering::SeqCst) {
                         if let Err(error) = inner.ports.membership.set_draining(&lease).await {
                             tracing::warn!(?error, "could not mark the registration as draining");
@@ -364,6 +551,8 @@ impl ConnectorEngine {
                     }
                     // A registration confirmed late keeps the lifetime of its
                     // first attempt: renew at once instead of a period later.
+                    // (An identical retry is idempotent and does not restart
+                    // the lifetime of an earlier attempt that landed.)
                     if retried && !self.renew().await {
                         return Err(failed("membership_lost"));
                     }
@@ -386,6 +575,8 @@ impl ConnectorEngine {
                     retried = true;
                 }
             }
+            // Retry wait; a drain's `stop` cuts it short so the draining
+            // check at the top of the loop returns promptly.
             tokio::select! {
                 () = backoff.wait() => {}
                 () = inner.stop.notified() => {}
@@ -395,6 +586,10 @@ impl ConnectorEngine {
 
     /// `false` when the registration is definitely lost: the process must
     /// stop claiming and restart under a new incarnation.
+    ///
+    /// `true` means "no reason to stop", not "renewed": it is also the answer
+    /// for a temporary error (the next renewal tries again) and when there is
+    /// no lease to renew (`None`: stub membership or never registered).
     async fn renew(&self) -> bool {
         let Some(lease) = lock(&self.inner.lease).clone() else {
             return true;
@@ -411,16 +606,37 @@ impl ConnectorEngine {
             }
         }
     }
+
+    /// Ends this instance's registration for good (drain only). Afterwards
+    /// liveness answers `Dead` for it at once, instead of after the lifetime
+    /// runs out. No registration (stub membership, or a drain before
+    /// registering): nothing to do. A failure is only logged: the
+    /// registration then expires on its own, because nothing renews it.
+    async fn retire(&self) {
+        let Some(lease) = lock(&self.inner.lease).clone() else {
+            return;
+        };
+        if let Err(error) = self.inner.ports.membership.retire(&lease).await {
+            tracing::warn!(?error, "membership retire failed; the registration expires on its own");
+        }
+    }
 }
 
+/// Locks a `std` mutex, ignoring poisoning. A mutex is poisoned when a thread
+/// panicked while holding it; the data here (maps and vectors changed in one
+/// step) stays usable, so the engine keeps going instead of panicking too.
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 #[async_trait]
 impl DistRuntimeControlPort for ConnectorEngine {
+    /// Health of this process: `active_work` = live actors plus orphans,
+    /// `pending_effects` = live actors with `pending_effect` set plus orphans.
     async fn snapshot(&self) -> Result<RuntimeSnapshot, RuntimeError> {
         let inner = &self.inner;
+        // One pass over the live actors counts both numbers: `fold` carries
+        // the pair `(active, pending)` and adds 1 and 0/1 per actor.
         let (active, pending) = {
             let actors = lock(&inner.actors);
             let live = actors.values().filter(|actor| !actor.task.is_finished());
@@ -441,8 +657,29 @@ impl DistRuntimeControlPort for ConnectorEngine {
         })
     }
 
-    /// Stops claiming and waits up to `grace` for held calls to end. Calls
-    /// still running are left held and recoverable, never aborted.
+    /// Stops claiming, waits up to `grace` for held calls to end, then stops
+    /// what is left and retires the registration (B20).
+    ///
+    /// Steps: mark draining, interrupt the main loop (`stop`) and wake
+    /// waiters, mark the registration as draining if there is one. Then wait
+    /// in two stages within the one deadline: first until the main loop has
+    /// left (a claim in flight may still start one actor), then until no
+    /// actor is live. It stops waiting as soon as both hold, and renews the
+    /// registration while it waits.
+    ///
+    /// At the end, every actor still running is aborted and awaited, so no
+    /// call of this process keeps talking to its agent or session after
+    /// this returns. No new actor starts once draining (`spawn` refuses), so
+    /// this also holds for a claim or resume still in flight. Then the
+    /// registration is retired: other processes see this instance `Dead` at
+    /// once, and the Worker's supervisor re-posts the hints of the calls it
+    /// still holds, so another Connector takes them over at the next holder
+    /// epoch. Their dispatches stay held (and in the held index) until then.
+    ///
+    /// Result: `Drained` when nothing was left and the main loop has stopped;
+    /// otherwise `DeadlineReached { remaining }` with the actors stopped plus
+    /// orphans (`remaining` can be 0 when only the main loop had not stopped
+    /// yet, for example while it waits on a claim).
     async fn drain(&self, grace: Duration) -> Result<DrainOutcome, RuntimeError> {
         let inner = &self.inner;
         inner.draining.store(true, Ordering::SeqCst);
@@ -465,32 +702,44 @@ impl DistRuntimeControlPort for ConnectorEngine {
             // The main loop no longer renews. Without this the registration
             // would expire during the grace period and other Connectors could
             // take over calls whose actors are still running here.
+            // The answer is ignored: a lost registration does not end the
+            // wait, there is nothing else to stop.
             if renewed_at.elapsed() >= inner.config.membership_renew {
                 renewed_at = Instant::now();
                 self.renew().await;
             }
         }
-        let leftover: Vec<(Did, Holder)> = lock(&inner.actors)
-            .iter()
-            .filter(|(_, actor)| !actor.task.is_finished())
-            .map(|(did, actor)| (did.clone(), actor.holder.clone()))
+        // Whatever still runs is stopped here, not left behind: once the
+        // registration is gone, another Connector may take these calls over,
+        // and the dispatch fences only this actor's `disp` writes, not its
+        // agent calls or inbox writes.
+        // One drain at a time from here (see `stopping`).
+        let _stopping = inner.stopping.lock().await;
+        // The set collected below is complete: `draining` is already set,
+        // and `spawn` starts no actor once it is (it checks under the same
+        // lock). So retiring after stopping them is safe even if the main
+        // loop is still inside a claim; that claim's call is left held.
+        let leftover: Vec<JoinHandle<()>> = lock(&inner.actors)
+            .drain()
+            .map(|(_, actor)| actor.task)
+            .filter(|task| !task.is_finished())
             .collect();
-        let leftover: Vec<(Did, Holder)> = leftover
-            .into_iter()
-            .chain(lock(&inner.orphans).iter().cloned())
-            .collect();
-        if leftover.is_empty() && !inner.looping.load(Ordering::SeqCst) {
+        let stopped = leftover.len();
+        // `abort` only asks; awaiting each task waits until it has stopped
+        // at its next await point.
+        for task in &leftover {
+            task.abort();
+        }
+        for task in leftover {
+            let _ = task.await;
+        }
+        let remaining = stopped + lock(&inner.orphans).len();
+        self.retire().await;
+        if remaining == 0 && !inner.looping.load(Ordering::SeqCst) {
             return Ok(DrainOutcome::Drained);
         }
-        for (did, holder) in &leftover {
-            // D8: handing a call over is not implemented yet; the call stays
-            // held and is recovered by the Worker's deadline re-post.
-            if let Err(error) = inner.ports.recovery.release(did, holder).await {
-                tracing::warn!(did = %did.0, ?error, "call left held after drain");
-            }
-        }
         Ok(DrainOutcome::DeadlineReached {
-            remaining: leftover.len() as u64,
+            remaining: remaining as u64,
         })
     }
 }

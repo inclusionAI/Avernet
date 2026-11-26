@@ -257,7 +257,7 @@ if [[ "$aggregate_only" -eq 0 ]]; then
   mkdir -p "$cov_dir"
   : > "$cli_coverage_log"
   export BCS_CLI_COVERAGE_LOG="$cli_coverage_log"
-  bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
+  BCS_E2E_WORKER_COVERAGE=1 bash "$bcs_dir/scripts/e2e-test/e2e.sh" || e2e_status=$?
   if [[ "$shared_tests_only" -eq 1 ]]; then
     # The parent still has independent producers running. Do not stop the
     # shared stack, merge profiles, or delete any evidence in this phase.
@@ -426,7 +426,16 @@ if [[ "$no_stop" -eq 0 ]]; then
     bcs-collaboration-store/src/memory_definition.rs
     bcs-collaboration-store/src/memory_runs.rs
     bcs-collaboration-store/src/memory_transition.rs
-    bcs-event-store/src/memory.rs
+# PR 4316 SQLite E2E: the split MemoryEventStore operations had zero hits;
+    # memory.rs itself runs initialization code and src/validation.rs is shared with SQL.
+    bcs-event-store/src/memory/delivery.rs
+    bcs-event-store/src/memory/fanout.rs
+    bcs-event-store/src/memory/repo.rs
+    bcs-event-store/src/memory/retention.rs
+    # The SQLite E2E stack wires DbEdgeGrantStore (server_infrastructure); the
+    # in-memory edge-grant store is only selected by server_construct for the
+    # DB-less dev path, so its owner-removal parity impl never runs here.
+    bcs-edge-permission-store/src/memory.rs
     bcs-friend-store/src/memory.rs
     bcs-group-store/src/memory.rs
     bcs-group-store/src/memory_builder.rs

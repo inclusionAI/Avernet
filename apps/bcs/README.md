@@ -15,8 +15,16 @@ Public BCS owns coordination contracts, services, adapters and reusable plugins;
 - [Local rules](AGENTS.md)
 - [API contracts](api-contracts/README.md)
 - [Configured catalog labels](docs/catalog-labels.md): policy, Agent/Group omission, persistence, full publication and compatibility gates.
-- [Distributed coordination contracts](crates/service-api/bcs-service-api/src/port/repo/distributed/README.md) — declarations; implementation pending
+- [Distributed coordination contracts](crates/service-api/bcs-service-api/src/port/repo/distributed/README.md) — portable contracts and provider status
+- [Retained membership amendment](specs/2026-11-20-retained-membership-lease/spec.md) — CAS termination, client clocks and 30-day storage retention
 - [Runtime store plugin API](crates/plugin-api/bcs-store-api/README.md) — capability contracts and provider harnesses
+- [Distributed Worker runtime](crates/services/bcs-dist-worker/README.md) — generic processor, ownership, isolation and bounded recovery
+- [Dispatch supervision](crates/services/bcs-dist-worker/src/supervisor/README.md) — durable remote obligations independent of Task termination
+- [Reliable distributed Inbox](crates/services/bcs-dist-store/src/inbox/README.md) — durable admission, consumption, scheduling and independent repair/discovery
+- [Distributed immutable archive](crates/services/bcs-dist-store/src/archive/README.md) — public Result/Blob persistence and committed-effect evidence
+- [Committed TaskFeed](crates/services/bcs-dist-store/src/task_feed/README.md) — output replay, snapshot publication and logical retention
+- [Distributed output projection](crates/services/bcs-dist-projection/README.md) — pure display transform, frozen quotas and replay accounting
+- [Distributed A2A output adapter](crates/adapters/output/bcs-dist-a2a-output/README.md) — Worker-side protocol formatting over neutral committed output
 - [Session deletion protocol](docs/session-delete-protocol.md)
 - [Flow navigation](docs/flows/README.md)
 - [Diagnostic navigation](docs/diagnostics/README.md)
@@ -87,6 +95,9 @@ reach into adapters.
 - **Delivery adapters** (`adapters/http`, `adapters/ws`, `tools/bcs-cli`) own
   their protocol definitions. They call service-api only — never reach into
   services or plugins directly.
+- **Output adapters** (`adapters/output`) implement the pure `port::dist_output`
+  formatter over neutral Worker data. The Worker-side read facade receives them
+  through injection; they do not call core services or repository ports.
 - **Service API** (`application` = inbound use cases, `core` = domain logic,
   `port` = outbound interfaces) is the contract boundary. Inter-component
   behavior is defined here.

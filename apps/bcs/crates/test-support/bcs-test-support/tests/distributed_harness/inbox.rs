@@ -17,7 +17,7 @@ fn producer_script() -> (Script, AdmitRequest, AdmitRequest) {
         .expect(
             "InboxProducerPort::admit",
             (&fresh,),
-            ok(AdmitOutcome::Accepted(receipt())),
+            ok(AdmitOutcome::Duplicate(receipt())),
         )
         .expect(
             "InboxProducerPort::admit",
@@ -81,7 +81,7 @@ async fn consumer_checks_durable_coverage_and_repeat_confirmation() -> ContractR
                 owner().shard,
                 PageRequest {
                     after: None,
-                    limit: NonZeroU32::MAX,
+                    limit: NonZeroU32::new(64).unwrap(),
                 },
             ),
             ok(Page {
@@ -124,11 +124,12 @@ async fn feed_watches_from_retained_start_and_checks_returned_input() -> Contrac
                 ReadLimits {
                     max_sessions: NonZeroU32::MIN,
                     max_entries: NonZeroU32::MIN,
-                    max_bytes: NonZeroU32::MAX,
+                    max_bytes: NonZeroU32::new(1024 * 1024).unwrap(),
                 },
                 Duration::from_secs(1),
             ),
             ok(FeedBatch {
+                failures: vec![],
                 sessions: vec![SessionBatch {
                     sid: expected.sid.clone(),
                     entries: vec![expected.clone()],

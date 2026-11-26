@@ -59,8 +59,12 @@ export function useBotPublicRisk({ botId, userId, publicScope = 'user', enabled 
   const [currentRecord, setCurrentRecord] = useState<BotPublicRiskCheckRecord | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const requestIdRef = useRef<string | null>(null);
-  const requestIntentKeyRef = useRef<string | null>(null);
+  const requestRef = useRef<{
+    id: string;
+    intent: string;
+    replaces: string | null;
+    confirmed: boolean;
+  } | null>(null);
   const pollFatalRef = useRef<Error | null>(null);
 
   const queryCurrent = useCallback(async () => {
@@ -77,18 +81,23 @@ export function useBotPublicRisk({ botId, userId, publicScope = 'user', enabled 
   const create = useCallback(
     async (intent: BotPublicRiskCreateIntent): Promise<BotPublicRiskCheckRecord | null> => {
       if (!botId || !userId) return null;
-      const intentKey = `${publicScope}|${intent.visibility}|${JSON.stringify(
+      const intentKey = JSON.stringify([
+        botId,
+        userId,
+        publicScope,
+        intent.visibility,
         intent.view_depts.map((d) => [d.deptNo, d.deptName]).sort(),
-      )}`;
-      if (requestIntentKeyRef.current !== intentKey || isTerminalRejectedRecord(currentRecord)) {
-        requestIdRef.current = generateRequestId();
-        requestIntentKeyRef.current = intentKey;
+      ]);
+      const replaces = currentRecord && isTerminalRejectedRecord(currentRecord) ? currentRecord.risk_check_id : null;
+      let request = requestRef.current;
+      if (!request || request.intent !== intentKey || (replaces && request.replaces !== replaces)) {
+        request = { id: generateRequestId(), intent: intentKey, replaces, confirmed: false };
+        requestRef.current = request;
       }
-      if (!requestIdRef.current) return null;
       setIsCreating(true);
       try {
         const resp = await createBotPublicRiskCheck(botId, userId, {
-          client_request_id: requestIdRef.current,
+          client_request_id: request.id,
           public_scope: publicScope,
           visibility: intent.visibility,
           view_depts: intent.view_depts,
@@ -98,6 +107,7 @@ export function useBotPublicRisk({ botId, userId, publicScope = 'user', enabled 
           notifyError(resp.message || '发起公开风险检测失败，请稍后重试');
           return null;
         }
+        request.confirmed = true;
         setCurrentRecord(record);
         return record;
       } catch (error) {
@@ -139,20 +149,16 @@ export function useBotPublicRisk({ botId, userId, publicScope = 'user', enabled 
 
   // 切换 Bot 重置会话态
   useEffect(() => {
-    requestIdRef.current = null;
-    requestIntentKeyRef.current = null;
+    requestRef.current = null;
     pollFatalRef.current = null;
     setCurrentRecord(null);
   }, [botId]);
 
-  // 编辑器会话边界（enabled false→true，页面模式下编辑器重开）：作废上轮申请标识并
-  // 复位轮询致命位，避免同 ID 重发命中已被 REPLACED/CLOSED 旧记录的幂等重放；
-  // 弹窗模式（fixedBotId）hook 随弹窗卸载重建，天然无此残留。
+  // 重开编辑器时清除已确认的申请标识。响应丢失时保留原标识供幂等重试。
   const prevEnabledRef = useRef(enabled);
   useEffect(() => {
     if (!prevEnabledRef.current && enabled) {
-      requestIdRef.current = null;
-      requestIntentKeyRef.current = null;
+      if (requestRef.current?.confirmed) requestRef.current = null;
       pollFatalRef.current = null;
     }
     prevEnabledRef.current = enabled;

@@ -4,6 +4,24 @@
 //! when the claim found nothing to hold), so the index may list too much but
 //! never misses a call. It only speeds recovery up; the holder recorded in the
 //! dispatch document is the truth.
+//!
+//! Spec rule B6: listed from before the claim until after the call ended.
+//! Removing too early could hide a call from recovery; removing too late (or
+//! never, after a failed removal) only costs a wasted look at an ended call.
+//!
+//! One sorted set per Connector process run:
+//!
+//! ```text
+//! key:    bcn:v1:held:<cluster>:<ns>:<node>:<incarnation>
+//!         bcn:v1:held:c01:main:conn-03:1794370950
+//! member: dispatch id, e.g. s0042.7f3a9c.b21e.n2.a1
+//! score:  claim time in ms (wall clock), e.g. 1794370950456
+//! ```
+//!
+//! Who reads it: nothing in production today; `StoreDispatchQueue::held_by`
+//! pages it. A dead Connector's calls are recovered without it: the Worker's
+//! supervisor re-posts their hints and a takeover follows once membership
+//! answers `Dead`.
 
 use crate::shared::Shared;
 use bcs_dist_model::{Did, Instance};
@@ -13,6 +31,8 @@ use bcs_store_api::zset::{ZAddMode, ZSetEntry, ZSetRange};
 use std::num::NonZeroU32;
 use std::ops::Bound;
 
+/// Lists `did` under `me`, with the current time as score. Called right
+/// before a claim write; re-adding an existing member only moves its score.
 pub(crate) async fn add(shared: &Shared, me: &Instance, did: &Did) -> Result<(), StoreError> {
     let key = shared.layout.held(me)?;
     let entry = ZSetEntry {
@@ -27,6 +47,8 @@ pub(crate) async fn add(shared: &Shared, me: &Instance, did: &Did) -> Result<(),
         .map_err(|e| from_write(&e, &did.0))
 }
 
+/// Unlists `did` from `me`. Called after the call ended, or when a claim
+/// found nothing to hold. The count of removed members is ignored.
 pub(crate) async fn remove(shared: &Shared, me: &Instance, did: &Did) -> Result<(), StoreError> {
     let key = shared.layout.held(me)?;
     shared

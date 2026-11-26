@@ -27,7 +27,11 @@ from agentclaw.community.core.gateway_principal.models import (
     UserPrincipal,
 )
 from agentclaw.community.core.gateway_principal.verifier import VerifiedCaller
-from tests.community.adapters.http.openapi_v1.conftest import mount_public_error_handlers, public_router
+from tests.community.adapters.http.openapi_v1.conftest import (
+    mount_public_error_handlers,
+    public_document,
+    public_router,
+)
 
 _SEARCH_PATH = "/openapi/v1/bots/catalog/search"
 _DISCOVER_PATH = "/openapi/v1/bots/catalog/discover"
@@ -134,8 +138,18 @@ def services() -> tuple[_PublicService, _DiscoverService]:
     return _PublicService(), _DiscoverService()
 
 
+@pytest.fixture(scope="module")
+def _base_app() -> FastAPI:
+    app = FastAPI()
+    app.include_router(public_router())
+    mount_public_error_handlers(app)
+    return app
+
+
 @pytest.fixture
-def app(services: tuple[_PublicService, _DiscoverService]) -> FastAPI:
+def app(
+    _base_app: FastAPI, services: tuple[_PublicService, _DiscoverService]
+) -> FastAPI:
     public_service, discover_service = services
 
     class _Bindings(Module):
@@ -143,16 +157,15 @@ def app(services: tuple[_PublicService, _DiscoverService]) -> FastAPI:
             binder.bind(BotPublicServiceProtocol, to=public_service)
             binder.bind(BotDiscoverServiceProtocol, to=discover_service)
 
-    app = FastAPI()
-    app.include_router(public_router())
-    app.dependency_overrides[require_principal] = lambda: VerifiedCaller(
+    _base_app.dependency_overrides.clear()
+    _base_app.dependency_overrides[require_principal] = lambda: VerifiedCaller(
         principals=(
             UserPrincipal(subject=GatewayUser(id="caller-1", username="caller-1")),
         )
     )
-    attach_injector(app, Injector([_Bindings()]))
-    mount_public_error_handlers(app)
-    return app
+    attach_injector(_base_app, Injector([_Bindings()]))
+    yield _base_app
+    _base_app.dependency_overrides.clear()
 
 
 @pytest.fixture
@@ -370,11 +383,9 @@ def test_search_omits_is_friend_when_bcs_did_not_return_it(
     assert "is_friend" not in response.json()["data"]["items"][0]
 
 
-def test_search_openapi_declares_the_fixed_catalog_unavailable_envelope(
-    app: FastAPI,
-) -> None:
+def test_search_openapi_declares_the_fixed_catalog_unavailable_envelope() -> None:
     """Catches generated clients losing the fixed 502 catalog error contract."""
-    response = app.openapi()["paths"][_SEARCH_PATH]["get"]["responses"]["502"]
+    response = public_document()["paths"][_SEARCH_PATH]["get"]["responses"]["502"]
 
     assert response["description"] == "Catalog service unavailable"
     content = response["content"]["application/json"]
@@ -386,10 +397,10 @@ def test_search_openapi_declares_the_fixed_catalog_unavailable_envelope(
     }
 
 
-def test_search_openapi_declares_optional_bcs_filter_parameters(app: FastAPI) -> None:
+def test_search_openapi_declares_optional_bcs_filter_parameters() -> None:
     parameters = {
         parameter["name"]: parameter
-        for parameter in app.openapi()["paths"][_SEARCH_PATH]["get"]["parameters"]
+        for parameter in public_document()["paths"][_SEARCH_PATH]["get"]["parameters"]
     }
 
     assert {
@@ -408,18 +419,16 @@ def test_search_openapi_declares_optional_bcs_filter_parameters(app: FastAPI) ->
     ]
 
 
-def test_search_openapi_declares_optional_bcs_is_friend(app: FastAPI) -> None:
-    is_friend = app.openapi()["components"]["schemas"]["PublicBot"]["properties"][
+def test_search_openapi_declares_optional_bcs_is_friend() -> None:
+    is_friend = public_document()["components"]["schemas"]["PublicBot"]["properties"][
         "is_friend"
     ]
 
     assert is_friend["anyOf"] == [{"type": "boolean"}, {"type": "null"}]
 
 
-def test_search_openapi_declares_optional_bcs_preferred_bot_uuid(
-    app: FastAPI,
-) -> None:
-    bot_uuid = app.openapi()["components"]["schemas"]["PublicBot"]["properties"][
+def test_search_openapi_declares_optional_bcs_preferred_bot_uuid() -> None:
+    bot_uuid = public_document()["components"]["schemas"]["PublicBot"]["properties"][
         "bot_uuid"
     ]
 
@@ -429,8 +438,8 @@ def test_search_openapi_declares_optional_bcs_preferred_bot_uuid(
     )
 
 
-def test_search_openapi_declares_optional_bcs_metadata_fields(app: FastAPI) -> None:
-    properties = app.openapi()["components"]["schemas"]["PublicBot"]["properties"]
+def test_search_openapi_declares_optional_bcs_metadata_fields() -> None:
+    properties = public_document()["components"]["schemas"]["PublicBot"]["properties"]
 
     assert properties["visibility"]["description"] == (
         "BCS visibility returned by Catalog Search when available."
@@ -642,8 +651,8 @@ def test_discover_preserves_allowlisted_legacy_json_values(
         assert forbidden not in rendered
 
 
-def test_discover_openapi_allows_legacy_json_values(app: FastAPI) -> None:
-    schemas = app.openapi()["components"]["schemas"]
+def test_discover_openapi_allows_legacy_json_values() -> None:
+    schemas = public_document()["components"]["schemas"]
     public_bot = schemas["PublicBot"]["properties"]
     recommendation = schemas["Recommendation"]["properties"]
 

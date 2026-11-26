@@ -12,9 +12,12 @@ async-trait = { workspace = true }
 bcs-dist-model = { workspace = true }
 bcs-service-api = { workspace = true }
 futures = { workspace = true }
-serde_json = { workspace = true }
 
 [dev-dependencies]
+serde_json = { workspace = true }
+bcs-dist-projection = { workspace = true }
+bcs-dist-worker.workspace = true
+bcs-dist-a2a-output = { workspace = true }
 bcs-dist-gateway-store = { workspace = true }
 bcs-dist-store = { workspace = true }
 bcs-store-api = { workspace = true }

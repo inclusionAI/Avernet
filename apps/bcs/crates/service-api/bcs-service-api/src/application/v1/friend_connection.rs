@@ -161,6 +161,12 @@ pub struct ListFriendConnections {
 #[derive(Debug, Clone)]
 pub struct DeleteFriendConnection {
     pub caller: AuthenticatedCaller,
+    /// Absent = caller-side self-removal (today's behavior). Present = a
+    /// managed-Bot Owner removal where `actor` is the Bot whose friendship
+    /// is being dissolved; the transport layer validates both-or-none on
+    /// the wire params, and the application service gates it on
+    /// `require_owner`.
+    pub actor: Option<FriendConnectionActor>,
     pub target_actor: FriendConnectionActor,
     /// Forwarded gateway principal + trace headers so the revoke
     /// friend-auth-sync trigger (Task 11d) can authenticate the backend
@@ -204,4 +210,77 @@ pub trait FriendConnectionService: Send + Sync {
         &self,
         command: DeleteFriendConnection,
     ) -> Result<DeleteResult, ApplicationError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::v1::{AuthenticatedCaller, AuthenticatedUserIdentity};
+
+    fn user_caller() -> AuthenticatedCaller {
+        AuthenticatedCaller {
+            tenant: None,
+            user: Some(AuthenticatedUserIdentity {
+                id: "u_1".into(),
+                username: "alice".into(),
+                display_name: None,
+                full_name: None,
+            }),
+            bot: None,
+            app: None,
+            access_key: None,
+        }
+    }
+
+    #[test]
+    fn friend_connection_actor_serde_round_trip_is_unchanged() {
+        let actor = FriendConnectionActor {
+            actor_type: FriendConnectionActorType::Bot,
+            id: "bot-1".into(),
+        };
+        let json = serde_json::to_string(&actor).unwrap();
+        assert_eq!(json, r#"{"type":"bot","id":"bot-1"}"#);
+        let restored: FriendConnectionActor = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, actor);
+
+        let human = FriendConnectionActor {
+            actor_type: FriendConnectionActorType::Human,
+            id: "u_1".into(),
+        };
+        let json = serde_json::to_string(&human).unwrap();
+        assert_eq!(json, r#"{"type":"human","id":"u_1"}"#);
+    }
+
+    #[test]
+    fn delete_friend_connection_without_actor_stays_self_removal() {
+        let command = DeleteFriendConnection {
+            caller: user_caller(),
+            target_actor: FriendConnectionActor {
+                actor_type: FriendConnectionActorType::Bot,
+                id: "bot-1".into(),
+            },
+            actor: None,
+            request_auth: None,
+        };
+        assert!(command.actor.is_none());
+    }
+
+    #[test]
+    fn delete_friend_connection_with_actor_marks_managed_bot_removal() {
+        let command = DeleteFriendConnection {
+            caller: user_caller(),
+            target_actor: FriendConnectionActor {
+                actor_type: FriendConnectionActorType::Human,
+                id: "u_2".into(),
+            },
+            actor: Some(FriendConnectionActor {
+                actor_type: FriendConnectionActorType::Bot,
+                id: "bot-1".into(),
+            }),
+            request_auth: None,
+        };
+        let actor = command.actor.expect("actor present");
+        assert_eq!(actor.actor_type, FriendConnectionActorType::Bot);
+        assert_eq!(actor.id, "bot-1");
+    }
 }

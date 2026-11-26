@@ -7,7 +7,8 @@ import { aiDraftSha256, aiDraftUuid, aiDraftValidText, aiDraftWorkflow, assertAi
   validateAiDraftRequest, validateAiDraftOutput } from './workflow-ai-draft-validation.js';
 
 const safeProviderErrors = new Set(['AUTO_HEAL_BOT_UNAVAILABLE', 'BAAS_AUTH_FAILED', 'BAAS_REQUEST_REJECTED',
-  'BAAS_GENERATION_FAILED', 'BAAS_PROVIDER_REJECTED', 'BAAS_EXECUTION_FAILED', 'GENERATION_FAILED', 'INVALID_GENERATION_RESULT']);
+  'BAAS_GENERATION_FAILED', 'BAAS_PROVIDER_REJECTED', 'BAAS_EXECUTION_FAILED', 'GENERATION_FAILED', 'INVALID_GENERATION_RESULT',
+  'BAAS_GENERATION_TIMEOUT', 'BAAS_GENERATION_CANCELLED', 'BAAS_SESSION_UNAVAILABLE', 'BAAS_RESULT_PERSISTENCE_FAILED']);
 const operationalProviderErrors = new Set(['BAAS_AUTH_FAILED', 'BAAS_POLL_UNAVAILABLE']);
 const MAX_CLOCK_SKEW_MS = 5_000;
 const requestDigest = (request: WorkflowAiDraftRequest) => aiDraftSha256(JSON.stringify([request.mode, request.prompt, request.currentYaml]));

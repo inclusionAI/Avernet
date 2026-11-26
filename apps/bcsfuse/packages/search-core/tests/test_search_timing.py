@@ -102,6 +102,7 @@ def test_progress_shows_input_branch_counts_and_returned_ids(caplog, timing_logs
         ),
         filter_fields=frozenset({"resource_type"}),
         trace_id_provider=lambda: "incoming",
+        index_identity=("prod", "catalog-a"),
     )
     query = '查"账单" 13800138000'
     asyncio.run(
@@ -128,6 +129,11 @@ def test_progress_shows_input_branch_counts_and_returned_ids(caplog, timing_logs
         progress["reranker"]["input_count"] == progress["reranker"]["result_count"] == 1
     )
     final = next(r for r in records if r["event"] == "search_steps")
+    assert (final["index_environment"], final["index_key"]) == ("prod", "catalog-a")
+    assert final["effective_limit"] == 1
+    assert final["effective_filters"] == {"resource_type": ["agent"]}
+    assert final["effective_filters_truncated"] is False
+    assert "is_load_test" not in final
     assert final["results"] == [
         {
             "rank": 1,

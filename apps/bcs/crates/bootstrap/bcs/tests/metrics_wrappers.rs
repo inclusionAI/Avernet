@@ -187,6 +187,51 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
 #[cfg(feature = "prometheus-metrics")]
 #[tokio::test]
 #[serial]
+async fn metrics_wrapper_forwards_catalog_label_normalization() {
+    let _runtime = install_runtime();
+    let group = MetricsGroupManagementService::new(
+        Arc::new(GroupServiceFake),
+        Arc::from("label-forward"),
+    );
+    // A configured inner service must accept a policy-valid key. Before the
+    // forwarding fix the wrapper silently fell back to the trait's
+    // CatalogLabelPolicy::default(), which rejects every key as UNKNOWN_KEY.
+    let input: bcs_service_api::types::catalog_labels::CatalogLabelsInput = serde_json::from_value(
+        serde_json::json!({"lifecycle": ["draft"]}),
+    )
+    .expect("valid label input");
+    let normalized = group
+        .normalize_catalog_labels(input)
+        .expect("wrapper must forward label normalization to the inner service");
+    assert_eq!(
+        normalized.as_map().get("lifecycle").map(|v| v.as_slice()),
+        Some(&["draft".to_string()][..]),
+        "normalized labels must come from the inner service's policy"
+    );
+
+    // Invalid values must fail with the inner service's rejection, so callers
+    // see the same error whether or not metrics instrumentation is enabled.
+    let rejected: bcs_service_api::types::catalog_labels::CatalogLabelsInput = serde_json::from_value(
+        serde_json::json!({"lifecycle": ["invalid-value"]}),
+    )
+    .expect("parsable label input");
+    let error = group
+        .normalize_catalog_labels(rejected)
+        .expect_err("inner service rejection must propagate through the wrapper");
+    let ServiceError::A2aManagement(error) = error else {
+        panic!("expected the inner service's structured rejection, got: {error}");
+    };
+    assert_eq!(
+        error.code,
+        bcs_service_api::types::a2a_bot::a2a_management::ManagementCode::InvalidRequest,
+    );
+    assert_eq!(error.field, "catalog_labels.lifecycle[0]");
+    assert_eq!(error.reason, "UNKNOWN_VALUE");
+}
+
+#[cfg(feature = "prometheus-metrics")]
+#[tokio::test]
+#[serial]
 async fn metrics_wrapper_preserves_native_task_dispatch_and_rejections() {
     let runtime = install_runtime();
     let flow = InstrumentedMessageFlowService::new(
@@ -239,6 +284,24 @@ struct GroupServiceFake;
 
 #[async_trait]
 impl GroupManagementService for GroupServiceFake {
+    fn normalize_catalog_labels(
+        &self,
+        input: bcs_service_api::types::catalog_labels::CatalogLabelsInput,
+    ) -> ServiceResult<bcs_service_api::types::catalog_labels::CatalogLabels> {
+        let policy = bcs_service_api::types::catalog_labels::CatalogLabelPolicy::new(
+            [(
+                "lifecycle".to_string(),
+                bcs_service_api::types::catalog_labels::CatalogLabelRule {
+                    allowed_values: vec!["draft".to_string()],
+                    allow_multiple: false,
+                },
+            )]
+            .into(),
+        )
+        .expect("valid dictionary policy");
+        policy.normalize(input)
+    }
+
     async fn create_group(
         &self,
         _cmd: GroupCreateCommand,

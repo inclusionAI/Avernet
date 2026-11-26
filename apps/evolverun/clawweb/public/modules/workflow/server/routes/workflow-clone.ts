@@ -1,3 +1,4 @@
+import { captureApiError, errorStack } from "./error-log-format.js";
 import { Router, type Request, type Response } from "express";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import { resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access";
@@ -10,10 +11,11 @@ export function createWorkflowCloneRouter(service: WorkflowCloneService): Router
 
   function writeError(response: Response, error: unknown): void {
     if (error instanceof WorkflowCloneError) {
+      console[error.status >= 500 ? "error" : "warn"]("[workflow-clone] request failed:", error.status >= 500 ? captureApiError(response, error) : errorStack(error));
       response.status(error.status).json({ error: "Workflow Clone Failed", code: error.code, message: error.message });
       return;
     }
-    console.error("[workflow-clone] request failed:", error);
+    console.error("[workflow-clone] request failed:", captureApiError(response, error));
     response.status(500).json({ error: "Internal Server Error", code: "INTERNAL_ERROR" });
   }
 

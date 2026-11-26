@@ -543,23 +543,26 @@ async def test_list_of_an_absent_directory_is_an_empty_page_not_a_500():
 
 @pytest.mark.asyncio
 async def test_list_does_not_swallow_other_upstream_statuses():
-    """Only 404 is an ordinary answer; an upstream fault must still surface."""
+    """Only 404 is an ordinary answer; an upstream fault must still surface —
+    as the mapped 502 upstream envelope, not a success or a bare 500."""
 
     class _FailingDirService:
         async def list_dir(self, **_kw):
             raise _http_status(503)
 
-    with pytest.raises(httpx.HTTPStatusError):
-        await list_resources(
-            page=PageParams(page=1, page_size=10),
-            user_id="u1",
-            owner_id="u1",
-            bot_id="bot-x",
-            path="docs",
-            bot_repo=_StubBotRepo(),
-            file_svc=_FailingDirService(),
-            request=_request_without_trace(),
-        )
+    resp = await list_resources(
+        page=PageParams(page=1, page_size=10),
+        user_id="u1",
+        owner_id="u1",
+        bot_id="bot-x",
+        path="docs",
+        bot_repo=_StubBotRepo(),
+        file_svc=_FailingDirService(),
+        request=_request_without_trace(),
+    )
+    assert isinstance(resp, Response)
+    assert resp.status_code == 502
+    assert json.loads(resp.body)["message"] == "Upstream service error"
 
 
 @pytest.mark.asyncio
@@ -1328,17 +1331,20 @@ async def test_read_404s_when_the_provider_reports_the_file_missing(handler):
 @pytest.mark.parametrize("code", [401, 500, 503])
 async def test_read_does_not_swallow_other_upstream_statuses(code):
     """Only 404 is an ordinary answer. Anything else is an upstream fault and
-    must stay unmapped, which is what a 500 reports."""
-    with pytest.raises(httpx.HTTPStatusError):
-        await download_file(
-            path="a.txt",
-            user_id="u1",
-            owner_id="u1",
-            bot_id="bot-x",
-            bot_repo=_StubBotRepo(),
-            file_svc=_StubReadFileService({}, read_raises=_http_status(code)),
-            request=_request_without_trace(),
-        )
+    surfaces as the mapped 502 upstream envelope — never a success, never a
+    bare 500 [Unhandled exception]."""
+    resp = await download_file(
+        path="a.txt",
+        user_id="u1",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubReadFileService({}, read_raises=_http_status(code)),
+        request=_request_without_trace(),
+    )
+    assert isinstance(resp, Response)
+    assert resp.status_code == 502
+    assert json.loads(resp.body)["message"] == "Upstream service error"
 
 
 @pytest.mark.asyncio
@@ -2264,18 +2270,21 @@ async def test_download_dir_404s_when_the_provider_raises_the_upstream_404():
 
 @pytest.mark.asyncio
 async def test_download_dir_surfaces_an_upstream_fault():
-    """Only 404 is an ordinary answer; an upstream fault must still surface."""
+    """Only 404 is an ordinary answer; an upstream fault must still surface —
+    here as the mapped 502 upstream envelope rather than a raw escape."""
 
-    with pytest.raises(httpx.HTTPStatusError):
-        await download_directory(
-            path="docs",
-            user_id="u1",
-            owner_id="u1",
-            bot_id="bot-x",
-            bot_repo=_StubBotRepo(),
-            file_svc=_StubTreeFileService({}, tree_raises=_http_status(503)),
-            request=_request_without_trace(),
-        )
+    resp = await download_directory(
+        path="docs",
+        user_id="u1",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubTreeFileService({}, tree_raises=_http_status(503)),
+        request=_request_without_trace(),
+    )
+    assert isinstance(resp, Response)
+    assert resp.status_code == 502
+    assert json.loads(resp.body)["message"] == "Upstream service error"
 
 
 @pytest.mark.asyncio

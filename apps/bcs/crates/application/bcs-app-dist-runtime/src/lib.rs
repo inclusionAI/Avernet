@@ -1,5 +1,12 @@
 //! Worker control application boundary. The delivery layer must authenticate
 //! and bind an exact node/incarnation before constructing the source argument.
+//!
+//! Also exports the Connector's admin boundary, `ConnectorRuntimeFacade`
+//! (snapshot and drain over the Connector engine; see `connector.rs`). The
+//! Connector engine is built elsewhere with its ports; its membership is the
+//! stub `PendingMembership` unless a real provider is injected, and nothing
+//! injects one today.
+mod isolation;
 use async_trait::async_trait;
 use bcs_dist_model::{Instance, RequestId, ShardId};
 use bcs_service_api::{
@@ -10,6 +17,7 @@ use bcs_service_api::{
     },
     types::dist_runtime::*,
 };
+pub use isolation::WorkerIsolationApplication;
 use std::{sync::Arc, time::Duration};
 
 mod connector;

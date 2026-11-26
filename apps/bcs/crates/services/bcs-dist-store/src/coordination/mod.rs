@@ -1,5 +1,9 @@
 //! Provider-independent membership, shard transitions and checkpoint fencing.
 //! Private document versions never encode epoch or business commit sequence.
+#[cfg(test)]
+mod capacity_tests;
+mod capacity;
+mod control;
 mod membership;
 mod session;
 mod shard;
@@ -27,6 +31,8 @@ struct StoredCheckpoint {
     envelope: CheckpointEnvelope,
     #[serde(default)]
     recovery_attempts: Vec<RequestId>,
+    #[serde(default)]
+    control: bcs_service_api::port::repo::distributed::control::SessionControl,
 }
 impl std::ops::Deref for StoredCheckpoint {
     type Target = CheckpointEnvelope;
@@ -44,6 +50,7 @@ struct CachedSession {
     holder: ShardOwner,
     checkpoint: Option<Versioned<StoredCheckpoint>>,
     uncertain_acquisition: bool,
+    known_checkpoint: bool,
 }
 
 /// Local process bounds; no durable state is evicted to enforce these limits.
@@ -52,10 +59,20 @@ pub struct CoordinationStoreConfig {
     pub max_cached_sessions: usize,
     /// Independent shard/handoff dimension, not an active-session budget.
     pub max_handoff_timers: usize,
+    /// Enforced before every CAS; the host separately validates backend capacity.
+    pub checkpoint_capacity: SessionCheckpointCapacity,
+    /// Host-declared worst-case private DocumentCas wrapper bytes. The adapter
+    /// must prove this bound; it is included in both declared byte budgets.
+    pub storage_envelope_bytes: usize,
 }
 impl Default for CoordinationStoreConfig {
     fn default() -> Self {
-        Self { max_cached_sessions: 10_000, max_handoff_timers: 4096 }
+        Self {
+            max_cached_sessions: 10_000,
+            max_handoff_timers: 4096,
+            checkpoint_capacity: SessionCheckpointCapacity::default(),
+            storage_envelope_bytes: 64,
+        }
     }
 }
 
@@ -75,7 +92,13 @@ impl CoordinationStore {
         index: Arc<dyn ZSetStorePlugin>,
         layout: KeyLayout,
     ) -> Result<Self, StoreError> {
-        Self::with_config(documents, leases, index, layout, CoordinationStoreConfig::default())
+        Self::with_config(
+            documents,
+            leases,
+            index,
+            layout,
+            CoordinationStoreConfig::default(),
+        )
     }
     pub fn with_config(
         documents: Arc<dyn DocumentStorePlugin>,
@@ -84,17 +107,25 @@ impl CoordinationStore {
         layout: KeyLayout,
         config: CoordinationStoreConfig,
     ) -> Result<Self, StoreError> {
-        if config.max_cached_sessions == 0 || config.max_handoff_timers == 0 {
+        if config.max_cached_sessions == 0 || config.max_handoff_timers == 0
+            || config.checkpoint_capacity.max_document_bytes < 256 * 1024
+            || config.checkpoint_capacity.max_document_bytes > 1024 * 1024
+            || config.checkpoint_capacity.max_envelope_bytes < 64 * 1024
+            || config.checkpoint_capacity.max_envelope_bytes > 128 * 1024
+            || config.checkpoint_capacity.max_envelope_bytes >= config.checkpoint_capacity.max_document_bytes
+            || config.storage_envelope_bytes >= config.checkpoint_capacity.max_envelope_bytes
+        {
             return Err(invalid("coordination_capacity"));
         }
+        capacity::validate_config(&config)?;
         for (supported, code) in [
             (
                 documents.supports(StoreCapability::DocumentCas),
                 "document_cas_required",
             ),
             (
-                leases.supports(StoreCapability::StrictLease),
-                "strict_lease_required",
+                leases.supports(StoreCapability::RetainedLease),
+                "retained_lease_required",
             ),
             (index.supports(StoreCapability::ZSet), "zset_required"),
         ] {
@@ -136,6 +167,7 @@ impl CoordinationStore {
         operation: &str,
     ) -> Result<Option<Version>, StoreError> {
         let data = encode_json(value)?;
+        capacity::validate_row(&data, &self.config)?;
         let outcome = match expected {
             Some(v) => self.documents.replace_document(key, v, &data).await,
             None => self.documents.create_document(key, &data).await,
@@ -146,7 +178,11 @@ impl CoordinationStore {
             WriteOutcome::ConditionNotMet => None,
         })
     }
-    async fn confirmed_alive(&self, instance: &Instance, operation: &str) -> Result<bool, StoreError> {
+    async fn confirmed_alive(
+        &self,
+        instance: &Instance,
+        operation: &str,
+    ) -> Result<bool, StoreError> {
         match self.liveness(instance).await? {
             Liveness::Alive => Ok(true),
             Liveness::Dead => Ok(false),
@@ -156,10 +192,15 @@ impl CoordinationStore {
         }
     }
     async fn valid_claim(&self, claim: &ShardClaim) -> Result<bool, StoreError> {
-        if !self.current(claim.shard).await?.is_some_and(|r| r.claim == *claim) {
+        if !self
+            .current(claim.shard)
+            .await?
+            .is_some_and(|r| r.claim == *claim)
+        {
             return Ok(false);
         }
-        self.confirmed_alive(&claim.owner.instance, "claim_liveness").await
+        self.confirmed_alive(&claim.owner.instance, "claim_liveness")
+            .await
     }
     fn cached(&self, sid: &Sid) -> Result<Option<Versioned<StoredCheckpoint>>, StoreError> {
         Ok(self
@@ -182,7 +223,30 @@ impl CoordinationStore {
                 .as_ref()
                 .is_none_or(|old| old.version < value.version)
         {
+            entry.known_checkpoint = true;
             entry.checkpoint = Some(value);
+        }
+        Ok(())
+    }
+    fn known_checkpoint(&self, sid: &Sid) -> Result<bool, StoreError> {
+        Ok(self
+            .cache
+            .lock()
+            .map_err(|_| not_applied("cache_poisoned"))?
+            .get(&sid.0)
+            .is_some_and(|entry| entry.known_checkpoint || entry.checkpoint.is_some()))
+    }
+    fn observe_checkpoint(&self, sid: &Sid, invalidate: bool) -> Result<(), StoreError> {
+        if let Some(entry) = self
+            .cache
+            .lock()
+            .map_err(|_| not_applied("cache_poisoned"))?
+            .get_mut(&sid.0)
+        {
+            entry.known_checkpoint = true;
+            if invalidate {
+                entry.checkpoint = None;
+            }
         }
         Ok(())
     }
@@ -209,6 +273,7 @@ impl CoordinationStore {
                     holder: holder.clone(),
                     checkpoint: None,
                     uncertain_acquisition: false,
+                    known_checkpoint: false,
                 },
             );
         }
@@ -219,14 +284,16 @@ impl CoordinationStore {
         sid: &Sid,
     ) -> Result<Option<Versioned<StoredCheckpoint>>, StoreError> {
         let value = self
-            .read::<StoredCheckpoint>(&self.layout.ckpt(sid)?)
-            .await?;
+            .read::<serde_json::Value>(&self.layout.ckpt(sid)?)
+            .await?
+            .map(|raw| {
+                decode_checkpoint(raw.value).map(|value| Versioned {
+                    version: raw.version,
+                    value,
+                })
+            })
+            .transpose()?;
         if let Some(v) = &value {
-            if v.value.checkpoint.format_version != 1 {
-                return Err(StoreError::UnsupportedFormat {
-                    format: v.value.checkpoint.format_version,
-                });
-            }
             if v.value
                 .checkpoint
                 .consumed
@@ -236,14 +303,20 @@ impl CoordinationStore {
                 return Err(invalid("stored_position"));
             }
             self.remember(sid, v.clone())?;
-        } else if self.cached(sid)?.is_some() {
+        } else if self.known_checkpoint(sid)? {
             return Err(not_applied("known_checkpoint_missing"));
         }
         Ok(value)
     }
     fn release_handoff_timer(&self, shard: ShardId, id: &RequestId) -> Result<(), StoreError> {
-        let mut timers = self.timers.lock().map_err(|_| not_applied("timer_poisoned"))?;
-        if timers.get(&shard.0).is_some_and(|(request, _)| request.request_id == *id) {
+        let mut timers = self
+            .timers
+            .lock()
+            .map_err(|_| not_applied("timer_poisoned"))?;
+        if timers
+            .get(&shard.0)
+            .is_some_and(|(request, _)| request.request_id == *id)
+        {
             timers.remove(&shard.0);
         }
         Ok(())
@@ -264,6 +337,22 @@ impl CoordinationStore {
                     && Instant::now() < *end
             }))
     }
+}
+
+fn decode_checkpoint(value: serde_json::Value) -> Result<StoredCheckpoint, StoreError> {
+    let checkpoint = &value["checkpoint"];
+    let format: u32 = decode_json(checkpoint["format_version"].clone())?;
+    // Inspect the header before decoding a body whose layout may be unknown.
+    // The #4145 coordination prototype reused v1 for an unscoped RunnerState;
+    // it is not a phase-one runtime namespace and has no implicit migration.
+    let legacy_runner = checkpoint["runner_state"].as_object().is_some_and(|runner| {
+        runner.contains_key("format_version") && runner.contains_key("value")
+            && !runner.contains_key("tid") && !runner.contains_key("state")
+    });
+    if format != 1 || legacy_runner {
+        return Err(StoreError::UnsupportedFormat { format });
+    }
+    decode_json(value)
 }
 fn invalid(code: &str) -> StoreError {
     StoreError::Invalid { code: code.into() }

@@ -1,5 +1,35 @@
 # bcs-service-api Context
 
+## Version 8.0.0: Owner-side friend removal contract
+
+`DeleteFriendConnection` (application/v1) gains `actor:
+Option<FriendConnectionActor>` — absent keeps caller-side self-removal,
+present marks a managed-Bot Owner removal. `FriendConnectNotificationKind`
+gains `RemovedByOwner`, emitted only after a non-empty owner revoke and
+best-effort. `ConnectService` gains the defaulted `revoke_friend_as_owner`
+and `EdgeGrantRepoPort` the defaulted `revoke_grant_if_active` (atomic
+conditional revoke returning whether the transition happened).
+
+Adding a field to a public struct and a variant to a public enum is
+source-incompatible for Rust consumers (struct literals / exhaustive
+matches), so this is a major Rust Service API version bump even though the
+HTTP wire compatibility stays strictly additive (optional query params on
+`DELETE /friend-connections`; GET untouched). All workspace consumers use
+path dependencies and rebuild together; exhaustive matches on
+`FriendConnectNotificationKind` must cover the new variant. The
+compatibility promise is HTTP-level only. There is no Plugin API, route,
+configuration, database schema, or migration change.
+
+## Distributed output reads
+
+`port::dist_output` owns the pure `DistOutputAdapterPort`, Worker-side
+`DistTaskOutputReaderPort` and transient formatted event envelopes. These use
+neutral model/JSON types and import no A2A DTOs. TaskFeed persistence continues
+to use neutral display snapshots and artifact operations. The Gateway core and
+application expose the facade's formatted results to delivery adapters, which
+retain their protocol envelopes. Centralized harnesses cover both output ports;
+the A2A adapter and Worker facade call those harnesses from conformance tests.
+
 ## Managed admission target failures
 
 `DeliveryAdmissionRejection::TargetUnavailable` records a recipient's failed
@@ -25,15 +55,35 @@ the reporting rules in the module documentation. The
 [change record](../../../specs/2026-11-17-connector-runtime/spec.md) holds the
 plan and validation.
 
+## Distributed Gateway/Worker integration amendment
+
+TaskAdmissionCoreService consumes a stable caller command; Gateway no longer
+supplies initial TaskSnapshot or output policy/version. Worker admission uses
+InboxProducerPort::lookup to retrieve scoped canonical content, checks caller
+intent, and confirms/repairs that original through admit, including first-request
+races. Lookup is not success proof. Accepted/Duplicate remain provider details;
+CoreAdmission exposes one successful receipt. This supersedes the original
+Accepted-only assumption documented below for this opt-in Worker composition.
+
+DistOutputAdapterPort formats neutral snapshots and stable artifact operations.
+DistTaskOutputReaderPort exposes converted views/events. WorkerOutputReader resolves
+content and invokes an injected formatter; Gateway forwards output with its A2A
+envelope. No A2A types enter the Worker or storage model. Byte quotas for units,
+cumulative output and complete snapshots are removed; physical frames remain.
+
+Propagation: Gateway app/core, Worker admission/output, Inbox/TaskFeed, harnesses
+and explicit Singlebox test assembly rebuild together. These unpublished metadata
+shapes require a fresh distributed namespace; automatic prototype migration is not
+provided. Existing non-distributed A2A registration and endpoints are unchanged.
+
 ## Version 7.0.0: One admission success and Gateway waiting
 
 Breaking for the unpublished distributed declarations only; no existing
 runtime, wire endpoint or stored record changes.
 
-- `AdmitOutcome::Duplicate` is removed. An input already admitted with the same
-  digest is `Accepted`: the admission record may be written by a retry or by a
-  compensating writer, so the writer cannot and need not be told apart.
-  `CoreAdmission` becomes a struct holding the receipt.
+- The original Gateway-only design collapsed provider admission outcomes. The
+  integrated Worker provider retains `Accepted` and `Duplicate`; both map to the
+  same `CoreAdmission` receipt, with no difference in HTTP success behavior.
 - `GatewayError::NotCancelable` reports a cancel of a finished task.
 - `DistGatewayService::wait_task` (`WaitTask`, `WaitUntil`) waits until a task
   needs input or is finished and the stored view covers that event, and
@@ -44,10 +94,22 @@ runtime, wire endpoint or stored record changes.
   `CancelTask` and `ListTasks` carry it; another group is answered as
   NotFound. `DistGatewayCoreService::session_group` reads the frozen group.
 
-Consumers matching `Duplicate` or implementing `DistGatewayService` must be
-updated; workspace path consumers rebuild together.
+Consumers implementing `DistGatewayService`, `TaskAdmissionCoreService` or the
+formatted output ports rebuild together with the explicit Worker composition.
 
 ## Version 6.1.0: Distributed coordination contracts
+
+The phase-one refinement adds the pure
+[`OutputProjectionCoreService`](src/core/dist_projection.rs), stable artifact
+operations and frozen internal physical output profiles. Candidate projection
+counts diagnostic usage only for newly committed output; read-side folding applies
+the same transform and structural checks without charging again. No output-body
+byte quota applies in this phase. The implementation is
+[bcs-dist-projection](../../services/bcs-dist-projection/README.md).
+Checkpoint Runner state is optional and bound to one task; finalization retains
+the frozen archive record and terminal publication progress independently of it.
+These unpublished v1 declarations require a fresh phase-one namespace and rebuild
+of workspace consumers; no legacy records are migrated or HTTP endpoints changed.
 
 Add opt-in Gateway, Worker and Connector service/port declarations plus
 `bcs-dist-model` shared data. No existing trait method, wire endpoint, runtime
@@ -58,8 +120,13 @@ The [distributed contract](src/port/repo/distributed/README.md) owns admission,
 atomic checkpoint/effect replay, scheduling, consistent task recovery and
 dispatch ownership semantics. State and queue adapters remain replaceable.
 The [change record](../../../specs/2026-11-15-distributed-contracts/spec.md) links
-ordered implementation tasks and actual validation; concrete providers and
-runtime implementations remain pending.
+ordered implementation tasks and actual validation. The public
+[Inbox provider](../../services/bcs-dist-store/src/inbox/README.md) implements
+scoped canonical admission, consumption and independent repair/discovery.
+`AdmitRequest.scope` binds trusted scope; `FeedBatch.failures` requires Worker
+watch recovery. `AdmissionControlPort` exposes gate/cut obligations, while
+terminal/archive confirmation and authorized resume remain runtime duties.
+Complete runtime assembly and provider acceptance remain separate.
 
 `SessionStorePort::get_spec` owns frozen-session specification reads, even before
 the first checkpoint. Inbox producer/consumer ports and the stateful shard feed

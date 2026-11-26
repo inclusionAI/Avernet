@@ -17,6 +17,10 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import websockets
+from websockets.exceptions import ConnectionClosedOK
+from websockets.frames import Close
+from websockets.protocol import State
 
 from secbaas.community.api.bot_interaction import InteractionResolution
 from secbaas.community.core.service.bot_run._bot_websocket_client import (
@@ -24,6 +28,7 @@ from secbaas.community.core.service.bot_run._bot_websocket_client import (
     ChatRequestError,
     _is_loopback_websocket_uri,
 )
+from secbaas.community.core.service.bot_run._chat_errors import RequestNotSentError
 
 # ==================== Fixtures ====================
 
@@ -579,6 +584,108 @@ class TestSendRequest:
 
         assert sent_ids[0] != sent_ids[1]
         assert len(sent_ids) == 2
+
+
+class TestSendRequestNotSent:
+    """写帧前连接已关闭时的判别：仅该分支可安全重放。"""
+
+    @staticmethod
+    def _closed_exc() -> ConnectionClosedOK:
+        return ConnectionClosedOK(Close(1005, ""), Close(1005, ""), True)
+
+    @pytest.mark.asyncio
+    async def test_closed_before_send_raises_request_not_sent(self, client):
+        """send 前 state 已非 OPEN：帧未写出，抛 RequestNotSentError 并清理 pending。"""
+        mock_ws = MagicMock()
+        mock_ws.state = State.CLOSED
+        mock_ws.send = AsyncMock(side_effect=self._closed_exc())
+        client._ws = mock_ws
+        client._connected = True
+
+        with pytest.raises(RequestNotSentError, match="test.method request not sent"):
+            await client._send_request("test.method", {})
+
+        assert client._pending_requests == {}
+
+    @pytest.mark.asyncio
+    async def test_closed_while_open_keeps_connection_closed_error(self, client):
+        """send 前 state 为 OPEN：帧可能已写出，结果未知，原样上抛不重放。"""
+        mock_ws = MagicMock()
+        mock_ws.state = State.OPEN
+        mock_ws.send = AsyncMock(side_effect=self._closed_exc())
+        client._ws = mock_ws
+        client._connected = True
+
+        with pytest.raises(websockets.ConnectionClosed):
+            await client._send_request("test.method", {})
+
+        assert client._pending_requests == {}
+
+    @pytest.mark.asyncio
+    async def test_real_socket_closed_before_send_raises_request_not_sent(self):
+        """真实 WS 握手后对端关闭：复用窗口内写帧被识别为"未发出"。"""
+        closed = asyncio.Event()
+
+        async def handler(ws):
+            raw = await ws.recv()
+            frame = json.loads(raw)
+            await ws.send(
+                json.dumps(
+                    {
+                        "type": "res",
+                        "id": frame["id"],
+                        "ok": True,
+                        "payload": {"server": {"host": "test"}},
+                    }
+                )
+            )
+            await ws.close()
+            closed.set()
+
+        server = await websockets.serve(handler, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        client = BotWebSocketClient(uri=f"ws://127.0.0.1:{port}/ws")
+        disconnected = asyncio.Event()
+        client.on_disconnect(lambda event, payload: disconnected.set())
+        try:
+            await client.connect()
+            await asyncio.wait_for(closed.wait(), timeout=5)
+            await asyncio.wait_for(disconnected.wait(), timeout=5)
+            # 模拟线上"recv_loop 尚未收口、池仍认为连接可用"的复用窗口
+            client._connected = True
+            client._handshake_complete = True
+            assert client._ws.state is State.CLOSED
+
+            with pytest.raises(RequestNotSentError):
+                await client._send_request_frame(
+                    {
+                        "type": "req",
+                        "id": "999",
+                        "method": "chat.send",
+                        "params": {},
+                    },
+                    timeout=1.0,
+                )
+
+            assert client._pending_requests == {}
+        finally:
+            await client.close()
+            server.close()
+            await server.wait_closed()
+
+    @pytest.mark.asyncio
+    async def test_other_send_errors_clean_pending(self, client):
+        """非 ConnectionClosed 的发送错误原样上抛，并清理 pending future。"""
+        mock_ws = MagicMock()
+        mock_ws.state = State.OPEN
+        mock_ws.send = AsyncMock(side_effect=OSError("boom"))
+        client._ws = mock_ws
+        client._connected = True
+
+        with pytest.raises(OSError, match="boom"):
+            await client._send_request("test.method", {})
+
+        assert client._pending_requests == {}
 
 
 # ==================== Tests: _handle_message ====================
@@ -1303,3 +1410,44 @@ class TestTraceIdInjection:
             )
 
         assert client._send_request_frame.await_args.args[0]["params"]["traceId"] == "-"
+
+
+class _FailingWS:
+    """``async for`` 直接抛异常的 ws stub，用于触发 recv loop 断连回调。"""
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise self._exc
+
+
+class TestRecvLoopDisconnectPayload:
+    """断连回调 payload 应携带根因异常摘要（正常关闭时为空）。"""
+
+    @pytest.mark.asyncio
+    async def test_disconnect_callback_receives_close_error(self, client):
+        client._ws = _FailingWS(RuntimeError("boom"))
+        callback = MagicMock()
+        client.on_disconnect(callback)
+
+        await client._recv_loop()
+
+        callback.assert_called_once_with("disconnect", {"error": "RuntimeError: boom"})
+        assert client._connected is False
+
+    @pytest.mark.asyncio
+    async def test_disconnect_callback_empty_payload_on_normal_close(self, client):
+        import websockets
+
+        client._ws = _FailingWS(websockets.ConnectionClosedOK(None, None))
+        callback = MagicMock()
+        client.on_disconnect(callback)
+
+        await client._recv_loop()
+
+        callback.assert_called_once_with("disconnect", {})
+        assert client._connected is False

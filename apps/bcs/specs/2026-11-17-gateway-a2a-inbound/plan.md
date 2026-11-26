@@ -637,3 +637,19 @@ Open, each needing a decision:
    live events too slowly is closed and has to reconnect.
 4. **Q3** (the core inlines large content through `BlobStorePort`) is
    implemented as proposed; it was not covered by the plan review.
+
+
+## Gateway/Worker integration amendment (2026-11-19)
+
+The #4245 integration supersedes Q2's internal assumption that Worker persists
+A2A-shaped display JSON. TaskFeed persists neutral versioned display and stable
+artifact operations. WorkerOutputReader applies an injected protocol adapter
+after restore/follow; Gateway HTTP retains only A2A envelopes and transport.
+No history store is introduced. Optional history/status.message have no generated
+source in DisplaySnapshot; explicit sources are preserved when provided. Question
+content/Structured Input profile delivery remains the separate interaction work.
+
+Initial task construction moves to WorkerTaskAdmission. Gateway passes trusted
+scope and stable caller intent; retries restore original initialization including
+concurrent first requests. Provider Accepted/Duplicate map to one CoreAdmission.
+A01/A02/A06, cursor redesign and list-order changes remain separate work items.

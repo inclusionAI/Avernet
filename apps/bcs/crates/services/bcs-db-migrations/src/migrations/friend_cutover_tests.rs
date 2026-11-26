@@ -5,7 +5,7 @@ use bcs_db_local::LocalSqliteDbPlugin;
 async fn friend_cutover_does_not_import_legacy_requests_or_change_history() -> DbResult<()> {
     let db = LocalSqliteDbPlugin::new()?;
     run_sqlite_bootstrap_tables(&db).await?;
-    for migration in SQLITE_VERSIONED_MIGRATIONS.iter().filter(|m| m.version <= 45) {
+    for migration in SQLITE_VERSIONED_MIGRATIONS.iter().filter(|m| m.version <= 46) {
         apply_sqlite_migration(&db, migration).await?;
     }
     db.execute(DbStatement::new(

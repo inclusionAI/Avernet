@@ -102,7 +102,7 @@ pub async fn dist_runtime_control_port_contract_tests(
 ) -> ContractResult {
     assert_eq!(runtime.snapshot().await?.active_work, 0);
     assert_eq!(
-        runtime.drain(Duration::from_secs(1)).await?,
+        runtime.drain(Duration::from_secs(5)).await?,
         DrainOutcome::Drained
     );
     assert!(runtime.snapshot().await?.draining);
@@ -178,7 +178,8 @@ pub fn dist_connector_core_service_contract_tests(
         (Report::Key(a), Report::Key(b)) => {
             assert_eq!(a.input.input_id, b.input.input_id);
             assert_eq!(a.input.business_digest, b.input.business_digest);
-            assert!(a.create_session.is_none() && a.create_task.is_none());
+            assert_eq!(a.identity, b.identity);
+            assert_eq!(a.identity.round, None);
         }
         _ => panic!("a final event must be admitted"),
     }

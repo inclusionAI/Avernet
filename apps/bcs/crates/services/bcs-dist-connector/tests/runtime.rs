@@ -8,6 +8,9 @@ use bcs_dist_connector::ConnectorEngine;
 use bcs_dist_model::*;
 use bcs_service_api::port::dist_runtime::DistRuntimeControlPort;
 use bcs_service_api::port::repo::distributed::common::{Page, PageRequest, StoreError};
+use bcs_service_api::port::repo::distributed::dispatch::{
+    ClaimOutcome, CommandFeedPort, DispatchClaimRequest, DispatchQueuePort, ResumeOwnedDispatch,
+};
 use bcs_service_api::port::repo::distributed::ownership::*;
 use bcs_service_api::types::dist_runtime::DrainOutcome;
 use rig::*;
@@ -22,7 +25,7 @@ fn second_did() -> Did {
 
 #[tokio::test]
 async fn snapshot_reports_readiness_and_work() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let engine = rig.engine();
     let idle = engine.snapshot().await.unwrap();
     assert_eq!(idle.instance, instance("conn-03"));
@@ -44,7 +47,7 @@ async fn snapshot_reports_readiness_and_work() {
 
 #[tokio::test]
 async fn at_capacity_no_hints_are_read() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     rig.config.max_active_calls = 1;
     let first = rig.agent.start_stream();
     let second = rig.agent.start_stream();
@@ -64,8 +67,8 @@ async fn at_capacity_no_hints_are_read() {
 }
 
 #[tokio::test]
-async fn drain_stops_claiming_and_leaves_running_calls_held() {
-    let rig = Rig::new();
+async fn drain_stops_claiming_and_stops_calls_still_running_at_the_deadline() {
+    let rig = Rig::new().await;
     let events = rig.agent.start_stream();
     rig.worker.create().await;
     rig.worker.notify().await;
@@ -76,29 +79,29 @@ async fn drain_stops_claiming_and_leaves_running_calls_held() {
     assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 });
     let snapshot = running.engine.snapshot().await.unwrap();
     assert!(snapshot.draining && !snapshot.ready);
-    assert_eq!(snapshot.active_work, 1, "the call is not aborted");
-    // D8: the release step is a stub; the call stays held and recoverable.
-    assert_eq!(*rig.recovery.released.lock().unwrap(), vec![did()]);
+    assert_eq!(snapshot.active_work, 0, "the call's actor is stopped, not left running");
+    // The dispatch stays held, so another Connector takes it over once this
+    // instance is dead and the Worker re-posts its hint.
     assert_eq!(rig.phase().await, "accepted");
     assert_eq!(rig.doc().await["execution"]["holder"]["instance"]["node"], "conn-03");
     assert_eq!(held_members(&rig.store, &instance("conn-03")).await, vec![DID.to_owned()]);
     assert!(running.task.await.unwrap().is_ok(), "the loop ended cleanly");
 
-    // No new claims after drain.
+    // A stopped actor reports nothing more, and no new claims happen.
+    let reported = rig.inbox_events().await.len();
+    let _ = events.send(final_event());
     rig.worker.create_spec(dispatch_spec(&second_did())).await;
     rig.worker.notify_did(&second_did()).await;
     settle().await;
+    assert_eq!(rig.inbox_events().await.len(), reported, "a stopped actor reports nothing more");
     assert_eq!(rig.agent.count("start"), 1);
-
-    // The held call can still finish; a second drain then reports drained.
-    events.send(final_event()).unwrap();
-    until("the call ends", || async { rig.phase().await == "ended" }).await;
-    assert_eq!(running.engine.drain(Duration::from_millis(200)).await.unwrap(), DrainOutcome::Drained);
+    assert_eq!(rig.phase().await, "accepted");
+    assert_eq!(running.engine.drain(Duration::from_millis(50)).await.unwrap(), DrainOutcome::Drained);
 }
 
 #[tokio::test]
 async fn drain_returns_as_soon_as_held_calls_end() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let events = rig.agent.start_stream();
     rig.worker.create().await;
     rig.worker.notify().await;
@@ -110,12 +113,11 @@ async fn drain_returns_as_soon_as_held_calls_end() {
     events.send(final_event()).unwrap();
     let outcome = tokio::time::timeout(Duration::from_secs(2), drain).await.unwrap().unwrap().unwrap();
     assert_eq!(outcome, DrainOutcome::Drained);
-    assert!(rig.recovery.released.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn invalid_settings_are_refused() {
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let mut config = rig.config.clone();
     config.max_active_calls = 0;
     assert_eq!(
@@ -152,7 +154,8 @@ impl MembershipPort for Leases {
         self.calls.lock().unwrap().push(format!("draining {}", lease.instance.node));
         Ok(Renewal::Renewed)
     }
-    async fn retire(&self, _: &MembershipLease) -> Result<(), StoreError> {
+    async fn retire(&self, lease: &MembershipLease) -> Result<(), StoreError> {
+        self.calls.lock().unwrap().push(format!("retire {}", lease.instance.node));
         Ok(())
     }
     async fn liveness(&self, _: &Instance) -> Result<Liveness, StoreError> {
@@ -165,19 +168,37 @@ impl MembershipPort for Leases {
 
 #[tokio::test]
 async fn the_connector_registers_renews_and_marks_draining() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let leases = Arc::new(Leases { lose_after: usize::MAX, ..Leases::default() });
     rig.membership = leases.clone();
     let running = rig.start();
     until("renewed", || async { leases.renewals.load(Ordering::SeqCst) >= 2 }).await;
     assert_eq!(leases.calls.lock().unwrap()[0], "register conn-03 Connector 3");
     assert_eq!(running.engine.drain(Duration::from_millis(50)).await.unwrap(), DrainOutcome::Drained);
-    assert!(leases.calls.lock().unwrap().contains(&"draining conn-03".to_owned()));
+    let calls = leases.calls.lock().unwrap().clone();
+    let at = |call: &str| calls.iter().position(|c| c == call).unwrap_or_else(|| panic!("{call} missing: {calls:?}"));
+    assert!(at("draining conn-03") < at("retire conn-03"), "marked draining first, retired at the end");
+}
+
+#[tokio::test]
+async fn a_drain_that_stops_calls_retires_after_they_stopped() {
+    let mut rig = Rig::new().await;
+    let leases = Arc::new(Leases { lose_after: usize::MAX, ..Leases::default() });
+    rig.membership = leases.clone();
+    let _events = rig.agent.start_stream();
+    rig.worker.create().await;
+    rig.worker.notify().await;
+    let running = rig.start();
+    until("accepted", || async { rig.phase().await == "accepted" }).await;
+    let outcome = running.engine.drain(Duration::from_millis(60)).await.unwrap();
+    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 });
+    assert_eq!(running.engine.snapshot().await.unwrap().active_work, 0);
+    assert!(leases.calls.lock().unwrap().contains(&"retire conn-03".to_owned()));
 }
 
 #[tokio::test]
 async fn a_refused_registration_fails_the_start() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let refusal = StoreError::Invalid { code: "registration".into() };
     let leases = Arc::new(Leases { lose_after: usize::MAX, register_errors: Mutex::new(vec![refusal]), ..Leases::default() });
     rig.membership = leases.clone();
@@ -190,7 +211,7 @@ async fn a_refused_registration_fails_the_start() {
 
 #[tokio::test]
 async fn an_uncertain_registration_is_asked_again_before_any_claim() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let unknown = || StoreError::OutcomeUnknown { operation_id: "register".into() };
     let leases = Arc::new(Leases {
         lose_after: usize::MAX,
@@ -210,7 +231,7 @@ async fn an_uncertain_registration_is_asked_again_before_any_claim() {
 
 #[tokio::test]
 async fn a_registration_not_confirmed_within_its_lifetime_fails_the_start() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     rig.config.membership_ttl = Duration::from_millis(40);
     // The first answer is lost; the lifetime then runs out unrenewed and the
     // provider refuses this incarnation for good.
@@ -228,7 +249,7 @@ async fn a_registration_not_confirmed_within_its_lifetime_fails_the_start() {
 
 #[tokio::test]
 async fn a_lost_registration_stops_claiming_but_not_held_calls() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let leases = Arc::new(Leases { lose_after: 3, ..Leases::default() });
     rig.membership = leases.clone();
     let events = rig.agent.start_stream();
@@ -249,7 +270,7 @@ async fn a_lost_registration_stops_claiming_but_not_held_calls() {
 async fn the_pending_membership_stub_does_not_stop_the_connector() {
     // MembershipPort provider pending from the executor team: registration
     // fails with need_contract and the Connector runs without it.
-    let rig = Rig::new();
+    let rig = Rig::new().await;
     let events = rig.agent.start_stream();
     rig.worker.create().await;
     rig.worker.notify().await;
@@ -262,7 +283,7 @@ async fn the_pending_membership_stub_does_not_stop_the_connector() {
 
 #[tokio::test]
 async fn the_registration_is_kept_alive_during_the_drain_grace_period() {
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     let leases = Arc::new(Leases { lose_after: usize::MAX, ..Leases::default() });
     rig.membership = leases.clone();
     let events = rig.agent.start_stream();
@@ -310,7 +331,7 @@ async fn a_feed_outage_does_not_let_the_registration_expire() {
             Ok(Box::new(BrokenFeed))
         }
     }
-    let mut rig = Rig::new();
+    let mut rig = Rig::new().await;
     // The feed backoff is far longer than the renewal period.
     rig.config.backoff_min = Duration::from_secs(20);
     rig.config.backoff_max = Duration::from_secs(60);
@@ -324,4 +345,79 @@ async fn a_feed_outage_does_not_let_the_registration_expire() {
     until("renewals continue through the outage", || async { leases.renewals.load(Ordering::SeqCst) >= 4 }).await;
     assert!(!task.is_finished(), "the engine keeps running");
     task.abort();
+}
+
+/// A queue whose claims wait for a permit: holds the main loop inside a
+/// claim for as long as a test needs.
+struct GatedQueue {
+    inner: Arc<dyn DispatchQueuePort>,
+    gate: tokio::sync::Semaphore,
+}
+
+#[async_trait]
+impl DispatchQueuePort for GatedQueue {
+    async fn claim(&self, request: DispatchClaimRequest) -> Result<ClaimOutcome, StoreError> {
+        let _permit = self.gate.acquire().await.unwrap();
+        self.inner.claim(request).await
+    }
+    async fn resume_owned(&self, request: ResumeOwnedDispatch) -> Result<ClaimOutcome, StoreError> {
+        self.inner.resume_owned(request).await
+    }
+    async fn notifications(&self, pool: PoolId, me: Instance) -> Result<Box<dyn CommandFeedPort>, StoreError> {
+        self.inner.notifications(pool, me).await
+    }
+}
+
+#[tokio::test]
+async fn a_claim_that_wins_after_the_drain_began_starts_no_actor() {
+    let mut rig = Rig::new().await;
+    let leases = Arc::new(Leases { lose_after: usize::MAX, ..Leases::default() });
+    rig.membership = leases.clone();
+    let _events = rig.agent.start_stream();
+    rig.worker.create().await;
+    rig.worker.notify().await;
+    let mut ports = rig.ports();
+    let gated = Arc::new(GatedQueue { inner: ports.queue.clone(), gate: tokio::sync::Semaphore::new(0) });
+    ports.queue = gated.clone();
+    let engine = ConnectorEngine::new(rig.config.clone(), ports).unwrap();
+    let looped = engine.clone();
+    let task = tokio::spawn(async move { looped.run().await });
+    until("registered", || async { leases.calls.lock().unwrap().iter().any(|c| c.starts_with("register")) }).await;
+    settle().await;
+
+    // The main loop is held inside the claim past the deadline. Draining
+    // already refuses new actors, so the drain can retire at once.
+    let outcome = engine.drain(Duration::from_millis(60)).await.unwrap();
+    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 0 });
+    assert!(leases.calls.lock().unwrap().contains(&"retire conn-03".to_owned()));
+
+    // The claim then wins, but no actor starts: the call stays held by this
+    // (now dead) instance for another Connector to take over.
+    gated.gate.add_permits(1);
+    until("claimed", || async { rig.phase().await == "claimed" }).await;
+    assert!(task.await.unwrap().is_ok());
+    settle().await;
+    assert_eq!(engine.snapshot().await.unwrap().active_work, 0);
+    assert_eq!(rig.agent.count("start"), 0, "nothing is sent for a call claimed while draining");
+    assert_eq!(rig.doc().await["execution"]["holder"]["instance"]["node"], "conn-03");
+}
+
+#[tokio::test]
+async fn concurrent_drains_both_end_with_every_actor_stopped() {
+    let mut rig = Rig::new().await;
+    let leases = Arc::new(Leases { lose_after: usize::MAX, ..Leases::default() });
+    rig.membership = leases.clone();
+    let _events = rig.agent.start_stream();
+    rig.worker.create().await;
+    rig.worker.notify().await;
+    let running = rig.start();
+    until("accepted", || async { rig.phase().await == "accepted" }).await;
+    let (first, second) = tokio::join!(
+        running.engine.drain(Duration::from_millis(60)),
+        running.engine.drain(Duration::from_millis(60)),
+    );
+    let outcomes = [first.unwrap(), second.unwrap()];
+    assert!(outcomes.contains(&DrainOutcome::DeadlineReached { remaining: 1 }), "{outcomes:?}");
+    assert_eq!(running.engine.snapshot().await.unwrap().active_work, 0);
+    assert!(leases.calls.lock().unwrap().contains(&"retire conn-03".to_owned()));
 }

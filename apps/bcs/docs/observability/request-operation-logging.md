@@ -155,3 +155,42 @@ slow success do not. Existing operation outcomes, timing and result values stay
 unchanged. `in_current_log_context` from the tracing API explicitly captures
 log-only context for Provider final tasks (including nested processing) and the
 unmanaged A2A drain. It does not extend a network span or restore its parent.
+
+## AgentCard business warnings
+
+AgentCard V1 management failures emit one WARN record to the explicit
+`bcs_business_warning` target. Bootstrap automatically adds `bcs-warning.log`
+beside the main/first configured log output (or `./logs` with no file outputs),
+including legacy explicit output lists. This target is isolated from wildcard
+console/main/error outputs so payloads are not copied into unrelated streams.
+Other WARN events are not automatically treated as business failures.
+
+Find `a2a.management.failed` by `request_id` or `trace_id`. `rpc_id` and the
+provider-owned correlation fields identify the current network call when that
+optional tracing provider supplies context; absence never manufactures IDs.
+The record contains operation, error_code, field and reason. V1 reports typed
+management details before safe response conversion; parse/protocol errors use
+their original application error code and safe message. Response contracts and
+Provider authorization are unchanged. No additional DB queries, writes or
+network calls are made.
+
+The existing bounded HTTP read supplies the original request body, not a
+reconstructed command. JSON is reserialized after recursive credential redaction;
+unknown Card fields and duplicate keys are retained, but whitespace is not.
+Provider token prefixes show at most four characters, followed by `****`; tokens
+of four or fewer characters are fully masked. Known Provider-token occurrences
+are removed from payload keys/values and error details. Credential-named fields
+are redacted recursively. Invalid JSON is explicitly omitted rather than logged
+raw. Bodies not read because of protocol/authentication/size rejection are marked
+unavailable. Payloads are capped at 64 KiB after redaction; byte counts and
+`payload_truncated` make incomplete captures explicit. Successful calls never
+print payloads. URL registrations retain the caller's URL request, not an
+assertion that a fetched remote Card was captured.
+
+`bcs-warning.log` follows the same rotating writer creation and permission
+behavior as other BCS log files such as `bcs.log`; the writer does not chmod
+files or grant extra access. Readable deployed access and platform log-query
+ACLs still need separate runtime verification.
+
+Regression suites: `bcs-observability` business warning unit tests;
+`bcs-api-http --test agentcard_warning`; bootstrap logging routing/rotation tests.

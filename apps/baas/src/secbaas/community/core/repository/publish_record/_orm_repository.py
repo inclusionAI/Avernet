@@ -264,6 +264,10 @@ class OrmPublishRecordRepository(OrmConnectionMixin, PublishRecordRepository):
             publish_max_retry_times=current.publish_max_retry_times,
             publish_retry_count=current.publish_retry_count + 1,
             attempt_started_at=attempt_started_at,
+            publish_manual_retry_count=current.publish_manual_retry_count,
+            publish_manual_retry_at=current.publish_manual_retry_at,
+            publish_manual_retry_operator=current.publish_manual_retry_operator,
+            cleanup_reason=current.cleanup_reason,
         )
         values = {
             "extra_config": json.dumps(dataclasses.asdict(claimed), ensure_ascii=False),
@@ -285,6 +289,94 @@ class OrmPublishRecordRepository(OrmConnectionMixin, PublishRecordRepository):
         )
         result = int(updated) > 0
         log.info("[publish-record:try_claim_retry] result: %s", result)
+        return result
+
+    @with_orm_session
+    def try_claim_manual_retry(
+        self,
+        *,
+        record_id: int,
+        tenant: str,
+        env: str,
+        expected_manual_retry_count: int,
+        attempt_started_at: str,
+        modifier: str | None = None,
+    ) -> bool:
+        log.info(
+            "try_claim_manual_retry: record_id=%s, tenant=%s, env=%s, "
+            "expected_manual_count=%s",
+            record_id,
+            tenant,
+            env,
+            expected_manual_retry_count,
+        )
+        import dataclasses
+        import json
+
+        from sqlalchemy import func
+
+        row = (
+            self._session.query(PublishRecordModel)
+            .filter(
+                PublishRecordModel.id == record_id,
+                PublishRecordModel.tenant == tenant,
+                PublishRecordModel.env == env,
+                PublishRecordModel.is_deleted == 0,
+                PublishRecordModel.result_status == "FAILED",
+            )
+            .with_for_update()
+            .first()
+        )
+        if row is None:
+            log.info("[publish-record:try_claim_manual_retry] no FAILED record")
+            return False
+
+        current = PublishRecordExtraConfig(**self._parse_extra_config(row.extra_config))
+        if current.publish_manual_retry_count != expected_manual_retry_count:
+            log.info(
+                "[publish-record:try_claim_manual_retry] stale expected count: "
+                "expected=%s actual=%s",
+                expected_manual_retry_count,
+                current.publish_manual_retry_count,
+            )
+            return False
+
+        claimed = PublishRecordExtraConfig(
+            device_uuid=current.device_uuid,
+            provider_device_id=current.provider_device_id,
+            publish_max_retry_times=current.publish_max_retry_times,
+            publish_retry_count=current.publish_retry_count,
+            attempt_started_at=attempt_started_at,
+            publish_manual_retry_count=current.publish_manual_retry_count + 1,
+            publish_manual_retry_at=attempt_started_at,
+            publish_manual_retry_operator=modifier,
+            cleanup_reason=current.cleanup_reason,
+        )
+        values = {
+            "extra_config": json.dumps(dataclasses.asdict(claimed), ensure_ascii=False),
+            "gmt_modified": func.now(),
+        }
+        if modifier is not None:
+            values["modifier"] = modifier
+
+        # FAILED -> PROCESSING is part of the claim: the orchestrator provisions
+        # against a PROCESSING record and every later settlement (callback or
+        # inline) uses update_result_if_processing, which only matches PROCESSING.
+        values["result_status"] = "PROCESSING"
+
+        updated = (
+            self._session.query(PublishRecordModel)
+            .filter(
+                PublishRecordModel.id == record_id,
+                PublishRecordModel.tenant == tenant,
+                PublishRecordModel.env == env,
+                PublishRecordModel.is_deleted == 0,
+                PublishRecordModel.result_status == "FAILED",
+            )
+            .update(values, synchronize_session=False)
+        )
+        result = int(updated) > 0
+        log.info("[publish-record:try_claim_manual_retry] result: %s", result)
         return result
 
     @with_orm_session
@@ -596,6 +688,60 @@ class OrmPublishRecordRepository(OrmConnectionMixin, PublishRecordRepository):
         result = {row[0]: row[1] for row in rows}
         log.info("[publish-record:count_records_by_publish_id] result: %s", result)
         return result
+
+    @with_orm_session
+    def list_by_publish_id(
+        self, publish_id: int, tenant: str, env: str
+    ) -> list[PublishRecordRecord]:
+        log.info(
+            "list_by_publish_id: publish_id=%s, tenant=%s, env=%s",
+            publish_id,
+            tenant,
+            env,
+        )
+        rows = (
+            self._session.query(PublishRecordModel)
+            .filter(
+                PublishRecordModel.publish_id == publish_id,
+                PublishRecordModel.tenant == tenant,
+                PublishRecordModel.env == env,
+                PublishRecordModel.is_deleted == 0,
+            )
+            .order_by(PublishRecordModel.id.asc())
+            .all()
+        )
+        items = [r.to_record() for r in rows]
+        log.info("[publish-record:list_by_publish_id] result: %s rows", len(items))
+        return items
+
+    @with_orm_session
+    def update_extra_config(
+        self,
+        *,
+        record_id: int,
+        tenant: str,
+        env: str,
+        extra_config: dict,
+        modifier: str | None = None,
+    ) -> None:
+        log.info("update_extra_config: record_id=%s", record_id)
+        import json
+
+        from sqlalchemy import func
+
+        values: dict = {
+            "extra_config": json.dumps(extra_config, ensure_ascii=False),
+            "gmt_modified": func.now(),
+        }
+        if modifier is not None:
+            values["modifier"] = modifier
+        self._session.query(PublishRecordModel).filter(
+            PublishRecordModel.id == record_id,
+            PublishRecordModel.tenant == tenant,
+            PublishRecordModel.env == env,
+            PublishRecordModel.is_deleted == 0,
+        ).update(values, synchronize_session=False)
+        log.info("[publish-record:update_extra_config] result: done")
 
     @with_orm_session
     def list_stale_processing_records(

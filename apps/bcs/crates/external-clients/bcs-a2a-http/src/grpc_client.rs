@@ -16,6 +16,8 @@ pub struct GrpcClient {
 
 impl GrpcClient {
     /// No endpoint fallback or automatic retry. Task lifecycle owns retry policy.
+    /// Every request carries a `grpc-timeout` deadline of 120 s unless
+    /// `with_timeout` changes it.
     pub fn new(channel: Channel, headers: MetadataMap, tenant: Option<String>) -> Self {
         Self { sdk: A2aServiceClient::new(channel)
             .max_decoding_message_size(8 * 1024 * 1024)
@@ -66,6 +68,8 @@ impl GrpcClient {
         }
     }
 
+    /// Unary send: one answer (a task or a direct message). The distributed
+    /// Connector uses it for agents that declare no streaming.
     pub async fn send_message(&self, request: &a2a::SendMessageRequest)
         -> Result<a2a::SendMessageResponse, A2AError> {
         let mut body = pbconv::to_proto_send_message_request(request);
@@ -75,6 +79,8 @@ impl GrpcClient {
             .ok_or_else(|| A2AError::parse_error("empty A2A gRPC submission response"))
     }
 
+    /// Streaming send: the error, if any, is the initial answer's; later
+    /// failures arrive as stream items.
     pub async fn send_streaming_message(&self, request: &a2a::SendMessageRequest)
         -> Result<BoxStream<'static, Result<a2a::StreamResponse, A2AError>>, A2AError> {
         let mut body = pbconv::to_proto_send_message_request(request);
@@ -154,6 +160,9 @@ struct ErrorInfo {
     #[prost(string, tag="1")] reason: String,
 }
 
+/// A gRPC status as an A2A error. A refused connection to the sidecar
+/// becomes `NOT_CONNECTED` (certainly not sent, see `transport_error`); every
+/// other status becomes `A2A gRPC <code>`, a marker callers classify by code.
 fn grpc_error(status: Status) -> A2AError {
     if crate::transport_error::grpc_not_connected(&status) {
         return A2AError::internal(crate::transport_error::NOT_CONNECTED);

@@ -136,19 +136,57 @@ again after asynchronous provider work, before returning a result.
 ## Diagnosing provider failure without disclosing diagnostics
 
 A verified provider message in a terminal failure state is not a transport or
-YAML validation failure. A recognized `BotBindingNotFoundError` in its `error`
-field is mapped to the existing safe code `AUTO_HEAL_BOT_UNAVAILABLE`; unknown
-provider failures retain `BAAS_GENERATION_FAILED`. Raw errors, credentials,
-URLs, stack traces and failed-message content are not returned as draft YAML or
-copied into browser error text. Completed assistant content and outer API-error
-envelopes are not used to infer this terminal binding error.
+YAML validation failure. Decode terminal status before inspecting reply content.
+`TIME_OUT` maps to `BAAS_GENERATION_TIMEOUT`; cancelled, stopped or aborted
+messages map to `BAAS_GENERATION_CANCELLED`. These are provider terminal states,
+not the local deadline or a local-cancel acknowledgement. They take precedence
+over conflicting diagnostics and never authorize automatic redispatch.
+
+Only native enveloped `data.error` may select a diagnostic classification, after
+the adapter validates the exact message and frozen Bot identity. Strings longer
+than 4,096 characters and non-string errors do not select a diagnostic code.
+Recognized `BotBindingNotFoundError`, `Bot binding not found:` and worker
+`binding not found:` signatures map to `AUTO_HEAL_BOT_UNAVAILABLE`. Source-backed
+authentication, session initialization and result-persistence signatures map to
+`BAAS_AUTH_FAILED`, `BAAS_SESSION_UNAVAILABLE` and
+`BAAS_RESULT_PERSISTENCE_FAILED`; unknown diagnostics retain
+`BAAS_GENERATION_FAILED`. Only known worker wrappers are removed; arbitrary
+prose, nested errors and assistant text are not searched for signatures.
+
+Raw errors, credentials, URLs, stack traces and failed-message content are not
+returned as draft YAML or copied into browser error text or adapter logs.
+Terminal failure content is never a candidate, even when it contains valid YAML.
+Completed assistant content and outer API-error envelopes are not used to infer
+terminal diagnostic codes. Outer poll errors retain their existing operational
+recovery semantics; they are not native execution failures.
+
+Known failure guidance includes the **original draft ID**, which is already the
+prepared BaaS `message_id`. An authorized operator can correlate that ID directly
+with the original provider message's `status` and `error`; there is no ClawWeb
+task table or persisted `job_id` lookup. Do not start a new generation just to
+obtain diagnostic evidence. Operational recovery keeps the same signed receipt
+and polls the same message only. Terminal failure permits a new attempt only
+through an explicit user action.
 
 For `AUTO_HEAL_BOT_UNAVAILABLE`, check the configured full Bot identity and owner,
 the selected endpoint/key pair, and the Bot and binding in the provider's actual
 Backend environment. A Bot marked ACTIVE in one environment does not prove that
 another environment can find it. A failed run row with no provider session can
 also exist: the provider may persist the message before resolving its binding.
-The error is not evidence that ClawWeb needs a new task table.
+New-session dispatch may omit `metadata.session_id`; authenticated BaaS context
+supplies tenant/application identity. The configured Bot runtime environment
+continues to select the complete transport pair. This change neither assumes a
+default-online Bot nor adds a lifecycle-stage selector, changes a binding or
+introduces a task table.
+
+Source evidence: BaaS `MessageResultResponseData` and `get_message_result` expose
+status/error; `bot_run/_executor.py`, `_task_message_dispatcher.py`,
+`_baas_service.py`, `api/bot_runtime/_exceptions.py` and `api/api_gateway/_jwt.py`
+produce the recognized signatures. Synthetic adapter/core/browser regressions
+cover safe classification, failed YAML rejection, original-message correlation,
+receipt-only recovery, no extra dispatch and no workflow/deploy writes. They
+establish diagnostic preservation, not the cause or resolution of a deployed
+incident.
 
 ## Uncertainty, recovery and cancellation
 
@@ -213,7 +251,11 @@ queried; an HTTP 400 alone is not proof of non-acceptance.
 | `BAAS_AUTH_FAILED` | Check provider credentials/permissions. A polling authorization failure does not prove that the remote execution stopped. |
 | `BAAS_POLL_UNAVAILABLE` | The outer message read failed, not a native task terminal state; retain the signed context and recover the same message. |
 | `BAAS_REQUEST_REJECTED` | BaaS positively rejected dispatch, distinct from an unknown acknowledgement. |
-| `BAAS_GENERATION_FAILED` / `BAAS_PROVIDER_REJECTED` | Provider execution failed or was rejected; no candidate may be applied. |
+| `BAAS_GENERATION_FAILED` / `BAAS_PROVIDER_REJECTED` | Unclassified provider execution failure or rejection; correlate the original message before deciding whether to retry. No candidate may be applied. |
+| `BAAS_GENERATION_TIMEOUT` | BaaS reports execution timeout, distinct from local `EXECUTION_TIMEOUT`. Check the original message and upstream timeout configuration; do not automatically redispatch. |
+| `BAAS_GENERATION_CANCELLED` | BaaS reports cancellation, stop or abort. Inspect the original message; this is not a local-cancel acknowledgement. |
+| `BAAS_SESSION_UNAVAILABLE` | A known execution signature indicates missing session context or materialization failure. Check Bot runtime, engine adapter and tenant/session initialization, not only the user requirement. |
+| `BAAS_RESULT_PERSISTENCE_FAILED` | BaaS could not persist the result. Even generated content is not accepted as a candidate; check provider storage and the original message. |
 | `INVALID_GENERATION_RESULT` | Reply parsing, workflow identity/version or output validation failed; no substitute YAML is produced. |
 | `EXECUTION_TIMEOUT` | The signed local waiting window expired; the remote Bot may continue. |
 | `AI_DRAFT_RECEIPT_REQUIRED` | An older client has no signed recovery context. Do not allocate and submit a replacement automatically. |

@@ -32,13 +32,28 @@ fn initial() -> Checkpoint {
         format_version: 1,
         commit_seq: CommitSeq(0),
         consumed: None,
-        tasks: Default::default(),
-        runner_state: RunnerState {
-            format_version: 1,
-            value: json!({"a":1,"b":2}),
-        },
+        tasks: vec![TaskProgress {
+            steps: 0,
+            tid: Tid("s0042.session.task".into()),
+            phase: TaskPhase::Running,
+            input: Payload::Inline(json!({})),
+            result_ref: None,
+            output_limits: PHASE_ONE_OUTPUT_LIMITS,
+            output_usage: OutputUsage::default(),
+            publication: SnapshotProgress::default(),
+            finalization: None,
+        }]
+        .into(),
+        runner_state: Some(TaskRunnerState {
+            tid: Tid("s0042.session.task".into()),
+            state: RunnerState {
+                format_version: 1,
+                value: json!({"a":1,"b":2}),
+            },
+        }),
         dispatch_seq: Default::default(),
         deadlines: vec![],
+        deadline_history: Default::default(),
         view_drafts: Default::default(),
         last_event_id: None,
         outbox: None,
@@ -84,12 +99,16 @@ fn commit(session: &AcquiredSession, seq: u64) -> CommitRequest {
     let id = CommitId(format!("commit-{seq}"));
     let digest = Digest(format!("digest-{seq}"));
     candidate.outbox = Some(CommittedBatch {
+        created_at: None,
         commit_id: id.clone(),
         source_commit: CommitSeq(seq),
         content_digest: digest.clone(),
         effects: vec![],
     });
     CommitRequest {
+        purpose: CommitPurpose::Ordinary {
+            control_revision: 0,
+        },
         owner: session.ownership.clone(),
         expected_commit_seq: CommitSeq(seq - 1),
         commit_id: id,
@@ -149,7 +168,7 @@ async fn sealing_preserves_state_and_rejects_old_full_checkpoint() {
     );
 }
 #[tokio::test]
-async fn control_versions_do_not_consume_business_sequence() {
+async fn control_versions_and_consumed_only_commits_do_not_reset_recovery_evidence() {
     let (_, s) = setup();
     register(&s, "a").await;
     let a = claim(&s, "a", None).await;
@@ -168,7 +187,7 @@ async fn control_versions_do_not_consume_business_sequence() {
             .unwrap()
             .recovery
             .takeover_streak,
-        0
+        1
     );
 }
 #[tokio::test]
@@ -542,6 +561,40 @@ async fn unknown_checkpoint_format_is_rejected_before_sealing() {
     ));
 }
 
+#[tokio::test]
+async fn unsupported_checkpoint_layout_is_classified_before_typed_decode() {
+    for (format, runner) in [
+        (99, json!({"future_state": true})),
+        (1, json!({"format_version": 1, "value": {"legacy": true}})),
+    ] {
+        let (model, store) = setup();
+        register(&store, "a").await;
+        let owner = claim(&store, "a", None).await;
+        let envelope = acquire(&store, &owner).await.envelope;
+        let key = KeyLayout::new("test", "worker").unwrap().ckpt(&sid()).unwrap();
+        let old = model.read_document(&key).await.unwrap().unwrap();
+        let mut raw = serde_json::to_value(envelope).unwrap();
+        raw["checkpoint"]["format_version"] = json!(format);
+        raw["checkpoint"]["runner_state"] = runner;
+        assert!(matches!(
+            model.replace_document(&key, old.version, &raw).await.unwrap(),
+            bcs_store_api::WriteOutcome::Applied { .. }
+        ));
+        let before = model.read_document(&key).await.unwrap().unwrap();
+        assert!(matches!(
+            store.load(&sid()).await,
+            Err(StoreError::UnsupportedFormat { format: found }) if found == format
+        ));
+        assert!(matches!(
+            store.acquire(&sid(), &owner, initial()).await,
+            Err(StoreError::UnsupportedFormat { format: found }) if found == format
+        ));
+        let after = model.read_document(&key).await.unwrap().unwrap();
+        assert_eq!(after.version, before.version);
+        assert_eq!(after.value, before.value);
+    }
+}
+
 struct DelayedDocuments {
     model: Arc<Model>,
     armed: std::sync::atomic::AtomicBool,
@@ -563,6 +616,9 @@ impl DelayedDocuments {
     }
 }
 impl bcs_store_api::StorePlugin for DelayedDocuments {
+    fn pool_observation(&self) -> Option<bcs_store_api::StorePoolObservation> {
+        self.model.pool_observation()
+    }
     fn supports(&self, c: bcs_store_api::StoreCapability) -> bool {
         c == bcs_store_api::StoreCapability::DocumentCas
     }
@@ -796,6 +852,82 @@ async fn deferred_observations_do_not_fill_receiver_cache() {
     }
     assert!(matches!(
         s.acquire(&Sid("s0042.new".into()), &record.claim, initial())
+            .await
+            .unwrap(),
+        AcquireOutcome::Acquired(_)
+    ));
+}
+
+#[tokio::test]
+async fn raw_deferred_and_fenced_observations_do_not_consume_receiver_capacity() {
+    use bcs_service_api::port::repo::distributed::control::{
+        ControlAcquireOutcome, SessionControlPort,
+    };
+    let (m, s) = setup();
+    register(&s, "a").await;
+    register(&s, "b").await;
+    let a = claim(&s, "a", None).await;
+    let source = acquire(&s, &a).await;
+    let layout = KeyLayout::new("test", "worker").unwrap();
+    for n in 0..2 {
+        m.create_document(
+            &layout.ckpt(&Sid(format!("s0042.protected{n}"))).unwrap(),
+            &serde_json::to_value(&source.envelope).unwrap(),
+        )
+        .await
+        .unwrap();
+    }
+    let receiver = CoordinationStore::with_config(
+        m.clone(),
+        m.clone(),
+        m.clone(),
+        layout.clone(),
+        bcs_dist_store::coordination::CoordinationStoreConfig {
+            max_cached_sessions: 1,
+            max_handoff_timers: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let HandoffOutcome::Accepted(record) = receiver
+        .handoff(HandoffRequest {
+            request_id: RequestId("handoff".into()),
+            from: a,
+            target: instance("b"),
+            grace: Duration::from_secs(60),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!()
+    };
+    for n in 0..2 {
+        assert!(matches!(
+            receiver
+                .acquire_control(&Sid(format!("s0042.protected{n}")), &record.claim)
+                .await
+                .unwrap(),
+            ControlAcquireOutcome::Deferred { .. }
+        ));
+    }
+    let mut future = source.envelope.clone();
+    future.owner.epoch = WorkerEpoch(999);
+    for n in 0..2 {
+        let sid = Sid(format!("s0042.future{n}"));
+        m.create_document(
+            &layout.ckpt(&sid).unwrap(),
+            &serde_json::to_value(&future).unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            receiver.acquire_control(&sid, &record.claim).await.unwrap(),
+            ControlAcquireOutcome::Fenced
+        ));
+    }
+    assert!(matches!(
+        receiver
+            .acquire(&Sid("s0042.new".into()), &record.claim, initial())
             .await
             .unwrap(),
         AcquireOutcome::Acquired(_)

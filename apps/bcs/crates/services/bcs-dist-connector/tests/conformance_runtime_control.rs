@@ -7,6 +7,6 @@ use bcs_test_support::contract::distributed::services::dist_runtime_control_port
 
 #[tokio::test]
 async fn conformance_connector_engine_runtime_control() {
-    let rig = rig::Rig::new();
+    let rig = rig::Rig::new().await;
     dist_runtime_control_port_contract_tests(&rig.engine()).await.unwrap();
 }

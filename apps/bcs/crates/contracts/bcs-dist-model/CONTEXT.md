@@ -11,6 +11,7 @@ Crate version: `0.1.0`. This crate depends only on serde and serde_json.
 | [session](src/session.rs) | Frozen session specification, participant bindings, declared downstream capabilities and limits |
 | [input](src/input.rs) | Logical input envelope, Agent events, admission receipt |
 | [task](src/task.rs) | Task state, interactions, persisted snapshot, reconstructed view, output events and final archive |
+| [output](src/output.rs) | Stable display identity/operations, versioned resolved snapshots, frozen output safety profile and publication progress |
 | [dispatch](src/dispatch.rs) | Immutable dispatch specification, separately owned control and execution state |
 | [runner](src/runner.rs) | Serializable reducer state and deadlines shared with checkpoint persistence |
 
@@ -36,6 +37,18 @@ at the Service API boundary; this crate stores its immutable reference and diges
 - `TaskSnapshot.snapshot_event_id` is exact persisted coverage;
   `TaskView.covered_through` is the cut after reconstruction. These are distinct
   from the newest event known to exist.
+- Artifact identity is `(NodeId, ArtifactId, OutputClass)`. Show and Artifact
+  events share explicit Upsert/AppendText operations; no implicit merge exists.
+  Complete DisplaySnapshot format 1 retains first-appearance order. Thinking
+  never enters that persisted snapshot. The pure implementation and accounting
+  rules live in [bcs-dist-projection](../../services/bcs-dist-projection/README.md).
+- `TaskSnapshot.output_limits` freezes the output profile at initial creation;
+  checkpoint TaskProgress retains exactly that profile and authoritative usage.
+  Published usage is diagnostic for that snapshot cut. Output content has no
+  per-unit, cumulative or full-snapshot byte quota.
+  No field defaults to the host's current configuration when a record is read.
+- Each Deadline has a stable occurrence ID, including the snapshot-flush timer.
+  Retries and takeover preserve it instead of manufacturing another timeout.
 - Pending dispatch input sequence and holder event sequence are separate
   namespaces. Removing a pending input must not remove its deduplication proof.
 - `RequestAccepted`, `ConfirmedCanceled` and `OutcomeUnknown` remain distinct.
@@ -52,6 +65,11 @@ owning service/provider. Credentials are references, never secret values.
 No existing records are migrated and no old wire API is replaced. This initial
 format is not yet frozen for deployment. Subsequent persisted changes require an
 explicit version/reader/migration decision before a provider writes them.
+
+The phase-one refinement keeps the unpublished version-1 envelope and requires a
+fresh namespace. Old implicit artifact operations, missing frozen profiles and
+unbound RunnerState are rejected rather than reinterpreted. There is no migration
+for retained prototype records and no change to deployed legacy HTTP/task data.
 
 `tests/persistence_shape.rs` checks representative persisted identities/tags.
 The `InboxPos` compile-fail example prevents accidental business ordering of

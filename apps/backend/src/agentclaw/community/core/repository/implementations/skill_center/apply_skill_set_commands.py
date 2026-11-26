@@ -375,10 +375,28 @@ class ApplySkillSetCommands:
             default_assets = self._scope(session.query(Skill), Skill).filter(
                 Skill.id.in_(default_ids)
             ).order_by(Skill.id).with_for_update().all()
-            if any(
-                self._apply_set_owns_skill(item, skill, skill_exclusions)
-                for item in facts if not item.is_default for skill in default_assets
-            ):
+            default_claimed = next(
+                (
+                    (item, skill)
+                    for item in facts if not item.is_default
+                    for skill in default_assets
+                    if self._apply_set_owns_skill(item, skill, skill_exclusions)
+                ),
+                None,
+            )
+            if default_claimed is not None:
+                item, skill = default_claimed
+                logger.warning(
+                    "[skill_center] RAISK default membership conflict: bot_id=%s "
+                    "owner_id=%s conflicting_set_id=%s conflicting_set_name=%s "
+                    "skill_id=%s skill_uuid=%s",
+                    scope.bot_id,
+                    scope.owner_id,
+                    item.id,
+                    item.name,
+                    skill.id,
+                    skill.skill_uuid,
+                )
                 raise SkillSetControlPlaneConflictError("RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET")
             # Internal target duplicates have no old row to expose an ownership collision.
             for attr in ("skill_ids", "mcp_codes"):
@@ -386,6 +404,24 @@ class ApplySkillSetCommands:
                     member for target in sets for member in getattr(target, attr)
                 ]
                 if len(members) != len(set(members)):
+                    duplicated = sorted(
+                        {m for m in members if members.count(m) > 1},
+                        key=str,
+                    )
+                    holder_names = [
+                        target.name
+                        for target in sets
+                        if set(getattr(target, attr)) & set(duplicated)
+                    ]
+                    logger.warning(
+                        "[skill_center] RAISK duplicate members in apply targets: "
+                        "bot_id=%s owner_id=%s attr=%s duplicated=%s holder_sets=%s",
+                        scope.bot_id,
+                        scope.owner_id,
+                        attr,
+                        duplicated,
+                        holder_names,
+                    )
                     raise SkillSetControlPlaneConflictError(
                         "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET"
                     )

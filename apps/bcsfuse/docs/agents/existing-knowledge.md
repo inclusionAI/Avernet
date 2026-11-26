@@ -5,6 +5,11 @@ This catalog routes existing repository knowledge into the app framework without
 ## Existing app documentation and contracts
 
 - [docs/README.md](../README.md)
+- [packages/search-core/docs/card-management-api.md](../../packages/search-core/docs/card-management-api.md)
+- [packages/search-core/docs/search-api.md](../../packages/search-core/docs/search-api.md)
+- [packages/search-core/docs/index-rebuild.md](../../packages/search-core/docs/index-rebuild.md)
+- [packages/search-core/docs/provider-contracts.md](../../packages/search-core/docs/provider-contracts.md)
+- [packages/search-core/docs/local-catalog.md](../../packages/search-core/docs/local-catalog.md)
 - [docs/api/api-external.md](../api/api-external.md)
 - [docs/api/api-reference.md](../api/api-reference.md)
 - [docs/architecture/composition-contract.md](../architecture/composition-contract.md)

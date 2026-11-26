@@ -18,11 +18,14 @@ pub struct Versioned<T> {
 /// every deployment of the same backend product.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreCapability {
-    /// Persistent whole-document create/read/exact-version replacement. No TTL,
+    /// Persistent create/read/projection/exact-version replacement and patch. No TTL,
     /// deletion, retained history after external deletion, or Newer is implied.
     DocumentCas,
-    /// Provider-timed, non-revivable registration lifetimes, including retirement.
-    StrictLease,
+    /// Persistent top-level objects: get_json, create with Absent/Replace, and
+    /// live Version/Newer Merge with Preserve. No delete, expiry or arbitrary Set.
+    PersistentJsonMerge,
+    /// CAS-confirmed membership termination retained for 30 days; GC TTL is separate.
+    RetainedLease,
     Kv,
     /// Versioned creation/read, unconditional deletion and TTL query; no CAS.
     VersionedKv,
@@ -52,6 +55,31 @@ pub enum StoreCapability {
 /// require Stream. Declarations are stable for the lifetime of this instance.
 pub trait StorePlugin: Send + Sync + 'static {
     fn supports(&self, capability: StoreCapability) -> bool;
+    /// Current ordinary-pool facts, read synchronously without storage IO.
+    /// None is unavailable evidence, never an idle-pool observation. Wrappers
+    /// forward this metadata; blocking-read pools must be reported separately.
+    fn pool_observation(&self) -> Option<StorePoolObservation> {
+        None
+    }
+}
+
+/// Resource facts only; consumers own admission thresholds and recovery policy.
+/// Snapshot fields must be consistent and current at the time of this call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorePoolObservation {
+    /// This provider has no connection pool, for example an in-process model.
+    Unpooled,
+    Bounded {
+        capacity: usize,
+        in_use: usize,
+        waiters: usize,
+        /// Monotonic duration for which all slots are occupied OR at least one
+        /// caller is queued. Preserve it across slot handoff to waiting callers;
+        /// reset to zero only when neither condition holds. Include connection
+        /// setup and authentication in occupancy; cancellation releases both
+        /// queued and checked-out reservations.
+        congested_for: Duration,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

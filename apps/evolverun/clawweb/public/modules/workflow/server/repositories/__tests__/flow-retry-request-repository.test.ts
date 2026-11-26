@@ -4,14 +4,14 @@
  * claimable again; release returns a row to the pool with attempts+1.
  */
 import { describe, it, expect } from "vitest";
-import type { IDatabase } from "@avernet/clawweb-shared/server/db";
-import { sqliteDialect } from "@avernet/clawweb-shared/server/db/dialect";
+import { SqliteDatabase, type IDatabase } from "@avernet/clawweb-shared/server/db";
 import { FlowRetryRequestRepository } from "../flow-retry-request-repository.js";
 import Database from "better-sqlite3";
 
 function createTestDb(): IDatabase {
   const raw = new Database(":memory:");
   raw.exec(`
+    CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, status TEXT NOT NULL);
     CREATE TABLE flow_retry_requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       request_id VARCHAR(255) NOT NULL,
@@ -33,24 +33,7 @@ function createTestDb(): IDatabase {
     CREATE INDEX idx_flow_retry_requests_flow_id ON flow_retry_requests (flow_id);
   `);
 
-  return {
-    dbType: "sqlite",
-    dialect: sqliteDialect,
-    query: async <T>(sql: string, params?: unknown[]) => {
-      const stmt = raw.prepare(sql);
-      const rows = params ? stmt.all(...params) : stmt.all();
-      return rows as T[];
-    },
-    exec: async (sql: string, params?: unknown[]) => {
-      const stmt = raw.prepare(sql);
-      const result = params ? stmt.run(...params) : stmt.run();
-      return { affectedRows: result.changes, insertId: result.lastInsertRowid as number };
-    },
-    transaction: async <T>(fn: (db: IDatabase) => Promise<T>) => {
-      return raw.transaction(() => fn(createTestDb()))();
-    },
-    close: async () => { raw.close(); },
-  };
+  return new SqliteDatabase(raw);
 }
 
 describe("FlowRetryRequestRepository", () => {

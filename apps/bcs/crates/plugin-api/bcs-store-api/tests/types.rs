@@ -1,4 +1,5 @@
 use bcs_store_api::{
+    document::DocumentStorePlugin,
     json::JsonStorePlugin,
     kv::{KvStorePlugin, VersionedKvStorePlugin},
     stream::*,
@@ -13,6 +14,7 @@ fn plugin_traits_are_object_safe() {
         _: &dyn KvStorePlugin,
         _: &dyn VersionedKvStorePlugin,
         _: &dyn JsonStorePlugin,
+        _: &dyn DocumentStorePlugin,
         _: &dyn ZSetStorePlugin,
         _: &dyn StreamStorePlugin,
     ) {

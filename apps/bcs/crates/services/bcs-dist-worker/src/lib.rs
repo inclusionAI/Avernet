@@ -3,9 +3,24 @@
 //! coordination never invents their completion from a successful owner update.
 mod config;
 mod control;
+mod processor;
 mod recovery;
 mod runtime;
 pub use config::{HrwIdentity, WorkerConfig, rank_candidates};
 pub use runtime::{CheckpointInitializer, WorkerRuntime};
 
 mod drain;
+
+pub use processor::{ProcessorConfig, ProcessorObservations, ProcessorPorts, WorkerProcessor};
+
+mod processor_runtime;
+
+mod rebuilding_feed;
+mod scan_resources;
+
+pub mod supervisor;
+
+mod admission;
+pub use admission::WorkerTaskAdmission;
+mod output;
+pub use output::WorkerOutputReader;

@@ -5,6 +5,7 @@
 )]
 mod support;
 use bcs_dist_model::*;
+use bcs_dist_worker::WorkerRuntime;
 use bcs_service_api::{
     port::{
         dist_runtime::DistRuntimeControlPort,
@@ -12,8 +13,60 @@ use bcs_service_api::{
     },
     types::dist_runtime::*,
 };
-use std::{sync::atomic::Ordering, time::Duration};
+use std::{sync::{Arc, atomic::Ordering}, time::Duration};
 use support::*;
+#[tokio::test(start_paused = true)]
+async fn explicit_incarnation_replays_registration_without_replacing_a_live_owner() {
+    let world = World::new();
+    let old = world.worker("a").await;
+    let old_instance = old.instance().clone();
+    world.store
+        .retire(&MembershipLease { instance: old_instance.clone() })
+        .await
+        .unwrap();
+    let (_stop, stop_rx) = tokio::sync::watch::channel(false);
+    assert_eq!(old.run(stop_rx).await.unwrap_err().code, "membership_lost");
+
+    let b = world.worker("b").await;
+    let owner = world.claim("b").await;
+    let new_instance = WorkerRuntime::fresh_instance(old_instance.node.clone());
+    let address = "http://a.example.test:8080";
+    let config = bcs_dist_worker::WorkerConfig {
+        shards: vec![ShardId(42)],
+        ..Default::default()
+    };
+    // The first registration was committed, but the host lost the response.
+    world.store
+        .register(new_instance.clone(), RuntimeRole::Worker, address.into(), config.lease_ttl)
+        .await
+        .unwrap();
+
+    let runtime = WorkerRuntime::start_with_instance(
+        new_instance.clone(),
+        address.into(),
+        config,
+        world.store.clone(),
+        world.store.clone(),
+        world.sessions.clone(),
+        Arc::new(Inbox(world.data.clone())),
+        world.scheduling.clone(),
+        |peer_instance| {
+            assert_eq!(peer_instance, &new_instance);
+            Ok(world.peers.clone())
+        },
+        Arc::new(|_| Ok(initial())),
+    )
+    .await
+    .unwrap();
+    assert_eq!(runtime.instance(), &new_instance);
+    assert_ne!(runtime.instance(), &old_instance);
+    assert!(!runtime.snapshot().await.unwrap().ready);
+    warm(&[b, runtime.clone()]).await;
+    assert!(runtime.snapshot().await.unwrap().ready);
+    assert_eq!(world.store.liveness(&old_instance).await.unwrap(), Liveness::Dead);
+    assert_eq!(world.store.current(ShardId(42)).await.unwrap().unwrap().claim, owner);
+}
+
 #[tokio::test(start_paused = true)]
 async fn warmup_and_recovery_must_complete_before_new_round() {
     let world = World::new();
@@ -265,6 +318,7 @@ async fn confirmed_checkpoint_and_receipt_advance_together() {
     a.recovery_completed(&owner).await.unwrap();
     let mut acquired = a.begin_round(&sid()).unwrap();
     let batch = CommittedBatch {
+        created_at: None,
         commit_id: CommitId("commit-1".into()),
         source_commit: CommitSeq(1),
         content_digest: Digest("digest-1".into()),

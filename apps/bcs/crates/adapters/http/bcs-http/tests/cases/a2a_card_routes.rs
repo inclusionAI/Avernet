@@ -3,18 +3,21 @@ use async_trait::async_trait;
 use axum::{body::{Body, to_bytes}, http::{Request, StatusCode}};
 use bcs_http::{router::build_router, state::HttpAppState};
 use bcs_service_api::{ServiceError, ServiceResult};
-use bcs_service_api::application::a2a_bot::{A2aBotManagementService, ConfigureA2aBotCommand, NamedA2aCard, NamedA2aRegistration, RegisterNamedA2aBotCommand};
+use bcs_service_api::application::a2a_bot::{A2aBotManagementService, ConfigureA2aBotCommand, NamedA2aCard, NamedA2aRegistration, RegisterNamedA2aBotCommand, UpdateAgentCommand};
 use bcs_service_api::types::a2a_bot::{A2aBotRecord};
 use bcs_services_container::Services;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
 #[derive(Default)]
-struct Management { calls: AtomicUsize, visibility: std::sync::Mutex<Vec<String>>, owners: std::sync::Mutex<Vec<Option<Vec<String>>>>, labels: std::sync::Mutex<Vec<Option<Value>>> }
+struct Management { calls: AtomicUsize, visibility: std::sync::Mutex<Vec<String>>, owners: std::sync::Mutex<Vec<Option<Vec<String>>>>, labels: std::sync::Mutex<Vec<Option<Value>>>, agent_ids: std::sync::Mutex<Vec<&'static str>> }
 
 fn record() -> A2aBotRecord {
     A2aBotRecord { catalog_labels:Default::default(), bot_uuid:"bot".into(), provider_id:"provider".into(), provider_bot_ref:"remote".into(),
-        agent_card_url:Some("https://example.org/card".into()), agent_card:json!({"skills":[{"description":"unchanged", "unknown":42}]}), revision:1 ,}
+        agent_card_url:Some("https://example.org/card".into()), agent_card:json!({"skills":[{"description":"unchanged", "unknown":42}]}), revision:1,
+        visibility:bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Protected,
+        status:bcs_service_api::ActorStatus::Online,user_visibility:bcs_service_api::application::v1::UserVisibility::Protected,
+        agent_id:None,}
 }
 
 #[async_trait]
@@ -28,13 +31,26 @@ impl A2aBotManagementService for Management {
         if token!="test-admin" {return Err(ServiceError::Forbidden("private-provider-id private-bot-uuid".into()));}
         assert_eq!(bot_id,"bot");
         Ok(bcs_service_api::application::a2a_bot::ManagedA2aCard { catalog_labels:Default::default(),provider_bot_ref:"remote".into(),provider_name:"orders".into(),agent_name:"订单助手".into(),
-            bot_id:bot_id.into(),agent_card_url:None,agent_card:json!({"name":"订单助手","skills":[{"description":"完整描述","unknown":42}]})})
+            bot_id:bot_id.into(),agent_card_url:None,agent_card:json!({"name":"订单助手","skills":[{"description":"完整描述","unknown":42}]}),
+            agent_id:None,visibility:bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Protected,
+            status:bcs_service_api::ActorStatus::Online,user_visibility:bcs_service_api::application::v1::UserVisibility::Protected})
     }
     async fn register_agent(&self,command:bcs_service_api::application::a2a_bot::RegisterAgentCommand)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
         self.visibility.lock().unwrap().push(command.visibility.as_str().into());
         self.owners.lock().unwrap().push(command.owners);
         assert_eq!(command.provider_bot_ref,"remote");
         self.get_agent_by_id(&command.provider_admin_token,"bot").await
+    }
+    async fn update_agent(&self,command:UpdateAgentCommand)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
+        let kind=match command.agent_id {
+            bcs_service_api::types::a2a_bot::A2aAgentIdentity::Omitted=>"omitted",
+            bcs_service_api::types::a2a_bot::A2aAgentIdentity::Null=>"null",
+            bcs_service_api::types::a2a_bot::A2aAgentIdentity::Text(value)=>match value.as_str() {
+                ""=>"empty",_=>"text",
+            }};
+        self.visibility.lock().unwrap().push(command.visibility.map(|v|v.as_str()).unwrap_or("omitted").into());
+        self.agent_ids.lock().unwrap().push(kind);
+        self.get_agent_by_id(&command.provider_admin_token,&command.bot_id).await
     }
     async fn update_agent_by_id(&self,token:&str,bot_id:&str,_source:bcs_service_api::types::a2a_bot::A2aCardSource)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {self.get_agent_by_id(token,bot_id).await}
     async fn update_agent_by_id_with_visibility(&self,token:&str,bot_id:&str,_source:Option<bcs_service_api::types::a2a_bot::A2aCardSource>,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<bcs_service_api::application::a2a_bot::ManagedA2aCard> {
@@ -265,6 +281,24 @@ async fn assert_resource_paths(prefix: &str) {
     for path in ["/a2a/agent-card?agent_name=x", "/a2a/agents/bot/versions"] {
         assert_eq!(app.clone().oneshot(req("GET",path,Value::Null)).await.unwrap().status(),StatusCode::NOT_FOUND);
     }
+}
+
+#[tokio::test]
+async fn public_update_translates_omitted_null_empty_and_text_agent_id() {
+    let management=Arc::new(Management::default());
+    let app=build_router(HttpAppState::new(Services::builder().a2a_bot_management(management.clone()).build_for_test()));
+    for body in [
+        json!({"agent_id":"trusted-agent"}),
+        json!({"agent_id":null}),
+        json!({"agent_id":""}),
+        json!({"visibility":"public"}),
+    ] {
+        let response=app.clone().oneshot(Request::builder().method("PUT").uri("/a2a/agents/bot/agent-card")
+            .header("authorization","Bearer test-admin").header("content-type","application/json")
+            .body(Body::from(body.to_string())).unwrap()).await.unwrap();
+        assert_eq!(response.status(),StatusCode::OK);
+    }
+    assert_eq!(*management.agent_ids.lock().unwrap(),vec!["text","null","empty","omitted"]);
 }
 
 #[tokio::test]

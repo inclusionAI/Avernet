@@ -20,6 +20,7 @@ from agentclaw.community.plugin_api.agentswarm.artifact import ArtifactStore
 from agentclaw.community.core.agentswarm.runtime.breaker import (
     UpstreamBreaker,
 )
+from agentclaw.community.core.agentswarm.catalog_rule import find_catalog_entry
 from agentclaw.community.core.agentswarm.runtime.slice_lost import SliceLost
 from agentclaw.community.core.agentswarm.runtime.store import SliceStore
 from agentclaw.community.log import get_logger
@@ -656,13 +657,9 @@ class SubagentRuntime:
         # Exact-name match first; then prefix match so the orchestrator's
         # composite spawn names (e.g. "coder_rust" from catalog "coder")
         # inherit the catalog entry's kind, config_manifest, and identity.
-        for spec in run.agent_catalog:
-            if spec.name == envelope.name:
-                return spec
-        for spec in run.agent_catalog:
-            if envelope.name.startswith(spec.name):
-                return spec
-        return None
+        # The rule lives in ``catalog_rule`` because the run read surface asks
+        # the same question and the two must not answer differently.
+        return find_catalog_entry(run.agent_catalog, envelope.name)
 
     def _inline_fallback(self, item: _WorkItem, output: Any,
                          output_str: str) -> Any:

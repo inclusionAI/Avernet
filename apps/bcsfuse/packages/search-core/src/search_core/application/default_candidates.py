@@ -20,14 +20,11 @@ class DefaultCandidates:
     def _load(self, request):
         selected, after = [], ""
         while len(selected) < request.limit:
-            page = self.repository.page(after, 100)
+            page = self.repository.page_states(after, 100)
             if not page:
                 break
-            ids = [key for key, _ in page]
-            cards = self.repository.get_many_cards(ids)
-            for key in ids:
-                card = cards.get(key)
-                if card is None or card.deleted:
+            for key, _, deleted in page:
+                if deleted:
                     continue
                 if not self.catalog.eligible(key, request.filters):
                     continue
@@ -112,7 +109,7 @@ class FilteredIndexFallback:
                 ids = await self.execution.call(
                     self.read_ids, request.filters, self.PAGE_SIZE
                 )
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 -- preserve the original empty result
                 stage.update(outcome="unavailable", error_type=type(error).__name__)
                 return replace(
                     original,
@@ -128,7 +125,9 @@ class FilteredIndexFallback:
             if not candidates:
                 return original
             result = await self.snapshot().retrieval.enrich(
-                replace(original, items=candidates), allow_timeout_projection=False
+                replace(original, items=candidates),
+                request=request,
+                allow_timeout_projection=False,
             )
             items = tuple(
                 item

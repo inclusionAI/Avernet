@@ -44,7 +44,7 @@ async fn projection_rejections_never_pin_or_mutate_across_card_entrypoints() {
             "register"=>{let mut input=request(card("After",None));input.source=source;service.register_agent(input).await.map(|_|())},
             "named"=>service.register_named(NamedCommand {catalog_labels:Default::default(),provider_name:"orders".into(),provider_admin_token:"test-admin".into(),
                 provider_bot_ref:"remote".into(),owners:vec!["delegated-owner".into()],summary:None,source,now_ms:1000}).await.map(|_|()),
-            "update"=>service.update_agent(UpdateAgentCommand {provider_admin_token:"test-admin".into(),bot_id:original.as_ref().unwrap().bot_uuid.clone(),
+            "update"=>service.update_agent(UpdateAgentCommand { agent_id:Default::default(),provider_admin_token:"test-admin".into(),bot_id:original.as_ref().unwrap().bot_uuid.clone(),
                 source:Some(source),visibility:None,catalog_labels:None}).await.map(|_|()),
             _=>unreachable!(),
         };

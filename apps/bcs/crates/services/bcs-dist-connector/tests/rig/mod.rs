@@ -1,22 +1,25 @@
 //! Test rig of the engine: the real store providers and admission on the
 //! in-memory store model, a test-only Worker, and a scripted agent.
-#![allow(dead_code, clippy::unwrap_used, clippy::expect_used, reason = "test support")]
+#![allow(
+    dead_code,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test support"
+)]
 
 #[path = "../../../bcs-dist-connector-store/tests/common/mod.rs"]
 pub mod store;
 
 use async_trait::async_trait;
-use bcs_dist_connector::delayed::HeldCallRecovery;
 use bcs_dist_connector::rules::DistConnectorRules;
 use bcs_dist_connector::{ConnectorConfig, ConnectorEngine, ConnectorPorts};
-use bcs_dist_connector_store::delayed;
 use bcs_dist_connector_store::membership::PendingMembership;
 use bcs_dist_model::*;
 use bcs_dist_store::codec::decode_inbox_entry;
 use bcs_dist_store::inbox::{InboxProducerConfig, StoreInboxProducer};
 use bcs_service_api::port::dist_agent::*;
 use bcs_service_api::port::dist_runtime::DistRuntimeControlPort;
-use bcs_service_api::port::repo::distributed::common::{IdempotentWrite, Page, PageRequest, StoreError};
+use bcs_service_api::port::repo::distributed::common::{IdempotentWrite, StoreError};
 use bcs_service_api::port::repo::distributed::ownership::MembershipPort;
 use bcs_service_api::port::repo::distributed::result::BlobStorePort;
 use bcs_store_api::json::JsonStorePlugin;
@@ -276,36 +279,40 @@ impl BlobStorePort for MemoryBlobs {
     }
 }
 
-/// The thin composition wrapper over the store crate's D3/D8 stubs.
-#[derive(Default)]
-pub struct StubRecovery {
-    pub released: Mutex<Vec<Did>>,
-}
-
-#[async_trait]
-impl HeldCallRecovery for StubRecovery {
-    async fn repost_held(&self, dead: &Instance, page: PageRequest) -> Result<Page<Did>, StoreError> {
-        delayed::repost_held(dead, page).await
-    }
-    async fn release(&self, did: &Did, holder: &Holder) -> Result<(), StoreError> {
-        self.released.lock().unwrap().push(did.clone());
-        delayed::release(did, holder).await
-    }
-}
-
 pub struct Rig {
     pub store: Arc<Recorder>,
     pub worker: WorkerFixture,
     pub agent: Arc<ScriptedAgent>,
     pub blobs: Arc<MemoryBlobs>,
-    pub recovery: Arc<StubRecovery>,
     pub membership: Arc<dyn MembershipPort>,
     pub config: ConnectorConfig,
 }
 
 impl Rig {
-    pub fn new() -> Self {
+    pub async fn new() -> Self {
         let store = Arc::new(Recorder::default());
+        // A real dispatch always refers to an admitted Session and Task.
+        use bcs_store_api::document::DocumentStorePlugin;
+        let dispatch = dispatch_spec(&did());
+        let mut spec = bcs_dist_test_runner::specification(dispatch.sid.clone());
+        spec.shard = bcs_dist_store::layout::KeyLayout::shard_of(&spec.sid).unwrap();
+        let task = bcs_dist_test_runner::metadata(&spec, dispatch.tid);
+        store
+            .model
+            .create_document(
+                &layout().spec(&spec.sid).unwrap(),
+                &serde_json::to_value(&spec).unwrap(),
+            )
+            .await
+            .unwrap();
+        store
+            .model
+            .create_document(
+                &layout().task(&task.tid).unwrap(),
+                &serde_json::to_value(&task).unwrap(),
+            )
+            .await
+            .unwrap();
         let mut config = ConnectorConfig::new(instance("conn-03"), pool());
         config.poll_interval = Duration::from_millis(25);
         config.receive_timeout = Duration::from_millis(30);
@@ -316,7 +323,6 @@ impl Rig {
             worker: WorkerFixture::new(&store),
             agent: Arc::new(ScriptedAgent::new(&store)),
             blobs: Arc::new(MemoryBlobs::default()),
-            recovery: Arc::new(StubRecovery::default()),
             membership: Arc::new(PendingMembership),
             config,
             store,
@@ -334,6 +340,8 @@ impl Rig {
     pub fn inbox(&self) -> Arc<StoreInboxProducer> {
         Arc::new(
             StoreInboxProducer::new(
+                Arc::new(bcs_dist_store::budget::SharedScanBudget::new(Default::default()).unwrap()),
+                Arc::new(bcs_dist_projection::OutputProjectionService),
                 self.store.clone(),
                 self.store.clone(),
                 self.store.clone(),
@@ -353,7 +361,6 @@ impl Rig {
             agent: self.agent.clone(),
             membership: self.membership.clone(),
             blobs: self.blobs.clone(),
-            recovery: self.recovery.clone(),
             rules: Arc::new(DistConnectorRules),
         }
     }

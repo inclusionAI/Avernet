@@ -17,11 +17,12 @@ function text(value: unknown, field: string, max: number): string {
 }
 export function parseOwnerHandoffContent(raw: unknown): RecoveryOwnerHandoffContent {
   const value = object(raw);
-  if (Object.keys(value).some(key => !["summary", "instructions"].includes(key))) invalid("Owner 交接说明只能包含 summary 和 instructions");
+  if (Object.keys(value).some(key => !["summary", "instructions", "reason"].includes(key))) invalid("Owner 交接说明只能包含 summary、instructions 和 reason");
+  if (value.reason !== undefined && value.reason !== "owner_material_needed") invalid("未知的 Owner 转交原因");
   const summary = text(value.summary, "handoff.summary", 1024).trim();
   const instructions = text(value.instructions, "handoff.instructions", 1024).trim();
   if ([summary, instructions].some(item => Buffer.byteLength(item) > 1024)) invalid("Owner 交接说明的每项文本最多 1024 字节；简洁保留问题、完整处理事项和入口，调查经过留在原 summary 中");
-  return { summary, instructions };
+  return { summary, instructions, ...(value.reason === "owner_material_needed" ? { reason: value.reason } : {}) };
 }
 
 export function isRecoveryTraceId(value: unknown): value is string {

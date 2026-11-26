@@ -23,12 +23,15 @@ from a2a_provider_config_cases import exercise as exercise_provider_config
 from a2a_rpc_peer import dispatch as dispatch_rpc, envelope as rpc_envelope
 
 TOOLS = "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/tools/v1.md"
+TOOLS_V2 = "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/tools/v2.md"
 
 
 class Peer:
-    def __init__(self, binding="HTTP+JSON", *, observe_rpc=None):
+    def __init__(self, binding="HTTP+JSON", *, observe_rpc=None, tools_version="v1"):
         self.binding = binding
         self.observe_rpc = observe_rpc
+        self.tools_version = tools_version
+        self.tools_uri = TOOLS_V2 if tools_version == "v2" else TOOLS
         self.rpc_methods = set()
         self.bearer = ""
         self.requests = []
@@ -186,7 +189,7 @@ class Peer:
                          "status": {"state": "TASK_STATE_COMPLETED"}}},
                     ]
                 if mode == "tools":
-                    assert TOOLS in self.headers.get("A2A-Extensions", "")
+                    assert peer.tools_uri in self.headers.get("A2A-Extensions", "")
                     records = [
                         {"phase": "start", "toolCallId": "e2e-call-" + str(sequence),
                          "name": "query_order", "args": {"id": "e2e-order"}},
@@ -196,10 +199,7 @@ class Peer:
                     ]
                     observations = []
                     for record in records:
-                        event = {"statusUpdate": {"taskId": task_id, "contextId": context,
-                            "status": {"state": "TASK_STATE_WORKING", "message": {
-                            "messageId": "observation-" + record["phase"], "role": "ROLE_AGENT",
-                            "metadata": {TOOLS: {"version": "1"}}, "parts": [{"data": record}]}}}}
+                        event = peer.tool_observation(task_id, context, "observation-" + record["phase"], record)
                         observations.extend([event, copy.deepcopy(event)])
                     events[2:2] = observations
                 elif mode == "wait":
@@ -207,17 +207,13 @@ class Peer:
                         "artifact": {"artifactId": "answer", "parts": [{"text": "A2A-WAITING-" + str(sequence)}]},
                         "append": False}})
                     # Complete a tool while the Task remains active; its text segment becomes visible.
-                    events.append({"statusUpdate": {"taskId": task_id, "contextId": context,
-                        "status": {"state": "TASK_STATE_WORKING", "message": {
-                        "messageId": "waiting-tool", "role": "ROLE_AGENT",
-                        "metadata": {TOOLS: {"version": "1"}}, "parts": [{"data": {
-                        "phase": "start", "toolCallId": "cancel-call", "name": "slow_tool", "args": {}}}]}}}})
-                    events.append({"statusUpdate": {"taskId": task_id, "contextId": context,
-                        "status": {"state": "TASK_STATE_WORKING", "message": {
-                        "messageId": "waiting-result", "role": "ROLE_AGENT",
-                        "metadata": {TOOLS: {"version": "1"}}, "parts": [{"data": {
+                    wait_start = {"phase": "start", "toolCallId": "cancel-call", "name": "slow_tool"}
+                    if peer.tools_version != "v2":
+                        wait_start["args"] = {}
+                    events.append(peer.tool_observation(task_id, context, "waiting-tool", wait_start))
+                    events.append(peer.tool_observation(task_id, context, "waiting-result", {
                         "phase": "result", "toolCallId": "cancel-call", "name": "slow_tool",
-                        "isError": False, "result": {"content": [{"type": "text", "text": "tool finished"}]}}}]}}}})
+                        "isError": False, "result": {"content": [{"type": "text", "text": "tool finished"}]}}))
                 elif mode == "replacement":
                     events = events[:2] + [{"artifactUpdate": {"taskId": task_id, "contextId": context,
                         "artifact": {"artifactId": "answer", "parts": [{"text": "unsupported replacement"}]},
@@ -252,9 +248,18 @@ class Peer:
                      "name": "A2A public E2E", "description": "Initial description", "version": "1",
                      "supportedInterfaces": [{"url": self.base + "/a2a", "protocolBinding": self.binding,
                                               "protocolVersion": "1.0"}],
-                     "capabilities": {"streaming": True, "extensions": [{"uri": TOOLS, "required": False}]}, "defaultInputModes": ["text/plain"],
+                     "capabilities": {"streaming": True, "extensions": [{"uri": self.tools_uri, "required": False}]}, "defaultInputModes": ["text/plain"],
                      "defaultOutputModes": ["text/plain"], "skills": [{"id": "e2e", "name": "Query",
                      "description": "Full skill description", "tags": ["e2e"], "futureField": {"keep": True}}]}
+
+    def tool_observation(self, task_id, context, message_id, record):
+        message = {"messageId": message_id, "role": "ROLE_AGENT", "parts": [{"data": record}]}
+        if self.tools_version == "v2":
+            message["extensions"] = [TOOLS_V2]
+        else:
+            message["metadata"] = {TOOLS: {"version": "1"}}
+        return {"statusUpdate": {"taskId": task_id, "contextId": context,
+                "status": {"state": "TASK_STATE_WORKING", "message": message}}}
 
     def start(self):
         self.thread.start()
@@ -312,8 +317,10 @@ class A2aStory(Story):
         prefix = "/providers/" + provider["provider_id"] + "/bots"
         registered = self.request("POST", self.a2a_prefix + "/agents", {"provider_bot_ref": "story-" + uuid.uuid4().hex, "owners": [self.owner],
             "agent_card_url": self.peer.base + "/agent-card.json"}, token=admin, status=201)
-        assert set(registered) == {"provider_name", "provider_bot_ref", "agent_name", "bot_id", "agent_card_url", "agent_card", "catalog_labels"}
+        assert set(registered) == {"provider_name", "provider_bot_ref", "agent_name", "bot_id", "agent_card_url", "agent_card", "catalog_labels", "agent_id", "visibility", "status", "user_visibility"}
         assert registered["catalog_labels"] == {}
+        assert registered["agent_id"] is None
+        assert registered["status"] == "online"
         assert registered["agent_name"] == self.peer.card["name"]
         bot_id = registered["bot_id"]
         bindings = self.request("GET", prefix, token=admin)
@@ -648,8 +655,8 @@ if __name__ == "__main__":
     parser.add_argument("--a2a-prefix", default="/a2a",
                         choices=("/a2a", "/api/v1/collaboration/a2a"))
     args = parser.parse_args()
-    for binding in ("HTTP+JSON", "JSONRPC"):
-        peer = Peer(binding)
+    for binding, tools_version in (("HTTP+JSON", "v1"), ("JSONRPC", "v2")):
+        peer = Peer(binding, tools_version=tools_version)
         peer.start()
         story = A2aStory(args.base_url, args.owner, peer, args.a2a_prefix)
         try:

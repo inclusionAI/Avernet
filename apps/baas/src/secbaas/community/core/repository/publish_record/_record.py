@@ -25,6 +25,19 @@ class PublishRecordExtraConfig:
     publish_retry_count: int = 0
     attempt_started_at: str | None = None
 
+    # Operator-authorized retry budget, independent of the automatic one.
+    # The automatic budget is disabled by default (``publish_max_retry_times=0``),
+    # so a manual recovery path must not be gated on it. Keeps the audit trail of
+    # who asked for the retry and when.
+    publish_manual_retry_count: int = 0
+    publish_manual_retry_at: str | None = None
+    publish_manual_retry_operator: str | None = None
+
+    # Marks a record that never actually ran: it was flipped to FAILED only
+    # because its stage had already failed. Such a record must not block a
+    # stage reconcile after the real failure is recovered.
+    cleanup_reason: str | None = None
+
 
 @dataclass(slots=True)
 class PublishRecordRecord:

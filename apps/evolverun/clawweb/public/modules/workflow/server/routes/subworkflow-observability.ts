@@ -1,3 +1,4 @@
+import { captureApiError } from "./error-log-format.js";
 import { Router, type Request } from 'express';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { FlowRunLinkRepository } from '@avernet/clawweb-shared/server/repositories/flow-run-link-repository';
@@ -133,8 +134,9 @@ export function createSubworkflowObservabilityRouter(db: IDatabase, authorize: R
           completedAt: timestamp(child.completed_at), nodes });
       }
       res.json({ items, completeness: 'best_effort' });
-    } catch {
+    } catch (error) {
       // Fail closed on database, schema, or authorization failures; never return diagnostics.
+      console.error("[subworkflow-observability] request failed:", captureApiError(res, error));
       res.status(503).json({ error: 'Observability unavailable', code: 'UNAVAILABLE' });
     }
   });

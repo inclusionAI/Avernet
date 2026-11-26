@@ -15,6 +15,9 @@ pub enum JsonEdit {
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonMutation {
     Replace(Value),
+    /// RFC 7396 object patch on a live object. Null members remove fields;
+    /// arrays replace as units (including literal nulls in their elements).
+    Merge(serde_json::Map<String, Value>),
     /// Nonempty ordered edits on a live document. Any invalid edit aborts ALL.
     Patch(Vec<JsonEdit>),
     /// Delete a live document while retaining its version high-water mark.
@@ -29,7 +32,8 @@ pub struct JsonProjection {
     pub values: Vec<Option<Value>>,
 }
 
-/// AtomicJson includes all these operations. Conditions compare the WHOLE key
+/// AtomicJson includes projection, replacement, pointer edits and delete.
+/// PersistentJsonMerge adds the persistent object creation / merge subset. Conditions compare the WHOLE key
 /// version, even for path edits. The condition, edits, version and expiry change
 /// are one atomic operation. Cross-document transactions are not implied.
 #[async_trait]

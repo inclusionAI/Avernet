@@ -70,11 +70,20 @@ impl HttpClient {
         } else if self.require_identity {
             return Err(A2AError::internal(CREDENTIAL_UNAVAILABLE));
         }
-        // Keeps whether a connection was established at all (see `transport_error`).
-        self.transport
+        // A required identity is scoped to the pre-release test submission.
+        let diagnostic = self.require_identity
+            .then(|| crate::test_response::SensitiveRequestValues::from_headers(request.headers()));
+        // Keeps whether a connection was established at all (see `transport_error`):
+        // a connect failure becomes `NOT_CONNECTED` (certainly not sent), any
+        // other failure the generic `connection_error` (outcome unknown).
+        let mut response = self.transport
             .execute_traced(request)
             .await
-            .map_err(|error| crate::transport_error::send_failure(&error, connection_error))
+            .map_err(|error| crate::transport_error::send_failure(&error, connection_error))?;
+        if let Some(diagnostic) = diagnostic {
+            response.extensions_mut().insert(diagnostic);
+        }
+        Ok(response)
     }
 }
 

@@ -32,6 +32,11 @@ from agentclaw.community.core.mcp.errors import (
     McpServerNotFoundError,
     McpSyncFailedError,
 )
+from agentclaw.community.core.skill_center.errors import (
+    SkillRuntimeNameConflictError,
+    SkillSetControlPlaneConflictError,
+    SkillSetControlPlaneLockUnavailableError,
+)
 from agentclaw.community.core.mcp.presentation import mask_api_key
 
 _VALID_ENDPOINT_ENVS = ("PROD", "PRE")
@@ -246,6 +251,18 @@ async def write_unified_config(
             target_bot_ids=affected_bot_ids,
             target_bot_owners=affected_bot_owners,
         )
+    except (
+        SkillSetControlPlaneConflictError,
+        SkillSetControlPlaneLockUnavailableError,
+        SkillRuntimeNameConflictError,
+    ):
+        # SkillSet control-plane conflicts keep their own app-layer wire
+        # decision; wrapping them as McpSyncFailedError below would turn a
+        # reason code clients already parse into an opaque 500. This is still
+        # a batch-level failure, so the stored write rolls back like any
+        # other exception from the fan-out.
+        _roll_back()
+        raise
     except Exception as exc:
         # Per-Bot delivery errors are converted to sync_results by the batch
         # service. An exception here is therefore a batch-level failure (or a

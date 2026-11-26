@@ -92,8 +92,13 @@ fn runner_harness_detects_nondeterministic_decisions() -> ContractResult {
 async fn gateway_core_harness_checks_duplicate_receipt() -> ContractResult {
     let request = AdmitTaskCommand {
         input: input(),
-        create_session: Some(spec()),
-        create_task: Some(snapshot()),
+        create_session: Some(FrozenGroupDefinition {
+            group: spec().group,
+            workflow: spec().workflow,
+            participants: spec().participants,
+            limits: spec().limits,
+        }),
+        start_task: true,
     };
     for same_receipt in [true, false] {
         let mut replay = receipt();
@@ -242,7 +247,7 @@ async fn runtime_harnesses_require_draining_state_after_drain() -> ContractResul
                 .expect(snapshot_method, (), Ok::<_, RuntimeError>(initial.clone()))
                 .expect(
                     drain_method,
-                    (Duration::from_secs(1),),
+                    (Duration::from_secs(if role == 2 { 5 } else { 1 }),),
                     Ok::<_, RuntimeError>(DrainOutcome::Drained),
                 )
                 .expect(

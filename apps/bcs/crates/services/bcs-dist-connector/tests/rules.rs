@@ -19,7 +19,7 @@ fn cursor(epoch: u64) -> ReportCursor {
 fn key(report: Report) -> (InputEnvelope, AgentEvent) {
     match report {
         Report::Key(request) => {
-            assert!(request.create_session.is_none() && request.create_task.is_none());
+            // Connector reports reference an existing task and cannot create one.
             let InputBody::Agent { event } = request.input.body.clone() else {
                 panic!("not an agent input");
             };

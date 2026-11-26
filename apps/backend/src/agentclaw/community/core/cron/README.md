@@ -69,7 +69,9 @@ service draft/verify/online targets are not added. The Bot owner's identity stay
 separate from the authenticated Caller. Every returned Caller row includes
 runtime_stage=online, device_uuid where applicable, and operator_id. Missing or
 unavailable Caller instances produce failed_targets while other Bots remain
-queryable. No Caller provisioning or parent fallback occurs.
+queryable; adapter read timeouts there are classified as cron_api_timeout with a
+warning log, matching the batch runtime-target classification. No Caller
+provisioning or parent fallback occurs.
 
 Explicit draft/verify filters preserve their existing parent-stage query behavior,
 including OpenAPI draft-only queries. Explicit operator_id/device_uuid still use

@@ -71,16 +71,30 @@ async fn send(State(agent): State<Arc<Agent>>, headers: HeaderMap, Json(body): J
     } else if matches!(agent.mode, Mode::Complete) {
         events.push(json!({"artifactUpdate":{"taskId":id,"contextId":"remote-context","artifact":{"artifactId":"answer","parts":[{"text":"你好"}]},"append":false}}));
         if headers.contains_key("a2a-extensions") {
-            assert_eq!(headers["a2a-extensions"], bcs_a2a_http::tools::EXTENSION);
-            for record in [
-                json!({"phase":"start","toolCallId":"call","name":"query_order","args":{"id":"1"}}),
-                json!({"phase":"result","toolCallId":"call","name":"query_order","isError":false,
-                    "result":{"content":[{"type":"text","text":"ok"}]}}),
-            ] {
-                let event=json!({"statusUpdate":{"taskId":id,"contextId":"remote-context","status":{
-                    "state":"TASK_STATE_WORKING","message":{"messageId":"observation","role":"ROLE_AGENT",
-                    "metadata":{bcs_a2a_http::tools::EXTENSION:{"version":"1"}},"parts":[{"data":record}]}}}});
-                events.push(event.clone()); events.push(event);
+            let ext = headers["a2a-extensions"].to_str().unwrap();
+            if ext == bcs_a2a_http::tools::EXTENSION_V2 {
+                for record in [
+                    json!({"phase":"start","toolCallId":"call","name":"query_order"}),
+                    json!({"phase":"result","toolCallId":"call","name":"query_order","isError":false,
+                        "result":{"content":[{"type":"text","text":"ok"}]}}),
+                ] {
+                    let event=json!({"statusUpdate":{"taskId":id,"contextId":"remote-context","status":{
+                        "state":"TASK_STATE_WORKING","message":{"messageId":"observation","role":"ROLE_AGENT",
+                        "extensions":[bcs_a2a_http::tools::EXTENSION_V2],"parts":[{"data":record}]}}}});
+                    events.push(event.clone()); events.push(event);
+                }
+            } else {
+                assert_eq!(ext, bcs_a2a_http::tools::EXTENSION);
+                for record in [
+                    json!({"phase":"start","toolCallId":"call","name":"query_order","args":{"id":"1"}}),
+                    json!({"phase":"result","toolCallId":"call","name":"query_order","isError":false,
+                        "result":{"content":[{"type":"text","text":"ok"}]}}),
+                ] {
+                    let event=json!({"statusUpdate":{"taskId":id,"contextId":"remote-context","status":{
+                        "state":"TASK_STATE_WORKING","message":{"messageId":"observation","role":"ROLE_AGENT",
+                        "metadata":{bcs_a2a_http::tools::EXTENSION:{"version":"1"}},"parts":[{"data":record}]}}}});
+                    events.push(event.clone()); events.push(event);
+                }
             }
         }
         events.push(json!({"artifactUpdate":{"taskId":id,"contextId":"remote-context","artifact":{"artifactId":"answer","parts":[{"text":"世界"}]},"append":true}}));
@@ -470,6 +484,25 @@ async fn negotiates_tools_and_ingests_each_observation_once_between_text_deltas(
     assert_eq!(events[1].event_type,"agent");
     assert_eq!(events[1].event_payload["stream"],"tool");
     assert_eq!(events[1].event_payload["data"]["toolCallId"],"call");
+    assert_eq!(events[2].event_payload["data"]["result"]["content"][0]["text"],"ok");
+}
+
+#[tokio::test]
+async fn negotiates_tools_v2_and_ingests_each_observation_once_between_text_deltas() {
+    let mut f=fixture(Mode::Complete).await;
+    if let BotDeliveryTarget::A2a { extensions, .. }=&mut f.target {
+        extensions.push(bcs_service_api::types::a2a_bot::A2aExtensionDeclaration {
+            uri:bcs_a2a_http::tools::EXTENSION_V2.into(),required:Some(false),params:Value::Null });
+    }
+    f.transport.deliver(command(&f,"tool-v2-run").await).await.unwrap();
+    completed(&f,"tool-v2-run").await;
+    assert_eq!(f.runs.get("tool-v2-run").await.unwrap().unwrap().extensions,vec![bcs_a2a_http::tools::EXTENSION_V2]);
+    let events=f.ingest.events.lock().unwrap();
+    assert_eq!(events.iter().map(|event|event.state.clone()).collect::<Vec<_>>(),vec![
+        ChatEventState::Delta,ChatEventState::ToolCallStart,ChatEventState::ToolCallEnd,ChatEventState::Delta,ChatEventState::Final]);
+    assert_eq!(events[1].event_payload["data"]["name"],"query_order");
+    assert!(events[1].event_payload["data"].get("args").is_none());
+    assert_eq!(events[2].event_payload["run_id"],"tool-v2-run");
     assert_eq!(events[2].event_payload["data"]["result"]["content"][0]["text"],"ok");
 }
 

@@ -43,6 +43,12 @@ from agentclaw.community.core.agentswarm.repository.message import MessageReposi
 from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
+from agentclaw.community.core.agentswarm.repository.agent_definition import (
+    AgentDefinitionRepository,
+)
+from agentclaw.community.core.agentswarm.repository.run_agent_ref import (
+    RunAgentRefRepository,
+)
 from agentclaw.community.core.agentswarm.runtime.pool import (
     SubagentRuntime,
 )
@@ -160,6 +166,8 @@ class AgentSwarmModule(Module):
         guard_repo: GuardEventRepository,
         result_repo: AgentResultRepository,
         attempt_repo: AgentAttemptRepository,
+        definition_repo: AgentDefinitionRepository,
+        run_agent_ref_repo: RunAgentRefRepository,
         config: AgentSwarmConfig,
         injector: Injector,
     ) -> AgentSwarmService:
@@ -174,7 +182,42 @@ class AgentSwarmModule(Module):
             attempt_repo=attempt_repo,
             config=config,
             authorization_source=self._authorization_source(injector),
+            definition_manifest_validator=(
+                self._definition_manifest_validator(injector)
+            ),
+            definition_repo=definition_repo,
+            run_agent_ref_repo=run_agent_ref_repo,
         )
+
+    @staticmethod
+    def _definition_manifest_validator(injector: Injector):
+        """The write-time validator for a definition's manifest document.
+
+        Deliberately **fail-clear, not fail-loud**: unlike
+        ``_authorization_source`` (a read-side nicety that may degrade to
+        ``None``), a definition write is a promise that its manifest was
+        accepted. Returning ``None`` here leaves the service *unable* to store
+        definitions rather than storing unvalidated ones — the caller gets a
+        configuration error, which is the honest answer for a profile that
+        cannot resolve the platform preflight.
+        """
+        try:
+            from agentclaw.community.core.bot_management.manifest_seam import (
+                ManifestCreationSeam,
+            )
+            from agentclaw.community.plugins.community.agentswarm.definition_manifest_validator import (
+                PlatformManifestDocumentValidator,
+            )
+            return PlatformManifestDocumentValidator(
+                injector.get(ManifestCreationSeam)
+            )
+        except Exception:
+            logger.warning(
+                "[agentswarm] definition manifest validator unavailable — "
+                "definition writes will be refused (a manifest cannot be "
+                "stored unvalidated)",
+            )
+            return None
 
     @staticmethod
     def _authorization_source(injector: Injector):
@@ -285,6 +328,22 @@ class AgentSwarmModule(Module):
     @inject
     def provide_agent_repo(self, db: DatabasePlugin) -> AgentRepository:
         return AgentRepository(db)
+
+    @provider
+    @singleton
+    @inject
+    def provide_agent_definition_repo(
+        self, db: DatabasePlugin,
+    ) -> AgentDefinitionRepository:
+        return AgentDefinitionRepository(db)
+
+    @provider
+    @singleton
+    @inject
+    def provide_run_agent_ref_repo(
+        self, db: DatabasePlugin,
+    ) -> RunAgentRefRepository:
+        return RunAgentRefRepository(db)
 
     @provider
     @singleton

@@ -28,6 +28,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from tests.community.adapters.http.openapi_v1.conftest import public_router
 from agentclaw.community.adapters.http.openapi_v1.admission import ADMISSION
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import OwnerIdDep
@@ -147,7 +148,7 @@ def test_attached_dependency_publishes_its_parameters(probe_surface):
 
 
 def _live_operations():
-    return {key for key, _ in operations(build_public_router())}
+    return {key for key, _ in operations(public_router())}
 
 
 def test_the_surface_and_the_table_agree_exactly():
@@ -202,7 +203,7 @@ def test_every_route_is_a_public_api_route():
     """
     offenders = [
         f"{sorted(getattr(ctx, 'methods', None) or {'WEBSOCKET'})} {path_of(ctx)}"
-        for ctx in effective_routes(build_public_router())
+        for ctx in effective_routes(public_router())
         if not isinstance(original_route_of(ctx), PublicAPIRoute)
         and hasattr(original_route_of(ctx), "methods")
     ]
@@ -236,7 +237,7 @@ def test_assembly_refuses_a_row_that_matches_no_operation():
     and a table that no longer describes the surface cannot be trusted to say
     an operation is covered.
     """
-    router = build_public_router()
+    router = public_router()
     AUTHORIZATION[("GET", "/openapi/v1/bots/{bot_id}/renamed-away")] = OWNER_SCOPED
     try:
         with pytest.raises(PublicRouteNotAuthorized) as refusal:
@@ -660,7 +661,7 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
 def test_every_edit_lock_operation_declares_423_in_openapi():
     routes = {
         key: original_route_of(ctx)
-        for key, ctx in operations(build_public_router())
+        for key, ctx in operations(public_router())
     }
     edit_locked = {
         key

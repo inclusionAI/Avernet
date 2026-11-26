@@ -25,6 +25,10 @@ impl MetricsGroupManagementService {
 #[cfg(feature = "prometheus-metrics")]
 #[async_trait::async_trait]
 impl GroupManagementService for MetricsGroupManagementService {
+    fn normalize_catalog_labels(&self, input: bcs_service_api::types::catalog_labels::CatalogLabelsInput) -> ServiceResult<bcs_service_api::types::catalog_labels::CatalogLabels> {
+        self.inner.normalize_catalog_labels(input)
+    }
+
     async fn create_group(
         &self,
         cmd: GroupCreateCommand,

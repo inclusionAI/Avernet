@@ -510,6 +510,7 @@ describe('collaboration privacy accessible UI', () => {
           isCreating: false,
           refreshCurrent: jest.fn(),
           isRefreshing: false,
+          retryCurrent: jest.fn(),
         }}
         onSearch={jest.fn()}
         onClose={jest.fn()}
@@ -517,9 +518,49 @@ describe('collaboration privacy accessible UI', () => {
       />,
     );
 
-    expect(html).toContain('Bot公开风险前置检测失败');
+    expect(html).toContain('Bot 公开风险前置检测未通过');
     expect(html).toContain('刷新状态');
-    expect(html).toContain('工单结论如有更新，可刷新状态同步，无需重新发起。');
+    expect(html).toContain('重新申请');
+    expect(html).toContain('查看检测工单');
+  });
+
+  test('审批同意后配置变更，提示发布被拦并仅提供重新申请', () => {
+    const record = {
+      risk_check_id: 'rk-blocked',
+      phase: 'NEEDS_ATTENTION',
+      security_status: 'PASS',
+      detail_url: null,
+      auto_poll_paused: false,
+      auto_poll_until: null,
+      next_action_at: null,
+      target: { public_scope: 'user', visibility: 'public', view_depts: [] },
+      error_reason: 'CONFIG_CHANGED',
+      invalidation_reason: null,
+      approval_puid: 'approval-id',
+      approval_decision: 'AGREE',
+    };
+    const html = renderWithPortals(
+      <PublicationEditor
+        open
+        audience="user"
+        initialConfig={{ scope: 'none', organizationPaths: [] }}
+        risk={{
+          uiState: { kind: 'attention', record },
+          record,
+          isCreating: false,
+          refreshCurrent: jest.fn(),
+          retryCurrent: jest.fn(),
+        }}
+        onSearch={jest.fn()}
+        onClose={jest.fn()}
+        onSubmit={jest.fn()}
+      />,
+    );
+
+    expect(html).toContain('配置已变更，本次公开未生效');
+    expect(html).toContain('审批已通过');
+    expect(html).toContain('重新申请');
+    expect(html).not.toContain('刷新状态');
   });
 
   test('未提供刷新回调时失败提示条不渲染刷新按钮', () => {
@@ -548,7 +589,7 @@ describe('collaboration privacy accessible UI', () => {
       />,
     );
 
-    expect(html).toContain('Bot公开风险前置检测失败');
+    expect(html).toContain('Bot 公开风险前置检测未通过');
     expect(html).not.toContain('刷新状态');
   });
 

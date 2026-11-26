@@ -88,7 +88,7 @@ fn sdk_validated_declarations_keep_optional_required_and_profile_parameters() {
 
 #[test]
 fn polling_rejects_required_stream_only_extensions_but_preserves_optional_declarations() {
-    for uri in [bcs_a2a_http::tools::EXTENSION,bcs_a2a_http::structured_exec::EXTENSION] {
+    for uri in [bcs_a2a_http::tools::EXTENSION,bcs_a2a_http::tools::EXTENSION_V2,bcs_a2a_http::structured_exec::EXTENSION] {
         let mut raw=card();
         raw["capabilities"]["streaming"]=json!(false);
         raw["capabilities"]["extensions"]=json!([{"uri":uri,"required":true}]);

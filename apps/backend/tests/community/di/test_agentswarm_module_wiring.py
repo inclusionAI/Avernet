@@ -409,3 +409,46 @@ class TestTheIdentitySourceSeamIsComposedWithThePassportProvider:
 
 OWNER = "49912"
 SOURCE = "20231101_old_bot"
+
+
+# ── P0-x: the definition manifest validator is required for definition writes ──
+
+class _ExplodingInjector:
+    """An injector that cannot resolve the manifest seam."""
+
+    def get(self, key):
+        raise RuntimeError(f"unresolvable: {key}")
+
+
+def test_definition_manifest_validator_resolves_when_the_seam_is_available():
+    from agentclaw.community.di.modules.agentswarm import AgentSwarmModule
+    from agentclaw.community.plugins.community.agentswarm.definition_manifest_validator import (
+        PlatformManifestDocumentValidator,
+    )
+
+    class _Seam:
+        def preflight(self, *, document, engine_type, bot_type):
+            return {}
+
+    class _Injector:
+        def get(self, key):
+            return _Seam()
+
+    validator = AgentSwarmModule._definition_manifest_validator(_Injector())
+    assert isinstance(validator, PlatformManifestDocumentValidator)
+
+
+def test_definition_manifest_validator_is_none_when_the_seam_is_unavailable():
+    """None means "cannot validate", which makes the service refuse writes."""
+    from agentclaw.community.di.modules.agentswarm import AgentSwarmModule
+
+    assert AgentSwarmModule._definition_manifest_validator(_ExplodingInjector()) is None
+
+
+def test_unavailable_validator_does_not_wedge_boot():
+    """Resolution failure must be fail-clear, never an exception at wiring."""
+    from agentclaw.community.di.modules.agentswarm import AgentSwarmModule
+
+    # Repeated calls stay stable rather than caching a poisoned state.
+    assert AgentSwarmModule._definition_manifest_validator(_ExplodingInjector()) is None
+    assert AgentSwarmModule._definition_manifest_validator(_ExplodingInjector()) is None

@@ -1,3 +1,4 @@
+import { errorStack } from "./error-log-format.js";
 import { Router } from "express";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import type {
@@ -334,7 +335,7 @@ export function createDashboardRouter(
         res.json({ approval, alerts, scheduler, flowControl });
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        console.warn(`[dashboard] subsystem-summary failed: ${msg}`);
+        console.warn("[dashboard] subsystem-summary failed: %s", msg, errorStack(error));
         res.json({
           approval: { pending: 0, approved: 0, rejected: 0, other: 0 },
           alerts: { unacknowledged: 0, critical: 0, warning: 0, info: 0 },

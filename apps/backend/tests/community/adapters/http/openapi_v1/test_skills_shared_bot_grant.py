@@ -201,8 +201,20 @@ class _Skills:
         }
 
 
+@pytest.fixture(scope="module")
+def _base_app():
+    app = FastAPI()
+    # The assembled router, not a hand-mounted subset: what is under test is
+    # partly *how* the group is mounted, so a fixture that mounted it its own
+    # way could not see the defect this file was written for.
+    app.include_router(public_router())
+    app.dependency_overrides[require_principal] = _app_caller
+    mount_public_error_handlers(app)
+    return app
+
+
 @pytest.fixture
-def client():
+def client(_base_app):
     skills = _Skills()
 
     class _M(Module):
@@ -232,15 +244,8 @@ def client():
                 collaborators=SeamCollaborators(PermissionLevel.MEMBER),
             )
 
-    app = FastAPI()
-    # The assembled router, not a hand-mounted subset: what is under test is
-    # partly *how* the group is mounted, so a fixture that mounted it its own
-    # way could not see the defect this file was written for.
-    app.include_router(public_router())
-    app.dependency_overrides[require_principal] = _app_caller
-    attach_injector(app, Injector([_M()]))
-    mount_public_error_handlers(app)
-    return user_scoped_client(app, CALLER)
+    attach_injector(_base_app, Injector([_M()]))
+    return user_scoped_client(_base_app, CALLER)
 
 
 #: ``(label, method, current address, retiring address)``. The owner is named in

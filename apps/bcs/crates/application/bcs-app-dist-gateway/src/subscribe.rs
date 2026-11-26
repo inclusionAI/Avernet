@@ -15,6 +15,7 @@ use crate::{DistGateway, scope_of};
 use bcs_dist_model::*;
 use bcs_service_api::application::dist_gateway::*;
 use bcs_service_api::core::dist_gateway::*;
+use bcs_service_api::port::dist_output::{FormattedOutputBody, FormattedOutputEvent};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use std::sync::Arc;
@@ -99,11 +100,11 @@ async fn snapshot(
 
 /// `true` for an event after which the stream ends: the task asks for input
 /// or authorization, or is finished.
-pub(crate) fn ends_stream(event: &OutputEvent) -> bool {
+pub(crate) fn ends_stream(event: &FormattedOutputEvent) -> bool {
     match &event.body {
-        OutputBody::Terminal { .. } => true,
-        OutputBody::Status { status, .. } => !matches!(status, TaskStatus::Submitted | TaskStatus::Working),
-        OutputBody::Artifact { .. } => false,
+        FormattedOutputBody::Terminal { .. } => true,
+        FormattedOutputBody::Status { status, .. } => !matches!(status, TaskStatus::Submitted | TaskStatus::Working),
+        FormattedOutputBody::Artifact { .. } => false,
     }
 }
 

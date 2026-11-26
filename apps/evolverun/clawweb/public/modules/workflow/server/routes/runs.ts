@@ -1,6 +1,8 @@
+import { captureApiError, errorStack } from "./error-log-format.js";
 import { createRunBaasRouter, computeAvailableInterventions } from "./run-baas-routes.js";
 import type { RunSubworkflowsReader } from "../contracts/run-subworkflows.js";
 import { createRunReadRouter } from "../services/run-read-http.js";
+import { registerRunExecutionRecord } from "./run-execution-record.js";
 
 /**
  * Runs API routes — reads from flow_runs, node_executions, flow_events.
@@ -99,6 +101,7 @@ export function createRunsRouter(
   const exposeRuntimeMetadata = options.exposeRuntimeMetadata === true;
   const effectiveRunSubviews = runSubviews ?? (facadeRepo && 'listRuns' in facadeRepo ? facadeRepo : null);
   const effectiveFacadeRepo = facadeRepo && !('listRuns' in facadeRepo) ? facadeRepo : null;
+  registerRunExecutionRecord(router, flowRunRepo, nodeExecRepo, botPermRepo, effectiveRunSubviews);
   router.use(createRunReadRouter(flowRunRepo, nodeExecRepo, eventRepo, botPermRepo, workflowSpecRepo,
     executionStepLogRepo, effectiveRunSubviews, exposeRuntimeMetadata));
   router.use(createRunBaasRouter(flowRunRepo, eventRepo, effectiveFacadeRepo));
@@ -203,6 +206,7 @@ export function createRunsRouter(
       res.json({ runs: runs.map(fixDurationMs), total, limit, offset, statusCounts });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -309,6 +313,7 @@ export function createRunsRouter(
       res.json({ workflows: page, total, limit, offset });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -332,6 +337,7 @@ export function createRunsRouter(
       res.json({ run: safeRun, nodes, availableInterventions });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -360,6 +366,7 @@ export function createRunsRouter(
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -377,6 +384,7 @@ export function createRunsRouter(
       res.json(events);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -437,7 +445,7 @@ export function createRunsRouter(
             console.log(`[runs] released flow-control for aborted flow ${flowId}: slots=${slotsReleased}, queue=${queueDeleted}`);
           }
         } catch (fcErr) {
-          console.warn(`[runs] failed to release flow-control for aborted flow ${flowId}:`, fcErr);
+          console.warn("[runs] failed to release flow-control for aborted flow %s:", flowId, errorStack(fcErr));
         }
       }
 
@@ -461,7 +469,7 @@ export function createRunsRouter(
             },
           });
         } catch (eventErr) {
-          console.warn(`[runs] failed to record abort event for ${flowId}:`, eventErr);
+          console.warn("[runs] failed to record abort event for %s:", flowId, errorStack(eventErr));
         }
       }
 
@@ -475,6 +483,7 @@ export function createRunsRouter(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -564,16 +573,19 @@ export function createRunsRouter(
         });
       } catch (err) {
         if (controller.signal.aborted) {
+          console.error("[runs] request failed:", captureApiError(res, err));
           res.status(504).json({ error: "BaaS poll request timed out" });
           return;
         }
         const msg = err instanceof Error ? err.message : String(err);
+        console.error("[runs] request failed:", captureApiError(res, err));
         res.status(502).json({ error: `BaaS poll request failed: ${msg}` });
       } finally {
         clearTimeout(timeout);
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -612,7 +624,7 @@ export function createRunsRouter(
           }
         } catch (fcErr) {
           // Flow control cleanup is best-effort — don't block the delete
-          console.warn(`[runs] failed to release flow-control for flow ${flowId}:`, fcErr);
+          console.warn("[runs] failed to release flow-control for flow %s:", flowId, errorStack(fcErr));
         }
       }
 
@@ -629,6 +641,7 @@ export function createRunsRouter(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -723,6 +736,7 @@ export function createRunsRouter(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -830,6 +844,7 @@ export function createRunsRouter(
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -860,6 +875,7 @@ export function createRunsRouter(
       res.json({ success: true, data: steps, meta: { total: count, limit, offset } });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));
@@ -881,6 +897,7 @@ export function createRunsRouter(
       res.json({ success: true, data: steps });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      console.error("[runs] request failed:", captureApiError(res, error));
       res.status(500).json({ error: "Internal Server Error", message: msg });
     }
   }));

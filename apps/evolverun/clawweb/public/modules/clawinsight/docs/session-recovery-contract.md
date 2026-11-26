@@ -202,8 +202,14 @@ require a template and callback route; ordinary handoff cards require a template
 and Markdown plan notices require neither. All legacy reads/format adaptation
 stay in the read-only adapter behind `bot-configuration.ts`. Each attempt reads current policy;
 missing/invalid settings and read failures skip sending. No skipped notice is
-replayed when enabled later. Existing paused ordinary Owner messages remain
-paused. See [configuration and migration](bot-diagnosis-recovery-config.md).
+replayed when enabled later. Ordinary Owner handoff messages are enabled only for an explicit
+`handoff.reason=owner_material_needed`, advertised in `ownerHandoffReasons`.
+Other and legacy handoffs remain silent. This business reason does not add a
+state or a feedback wait; the terminal transition is saved before notification
+and execution fencing rejects duplicate reports. The host may inject an
+original-session URL resolver; the notifier appends that link to existing
+instructions without changing template parameters. Oversized combined text
+points to the full checklist rather than truncating an action or URL. See [configuration and migration](bot-diagnosis-recovery-config.md).
 
 Administrators can list all tasks linked to a diagnosis event, including private
 tasks. Other users still see only their own tasks or tasks explicitly shared by

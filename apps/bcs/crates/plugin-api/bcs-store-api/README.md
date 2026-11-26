@@ -31,12 +31,14 @@ ports directly: it need not emulate these data structures.
 
 ## Capabilities and operation traits
 
-`StorePlugin::supports` declares support for this configured instance. Five
+`StorePlugin::supports` declares support for this configured instance. The
 operation traits are independently injectable; no all-capabilities adapter,
 factory registry or business wrapper is required.
 
 | Capability | Trait and surface | Guarantee |
 | --- | --- | --- |
+| DocumentCas | `DocumentStorePlugin`: read_document, read_document_paths, create_document, replace_document, patch_document | Persistent whole-document version; atomic create and exact-version replacement/ordered patch; consistent projections |
+| RetainedLease | `LeaseStorePlugin`: register_lease, read_lease, update_lease, retire_lease | CAS-confirmed termination and 30-day retention; synchronized client time allowed |
 | Kv | `KvStorePlugin`: get, mget, set, put_if_absent, delete, expire, ttl | Byte values; atomic single-key writes/NX; explicit expiry |
 | VersionedKv | `VersionedKvStorePlugin`: create_versioned, get_versioned, delete, ttl | Atomic creation, consistent value/version read, unconditional deletion and TTL query; Persistent expiry is always supported |
 | ConditionalKv | Same trait: compare_and_set | Exact-version update of a live value; never recreate a missing/expired key |
@@ -127,6 +129,17 @@ For a patch, all paths, the whole-key version condition and expiry are handled i
 one atomic operation. If the second edit fails, the first must not remain visible.
 A path-only ownership update invalidates an old whole-document CAS. Replacement
 and patch are single-document operations, not transactions across documents.
+
+`PersistentJsonMerge` is a separate, narrower capability for persistent objects.
+A key is dedicated to this contract: read the full business object via `get_json`;
+create it at version 1 with `Absent + Replace(object)`; patch a live object with
+`Version(expected) + Merge` (next revision) or `Newer(version) + Merge` (exactly
+that newer revision). Each mutation uses `Expiry::Preserve`. A missing object or
+rejected version cannot be created by a patch. `_store` is reserved at the root.
+A merge follows RFC 7396: omitted members stay, null members are removed, arrays
+replace as units. This capability does not imply arbitrary path edits, projection,
+expiry, deletion or historical version fencing after external deletion. Do not mix
+these keys with `DocumentCas` keys, whose logical values permit arbitrary JSON.
 
 ## Sorted sets and scheduling
 
@@ -236,6 +249,9 @@ streams require keys within the provider's supported routing scope. Call:
 - `kv_expiry_contract_tests` for VersionedKvTtl with a clock/wait callback exceeding TTL rounding; retained-history assertions run only when MonotonicKv is advertised;
 - `kv_unknown_outcome_contract_tests` for VersionedKv with provider/proxy response-loss injection;
 - `json_store_plugin_contract_tests`;
+- `document_store_contract_tests` for persistent create/read/replace, projection, patch and competing writes;
+- `document_version_exhaustion_contract_tests` with a provider-seeded document at its final usable version;
+- `document_unknown_outcome_contract_tests` with provider/proxy response-loss injection for create, replace and patch;
 - `z_set_store_plugin_contract_tests` and `versioned_zset_contract_tests`;
 - `stream_store_plugin_contract_tests`, `stream_group_contract_tests` and
   `stream_blocking_contract_tests`.
@@ -252,6 +268,7 @@ From `apps/bcs`:
 ```sh
 cargo test -p bcs-store-api
 cargo test -p bcs-test-support --test conformance_store
+cargo test -p bcs-test-support --test coordination_primitives --test document_subset
 cargo clippy -p bcs-store-api --all-targets -- -D warnings
 cargo doc -p bcs-store-api --no-deps
 ```
@@ -287,11 +304,13 @@ must reject a provider without StreamRecovery instead of treating None as a clea
 stream. Service-owned snapshot/checkpoint and retention protocols remain required.
 
 
-## Persistent documents and strict leases
+## Persistent documents and retained membership leases
 
 `DocumentStorePlugin` / `DocumentCas` is an independent, smaller contract than
-`AtomicJson`: consistent whole-document reads, create-if-absent and exact-version
-whole-document replacement. It does not imply deletion, TTL editing, `Newer` or
+`AtomicJson`: consistent whole-document reads and path projections,
+create-if-absent at version 1, and exact-version replacement or ordered patch.
+Every accepted update advances the version, including identical content.
+It does not imply deletion, TTL editing, `Newer` or
 retained version history after external deletion. All writers in its namespace
 must use the same format and CAS discipline. Persistent coordination records
 must not expire, be evicted, be deleted or be restored to an earlier version.
@@ -301,13 +320,66 @@ a reserved business field. Unsupported old formats fail rather than being
 silently reinterpreted. The reusable suite is
 `contract::plugin::store::document::document_store_contract_tests`.
 
-`LeaseStorePlugin` / `StrictLease` adds a separate provider-timed registration
-lifetime. Expiry/version checks, optional deadline extension and payload changes
-are atomic. A terminal lifetime cannot be revived by delayed registration or
-renewal; retirement also fences a still-pending first registration. Missing is
-not stable termination. Retrying registration preserves both its original
-identity and deadline, even after its mutable payload has changed. A failed
-response can be `OutcomeUnknown`; consumers resolve it without treating absence
-as death. The test-only model uses one lock and a controllable clock. It is not a
-production lease service and proves neither durability nor failover behavior.
-Document CAS and ordinary TTL alone do not establish StrictLease support.
+`read_document_paths` shares `JsonProjection` and RFC 6901 semantics with
+`AtomicJson`. Paths and version come from one document; a real null and a missing
+path remain distinct. `patch_document` accepts nonempty ordered `JsonEdit`s and
+compares the whole-document version. Request shape is validated before reading;
+document-dependent errors are checked only after the condition matches. Parents
+must exist, Remove requires a target, and array Set replaces an existing element
+using a canonical nonnegative index. Root replacement uses `replace_document`.
+Any failed edit leaves the complete document and version unchanged.
+
+The portable defaults keep existing DocumentCas providers compatible without
+requiring full AtomicJson or additional backend commands. Projection performs
+one consistent full-document read. Patch performs at most one full-document read
+and one atomic `replace_document` with the original expected version, computing
+all edits before submitting the write. An intervening writer rejects the entire
+candidate. These are bounds per call, with no retry loop; services own bounded
+conflict retries and backpressure. Projection does not reduce bytes fetched,
+and patch writes the full replacement under the provider's document-size limit.
+An optimized native override must pass the same harness. Neither implementation
+may turn an unknown replacement into a retry or infer AlreadyApplied from a
+version mismatch. The default implementation rejects unsupported providers
+before I/O. The model's path/patch methods use these same portable defaults;
+forced interleavings and response-loss tests validate their CAS composition.
+
+`LeaseStorePlugin` / `RetainedLease` keeps a short heartbeat deadline and a
+separate 30-day storage retention period. A timed-out observation attempts to CAS
+that exact record/version to terminal; only confirmed termination establishes
+Dead. A heartbeat may win before that CAS. Terminal records reject delayed
+registration and renewal throughout retention, including retire-before-register.
+Missing is Unknown, including after garbage collection. Return with a new
+incarnation and acquire fresh ownership after losing registration.
+
+Registration retries preserve the original identity and deadline even after
+payload edits. Successful mutations refresh retention; ordinary reads and
+idempotent retries do not. GC TTL may be written separately: partial success is
+`OutcomeUnknown`, and subsequent observation repairs a missing TTL. An orphan
+left by a crash between creation and TTL assignment can remain until observed.
+The finite recovery window deliberately excludes arbitrarily old requests.
+
+Providers may sample synchronized client wall time, without server TIME or an
+atomic time predicate. Deployments must budget clock skew/steps, heartbeat delay
+and transport latency; consumers subtract the full request duration using a
+monotonic clock. CAS preserves terminal state even when a clock error causes an
+early/late timeout decision. Owner epochs and session fences remain required.
+The deterministic model proves contract behavior, not clock discipline, storage
+durability or production capacity. See the
+[adopted amendment](../../../specs/2026-11-20-retained-membership-lease/spec.md).
+
+## Ordinary connection-pool observations
+
+`StorePlugin::pool_observation` supplies current, body-free local resource facts
+without storage IO. `None` means unavailable evidence; it is never an idle pool.
+`Unpooled` is explicit for providers without a connection pool. `Bounded` reports
+one consistent ordinary-pool capacity, checked-out count, waiter count and the
+monotonic duration for which all slots are occupied or a caller is queued.
+That congestion duration survives direct slot handoff to waiting callers and
+resets only when neither condition holds. Connection setup and authentication
+occupy the checked-out slot; cancellation releases queued and checked-out state.
+Separate blocking-read pools do not contribute to the ordinary-pool snapshot.
+
+Wrappers forward this metadata. The configured provider's resource kind and
+capacity remain stable; a current snapshot that cannot be obtained returns
+`None`. Consumers own pressure thresholds and business admission policy. This
+observation neither authorizes writes nor changes their atomicity or uncertainty.

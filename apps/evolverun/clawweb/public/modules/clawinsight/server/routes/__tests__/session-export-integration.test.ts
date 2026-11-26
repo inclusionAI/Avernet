@@ -1,3 +1,4 @@
+// @vitest-environment node
 import Database from "better-sqlite3";
 import express from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +8,12 @@ import {
   createSessionExportIntegrationRouter,
 } from "../session-export-integration.js";
 
+import type { SessionAisOptions } from "@avernet/clawevolve/server/contracts/ais-executor";
+import { createSessionAnalysisRouter, validateAisResult } from "@avernet/clawevolve/server/routes/session-analysis";
+import { createEvolveRouter } from "@avernet/clawevolve/server/routes/evolve";
+import { parseAisArtifactContract, validateAisArtifactRequest } from "@avernet/clawevolve/server/services/ais/ais-artifact-contract";
+
+let aisOptions: SessionAisOptions;
 let db: SqliteDatabase;
 let repo: EvolveRepository;
 let server: ReturnType<express.Application["listen"]> | null;
@@ -68,14 +75,25 @@ beforeEach(async () => {
   officeSignedUrl.mockResolvedValue("https://office-oss.example/session");
   productionSignedUrl.mockReset();
   productionSignedUrl.mockResolvedValue("https://production-oss.example/session");
+  aisOptions = { legacySnapshotId: 1, deadlineSeconds: 7200 };
   const app = express();
   app.use(express.json());
   app.use("/api/integrations/v1/session-exports", createSessionExportIntegrationRouter({
     repo,
     ais: { execute },
+    aisOptions,
     officeDownloadStore: { createSignedUrl: officeSignedUrl },
     productionDownloadStore: { createSignedUrl: productionSignedUrl },
     now: () => Date.parse("2026-08-20T02:10:00Z"),
+  }));
+  app.use("/api/session-analyses", (req, _res, next) => { req.isClawEvolveAdmin = true; next(); },
+    createSessionAnalysisRouter({ repo, aisOptions, publicBaseUrl: "http://localhost:3001",
+      artifactUploadMode: "broker",
+      ais: { execute, getJobStatus: vi.fn(), getJobStatusDetail: vi.fn(), stopExecution: vi.fn() },
+      uploadStore: { createSignedUrl: officeSignedUrl } as never,
+    }));
+  app.use("/api/evolve", createEvolveRouter(repo, {
+    aisArtifactUrlStore: { createSignedUrl: officeSignedUrl } as never,
   }));
   const started = await new Promise<ReturnType<express.Application["listen"]>>((resolve) => {
     const instance = app.listen(0, () => resolve(instance));
@@ -92,6 +110,86 @@ afterEach(async () => {
 });
 
 describe("Session Export Integration API", () => {
+  it.each([[17, "bot"], [29, "bot"], [17, "single"], [29, "single"]] as const)("uses configured Snapshot %s for %s exports with Base uploads and callbacks", async (snapshotId, exportScope) => {
+    aisOptions.deployment = { snapshotId, packageId: "clawevolve-ais-diagnose" };
+    const response = await request("/api/integrations/v1/session-exports", {
+      method: "POST", headers: { "Idempotency-Key": "configured-export-0001" },
+      body: JSON.stringify({ exportScope, ...(exportScope === "single" ? { sessionIdentifier: "session-1" } : {}),
+        target: { userId: "197444", botId: "bot-1", stage: "service" } }),
+    });
+    expect(response.status).toBe(202);
+    const { exportId } = await response.json();
+    const config = JSON.parse((await repo.findTask(exportId))!.config_json);
+    expect(execute.mock.calls[0][2]).toBe(snapshotId);
+    const envelope = JSON.parse(execute.mock.calls[0][1]["${clawevolve_params}"]);
+    expect(envelope).toMatchObject({ taskType: "session_export", taskId: exportId,
+      input: { userId: "197444", botId: "bot-1", stage: "service", llmAnalysis: false },
+      runtime: { package: { packageId: "clawevolve-ais-diagnose" } } });
+    expect(envelope.runtime).not.toHaveProperty("outputDir");
+    const contract = parseAisArtifactContract(config)!;
+    expect(contract).not.toBeNull();
+    const artifacts = Object.fromEntries(Object.entries(contract.artifacts).map(([name, spec]) => {
+      const meta = { objectKey: spec.objectKey, contentType: spec.contentType, size: 10, sha256: "a".repeat(64) };
+      expect(() => validateAisArtifactRequest(contract, name, meta)).not.toThrow();
+      return [name, meta];
+    }));
+    expect(artifacts).toHaveProperty("runtimeBundle");
+    expect(() => validateAisResult({ taskId: exportId, success: true, artifacts }, config)).not.toThrow();
+    const { raw, ...withoutRaw } = artifacts;
+    expect(() => validateAisResult({ taskId: exportId, success: true, artifacts: withoutRaw }, config)).toThrow();
+    const path = `/api/evolve/internal/tasks/${exportId}/steps/${config.stepId}`;
+    const upload = await request(`${path}/artifacts/upload-url`, { method: "POST",
+      body: JSON.stringify({ executor: "ais", artifactName: "raw", ...raw }) });
+    expect(upload.status).toBe(200);
+    const report = await request(`${path}/report`, { method: "POST", body: JSON.stringify({
+      status: "succeeded", output: { taskId: exportId, success: true, sessionIds: ["session-1"], artifacts },
+    }) });
+    expect(report.status).toBe(200);
+    const view = await request(`/api/integrations/v1/session-exports/${exportId}`);
+    expect(await view.json()).toMatchObject({ status: "succeeded",
+      artifact: { contentType: exportScope === "single" ? "application/x-ndjson" : "application/gzip" },
+      resolution: { resolvedSessionIds: ["session-1"] } });
+  });
+
+  it("moves a failed legacy export to Base on retry and retains that selection on later retries", async () => {
+    const response = await request("/api/integrations/v1/session-exports", {
+      method: "POST", headers: { "Idempotency-Key": "legacy-export-retry-0001" },
+      body: JSON.stringify({ exportScope: "single", sessionIdentifier: "session-1",
+        target: { userId: "197444", botId: "bot-1", stage: "service" } }),
+    });
+    const { exportId } = await response.json();
+    expect(execute.mock.calls[0][2]).toBe(1);
+    await repo.markDispatchFailed(`${exportId}-AIS`, "old runtime");
+    aisOptions.deployment = { snapshotId: 17, packageId: "clawevolve-ais-diagnose" };
+    for (const attempt of [2, 3]) {
+      const retry = await request(`/api/session-analyses/${exportId}/retry`, {
+        method: "POST", headers: { "X-Staff-Id": "operator" }, body: "{}",
+      });
+      expect(retry.status).toBe(202);
+      const cfg = JSON.parse((await repo.findTask(exportId))!.config_json);
+      expect(cfg.aisBase.snapshotId).toBe(17);
+      expect(cfg.stepId).toBe(`${exportId}-AIS-${attempt}`);
+      expect(cfg.artifacts.raw.contentType).toBe("application/x-ndjson");
+      expect(cfg.artifacts.runtimeBundle.objectKey).toContain(`/attempt-${attempt}/`);
+      expect(execute.mock.calls.at(-1)![2]).toBe(17);
+      const payload = JSON.parse(execute.mock.calls.at(-1)![1]["${clawevolve_params}"]);
+      expect(payload.runtime.package.packageId).toBe("clawevolve-ais-diagnose");
+      expect(payload.input.userId).toBe("197444");
+      await repo.markDispatchFailed(cfg.stepId, "retry fixture");
+      aisOptions.deployment.snapshotId = 29;
+    }
+  });
+
+  it("rejects invalid deployment before creating or dispatching an export", async () => {
+    aisOptions.configurationError = "SESSION_AIS_CONFIG_INVALID";
+    const response = await request("/api/integrations/v1/session-exports", {
+      method: "POST", headers: { "Idempotency-Key": "invalid-config-0001" },
+      body: JSON.stringify({ exportScope: "bot", target: { userId: "197444", botId: "bot-1", stage: "service" } }),
+    });
+    expect(response.status).toBe(503);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("is public and returns not found for an unknown export", async () => {
     const response = await fetch(`${baseUrl}/api/integrations/v1/session-exports/missing`);
     expect(response.status).toBe(404);

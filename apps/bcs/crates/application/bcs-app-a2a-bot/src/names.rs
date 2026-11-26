@@ -37,7 +37,7 @@ impl A2aBotManagement {
             name:String::new(),provider_bot_ref:command.provider_bot_ref,owners:command.owners,
             summary:command.summary,webhook_url:None,domains:vec![],skills:vec![],scopes:vec![],bot_uuid:None,
             reject_existing_bot_uuid:true,connection_mode:bcs_service_api::ProviderBotConnectionMode::Gateway,
-        },url,card,command.now_ms,bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Protected,labels).await?;
+        },url,card,command.now_ms,bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Protected,bcs_service_api::types::a2a_bot::A2aAgentIdentity::Omitted,labels).await?;
         let record=self.core.get_card(&outcome.bot_uuid).await?.ok_or_else(||ServiceError::InternalError("registered Card missing".into()))?;
         Ok(NamedA2aRegistration {card:self.named_projection(&command.provider_name,record)?,bot_runtime_token:outcome.bot_runtime_token})
     }

@@ -24,6 +24,26 @@ def dispatch(handler, peer):
         peer.rpc_methods.add(method)
         if peer.observe_rpc is not None:
             peer.observe_rpc(method, handler.headers)
+        mode = peer.mode
+    if method == "SendStreamingMessage" and mode in (
+        "short_error", "unexpected_content_type", "incomplete_sse",
+    ):
+        if mode == "short_error":
+            content_type = "application/json"
+            body = json.dumps({
+                "code": "DENIED", "message": "invalid identity",
+                "errorMsg": handler.headers["x-e2e-app-identity"],
+            }, separators=(",", ":")).encode().ljust(88, b" ")
+        elif mode == "unexpected_content_type":
+            content_type, body = "text/plain", b"unstructured response fixture"
+        else:
+            content_type, body = "text/event-stream", b'data: {"code":410}\n'
+        handler.send_response(200)
+        handler.send_header("Content-Type", content_type)
+        handler.send_header("Content-Length", str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
+        return True
     if method == "SubscribeToTask":
         with peer.lock:
             task = copy.deepcopy(peer.tasks[params["id"]])

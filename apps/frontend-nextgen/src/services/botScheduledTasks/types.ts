@@ -53,7 +53,14 @@ export interface RoutineAddress extends RoutineTarget {
   id: string;
   key: string;
 }
-export interface RoutineForm extends BotEditorRoutineInput, RoutineTarget {}
+/** 创建目标选择的结构类型：RoutineTarget 之上带可选的实例多选清单，兼容裸 target 与完整表单。 */
+export interface RoutineCreateSelection extends RoutineTarget {
+  device_uuids?: string[];
+}
+export interface RoutineForm extends BotEditorRoutineInput, RoutineTarget {
+  /** 多实例环境下的多选运行实例；单选（device_uuid）与编辑路径不使用。 */
+  device_uuids?: string[];
+}
 export interface RoutineRunMessage {
   role: string;
   content: string;
@@ -193,20 +200,39 @@ export function routineInstanceMode(context: RoutineContext, stage?: RoutineStag
   const count = routineInstanceIds(context, stage).length;
   return count >= 2 ? 'multiple' : count === 1 ? 'single' : 'defer';
 }
-export function validateCreateTarget(context: RoutineContext, form: RoutineTarget, actorId: string): RoutineTarget {
+/** 多实例创建时已确认勾选的实例清单：去重并过滤掉环境清单外的成员；未勾选时回退到单选 device_uuid。 */
+export function selectedCreateInstances(context: RoutineContext, form: RoutineCreateSelection): string[] {
+  const confirmed = routineInstanceIds(context, form.runtime_stage);
+  const picked = [...new Set(form.device_uuids || [])].filter((id) => confirmed.includes(id));
+  if (picked.length > 0) return picked;
+  return form.device_uuid && confirmed.includes(form.device_uuid) ? [form.device_uuid] : [];
+}
+export function validateCreateTarget(
+  context: RoutineContext,
+  form: RoutineCreateSelection,
+  actorId: string,
+): RoutineTarget {
   if (context.bot_type !== 'service') return {};
   if (context.caller_mode === undefined) throw new Error('尚未确认 Bot 的 Caller 配置，请刷新后重试');
   if (!form.runtime_stage) throw new Error('请选择生效环境');
   if (context.caller_mode && form.runtime_stage !== 'online') throw new Error('Caller 模式仅支持正式运行环境');
   const mode = routineInstanceMode(context, form.runtime_stage);
-  if (
-    mode === 'multiple' &&
-    (!form.device_uuid || !routineInstanceIds(context, form.runtime_stage).includes(form.device_uuid))
-  )
+  if (mode === 'multiple' && selectedCreateInstances(context, form).length === 0)
     throw new Error('请选择当前环境中已确认的运行实例');
   return targetParams({
     runtime_stage: form.runtime_stage,
     device_uuid: mode === 'multiple' ? form.device_uuid : undefined,
     operator_id: context.caller_mode ? actorId : undefined,
   });
+}
+/** 创建请求目标展开：多实例环境按勾选实例逐个展开（每目标一个 device_uuid），
+ * 其余模式维持单目标；Caller 的 operator_id 随基础目标进入每个请求。 */
+export function createRequestTargets(
+  context: RoutineContext,
+  form: RoutineCreateSelection,
+  actorId: string,
+): RoutineTarget[] {
+  const base = validateCreateTarget(context, form, actorId);
+  if (routineInstanceMode(context, form.runtime_stage) !== 'multiple') return [base];
+  return selectedCreateInstances(context, form).map((device_uuid) => ({ ...base, device_uuid }));
 }

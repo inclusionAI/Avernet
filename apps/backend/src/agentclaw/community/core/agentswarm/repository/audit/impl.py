@@ -50,6 +50,14 @@ class AuditAction(StrEnum):
     SUBMIT_ACCEPTED = "submit_accepted"
     SUBMIT_REJECTED = "submit_rejected"
     CANCEL_REQUESTED = "cancel_requested"
+    # Definition lifecycle. Definitions are human-authored configuration, so
+    # their edits belong in the same trail as submit/cancel.
+    DEFINITION_CREATED = "definition_created"
+    DEFINITION_REVISED = "definition_revised"
+    DEFINITION_DELETED = "definition_deleted"
+    DEFINITION_NAME_CONFLICT = "definition_name_conflict"
+    DEFINITION_ROW_CONFLICT = "definition_row_conflict"
+    DEFINITION_MANIFEST_REJECTED = "definition_manifest_rejected"
 
 
 class AgentSwarmAuditWriter:
