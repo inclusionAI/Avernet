@@ -561,6 +561,7 @@ pub async fn settle() {
 pub struct Members {
     pub records: Mutex<Vec<bcs_service_api::port::repo::distributed::ownership::MemberRecord>>,
     pub dead: Mutex<Vec<String>>,
+    pub renewals: std::sync::atomic::AtomicUsize,
 }
 
 impl Members {
@@ -595,6 +596,7 @@ impl MembershipPort for Members {
         _: &bcs_service_api::port::repo::distributed::ownership::MembershipLease,
         _: Duration,
     ) -> Result<bcs_service_api::port::repo::distributed::ownership::Renewal, StoreError> {
+        self.renewals.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(bcs_service_api::port::repo::distributed::ownership::Renewal::Renewed)
     }
     async fn set_draining(

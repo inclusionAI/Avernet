@@ -160,3 +160,132 @@ fn hrw_order_is_stable_and_complete() {
         (0..32).map(|p| rank_candidates(p, &all)[0].node.clone()).collect();
     assert_eq!(firsts.len(), 3);
 }
+
+/// Owner records whose reads can be held open, to stall an ownership round.
+struct StalledOwners {
+    inner: MemoryOwners,
+    stalled: std::sync::atomic::AtomicBool,
+}
+
+#[async_trait::async_trait]
+impl ShardLeasePort for StalledOwners {
+    async fn claim(
+        &self,
+        request: bcs_service_api::port::repo::distributed::ownership::ClaimShard,
+    ) -> Result<bcs_service_api::port::repo::distributed::ownership::LeaseClaim, bcs_service_api::port::repo::distributed::common::StoreError> {
+        self.inner.claim(request).await
+    }
+    async fn current(
+        &self,
+        shard: ShardId,
+    ) -> Result<Option<bcs_service_api::port::repo::distributed::ownership::ShardRecord>, bcs_service_api::port::repo::distributed::common::StoreError> {
+        while self.stalled.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        self.inner.current(shard).await
+    }
+    async fn handoff(&self, request: HandoffRequest) -> Result<HandoffOutcome, bcs_service_api::port::repo::distributed::common::StoreError> {
+        self.inner.handoff(request).await
+    }
+    async fn source_done(
+        &self,
+        target: &bcs_service_api::port::repo::distributed::ownership::ShardClaim,
+        id: &RequestId,
+    ) -> Result<bool, bcs_service_api::port::repo::distributed::common::StoreError> {
+        self.inner.source_done(target, id).await
+    }
+    async fn clear_handoff(
+        &self,
+        target: &bcs_service_api::port::repo::distributed::ownership::ShardClaim,
+        id: &RequestId,
+    ) -> Result<bool, bcs_service_api::port::repo::distributed::common::StoreError> {
+        self.inner.clear_handoff(target, id).await
+    }
+}
+
+#[tokio::test]
+async fn a_stalled_ownership_round_does_not_stop_the_renewals() {
+    use std::sync::atomic::Ordering;
+    let mut rig = Rig::new().await;
+    let members = members(&mut rig);
+    rig.config.peer_timeout = Duration::from_secs(30);
+    let owners = Arc::new(StalledOwners { inner: rig.owners.clone(), stalled: true.into() });
+    let mut ports = rig.ports();
+    ports.partitions = owners.clone();
+    let engine = bcs_dist_connector::ConnectorEngine::new(rig.config.clone(), ports).unwrap();
+    let looped = engine.clone();
+    let task = tokio::spawn(async move { looped.run().await });
+    // The main loop is stuck in its first ownership round; the heartbeat
+    // still renews every `membership_renew` (20 ms here).
+    until("renewed while the round is stalled", || async { members.renewals.load(Ordering::SeqCst) >= 5 }).await;
+    assert!(!task.is_finished());
+    owners.stalled.store(false, Ordering::SeqCst);
+    until("the round completes", || async { rig.owners.owner(0) == Some(instance("conn-03")) }).await;
+    task.abort();
+}
+
+/// A queue whose claims wait for a permit.
+struct HeldClaims {
+    inner: Arc<dyn bcs_service_api::port::repo::distributed::dispatch::DispatchQueuePort>,
+    gate: tokio::sync::Semaphore,
+}
+
+#[async_trait::async_trait]
+impl bcs_service_api::port::repo::distributed::dispatch::DispatchQueuePort for HeldClaims {
+    fn command_partitions(&self) -> u32 {
+        self.inner.command_partitions()
+    }
+    fn partition_of(&self, did: &Did) -> u32 {
+        self.inner.partition_of(did)
+    }
+    async fn claim(
+        &self,
+        request: bcs_service_api::port::repo::distributed::dispatch::DispatchClaimRequest,
+    ) -> Result<bcs_service_api::port::repo::distributed::dispatch::ClaimOutcome, bcs_service_api::port::repo::distributed::common::StoreError> {
+        let _permit = self.gate.acquire().await.unwrap();
+        self.inner.claim(request).await
+    }
+    async fn resume_owned(
+        &self,
+        request: bcs_service_api::port::repo::distributed::dispatch::ResumeOwnedDispatch,
+    ) -> Result<bcs_service_api::port::repo::distributed::dispatch::ClaimOutcome, bcs_service_api::port::repo::distributed::common::StoreError> {
+        self.inner.resume_owned(request).await
+    }
+    async fn notifications(
+        &self,
+        pool: PoolId,
+        me: Instance,
+    ) -> Result<Box<dyn bcs_service_api::port::repo::distributed::dispatch::CommandFeedPort>, bcs_service_api::port::repo::distributed::common::StoreError> {
+        self.inner.notifications(pool, me).await
+    }
+    async fn held_in(&self, pool: &PoolId, partition: u32, limit: std::num::NonZeroU32) -> Result<Vec<Did>, bcs_service_api::port::repo::distributed::common::StoreError> {
+        self.inner.held_in(pool, partition, limit).await
+    }
+}
+
+#[tokio::test]
+async fn a_claim_still_running_keeps_the_partition_from_moving() {
+    let mut rig = Rig::new().await;
+    let _members = members(&mut rig);
+    rig.worker.create().await;
+    let mut ports = rig.ports();
+    let held = Arc::new(HeldClaims { inner: ports.queue.clone(), gate: tokio::sync::Semaphore::new(0) });
+    ports.queue = held.clone();
+    let source = bcs_dist_connector::ConnectorEngine::new(rig.config.clone(), ports).unwrap();
+    rig.peers.add(&source, "conn-03");
+    let looped = source.clone();
+    let task = tokio::spawn(async move { looped.run().await });
+    until("owns the partition", || async { rig.owners.owner(0) == Some(instance("conn-03")) }).await;
+    let peer = rig.start_as("conn-07");
+    until("peer ready", || async { peer.engine.snapshot().await.unwrap().ready }).await;
+    // A hint arrives; its claim is held open inside the main loop.
+    rig.worker.notify().await;
+    settle().await;
+
+    let outcome = source.drain(Duration::from_millis(400)).await.unwrap();
+    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 }, "the partition stays");
+    assert!(rig.peers.offers.lock().unwrap().is_empty(), "nothing offered while a claim runs");
+    assert_eq!(rig.owners.owner(0), Some(instance("conn-03")));
+    held.gate.add_permits(1);
+    assert!(task.await.unwrap().is_ok());
+}

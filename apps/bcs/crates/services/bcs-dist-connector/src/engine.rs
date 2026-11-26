@@ -127,6 +127,17 @@ struct Inner {
     /// Set by `drain`: every actor stops at its next safe point. Shared with
     /// the actors.
     yielding: Arc<AtomicBool>,
+    /// The heartbeat task (`heartbeat`) found the registration lost; the main
+    /// loop ends with `membership_lost`.
+    lost: AtomicBool,
+    /// The heartbeat must stop: the registration was retired, or `run`
+    /// failed (a failed process must not look alive).
+    quiet: AtomicBool,
+    /// Held (shared) by every claim the engine makes with a partition proof,
+    /// for the whole claim; taken exclusively by `drain` before it hands the
+    /// partitions over, so no claim checked against the old ownership can
+    /// still write after the transfer.
+    claim_gate: tokio::sync::RwLock<()>,
 }
 
 /// One Connector process: reads the command feed, claims dispatches and runs
@@ -176,6 +187,9 @@ impl ConnectorEngine {
                 stopping: tokio::sync::Mutex::new(()),
                 ownership: Mutex::new(partitions::Ownership::default()),
                 yielding: Arc::new(AtomicBool::new(false)),
+                lost: AtomicBool::new(false),
+                quiet: AtomicBool::new(false),
+                claim_gate: tokio::sync::RwLock::new(()),
             }),
         })
     }
@@ -191,6 +205,12 @@ impl ConnectorEngine {
     pub async fn run(&self) -> Result<(), RuntimeError> {
         self.inner.looping.store(true, Ordering::SeqCst);
         let result = self.run_loop().await;
+        if result.is_err() {
+            // A failed process stops renewing, so it becomes `Dead` and its
+            // partitions and calls move on. After a drain the heartbeat keeps
+            // going until the drain retires the registration.
+            self.inner.quiet.store(true, Ordering::SeqCst);
+        }
         self.inner.ready.store(false, Ordering::SeqCst);
         self.inner.looping.store(false, Ordering::SeqCst);
         self.inner.wake.notify_waiters();
@@ -199,9 +219,9 @@ impl ConnectorEngine {
 
     /// The main loop. Start: register membership, open the command feed,
     /// mark ready. Then each pass:
-    /// 1. stop if draining;
-    /// 2. renew the registration when `membership_renew` has passed; a
-    ///    definite loss ends the loop with `membership_lost`;
+    /// 1. stop if draining; end with `membership_lost` if the heartbeat
+    ///    found the registration lost (it renews on its own task, so slow
+    ///    store or peer I/O here never lets the registration expire);
     /// 3. every `ownership_interval` (and on the first pass): the ownership
     ///    round, then point the feed at the owned partitions if they changed;
     /// 4. `reap` finished and dead actors and retry orphans;
@@ -229,7 +249,7 @@ impl ConnectorEngine {
                 failed("command_feed_unavailable")
             })?;
         inner.ready.store(true, Ordering::SeqCst);
-        let mut renewed_at = Instant::now();
+        self.start_heartbeat();
         let mut owned_at: Option<Instant> = None;
         let mut assigned: Option<u64> = None;
         let mut backoff = Backoff::new(&config);
@@ -237,11 +257,8 @@ impl ConnectorEngine {
             if inner.draining.load(Ordering::SeqCst) {
                 return Ok(());
             }
-            if renewed_at.elapsed() >= config.membership_renew {
-                renewed_at = Instant::now();
-                if !self.renew().await {
-                    return Err(failed("membership_lost"));
-                }
+            if inner.lost.load(Ordering::SeqCst) {
+                return Err(failed("membership_lost"));
             }
             if owned_at.is_none_or(|at| at.elapsed() >= config.ownership_interval) {
                 owned_at = Some(Instant::now());
@@ -290,12 +307,13 @@ impl ConnectorEngine {
                 }
                 Err(error) => {
                     tracing::warn!(?error, "command feed read failed");
-                    // Only until the next renewal is due: a feed outage,
-                    // even one whose reads fail slowly, must not let this
-                    // instance's registration expire. The backoff still
-                    // doubles (200 ms up to 5 s by default) across errors.
-                    let until_renewal = config.membership_renew.saturating_sub(renewed_at.elapsed());
-                    backoff.wait_at_most(until_renewal).await;
+                    // The heartbeat keeps the registration alive meanwhile;
+                    // a drain or a lost registration cuts the wait short.
+                    // The backoff doubles (200 ms up to 5 s by default).
+                    tokio::select! {
+                        () = backoff.wait() => {}
+                        () = inner.stop.notified() => {}
+                    }
                 }
             }
         }
@@ -338,6 +356,14 @@ impl ConnectorEngine {
     /// partition moved meanwhile: it is dropped until the next round.
     async fn decide(&self, did: &Did) -> Result<(), StoreError> {
         let inner = &self.inner;
+        // Read after the gate, so a drain that handed the partition over
+        // (holding the gate) leaves no proof behind for this claim.
+        let _claiming = inner.claim_gate.read().await;
+        if inner.draining.load(Ordering::SeqCst) {
+            // Nothing new is taken on while draining; the partition's next
+            // owner gets the re-posted hint.
+            return Ok(());
+        }
         let Some(proof) = self.proof_for(did) else {
             return Ok(());
         };
@@ -637,6 +663,34 @@ impl ConnectorEngine {
         }
     }
 
+    /// Renews the registration every `membership_renew` on its own task, so
+    /// no I/O of the main loop or of a drain (ownership rounds, recovery,
+    /// handoffs) can delay a renewal. Ends when the registration is retired,
+    /// when `run` failed, or when a renewal finds it lost (then the main loop
+    /// is told through `lost` and `stop`). Without a registration (stub
+    /// membership) there is nothing to renew.
+    fn start_heartbeat(&self) {
+        if lock(&self.inner.lease).is_none() {
+            return;
+        }
+        let engine = self.clone();
+        tokio::spawn(async move {
+            let inner = &engine.inner;
+            loop {
+                tokio::time::sleep(inner.config.membership_renew).await;
+                if inner.quiet.load(Ordering::SeqCst) {
+                    return;
+                }
+                if !engine.renew().await {
+                    inner.lost.store(true, Ordering::SeqCst);
+                    inner.stop.notify_one();
+                    inner.wake.notify_waiters();
+                    return;
+                }
+            }
+        });
+    }
+
     /// `false` when the registration is definitely lost: the process must
     /// stop claiming and restart under a new incarnation.
     ///
@@ -666,6 +720,7 @@ impl ConnectorEngine {
     /// registering): nothing to do. A failure is only logged: the
     /// registration then expires on its own, because nothing renews it.
     async fn retire(&self) {
+        self.inner.quiet.store(true, Ordering::SeqCst);
         let Some(lease) = lock(&self.inner.lease).clone() else {
             return;
         };
@@ -721,15 +776,16 @@ impl DistRuntimeControlPort for ConnectorEngine {
     ///
     /// Steps: mark draining, interrupt the main loop (`stop`), mark the
     /// registration as draining if there is one, and ask every actor to stop
-    /// at its next safe point (`yielding`, plus a poke). Then wait, renewing
-    /// the registration, until the main loop has left and no actor is live,
-    /// but only until `handoff_reserve` (at most half the grace) before the
-    /// deadline.
+    /// at its next safe point (`yielding`, plus a poke). Then wait (the
+    /// heartbeat keeps the registration alive) until the main loop has left
+    /// and no actor is live, but only until `handoff_reserve` (at most half
+    /// the grace) before the deadline.
     ///
     /// Then every actor still running is aborted and awaited, so no call of
     /// this process talks to its agent or session any more. No new actor
     /// starts once draining (`spawn` refuses), so this also holds for a claim
-    /// or resume still in flight. Only then is each owned partition offered
+    /// or resume still in flight. Claims still in flight are waited for
+    /// (`claim_gate`); only then is each owned partition offered
     /// to a peer: the peer that takes it owns it at once and takes its calls
     /// over (they stay held by this process until then). Finally the
     /// registration is retired: this instance is `Dead` at once, and
@@ -760,19 +816,11 @@ impl DistRuntimeControlPort for ConnectorEngine {
         // First the main loop must leave its iteration: a claim in flight may
         // still take a call. Then the held calls get the rest of the grace.
         // Short waits instead of one long one: a wake-up can be missed.
+        // The heartbeat keeps renewing meanwhile (until `retire`), so other
+        // Connectors cannot take over calls whose actors still run here.
         let step = Duration::from_millis(20);
-        let mut renewed_at = Instant::now();
         while (inner.looping.load(Ordering::SeqCst) || self.live() > 0) && Instant::now() < calls_until {
             let _ = tokio::time::timeout(step, inner.wake.notified()).await;
-            // The main loop no longer renews. Without this the registration
-            // would expire during the grace period and other Connectors could
-            // take over calls whose actors are still running here.
-            // The answer is ignored: a lost registration does not end the
-            // wait, there is nothing else to stop.
-            if renewed_at.elapsed() >= inner.config.membership_renew {
-                renewed_at = Instant::now();
-                self.renew().await;
-            }
         }
         // Whatever still runs is stopped here, not left behind: once the
         // registration is gone, another Connector may take these calls over,
@@ -798,7 +846,19 @@ impl DistRuntimeControlPort for ConnectorEngine {
         for task in leftover {
             let _ = task.await;
         }
-        let left = self.hand_off(deadline).await;
+        // No claim made under the current ownership may still be running
+        // when a partition moves: it could take a call back from the new
+        // owner. Wait for claims in flight (the main loop may be inside one);
+        // if one does not end in time, hand nothing over: the partitions
+        // then move only once this instance is `Dead`.
+        let gate_until = deadline.checked_sub(inner.config.peer_timeout).unwrap_or(deadline);
+        let left = match tokio::time::timeout_at(gate_until, inner.claim_gate.write()).await {
+            Ok(_quiet_claims) => self.hand_off(deadline).await,
+            Err(_) => {
+                tracing::warn!("a claim is still running; partitions are not handed over");
+                self.owned_partitions().1.len()
+            }
+        };
         let remaining = stopped + lock(&inner.orphans).len() + left;
         self.retire().await;
         if remaining == 0 && !inner.looping.load(Ordering::SeqCst) {
