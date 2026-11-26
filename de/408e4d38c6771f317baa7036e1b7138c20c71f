@@ -1,0 +1,24 @@
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/http_client.rs
+  h_10f6235a5d078a 1,55-65,94-105,119,135
+apps/bcs/crates/bootstrap/bcs/src/logging.rs
+  h_10f6235a5d078a 633,641
+apps/bcs/crates/external-clients/bcs-a2a-http/CONTEXT.md
+  h_10f6235a5d078a 237
+apps/bcs/crates/external-clients/bcs-a2a-http/src/digest.rs
+  h_10f6235a5d078a 7,9-22,25-31,36,87-88,122,124-125,145-150,182-184,206-215,350,354-355,362-372,374,384-401,443-444
+apps/bcs/crates/external-clients/bcs-a2a-http/src/http_client.rs
+  h_10f6235a5d078a 7,99-103
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/client_digest_log.rs
+  h_10f6235a5d078a 4,13,16-19,203-210,212-220,232-235,250-251,273,275,278-279,281,293-412,417-434
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "de408e4d38c6771f317baa7036e1b7138c20c71f",
+  "prompts": {},
+  "humans": {
+    "h_10f6235a5d078a": {
+      "author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
