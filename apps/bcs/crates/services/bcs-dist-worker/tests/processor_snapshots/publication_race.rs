@@ -1,16 +1,9 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    reason = "snapshot publication fault assertions"
-)]
-mod lifecycle_support;
-mod processor_support;
-mod support;
+#![allow(clippy::expect_used, reason = "snapshot publication fault assertions")]
 use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_service_api::port::repo::distributed::{common::*, result::*, task_feed::*};
-use lifecycle_support::*;
-use processor_support::Fixture;
+use crate::lifecycle_support::*;
+use crate::processor_support::Fixture;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicUsize, Ordering},

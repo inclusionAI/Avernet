@@ -1,14 +1,10 @@
-#![allow(clippy::unwrap_used, reason = "output quota lifecycle assertions")]
-mod lifecycle_support;
-mod processor_support;
-mod support;
 use bcs_dist_model::*;
 use bcs_service_api::{
     core::dist_runner::*,
     port::repo::distributed::{control::*, dispatch::DispatchControlPort, result::*, task_feed::*},
 };
-use lifecycle_support::*;
-use processor_support::{FinishingRunner, Fixture};
+use crate::lifecycle_support::*;
+use crate::processor_support::{FinishingRunner, Fixture};
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},

@@ -1,4 +1,6 @@
 #![allow(clippy::unwrap_used, reason = "public provider lifecycle assertions")]
+#[path = "processor_lifecycle/quota.rs"]
+mod quota;
 mod lifecycle_support;
 mod processor_support;
 mod support;

@@ -6,17 +6,22 @@
 mod processor_support;
 mod support;
 use bcs_dist_model::*;
-use bcs_service_api::port::repo::distributed::{result::*, session::*};
+use bcs_service_api::{
+    core::dist_runner::*,
+    port::repo::distributed::{result::*, session::*, task_feed::*},
+};
+use futures::StreamExt;
 use processor_support::*;
 use std::{
     sync::{Arc, atomic::Ordering},
     time::Duration,
 };
 
-#[tokio::test]
-async fn real_providers_archive_then_publish_terminal_before_starting_next_task() {
+#[tokio::test(start_paused = true)]
+async fn large_output_is_archived_and_published_before_starting_the_next_task() {
     let runner = Arc::new(FinishingRunner {
-        text: 100,
+        // One byte above the former 1 MiB quota once the JSON string is encoded.
+        text: 1_048_575,
         ..Default::default()
     });
     let f = Fixture::new(runner.clone()).await;
@@ -24,7 +29,7 @@ async fn real_providers_archive_then_publish_terminal_before_starting_next_task(
     let second = f.admit("second").await;
     f.warm().await;
     let mut observed_awaiting = false;
-    for _ in 0..80 {
+    for _ in 0..100 {
         f.step().await.unwrap();
         let checkpoint = f.checkpoint().await;
         if checkpoint
@@ -50,24 +55,17 @@ async fn real_providers_archive_then_publish_terminal_before_starting_next_task(
     }
     assert!(observed_awaiting);
     assert_eq!(runner.calls.load(Ordering::SeqCst), 2);
-    assert_eq!(
-        f.snapshot(&first).await.content.status,
-        TaskStatus::Completed
-    );
-    assert_eq!(
-        f.snapshot(&second).await.content.status,
-        TaskStatus::Completed
-    );
-    assert!(
-        f.archive
-            .get_final(&spec().scope, &first)
-            .await
-            .unwrap()
-            .is_some()
-    );
+    for tid in [first, second] {
+        let snapshot = f.snapshot(&tid).await;
+        assert_eq!(snapshot.content.status, TaskStatus::Completed);
+        assert_eq!(snapshot.output_usage.cumulative_bytes, 1_048_577);
+        let record = f.archive.get_final(&spec().scope, &tid).await.unwrap().unwrap();
+        assert_eq!(record.result, Payload::Inline(serde_json::json!({"finished":true})));
+    }
+    assert!(!f.coordination.load(&spec().sid).await.unwrap().unwrap().recovery.quarantined);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn lost_commit_response_keeps_the_decision_and_large_blob_identity() {
     let runner = Arc::new(FinishingRunner {
         text: 9 * 1024 * 1024,
@@ -136,7 +134,6 @@ async fn lost_commit_response_keeps_the_decision_and_large_blob_identity() {
             .unwrap()
             .record
     );
-    use bcs_service_api::port::repo::distributed::task_feed::{RestoredTask, TaskReaderPort};
     let Some(RestoredTask::Final(view)) = f.feed.restore(&spec().scope, &tid).await.unwrap() else {
         panic!("final output")
     };
@@ -148,34 +145,7 @@ async fn lost_commit_response_keeps_the_decision_and_large_blob_identity() {
 
 }
 
-#[tokio::test]
-async fn output_above_the_former_unit_quota_completes_and_leaves_the_next_task_healthy() {
-    let runner = Arc::new(FinishingRunner {
-        text: 1_048_575,
-        ..Default::default()
-    });
-    let f = Fixture::new(runner.clone()).await;
-    let first = f.admit("large-output").await;
-    let second = f.admit("next").await;
-    f.warm().await;
-    for _ in 0..100 {
-        f.step().await.unwrap();
-        if f.snapshot(&second).await.content.status == TaskStatus::Completed {
-            break;
-        }
-    }
-    assert_eq!(runner.calls.load(Ordering::SeqCst), 2);
-    for tid in [first, second] {
-        let snapshot = f.snapshot(&tid).await;
-        assert_eq!(snapshot.content.status, TaskStatus::Completed);
-        assert_eq!(snapshot.output_usage.cumulative_bytes, 1_048_577);
-        let record = f.archive.get_final(&spec().scope, &tid).await.unwrap().unwrap();
-        assert_eq!(record.result, Payload::Inline(serde_json::json!({"finished":true})));
-    }
-    assert!(!f.coordination.load(&spec().sid).await.unwrap().unwrap().recovery.quarantined);
-}
-
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn canceling_the_processing_future_keeps_its_unknown_commit_for_resolution() {
     let runner = Arc::new(FinishingRunner {
         text: 100,
@@ -216,7 +186,7 @@ async fn canceling_the_processing_future_keeps_its_unknown_commit_for_resolution
     assert_eq!(f.snapshot(&tid).await.content.status, TaskStatus::Completed);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn takeover_after_archive_replays_the_frozen_result_without_running_the_reducer() {
     let runner = Arc::new(FinishingRunner {
         text: 70000,
@@ -287,7 +257,7 @@ async fn takeover_after_archive_replays_the_frozen_result_without_running_the_re
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn release_failure_retries_the_release_instead_of_starting_another_round() {
     let runner = Arc::new(FinishingRunner {
         text: 100,
@@ -313,7 +283,7 @@ async fn release_failure_retries_the_release_instead_of_starting_another_round()
     assert_eq!(f.sessions.release_calls.load(Ordering::SeqCst), 2);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn full_reader_capacity_rebuilds_without_losing_pending_input_or_unknown_commit() {
     let runner = Arc::new(FinishingRunner {
         text: 100,
@@ -352,7 +322,7 @@ async fn full_reader_capacity_rebuilds_without_losing_pending_input_or_unknown_c
     assert_eq!(runner.calls.load(Ordering::SeqCst), 2);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_locally_released_session_can_be_reacquired_under_the_same_owner() {
     let runner = Arc::new(FinishingRunner {
         text: 10,
@@ -404,7 +374,7 @@ async fn a_locally_released_session_can_be_reacquired_under_the_same_owner() {
     assert_eq!(runner.calls.load(Ordering::SeqCst), 2);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn busy_session_read_ahead_does_not_exhaust_receipts_for_a_healthy_sibling() {
     let runner = Arc::new(FinishingRunner {
         text: 10,
@@ -449,7 +419,7 @@ async fn busy_session_read_ahead_does_not_exhaust_receipts_for_a_healthy_sibling
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn mixed_failure_and_delivery_retains_the_healthy_input_even_if_rewatch_fails() {
     let runner = Arc::new(FinishingRunner {
         text: 10,
@@ -475,5 +445,103 @@ async fn mixed_failure_and_delivery_retains_the_healthy_input_even_if_rewatch_fa
     assert_eq!(
         f.snapshot(&healthy).await.content.status,
         TaskStatus::Completed
+    );
+}
+
+struct AppendingRunner;
+impl DistRunnerCoreService for AppendingRunner {
+    fn init(&self, context: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
+        FinishingRunner::default().init(context)
+    }
+    fn reduce(
+        &self,
+        context: &EvaluationContext<'_>,
+        state: &RunnerState,
+        inputs: &[RunnerInput],
+    ) -> Result<Decision, RunnerError> {
+        let mut decision = FinishingRunner {
+            text: 1_048_574,
+            ..Default::default()
+        }
+        .reduce(context, state, inputs)?;
+        let ActionIntent::Show { update, .. } = &mut decision.actions[0] else {
+            panic!()
+        };
+        let ArtifactUpdate::Upsert { content } = update else {
+            panic!()
+        };
+        *update = ArtifactUpdate::AppendText {
+            delta: content.clone(),
+        };
+        Ok(decision)
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn one_mib_append_externalizes_outbox_and_restores_the_same_complete_text() {
+    let f = Fixture::new(Arc::new(AppendingRunner)).await;
+    let tid = f.admit("large-append").await;
+    let Some(RestoredTask::Live { cursor, .. }) =
+        f.feed.restore(&spec().scope, &tid).await.unwrap()
+    else {
+        panic!()
+    };
+    f.warm().await;
+    for _ in 0..100 {
+        f.step().await.unwrap();
+        if f.snapshot(&tid).await.content.status == TaskStatus::Completed {
+            break;
+        }
+    }
+    assert_eq!(f.snapshot(&tid).await.content.status, TaskStatus::Completed);
+    let requests = f.publisher.append_requests.lock().unwrap().clone();
+    assert!(
+        requests
+            .iter()
+            .flat_map(|r| &r.events)
+            .any(|event| matches!(
+                &event.body,
+                OutputBody::Artifact {
+                    update: ArtifactUpdate::AppendText {
+                        delta: Payload::Ref(_)
+                    },
+                    ..
+                }
+            ))
+    );
+    let Some(RestoredTask::Final(view)) = f.feed.restore(&spec().scope, &tid).await.unwrap() else {
+        panic!()
+    };
+    let Payload::Inline(snapshot) = view.content.snapshot else {
+        panic!()
+    };
+    let display: DisplaySnapshot = serde_json::from_value(snapshot).unwrap();
+    assert_eq!(display.units.len(), 1);
+    assert_eq!(
+        display.units[0].content,
+        serde_json::json!("x".repeat(1_048_574))
+    );
+    let mut follow = f.feed.follow(spec().scope, cursor);
+    let mut deltas = Vec::new();
+    while let Some(item) = tokio::time::timeout(Duration::from_secs(2), follow.next())
+        .await
+        .unwrap()
+    {
+        let FollowItem::Events { items, .. } = item.unwrap() else {
+            panic!("unexpected Gap")
+        };
+        for event in items {
+            if let OutputBody::Artifact {
+                update: ArtifactUpdate::AppendText { delta },
+                ..
+            } = event.body
+            {
+                deltas.push(delta);
+            }
+        }
+    }
+    assert_eq!(
+        deltas,
+        vec![Payload::Inline(serde_json::json!("x".repeat(1_048_574)))]
     );
 }
