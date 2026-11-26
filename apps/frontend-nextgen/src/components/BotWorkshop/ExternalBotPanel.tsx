@@ -157,6 +157,7 @@ export function ExternalBotPanel({ active }: { active: boolean }) {
         <BotGeneralConfigDialog
           bot={externalBotToGeneralConfig(configBot)}
           isExternalBot
+          externalBotAccessRelation={configBot.accessRelation}
           onClose={() => setConfigBot(undefined)}
         />
       ) : null}

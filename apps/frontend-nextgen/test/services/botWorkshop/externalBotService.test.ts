@@ -23,6 +23,7 @@ test('合并 mine 分页后仅保留 bot_ 前缀的外部 Bot，不依赖 TC Bot
             kind: 'bot',
             bot_id: 'bot_0e0ed32d',
             name: 'External One',
+            access_relation: 'owner',
             descriptor: { summary: '外部描述', domains: [], scopes: [], skills: [] },
           },
         ],
@@ -33,7 +34,7 @@ test('合并 mine 分页后仅保留 bot_ 前缀的外部 Bot，不依赖 TC Bot
       message: 'OK',
       data: {
         total: 3,
-        items: [{ kind: 'bot', bot_id: 'bot_258dfd15', name: 'External Two', status: 'online' }],
+        items: [{ kind: 'bot', bot_id: 'bot_258dfd15', name: 'External Two', status: 'online', access_relation: 'manager' }],
       },
     });
   owned.mockResolvedValue({
@@ -45,7 +46,8 @@ test('合并 mine 分页后仅保留 bot_ 前缀的外部 Bot，不依赖 TC Bot
   const result = await externalBotService.list({ pageSize: 2 });
 
   expect(result.map((item) => item.id)).toEqual(['bot_0e0ed32d', 'bot_258dfd15']);
-  expect(result[0]).toMatchObject({ name: 'External One', description: '外部描述' });
+  expect(result[0]).toMatchObject({ name: 'External One', description: '外部描述', accessRelation: 'owner' });
+  expect(result[1]).toMatchObject({ accessRelation: 'manager' });
   expect(mine).toHaveBeenNthCalledWith(1, { kind: 'bot', offset: 0, limit: 2 });
   expect(mine).toHaveBeenNthCalledWith(2, { kind: 'bot', offset: 2, limit: 2 });
   expect(owned).not.toHaveBeenCalled();

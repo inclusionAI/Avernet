@@ -9,6 +9,7 @@ export interface ExternalBotDomain {
   name: string;
   description?: string;
   avatarUrl?: string;
+  accessRelation?: 'owner' | 'manager';
   status?: string;
   reachability?: string;
   engine?: string;
@@ -42,6 +43,9 @@ function mapExternalBot(dto: CollaborationBotDto): ExternalBotDomain {
     name: dto.name?.trim() || dto.bot_id,
     description: dto.descriptor?.summary,
     avatarUrl: normalizeAvatarUrl(dto.avatar_url),
+    accessRelation: dto.access_relation === 'owner' || dto.access_relation === 'manager'
+      ? dto.access_relation
+      : undefined,
     status: dto.status,
     reachability: dto.reachability,
     engine: dto.engine,

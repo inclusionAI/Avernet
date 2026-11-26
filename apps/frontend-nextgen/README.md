@@ -27,6 +27,17 @@ npm run check:open-core
 npm run ci
 ```
 
+## Bot management: friend roster
+
+Public settings reuses one friend roster for managed and external Bots. The
+managed Bot entry uses its directory Owner ID; the external Bot entry uses the
+[BCS mine projection](../bcs/api-contracts/v1/domain-models.yaml) and shows the
+roster only when `access_relation` is `owner`, not when it is missing or `manager`.
+BCS still checks current ownership for removal. Friend Bot avatars use the
+query result when available and the same ID-seeded fallback as Bot management;
+friend user avatars are unchanged. See the
+[friend roster regression tests](test/components/CollaborationPrivacy/BotFriendRoster.test.tsx).
+
 ## Group and Session invitation links
 
 The [invitation landing hook](src/pages/Workspace/hooks/useInviteAccept.ts) first
