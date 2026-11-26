@@ -419,3 +419,15 @@ Source Bot creation times retain their stored timezone semantics; new audit
 times are UTC. Diagnose `release_audit.create.*` and `release_audit.complete.*`
 using change/publication IDs, environment, actor, result and completion time.
 Raw publication config/ext and authentication credentials are not logged.
+
+Audit entrypoints also emit one `release_audit.record_created.finished` or
+`release_audit.record_transition.finished` log per call with `publish_id`,
+`outcome=success|failed|skipped` and monotonic `elapsed_ms`. This duration includes
+transaction acquisition, snapshot/Plugin work, commit or rollback, and session
+exit; Plugin-level durations alone exclude the caller's commit. Duplicate or
+inapplicable updates are skipped. Timing log failures do not escape the caller.
+
+Audit change/workflow checks gate audit-marker writes only. Native retry cleanup
+always runs, and restarting cleanup retains its original dict guard only. This
+preserves the pre-audit cleanup behavior even under concurrent retries; native
+concurrency policy is outside this audit change. No ledger query or lock is added.

@@ -182,7 +182,8 @@ def test_retry_to_stable_success_waits_for_restart_confirmation(repository):
     assert audits(repository)[-1].finish_status == "succeeded"
 
 
-def test_late_restart_success_does_not_finish_new_retry(repository):
+@pytest.mark.parametrize("workflow", ["same", "new", "absent"])
+def test_late_restart_success_does_not_finish_new_retry(repository, workflow):
     from unittest.mock import Mock
     from agentclaw.community.core.service_bot.services.publish_flow.progress_sync_mixin import ProgressSyncMixin
     from agentclaw.community.core.service_bot.services.publish_flow.stage_status_mixin import StageStatusMixin
@@ -202,7 +203,10 @@ def test_late_restart_success_does_not_finish_new_retry(repository):
         def get_baas_publish_progress(self, **kwargs):
             assert kwargs["baas_publish_id"] == 101
             repo.update_status(record.id, "failed", "success")
-            repo.update_status_with_ext(record.id, "success", {"retry": True, "restart": {"online": 202}},
+            restart = {"restarting": True}
+            if workflow != "absent":
+                restart["online"] = 202 if workflow == "new" else 101
+            repo.update_status_with_ext(record.id, "success", {"retry": True, "restart": restart},
                                         "failed", audit_operator_id="second")
             return {"status": "SUCCESS"}
 
@@ -221,6 +225,7 @@ def test_late_restart_success_does_not_finish_new_retry(repository):
     latest = repo.get_by_id(record.id).ext
     assert latest.get("_release_audit_restart_completed") != latest["_release_audit_change_id"]
     assert old.ext["_release_audit_change_id"] != latest["_release_audit_change_id"]
+    assert "restarting" not in latest["restart"]
 
 
 @pytest.mark.asyncio
@@ -570,3 +575,151 @@ def test_audit_commit_failure_keeps_native_publication(repository):
     record = create(repository)
     assert record.status == "draft"
     assert audits(repository) == []
+
+
+@pytest.fixture(params=["record_created", "record_transition"])
+def timed_audit_call(repository, request):
+    from agentclaw.community.core.repository.implementations.publishing import release_audit
+    repo, _ = repository
+    record = create(repository)
+    if request.param == "record_created":
+        def invoke():
+            return release_audit.record_created(
+                repo._db, record.id, ext=None, actor="editor", audit=repo._audit)
+    else:
+        started = repo.update_status(record.id, "building", "draft", audit_operator_id="editor")
+        with repo._db.orm_session() as session:
+            session.query(repo.Model).filter(repo.Model.id == record.id).update({"status": "validating"})
+        def invoke():
+            return release_audit.record_transition(
+                repo._db, record.id, status="validating", ext=json.dumps(started.ext, ensure_ascii=False),
+                source_status="building", actor=None, new_change_id=None, audit=repo._audit)
+    return request.param, invoke
+
+
+def _timing_messages(caplog, operation):
+    return [record.getMessage() for record in caplog.records
+            if record.getMessage().startswith(f"release_audit.{operation}.finished ")]
+
+
+@pytest.mark.parametrize("commit_fails", [False, True])
+def test_call_timing_includes_transaction_exit(repository, timed_audit_call, monkeypatch, caplog, commit_fails):
+    from agentclaw.community.core.repository.implementations.publishing import release_audit
+    repo, _ = repository
+    operation, invoke = timed_audit_call
+    original = repo._db.transactional_orm_session
+    clock = [10.0]
+    monkeypatch.setattr(release_audit, "monotonic", lambda: clock[0])
+    @contextmanager
+    def transaction():
+        with original() as session:
+            yield session
+            clock[0] += 0.125
+            if commit_fails:
+                raise RuntimeError("private commit payload")
+    repo._db.transactional_orm_session = transaction
+    caplog.set_level("INFO")
+    caplog.clear()
+    assert invoke() is None
+    messages = _timing_messages(caplog, operation)
+    assert len(messages) == 1
+    assert f"outcome={'failed' if commit_fails else 'success'}" in messages[0]
+    assert "elapsed_ms=125.00" in messages[0]
+    assert "private commit payload" not in caplog.text
+    if operation == "record_transition":
+        assert audits(repository)[-1].finish_status == ("pending" if commit_fails else "succeeded")
+
+
+def test_call_timing_records_plugin_failure(repository, timed_audit_call, caplog):
+    repo, _ = repository
+    operation, invoke = timed_audit_call
+    class BrokenPlugin:
+        def create(self, *args, **kwargs):
+            raise RuntimeError("private plugin payload")
+        def complete(self, *args, **kwargs):
+            raise RuntimeError("private plugin payload")
+    repo._audit = BrokenPlugin()
+    caplog.set_level("INFO")
+    caplog.clear()
+    assert invoke() is None
+    messages = _timing_messages(caplog, operation)
+    assert len(messages) == 1 and "outcome=failed" in messages[0]
+    assert "elapsed_ms=" in messages[0]
+    assert "private plugin payload" not in caplog.text
+
+
+@pytest.mark.parametrize("skip", ["no_actor", "stale", "untracked", "non_terminal", "duplicate"])
+def test_call_timing_records_skip(repository, caplog, skip):
+    from agentclaw.community.core.repository.implementations.publishing import release_audit
+    repo, _ = repository
+    record = create(repository)
+    status, ext = "draft", None
+    if skip in {"non_terminal", "duplicate"}:
+        record = repo.update_status(record.id, "building", "draft", audit_operator_id="editor")
+        if skip == "duplicate":
+            record = repo.update_status(record.id, "validating", "building")
+        status, ext = record.status, json.dumps(record.ext, ensure_ascii=False)
+    if skip == "stale":
+        status = "success"
+    caplog.set_level("INFO")
+    caplog.clear()
+    if skip == "no_actor":
+        operation = "record_created"
+        release_audit.record_created(repo._db, record.id, ext=ext, actor=None, audit=repo._audit)
+    else:
+        operation = "record_transition"
+        release_audit.record_transition(repo._db, record.id, status=status, ext=ext,
+                                        source_status=status, actor=None, new_change_id=None, audit=repo._audit)
+    messages = _timing_messages(caplog, operation)
+    assert len(messages) == 1 and "outcome=skipped" in messages[0]
+    assert "elapsed_ms=" in messages[0]
+
+
+def test_timing_log_failure_does_not_escape(repository, timed_audit_call, monkeypatch):
+    from agentclaw.community.core.repository.implementations.publishing import release_audit
+    _operation, invoke = timed_audit_call
+    original = release_audit.logger.info
+    def info(message, *args, **kwargs):
+        if message.startswith("release_audit.%s.finished"):
+            raise RuntimeError("log sink unavailable")
+        return original(message, *args, **kwargs)
+    monkeypatch.setattr(release_audit.logger, "info", info)
+    assert invoke() is None
+    assert audits(repository)[-1].finish_status == "succeeded"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("audit_id", [None, "old"])
+@pytest.mark.parametrize("workflow_changed", [False, True])
+@pytest.mark.parametrize("audit_replaced", [False, True])
+async def test_retry_cleanup_is_independent_of_audit_id(audit_id, workflow_changed, audit_replaced):
+    import copy
+    from agentclaw.community.core.service_bot.services.publish_flow.retry_ops_mixin import RetryOpsMixin
+    from agentclaw.community.core.service_bot.services.publish_flow.stage_status_mixin import StageStatusMixin
+    from agentclaw.community.core.service_bot.repository.models import PublishStatus
+    latest = {"retry": True, "restart": {"online": 101}}
+    if audit_id:
+        latest["_release_audit_change_id"] = audit_id
+    class Flow(RetryOpsMixin, StageStatusMixin):
+        @staticmethod
+        def _get_latest_ext(publish_id):
+            return copy.deepcopy(latest)
+        async def execute_restart(self, **kwargs):
+            if audit_replaced:
+                latest["_release_audit_change_id"] = "new"
+            if workflow_changed:
+                latest["restart"]["online"] = 202
+                raise RuntimeError("bookkeeping failed after workflow was recorded")
+            return {"success": False, "message": "submission failed"}
+        @staticmethod
+        def _clear_retry_flag(ext):
+            ext.pop("retry", None)
+        @staticmethod
+        def _mutate_and_update_ext(publish_id, mutator):
+            mutator(latest)
+            return latest
+    result = await Flow()._retry_via_restart(1, "editor", PublishStatus.SUCCESS)
+    assert result.action == "restart"
+    assert "retry" not in latest
+    expected = audit_id if audit_id and not audit_replaced and not workflow_changed else None
+    assert latest.get("_release_audit_submit_failed") == expected
