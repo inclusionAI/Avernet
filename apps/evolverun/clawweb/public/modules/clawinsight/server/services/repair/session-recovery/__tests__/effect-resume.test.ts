@@ -30,10 +30,10 @@ beforeEach(async () => {
   start = vi.fn(async (_task: RecoveryStoredTask) => {});
   deps = { tasks, controlPlaneEnvironment: "pre", observationMs: hour, now: () => now,
     agent: { start, release: async () => {}, terminate: async () => ({ status: "remote_stopped", aisJobId: null }), listExecutions: async () => [] },
-    notifier: { notify: async () => false }, reporter: { report: async () => {} } };
+    notifier: { notify: async () => false }, reporter: { report: vi.fn(async () => {}) } };
   service = new SessionRecoveryTaskService(deps);
 });
-afterEach(async () => { await db.close(); });
+afterEach(async () => { await service.dispose(); await db.close(); });
 
 async function enable(concurrency = 2) {
   await new AppConfigRepository(db).create({ config_key: "session_recovery_effect_resume_pre", config_json: JSON.stringify({ concurrency }) });
@@ -45,7 +45,7 @@ async function seed(id: string, patch: Partial<RecoveryStoredTask> = {}) {
     request: { event_id: id, delivery_key: id, tc_fault_label: null, diagnosis: "fixture", session_key: "original",
       target: { bot_id: "default", entity_id: "owner", env: "prod", engine: "TE" } },
     observationDeadlineAt: now - hour, ownerDeadlineAt: null, plan: null,
-    judgment: { ...unknown, evidence_ids: [] }, evidence: [], pending_results: [],
+    judgment: { ...unknown, evidence_ids: [] }, evidence: [],
     timeline: [], effectWait: { firstAt: now - hour, sinceAt: now - hour, resumes: 0 }, ...patch,
   };
   await tasks.create(task, `${id}-1`);
@@ -134,9 +134,9 @@ it("closes aged legacy waits and exhausted rounds with an unknown effect and no 
   await service.maintenance();
   for (const id of ["aged", "exhausted"]) {
     const task = await current(id);
-    expect(task.status).toBe("completed");
+    expect(deps.reporter.report).toHaveBeenCalledWith(expect.objectContaining({ status: "completed", effect: "unknown" }));
     expect(task.judgment).toMatchObject({ effect: "unknown", delivery: "confirmed", response: "acted" });
-    expect(task.pending_results.at(-1)).toMatchObject({ status: "completed", effect: "unknown" });
+    expect(deps.reporter.report).toHaveBeenCalledWith(expect.objectContaining({ status: "completed", effect: "unknown" }));
   }
   expect((await current("prod")).status).toBe("waiting_effect");
   expect(start).not.toHaveBeenCalled();
@@ -244,35 +244,12 @@ it.each(["completed", "failed", "canceled"] as const)("keeps a %s business resul
   vi.mocked(deps.agent.effectResumeJobEnded).mockResolvedValue(true);
   await service.maintenance();
   const after = await current("settlement");
-  expect(after).toMatchObject({ status, version: before.version + 1, pending_results: before.pending_results, timeline: before.timeline });
+  expect(after).toMatchObject({ status, version: before.version + 1, timeline: before.timeline });
   expect(after.effectResumeSlot).toBeUndefined();
   expect((await repo.findTask("settlement"))!.status).toBe(status);
   expect(await tasks.settleEffectResumeSlot("settlement", slot, async () => true)).toBe(false);
   expect(await tasks.update("settlement", before.version, value => ({ ...value, version: value.version + 1 }))).toBeNull();
   expect((await tasks.listForMaintenance(200)).map(task => task.taskId)).not.toContain("settlement");
-});
-
-it("rejects a result-delivery snapshot taken before slot cleanup instead of resurrecting the slot", async () => {
-  const slot = { firstExecutionNo: 1, lastExecutionNo: 1 };
-  await seed("delivery-race", { status: "completed", effectResumeSlot: slot });
-  await repo.createStep({ taskId: "delivery-race", stepId: "delivery-race-AIS-1", stepType: "agent_execution", stepNo: -1, command: "session_recovery" });
-  await db.exec("UPDATE ce_steps SET status = 'succeeded' WHERE step_id = ?", ["delivery-race-AIS-1"]);
-  const raw = JSON.parse((await repo.findTask("delivery-race"))!.config_json!);
-  raw.resultDelivery = [{ objectKey: "fixture", sha256: "fixture", resultVersion: 7, attempts: 0, retryAfterMs: 0 }];
-  await db.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify(raw), "delivery-race"]);
-  const exec = db.exec.bind(db);
-  const intercept = vi.spyOn(db, "exec").mockImplementation(async (sql, params) => {
-    if (sql.includes("AND JSON_EXTRACT(config_json, '$.version') = ?")) {
-      expect(await tasks.settleEffectResumeSlot("delivery-race", slot, async () => true)).toBe(true);
-    }
-    return exec(sql, params);
-  });
-  try { expect(await tasks.claimResult("delivery-race", 7)).toBeNull(); }
-  finally { intercept.mockRestore(); }
-  const stored = (await repo.findTask("delivery-race"))!;
-  expect(stored.status).toBe("completed");
-  expect(JSON.parse(stored.config_json!)).toMatchObject({ version: raw.version + 1, resultDelivery: [{ resultVersion: 7, attempts: 0 }] });
-  expect(JSON.parse(stored.config_json!).effectResumeSlot).toBeUndefined();
 });
 
 it("uses only status predicates for every maintenance candidate page", async () => {

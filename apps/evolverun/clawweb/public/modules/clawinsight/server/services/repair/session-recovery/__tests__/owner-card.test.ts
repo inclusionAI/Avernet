@@ -4,7 +4,7 @@ import { SessionRecoveryNotifier } from "../notification.js";
 import type { RecoveryStoredTask } from "../task-contracts.js";
 const task: RecoveryStoredTask = { schemaVersion: "session-recovery-task/v1", taskId: "SR-one", request: { event_id: "e", delivery_key: "d", session_key: "original", diagnosis: "缺正文", tc_fault_label: null,
   target: { bot_id: "bot", entity_id: "123", env: "prod", engine: "OC" } }, level: "approval", status: "waiting_owner", phase: "assess", version: 2,
-  controlPlaneEnvironment: "pre", observationDeadlineAt: null, ownerDeadlineAt: null, plan: null, judgment: null, evidence: [], timeline: [], pending_results: [],
+  controlPlaneEnvironment: "pre", observationDeadlineAt: null, ownerDeadlineAt: null, plan: null, judgment: null, evidence: [], timeline: [],
   ownerRequest: { requestId: "r1", revision: 1, status: "pending", reason: "permission", summary: "原文档读取权限不足", instructions: "请申请原文档读取权限", evidence_ids: [], resumePhase: "assess", createdAtMs: 1 } };
 it("selects the card route by CW environment even when the Bot is production, and updates one card", async () => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };

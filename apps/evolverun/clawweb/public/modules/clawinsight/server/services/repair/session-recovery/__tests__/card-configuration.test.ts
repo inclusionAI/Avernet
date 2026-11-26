@@ -14,7 +14,7 @@ const task = (): RecoveryStoredTask => ({ schemaVersion: 'session-recovery-task/
   request: { event_id: 'event', delivery_key: 'delivery', session_key: 'original', diagnosis: 'Permission denied', tc_fault_label: 'TC.MCP.PERMISSION',
     target: { bot_id: 'bot', entity_id: 'owner', env: 'prod', engine: 'OC' } },
   level: 'approval', status: 'waiting_owner', phase: 'assess', controlPlaneEnvironment: 'pre',
-  observationDeadlineAt: null, ownerDeadlineAt: null, plan: null, judgment: null, evidence: [], timeline: [], pending_results: [],
+  observationDeadlineAt: null, ownerDeadlineAt: null, plan: null, judgment: null, evidence: [], timeline: [],
   ownerRequest: { requestId: 'request-1', revision: 1, status: 'pending', reason: 'permission', summary: 'Read access missing',
     instructions: 'Request document read access', evidence_ids: [], resumePhase: 'assess', createdAtMs: 1 },
 });

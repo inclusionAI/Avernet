@@ -47,7 +47,7 @@ it.each([
   const evidence = await inspect(first);
   await agent.report(await current(first.taskId), { phase: first.phase, kind: "owner_handoff", summary: "服务权限需Owner申请", evidence_ids: [evidence.evidenceId], owner_request: { reason: "permission", instructions: "请申请服务权限后点击已处理" } });
   let saved = await current(first.taskId);
-  expect(saved.status).toBe("waiting_owner"); expect(saved.pending_results).toEqual([]);
+  expect(saved.status).toBe("waiting_owner"); expect(callbacks).toEqual([]);
   expect(runtime.sendMessage).toHaveBeenCalledTimes(hadInitial ? 1 : 0);
   saved = await setOwnerRequestId(saved, phoneLikeOwnerRequestId);
   const requestId = saved.ownerRequest!.requestId;
@@ -140,7 +140,7 @@ beforeEach(async () => {
   reporter = { report: async result => { callbacks.push(result); } };
   service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target), actionNotifier });
 });
-afterEach(async () => { await db.close(); await rm(directory, { recursive: true, force: true }); });
+afterEach(async () => { await service?.dispose(); await db.close(); await rm(directory, { recursive: true, force: true }); });
 
 it("Agent can observe existing progress without sending, and an unknown send is never replayed", async () => {
   let task = await create("automatic", { tc_fault_label: null }); const read = await inspect(task, "read-progress");
@@ -200,10 +200,10 @@ it.each(["assess", "observe", "plan", "apply", "verify"] as const)("normally com
   expect(task.executionRetry).toBeUndefined(); expect(runtime.sendMessage).not.toHaveBeenCalled();
   expect(actionNotifier.after).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.taskId, kind: "result" }));
   expect(await service.list(request.event_id, actor)).toContainEqual(expect.objectContaining({ completion_reason: "user_continued", status: "completed" }));
-  await service.reportResults(); expect(callbacks).toHaveLength(1);
+  await flush(); expect(callbacks).toHaveLength(1);
   expect(callbacks[0]).toMatchObject({ status: "completed", completion_reason: "user_continued", effect: "unknown", intervention_status: "none" });
   await service.executionFailure(task.taskId, "late AIS failure", task.execution!.executionId, true);
-  await service.maintenance(); await service.reportResults();
+  await service.maintenance(); await flush();
   expect(submissions).toHaveLength(1); expect(callbacks).toHaveLength(1);
   expect((await current(task.taskId)).status).toBe("completed");
 });
@@ -215,7 +215,7 @@ it("preserves actual intervention and effect evidence when a user takes over aft
   await agent.report(task, { kind: "blocked", phase: "plan", reason: "user_continued", summary: "用户已接手，本次不再操作", evidence_ids: [read.evidenceId] });
   task = await current(task.taskId);
   expect(task).toMatchObject({ status: "completed", completionReason: "user_continued", interventionStatus: "performed", judgment: { effect: "not_recovered", delivery: "confirmed" } });
-  expect(runtime.sendMessage).toHaveBeenCalledTimes(sent); await service.reportResults();
+  expect(runtime.sendMessage).toHaveBeenCalledTimes(sent); await flush();
   expect(callbacks.at(-1)).toMatchObject({ completion_reason: "user_continued", effect: "not_recovered", intervention_status: "performed" });
 });
 
@@ -246,7 +246,7 @@ it("ends normally for a proven destroyed target, preserving audit and unknown bu
   await agent.report(task, { kind: "blocked", phase: "assess", reason: "target_unavailable", summary: "目标已销毁，无法继续调查或干预", evidence_ids: [read.evidenceId] });
   task = await current(task.taskId);
   expect(task).toMatchObject({ status: "completed", completionReason: "target_unavailable", interventionStatus: "none", judgment: { effect: "unknown" }, execution: { state: "ended" } });
-  await service.reportResults();
+  await flush();
   expect(callbacks.at(-1)).toMatchObject({ status: "completed", completion_reason: "target_unavailable", effect: "unknown", intervention_status: "none" });
   await service.executionFailure(task.taskId, "late failed callback", task.execution!.executionId, true);
   await service.maintenance();
@@ -281,7 +281,7 @@ it.each(["assess", "observe", "plan", "verify"] as const)("ends a handbook-direc
     kind: "termination", summary, payload: { completion_reason: "owner_handoff" },
   });
   expect(task.timeline.some(event => event.kind === "plan" || event.kind === "owner_decision")).toBe(false);
-  await service.reportResults();
+  await flush();
   expect(callbacks.at(-1)).toMatchObject({ status: "completed", completion_reason: "owner_handoff", effect: "not_recovered", intervention_status: phase === "observe" ? "performed" : "none" });
   await service.executionFailure(task.taskId, "late AIS callback", task.execution!.executionId, true);
   await service.maintenance();
@@ -306,7 +306,7 @@ it.each(["assess", "observe", "plan", "verify"].flatMap(phase => ["not_recovered
     expect(notifier.notify).not.toHaveBeenCalled();
     expect(runtime.sendMessage).not.toHaveBeenCalled();
     expect(task.timeline.some(event => event.kind === "plan" || event.kind === "owner_decision")).toBe(false);
-    await service.reportResults();
+    await flush();
     expect(callbacks.at(-1)).toMatchObject({ status: "completed", completion_reason: "owner_handoff", effect, intervention_status: "none" });
     await service.maintenance(); expect(submissions).toHaveLength(1);
   });
@@ -630,7 +630,7 @@ it.each(["assess", "observe", "plan", "verify"].flatMap(phase => [false, true].m
     await expect(service.finishForOwnerHandoff(task.taskId, task.version, input)).rejects.toMatchObject({ status: 422 });
     expect(await current(task.taskId)).toMatchObject({ version: task.version, status: "running", phase, judgment: task.judgment, execution: task.execution });
     expect(notifier.notify).not.toHaveBeenCalled(); expect(actionNotifier.after).not.toHaveBeenCalled();
-    await service.reportResults(); expect(callbacks).toEqual([]); expect(runtime.sendMessage).not.toHaveBeenCalled();
+    await flush(); expect(callbacks).toEqual([]); expect(runtime.sendMessage).not.toHaveBeenCalled();
   });
 
 it("does not turn an existing recovered result into another Owner permission wait", async () => {
@@ -657,12 +657,12 @@ it.each([false, true])("finishes recovery found during planning normally (pendin
   expect(task.timeline.some(event => event.kind === "termination")).toBe(false);
   expect(notifier.notify).not.toHaveBeenCalled(); expect(runtime.sendMessage).toHaveBeenCalledOnce();
   if (pending) {
-    await service.reportResults(); expect(callbacks).toEqual([]);
+    await flush(); expect(callbacks).toEqual([]);
     await agent.report(task, { kind: "observation", phase: "observe", judgment: { ...judgment, delivery: "confirmed", response: "acted" } });
   }
   expect(await current(task.taskId)).toMatchObject({ status: "completed" });
   expect((await current(task.taskId)).completionReason).toBeUndefined();
-  await service.reportResults(); expect(callbacks.at(-1)).toMatchObject({ effect: "recovered", intervention_status: "performed" });
+  await flush(); expect(callbacks.at(-1)).toMatchObject({ effect: "recovered", intervention_status: "performed" });
   expect(callbacks.at(-1)).not.toHaveProperty("completion_reason");
 });
 

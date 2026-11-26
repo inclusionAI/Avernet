@@ -1,3 +1,4 @@
+const flush = () => new Promise(resolve => setImmediate(resolve));
 import Database from "better-sqlite3";
 import express from "express";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -72,10 +73,10 @@ it("audits existing bounded session reads and records the proposed message witho
   await agent.report(task, { kind: "assessment", phase: "assess", decision: "message", summary: "原 Bot 可核对调用后继续原任务", final_summary: "历史任务因调用格式受阻，建议纠正参数后从失败步骤继续。未执行消息干预。", evidence_ids: [receipt.evidenceId], message: "请核对原调用参数，从失败步骤继续；不要重复已完成的操作。",
     knowledge: [{ path: "clawevolve-recovery-handbook/mcp/handbook.md", sha256: "a".repeat(64) }] });
   task = await current(task.taskId);
-  expect(task).toMatchObject({ status: "completed", phase: "assess", final_summary: expect.stringContaining("未执行消息干预"), judgment: { effect: "not_intervened" }, pending_results: [] });
+  expect(task).toMatchObject({ status: "completed", phase: "assess", final_summary: expect.stringContaining("未执行消息干预"), judgment: { effect: "not_intervened" } });
   expect(task.delivery).toBeUndefined();
   expect(task.timeline.find(event => event.kind === "assessment")!.payload).toMatchObject({ message: expect.stringContaining("从失败步骤继续"), knowledge: [{ sha256: "a".repeat(64) }] });
-  await service.reportResults(); noExternalEffects();
+  await flush(); noExternalEffects();
 });
 
 it("uses the existing complete plan contract, terminates before apply, and cannot approve or resume it", async () => {
@@ -85,7 +86,7 @@ it("uses the existing complete plan contract, terminates before apply, and canno
   expect(task.final_summary).toBeUndefined();
   await agent.report(task, { kind: "plan", phase: "plan", plan, final_summary: "已形成完整拟议方案及必要配合事项，未执行环境修改。" });
   task = await current(task.taskId);
-  expect(task).toMatchObject({ status: "completed", phase: "plan", final_summary: expect.stringContaining("未执行环境修改"), plan: { approvedAt: null }, judgment: { effect: "not_intervened" }, pending_results: [] });
+  expect(task).toMatchObject({ status: "completed", phase: "plan", final_summary: expect.stringContaining("未执行环境修改"), plan: { approvedAt: null }, judgment: { effect: "not_intervened" } });
   await expect(service.decide(task.taskId, task.plan!.digest, true, actor, true)).rejects.toMatchObject({ status: 409 });
   await expect(service.resume(task.taskId)).rejects.toMatchObject({ status: 409 });
   noExternalEffects();
@@ -95,7 +96,7 @@ it("accepts a missing historical scene as an inconclusive simulation, including 
   const input = batch();
   let task = await create(input);
   await agent.report(task, { kind: "assessment", phase: "assess", decision: "insufficient_evidence", summary: "仅有诊断线索，无法确认当时的实际操作", evidence_ids: [] });
-  expect(await current(task.taskId)).toMatchObject({ status: "completed", judgment: { effect: "not_intervened" }, pending_results: [] });
+  expect(await current(task.taskId)).toMatchObject({ status: "completed", judgment: { effect: "not_intervened" } });
   const second = batch(); second.batch_id = "handbook-v2"; task = await create(second);
   const receipt = await read(task); task = await current(task.taskId);
   await agent.report(task, { kind: "assessment", phase: "assess", decision: "environment", summary: "需要核查环境依赖", evidence_ids: [receipt.evidenceId] });
@@ -147,7 +148,7 @@ it("allows readonly current environment investigation and labels its temporal co
 it.each(["observe", "user_continued", "owner_handoff"])("records %s as a completed proposal without observing current Bot progress", async decision => {
   let task = await create(); const receipt = await read(task); task = await current(task.taskId);
   await agent.report(task, { kind: "assessment", phase: "assess", decision, summary: "依据截止时点内的历史记录，无需发起干预", evidence_ids: [receipt.evidenceId] });
-  expect(await current(task.taskId)).toMatchObject({ status: "completed", phase: "assess", judgment: { effect: "not_intervened" }, pending_results: [] });
+  expect(await current(task.taskId)).toMatchObject({ status: "completed", phase: "assess", judgment: { effect: "not_intervened" } });
   noExternalEffects();
 });
 
@@ -158,10 +159,10 @@ it("records a plan-stage Owner handoff without a plan, waiting state or notifica
   await agent.report(task, { kind: "assessment", phase: "plan", decision: "owner_handoff", summary: "调查后确认应直接转交 Owner", evidence_ids: [receipt.evidenceId], final_summary: "拟直接转交 Owner，未通知或执行。" });
   task = await current(task.taskId);
   expect(task).toMatchObject({ status: "completed", phase: "plan", plan: null, ownerDeadlineAt: null,
-    judgment: { effect: "not_intervened" }, pending_results: [] });
+    judgment: { effect: "not_intervened" } });
   expect(task.timeline.findLast(event => event.kind === "assessment")!.payload).toMatchObject({ decision: "owner_handoff", phase: "plan", simulation: true });
   expect(task.completionReason).toBeUndefined();
-  await service.reportResults(); noExternalEffects();
+  await flush(); noExternalEffects();
 });
 
 it("preserves proposed guidance verbatim without evaluating or rewriting it", async () => {
@@ -177,8 +178,8 @@ it("preserves cancellation against a late assessment and never queues online cal
   let task = await create(); const receipt = await read(task); task = await current(task.taskId);
   await service.terminate(task.taskId, actor, "停止仿真");
   await expect(agent.report(task, { kind: "assessment", phase: "assess", decision: "message", summary: "迟到的判断", message: "不可发送", evidence_ids: [receipt.evidenceId] })).rejects.toMatchObject({ status: 409 });
-  expect(await current(task.taskId)).toMatchObject({ status: "canceled", pending_results: [] });
-  await service.reportResults(); noExternalEffects();
+  expect(await current(task.taskId)).toMatchObject({ status: "canceled" });
+  await flush(); noExternalEffects();
 });
 
 it("validates every case identity and timestamp before persisting the batch", async () => {

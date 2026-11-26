@@ -97,5 +97,5 @@ export function createSessionRecoveryRuntime(options: {
       throw error;
     }
   };
-  return { service: tasks, tasks, agent, maintenance, reportResults: () => tasks.reportResults() };
+  return { service: tasks, tasks, agent, maintenance, dispose: () => tasks.dispose() };
 }
