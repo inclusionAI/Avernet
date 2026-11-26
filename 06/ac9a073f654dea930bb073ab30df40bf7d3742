@@ -1,0 +1,26 @@
+apps/frontend-nextgen/src/hooks/useCollaborationPrivacyUserRisk.ts
+  s_8d555dc0a6c381::t_a85fe3b5cad9df 1,3-104
+  s_8d555dc0a6c381::t_830052d9fe5f77 2
+apps/frontend-nextgen/src/hooks/useCollaborationPrivacy.ts
+  s_8d555dc0a6c381::t_3ea6efbadf655d 132-142
+  s_8d555dc0a6c381::t_257693a21bb96d 177
+  s_8d555dc0a6c381::t_305b1bdb7cde00 25
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/RiskFlowBanners.tsx
+  s_8d555dc0a6c381::t_e43cdd6f5985d2 70-72,76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "06ac9a073f654dea930bb073ab30df40bf7d3742",
+  "prompts": {},
+  "sessions": {
+    "s_8d555dc0a6c381": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "d15c2cae-54e6-459e-b8f4-6f09eedaedb4",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
