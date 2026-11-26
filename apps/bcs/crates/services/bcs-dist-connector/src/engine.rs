@@ -227,15 +227,15 @@ impl ConnectorEngine {
     /// 1. stop if draining; end with `membership_lost` if the heartbeat
     ///    found the registration lost (it renews on its own task, so slow
     ///    store or peer I/O here never lets the registration expire);
-    /// 3. every `ownership_interval` (and on the first pass): the ownership
+    /// 2. every `ownership_interval` (and on the first pass): the ownership
     ///    round, then point the feed at the owned partitions if they changed;
-    /// 4. `reap` finished and dead actors and retry orphans;
-    /// 5. at capacity, read no hints: wait for an actor to finish (or
+    /// 3. `reap` finished and dead actors and retry orphans;
+    /// 4. at capacity, read no hints: wait for an actor to finish (or
     ///    `receive_timeout`) and start over. The hints of this process's
     ///    partitions wait in their streams meanwhile: only the owner reads a
     ///    partition, and a live owner is not displaced (no rebalancing);
-    /// 6. otherwise read up to `free` hints, interruptible by `stop`;
-    /// 7. handle each hint (claim, act, ack); on a read error, back off.
+    /// 5. otherwise read up to `free` hints, interruptible by `stop`;
+    /// 6. handle each hint (claim, act, ack); on a read error, back off.
     ///
     /// A `?` here (register, open feed) returns the error from `run`: the
     /// process does not claim anything then.
@@ -284,7 +284,7 @@ impl ConnectorEngine {
             let Some(free) = u32::try_from(free).ok().and_then(NonZeroU32::new) else {
                 // At capacity: read no hints; they wait in the streams.
                 // An actor that ends sends `wake`; the timeout covers a missed
-                // wake-up and keeps renewals and drain checks going.
+                // wake-up and keeps the drain and membership checks going.
                 let _ = tokio::time::timeout(config.receive_timeout, inner.wake.notified()).await;
                 continue;
             };
