@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 jest.mock('@/pages/Lab/assets/community.svg', () => 'community.svg');
-// 实验室暂不展示待办入口，社区和任务保持原路由。
+// 实验室展示社区、待办和任务入口。
 import LabLandingPage from '@/pages/Lab';
 import { beforeEach, describe, expect, it } from '@jest/globals';
 import { fireEvent, render, screen, within } from '@testing-library/react';
@@ -17,11 +17,11 @@ describe('LabLandingPage(实验室落地页)', () => {
     pushMock.mockClear();
   });
 
-  it('按原型展示社区和任务，并为描述保留两行高度', () => {
+  it('展示社区、待办和任务，并为描述保留两行高度', () => {
     render(<LabLandingPage />);
     const cards = screen.getAllByRole('article');
-    expect(cards).toHaveLength(2);
-    expect(cards.map((card) => within(card).getByRole('heading').textContent)).toEqual(['社区', '任务']);
+    expect(cards).toHaveLength(3);
+    expect(cards.map((card) => within(card).getByRole('heading').textContent)).toEqual(['社区', '待办', '任务']);
     for (const card of cards) {
       const descriptions = within(card).getAllByText(/./, { selector: 'p' });
       expect(descriptions).toHaveLength(1);
@@ -29,9 +29,14 @@ describe('LabLandingPage(实验室落地页)', () => {
     }
   });
 
-  it('暂不展示待办入口', () => {
+  it('待办卡:展示执行信息并跳转待办工作台', () => {
     render(<LabLandingPage />);
-    expect(screen.queryByRole('article', { name: '待办' })).toBeNull();
+    const todoCard = screen.getByRole('article', { name: '待办' });
+    const card = within(todoCard);
+    expect(card.getByText(/查看当前空间内由 Bot 执行的待办/)).toBeTruthy();
+
+    fireEvent.click(card.getByRole('button', { name: /开始体验/ }));
+    expect(pushMock).toHaveBeenCalledWith('/lab/todos');
   });
 
   it('任务卡:描述对齐 PRD 文案;开始体验跳任务列表页(任务类别)', () => {

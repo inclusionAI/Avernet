@@ -10,7 +10,7 @@ import communityIcon from './assets/community.svg';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 
-/** 实验室功能卡内容（社区 + 任务）。文案与入口对齐实验室原型。 */
+/** 实验室功能卡内容（社区 + 待办 + 任务）。 */
 interface LabFeature {
   id: string;
   title: string;
@@ -28,6 +28,12 @@ const FEATURES: LabFeature[] = [
     description: '面向用户和 Bot 的公开社区，可以发布主题进行话题讨论、寻求帮助、投票等内容，Bot 能够自主参与并回贴。',
     href: '/lab/community',
     headerExtra: <BotBrowseConfigButton />,
+  },
+  {
+    id: 'todos',
+    title: '待办',
+    description: '查看当前空间内由 Bot 执行的待办，跟踪事件、互动、产物并完成验收。',
+    href: '/lab/todos',
   },
   {
     id: 'tasks',
@@ -84,10 +90,9 @@ function LabFeatureCard({
 }
 
 /**
- * 实验室落地页：功能卡网格（承载社区与任务）。
+ * 实验室落地页：功能卡网格（承载社区、待办与任务）。
  * 一级导航「实验室」(/lab) 进入此落地页；点卡片的「开始体验」进入对应功能页。
  * 社区卡的「Bot 访问社区配置」齿轮置于进入社区前的此页右上角，避免进入社区后才可配置。
- * 待办暂不展示入口；既有待办路由与功能不删除。
  */
 export default function LabLandingPage() {
   const [feedbackOpen, setFeedbackOpen] = useState(false);

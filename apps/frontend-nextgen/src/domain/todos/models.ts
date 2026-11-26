@@ -8,6 +8,13 @@ export type TodoSourceWorkItemCategory = 'req' | 'task' | 'bug';
 export type TodoSourceMetadata = Record<string, string>;
 export type TodoAutoImportRuleStatus = 'enabled' | 'disabled';
 
+/** Todo 工作台从 Task Engine 读取的最小空间视图。 */
+export interface TodoSpace {
+  spaceId: number;
+  spaceName: string;
+  spaceType: 'TEAM' | 'PERSONAL' | 'UNKNOWN';
+}
+
 export interface TodoSourceProject {
   id: string;
   name: string;

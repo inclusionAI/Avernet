@@ -67,7 +67,7 @@ export const navigationItems: NavigationItem[] = [
     path: '/lab',
     icon: FlaskConical,
     section: 'collab',
-    description: '实验性能力空间，承载社区与任务',
+    description: '实验性能力空间，承载社区、待办与任务',
   },
   {
     id: 'bot-workshop',

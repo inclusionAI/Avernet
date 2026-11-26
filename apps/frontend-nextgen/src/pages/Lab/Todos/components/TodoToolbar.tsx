@@ -1,13 +1,12 @@
 import { Button, Segmented } from '@/components/ui';
 import { Input } from '@/components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
-import type { Space } from '@/domain/admin/models';
-import type { TodoBotOption, TodoStatus } from '@/domain/todos/models';
+import type { TodoBotOption, TodoSpace, TodoStatus } from '@/domain/todos/models';
 import { TODO_STATUS_OPTIONS } from '@/domain/todos/status';
 import { Download, Plus, Search } from 'lucide-react';
 
 interface TodoToolbarProps {
-  space?: Space;
+  space?: TodoSpace;
   bots: TodoBotOption[];
   botsLoading: boolean;
   keyword: string;

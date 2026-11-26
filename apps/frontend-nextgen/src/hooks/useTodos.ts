@@ -1,6 +1,5 @@
 import { notifySuccess } from '@/components/ui/notify';
 import type { CreateTodoInput, TodoStatus } from '@/domain/todos/models';
-import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { addTodo, loadTodos } from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
 import { safeReportError } from '@/utils/errorToast';
@@ -9,10 +8,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 10;
 
-export function useTodos() {
-  const currentSpaceId = useSpaceContext((state) => state.currentSpaceId);
-  const currentSpace = useSpaceContext((state) => state.currentSpace);
-  const initialized = useSpaceContext((state) => state.initialized);
+interface UseTodosOptions {
+  currentSpaceId?: number;
+  initialized: boolean;
+}
+
+export function useTodos({ currentSpaceId, initialized }: UseTodosOptions) {
   const [page, setPage] = useState(DEFAULT_PAGE);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [keyword, setKeywordState] = useState('');
@@ -60,9 +61,14 @@ export function useTodos() {
   }, [botId, currentSpaceId, keyword, page, pageSize, setError, setLoading, setTodos, status]);
 
   useEffect(() => {
-    if (!initialized || currentSpaceId === undefined) return;
+    if (!initialized || currentSpaceId === undefined) {
+      requestId.current += 1;
+      setTodos([], 0);
+      setLoading(false);
+      return;
+    }
     void refresh();
-  }, [currentSpaceId, initialized, refresh]);
+  }, [currentSpaceId, initialized, refresh, setLoading, setTodos]);
 
   const setKeyword = useCallback((value: string) => {
     setKeywordState(value);
@@ -102,7 +108,6 @@ export function useTodos() {
   );
 
   return {
-    currentSpace,
     currentSpaceId,
     todos,
     total,

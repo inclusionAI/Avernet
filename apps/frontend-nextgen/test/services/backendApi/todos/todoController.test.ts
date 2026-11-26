@@ -7,6 +7,7 @@ import {
   getTodoSourceDraft,
   listTodoEvents,
   listTodoInteractions,
+  listTodoSpaces,
   listTodos,
   listTodoSourceProjects,
   listTodoSourceWorkItems,
@@ -32,6 +33,21 @@ describe('todoController', () => {
   beforeEach(() => {
     request.mockReset();
     request.mockResolvedValue({ code: 200000, data: { items: [], total: 0 } } as never);
+  });
+
+  it('从 Engine 内部 API 查询 Todo 可访问空间', async () => {
+    await listTodoSpaces();
+
+    expect(request).toHaveBeenCalledWith('/api/v1/collaboration/tasks/spaces', {
+      method: 'GET',
+      params: {
+        page_no: 1,
+        page_size: 100,
+        scope: 'accessible',
+      },
+      operation: 'list-todo-spaces',
+      retryOnTransient: true,
+    });
   });
 
   it('全量查询不下发空筛选键', async () => {

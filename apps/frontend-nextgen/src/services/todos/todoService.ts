@@ -19,6 +19,7 @@ export {
   loadTodoEvents,
   loadTodoInteractions,
   loadTodos,
+  loadTodoSpaces,
   loadTodoSourceDraft,
   loadTodoSourceProjects,
   loadTodoSourceWorkItems,

@@ -4,6 +4,7 @@ import {
   listTodoArtifacts,
   listTodoAutoImportRules,
   listTodoSourceProjects,
+  listTodoSpaces,
   listTodoSourceWorkItems,
   updateTodoAutoImportRule,
 } from '@/services/backendApi/todos/todoController';
@@ -13,22 +14,29 @@ import {
   loadTodoAutoImportRules,
   loadTodoSourceDraft,
   loadTodoSourceProjects,
+  loadTodoSpaces,
   loadTodoSourceWorkItems,
   updateTodoAutoImportRule as updateTodoAutoImportRuleService,
 } from '@/services/backendApi/todos/todoService';
 
-jest.mock('@/services/backendApi/todos/todoController', () => ({
-  listTodoArtifacts: jest.fn(),
-  listTodoSourceProjects: jest.fn(),
-  listTodoSourceWorkItems: jest.fn(),
-  getTodoSourceDraft: jest.fn(),
-  createTodoAutoImportRule: jest.fn(),
-  listTodoAutoImportRules: jest.fn(),
-  updateTodoAutoImportRule: jest.fn(),
-}));
+jest.mock('@/services/backendApi/todos/todoController', () => {
+  const actual = jest.requireActual('@/services/backendApi/todos/todoController');
+  return {
+    ...actual,
+    createTodoAutoImportRule: jest.fn(),
+    getTodoSourceDraft: jest.fn(),
+    listTodoArtifacts: jest.fn(),
+    listTodoAutoImportRules: jest.fn(),
+    listTodoSourceProjects: jest.fn(),
+    listTodoSpaces: jest.fn(),
+    listTodoSourceWorkItems: jest.fn(),
+    updateTodoAutoImportRule: jest.fn(),
+  };
+});
 
 const listArtifacts = jest.mocked(listTodoArtifacts);
 const listProjects = jest.mocked(listTodoSourceProjects);
+const listSpaces = jest.mocked(listTodoSpaces);
 const listWorkItems = jest.mocked(listTodoSourceWorkItems);
 const getDraft = jest.mocked(getTodoSourceDraft);
 const createAutoImportRule = jest.mocked(createTodoAutoImportRule);
@@ -97,6 +105,52 @@ describe('todoService artifacts', () => {
         executionId: 'todoexecution-legacy',
         kind: 'url_link',
       }),
+    ]);
+  });
+});
+
+describe('todoService Engine space normalization', () => {
+  beforeEach(() => {
+    listSpaces.mockReset();
+  });
+
+  it('映射 Engine 分页空间响应为 Todo 最小空间模型', async () => {
+    listSpaces.mockResolvedValue({
+      code: 200000,
+      data: {
+        items: [
+          {
+            space_id: 10,
+            space_name: '测试用户的个人空间',
+            space_type: 'PERSONAL',
+          },
+        ],
+      },
+    });
+
+    await expect(loadTodoSpaces()).resolves.toEqual([
+      {
+        spaceId: 10,
+        spaceName: '测试用户的个人空间',
+        spaceType: 'PERSONAL',
+      },
+    ]);
+  });
+
+  it('兼容 Engine 的 id/name/type 与 spaces 列表结构', async () => {
+    listSpaces.mockResolvedValue({
+      code: 200000,
+      data: {
+        spaces: [{ id: '11', name: '协作空间', type: 'team' }],
+      },
+    });
+
+    await expect(loadTodoSpaces()).resolves.toEqual([
+      {
+        spaceId: 11,
+        spaceName: '协作空间',
+        spaceType: 'TEAM',
+      },
     ]);
   });
 });
