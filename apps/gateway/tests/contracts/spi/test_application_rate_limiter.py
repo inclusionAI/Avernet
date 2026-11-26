@@ -52,11 +52,9 @@ def _redis_reachable(url: str) -> bool:
 
 
 _REDIS_OK = _redis_reachable(_REDIS_URL)
-# NOTE: these tests skip when no Redis is reachable. That leaves the Lua admission
-# script with no CI coverage until the gateway CI job gains a Redis service (see
-# the PR discussion) — the review flagged this, and the workflow change needs the
-# `workflow` OAuth scope this session's token lacks. Once a `redis:7` service and
-# REDIS_URL are added to the gateway job, tighten this to fail (not skip) under CI.
+# NOTE: these tests skip when no Redis is reachable, so the Lua admission script
+# has no CI coverage until the gateway CI job gains a `redis:7` service and
+# REDIS_URL. Once it does, make this fail (not skip) under CI.
 _requires_redis = pytest.mark.skipif(
     not _REDIS_OK, reason=f"no Redis reachable at {_REDIS_URL}"
 )
