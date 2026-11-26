@@ -23,6 +23,7 @@ user_config:
     file_transfer: "stub"  # stub | real
     # Session file URL projection selector: stub (identity) | aliyun_ack (proxy to BaaS domain)
     session_file_url_projector: "stub"
+    changeflow: "stub"        # stub | real (ChangeFlow external-publish observe)
     database: "sqlite"        # sqlite | mariadb
     eval_env: "stub"       # stub | real (评测环境 Plugin: stub=空操作, real=实际逻辑)
     sandbox:

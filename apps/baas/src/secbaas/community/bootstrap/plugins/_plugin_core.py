@@ -30,6 +30,7 @@ from secbaas.community.plugins.bot_service import (
 )
 from secbaas.community.plugins.cache.redis import RedisCachePlugin
 from secbaas.community.plugins.cache.stub import StubCachePlugin
+from secbaas.community.plugins.changeflow.stub import NoopChangeFlowObserver
 from secbaas.community.plugins.database.mariadb.mariadb_orm import MariaDbOrmPlugin
 from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 from secbaas.community.plugins.eval_env import (
@@ -302,6 +303,11 @@ class PluginContainer(containers.DeclarativeContainer):
     eval_session_log = providers.Selector(
         config.plugins.eval_env,
         stub=providers.Singleton(NoopEvalSessionLog),
+    )
+
+    changeflow_observer = providers.Selector(
+        config.plugins.changeflow,
+        stub=providers.Singleton(NoopChangeFlowObserver),
     )
 
 

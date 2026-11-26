@@ -173,6 +173,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ),
         eval_consistency_check=plugins.eval_consistency_check,
         eval_session_log=plugins.eval_session_log,
+        changeflow_observer=plugins.changeflow_observer,
     )
 
     tasks = providers.Container(

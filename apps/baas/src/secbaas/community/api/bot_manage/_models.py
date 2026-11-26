@@ -54,6 +54,15 @@ class BotConfig(BaseModel):
         default=False,
         description="When True, auto-approve all publish stage gates after bot creation",
     )
+    publish_stage: str | None = Field(
+        default=None,
+        max_length=32,
+        description=(
+            "Caller publish stage (verify/online). Only online publishes are "
+            "exposed to ChangeFlow; persisted with the bot config and copied "
+            "onto the publish record."
+        ),
+    )
 
 
 class BotClusterCreate(BaseModel):

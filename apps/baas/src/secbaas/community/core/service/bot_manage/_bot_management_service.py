@@ -295,6 +295,7 @@ class DefaultBotManagementService(BotManageService):
             ),
             auto_approve=bot_config.auto_approve_publish,
             publish_max_retry_times=bot_config.publish_max_retry_times or 0,
+            publish_stage=getattr(bot_config, "publish_stage", None),
         )
         publish = await self._publish_service.create_publish(
             tenant=tenant,
@@ -1044,6 +1045,9 @@ class DefaultBotManagementService(BotManageService):
                     stored_config.publish_max_retry_times = (
                         bot_config.publish_max_retry_times
                     )
+                bot_publish_stage = getattr(bot_config, "publish_stage", None)
+                if bot_publish_stage is not None:
+                    stored_config.publish_stage = bot_publish_stage
                 stored_config.callback_timeout_seconds = (
                     bot_config.callback_timeout_seconds
                 )
@@ -1079,6 +1083,7 @@ class DefaultBotManagementService(BotManageService):
                 auto_approve=stored_config.auto_approve_publish,
                 publish_max_retry_times=stored_config.publish_max_retry_times or 0,
                 template_uuid=template_uuid,
+                publish_stage=stored_config.publish_stage,
             )
 
             publish = await self._publish_service.create_publish(

@@ -161,6 +161,9 @@ class PublishConfig(BaseModel):
     # auto_approve: when True, manual /approve calls are rejected; only internal loop drives gates
     auto_approve: bool = False
 
+    # Online-only audit hook input (verify/online). Absent/verify never calls CF.
+    publish_stage: str | None = None
+
     @classmethod
     def get_defaults_for_type(cls, publish_type: PublishType) -> dict[str, Any]:
         """Get default stage configuration for publish type per D-01a.
