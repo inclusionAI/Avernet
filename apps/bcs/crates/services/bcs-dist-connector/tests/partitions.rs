@@ -368,3 +368,24 @@ async fn a_cancelled_drain_stops_the_calls_then_retires() {
     settle().await;
     assert_eq!(members.renewals.load(Ordering::SeqCst), after, "no renewal after the cancelled drain");
 }
+
+#[tokio::test]
+async fn a_peer_that_never_answers_does_not_hold_the_drain_past_its_deadline() {
+    use std::sync::atomic::Ordering;
+    let mut rig = Rig::new().await;
+    let members = members(&mut rig);
+    rig.config.peer_timeout = Duration::from_millis(400);
+    let source = rig.start();
+    until("owns the partition", || async { rig.owners.owner(0) == Some(instance("conn-03")) }).await;
+    let peer = rig.start_as("conn-07");
+    until("peer ready", || async { peer.engine.snapshot().await.unwrap().ready }).await;
+    // Discovery takes 800 ms of the 1 s grace, then the peer never answers:
+    // a request bounded only by `peer_timeout` would end 200 ms late.
+    members.members_delay_ms.store(800, Ordering::SeqCst);
+    rig.peers.hang.store(true, Ordering::SeqCst);
+    let started = tokio::time::Instant::now();
+    let outcome = source.engine.drain(Duration::from_secs(1)).await.unwrap();
+    assert!(started.elapsed() < Duration::from_millis(1150), "took {:?}", started.elapsed());
+    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 });
+    assert_eq!(rig.peers.offers.lock().unwrap().len(), 1, "the peer was asked");
+}

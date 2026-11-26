@@ -286,6 +286,8 @@ pub struct LocalPeers {
     pub engines: Mutex<HashMap<String, ConnectorEngine>>,
     /// Every handoff offered, as `<partition> -> <target node>`.
     pub offers: Mutex<Vec<String>>,
+    /// While set, an offer never gets an answer.
+    pub hang: std::sync::atomic::AtomicBool,
 }
 
 impl LocalPeers {
@@ -305,6 +307,9 @@ impl bcs_service_api::port::dist_runtime::DistWorkerPeerPort for LocalPeers {
             .lock()
             .unwrap()
             .push(format!("{} -> {}", request.from.shard.0, target.instance.node));
+        if self.hang.load(std::sync::atomic::Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
         let engine = self.engines.lock().unwrap().get(&target.instance.node).cloned();
         match engine {
             Some(engine) => engine.accept_handoff(request).await,
@@ -564,6 +569,8 @@ pub struct Members {
     pub renewals: std::sync::atomic::AtomicUsize,
     /// While set, `members` does not answer.
     pub stall_members: std::sync::atomic::AtomicBool,
+    /// Extra time every `members` answer takes, in ms.
+    pub members_delay_ms: std::sync::atomic::AtomicU64,
 }
 
 impl Members {
@@ -629,6 +636,8 @@ impl MembershipPort for Members {
         _: bcs_service_api::port::repo::distributed::ownership::RuntimeRole,
         _: bcs_service_api::port::repo::distributed::common::PageRequest,
     ) -> Result<bcs_service_api::port::repo::distributed::common::Page<bcs_service_api::port::repo::distributed::ownership::MemberRecord>, StoreError> {
+        let delay = self.members_delay_ms.load(std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(delay)).await;
         while self.stall_members.load(std::sync::atomic::Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }

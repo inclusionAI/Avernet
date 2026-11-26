@@ -336,6 +336,13 @@ impl ConnectorEngine {
                 continue;
             };
             attempt += 1;
+            // Discovery took time: measure from now, and never wait past the
+            // drain deadline for the peer's answer.
+            let now = Instant::now();
+            if now >= deadline {
+                return false;
+            }
+            let answer_by = (now + inner.config.peer_timeout).min(deadline);
             let request = HandoffRequest {
                 request_id: RequestId(format!(
                     "handoff:{}:{}:{}:{}:{attempt}",
@@ -345,7 +352,7 @@ impl ConnectorEngine {
                 target: target.instance.clone(),
                 grace: deadline.saturating_duration_since(now),
             };
-            let outcome = timeout(inner.config.peer_timeout, inner.ports.peers.handoff(&target, request.clone())).await;
+            let outcome = tokio::time::timeout_at(answer_by, inner.ports.peers.handoff(&target, request.clone())).await;
             match outcome {
                 Ok(Ok(HandoffOutcome::Accepted(record)))
                     if record.claim.owner.instance == target.instance && record.claim.shard == claim.shard =>
