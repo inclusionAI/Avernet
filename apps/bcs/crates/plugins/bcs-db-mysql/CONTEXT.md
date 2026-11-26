@@ -51,14 +51,3 @@ control on the same pinned connection, for text and prepared statement protocols
 Zero-row early success commits and returns only the executed prefix; execution
 or commit failures propagate. The shared real-MySQL conformance harness covers
 this alongside SQLite.
-
-The additive outcome-aware DML executor distinguishes setup failures and
-acknowledged rollback (NotCommitted) from commit/unconfirmed rollback
-(CommitUnknown). It never infers certainty from provider text or ignores a
-rollback failure. Legacy manager/DbPlugin signatures and DbError variants stay
-unchanged. Both paths share one step/binding/deadline/early-prefix executor and
-pin one connection; no retry or extra SQL statement is added. The opt-in method
-rejects DDL/control/scripts/commented SQL before starting and requires only
-transactional tables/functions/triggers without external effects. Existing
-real-MySQL text/prepared conformance now also calls the native outcome harness;
-compilation or a local ignored test is not real-MySQL execution evidence.

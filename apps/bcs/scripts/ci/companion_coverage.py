@@ -38,7 +38,6 @@ def supervise(bcs_dir: Path, report_dir: Path) -> int:
     oauth_report = bcs_dir / 'target/cov-e2e/oauth_e2e.json'
     oauth_report.parent.mkdir(parents=True, exist_ok=True)
     oauth_report.write_text('{"status":"failed","scenarios":[],"checks":[]}\n')
-    (oauth_report.parent / 'agent_invoke_e2e.json').write_text('{"status":"failed","scenarios":[],"operations":[]}\n')
     result = {'status': 'failed', 'phases': {}}
     processes = []
     logs = []

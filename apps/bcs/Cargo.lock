@@ -589,11 +589,7 @@ dependencies = [
  "bcs-config",
  "bcs-config-api",
  "bcs-db-api",
- "bcs-db-local",
- "bcs-db-migrations",
  "bcs-domain",
- "bcs-edge-permission",
- "bcs-edge-permission-store",
  "bcs-observability",
  "bcs-service-api",
  "bcs-storage-api",
@@ -616,7 +612,6 @@ dependencies = [
  "ulid",
  "url",
  "urlencoding",
- "uuid",
 ]
 
 [[package]]
@@ -1795,24 +1790,18 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "bcs-bot",
- "bcs-bot-store",
- "bcs-config",
  "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
- "bcs-db-migrations",
  "bcs-db-mysql",
  "bcs-domain",
- "bcs-edge-permission",
  "bcs-service-api",
  "bcs-test-support",
  "mysql_async",
  "serde_json",
  "sha2",
- "tempfile",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -2264,7 +2253,6 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
- "bcs-api-http",
  "bcs-app-group",
  "bcs-bot",
  "bcs-bot-store",
@@ -2302,7 +2290,6 @@ dependencies = [
  "chrono",
  "futures",
  "hex",
- "jsonwebtoken",
  "metrics",
  "regex",
  "serde",

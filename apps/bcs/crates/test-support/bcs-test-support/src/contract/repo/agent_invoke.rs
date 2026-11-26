@@ -1,5 +1,5 @@
-//! Reader-first AgentInvoke repo conformance. This is not a management or
-//! production admission harness: raw repo writes seed trusted test fixtures.
+//! AgentInvoke type/store conformance shared by memory, SQLite and MySQL.
+//! Raw repo writes seed trusted test fixtures, not public management APIs.
 use bcs_domain::edge_permission::{EdgeGrant, EdgeStatus, GrantKind, OriginatorPolicyType};
 use bcs_service_api::port::repo::{EdgeGrantRepoPort, edge_grant::FriendListQuery};
 
@@ -21,7 +21,7 @@ pub async fn run_agent_invoke_repo_contract<T: EdgeGrantRepoPort + ?Sized>(
     assert_eq!(listed[0].edge_id, edge_id);
     assert_eq!(listed[0].grant_kind, GrantKind::AgentInvoke);
     assert_eq!(repo.list_active_grants(from, to, env).await, listed);
-    assert!(repo.is_authorized(from, to, env).await, "candidate existence only");
+    assert!(repo.is_authorized(from, to, env).await, "directed runtime authorization");
     assert!(!repo.is_authorized(to, from, env).await, "no reverse authorization");
     assert!(repo.list_runtime_grants_checked(from, to, "other-env").await.unwrap().is_empty());
     assert!(repo.list_runtime_grants_checked(&format!("{from} "), to, env).await.unwrap().is_empty());

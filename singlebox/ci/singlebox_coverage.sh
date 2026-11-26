@@ -585,8 +585,7 @@ run_bcs_e2e() {
     endpoint_coverage.txt \
     cli_command_coverage.txt \
     changed_line_coverage.json \
-    oauth_e2e.json \
-    agent_invoke_e2e.json; do
+    oauth_e2e.json; do
     if [[ -f "$bcs_coverage_dir/$artifact" ]]; then
       cp "$bcs_coverage_dir/$artifact" "$bcs_report_dir/$artifact"
     fi
@@ -746,7 +745,6 @@ bcs_system = {
     "artifacts": {
         "e2e_log": "bcs/e2e.log",
         "oauth_e2e": "bcs/oauth_e2e.json",
-        "agent_invoke_e2e": "bcs/agent_invoke_e2e.json",
         "cobertura": "bcs/cobertura.xml",
         "coverage_text": "bcs/coverage.txt",
         "summary": "bcs/summary.json",
@@ -852,7 +850,6 @@ verify_required_artifacts() {
     "$report_dir/bcs/companion-timings.json"
     "$report_dir/bcs/e2e.log"
     "$report_dir/bcs/oauth_e2e.json"
-    "$report_dir/bcs/agent_invoke_e2e.json"
     "$report_dir/bcs/cobertura.xml"
     "$report_dir/bcs/coverage.txt"
     "$report_dir/bcs/summary.json"

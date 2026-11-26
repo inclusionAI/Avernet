@@ -45,5 +45,3 @@ pub mod dist_runner;
 pub mod dist_projection;
 
 pub mod dist_admission;
-
-pub mod agent_invoke;

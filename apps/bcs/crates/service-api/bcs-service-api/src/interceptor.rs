@@ -6,9 +6,6 @@
 use async_trait::async_trait;
 use bcs_domain::{AgentCredentials, GroupMessage};
 
-use crate::application::agent_invoke::{
-    AgentInvocationInput, AgentInvocationPermit, AgentInvokeError, AgentInvokeResult,
-};
 use crate::port::{DeliveryBlockContext, DeliveryPolicyBlockInstrumentationHook};
 
 use std::sync::Arc;
@@ -54,17 +51,6 @@ pub struct OutboundMessage {
 pub trait MessageInterceptor: Send + Sync {
     /// Inspect or modify an outbound message before delivery.
     async fn on_outbound(&self, msg: &mut OutboundMessage) -> InterceptorDecision;
-
-    /// Independent, mandatory authorization for an explicit AgentInvoke. None
-    /// means this interceptor has no capability, NEVER an allow. Existing
-    /// content/security interceptors retain their outbound-only semantics.
-    /// Called without AgentCredentials, including when agent_code is absent.
-    async fn on_agent_invocation(
-        &self,
-        _input: &AgentInvocationInput,
-    ) -> Option<AgentInvokeResult<AgentInvocationPermit>> {
-        None
-    }
 }
 
 #[derive(Debug, Default)]
@@ -127,33 +113,6 @@ impl InterceptorChain {
 
     pub fn is_empty(&self) -> bool {
         self.interceptors.is_empty()
-    }
-
-    /// Every registered invocation provider must allow the exact operation.
-    /// At least one provider is required. No provider, error, malformed or
-    /// inconsistent permits fail closed; normal empty outbound chains still pass.
-    /// A permit is for this check only, not a reusable positive cache.
-    pub async fn authorize_agent_invocation(
-        &self,
-        input: &AgentInvocationInput,
-    ) -> AgentInvokeResult<AgentInvocationPermit> {
-        use bcs_domain::edge_permission::{GrantKind, GrantSource};
-        let mut accepted = None;
-        for interceptor in &self.interceptors {
-            let Some(result) = interceptor.on_agent_invocation(input).await else { continue; };
-            let permit = result?;
-            if permit.kind != GrantKind::AgentInvoke || permit.ref_id == 0
-                || permit.revision.is_none_or(|version| version == 0)
-                || permit.source != GrantSource::EdgeGrant || permit.digest.is_some()
-            {
-                return Err(AgentInvokeError::InvalidState);
-            }
-            if accepted.as_ref().is_some_and(|prior| prior != &permit) {
-                return Err(AgentInvokeError::Conflict);
-            }
-            accepted = Some(permit);
-        }
-        accepted.ok_or(AgentInvokeError::Unavailable)
     }
 
     pub async fn on_outbound(&self, msg: &mut OutboundMessage) -> InterceptorDecision {

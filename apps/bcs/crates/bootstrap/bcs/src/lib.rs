@@ -149,7 +149,6 @@ mod ws_leadership;
 pub mod metrics;
 pub mod migrations;
 mod message_delivery_wiring;
-pub mod agent_invoke_wiring;
 mod delivery_metrics;
 pub mod plugins;
 pub mod server;

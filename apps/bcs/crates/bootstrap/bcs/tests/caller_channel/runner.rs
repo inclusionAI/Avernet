@@ -1,7 +1,5 @@
 //! Test-only executable: real BCS composition with a synthetic channel boundary.
 mod provider;
-#[path = "../agent_invoke_e2e/host.rs"]
-mod agent_invoke;
 mod cache_fixture;
 mod network_tracing;
 mod custom_binding;
@@ -23,8 +21,6 @@ struct Args {
     a2a_peer_url: Option<String>,
     #[arg(long)]
     provider_request_headers: bool,
-    #[arg(long)]
-    agent_invoke_fixture_port: Option<u16>,
 }
 
 #[tokio::main]
@@ -34,9 +30,6 @@ async fn main() -> anyhow::Result<()> {
     if args.print_config {
         println!("{}", serde_json::to_string(&bcs::BcsConfig::default())?);
         return Ok(());
-    }
-    if let Some(port) = args.agent_invoke_fixture_port {
-        return agent_invoke::run(args.config_dir.as_ref(), port).await;
     }
     if args.provider_request_headers { request_headers::install()?; }
     if let Some(url) = args.a2a_peer_url { custom_binding::install(url)?; }

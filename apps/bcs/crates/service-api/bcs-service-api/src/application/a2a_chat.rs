@@ -107,19 +107,6 @@ pub trait A2aChatService: Send + Sync {
     /// Reject a zero-length message with InvalidOperation before admission side
     /// effects. Nonempty messages, including whitespace, are not normalized.
     async fn chat(&self, cmd: A2aChatCommand) -> ServiceResult<A2aChatOutcome>;
-
-    /// Explicit direct AgentInvoke, NOT a fallback from friend/public denial.
-    /// The adapter supplies verified scoped Bot identity and trusted lineage;
-    /// never deserialize invocation context from an ordinary chat body. The
-    /// implementation checks before effects and again at actual send time.
-    /// Older implementations have no invocation capability and fail closed.
-    async fn chat_agent_invocation(
-        &self,
-        _cmd: A2aChatCommand,
-        _invocation: super::agent_invoke::AgentInvocationInput,
-    ) -> ServiceResult<A2aChatOutcome> {
-        Err(crate::core::ServiceError::Forbidden("AgentInvoke runtime is not configured".into()))
-    }
     async fn get_run(&self, caller: CallerContext, run_id: &str) -> ServiceResult<A2aRunStatus>;
     async fn wait_run(
         &self,
@@ -147,16 +134,6 @@ pub trait A2aChatRunService: Send + Sync {
         &self,
         cmd: AsyncA2aChatCommand,
     ) -> ServiceResult<AsyncA2aChatAccepted>;
-
-    /// Same explicit, credential-free trust boundary as chat_agent_invocation.
-    /// Rejection must precede channel/context/session/Run/queue registration.
-    async fn start_async_agent_invocation(
-        &self,
-        _cmd: AsyncA2aChatCommand,
-        _invocation: super::agent_invoke::AgentInvocationInput,
-    ) -> ServiceResult<AsyncA2aChatAccepted> {
-        Err(crate::core::ServiceError::Forbidden("AgentInvoke runtime is not configured".into()))
-    }
 
     async fn get_run(&self, cmd: ChatRunQueryCommand) -> ServiceResult<A2aRunStatus>;
 

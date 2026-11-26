@@ -339,29 +339,10 @@ other BCS log files, without a permission exception. See the request-operation
 logging diagnostic contract for redaction, correlation, limits and runtime
 verification boundaries.
 
-## Explicit AgentInvoke host assembly
+## Existing edge admission assembly
 
-`BcsServerExtensions.agent_invoke` is an optional, non-serde registration of
-scope, exact tenant/App-governance mapping, finite limits and source lease bound.
-Only the SQL `new_with_infrastructure` root consumes it. The default extension
-(and the memory constructors) mounts no capability, does not initialize a scope,
-and adds no invocation provider. An explicit registration joins management,
-query, exact identity resolver and the existing metrics-wrapped Direct A2A run
-facade over ONE SQL store. The provider is appended before the existing chain is
-shared; normal security hooks remain, and inline/queue/before_send use that chain.
-
-Assembly checks the actual process env and stored scope/limits. It may initialize
-a closed scope, but NEVER publishes eligibility/governance facts or enables
-writer/runtime gates. Reopening preserves durable gate state. It adds four SQL
-statements (three reads and one insert) on first scope initialization, two reads
-on reopen, zero absent-registration statements, and no additional hot-path reads
-beyond the existing AgentInvoke use cases. No transaction is held over network I/O.
-
-This seam is not a host capability attestation. Embedders still own current
-reader/SDK/runtime acceptance, trusted inventory and durable invalidation feeds,
-lease refresh/failure handling, migration-before-binary and explicit activation.
-Public-local synthetic sources can use the same ports; labels/AgentCode/App type
-are never qualification inputs. A scope belongs to one physical namespace/env,
-not an implicit multi-tenant partition over legacy tables. No config/header can
-select this optional registration. Full host and Singlebox evidence remains
-separate from the constructor/Router regressions.
+The normal infrastructure constructor supplies its existing admission service
+and resolved environment to direct A2A chat. SQL and memory edge stores support
+AgentInvoke without an extra registration, capability or feature flag. The
+public API surface, default test construction and existing security hooks are
+unchanged; no AgentInvoke-specific host extension is exposed.

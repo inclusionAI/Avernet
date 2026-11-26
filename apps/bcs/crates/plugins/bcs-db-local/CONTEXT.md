@@ -50,12 +50,3 @@ Plain Execute transaction steps honor the DB contract's opt-in stop-on-no-rows
 control: commit and return the executed prefix after a zero-row result. Step
 options are validated before acquiring the transaction. Shared conformance tests
 cover prefix commits, skipped SQL, nonempty continuation and rollback.
-
-Outcome-aware DML transactions explicitly await the blocking operation's
-rollback acknowledgement before reporting NotCommitted. Commit failures,
-unconfirmed rollback and opaque pool/task failures are conservatively unknown.
-They share the unchanged step/binding/deadline/early-prefix executor with legacy
-transactions; no extra SQL round trip or pool connection is introduced. SQLite
-commit and rollback-failure tests exercise actual deferred constraints and
-RAISE(ROLLBACK), while native conformance covers memory and file-backed pools.
-DDL/migration execution remains on the legacy API, not the restricted new method.

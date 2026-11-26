@@ -1,8 +1,6 @@
-//! Pure structural validation for an Agent-to-Agent invocation candidate.
-//!
-//! A valid shape is NOT authentication, Agent eligibility, production-domain
-//! isolation, approval-generation freshness or an operation admission decision.
-//! Those are mandatory before this kind can ever be consumed at runtime.
+//! Canonical representation of an Agent-to-Agent invocation edge.
+//! Identity authentication and edge state/environment checks stay in the
+//! existing admission model; this type adds no separate eligibility system.
 
 use crate::edge_permission::{EdgeGrant, GrantKind, OriginatorPolicyType};
 
@@ -80,12 +78,11 @@ mod tests {
             &serde_json::to_string(&grant).unwrap()).unwrap(), grant);
         grant.status = EdgeStatus::Revoked;
         assert!(validate_agent_invoke_shape(&grant).is_ok());
-        assert!(grant.grant_kind.is_runtime_candidate());
-        assert!(!grant.grant_kind.is_legacy_runtime());
-        assert!(!GrantKind::Owner.is_runtime_candidate());
-        assert!(!GrantKind::Manager.is_runtime_candidate());
-        assert!(GrantKind::Rules.is_legacy_runtime());
-        assert!(GrantKind::PermissionProfile.is_legacy_runtime());
+        assert!(grant.grant_kind.is_runtime_grant());
+        assert!(!GrantKind::Owner.is_runtime_grant());
+        assert!(!GrantKind::Manager.is_runtime_grant());
+        assert!(GrantKind::Rules.is_runtime_grant());
+        assert!(GrantKind::PermissionProfile.is_runtime_grant());
     }
 
     #[test]

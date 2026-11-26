@@ -1,4 +1,4 @@
-//! Fallible runtime candidate reads. SQL and decoding stay store-owned.
+//! Fallible runtime grant reads. SQL and decoding stay store-owned.
 use super::*;
 
 impl DbEdgeGrantStore {

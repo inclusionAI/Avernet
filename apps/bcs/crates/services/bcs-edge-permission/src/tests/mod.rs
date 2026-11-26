@@ -388,7 +388,3 @@ mod request_pagination;
 mod friendship_writeback;
 
 mod agent_invoke;
-
-mod agent_invoke_policy;
-
-mod agent_invoke_query;

@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 
 #[derive(Default)]
 pub(super) struct AdmissionEvents {
-    pub(super) registered: AtomicUsize,
+    registered: AtomicUsize,
 }
 
 #[async_trait::async_trait]

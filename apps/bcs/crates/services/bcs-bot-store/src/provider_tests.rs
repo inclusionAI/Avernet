@@ -150,7 +150,7 @@
         .await
         .expect("create bcs_provider_bot_bindings");
         db.execute(DbStatement::new(
-            "CREATE TABLE bcs_bots (agent_invoke_identity_revision BIGINT NOT NULL DEFAULT 1,
+            "CREATE TABLE bcs_bots (
                 agent_card TEXT,
                 connection_mode TEXT DEFAULT 'plugin',
                 bot_uuid TEXT NOT NULL,

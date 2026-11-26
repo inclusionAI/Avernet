@@ -197,22 +197,6 @@ mod second { #[test] #[ignore] fn ambiguous() { panic!("must not execute"); } }
                     matches.extend(re.findall(r'#\[ignore[^\]]*\]\s*(?:async\s+)?fn\s+(' + re.escape(test) + r')\s*\(', source.read_text()))
                 self.assertEqual(matches, [test])
 
-    def test_agent_invoke_contract_reuses_existing_edge_authority_database(self) -> None:
-        workflow = (ROOT / '.github/workflows/unit-tests.yml').read_text()
-        self.assertNotIn('mysql_agent_invoke:', workflow)
-        self.assertNotIn('bcs_agent_invoke', workflow)
-        self.assertIn('--binary authority_mysql --test authority_mysql_conformance', workflow)
-        tests = BCS / 'crates/services/bcs-edge-permission-store/tests'
-        entry = (tests / 'authority_mysql.rs').read_text()
-        self.assertIn('agent_invoke::run(database.plugin.clone(), bcs_db_api::DbSqlFlavor::Mysql).await;', entry)
-        self.assertLess(entry.index('database.apply_full_migration_chain()'), entry.index('agent_invoke::run('))
-        self.assertLess(entry.index('agent_invoke::run('), entry.index('database.close()'))
-        shared = (tests / 'support/agent_invoke_migrated.rs').read_text()
-        self.assertNotIn('open_empty()', shared)
-        self.assertNotIn('apply_full_migration_chain()', shared)
-        self.assertIn('races::cases()', shared)
-        self.assertIn('registry::run(db.clone(), flavor)', shared)
-
     def test_workflow_runs_ci_tooling_regressions(self) -> None:
         workflow = (ROOT / '.github/workflows/unit-tests.yml').read_text()
         self.assertIn("python3 -m unittest discover -s singlebox/ci/tests -p 'test_bcs_*.py'", workflow)

@@ -195,9 +195,6 @@ JSON
 cat > "$cov_dir/oauth_e2e.json" <<'JSON'
 {"status":"passed","scenarios":["mixed-sqlite","mixed-memory","compatibility-and-chain-selection","pending-capacity","startup-validation"],"checks":[{"path":"/auth/url","status":200}],"provider_calls":{"authorize":1,"exchange":1,"userinfo":1}}
 JSON
-cat > "$cov_dir/agent_invoke_e2e.json" <<'JSON'
-{"status":"passed","process_exit":0,"peer_deliveries":5,"scenarios":["startup-isolation","lifecycle:api","lifecycle:openapi","authentication-validation:api","authentication-validation:openapi","governance","active-pending-quotas","queued-revoke-and-dispatch"],"operations":[{"method":"POST","path":"/api/v1/collaboration/agent-invoke/grants","status":201},{"method":"POST","path":"/api/v1/collaboration/agent-invoke/requests","status":201},{"method":"GET","path":"/api/v1/collaboration/agent-invoke/degrees","status":200},{"method":"GET","path":"/api/v1/collaboration/agent-invoke/audit","status":200},{"method":"POST","path":"/api/v1/collaboration/agent-invoke/invocations","status":202},{"method":"POST","path":"/api/v1/collaboration/agent-invoke/invocations","status":403},{"method":"POST","path":"/openapi/v1/collaboration/agent-invoke/grants","status":201},{"method":"POST","path":"/openapi/v1/collaboration/agent-invoke/requests","status":201},{"method":"GET","path":"/openapi/v1/collaboration/agent-invoke/degrees","status":200},{"method":"GET","path":"/openapi/v1/collaboration/agent-invoke/audit","status":200},{"method":"POST","path":"/openapi/v1/collaboration/agent-invoke/invocations","status":202},{"method":"POST","path":"/openapi/v1/collaboration/agent-invoke/invocations","status":403}]}
-JSON
 printf '%s\n' '<coverage line-rate="0.45"></coverage>' > "$cov_dir/cobertura.xml"
 printf '%s\n' 'TOTAL 100 55 45.00%' > "$cov_dir/coverage.txt"
 printf '%s\n' '<endpointCoverage><overall covered="12" total="12" uncovered="0" percent="100.0"/></endpointCoverage>' > "$cov_dir/endpoint_coverage.xml"
@@ -321,7 +318,7 @@ test_default_mode_runs_real_singlebox() {
     fail "summary.md artifact missing"
   [ -s "${tmp}/singlebox/.dependencies/coverage/singlebox/reports/dashboard.html" ] || \
     fail "dashboard.html artifact missing"
-  for artifact in e2e.log oauth_e2e.json agent_invoke_e2e.json cobertura.xml coverage.txt summary.json endpoint_coverage.xml endpoint_coverage.txt cli_command_coverage.txt; do
+  for artifact in e2e.log oauth_e2e.json cobertura.xml coverage.txt summary.json endpoint_coverage.xml endpoint_coverage.txt cli_command_coverage.txt; do
     [ -s "${tmp}/singlebox/.dependencies/coverage/singlebox/reports/bcs/${artifact}" ] || \
       fail "BCS artifact missing: ${artifact}"
   done

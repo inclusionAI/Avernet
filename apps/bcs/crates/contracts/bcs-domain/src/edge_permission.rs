@@ -26,10 +26,8 @@ pub enum GrantKind {
     PermissionProfile,
     /// Edge carries inline `rules`.
     Rules,
-    /// Directed Agent-to-Agent invocation candidate, never friendship or authority.
-    /// Framework-neutral (e.g. Spring AI); endpoints are concrete Bot identities.
-    /// Canonical shape: ref=0, rules=None, same_as_from, no policy data.
-    /// Consumption requires a separate trusted, operation-aware decision.
+    /// Directed Agent-to-Agent invocation authorization, not friendship or authority.
+    /// Endpoints are concrete Bot identities; ref=0, rules=None, same_as_from.
     AgentInvoke,
     /// Owner management edge (Human → Bot). Exactly one approved
     /// edge per `(env, to_id)`; unified `grant_ref_id = 0`.
@@ -40,14 +38,9 @@ pub enum GrantKind {
 }
 
 impl GrantKind {
-    /// Kinds usable by the existing generic admission paths.
-    pub fn is_legacy_runtime(self) -> bool {
-        matches!(self, Self::PermissionProfile | Self::Rules)
-    }
-
-    /// Runtime candidates, not a complete caller/operation authorization.
-    pub fn is_runtime_candidate(self) -> bool {
-        self.is_legacy_runtime() || self == Self::AgentInvoke
+    /// Edge kinds that grant runtime access in the existing admission model.
+    pub fn is_runtime_grant(self) -> bool {
+        matches!(self, Self::PermissionProfile | Self::Rules | Self::AgentInvoke)
     }
 }
 
@@ -92,7 +85,7 @@ pub struct EdgeGrant {
     pub to_id: String,
     pub grant_kind: GrantKind,
     /// `PermissionProfile` -> target's default (or other) profile id;
-    /// `Rules` -> opaque rules ref.
+    /// `Rules` -> opaque rules ref; `AgentInvoke` -> 0.
     pub grant_ref_id: u64,
     /// Inline rules; `None` unless `GrantKind::Rules`.
     /// AgentInvoke always uses ref=0 and rules=None, without a default profile.
@@ -211,7 +204,7 @@ pub enum RequestKind {
     Rules,
     /// Revoke an existing edge.
     Revoke,
-    /// Dedicated Agent invocation request, never a Connect request.
+    /// Agent invocation request type; not accepted by the Connect lifecycle.
     AgentInvoke,
 }
 

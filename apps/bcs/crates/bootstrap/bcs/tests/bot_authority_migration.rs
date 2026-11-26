@@ -272,8 +272,6 @@ async fn bot_authority_upgrade_preserves_legacy_rows_and_extends_runtime() {
         .find(|row| row.get("version") == Some(&DbValue::I64(46)))
         .expect("configured_catalog_labels present");
     assert_eq!(catalog_labels.get("name"), Some(&DbValue::String("configured_catalog_labels".into())));
-    let archive = history.iter().find(|row| row.get("version") == Some(&DbValue::I64(47))).expect("immutable archive remains recorded");
-    assert_eq!(archive.get("name"), Some(&DbValue::String("dist_immutable_objects".into())));
     let tail = history.last().expect("chain tail present");
     assert_eq!(tail.get("version"), Some(&DbValue::I64(50)));
     assert_eq!(tail.get("name"), Some(&DbValue::String("agent_invoke_governance_queries".into())));

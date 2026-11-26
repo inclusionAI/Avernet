@@ -20,8 +20,6 @@ pub(crate) struct DirectProjection {
     pub expires_at_ms: u64,
     pub provider_route_headers: Vec<(String, String)>,
     pub policy_version: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_invocation: Option<agent_invocation::DirectInvocationProjection>,
 }
 
 pub(crate) fn invalid(message: &str) -> ServiceError { ServiceError::InternalError(message.into()) }
@@ -54,7 +52,7 @@ impl A2aChat {
         Ok(())
     }
 
-    pub(crate) async fn admit_direct(&self, cmd: &A2aChatCommand, from: &str, run: &str, session: &str, expires: u64, invocation: Option<&bcs_service_api::application::agent_invoke::AgentInvocationInput>) -> ServiceResult<A2aChatOutcome> {
+    pub(crate) async fn admit_direct(&self, cmd: &A2aChatCommand, from: &str, run: &str, session: &str, expires: u64) -> ServiceResult<A2aChatOutcome> {
         let flow = self.queue_flow().ok_or_else(|| invalid("direct queue unavailable"))?;
         let service = flow.managed_deliveries.as_ref().ok_or_else(|| invalid("direct queue unavailable"))?;
         let live = flow.delivery_policy.as_ref().ok_or_else(|| invalid("direct queue policy unavailable"))?;
@@ -71,11 +69,7 @@ impl A2aChat {
         let snapshot = bcs_config_api::queued_provider_headers::snapshot(&headers, &flow.queue_persistable_headers);
         let rejection = snapshot.as_ref().err().map(|_| bcs_service_api::port::repo::message_delivery::DeliveryAdmissionRejection::ProviderHeadersUnsupported);
         let projection = DirectProjection {
-            version: invocation.map_or(1, |input| match input.authentication {
-                bcs_service_api::application::agent_invoke::AgentInvocationAuthentication::TrustedInProcess => 2,
-                bcs_service_api::application::agent_invoke::AgentInvocationAuthentication::VerifiedSource(_) => 3,
-            }),
-            agent_invocation: invocation.map(agent_invocation::DirectInvocationProjection::from_input),
+            version: 1,
             from_bot_id: from.into(), from_actor_id: cmd.from_actor_id.clone().unwrap_or_else(|| from.into()),
             sender_name: self.sender_display_name(from).await, target_tags: cmd.tags.clone(),
             caller_wait_mode: cmd.caller_wait_mode.clone(), organization_code: cmd.organization_code.clone(),

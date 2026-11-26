@@ -590,7 +590,7 @@ impl PersistentBotRepo {
     /// Soft-delete bot from the configured database.
     async fn soft_delete_in_db(&self, bot_uuid: &str) -> bool {
         let env = resolve_env();
-        let sql = "UPDATE bcs_bots SET agent_invoke_identity_revision = agent_invoke_identity_revision + 1, is_deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0 AND agent_invoke_identity_revision BETWEEN 1 AND 9223372036854775806";
+        let sql = "UPDATE bcs_bots SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0";
 
         self.db_execute_affected(sql, vec![Value::from(bot_uuid), Value::from(env.as_str())])
             .await

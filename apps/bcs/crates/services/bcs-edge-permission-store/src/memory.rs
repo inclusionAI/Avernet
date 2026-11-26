@@ -293,7 +293,7 @@ impl EdgeGrantRepoPort for MemoryEdgeGrantStore {
                     && grant.status == EdgeStatus::Approved
                     // Runtime grants only: owner/manager metadata edges never
                     // surface as runtime authorization (spec §3.2.5 / A16).
-                    && grant.grant_kind.is_runtime_candidate()
+                    && grant.grant_kind.is_runtime_grant()
             })
             .cloned()
             .collect()

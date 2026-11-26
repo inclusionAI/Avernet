@@ -42,8 +42,6 @@ use bcs_test_support::contract::bot_transfer_contract::{
 };
 #[path = "../../../test-support/authority_mysql_chain.rs"]
 mod mysql_chain;
-#[path = "support/agent_invoke_migrated.rs"]
-mod agent_invoke;
 
 use mysql_chain::{MysqlConformanceDb, report_mysql_gate_scenarios};
 
@@ -545,9 +543,9 @@ async fn authority_mysql_conformance() {
     );
     report_mysql_gate_scenarios("edge-authority", &scenarios);
 
-    // All grant kinds share the existing migrated schema and connection pool.
-    // Preserve the original 64-scenario inventory above; additions have their
-    // own markers and must complete before this single CI-selected test passes.
-    agent_invoke::run(database.plugin.clone(), bcs_db_api::DbSqlFlavor::Mysql).await;
+    bcs_test_support::contract::repo::edge_grant::run_agent_invoke_repo_contract(
+        &bcs_edge_permission_store::DbEdgeGrantStore::mysql(database.plugin.clone()),
+        "agent-kind-contract", "agent-kind-a", "agent-kind-b",
+    ).await;
     database.close().await;
 }

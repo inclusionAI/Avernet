@@ -1057,121 +1057,12 @@ instead of upsert. Custom downstream Core/repo implementations must implement
 or delegate this method before using legacy creation. Trusted internal upserts
 and DM pair reuse retain their separate behavior. See the [label contract](../../../docs/catalog-labels.md).
 
-## Reader-first Agent invocation support
+## AgentInvoke admission compatibility
 
-`EdgeGrantRepoPort` candidates include approved `agent_invoke` alongside
-profile/rules and exclude owner/manager. The additive
-`list_runtime_grants_checked` contract fails as a whole on query, row, unknown
-kind or AgentInvoke shape errors; its default is explicitly unavailable, never a
-wrapper over the legacy best-effort read. DB and memory implement it. Existing
-vec/bool signatures remain compatible; their results are candidates, not
-operation authorization. Generic admission/context consumers explicitly retain
-profile/rules only, and friend request operations accept Connect only. Downstream
-implementations must implement the checked contract before consuming these
-candidates. The independent contracts below do not enable production admission.
-
-
-## Independent Agent invocation contracts
-
-`application::agent_invoke` exposes separate management and per-operation
-invocation Service APIs. `core::agent_invoke::AgentInvokePolicyCoreService`
-is pure; `port::agent_invoke::AgentInvokeFactsPort` is the replaceable business
-facts boundary, not a host SDK or an unverified Card lookup. Its current
-snapshot contract includes isolated namespace/env, exact Bot bindings,
-eligibility generations and the persisted approval generation. Trusted inputs
-and facts deliberately do not derive serde.
-
-`port::repo::agent_invoke::AgentInvokeCommandRepoPort` is the atomic lifecycle
-port: fence/authority recheck, optimistic version, request/grant mutation,
-finite quotas, audit and idempotency receipt share one commit. It must not
-chain legacy insert/decide/revoke calls. Historical and current state are
-separate receipt fields; replay cannot resurrect an edge. Errors are closed,
-credential-free `AgentInvokeError` values; unknown commits are never retried by
-the application. Additive separate modules do not change existing trait methods
-or wire formats; custom downstream implementations opt in explicitly.
-
-Consumer conformance: `bcs-edge-permission::tests::agent_invoke_policy` records
-actual fact/command port hits and failure propagation. Shared lifecycle tests
-are `bcs-test-support::contract::agent_invoke`, run by the synthetic local and
-real SQLite lifecycle drivers; the native MySQL gate opts in separately. SQL
-lifecycle implementations do not enable a production provider, HTTP route, SDK
-or runtime dispatch.
-
-
-## Independent Agent invocation governance queries
-
-The additive `AgentInvokeGovernanceQueryService`, pure
-`AgentInvokeQueryPolicyCoreService` and `AgentInvokeQueryRepoPort` separate
-management reads from write commands and runtime permission checks. Their
-credential-free types in `types::agent_invoke_query` intentionally have no
-serde: authentication, scope and principal must come from a trusted ingress,
-not request JSON. Existing traits and wire formats remain unchanged.
-
-Exact grants/requests, directed keyset lists, pair/action audit time pages and
-atomic degrees use one bound context. Cursors bind principal, scope, anchor,
-peer, resource, direction and filters; page defaults to 50, maximum 100.
-Human current owner/manager controls the anchor; ordinary Agents cannot inspect
-the management graph. Governance requires exact-pair Query delegation; a degree
-reveals both directions and therefore requires both delegations. Audit requires
-a peer. Eligibility and writer/runtime gates do not block authorized history.
-
-`StoredApproved` degree counts persisted approvals, not executable permissions.
-Display name/agent_code is optional decoration, never identity or authority.
-Audit projects fixed fields, not raw before/after snapshots. The repository
-must reauthorize the same data snapshot, propagate backend/corrupt-row errors,
-and perform no write. Central query harnesses exercise policy, application and
-real SQLite repository implementations; MySQL executes the same application
-and repo harnesses in its explicit native gate. HTTP and SDK remain unmounted.
-
-
-## AgentInvoke HTTP vocabulary export
-
-`application::agent_invoke` re-exports its protocol-free commands, result/error
-and governance query vocabulary so delivery adapters import only the application
-boundary. No Core/repository methods or concrete implementation are aliased as
-an application service. Trusted publication/context types still have no serde;
-HTTP owns its strict wire DTOs and constructs principal/scope from verified,
-composition-bound identity. Existing Service API methods and persisted shapes
-remain unchanged. The V1 adapter now implements the management/query protocol
-under independent AgentInvoke prefixes; disabled/missing production capability
-returns 503 rather than enabling the feature. SDK/host/runtime integration is
-not established by exposing these declarations.
-
-
-## Additive explicit AgentInvoke dispatch contract
-
-A2aChatService::chat_agent_invocation and
-A2aChatRunService::start_async_agent_invocation receive non-serde trusted
-AgentInvocationInput separately from ordinary chat commands. Ingress must resolve
-verified unique scoped Bot identity and preserve originator lineage; legacy
-implementations default to Forbidden. This is not a new ordinary-chat DTO field
-or a public/friend fallback. MessageInterceptor::on_agent_invocation is the
-central operation-aware extension; None means unsupported. InterceptorChain
-requires at least one provider, propagates failures, validates AgentInvoke permit
-shape and rejects inconsistent providers. Ordinary on_outbound semantics and
-struct literals are unchanged. A2aChat consumes the hook before effects and at
-send time; its V2 queued projection is private, credential-free and rejected by
-old V1 readers. No wire SDK schema or production capability is implied. The
-shared interceptor harness, API chain/default compatibility tests and real SQL
-Direct A2A runtime conformance cover propagation to existing implementations.
-
-
-## Verified AgentInvoke ingress and physical handoff
-
-AgentInvokeDirectService is a separate application capability for verified
-Bot-only direct-call admission. Its command has no serialized trusted context.
-AgentInvokeIdentityResolutionPort resolves exact scoped UUID+verified AgentCode
-into physical registration/revision and binding/eligibility generations.
-AgentInvocationAuthentication explicitly distinguishes trusted in-process
-identity ownership from a VerifiedSource handoff; public ingress must select the
-latter. AgentInvokeRuntimeSnapshot now carries source physical registration,
-and policy compares all four pin values on every hook. External custom providers
-must propagate these new, unreleased AgentInvoke fields before enabling writers.
-Legacy four-kind contracts and DB plugin signatures remain unchanged.
-
-AgentInvokeDirectLimits requires finite positive default/max timeouts. V3 private
-queue reconstruction preserves the pin; V1/V2 retain previous meanings and do not
-accept a V3 downgrade. Shared identity/direct-service harnesses, physical-binding
-policy tests and signed-router/runtime conformance cover consumers. The original
-spec tracks SDK, separate Run GET/cancel, approved host assembly, inventory,
-Singlebox and rollout as unfinished; this capability does not imply them.
+The existing `AdmissionService` consumes valid directed `agent_invoke` edges
+alongside profile/rules. Admission and `AuthzContext` retain the new kind and
+ref=0, without looking up or creating a target default profile for that kind.
+`EdgeGrantRepoPort::list_runtime_grants_checked` is the fallible exact-pair read;
+unupdated custom implementations return an explicit error until they implement
+it. Memory, SQL and the test Noop implementation implement this contract.
+There are no AgentInvoke-specific application/core APIs, public routes or SDK.

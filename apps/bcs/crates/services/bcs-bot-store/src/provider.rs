@@ -1,5 +1,3 @@
-#[path = "provider_identity.rs"]
-mod identity;
 #[path = "provider_db.rs"]
 mod db;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -609,7 +607,24 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
     }
 
     async fn insert_binding(&self, binding: ProviderBotBinding) -> ServiceResult<()> {
-        self.insert_binding_identity(binding).await
+        let env = resolve_env();
+        self.execute_insert(
+            "insert_provider_bot_binding",
+            DbStatement::with_params(
+                Self::insert_binding_sql(),
+                vec![
+                    DbValue::from(binding.bot_uuid.as_str()),
+                    DbValue::from(binding.provider_id.as_str()),
+                    DbValue::from(binding.provider_bot_ref.as_str()),
+                    DbValue::from(env.as_str()),
+                    DbValue::from(binding.disabled),
+                    binding.webhook_url.as_deref().map(DbValue::from).unwrap_or(DbValue::Null),
+                ],
+            ),
+        )
+        .await?;
+        self.bindings.invalidate(&format!("{}:{}", env, binding.bot_uuid));
+        Ok(())
     }
 
     async fn get_binding_by_bot_uuid(
@@ -756,7 +771,26 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
         disabled: bool,
         _updated_at: u64,
     ) -> ServiceResult<Option<ProviderBotBinding>> {
-        self.update_binding_identity_disabled(bot_uuid, disabled).await
+        let env = resolve_env();
+        let sql = format!(
+            "UPDATE bcs_provider_bot_bindings SET disabled = ?, {now_clause} \
+             WHERE bot_uuid = ? AND env = ?",
+            now_clause = self.now_modified_clause(),
+        );
+        self.execute(
+            "update_provider_binding_disabled",
+            DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(disabled),
+                    DbValue::from(bot_uuid),
+                    DbValue::from(env.as_str()),
+                ],
+            ),
+        )
+        .await?;
+        self.bindings.invalidate(&format!("{env}:{bot_uuid}"));
+        self.get_binding_by_bot_uuid(bot_uuid).await
     }
 }
 

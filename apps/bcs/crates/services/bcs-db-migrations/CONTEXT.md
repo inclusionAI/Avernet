@@ -68,28 +68,17 @@ restarts. The MySQL table shape is statically checked; real MySQL/OceanBase
 acceptance is not implied by those checks.
 
 
-SQLite 048 / MySQL 050 add the disabled-by-default Agent invocation metadata
-foundation (eight tables and bounded indexes). No historical body/checksum or
-legacy data is rewritten. New SQLite 048 owns its DDL and history insertion in
-one transaction; record failure rolls back both, unlike implicit-commit MySQL
-DDL. Upgrade tests preserve populated legacy rows and prior migration history.
-The separate MySQL CI contract must execute the full chain on an EMPTY database;
-static schema checks and local SQLite tests are not a MySQL acceptance result.
+## Frozen AgentInvoke-era migration history
 
-SQLite 049 / MySQL 051 add command registration/requester fences. Existing
-approval/request/fact metadata defaults to unknown binding (zero), not invented
-registration proof. Bot/Human registration rows receive a dedicated identity
-revision column, but lifecycle writers still need to advance it before production
-activation. MySQL widens legacy env and request operator columns without changing
-the five-column edge unique key or actor collations. New SQLite 049 keeps DDL and
-history atomic; committed 048/050 and all earlier migrations remain frozen.
-Upgrade tests preserve prior history/data and inject history-record failure.
-Static MySQL key-width checks do not replace full-chain execution on real MySQL.
+SQLite 048–050 / MySQL 050–052 and their registered names/checksums are retained
+byte-for-byte because they have already been committed. They add historical
+metadata/fact/request/audit tables, identity-fence columns, indexes and legacy
+column-width changes. This schema is inert in the phase-one implementation:
+no management/facts/runtime-capability service writes or consumes those tables.
+AgentInvoke type compatibility uses the existing `edge_grants` table only and
+does not require a row in those historical metadata tables or a dedicated flag.
 
-
-SQLite 050 / MySQL 052 add the AgentInvoke request-pair and audit pair/time /
-action/time query indexes as one additive upgrade per dialect. No committed
-migration body, checksum or retained application data is changed. SQLite tests
-verify index installation, existing history/data preservation and atomic
-DDL/history rollback. Cross-dialect static key-width checks retain the native
-MySQL 3072-byte budget; they do not replace real MySQL execution or query plans.
+The migration runner and bootstrap DDL are not rewritten. Existing fresh-chain,
+retained-data, checksum, index and atomic SQLite history-write regressions stay
+in place; native MySQL full-chain testing uses the existing authority fixture.
+SQLite/static tests do not substitute for real MySQL execution.

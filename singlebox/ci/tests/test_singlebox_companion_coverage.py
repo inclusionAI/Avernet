@@ -88,7 +88,6 @@ fi
     profiles.mkdir(parents=True)
     (profiles / 'bcs-shared.profraw').write_text('do not remove')
     (profiles.parent / 'oauth_e2e.json').write_text('{"status":"passed"}')
-    (profiles.parent / 'agent_invoke_e2e.json').write_text('{"status":"passed"}')
     env = {**os.environ, 'CASE_ROOT': str(tmp_path),
            'PATH': str(tools) + ':' + os.environ['PATH']}
     return tmp_path, env
@@ -124,7 +123,6 @@ def test_failed_build_invalidates_prior_success_and_does_not_start_tests(compani
     result = subprocess.run(command(root), env={**env, 'BUILD_RC': '23'}, capture_output=True, timeout=15)
     assert result.returncode == 23, result.stderr
     assert json.loads((root / 'target/cov-e2e/oauth_e2e.json').read_text())['status'] == 'failed'
-    assert json.loads((root / 'target/cov-e2e/agent_invoke_e2e.json').read_text())['status'] == 'failed'
     assert not (root / 'caller-started').exists()
     assert not (root / 'oauth-started').exists()
 
@@ -167,7 +165,7 @@ def test_run_only_wrappers_use_prebuilt_bins_without_touching_shared_evidence(tm
     shared = runtime / 'bcs-shared.profraw'
     shared.write_text('shared')
     names = (['caller_execution_story.py', 'task_cache_story.py', 'custom_binding_story.py',
-              'custom_binding_story.py', 'agent_invoke_story.py', 'a2a_test_user_story.py']
+              'custom_binding_story.py', 'a2a_test_user_story.py']
              if name == 'caller' else ['oauth/story.py'])
     events = tmp_path / 'events'
     for story in names:

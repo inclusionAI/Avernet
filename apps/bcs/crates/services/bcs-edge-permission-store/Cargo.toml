@@ -16,14 +16,8 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-uuid = { workspace = true }
 
 [dev-dependencies]
-bcs-config = { workspace = true }
-bcs-bot-store = { workspace = true }
-bcs-db-migrations = { workspace = true }
-tempfile = { workspace = true }
-bcs-edge-permission = { workspace = true }
 bcs-bot         = { workspace = true }
 bcs-config-api  = { workspace = true }
 bcs-db-mysql    = { workspace = true }

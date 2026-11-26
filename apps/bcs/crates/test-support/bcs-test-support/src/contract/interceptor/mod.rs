@@ -56,18 +56,3 @@ fn assert_valid_decision(decision: InterceptorDecision) {
         );
     }
 }
-
-/// Invocation-capable providers opt into this separate operation contract.
-/// Outbound-only providers keep the existing shared harness above; None means
-/// unsupported, not authorization. The fixture controls current trusted facts.
-pub async fn agent_invocation_interceptor_contract_tests(
-    svc: &dyn MessageInterceptor,
-    input: &bcs_service_api::application::agent_invoke::AgentInvocationInput,
-    expected: bcs_service_api::application::agent_invoke::AgentInvokeResult<
-        bcs_service_api::application::agent_invoke::AgentInvocationPermit>,
-) {
-    assert_eq!(svc.on_agent_invocation(input).await, Some(expected));
-    // New invocation authority must not become group/content authorization.
-    let mut ordinary = sample_outbound_message();
-    assert!(matches!(svc.on_outbound(&mut ordinary).await, InterceptorDecision::Pass));
-}

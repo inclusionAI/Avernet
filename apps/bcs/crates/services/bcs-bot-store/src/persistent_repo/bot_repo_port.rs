@@ -811,11 +811,16 @@ impl BotRepoPort for PersistentBotRepo {
             bcs_service_api::ActorStatus::Hidden => "hidden",
         };
 
-        crate::agent_invoke_identity::update(
-            self.db.as_ref(), &env, bot_id,
-            &[("status", Value::from(status_str))], "status = ?",
-            vec![Value::from(status_str)],
-        ).await
+        let sql = "UPDATE bcs_bots SET status = ? WHERE bot_uuid = ? AND env = ?";
+        self.db_execute_affected(
+            sql,
+            vec![
+                Value::from(status_str),
+                Value::from(bot_id),
+                Value::from(env.as_str()),
+            ],
+        )
+        .await
         .map_err(|e| {
             warn!(
                 request_id = %bcs_observability::CurrentRequestId,

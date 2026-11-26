@@ -41,7 +41,7 @@ pub const OWNER: &str = "11111111";
 const SCHEMA: &[&str] = &[
     // bcs_bots baseline subset (the columns the composite
     // writes/reads), matching the migration's meanings.
-    "CREATE TABLE bcs_bots (agent_invoke_identity_revision BIGINT NOT NULL DEFAULT 1,\
+    "CREATE TABLE bcs_bots (\
         bot_uuid TEXT NOT NULL, \
         env TEXT NOT NULL, \
         name TEXT NOT NULL DEFAULT '', \

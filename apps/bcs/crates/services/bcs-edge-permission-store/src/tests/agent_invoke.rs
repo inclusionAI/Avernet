@@ -101,3 +101,19 @@ async fn checked_identity_comparison_stays_exact_on_case_insensitive_columns() {
     assert!(store.list_runtime_grants_checked("bot-a", "bot-b", "dev").await.is_err(),
         "case-insensitive SQL must not hide an unknown kind as authority metadata");
 }
+
+#[tokio::test]
+async fn checked_pair_read_uses_one_query_and_no_unrelated_rows() {
+    let seed = sqlite_store().await;
+    seed.insert_grant(agent_grant("a", "b")).await.unwrap();
+    for n in 0..32 {
+        seed.insert_grant(agent_grant(&format!("unrelated-{n}"), "b")).await.unwrap();
+    }
+    let db = Arc::new(RecordingFriendDb { inner: seed.db, reads: std::sync::Mutex::new(Vec::new()) });
+    let store = DbEdgeGrantStore::sqlite(db.clone());
+    assert_eq!(store.list_runtime_grants_checked("a", "b", "dev").await.unwrap().len(), 1);
+    let reads = db.reads.lock().unwrap();
+    assert_eq!(reads.len(), 1);
+    assert_eq!(reads[0].1, 1, "only the matching pair crosses the plugin boundary");
+    assert_eq!(reads[0].0.params().len(), 6);
+}

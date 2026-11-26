@@ -530,8 +530,8 @@ impl BotProviderRepoPort for DbProviderStore {
         let mut steps = self.affiliation_scope_steps(&record, &env);
         let guard_step = steps.len() - 1;
         let mut statement = DbStatement::with_params(
-                "UPDATE bcs_bots SET agent_invoke_identity_revision = agent_invoke_identity_revision + 1, provider_id = ?, provider_bot_ref = ?, connection_mode = ?, webhook_url = ?, updated_at = CURRENT_TIMESTAMP \
-                 WHERE bot_uuid = ? AND env = ? AND is_deleted = 0 AND agent_invoke_identity_revision BETWEEN 1 AND 9223372036854775806 \
+                "UPDATE bcs_bots SET provider_id = ?, provider_bot_ref = ?, connection_mode = ?, webhook_url = ?, updated_at = CURRENT_TIMESTAMP \
+                 WHERE bot_uuid = ? AND env = ? AND is_deleted = 0 \
                  AND (provider_id IS NULL OR (provider_id = ? AND provider_bot_ref = ? AND connection_mode = 'plugin' AND ? = 'gateway')) \
                  AND NOT EXISTS (SELECT 1 FROM bcs_provider_bot_bindings WHERE env = ? AND provider_id = ? AND provider_bot_ref = ? AND bot_uuid <> ?)",
                 vec![record.provider_id.as_str().into(), record.provider_bot_ref.as_str().into(), mode.into(), record.webhook_url.clone().into(),
@@ -688,7 +688,7 @@ impl BotProviderRepoPort for DbProviderStore {
             steps.push(self.lock_gateway_binding(&record, &env));
         }
         steps.push(DbTransactionStep::ExecuteChecked { statement: DbStatement::with_params(
-            "UPDATE bcs_bots SET agent_invoke_identity_revision = agent_invoke_identity_revision + 1, is_deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ? AND provider_id = ? AND provider_bot_ref = ? AND connection_mode = ? AND is_deleted = 0 AND agent_invoke_identity_revision BETWEEN 1 AND 9223372036854775806",
+            "UPDATE bcs_bots SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ? AND provider_id = ? AND provider_bot_ref = ? AND connection_mode = ? AND is_deleted = 0",
             vec![bot_uuid.into(), env.as_str().into(), provider_id.into(), record.provider_bot_ref.as_str().into(), record.connection_mode.as_str().into()]), expected_affected_rows: 1 });
         if record.connection_mode == BotConnectionMode::Gateway {
             steps.push(DbTransactionStep::Execute(DbStatement::with_transaction_params(

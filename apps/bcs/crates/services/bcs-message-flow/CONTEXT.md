@@ -525,59 +525,21 @@ establish production MySQL load capacity. See the
 The [delegation regressions](src/caller_delegation_tests.rs) cover a rejected
 reply target followed by a valid sibling with one invocation remaining.
 
+## Directed edge admission for existing direct calls
 
-## Explicit AgentInvoke Direct A2A capability
+`A2aChat::with_edge_admission` attaches the host's existing `AdmissionService`
+and environment. Existing direct chat and async-start APIs use it when legacy
+self/same-owner/public/friend paths do not already admit the call. Directed
+profile/rules/AgentInvoke access never becomes symmetric friendship. Existing
+source identity, target status, organization and outbound security checks remain
+in force. No new invocation endpoint, queue payload, permit or per-kind switch
+is introduced. Minimal test setups without an edge service retain legacy paths.
 
-The additive chat_agent_invocation/start_async_agent_invocation application
-methods require verified scoped Bot identity and trusted originator lineage.
-They never consume ordinary chat body metadata as proof or fall back to public/
-friend/organization admission. Older implementations default to refusal. The
-existing central MessageInterceptor chain has a separate mandatory operation
-hook, independent of optional agent_code-based legacy content/security hooks.
-No provider, mismatched pair/lineage, errors or malformed permits fail closed.
-AgentInvoke does not widen Provider collaboration/same-owner policy.
-
-Authorization precedes channel/context/session/Run/queue effects and is repeated
-immediately before inline delivery. A private V2 DirectProjection persists only
-credential-free scope/operation/lineage, not a positive permit. Older V1 readers
-reject the version; V1 legacy records remain unchanged. Pickup compares canonical
-ChatRun/message/row identities, validates the projection, rereads current facts,
-and keeps the existing target/content checks. before_send performs a final live
-authorization after StartSend CAS and correlation writes. Revocation, qualification
-or binding ABA, disabled capability and DB failure cannot reuse an admission
-permit; no automatic authorization retry or lock spans network delivery.
-
-With the bundled SQL facts provider, synchronous inline uses two exact-pair SQL
-snapshots, asynchronous inline three, queued admission two plus pickup two and
-before_send one (five total). Each is one LIMIT 2 statement and each check also
-reuses existing Provider collaboration over exactly two actors. Existing queue
-storage/transition costs remain, with no added growing-graph scan or per-frame
-reads. Regression tests record actual SQL count/returned-row bounds, genuine
-SQLite lifecycle writes, Notify-controlled revocation, and actual scheduler fake
-transport sends. They do not establish multi-worker/load, trusted HTTP ingress,
-production inventory capability, or Singlebox E2E coverage; production assembly
-remains disabled until those separate contracts are satisfied.
-
-
-## Verified AgentInvoke ingress and physical handoff
-
-AgentInvokeDirectApplicationService validates authenticated scope, required Bot
-identity/target/text, direct session and finite timeout, calls the identity port
-once, then invokes only start_async_agent_invocation with trusted caller/from/
-channel/originator. No legacy fallback, App/Human-as-Bot, Provider headers or
-client-chosen authentication mode can enter this facade.
-
-VerifiedSource pins registration ID/revision and binding/eligibility generations;
-private V3 retains these through queue pickup and final before_send. V1 ordinary
-and V2 trusted-internal projections retain their prior meanings. Older readers
-refuse V3; version/pin mismatch never downgrades. A rebind plus explicit fresh
-approval cannot silently retarget an old authenticated handoff. Tests prove that
-with actual SQLite publication/reapproval and current unbound authorization as a
-positive control. Signed HTTP/SQL/A2A transport composition lives in this crate's
-tests, preserving the HTTP adapter's prohibition on legacy protocol dependencies.
-
-The public facade adds one bounded identity query: asynchronous inline uses four
-identity/authz reads and queued lifecycle six, plus the existing two-actor Provider
-checks. No new authorization transaction, cache, N+1 or network-held DB lock.
-Production inventory/assembly, separate V1 Run GET/cancel and SDK, Singlebox and
-rollout remain incomplete; 202 acceptance is not completion or idempotence.
+Additional cost on the previously denied private/protected nonfriend path is
+one target configuration lookup, at most one existing collaboration-owner batch
+read (the host wires that guard), and one exact-pair edge query: at most three
+SQL statements, no per-edge N+1. The owner query reads at most the two endpoints;
+the edge query reads only that indexed pair. AgentInvoke requires no profile
+write/read, qualification lookup, retry or external I/O.
+Other existing allow paths add no edge queries. Queue processing and edge-change
+visibility retain their existing behavior, not a new revocation protocol.

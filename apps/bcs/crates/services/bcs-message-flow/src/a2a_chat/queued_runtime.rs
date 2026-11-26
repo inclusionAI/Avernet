@@ -8,7 +8,7 @@ use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
 impl A2aChat {
     pub(crate) async fn prepare_direct(&self, flow: &crate::BcsMessageFlow, row: &PersistedMessageDelivery) -> ServiceResult<PreparedManagedDelivery> {
         let p: DirectProjection = serde_json::from_value(row.semantic_projection_json.clone()).map_err(|_| invalid("invalid direct projection"))?;
-        if !match &p.agent_invocation { None => p.version == 1, Some(stored) => p.version == stored.version() }
+        if p.version != 1
             || row.flow_kind != DeliveryFlowKind::DirectA2a || !row.group_id.is_empty()
         {
             return Err(invalid("invalid direct projection scope"));
@@ -20,21 +20,13 @@ impl A2aChat {
         let run = row.run_id.as_deref().ok_or_else(|| invalid("direct run missing"))?;
         let record = self.run_store.try_get(run).await?.ok_or_else(|| invalid("direct chat run missing"))?;
         if record.delivery_id.as_deref() != Some(&row.delivery_id) || record.source_message_id.as_deref() != Some(&row.source_message_id)
-            || record.from_bot_id != p.from_bot_id || record.bot_uuid != row.target_bot_id
-            || record.session_key != row.session_id || record.run_id != run
             || record.state.is_terminal() || record.expires_at_ms != p.expires_at_ms { return Err(invalid("direct chat run identity mismatch")); }
         let message = flow.message_repo.as_ref().ok_or_else(|| invalid("direct message store unavailable"))?
             .get_message_by_id(&row.session_id, &row.source_message_id).await.map_err(|_| invalid("direct source read failed"))?
             .ok_or_else(|| invalid("direct source missing"))?;
         if message.run_id != run || message.sender_id != p.from_bot_id || message.owner_bot_id.as_deref() != Some(&row.target_bot_id)
             || message.session_id != row.session_id || !message.group_id.is_empty() { return Err(invalid("direct source scope mismatch")); }
-        let invocation = p.agent_invocation.as_ref().map(|stored| stored.input(&p.from_bot_id, &row.target_bot_id));
-        let bot = if let Some(input) = invocation.as_ref() {
-            self.authorize_direct_invocation(input,
-                &CallerContext::Bot(bcs_service_api::BotActor { bot_uuid: p.from_bot_id.clone() }),
-                &row.target_bot_id, Some(&p.from_actor_id), None, p.organization_code.as_deref(), false).await?;
-            self.registry.try_get(&row.target_bot_id).await?.ok_or_else(|| invalid("direct target missing"))?
-        } else if let Some(code) = &p.organization_code {
+        let bot = if let Some(code) = &p.organization_code {
             self.organization.as_ref().ok_or_else(|| invalid("organization service unavailable"))?.authorize_pair(code, &p.from_bot_id, &row.target_bot_id).await?;
             self.ensure_organization_target_reachable(&p.from_bot_id, &row.target_bot_id).await?
         } else { self.ensure_target_reachable(&p.from_bot_id, &row.target_bot_id).await? };
@@ -52,9 +44,6 @@ impl A2aChat {
         if let BcsFrame::Request(request) = &mut frame {
             if let Some(params) = &mut request.params { params["idempotency_key"] = serde_json::json!(row.idempotency_key); }
         }
-        // Re-read after resolver/credential/content hooks, never cache an
-        // admission permit across queued delivery or a retry/recovery.
-        if let Some(input) = invocation.as_ref() { self.check_invocation(input).await?; }
         let transport = crate::queued_group::QueuedTransportContext { caller_expires_at_ms: None, version: 1, owner, connection_id,
             downstream_run_id: None, cancel_reason: None, task_timeout: false, downstream_session_key: row.session_id.clone(),
             provider_route_headers: headers.clone(), relay_route_headers: None };

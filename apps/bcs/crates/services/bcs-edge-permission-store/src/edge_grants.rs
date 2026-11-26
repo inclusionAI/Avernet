@@ -130,11 +130,10 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
     }
 
     async fn is_authorized(&self, from: &str, to: &str, env: &str) -> bool {
-        // Any active approved edge from→to admits (friend OR non-friend).
-        // `list_active_grants` already filters `status='approved'`, so a
-        // non-empty result ⇒ authorized. Keep the repo-level call (not a raw
-        // SELECT 1) so this stays a pure projection over the same SoR.
-        !self.list_active_grants(from, to, env).await.is_empty()
+        // Preserve the boolean API while failing closed on query/decoding
+        // errors. Admission consumers use the fallible form to surface errors.
+        self.read_runtime_grants_checked(from, to, env).await
+            .map(|grants| !grants.is_empty()).unwrap_or(false)
     }
 
     async fn has_friend_edge(&self, x: &str, y: &str, env: &str) -> bool {
