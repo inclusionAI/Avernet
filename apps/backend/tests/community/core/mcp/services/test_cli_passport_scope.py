@@ -9,6 +9,7 @@ import pytest
 from agentclaw.community.core.mcp.services.cli_passport_scope import (
     CliPassportScopeReconciler,
     build_passport_resource_scope,
+    passport_grants_match,
 )
 from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
 
@@ -429,3 +430,24 @@ def test_add_cli_of_an_ungranted_default_is_not_a_duplicate() -> None:
     )
 
     assert result.cli_codes == ("dataphin", "deepinsight-cli")
+
+
+@pytest.mark.parametrize("target_identity", ["caller", "owner"])
+def test_grant_comparison_checks_execution_identity_and_ignores_order(target_identity):
+    current = {
+        "mcps": [
+            {"mcp_code": "mcp.a", "mcp_name": "Display name", "identity_mode": "caller"},
+            {"mcp_code": "mcp.b"},
+        ],
+        "clis": [],
+    }
+    scope = build_passport_resource_scope(
+        current,
+        desired_mcp_items=[
+            {"mcp_code": "mcp.b", "identity_mode": "owner"},
+            {"mcp_code": "mcp.a", "identity_mode": "caller"},
+        ],
+        mcp_identity_modes={"mcp.a": target_identity},
+    )
+
+    assert passport_grants_match(current, scope) is (target_identity == "caller")
