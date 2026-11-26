@@ -52,6 +52,11 @@ def _redis_reachable(url: str) -> bool:
 
 
 _REDIS_OK = _redis_reachable(_REDIS_URL)
+# NOTE: these tests skip when no Redis is reachable. That leaves the Lua admission
+# script with no CI coverage until the gateway CI job gains a Redis service (see
+# the PR discussion) — the review flagged this, and the workflow change needs the
+# `workflow` OAuth scope this session's token lacks. Once a `redis:7` service and
+# REDIS_URL are added to the gateway job, tighten this to fail (not skip) under CI.
 _requires_redis = pytest.mark.skipif(
     not _REDIS_OK, reason=f"no Redis reachable at {_REDIS_URL}"
 )
@@ -285,9 +290,17 @@ class TestRedisRateLimiterDependencyFailure:
     """Dependency-failure surfacing needs no live Redis — it points at a dead port."""
 
     async def test_unreachable_backend_raises_unavailable_not_rejection(self) -> None:
+        import socket
+
+        # Reserve a port with a bound-but-not-listening socket held open for the
+        # duration: nothing can accept on it (connects get refused), and nothing
+        # else can grab it — unlike a hard-coded port, which collides with any
+        # stray Redis a developer happens to run there.
+        holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        holder.bind(("127.0.0.1", 0))
+        dead_port = holder.getsockname()[1]
         limiter = RedisTokenBucketRateLimiter(
-            # Reserved-ish port with nothing listening; tiny timeouts.
-            url="redis://127.0.0.1:6399/0",
+            url=f"redis://127.0.0.1:{dead_port}/0",
             namespace="dep-fail",
             socket_timeout=0.2,
             socket_connect_timeout=0.2,
@@ -299,3 +312,4 @@ class TestRedisRateLimiterDependencyFailure:
                 await limiter.try_acquire(subject, policy)
         finally:
             await limiter.close()
+            holder.close()

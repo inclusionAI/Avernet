@@ -224,6 +224,35 @@ class RateLimitConfig(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _validate_override_keys(self) -> RateLimitConfig:
+        """Reject malformed override keys at load rather than silently ignoring them.
+
+        An override is applied only by exact string match against
+        ``"<tenant>:<app_id>"`` (see ``PolicyResolver``). A key like ``"12345"``
+        (no tenant), ``"t: 12345"`` (stray space) or ``"t:012345"`` (leading
+        zero) would load cleanly and then never match, leaving that application
+        on the *default* budget with no error — exactly the silent fallback this
+        feature otherwise refuses. Catch it here instead.
+        """
+        for key in self.overrides:
+            tenant, sep, app_id = key.rpartition(":")
+            ok = bool(sep) and bool(tenant)
+            if ok:
+                try:
+                    ok = str(int(app_id)) == app_id and int(app_id) > 0
+                except ValueError:
+                    ok = False
+            if not ok:
+                raise ValueError(
+                    f"rate_limit.overrides key {key!r} is malformed: expected "
+                    '"<tenant>:<app_id>" with a non-empty tenant and a positive '
+                    "integer app_id (no spaces or leading zeros), matching the "
+                    "authenticated tenant+app_id. It would never match and the "
+                    "app would silently keep the default budget."
+                )
+        return self
+
 
 class PluginConfig(BaseSettings):
     """Plugin selection config for gateway DI container.

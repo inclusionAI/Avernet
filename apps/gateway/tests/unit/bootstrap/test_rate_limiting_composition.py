@@ -90,3 +90,35 @@ def test_unknown_rate_limit_field_is_rejected() -> None:
         RateLimitConfig(
             enabled=True, default=RateLimitPolicyConfig(rate=5, burst=10), rpm=600
         )
+
+
+@pytest.mark.parametrize(
+    "bad_key",
+    [
+        "12345",  # no tenant
+        "tenant-a: 12345",  # stray space
+        "tenant-a:012345",  # leading zero
+        "tenant-a:0",  # non-positive app_id
+        "tenant-a:abc",  # non-numeric app_id
+        ":12345",  # empty tenant
+        "tenant-a:",  # empty app_id
+    ],
+)
+def test_malformed_override_key_is_rejected(bad_key: str) -> None:
+    # A key that PolicyResolver's exact match would never apply must fail at load,
+    # not silently leave the app on the default budget.
+    with pytest.raises(ValidationError, match="overrides"):
+        RateLimitConfig(
+            enabled=True,
+            default=RateLimitPolicyConfig(rate=5, burst=10),
+            overrides={bad_key: RateLimitPolicyConfig(rate=1, burst=2)},
+        )
+
+
+def test_wellformed_override_key_is_accepted() -> None:
+    cfg = RateLimitConfig(
+        enabled=True,
+        default=RateLimitPolicyConfig(rate=5, burst=10),
+        overrides={"tenant-a:12345": RateLimitPolicyConfig(rate=1, burst=2)},
+    )
+    assert "tenant-a:12345" in cfg.overrides
