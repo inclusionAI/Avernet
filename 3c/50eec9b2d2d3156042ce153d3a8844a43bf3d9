@@ -1,0 +1,22 @@
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskNodePanelV2.tsx
+  s_885ffb973587a3::t_a17f60cca27758 7,90
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskNodePanelV2.test.tsx
+  s_885ffb973587a3::t_a17f60cca27758 212-213
+  s_885ffb973587a3::t_b28667725625c4 133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3c50eec9b2d2d3156042ce153d3a8844a43bf3d9",
+  "prompts": {},
+  "sessions": {
+    "s_885ffb973587a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17742-1085-7833-94e1-041d70172b63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
