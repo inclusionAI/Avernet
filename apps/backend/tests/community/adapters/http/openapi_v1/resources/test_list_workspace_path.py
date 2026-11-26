@@ -21,16 +21,16 @@ from agentclaw.community.core.ports.resource_file_port import ListingFailed
         ("notes/data.json", 400, False, "bad_path"),
         ("notes", 200, None, "page"),
         ("missing", 404, None, "page"),
-        ("notes", 500, None, "original_error"),
-        ("notes", 400, True, "original_error"),
-        ("missing", 400, None, "original_error"),
-        ("notes", 400, ListingFailed("Parent unavailable"), "original_error"),
-        ("notes", 400, DeviceOfflineError("Device went offline"), "original_error"),
-        ("", 400, None, "original_error"),
+        ("notes", 500, None, "upstream_error"),
+        ("notes", 400, True, "upstream_error"),
+        ("missing", 400, None, "upstream_error"),
+        ("notes", 400, ListingFailed("Parent unavailable"), "upstream_error"),
+        ("notes", 400, DeviceOfflineError("Device went offline"), "upstream_error"),
+        ("", 400, None, "upstream_error"),
     ],
 )
 async def test_list_classifies_file_only_after_a_bad_directory_response(
-    path, listing_status, probe_result, expected,
+    path, listing_status, probe_result, expected, caplog,
 ):
     upstream_request = httpx.Request("POST", "http://device.test/api/file/list")
     upstream_response = httpx.Response(listing_status, request=upstream_request)
@@ -72,9 +72,18 @@ async def test_list_classifies_file_only_after_a_bad_directory_response(
         response = await list_path()
         assert response.data.total == 0
     else:
-        with pytest.raises(httpx.HTTPStatusError) as error:
-            await list_path()
-        assert error.value is upstream_error
+        response = await list_path()
+        assert response.status_code == 502
+        assert json.loads(response.body) == {
+            "code": 502000,
+            "message": "Upstream service error",
+            "data": None,
+            "request_id": "",
+        }
+        assert any(
+            record.exc_info is not None and record.exc_info[1] is upstream_error
+            for record in caplog.records
+        )
 
     file_svc.list_dir.assert_awaited_once()
     if path and listing_status == 400:
