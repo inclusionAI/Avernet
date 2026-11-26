@@ -14,7 +14,6 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
-import httpx
 from injector import inject
 
 from agentclaw.community.core.aicoding.work_items_service_protocol import (
@@ -31,6 +30,7 @@ from agentclaw.community.core.aicoding.work_items_models import (
     WorkItemsData,
     WorkItemsFilters,
 )
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
     DeviceNotBoundError,
@@ -49,7 +49,6 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 
 _SESSIONS_PATH = "/api/aicoding/sessions"
 _WORK_ITEMS_TIMEOUT = 5.0
-_LOCAL_ENGINE_URL = "http://127.0.0.1:20003"
 _DEFAULT_SCAN_LIMIT = 50
 _WORK_ITEMS_FANOUT_CONCURRENCY = 12
 _ENGINE_ERROR_CODE = re.compile(r"[A-Z][A-Z0-9_]*")
@@ -59,7 +58,6 @@ _SAFE_ERROR_MESSAGES = {
     "ENGINE_HTTP_404": "Engine session list endpoint not found",
     "ENGINE_TIMEOUT": "Engine session list timed out",
     "ENGINE_SESSION_LIST_FAILED": "Engine session list failed",
-    "ENGINE_PROBE_ERROR": "Engine session list failed",
 }
 
 logger = get_logger()
@@ -162,7 +160,11 @@ class AICodingWorkItemsService(AICodingWorkItemsServiceProtocol):
             ctx = self._resolver.resolve_for_bot(target.bot_id, target.owner_id)
         except DeviceNotBoundError:
             return _ProbeResult("unavailable", [])
-        except (UnknownProviderError, ConnInfoBuildError) as exc:
+        except (
+            UnknownProviderError,
+            ConnInfoBuildError,
+            BotLookupAmbiguousError,
+        ) as exc:
             logger.warning(
                 "[work_items] resolve failed bot=%s owner=%s error_type=%s",
                 target.bot_id,
@@ -174,16 +176,13 @@ class AICodingWorkItemsService(AICodingWorkItemsServiceProtocol):
             )
 
         try:
-            if ctx.provider == "local":
-                result = await _probe_local(params)
-            else:
-                result = await self._transport.invoke(
-                    ctx.conn_info,
-                    "GET",
-                    _SESSIONS_PATH,
-                    params=params,
-                    timeout=_WORK_ITEMS_TIMEOUT,
-                )
+            result = await self._transport.invoke(
+                ctx.conn_info,
+                "GET",
+                _SESSIONS_PATH,
+                params=params,
+                timeout=_WORK_ITEMS_TIMEOUT,
+            )
             if not isinstance(result, dict):
                 logger.warning(
                     "[work_items] malformed response bot=%s owner=%s",
@@ -197,8 +196,21 @@ class AICodingWorkItemsService(AICodingWorkItemsServiceProtocol):
                     _safe_error_message("ENGINE_MALFORMED_RESPONSE"),
                 )
 
+            success = result.get("success") is True
             data = result.get("data", [])
-            if result.get("success") is not True or not isinstance(data, list):
+            if success and ("data" not in result or not isinstance(data, list)):
+                logger.warning(
+                    "[work_items] malformed data bot=%s owner=%s",
+                    target.bot_id,
+                    target.owner_id,
+                )
+                return _ProbeResult(
+                    "error",
+                    [],
+                    "ENGINE_MALFORMED_RESPONSE",
+                    _safe_error_message("ENGINE_MALFORMED_RESPONSE"),
+                )
+            if not success:
                 message = str(
                     result.get("message")
                     or result.get("error")
@@ -286,6 +298,10 @@ def _relay_params(
     since_ms: int | None,
     run_status_filter: list[str] | None,
 ) -> dict[str, Any]:
+    # ``user_id`` is the source-classification viewer. Relay does not send it
+    # to the underlying session store as a storage filter; it uses it to
+    # classify ``source=mine/others/collab`` before pagination, and the caller
+    # can still enumerate sessions from other users as well.
     params: dict[str, Any] = {
         "user_id": current_user_id,
         "session_kind": "user",
@@ -321,27 +337,6 @@ def _bot_summary(
     )
 
 
-async def _probe_local(params: dict[str, Any]) -> dict[str, Any]:
-    url = f"{_LOCAL_ENGINE_URL}{_SESSIONS_PATH}"
-    try:
-        async with httpx.AsyncClient(timeout=_WORK_ITEMS_TIMEOUT) as client:
-            response = await client.get(url, params=params)
-        if response.status_code != 200:
-            return {
-                "success": False,
-                "message": f"ENGINE_HTTP_{response.status_code}",
-            }
-        result = response.json()
-        if not isinstance(result, dict):
-            return {"success": False, "message": "ENGINE_MALFORMED_RESPONSE"}
-        return result
-    except Exception as exc:
-        logger.warning(
-            "[work_items] local probe failed error_type=%s", type(exc).__name__
-        )
-        return {"success": False, "message": "ENGINE_PROBE_ERROR"}
-
-
 def _map_work_item(
     target: WorkItemsBotTarget,
     current_user_id: str,
@@ -371,11 +366,6 @@ def _map_work_item(
         updated_at_ms=_timestamp_ms(updated_at),
         cwd=_optional_text(session.get("cwd")),
         model=_optional_text(session.get("model")),
-        ext_info=(
-            session.get("ext_info")
-            if isinstance(session.get("ext_info"), dict)
-            else None
-        ),
     )
 
 
