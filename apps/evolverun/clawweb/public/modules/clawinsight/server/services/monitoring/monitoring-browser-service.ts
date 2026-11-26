@@ -1,7 +1,7 @@
 import { MonitoringError, type MonitoringStore, type MonitoringSummary } from './contracts.js';
 import type { BotOption, BotScope, DirectoryBot, DirectoryScope, MonitoringBotDirectory, MonitoringBrowserApi,
-  MonitoringPrincipal, MonitoringReferences } from './directory-contracts.js';
-import { browserDiagnosisQuery, parseWindow, queryKeys } from './browser-validation.js';
+  MonitoringPrincipal, MonitoringReferences, MonitoringSpaceSettings } from './directory-contracts.js';
+import { browserDiagnosisQuery, parseSpaceId, parseWindow, queryKeys } from './browser-validation.js';
 import type { BotDiagnosisRecoveryConfig, BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
 import { botConfigurationDisabledReason, configureBots, isServiceBot, replaceBotConfiguration, type BotEnabledNotifier } from './bot-config-service.js';
 import { recoveryConfigurations } from '../repair/session-recovery/bot-configuration.js';
@@ -9,7 +9,8 @@ import type { RecoveryAppConfigStore } from '../repair/session-recovery/configur
 
 export function createMonitoringBrowserService(store: MonitoringStore, directory: MonitoringBotDirectory,
   references: MonitoringReferences, storageScope: DirectoryScope, now: () => number = Date.now,
-  configurations?: BotDiagnosisRecoveryConfigStore, legacyConfig?: RecoveryAppConfigStore, onBotEnabled?: BotEnabledNotifier): MonitoringBrowserApi {
+  configurations?: BotDiagnosisRecoveryConfigStore, legacyConfig?: RecoveryAppConfigStore, onBotEnabled?: BotEnabledNotifier,
+  spaceSettings?: MonitoringSpaceSettings): MonitoringBrowserApi {
   function authorize(p: MonitoringPrincipal) {
     if (!p.isAuthenticated || !p.staffId?.trim()) throw new MonitoringError('UNAUTHENTICATED', '请先登录。');
     if (!p.tenant || p.tenant !== storageScope.tenant || !p.allowedTargetEnvs.length
@@ -43,6 +44,16 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
       configuration: { diagnosisEnabled: config?.diagnosisEnabled ?? false, recoveryEnabled: config?.recoveryEnabled ?? false, version: config?.version ?? 0 },
       capabilities: { canView: true, canRequestEnrollment: !summary } };
   }
+  async function spaceOptions(p: MonitoringPrincipal, spaceId: string) {
+    if (!spaceSettings) throw new MonitoringError('NOT_READY', '空间 Bot 设置尚未就绪。');
+    return (await spaceSettings.listBots(p, spaceId)).filter(bot => p.allowedTargetEnvs.includes(bot.env));
+  }
+  async function spaceOption(bot: DirectoryBot, info: BotOption, p: MonitoringPrincipal, spaceId: string): Promise<BotOption> {
+    const disabledReason = info.configurationDisabledReason ?? (bot.env !== 'prod' ? '仅支持生产环境 Bot 的诊断自愈配置' : undefined);
+    const canConfigure = !disabledReason && Boolean(await spaceSettings!.configurableBot(p, spaceId, bot));
+    return { ...info, canConfigure, configurationDisabledReason: disabledReason
+      ?? (canConfigure ? undefined : '仅 Bot 所有者和已获编辑权限的协作者可以修改配置') };
+  }
   function directoryIdBefore(left: string, right: string): boolean {
     return left.length < right.length || (left.length === right.length && left < right);
   }
@@ -67,7 +78,7 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
   return {
     async configure(p, input) {
       authorize(p);
-      return configureBots(configurations, directory, references, p, input, onBotEnabled);
+      return configureBots(configurations, directory, references, p, input, onBotEnabled, spaceSettings);
     },
     async readConfiguration(p, ref) {
       const { bot, store } = await configurationTarget(p, ref);
@@ -79,10 +90,12 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
     },
     async options(p, query) {
       authorize(p);
-      queryKeys(query, ['scope', 'q', 'limit', 'cursor', 'start', 'end', 'env']);
+      queryKeys(query, ['scope', 'q', 'limit', 'cursor', 'start', 'end', 'env', 'spaceId']);
+      const spaceId = parseSpaceId(query.spaceId);
       const scope = (query.scope ?? 'mine') as BotScope;
       if (!['mine', 'all', 'monitored'].includes(scope)) throw new MonitoringError('INVALID_EVENT', 'Bot 范围无效。');
       if (scope !== 'mine' && !p.isClawInsightAdmin) throw new MonitoringError('FORBIDDEN', '无权访问此 Bot 范围。');
+      if (spaceId && scope !== 'mine') throw new MonitoringError('INVALID_EVENT', '空间设置不支持切换 Bot 范围。');
       const env = query.env;
       if (env !== undefined && (typeof env !== 'string' || !p.allowedTargetEnvs.includes(env))) {
         throw new MonitoringError('INVALID_EVENT', 'Bot 环境无效。');
@@ -93,17 +106,25 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
       const limit = Number(rawLimit);
       if (q.length > 200 || !/^\d+$/.test(rawLimit) || limit < 1 || limit > 50) throw new MonitoringError('INVALID_EVENT', '搜索条件无效。');
       const window = parseWindow(query, now());
-      const context = JSON.stringify([1, p.staffId, p.isClawInsightAdmin, p.tenant, [...principal.allowedTargetEnvs].sort(), scope, q, limit, window]);
+      const context = JSON.stringify([1, p.staffId, p.isClawInsightAdmin, p.tenant, [...principal.allowedTargetEnvs].sort(), scope, q, limit, window, ...(spaceId ? [spaceId] : [])]);
       let after = query.cursor ? references.readCursor(String(query.cursor), context) : null;
       let page: { items: DirectoryBot[]; hasMore: boolean };
-      if (scope === 'monitored') {
+      if (spaceId) {
+        const candidates = (await spaceOptions(principal, spaceId))
+          .filter(bot => matchesQuery(bot, q) && (!after || directoryIdBefore(bot.directoryId, after)))
+          .sort((a, b) => directoryIdBefore(a.directoryId, b.directoryId) ? 1 : -1);
+        page = { items: candidates.slice(0, limit), hasMore: candidates.length > limit };
+      } else if (scope === 'monitored') {
         page = await monitoredDirectory(q, after, limit, principal);
       } else {
         page = await directory.search({ principal, scope, q, limit, after });
       }
-      const summaries = await store.summaries(page.items, window);
+      const summaries = spaceId ? [] : await store.summaries(page.items, window);
       const configs = configurations ? await recoveryConfigurations(configurations, page.items, legacyConfig) : undefined;
-      const items = page.items.map((bot, index) => option(bot, summaries[index], p.tenant, configs?.[index]));
+      const items = await Promise.all(page.items.map(async (bot, index) => {
+        const info = option(bot, summaries[index] ?? null, p.tenant, configs?.[index]);
+        return spaceId ? spaceOption(bot, info, principal, spaceId) : info;
+      }));
       const nextAfter = page.items.length ? page.items[page.items.length - 1].directoryId : after;
       return { items, nextCursor: page.hasMore && nextAfter ? references.cursor(nextAfter, context) : null, window };
     },

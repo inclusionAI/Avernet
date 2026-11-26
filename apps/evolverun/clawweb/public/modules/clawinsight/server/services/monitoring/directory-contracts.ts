@@ -41,10 +41,16 @@ export type BotOption = {
   activeEngine?: string; botType?: string | null;
   isServiceBot?: boolean;
   configurationDisabledReason?: string;
+  canConfigure?: boolean;
   enrollmentState: 'ENROLLED' | 'NOT_ENROLLED'; monitoring: MonitoringSummary | null;
   configuration?: { diagnosisEnabled: boolean; recoveryEnabled: boolean; version: number };
   capabilities: { canView: true; canRequestEnrollment: boolean };
 };
+/** The host verifies current Space membership and exact Bot assignment and Editor standing. */
+export interface MonitoringSpaceSettings {
+  listBots(principal: MonitoringPrincipal, spaceId: string): Promise<DirectoryBot[]>;
+  configurableBot(principal: MonitoringPrincipal, spaceId: string, bot: DirectoryBot): Promise<DirectoryBot | null>;
+}
 export type BotOptionsPage = { items: BotOption[]; nextCursor: string | null; window: MonitoringWindow };
 /** Service API: authenticated monitoring reads and Bot configuration writes. */
 export interface MonitoringBrowserApi {

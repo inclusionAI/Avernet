@@ -3,7 +3,8 @@ import { logRepairEvent, repairLogError } from "../services/repair/common/loggin
 import { resolveRepairRequestActor } from "../services/repair/common/request-actor.js";
 import { parseAgentExecutionTicket } from "../services/repair/common/agent-execution.js";
 import { AgentToolError } from "../services/repair/common/agent-tools/errors.js";
-import type { RecoveryActor } from "../services/repair/session-recovery/contracts.js";
+import type { RecoveryActor, RecoveryRequest } from "../services/repair/session-recovery/contracts.js";
+import { MonitoringError, type DiagnosisItem } from "../services/monitoring/contracts.js";
 import { Router, json, type Request } from "express";
 import { SessionRecoveryError } from "../services/repair/session-recovery/errors.js";
 import { parseRequest } from "../services/repair/session-recovery/validation.js";
@@ -12,6 +13,8 @@ import { redactPersistableText } from "@avernet/clawweb-shared/server/services/r
 import type { SessionRecoveryRuntime } from "../services/repair/session-recovery/contracts.js";
 export type SessionRecoveryRouterOptions = SessionRecoveryRuntime & {
   resolveActor?: (req: Request) => Promise<RecoveryActor | null>;
+  diagnosisForRecovery?: (request: RecoveryRequest) => Promise<Pick<DiagnosisItem,
+    "diagnosisId" | "decision" | "diagnosedAt" | "handlerName" | "businessProblemCategory" | "businessDiagnosis" | "systemDiagnosis"> | null>;
 };
 export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOptions): Router {
   const router = Router();
@@ -61,7 +64,16 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
     } catch (error) { next(error); }
   });
   router.get("/monitoring/session-recoveries/:taskId", async (req, res, next) => {
-    try { res.set("Cache-Control", "no-store").json(await tasks().detail(String(req.params.taskId), await actor(req))); }
+    try {
+      const task = await tasks().detail(String(req.params.taskId), await actor(req));
+      const diagnosis = req.query.includeDiagnosis === "true" && supplied?.diagnosisForRecovery
+        ? await supplied.diagnosisForRecovery(task.request).catch(error => {
+          if (error instanceof MonitoringError && error.code === "NOT_READY") return null;
+          throw error;
+        })
+        : null;
+      res.set("Cache-Control", "no-store").json(diagnosis ? { ...task, diagnosis } : task);
+    }
     catch (error) { next(error); }
   });
   router.patch("/monitoring/session-recoveries/:taskId/share", json({ limit: "8kb", inflate: false }), async (req, res, next) => {
