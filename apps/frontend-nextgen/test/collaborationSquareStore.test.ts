@@ -94,6 +94,30 @@ describe('collaboration square store', () => {
       'none',
     ]);
   });
+
+  test('申请中写入最新 pending 单号，关系状态变化时清除旧单号', () => {
+    const store = useCollaborationSquareStore.getState();
+    store.setBots([
+      {
+        id: 'b1',
+        name: '助手',
+        ownerName: 'Owner',
+        description: '',
+        capabilities: [],
+        relationshipStatus: 'applying',
+        pendingFriendRequestId: 'request-old',
+      },
+    ]);
+
+    store.updateBotRelationship('b1', 'applying', 'request-new');
+    expect(useCollaborationSquareStore.getState().bots[0].pendingFriendRequestId).toBe('request-new');
+
+    store.updateBotRelationship('b1', 'friend');
+    expect(useCollaborationSquareStore.getState().bots[0]).toMatchObject({
+      relationshipStatus: 'friend',
+      pendingFriendRequestId: undefined,
+    });
+  });
 });
 
 describe('collaboration square store task slice', () => {
