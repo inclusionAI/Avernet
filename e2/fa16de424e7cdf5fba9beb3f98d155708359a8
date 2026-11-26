@@ -1,0 +1,18 @@
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  h_b601d8706f5d44 374
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/owner-card.test.ts
+  h_b601d8706f5d44 12-13,17-20,40-41,46-47,64,87-88,101-102,156,158,178-194
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/notification.ts
+  h_b601d8706f5d44 50,74-78,81,109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e2fa16de424e7cdf5fba9beb3f98d155708359a8",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

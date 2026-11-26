@@ -1,0 +1,41 @@
+apps/bcs/crates/bootstrap/bcs/tests/agent_invoke_e2e/host.rs
+  s_7d114ded8fc0da::t_3faf1b3ed523fb 1-97
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/runner.rs
+  s_7d114ded8fc0da::t_4a1fcbfe6bcfdf 3-4,26-27,38-40
+apps/bcs/docs/superpowers/specs/2026-08-18-friend-edge-permission-reform.md
+  s_7d114ded8fc0da::t_ed40af62f62eb2 3676-3684,3692,3719,3727
+apps/bcs/scripts/caller_e2e_coverage.sh
+  s_7d114ded8fc0da::t_3764c114fbe30d 14,38-44
+apps/bcs/scripts/ci/companion_coverage.py
+  s_7d114ded8fc0da::t_83b33c9007775c 41
+apps/bcs/scripts/e2e-test/agent_invoke_story.py
+  s_7d114ded8fc0da::t_7da6807ac25f60 1-260
+apps/bcs/scripts/e2e-test/agent_invoke_story_cases.py
+  s_7d114ded8fc0da::t_67d9d58d045b77 1-230
+singlebox/ci/singlebox_coverage.sh
+  s_7d114ded8fc0da::t_dbc09d3e18fd02 588-589,749,855
+singlebox/ci/tests/test_singlebox_companion_coverage.py
+  s_7d114ded8fc0da::t_8e0d440532a2c0 91,127,170
+singlebox/ci/tests/test_verify_singlebox_coverage_artifacts.py
+  s_7d114ded8fc0da::t_a1fe9edbc10daf 34-47,147-173
+singlebox/ci/verify_singlebox_coverage_artifacts.py
+  s_7d114ded8fc0da::t_cb5d026916186a 35,212-239,246
+singlebox/verity/test_singlebox_coverage_gate.sh
+  s_7d114ded8fc0da::t_0a6783ee03cf1f 198-200,324
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a404e3aa91652c25e175d69aace716b92008fec9",
+  "prompts": {},
+  "sessions": {
+    "s_7d114ded8fc0da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b4-ef36-7703-9562-0f40ee69f61b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+apps/frontend-nextgen/src/components/ui/DataTable/DataTable.tsx
+  s_e21a120e2af364::t_62f5b07afe86e8 105-114
+apps/frontend-nextgen/test/components/ui/DataTable.test.tsx
+  s_e21a120e2af364::t_b568ecf921ba13 136-156
+apps/frontend-nextgen/test/components/BotWorkshop/BotInfoCell.test.tsx
+  s_e21a120e2af364::t_14187d552e3dc0 45-56,58-70
+  s_e21a120e2af364::t_0b408c318bd79c 57
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotInfoCell.tsx
+  s_e21a120e2af364::t_bdc115f20574ef 109-125
+  s_e21a120e2af364::t_fb30f90be6aa61 4,11
+  s_e21a120e2af364::t_93c1320bdf92b1 38,42-45,47-50
+  s_e21a120e2af364::t_b63739d3feec1c 39-41,46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "df622efbc6040d3d65cedb4f98cb4c1d0de3c8c7",
+  "prompts": {},
+  "sessions": {
+    "s_e21a120e2af364": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "eafe87f1-1f6c-41f6-abaa-5bf47e4dbec0",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

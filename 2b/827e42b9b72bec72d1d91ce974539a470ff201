@@ -1,0 +1,25 @@
+apps/bcsfuse/packages/search-core/src/search_core/core/observation.py
+  s_f9448a67993c61::t_ee3d25e67dabb6 65-77,220
+apps/bcsfuse/packages/search-core/tests/test_log_context.py
+  s_f9448a67993c61::t_52927733f94482 1-38
+apps/bcsfuse/packages/search-core/src/search_core/core/log_context.py
+  s_f9448a67993c61::t_0d32f9c8f36834 1-90
+apps/bcsfuse/packages/search-core/src/search_core/application/search.py
+  s_f9448a67993c61::t_41f03f12c97c6d 22,40,101,112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2b827e42b9b72bec72d1d91ce974539a470ff201",
+  "prompts": {},
+  "sessions": {
+    "s_f9448a67993c61": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c37b-a948-7d12-8346-7160e12ca8b0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

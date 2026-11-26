@@ -1,0 +1,45 @@
+apps/backend/src/agentclaw/community/adapters/http/bot_public/risk_routes.py
+  s_4b3bb5e3f4e05a::t_8d13e004c74ddf 94
+apps/backend/src/agentclaw/community/adapters/http/bot_public/schemas_risk.py
+  s_4b3bb5e3f4e05a::t_2fcd3740e1e6a6 108
+apps/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py
+  s_4b3bb5e3f4e05a::t_351b4e7a4440bc 53,392-422,453-454,462-466,469,471-472,475,480,484,488-490,564-569
+apps/backend/src/agentclaw/community/core/bot_public/services/publication_actions.py
+  s_4b3bb5e3f4e05a::t_cbb89fda47dbe3 446-449
+apps/backend/src/agentclaw/community/core/bot_public_risk/advance.py
+  s_4b3bb5e3f4e05a::t_c44c4fcb261d11 7-12,14,46,58-59,78-82,104,136,240-241,244-248
+apps/backend/src/agentclaw/community/core/bot_public_risk/approval_guard.py
+  s_4b3bb5e3f4e05a::t_38c723d04f72b3 8-13,19,47-63,103-104,117-123,132-133,136-142,144-147,149-150,156-178
+apps/backend/src/agentclaw/community/core/bot_public_risk/eligibility.py
+  s_4b3bb5e3f4e05a::t_28c47f4b5a7e3a 2,4-5,9-64,71-74,77,82-90
+apps/backend/src/agentclaw/community/core/bot_public_risk/notices.py
+  s_4b3bb5e3f4e05a::t_7a2a76e451bd81 15-16,151-152
+apps/backend/src/agentclaw/community/di/modules/bot_public_risk_module.py
+  s_4b3bb5e3f4e05a::t_e1e4f0cd733325 100,107
+apps/backend/tests/community/adapters/http/bot_public/test_risk_routes.py
+  s_4b3bb5e3f4e05a::t_463bbc332725ff 1,561,568-571,574-576
+apps/backend/tests/community/core/bot_public/test_risk_approval_guard.py
+  s_4b3bb5e3f4e05a::t_bfadd1c5741e84 8,62,68-75,77-83,177-180,182,226-268
+apps/backend/tests/community/core/bot_public/test_risk_eligibility.py
+  s_4b3bb5e3f4e05a::t_969f15211fca6e 1,23,26,40-61
+docs/adr/0027-bot-publication-risk-is-the-application-state.md
+  s_4b3bb5e3f4e05a::t_99f22f06b83c75 1-41
+docs/adr/README.md
+  s_4b3bb5e3f4e05a::t_9625c32bebc226 12-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "18720820f44ce8ec7ea0bfafa5f6ad92be23a5e3",
+  "prompts": {},
+  "sessions": {
+    "s_4b3bb5e3f4e05a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212ee-6dfd-7652-9c5d-c1f683ce868a",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

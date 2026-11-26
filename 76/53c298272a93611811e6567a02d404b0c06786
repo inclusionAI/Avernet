@@ -1,0 +1,97 @@
+apps/frontend-nextgen/src/pages/Workspace/hooks/useManifestHistoryLoader.ts
+  s_f3220071434f0b::t_f1a217fdf3ddec 2,10,13-17,25
+  s_f3220071434f0b::t_213c312a7a9842 35,44-45,52-56
+  s_f3220071434f0b::t_3373eed802b6bb 72-77
+  s_f3220071434f0b::t_856206527879d4 1,5,12,18-21
+  s_f3220071434f0b::t_ff0903bcf1e144 68-69
+  s_f3220071434f0b::t_a52e26bcecbb49 78
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/SpeakingLeaseControl.tsx
+  s_9e46492605eb24::t_0008ee02b281e7 26-30
+  s_9e46492605eb24::t_0ef0c87fa0b62f 77
+  s_9e46492605eb24::t_96139f93601cfb 91-92,94-95
+  s_9e46492605eb24::t_8192ae3c8416a8 6-8
+  s_9e46492605eb24::t_1926fb3b486ab7 133,135-141,149
+apps/frontend-nextgen/src/services/bcs/collabSenderBots.ts
+  s_f3220071434f0b::t_c37c584a5c4e65 2-4,7-24,68-84,87-113
+  s_f3220071434f0b::t_cec79adae2a057 1,5-6
+  s_f3220071434f0b::t_9c9ffc3f8238ae 85-86
+  s_f3220071434f0b::t_61756e8905ac9e 25-67
+apps/frontend-nextgen/test/pages/Workspace/GroupChatPane/SpeakingLeaseControl.test.tsx
+  s_9e46492605eb24::t_b5910ee2a5f263 160-175
+  s_9e46492605eb24::t_2647feabf08032 68-78
+apps/frontend-nextgen/src/services/botWorkshop/botEditorService.ts
+  s_f3220071434f0b::t_fa67ef12ae9255 13
+  s_f3220071434f0b::t_f29b156f26ea1a 73-75,77,79,82
+apps/frontend-nextgen/test/sidePanel/libraryCdnInjector.refresh.test.ts
+  s_f3220071434f0b::t_1c3d34dcfa01ed 63,72
+apps/frontend-nextgen/test/pages/Workspace/hooks/useSenderBotCdnSync.test.tsx
+  s_f3220071434f0b::t_d06b78714a0817 71-80,89,92
+  s_f3220071434f0b::t_75edb6b6651601 1-15,28-30,32-33,36,40-42,44-46,48-53,55-56,58-64,66-68
+  s_f3220071434f0b::t_d1c2cd38b6374c 69-70,81-88,90-91,93-115
+  s_f3220071434f0b::t_3cbf62ea9d10fc 19,23
+  s_f3220071434f0b::t_f973811ca40a4d 16-18,20-22,24-27,31,34-35,37-39,43,47,54,57,65
+apps/frontend-nextgen/test/services/bcs/collabSenderBots.test.ts
+  s_f3220071434f0b::t_11df1f449c2370 71-103
+  s_f3220071434f0b::t_a116cb0b4b9f3e 2-7
+  s_f3220071434f0b::t_707a0744ea8730 42
+  s_f3220071434f0b::t_1beb1d253ea75e 1,8-41,43-70
+apps/frontend-nextgen/src/services/bcs/bcsManifestController.ts
+  s_f3220071434f0b::t_e45a17898eea47 96
+  s_f3220071434f0b::t_3020166c077a69 82-84,87-88,91-95
+apps/frontend-nextgen/test/sidePanel/libraryCdnInjector.test.ts
+  s_f3220071434f0b::t_c345d8bbf36321 10,12
+  s_f3220071434f0b::t_ab8cc42f8d43d7 99-122
+apps/frontend-nextgen/test/pages/Workspace/hooks/useManifestHistoryLoader.cdn.test.tsx
+  s_f3220071434f0b::t_d975a8c270af94 106-127,129,131
+  s_f3220071434f0b::t_8c047390513786 1-71,73-78,80-105
+  s_f3220071434f0b::t_68f2ecd3237790 72,79
+  s_f3220071434f0b::t_1c23815bc0ff72 130
+  s_f3220071434f0b::t_8a385060be9d2d 128
+apps/frontend-nextgen/src/services/bcs/libraryCdnInjector.ts
+  s_f3220071434f0b::t_ee003b17342afb 121,131,136-138
+  s_f3220071434f0b::t_4ab168f644247a 198,202,205,212-244
+  s_f3220071434f0b::t_0359649df0f2e4 34,42,45-59
+  s_f3220071434f0b::t_533723a90e37bf 160-172,245
+  s_f3220071434f0b::t_f19429c4f7f747 60
+  s_f3220071434f0b::t_0e64f679aad2fe 246
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChatHistorySync.ts
+  s_f3220071434f0b::t_f78b96b566dcc0 1,17,24-25,36
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/index.tsx
+  s_9e46492605eb24::t_c564e78a6951ff 254-256
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChat.ts
+  s_f3220071434f0b::t_ba1f5290a3d888 11
+  s_f3220071434f0b::t_65a2480fad77aa 53-55
+  s_f3220071434f0b::t_f57314fb10bf26 2
+  s_f3220071434f0b::t_65f9c48134dae2 29
+  s_f3220071434f0b::t_3d3d7d3cefc878 130
+  s_f3220071434f0b::t_e3f292e07a7d4c 82-84
+apps/frontend-nextgen/src/pages/Workspace/hooks/useSenderBotCdnSync.ts
+  s_f3220071434f0b::t_49457e57142d7e 1,3-16,21-25,27,29-32,36-41,44,46
+  s_f3220071434f0b::t_9df36f8039da78 2,17-20,26,28,33-35,42-43,45,47
+apps/frontend-nextgen/test/sidePanel/libraryCdnInjector.registerBotCdnList.test.ts
+  s_f3220071434f0b::t_3b607b4afa512b 1-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7653c298272a93611811e6567a02d404b0c06786",
+  "prompts": {},
+  "sessions": {
+    "s_9e46492605eb24": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "e8a23be7-c246-4ac1-b890-4acfc93784c6",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_f3220071434f0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "f6c0fde5-8935-4637-8b47-6d750e04625f",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

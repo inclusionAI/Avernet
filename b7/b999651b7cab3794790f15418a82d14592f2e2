@@ -1,0 +1,85 @@
+.github/workflows/unit-tests.yml
+  s_94c42a5933ce17::t_4f52c13495beb7 121-135,297-302
+apps/bcs/Cargo.lock
+  s_7d114ded8fc0da::t_5670c5d3f0fb7b 1796,1805
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/agent_invoke.rs
+  s_7d114ded8fc0da::t_2acf474ff432d1 43-66
+apps/bcs/crates/service-api/bcs-service-api/src/types/agent_invoke.rs
+  s_7d114ded8fc0da::t_7e8c69975c2fbf 242-263
+apps/bcs/crates/services/bcs-db-migrations/CONTEXT.md
+  s_7d114ded8fc0da::t_18e3b62c51e1e8 9,16,57,69-77
+apps/bcs/crates/services/bcs-db-migrations/src/lib.rs
+  s_7d114ded8fc0da::t_8c72857ab27fdd 167,295,303-314,617-620,730-732,782-791
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/agent_invoke_tests.rs
+  s_7d114ded8fc0da::t_61a4f5af90cf3a 1-90
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/auth_session_version_migration_tests.rs
+  s_7d114ded8fc0da::t_ff82eacd1c7653 93
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/catalog_labels_tests.rs
+  s_7d114ded8fc0da::t_94816fa445d703 26
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests.rs
+  s_7d114ded8fc0da::t_e783665d903ca2 278,289,752
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests/bot_provider_storage.rs
+  s_7d114ded8fc0da::t_61d7ce6a115119 9,48,71,100,129,131
+apps/bcs/crates/services/bcs-edge-permission-store/CONTEXT.md
+  s_7d114ded8fc0da::t_e7edaeb603db2f 205-230
+apps/bcs/crates/services/bcs-edge-permission-store/Cargo.toml
+  s_7d114ded8fc0da::t_1e287e5b70a69f 21-22
+apps/bcs/crates/services/bcs-edge-permission-store/src/agent_invoke/facts.rs
+  s_7d114ded8fc0da::t_00385868d3ad1b 1-112
+apps/bcs/crates/services/bcs-edge-permission-store/src/agent_invoke/mod.rs
+  s_7d114ded8fc0da::t_c4d851090d0dfb 1-165
+apps/bcs/crates/services/bcs-edge-permission-store/src/agent_invoke/scope.rs
+  s_7d114ded8fc0da::t_d927a44731168f 1-72
+apps/bcs/crates/services/bcs-edge-permission-store/src/agent_invoke/tests.rs
+  s_7d114ded8fc0da::t_e0f7c13acf7cb7 1-50
+apps/bcs/crates/services/bcs-edge-permission-store/src/lib.rs
+  s_7d114ded8fc0da::t_3aa6cca0572dc6 70-72
+apps/bcs/crates/services/bcs-edge-permission-store/tests/agent_invoke_facts.rs
+  s_7d114ded8fc0da::t_d775c2fc10bdba 1-267
+apps/bcs/crates/services/bcs-edge-permission-store/tests/conformance_agent_invoke_facts.rs
+  s_7d114ded8fc0da::t_23d40878591c6b 1-18
+apps/bcs/crates/services/bcs-edge-permission-store/tests/conformance_agent_invoke_local.rs
+  s_7d114ded8fc0da::t_e95c0d9b0b5e98 84,92,100,104,129,202-206
+apps/bcs/crates/services/bcs-edge-permission-store/tests/conformance_agent_invoke_mysql.rs
+  s_7d114ded8fc0da::t_bf9b89c46381e6 3,19,22-61
+apps/bcs/crates/test-support/bcs-test-support/src/contract/agent_invoke.rs
+  s_7d114ded8fc0da::t_f644c860ca900e 115,306,431,482
+apps/bcs/crates/test-support/bcs-test-support/src/contract/agent_invoke_facts.rs
+  s_7d114ded8fc0da::t_06621e2f725f52 1-43
+apps/bcs/crates/test-support/bcs-test-support/src/contract/mod.rs
+  s_7d114ded8fc0da::t_771d5eb275392e 38-39
+apps/bcs/crates/tools/bcs-admin/src/migrate_human_input_index_tests.rs
+  s_94c42a5933ce17::t_bb1ef22344cae1 40
+apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs
+  s_94c42a5933ce17::t_b9f87d815e2047 60,62,66,73,194,196
+apps/bcs/docs/superpowers/specs/2026-08-18-friend-edge-permission-reform.md
+  s_7d114ded8fc0da::t_68a3274efb35d4 3530,3546-3557
+apps/bcs/migrations/mysql/050_agent_invoke_authorization.sql
+  s_7d114ded8fc0da::t_67b440c0374f47 1-133
+apps/bcs/migrations/sqlite/048_agent_invoke_authorization.sql
+  s_7d114ded8fc0da::t_e9ad897939713d 1-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b7b999651b7cab3794790f15418a82d14592f2e2",
+  "prompts": {},
+  "sessions": {
+    "s_7d114ded8fc0da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b4-ef36-7703-9562-0f40ee69f61b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    },
+    "s_94c42a5933ce17": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20d69-010f-7df2-957c-de77c2ec3c63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

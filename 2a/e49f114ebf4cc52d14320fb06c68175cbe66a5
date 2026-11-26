@@ -1,0 +1,28 @@
+apps/evolverun/docs/clawweb/evolve-host-contract.md
+  s_f9ec5eab8f4aa4::t_61b40d0f92426e 20-32
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/components/SkillRegistrationDialog.tsx
+  s_f9ec5eab8f4aa4::t_83500512496d1f 21,25-26,32,48-49,55-62,66
+  s_f9ec5eab8f4aa4::t_fad8b494a6b4ff 88
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/pages/__tests__/skill-registration-link.test.tsx
+  s_f9ec5eab8f4aa4::t_fad8b494a6b4ff 95
+  s_f9ec5eab8f4aa4::t_61b40d0f92426e 1-94,96-151
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/pages/SkillCenter.tsx
+  s_f9ec5eab8f4aa4::t_83500512496d1f 2,12-13,18,24-28,55,59-66,70-71,80-86,117-118
+  s_f9ec5eab8f4aa4::t_61b40d0f92426e 72-79,91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2ae49f114ebf4cc52d14320fb06c68175cbe66a5",
+  "prompts": {},
+  "sessions": {
+    "s_f9ec5eab8f4aa4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c2d2-ba2d-7031-8b2f-68d24b6afb0c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
