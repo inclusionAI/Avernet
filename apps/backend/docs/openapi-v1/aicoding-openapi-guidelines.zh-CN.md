@@ -165,16 +165,21 @@ GET /openapi/v1/bots/aicoding/work-items
 Service 对每个目标 Bot 调用现有：
 
 ```text
-GET /api/aicoding/sessions?user_id=<caller>&session_kind=user&limit=<scan_limit>&offset=0
+GET /api/aicoding/sessions?user_id=<signed-human>&session_kind=user&limit=<scan_limit>&offset=0
 ```
 
-并尽可能透传 `source`、`since_ms`、`run_status`。
+并透传 `source`、`since_ms`、`run_status`。`user_id` 是 source 分类视角，不是 Relay 的
+存储过滤条件，因此它不会把 collab / member-task 会话在源头过滤掉。
 
 兼容规则：
 
 1. 所有 Bot 使用同一份参数；不做新旧 Bot 双轨参数转换。
-2. 新 Relay：在源头先过滤 source/time/status，再返回满足条件的前 `limit` 条。
-3. 旧 Relay：忽略不认识的可选参数，返回最近前 `limit` 条；OCB 再做同样的过滤。
+2. 新 Relay：读取 `user_id` 作为分类视角，在源头先过滤 source/time/status，
+   再返回满足条件的前 `limit` 条。
+3. 旧 Relay：忽略 `source/since_ms/run_status`，返回最近前
+   `limit` 条；OCB 再做同样的过滤。旧版先截页再过滤，因此如果前
+   `limit` 条不满足条件，本快照可能返回空；这是近期扫描窗口的明确结果保证，
+   不是 `partial=true`。
 4. OCB 永远保留 fallback 过滤，即使新 Relay 已经保证结果。这样升级期和异常结果都稳定。
 5. OCB 按 `(bot_id, owner_id, session_key)` 去重，保留 `updated_at_ms` 最新一条。
 6. 聚合排序使用 `updated_at_ms` desc，再按 Bot/owner/session key 稳定排序。
