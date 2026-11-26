@@ -97,18 +97,44 @@ impl Host {
                         Duration::from_secs(60),
                     )
                     .await?;
+                // Like the Connector engine: own the call's command partition,
+                // read it through an assigned feed, claim with the ownership
+                // proof, and find the call in the partition's held index.
+                let pool = self
+                    .dispatch
+                    .get(&did)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("dispatch missing"))?
+                    .view
+                    .spec
+                    .pool;
+                let partition = self.queue.partition_of(&did);
+                let proof = self.own_partition(partition, &me).await?;
+                let mut hints = self.queue.notifications(pool.clone(), me.clone()).await?;
+                hints.assign(&[partition]);
+                for hint in hints
+                    .receive(NonZeroU32::new(16).unwrap_or(NonZeroU32::MIN), Duration::from_millis(50))
+                    .await?
+                {
+                    hints.ack(&hint).await?;
+                }
                 let ClaimOutcome::Acquired(mut held) = self
                     .queue
                     .claim(DispatchClaimRequest {
                         did: did.clone(),
                         me,
                         request_id: RequestId(format!("{}.claim", did.0)),
-                        partition: None,
+                        partition: Some(proof),
                     })
                     .await?
                 else {
                     anyhow::bail!("dispatch was not claimable")
                 };
+                let listed = self
+                    .queue
+                    .held_in(&pool, partition, NonZeroU32::new(100).unwrap_or(NonZeroU32::MIN))
+                    .await?;
+                anyhow::ensure!(listed.contains(&did), "claimed call missing from its partition index");
                 let operation = SendOperation::Start {
                     request_id: RequestId(format!("{}.send", did.0)),
                 };
@@ -282,5 +308,55 @@ impl Host {
             }
             other => anyhow::bail!("unknown dispatch action {other}"),
         }
+    }
+}
+
+impl Host {
+    /// Makes `me` the owner of a Connector partition the way the engine
+    /// does: claim it when it has no owner, otherwise take it over from the
+    /// earlier story Connector by a handoff that this target commits.
+    async fn own_partition(&self, partition: u32, me: &Instance) -> anyhow::Result<ShardClaim> {
+        let shard = ShardId(partition);
+        let Some(current) = self.partitions.current(shard).await? else {
+            return match self
+                .partitions
+                .claim(ClaimShard {
+                    shard,
+                    me: me.clone(),
+                    expected_epoch: None,
+                    request_id: RequestId(format!("{}.{partition}.claim", me.incarnation)),
+                })
+                .await?
+            {
+                LeaseClaim::Claimed(claim) | LeaseClaim::AlreadyClaimed(claim) => Ok(claim),
+                LeaseClaim::Conflict => anyhow::bail!("partition not acquired"),
+            };
+        };
+        if current.claim.owner.instance == *me {
+            return Ok(current.claim);
+        }
+        if let Some(open) = &current.handoff {
+            // The earlier transfer's source reported done; clear its mark.
+            self.partitions.clear_handoff(&current.claim, &open.request_id).await?;
+        }
+        let request_id = RequestId(format!("{}.{partition}.handoff", me.incarnation));
+        let HandoffOutcome::Accepted(record) = self
+            .partitions
+            .handoff(HandoffRequest {
+                request_id: request_id.clone(),
+                from: current.claim,
+                target: me.clone(),
+                grace: Duration::from_secs(5),
+            })
+            .await?
+        else {
+            anyhow::bail!("partition not handed over");
+        };
+        // The source (the earlier story command) holds no running call.
+        anyhow::ensure!(
+            self.partitions.source_done(&record.claim, &request_id).await?,
+            "handoff source not recorded done"
+        );
+        Ok(record.claim)
     }
 }
