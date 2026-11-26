@@ -168,8 +168,10 @@ impl ConnectorEngine {
         let inner = &self.inner;
         let me = inner.config.me.clone();
         let count = inner.ports.queue.command_partitions();
-        let candidates = self.candidates().await;
-        let candidates: Option<Vec<Instance>> = candidates.map(|c| c.into_iter().map(|m| m.instance).collect());
+        // The member list is read only once a partition needs an owner, and
+        // at most once per round: with healthy owners a round reads only the
+        // owner records.
+        let mut candidates: Option<Option<Vec<Instance>>> = None;
         let mut liveness: BTreeMap<(String, String), Liveness> = BTreeMap::new();
         for partition in 0..count {
             if inner.draining.load(Ordering::SeqCst) {
@@ -212,7 +214,11 @@ impl ConnectorEngine {
             } else {
                 lock(&inner.ownership).lose(partition);
             }
-            let Some(candidates) = &candidates else {
+            if candidates.is_none() {
+                let listed = self.candidates().await;
+                candidates = Some(listed.map(|c| c.into_iter().map(|m| m.instance).collect()));
+            }
+            let Some(Some(candidates)) = &candidates else {
                 continue;
             };
             let Some(rank) = rank_candidates(partition, candidates).iter().position(|i| *i == me) else {

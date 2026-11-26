@@ -420,3 +420,17 @@ async fn a_cancelled_drain_caller_does_not_cut_short_another_drain() {
     assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 }, "only the partition (no peer)");
     assert!(members.dead.lock().unwrap().contains(&"conn-03".to_owned()));
 }
+
+#[tokio::test]
+async fn rounds_with_healthy_owners_do_not_read_the_member_list() {
+    use std::sync::atomic::Ordering;
+    let mut rig = Rig::new().await;
+    let members = members(&mut rig);
+    let _running = rig.start();
+    until("owns the partition", || async { rig.owners.owner(0) == Some(instance("conn-03")) }).await;
+    settle().await;
+    let reads = members.member_reads.load(Ordering::SeqCst);
+    // Several more ownership rounds (every 20 ms): owner records only.
+    settle().await;
+    assert_eq!(members.member_reads.load(Ordering::SeqCst), reads);
+}
