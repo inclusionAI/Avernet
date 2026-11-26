@@ -99,10 +99,10 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
                 event_type=event_type,
                 actor_type=actor_type,
                 actor_id=actor_id,
-                actor_display_name=_actor_display_name(
-                    actor_type,
-                    actor_id,
-                    actor_display_name,
+                actor_display_name=self._resolve_actor_display_name(
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    display_name=actor_display_name,
                 ),
                 original_text=text,
                 target_type=target_type,
@@ -130,7 +130,9 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
     ) -> Callable[[dict[str, object] | None], dict[str, object]]:
         def build(current: dict[str, object] | None) -> dict[str, object]:
             aggregate = _decode_aggregate(current)
-            actor = _Actor(type=actor_type, id=actor_id, display_name=actor_display_name)
+            actor = _Actor(
+                type=actor_type, id=actor_id, display_name=actor_display_name
+            )
             actors = aggregate.actors
             next_actors = _upsert_actor(actors, actor)
             event_count = aggregate.event_count + 1
@@ -183,6 +185,37 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
             identity = f"{target_type}:{target_id}"
         raw = f"{event_type.value}|{identity}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _resolve_actor_display_name(
+        self,
+        *,
+        actor_type: str,
+        actor_id: str,
+        display_name: str | None,
+    ) -> str:
+        """Resolve Bot Actor展示名，失败时按既有规则降级，不影响主动作。"""
+        if actor_type != "BOT":
+            return _actor_display_name(actor_type, actor_id, display_name)
+
+        fallback = _actor_display_name(actor_type, actor_id, display_name)
+        try:
+            scoped = parse_scoped_bot_identity(actor_id)
+            if scoped is None:
+                if is_bare_default_bot_identity(actor_id):
+                    return fallback
+                bot = self._bot_repository.get_by_id(actor_id)
+            else:
+                bot_id, owner_id = scoped
+                bot = self._bot_repository.get_by_id_and_owner(bot_id, owner_id)
+            bot_name = bot.get("bot_name") if bot is not None else None
+            if isinstance(bot_name, str) and bot_name.strip():
+                return bot_name
+        except Exception:
+            pass
+
+        if display_name and display_name.strip():
+            return display_name
+        return fallback
 
     def _recipient_user_id(
         self,
@@ -280,7 +313,9 @@ def _decode_aggregate(current: dict[str, object] | None) -> _Aggregate:
         if isinstance(value, str)
     )
     return _Aggregate(
-        event_count=event_count if isinstance(event_count, int) and event_count > 0 else 0,
+        event_count=event_count
+        if isinstance(event_count, int) and event_count > 0
+        else 0,
         actors=tuple(actors),
         post_ids=post_ids,
         topic_title=topic_title if isinstance(topic_title, str) else None,
@@ -292,10 +327,14 @@ def _upsert_actor(actors: tuple[_Actor, ...], next_actor: _Actor) -> tuple[_Acto
     for actor in actors:
         if actor.type == next_actor.type and actor.id == next_actor.id:
             display_name = next_actor.display_name or actor.display_name
-            result.append(_Actor(type=actor.type, id=actor.id, display_name=display_name))
+            result.append(
+                _Actor(type=actor.type, id=actor.id, display_name=display_name)
+            )
         else:
             result.append(actor)
-    if not any(actor.type == next_actor.type and actor.id == next_actor.id for actor in result):
+    if not any(
+        actor.type == next_actor.type and actor.id == next_actor.id for actor in result
+    ):
         result.append(next_actor)
     return tuple(result)
 
@@ -321,7 +360,6 @@ def _actor_label(actor: _Actor) -> str:
     return actor.display_name or actor.id
 
 
-
 def _aggregate_action(
     event_type: WorkOrderEventType,
     original_text: str,
@@ -337,6 +375,7 @@ def _aggregate_action(
     if original_text == "回复了你的回复":
         return "回复了你的回复"
     return "回复了你的帖子"
+
 
 def _aggregate_text(
     *,
