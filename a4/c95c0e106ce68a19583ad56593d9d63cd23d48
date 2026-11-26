@@ -1,0 +1,21 @@
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskOverviewV2.test.tsx
+  s_885ffb973587a3::t_d1b91934e5a0c9 440
+apps/frontend-nextgen/test/collaborationPrivacyComponents.test.tsx
+  s_885ffb973587a3::t_d1b91934e5a0c9 68-69,75-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a4c95c0e106ce68a19583ad56593d9d63cd23d48",
+  "prompts": {},
+  "sessions": {
+    "s_885ffb973587a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17742-1085-7833-94e1-041d70172b63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
