@@ -1,0 +1,36 @@
+.tc-recovery-list-layout {
+  container: recovery-list / inline-size;
+}
+
+.tc-recovery-list-table {
+  display: none;
+}
+
+@container recovery-list (min-width: 850px) {
+  .tc-recovery-list-table {
+    display: block;
+  }
+
+  .tc-recovery-list-cards {
+    display: none;
+  }
+}
+
+.tc-recovery-progress-node:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 15px;
+  left: calc(50% + 22px);
+  right: calc(-50% + 22px);
+  border-top: 1px solid var(--color-border);
+}
+
+.tc-recovery-detail {
+  container: recovery-detail / inline-size;
+}
+
+@container recovery-detail (min-width: 720px) {
+  .tc-recovery-plan-columns {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  }
+}

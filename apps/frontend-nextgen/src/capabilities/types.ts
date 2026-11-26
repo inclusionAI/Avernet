@@ -696,6 +696,8 @@ export interface AppCapabilities {
   navigateToConversation: (target: TaskSessionJumpTarget) => CapabilityResult<null>;
   getRuntimeRouteRedirect: (context: RuntimeRouteContext) => CapabilityResult<string | null>;
   getBotHealthCapability: () => CapabilityResult<BotHealthCapability>;
+  /** Whether the deployment provides the session recovery API. Unavailable when omitted. */
+  getSessionRecoveryEnabled?: () => CapabilityResult<boolean>;
   getCurrentOpenApiUserId: (context?: CurrentUserContext) => CapabilityResult<string | undefined>;
   /**
    * 当前登录 human 身份（花名/头像/在线）。Open Core 默认读 workspaceStore.identities

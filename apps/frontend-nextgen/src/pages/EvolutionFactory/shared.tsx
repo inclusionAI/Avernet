@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { Button } from '@/components/ui/Button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { cn } from '@/utils/cn';
@@ -11,16 +12,70 @@ import { Hint } from './sharedPrimitives';
 // 列表页既有 `from './shared'` 调用点保持零改动。
 export * from './sharedPrimitives';
 
-/** Shared navigation: blue text on a light blue pill, with no underline or border. */
-export type EvolutionTab = 'tasks' | 'templates' | 'versions';
-const EVOLUTION_TABS: ReadonlyArray<readonly [EvolutionTab, string]> = [
+export type EvolutionTab = 'tasks' | 'templates' | 'versions' | 'recovery';
+
+export function sessionRecoveryEnabled() {
+  return getCapabilities().getSessionRecoveryEnabled?.().value === true;
+}
+const EVOLUTION_TABS = [
   ['tasks', '进化任务'],
   ['templates', '评测模板'],
   ['versions', '进化版本'],
-];
-export function EvolutionTabs({ tab, className }: { tab: EvolutionTab; className?: string }) {
+] as const;
+
+export function EvolutionModeSwitch({ tab }: { tab: EvolutionTab }) {
+  if (!sessionRecoveryEnabled()) return null;
+  const recovery = tab === 'recovery';
   return (
-    <div className={cn('flex items-center gap-2', className)} role="tablist" aria-label="智能进化">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <div className="inline-flex shrink-0 gap-1 rounded-lg bg-muted/50 p-1" role="group" aria-label="智能进化功能">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-pressed={!recovery}
+          className={cn(
+            'h-7 px-3 text-[13px]',
+            !recovery && 'bg-primary/15 font-semibold text-primary hover:bg-primary/15 hover:text-primary',
+          )}
+          onClick={() => {
+            if (recovery) history.push('/evolution-factory');
+          }}
+        >
+          Bot进化
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          id="evolution-recovery-tab"
+          aria-pressed={recovery}
+          aria-controls={recovery ? 'evolution-recovery-panel' : undefined}
+          className={cn(
+            'h-7 px-3 text-[13px]',
+            recovery && 'bg-primary/15 font-semibold text-primary hover:bg-primary/15 hover:text-primary',
+          )}
+          onClick={() => history.push('/evolution-factory?tab=recovery')}
+        >
+          自愈
+        </Button>
+      </div>
+      <p className="m-0 text-[13px] leading-5 text-muted-foreground">
+        {recovery ? '查看 Bot 运行异常的处理进度和恢复结果。' : '评测 Bot 表现，验证优化效果并沉淀版本。'}
+      </p>
+    </div>
+  );
+}
+
+export function EvolutionTabs({ tab, className }: { tab: EvolutionTab; className?: string }) {
+  if (tab === 'recovery') return null;
+  const nested = sessionRecoveryEnabled();
+  return (
+    <div
+      className={cn('flex items-center', nested ? 'gap-4 border-b border-divider' : 'gap-2', className)}
+      role="tablist"
+      aria-label={nested ? 'Bot进化入口' : '智能进化'}
+    >
       {EVOLUTION_TABS.map(([value, label]) => (
         <Button
           key={value}
@@ -29,10 +84,17 @@ export function EvolutionTabs({ tab, className }: { tab: EvolutionTab; className
           type="button"
           aria-selected={tab === value}
           className={cn(
-            'inline-flex h-8 items-center rounded-md border-0 px-3 text-[13px] transition-colors cursor-pointer',
-            tab === value
-              ? 'bg-primary/10 font-medium text-primary hover:bg-primary/10 hover:text-primary'
-              : 'bg-transparent font-normal text-muted-foreground hover:bg-muted hover:text-foreground',
+            nested
+              ? cn(
+                  'h-9 rounded-none border-0 border-b-2 border-transparent bg-transparent px-2 text-[13px] hover:bg-transparent',
+                  tab === value ? 'border-primary font-medium text-primary' : 'font-normal text-muted-foreground',
+                )
+              : cn(
+                  'inline-flex h-8 items-center rounded-md border-0 px-3 text-[13px] transition-colors cursor-pointer',
+                  tab === value
+                    ? 'bg-primary/10 font-medium text-primary hover:bg-primary/10 hover:text-primary'
+                    : 'bg-transparent font-normal text-muted-foreground hover:bg-muted hover:text-foreground',
+                ),
           )}
           onClick={() => history.push(`/evolution-factory${value === 'tasks' ? '' : `?tab=${value}`}`)}
         >
@@ -89,7 +151,7 @@ export function EvolutionHeader({
   actions,
   showTabs = true,
 }: {
-  tab: 'tasks' | 'templates' | 'versions';
+  tab: EvolutionTab;
   actions?: ReactNode;
   showTabs?: boolean;
 }) {
@@ -99,7 +161,12 @@ export function EvolutionHeader({
         <h1 className="text-2xl font-semibold">智能进化</h1>
         {actions}
       </header>
-      {showTabs && <EvolutionTabs tab={tab} />}
+      {showTabs && (
+        <>
+          <EvolutionModeSwitch tab={tab} />
+          <EvolutionTabs tab={tab} />
+        </>
+      )}
     </div>
   );
 }
