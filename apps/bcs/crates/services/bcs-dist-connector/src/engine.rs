@@ -131,8 +131,10 @@ struct Inner {
     /// loop ends with `membership_lost`.
     lost: AtomicBool,
     /// The heartbeat must stop: the registration was retired, or `run`
-    /// failed (a failed process must not look alive).
+    /// failed or was dropped (a stopped process must not look alive).
     quiet: AtomicBool,
+    /// The heartbeat task; aborted when it must stop.
+    heartbeat: Mutex<Option<JoinHandle<()>>>,
     /// Held (shared) by every claim the engine makes with a partition proof,
     /// for the whole claim; taken exclusively by `drain` before it hands the
     /// partitions over, so no claim checked against the old ownership can
@@ -189,6 +191,7 @@ impl ConnectorEngine {
                 yielding: Arc::new(AtomicBool::new(false)),
                 lost: AtomicBool::new(false),
                 quiet: AtomicBool::new(false),
+                heartbeat: Mutex::new(None),
                 claim_gate: tokio::sync::RwLock::new(()),
             }),
         })
@@ -204,13 +207,15 @@ impl ConnectorEngine {
     /// `looping` and wakes `drain`, which waits for `looping` to turn false.
     pub async fn run(&self) -> Result<(), RuntimeError> {
         self.inner.looping.store(true, Ordering::SeqCst);
+        // Silences the heartbeat unless the loop ended for a drain: a failed
+        // process, or one whose `run` future was dropped (its task aborted),
+        // stops renewing, so it becomes `Dead` and its partitions and calls
+        // move on. After a drain the heartbeat keeps going until the drain
+        // retires the registration.
+        let mut silence = Silence { inner: &self.inner, armed: true };
         let result = self.run_loop().await;
-        if result.is_err() {
-            // A failed process stops renewing, so it becomes `Dead` and its
-            // partitions and calls move on. After a drain the heartbeat keeps
-            // going until the drain retires the registration.
-            self.inner.quiet.store(true, Ordering::SeqCst);
-        }
+        silence.armed = result.is_err();
+        drop(silence);
         self.inner.ready.store(false, Ordering::SeqCst);
         self.inner.looping.store(false, Ordering::SeqCst);
         self.inner.wake.notify_waiters();
@@ -675,7 +680,7 @@ impl ConnectorEngine {
             return;
         }
         let engine = self.clone();
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let inner = &engine.inner;
             loop {
                 tokio::time::sleep(inner.config.membership_renew).await;
@@ -690,6 +695,11 @@ impl ConnectorEngine {
                 }
             }
         });
+        *lock(&self.inner.heartbeat) = Some(task);
+        // Silenced before it was stored (a racing `retire`): stop it now.
+        if self.inner.quiet.load(Ordering::SeqCst) {
+            silence_heartbeat(&self.inner);
+        }
     }
 
     /// `false` when the registration is definitely lost: the process must
@@ -721,12 +731,35 @@ impl ConnectorEngine {
     /// registering): nothing to do. A failure is only logged: the
     /// registration then expires on its own, because nothing renews it.
     async fn retire(&self) {
-        self.inner.quiet.store(true, Ordering::SeqCst);
+        silence_heartbeat(&self.inner);
         let Some(lease) = lock(&self.inner.lease).clone() else {
             return;
         };
         if let Err(error) = self.inner.ports.membership.retire(&lease).await {
             tracing::warn!(?error, "membership retire failed; the registration expires on its own");
+        }
+    }
+}
+
+/// Stops the heartbeat for good: no renewal starts after this returns
+/// (`abort` takes effect at the task's next await point, before a renewal).
+fn silence_heartbeat(inner: &Inner) {
+    inner.quiet.store(true, Ordering::SeqCst);
+    if let Some(task) = lock(&inner.heartbeat).take() {
+        task.abort();
+    }
+}
+
+/// Silences the heartbeat when dropped while `armed` (see `run`).
+struct Silence<'a> {
+    inner: &'a Inner,
+    armed: bool,
+}
+
+impl Drop for Silence<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            silence_heartbeat(self.inner);
         }
     }
 }

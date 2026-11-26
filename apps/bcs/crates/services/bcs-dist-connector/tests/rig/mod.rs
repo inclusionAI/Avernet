@@ -562,6 +562,8 @@ pub struct Members {
     pub records: Mutex<Vec<bcs_service_api::port::repo::distributed::ownership::MemberRecord>>,
     pub dead: Mutex<Vec<String>>,
     pub renewals: std::sync::atomic::AtomicUsize,
+    /// While set, `members` does not answer.
+    pub stall_members: std::sync::atomic::AtomicBool,
 }
 
 impl Members {
@@ -627,6 +629,9 @@ impl MembershipPort for Members {
         _: bcs_service_api::port::repo::distributed::ownership::RuntimeRole,
         _: bcs_service_api::port::repo::distributed::common::PageRequest,
     ) -> Result<bcs_service_api::port::repo::distributed::common::Page<bcs_service_api::port::repo::distributed::ownership::MemberRecord>, StoreError> {
+        while self.stall_members.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
         let items = self.records.lock().unwrap().iter().filter(|r| !r.draining).cloned().collect();
         Ok(bcs_service_api::port::repo::distributed::common::Page { items, next: None })
     }

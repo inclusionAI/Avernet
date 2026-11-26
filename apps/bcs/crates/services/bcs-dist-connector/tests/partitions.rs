@@ -289,3 +289,32 @@ async fn a_claim_still_running_keeps_the_partition_from_moving() {
     held.gate.add_permits(1);
     assert!(task.await.unwrap().is_ok());
 }
+
+#[tokio::test]
+async fn an_aborted_run_stops_renewing() {
+    use std::sync::atomic::Ordering;
+    let mut rig = Rig::new().await;
+    let members = members(&mut rig);
+    let running = rig.start();
+    until("renewing", || async { members.renewals.load(Ordering::SeqCst) >= 2 }).await;
+    running.task.abort();
+    let _ = running.task.await;
+    let after = members.renewals.load(Ordering::SeqCst);
+    settle().await;
+    assert_eq!(members.renewals.load(Ordering::SeqCst), after, "a dropped run must not look alive");
+}
+
+#[tokio::test]
+async fn a_stalled_member_list_does_not_hold_the_drain_past_its_deadline() {
+    use std::sync::atomic::Ordering;
+    let mut rig = Rig::new().await;
+    let members = members(&mut rig);
+    let running = rig.start();
+    until("owns the partition", || async { rig.owners.owner(0) == Some(instance("conn-03")) }).await;
+    members.stall_members.store(true, Ordering::SeqCst);
+    let started = tokio::time::Instant::now();
+    let outcome = running.engine.drain(Duration::from_millis(300)).await.unwrap();
+    assert!(started.elapsed() < Duration::from_millis(800), "took {:?}", started.elapsed());
+    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 });
+    assert!(members.dead.lock().unwrap().contains(&"conn-03".to_owned()), "retired on time");
+}

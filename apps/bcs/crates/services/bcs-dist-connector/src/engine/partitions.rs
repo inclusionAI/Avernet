@@ -309,9 +309,13 @@ impl ConnectorEngine {
                 tracing::warn!(partition, "no time left to hand the partition over");
                 return false;
             }
-            let peers: Vec<MemberRecord> = self
-                .candidates()
-                .await
+            // Bounded by the drain's deadline, like every step here: a slow
+            // store must not keep the drain from retiring on time.
+            let Ok(candidates) = tokio::time::timeout_at(deadline, self.candidates()).await else {
+                tracing::warn!(partition, "member list too slow; partition not handed over");
+                return false;
+            };
+            let peers: Vec<MemberRecord> = candidates
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|m| m.instance != *me && !m.draining && !refused.contains(&m.instance))
@@ -359,10 +363,11 @@ impl ConnectorEngine {
                 // which a transfer to another peer replaces.
                 other => {
                     tracing::warn!(partition, target = %target.instance.node, ?other, "handoff answer unclear");
-                    match inner.ports.partitions.current(claim.shard).await {
-                        Ok(Some(record)) if record.claim != *claim => return true,
-                        Ok(None) => return true,
-                        _ => refused.push(target.instance),
+                    match tokio::time::timeout_at(deadline, inner.ports.partitions.current(claim.shard)).await {
+                        Ok(Ok(Some(record))) if record.claim != *claim => return true,
+                        Ok(Ok(None)) => return true,
+                        Ok(_) => refused.push(target.instance),
+                        Err(_) => return false,
                     }
                 }
             }
