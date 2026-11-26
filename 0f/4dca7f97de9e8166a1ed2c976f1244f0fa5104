@@ -1,0 +1,24 @@
+apps/bcs/crates/external-clients/bcs-a2a-http/src/client.rs
+  h_10f6235a5d078a 8,19,21,23,25,34-35,45-46,52-53,61-62,65,72,75-76
+apps/bcs/crates/external-clients/bcs-a2a-http/src/client_json.rs
+  h_10f6235a5d078a 2,17,23-26,29,31-33
+apps/bcs/crates/external-clients/bcs-a2a-http/src/digest.rs
+  h_10f6235a5d078a 33,63,75,93,128-129,139-140,150,153-156,163,169-184,186,191,193,228-234,237,241-247,260-300,316,331,336,339,344,351-352,359,363,366-368,371,382-399,405,410-411,418-419
+apps/bcs/crates/external-clients/bcs-a2a-http/src/http_client.rs
+  h_10f6235a5d078a 56-67,71-76,78-79,92-97
+apps/bcs/crates/external-clients/bcs-a2a-http/src/jsonrpc.rs
+  h_10f6235a5d078a 4,19,24,31,33,38,41,54-59,61,68-71,78-80,82,88-91,94-97,100-104,112-114
+apps/bcs/crates/external-clients/bcs-a2a-http/src/subscribe.rs
+  h_10f6235a5d078a 2,6,20,24,33,35,42-45,54-55,57,60-61,64,66,69-70,88,94,105,107-110,112,114-117,119-120,123-127,129-131,133,146,149-154,156-158,161-164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0f4dca7f97de9e8166a1ed2c976f1244f0fa5104",
+  "prompts": {},
+  "humans": {
+    "h_10f6235a5d078a": {
+      "author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

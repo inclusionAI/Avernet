@@ -1,0 +1,67 @@
+apps/bcs/crates/bootstrap/bcs/src/metrics/agent_invocation_tests.rs
+  s_7d114ded8fc0da::t_3800b6a791e3de 1-53
+apps/bcs/crates/bootstrap/bcs/src/metrics/wrappers.rs
+  s_7d114ded8fc0da::t_2b0865910306a3 209-218,496-499
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_7d114ded8fc0da::t_53a243437d9a73 1139-1156
+apps/bcs/crates/service-api/bcs-service-api/src/application/a2a_chat.rs
+  s_7d114ded8fc0da::t_14ccf4c66f2948 110-122,151-160
+apps/bcs/crates/service-api/bcs-service-api/src/application/agent_invoke.rs
+  s_7d114ded8fc0da::t_e12f3bcafae8f3 8
+apps/bcs/crates/service-api/bcs-service-api/src/interceptor.rs
+  s_7d114ded8fc0da::t_d949468befb89e 9-11,57-67,132-158
+apps/bcs/crates/service-api/bcs-service-api/tests/agent_invocation_interceptor.rs
+  s_7d114ded8fc0da::t_ef3082bcfb3fb0 1-114
+apps/bcs/crates/services/bcs-edge-permission/CONTEXT.md
+  s_7d114ded8fc0da::t_eb4ae86ec1a129 35-36,57-58,77-91
+apps/bcs/crates/services/bcs-edge-permission/src/agent_invoke/interceptor.rs
+  s_7d114ded8fc0da::t_ffc331ca213a8f 1-32
+apps/bcs/crates/services/bcs-edge-permission/src/agent_invoke/mod.rs
+  s_7d114ded8fc0da::t_2d91d88513acc3 4-5
+apps/bcs/crates/services/bcs-message-flow/CONTEXT.md
+  s_7d114ded8fc0da::t_c2269ec83c89dc 527-559
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/agent_invocation.rs
+  s_7d114ded8fc0da::t_1b9db17096be72 1-144
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/async_start.rs
+  s_7d114ded8fc0da::t_b75024ebf9c8a7 1-138
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/dispatch.rs
+  s_7d114ded8fc0da::t_63bda2ebcbb925 4,7,11-20,77,255-260
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/mod.rs
+  s_7d114ded8fc0da::t_0be028df65745a 3-4,306-307,309-313,341-348
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/queued.rs
+  s_7d114ded8fc0da::t_3d7a34d295ffd5 23-24,57,74-75
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/queued_runtime.rs
+  s_7d114ded8fc0da::t_4c1ebc151fb00f 11,23-24,31-37,55-57
+apps/bcs/crates/services/bcs-message-flow/src/queued_group.rs
+  s_7d114ded8fc0da::t_d1dc78fde5bb15 461-464
+apps/bcs/crates/services/bcs-message-flow/tests/cases/conformance_direct_a2a.rs
+  s_7d114ded8fc0da::t_a883dc956a82c7 20-21,46-50,81,84-86,436-444
+apps/bcs/crates/services/bcs-message-flow/tests/support/direct_a2a_empty_input.rs
+  s_7d114ded8fc0da::t_04cf490dfc61f6 6
+apps/bcs/crates/services/bcs-message-flow/tests/support/direct_a2a_regressions.rs
+  s_7d114ded8fc0da::t_ab1224923d37a7 23
+apps/bcs/crates/services/bcs-message-flow/tests/support/direct_agent_invocation.rs
+  s_7d114ded8fc0da::t_ba5fe94620f574 1-330
+apps/bcs/crates/test-support/bcs-test-support/src/contract/interceptor/mod.rs
+  s_7d114ded8fc0da::t_9e6967fb56f804 59-73
+apps/bcs/crates/test-support/message_flow_contract/registry_routing_fakes.rs
+  s_7d114ded8fc0da::t_5f5aea8b3cf092 325-326,367-374,425-430,462
+apps/bcs/docs/superpowers/specs/2026-08-18-friend-edge-permission-reform.md
+  s_7d114ded8fc0da::t_9696ee00f6a527 3627-3636,3639,3670,3683
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1894710d759a42d08d533a9e57bd389a3ff8ca66",
+  "prompts": {},
+  "sessions": {
+    "s_7d114ded8fc0da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b4-ef36-7703-9562-0f40ee69f61b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

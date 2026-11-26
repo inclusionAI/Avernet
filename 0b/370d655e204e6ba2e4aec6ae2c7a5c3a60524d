@@ -1,0 +1,50 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/flow-run-lineage.md
+  h_bb3ca6fb13c5df 60-86,150-155
+apps/evolverun/clawweb/public/modules/workflow/docs/run-detail-contract.md
+  h_bb3ca6fb13c5df 8-54,91-94
+apps/evolverun/clawweb/public/modules/workflow/docs/run-summary-contract.md
+  h_bb3ca6fb13c5df 1-84
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/run-subworkflows-lineage.test.ts
+  h_bb3ca6fb13c5df 1-63
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/run-subworkflows-repository.ts
+  h_bb3ca6fb13c5df 10,18,84-85
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/run-detail-launch-input.test.ts
+  h_bb3ca6fb13c5df 1-384
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-launch-lineage.test.ts
+  h_bb3ca6fb13c5df 1-96
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-launch-lineage.ts
+  h_bb3ca6fb13c5df 1-37
+apps/evolverun/clawweb/public/modules/workflow/server/services/run-read-http.ts
+  h_bb3ca6fb13c5df 12,288-289,294
+apps/evolverun/clawweb/public/modules/workflow/shared/run-launch-metadata.ts
+  h_bb3ca6fb13c5df 1-7
+apps/evolverun/clawweb/public/modules/workflow/web/components/RunLaunchDetails.tsx
+  h_bb3ca6fb13c5df 1-97
+apps/evolverun/clawweb/public/modules/workflow/web/components/RunSummaryHeader.tsx
+  h_bb3ca6fb13c5df 7-8,11,23-28,191-192,242,244
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunDetailReadOnly.test.tsx
+  h_bb3ca6fb13c5df 24
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunLaunchDetails.test.tsx
+  h_bb3ca6fb13c5df 1-152
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunMarkers.integration.test.tsx
+  h_bb3ca6fb13c5df 188,197
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunSummaryHeader.test.tsx
+  h_bb3ca6fb13c5df 5,34-36
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/RunSummaryHeaderLaunch.test.tsx
+  h_bb3ca6fb13c5df 1-186
+apps/evolverun/clawweb/public/modules/workflow/web/utils/__tests__/run-launch-details.test.ts
+  h_bb3ca6fb13c5df 1-90
+apps/evolverun/clawweb/public/modules/workflow/web/utils/run-launch-details.ts
+  h_bb3ca6fb13c5df 1-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0b370d655e204e6ba2e4aec6ae2c7a5c3a60524d",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,34 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/execution-record-contract.md
+  h_bb3ca6fb13c5df 1-204
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-repository.ts
+  h_bb3ca6fb13c5df 11,257-270
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/node-execution-repository.ts
+  h_bb3ca6fb13c5df 6,143-158
+apps/evolverun/clawweb/public/modules/workflow/server/routes/README.md
+  h_bb3ca6fb13c5df 62-67
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/run-execution-record-authorization.test.ts
+  h_bb3ca6fb13c5df 1-266
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/run-execution-record.test.ts
+  h_bb3ca6fb13c5df 1-360
+apps/evolverun/clawweb/public/modules/workflow/server/routes/run-execution-record.ts
+  h_bb3ca6fb13c5df 1-108
+apps/evolverun/clawweb/public/modules/workflow/server/routes/runs.ts
+  h_bb3ca6fb13c5df 5,104
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/execution-record-service.test.ts
+  h_bb3ca6fb13c5df 1-55
+apps/evolverun/clawweb/public/modules/workflow/server/services/execution-record-service.ts
+  h_bb3ca6fb13c5df 1-76
+apps/evolverun/clawweb/public/modules/workflow/shared/execution-record.ts
+  h_bb3ca6fb13c5df 1-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "279f5e2c552aac5fa4bc4440e73606d6f7336c4e",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

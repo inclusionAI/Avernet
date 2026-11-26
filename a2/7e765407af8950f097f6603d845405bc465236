@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/pack-operation-migration.test.ts
+  h_b601d8706f5d44 13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a27e765407af8950f097f6603d845405bc465236",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

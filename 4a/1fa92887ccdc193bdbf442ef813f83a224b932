@@ -1,0 +1,24 @@
+apps/frontend-nextgen/src/components/Workspace/TaskEscortDemo/Overview.tsx
+  h_bb3ca6fb13c5df 6-7,15-16,18-23,145-148
+apps/frontend-nextgen/src/components/Workspace/TaskEscortDemo/RunDetail.tsx
+  h_bb3ca6fb13c5df 20-21,27,33-35
+apps/frontend-nextgen/src/components/Workspace/TaskEscortDemo/RunList.tsx
+  h_bb3ca6fb13c5df 4,6,10-13,18-22,30-31,39,51,97-106
+apps/frontend-nextgen/src/components/Workspace/TaskEscortDemo/index.tsx
+  h_bb3ca6fb13c5df 141-143
+apps/frontend-nextgen/test/components/Workspace/TaskEscortDemo.test.tsx
+  h_bb3ca6fb13c5df 7,49,63-195,230,235-237
+apps/frontend-nextgen/test/components/Workspace/TaskEscortWorkflowSwitch.test.tsx
+  h_bb3ca6fb13c5df 68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4a1fa92887ccdc193bdbf442ef813f83a224b932",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

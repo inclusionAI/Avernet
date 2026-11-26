@@ -1,0 +1,16 @@
+apps/frontend-nextgen/src/domain/collaborationPrivacy/botPublicRisk.ts
+  h_9d7cfd405752f5 5-8,49-59
+apps/frontend-nextgen/src/hooks/useCollaborationPrivacy.ts
+  h_9d7cfd405752f5 2-6,173-174,176-177,202,208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3f2c1825651e30bb98630708a503a26276fa9165",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/bcsfuse/packages/search-core/src/search_core/application/default_candidates.py
+  s_ee7faec72ec072::t_cc141321640058 23,26-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "06690872342ae5dbafd0657e13ec0dedd2ef5636",
+  "prompts": {},
+  "sessions": {
+    "s_ee7faec72ec072": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bb4-0877-7ef3-abef-b714be896d7a",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

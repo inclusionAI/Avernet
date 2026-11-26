@@ -1,0 +1,14 @@
+apps/frontend-nextgen/test/taskEscortWorkspace/page.test.tsx
+  h_bb3ca6fb13c5df 167-171,174-178,188-191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7b5c8d286bdc8317c15315ef8f5ca090ad7a4970",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
