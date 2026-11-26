@@ -10,7 +10,12 @@ All distributed-correctness details live here, behind the semantic SPI:
 - **One authoritative clock.** The elapsed time that drives refill is measured
   from Redis's own ``TIME`` *inside* the script, not from a gateway instance's
   wall clock. Two gateways with skewed clocks therefore refill the same bucket
-  consistently; a backwards clock jump is clamped to zero elapsed.
+  consistently. A backwards clock jump is clamped to zero elapsed for the one
+  request that straddles it (so the jump grants no tokens), and the stored
+  timestamp follows the clock (``ts = now``) rather than a high-water mark — the
+  next request measures elapsed between two post-jump readings, i.e. real time,
+  and refills normally. Holding ``ts`` ahead of the clock would instead withhold
+  all budget for the whole length of the jump, so it is deliberately not done.
 
 - **Token precision.** Tokens are carried as a double and the last-update time
   as integer microseconds. A microsecond epoch (~1.7e15) is well inside a
@@ -26,9 +31,10 @@ All distributed-correctness details live here, behind the semantic SPI:
   back a budget early.
 
 - **Key isolation.** Keys are ``ratelimit:{namespace}:{tenant}:{app_id}:
-  {scope}`` — deployment namespace, application identity and rule scope. No
-  credential or token ever appears in a key (or a log line); the app's surrogate
-  id is not a secret.
+  {scope}`` — deployment namespace, application identity and rule scope — with
+  each variable component percent-encoded so a ``:`` inside a namespace or tenant
+  cannot make two distinct subjects collide on one key. No credential or token
+  ever appears in a key (or a log line); the app's surrogate id is not a secret.
 
 - **Bounded, non-blocking, no ambiguous retry.** The async client carries a
   per-command socket timeout; a timeout or connection error becomes
@@ -47,7 +53,7 @@ rate-limit keys are not evicted, or give the limiter a dedicated instance.
 from __future__ import annotations
 
 import math
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from redis import asyncio as redis_asyncio
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -67,22 +73,22 @@ logger = get_logger("rate_limiter")
 
 
 def _redact_redis_url(url: str) -> str:
-    """Return *url* with any ``user:password@`` authentication stripped.
+    """Return *url* reduced to ``scheme://host:port/db``, with no credentials.
 
-    A Redis URL may embed credentials (``redis://user:pass@host:6379/0``);
-    logging it verbatim would leak them to log readers and collectors. Host,
-    port and db are kept (useful for operators) and the userinfo is replaced
-    with ``***``. On any parse failure the URL is suppressed entirely rather
-    than risk leaking it.
+    A Redis URL can carry a password two ways, and redis-py honours both: in the
+    userinfo (``redis://user:pass@host/0``) and in the query string
+    (``redis://host/0?password=pass``). Logging the URL verbatim would leak
+    either to log readers and collectors. So this keeps only scheme, host, port
+    and path (the db) — stripping userinfo *and* the whole query and fragment —
+    which cannot carry a secret however the URL spells it. On any parse failure
+    the URL is suppressed entirely rather than risk leaking it.
     """
     try:
         parts = urlsplit(url)
-        if parts.username or parts.password:
-            host = parts.hostname or ""
-            if parts.port is not None:
-                host = f"{host}:{parts.port}"
-            parts = parts._replace(netloc=f"***@{host}")
-        return urlunsplit(parts)
+        host = parts.hostname or ""
+        if parts.port is not None:
+            host = f"{host}:{parts.port}"
+        return urlunsplit((parts.scheme, host, parts.path, "", ""))
     except Exception:  # noqa: BLE001 — never let redaction leak the raw URL
         return "<redacted>"
 
@@ -108,6 +114,14 @@ if tokens == nil or ts == nil then
   ts = now_us
 end
 
+-- Refill by elapsed real time, clamped so a backwards clock jump cannot grant
+-- tokens. The request that straddles the jump reads elapsed < 0 and so refills
+-- nothing; every later request measures elapsed between two readings of the
+-- post-jump clock, which is real elapsed time, and refills correctly. The store
+-- below keeps ts = now_us (not a high-water mark): holding ts ahead of the clock
+-- would instead withhold legitimate budget for the entire length of the jump
+-- (every call clamped to 0 while real time passes), turning a clock step into a
+-- stretch of spurious 429s. Clamp-only never over-grants and self-heals at once.
 local elapsed_us = now_us - ts
 if elapsed_us < 0 then
   elapsed_us = 0
@@ -127,18 +141,7 @@ else
   retry_after_ms = math.ceil((deficit / rate) * 1000.0)
 end
 
--- Persist the timestamp as a monotonic high-water mark. Clamping elapsed above
--- only stops the one request that straddles a backwards clock jump; writing the
--- lower now_us would let every request after it refill over time already
--- accounted for before the jump. Keeping max(ts, now_us) means a backwards jump
--- never lowers the mark, so no extra budget is granted until the clock passes
--- its previous high-water again.
-local stored_ts = now_us
-if ts > now_us then
-  stored_ts = ts
-end
-
-redis.call('HSET', KEYS[1], 'tokens', tokens, 'ts', stored_ts)
+redis.call('HSET', KEYS[1], 'tokens', tokens, 'ts', now_us)
 redis.call('PEXPIRE', KEYS[1], ttl_ms)
 
 return {allowed, retry_after_ms, math.floor(tokens * 1000.0)}
@@ -202,14 +205,18 @@ class RedisTokenBucketRateLimiter(ApplicationRateLimiter):
         )
 
     def _key(self, subject: RateLimitSubject) -> str:
-        # namespace on the subject (deployment) and on the limiter (this
-        # process) are the same value in normal wiring; the subject's is used so
-        # the key reflects exactly what the admission layer scoped the request
-        # to. No credential is present in any component.
-        return (
-            f"{self._key_prefix}:{subject.namespace}:{subject.tenant}"
-            f":{subject.app_id}:{subject.scope}"
-        )
+        # Percent-encode each variable component before joining on ':'. A
+        # namespace or tenant that itself contains ':' would otherwise let two
+        # distinct subjects collapse to the same key — e.g. namespace "a:b" +
+        # tenant "c" vs namespace "a" + tenant "b:c" both yield ...:a:b:c:... —
+        # so deployments or tenants sharing one Redis could consume each other's
+        # budgets. Encoding with safe='' maps ':' to '%3A', making the join
+        # unambiguous. app_id is an int and scope is a fixed literal, but they are
+        # encoded too for uniformity. No credential is present in any component.
+        namespace = quote(subject.namespace, safe="")
+        tenant = quote(subject.tenant, safe="")
+        scope = quote(subject.scope, safe="")
+        return f"{self._key_prefix}:{namespace}:{tenant}:{subject.app_id}:{scope}"
 
     def _ttl_ms(self, policy: RateLimitPolicy) -> int:
         refill_ms = math.ceil((policy.burst / policy.rate) * 1000.0)

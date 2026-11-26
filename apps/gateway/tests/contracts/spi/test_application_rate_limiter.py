@@ -249,18 +249,22 @@ class TestRedisRateLimiterContract(ApplicationRateLimiterContract):
             await raw.aclose()
             await self._close(limiter)
 
-    async def test_backward_clock_jump_does_not_grant_extra_budget(self) -> None:
-        """A backwards server-clock jump must not refill the bucket.
+    async def test_backward_clock_jump_clamps_then_resumes_real_time_refill(
+        self,
+    ) -> None:
+        """A backwards clock jump grants no tokens, then refill resumes.
 
-        Regression for the high-water-mark fix: the stored timestamp is kept at
-        ``max(ts, now)``, so an empty bucket whose last update is *ahead* of the
-        current clock (what a rollback leaves behind) stays empty across
-        successive requests instead of refilling over already-accounted time.
+        The request straddling the jump reads elapsed < 0 and is clamped to zero,
+        so the jump itself grants nothing (the empty bucket stays empty → that
+        request is rejected). Because the store follows the clock (``ts = now``,
+        not a high-water mark), the *next* request measures real elapsed time and
+        refills normally — the limiter self-heals instead of withholding all
+        budget for the length of the jump.
         """
         import redis.asyncio as redis_async
 
         limiter = self.make_limiter()
-        policy = RateLimitPolicy(rate=1000.0, burst=1)  # fast refill if it leaks
+        policy = RateLimitPolicy(rate=20.0, burst=1)
         subject = _subject(self.namespace, app_id=77)
         raw = redis_async.Redis.from_url(_REDIS_URL, decode_responses=False)
         key = (
@@ -274,13 +278,16 @@ class TestRedisRateLimiterContract(ApplicationRateLimiterContract):
             future_us = (int(secs) * 1_000_000 + int(micros)) + 5_000_000
             await raw.hset(key, mapping={"tokens": "0", "ts": str(future_us)})
 
-            # Even at 1000 tok/s, two requests a real moment apart must both be
-            # rejected: the stored mark stays ahead, so elapsed stays <= 0.
+            # The straddling request: elapsed clamped to 0 → no refill → rejected,
+            # and the jump grants nothing.
             d1 = await limiter.try_acquire(subject, policy)
-            await asyncio.sleep(0.05)
-            d2 = await limiter.try_acquire(subject, policy)
             assert not d1.allowed
-            assert not d2.allowed
+
+            # ~0.1s of real time later (> 1/rate = 50ms), refill has resumed from
+            # the now-current stored ts: the next request is admitted.
+            await asyncio.sleep(0.1)
+            d2 = await limiter.try_acquire(subject, policy)
+            assert d2.allowed
         finally:
             await raw.aclose()
             await self._close(limiter)

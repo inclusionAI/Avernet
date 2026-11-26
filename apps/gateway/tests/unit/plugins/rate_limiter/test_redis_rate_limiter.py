@@ -24,16 +24,23 @@ from gateway.community.spi.rate_limiter import (
 
 
 def test_redact_redis_url_strips_credentials() -> None:
-    # Credentials in the URL must never survive into a log line.
-    assert (
-        _redact_redis_url("redis://user:s3cret@host:6379/0")
-        == "redis://***@host:6379/0"
-    )
-    assert _redact_redis_url("rediss://:tokenonly@host/2") == "rediss://***@host/2"
-    # No credentials -> URL kept as-is (host/port/db are useful to operators).
+    # Credentials in the URL must never survive into a log line; userinfo is
+    # dropped, keeping scheme/host/port/db.
+    assert _redact_redis_url("redis://user:s3cret@host:6379/0") == "redis://host:6379/0"
+    assert _redact_redis_url("rediss://:tokenonly@host/2") == "rediss://host/2"
+    # No credentials -> host/port/db unchanged (useful to operators).
     assert _redact_redis_url("redis://localhost:6379/0") == "redis://localhost:6379/0"
     # A password must not leak through any component of the result.
     assert "s3cret" not in _redact_redis_url("redis://user:s3cret@host:6379/0")
+    # redis-py also reads the password from the query string, so that must be
+    # stripped too (keeping scheme/host/port/db).
+    assert (
+        _redact_redis_url("redis://host:6380/3?password=s3cret")
+        == "redis://host:6380/3"
+    )
+    assert "s3cret" not in _redact_redis_url(
+        "rediss://u:p@host/0?password=s3cret&ssl=1"
+    )
     # A URL that fails to parse (here, an out-of-range port) is suppressed
     # entirely rather than risk leaking credentials it may carry.
     suppressed = _redact_redis_url("redis://user:s3cret@host:99999/0")
@@ -93,6 +100,25 @@ async def test_key_format_and_args() -> None:
     assert (rate, burst, requested) == (10.0, 20, 1)
     # ttl >= refill-to-full (burst/rate = 2s = 2000ms) plus margin.
     assert ttl_ms >= 2000
+
+
+def test_key_components_with_colons_do_not_collide() -> None:
+    # namespace "a:b" + tenant "c" and namespace "a" + tenant "b:c" must NOT map
+    # to the same Redis key, or deployments/tenants sharing Redis would share a
+    # budget. Percent-encoding the components keeps them distinct.
+    async def script(*, keys, args):
+        return [1, 0, 0]
+
+    plugin = _make(script)
+    key_a = plugin._key(  # noqa: SLF001
+        RateLimitSubject(namespace="a:b", tenant="c", app_id=1, scope="app")
+    )
+    key_b = plugin._key(  # noqa: SLF001
+        RateLimitSubject(namespace="a", tenant="b:c", app_id=1, scope="app")
+    )
+    assert key_a != key_b
+    assert key_a == "ratelimit:a%3Ab:c:1:app"
+    assert key_b == "ratelimit:a:b%3Ac:1:app"
 
 
 async def test_allowed_decision_mapping() -> None:
