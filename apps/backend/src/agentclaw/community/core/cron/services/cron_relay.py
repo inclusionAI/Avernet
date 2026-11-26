@@ -651,7 +651,7 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
         self,
         *,
         bot_id: str,
-        owner_id: str,
+        source_bot_pk: int,
     ) -> Any | None:
         """返回生产发布单中仍可使用的 verify 运行态。
 
@@ -660,9 +660,8 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
         verify binding 仍为 ACTIVE，表示该预发运行态在生产发布后仍被保留。
         """
         publish_record = (
-            self._publish_repo.get_latest_by_source_bot_id_and_owner_and_status(
-                source_bot_id=bot_id,
-                owner_id=owner_id,
+            self._publish_repo.get_latest_by_source_bot_and_status(
+                source_bot_pk=source_bot_pk,
                 status=PublishStatus.SUCCESS.value,
                 env=get_current_env(),
             )
@@ -741,6 +740,7 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
         if bot_type != "service":
             return targets, failed_targets
 
+        # Owner may change; publications remain attached to the immutable source Bot PK.
         # verify 优先使用验证中版本；online 使用发布成功版本。
         for runtime_stage, publish_status, binding_key in (
             (RUNTIME_STAGE_VERIFY, PublishStatus.VALIDATING.value, "verify"),
@@ -748,9 +748,8 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
         ):
             try:
                 publish_record = (
-                    self._publish_repo.get_latest_by_source_bot_id_and_owner_and_status(
-                        source_bot_id=bot_id,
-                        owner_id=owner_id,
+                    self._publish_repo.get_latest_by_source_bot_and_status(
+                        source_bot_pk=bot["id"],
                         status=publish_status,
                         env=get_current_env(),
                     )
@@ -760,7 +759,7 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
                 if publish_record is None and runtime_stage == RUNTIME_STAGE_VERIFY:
                     publish_record = self._get_retained_verify_publish_record(
                         bot_id=bot_id,
-                        owner_id=owner_id,
+                        source_bot_pk=bot["id"],
                     )
             except Exception as e:
                 failed_targets.append(
@@ -831,9 +830,8 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
             RUNTIME_STAGE_VERIFY: (PublishStatus.VALIDATING.value, "verify"),
             RUNTIME_STAGE_ONLINE: (PublishStatus.SUCCESS.value, "online"),
         }[runtime_stage]
-        publish_record = self._publish_repo.get_latest_by_source_bot_id_and_owner_and_status(
-            source_bot_id=bot_id,
-            owner_id=owner_id,
+        publish_record = self._publish_repo.get_latest_by_source_bot_and_status(
+            source_bot_pk=bot["id"],
             status=publish_status,
             env=get_current_env(),
         )
@@ -841,7 +839,7 @@ class CronRelayService(CronTargetedOperationsMixin, CronRuntimeOperationsMixin, 
         if publish_record is None and runtime_stage == RUNTIME_STAGE_VERIFY:
             publish_record = self._get_retained_verify_publish_record(
                 bot_id=bot_id,
-                owner_id=owner_id,
+                source_bot_pk=bot["id"],
             )
         if publish_record is None:
             raise CronRelayError(

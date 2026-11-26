@@ -529,3 +529,12 @@ engine-only refresh and restart-publication are excluded. Without an extension,
 confirmation-only restart behavior is unchanged. See
 [capability types](src/capabilities/types.ts) and
 [workshop service](src/services/botWorkshop/botWorkshopService.ts).
+
+## Scheduled tasks after Owner handoff
+
+Bot-management task links use the Bot's stable `entity_id` when available.
+Existing links containing `owner_id` keep that legacy query name; they are
+never relabeled as `entity_id`. Lists, Caller metadata and task operations use
+one address scope. Edit-lock reads use the current Owner returned by Bot detail
+as `owner_id`, independently of the stable resource address. The acting user's
+identity and existing management/lock requirements are unchanged.

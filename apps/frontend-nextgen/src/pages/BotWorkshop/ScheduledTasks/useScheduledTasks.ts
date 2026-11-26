@@ -13,15 +13,16 @@ import type {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 export function useScheduledTasks(
   botId: string,
-  ownerId: string | undefined,
+  entityId: string | undefined,
   target: RoutineTarget,
   page: number,
   pageSize: number,
+  legacyOwnerId?: string,
 ) {
   const identity = useBotWorkshopRequestIdentity();
   const client = useMemo(
-    () => createRoutineClient(botId, ownerId, identity.userId || '', target.runtime_stage || undefined),
-    [botId, ownerId, identity.userId, target.runtime_stage],
+    () => createRoutineClient(botId, entityId, identity.userId || '', target.runtime_stage || undefined, legacyOwnerId),
+    [botId, entityId, legacyOwnerId, identity.userId, target.runtime_stage],
   );
   const [context, setContext] = useState<RoutineContext>();
   const [tasks, setTasks] = useState<ManagedRoutine[]>([]);
@@ -179,7 +180,7 @@ export function useScheduledTasks(
       setBusy(false);
     }
   }
-  const loadModels = useCallback(() => botEditorService.listRoutineModels(botId, ownerId), [botId, ownerId]);
+  const loadModels = useCallback(() => botEditorService.listRoutineModels(botId, entityId ?? legacyOwnerId), [botId, entityId, legacyOwnerId]);
   return {
     identity,
     context,
