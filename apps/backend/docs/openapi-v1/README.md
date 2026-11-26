@@ -796,6 +796,14 @@ the generated document — the 56 that take it, the 4 that do not, that `user_id
 is never a body field or a path segment, and that `bot_id`'s placement is
 unchanged — so a route that breaks the rule fails there rather than in review.
 
+**AICoding work-items is a different exception.** It has a user dimension, but
+that dimension is the signed human acting for themself: it takes no
+caller-selectable `user_id`, refuses an app-only caller with `401`, and cannot
+return the owner-mismatch `403` described in this rule. The generated document
+therefore publishes the base error table, not `USER_SCOPED_ERROR_RESPONSES`,
+and `test_explicit_user_id.py` records it in `_AUTHENTICATED_SELF` while
+excluding it from the 403 assertion.
+
 ---
 
 ## Operating shared bots and published stages (`?entity_id=`, `?stage=`)

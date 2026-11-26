@@ -587,6 +587,12 @@ Agent，也就是 `specs/2026-08-02-public-api-user-only-principal/` 记录的�
 56 个、不带它的 4 个、`user_id` 从不作为 body 字段或路径段出现、以及 `bot_id` 的位置
 没有变化 —— 所以破坏该规则的路由会在那里失败，而不是等到 review。
 
+**AICoding work-items 是另一类例外。** 它有用户维度，但该维度是签名 human 本人：
+它没有调用方可选的 `user_id`，app-only 调用方会被 `401` 拒绝，也永远返回不了本规则中的
+owner-mismatch `403`。因此生成契约使用基础错误表，而不是
+`USER_SCOPED_ERROR_RESPONSES`；`test_explicit_user_id.py` 把它登记在
+`_AUTHENTICATED_SELF`，同时从 403 断言中排除。
+
 ---
 
 ## 操作共享 Bot 与已发布阶段（`?entity_id=`、`?stage=`）
