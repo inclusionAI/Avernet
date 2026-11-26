@@ -10,6 +10,7 @@ vi.mock('@avernet/clawweb-shared/server/schema', async original => ({
 }));
 vi.mock('@avernet/clawweb-shared/server/schema-workflow-snapshot', () => ({ workflowSnapshotMigrations: [] }));
 vi.mock('@avernet/clawweb-shared/server/schema-aistudio-train', () => ({ aistudioTrainMigrations: [] }));
+vi.mock('@avernet/clawweb-shared/server/schema-distributed-lock', () => ({ distributedLockMigrations: [] }));
 
 describe('retired ClawWeb operation migration 149', () => {
   it('reserves 149 without reusing it in active migration lists', async () => {
