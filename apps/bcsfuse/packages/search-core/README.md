@@ -159,3 +159,15 @@ IDs; the default still drops them. Confirmed missing/deleted Cards and other
 database failures do not use this projection. Final catalog eligibility still
 applies. Running synchronous work can finish and log after the response but
 does not refill the cache after timeout.
+
+### Request defaults and emergency permissions
+
+Catalog hosts may opt into separate normal settings with `request_retrieval_defaults`.
+`update_retrieval` accepts flat retrieval switches, deadlines, result/admission limits,
+empty-result fallback and embedding singleflight. Missing keys reset to that host's
+startup defaults; invalid updates retain the last valid snapshot. `update` then accepts
+only `retrieval` permissions (missing keys allow); request switches override normal
+defaults, never emergency denials. Cache configuration remains independent.
+Requests retain one immutable snapshot. Hosts not opting in retain the existing
+emergency policy contract, including TC. Platform subscription and host-specific
+timeout defaults belong to the host composition.

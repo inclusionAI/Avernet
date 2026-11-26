@@ -113,15 +113,13 @@ class CatalogSearchApplication:
                 )
             started = time.monotonic()
             with stage_timing("configuration"):
+                overrides = command.retrieval if isinstance(command, CatalogSearchCommand) else {}
+                if overrides and self._emergency is None:
+                    raise UnsupportedSearchOption("request retrieval switches unavailable")
                 snapshot = (
-                    self._emergency.snapshot() if self._emergency is not None else None
+                    self._emergency.for_request(overrides)
+                    if self._emergency is not None else None
                 )
-                if isinstance(command, CatalogSearchCommand) and command.retrieval:
-                    if self._emergency is None:
-                        raise UnsupportedSearchOption(
-                            "request retrieval switches unavailable"
-                        )
-                    snapshot = self._emergency.for_request(command.retrieval)
                 maximum = snapshot.policy.max_results if snapshot is not None else 20
                 if command.limit > maximum:
                     events.record(

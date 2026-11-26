@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 from search_core.api.errors import UnsupportedSearchOption
 from search_core.api.services import RetrievalService
+from search_core.application.retrieval_config import EmergencyConfig, RetrievalConfig
 from search_core.core.observation import events
 
 
@@ -94,6 +95,7 @@ class EmergencySnapshot:
     policy: EmergencyPolicy
     version: str
     retrieval: RetrievalService
+    request_defaults: RetrievalSwitches | None = None
     variants: dict[tuple[bool, bool, bool], RetrievalService] = field(
         default_factory=dict
     )
@@ -108,7 +110,10 @@ class EmergencyControl:
         build: Callable,
         *,
         build_variants: Callable | None = None,
+        request_defaults: RetrievalSwitches | None = None,
     ):
+        self._startup_policy = defaults
+        self._startup_request_defaults = request_defaults
         self._default_keyword_timeout_ms = defaults.keyword_timeout_ms
         self._default_card_metadata_timeout_ms = defaults.card_metadata_timeout_ms
         self._build = build
@@ -120,20 +125,38 @@ class EmergencyControl:
         self._independent_cache = False
         self.current = self._compile(defaults)
 
-    def _compile(self, policy):
-        encoded = json.dumps(policy.model_dump(), sort_keys=True).encode()
+    def _compile(self, policy, request_defaults=None):
+        if request_defaults is None:
+            request_defaults = (
+                self.current.request_defaults
+                if hasattr(self, "current")
+                else self._startup_request_defaults
+            )
+        values = policy.model_dump()
+        if request_defaults is not None:
+            values["request_defaults"] = request_defaults.model_dump()
+        encoded = json.dumps(values, sort_keys=True).encode()
         variants = self._build_variants(policy) if self._build_variants else {}
         key = tuple(policy.retrieval.pipeline_switches().values())
         retrieval = variants[key] if variants else self._build(policy)
         return EmergencySnapshot(
-            policy, hashlib.sha256(encoded).hexdigest()[:12], retrieval, variants
+            policy,
+            hashlib.sha256(encoded).hexdigest()[:12],
+            retrieval,
+            request_defaults,
+            variants,
         )
 
     def for_request(self, overrides):
-        snapshot = self.snapshot()
+        snapshot = self._bound.get() or self.current
         configured = snapshot.policy.retrieval.pipeline_switches()
+        defaults = (
+            snapshot.request_defaults.pipeline_switches()
+            if snapshot.request_defaults is not None
+            else dict.fromkeys(configured, True)
+        )
         switches = {
-            name: enabled and overrides.get(name, True)
+            name: enabled and overrides.get(name, defaults[name])
             for name, enabled in configured.items()
         }
         # No recall means default TopK; there is nothing to rerank.
@@ -150,6 +173,8 @@ class EmergencyControl:
         return replace(snapshot, policy=policy, retrieval=retrieval)
 
     def update(self, raw):
+        if self._startup_request_defaults is not None:
+            return self._update_emergency_switches(raw)
         try:
             policy = (
                 EmergencyPolicy.model_validate_json(raw)
@@ -191,6 +216,96 @@ class EmergencyControl:
         except (ValueError, TypeError):
             events.record(
                 "search_emergency_config",
+                "config",
+                "rejected",
+                retained_version=self.current.version,
+            )
+            return False
+
+    def _update_emergency_switches(self, raw):
+        try:
+            config = (
+                EmergencyConfig.model_validate_json(raw)
+                if isinstance(raw, str)
+                else EmergencyConfig.model_validate(raw)
+            )
+            switches = config.retrieval.model_dump()
+            if not switches["keyword_enabled"] and not switches["vector_enabled"]:
+                switches["rerank_enabled"] = False
+            with self._lock:
+                policy = self.current.policy.model_copy(
+                    update={
+                        "retrieval": self.current.policy.retrieval.model_copy(
+                            update=switches
+                        )
+                    }
+                )
+                if policy != self.current.policy:
+                    self.current = self._compile(policy)
+                events.record(
+                    "search_emergency_config",
+                    "config",
+                    "applied",
+                    version=self.current.version,
+                    **config.model_dump(),
+                )
+            return True
+        except (ValueError, TypeError):
+            events.record(
+                "search_emergency_config",
+                "config",
+                "rejected",
+                retained_version=self.current.version,
+            )
+            return False
+
+    def update_retrieval(self, raw):
+        """Replace normal settings; omitted keys reset to host startup defaults."""
+        if self._startup_request_defaults is None:
+            raise UnsupportedSearchOption(
+                "separate retrieval configuration unavailable"
+            )
+        try:
+            values = json.loads(raw) if isinstance(raw, str) else raw
+            if not isinstance(values, dict):
+                raise ValueError("retrieval configuration must be an object")
+            defaults = self._startup_policy.model_dump(exclude={"cache", "retrieval"})
+            defaults.update(self._startup_request_defaults.model_dump())
+            config = RetrievalConfig.model_validate({**defaults, **values})
+            fields = config.model_dump()
+            switch_fields = {
+                name: fields.pop(name)
+                for name in defaults
+                if name in RetrievalSwitches.model_fields
+            }
+            # Normal defaults can request reranking without recall; selection
+            # turns it off unless a caller explicitly enables a recall branch.
+            request_defaults = self._startup_request_defaults.model_copy(
+                update=switch_fields
+            )
+            with self._lock:
+                fields["retrieval"] = self.current.policy.retrieval.model_copy(
+                    update={
+                        "empty_result_fallback_enabled": config.empty_result_fallback_enabled
+                    }
+                )
+                policy = self.current.policy.model_copy(update=fields)
+                if (
+                    policy != self.current.policy
+                    or request_defaults != self.current.request_defaults
+                ):
+                    self.current = self._compile(policy, request_defaults)
+                events.record(
+                    "search_retrieval_config",
+                    "config",
+                    "applied",
+                    version=self.current.version,
+                    **config.model_dump(),
+                )
+            return True
+        except (ValueError, TypeError):
+            events.record(
+                "search_retrieval_config",
                 "config",
                 "rejected",
                 retained_version=self.current.version,
@@ -243,7 +358,7 @@ class EmergencyControl:
             self._bound.reset(token)
 
     def snapshot(self):
-        return self._bound.get() or self.current
+        return self._bound.get() or self.for_request({})
 
     async def retrieve(self, request):
         snapshot = self.snapshot()
