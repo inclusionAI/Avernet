@@ -16,6 +16,7 @@ import {
   DrawerTitle,
 } from '@/components/ui/Drawer';
 import { Empty } from '@/components/ui/Empty';
+import { BotDisplayAvatar } from '@/components/Workspace/BotDisplayAvatar';
 import { Input } from '@/components/ui/Input';
 import { Segmented } from '@/components/ui/Segmented';
 import type { BotFriendRoster } from '@/hooks/useBotFriendRoster';
@@ -55,7 +56,11 @@ function FriendRow({
 }) {
   return (
     <div className="flex items-center gap-3 border-b border-divider px-1 py-3 last:border-b-0">
-      <Avatar name={view.displayName} size={32} />
+      {view.actorType === 'bot' ? (
+        <BotDisplayAvatar botId={view.actorId} name={view.displayName} avatarUrl={view.avatarUrl} />
+      ) : (
+        <Avatar name={view.displayName} size={32} />
+      )}
       <div className="min-w-0 flex-1">
         <p className="m-0 truncate text-sm font-medium text-foreground">{view.displayName}</p>
         <p className="m-0 mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -108,64 +113,72 @@ export function BotFriendManageDrawer({ open, onOpenChange, roster }: BotFriendM
     <Drawer open={open} onOpenChange={onOpenChange}>
       {/* 管理好友抽屉挂在仍在打开的「公开设置」Modal 内：取 nested 层级，
           否则父 Modal 遮罩（--z-dialog）会盖住抽屉导致无法交互。 */}
-      <DrawerContent layer="nested" side="right" size="md" bodyClassName="flex flex-col gap-4">
-        <DrawerHeader>
-          <DrawerTitle>管理好友</DrawerTitle>
+      <DrawerContent
+        layer="nested"
+        side="right"
+        size="md"
+        bodyClassName="flex flex-col overflow-hidden p-0"
+        aria-describedby={undefined}
+      >
+        <DrawerHeader className="m-0 h-14 shrink-0 justify-center border-b border-border pl-5 pr-14">
+          <DrawerTitle className="m-0 text-base font-medium leading-6">管理好友</DrawerTitle>
         </DrawerHeader>
-        <Segmented<BotFriendActorType>
-          aria-label="好友类型"
-          value={tab}
-          options={[
-            { value: 'human', label: TAB_LABEL.human },
-            { value: 'bot', label: TAB_LABEL.bot },
-          ]}
-          onChange={(next) => {
-            setTab(next);
-            setKeyword('');
-          }}
-        />
-        <Input
-          placeholder="搜索好友"
-          value={keyword}
-          onChange={(event) => setKeyword(event.target.value)}
-        />
-        {roster.removeError ? (
-          <p className="m-0 text-xs text-destructive">{roster.removeError.friendlyMessage}</p>
-        ) : null}
-        <div className="min-h-0 flex-1">
-          {!section ? (
-            <Empty icon={<UsersRound className="h-5 w-5" aria-hidden />} title="好友名单加载中" />
-          ) : !section.ok ? (
-            <Empty
-              title={`加载${TAB_LABEL[tab]}失败`}
-              description={section.error.friendlyMessage}
-              icon={<RefreshCw className="h-5 w-5" aria-hidden />}
-              action={
-                <Button
-                  leftIcon={<RefreshCw className="h-4 w-4" aria-hidden />}
-                  onClick={() => void roster.reload(tab)}
-                >
-                  重试
-                </Button>
-              }
-            />
-          ) : items.length === 0 ? (
-            <Empty
-              icon={<Search className="h-5 w-5" aria-hidden />}
-              title={keyword.trim() ? '没有匹配的好友' : `暂无${TAB_LABEL[tab]}`}
-            />
-          ) : (
-            <div>
-              {items.map((view) => (
-                <FriendRow
-                  key={view.queryId}
-                  view={view}
-                  removing={roster.removingIds.includes(view.actorId)}
-                  onRemove={() => setConfirming(view)}
-                />
-              ))}
-            </div>
-          )}
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
+          <Segmented<BotFriendActorType>
+            aria-label="好友类型"
+            value={tab}
+            options={[
+              { value: 'human', label: TAB_LABEL.human },
+              { value: 'bot', label: TAB_LABEL.bot },
+            ]}
+            onChange={(next) => {
+              setTab(next);
+              setKeyword('');
+            }}
+          />
+          <Input
+            placeholder="搜索好友"
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+          />
+          {roster.removeError ? (
+            <p className="m-0 text-xs text-destructive">{roster.removeError.friendlyMessage}</p>
+          ) : null}
+          <div className="min-h-0 flex-1">
+            {!section ? (
+              <Empty icon={<UsersRound className="h-5 w-5" aria-hidden />} title="好友名单加载中" />
+            ) : !section.ok ? (
+              <Empty
+                title={`加载${TAB_LABEL[tab]}失败`}
+                description={section.error.friendlyMessage}
+                icon={<RefreshCw className="h-5 w-5" aria-hidden />}
+                action={
+                  <Button
+                    leftIcon={<RefreshCw className="h-4 w-4" aria-hidden />}
+                    onClick={() => void roster.reload(tab)}
+                  >
+                    重试
+                  </Button>
+                }
+              />
+            ) : items.length === 0 ? (
+              <Empty
+                icon={<Search className="h-5 w-5" aria-hidden />}
+                title={keyword.trim() ? '没有匹配的好友' : `暂无${TAB_LABEL[tab]}`}
+              />
+            ) : (
+              <div>
+                {items.map((view) => (
+                  <FriendRow
+                    key={view.queryId}
+                    view={view}
+                    removing={roster.removingIds.includes(view.actorId)}
+                    onRemove={() => setConfirming(view)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         <ConfirmDialog
           open={Boolean(confirming)}

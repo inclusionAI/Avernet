@@ -11,15 +11,13 @@ import {
 
 export type { BotGeneralConfigDialogProps };
 
-export function BotGeneralConfigDialog({ bot, isExternalBot = false, onClose }: BotGeneralConfigDialogProps) {
+export function BotGeneralConfigDialog(props: BotGeneralConfigDialogProps) {
   const human = useHumanIdentity();
   const userId = human.identity?.userId ?? '';
   return (
     <BotGeneralConfigDialogBody
-      key={`${bot.id}:${userId}`}
-      bot={bot}
-      isExternalBot={isExternalBot}
-      onClose={onClose}
+      key={`${props.bot.id}:${userId}`}
+      {...props}
       human={human}
     />
   );

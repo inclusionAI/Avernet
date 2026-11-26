@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { BotGeneralConfigDialog } from '@/components/CollaborationPrivacy/BotGeneralConfigDialog';
 import { ExternalBotPanel } from '@/components/BotWorkshop/ExternalBotPanel';
 import { generateBotAvatar } from '@/services/botWorkshop/botAvatarGenerator';
 import { externalBotService } from '@/services/botWorkshop/externalBotService';
@@ -10,9 +11,9 @@ jest.mock('@/services/botWorkshop/externalBotService', () => ({
   externalBotService: { list: jest.fn() },
 }));
 jest.mock('@/components/CollaborationPrivacy/BotGeneralConfigDialog', () => ({
-  BotGeneralConfigDialog: ({ isExternalBot }: { isExternalBot?: boolean }) => (
+  BotGeneralConfigDialog: jest.fn(({ isExternalBot }: { isExternalBot?: boolean }) => (
     <div>{isExternalBot ? '外部 Bot 配置' : 'TC Bot 配置'}</div>
-  ),
+  )),
 }));
 jest.mock('@/components/Workspace/IdentitySelector/BotRegistrationDialog', () => ({
   BotRegistrationDialog: ({ open, onClose }: { open: boolean; onClose: () => void }) =>
@@ -23,13 +24,17 @@ jest.mock('@/components/Workspace/IdentitySelector/BotRegistrationDialog', () =>
     ) : null,
 }));
 
-afterEach(() => jest.resetAllMocks());
+afterEach(() => jest.clearAllMocks());
 
 it('外部 Bot 的公开设置入口明确使用外部配置模式', async () => {
-  jest.mocked(externalBotService.list).mockResolvedValue([{ id: 'external-1', name: '外部助手' }]);
+  jest.mocked(externalBotService.list).mockResolvedValue([{ id: 'external-1', name: '外部助手', accessRelation: 'owner' }]);
   render(<ExternalBotPanel active />);
   fireEvent.click(await screen.findByRole('button', { name: '公开设置' }));
   expect(screen.getByText('外部 Bot 配置')).toBeInTheDocument();
+  expect(jest.mocked(BotGeneralConfigDialog).mock.lastCall?.[0]).toMatchObject({
+    isExternalBot: true,
+    externalBotAccessRelation: 'owner',
+  });
 });
 
 it('关闭接入指南后重新查询并显示刚接入的外部 Bot', async () => {
