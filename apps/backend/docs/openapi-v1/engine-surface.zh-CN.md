@@ -53,6 +53,10 @@ Track C 并不包装其中的大多数。四条规则逐个裁定：
 | **C3** | **WebSocket** → **不包装。** | 公共 API 返回一条完整的 socket URL（凭据在其中），由调用方自己建连。转发帧等于把 engine 内部帧格式发布成公共契约。 |
 | **C4** | **仅 AICoding** → **不在范围内。** | 产品专有面，不属于租户契约。 |
 
+C4 排除的是把 AICoding Engine/Relay 的内部路径原样透传成租户契约；它**不**禁止
+OCB 在产品需要时发布自己拥有的 AICoding 产品 API。此类 API 有独立合同，规范见
+`aicoding-openapi-guidelines.zh-CN.md`。
+
 C1 的权威清单是 `apps/frontend/src/requestConfig.ts:189-205` 里的 proxypass 前缀
 数组 —— 前端会重写到 engine 的那一组路径前缀，就是它。
 

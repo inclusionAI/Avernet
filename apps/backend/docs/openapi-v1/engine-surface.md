@@ -58,6 +58,11 @@ Track C does not wrap most of them. Four rules decide each one:
 | **C3** | **WebSocket** → **do not wrap.** | The public API returns one complete socket URL, credential included; the caller opens the socket itself. Relaying frames would republish the engine's internal frame format as a public contract. |
 | **C4** | **AICoding-only** → **out of scope.** | Product-specific surface, not part of the tenant contract. |
 
+C4 excludes passing internal AICoding Engine/Relay paths through as tenant
+contracts. It does **not** prevent OCB from publishing its own AICoding product
+API when a product need requires one; such an API has its own contract and is
+governed by `aicoding-openapi-guidelines.zh-CN.md`.
+
 The authoritative list for C1 is the proxypass prefix list in
 `apps/frontend/src/requestConfig.ts:189-205` — the exact set of path prefixes the
 frontend rewrites to the engine.
