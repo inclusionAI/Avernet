@@ -221,6 +221,50 @@ class TestUpdateEngineConfig:
         assert body["error_code"] == 400
         svc.write_bot_config.assert_not_awaited()
 
+    def test_write_device_offline_returns_service_unavailable(self, engine_cfg_client):
+        """The write resolves the device the same way the read does, so a
+        trusted structured offline contract gets the same 503 classification
+        instead of a 500 with the internal exception text."""
+        from agentclaw.community.core.devices.services.device_context import (
+            DeviceOfflineError,
+        )
+
+        tc, svc = engine_cfg_client
+        svc.write_bot_config.side_effect = DeviceOfflineError(
+            "No active device for binding=1394158"
+        )
+        resp = tc.put("/api/bots/default/engine-config", json={"k": "v"})
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 503
+        assert body["message"] == "Bot 设备暂时不可用，请稍后重试"
+        assert "1394158" not in body["message"]
+
+    def test_write_device_offline_logged_as_info_not_error(
+        self, engine_cfg_client, caplog
+    ):
+        import logging
+
+        from agentclaw.community.core.devices.services.device_context import (
+            DeviceConnectionUnavailableError,
+        )
+
+        tc, svc = engine_cfg_client
+        svc.write_bot_config.side_effect = DeviceConnectionUnavailableError(
+            "Device connection is temporarily unavailable for binding=1394158"
+        )
+        with caplog.at_level(logging.INFO, logger="start"):
+            resp = tc.put("/api/bots/default/engine-config", json={"k": "v"})
+
+        assert resp.json()["error_code"] == 503
+        records = [
+            record
+            for record in caplog.records
+            if "bot_router.update_engine_config" in record.message
+        ]
+        assert records
+        assert all(record.levelno == logging.INFO for record in records)
+
 
 class TestGetEngineConfig:
     """get_engine_config delegates to EngineConfigService.read_bot_config (provider-blind)."""
@@ -297,6 +341,67 @@ class TestGetEngineConfig:
             resp = tc.get("/api/bots/default/engine-config")
 
         assert resp.json()["error_code"] == 409
+        records = [
+            record
+            for record in caplog.records
+            if "bot_router.get_engine_config" in record.message
+        ]
+        assert records
+        assert all(record.levelno == logging.INFO for record in records)
+
+    def test_device_offline_returns_service_unavailable(self, engine_cfg_client):
+        """A trusted structured offline contract (BaaS NO_ACTIVE_DEVICES →
+        DeviceOfflineError) is classified as temporarily unavailable, not a
+        500 with the internal exception text leaking the binding id."""
+        from agentclaw.community.core.devices.services.device_context import (
+            DeviceOfflineError,
+        )
+
+        tc, svc = engine_cfg_client
+        svc.read_bot_config.side_effect = DeviceOfflineError(
+            "No active device for binding=1394158"
+        )
+        resp = tc.get("/api/bots/default/engine-config")
+        body = resp.json()
+        assert resp.status_code == 200
+        assert body["success"] is False
+        assert body["error_code"] == 503
+        assert body["data"] is None
+        assert body["message"] == "Bot 设备暂时不可用，请稍后重试"
+        assert "1394158" not in body["message"]
+
+    def test_connection_unavailable_returns_service_unavailable(
+        self, engine_cfg_client
+    ):
+        from agentclaw.community.core.devices.services.device_context import (
+            DeviceConnectionUnavailableError,
+        )
+
+        tc, svc = engine_cfg_client
+        svc.read_bot_config.side_effect = DeviceConnectionUnavailableError(
+            "Device connection is temporarily unavailable for binding=1394158"
+        )
+        body = tc.get("/api/bots/default/engine-config").json()
+        assert body["error_code"] == 503
+        assert body["message"] == "Bot 设备暂时不可用，请稍后重试"
+
+    def test_device_offline_logged_as_info_not_error(self, engine_cfg_client, caplog):
+        """The offline state is expected and self-healing — an ERROR record is
+        what fed this cluster into the CDO alarm pipeline in the first place."""
+        import logging
+
+        from agentclaw.community.core.devices.services.device_context import (
+            DeviceOfflineError,
+        )
+
+        tc, svc = engine_cfg_client
+        svc.read_bot_config.side_effect = DeviceOfflineError(
+            "No active device for binding=1394158"
+        )
+        with caplog.at_level(logging.INFO, logger="start"):
+            resp = tc.get("/api/bots/default/engine-config")
+
+        assert resp.json()["error_code"] == 503
         records = [
             record
             for record in caplog.records
