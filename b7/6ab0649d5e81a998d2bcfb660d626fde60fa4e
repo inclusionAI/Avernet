@@ -1,0 +1,14 @@
+apps/frontend-nextgen/test/taskEscortParity/overviewService.test.ts
+  h_bb3ca6fb13c5df 157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b76ab0649d5e81a998d2bcfb660d626fde60fa4e",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
