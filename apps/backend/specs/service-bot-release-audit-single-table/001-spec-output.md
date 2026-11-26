@@ -9,7 +9,7 @@ Delete the event table/model/envelope, revision/snapshot copies, delivery handle
 
 ## Transaction and Plugin contract
 
-The publication repository owns `DatabasePlugin.transactional_orm_session()`. Inject the audit Plugin into that repository; call `create(session, snapshot)` or `complete(session, ...)` in a separate session after the native transaction commits. Plugins must not open or commit an independent session. Only the separate failed audit transaction rolls back, logs a warning and leaves the committed native write intact. New native attempts retain their new correlation IDs even if audit INSERT fails. Native publication/artifact failures still propagate. A rejected native CAS produces no audit mutation.
+Native publication writes keep the existing `DatabasePlugin.orm_session()` semantics, including production AUTOCOMMIT. Only the separate audit operation uses `DatabasePlugin.transactional_orm_session()`. Inject the audit Plugin into that repository; call `create(session, snapshot)` or `complete(session, ...)` in a separate session after the native transaction commits. Plugins must not open or commit an independent session. Only the separate failed audit transaction rolls back, logs a warning and leaves the committed native write intact. New native attempts retain their new correlation IDs even if audit INSERT fails. Native publication/artifact failures still propagate. A rejected native CAS produces no audit mutation.
 
 Freeze authenticated actor, original creator and system environment at submission. Persist the active change and trusted tenant alongside the publication correlation metadata for background completion; restore that tenant only for the bounded audit update. Terminal updates are conditional on pending state and expected stage; duplicate or old results cannot replace the first completion time. Existing workflow/change fences and artifact-last serialization remain intact.
 
@@ -38,3 +38,9 @@ Accept CR 4705107662: snapshot/create/complete errors, missing schema and missin
 Accept CR 4705374174: remove artifact-specific key manipulation; prepend audit metadata while preserving remaining ext values/order. Verify inline/offloaded artifact CAS.
 
 Tests: draft/start/completion, partial Plugin writes, missing table/Bot/Plugin, native write failure, tenant/restart fences and duplicate completion. Rebase on GitHub REL20261127; one topic commit. No OCB gitlink/worktree.
+
+## Restore legacy publication sessions (2026-11-26)
+
+Restore the five publication sessions changed by this feature: insert, status, status+ext, ext CAS, and status+ext CAS. Leave pre-existing explicit transactions in other methods untouched. Audit persistence remains separately transactional and failure-isolated after native session exit. Verify actual AUTOCOMMIT writes, persisted new change markers, rejected CAS, retries and artifact handling. Do not introduce a new lock or change legacy rollback/visibility semantics.
+
+AUTOCOMMIT concurrency: prepare correlation metadata as a pure serialized payload and write it with status in the same native UPDATE, never through a later ORM dirty flush. The status-only entrypoint uses an ext CAS and rereads on contention so another successful native ext write survives; explicit status/ext CAS callers retain their rejection semantics. Verify deterministic interleavings before and after SQL execution with a second connection.

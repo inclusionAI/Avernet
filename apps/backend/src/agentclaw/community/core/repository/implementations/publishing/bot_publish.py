@@ -104,7 +104,7 @@ class BotPublishRepository(
     def insert(self, data: Dict[str, Any]) -> BotPublishRecord:
         ext = data.get("ext")
         env = data.get("env", get_current_env())
-        with self._db.transactional_orm_session() as db:
+        with self._db.orm_session() as db:
             row = self.Model(
                 source_bot_pk=data["source_bot_pk"],
                 source_bot_id=data["source_bot_id"],
@@ -485,23 +485,34 @@ class BotPublishRepository(
         *,
         audit_operator_id: Optional[str] = None,
     ) -> Optional[BotPublishRecord]:
-        with self._db.transactional_orm_session() as db:
-            query = db.query(self.Model).filter(
-                self.Model.id == publish_id
-            )
-            if source_status is not None:
-                query = query.filter(self.Model.status == source_status)
-            affected = query.update(
-                {
-                    self.Model.status: target_status,
-                    self.Model.gmt_modified: func.now(),
-                },
-                synchronize_session=False,
-            )
-            if affected > 0:
-                row = db.query(self.Model).filter(self.Model.id == publish_id).populate_existing().first()
-                audit_change_id = prepare_transition(row, source_status=source_status, actor=audit_operator_id)
-                audit_status, audit_ext = row.status, row.ext
+        while True:
+            audit_change_id = None
+            with self._db.orm_session() as db:
+                query = db.query(self.Model).filter(self.Model.id == publish_id)
+                if source_status is not None:
+                    query = query.filter(self.Model.status == source_status)
+                values = {self.Model.status: target_status, self.Model.gmt_modified: func.now()}
+                guarded = query
+                if audit_operator_id is not None:
+                    before = query.first()
+                    if before is None:
+                        return None
+                    prepared_ext, audit_change_id = prepare_transition(
+                        publish_id, status=target_status, ext_json=before.ext,
+                        source_status=source_status, actor=audit_operator_id)
+                    if audit_change_id is not None:
+                        # Preserve concurrent ext writers under production AUTOCOMMIT.
+                        guarded = query.filter(self.Model.ext.is_(None) if before.ext is None
+                                               else self.Model.ext == before.ext)
+                        values[self.Model.ext] = prepared_ext
+                affected = guarded.update(values, synchronize_session=False)
+                if affected > 0:
+                    row = db.query(self.Model).filter(self.Model.id == publish_id).populate_existing().first()
+                    audit_status, audit_ext = row.status, row.ext
+            if affected > 0 or audit_change_id is None:
+                break
+            # A fresh legacy session also refreshes repeatable-read snapshots.
+            logger.info("release_audit.native_ext_retry publish_id=%s", publish_id)
         if affected > 0:
             record_transition(self._db, publish_id, status=audit_status, ext=audit_ext,
                               source_status=source_status, actor=audit_operator_id,
@@ -522,7 +533,10 @@ class BotPublishRepository(
         ext_json, pending = self._offload.prepare(
             ext, publish_id, get_current_env()
         )
-        with self._db.transactional_orm_session() as db:
+        ext_json, audit_change_id = prepare_transition(
+            publish_id, status=target_status, ext_json=ext_json,
+            source_status=source_status, actor=audit_operator_id)
+        with self._db.orm_session() as db:
             query = db.query(self.Model).filter(
                 self.Model.id == publish_id
             )
@@ -545,7 +559,6 @@ class BotPublishRepository(
                 self._offload.upload(pending)
             if affected > 0:
                 row = db.query(self.Model).filter(self.Model.id == publish_id).populate_existing().first()
-                audit_change_id = prepare_transition(row, source_status=source_status, actor=audit_operator_id)
                 audit_status, audit_ext = row.status, row.ext
         if affected > 0:
             record_transition(self._db, publish_id, status=audit_status, ext=audit_ext,
@@ -571,7 +584,7 @@ class BotPublishRepository(
         env = get_current_env()
         expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
         ext_json, pending = self._offload.prepare(ext, publish_id, env)
-        with self._db.transactional_orm_session() as db:
+        with self._db.orm_session() as db:
             query = db.query(self.Model).filter(self.Model.id == publish_id)
             if expected_json is None:
                 query = query.filter(self.Model.ext.is_(None))
@@ -587,12 +600,11 @@ class BotPublishRepository(
             if affected > 0:
                 self._offload.upload(pending)
                 row = db.query(self.Model).filter(self.Model.id == publish_id).populate_existing().first()
-                audit_change_id = prepare_transition(row, source_status=row.status, actor=None)
                 audit_status, audit_ext = row.status, row.ext
         if affected > 0:
             record_transition(self._db, publish_id, status=audit_status, ext=audit_ext,
                               source_status=audit_status, actor=None,
-                              new_change_id=audit_change_id, audit=self._audit)
+                              new_change_id=None, audit=self._audit)
         if affected == 0:
             return None
         return self.get_by_id(publish_id)
@@ -611,7 +623,10 @@ class BotPublishRepository(
         env = get_current_env()
         expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
         ext_json, pending = self._offload.prepare(ext, publish_id, env)
-        with self._db.transactional_orm_session() as db:
+        ext_json, audit_change_id = prepare_transition(
+            publish_id, status=target_status, ext_json=ext_json,
+            source_status=source_status, actor=audit_operator_id)
+        with self._db.orm_session() as db:
             query = db.query(self.Model).filter(
                 self.Model.id == publish_id,
                 self.Model.status == source_status,
@@ -632,7 +647,6 @@ class BotPublishRepository(
                 self._offload.upload(pending)
             if affected > 0:
                 row = db.query(self.Model).filter(self.Model.id == publish_id).populate_existing().first()
-                audit_change_id = prepare_transition(row, source_status=source_status, actor=audit_operator_id)
                 audit_status, audit_ext = row.status, row.ext
         if affected > 0:
             record_transition(self._db, publish_id, status=audit_status, ext=audit_ext,

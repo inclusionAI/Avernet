@@ -390,7 +390,9 @@ result and first completion time; retries and stages have distinct change IDs.
 The publication repository injects `ServiceBotReleaseAuditPlugin` and calls its
 `create(session, snapshot)` / `complete(session, ...)` operations using the
 `DatabasePlugin.transactional_orm_session()` capability, in a separate audit
-transaction after the native publication transaction commits. Plugins use the
+transaction after the native publication session exits successfully. Native
+publication operations retain `orm_session()` and production AUTOCOMMIT; the
+audit feature must not change their transaction/locking/rollback semantics. Plugins use the
 supplied session without opening or committing another one. Snapshot, Plugin,
 schema and audit-transaction failures roll back only auditing and log
 `release_audit.skipped`; the native result is already committed. A status/ext
