@@ -113,6 +113,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors_managed_bots import MAN
 from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials import (
     SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors_service_publish import SERVICE_PUBLISH_ENVELOPE_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
 from agentclaw.community.adapters.http.openapi_v1.errors_space_skill import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.task.errors_todo import (
@@ -350,8 +351,6 @@ from agentclaw.community.core.service_bot.errors import (
     ServicePublicationLockedError,
     ServicePublicationNotFoundError,
     ServicePublicationUnsupportedError,
-    ServicePublishUpstreamError,
-    ServicePublishWorkflowNotFoundError,
 )
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterMarketSearchError,
@@ -554,8 +553,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Container is not in a valid state for this operation",
     ),
     ServiceContainerUpstreamError: (502, "Container service error"),
-    ServicePublishWorkflowNotFoundError: (404, "Not found"),
-    ServicePublishUpstreamError: (502, "Publish service error"),
     HealthDiagnosisNotFoundError: (404, "Not found"),
     HealthDiagnosisConflictError: (409, "A health diagnosis is already running"),
     HealthDiagnosisUnavailableError: (502, "Health diagnosis service error"),
@@ -677,6 +674,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
+    **SERVICE_PUBLISH_ENVELOPE_ERRORS,
     **SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
     **GENOME_ENVELOPE_ERRORS,
     **TODO_HTTP_ERRORS,
