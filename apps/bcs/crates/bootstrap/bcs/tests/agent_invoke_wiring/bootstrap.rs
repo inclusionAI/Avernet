@@ -4,7 +4,6 @@ use super::*;
 use tower::ServiceExt;
 use bcs_db_api::{DbPlugin, DbStatement};
 
-const KEY: &str = "TEST-ONLY-composition-principal-signing-key";
 #[test]
 fn sql_bootstrap_mounts_only_explicit_registration_and_never_activates_it() {
     const NAME: &str = "server::state::agent_invoke_bootstrap_tests::sql_bootstrap_mounts_only_explicit_registration_and_never_activates_it";
@@ -14,8 +13,8 @@ fn sql_bootstrap_mounts_only_explicit_registration_and_never_activates_it() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", NAME, "--nocapture"]).current_dir(dir.path()).env(CHILD, "1")
             .env("SERVER_ENV", "local")
-            .env("AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE", KEY)
-            .env("BCS_SECRET_BCN_GROUP_SESSION_WS_JWT", "TEST-ONLY-session-jwt-composition-key")
+            .env("AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE", uuid::Uuid::new_v4().to_string())
+            .env("BCS_SECRET_BCN_GROUP_SESSION_WS_JWT", uuid::Uuid::new_v4().to_string())
             .output().unwrap();
         assert!(output.status.success(), "isolated actual SQL bootstrap failed:\n{}\n{}",
             String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
@@ -25,7 +24,7 @@ fn sql_bootstrap_mounts_only_explicit_registration_and_never_activates_it() {
         for injected in [false, true] {
             let dir = tempfile::tempdir().unwrap();
             let mut config = BcsConfig { bots_base_dir: dir.path().join("bots"), ..BcsConfig::default() };
-            config.invite.token_secret = Some("TEST-ONLY-invite-composition-key-32bytes".into());
+            config.invite.token_secret = Some(uuid::Uuid::new_v4().to_string());
             config.manifest.bundles.clear();
             config.bcsfuse.enabled = false;
             config.metrics.enabled = false;
@@ -69,7 +68,8 @@ fn sql_bootstrap_mounts_only_explicit_registration_and_never_activates_it() {
                 "iss":server.config.gateway_principal.issuers[0], "aud":server.config.gateway_principal.audience,
                 "iat":now, "exp":now+120, "principals":[{"type":"bot","tenant":"composition-tenant","bot":{
                     "bot_uuid":"composition-source","agent_code":"source-code","owner_id":"display-only","app_id":7,"tenant":"composition-tenant"}}]
-            }), &jsonwebtoken::EncodingKey::from_secret(KEY.as_bytes())).unwrap();
+            }), &jsonwebtoken::EncodingKey::from_secret(
+                std::env::var("AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE").unwrap().as_bytes())).unwrap();
             let router = bcs_api_http::router(state);
             for prefix in ["/api/v1", "/openapi/v1"] {
                 let uri = format!("{prefix}/collaboration/agent-invoke/invocations");
