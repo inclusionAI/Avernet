@@ -253,6 +253,7 @@ Owner 或管理员在原任务控制面调用，传入 `{ "request_id": "调用�
 
 ```text
 GET  /api/insight/v1/monitoring/session-recoveries?event_id=…
+GET  /api/insight/v1/monitoring/session-recoveries/tasks
 GET  /api/insight/v1/monitoring/session-recoveries/:taskId
 PATCH /api/insight/v1/monitoring/session-recoveries/:taskId/share
 GET  /api/insight/v1/monitoring/session-recoveries/:taskId/tool-calls/:toolCallId
@@ -260,6 +261,10 @@ POST /api/insight/v1/monitoring/session-recoveries/:taskId/decision
 POST /api/insight/v1/monitoring/session-recoveries/:taskId/annotations
 POST /api/insight/v1/monitoring/session-recoveries/:taskId/terminate
 ```
+
+任务列表按登录用户分页，支持 `page`、`pageSize`、`botId`、`env` 和 `status`。传 `includePresentation=true` 时，根据已保存的诊断报告和处理事件补充 `overview`、`startAtMs`、`endAtMs` 和 `completionReason`。缺少对应记录时省略该字段。
+
+任务详情可传 `includeDiagnosis=true`。任务鉴权通过后，按任务对应的事件、Bot、目标环境和原会话核对诊断上报。匹配时返回 `diagnosis`，包含诊断时间、问题类型、诊断时的任务状态和诊断原文。
 
 分享设置请求：`{ "shared": true }`（关闭为 `false`），返回更新后的任务详情。仅布尔值合法；重复设置同一状态幂等。
 
