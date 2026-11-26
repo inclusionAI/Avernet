@@ -2,7 +2,10 @@
 // deriveRiskUiState 与老前端（open-claw riskFlowState）同构；phase 为后端开放字符串，
 // 未知值按保守锁定兜底（行编辑禁用 + 通用文案），绝不因未知值解锁。
 
-import type { BotPublicRiskCheckRecord } from '@/services/backendApi/collaboration/collaborationBotPublicRiskController';
+import type {
+  BotPublicRiskCheckRecord,
+  CreateBotPublicRiskRequest,
+} from '@/services/backendApi/collaboration/collaborationBotPublicRiskController';
 import type { ViewDept } from '@/services/backendApi/collaboration/collaborationPublicationController';
 import { publicConfigsEqual } from './policies';
 import type { PublicConfig, PublicScope } from './types';
@@ -41,6 +44,64 @@ export function deriveRiskUiState(record: BotPublicRiskRecordLike | null): BotPu
   if (record.phase === 'APPROVING') return { kind: 'approving', record };
   if (record.security_status === 'PASS' || record.phase === 'ADVANCING') return { kind: 'advancing', record };
   return { kind: 'checking', record };
+}
+
+/** 重试沿用失败申请的对用户公开目标及组织范围。 */
+export function getRiskRetryIntent(
+  state: BotPublicRiskUiState,
+): Pick<CreateBotPublicRiskRequest, 'visibility' | 'view_depts'> | null {
+  if (state.kind !== 'failed' && state.kind !== 'attention') return null;
+  const target = state.record.target;
+  const visibility = target?.visibility.toLowerCase();
+  if (target?.public_scope !== 'user' || (visibility !== 'public' && visibility !== 'protected')) return null;
+  return { visibility, view_depts: target.view_depts };
+}
+
+/** 失败标题、恢复操作和行级简短状态使用同一映射。 */
+export function getRiskFailurePresentation(
+  kind: 'failed' | 'attention',
+  record: BotPublicRiskRecordLike | null,
+) {
+  const approved = record?.approval_decision === 'AGREE';
+  switch (kind === 'attention' ? record?.error_reason : null) {
+    case 'CONFIG_CHANGED':
+      return {
+        label: '配置已变更',
+        title: approved ? '配置已变更，本次公开未生效' : '配置已变更，请重新申请',
+        description: approved
+          ? '审批已通过，但期间 Bot 配置（如 MCP 或其他资源）发生变更。为保障安全，本次公开已被拦截，请按当前配置重新申请。'
+          : 'Bot 配置已偏离送扫快照，本次申请未生效，请按当前配置重新申请。',
+        canRefresh: false,
+      };
+    case 'PERMISSION_CHANGED':
+      return {
+        label: '权限已变更',
+        title: '权限已变更，本次公开未生效',
+        description: `${approved ? '审批已通过，但' : ''}原申请人管理权限或 Bot 归属已变化，请确认权限后重新申请。`,
+        canRefresh: false,
+      };
+    case 'INPUT_OR_PERMISSION_INVALID':
+      return {
+        label: '配置或权限已变更',
+        title: '配置或权限已变更，请重新申请',
+        description: '申请期间 Bot 配置或申请人权限发生变化，本次公开未生效。',
+        canRefresh: false,
+      };
+    default:
+      return kind === 'failed'
+        ? {
+            label: '检测未通过',
+            title: 'Bot 公开风险前置检测未通过',
+            description: '请前往检测工单查看风险明细并整改，整改后可重新申请。',
+            canRefresh: true,
+          }
+        : {
+            label: '流程异常',
+            title: '公开流程状态异常',
+            description: '请先刷新状态确认，或重新发起公开申请。',
+            canRefresh: true,
+          };
+  }
 }
 
 /** 发布提交通道：direct=现行直改（收紧/外部 Bot）、risk-check=前置检测动线、none=未变化。 */

@@ -3,6 +3,7 @@
 
 import {
   deriveRiskUiState,
+  getRiskFailurePresentation,
   resolvePublishChannel,
   toBotPublicRiskVisibility,
   type BotPublicRiskRecordLike,
@@ -95,6 +96,31 @@ describe('toBotPublicRiskVisibility', () => {
     expect(toBotPublicRiskVisibility('restricted', [{ deptNo: '', deptName: '集团 / A部' }])).toEqual({
       visibility: 'protected',
       view_depts: [{ deptNo: '集团 / A部', deptName: '集团 / A部' }],
+    });
+  });
+});
+
+describe('getRiskFailurePresentation', () => {
+  it.each([
+    ['CONFIG_CHANGED', null, '配置已变更，请重新申请'],
+    ['CONFIG_CHANGED', 'AGREE', '配置已变更，本次公开未生效'],
+    ['PERMISSION_CHANGED', null, '权限已变更，本次公开未生效'],
+    ['INPUT_OR_PERMISSION_INVALID', 'AGREE', '配置或权限已变更，请重新申请'],
+  ])('shows %s with decision %s and offers a fresh application without refresh', (error_reason, approval_decision, title) => {
+    expect(getRiskFailurePresentation('attention', rec({ error_reason, approval_decision }))).toMatchObject({
+      title,
+      canRefresh: false,
+    });
+  });
+
+  it('allows refresh for both a rejected scan and an unknown workflow outcome', () => {
+    expect(getRiskFailurePresentation('failed', rec({ security_status: 'REJECT' }))).toMatchObject({
+      title: 'Bot 公开风险前置检测未通过',
+      canRefresh: true,
+    });
+    expect(getRiskFailurePresentation('attention', rec({ error_reason: 'CALLBACK_OUTCOME_UNKNOWN' }))).toMatchObject({
+      title: '公开流程状态异常',
+      canRefresh: true,
     });
   });
 });

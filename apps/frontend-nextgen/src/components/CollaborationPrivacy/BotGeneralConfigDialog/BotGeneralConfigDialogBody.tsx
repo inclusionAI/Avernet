@@ -102,7 +102,7 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
   // 禁用置关并提示原因，且不发审批配置请求（后端对非服务 Bot 拒绝）。
   const publishApprovalEnabled = showPublishApproval && bot.serviceMode === 'service';
   const publishApproval = useBotPublishApproval(bot.id, bot.ownerId, publishApprovalEnabled);
-  // 公开风险前置检测在途态（bot-public-risk-check）：仅「对用户」行消费；
+  // 公开风险检测进度与失败恢复入口仅在「对用户」行展示。
   // 行级「刷新状态」双刷（重读风险记录 + 静默重载总览）等派生逻辑见 useUserRiskStatus。
   const userRiskStatus = useUserRiskStatus(privacy);
   const publishApprovalSection = showPublishApproval ? (

@@ -59,7 +59,7 @@ interface PublicationEditorProps {
    * 公开风险前置检测状态（bot-public-risk-check；仅 audience==='user' 且非外部 Bot 时由宿主传入）。
    * checking/advancing/approving → 已发起终态锁定，并提供「刷新状态」入口（§2.2 手动刷新：
    * 检测超时后端暂停自动轮询时可主动同步最新结论）；failed/attention → 失败提示 + 可编辑重发，
-   * 同样提供「刷新状态」入口：立即查询原安全单同步最新结论，不重新建单。
+   * 失败时可用原公开目标重新申请；可刷新的失败态提供原安全单刷新。
    */
   risk?: {
     uiState: BotPublicRiskUiState;
@@ -67,6 +67,7 @@ interface PublicationEditorProps {
     isCreating: boolean;
     refreshCurrent?: () => void;
     isRefreshing?: boolean;
+    retryCurrent?: () => void;
   };
 }
 
@@ -195,6 +196,8 @@ export function PublicationEditor({
                   record={riskActive.record}
                   onRefreshState={riskActive.refreshCurrent}
                   refreshing={riskActive.isRefreshing}
+                  onRetry={riskActive.retryCurrent}
+                  retrying={riskActive.isCreating}
                 />
               ) : null}
               <ChoiceGroup
@@ -247,7 +250,7 @@ export function PublicationEditor({
               <Button variant="secondary" disabled={loading} onClick={onClose}>
                 取消
               </Button>
-              <Button loading={loading} disabled={invalid || unchanged} onClick={handleSubmit}>
+              <Button loading={loading} disabled={invalid || unchanged || riskActive?.isRefreshing} onClick={handleSubmit}>
                 {isExternalBot ? '保存' : '发起变更'}
               </Button>
             </>
