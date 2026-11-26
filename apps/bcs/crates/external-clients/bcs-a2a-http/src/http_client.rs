@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use a2a::A2AError;
 use bcs_app_identity_api::{CredentialError, OutboundAppIdentity, OutboundTarget, SensitiveHeader};
-use bcs_network_tracing::{ClientExt, ClientWithDefaults, RequestWithDefaults};
+use bcs_network_tracing::{ClientWithDefaults, RequestWithDefaults};
 use reqwest::header::{HeaderName, HeaderValue};
 
 const DESTINATION_REJECTED: &str = "A2A application identity destination rejected";
@@ -96,7 +96,11 @@ impl HttpClient {
         // Keeps whether a connection was established at all (see `transport_error`):
         // a connect failure becomes `NOT_CONNECTED` (certainly not sent), any
         // other failure the generic `connection_error` (outcome unknown).
-        let mut response = match self.transport.execute_traced(request).await {
+        let (result, correlation) = self.transport.execute_traced_with_correlation(request).await;
+        if let Some(correlation) = correlation {
+            guard.set_log_correlation(&correlation);
+        }
+        let mut response = match result {
             Ok(response) => response,
             Err(error) => {
                 let (rc, ec) = crate::digest::classify_reqwest_error(&error);

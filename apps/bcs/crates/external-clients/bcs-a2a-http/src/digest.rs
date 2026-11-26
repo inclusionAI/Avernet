@@ -4,34 +4,36 @@
 //! `bcs_a2a_http_client_digest` tracing target, modeled after SOFARPC's
 //! `rpc-client-digest.log` for direct success-rate and latency monitoring.
 //!
-//! Column schema (20 comma-separated fields):
+//! Column schema (22 comma-separated fields):
 //!  1. timestamp     - local time `YYYY-MM-DD HH:mm:ss.SSS`
-//!  2. request_id    - BCS request ID from `bcs-observability` (empty if none)
-//!  3. run_id        - BCS run ID from `A2aCallContext` (empty if standalone)
-//!  4. protocol      - `HTTP+JSON` or `JSONRPC`
-//!  5. invoke_type   - `SYNC` or `STREAM`
-//!  6. method        - `SendMessage` | `SendStreamingMessage` | `GetTask` | `CancelTask` | `SubscribeToTask`
-//!  7. target_host   - sanitized `host[:port]` (never credentials/query/fragment)
-//!  8. target_path   - sanitized canonical path (REST task IDs normalized to `{id}`)
-//!  9. provider_id   - BCS provider ID (empty if standalone)
-//! 10. bot_id        - BCS target bot ID (empty if standalone)
-//! 11. tenant        - selected interface tenant (empty if none)
-//! 12. success       - `Y` (`result_code == "00"`) or `N`
-//! 13. result_code   - `00`=ok, `01`=protocol/biz error, `02`=server/parse/client error,
+//!  2. trace_id      - trace ID from `bcs-tracing-api` `LogCorrelation` (e.g. `sofa_trace_id`; empty if none)
+//!  3. span_id       - span/RPC ID from `bcs-tracing-api` `LogCorrelation` (e.g. outbound `sofa_rpc_id`; empty if none)
+//!  4. request_id    - BCS request ID from `bcs-observability` (empty if none)
+//!  5. run_id        - BCS run ID from `A2aCallContext` (empty if standalone)
+//!  6. protocol      - `HTTP+JSON` or `JSONRPC`
+//!  7. invoke_type   - `SYNC` or `STREAM`
+//!  8. method        - `SendMessage` | `SendStreamingMessage` | `GetTask` | `CancelTask` | `SubscribeToTask`
+//!  9. target_host   - sanitized `host[:port]` (never credentials/query/fragment)
+//! 10. target_path   - sanitized canonical path (REST task IDs normalized to `{id}`)
+//! 11. provider_id   - BCS provider ID (empty if standalone)
+//! 12. bot_id        - BCS target bot ID (empty if standalone)
+//! 13. tenant        - selected interface tenant (empty if none)
+//! 14. success       - `Y` (`result_code == "00"`) or `N`
+//! 15. result_code   - `00`=ok, `01`=protocol/biz error, `02`=server/parse/client error,
 //!     `03`=timeout, `04`=connect/transport error, `05`=rate-limited(429),
 //!     `06`=auth-rejected(401/403), `07`=cancelled
-//! 14. http_status   - HTTP status code (`0` when no response was received)
-//! 15. error_code    - bounded structured error code/reason (empty on `00`)
-//! 16. req_bytes     - serialized request body length in bytes (`0` for GET)
-//! 17. resp_bytes    - received response body bytes (cumulative SSE bytes for STREAM)
-//! 18. duration_ms   - total call latency in integer milliseconds
-//! 19. ttfb_ms       - response-header latency in integer milliseconds (`-1` if unreceived)
-//! 20. stream_events - decoded SSE `StreamResponse` event count (`0` for SYNC)
+//! 16. http_status   - HTTP status code (`0` when no response was received)
+//! 17. error_code    - bounded structured error code/reason (empty on `00`)
+//! 18. req_bytes     - serialized request body length in bytes (`0` for GET)
+//! 19. resp_bytes    - received response body bytes (cumulative SSE bytes for STREAM)
+//! 20. duration_ms   - total call latency in integer milliseconds
+//! 21. ttfb_ms       - response-header latency in integer milliseconds (`-1` if unreceived)
+//! 22. stream_events - decoded SSE `StreamResponse` event count (`0` for SYNC)
 
 use std::time::Instant;
 
 pub const A2A_HTTP_CLIENT_DIGEST_TARGET: &str = "bcs_a2a_http_client_digest";
-pub const A2A_HTTP_CLIENT_DIGEST_COLUMNS: usize = 20;
+pub const A2A_HTTP_CLIENT_DIGEST_COLUMNS: usize = 22;
 
 pub const RESULT_OK: &str = "00";
 pub const RESULT_PROTOCOL_ERROR: &str = "01";
@@ -82,6 +84,8 @@ impl InvokeType {
 /// RAII digest recorder ensuring every HTTP+JSON / JSONRPC call emits
 /// exactly one digest record across success, error, timeout, stream end, or drop.
 pub(crate) struct DigestGuard {
+    trace_id: String,
+    span_id: String,
     request_id: String,
     context: A2aCallContext,
     protocol: Protocol,
@@ -115,7 +119,10 @@ impl DigestGuard {
     pub(crate) fn start(params: DigestStart<'_>) -> Self {
         let (target_host, parsed_path) = split_host_and_path(params.url);
         let target_path = params.canonical_path.unwrap_or(parsed_path);
+        let (trace_id, span_id) = extract_correlation(bcs_tracing_api::current_log_correlation().as_ref());
         Self {
+            trace_id,
+            span_id,
             request_id: bcs_observability::current_request_id(),
             context: params.context.clone(),
             protocol: params.protocol,
@@ -133,6 +140,12 @@ impl DigestGuard {
             started: Instant::now(),
             finished: false,
         }
+    }
+
+    pub(crate) fn set_log_correlation(&mut self, correlation: &bcs_tracing_api::LogCorrelation) {
+        let [(_, trace_id), (_, span_id)] = correlation.fields();
+        self.trace_id = trace_id.to_owned();
+        self.span_id = span_id.to_owned();
     }
 
     pub(crate) fn record_headers(&mut self, status: u16) {
@@ -166,7 +179,9 @@ impl DigestGuard {
         let duration_ms = self.started.elapsed().as_millis();
         let success = if result_code == RESULT_OK { "Y" } else { "N" };
         let line = format!(
-            "{timestamp},{},{},{},{},{},{},{},{},{},{},{success},{result_code},{},{},{},{},{duration_ms},{},{}",
+            "{timestamp},{},{},{},{},{},{},{},{},{},{},{},{},{success},{result_code},{},{},{},{},{duration_ms},{},{}",
+            sanitize_csv_field(&self.trace_id),
+            sanitize_csv_field(&self.span_id),
             sanitize_csv_field(&self.request_id),
             sanitize_csv_field(&self.context.run_id),
             self.protocol.as_str(),
@@ -185,6 +200,16 @@ impl DigestGuard {
             self.stream_events,
         );
         tracing::info!(target: A2A_HTTP_CLIENT_DIGEST_TARGET, "{line}");
+    }
+}
+
+fn extract_correlation(correlation: Option<&bcs_tracing_api::LogCorrelation>) -> (String, String) {
+    match correlation {
+        Some(correlation) => {
+            let [(_, trace_id), (_, span_id)] = correlation.fields();
+            (trace_id.to_owned(), span_id.to_owned())
+        }
+        None => (String::new(), String::new()),
     }
 }
 
@@ -322,26 +347,31 @@ mod tests {
     }
 
     #[test]
-    fn guard_emits_exactly_once_with_20_sanitized_columns() {
+    fn guard_emits_exactly_once_with_22_sanitized_columns() {
         let capture = Capture::default();
         let subscriber = tracing_subscriber::registry().with(capture.clone());
         let dispatch = tracing::Dispatch::new(subscriber);
+        let parent_ids = bcs_tracing_api::LogCorrelation::new("sofa_trace_id", "trace-parent", "sofa_rpc_id", "0").unwrap();
+        let child_ids = bcs_tracing_api::LogCorrelation::new("sofa_trace_id", "trace-parent", "sofa_rpc_id", "0.1").unwrap();
         tracing::dispatcher::with_default(&dispatch, || {
             let ctx = A2aCallContext {
                 bot_id: "bot,1".into(),
                 provider_id: "prv\n1".into(),
                 run_id: "run-1".into(),
             };
-            let mut guard = DigestGuard::start(DigestStart {
-                protocol: Protocol::HttpJson,
-                invoke_type: InvokeType::Sync,
-                method: "SendMessage",
-                url: "https://u:p@agent.example.com:443/a2a?q=1",
-                canonical_path: Some("/a2a/message:send".into()),
-                tenant: Some("tenant,a"),
-                context: &ctx,
-                req_bytes: 128,
+            let mut guard = bcs_tracing_api::with_log_correlation(Some(parent_ids), || {
+                DigestGuard::start(DigestStart {
+                    protocol: Protocol::HttpJson,
+                    invoke_type: InvokeType::Sync,
+                    method: "SendMessage",
+                    url: "https://u:p@agent.example.com:443/a2a?q=1",
+                    canonical_path: Some("/a2a/message:send".into()),
+                    tenant: Some("tenant,a"),
+                    context: &ctx,
+                    req_bytes: 128,
+                })
             });
+            guard.set_log_correlation(&child_ids);
             guard.record_headers(200);
             guard.add_resp_bytes(256);
             guard.finish_ok();
@@ -351,22 +381,24 @@ mod tests {
         assert_eq!(lines.len(), 1);
         let cols: Vec<&str> = lines[0].split(',').collect();
         assert_eq!(cols.len(), A2A_HTTP_CLIENT_DIGEST_COLUMNS, "line: {}", lines[0]);
-        assert_eq!(cols[2], "run-1");
-        assert_eq!(cols[3], "HTTP+JSON");
-        assert_eq!(cols[4], "SYNC");
-        assert_eq!(cols[5], "SendMessage");
-        assert_eq!(cols[6], "agent.example.com");
-        assert_eq!(cols[7], "/a2a/message:send");
-        assert_eq!(cols[8], "prv 1");
-        assert_eq!(cols[9], "bot 1");
-        assert_eq!(cols[10], "tenant a");
-        assert_eq!(cols[11], "Y");
-        assert_eq!(cols[12], "00");
-        assert_eq!(cols[13], "200");
-        assert_eq!(cols[14], "");
-        assert_eq!(cols[15], "128");
-        assert_eq!(cols[16], "256");
-        assert_eq!(cols[19], "0");
+        assert_eq!(cols[1], "trace-parent");
+        assert_eq!(cols[2], "0.1");
+        assert_eq!(cols[4], "run-1");
+        assert_eq!(cols[5], "HTTP+JSON");
+        assert_eq!(cols[6], "SYNC");
+        assert_eq!(cols[7], "SendMessage");
+        assert_eq!(cols[8], "agent.example.com");
+        assert_eq!(cols[9], "/a2a/message:send");
+        assert_eq!(cols[10], "prv 1");
+        assert_eq!(cols[11], "bot 1");
+        assert_eq!(cols[12], "tenant a");
+        assert_eq!(cols[13], "Y");
+        assert_eq!(cols[14], "00");
+        assert_eq!(cols[15], "200");
+        assert_eq!(cols[16], "");
+        assert_eq!(cols[17], "128");
+        assert_eq!(cols[18], "256");
+        assert_eq!(cols[21], "0");
     }
 
     #[test]
@@ -408,7 +440,7 @@ mod tests {
         assert_eq!(lines.len(), 2);
         let c1: Vec<&str> = lines[0].split(',').collect();
         let c2: Vec<&str> = lines[1].split(',').collect();
-        assert_eq!((c1[11], c1[12], c1[19]), ("Y", "00", "1"));
-        assert_eq!((c2[11], c2[12], c2[14], c2[19]), ("N", "07", "CANCELLED", "0"));
+        assert_eq!((c1[13], c1[14], c1[21]), ("Y", "00", "1"));
+        assert_eq!((c2[13], c2[14], c2[16], c2[21]), ("N", "07", "CANCELLED", "0"));
     }
 }

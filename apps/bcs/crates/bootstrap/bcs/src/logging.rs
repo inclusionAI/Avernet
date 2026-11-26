@@ -630,7 +630,7 @@ mod tests {
             .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(RotatingFileWriter::new(dir.path(), &main.file)).with_filter(build_output_targets_filter(&main)))
             .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(RotatingFileWriter::new(dir.path(), "console.log")).with_filter(build_env_filter_with_overlay(&config, None)));
         let dispatch = tracing::Dispatch::new(subscriber);
-        let row = "2026-11-26 16:00:00.123,req-1,run-1,HTTP+JSON,SYNC,SendMessage,agent.example.com,/a2a/message:send,prv_1,bot_1,t1,Y,00,200,,128,256,42,15,0";
+        let row = "2026-11-26 16:00:00.123,trace-1,0.1,req-1,run-1,HTTP+JSON,SYNC,SendMessage,agent.example.com,/a2a/message:send,prv_1,bot_1,t1,Y,00,200,,128,256,42,15,0";
         tracing::dispatcher::with_default(&dispatch, || {
             tracing::info!(target: A2A_HTTP_CLIENT_DIGEST_TARGET, "{row}");
             tracing::error!("ordinary message");
@@ -638,7 +638,7 @@ mod tests {
         drop(guard);
         let digest = fs::read_to_string(dir.path().join("a2a-http-client-digest.log")).unwrap();
         assert_eq!(digest, format!("{row}\n"));
-        assert!(digest.lines().all(|line| line.split(',').count() == 20));
+        assert!(digest.lines().all(|line| line.split(',').count() == 22));
         for file in ["bcs.log", "console.log"] {
             let text = fs::read_to_string(dir.path().join(file)).unwrap();
             assert!(text.contains("ordinary message"), "{file}: {text:?}");
