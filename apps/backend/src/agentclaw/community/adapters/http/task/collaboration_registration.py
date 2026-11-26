@@ -14,6 +14,18 @@ from agentclaw.community.adapters.http.task.context_collab_methods import (
 from agentclaw.community.adapters.http.task.todos.artifact_routes import (
     router as todo_artifact_router,
 )
+from agentclaw.community.adapters.http.task.todos.auto_import_agent_routes import (
+    router as todo_auto_import_agent_router,
+)
+from agentclaw.community.adapters.http.task.todos.human_routes import (
+    router as todo_human_router,
+)
+from agentclaw.community.adapters.http.task.todos.template_capability_routes import (
+    router as todo_template_capability_router,
+)
+from agentclaw.community.adapters.http.task.todos.template_routes import (
+    router as todo_template_router,
+)
 
 
 def mount_collaboration_routers(app: FastAPI) -> None:
@@ -21,4 +33,8 @@ def mount_collaboration_routers(app: FastAPI) -> None:
     app.include_router(commission_a2a_router)
     app.include_router(context_collab_router)
     app.include_router(todo_artifact_router)
+    app.include_router(todo_human_router)
+    app.include_router(todo_template_router)
+    app.include_router(todo_template_capability_router)
+    app.include_router(todo_auto_import_agent_router)
     app.include_router(context_collab_methods_router)

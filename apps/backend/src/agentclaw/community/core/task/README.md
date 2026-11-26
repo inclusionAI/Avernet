@@ -213,6 +213,16 @@ Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.p
 `BcsBotTokenProvider` 及其 DI adapter/binding，复制 Todo 所需的群创建、恢复和
 状态查询编排；本轮不修改 `TaskExecutor`，也不抽取 Task/Todo 公共执行层。
 
+### Todo 内部面路由镜像
+
+- Todo workbench、模板管理、模板能力与自动导入 Agent 面，在 Engine 内部
+  `/api/v1/collaboration/tasks/{todos,todo-templates,todo-template-capabilities}` 与
+  `/openapi/v1` 公开面保持同一 Service API 与响应 schema。
+- 人面路由的 actor 从 `get_current_user` 的 `user.staffId` 解析；显式 `user_id`
+  查询参数必须与该 `staffId` 一致，不改变公开面的 `403` 语义。
+- 自动导入 Agent 镜像保持服务契约不变，但至少要求登录上下文，避免直连
+  Engine 时匿名读取或写入规则处理进度。
+
 ### Todo Space 选择边界
 
 - `GET /api/v1/collaboration/tasks/spaces` 是 Todo 页面读取 Space 的 Engine 内部面，必须排在通用 `/{task_id}` 读路由之前。
