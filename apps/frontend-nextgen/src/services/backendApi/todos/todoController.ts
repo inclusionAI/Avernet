@@ -13,6 +13,8 @@ import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '../types';
 
 const TODO_API_BASE = `${TASK_READ_API_BASE}/todos`;
+// Space 列表是 Task Engine 内部契约，不存在对应 OpenAPI；保持同源相对路径，由本地/部署代理转发到 Engine。
+const TODO_SPACES_API_PATH = '/api/v1/collaboration/tasks/spaces';
 
 export interface TodoDto extends BackendUnknownRecord {
   todo_id?: string | number;
@@ -65,6 +67,21 @@ export interface TodoPageDto {
   pageSize?: number;
 }
 
+export interface TodoSpaceDto extends BackendUnknownRecord {
+  space_id?: number | string;
+  id?: number | string;
+  space_name?: string;
+  name?: string;
+  space_type?: string;
+  type?: string;
+}
+
+export interface TodoSpacePageDto extends BackendApiPage<TodoSpaceDto> {
+  list?: TodoSpaceDto[];
+  spaces?: TodoSpaceDto[];
+  page_no?: number;
+}
+
 export interface TodoSourceProjectDto extends BackendUnknownRecord {
   id?: string | number;
   name?: string;
@@ -105,6 +122,7 @@ export interface TodoAutoImportRuleDto extends BackendUnknownRecord {
 }
 
 export const TODO_ENDPOINTS = {
+  spaces: TODO_SPACES_API_PATH,
   list: TODO_API_BASE,
   detail: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}`,
   acceptance: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/acceptance`,
@@ -125,6 +143,15 @@ export const TODO_ENDPOINTS = {
   dimaAutoImportRule: (ruleId: string) =>
     `${TODO_API_BASE}/sources/dima/auto-import-rules/${encodeURIComponent(ruleId)}`,
 };
+
+export function listTodoSpaces() {
+  return backendRequest<BackendApiEnvelope<TodoSpacePageDto | TodoSpaceDto[]>>(TODO_ENDPOINTS.spaces, {
+    method: 'GET',
+    params: { page_no: 1, page_size: 100, scope: 'accessible' },
+    operation: 'list-todo-spaces',
+    retryOnTransient: true,
+  });
+}
 
 export function listTodos(query: TodoListQuery) {
   const listingParams: BackendUnknownRecord = {

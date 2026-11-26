@@ -13,6 +13,7 @@ describe('todoController task API path', () => {
     jest.isolateModules(() => {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { TODO_ENDPOINTS } = require('@/services/backendApi/todos/todoController');
+      expect(TODO_ENDPOINTS.spaces).toBe('/api/v1/collaboration/tasks/spaces');
       expect(TODO_ENDPOINTS.list).toBe('/api/v1/collaboration/tasks/todos');
       expect(TODO_ENDPOINTS.run('todo/1')).toBe('/api/v1/collaboration/tasks/todos/todo%2F1/run');
       expect(TODO_ENDPOINTS.dimaProjects).toBe('/api/v1/collaboration/tasks/todos/sources/dima/projects');
@@ -22,6 +23,20 @@ describe('todoController task API path', () => {
       expect(TODO_ENDPOINTS.dimaWorkItem('P/1', 'work/1')).toBe(
         '/api/v1/collaboration/tasks/todos/sources/dima/projects/P%2F1/work-items/work%2F1',
       );
+    });
+  });
+
+  test('space listing always uses the Engine internal API instead of OpenAPI', () => {
+    Object.defineProperty(globalThis, 'TEAMCLAW_TASK_API_BASE', {
+      configurable: true,
+      value: '/openapi/v1/collaboration/tasks',
+    });
+
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { TODO_ENDPOINTS } = require('@/services/backendApi/todos/todoController');
+      expect(TODO_ENDPOINTS.spaces).toBe('/api/v1/collaboration/tasks/spaces');
+      expect(TODO_ENDPOINTS.spaces).not.toContain('/openapi/');
     });
   });
 });

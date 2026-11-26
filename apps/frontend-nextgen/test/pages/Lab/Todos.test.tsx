@@ -9,30 +9,16 @@ import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { history } from '@umijs/max';
 
+const mockPersonalSpace = {
+  spaceId: 10,
+  spaceName: '测试用户的个人空间',
+  spaceType: 'PERSONAL' as const,
+};
+
 jest.mock('@umijs/max', () => ({
   history: { push: jest.fn(), replace: jest.fn() },
   useLocation: () => ({ pathname: '/lab/todos' }),
 }));
-
-jest.mock('@/hooks/useSpaceContext', () => {
-  const currentSpace = {
-    spaceId: 10,
-    spaceCode: 'personal-u-1',
-    spaceName: '测试用户的个人空间',
-    spaceType: 'PERSONAL',
-    currentUserRole: 'ADMIN',
-    memberCount: 1,
-    ownerCount: 1,
-    botCount: 1,
-    gmtModified: '2026-11-10T01:00:00Z',
-  };
-  const state = { currentSpace, currentSpaceId: 10, initialized: true };
-  const init = jest.fn(async () => undefined);
-  return {
-    useSpaceContext: (selector: (value: typeof state) => unknown) => selector(state),
-    useSpaceContextActions: () => ({ init, refresh: jest.fn(), switchSpace: jest.fn() }),
-  };
-});
 
 jest.mock('@/hooks/useHumanIdentity', () => ({
   useHumanIdentity: jest.fn(() => ({
@@ -75,6 +61,7 @@ jest.mock('@/services/botWorkshop', () => ({
 }));
 
 jest.mock('@/services/todos/todoService', () => ({
+  loadTodoSpaces: jest.fn(),
   loadTodos: jest.fn(),
   loadTodo: jest.fn(),
   addTodo: jest.fn(),
@@ -171,7 +158,9 @@ function resetTodoStore() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  localStorage.clear();
   resetTodoStore();
+  mockedService.loadTodoSpaces.mockResolvedValue([mockPersonalSpace]);
   mockedService.loadTodos.mockResolvedValue({
     items: [awaitingAcceptanceTodo, runningTodo],
     total: 2,
@@ -185,6 +174,22 @@ beforeEach(() => {
 });
 
 describe('LabTodosPage（待办卡片工作台）', () => {
+  it('Engine 空间加载失败时展示错误，重试成功后再请求待办', async () => {
+    mockedService.loadTodoSpaces.mockRejectedValueOnce(new Error('加载空间列表失败'));
+
+    render(<LabTodosPage />);
+
+    expect(await screen.findByText('加载空间列表失败')).toBeInTheDocument();
+    expect(screen.queryByText('加载待办中…')).not.toBeInTheDocument();
+    expect(mockedService.loadTodos).not.toHaveBeenCalled();
+    expect(mockedService.loadTodoSpaces).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+
+    await waitFor(() => expect(mockedService.loadTodoSpaces).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockedService.loadTodos).toHaveBeenCalledWith(expect.objectContaining({ spaceId: 10 })));
+  });
+
   it('展示当前空间待办，并用当前空间查询', async () => {
     expect(botWorkshop.botWorkshopService).toBeDefined();
     render(<LabTodosPage />);
@@ -195,7 +200,7 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     expect(heading).toHaveClass('text-[20px]', 'font-semibold', 'leading-[30px]');
     expect(description).toBeInTheDocument();
     expect(description).toHaveClass('text-[13px]', 'font-normal', 'leading-[20px]');
-    expect(screen.getByText('测试用户的个人空间')).toBeInTheDocument();
+    expect(await screen.findByText('测试用户的个人空间')).toBeInTheDocument();
     expect(screen.queryByText('个人空间')).not.toBeInTheDocument();
 
     await waitFor(() =>
