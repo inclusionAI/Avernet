@@ -7,25 +7,39 @@ Tests for the public endpoints:
 
 """
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
-from injector import Injector, Module
+from injector import CallableProvider, Injector, Module
 
+from agentclaw.community.adapters.http.bot_public import public_noauth_router
 from agentclaw.community.adapters.http.bot_public.public_noauth_router import (
     _scrub_sensitive,
     router,
 )
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.repository.protocols.bot import BotRepository, TemplateRepository
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+)
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
+)
 
 
 # --- Helpers ---
 
-def _bind_services(mock_bot_service=None, mock_bot_repo=None, mock_template_repo=None):
+def _bind_services(
+    mock_bot_service=None,
+    mock_bot_repo=None,
+    mock_template_repo=None,
+    mock_publish_repo=None,
+    mock_binding_repo=None,
+):
     """Bind mock services via injector Module."""
     class _M(Module):
         def configure(self, binder):
@@ -37,6 +51,13 @@ def _bind_services(mock_bot_service=None, mock_bot_repo=None, mock_template_repo
                 binder.bind(BotRepository, to=mock_bot_repo)
             if mock_template_repo is not None:
                 binder.bind(TemplateRepository, to=mock_template_repo)
+            if mock_publish_repo is not None:
+                binder.bind(
+                    BotPublishRepositoryProtocol,
+                    to=CallableProvider(lambda: mock_publish_repo),
+                )
+            if mock_binding_repo is not None:
+                binder.bind(DeviceBindingRepository, to=mock_binding_repo)
     return _M()
 
 
@@ -95,26 +116,38 @@ def mock_bot_repo():
     """Mock BotRepository for ext update tests."""
     repo = MagicMock()
     # Mock list_by_conditions to return a bot
+    repo.get_unique_by_id = MagicMock(return_value={
+        "id": 1,
+        "bot_id": "default",
+        "bot_name": "Default Bot",
+        "owner_id": "test_owner",
+        "device_id": "device_001",
+        "binding_id": 1001,
+        "bot_type": "personal",
+        "env": "dev",
+        "template_config": {
+            "template_type": "applicationCoding",
+            "workspace": {"image": "latest"},
+        },
+        "ext": {
+            "existing_key": "existing_value",
+            "arch_domain": "测试架构域",
+            "iam_token": "secret-jwt",
+            "token": "enc:v1:secret",
+        },
+    })
     repo.list_by_conditions = MagicMock(return_value=(
         1,
         [{
-            "id": 1,
             "bot_id": "default",
-            "bot_name": "Default Bot",
             "owner_id": "test_owner",
-            "device_id": "device_001",
-            "binding_id": 1001,
-            "template_config": {
-                "template_type": "applicationCoding",
-                "workspace": {"image": "latest"},
-            },
             "ext": {
                 "existing_key": "existing_value",
                 "arch_domain": "测试架构域",
                 "iam_token": "secret-jwt",
                 "token": "enc:v1:secret",
             },
-        }]
+        }],
     ))
     repo.update_by_owner = MagicMock(return_value={"id": 1, "bot_id": "default"})
     return repo
@@ -128,11 +161,37 @@ def mock_template_repo():
 
 
 @pytest.fixture
-def client(mock_bot_service, mock_bot_repo, mock_template_repo):
+def mock_publish_repo():
+    repo = MagicMock(spec=BotPublishRepositoryProtocol)
+    repo.list_by_source_bot = MagicMock(return_value=[])
+    return repo
+
+
+@pytest.fixture
+def mock_binding_repo():
+    repo = MagicMock(spec=DeviceBindingRepository)
+    repo.get_by_id = MagicMock(return_value=None)
+    return repo
+
+
+@pytest.fixture
+def client(
+    mock_bot_service,
+    mock_bot_repo,
+    mock_template_repo,
+    mock_publish_repo,
+    mock_binding_repo,
+):
     """TestClient with mocked services."""
     app = FastAPI()
     app.include_router(router)
-    attach_injector(app, Injector([_bind_services(mock_bot_service, mock_bot_repo, mock_template_repo)]))
+    attach_injector(app, Injector([_bind_services(
+        mock_bot_service,
+        mock_bot_repo,
+        mock_template_repo,
+        mock_publish_repo,
+        mock_binding_repo,
+    )]))
     return TestClient(app)
 
 
@@ -154,9 +213,7 @@ class TestGetBotBindingPublic:
             "template_type": "applicationCoding",
             "workspace": {"image": "latest"},
         }
-        mock_bot_repo.list_by_conditions.assert_called_once_with(
-            bot_id="arch_001", page=1, page_size=1
-        )
+        mock_bot_repo.get_unique_by_id.assert_called_once_with("arch_001")
 
     def test_sensitive_fields_are_scrubbed(self, client):
         resp = client.get("/api/public/bots/arch_001/binding")
@@ -172,13 +229,121 @@ class TestGetBotBindingPublic:
         assert "token" not in bot["ext"]
         assert bot["ext"]["arch_domain"] == "测试架构域"
 
+    def test_service_bot_returns_online_binding_by_default(
+        self, client, mock_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        mock_bot_repo.get_unique_by_id.return_value = {
+            "id": 10,
+            "bot_id": "service_001",
+            "owner_id": "test_owner",
+            "device_id": "draft_device",
+            "binding_id": 1001,
+            "bot_type": "service",
+            "env": "prod",
+        }
+        mock_publish_repo.list_by_source_bot.return_value = [
+            SimpleNamespace(
+                id=20,
+                status="success",
+                ext=json.dumps({"binding": {"online": 2002}}),
+            )
+        ]
+
+        resp = client.get("/api/public/bots/service_001/binding")
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["binding_id"] == 2002
+        mock_publish_repo.list_by_source_bot.assert_called_once_with(10, "prod")
+        mock_binding_repo.get_by_id.assert_not_called()
+
+    def test_service_bot_can_request_draft_binding(
+        self, client, mock_bot_repo, mock_publish_repo
+    ):
+        mock_bot_repo.get_unique_by_id.return_value = {
+            "id": 10,
+            "bot_id": "service_001",
+            "binding_id": 1001,
+            "bot_type": "service",
+            "env": "prod",
+        }
+
+        resp = client.get("/api/public/bots/service_001/binding?stage=draft")
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["binding_id"] == 1001
+        mock_publish_repo.list_by_source_bot.assert_not_called()
+
+    def test_service_bot_verify_uses_published_binding(
+        self, client, mock_bot_repo, mock_publish_repo, mock_binding_repo
+    ):
+        mock_bot_repo.get_unique_by_id.return_value = {
+            "id": 10,
+            "bot_id": "service_001",
+            "binding_id": 1001,
+            "bot_type": "service",
+            "env": "prod",
+        }
+        mock_publish_repo.list_by_source_bot.return_value = [
+            SimpleNamespace(
+                id=20,
+                status="validating",
+                ext=json.dumps({"binding": {"verify": 3003}}),
+            )
+        ]
+
+        resp = client.get("/api/public/bots/service_001/binding?stage=verify")
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["binding_id"] == 3003
+        mock_publish_repo.list_by_source_bot.assert_called_once_with(10, "prod")
+        mock_binding_repo.get_by_id.assert_not_called()
+
+    def test_service_bot_returns_conflict_when_online_runtime_not_live(
+        self, client, mock_bot_repo, mock_publish_repo
+    ):
+        mock_bot_repo.get_unique_by_id.return_value = {
+            "id": 10,
+            "bot_id": "service_001",
+            "binding_id": 1001,
+            "bot_type": "service",
+            "env": "prod",
+        }
+        mock_publish_repo.list_by_source_bot.return_value = []
+
+        resp = client.get("/api/public/bots/service_001/binding")
+
+        body = resp.json()
+        assert resp.status_code == 200
+        assert body["success"] is False
+        assert body["error_code"] == 409
+        assert "no live online runtime" in body["message"]
+        # Never silently fall back to the draft binding.
+        assert body["data"] is None
+
+    def test_ambiguous_bot_id_returns_conflict(self, client, mock_bot_repo):
+        from agentclaw.community.core.bot_management.errors import (
+            BotLookupAmbiguousError,
+        )
+
+        mock_bot_repo.get_unique_by_id.side_effect = BotLookupAmbiguousError
+
+        resp = client.get("/api/public/bots/ambiguous/binding")
+
+        body = resp.json()
+        assert resp.status_code == 200
+        assert body["success"] is False
+        assert body["error_code"] == 409
+
     def test_template_config_omitted_when_template_missing(
         self, client, mock_bot_repo, mock_template_repo
     ):
-        mock_bot_repo.list_by_conditions.return_value = (
-            1,
-            [{"bot_id": "arch_001", "device_id": "device_001", "binding_id": 1001}],
-        )
+        mock_bot_repo.get_unique_by_id.return_value = {
+            "id": 1,
+            "bot_id": "arch_001",
+            "device_id": "device_001",
+            "binding_id": 1001,
+            "template_config": None,
+        }
         mock_template_repo.get_by_bot_id.return_value = None
 
         resp = client.get("/api/public/bots/arch_001/binding")
@@ -187,7 +352,7 @@ class TestGetBotBindingPublic:
         assert "template_config" not in resp.json()["data"]
 
     def test_not_found(self, client, mock_bot_repo):
-        mock_bot_repo.list_by_conditions.return_value = (0, [])
+        mock_bot_repo.get_unique_by_id.return_value = None
 
         resp = client.get("/api/public/bots/missing/binding")
 
@@ -198,7 +363,7 @@ class TestGetBotBindingPublic:
 
     def test_service_error_handled(self, client, mock_bot_repo):
         from agentclaw.community.core.bot_management.services.bot_service import BotServiceError
-        mock_bot_repo.list_by_conditions.side_effect = BotServiceError("Database error")
+        mock_bot_repo.get_unique_by_id.side_effect = BotServiceError("Database error")
 
         resp = client.get("/api/public/bots/arch_001/binding")
 
@@ -207,7 +372,7 @@ class TestGetBotBindingPublic:
         assert body["error_code"] == 500
 
     def test_unexpected_error_handled(self, client, mock_bot_repo):
-        mock_bot_repo.list_by_conditions.side_effect = RuntimeError("Unexpected error")
+        mock_bot_repo.get_unique_by_id.side_effect = RuntimeError("Unexpected error")
 
         resp = client.get("/api/public/bots/arch_001/binding")
 
