@@ -2,7 +2,7 @@
 
 Owner: `@avernet/workflow`. Contract version: 1 (additive Service API).
 
-`GET /api/runs/:flowId/execution-record` lets authorized clients query the stored
+`GET /api/runs/:flowId/execution-record` lets clients query the stored
 execution record in the same envelope as workflow HTTP callbacks. The path is
 relative to the host's runs mount (`/api/runs` in ClawWeb). This is a consumer
 read Service API, not the engine's outgoing HTTP callback Plugin API.
@@ -16,7 +16,8 @@ read Service API, not the engine's outgoing HTTP callback Plugin API.
   The default is `false`, matching HTTP callback configuration. Repeated,
   structured, empty, or other values return HTTP 400.
 - Use the host's existing authentication/session mechanism. Passing
-  `botOwnerId`, `botId`, or another query filter does not grant access to a run.
+  `botOwnerId`, `botId`, or another query filter does not supply an identity or
+  filter the selected run. This endpoint does not require a workflow/run view grant.
 
 ```sh
 curl "$CLAWWEB_URL/api/runs/$FLOW_ID/execution-record?includeNodeOutput=true"
@@ -127,51 +128,57 @@ credential column is never read by this endpoint.
 ## Access and errors
 
 When the host supplies a workflow permission repository or a run-subworkflows
-reader, an identity is required unless the host has already authorized the caller
-as an administrator. The effective reader includes the legacy composition that
-passes it in the `facadeRepo` argument. Request validation and flow ID trimming
-happen before inspection. Reader inspection authorizes the run before either
-execution-record repository reads raw payloads; its identity and scope checks are
-not bypassed when the router's permission repository is absent.
+reader, an identity is still required unless the host has already authorized the
+caller as an administrator. The effective reader includes the legacy composition
+that passes it in the `facadeRepo` argument. Request validation and flow ID trimming
+happen before any database reads.
 
-When a permission repository is supplied, non-administrators also need a view
-grant for that workflow and must satisfy its run scope. An `all` grant allows
-all ordinary runs; a Bot-scoped grant matches the full Bot/owner identity in
-`origin_bot_id`. An explicit wildcard-owner grant matches the named Bot across
-owners. Missing origin ownership does not satisfy a Bot-scoped grant.
+**This endpoint does not check workflow view grants or Bot/owner run scope.** An
+identified caller can query an ordinary run by `flowId` even without a view grant,
+with a different Bot/owner, or when the run has no origin Bot. It does not call
+`resolveRunViewScope` or the authorization-enforcing `inspectRun` reader method.
+This is a deliberate endpoint-specific access relaxation; run lists, detail,
+node and subworkflow APIs retain their existing authorization.
 
-On reader-enabled mounts, **managed fanout parents, restricted snapshots, and
-sensitive fanout children are denied with a fixed HTTP 403**, including for
-administrators. Their raw callback payloads cannot substitute for the existing
-permission-filtered subworkflow views. Ordinary records keep the callback
-allowlist and output opt-in behavior above. Before reading node payloads, the
-selected run's exact `flow_id`, `workflow_id`, and `origin_bot_id` must still
-match the inspected identity (and the trimmed requested flow ID); a mismatch
-returns a fixed HTTP 409 without node payloads. This pins authorization to the
-selected identity; it does not make concurrent flow/node writes transactional.
+On reader-enabled mounts, the endpoint still rejects **fanout parent and sensitive
+fanout child payloads with a fixed HTTP 403**, including for administrators. It
+classifies the same strict database snapshot used for the response, independently
+of actor permissions: any nonempty top-level `subworkflowFanouts` map or own
+`fanoutOrigin` key (even null) makes the record unavailable. It does not resolve
+child permissions or consume custom reader inspection flags. A malformed root or
+fanout map returns a fixed 500; a nonempty map is conservatively denied without
+validating its group contents. These raw callback payloads cannot substitute for
+the existing permission-filtered subworkflow views.
+
+The strict flow snapshot reads `state_json` internally for this classification;
+the response allowlist never exposes it. The selected `flow_id` must match the
+trimmed requested flow ID, and a state snapshot's embedded `flowId`, if present,
+must match the selected run. A mismatch returns a fixed HTTP 409 before reading
+node payloads. Flow and node reads are not transactional.
 
 Caller-supplied query filters do not override these rules. Hosts remain
-responsible for verifying request identities before the router. Only isolated
-mounts with neither a permission repository nor a reader retain unrestricted
-mode.
+responsible for verifying request identities before the router; the shared actor
+resolver extracts an identity but does not verify a session. Neither a permission
+repository nor a reader is required for isolated mounts, which retain their
+existing unrestricted mode. Mounting this endpoint therefore requires a trusted
+host authentication boundary; knowing a flow ID plus a host-accepted identity is
+sufficient for ordinary records, not a per-workflow authorization grant.
 
 | HTTP status | Meaning |
 | --- | --- |
 | 400 | Blank flow ID or invalid `includeNodeOutput` |
 | 401 | Identity required on a permission- or reader-enabled mount |
-| 403 | Workflow/run scope denies access, or reader inspection identifies a fanout/restricted snapshot |
+| 403 | Reader-enabled mount identifies a fanout parent or sensitive child snapshot |
 | 404 | No stored run with this `flowId` |
-| 409 | Inspected/selected run identity or reader snapshot changed; retry |
-| 503 | Required database repositories are not configured, or the reader is unavailable |
-| 500 | Database read or other internal failure; no SQL/error details returned |
+| 409 | Selected or embedded flow identity differs from the requested flow; retry |
+| 503 | Required database repositories are not configured |
+| 500 | Database read, malformed classification state or other internal failure; no SQL/error details returned |
 
 Errors keep the runs API's `{ "error": "...", "message": "..." }` shape.
-Known reader failures map to fixed safe responses: unauthenticated to 401,
-forbidden to 403, not-found to 404, invalid query to 400, identity/snapshot
-conflicts to 409, unavailable to 503, and invalid persisted state to 500.
-Neither caught messages nor driver details are returned. Unexpected errors
-remain fixed HTTP 500 responses. Database errors must propagate as failures,
-never as a successful empty node list or a false not-found response.
+Neither caught messages nor driver details are returned. Database errors must
+propagate as failures, never as a successful empty node list or a false not-found
+response. Reader/permission service outages do not affect this endpoint because
+it does not invoke either service.
 
 Every 5xx failure emits fixed privacy-safe ERROR metadata and places a diagnostic
 in `res.locals.taskGuardApiDiagnostic` using `captureSensitiveApiError`. Its
@@ -190,7 +197,8 @@ cross-package runtime dependency. Removing this route is the rollback path.
 
 `server/routes/__tests__/run-execution-record.test.ts` covers the HTTP contract
 with Express and an in-memory SQLite database, including output opt-in,
-multiple attempts, large records, access scopes, and database failures.
+multiple attempts, large records, identity requirements, grant-independent reads,
+and database failures.
 `server/services/__tests__/execution-record-service.test.ts` independently pins
 the transport-free projection, output opt-in, credential redaction, and error
 propagation behavior.
@@ -198,7 +206,8 @@ propagation behavior.
 `server/routes/__tests__/run-execution-record-authorization.test.ts` exercises
 reader-only, reader-plus-permission-repository, and legacy reader compositions
 using the actual reader service, permission resolver and migrated SQLite schema.
-It covers ordinary authorization and fanout denial including administrators,
-identity drift, fixed reader-error mapping, and privacy-safe console/HTTP
-logging diagnostics. Fault injection supplements the actual-service paths;
-existing run-subworkflows service suites remain the reader contract baseline.
+It covers ordinary reads without workflow/run grants, preserved identity checks,
+state-based fanout denial including administrators, snapshot identity conflicts,
+malformed state, and privacy-safe console/HTTP logging diagnostics. Regression
+checks ensure other run read endpoints still enforce the real reader's scope.
+Existing run-subworkflows service suites remain the reader contract baseline.

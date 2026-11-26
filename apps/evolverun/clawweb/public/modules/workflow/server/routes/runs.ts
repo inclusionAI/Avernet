@@ -101,7 +101,10 @@ export function createRunsRouter(
   const exposeRuntimeMetadata = options.exposeRuntimeMetadata === true;
   const effectiveRunSubviews = runSubviews ?? (facadeRepo && 'listRuns' in facadeRepo ? facadeRepo : null);
   const effectiveFacadeRepo = facadeRepo && !('listRuns' in facadeRepo) ? facadeRepo : null;
-  registerRunExecutionRecord(router, flowRunRepo, nodeExecRepo, botPermRepo, effectiveRunSubviews);
+  registerRunExecutionRecord(router, flowRunRepo, nodeExecRepo, {
+    requireIdentity: Boolean(botPermRepo || effectiveRunSubviews),
+    restrictFanoutPayloads: Boolean(effectiveRunSubviews),
+  });
   router.use(createRunReadRouter(flowRunRepo, nodeExecRepo, eventRepo, botPermRepo, workflowSpecRepo,
     executionStepLogRepo, effectiveRunSubviews, exposeRuntimeMetadata));
   router.use(createRunBaasRouter(flowRunRepo, eventRepo, effectiveFacadeRepo));

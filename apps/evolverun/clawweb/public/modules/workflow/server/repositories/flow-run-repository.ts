@@ -20,6 +20,9 @@ function isMissingEvolutionAnalysisStatusColumn(message: string): boolean {
     || normalized.includes("no such column: evolution_analysis_status");
 }
 
+/** Internal selection for execution-record guards; state is never part of the callback DTO. */
+export type ExecutionRecordSnapshot = ExecutionRecordFlowRun & { state_json: string | null };
+
 export type FlowRunRow = {
   id: number;
   flow_id: string;
@@ -259,14 +262,14 @@ export class FlowRunRepository {
     }
   }
 
-  /** Callback-field snapshot. Never reads credentials; database failures must propagate. */
-  async findExecutionRecordByFlowIdStrict(flowId: string): Promise<ExecutionRecordFlowRun | null> {
-    const rows = await this.db.query<ExecutionRecordFlowRun>(
+  /** Callback fields plus same-snapshot internal state. Never reads credentials; failures propagate. */
+  async findExecutionRecordByFlowIdStrict(flowId: string): Promise<ExecutionRecordSnapshot | null> {
+    const rows = await this.db.query<ExecutionRecordSnapshot>(
       `SELECT id, flow_id, workflow_id, workflow_title, status, params_json, input_json,
               result_json, node_count, succeeded_count, failed_count, total_duration_ms,
               total_token_usage, triggered_by, identity_key, current_phase, started_at,
               completed_at, NULL AS credentials_json, origin_session_key, origin_session_id,
-              origin_bot_id, user_id, plugin_version, gmt_create, gmt_modified
+              origin_bot_id, user_id, plugin_version, gmt_create, gmt_modified, state_json
        FROM flow_runs WHERE flow_id = ?`,
       [flowId],
     );
