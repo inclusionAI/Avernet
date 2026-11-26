@@ -148,7 +148,9 @@ exact version link. A self-contained Skill directory with a readable root
 `SKILL.md` at the same active name is delivered as local content. A missing
 entry, a dependent directory, or an unexpected Center link blocks the build.
 Legacy manifests include Center delivery only when at least one included Skill
-references it. Pool manifests retain their shared-corpus declarations.
+references it. Only delivered Center references require the V3 mapping capability
+and exact Store Version verification. Pool manifests retain their shared-corpus
+declarations.
 
 Publish history is associated with its source Bot through immutable
 `ac_bot_publish.source_bot_pk`. Version duplicate checks and stage-record reads

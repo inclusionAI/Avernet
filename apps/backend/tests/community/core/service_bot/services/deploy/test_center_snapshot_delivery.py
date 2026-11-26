@@ -1,6 +1,7 @@
 """Exercise shadowed Center skills in file snapshots and release replay."""
 
 from dataclasses import replace
+from os.path import relpath
 from pathlib import Path
 from shutil import copytree
 from unittest.mock import AsyncMock, Mock
@@ -22,6 +23,7 @@ from agentclaw.community.core.service_bot.services.deploy.service_skills_manifes
 from agentclaw.community.core.service_bot.services.service_artifact_refs import (
     exact_center_refs_from_artifact_ext,
 )
+from agentclaw.community.core.skill_center.services.runtime_layout_probe import MAPPING_CONTRACT_VERSION
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
@@ -95,9 +97,14 @@ def snapshot(request, tmp_path):
 
     producer = ArcaSnapshotProducer(Mock(build=copy_snapshot), builder)
 
-    def produce(version):
+    def produce(version, *, center_available=True):
+        observation = observed if center_available else replace(
+            observed,
+            center_mount_status="NOT_READY",
+            supported_mapping_contract_versions=frozenset({MAPPING_CONTRACT_VERSION}),
+        )
         artifact = producer.produce_artifact(
-            ArtifactBuildRequest.create(bot=bot, version=version, layout_observation=observed)
+            ArtifactBuildRequest.create(bot=bot, version=version, layout_observation=observation)
         )
         validate_service_skills_manifest_for_release(artifact.ext["skills_manifest"], bot)
         return artifact.ext
@@ -127,7 +134,7 @@ def test_snapshot_delivers_local_files_and_pins_only_center_links(snapshot, pool
 
     _write_local(entry)
     store.ready = False
-    local = produce(1)
+    local = produce(1, center_available=False)
     assert exact_center_refs_from_artifact_ext(local) == ()
     assert not store.refs
     assert not _snapshot_entry(local).is_symlink()
@@ -157,8 +164,25 @@ def test_snapshot_rejects_incomplete_or_dependent_override(snapshot, invalid):
         entry.symlink_to(target.with_name("v2.0"))
     elif invalid == "external-link":
         _write_local(entry)
+        (entry.parent / "outside").write_text("outside package")
         (entry / "dependency").symlink_to("../outside")
     with pytest.raises(ServiceSkillsManifestError, match="frozen exact manifest: .*observ"):
+        produce(1)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("relative", [False, True])
+def test_local_override_still_rejects_undeclared_center_alias(snapshot, relative):
+    bot, _, _, entry, target, produce = snapshot
+    _write_local(entry)
+    if relative:
+        engine = "aicoding" if bot["active_engine"] == "claude_code" else "openclaw"
+        active_runtime = _ready_observation(engine).resolved_layout.active_root
+        alias = relpath(target, active_runtime)
+    else:
+        alias = target.parent.parent / ".." / "skill-center" / _UUID / _VERSION
+    (entry.parent / "undeclared").symlink_to(alias)
+    with pytest.raises(ServiceSkillsManifestError, match="frozen exact manifest: .*undeclared"):
         produce(1)
 
 

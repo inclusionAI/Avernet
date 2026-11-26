@@ -170,8 +170,10 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         )
         center_root = PurePosixPath(center_delivery.runtime_path)
         active = root.joinpath(*active_path.parts)
-        if any(root.joinpath(*active_path.parts[:depth]).is_symlink()
-               for depth in range(1, len(active_path.parts) + 1)):
+        if any(
+            root.joinpath(*active_path.parts[:depth]).is_symlink()
+            for depth in range(1, len(active_path.parts) + 1)
+        ):
             raise ServiceSkillsManifestError("shared corpus snapshot has an invalid active Skills root")
 
         delivered = []
@@ -185,19 +187,18 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
                 (str(active_path / name), str(center_root / item["skill_uuid"] / item["sc_version_number"]))
             )
         actual: list[tuple[str, str]] = []
+        assert captured.active_runtime_path is not None
+        runtime_active = PurePosixPath(captured.active_runtime_path)
         if root.exists():
             for entry in root.rglob("*"):
                 if not entry.is_symlink():
                     continue
                 target = os.readlink(entry)
                 target_path = PurePosixPath(target)
-                try:
-                    target_path.relative_to(center_root)
-                except ValueError:
-                    continue
-                actual.append(
-                    (entry.relative_to(root).as_posix(), target_path.as_posix())
-                )
+                if not target_path.is_absolute() and entry.is_relative_to(active):
+                    target_path = runtime_active / entry.relative_to(active).parent / target_path
+                if PurePosixPath(os.path.normpath(target_path)).is_relative_to(center_root):
+                    actual.append((entry.relative_to(root).as_posix(), target))
         actual_links = set(actual)
         if len(actual) != len(actual_links) or actual_links != expected:
             paths = ", ".join(sorted({path for path, _ in actual_links ^ expected}))
@@ -220,13 +221,26 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         except OSError:
             return False
         package_root = directory.resolve()
-        for entry in directory.rglob("*"):
-            if entry.is_symlink():
-                if Path(os.readlink(entry)).is_absolute():
-                    return False
-                try:
-                    if not entry.resolve(strict=True).is_relative_to(package_root):
+        try:
+            for parent, _, names in directory.walk(on_error=_raise_walk_error):
+                for name in names:
+                    entry = parent / name
+                    if not entry.is_symlink():
+                        continue
+                    target = Path(os.readlink(entry))
+                    if target.is_absolute() or not Path(
+                        os.path.normpath(parent / target)
+                    ).is_relative_to(directory):
                         return False
-                except (OSError, RuntimeError):
-                    return False
+                    candidate = parent
+                    for part in target.parts:
+                        candidate /= part
+                        if not candidate.resolve(strict=True).is_relative_to(package_root):
+                            return False
+        except (OSError, RuntimeError):
+            return False
         return True
+
+
+def _raise_walk_error(error: OSError) -> None:
+    raise error

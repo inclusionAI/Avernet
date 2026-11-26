@@ -60,6 +60,7 @@ class CapturedServiceSkillsLayout:
     active_runtime_path: str | None
     center_skills: tuple[dict[str, Any], ...]
     shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...]
+    supports_center_mapping: bool
 
 
 _SERVICE_MANIFEST_ENGINES = frozenset({"openclaw", "claude_code", "aicoding", "hermes"})
@@ -251,15 +252,7 @@ class ServiceSkillsManifestBuilder:
         ready_observation: ServiceArtifactLayoutObservation | None = None
         requires_observation = is_pool or bool(center_skills)
         if requires_observation:
-            required_mapping = (
-                MAPPING_V3_CONTRACT_VERSION
-                if center_skills
-                else MAPPING_CONTRACT_VERSION
-            )
-            ready_observation = self._require_layout_observation(
-                layout_observation,
-                required_mapping_contract=required_mapping,
-            )
+            ready_observation = self._require_layout_observation(layout_observation)
             assert ready_observation.resolved_layout is not None
             if is_pool and ready_observation.resolved_layout.source_layout == "legacy":
                 raise ServiceSkillsManifestError(
@@ -302,6 +295,11 @@ class ServiceSkillsManifestBuilder:
             active_runtime_path=active_runtime_path,
             center_skills=center_skills,
             shared_corpora=shared_corpora,
+            supports_center_mapping=(
+                ready_observation is not None
+                and MAPPING_V3_CONTRACT_VERSION
+                in ready_observation.supported_mapping_contract_versions
+            ),
         )
 
     def finalize(
@@ -330,6 +328,11 @@ class ServiceSkillsManifestBuilder:
                 code=ServiceArtifactBuildErrorCode.CAPABILITY_CHANGED,
             )
         if delivered_center_skills:
+            if not captured.supports_center_mapping:
+                raise ServiceSkillsManifestError(
+                    "service build runtime mapping capability is unavailable",
+                    code=ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_UNAVAILABLE,
+                )
             self._verify_exact_store(delivered_center_skills)
 
         manifest = {
@@ -355,8 +358,6 @@ class ServiceSkillsManifestBuilder:
     @staticmethod
     def _require_layout_observation(
         observation: ServiceArtifactLayoutObservation | None,
-        *,
-        required_mapping_contract: str,
     ) -> ServiceArtifactLayoutObservation:
         if observation is None:
             raise ServiceSkillsManifestError(
@@ -379,10 +380,7 @@ class ServiceSkillsManifestBuilder:
                 "service build runtime layout evidence is invalid",
                 code=ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_INVALID,
             )
-        if (
-            required_mapping_contract
-            not in observation.supported_mapping_contract_versions
-        ):
+        if MAPPING_CONTRACT_VERSION not in observation.supported_mapping_contract_versions:
             raise ServiceSkillsManifestError(
                 "service build runtime mapping capability is unavailable",
                 code=ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_UNAVAILABLE,

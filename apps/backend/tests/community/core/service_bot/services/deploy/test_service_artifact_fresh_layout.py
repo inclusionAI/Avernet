@@ -194,12 +194,13 @@ def test_center_requires_mapping_v3() -> None:
     asset = _center_asset()
     builder = _builder(_legacy_state(), _Reader((asset,)))
 
+    captured = builder.capture(
+        bot=_bot(),
+        layout_observation=_observation(mappings=frozenset({MAPPING_CONTRACT_VERSION})),
+    )
     with pytest.raises(ServiceSkillsManifestError) as raised:
-        builder.capture(
-            bot=_bot(),
-            layout_observation=_observation(
-                mappings=frozenset({MAPPING_CONTRACT_VERSION})
-            ),
+        builder.finalize(
+            captured=captured, delivered_center_skills=captured.center_skills, bot=_bot(),
         )
 
     assert raised.value.code is (
@@ -378,14 +379,8 @@ def test_legacy_center_build_without_pool_preparation(
     builder = _builder(
         _legacy_state(), _Reader((asset,), (asset,)), _Store(ready=store_ready)
     )
-    if expected_error is ServiceArtifactBuildErrorCode.LAYOUT_EVIDENCE_UNAVAILABLE:
-        with pytest.raises(ServiceSkillsManifestError) as raised:
-            builder.capture(bot=bot, layout_observation=observed)
-        assert raised.value.code is expected_error
-        return
-
     captured = builder.capture(bot=bot, layout_observation=observed)
-    if expected_error is ServiceArtifactBuildErrorCode.CENTER_STORE_NOT_READY:
+    if expected_error is not None:
         with pytest.raises(ServiceSkillsManifestError) as raised:
             builder.finalize(
                 captured=captured, delivered_center_skills=captured.center_skills, bot=bot,
