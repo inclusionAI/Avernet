@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -88,10 +88,6 @@ class WorkItem(BaseModel):
         default=None, description="Workspace root used for DDF detail lookups."
     )
     model: str | None = Field(default=None, description="Session model name.")
-    ext_info: dict[str, Any] | None = Field(
-        default=None,
-        description="Relay ext_info projection, or null when Relay did not return it.",
-    )
 
 
 class WorkItemBotSummary(BaseModel):
