@@ -951,6 +951,14 @@ export interface AppCapabilities {
    */
   getCodingBotConversationHost: () => CapabilityResult<CodingBotConversationHost | null>;
   /**
+   * ACE 统一登录登出地址（仅 ace-gateway 形态生效）。
+   * Open Core 默认 null（无 ACE 网关，useAccountLogout 走 oauth-provider 的 OAuth 退出）；
+   * internal overlay 返回 ACE SSO 登出 URL，供 useAccountLogout 在 ace-gateway 策略下
+   * 通过页面跳转完成统一登录登出（清除 ACE 域会话后回到当前站点，触发网关登录重定向）。
+   * 同步签名，不发请求。返回 null 时 ace-gateway 策略下 canLogout 回退 false（兜底安全）。
+   */
+  getAceGatewayLogoutUrl: () => CapabilityResult<string | null>;
+  /**
    * SPM 埋点上报 adapter（见 `TrackerAdapter`）。
    * Open Core 默认 no-op（零上报、零内部资源）；internal overlay 注入真实 Tracert 实现。
    * 消费方统一经 `Tracert` facade 调用，禁止业务代码直取本 capability。

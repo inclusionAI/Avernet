@@ -99,7 +99,7 @@ describe('AccountBadge', () => {
     expect(screen.getByText('退出登录').closest('button')).toBeDisabled();
   });
 
-  it('internal 形态（canLogout=false）：点头像同样打开弹窗，弹窗内无退出登录（AC-12/13）', () => {
+  it('canLogout=false 时：点头像同样打开弹窗，弹窗内无退出登录', () => {
     render(<AccountBadge currentUser={{ displayName: '验收用户' }} />);
 
     fireEvent.click(screen.getByText('验收用户'));

@@ -385,6 +385,10 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: null,
   }),
+  // ACE 统一登录登出地址：Open Core 无 ACE 网关，返回 null（ace-gateway 策略下 canLogout 回退 false）。
+  // internal overlay 注入真实 URL（extensions/internal.ts），供 useAccountLogout 在 ace-gateway 策略下
+  // 跳转至 ACE SSO 登出页（清除 ACE 域会话后经 returnUrl 回到当前站点）。
+  getAceGatewayLogoutUrl: (): CapabilityResult<string | null> => ({ status: 'available', value: null }),
   // SPM 埋点 adapter(add-spm-tracking):Open Core 默认 no-op——零上报、
   // 不加载任何埋点 SDK;internal overlay 注入真实 Tracert 实现(码表在 overlay 侧维护,
   // 开源仓库只见语义点位常量 src/tracking/points.ts)。
