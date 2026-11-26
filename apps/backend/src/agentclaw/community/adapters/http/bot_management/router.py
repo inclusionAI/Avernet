@@ -3469,16 +3469,27 @@ async def get_engine_config(
             error_code=409,
             data=None,
         )
-    except (DeviceOfflineError, DeviceConnectionUnavailableError) as e:
-        # The provider confirmed a structured offline contract (BaaS
-        # NO_ACTIVE_DEVICES, an ARCA sandbox being replaced, …). It is an
-        # expected, self-healing state — logging it as ERROR only floods the
-        # alarm/ticket pipeline (see BaasService.get_ws_info's own INFO
-        # contract). Classify it as "temporarily unavailable" like the channel
-        # and file routers do, instead of surfacing a 500 with the internal
-        # exception text.
+    except DeviceOfflineError as e:
+        # Provider-confirmed structured offline contract (BaaS NO_ACTIVE_DEVICES,
+        # an ARCA sandbox being replaced, …). Expected, self-healing state —
+        # logging it as ERROR only floods the alarm/ticket pipeline. Keep the
+        # stable 503 contract used by the channel and file routers.
         logger.info(
-            f"[bot_router.get_engine_config] device offline, expected self-healing state: bot_id={bot_id}, error={e}"
+            f"[bot_router.get_engine_config] device offline (provider-confirmed), expected self-healing state: bot_id={bot_id}, error={e}"
+        )
+        return ApiResponse(
+            success=False,
+            message="Bot 设备暂时不可用，请稍后重试",
+            error_code=503,
+            data=None,
+        )
+    except DeviceConnectionUnavailableError as e:
+        # Transient request failure: an upstream connection failure (BaaS 5xx /
+        # timeout) or a runtime-binding race (the subclass). The device is not
+        # known to be offline. Keep the same 503 user contract, but do not
+        # collapse this into the provider-confirmed offline ticket cluster.
+        logger.warning(
+            f"[bot_router.get_engine_config] device request unavailable (transient provider connection failure or runtime binding change, state unknown): bot_id={bot_id}, error={e}"
         )
         return ApiResponse(
             success=False,
@@ -3615,13 +3626,25 @@ async def update_engine_config(
             error_code=404,
             data=None,
         )
-    except (DeviceOfflineError, DeviceConnectionUnavailableError) as e:
-        # Same expected, self-healing offline state as the read side — the
-        # write first resolves the device the same way, so it can hit the same
-        # structured offline contract. Not a server fault: same 503 + INFO
-        # classification as get_engine_config above.
+    except DeviceOfflineError as e:
+        # Same provider-confirmed offline state as the read side: the write
+        # resolves the device the same way. Keep the stable 503 contract.
         logger.info(
-            f"[bot_router.update_engine_config] device offline, expected self-healing state: bot_id={bot_id}, error={e}"
+            f"[bot_router.update_engine_config] device offline (provider-confirmed), expected self-healing state: bot_id={bot_id}, error={e}"
+        )
+        return ApiResponse(
+            success=False,
+            message="Bot 设备暂时不可用，请稍后重试",
+            error_code=503,
+            data=None,
+        )
+    except DeviceConnectionUnavailableError as e:
+        # Transient request failure: an upstream connection failure (BaaS 5xx /
+        # timeout) or a runtime-binding race (the subclass). The device is not
+        # known to be offline. Keep the 503 user contract, but do not collapse
+        # this into the provider-confirmed offline cluster.
+        logger.warning(
+            f"[bot_router.update_engine_config] device request unavailable (transient provider connection failure or runtime binding change, state unknown): bot_id={bot_id}, error={e}"
         )
         return ApiResponse(
             success=False,
