@@ -25,6 +25,7 @@ const populatedCredentials = JSON.stringify({
 describe("GET /api/runs/:flowId runtime metadata", () => {
   const raw = new Database(":memory:");
   const db = new SqliteDatabase(raw);
+  let databaseNow = Math.floor(Date.now() / 1000);
   let server: Server;
   let runsUrl: string;
   let defaultRunsUrl: string;
@@ -32,6 +33,7 @@ describe("GET /api/runs/:flowId runtime metadata", () => {
 
   beforeAll(async () => {
     await runMigrations(db, "sqlite");
+    raw.function("unixepoch", () => databaseNow);
     raw.exec(`
       INSERT INTO flow_runs (flow_id, workflow_id, status, started_at, credentials_json)
       VALUES ('another-flow', 'fixture-workflow', 'running', 99,
@@ -76,8 +78,10 @@ describe("GET /api/runs/:flowId runtime metadata", () => {
   });
 
   async function readDetail(credentialsJson: string | null, url = runsUrl, stateJson: string | null = null) {
-    raw.prepare("UPDATE flow_runs SET credentials_json = ?, state_json = ? WHERE flow_id = 'fixture-flow'")
-      .run(credentialsJson, stateJson);
+    // Reuse the same stored snapshot when comparing different read projections.
+    raw.prepare(`UPDATE flow_runs SET credentials_json = ?, state_json = ? WHERE flow_id = 'fixture-flow'
+      AND (credentials_json IS NOT ? OR state_json IS NOT ?)`)
+      .run(credentialsJson, stateJson, credentialsJson, stateJson);
     const response = await fetch(`${url}/fixture-flow`);
     expect(response.status).toBe(200);
     const body = await response.text();
@@ -107,6 +111,8 @@ describe("GET /api/runs/:flowId runtime metadata", () => {
       nodes: [{ flow_id: "fixture-flow", node_id: "fixture-node", attempt: 1, started_at: 100 }],
       availableInterventions: ["confirm", "skip"],
     });
+    // Cross a database-clock second without changing the persisted fixture.
+    databaseNow++;
     const detail = await readDetail(populatedCredentials);
     expect(detail).toEqual({
       ...baseline,
