@@ -5,11 +5,13 @@ AICoding workspace orchestration — provisions per-user code-execution workspac
 ## Context Boundary
 
 ```yaml
-purpose: "AICoding workspace orchestration — provisions per-user code-execution workspaces; aggregates external workflow catalog for the frontend; resolves bot containers and forwards aixharness ↔ harness-data /data/* traffic."
+purpose: "AICoding workspace orchestration — provisions per-user code-execution workspaces; aggregates external workflow catalog for the frontend; resolves bot containers and forwards aixharness ↔ harness-data /data/* traffic; aggregates user-level work items across reachable bots."
 provides:
   - "WorkspaceService"
   - "WorkflowCatalogService"
   - "DataProxyService"
+  - "AICodingWorkItemsServiceProtocol"
+  - "AICodingWorkItemsService"
 consumes:
   - "BotService"
   - "DeviceService"
@@ -28,9 +30,11 @@ internal_dependencies:
   - agentclaw.corp.di.config_corp
   - agentclaw.community.log
   - agentclaw.community.plugin_api.devices
+  - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.cache
   - agentclaw.community.plugin_api.sandbox_runtime
   - agentclaw.community.utils.arca_utils
+  - agentclaw.community.utils.env_utils
 ```
 
 ### Change impact
