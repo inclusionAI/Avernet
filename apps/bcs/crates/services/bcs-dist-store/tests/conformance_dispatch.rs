@@ -18,6 +18,7 @@ async fn conformance_dispatch_queue_and_commands() {
             did: spec().did,
             me: me(),
             request_id: RequestId("contract-claim".into()),
+            partition: None,
         },
     )
     .await
@@ -25,6 +26,8 @@ async fn conformance_dispatch_queue_and_commands() {
     f.board.notify(&spec().pool, &spec().did).await.unwrap();
     // Commands is the real private command-feed implementation returned here.
     let mut feed = port.notifications(spec().pool, me()).await.unwrap();
+    let partitions = bcs_dist_store::dispatch::DispatchConfig::default().command_streams.partitions();
+    feed.assign(&(0..partitions).collect::<Vec<_>>());
     command_feed_port_contract_tests(feed.as_mut(), &spec().did)
         .await
         .unwrap();

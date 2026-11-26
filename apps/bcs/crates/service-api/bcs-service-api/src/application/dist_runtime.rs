@@ -45,6 +45,18 @@ pub trait DistWorkerRuntimeService: Send + Sync {
 /// No business submission API; calls arrive through DispatchBoard.
 #[async_trait]
 pub trait DistConnectorRuntimeService: Send + Sync {
+    /// A draining Connector offers one of its command partitions. The host
+    /// binds the source like for the Worker; the application checks it
+    /// against the source claim.
+    async fn accept_handoff(
+        &self,
+        _authenticated_source: Instance,
+        _request: HandoffRequest,
+    ) -> Result<HandoffOutcome, RuntimeError> {
+        Err(RuntimeError {
+            code: "connector_handoff_unsupported".into(),
+        })
+    }
     async fn snapshot(&self) -> Result<RuntimeSnapshot, RuntimeError>;
     async fn drain(&self, grace: Duration) -> Result<DrainOutcome, RuntimeError>;
 }

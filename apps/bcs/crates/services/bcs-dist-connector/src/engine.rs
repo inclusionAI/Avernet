@@ -30,9 +30,15 @@
 //!   succeeded yet; retried on every main-loop pass.
 //! - lease: this process's membership registration (who is alive). With the
 //!   default stub membership there is none.
+//! - partition owner: this process reads and runs the calls of the command
+//!   partitions it owns (see [`partitions`]); a hint of another partition is
+//!   acked without a claim.
 //!
-//! Locks: `actors`, `lease` and `orphans` are plain `std` mutexes held only for
-//! a map/vector operation, never across an `.await`.
+//! Locks: `actors`, `lease`, `orphans` and `ownership` are plain `std`
+//! mutexes held only for a map/vector operation, never across an `.await`.
+
+mod partitions;
+pub use partitions::rank_candidates;
 
 use crate::call::{Call, CallStatus};
 use crate::config::{Backoff, ConnectorConfig, ConnectorPorts};
@@ -44,7 +50,9 @@ use bcs_service_api::port::repo::distributed::dispatch::{
     ClaimOutcome, CommandDelivery, CommandFeedPort, DispatchClaimRequest, HeldDispatchPort,
     ResumeOwnedDispatch,
 };
-use bcs_service_api::port::repo::distributed::ownership::{MembershipLease, Renewal, RuntimeRole};
+use bcs_service_api::port::repo::distributed::ownership::{
+    HandoffOutcome, HandoffRequest, MembershipLease, Renewal, RuntimeRole,
+};
 use bcs_service_api::types::dist_runtime::{DrainOutcome, RuntimeError, RuntimeSnapshot};
 use std::collections::HashMap;
 use std::num::NonZeroU32;
@@ -109,10 +117,16 @@ struct Inner {
     /// permit is stored and the next wait (in the main loop or in
     /// `register`'s retry backoff) returns at once.
     stop: Notify,
-    /// Serializes the end of `drain` (stop the leftover actors, retire). A
-    /// second, concurrent drain must not retire while the first is still
-    /// waiting for the actors it aborted: those may still act until then.
+    /// Serializes the end of `drain` (stop the leftover actors, hand the
+    /// partitions over, retire). A second, concurrent drain must not retire
+    /// while the first is still waiting for the actors it aborted: those may
+    /// still act until then.
     stopping: tokio::sync::Mutex<()>,
+    /// The partitions this process owns (see [`partitions`]).
+    ownership: Mutex<partitions::Ownership>,
+    /// Set by `drain`: every actor stops at its next safe point. Shared with
+    /// the actors.
+    yielding: Arc<AtomicBool>,
 }
 
 /// One Connector process: reads the command feed, claims dispatches and runs
@@ -134,10 +148,16 @@ fn failed(code: &str) -> RuntimeError {
 
 impl ConnectorEngine {
     /// Builds an engine that does nothing yet; `run` starts it. Refuses
-    /// (`connector_config_invalid`) a zero capacity, poll interval or minimum
-    /// backoff, each of which would make a loop spin or never claim.
+    /// (`connector_config_invalid`) a zero capacity, poll interval, minimum
+    /// backoff, ownership interval or peer timeout, each of which would make
+    /// a loop spin or never claim.
     pub fn new(config: ConnectorConfig, ports: ConnectorPorts) -> Result<Self, RuntimeError> {
-        if config.max_active_calls == 0 || config.poll_interval.is_zero() || config.backoff_min.is_zero() {
+        if config.max_active_calls == 0
+            || config.poll_interval.is_zero()
+            || config.backoff_min.is_zero()
+            || config.ownership_interval.is_zero()
+            || config.peer_timeout.is_zero()
+        {
             return Err(failed("connector_config_invalid"));
         }
         Ok(Self {
@@ -154,6 +174,8 @@ impl ConnectorEngine {
                 wake: Notify::new(),
                 stop: Notify::new(),
                 stopping: tokio::sync::Mutex::new(()),
+                ownership: Mutex::new(partitions::Ownership::default()),
+                yielding: Arc::new(AtomicBool::new(false)),
             }),
         })
     }
@@ -180,12 +202,14 @@ impl ConnectorEngine {
     /// 1. stop if draining;
     /// 2. renew the registration when `membership_renew` has passed; a
     ///    definite loss ends the loop with `membership_lost`;
-    /// 3. `reap` finished and dead actors and retry orphans;
-    /// 4. at capacity, read no hints: wait for an actor to finish (or
+    /// 3. every `ownership_interval` (and on the first pass): the ownership
+    ///    round, then point the feed at the owned partitions if they changed;
+    /// 4. `reap` finished and dead actors and retry orphans;
+    /// 5. at capacity, read no hints: wait for an actor to finish (or
     ///    `receive_timeout`) and start over. Other Connectors read the hints
     ///    meanwhile, so load spreads by who has room (pull-based);
-    /// 5. otherwise read up to `free` hints, interruptible by `stop`;
-    /// 6. handle each hint (claim, act, ack); on a read error, back off.
+    /// 6. otherwise read up to `free` hints, interruptible by `stop`;
+    /// 7. handle each hint (claim, act, ack); on a read error, back off.
     ///
     /// A `?` here (register, open feed) returns the error from `run`: the
     /// process does not claim anything then.
@@ -206,6 +230,8 @@ impl ConnectorEngine {
             })?;
         inner.ready.store(true, Ordering::SeqCst);
         let mut renewed_at = Instant::now();
+        let mut owned_at: Option<Instant> = None;
+        let mut assigned: Option<u64> = None;
         let mut backoff = Backoff::new(&config);
         loop {
             if inner.draining.load(Ordering::SeqCst) {
@@ -216,6 +242,17 @@ impl ConnectorEngine {
                 if !self.renew().await {
                     return Err(failed("membership_lost"));
                 }
+            }
+            if owned_at.is_none_or(|at| at.elapsed() >= config.ownership_interval) {
+                owned_at = Some(Instant::now());
+                self.own_partitions().await;
+            }
+            // Also after an accepted handoff, which changes ownership from
+            // the control path between rounds.
+            let (version, owned) = self.owned_partitions();
+            if assigned != Some(version) {
+                assigned = Some(version);
+                feed.assign(&owned);
             }
             self.reap().await;
             let free = config.max_active_calls.saturating_sub(self.live());
@@ -280,28 +317,11 @@ impl ConnectorEngine {
     /// and comes back through idle takeover, here or on another Connector.
     /// A hint that fails every time is therefore retried forever.
     async fn handle(&self, feed: &mut dyn CommandFeedPort, delivery: CommandDelivery) {
-        let inner = &self.inner;
         let did = delivery.did.clone();
-        let request = DispatchClaimRequest {
-            did: did.clone(),
-            me: inner.config.me.clone(),
-            request_id: self.claim_request_id(&did),
-        };
-        match inner.ports.queue.claim(request).await {
-            Ok(ClaimOutcome::Acquired(held)) => self.spawn(held).await,
-            Ok(ClaimOutcome::OwnedByMe(holder)) => {
-                if !self.poke(&did) {
-                    // Held by this process but no actor runs it (it died, or
-                    // a claim answer was lost): take a new generation.
-                    self.resume(did.clone(), holder).await;
-                }
-            }
-            Ok(ClaimOutcome::HeldByOther(_) | ClaimOutcome::Ended | ClaimOutcome::NotFound) => {}
-            Err(error) => {
-                // No decision, no ack: the hint stays pending and comes back.
-                tracing::warn!(did = %did.0, ?error, "claim failed; hint left pending");
-                return;
-            }
+        if let Err(error) = self.decide(&did).await {
+            // No decision, no ack: the hint stays pending and comes back.
+            tracing::warn!(did = %did.0, ?error, "claim failed; hint left pending");
+            return;
         }
         // A failed ack only means the hint comes back later; the claim
         // decision is in the dispatch document, so handling it again is
@@ -309,6 +329,38 @@ impl ConnectorEngine {
         if let Err(error) = feed.ack(&delivery).await {
             tracing::warn!(did = %did.0, ?error, "command ack failed; the hint will be redelivered");
         }
+    }
+
+    /// Claims `did` as the owner of its partition and acts on the outcome
+    /// (see `handle`). A call of a partition this process does not own is
+    /// left alone: its owner reads its hints (a read started before the
+    /// partition moved can still deliver one here). `NotOwner` means the
+    /// partition moved meanwhile: it is dropped until the next round.
+    async fn decide(&self, did: &Did) -> Result<(), StoreError> {
+        let inner = &self.inner;
+        let Some(proof) = self.proof_for(did) else {
+            return Ok(());
+        };
+        let partition = proof.shard.0;
+        let request = DispatchClaimRequest {
+            did: did.clone(),
+            me: inner.config.me.clone(),
+            request_id: self.claim_request_id(did),
+            partition: Some(proof),
+        };
+        match inner.ports.queue.claim(request).await? {
+            ClaimOutcome::Acquired(held) => self.spawn(held).await,
+            ClaimOutcome::OwnedByMe(holder) => {
+                if !self.poke(did) {
+                    // Held by this process but no actor runs it (it died, or
+                    // a claim answer was lost): take a new generation.
+                    self.resume(did.clone(), holder).await;
+                }
+            }
+            ClaimOutcome::NotOwner => lock(&inner.ownership).lose(partition),
+            ClaimOutcome::HeldByOther(_) | ClaimOutcome::Ended | ClaimOutcome::NotFound => {}
+        }
+        Ok(())
     }
 
     /// A request id unique to one claim or resume attempt of this process:
@@ -411,6 +463,7 @@ impl ConnectorEngine {
             held,
             status.clone(),
             poke.clone(),
+            inner.yielding.clone(),
         );
         let wake = self.inner.clone();
         // Checked under the `actors` lock, in the same critical section as
@@ -418,8 +471,8 @@ impl ConnectorEngine {
         // under this lock, so either it sees this actor and stops it, or
         // this sees `draining` and starts nothing. A claim or resume that
         // wins after the drain began therefore never runs here; its call
-        // stays held and is taken over once this instance is `Dead`, like
-        // the actors `drain` stops.
+        // stays held and the partition's next owner takes it over, like the
+        // calls of the actors `drain` stops.
         let mut actors = lock(&self.inner.actors);
         if self.inner.draining.load(Ordering::SeqCst) {
             tracing::info!(did = %did.0, "draining; the call is left held for another Connector");
@@ -631,6 +684,12 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 #[async_trait]
 impl DistRuntimeControlPort for ConnectorEngine {
+    /// A draining peer offers one of its partitions (see
+    /// `partitions::accept`). The caller is bound by the application layer.
+    async fn accept_handoff(&self, request: HandoffRequest) -> Result<HandoffOutcome, RuntimeError> {
+        self.accept(request).await
+    }
+
     /// Health of this process: `active_work` = live actors plus orphans,
     /// `pending_effects` = live actors with `pending_effect` set plus orphans.
     async fn snapshot(&self) -> Result<RuntimeSnapshot, RuntimeError> {
@@ -657,29 +716,30 @@ impl DistRuntimeControlPort for ConnectorEngine {
         })
     }
 
-    /// Stops claiming, waits up to `grace` for held calls to end, then stops
-    /// what is left and retires the registration (B20).
+    /// Stops claiming, lets held calls reach a safe point, hands the owned
+    /// partitions to peers, then retires the registration (B20).
     ///
-    /// Steps: mark draining, interrupt the main loop (`stop`) and wake
-    /// waiters, mark the registration as draining if there is one. Then wait
-    /// in two stages within the one deadline: first until the main loop has
-    /// left (a claim in flight may still start one actor), then until no
-    /// actor is live. It stops waiting as soon as both hold, and renews the
-    /// registration while it waits.
+    /// Steps: mark draining, interrupt the main loop (`stop`), mark the
+    /// registration as draining if there is one, and ask every actor to stop
+    /// at its next safe point (`yielding`, plus a poke). Then wait, renewing
+    /// the registration, until the main loop has left and no actor is live,
+    /// but only until `handoff_reserve` (at most half the grace) before the
+    /// deadline.
     ///
-    /// At the end, every actor still running is aborted and awaited, so no
-    /// call of this process keeps talking to its agent or session after
-    /// this returns. No new actor starts once draining (`spawn` refuses), so
-    /// this also holds for a claim or resume still in flight. Then the
-    /// registration is retired: other processes see this instance `Dead` at
-    /// once, and the Worker's supervisor re-posts the hints of the calls it
-    /// still holds, so another Connector takes them over at the next holder
-    /// epoch. Their dispatches stay held (and in the held index) until then.
+    /// Then every actor still running is aborted and awaited, so no call of
+    /// this process talks to its agent or session any more. No new actor
+    /// starts once draining (`spawn` refuses), so this also holds for a claim
+    /// or resume still in flight. Only then is each owned partition offered
+    /// to a peer: the peer that takes it owns it at once and takes its calls
+    /// over (they stay held by this process until then). Finally the
+    /// registration is retired: this instance is `Dead` at once, and
+    /// partitions not handed over are claimed by others.
     ///
-    /// Result: `Drained` when nothing was left and the main loop has stopped;
-    /// otherwise `DeadlineReached { remaining }` with the actors stopped plus
-    /// orphans (`remaining` can be 0 when only the main loop had not stopped
-    /// yet, for example while it waits on a claim).
+    /// Result: `Drained` when every call stopped at a safe point, every
+    /// partition was handed over and the main loop has stopped; otherwise
+    /// `DeadlineReached { remaining }` with the actors aborted, orphans and
+    /// partitions not handed over (`remaining` can be 0 when only the main
+    /// loop had not stopped yet, for example while it waits on a claim).
     async fn drain(&self, grace: Duration) -> Result<DrainOutcome, RuntimeError> {
         let inner = &self.inner;
         inner.draining.store(true, Ordering::SeqCst);
@@ -691,13 +751,18 @@ impl DistRuntimeControlPort for ConnectorEngine {
                 tracing::warn!(?error, "membership drain mark failed");
             }
         }
+        inner.yielding.store(true, Ordering::SeqCst);
+        for actor in lock(&inner.actors).values() {
+            actor.poke.notify_one();
+        }
         let deadline = Instant::now() + grace;
+        let calls_until = deadline - inner.config.handoff_reserve.min(grace / 2);
         // First the main loop must leave its iteration: a claim in flight may
         // still take a call. Then the held calls get the rest of the grace.
         // Short waits instead of one long one: a wake-up can be missed.
         let step = Duration::from_millis(20);
         let mut renewed_at = Instant::now();
-        while (inner.looping.load(Ordering::SeqCst) || self.live() > 0) && Instant::now() < deadline {
+        while (inner.looping.load(Ordering::SeqCst) || self.live() > 0) && Instant::now() < calls_until {
             let _ = tokio::time::timeout(step, inner.wake.notified()).await;
             // The main loop no longer renews. Without this the registration
             // would expire during the grace period and other Connectors could
@@ -733,7 +798,8 @@ impl DistRuntimeControlPort for ConnectorEngine {
         for task in leftover {
             let _ = task.await;
         }
-        let remaining = stopped + lock(&inner.orphans).len();
+        let left = self.hand_off(deadline).await;
+        let remaining = stopped + lock(&inner.orphans).len() + left;
         self.retire().await;
         if remaining == 0 && !inner.looping.load(Ordering::SeqCst) {
             return Ok(DrainOutcome::Drained);

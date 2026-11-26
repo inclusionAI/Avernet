@@ -19,7 +19,7 @@
 //!             patch e.g. {"execution": {"phase": "accepted",
 //!             "remote": {"task_id": "t-81", "context_id": null}}}
 //!             written at read version + 1, e.g. 2000000004 -> 2000000005
-//! held index: bcn:v1:held:c01:main:conn-03:1794370950
+//! held index: bcn:v1:c01:main:a2a:p0003:held
 //!             member "s0042.7f3a9c.b21e.n2.a1" removed by `finish`
 //! ```
 //!
@@ -453,7 +453,7 @@ impl HeldDispatchPort for StoreHeldDispatch {
         // Unlisted only after ENDED is durable. A failure leaves the index
         // listing a finished call, which is harmless.
         let did = self.view.spec.did.clone();
-        if let Err(error) = held_index::remove(&self.shared, &self.holder.instance, &did).await {
+        if let Err(error) = held_index::remove(&self.shared, &self.view.spec.pool, &did).await {
             tracing::warn!(?error, did = %did.0, "held index removal failed after finish");
         }
         Ok(written)

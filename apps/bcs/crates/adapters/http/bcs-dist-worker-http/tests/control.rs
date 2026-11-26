@@ -273,3 +273,57 @@ async fn oversized_control_request_is_rejected_before_application_admission() {
     assert_eq!(app.calls.load(Ordering::SeqCst), 0);
     task.abort();
 }
+
+struct Connector;
+#[async_trait]
+impl DistConnectorRuntimeService for Connector {
+    async fn accept_handoff(&self, source: Instance, request: HandoffRequest) -> Result<HandoffOutcome, RuntimeError> {
+        assert_eq!(source, request.from.owner.instance);
+        Ok(HandoffOutcome::Accepted(ShardRecord {
+            claim: ShardClaim {
+                shard: request.from.shard,
+                owner: ShardOwner {
+                    instance: request.target,
+                    epoch: WorkerEpoch(request.from.owner.epoch.0 + 1),
+                },
+            },
+            handoff: None,
+        }))
+    }
+    async fn snapshot(&self) -> Result<RuntimeSnapshot, RuntimeError> {
+        unreachable!("not used by the route")
+    }
+    async fn drain(&self, _: Duration) -> Result<DrainOutcome, RuntimeError> {
+        unreachable!("not used by the route")
+    }
+}
+
+#[tokio::test]
+async fn the_connector_route_takes_a_partition_offer_from_a_bound_peer() {
+    let router = connector_router(Arc::new(Connector)).layer(Extension(instance("a")));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert("x-test-identity", "test".parse().unwrap());
+    let client = HttpWorkerPeer::connector(instance("a"), headers, Duration::from_secs(1)).unwrap();
+    let target = MemberRecord {
+        instance: instance("b"),
+        role: RuntimeRole::Connector,
+        control_address: url.clone(),
+        draining: false,
+    };
+    let HandoffOutcome::Accepted(record) = client.handoff(&target, request()).await.unwrap() else {
+        panic!("not accepted");
+    };
+    assert_eq!(record.claim, claim("b", 2));
+    // The Worker routes are not served here.
+    let response = reqwest::Client::new()
+        .post(format!("{url}/internal/bcn/worker/handoff"))
+        .json(&request())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+    task.abort();
+}

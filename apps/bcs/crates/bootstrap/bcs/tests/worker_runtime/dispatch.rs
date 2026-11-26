@@ -103,6 +103,7 @@ impl Host {
                         did: did.clone(),
                         me,
                         request_id: RequestId(format!("{}.claim", did.0)),
+                        partition: None,
                     })
                     .await?
                 else {

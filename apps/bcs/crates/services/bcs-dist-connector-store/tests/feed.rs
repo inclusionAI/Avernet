@@ -21,7 +21,14 @@ fn max(n: u32) -> NonZeroU32 {
 const SHORT: Duration = Duration::from_millis(60);
 
 async fn feed(store: &Arc<Recorder>, node: &str) -> Box<dyn CommandFeedPort> {
-    queue(store).notifications(pool(), instance(node)).await.unwrap()
+    let mut feed = queue(store).notifications(pool(), instance(node)).await.unwrap();
+    assign_all(feed.as_mut());
+    feed
+}
+
+/// Reads every partition, as the owner of all of them.
+fn assign_all(feed: &mut dyn CommandFeedPort) {
+    feed.assign(&(0..8).collect::<Vec<_>>());
 }
 
 #[tokio::test]
@@ -68,6 +75,7 @@ async fn each_hint_goes_to_one_consumer_and_ack_is_repeatable() {
     .notifications(pool(), instance("conn-c"))
     .await
     .unwrap();
+    assign_all(c.as_mut());
     assert!(c.receive(max(10), SHORT).await.unwrap().is_empty());
 }
 
@@ -91,6 +99,7 @@ async fn pending_hints_of_a_dead_consumer_are_taken_over() {
         .notifications(pool(), instance("conn-08"))
         .await
         .unwrap();
+    assign_all(live.as_mut());
     let got = live.receive(max(10), SHORT).await.unwrap();
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].did, did());
@@ -127,6 +136,7 @@ async fn idle_takeover_covers_every_partition_with_a_small_max() {
         .notifications(pool(), instance("conn-dead"))
         .await
         .unwrap();
+    assign_all(dead.as_mut());
     let dids: Vec<Did> = (0..9).map(|n| Did(format!("s0042.7f3a9c.b21e.n{n}.a1"))).collect();
     for did in &dids {
         worker.notify_did(did).await;
@@ -144,6 +154,7 @@ async fn idle_takeover_covers_every_partition_with_a_small_max() {
         .notifications(pool(), instance("conn-08"))
         .await
         .unwrap();
+    assign_all(live.as_mut());
     let mut got = std::collections::BTreeSet::new();
     for _ in 0..40 {
         // One at a time: the takeover must still reach all three partitions.
@@ -186,6 +197,7 @@ async fn every_partition_is_read_and_acked_on_its_own_stream() {
         config(4),
     );
     let mut feed = q.notifications(pool(), instance("conn-03")).await.unwrap();
+    assign_all(feed.as_mut());
     let dids: Vec<Did> = (0..12).map(|n| Did(format!("s0042.7f3a9c.b21e.n{n}.a1"))).collect();
     for did in &dids {
         worker.notify_did(did).await;
@@ -235,6 +247,7 @@ async fn malformed_entries_are_acked_and_skipped() {
         .notifications(pool(), instance("conn-09"))
         .await
         .unwrap();
+    assign_all(other.as_mut());
     assert!(other.receive(max(10), SHORT).await.unwrap().is_empty());
 }
 
@@ -256,4 +269,28 @@ async fn bad_delivery_handles_and_instances_are_invalid() {
         queue(&store).notifications(pool(), bad).await.map(|_| ()),
         Err(StoreError::Invalid { .. })
     ));
+}
+
+#[tokio::test]
+async fn a_feed_reads_only_the_partitions_assigned_to_it() {
+    let store = Arc::new(Recorder::default());
+    let streams = CommandStreams::new(max(2));
+    let worker = WorkerFixture { store: store.clone(), streams };
+    let dids: Vec<Did> = (0..6).map(|n| Did(format!("s0042.7f3a9c.b21e.n{n}.a1"))).collect();
+    for did in &dids {
+        worker.notify_did(did).await;
+    }
+    let q = queue_with(&store, Arc::new(bcs_dist_connector_store::membership::PendingMembership), config(2));
+    let mut feed = q.notifications(pool(), instance("conn-03")).await.unwrap();
+    // Owns nothing yet: reads nothing.
+    assert!(feed.receive(max(10), SHORT).await.unwrap().is_empty());
+    feed.assign(&[1]);
+    let mut got = Vec::new();
+    for _ in 0..10 {
+        got.extend(feed.receive(max(10), SHORT).await.unwrap());
+    }
+    let expected: Vec<&Did> = dids.iter().filter(|did| streams.partition_of(did) == 1).collect();
+    assert!(!expected.is_empty());
+    assert_eq!(got.len(), expected.len());
+    assert!(got.iter().all(|delivery| streams.partition_of(&delivery.did) == 1));
 }

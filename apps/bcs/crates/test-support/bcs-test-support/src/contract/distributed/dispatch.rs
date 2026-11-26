@@ -41,6 +41,7 @@ pub async fn dispatch_queue_port_contract_tests(
     Ok(())
 }
 
+/// The feed has the expected dispatch's partition assigned.
 pub async fn command_feed_port_contract_tests(
     feed: &mut dyn CommandFeedPort,
     expected: &Did,

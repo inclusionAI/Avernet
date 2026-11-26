@@ -348,6 +348,14 @@ impl DispatchControlPort for Script {
 
 #[async_trait]
 impl DispatchQueuePort for Script {
+    fn command_partitions(&self) -> u32 {
+        1
+    }
+
+    fn partition_of(&self, _did: &Did) -> u32 {
+        0
+    }
+
     async fn claim(&self, request: DispatchClaimRequest) -> Result<ClaimOutcome, StoreError> {
         self.call("DispatchQueuePort::claim", (request,))
     }

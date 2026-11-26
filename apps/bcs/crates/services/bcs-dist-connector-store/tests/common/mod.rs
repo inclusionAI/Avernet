@@ -24,7 +24,8 @@ use bcs_service_api::port::repo::distributed::common::{
 };
 use bcs_service_api::port::repo::distributed::dispatch::*;
 use bcs_service_api::port::repo::distributed::ownership::{
-    Liveness, MembershipLease, MembershipPort, Renewal, RuntimeRole,
+    ClaimShard, HandoffOutcome, HandoffRequest, LeaseClaim, Liveness, MembershipLease, MembershipPort, Renewal,
+    RuntimeRole, ShardClaim, ShardHandoff, ShardLeasePort, ShardRecord,
 };
 use std::sync::Arc;
 use bcs_store_api::json::*;
@@ -494,11 +495,21 @@ pub fn queue_with(
     membership: Arc<dyn MembershipPort>,
     config: DispatchBoardConfig,
 ) -> StoreDispatchQueue {
+    queue_owned(store, membership, Arc::new(MemoryOwners::default()), config)
+}
+
+pub fn queue_owned(
+    store: &Arc<Recorder>,
+    membership: Arc<dyn MembershipPort>,
+    partitions: Arc<dyn ShardLeasePort>,
+    config: DispatchBoardConfig,
+) -> StoreDispatchQueue {
     StoreDispatchQueue::new(
         store.clone(),
         store.clone(),
         store.clone(),
         membership,
+        partitions,
         layout(),
         Arc::new(FixedClock(NOW)),
         config,
@@ -516,6 +527,7 @@ pub fn claim_request(me: &Instance) -> DispatchClaimRequest {
         did: did(),
         me: me.clone(),
         request_id: RequestId("claim-1".into()),
+        partition: None,
     }
 }
 
@@ -533,6 +545,7 @@ pub fn outcome_name(outcome: &ClaimOutcome) -> &'static str {
         ClaimOutcome::HeldByOther(_) => "held_by_other",
         ClaimOutcome::Ended => "ended",
         ClaimOutcome::NotFound => "not_found",
+        ClaimOutcome::NotOwner => "not_owner",
     }
 }
 
@@ -542,14 +555,15 @@ pub async fn stored(store: &Recorder) -> (Value, u64) {
     (doc.value, doc.version.0)
 }
 
-pub async fn held_members(store: &Recorder, me: &Instance) -> Vec<String> {
+/// The dispatch ids listed in the fixture dispatch's partition.
+pub async fn held_members(store: &Recorder) -> Vec<String> {
     let range = ZSetRange {
         min: Bound::Unbounded,
         max: Bound::Unbounded,
         after: None,
         limit: NonZeroU32::new(100).unwrap(),
     };
-    ZSetStorePlugin::range(&store.model, &layout().held(me).unwrap(), &range)
+    ZSetStorePlugin::range(&store.model, &layout().partition_held(&pool(), 0).unwrap(), &range)
         .await
         .unwrap()
         .into_iter()
@@ -730,5 +744,120 @@ impl DispatchControlPort for WorkerFixture {
     }
     async fn reschedule(&self, _: &Did, _: Revision, _: TimestampMillis) -> Result<RecheckOutcome, PortError> {
         Err(need_contract())
+    }
+}
+
+/// Partition owner records in memory, with the transitions of
+/// `ShardLeasePort` but no liveness checks: a claim needs the expected epoch,
+/// a handoff the exact source claim and no open handoff. Shared by clones.
+#[derive(Default, Clone)]
+pub struct MemoryOwners {
+    pub records: Arc<Mutex<BTreeMap<u32, ShardRecord>>>,
+}
+
+impl MemoryOwners {
+    /// Makes `owner` the owner of `partition` at `epoch`; returns the proof.
+    pub fn set(&self, partition: u32, owner: &Instance, epoch: u64) -> ShardClaim {
+        let claim = ShardClaim {
+            shard: ShardId(partition),
+            owner: ShardOwner {
+                instance: owner.clone(),
+                epoch: WorkerEpoch(epoch),
+            },
+        };
+        self.records.lock().unwrap().insert(
+            partition,
+            ShardRecord {
+                claim: claim.clone(),
+                handoff: None,
+            },
+        );
+        claim
+    }
+    pub fn owner(&self, partition: u32) -> Option<Instance> {
+        self.records.lock().unwrap().get(&partition).map(|r| r.claim.owner.instance.clone())
+    }
+}
+
+#[async_trait]
+impl ShardLeasePort for MemoryOwners {
+    async fn claim(&self, request: ClaimShard) -> Result<LeaseClaim, PortError> {
+        let mut records = self.records.lock().unwrap();
+        let current = records.get(&request.shard.0).map(|r| r.claim.owner.epoch);
+        if current != request.expected_epoch {
+            return Ok(LeaseClaim::Conflict);
+        }
+        let claim = ShardClaim {
+            shard: request.shard,
+            owner: ShardOwner {
+                instance: request.me,
+                epoch: WorkerEpoch(current.map_or(1, |e| e.0 + 1)),
+            },
+        };
+        records.insert(
+            request.shard.0,
+            ShardRecord {
+                claim: claim.clone(),
+                handoff: None,
+            },
+        );
+        Ok(LeaseClaim::Claimed(claim))
+    }
+    async fn current(&self, shard: ShardId) -> Result<Option<ShardRecord>, PortError> {
+        Ok(self.records.lock().unwrap().get(&shard.0).cloned())
+    }
+    async fn handoff(&self, request: HandoffRequest) -> Result<HandoffOutcome, PortError> {
+        let mut records = self.records.lock().unwrap();
+        let Some(record) = records.get(&request.from.shard.0).cloned() else {
+            return Ok(HandoffOutcome::Fenced);
+        };
+        if record.handoff.as_ref().is_some_and(|h| h.request_id == request.request_id) {
+            return Ok(HandoffOutcome::Accepted(record));
+        }
+        if record.claim != request.from {
+            return Ok(HandoffOutcome::Fenced);
+        }
+        if record.handoff.is_some() {
+            return Ok(HandoffOutcome::Rejected);
+        }
+        let next = ShardRecord {
+            claim: ShardClaim {
+                shard: request.from.shard,
+                owner: ShardOwner {
+                    instance: request.target.clone(),
+                    epoch: WorkerEpoch(request.from.owner.epoch.0 + 1),
+                },
+            },
+            handoff: Some(ShardHandoff {
+                request_id: request.request_id.clone(),
+                from: request.from.clone(),
+                deadline: TimestampMillis(0),
+                source_done: false,
+            }),
+        };
+        records.insert(request.from.shard.0, next.clone());
+        Ok(HandoffOutcome::Accepted(next))
+    }
+    async fn source_done(&self, target: &ShardClaim, id: &RequestId) -> Result<bool, PortError> {
+        let mut records = self.records.lock().unwrap();
+        match records.get_mut(&target.shard.0) {
+            Some(r) if r.claim == *target && r.handoff.as_ref().is_some_and(|h| h.request_id == *id) => {
+                if let Some(h) = r.handoff.as_mut() {
+                    h.source_done = true;
+                }
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+    async fn clear_handoff(&self, target: &ShardClaim, id: &RequestId) -> Result<bool, PortError> {
+        let mut records = self.records.lock().unwrap();
+        match records.get_mut(&target.shard.0) {
+            Some(r) if r.claim == *target && r.handoff.as_ref().is_some_and(|h| h.request_id == *id) => {
+                r.handoff = None;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 }

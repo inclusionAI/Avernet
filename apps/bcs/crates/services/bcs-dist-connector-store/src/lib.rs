@@ -17,7 +17,7 @@
 //!
 //! Helpers and stubs:
 //!
-//! - [`held_index`]: the dispatches one Connector instance holds.
+//! - [`held_index`]: the unfinished calls of one command partition.
 //! - [`doc`]: decoding the stored dispatch document and building its patches.
 //! - [`membership`]: an explicit stub of the membership provider; it fails
 //!   with `need_contract_not_implemented`.
@@ -68,11 +68,15 @@
 //!          bcn:v1:cmd:c01:main:a2a:p3
 //!   entry: id 1794370950123-0, fields {"did": "s0042.7f3a9c.b21e.n2.a1"}
 //!
-//! held index (sorted set, one per Connector process run)
-//!   key:   bcn:v1:held:<cluster>:<ns>:<node>:<incarnation>
-//!          bcn:v1:held:c01:main:conn-03:1794370950
+//! held index (sorted set, one per command partition of a pool)
+//!   key:   bcn:v1:<cluster>:<ns>:<pool>:p<nnnn>:held
+//!          bcn:v1:c01:main:a2a:p0003:held
 //!   value: member "s0042.7f3a9c.b21e.n2.a1", score 1794370950456
-//!          (member = dispatch id, score = claim time in ms)
+//!          (member = dispatch id, score = first listed, in ms)
+//!
+//! partition owner (read through `ShardLeasePort`, written by the engine)
+//!   key:   bcn:v1:<cluster>:<ns>:<pool>:p<nnnn>:owner
+//!          bcn:v1:c01:main:a2a:p0003:owner
 //! ```
 //!
 //! # Glossary
@@ -89,10 +93,11 @@
 //! - **Hint**: a command-stream entry with one field `did`, meaning "go look at
 //!   `disp:<did>`". Never an instruction; the document decides.
 //! - **Partition**: one of the N streams a pool's hints are spread over.
+//!   Each has one owner Connector instance, which reads it and runs its calls.
 //! - **Idle takeover**: moving hints another consumer left unacknowledged for
 //!   too long to this consumer.
-//! - **Held index**: the per-instance list of held dispatches. It may list too
-//!   much, never too little (spec rule B6).
+//! - **Held index**: the per-partition list of unfinished dispatches. It may
+//!   list too much, never too little (spec rule B6).
 
 pub mod doc;
 pub mod feed;

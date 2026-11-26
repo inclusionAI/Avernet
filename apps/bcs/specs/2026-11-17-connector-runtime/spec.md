@@ -2,6 +2,10 @@
 
 Status: implemented in this change, not wired into the `bcs` binary (composition is task I1). Evidence: [validation](validation.md).
 
+Amended by [Connector partition ownership](../2026-11-26-connector-partition-ownership/spec.md):
+each command partition has one owner Connector, the held index is kept per
+partition instead of per instance, and a drain hands the partitions to peers.
+
 Design authority (Notion, workspace Work / Projects / Teamclaw): the decisions
 page (rows 1–31), "Gateway & Connector — design" §5.1, "Worker & TBase — v2.9"
 §5/§6.10/§6.11/§6.14, the PR #4020 walkthrough §12/§15/§16. Type and trait

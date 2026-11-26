@@ -1,11 +1,9 @@
 //! Worker control application boundary. The delivery layer must authenticate
 //! and bind an exact node/incarnation before constructing the source argument.
 //!
-//! Also exports the Connector's admin boundary, `ConnectorRuntimeFacade`
-//! (snapshot and drain over the Connector engine; see `connector.rs`). The
-//! Connector engine is built elsewhere with its ports; its membership is the
-//! stub `PendingMembership` unless a real provider is injected, and nothing
-//! injects one today.
+//! Also exports the Connector's boundary, `ConnectorRuntimeFacade`
+//! (snapshot, drain and partition handoff over the Connector engine; see
+//! `connector.rs`). The Connector engine is built elsewhere with its ports.
 mod isolation;
 use async_trait::async_trait;
 use bcs_dist_model::{Instance, RequestId, ShardId};

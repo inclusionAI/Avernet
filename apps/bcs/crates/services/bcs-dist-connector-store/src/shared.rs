@@ -31,7 +31,7 @@ use std::sync::Arc;
 pub(crate) struct Shared {
     /// The `disp` documents.
     pub json: Arc<dyn JsonStorePlugin>,
-    /// The held index (one sorted set per Connector instance).
+    /// The held index (one sorted set per command partition).
     pub zset: Arc<dyn ZSetStorePlugin>,
     /// The command-stream partitions.
     pub stream: Arc<dyn StreamStorePlugin>,
@@ -39,7 +39,7 @@ pub(crate) struct Shared {
     pub membership: Arc<dyn MembershipPort>,
     /// Builds every key name; validates ids before they reach the store.
     pub layout: KeyLayout,
-    /// Wall clock; gives the held-index score (claim time in ms).
+    /// Wall clock; gives the held-index score (first listed, in ms).
     pub clock: Arc<dyn Clock>,
     pub config: DispatchBoardConfig,
 }

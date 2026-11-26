@@ -10,10 +10,10 @@
 //!
 //! Two former stubs are gone. D3 (re-post a dead Connector's calls) is done
 //! by the Worker's supervisor, which re-posts a hint for every open dispatch
-//! about every second; a Connector receiving it takes the call over once
-//! membership answers `Dead`. D8 (hand calls over on drain) is replaced by
-//! `drain` itself: it stops the actors still running at the end of the grace
-//! period and retires the registration, so the same takeover applies.
+//! about every second, and by partition ownership: the next owner of a dead
+//! Connector's partitions claims their calls. D8 (hand calls over on drain)
+//! is `drain` itself: calls stop at a safe point and each partition is handed
+//! to a peer, which takes its calls over at once.
 
 use bcs_dist_model::Did;
 use bcs_service_api::port::repo::distributed::common::StoreError;

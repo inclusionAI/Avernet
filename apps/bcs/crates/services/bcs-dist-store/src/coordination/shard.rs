@@ -14,7 +14,7 @@ fn digest<T: Serialize>(value: &T) -> Result<Digest, StoreError> {
 impl ShardLeasePort for CoordinationStore {
     async fn current(&self, shard: ShardId) -> Result<Option<ShardRecord>, StoreError> {
         Ok(self
-            .read::<StoredShard>(&self.layout.owner(shard))
+            .read::<StoredShard>(&self.owner_key(shard)?)
             .await?
             .map(|x| x.value.record))
     }
@@ -22,7 +22,7 @@ impl ShardLeasePort for CoordinationStore {
         if !self.confirmed_alive(&request.me, &request.request_id.0).await? {
             return Ok(LeaseClaim::Conflict);
         }
-        let key = self.layout.owner(request.shard);
+        let key = self.owner_key(request.shard)?;
         let fingerprint = digest(&(
             request.shard,
             &request.me,
@@ -90,7 +90,7 @@ impl ShardLeasePort for CoordinationStore {
         if request.grace.is_zero() || request.target == request.from.owner.instance {
             return Err(invalid("handoff_input"));
         }
-        let key = self.layout.owner(request.from.shard);
+        let key = self.owner_key(request.from.shard)?;
         let fingerprint = digest(&request)?;
         let epoch = request
             .from
@@ -211,7 +211,7 @@ impl CoordinationStore {
         id: &RequestId,
         clear: bool,
     ) -> Result<bool, StoreError> {
-        let key = self.layout.owner(target.shard);
+        let key = self.owner_key(target.shard)?;
         for _ in 0..RETRIES {
             if !self.valid_claim(target).await? {
                 return Ok(false);

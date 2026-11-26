@@ -1,7 +1,8 @@
-//! Worker peer routes. Mount only behind a host policy that binds an exact
-//! node/incarnation as an Instance extension. The host must authenticate the
-//! peer or restrict access to mutually trusted Workers before accepting a
-//! declared instance. Requests without a bound instance are rejected.
+//! Worker and Connector peer routes. Mount only behind a host policy that
+//! binds an exact node/incarnation as an Instance extension. The host must
+//! authenticate the peer or restrict access to mutually trusted Workers (or
+//! Connectors) before accepting a declared instance. Requests without a bound
+//! instance are rejected.
 use axum::{
     Extension, Json, Router,
     extract::{DefaultBodyLimit, State},
@@ -10,7 +11,7 @@ use axum::{
 };
 use bcs_dist_model::{Instance, RequestId, ShardId};
 use bcs_service_api::application::dist_runtime::{
-    DistWorkerRuntimeService, HandoffOutcome, HandoffRequest, ShardClaim,
+    DistConnectorRuntimeService, DistWorkerRuntimeService, HandoffOutcome, HandoffRequest, ShardClaim,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -83,5 +84,26 @@ async fn wake(
         .wake(source, body.shard)
         .await
         .map(|_| StatusCode::NO_CONTENT)
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)
+}
+
+/// The Connector's peer route: a draining Connector offers one of its
+/// command partitions (`HttpWorkerPeer::connector` calls it). Explicit
+/// composition only, like `worker_router`.
+pub fn connector_router(service: Arc<dyn DistConnectorRuntimeService>) -> Router {
+    Router::new()
+        .route("/internal/bcn/connector/handoff", post(connector_handoff))
+        .layer(DefaultBodyLimit::max(16_384))
+        .with_state(service)
+}
+async fn connector_handoff(
+    State(service): State<Arc<dyn DistConnectorRuntimeService>>,
+    peer: Option<Extension<Instance>>,
+    Json(body): Json<HandoffRequest>,
+) -> Result<Json<HandoffOutcome>, StatusCode> {
+    service
+        .accept_handoff(caller(peer)?, body)
+        .await
+        .map(Json)
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)
 }

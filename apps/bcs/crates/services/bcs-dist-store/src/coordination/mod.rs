@@ -84,8 +84,28 @@ pub struct CoordinationStore {
     config: CoordinationStoreConfig,
     cache: Mutex<HashMap<String, CachedSession>>,
     timers: Mutex<HashMap<u32, (HandoffRequest, Instant)>>,
+    /// Whose owner records `ShardLeasePort` manages: the Worker's shards
+    /// (`None`) or the Connector partitions of one pool.
+    partitions: Option<PoolId>,
 }
 impl CoordinationStore {
+    /// Makes `ShardLeasePort` manage the Connector partitions of `pool`
+    /// instead of the Worker's shards: a `ShardId` is then a partition
+    /// number and the owner record is `bcn:v1:<c>:<ns>:<pool>:p<nnnn>:owner`.
+    /// Claims, handoffs and their rules are the same. Membership is not
+    /// affected, so the same store also serves as the Connector's
+    /// `MembershipPort`.
+    pub fn with_partition_owners(mut self, pool: PoolId) -> Result<Self, StoreError> {
+        self.layout.partition_owner(&pool, 0)?;
+        self.partitions = Some(pool);
+        Ok(self)
+    }
+    fn owner_key(&self, shard: ShardId) -> Result<String, StoreError> {
+        match &self.partitions {
+            None => Ok(self.layout.owner(shard)),
+            Some(pool) => self.layout.partition_owner(pool, shard.0),
+        }
+    }
     pub fn new(
         documents: Arc<dyn DocumentStorePlugin>,
         leases: Arc<dyn LeaseStorePlugin>,
@@ -141,6 +161,7 @@ impl CoordinationStore {
             config,
             cache: Mutex::new(HashMap::new()),
             timers: Mutex::new(HashMap::new()),
+            partitions: None,
         })
     }
     async fn read<T: DeserializeOwned>(

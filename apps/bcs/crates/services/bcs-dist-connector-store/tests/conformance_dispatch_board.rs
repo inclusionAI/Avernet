@@ -27,6 +27,7 @@ async fn conformance_store_command_feed() {
     let worker = WorkerFixture::new(&store);
     worker.notify().await;
     let mut feed = queue(&store).notifications(pool(), instance("conn-03")).await.unwrap();
+    feed.assign(&[0]);
     command_feed_port_contract_tests(feed.as_mut(), &did()).await.unwrap();
 }
 

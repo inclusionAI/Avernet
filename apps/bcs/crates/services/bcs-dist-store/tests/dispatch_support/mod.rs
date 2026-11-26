@@ -67,6 +67,7 @@ impl Fixture {
             base.storage.clone(),
             base.storage.clone(),
             membership.clone(),
+            partition_owners(&base.layout),
             base.layout.clone(),
             Arc::new(bcs_dist_store::inbox::SystemClock),
             bcs_dist_connector_store::DispatchBoardConfig::new(
@@ -166,6 +167,7 @@ impl Fixture {
                 did: spec().did,
                 me: me(),
                 request_id: RequestId("claim".into()),
+                partition: None,
             })
             .await
             .unwrap()
@@ -386,4 +388,20 @@ impl bcs_store_api::json::JsonStorePlugin for HangingDocument {
     ) -> bcs_store_api::StoreResult<bcs_store_api::WriteOutcome> {
         self.inner.mutate_json(key, c, m, e).await
     }
+}
+/// Connector partition owner records on their own in-memory store; claims
+/// here carry no ownership proof, so they are never read.
+pub fn partition_owners(layout: &bcs_dist_store::layout::KeyLayout) -> Arc<dyn ShardLeasePort> {
+    let model = Arc::new(bcs_test_support::store_model::Model::default());
+    Arc::new(
+        bcs_dist_store::coordination::CoordinationStore::new(model.clone(), model.clone(), model, layout.clone())
+            .unwrap()
+            .with_partition_owners(PoolId("a2a".into()))
+            .unwrap(),
+    )
+}
+/// Lets a command feed read every partition (as if it owned them all).
+pub fn assign_all(feed: &mut dyn CommandFeedPort) {
+    let partitions = DispatchConfig::default().command_streams.partitions();
+    feed.assign(&(0..partitions).collect::<Vec<_>>());
 }

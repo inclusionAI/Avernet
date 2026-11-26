@@ -57,7 +57,12 @@ fn key_names_match_the_catalogue() {
         node: "conn-03".into(),
         incarnation: "1794370950".into(),
     };
-    assert_eq!(l.held(&conn).unwrap(), "bcn:v1:held:c01:main:conn-03:1794370950");
+    let pool = PoolId("a2a".into());
+    assert_eq!(l.partition_owner(&pool, 3).unwrap(), "bcn:v1:c01:main:a2a:p0003:owner");
+    assert_eq!(l.partition_held(&pool, 3).unwrap(), "bcn:v1:c01:main:a2a:p0003:held");
+    assert_ne!(l.partition_owner(&pool, 42).unwrap(), l.owner(shard));
+    assert!(l.partition_owner(&PoolId("a:b".into()), 0).is_err());
+    assert_eq!(KeyLayout::instance_text(&conn).unwrap(), "conn-03:1794370950");
     assert_eq!(
         l.heartbeat(HeartbeatCopy::B, &conn).unwrap(),
         "bcn:v1:hb:c01:main:b:conn-03:1794370950"
