@@ -240,6 +240,8 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
 
 
 def _snapshot_links(root: Path) -> Iterator[Path]:
+    if not root.exists():
+        return
     for directory, _, names in root.walk(on_error=_raise_walk_error):
         for name in names:
             entry = directory / name
