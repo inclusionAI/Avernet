@@ -23,6 +23,7 @@ import {
 } from '@/services/botScheduledTasks/types';
 import { useEffect, useRef, useState } from 'react';
 import { RoutineCronPreview } from './RoutineCronPreview';
+import { RoutineInstanceMultiSelect } from './RoutineInstanceMultiSelect';
 import { useRoutineModels } from './useRoutineModels';
 
 /** 弹窗内的小节标题：与详情页分组称呼一致，弱化为眉题而不是大块标题。 */
@@ -67,7 +68,13 @@ export function RoutineFormDialog({
   const instanceIds = routineInstanceIds(context, form.runtime_stage);
   useEffect(() => {
     if (!original && context.caller_mode && form.runtime_stage !== 'online')
-      setForm((current) => ({ ...current, runtime_stage: 'online', device_uuid: undefined, operator_id: undefined }));
+      setForm((current) => ({
+        ...current,
+        runtime_stage: 'online',
+        device_uuid: undefined,
+        device_uuids: undefined,
+        operator_id: undefined,
+      }));
   }, [original, context.caller_mode, form.runtime_stage]);
   let targetError = '';
   try {
@@ -133,6 +140,7 @@ export function RoutineFormDialog({
                         ...form,
                         runtime_stage: value as RoutineStage,
                         device_uuid: undefined,
+                        device_uuids: undefined,
                         operator_id: undefined,
                       })
                     }
@@ -150,7 +158,18 @@ export function RoutineFormDialog({
                     </SelectContent>
                   </Select>
                 </div>
-                {instanceMode === 'multiple' && (
+                {instanceMode === 'multiple' && !original && (
+                  <div className="space-y-1 text-sm">
+                    <span>运行实例</span>
+                    <RoutineInstanceMultiSelect
+                      value={form.device_uuids || []}
+                      options={instanceIds}
+                      disabled={!editable || saving}
+                      onChange={(device_uuids) => setForm({ ...form, device_uuids })}
+                    />
+                  </div>
+                )}
+                {instanceMode === 'multiple' && original && (
                   <div className="space-y-1 text-sm">
                     <span>运行实例</span>
                     <Select

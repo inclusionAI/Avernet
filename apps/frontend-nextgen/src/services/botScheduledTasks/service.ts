@@ -4,9 +4,9 @@ import { loadRoutineContext } from './metadata';
 import { loadRoutineLock } from './locks';
 import { batchOutcome, isBatch, runOutcome } from './results';
 import {
+  createRequestTargets,
   routineKey,
   targetParams,
-  validateCreateTarget,
   type RoutineAddress,
   type RoutineStage,
   type ManagedRoutine,
@@ -128,7 +128,30 @@ export function createRoutineClient(
         timeout_secs: form.timeoutSecs,
       };
       if (!original) {
-        const target = validateCreateTarget(context, form, actorId);
+        const targets = createRequestTargets(context, form, actorId);
+        if (targets.length > 1) {
+          // 多实例创建：实例彼此独立，逐个提交；单个失败不阻断后续实例。
+          const failures: Array<{ device_uuid: string; reason: string }> = [];
+          for (const target of targets) {
+            try {
+              await request<RoutineDto>('', 'POST', {}, { ...content, ...target });
+            } catch (reason) {
+              failures.push({
+                device_uuid: String(target.device_uuid),
+                reason: reason instanceof Error ? reason.message : '创建失败',
+              });
+            }
+          }
+          if (failures.length > 0)
+            return {
+              level: 'error',
+              message: `已创建 ${targets.length - failures.length}/${targets.length} 个实例；失败：${failures
+                .map((failure) => `${failure.device_uuid}（${failure.reason}）`)
+                .join('、')}。已成功创建的实例无需重复勾选`,
+            };
+          return { level: 'success', message: `任务已在 ${targets.length} 个实例上创建` };
+        }
+        const target = targets[0] ?? {};
         const row = await request<RoutineDto>('', 'POST', {}, { ...content, ...target });
         const routine = mapManagedRoutine(
           {

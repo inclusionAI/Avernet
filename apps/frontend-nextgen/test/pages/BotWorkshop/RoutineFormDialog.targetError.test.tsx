@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import { RoutineFormDialog } from '@/pages/BotWorkshop/ScheduledTasks/RoutineFormDialog';
-import type { RoutineContext } from '@/services/botScheduledTasks/types';
+import type { ManagedRoutine, RoutineContext } from '@/services/botScheduledTasks/types';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 
@@ -70,4 +70,63 @@ it('个人 Bot 不做服务化目标校验，填完字段即可保存', () => {
   renderDialog(buildContext({ bot_type: 'personal', caller_mode: false }));
   fillForm();
   expect(screen.getByRole('button', { name: '保存' })).toBeEnabled();
+});
+
+it('多实例环境需先勾选运行实例，勾选后才能保存', () => {
+  renderDialog(
+    buildContext({
+      engine: 'openclaw',
+      environments: [
+        { runtime_stage: 'draft', instances: [] },
+        { runtime_stage: 'verify', instances: [] },
+        { runtime_stage: 'online', instances: ['uuid-a', 'uuid-b'] },
+      ],
+    }),
+  );
+  fillForm();
+  fireEvent.click(screen.getByRole('combobox', { name: '生效环境' }));
+  fireEvent.click(screen.getByRole('option', { name: '运行中' }));
+  expect(screen.getByText('请选择当前环境中已确认的运行实例')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+  fireEvent.pointerDown(screen.getByRole('button', { name: '运行实例' }));
+  fireEvent.click(screen.getByRole('button', { name: '运行实例' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'uuid-a' }));
+  expect(screen.getByText('已选 1 个实例')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '保存' })).toBeEnabled();
+});
+
+it('编辑任务时运行实例保持固定，不出现多选', () => {
+  const original: ManagedRoutine = {
+    id: 'job/a',
+    key: JSON.stringify(['u1', 'b1', 'online', 'uuid-a', null, 'job/a']),
+    bot_id: 'b1',
+    name: '每日站会日报',
+    cron: '0 9 * * *',
+    command: '总结今天群里的重点讨论',
+    enabled: true,
+    timezone: 'Asia/Shanghai',
+    timeoutSecs: 1800,
+    runtime_stage: 'online',
+    device_uuid: 'uuid-a',
+  };
+  render(
+    <RoutineFormDialog
+      context={buildContext({
+        engine: 'openclaw',
+        environments: [
+          { runtime_stage: 'draft', instances: [] },
+          { runtime_stage: 'verify', instances: [] },
+          { runtime_stage: 'online', instances: ['uuid-a', 'uuid-b'] },
+        ],
+      })}
+      original={original}
+      editable
+      onClose={jest.fn()}
+      onSave={jest.fn(async () => undefined)}
+      onLoadModels={() => Promise.resolve([])}
+    />,
+  );
+  expect(screen.getByRole('combobox', { name: '运行实例' })).toBeDisabled();
+  expect(screen.getByText(/执行目标已固定/)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '运行实例' })).not.toBeInTheDocument();
 });

@@ -2,10 +2,12 @@ import { backendRequest, BackendRequestError } from '@/services/backendApi/httpC
 import { createRoutineClient, mapManagedRoutine } from '@/services/botScheduledTasks/service';
 import {
   addressFromKey,
+  createRequestTargets,
   routineKey,
   validateCreateTarget,
   routineInstanceMode,
   type RoutineContext,
+  type RoutineTarget,
 } from '@/services/botScheduledTasks/types';
 import { describeFailure } from '@/services/botScheduledTasks/results';
 import { estimateNextRun } from '@/services/botScheduledTasks/nextRun';
@@ -360,5 +362,57 @@ describe('instance selection follows the number of distinct reported UUIDs', () 
       device_uuid: 'uuid',
       operator_id: 'caller',
     });
+  });
+});
+
+describe('multi-instance create expands one request per selected instance', () => {
+  test('create targets carry one device_uuid per selected instance', () => {
+    expect(createRequestTargets(context, { runtime_stage: 'verify', device_uuids: ['uuid', 'uuid-2'] }, 'admin')).toEqual([
+      { runtime_stage: 'verify', device_uuid: 'uuid' },
+      { runtime_stage: 'verify', device_uuid: 'uuid-2' },
+    ]);
+  });
+  test('selection is deduped and filtered against the confirmed instance list', () => {
+    expect(
+      createRequestTargets(context, { runtime_stage: 'verify', device_uuids: ['uuid', 'uuid', 'foreign'] }, 'admin'),
+    ).toEqual([{ runtime_stage: 'verify', device_uuid: 'uuid' }]);
+    expect(() => createRequestTargets(context, { runtime_stage: 'verify', device_uuids: ['foreign'] }, 'admin')).toThrow(
+      '请选择',
+    );
+  });
+  test('legacy single device_uuid still yields one create target', () => {
+    expect(createRequestTargets(context, { runtime_stage: 'verify', device_uuid: 'uuid-2' }, 'admin')).toEqual([
+      { runtime_stage: 'verify', device_uuid: 'uuid-2' },
+    ]);
+  });
+  test('Caller mode carries operator_id on every per-instance target', () => {
+    const targets: RoutineTarget[] = createRequestTargets(
+      { ...context, caller_mode: true },
+      { runtime_stage: 'online', device_uuids: ['uuid', 'uuid-2'] },
+      'admin',
+    );
+    expect(targets).toHaveLength(2);
+    for (const target of targets) expect(target).toMatchObject({ runtime_stage: 'online', operator_id: 'admin' });
+  });
+  test('multi create posts once per instance and reports aggregate success', async () => {
+    request.mockResolvedValueOnce(ok(dto, 201000)).mockResolvedValueOnce(ok({ ...dto, routine_id: 'job/b' }, 201000));
+    const result = await client().save(context, { ...form, device_uuids: ['uuid', 'uuid-2'] });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[0][1].data).toMatchObject({ runtime_stage: 'verify', device_uuid: 'uuid' });
+    expect(request.mock.calls[1][1].data).toMatchObject({ runtime_stage: 'verify', device_uuid: 'uuid-2' });
+    for (const [, options] of request.mock.calls) expect(options.data).not.toHaveProperty('device_uuids');
+    expect(result).toMatchObject({ level: 'success', message: '任务已在 2 个实例上创建' });
+    expect(result.routine).toBeUndefined();
+  });
+  test('a failed instance does not block others and the failure is listed for retry', async () => {
+    request
+      .mockResolvedValueOnce(ok(dto, 201000))
+      .mockResolvedValue({ code: 500000, message: '实例不可用', data: null, request_id: 'trace-500' });
+    const result = await client().save(context, { ...form, device_uuids: ['uuid', 'uuid-2'] });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(result.level).toBe('error');
+    expect(result.message).toContain('已创建 1/2 个实例');
+    expect(result.message).toContain('uuid-2（实例不可用');
+    expect(result.message).toContain('无需重复勾选');
   });
 });
