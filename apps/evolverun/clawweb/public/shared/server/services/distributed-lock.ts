@@ -39,10 +39,10 @@ export class DistributedLockService {
       try { lease.assertHeld(); } catch { return; }
       const renewalStarted = performance.now();
       renewing = this.repository.renew(current!).then(next => {
-        // Once the previous local budget expired, even a delayed successful
-        // DB renewal must not revive abandoned business work.
-        lease.assertHeld();
+        // Retain every successful DB revision for cleanup, even after local
+        // ownership was lost. A late receipt must never revive business work.
         current = next;
+        lease.assertHeld();
         deadline = renewalStarted + next.remainingMs;
         lease.assertHeld();
       }).catch(error => {
