@@ -1,4 +1,5 @@
 //! REST resource-path encoding and bounded Task snapshots. Models are SDK types.
+use crate::digest::DigestGuard;
 use crate::http_client::HttpClient;
 use a2a::{A2AError, Task, TypedDetail};
 
@@ -8,17 +9,19 @@ pub(super) fn task_url(base: &str, id: &str, suffix: &str) -> Result<String, A2A
     Ok(format!("{}/tasks/{id}{suffix}", base.trim_end_matches('/')))
 }
 
-pub(super) async fn task_response(http: &HttpClient, request: bcs_network_tracing::RequestWithDefaults<reqwest::RequestBuilder>) -> Result<Task, A2AError> {
-    json_response(http, request).await
+pub(super) async fn task_response(http: &HttpClient, request: bcs_network_tracing::RequestWithDefaults<reqwest::RequestBuilder>, guard: DigestGuard) -> Result<Task, A2AError> {
+    json_response(http, request, guard).await
 }
 
-pub(super) async fn json_response<T:serde::de::DeserializeOwned>(http: &HttpClient, request: bcs_network_tracing::RequestWithDefaults<reqwest::RequestBuilder>) -> Result<T, A2AError> {
-    tokio::time::timeout(std::time::Duration::from_secs(15), async {
+pub(super) async fn json_response<T:serde::de::DeserializeOwned>(http: &HttpClient, request: bcs_network_tracing::RequestWithDefaults<reqwest::RequestBuilder>, mut guard: DigestGuard) -> Result<T, A2AError> {
+    let result = tokio::time::timeout(std::time::Duration::from_secs(15), async {
         let request = request.map(|request| request.header("A2A-Version", "1.0"));
-        let mut response = http.send(request, "A2A Task request interrupted").await?;
+        let mut response = http.send_observed(request, "A2A Task request interrupted", &mut guard).await?;
         let status = response.status();
+        guard.record_headers(status.as_u16());
         let mut body = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(|_|A2AError::internal("A2A Task response incomplete"))? {
+            guard.add_resp_bytes(chunk.len());
             if body.len().saturating_add(chunk.len()) > 8 * 1024 * 1024 { return Err(A2AError::invalid_request("Task snapshot exceeds size limit")); }
             body.extend_from_slice(&chunk);
         }
@@ -26,7 +29,8 @@ pub(super) async fn json_response<T:serde::de::DeserializeOwned>(http: &HttpClie
             return Err(http_error(status.as_u16(), &body));
         }
         serde_json::from_slice(&body).map_err(|_|A2AError::parse_error("invalid Task snapshot"))
-    }).await.map_err(|_|A2AError::internal("A2A Task request timed out"))?
+    }).await.map_err(|_|A2AError::internal("A2A Task request timed out")).and_then(|res| res);
+    guard.observe(result)
 }
 
 /// ProtoJSON Status wraps details in `error`; accept the SDK's legacy flat

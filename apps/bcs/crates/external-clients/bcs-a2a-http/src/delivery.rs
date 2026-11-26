@@ -201,14 +201,25 @@ impl A2aHttpTransport {
         if require_identity {
             http = http.require_identity();
         }
+        let call_context = crate::digest::A2aCallContext {
+            bot_id: record.scope.bot_id.clone(),
+            provider_id: record.scope.provider_id.clone(),
+            run_id: record.run_id.clone(),
+        };
         if record.interface.binding == A2aBinding::JsonRpc {
-            return Ok(BindingClient::JsonRpc(crate::jsonrpc::JsonRpcClient::with_http(
-                http, record.interface.url.clone(), record.interface.tenant.clone(),
-            )));
+            return Ok(BindingClient::JsonRpc(
+                crate::jsonrpc::JsonRpcClient::with_http(
+                    http, record.interface.url.clone(), record.interface.tenant.clone(),
+                )
+                .with_call_context(call_context),
+            ));
         }
-        Ok(BindingClient::Rest(crate::client::rest_client(
-            http, record.interface.url.clone(), record.interface.tenant.clone(),
-        )))
+        Ok(BindingClient::Rest(
+            crate::client::rest_client(
+                http, record.interface.url.clone(), record.interface.tenant.clone(),
+            )
+            .with_call_context(call_context),
+        ))
     }
 
     async fn save(&self, record: &mut A2aRunRecord, state: A2aRunState) -> ServiceResult<()> {
@@ -439,7 +450,8 @@ impl BotDeliveryPort for A2aHttpTransport {
         };
         if !finished {
             let transport = self.clone();
-            tokio::spawn(bcs_network_tracing::in_current_context(async move {
+            let request_id = bcs_observability::current_request_id();
+            tokio::spawn(bcs_observability::with_request_id(request_id, bcs_network_tracing::in_current_context(async move {
                 let _lease = lease;
                 let result=if record.interface.update_mode==bcs_service_api::types::a2a::A2aUpdateMode::Poll {
                     transport.drive_poll(&mut record,&mut projection,receiver).await
@@ -447,7 +459,7 @@ impl BotDeliveryPort for A2aHttpTransport {
                 if result.is_err() {
                     transport.tracking_failed(&mut record).await;
                 }
-            }));
+            })));
         }
         Ok(BotDeliveryResult { target_bot_id: bot_id.clone(), delivered: true, error: None })
     }

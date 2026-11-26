@@ -160,6 +160,16 @@ targets = ["*"]
 max_keep_days = 7
 
 [[logging.outputs]]
+name = "a2a-http-client-digest"
+path = "./logs"
+file = "a2a-http-client-digest.log"
+level = "info"
+rotation = "daily"
+format = "raw"
+targets = ["bcs_a2a_http_client_digest"]
+max_keep_days = 7
+
+[[logging.outputs]]
 name = "messages"
 path = "./logs"
 file = "bcs-messages.log"

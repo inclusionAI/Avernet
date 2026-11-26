@@ -17,6 +17,7 @@ pub mod card_fetch;
 mod subscribe;
 mod test_response;
 pub mod delivery;
+pub mod digest;
 mod client_json;
 mod http_client;
 pub mod tools;
