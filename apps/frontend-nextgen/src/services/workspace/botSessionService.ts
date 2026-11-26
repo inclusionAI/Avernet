@@ -164,8 +164,8 @@ export function buildConversationSessionRequestRange(
 /**
  * 对话栏目本人会话的统一请求范围。
  * user_id 是经网关校验的操作者；f_user_id 是会话主体。当前产品不开放接管，
- * 两者始终归一为同一登录 Human。后端仅在 Caller 模式下据此切到独立实例，
- * owner 模式仍保持共享运行时；旧客户端不传 f_user_id 时继续走运维控制台链路。
+ * 声明会话主体时，两者均指向同一登录 Human。自有个人 Bot 只有自身的草稿实例，
+ * 直接走受鉴权保护的管理会话接口，避免老版本将其误路由到好友会话。
  */
 export function withConversationSubjectParams<T extends { user_id: string; owner_id?: string; stage?: BotIamTokenStage }>(
   bot: ChatBotView,
@@ -177,11 +177,19 @@ export function withConversationSubjectParams<T extends { user_id: string; owner
     bot.isFriendBot || bot.isTeamBot || bot.runtimeStage === 'online'
       ? resolveChatRuntimeStage(bot)
       : requestedStage ?? resolveChatRuntimeStage(bot);
+  const subjectUserId = resolveUserId(userId);
+  const isOwnedPersonalRuntime =
+    bot.botType === 'personal' &&
+    !bot.isFriendBot &&
+    !bot.isTeamBot &&
+    bot.callType?.toLowerCase() !== 'caller' &&
+    Boolean(subjectUserId) &&
+    bot.engineOwnerId === subjectUserId;
   return {
     ...baseParams,
     ...(bot.botType === 'service' ? { stage } : {}),
     ...((bot.isFriendBot || bot.isTeamBot) && bot.ownerId ? { owner_id: bot.ownerId } : {}),
-    f_user_id: resolveUserId(userId),
+    ...(!isOwnedPersonalRuntime ? { f_user_id: subjectUserId } : {}),
   };
 }
 

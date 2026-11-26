@@ -519,7 +519,45 @@ describe('botSessionService', () => {
     expect(res.ok && res.data.model).toBe('openai/gpt-5.3');
   });
 
-  it('所有对话 Bot 的本人会话接口统一携带 f_user_id', async () => {
+  it('自有个人 Bot 的历史会话详情与消息使用管理会话接口，保留完整 session key', async () => {
+    const sessionId = 'agent:main:session:67a16490-f599-4c18-afcc-575ec508f8f5:user:2088';
+    ownedMocked.listBots.mockResolvedValue({ data: { items: [{
+      bot_id: bot.realBotId, bot_type: 'personal', owner_entity_id: '2088',
+      entity_id: 'existing-locator', bot_name: '个人 Bot', status: 'ACTIVE',
+    }] } });
+    mocked.getBotSession.mockResolvedValue({ data: { session_id: sessionId } });
+    mocked.listBotSessionMessages.mockResolvedValue({ data: { items: [], total: 0 } });
+    const result = await botSessionService.listOwnedBots('human_2088');
+    if (!result.ok) throw new Error('自有 Bot 目录加载失败');
+    const [personalBot] = result.data;
+    const params = { user_id: '2088', owner_id: 'existing-locator' };
+
+    await expect(botSessionService.getSessionDetail(personalBot, 'human_2088', sessionId)).resolves.toMatchObject({
+      ok: true, data: { sessionId },
+    });
+    await botSessionService.listMessagesPage(personalBot, 'human_2088', sessionId);
+
+    expect(mocked.getBotSession).toHaveBeenLastCalledWith(bot.realBotId, sessionId, params);
+    expect(mocked.listBotSessionMessages).toHaveBeenLastCalledWith(bot.realBotId, sessionId, {
+      ...params, page: 1, page_size: 50,
+    });
+  });
+
+  it.each([
+    { label: '好友 Bot', flags: { isFriendBot: true }, userId: '2088' },
+    { label: '团队 Bot', flags: { isTeamBot: true }, userId: '2088' },
+    { label: '协作 Bot', flags: {}, userId: '900003' },
+    { label: 'Caller Bot', flags: { callType: 'caller' }, userId: '2088' },
+  ])('$label 继续携带会话主体', async ({ flags, userId }) => {
+    const target = { ...bot, botType: 'personal', engineOwnerId: '2088', ...flags };
+    mocked.listBotSessionMessages.mockResolvedValue({ data: { items: [], total: 0 } });
+    await botSessionService.listMessagesPage(target, userId, 's1');
+    expect(mocked.listBotSessionMessages).toHaveBeenLastCalledWith(
+      target.realBotId, 's1', expect.objectContaining({ f_user_id: userId }),
+    );
+  });
+
+  it('好友 Bot 的本人会话接口统一携带 f_user_id', async () => {
     const sessionDto = {
       session_id: 's1',
       title: '标题',

@@ -233,6 +233,25 @@ describe('botChatProvider', () => {
     expect(mockedGetIamToken).toHaveBeenNthCalledWith(3, 'b', 'u', '2088', 'draft', draftContext);
   });
 
+  it('自有个人 Bot 的历史会话从管理入口获取连接和凭证', async () => {
+    const sessionId = 'agent:main:session:67a16490-f599-4c18-afcc-575ec508f8f5:user:2088';
+    mockedGetConnection.mockResolvedValue({
+      data: { engine: 'openclaw', sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
+    });
+    const target = { ...bot, botType: 'personal', engineOwnerId: '2088', runtimeStage: 'draft' as const };
+    const provider = createBotChatProvider({ bot: target, userId: 'human_2088', sessionId });
+
+    await provider.connect();
+
+    expect(mockedGetConnection).toHaveBeenCalledWith('b', {
+      user_id: '2088', owner_id: '2088', session_id: sessionId,
+    });
+    expect(mockedGetIamToken).toHaveBeenCalledWith('b', '2088', '2088', undefined, {
+      sessionKey: sessionId, friendUserId: undefined, ownerId: '2088',
+    });
+    await provider.disconnect();
+  });
+
   it('Bot 工坊调试关闭 subject scope，IAM、连接和历史均不携带 f_user_id', async () => {
     mockedGetConnection.mockResolvedValue({
       code: 200000,
