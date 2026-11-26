@@ -8,11 +8,11 @@ export const executionRecordUnauthorized = { error: "Unauthorized", message: "In
 export const executionRecordLegacyWorkflow = { workflow_yaml: null, workflow_snapshot: { status: "unresolved", reason: "LEGACY_MISSING" } } as const;
 export const executionRecordAuthUnavailable = { error: "Service Unavailable", message: "Execution record authentication unavailable" };
 
-export function tokenConfigYaml(token = executionRecordTestToken): string {
-  return `execution_record_sha256: "${createHash("sha256").update(token, "utf8").digest("hex")}"\n`;
+export function tokenConfigYaml(token?: string): string {
+  return `execution_record_sha256: "${createHash("sha256").update(token ?? executionRecordTestToken, "utf8").digest("hex")}"\n`;
 }
 
-export function seedExecutionRecordToken(raw: Database.Database, token = executionRecordTestToken): void {
+export function seedExecutionRecordToken(raw: Database.Database, token?: string): void {
   raw.exec(`CREATE TABLE IF NOT EXISTS cm_app_config (
     id INTEGER PRIMARY KEY, config_key TEXT NOT NULL UNIQUE, config_yaml TEXT NOT NULL,
     version INTEGER NOT NULL DEFAULT 1, enabled INTEGER NOT NULL DEFAULT 1,

@@ -48,8 +48,8 @@ export async function verifyExecutionRecordToken(
   if (authorizationCount > 1 || typeof authorization !== "string") return "unauthorized";
   const separator = authorization.indexOf(" ");
   const scheme = authorization.slice(0, separator);
-  const token = authorization.slice(separator + 1);
-  if (scheme.toLowerCase() !== "bearer" || token.length !== 64 || !/^[0-9a-f]{64}$/.test(token)) return "unauthorized";
-  const actual = createHash("sha256").update(token, "utf8").digest();
+  const bearerValue = authorization.slice(separator + 1);
+  if (scheme.toLowerCase() !== "bearer" || bearerValue.length !== 64 || !/^[0-9a-f]{64}$/.test(bearerValue)) return "unauthorized";
+  const actual = createHash("sha256").update(bearerValue, "utf8").digest();
   return actual.length === expected.length && timingSafeEqual(actual, expected) ? "authenticated" : "unauthorized";
 }

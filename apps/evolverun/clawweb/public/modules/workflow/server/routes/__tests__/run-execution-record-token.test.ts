@@ -142,8 +142,10 @@ describe("execution record dedicated Bearer token authentication", () => {
   });
 
   it("does not accept query or cookie credentials", async () => {
+    const credentialQuery = new URLSearchParams();
+    for (const key of ["token", "access_token", "api_token"]) credentialQuery.set(key, executionRecordTestToken);
     await expectRejected(await read({ cookie: `api_token=${executionRecordTestToken}; Authorization=Bearer%20${executionRecordTestToken}` },
-      "/runs", `?token=${executionRecordTestToken}&access_token=${executionRecordTestToken}&api_token=${executionRecordTestToken}`), 401);
+      "/runs", `?${credentialQuery}`), 401);
   });
 
   it("rejects duplicate original Authorization headers even when Node drops one normalized value", async () => {
