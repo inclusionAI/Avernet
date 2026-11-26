@@ -346,6 +346,8 @@ pub fn fixture_with(tune: impl FnOnce(&mut GatewayStoreConfig)) -> Fixture {
     let mut config = GatewayStoreConfig::new(BackendId("tbase".into()));
     config.read_block = Duration::from_millis(40);
     config.read_grace = Duration::from_millis(60);
+    config.cursor_secret = Some(b"-tests bound cursor key-".to_vec());
+    config.now = Arc::new(|| TimestampMillis(NOW));
     tune(&mut config);
     let reader = StoreTaskReader::new(
         model.clone(),

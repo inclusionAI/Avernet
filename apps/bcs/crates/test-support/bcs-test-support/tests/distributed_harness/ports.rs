@@ -463,8 +463,9 @@ impl DistGatewayService for Script {
         caller: &GatewayCaller,
         group: &GroupId,
         tid: &Tid,
+        source: CreationSource,
     ) -> Result<TaskView, GatewayError> {
-        self.call("DistGatewayService::get_task", (caller, group, tid))
+        self.call("DistGatewayService::get_task", (caller, group, tid, source))
     }
 
     async fn subscribe(
@@ -497,6 +498,30 @@ impl DistGatewayService for Script {
         request: ListTasks,
     ) -> Result<TaskPage, GatewayError> {
         self.call("DistGatewayService::list_tasks", (caller, request))
+    }
+
+    async fn group_send(
+        &self,
+        caller: &GatewayCaller,
+        request: SubmitInput,
+    ) -> Result<AdmissionReceipt, GatewayError> {
+        self.call("DistGatewayService::group_send", (caller, request))
+    }
+
+    async fn group_list_tasks(
+        &self,
+        caller: &GatewayCaller,
+        request: GroupTaskList,
+    ) -> Result<bcs_service_api::port::repo::distributed::group_listing::GroupIndexPage, GatewayError> {
+        self.call("DistGatewayService::group_list_tasks", (caller, request))
+    }
+
+    async fn group_wait_task(
+        &self,
+        caller: &GatewayCaller,
+        request: WaitTask,
+    ) -> Result<(TaskView, bool), GatewayError> {
+        self.call("DistGatewayService::group_wait_task", (caller, request))
     }
 }
 

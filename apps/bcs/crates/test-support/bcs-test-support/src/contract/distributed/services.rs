@@ -72,17 +72,25 @@ pub async fn dist_gateway_service_contract_tests(
     let receipt = gateway.submit(caller, request.clone()).await?;
     assert_eq!(gateway.submit(caller, request).await?, receipt);
     assert_eq!(
-        gateway.get_task(caller, &group, &receipt.tid).await?.tid,
+        gateway
+            .get_task(caller, &group, &receipt.tid, CreationSource::Rpc)
+            .await?
+            .tid,
         receipt.tid
     );
     assert!(matches!(
-        gateway.get_task(unauthorized, &group, &receipt.tid).await,
+        gateway.get_task(unauthorized, &group, &receipt.tid, CreationSource::Rpc).await,
         Err(GatewayError::AccessDenied | GatewayError::NotFound)
     ));
     // A task is reached only through the group it was created for.
     let another = GroupId(format!("{}-another", group.0));
     assert_eq!(
-        gateway.get_task(caller, &another, &receipt.tid).await,
+        gateway.get_task(caller, &another, &receipt.tid, CreationSource::Rpc).await,
+        Err(GatewayError::NotFound)
+    );
+    // A task of one source is never reached through another entrance.
+    assert_eq!(
+        gateway.get_task(caller, &group, &receipt.tid, CreationSource::GroupA2a).await,
         Err(GatewayError::NotFound)
     );
     Ok(())

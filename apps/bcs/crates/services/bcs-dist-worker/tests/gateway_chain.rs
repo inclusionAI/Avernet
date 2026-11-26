@@ -80,15 +80,61 @@ fn app(f: &Fixture, groups: Arc<Groups>) -> Router {
         Arc::new(output),
         f.coordination.clone(),
     );
+    // No group surface hosted by this joint chain: the policy denies and
+    // no listing is wired; the legacy JSON-RPC chain stays as it was.
+    struct GroupDeny;
+    #[async_trait::async_trait]
+    impl GroupGrantPolicy for GroupDeny {
+        async fn grants(&self, _: &GatewayCaller, _: &GroupId) -> GroupRoundGrants {
+            GroupRoundGrants { published: false, invoke: false, read: false, cancel: false }
+        }
+    }
+    struct NoListing;
+    #[async_trait::async_trait]
+    impl bcs_service_api::port::repo::distributed::group_listing::GroupListingPort for NoListing {
+        async fn first_page(
+            &self,
+            _: &TaskScope,
+            _: &GroupId,
+            _: &bcs_service_api::port::repo::distributed::group_listing::GroupIndexQuery,
+            _: TimestampMillis,
+        ) -> Result<bcs_service_api::port::repo::distributed::group_listing::GroupIndexPage, bcs_service_api::port::repo::distributed::common::StoreError> {
+            Err(bcs_service_api::port::repo::distributed::common::StoreError::NotApplied {
+                code: "group_listing_unconfigured".to_owned(),
+            })
+        }
+        async fn continue_page(
+            &self,
+            _: &TaskScope,
+            _: &GroupId,
+            _: &PageToken,
+            _: bool,
+            _: TimestampMillis,
+        ) -> Result<bcs_service_api::port::repo::distributed::group_listing::GroupIndexPage, bcs_service_api::port::repo::distributed::common::StoreError> {
+            Err(bcs_service_api::port::repo::distributed::common::StoreError::NotApplied {
+                code: "group_listing_unconfigured".to_owned(),
+            })
+        }
+    }
+    struct NoDiscovery;
+    #[async_trait::async_trait]
+    impl GroupDiscoveryService for NoDiscovery {
+        async fn card(&self, _: &GatewayCaller, _: &GroupId) -> Result<GroupCard, GatewayError> {
+            Err(GatewayError::NotFound)
+        }
+    }
     let gateway = bcs_app_dist_gateway::DistGateway::new(
         Arc::new(core),
         groups,
+        Arc::new(GroupDeny),
+        Arc::new(NoListing),
         Arc::new(bcs_app_dist_gateway::SystemClock),
         bcs_app_dist_gateway::DistGatewayConfig::new(1),
     )
     .unwrap();
     bcs_dist_gateway_http::router(
         Arc::new(gateway),
+        Arc::new(NoDiscovery),
         bcs_dist_gateway_http::GatewayHttpConfig::new("http://localhost"),
     )
     .layer(Extension(GatewayCaller {

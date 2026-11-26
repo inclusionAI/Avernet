@@ -38,10 +38,10 @@ use tokio::sync::broadcast::error::RecvError;
 pub const SUBSCRIBER_LAGGED: &str = "subscriber_lagged";
 
 /// Task snapshots read at once while listing.
-const LIST_READ_CONCURRENCY: usize = 8;
+pub(crate) const LIST_READ_CONCURRENCY: usize = 8;
 
 /// Settings of the Gateway's readers.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct GatewayStoreConfig {
     /// Identifies the store in replay tokens, e.g. `tbase`.
     pub backend: BackendId,
@@ -54,6 +54,13 @@ pub struct GatewayStoreConfig {
     /// Time a blocking read may take beyond `read_block` before it counts as
     /// a failed read.
     pub read_grace: Duration,
+    /// HMAC signing key of the list cursors. Deployment configuration:
+    /// replicas that share reads share the key; absent fails closed (no
+    /// cursor is issued or accepted).
+    pub cursor_secret: Option<Vec<u8>>,
+    /// The clock cursor expiry and snapshot deadlines read. Deployment
+    /// configuration; tests pin it.
+    pub now: Arc<dyn Fn() -> TimestampMillis + Send + Sync>,
 }
 
 impl GatewayStoreConfig {
@@ -64,22 +71,30 @@ impl GatewayStoreConfig {
             read_batch: NonZeroU32::new(100).unwrap_or(NonZeroU32::MIN),
             subscriber_buffer: 256,
             read_grace: ReaderConfig::DEFAULT_GRACE,
+            cursor_secret: None,
+            now: Arc::new(|| {
+                let millis = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or_default();
+                TimestampMillis(i64::try_from(millis).unwrap_or(i64::MAX))
+            }),
         }
     }
 }
 
-struct Shared {
-    documents: Arc<dyn DocumentStorePlugin>,
-    zset: Arc<dyn ZSetStorePlugin>,
-    stream: Arc<dyn StreamStorePlugin>,
-    results: Arc<dyn ResultStorePort>,
-    layout: KeyLayout,
-    config: GatewayStoreConfig,
-    readers: SessionReaders,
+pub(crate) struct Shared {
+    pub(crate) documents: Arc<dyn DocumentStorePlugin>,
+    pub(crate) zset: Arc<dyn ZSetStorePlugin>,
+    pub(crate) stream: Arc<dyn StreamStorePlugin>,
+    pub(crate) results: Arc<dyn ResultStorePort>,
+    pub(crate) layout: KeyLayout,
+    pub(crate) config: GatewayStoreConfig,
+    pub(crate) readers: SessionReaders,
 }
 
 pub struct StoreTaskReader {
-    shared: Arc<Shared>,
+    pub(crate) shared: Arc<Shared>,
 }
 
 impl StoreTaskReader {
@@ -229,9 +244,20 @@ impl Shared {
     fn cursor(&self, sid: &Sid, tid: &Tid, id: StreamId) -> TaskCursor {
         position::cursor(&self.config.backend, sid, tid, id)
     }
+
+    /// The frozen group of a session, or `None` for another scope's or an
+    /// absent session. One bounded document read.
+    pub(crate) async fn session_group(&self, scope: &TaskScope, sid: &Sid) -> Result<Option<GroupId>, StoreError> {
+        let key = self.layout.spec(sid)?;
+        let Some(doc) = self.documents.read_document(&key).await.map_err(|e| from_read(&e))? else {
+            return Ok(None);
+        };
+        let spec: SessionSpec = decode_json(doc.value)?;
+        Ok((&spec.scope == scope).then_some(spec.group))
+    }
 }
 
-enum Stored {
+pub(crate) enum Stored {
     Live(TaskSnapshot),
     Archived(FinalTaskRecord),
 }
@@ -278,17 +304,53 @@ fn archived_view(record: FinalTaskRecord) -> TaskView {
     }
 }
 
-fn stored_view(stored: Stored) -> TaskView {
+pub(crate) fn stored_view(stored: Stored) -> TaskView {
     match stored {
         Stored::Live(snapshot) => live_view(snapshot),
         Stored::Archived(record) => archived_view(record),
     }
 }
 
-fn invalid(code: &str) -> StoreError {
+pub(crate) fn invalid(code: &str) -> StoreError {
     StoreError::Invalid {
         code: code.to_owned(),
     }
+}
+
+/// Wire-independent lower-case names of task states, shared by cursor claims
+/// and materialized cut rows.
+pub(crate) fn status_name(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Submitted => "submitted",
+        TaskStatus::Working => "working",
+        TaskStatus::InputRequired => "input_required",
+        TaskStatus::AuthRequired => "auth_required",
+        TaskStatus::Completed => "completed",
+        TaskStatus::Failed => "failed",
+        TaskStatus::Canceled => "canceled",
+        TaskStatus::Rejected => "rejected",
+    }
+}
+
+pub(crate) fn status_of_name(name: &str) -> Option<TaskStatus> {
+    Some(match name {
+        "submitted" => TaskStatus::Submitted,
+        "working" => TaskStatus::Working,
+        "input_required" => TaskStatus::InputRequired,
+        "auth_required" => TaskStatus::AuthRequired,
+        "completed" => TaskStatus::Completed,
+        "failed" => TaskStatus::Failed,
+        "canceled" => TaskStatus::Canceled,
+        "rejected" => TaskStatus::Rejected,
+        _ => return None,
+    })
+}
+
+/// The deterministic status-filter key bound into cursors and cut identities.
+pub(crate) fn status_key(statuses: &[TaskStatus]) -> String {
+    let mut names: Vec<&str> = statuses.iter().map(|status| status_name(*status)).collect();
+    names.sort_unstable();
+    names.join(",")
 }
 
 fn in_session(sid: &Sid, tid: &Tid) -> bool {
@@ -378,7 +440,31 @@ impl TaskReaderPort for StoreTaskReader {
         let Some(sid) = &filter.sid else {
             return Err(invalid("session_filter_required"));
         };
-        let after = page.after.as_ref().map(page::decode).transpose()?;
+        let after = match &page.after {
+            None => None,
+            Some(token) => match page::decode(token, &shared.config.cursor_secret) {
+                Ok(claims) => {
+                    let statuses = status_key(&filter.statuses);
+                    page::verify(
+                        &claims,
+                        "list",
+                        &scope.tenant.0,
+                        &scope.principal.0,
+                        &sid.0,
+                        Some(statuses.as_str()),
+                        "created_at:asc,tid:asc",
+                        (shared.config.now)().0,
+                    )
+                    // The legacy binding answers one unchanged wire code.
+                    .map_err(|_| invalid("page_token"))?;
+                    Some(page::entry_of(&claims))
+                }
+                // The store rejected the token's format: invalid input, not a
+                // failed dependency a client should retry. Same wire contract
+                // as the unsigned v1 token.
+                Err(_) => return Err(invalid("page_token")),
+            },
+        };
         let index = shared
             .zset
             .range(
@@ -392,9 +478,29 @@ impl TaskReaderPort for StoreTaskReader {
             )
             .await
             .map_err(|e| from_read(&e))?;
-        let next = (index.len() >= page.limit.get() as usize)
-            .then(|| index.last().map(page::encode))
-            .flatten();
+        let next = match index.last().filter(|_| index.len() >= page.limit.get() as usize) {
+            Some(last) => {
+                let claims = page::CursorClaims {
+                    surface: "list".to_owned(),
+                    tenant: scope.tenant.0.clone(),
+                    principal: scope.principal.0.clone(),
+                    binding: sid.0.clone(),
+                    statuses: status_key(&filter.statuses),
+                    sort: "created_at:asc,tid:asc".to_owned(),
+                    cut: "live".to_owned(),
+                    last_score: last.score as i64,
+                    last_member: last.member.clone(),
+                    expires_at_ms: (shared.config.now)().0 + (page::CURSOR_LIFETIME_MILLIS as i64),
+                };
+                match page::encode(&claims, &shared.config.cursor_secret) {
+                    Ok(token) => Some(token),
+                    // No cursor is ever issued unsigned; a reader without a
+                    // key stops the pagination instead of degrading it.
+                    Err(_) => return Err(not_applied("cursor_secret_unconfigured")),
+                }
+            }
+            None => None,
+        };
         let reads: Vec<_> = index
             .iter()
             .map(|entry| read_stored(shared.clone(), scope.clone(), Tid(entry.member.clone())))
@@ -417,7 +523,7 @@ impl TaskReaderPort for StoreTaskReader {
     }
 }
 
-async fn read_stored(
+pub(crate) async fn read_stored(
     shared: Arc<Shared>,
     scope: TaskScope,
     tid: Tid,
@@ -583,7 +689,7 @@ impl Follow {
     }
 }
 
-fn not_applied(code: &str) -> StoreError {
+pub(crate) fn not_applied(code: &str) -> StoreError {
     StoreError::NotApplied {
         code: code.to_owned(),
     }

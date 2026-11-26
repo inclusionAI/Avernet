@@ -15,6 +15,11 @@ bcs-dist-store = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-store-api = { workspace = true }
 futures = { workspace = true }
+hex = { workspace = true }
+hmac = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 

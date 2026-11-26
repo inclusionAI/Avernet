@@ -162,6 +162,7 @@ async fn gateway_harness_checks_idempotency_task_identity_and_access_denial() ->
         caller: CallerContext::Public,
     };
     let request = SubmitInput {
+        source: CreationSource::Rpc,
         group: spec().group,
         message_id: RequestId("request-a".into()),
         session: Some(owner().sid),
@@ -188,23 +189,31 @@ async fn gateway_harness_checks_idempotency_task_identity_and_access_denial() ->
             )
             .expect(
                 "DistGatewayService::get_task",
-                (&caller, &request.group, input().tid),
+                (&caller, &request.group, input().tid, CreationSource::Rpc),
                 Ok::<_, GatewayError>(task_view()),
             )
             .expect(
                 "DistGatewayService::get_task",
-                (&unauthorized, &request.group, input().tid),
+                (&unauthorized, &request.group, input().tid, CreationSource::Rpc),
                 denied,
             );
         let another = GroupId(format!("{}-another", request.group.0));
         let script = if leaks {
             script
         } else {
-            script.expect(
-                "DistGatewayService::get_task",
-                (&caller, &another, input().tid),
-                Err::<TaskView, _>(GatewayError::NotFound),
-            )
+            script
+                .expect(
+                    "DistGatewayService::get_task",
+                    (&caller, &another, input().tid, CreationSource::Rpc),
+                    Err::<TaskView, _>(GatewayError::NotFound),
+                )
+                // A resource of one source is never reached through another
+                // entrance (plan T8): the script refuses the cross-source read.
+                .expect(
+                    "DistGatewayService::get_task",
+                    (&caller, &request.group, input().tid, CreationSource::GroupA2a),
+                    Err::<TaskView, _>(GatewayError::NotFound),
+                )
         };
         let test =
             dist_gateway_service_contract_tests(&script, &caller, &unauthorized, request.clone());
