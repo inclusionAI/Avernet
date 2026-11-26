@@ -647,6 +647,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/authorized"): NoCheck(
         "a collection, not one addressed bot"
     ),
+    ("GET", "/openapi/v1/bots/aicoding/work-items"): NoCheck(
+        "the signed human's own work-item aggregate, not one addressed bot"
+    ),
     ("GET", "/openapi/v1/bots/routines/all"): NoCheck(
         "a collection, not one addressed bot"
     ),
