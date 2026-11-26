@@ -189,8 +189,13 @@ assertion that a fetched remote Card was captured.
 
 `bcs-warning.log` follows the same rotating writer creation and permission
 behavior as other BCS log files such as `bcs.log`; the writer does not chmod
-files or grant extra access. Readable deployed access and platform log-query
-ACLs still need separate runtime verification.
+files or grant extra access. The writer also rolls an existing active file at
+creation when its last write predates the current period, so sparse outputs
+such as `bcs-warning.log` (restart-heavy deployments, quiet days) cannot strand
+multi-day content in one file. The creation roll and the write-path roll share
+one period key (`rotation_period_key`) and the same archive-naming rule, so
+both roll sites stay aligned with the active cadence. Readable deployed access
+and platform log-query ACLs still need separate runtime verification.
 
 Regression suites: `bcs-observability` business warning unit tests;
 `bcs-api-http --test agentcard_warning`; bootstrap logging routing/rotation tests.
