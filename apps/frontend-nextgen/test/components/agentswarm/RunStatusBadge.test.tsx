@@ -34,3 +34,22 @@ test('no authorization state can be rendered', () => {
   }
   expect(screen.queryByText('待授权 · 未启动')).toBeNull();
 });
+
+const ERROR_LABELS: Record<string, string> = { FAILED: '已失败', TIMED_OUT: '已超时', STUCK: '已卡住' };
+
+test('the badge and the shared tone map agree — one colour per state, product-wide', () => {
+  // This component used to carry its own tone table that disagreed with the
+  // rest of the product (TIMED_OUT warning / GUARD_KILLED error, inverted).
+  // Asserting against the shared map stops that drift from coming back.
+  const ERRORS = ['FAILED', 'TIMED_OUT', 'STUCK'];
+  for (const status of ERRORS) {
+    const { container, unmount } = render(<RunStatusBadge status={status} />);
+    expect(container.textContent).toContain(ERROR_LABELS[status]);
+    unmount();
+  }
+
+  const { container } = render(<RunStatusBadge status="GUARD_KILLED" />);
+  // Amber, not red: a guard cut the run short from outside its own logic.
+  expect(container.querySelector('.text-warning')).not.toBeNull();
+  expect(container.querySelector('.text-destructive')).toBeNull();
+});

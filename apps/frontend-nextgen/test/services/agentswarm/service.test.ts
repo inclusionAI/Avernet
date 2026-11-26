@@ -78,15 +78,15 @@ test('an llm-only run is exempt from the identity requirement', () => {
 });
 
 test('a bot-kind run without a source is refused locally, not sent to the gateway', async () => {
-  expect(validateIdentitySource({ agents: [botAgent] })).toContain('身份 Bot');
-  await expect(submitRun('acme', { tenant: 'acme', goal: 'g', agents: [botAgent] })).rejects.toThrow('身份 Bot');
+  expect(validateIdentitySource({ agents: [botAgent] })).toContain('执行权限 Bot');
+  await expect(submitRun('acme', { tenant: 'acme', goal: 'g', agents: [botAgent] })).rejects.toThrow('执行权限 Bot');
   expect(request).not.toHaveBeenCalled();
 });
 
 test('a blank source counts as absent', () => {
-  expect(validateIdentitySource({ agents: [botAgent], identity_bot_id: '   ' })).toContain('身份 Bot');
+  expect(validateIdentitySource({ agents: [botAgent], identity_bot_id: '   ' })).toContain('执行权限 Bot');
 });
 
 test('one bot-kind agent among llm agents still requires a source', () => {
-  expect(validateIdentitySource({ agents: [llmAgent, botAgent] })).toContain('身份 Bot');
+  expect(validateIdentitySource({ agents: [llmAgent, botAgent] })).toContain('执行权限 Bot');
 });

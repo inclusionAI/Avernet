@@ -58,6 +58,39 @@ export function runStatusLabel(status: string | null | undefined): string {
   return isRunStatus(status) ? RUN_STATUS_LABELS[status] : status;
 }
 
+/** Badge tones the product has, mirrored here so the status map stays pure data. */
+export type StatusTone = 'neutral' | 'primary' | 'success' | 'warning' | 'error';
+
+/**
+ * One tone per gateway state, so the seven statuses are distinguishable at a
+ * glance rather than collapsing into "done" and "not done".
+ *
+ * - `success` — the run did what was asked.
+ * - `primary` — still moving; not an outcome.
+ * - `warning` — stopped from outside the run's own logic (a guard cut it short),
+ *   which is neither a clean success nor an internal failure.
+ * - `error` — failed, timed out, or wedged on its own.
+ * - `neutral` — the user stopped it; not a defect.
+ */
+export const RUN_STATUS_TONES: Record<RunStatus, StatusTone> = {
+  RUNNING: 'primary',
+  COMPLETED: 'success',
+  FAILED: 'error',
+  CANCELLED: 'neutral',
+  TIMED_OUT: 'error',
+  GUARD_KILLED: 'warning',
+  STUCK: 'error',
+};
+
+/**
+ * Tone for a status string. Unknown strings get `neutral` rather than a guess:
+ * an unrecognised state should read as "no judgement", not as success.
+ */
+export function runStatusTone(status: string | null | undefined): StatusTone {
+  if (!status) return 'neutral';
+  return isRunStatus(status) ? RUN_STATUS_TONES[status] : 'neutral';
+}
+
 /** Agent kinds accepted by the gateway. `bot` provisions a container; `llm` runs in-process. */
 export type AgentKind = 'bot' | 'llm';
 
@@ -98,10 +131,22 @@ export interface RunOptionsDTO {
   max_attempts?: number | null;
 }
 
+/** A roster entry that names a stored definition instead of restating it. */
+export interface AgentDefinitionRefDTO {
+  definition_id: string;
+  /**
+   * Catalog name to spawn this agent under. Defaults to the definition's own
+   * name; the same definition may appear twice under distinct aliases.
+   */
+  alias?: string | null;
+}
+
 export interface SubmitRunDTO {
   tenant: string;
   goal: string;
-  agents: AgentSpecDTO[];
+  /** A run is EITHER a list of inline specs OR a list of definition refs. */
+  agents?: AgentSpecDTO[];
+  agent_refs?: AgentDefinitionRefDTO[];
   provider?: ProviderKind | null;
   model?: string | null;
   idempotency_key?: string | null;
@@ -111,6 +156,61 @@ export interface SubmitRunDTO {
    */
   identity_bot_id?: string | null;
   options?: RunOptionsDTO | null;
+}
+
+/**
+ * A stored agent definition, as the gateway returns it.
+ *
+ * `definition_row_id` is the version that was read. An update must send it back:
+ * a stale value is refused with 409, which is how two writers avoid silently
+ * overwriting each other.
+ */
+export interface DefinitionDTO {
+  definition_id: string;
+  name: string;
+  role: string;
+  instructions: string;
+  kind: string;
+  model?: string | null;
+  engine?: string | null;
+  bot_type: string;
+  manifest_document: string;
+  manifest_digest: string;
+  owner_id: string;
+  creator_id: string;
+  modifier_id: string;
+  definition_row_id: number;
+  created_at: number;
+}
+
+export interface DefinitionListDTO {
+  items: DefinitionDTO[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/** Fields accepted when creating or revising a definition. */
+export interface DefinitionWriteDTO {
+  name: string;
+  role?: string;
+  instructions?: string;
+  kind?: AgentKind;
+  model?: string | null;
+  engine?: string | null;
+  bot_type?: string | null;
+  manifest_document?: string;
+}
+
+export interface UpdateDefinitionDTO extends DefinitionWriteDTO {
+  definition_id: string;
+  definition_row_id: number;
+}
+
+export interface QueryDefinitionsDTO {
+  name?: string;
+  page?: number;
+  page_size?: number;
 }
 
 export interface RunSummaryDTO {

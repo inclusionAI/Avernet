@@ -123,7 +123,7 @@ export function RunOptionsPanel({ options, onChange }: RunOptionsPanelProps) {
       ) : null}
 
       <ModelSelector
-        label="运行默认模型"
+        label="执行默认模型"
         inheritLabel="使用平台默认模型"
         hint="未单独指定模型的 Agent 使用该模型。"
         value={options?.model_name ?? null}

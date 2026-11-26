@@ -877,6 +877,50 @@ class TestRoundRepository:
         rounds = round_repo.list_by_run(run.run_id, TENANT_A)
         assert len(rounds) == 3
 
+    def test_rounds_stay_open_until_the_run_ends(self, run_repo, round_repo):
+        # Every round row is written with ended_at unset and nothing closes it,
+        # so before close_open ran the field was NULL on completed runs too and
+        # a reader could not tell a finished stage from a running one.
+        run = _mk_run()
+        run_repo.create(run)
+        round_repo.create(dm.Round(
+            id=dm.RoundId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            stage_index=0,
+            orchestrator_steps=1,
+            slowest_attempt_steps=0,
+            cohort_agent_ids=(dm.AgentId("a"),),
+            started_at=dm.EpochMillis(_now_ms()),
+        ))
+        assert round_repo.list_by_run(run.run_id, TENANT_A)[0].ended_at is None
+
+        closed = round_repo.close_open(run.run_id, TENANT_A)
+        assert closed == 1
+        assert round_repo.list_by_run(run.run_id, TENANT_A)[0].ended_at is not None
+
+        # Idempotent: nothing left open, so a second call changes nothing.
+        assert round_repo.close_open(run.run_id, TENANT_A) == 0
+
+    def test_close_open_leaves_already_closed_rounds_alone(self, run_repo, round_repo):
+        run = _mk_run()
+        run_repo.create(run)
+        stamp = dm.EpochMillis(_now_ms() - 1000)
+        round_repo.create(dm.Round(
+            id=dm.RoundId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT_A,
+            stage_index=0,
+            orchestrator_steps=1,
+            slowest_attempt_steps=0,
+            cohort_agent_ids=(dm.AgentId("a"),),
+            started_at=dm.EpochMillis(_now_ms()),
+            ended_at=stamp,
+        ))
+
+        assert round_repo.close_open(run.run_id, TENANT_A) == 0
+        assert round_repo.list_by_run(run.run_id, TENANT_A)[0].ended_at == stamp
+
 
 class TestGuardEventRepository:
     def test_create_and_list(self, run_repo, guard_repo):

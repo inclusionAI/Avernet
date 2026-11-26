@@ -2,6 +2,8 @@ import {
   isRunStatus,
   isTerminalStatus,
   runStatusLabel,
+  runStatusTone,
+  RUN_STATUS_TONES,
   RUN_STATUSES,
   TERMINAL_STATUSES,
   type RunStatus,
@@ -44,4 +46,24 @@ test('the status union rejects a literal the gateway cannot report', () => {
   // @ts-expect-error WAITING_AUTHORIZATION is not a gateway status.
   const removed: RunStatus = 'WAITING_AUTHORIZATION';
   expect(removed).toBe('WAITING_AUTHORIZATION');
+});
+
+test('every gateway state has a tone, and the tones actually distinguish states', () => {
+  for (const status of RUN_STATUSES) expect(RUN_STATUS_TONES[status]).toBeTruthy();
+
+  // A guard kill is neither a clean success nor an internal failure, and a
+  // user cancel is not a defect — collapsing them into error/success was the
+  // bug this map exists to prevent.
+  expect(runStatusTone('COMPLETED')).toBe('success');
+  expect(runStatusTone('RUNNING')).toBe('primary');
+  expect(runStatusTone('GUARD_KILLED')).toBe('warning');
+  expect(runStatusTone('CANCELLED')).toBe('neutral');
+  for (const status of ['FAILED', 'TIMED_OUT', 'STUCK'] as const) {
+    expect(runStatusTone(status)).toBe('error');
+  }
+});
+
+test('an unrecognized status reads as no-judgement, never as success', () => {
+  expect(runStatusTone('SOMETHING_NEW')).toBe('neutral');
+  expect(runStatusTone(null)).toBe('neutral');
 });

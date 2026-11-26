@@ -7,7 +7,7 @@
  * -- a renamed field, a manifest dropped to "", an identity moved per-agent --
  * this fails here instead of at a live submit.
  */
-import { createAgentDraft, toSubmitDTO, type ComputeDraft } from '@/domain/agentswarm/draft';
+import { createNewAgentRef, toSubmitDTO, type ComputeDraft } from '@/domain/agentswarm/draft';
 
 const MANIFEST_DOC =
   "schema_version: 1\n" +
@@ -31,88 +31,78 @@ const TENANT = 'teamclaw';
  */
 const IDENTITY = '<deploy-minted-bot-id>';
 
-/** The exact body that returned 200 from POST /openapi/v1/agentswarm/runs. */
-const ACCEPTED_BODY = {
+/**
+ * The run payload is now always a roster of definition refs, so the accepted
+ * shape is the ref list plus the run-level fields. The agent *body* (manifest,
+ * instructions) travels in the definition, not here.
+ */
+const ACCEPTED_REF_BODY = {
   tenant: TENANT,
   identity_bot_id: IDENTITY,
   goal: 'Say hello world',
   options: { model_name: 'DeepSeek-V4.1-Flash' },
-  agents: [
-    {
-      name: 'manifest_greeter',
-      role: 'hello world producer',
-      kind: 'bot',
-      instructions: 'Respond with exactly the single word: hello world',
-      config_manifest: MANIFEST_DOC,
-    },
-  ],
+  agent_refs: [{ definition_id: 'def-manifest-greeter', alias: 'manifest_greeter' }],
 };
 
 const draft = (): ComputeDraft => ({
   goal: 'Say hello world',
   identityBotId: IDENTITY,
   options: { model_name: 'DeepSeek-V4.1-Flash' },
-  agents: [
-    createAgentDraft({
-      key: 'k',
-      name: 'manifest_greeter',
-      role: 'hello world producer',
-      kind: 'bot',
-      instructions: 'Respond with exactly the single word: hello world',
-      config_manifest: MANIFEST_DOC,
-    }),
+  refs: [
+    {
+      ...createNewAgentRef({
+        key: 'k',
+        name: 'manifest_greeter',
+        role: 'hello world producer',
+        kind: 'bot',
+        instructions: 'Respond with exactly the single word: hello world',
+        config_manifest: MANIFEST_DOC,
+      }),
+      alias: 'manifest_greeter',
+    },
   ],
 });
 
+const RESOLVED = { k: 'def-manifest-greeter' };
+
 test('the builder reproduces every field the live gateway accepted', () => {
-  // The accepted body omitted engine/bot_type, so the gateway defaulted them.
-  // The builder now sends them explicitly, which must not disturb anything else.
-  const dto = toSubmitDTO(draft(), TENANT);
-  expect(dto).toMatchObject({ ...ACCEPTED_BODY, agents: [expect.objectContaining(ACCEPTED_BODY.agents[0])] });
+  expect(toSubmitDTO(draft(), TENANT, RESOLVED)).toEqual(ACCEPTED_REF_BODY);
 });
 
-test('engine and bot_type are fixed and not user-chosen', () => {
-  const dto = toSubmitDTO(draft(), TENANT);
-  expect(dto.agents[0].engine).toBe('openclaw');
-  expect(dto.agents[0].bot_type).toBe('personal');
+test('the run payload carries no inline agent body', () => {
+  // The manifest lives in the definition; sending it on the submit would mean
+  // the two copies could disagree about what the agent actually is.
+  const dto = toSubmitDTO(draft(), TENANT, RESOLVED);
+  expect(dto).not.toHaveProperty('agents');
+  expect(JSON.stringify(dto)).not.toContain('meticulous greeter');
 });
 
-test('the manifest survives the round trip byte for byte', () => {
-  const dto = toSubmitDTO(draft(), TENANT);
-  expect(dto.agents[0].config_manifest).toBe(MANIFEST_DOC);
-  expect(dto.agents[0].config_manifest).toContain('meticulous greeter');
-  expect(dto.agents[0].config_manifest).toContain('echo manifest-provisioned');
+test('the definition body keeps the manifest byte for byte', () => {
+  const entry = draft().refs[0];
+  expect(entry.body.config_manifest).toBe(MANIFEST_DOC);
+  expect(entry.body.config_manifest).toContain('meticulous greeter');
+  expect(entry.body.config_manifest).toContain('echo manifest-provisioned');
 });
 
-test('the run-level identity rides on the submit, not on the agent', () => {
-  const dto = toSubmitDTO(draft(), TENANT);
+test('the run-level identity rides on the submit, not on a ref', () => {
+  const dto = toSubmitDTO(draft(), TENANT, RESOLVED);
   expect(dto.identity_bot_id).toBe(IDENTITY);
-  // `identity_bot_id` on AgentSpecDTO would be a 422 (extra="forbid").
-  expect(dto.agents[0]).not.toHaveProperty('identity_bot_id');
+  // `identity_bot_id` on an AgentDefinitionRefDTO would be a 422 (extra="forbid").
+  expect(dto.agent_refs?.[0]).not.toHaveProperty('identity_bot_id');
 });
 
 test('the payload carries no draft-only key', () => {
-  const dto = toSubmitDTO(draft(), TENANT);
-  expect(dto.agents[0]).not.toHaveProperty('key');
+  const dto = toSubmitDTO(draft(), TENANT, RESOLVED);
+  expect(dto.agent_refs?.[0]).not.toHaveProperty('key');
   expect(Object.keys(dto).sort()).toEqual(
-    ['agents', 'goal', 'identity_bot_id', 'options', 'tenant'].sort(),
+    ['agent_refs', 'goal', 'identity_bot_id', 'options', 'tenant'].sort(),
   );
 });
 
-test('the same draft without a manifest still submits, minus that field', () => {
+test('a blank alias is omitted so the definition name applies', () => {
   const bare = draft();
-  bare.agents = bare.agents.map((agent) => ({ ...agent, config_manifest: '' }));
-  const dto = toSubmitDTO(bare, TENANT);
-  expect(dto.agents[0]).not.toHaveProperty('config_manifest');
-
-  // Everything else is unchanged, so only the manifest decides the persona source.
-  const withoutManifest = (agent: object) => {
-    const copy = { ...(agent as Record<string, unknown>) };
-    delete copy.config_manifest;
-    return copy;
-  };
-  expect({ ...dto, agents: dto.agents.map(withoutManifest) }).toMatchObject({
-    ...ACCEPTED_BODY,
-    agents: ACCEPTED_BODY.agents.map(withoutManifest),
+  bare.refs = bare.refs.map((ref) => ({ ...ref, alias: '' }));
+  expect(toSubmitDTO(bare, TENANT, RESOLVED).agent_refs?.[0]).toEqual({
+    definition_id: 'def-manifest-greeter',
   });
 });

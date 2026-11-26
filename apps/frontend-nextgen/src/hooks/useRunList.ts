@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AgentswarmRequestError } from '@/services/agentswarm/http';
 import { listRuns } from '@/services/agentswarm/service';
 import type { ListRunsQuery } from '@/services/agentswarm/types';
-import { isTerminalStatus, type RunSummaryDTO } from '@/services/agentswarm/types';
+import { isTerminalStatus, type RunStatus, type RunSummaryDTO } from '@/services/agentswarm/types';
 import { POLL_INTERVAL_MS } from './useRunPolling';
 
 export type ListPhase = 'idle' | 'polling' | 'stopped';
@@ -25,6 +25,8 @@ export interface UseRunListOptions {
   order?: ListRunsQuery['order'];
   /** Server-side keyword search over run id and goal text. */
   keyword?: string;
+  /** Server-side exact status filter; the gateway narrows before paging. */
+  status?: RunStatus;
 }
 
 export interface UseRunListResult {
@@ -46,6 +48,7 @@ export function useRunList({
   sort,
   order,
   keyword,
+  status,
 }: UseRunListOptions): UseRunListResult {
   const [runs, setRuns] = useState<RunSummaryDTO[]>([]);
   const [total, setTotal] = useState(0);
@@ -77,6 +80,7 @@ export function useRunList({
           ...(sort ? { sort } : {}),
           ...(order ? { order } : {}),
           ...(keyword ? { keyword } : {}),
+          ...(status ? { status } : {}),
         });
         if (cancelled) return;
         setRuns(result.items ?? []);
@@ -107,7 +111,7 @@ export function useRunList({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [tenant, enabled, page, pageSize, intervalMs, sort, order, keyword, nonce]);
+  }, [tenant, enabled, page, pageSize, intervalMs, sort, order, keyword, status, nonce]);
 
   return { runs, total, loaded, phase, error, degraded, refresh };
 }

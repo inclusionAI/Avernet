@@ -1,12 +1,13 @@
-import { CircleHelp, Copy, Trash2 } from 'lucide-react';
+import { CircleHelp, Copy, Plus, Trash2 } from 'lucide-react';
 import { ModelSelector } from './ModelSelector';
 import { YamlCodeEditor } from '@/pages/Workspace/components/Modals/YamlEditor';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs';
 import { Textarea } from '@/components/ui/Textarea';
-import type { AgentDraft } from '@/domain/agentswarm/draft';
-import { MANIFEST_DOCS_URL, MANIFEST_TEMPLATE } from '@/domain/agentswarm/manifest';
+import { spawnName, type AgentDraft, type AgentRefDraft } from '@/domain/agentswarm/draft';
+import { MANIFEST_DOCS_URL } from '@/domain/agentswarm/manifest';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { VerticalResizeHandle } from './VerticalResizeHandle';
 import { useState } from 'react';
@@ -17,22 +18,8 @@ const EDITOR_DEFAULT_HEIGHT = 260;
 const EDITOR_MIN_HEIGHT = 160;
 const EDITOR_MAX_HEIGHT = 640;
 
-export interface AgentFieldCardProps {
-  agent: AgentDraft;
-  index: number;
-  /** Whether validation messages should be shown yet. */
-  showErrors: boolean;
-  /** This agent's name is already used by another agent in the draft. */
-  duplicate: boolean;
-  /** The manifest error message, when this agent's manifest is the offender. */
-  manifestError?: string;
-  canRemove: boolean;
-  onChange: (patch: Partial<AgentDraft>) => void;
-  onDuplicate: () => void;
-  onRemove: () => void;
-}
-
-/** One agent's definition, collapsed to "name · role" until opened. */
+/** PRD §7: the middle column edits one agent under two tabs. */
+export type AgentTab = 'basic' | 'capabilities';
 
 /**
  * The agent's manifest.
@@ -45,11 +32,14 @@ function ManifestField({
   agent,
   synthesized,
   error,
+  readOnly = false,
   onChange,
 }: {
   agent: AgentDraft;
   synthesized: boolean;
   error?: string;
+  /** A reference shows its definition's YAML; editing happens in 我的定义库. */
+  readOnly?: boolean;
   onChange: (patch: Partial<AgentDraft>) => void;
 }) {
   const [editorHeight, setEditorHeight] = useState(EDITOR_DEFAULT_HEIGHT);
@@ -77,15 +67,22 @@ function ManifestField({
             </Tooltip>
           </TooltipProvider>
         </span>
-        {synthesized ? (
+        {readOnly ? null : synthesized ? (
           <Button
             type="button"
             size="sm"
             variant="outline"
             onClick={() =>
-              // 自写的起点是模板，不是合成的 identity-only 预览：那个形状里
-              // 没有 mcp/skills 的字段可循，用户只能对着空白猜。
-              onChange({ config_manifest: MANIFEST_TEMPLATE })
+              // 起点是该 Agent 当前的合成内容，而不是空模板：用户的「指令」已经
+              // 决定了 SOUL.md，用模板覆盖等于把他们写过的东西丢掉。模板语法放
+              // 在注释里，需要照抄时仍在眼前。
+              onChange({
+                config_manifest: [
+                  `# 自定义起始于当前生成的 SOUL.md。完整语法：${MANIFEST_DOCS_URL}`,
+                  `# 可自行补充 mcp / skills 等分类；留空则回到平台生成。`,
+                  synthesizeManifest(agent.instructions ?? ''),
+                ].join('\n'),
+              })
             }
           >
             改为自定义 YAML
@@ -97,7 +94,16 @@ function ManifestField({
         )}
       </div>
 
-      {synthesized ? (
+      {readOnly ? (
+        <>
+          <pre className="max-h-[280px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 font-mono text-xs leading-5">
+            {(agent.config_manifest ?? '').trim() || synthesizeManifest(agent.instructions ?? '')}
+          </pre>
+          <p className="text-xs leading-5 text-muted-foreground">
+            来自定义库，只读。要修改请到「我的定义库」编辑该定义，或改名为新名称另存一份。
+          </p>
+        </>
+      ) : synthesized ? (
         <>
           <pre className="max-h-[200px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 font-mono text-xs leading-5">
             {synthesizeManifest(agent.instructions ?? '')}
@@ -134,85 +140,192 @@ function ManifestField({
   );
 }
 
-export function AgentFieldCard({
-  agent,
+export interface AgentEditorProps {
+  /** The roster: library refs and not-yet-saved new entries alike. */
+  refs: AgentRefDraft[];
+  index: number;
+  tab: AgentTab;
+  onTabChange: (tab: AgentTab) => void;
+  /** Selecting an agent in the left nav. */
+  onSelect: (index: number) => void;
+  /** Whether validation messages should be shown yet. */
+  showErrors: boolean;
+  /** Names already used by another agent in the draft. */
+  duplicateNames: Set<string>;
+  /** The manifest error message, when this agent's manifest is the offender. */
+  manifestError?: string;
+  canRemove: boolean;
+  onChange: (patch: Partial<AgentDraft>) => void;
+  onDuplicate: () => void;
+  onRemove: () => void;
+  onAdd: () => void;
+}
+
+/**
+ * Agent definitions, as PRD §7 lays them out: the left nav switches agents, the
+ * middle column edits the selected one under 基本信息 and 身份与能力.
+ *
+ * The nav and the editor share one row so the list stays reachable while a long
+ * editor scrolls — on narrow screens they stack.
+ */
+export function AgentEditor({
+  refs,
   index,
+  tab,
+  onTabChange,
+  onSelect,
   showErrors,
-  duplicate,
+  duplicateNames,
   manifestError,
   canRemove,
   onChange,
   onDuplicate,
   onRemove,
-}: AgentFieldCardProps) {
+  onAdd,
+}: AgentEditorProps) {
+  const activeRef = refs[Math.min(index, refs.length - 1)];
+  // Both kinds edit the same body shape; a new entry is editable, a library one
+  // is a resolved reference so only its alias is writable here.
+  const agent = activeRef.body;
+  const readOnly = activeRef.origin === 'library';
   const nameInvalid = showErrors && !agent.name.trim();
   const roleInvalid = showErrors && !agent.role.trim();
   const synthesized = isSynthesized(agent.config_manifest);
 
   return (
-    <details className="rounded-lg border border-border bg-card p-3">
-      <summary className="cursor-pointer break-words text-sm font-medium">
-        {agent.name || `Agent ${index + 1}`} · {agent.role || '待填写角色'}
-      </summary>
-      <div className="mt-4 space-y-3">
-        <div className="space-y-1.5">
-          <Label htmlFor={`compute-name-${agent.key}`}>
-            名称 <span className="text-destructive">*</span>
-          </Label>
-          <Input
-            id={`compute-name-${agent.key}`}
-            value={agent.name}
-            placeholder="例如：greeter_bot"
-            aria-invalid={nameInvalid || duplicate || undefined}
-            onChange={(event) => onChange({ name: event.target.value })}
-          />
-          <p className="text-xs leading-5 text-muted-foreground">标识符风格，运行内唯一；不进入人设。</p>
-          {duplicate ? (
-            <p role="alert" className="text-xs text-destructive">
-              同次运行的 Agent 名称不能重复
-            </p>
-          ) : null}
-        </div>
+    <div className="grid min-w-0 gap-5 lg:grid-cols-[180px_minmax(0,1fr)]">
+      <nav
+        aria-label="执行 Agent 定义"
+        className="flex min-w-0 flex-col gap-1 border-b border-border pb-4 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-4 lg:sticky lg:top-0 lg:self-start lg:max-h-[60vh] lg:overflow-y-auto"
+      >
+        {refs.map((item, itemIndex) => {
+          const selected = itemIndex === index;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => onSelect(itemIndex)}
+              aria-current={selected ? 'true' : undefined}
+              className={[
+                'flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-2 text-left',
+                selected ? 'bg-primary/5 text-foreground' : 'hover:bg-accent',
+              ].join(' ')}
+            >
+              <span className="truncate text-sm font-medium">
+                {spawnName(item) || `Agent ${itemIndex + 1}`}
+              </span>
+              <span className="truncate text-xs text-muted-foreground">
+                {item.origin === 'new' ? '新建 · 未保存' : `第 ${itemIndex + 1} 个 · 来自定义库`}
+              </span>
+            </button>
+          );
+        })}
+        <Button type="button" size="sm" variant="ghost" onClick={onAdd}>
+          <Plus className="mr-1 h-3.5 w-3.5" />
+          空白新建
+        </Button>
+      </nav>
 
-        <div className="space-y-1.5">
-          <Label htmlFor={`compute-role-${agent.key}`}>
-            角色 <span className="text-destructive">*</span>
-          </Label>
-          <Input
-            id={`compute-role-${agent.key}`}
-            value={agent.role}
-            placeholder="例如：负责竞品动态调研"
-            aria-invalid={roleInvalid || undefined}
-            onChange={(event) => onChange({ role: event.target.value })}
-          />
-          <p className="text-xs leading-5 text-muted-foreground">一句话职能描述；不进入人设。</p>
-        </div>
+      <div className="min-w-0 space-y-4">
+        {/* Say where this entry comes from: a library ref is resolved at run
+            time, so editing its body here would silently do nothing. */}
+        <p className="m-0 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+          {readOnly
+            ? `来自定义库：本次运行引用该定义，修改定义请到下方「我的定义库」。这里只可改本次运行的名称。`
+            : `新建 Agent：提交时会先保存到「我的定义库」，再以定义引用提交。`}
+        </p>
+        <Tabs value={tab} onValueChange={(next) => onTabChange(next as AgentTab)}>
+          <TabsList aria-label="编辑 Agent 内容">
+            <TabsTrigger value="basic">基本信息</TabsTrigger>
+            <TabsTrigger value="capabilities">身份与能力</TabsTrigger>
+          </TabsList>
 
-        <div className="space-y-1.5">
-          <Label htmlFor={`compute-instructions-${agent.key}`}>指令</Label>
-          <Textarea
-            id={`compute-instructions-${agent.key}`}
-            value={agent.instructions ?? ''}
-            placeholder="例如：梳理本季度主要竞品的功能更新，只输出结构化要点。"
-            onChange={(event) => onChange({ instructions: event.target.value })}
-          />
-          <p className="text-xs leading-5 text-muted-foreground">
-            具体行为要求。未填写 YAML 时，这段文字会成为该 Agent 的 SOUL.md 内容。
-          </p>
-        </div>
+          <TabsContent value="basic" className="space-y-3 pt-4">
+            <div className="space-y-1.5">
+              <Label htmlFor={`compute-name-${agent.key}`}>
+                名称 <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id={`compute-name-${agent.key}`}
+                value={agent.name}
+                placeholder="例如：greeter_bot"
+                // Always editable: renaming a referenced entry detaches it, so
+                // the user can fork a stored definition under a new name.
 
-        <details className="text-sm">
-          <summary className="cursor-pointer text-muted-foreground">身份与能力配置</summary>
-          <div className="mt-3 space-y-3">
-            <ModelSelector
-              label="独立模型"
-              inheritLabel="跟随运行默认模型"
-              value={agent.model ?? null}
-              onChange={(model) => onChange({ model })}
+                aria-invalid={nameInvalid || duplicateNames.has(agent.name.trim()) || undefined}
+                onChange={(event) => onChange({ name: event.target.value })}
+              />
+              <p className="text-xs leading-5 text-muted-foreground">
+                {readOnly
+                  ? '改名为新名称即脱离该定义，成为可编辑的新建 Agent；原名会继续引用定义库中的定义。'
+                  : '标识符风格，运行内唯一；不进入人设。'}
+              </p>
+              {showErrors && duplicateNames.has(agent.name.trim()) ? (
+                <p role="alert" className="text-xs text-destructive">
+                  同次运行的 Agent 名称不能重复
+                </p>
+              ) : null}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor={`compute-role-${agent.key}`}>
+                角色 <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id={`compute-role-${agent.key}`}
+                value={agent.role}
+                placeholder="例如：负责竞品动态调研"
+                disabled={readOnly}
+                aria-invalid={roleInvalid || undefined}
+                onChange={(event) => onChange({ role: event.target.value })}
+              />
+              <p className="text-xs leading-5 text-muted-foreground">一句话职能描述；不进入人设。</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor={`compute-instructions-${agent.key}`}>指令</Label>
+              <Textarea
+                id={`compute-instructions-${agent.key}`}
+                disabled={readOnly}
+                value={agent.instructions ?? ''}
+                placeholder="例如：梳理本季度主要竞品的功能更新，只输出结构化要点。"
+                onChange={(event) => onChange({ instructions: event.target.value })}
+              />
+              <p className="text-xs leading-5 text-muted-foreground">
+                具体行为要求。未填写 YAML 时，这段文字会成为该 Agent 的 SOUL.md 内容。
+              </p>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="capabilities" className="space-y-4 pt-4">
+            {readOnly ? (
+              // A reference is the stored definition: its model is that
+              // definition's, so showing a picker would promise an edit that
+              // does not belong here. Rename or remove the entry to change what
+              // it points at.
+              <div className="space-y-1.5">
+                <Label>独立模型</Label>
+                <p className="m-0 rounded-md bg-muted px-3 py-2 text-xs">
+                  {agent.model || '跟随执行默认模型'}
+                </p>
+              </div>
+            ) : (
+              <ModelSelector
+                label="独立模型"
+                inheritLabel="跟随执行默认模型"
+                value={agent.model ?? null}
+                onChange={(model) => onChange({ model })}
+              />
+            )}
+            <ManifestField
+              agent={agent}
+              synthesized={synthesized}
+              error={manifestError}
+              readOnly={readOnly}
+              onChange={onChange}
             />
-            <ManifestField agent={agent} synthesized={synthesized} error={manifestError} onChange={onChange} />
-          </div>
-        </details>
+          </TabsContent>
+        </Tabs>
 
         <div className="flex gap-2">
           <Button type="button" size="sm" variant="ghost" onClick={onDuplicate}>
@@ -225,6 +338,6 @@ export function AgentFieldCard({
           </Button>
         </div>
       </div>
-    </details>
+    </div>
   );
 }

@@ -18,13 +18,13 @@ test('a gateway-flattened 422 still yields the actionable identity message', () 
 
 test('a gateway-flattened 400 still yields the choose-identity message', () => {
   const result = explainSubmitRefusal(refusal('identity_source_missing', 'Bad Request', 400));
-  expect(result.message).toContain('身份 Bot');
+  expect(result.message).toContain('执行权限 Bot');
   expect(result.message).not.toBe('Bad Request');
 });
 
 test('a missing identity source tells the user to choose one and stays retryable', () => {
   const result = explainSubmitRefusal(refusal('identity_source_missing', 'raw gateway text', 400));
-  expect(result.message).toContain('身份 Bot');
+  expect(result.message).toContain('执行权限 Bot');
   expect(result.message).not.toBe('raw gateway text');
   expect(result.retryable).toBe(true);
   expect(result.verifyBeforeRetry).toBe(false);
@@ -51,8 +51,8 @@ test('the three identity outcomes produce three distinct messages', () => {
 });
 
 test('a local validation refusal is retryable once corrected', () => {
-  const result = explainSubmitRefusal(new Error('请选择身份 Bot'));
-  expect(result).toMatchObject({ retryable: true, verifyBeforeRetry: false, message: '请选择身份 Bot' });
+  const result = explainSubmitRefusal(new Error('请选择执行权限 Bot'));
+  expect(result).toMatchObject({ retryable: true, verifyBeforeRetry: false, message: '请选择执行权限 Bot' });
 });
 
 test('an unrecognized failure stays generic and does not claim the run exists', () => {

@@ -74,5 +74,11 @@ class GuardEventRepository(GuardEventRepositoryProtocol):
             agent_id=dm.AgentId(row.agent_id) if row.agent_id else None,
             kind=_decode_guard_kind(row.kind),
             details=_loads(row.details) or {},
-            created_at=dm.EpochMillis(0),
+            # gmt_create *is* the guard event's creation time — the row is
+            # written once, when the guard fires, and nothing updates it. The
+            # field was previously hardcoded to 0, which made every guard event
+            # read as "no time" in the UI.
+            created_at=dm.EpochMillis(
+                int(row.gmt_create.timestamp() * 1000) if row.gmt_create else 0
+            ),
         )

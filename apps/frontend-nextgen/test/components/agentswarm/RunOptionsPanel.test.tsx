@@ -61,7 +61,7 @@ test('turning the switch off clears limits but keeps the chosen model', () => {
 
 test('the model selector sits outside the switch — it is not a limit', () => {
   renderPanel({ model_name: 'GLM-5' });
-  expect(screen.getByText('运行默认模型')).toBeInTheDocument();
+  expect(screen.getByText('执行默认模型')).toBeInTheDocument();
   expect(hasCustomLimits({ model_name: 'GLM-5' })).toBe(false);
 });
 

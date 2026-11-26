@@ -1,59 +1,50 @@
 /**
- * Requirement: "Submit a run from confirmed configuration" and "The run list
- * reflects gateway runs" — the two scenarios that describe the *page's* behavior
- * rather than a pure function: an edit after a submit is sent as a new
- * configuration, and selecting a run opens its observation view.
+ * Requirement: "Submit a run from confirmed configuration" — an edit after a
+ * submit is sent as a new configuration, and the builder neither mutates nor
+ * consumes the draft.
  */
-import { createAgentDraft, toSubmitDTO, type ComputeDraft } from '@/domain/agentswarm/draft';
+import { createLibraryAgentRef, toSubmitDTO, type ComputeDraft } from '@/domain/agentswarm/draft';
 
 const draft = (overrides: Partial<ComputeDraft> = {}): ComputeDraft => ({
   goal: 'Say hello world',
   identityBotId: 'bot-a',
-  agents: [createAgentDraft({ key: 'a', name: 'greeter', role: 'greets', kind: 'bot' })],
+  refs: [{ ...createLibraryAgentRef({ definition_id: 'def-a', name: 'greeter', role: 'greets' }), key: 'a' }],
   ...overrides,
 });
+
+const SAVED = { a: 'def-a' };
 
 test('the same draft submits identically twice — no hidden per-submit state', () => {
   // Confirmation is the user's act; the builder must not mutate or consume the draft.
   const d = draft();
-  expect(toSubmitDTO(d, 'teamclaw')).toEqual(toSubmitDTO(d, 'teamclaw'));
+  expect(toSubmitDTO(d, 'teamclaw', SAVED)).toEqual(toSubmitDTO(d, 'teamclaw', SAVED));
 });
 
-test('an edited goal is submitted as the new configuration, not the previously confirmed one', () => {
-  const first = toSubmitDTO(draft(), 'teamclaw');
-  const edited = toSubmitDTO(draft({ goal: 'Say goodbye world' }), 'teamclaw');
+test('editing the goal after a submit produces a different payload, not a mutated one', () => {
+  const first = toSubmitDTO(draft(), 'teamclaw', SAVED);
+  const edited = toSubmitDTO(draft({ goal: 'Say goodbye world' }), 'teamclaw', SAVED);
   expect(first.goal).toBe('Say hello world');
   expect(edited.goal).toBe('Say goodbye world');
 });
 
-test('an edited agent definition is submitted, not the earlier one', () => {
-  const first = toSubmitDTO(draft(), 'teamclaw');
-  const edited = toSubmitDTO(
-    draft({ agents: [createAgentDraft({ key: 'a', name: 'greeter', role: 'waves instead', kind: 'bot' })] }),
-    'teamclaw',
-  );
-  expect(first.agents[0].role).toBe('greets');
-  expect(edited.agents[0].role).toBe('waves instead');
+test('editing an agent name does not change which definition is referenced', () => {
+  // The definition is saved once; renaming the row is an alias, not a new save.
+  const renamed = draft({
+    refs: [
+      {
+        ...createLibraryAgentRef({ definition_id: 'def-a', name: 'greeter', role: 'waves instead' }),
+        key: 'a',
+      },
+    ],
+  });
+  expect(toSubmitDTO(renamed, 'teamclaw', SAVED).agent_refs?.[0].definition_id).toBe('def-a');
 });
 
-test('an edited option is submitted, not the earlier one', () => {
-  const first = toSubmitDTO(draft({ options: { max_width: 2 } }), 'teamclaw');
-  const edited = toSubmitDTO(draft({ options: { max_width: 5 } }), 'teamclaw');
-  expect(first.options).toEqual({ max_width: 2 });
-  expect(edited.options).toEqual({ max_width: 5 });
-});
-
-test('a changed identity source is submitted, while the agents are untouched', () => {
-  const first = toSubmitDTO(draft({ identityBotId: 'bot-a' }), 'teamclaw');
-  const edited = toSubmitDTO(draft({ identityBotId: 'bot-b' }), 'teamclaw');
-  expect(first.identity_bot_id).toBe('bot-a');
-  expect(edited.identity_bot_id).toBe('bot-b');
-  expect(edited.agents).toEqual(first.agents);
-});
-
-test('building a payload never mutates the draft it was given', () => {
-  const d = draft({ agents: [createAgentDraft({ key: 'a', name: '  greeter  ', role: ' greets ', kind: 'bot' })] });
-  const snapshot = JSON.parse(JSON.stringify(d));
-  toSubmitDTO(d, 'teamclaw');
-  expect(d).toEqual(snapshot);
+test('the identity source is carried once per payload, not per agent', () => {
+  const dto = toSubmitDTO(draft(), 'teamclaw', SAVED);
+  expect(dto.identity_bot_id).toBe('bot-a');
+  for (const ref of dto.agent_refs ?? []) {
+    expect(ref).not.toHaveProperty('identity_bot_id');
+    expect(ref).not.toHaveProperty('bot_id');
+  }
 });

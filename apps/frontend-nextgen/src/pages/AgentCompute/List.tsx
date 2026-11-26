@@ -2,11 +2,18 @@ import { PageHeader } from '@/components/Common/PageHeader';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Empty } from '@/components/ui/Empty';
+import { Badge } from '@/components/ui/Badge';
 import { Pagination } from '@/components/ui/Pagination';
-import { Segmented } from '@/components/ui/Segmented';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
+import { formatRunTimeOrDash } from '@/components/agentswarm/formatRunTime';
 import { useRunList } from '@/hooks/useRunList';
 import { resolveAgentswarmTenant } from '@/services/agentswarm/tenant';
-import { runStatusLabel } from '@/services/agentswarm/types';
+import {
+  RUN_STATUSES,
+  runStatusLabel,
+  runStatusTone,
+  type RunStatus,
+} from '@/services/agentswarm/types';
 import { history } from '@umijs/max';
 import { ArrowDown, ArrowUp, ArrowUpDown, Plus } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -16,37 +23,10 @@ const BASE = '/agent-compute';
 type SortKey = 'id' | 'run_id' | 'status' | 'started_at' | 'ended_at';
 type SortDir = 'asc' | 'desc';
 
-/**
- * The gateway reports epoch **milliseconds**, but accept seconds too so an
- * older payload cannot render as an invalid date.
- */
-// A cached formatter: `toLocaleString` rebuilds its options each call and is
-// ~60x slower than one `Intl.DateTimeFormat` reused across cells.
-/**
- * `yyyy-MM-dd HH:mm`, the Java SimpleDateFormat pattern used elsewhere in this
- * product. Built from parts on purpose: handing the locale the job lets it pick
- * its own separators (zh-CN gives `2026/11/11 10:56`), and `hourCycle: 'h23'`
- * alone does not guarantee a 24-hour clock across engines.
- */
-const TIME_FORMAT = new Intl.DateTimeFormat('en-CA', {
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-});
-
-function formatTime(value: number | null | undefined): string {
-  if (!value) return '—';
-  const millis = value > 10_000_000_000 ? value : value * 1000;
-  const date = new Date(millis);
-  if (Number.isNaN(date.getTime())) return '—';
-  const parts = TIME_FORMAT.formatToParts(date);
-  const get = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((part) => part.type === type)?.value ?? '';
-  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
-}
+// A single formatter shared with the run detail page: two copies drifted once
+// already (the list kept minute precision after the detail page gained
+// seconds), so list and detail now read from the same module.
+const formatTime = formatRunTimeOrDash;
 
 
 
@@ -63,7 +43,9 @@ export default function AgentComputeListPage() {
   const [query, setQuery] = useState('');
   // 输入框即时回显，但只在停顿 300ms 后检索：否则每敲一个字就发一次请求。
   const [keyword, setKeyword] = useState('');
-  const [status, setStatus] = useState<'all' | 'running' | 'terminal'>('all');
+  // 'all' or one of the seven gateway states. Exact match, not running/terminal
+  // buckets: the gateway reports seven states and the dropdown lists them.
+  const [status, setStatus] = useState<'all' | RunStatus>('all');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   // 默认按行 id 倒序：最新提交的排在最前，与网关的默认顺序一致。
@@ -76,7 +58,8 @@ export default function AgentComputeListPage() {
     return () => clearTimeout(timer);
   }, [query]);
 
-  // 搜索、排序、分页全部由网关承担：只有这样跨页排序才是真的，而不是只排当前页。
+  // 搜索、排序、分页、状态筛选全部由网关承担：只有这样跨页排序与筛选才是真的，
+  // 而不是只排/只筛当前页。
   const { runs, total, loaded, error } = useRunList({
     tenant,
     enabled: true,
@@ -85,16 +68,12 @@ export default function AgentComputeListPage() {
     sort: sort.key,
     order: sort.dir,
     keyword: keyword || undefined,
+    status: status === 'all' ? undefined : status,
   });
 
-  // 运行中/已结束是本地分流，因为网关的 status 是七态枚举而不是这两段；
-  // 该分流只作用于当前页，与分页语义一致（总数仍以网关为准）。
-  const visible = useMemo(() => {
-    if (status === 'all') return runs;
-    return runs.filter((run) =>
-      status === 'running' ? run.status === 'RUNNING' : run.status !== 'RUNNING',
-    );
-  }, [runs, status]);
+  // 网关已按状态筛选并给出该状态下的总数，这里不再本地二次过滤：
+  // 否则切到某个状态会在一页只含别处数据时显示空列表。
+  const visible = runs;
 
   const hasAnyRun = total > 0;
 
@@ -142,10 +121,15 @@ export default function AgentComputeListPage() {
             title="计算任务"
             description="定义一个或多个执行 Agent，协同完成批量计算。"
             actions={
-              <Button onClick={() => history.push(`${BASE}/new`)}>
-                <Plus className="mr-2 size-4" aria-hidden />
-                新建计算任务
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={() => history.push(`${BASE}/definitions`)}>
+                  我的定义库
+                </Button>
+                <Button onClick={() => history.push(`${BASE}/new`)}>
+                  <Plus className="mr-2 size-4" aria-hidden />
+                  新建计算任务
+                </Button>
+              </div>
             }
           />
 
@@ -157,19 +141,25 @@ export default function AgentComputeListPage() {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
-            <Segmented
-              aria-label="筛选任务状态"
+            <Select
               value={status}
-              onChange={(next) => {
-                setStatus(next as 'all' | 'running' | 'terminal');
+              onValueChange={(next) => {
+                setStatus(next as 'all' | RunStatus);
                 setPage(1);
               }}
-              options={[
-                { label: '全部状态', value: 'all' },
-                { label: '执行中', value: 'running' },
-                { label: '已结束', value: 'terminal' },
-              ]}
-            />
+            >
+              <SelectTrigger aria-label="筛选任务状态" className="w-[104px] shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部状态</SelectItem>
+                {RUN_STATUSES.map((state) => (
+                  <SelectItem key={state} value={state}>
+                    {runStatusLabel(state)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {error ? (
@@ -219,7 +209,9 @@ export default function AgentComputeListPage() {
                       <td className="w-44 truncate px-4 py-3 font-mono text-xs text-muted-foreground">
                         <span title={run.run_id}>{run.run_id}</span>
                       </td>
-                      <td className="w-28 min-w-28 whitespace-nowrap px-4 py-3">{runStatusLabel(run.status)}</td>
+                      <td className="w-28 min-w-28 whitespace-nowrap px-4 py-3">
+                        <Badge tone={runStatusTone(run.status)}>{runStatusLabel(run.status)}</Badge>
+                      </td>
                       {/* 目标只是一段摘要（网关把 goal 截断到 160 字），单元格单行截断。
                           悬停给出可读的多行摘要，并说明完整目标在详情页——列表接口不含全文。 */}
                       <td className="w-80 max-w-80 px-4 py-3 font-medium">

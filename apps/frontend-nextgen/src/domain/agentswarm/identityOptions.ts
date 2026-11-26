@@ -57,3 +57,19 @@ export function findIdentityOption(
   if (!botId) return undefined;
   return options.find((option) => option.botId === botId);
 }
+
+/**
+ * The Bot to preselect when the caller has no explicit preference.
+ *
+ * An existing choice always wins — a re-entered draft must not be reassigned
+ * mid-edit. Otherwise the first usable Bot is picked, ordered so an offline one
+ * never beats an online one: the gateway refuses a Bot without a passport, and
+ * while this client cannot see passports it can at least prefer a Bot that is
+ * demonstrably alive.
+ */
+export function defaultIdentityBotId(options: readonly IdentityOption[]): string | undefined {
+  // `botId` is compared trimmed: a whitespace-only id is not a Bot, and
+  // returning it verbatim would seed the draft with a value the gateway rejects.
+  const usable = options.filter((option) => option.selectable && option.botId.trim());
+  return (usable.find((option) => option.online) ?? usable[0])?.botId.trim();
+}
