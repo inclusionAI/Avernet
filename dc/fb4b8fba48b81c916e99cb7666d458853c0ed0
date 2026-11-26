@@ -1,0 +1,26 @@
+apps/frontend-nextgen/test/components/CollaborationPrivacy/BotGeneralConfigDialog.test.tsx
+  s_4b3bb5e3f4e05a::t_d1e58205caaa08 654,689-691
+apps/frontend-nextgen/src/components/CollaborationPrivacy/RelationCard/index.tsx
+  s_4b3bb5e3f4e05a::t_2822ab77257c24 95-109,118-119,125-126
+  s_4b3bb5e3f4e05a::t_d1e58205caaa08 4,28,42,49,111,113-114,116,120-124,127-133
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/useUserRiskStatus.ts
+  s_4b3bb5e3f4e05a::t_d1e58205caaa08 34-35
+apps/frontend-nextgen/src/domain/collaborationPrivacy/botPublicRisk.ts
+  s_4b3bb5e3f4e05a::t_d1e58205caaa08 70-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dcfb4b8fba48b81c916e99cb7666d458853c0ed0",
+  "prompts": {},
+  "sessions": {
+    "s_4b3bb5e3f4e05a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212ee-6dfd-7652-9c5d-c1f683ce868a",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

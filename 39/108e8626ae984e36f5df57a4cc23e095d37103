@@ -1,0 +1,19 @@
+apps/evolverun/clawweb/scripts/sql/distributed-locks-v158.mysql.sql
+  s_118944da3d52d1::t_b856dc73b7b33d 20-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "39108e8626ae984e36f5df57a4cc23e095d37103",
+  "prompts": {},
+  "sessions": {
+    "s_118944da3d52d1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212f1-f5c7-71d1-9784-e0e8a73b9f55",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
