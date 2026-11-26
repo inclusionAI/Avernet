@@ -242,7 +242,9 @@ describe('conversationService.listManagedSessions', () => {
 
     expect(mocked.listBotSessions).toHaveBeenCalledWith(
       'bot-a',
-      expect.objectContaining({ user_id: '900003', owner_id: '2088', page: 1, page_size: 20, source: 'mine' }),
+      expect.objectContaining({
+        user_id: '900003', owner_id: '2088', f_user_id: '900003', page: 2, page_size: 20,
+      }),
     );
     expect(mocked.listFavoriteSessions).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
@@ -280,18 +282,27 @@ describe('conversationService.listManagedSessions', () => {
       session_id: sessionId,
       title: `历史会话_${sessionId}`,
     });
+    const rawSessionsEnvelope = (items: unknown[], total = items.length) => ({
+      code: 20000,
+      message: 'OK',
+      data: { items, total },
+      request_id: 'sessions',
+    });
 
-    it('delegates mine filtering to backend without rescanning raw pages in the browser', async () => {
+    it('requests unfiltered raw pages and filters mine sessions in the frontend', async () => {
       const mineSession = sessionDto('user:100:session:mine:agent:bot-a');
-      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([mineSession]));
+      const otherSession = sessionDto('user:200:session:other:agent:bot-a');
+      mocked.listBotSessions.mockResolvedValue(rawSessionsEnvelope([mineSession, otherSession]));
 
       const result = await conversationService.listManagedSessions(codingBot, '100', 'all', 1, 10);
 
       expect(mocked.listBotSessions).toHaveBeenNthCalledWith(
         1,
         'bot-a',
-        expect.objectContaining({ page: 1, page_size: 10, source: 'mine', user_id: '100' }),
+        expect.objectContaining({ page: 1, page_size: 100, user_id: '100' }),
       );
+      expect(mocked.listBotSessions.mock.calls[0][1]).not.toHaveProperty('source');
+      expect(mocked.listBotSessions.mock.calls[0][1]).not.toHaveProperty('f_user_id');
       expect(mocked.listBotSessions).toHaveBeenCalledTimes(1);
       expect(result).toMatchObject({
         ok: true,
@@ -299,11 +310,14 @@ describe('conversationService.listManagedSessions', () => {
       });
     });
 
-    it('returns only sessions created by other users for origin=others', async () => {
+    it('returns only AgentCoding-defined other sessions for origin=others', async () => {
       mocked.listBotSessions.mockResolvedValue(
-        sessionsEnvelope([
+        rawSessionsEnvelope([
+          sessionDto('user:100:session:mine:agent:bot-a'),
           sessionDto('user:200:session:other:agent:bot-a'),
-        ], 1, 'others'),
+          sessionDto('bcs-cli:default:2088:abc'),
+          sessionDto('user:100:session:task:agent:member-task'),
+        ]),
       );
 
       const result = await conversationService.listManagedSessions(
@@ -317,14 +331,21 @@ describe('conversationService.listManagedSessions', () => {
         'others',
       );
 
+      expect(mocked.listBotSessions.mock.calls[0][1]).not.toHaveProperty('source');
       expect(result).toMatchObject({
         ok: true,
-        data: { items: [{ sessionId: 'user:200:session:other:agent:bot-a' }], total: 1 },
+        data: {
+          items: [
+            { sessionId: 'user:200:session:other:agent:bot-a' },
+            { sessionId: 'bcs-cli:default:2088:abc' },
+          ],
+          total: 2,
+        },
       });
     });
 
     it('treats numeric user ids with leading zeroes as the same creator', async () => {
-      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([sessionDto('user:000100:session:mine:agent:bot-a')]));
+      mocked.listBotSessions.mockResolvedValue(rawSessionsEnvelope([sessionDto('user:000100:session:mine:agent:bot-a')]));
 
       const result = await conversationService.listManagedSessions(codingBot, '100', 'all');
 
@@ -349,7 +370,7 @@ describe('conversationService.listManagedSessions', () => {
         ...sessionDto('user:100:session:hidden:agent:bot-a'),
         title: 'cron: MemoryOS任务_user:100:session:hidden:agent:bot-a',
       };
-      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([hidden, normal], 2));
+      mocked.listBotSessions.mockResolvedValue(rawSessionsEnvelope([hidden, normal]));
 
       const result = await conversationService.listManagedSessions(codingBot, '100', 'all', 1, 10);
 
@@ -369,7 +390,9 @@ describe('conversationService.listManagedSessions', () => {
           },
         }),
       });
-      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([sessionItem]));
+      mocked.listBotSessions.mockResolvedValue(
+        sessionsEnvelope([sessionItem], 1, 'mine'),
+      );
 
       const result = await conversationService.listManagedSessions(managedBot, 'human_900003', 'all');
 
@@ -379,8 +402,25 @@ describe('conversationService.listManagedSessions', () => {
       });
     });
 
+    it('addresses normal CC Bots through the current conversation subject', async () => {
+      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([sessionItem]));
+
+      const result = await conversationService.listManagedSessions(
+        { ...managedBot, engine: 'claude_code', templateType: 'normalCC', isAgentCodingBot: false },
+        '100',
+        'all',
+      );
+
+      expect(mocked.listBotSessions).toHaveBeenCalledWith(
+        'bot-a',
+        expect.objectContaining({ page: 1, page_size: 10, user_id: '100', f_user_id: '100' }),
+      );
+      expect(mocked.listBotSessions.mock.calls[0][1]).not.toHaveProperty('source');
+      expect(result).toMatchObject({ ok: true, data: { items: [{ sessionId: 'session-1' }] } });
+    });
+
     it('keeps unrecognized legacy session ids in mine for backward compatibility', async () => {
-      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([sessionDto('legacy-session-id')]));
+      mocked.listBotSessions.mockResolvedValue(rawSessionsEnvelope([sessionDto('legacy-session-id')]));
 
       const result = await conversationService.listManagedSessions(codingBot, '100', 'all');
 
@@ -438,6 +478,8 @@ it('normalizes a stale TEClaw favorite scope to ordinary sessions', async () => 
     10,
   );
   expect(result.ok).toBe(true);
-  expect(mocked.listBotSessions).toHaveBeenCalledWith('bot-a', expect.objectContaining({ page: 1, page_size: 10, source: 'mine' }));
+  expect(mocked.listBotSessions).toHaveBeenCalledWith(
+    'bot-a', expect.objectContaining({ page: 2, page_size: 10, f_user_id: 'user' }),
+  );
   expect(mocked.listFavoriteSessions).not.toHaveBeenCalled();
 });

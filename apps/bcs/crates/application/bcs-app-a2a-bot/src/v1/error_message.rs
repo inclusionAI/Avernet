@@ -12,6 +12,7 @@ pub(super) fn public_message(error: &ManagementError) -> String {
             "provider_bot_ref is already registered; find the existing Agent before updating it"
         }
         Code::BotNameConflict => "Agent name conflicts with an existing registration",
+        Code::AgentIdentityConflict => { "AgentId conflicts with the stored identity" }
         Code::SourceAgentConflict => "The source Agent is already bound to another registration",
         Code::SourceAgentChangeNotAllowed => {
             "The source Agent identity cannot be changed by updating its Card"
@@ -116,7 +117,10 @@ fn public_reason(reason: &str) -> Option<&'static str> {
             "bot_id must be non-empty and contain no control characters or surrounding whitespace"
         }
         "INVALID_REGISTRATION_TIME" => "registration time must not be negative",
-        "UPDATE_REQUIRED" => "provide a Card source, visibility or catalog_labels to update",
+        "UPDATE_REQUIRED" => "provide a Card source, visibility or AgentId to update",
+        "IDENTITY_CONFLICT" => "the stored AgentId cannot be replaced",
+        "METADATA_UPDATE_REQUIRED" => "provide status, catalog_labels, visibility or user_visibility to update",
+        "METADATA_UPDATE_UNAVAILABLE" => "AgentCard metadata update is temporarily unavailable",
         "ONE_OWNER_REQUIRED" => "exactly one valid owner is required",
         "DEFAULT_OWNER_NOT_CONFIGURED" => {
             "supply an owner or ask the administrator to configure the Provider default owner"

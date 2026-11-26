@@ -92,6 +92,7 @@ pub fn agent_card(bot: &BotControlPlaneRecord, agent_card: Option<&Value>) -> Re
     Ok(Some(CardWriteRequest {
         resource_type: CardResourceType::Agent,
         labels: [
+            ("status".into(), vec![match bot.status { bcs_service_api::ActorStatus::Online=>"online", bcs_service_api::ActorStatus::Hidden=>"hidden" }.into()]),
             ("visibility".into(), vec![bot.visibility.clone()]),
             ("user_visibility".into(), vec![match bot.user_visibility {
                 UserVisibility::Public => "public",
@@ -254,8 +255,9 @@ mod tests {
                 bot.user_visibility = user_visibility;
                 let card = serde_json::to_value(agent_card(&bot, None).unwrap().unwrap()).unwrap();
                 assert_eq!(card["labels"]["visibility"], json!([visibility]));
+                assert_eq!(card["labels"]["status"], json!(["hidden"]));
                 assert_eq!(card["labels"]["user_visibility"], json!([user_visibility]));
-                assert_eq!(card["labels"].as_object().unwrap().len(), 2);
+                assert_eq!(card["labels"].as_object().unwrap().len(), 3);
             }
         }
         bot.kind = ActorKind::Human;

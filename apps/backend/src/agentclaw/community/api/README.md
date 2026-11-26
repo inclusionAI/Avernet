@@ -103,6 +103,7 @@ untangling first: `baas_service.py`, `bot_build_service.py`,
 ```yaml
 purpose: "Service API Protocols — transport-agnostic contracts between adapters and core services."
 provides:
+  - TaskCommissionServiceProtocol  # Product use cases and binding-scoped Swarm controls
   - BotOwnershipSyncProtocol
   - CollaborationRepairServiceProtocol   # defined in its owning core module, re-exported by collaboration_repair_service.py
   - BuildIgnoreServiceProtocol
@@ -143,6 +144,7 @@ consumes:
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
   - agentclaw.community.core.task.todos.source_service_protocol  # Todo source-import Service API contract re-export
+  - agentclaw.community.core.bot_management.managed_bots_protocol
   - agentclaw.community.core.task.bot_grant_reconciliation_service_protocol  # Owned-Bot secbaas grant compensation Service API re-export
   - agentclaw.community.core.task.todos.service_protocol  # Todo workbench Service API contract re-export
   - agentclaw.community.core.task.todos.artifact_service_protocol  # Todo artifact Service API contract re-export
@@ -227,6 +229,8 @@ internal_dependencies:
   - agentclaw.community.core.task.task_runner.integration.ports  # OpenApiBotPort — typed in task_grant_service.py (stateless secbaas grant/revoke relay)
   - agentclaw.community.core.tc_file_upload_integrations.service_protocol  # READY observation Service API re-exported for HTTP adapters
   - agentclaw.community.log                          # get_logger used by task_grant_service.py grant/revoke relay logging
+  - agentclaw.community.core.task.context_collab.products.service_api  # BBS product Protocol re-export, no implementation imports
+  - agentclaw.community.core.task.context_collab.products.task_commission.service_api  # Commission product Protocol re-export
   - agentclaw.community.core.task.context_collab.service_api  # ContextCollabServiceProtocol — re-exported by api/task/context_collab_service.py
   - agentclaw.community.core.access.policy_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.agentswarm.service.protocols  # AgentSwarm Service API Protocol + SubmitRunRequest DTO + typed submit errors, re-exported here

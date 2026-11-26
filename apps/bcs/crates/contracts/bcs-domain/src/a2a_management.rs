@@ -20,6 +20,7 @@ pub enum ManagementCode {
     NotAcceptable,
     ProviderBotRefConflict,
     BotNameConflict,
+    AgentIdentityConflict,
     SourceAgentConflict,
     SourceAgentChangeNotAllowed,
     TargetChanged,

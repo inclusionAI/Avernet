@@ -33,6 +33,24 @@ jest.mock('@/services/backendApi/collaboration/collaborationBotPublicRiskControl
   getBotPublicRiskCheck: jest.fn(),
   refreshBotPublicRiskCheck: jest.fn(),
 }));
+// 好友名单(bot-friend-roster)分区已进 Owner 弹窗:本套件不断言其行为,
+// 只需把它的网络边缘封成空名单,避免真实的分页/详情请求。
+jest.mock('@/services/backendApi/collaboration/collaborationFriendConnectionController', () => ({
+  listFriendConnections: jest.fn(async () => ({
+    code: 20000,
+    message: 'OK',
+    data: { items: [], total: 0, page: 1, page_size: 100 },
+    request_id: 'relations',
+  })),
+}));
+jest.mock('@/services/backendApi/collaboration/collaborationBotController', () => ({
+  queryCollaborationBots: jest.fn(async () => ({
+    code: 20000,
+    message: 'OK',
+    data: { items: [] },
+    request_id: 'details',
+  })),
+}));
 
 const mockCapabilities = jest.fn();
 jest.mock('@/capabilities', () => ({ getCapabilities: () => mockCapabilities() }));
@@ -260,9 +278,9 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
 
     await waitFor(() => expect(screen.getByText('参与协作群聊')).toBeInTheDocument());
 
-    // 组序：发布审批为首组，其后 Bot 可见性 / Bot 好友审批 / 协作能力。
+    // 组序：发布审批为首组，其后 Bot 可见性 / Bot 好友审批 / 好友名单（bot-friend-roster，Owner 可见）/ 协作能力。
     const sectionTitles = screen.getAllByRole('heading', { level: 4 }).map((heading) => heading.textContent);
-    expect(sectionTitles).toEqual(['发布审批', 'Bot 可见性', 'Bot 好友审批', '协作能力']);
+    expect(sectionTitles).toEqual(['发布审批', 'Bot 可见性', 'Bot 好友审批', '好友名单', '协作能力']);
 
     const approvalSwitch = await screen.findByRole('switch', { name: '关闭共同编辑者发布需 Owner 审批' });
     fireEvent.click(approvalSwitch);
@@ -631,6 +649,53 @@ describe('内部 Bot 协作能力修复行（AC-23/24/27/28/34）', () => {
     fireEvent.click(refreshButton);
 
     await waitFor(() => expect(mockRiskRefresh).toHaveBeenCalledWith('bot-1:900004', '900004', 'rk-1'));
+  });
+
+  it('已拦截的风险申请覆盖旧审批投影，去处理可打开可见性编辑器', async () => {
+    mockCapabilities.mockReturnValue({
+      ...mockCapabilities(),
+      getRestrictedPublicationScopeEnabled: () => ({ value: false }),
+    });
+    const pendingBot = makeBot('bot-1:900004');
+    pendingBot.pendingPublications.user = {
+      id: 'WO-1',
+      audience: 'user',
+      target: { scope: 'all', organizationPaths: [] },
+      submittedAt: '',
+      approvalUrl: 'https://approval.example.test/ticket/WO-1',
+    };
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBot(pendingBot));
+    jest.mocked(getCurrentBotPublicRiskCheck).mockResolvedValue({
+      code: 200000,
+      message: 'OK',
+      data: {
+        risk_check_id: 'rk-blocked',
+        phase: 'NEEDS_ATTENTION',
+        security_status: 'PASS',
+        detail_url: null,
+        auto_poll_paused: false,
+        auto_poll_until: null,
+        next_action_at: null,
+        target: { public_scope: 'user', visibility: 'public', view_depts: [] },
+        error_reason: 'CONFIG_CHANGED',
+        invalidation_reason: null,
+        approval_puid: 'WO-1',
+        approval_decision: 'AGREE',
+      },
+    });
+
+    render(<BotGeneralConfigDialog bot={rowBot()} onClose={jest.fn()} />);
+
+    const action = await screen.findByRole('button', { name: '去处理' });
+    expect(screen.getByText('配置已变更')).toBeInTheDocument();
+    expect(screen.queryByText('待审批')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '查看审批进度' })).not.toBeInTheDocument();
+    fireEvent.click(action);
+
+    const editor = await screen.findByRole('dialog', { name: 'Bot 可见性：对用户' });
+    expect(within(editor).getByText('配置已变更，本次公开未生效')).toBeInTheDocument();
+    expect(within(editor).getByRole('button', { name: '重新申请' })).toBeEnabled();
+    expect(within(editor).queryByRole('button', { name: '刷新状态' })).not.toBeInTheDocument();
   });
 
   it('审批期行带 pending 投影时「刷新状态」仍可见，双刷后行回正常态（bot-public-risk-check）', async () => {

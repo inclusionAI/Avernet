@@ -296,6 +296,26 @@ class AsyncChatClientPool:
                 len(all_entries),
             )
 
+    def discard(self, client: AsyncChatClient) -> None:
+        """移出并异步关闭一条已确认失效的连接。
+
+        用于发送侧已证实请求未写出、但连接仍可能被池当作健康连接复用的
+        窗口（recv_loop 尚未置位 disconnected）。全同步移除，在事件循环内
+        原子；关闭异步 best-effort，不阻塞调用方。重复调用幂等。
+        """
+        for sandbox_id, entries in list(self._clients.items()):
+            for index, entry in enumerate(entries):
+                if entry.client is client:
+                    entries.pop(index)
+                    if not entries:
+                        del self._clients[sandbox_id]
+                    logger.info(
+                        "[ChatClientPool] Discarded dead connection: sandbox=%s",
+                        sandbox_id,
+                    )
+                    asyncio.ensure_future(self._safe_close(client))
+                    return
+
     # ── 内部实现 ──────────────────────────────────────────────────────────
 
     @staticmethod

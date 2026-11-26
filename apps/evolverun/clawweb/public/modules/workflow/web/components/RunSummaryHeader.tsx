@@ -4,9 +4,11 @@ import StatusBadge from '@avernet/workflow/web/components/StatusBadge'
 import RunMarkers from './RunMarkers'
 import { useDeleteFlowRun, useRerunFlowRun, useAbortFlowRun } from '@avernet/clawweb-shared/web/api/hooks'
 import type { RunRuntimeMetadata } from '../../shared/run-runtime-metadata'
+import type { RunLaunchMetadata } from '../../shared/run-launch-metadata'
+import RunLaunchDetails from './RunLaunchDetails'
 
 interface RunSummaryHeaderProps {
-  run: FlowRun & Partial<RunRuntimeMetadata>
+  run: FlowRun & Partial<RunRuntimeMetadata> & Partial<RunLaunchMetadata>
   nodeCount: number
   succeededCount?: number
   failedCount?: number
@@ -18,7 +20,12 @@ interface RunSummaryHeaderProps {
 
 import { formatTime, formatDuration } from '@avernet/workflow/web/utils/time'
 
-export default function RunSummaryHeader({ run, nodeCount, succeededCount, failedCount, onAutoHeal, onApproval, pendingApprovalCount = 0, readOnly = false }: RunSummaryHeaderProps) {
+export default function RunSummaryHeader(props: RunSummaryHeaderProps) {
+  // Destructive confirmations belong to one run, never a cached navigation destination.
+  return <RunScopedSummaryHeader key={props.run.flow_id} {...props} />
+}
+
+function RunScopedSummaryHeader({ run, nodeCount, succeededCount, failedCount, onAutoHeal, onApproval, pendingApprovalCount = 0, readOnly = false }: RunSummaryHeaderProps) {
   const succeeded = succeededCount ?? run.succeeded_count
   const failed = failedCount ?? run.failed_count
   const succeededPct = nodeCount > 0 ? Math.round((succeeded / nodeCount) * 100) : 0
@@ -181,6 +188,8 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
         </div>
       </div>
 
+      <RunLaunchDetails run={run} />
+
       <dl className="mt-4 grid grid-cols-2 gap-x-5 gap-y-3 border-t border-slate-100 pt-3 sm:grid-cols-3 lg:grid-cols-7">
         <Stat label="工作流" value={run.workflow_id} mono />
         <Stat label="版本" value={run.workflow_version != null ? (run.workflow_version === -1 ? '未绑定发布版本' : String(run.workflow_version)) : '—'} mono={run.workflow_version != null && run.workflow_version !== -1} />
@@ -230,9 +239,9 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
 
 function Stat({ label, value, mono, className }: { label: string; value: string; mono?: boolean; className?: string }) {
   return (
-    <div className={className}>
+    <div className={`min-w-0 ${className ?? ''}`}>
       <dt className="text-gray-400 text-xs">{label}</dt>
-      <dd className={`mt-0.5 text-sm font-medium text-gray-900 ${mono ? 'font-mono' : ''}`}>
+      <dd className={`mt-0.5 min-w-0 break-words text-sm font-medium text-gray-900 [overflow-wrap:anywhere] ${mono ? 'font-mono' : ''}`}>
         {value}
       </dd>
     </div>

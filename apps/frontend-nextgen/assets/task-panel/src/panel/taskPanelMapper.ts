@@ -605,16 +605,16 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
         present: presentation.present,
         attemptCount: presentation.attemptCount,
         needsHitl: presentation.needsHitl,
-        drillable: isGroupNode,
+        drillable: isGroupNode || nodeSessionId !== null,
         execDag: deriveNodeExecDag(effectiveRunInfo.action_log),
         startedAtMs: effectiveRunInfo.start_time ?? null,
         endAtMs: effectiveRunInfo.end_time ?? null,
         executor: resolveNodeExecutor(effectiveRunInfo),
         executorColor: executorColor(effectiveRunMode),
         runMode: effectiveRunMode ?? null,
-        // 下钻触发条件 = session_id 存在(与单/群判别无关):
-        // - 协作群(isGroupNode) → 按 group_id 查群成员 + 协作群消息端点
-        // - 单 bot → 按 assignee 内部 id(去 :user_id 后缀)走 bots sessions 消息端点
+        // 下钻触发条件 = 有可解析会话(与单/群判别无关):
+        // - 协作群(isGroupNode) → 按 group_id/派生会话查群成员与协作群消息端点
+        // - 单 bot → 节点自带 session_id,按 assignee 内部 id(去 :user_id 后缀)走 bots sessions 消息端点
         groupId,
         groupName,
         sessionId: nodeSessionId,

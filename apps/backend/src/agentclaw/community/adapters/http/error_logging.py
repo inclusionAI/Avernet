@@ -126,7 +126,7 @@ class _Opaque:
 
 def _is_sensitive(name: str) -> bool:
     lowered = name.lower()
-    return any(part in lowered for part in _SENSITIVE_NAME_PARTS)
+    return lowered in {'template_config', 'templateconfig'} or any(part in lowered for part in _SENSITIVE_NAME_PARTS)
 
 
 def _truncate(text: str) -> str:

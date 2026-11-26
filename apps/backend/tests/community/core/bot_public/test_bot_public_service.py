@@ -3374,3 +3374,24 @@ def test_completed_risk_approval_is_staged_before_target_and_replay_failure_prop
     guard.check.assert_called_once()
     guard.mark_target_ready.assert_called_once()
     guard.replay.assert_called_once()
+
+
+@pytest.mark.parametrize("decision", ["DISAGREE", "CANCEL"])
+def test_risk_legacy_negative_callback_reports_failed_persistence(decision):
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _make_bot("b1", "u1", ext={
+        "public_approval": {
+            "puid": "p1", "status": "PROCESSING", "public": "1",
+            "permission_owner": "owner", "friend_approval": "0",
+        },
+    })
+    service = _make_service(bot_repository=bots)
+    guard = MagicMock()
+    guard.check.return_value = "ALLOW"
+    guard.revalidate_claim.return_value = True
+    guard.repo.get.return_value.target_json = '{"permission_owner":"owner","friend_approval":"0"}'
+    service._risk_approval_guard = guard
+    with patch.object(service, "_update_bot_with_notification", return_value=None):
+        result = service.handle_public_approval_callback("b1", "u1", "p1", decision, risk_check_id="risk-a")
+    assert result["success"] is False
+    assert guard.finish.call_args.args[1:] == ("risk-a", "p1", decision, False)

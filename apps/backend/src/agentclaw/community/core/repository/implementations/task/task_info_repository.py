@@ -6,7 +6,9 @@ from datetime import datetime
 from typing import Optional, Sequence
 
 from injector import inject
+from sqlalchemy import func, or_
 
+from agentclaw.community.core.repository.json_expression import JsonText, SafeJsonDocument
 from agentclaw.community.core.repository.protocols.task import TaskInfoRepositoryProtocol
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import Status
@@ -123,13 +125,39 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
             db.flush()
             return True
 
+    @staticmethod
+    def _keyword_filter(keyword: Optional[str]):
+        """Build one case-insensitive substring filter over list-search fields.
+
+        A blank keyword disables the filter. The searchable fields are task_id,
+        owner_bot_id, and the user-facing task summary text in TaskSpec.
+        """
+        normalized = str(keyword or "").strip()
+        if not normalized:
+            return None
+        safe_task_spec = SafeJsonDocument(TaskInfoModel.task_spec)
+        field_values = (
+            TaskInfoModel.task_id,
+            TaskInfoModel.owner_bot_id,
+            JsonText(safe_task_spec, "$.context.title"),
+            JsonText(safe_task_spec, "$.goal.objective"),
+        )
+        return or_(
+            *(
+                func.lower(value).contains(normalized, autoescape=True)
+                for value in field_values
+            )
+        )
+
     def list_records(
         self,
         status: Optional[Sequence[Status]] = None,
         *,
         owner_user_id: Optional[str] = None,
+        keyword: Optional[str] = None,
     ) -> list[TaskInfoRecord]:
         with self._db.orm_session() as db:
+            keyword_filter = self._keyword_filter(keyword)
             q = db.query(self._model).filter(
                 self._model.env == get_current_env(),
             )
@@ -138,6 +166,8 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
                 q = q.filter(self._model.status.in_([s.value for s in status]))
             if owner_user_id is not None:
                 q = q.filter(self._model.owner_user_id == owner_user_id)
+            if keyword_filter is not None:
+                q = q.filter(keyword_filter)
             rows = q.order_by(
                 self._model.gmt_modified.desc(),
                 self._model.id.desc(),
@@ -149,10 +179,12 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
         status: Optional[Sequence[Status]] = None,
         *,
         owner_user_id: Optional[str] = None,
+        keyword: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[TaskInfoRecord], int]:
         with self._db.orm_session() as db:
+            keyword_filter = self._keyword_filter(keyword)
             q = db.query(self._model).filter(
                 self._model.env == get_current_env(),
             )
@@ -161,6 +193,8 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
                 q = q.filter(self._model.status.in_([s.value for s in status]))
             if owner_user_id is not None:
                 q = q.filter(self._model.owner_user_id == owner_user_id)
+            if keyword_filter is not None:
+                q = q.filter(keyword_filter)
             total = q.count()
             rows = (
                 q.order_by(

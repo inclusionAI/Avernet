@@ -91,6 +91,7 @@ def _view(record):
             "error_reason": workflow.get("error"),
             "invalidation_reason": workflow.get("invalidation_reason"),
             "approval_puid": record.approval_puid,
+            "approval_decision": workflow.get("approval_decision"),
         }
     )
 

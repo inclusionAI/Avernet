@@ -129,7 +129,7 @@ fn operational_failures_offer_recovery_without_exposing_raw_details() {
         (
             Code::InvalidRequest,
             "UPDATE_REQUIRED",
-            "provide a Card source, visibility or catalog_labels",
+            "provide a Card source, visibility or AgentId",
         ),
         (
             Code::CardUrlRequired,

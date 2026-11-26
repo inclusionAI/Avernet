@@ -98,6 +98,6 @@ describe('serviceBotPublishResolver', () => {
         ownerId: 'owner-1',
         stage: 'online',
       }),
-    ).rejects.toThrow('未找到可用的线上服务发布单');
+    ).rejects.toThrow('未找到可用的正式运行服务发布单');
   });
 });

@@ -15,6 +15,7 @@ import { PublicationEditor } from '@/components/CollaborationPrivacy/Publication
 import { ScopeViewer } from '@/components/CollaborationPrivacy/ScopeViewer';
 import {
   BotAbilitySettings,
+  BotFriendListSettings,
   BotVisibilitySettings,
   FriendApprovalSettings,
   PublishApprovalSettings,
@@ -102,7 +103,7 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
   // 禁用置关并提示原因，且不发审批配置请求（后端对非服务 Bot 拒绝）。
   const publishApprovalEnabled = showPublishApproval && bot.serviceMode === 'service';
   const publishApproval = useBotPublishApproval(bot.id, bot.ownerId, publishApprovalEnabled);
-  // 公开风险前置检测在途态（bot-public-risk-check）：仅「对用户」行消费；
+  // 公开风险检测进度与失败恢复入口仅在「对用户」行展示。
   // 行级「刷新状态」双刷（重读风险记录 + 静默重载总览）等派生逻辑见 useUserRiskStatus。
   const userRiskStatus = useUserRiskStatus(privacy);
   const publishApprovalSection = showPublishApproval ? (
@@ -203,6 +204,14 @@ export function BotGeneralConfigDialogBody({ bot, isExternalBot = false, onClose
                 onViewFriendApprovalScope={privacy.openFriendScopeViewer}
               />
             </div>
+            {/* 好友名单(bot-friend-roster):严格 Owner 判定(userId 非空且等于
+                行数据 ownerId);只在已解析出协作 Bot UUID(targetBot.id)时挂载——
+                绝不传后端行 bot.id。外部 Bot 变体同样渲染(CF-1 已确认同权)。 */}
+            {Boolean(userId && bot.ownerId === userId) ? (
+              <div className={sectionCardClass}>
+                <BotFriendListSettings botUuid={targetBot.id} />
+              </div>
+            ) : null}
             {showCollaborationAbilitySettings ? (
               <div className={sectionCardClass}>
                 <BotAbilitySettings

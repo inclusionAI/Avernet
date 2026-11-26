@@ -179,6 +179,10 @@ describe('AutoHeal/BaaS draft lifecycle safety', () => {
     ['BAAS_AUTH_FAILED', '认证失败不能证明任务未被派发'],
     ['BAAS_REQUEST_REJECTED', 'BaaS 明确拒绝本次请求'],
     ['BAAS_GENERATION_FAILED', '检查上游任务状态或日志'],
+    ['BAAS_GENERATION_TIMEOUT', '原消息执行超时'],
+    ['BAAS_GENERATION_CANCELLED', '原消息被取消或中止'],
+    ['BAAS_SESSION_UNAVAILABLE', '会话创建或会话上下文失败'],
+    ['BAAS_RESULT_PERSISTENCE_FAILED', '结果持久化失败'],
     ['BAAS_PROVIDER_REJECTED', '检查提供方错误信息、配额、访问策略和 Bot 配置'],
     ['INVALID_GENERATION_RESULT', '无法解析或未通过工作流结构校验'],
     ['EXECUTION_TIMEOUT', '请先核对原消息状态，不要盲目重新派发'],
@@ -189,6 +193,9 @@ describe('AutoHeal/BaaS draft lifecycle safety', () => {
     const failure = (await generateWorkflowAiDraft('modify', '需求', source).catch(cause => cause as Error)) as Error
     expect(failure.message).toContain(code)
     expect(failure.message).toContain(guidance)
+    expect(failure.message).toContain('草稿任务 ID：draft')
+    expect(api.generate).toHaveBeenCalledOnce()
+    expect(api.poll).toHaveBeenCalledOnce()
     expect(api.validate).not.toHaveBeenCalled()
   })
 
@@ -554,6 +561,7 @@ it.each(['BAAS_AUTH_FAILED', 'BAAS_POLL_UNAVAILABLE'])('recovers an operational 
   expect(failure).toBeInstanceOf(WorkflowAiRecoveryError);
   expect(failure.attempt).toBe(attempt);
   expect(failure.message).toContain(code);
+  expect(failure.message).toContain('草稿任务 ID：draft');
   expect(attempt).toMatchObject({ draftId: 'draft', receipt: 'signed-receipt', submitted: true });
   expect(api.prepare).toHaveBeenCalledOnce(); expect(api.generate).toHaveBeenCalledOnce();
   await expect(generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)).resolves.toHaveProperty('workflowId', source.id);

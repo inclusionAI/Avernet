@@ -19,8 +19,6 @@ from __future__ import annotations
 
 from agentclaw.community.core.caller_identity.scheduled_refresh import ScheduledCallerRefreshProtocol
 
-from agentclaw.community.core.apply_engine.compiler import StateCompilers
-from agentclaw.community.core.apply_engine.completion import StateCompletionHandlers
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.core.bot_management.creation_source import validate_creation_source
@@ -89,9 +87,6 @@ from agentclaw.community.api.bot_config_manifest_service import (
 )
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_service import (
     BotConfigManifestService,
-)
-from agentclaw.community.api.apply_run_service import (
-    ApplyRunServiceProtocol,
 )
 from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.core.mcp.mcp_config_service_protocol import (
@@ -219,9 +214,6 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
 )
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
-from agentclaw.community.core.apply_engine.delivery import (
-    DeliveryStrategyFactory,
-)
 from agentclaw.community.core.apply_engine.managed_files import ManagedFilesStore
 from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
@@ -248,9 +240,6 @@ from agentclaw.community.core.repository.implementations.bot.source_credential i
     SourceCredentialRepository,
 )
 
-from agentclaw.community.core.skill_center.capability_projection_reconcile import (
-    CapabilityProjectionReconcileProtocol,
-)
 from agentclaw.community.core.repository.implementations.bot.config_manifest_apply import (
     BotConfigManifestApplyLockRepository,
     BotConfigManifestApplyRepository,
@@ -395,14 +384,6 @@ class BotManagementModule(Module):
             to=BotConfigManifestApplyLockRepository,
             scope=singleton,
         )
-        # ``ApplyRunService`` is built by the provider below rather
-        # than auto-constructed: its task-queue dependency is a lazy callable, and
-        # the queue module imports the DI container at module scope, so the
-        # annotation the injector would have to resolve cannot be imported here.
-        # The Protocol is bound through a provider too: ``bind(Protocol,
-        # to=ConcreteClass)`` builds a ClassProvider that instantiates the class
-        # *directly*, bypassing the provider below and failing on the same
-        # annotation.
         # TemplateService: constructed with injected TemplateRepository.
         binder.bind(TemplateService, to=TemplateService, scope=singleton)
         # CronAutoSetupService: constructed with injected dependencies.
@@ -751,43 +732,6 @@ class BotManagementModule(Module):
     @singleton
     @provider
     @inject
-    def bot_config_manifest_apply_service(
-        self,
-        manifest_service: BotConfigManifestServiceProtocol,
-        apply_repository: BotConfigManifestApplyRepositoryProtocol,
-        lock_repository: BotConfigManifestApplyLockRepositoryProtocol,
-        task_queue_provider: Callable[[], TaskQueueService],
-        bot_repository: BotRepository,
-        delivery_strategies: DeliveryStrategyFactory,
-        compilers: StateCompilers,
-        completion_handlers: StateCompletionHandlers,
-        capability_projection: CapabilityProjectionReconcileProtocol,
-    ) -> ApplyRunService:
-        """Assemble Apply from its delivery, compiler, and completion bindings."""
-        return ApplyRunService(
-            manifest_service,
-            apply_repository,
-            lock_repository,
-            task_queue_provider,
-            bot_repository,
-            delivery_strategies=delivery_strategies,
-            compilers=compilers,
-            completion_handlers=completion_handlers,
-            capability_projection=capability_projection,
-        )
-
-    @singleton
-    @provider
-    @inject
-    def bot_config_manifest_apply_service_protocol(
-        self, service: ApplyRunService
-    ) -> ApplyRunServiceProtocol:
-        """The Protocol every adapter injects, delegated to the one instance."""
-        return service
-
-    @singleton
-    @provider
-    @inject
     def bot_creation_manifest_seam(
         self,
         injector: Injector,
@@ -868,6 +812,7 @@ class BotManagementModule(Module):
             # A creation that gives up before a bot exists withdraws the grant
             # the submitting application was given at submission.
             grant_sweep_provider=lambda: injector.get(BotAppGrantService),
+
         )
 
     @singleton

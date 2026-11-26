@@ -53,6 +53,7 @@ describe('botWorkshopService.copyBot — 请求体契约', () => {
     const body = copyBotApiMock.mock.calls[0][0];
     expect(body).toEqual({
       source_bot_id: 'src_1',
+      source_owner_id: 'u1',
       bot_name: '副本',
       bot_desc: 'desc',
       request_detail: { excludes: ['/x', '/y'] },
@@ -68,6 +69,8 @@ describe('botWorkshopService.copyBot — 请求体契约', () => {
     await botWorkshopService.copyBot(baseInput({ excludes: [] }));
     const body = copyBotApiMock.mock.calls[0][0];
     expect(body).not.toHaveProperty('request_detail');
+    // source_owner_id 恒传(bot_id 非全局唯一,后端按 owner 定位源行)。
+    expect(body.source_owner_id).toBe('u1');
   });
 });
 

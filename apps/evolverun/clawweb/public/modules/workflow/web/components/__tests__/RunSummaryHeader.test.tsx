@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, within } from '@testing-library/react'
 import type { FlowRun } from '@avernet/clawweb-shared/web/types'
 import { describe, expect, it } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 import RunSummaryHeader from '../RunSummaryHeader'
 
 const legacyRun: FlowRun = {
@@ -30,7 +31,9 @@ const metadataLabels = ['device_id', 'BOT_TYPE', 'STAGE']
 function renderSummary(run: Parameters<typeof RunSummaryHeader>[0]['run']) {
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <RunSummaryHeader run={run} nodeCount={run.node_count} />
+      <MemoryRouter>
+        <RunSummaryHeader run={run} nodeCount={run.node_count} />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 

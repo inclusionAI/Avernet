@@ -107,7 +107,9 @@ struct FriendWorkOrderEventRequest {
     event_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     applicant_user_id: Option<String>,
-    #[serde(default)]
+    /// Empty (all NOTICE kinds) serializes to an ABSENT field: the
+    /// work-order intake forbids approver fields on NOTICE events.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     approver_user_ids: Vec<String>,
     #[serde(default)]
     recipient_user_ids: Vec<String>,
@@ -153,6 +155,8 @@ fn event_type_for(kind: FriendConnectNotificationKind, applicant_actor_id: &str)
         | (FriendConnectNotificationKind::Reviewed, true) => "HUMAN2BOT_FRIEND_REVIEWED",
         (FriendConnectNotificationKind::AutoApproved, false)
         | (FriendConnectNotificationKind::Reviewed, false) => "BOT2BOT_FRIEND_REVIEWED",
+        (FriendConnectNotificationKind::RemovedByOwner, true) => "HUMAN2BOT_FRIEND_REMOVED",
+        (FriendConnectNotificationKind::RemovedByOwner, false) => "BOT2BOT_FRIEND_REMOVED",
     }
 }
 
@@ -160,7 +164,8 @@ fn event_category_for(kind: FriendConnectNotificationKind) -> &'static str {
     match kind {
         FriendConnectNotificationKind::ApprovalRequested => "APPROVAL",
         FriendConnectNotificationKind::AutoApproved
-        | FriendConnectNotificationKind::Reviewed => "NOTICE",
+        | FriendConnectNotificationKind::Reviewed
+        | FriendConnectNotificationKind::RemovedByOwner => "NOTICE",
     }
 }
 
@@ -169,14 +174,25 @@ fn notification_kind_label(kind: FriendConnectNotificationKind) -> &'static str 
         FriendConnectNotificationKind::ApprovalRequested => "approval_requested",
         FriendConnectNotificationKind::AutoApproved => "auto_approved",
         FriendConnectNotificationKind::Reviewed => "reviewed",
+        FriendConnectNotificationKind::RemovedByOwner => "removed_by_owner",
     }
 }
 
-fn title_for(kind: FriendConnectNotificationKind) -> &'static str {
+fn title_for(kind: FriendConnectNotificationKind, applicant_actor_id: &str) -> &'static str {
     match kind {
         FriendConnectNotificationKind::ApprovalRequested => "好友申请待审批",
         FriendConnectNotificationKind::AutoApproved => "好友申请已自动通过",
         FriendConnectNotificationKind::Reviewed => "好友申请已处理",
+        // These strings equal the Backend work-order event catalog titles
+        // exactly; the catalog is authoritative for registered event types
+        // and this payload title is only a fallback.
+        FriendConnectNotificationKind::RemovedByOwner => {
+            if is_human_actor(applicant_actor_id) {
+                "你已被移出 Bot 好友名单"
+            } else {
+                "你的 Bot 已被移出好友名单"
+            }
+        }
     }
 }
 
@@ -204,6 +220,21 @@ fn content_for(command: &FriendConnectNotificationCommand) -> String {
             "{}与 Bot「{}」的好友申请已处理。",
             applicant, target
         ),
+        // `target` is the managed Bot whose Owner performed the removal;
+        // `applicant` is the removed friend (human or friend Bot).
+        FriendConnectNotificationKind::RemovedByOwner => {
+            if is_human_actor(&command.applicant_actor_id) {
+                format!(
+                    "Bot「{}」的管理者已将你移出其好友名单，好友关系已解除。",
+                    target
+                )
+            } else {
+                format!(
+                    "Bot「{}」的管理者已将你的 Bot「{}」移出其好友名单，好友关系已解除。",
+                    target, applicant
+                )
+            }
+        }
     }
 }
 
@@ -273,7 +304,8 @@ impl FriendWorkOrderEventRequest {
                 Vec::new(),
             ),
             FriendConnectNotificationKind::AutoApproved
-            | FriendConnectNotificationKind::Reviewed => (
+            | FriendConnectNotificationKind::Reviewed
+            | FriendConnectNotificationKind::RemovedByOwner => (
                 None,
                 Vec::new(),
                 command.recipient_user_ids.clone(),
@@ -291,7 +323,7 @@ impl FriendWorkOrderEventRequest {
             applicant_user_id,
             approver_user_ids,
             recipient_user_ids,
-            title: title_for(command.kind).to_string(),
+            title: title_for(command.kind, &command.applicant_actor_id).to_string(),
             content: Some(serde_json::json!({ "text": content_for(command) })),
             apply_reason: command.message.clone(),
             biz_data: Some(biz_data),
@@ -742,6 +774,130 @@ mod tests {
                 "text": "human_1001与 Bot「bot_2001」的好友申请已处理。"
             }))
         );
+    }
+
+    #[test]
+    fn builds_removed_by_owner_payload_for_human_friend() {
+        // Owner removed a human friend: the removed human is the
+        // applicant actor, the managed Bot is the target.
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::RemovedByOwner,
+            env: "dev".to_string(),
+            request_ids: vec!["17".to_string(), "18".to_string()],
+            applicant_actor_id: "human_447147".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["447147".to_string()],
+            message: None,
+            request_auth: None,
+            applicant_name: Some("李四".to_string()),
+            target_bot_name: Some("本地代码专家".to_string()),
+            applicant_user_id: None,
+        });
+
+        assert_eq!(payload.event_category, "NOTICE");
+        assert_eq!(payload.event_type, "HUMAN2BOT_FRIEND_REMOVED");
+        assert_eq!(payload.title, "你已被移出 Bot 好友名单");
+        assert_eq!(
+            payload.content,
+            Some(serde_json::json!({
+                "text": "Bot「本地代码专家」的管理者已将你移出其好友名单，好友关系已解除。"
+            }))
+        );
+        assert_eq!(payload.recipient_user_ids, vec!["447147".to_string()]);
+        assert!(payload.approver_user_ids.is_empty());
+        assert_eq!(payload.biz_id, "17");
+        assert_eq!(
+            payload.biz_data,
+            Some(serde_json::json!({
+                "request_ids": ["17", "18"],
+                "applicant_actor_id": "human_447147",
+                "target_bot_id": "bot_2001",
+                "notification_kind": "removed_by_owner"
+            }))
+        );
+    }
+
+    #[test]
+    fn builds_removed_by_owner_payload_for_bot_friend() {
+        // Owner removed a Bot friend: the removed friend Bot is the
+        // applicant actor, the managed Bot is the target; recipients are
+        // the friend Bot's Owner.
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::RemovedByOwner,
+            env: "dev".to_string(),
+            request_ids: vec!["21".to_string()],
+            applicant_actor_id: "bot_1001".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["327325".to_string()],
+            message: None,
+            request_auth: None,
+            applicant_name: Some("好友助手".to_string()),
+            target_bot_name: Some("本地代码专家".to_string()),
+            applicant_user_id: None,
+        });
+
+        assert_eq!(payload.event_category, "NOTICE");
+        assert_eq!(payload.event_type, "BOT2BOT_FRIEND_REMOVED");
+        assert_eq!(payload.title, "你的 Bot 已被移出好友名单");
+        assert_eq!(
+            payload.content,
+            Some(serde_json::json!({
+                "text": "Bot「本地代码专家」的管理者已将你的 Bot「好友助手」移出其好友名单，好友关系已解除。"
+            }))
+        );
+        assert_eq!(payload.recipient_user_ids, vec!["327325".to_string()]);
+    }
+
+    #[test]
+    fn removed_by_owner_bot_content_falls_back_per_field() {
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::RemovedByOwner,
+            env: "dev".to_string(),
+            request_ids: vec!["21".to_string()],
+            applicant_actor_id: "bot_1001".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["327325".to_string()],
+            message: None,
+            request_auth: None,
+            applicant_name: None,
+            target_bot_name: Some("本地代码专家".to_string()),
+            applicant_user_id: None,
+        });
+        assert_eq!(
+            payload.content,
+            Some(serde_json::json!({
+                "text": "Bot「本地代码专家」的管理者已将你的 Bot「bot_1001」移出其好友名单，好友关系已解除。"
+            }))
+        );
+    }
+
+    #[test]
+    fn removed_by_owner_serialized_payload_omits_applicant_and_approvers() {
+        // NOTICE intake forbids applicant/approver fields.
+        let payload = FriendWorkOrderEventRequest::from_command(&FriendConnectNotificationCommand {
+            kind: FriendConnectNotificationKind::RemovedByOwner,
+            env: "dev".to_string(),
+            request_ids: vec!["17".to_string()],
+            applicant_actor_id: "human_447147".to_string(),
+            target_bot_id: "bot_2001".to_string(),
+            recipient_user_ids: vec!["447147".to_string()],
+            message: None,
+            request_auth: None,
+            applicant_name: None,
+            target_bot_name: None,
+            applicant_user_id: Some("447147".to_string()),
+        });
+        let serialized = serde_json::to_value(&payload).expect("serialize payload");
+        assert!(
+            serialized.get("applicant_user_id").is_none(),
+            "NOTICE removal must omit applicant_user_id from the JSON"
+        );
+        assert!(
+            serialized.get("approver_user_ids").is_none(),
+            "NOTICE removal must omit approver_user_ids from the JSON"
+        );
+        assert_eq!(serialized["event_type"], "HUMAN2BOT_FRIEND_REMOVED");
+        assert_eq!(serialized["biz_data"]["request_ids"], serde_json::json!(["17"]));
     }
 
     #[test]

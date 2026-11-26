@@ -59,6 +59,7 @@ export async function dashboardTask(
 export interface ListTasksParams {
   user_id: string;
   status?: string;
+  keyword?: string;
   page?: number;
   page_size?: number;
 }

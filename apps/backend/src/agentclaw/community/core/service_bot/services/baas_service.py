@@ -34,6 +34,7 @@ from agentclaw.community.core.service_bot.services.baas_api_response import (
 from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasBotNotFoundError,
     BaasNoActiveDevicesError,
+    BaasNoDevicesFoundError,
     BaasServiceError,
     BaasTransientServiceError,
 )
@@ -247,6 +248,17 @@ def _is_bot_not_found_response(response: httpx.Response) -> bool:
         return False
     detail = payload.get("detail")
     return isinstance(detail, dict) and detail.get("error") == "BOT_NOT_FOUND"
+
+
+def _is_no_devices_response(response: httpx.Response) -> bool:
+    if response.status_code not in {404, 503}:
+        return False
+    try:
+        payload = response.json()
+    except (ValueError, TypeError):
+        return False
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    return isinstance(detail, dict) and detail.get("error") == "NO_DEVICES_FOUND"
 
 
 @dataclass
@@ -2185,6 +2197,9 @@ class BaasService:  # pragma: no cover
                     f"BaaS API error: 404 - BOT_NOT_FOUND: bot_uuid={bot_uuid}"
                 ) from e
 
+            if _is_no_devices_response(e.response):
+                raise BaasNoDevicesFoundError("BaaS API error: no devices found") from e
+
             location = e.response.headers.get("location")
             logger.warning(
                 f"[BaasService.get_ws_info_by_bot_uuid] "
@@ -3954,6 +3969,12 @@ class BaasService:  # pragma: no cover
             return result
 
         except httpx.HTTPStatusError as e:
+            if _is_no_active_devices_response(e.response) or _is_no_devices_response(e.response):
+                raise BaasNoActiveDevicesError(status_code=e.response.status_code) from e
+            if e.response.status_code >= 500:
+                raise BaasTransientServiceError(
+                    f"BaaS HTTP connection resolution unavailable: {e.response.status_code}"
+                ) from e
             logger.error(
                 f"[BaasService.get_http_info] "
                 f"HTTP error: {e.response.status_code} - {e.response.text}"
@@ -3961,6 +3982,10 @@ class BaasService:  # pragma: no cover
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+        except httpx.RequestError as e:
+            raise BaasTransientServiceError(
+                f"Failed to get http info: {type(e).__name__}"
+            ) from e
         except BaasServiceError:
             raise
         except Exception as e:

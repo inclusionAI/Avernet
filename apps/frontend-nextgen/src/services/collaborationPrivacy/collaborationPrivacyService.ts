@@ -111,13 +111,19 @@ export class CollaborationPrivacyService {
     }
   }
 
-  async submitPublication(command: PublicationCommand, signal?: AbortSignal) {
+  async submitPublication(
+    { blockedRiskApprovalPuid, ...command }: PublicationCommand & { blockedRiskApprovalPuid?: string },
+    signal?: AbortSignal,
+  ) {
     const bot = this.requireWritableBot(command.botId);
-    // 外部 Bot 无审批链路：不能被遗留的 pending 拦截（否则旧审批字段会永远卡住保存）。
-    if (!command.isExternalBot && bot.pendingPublications[command.audience]) {
+    const config = validatePublicConfig(normalizePublicConfig(command.config));
+    const pending = bot.pendingPublications[command.audience];
+    // 仅撤回对用户公开时，相同 PUID 的拦截记录可以覆盖 BCS 的旧审批投影。
+    const canWithdrawBlockedApproval =
+      command.audience === 'user' && config.scope === 'none' && pending?.id === blockedRiskApprovalPuid;
+    if (!command.isExternalBot && pending && !canWithdrawBlockedApproval) {
       throw new Error('该可见性已有待审批变更');
     }
-    const config = validatePublicConfig(normalizePublicConfig(command.config));
     if (publicConfigsEqual(bot.publication[command.audience], config)) {
       throw new Error(command.isExternalBot ? '可见性未发生变化，无需保存' : '可见性未发生变化，无需提交审批');
     }

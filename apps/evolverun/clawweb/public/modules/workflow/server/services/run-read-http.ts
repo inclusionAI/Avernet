@@ -9,6 +9,7 @@ import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/se
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import { resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access";
 import { fixDurationMs, computeAvailableInterventions, allowsRuntimeMetadataFromStoredState, readRunRuntimeMetadata, toSafeRunFields, withoutRunLineage } from "./run-read-fields.js";
+import { readVisibleRunLineage } from "./run-launch-lineage.js";
 import type { RunSubworkflowsReader, RunReadInspection } from "../contracts/run-subworkflows.js";
 import { installFanoutReadHandlers, projectRun, projectNodes, sendRunReadError } from "./run-subworkflows-http.js";
 
@@ -284,11 +285,13 @@ export function createRunReadRouter(
       const availableInterventions = res.locals.runRead?.managed || res.locals.runRead?.sensitiveChild ? [] : computeAvailableInterventions(run);
       // Never expose credentials_json; add safe derived fields
       const safeRun = projectRun(toSafeRunFields(fixDurationMs(run) as Record<string, unknown>), inspection);
+      const lineage = runSubviews && inspection ? await readVisibleRunLineage(runSubviews,
+        { actorId: resolveWorkflowActorId(req), isAdmin: req.isAdmin === true }, inspection) : {};
       const includeMetadata = exposeRuntimeMetadata && (inspection
         ? !inspection.managed && !inspection.restricted && !inspection.sensitiveChild
         : allowsRuntimeMetadataFromStoredState(run.state_json));
       res.json({
-        run: includeMetadata ? { ...safeRun, ...readRunRuntimeMetadata(run.credentials_json) } : safeRun,
+        run: { ...safeRun, ...lineage, ...(includeMetadata ? readRunRuntimeMetadata(run.credentials_json) : {}) },
         nodes: projectNodes(nodes, inspection),
         availableInterventions,
       });

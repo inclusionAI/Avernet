@@ -251,7 +251,9 @@ export function GroupChatPane(props: GroupChatPaneProps) {
                 onReconnect={() => { void reconnect(); }}
               />
             ) : null}
-            <SpeakingLeaseStrip model={speakingLease} />
+            {/* caller 帽条：上方还有发言模式帽条时收掉顶圆角，方角密接——堆叠态下接缝处
+                不应出现圆角缺口（与 ComposerStatusBar 的「仅最上条顶圆角」帽条几何保持一致）。 */}
+            <SpeakingLeaseStrip model={speakingLease} topRounded={!statusBarVisible} />
             <GroupChatComposer
               session={session}
               connectionStatus={connectionStatus}

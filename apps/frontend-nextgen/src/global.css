@@ -156,6 +156,10 @@
      在抽屉或弹窗内展开时会被容器遮住（看起来像"点击没反应"），故必须高于所有容器层。 */
   --z-drawer: 500;
   --z-dialog: 600;
+
+  /* 嵌套在已打开 Modal/Drawer 内的第二层抽屉（如公开设置 → 管理好友）：
+     必须高于父层遮罩，低于二次确认框，Portal 不会自动抬升。 */
+  --z-nested-drawer: 650;
   --z-critical-dialog: 700;
   --z-popover: 750;
   --z-tooltip: 800;

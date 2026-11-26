@@ -3,6 +3,7 @@
 ensure_grant:GET allowed-bots → 缺则 POST grant(Cookie+Referer 登录态,非 Bearer)。
 send_message:POST /openapi/v1/messages(Bearer)→ message_id(=run_id);顺带回包 session_id(BaaS 当前未返时前向兼容为 None,将来补字段自动落库)。
 get_run:GET /openapi/v1/messages/{id}→ {status,result,error}(status 大小写不敏感)。
+cancel_run:POST /openapi/v1/runs/{id}/abort → 同会话内按需终止旧 run。
 get_session_messages:GET /openapi/v1/sessions/{sid}/messages(Bearer)→ 引擎侧会话明细
 (轨迹纯读/分析实拉用,鉴权面=派发面——同一 api_key 同一 policy gate)。
 """
@@ -356,17 +357,41 @@ class OpenApiBotAdapter(
             params["bot_id"] = bot_id
         if lifecycle_stage:
             params["lifecycle_stage"] = lifecycle_stage
-        async with self._client_for_current_loop() as client:
-            response = await client.get(
-                "/openapi/v1/sessions/runtime/status", params=params, headers=self._headers(),
+        path = "/openapi/v1/sessions/runtime/status"
+        logger.info(
+            "[task][openapi_bot] >>> runtime_status GET %s session=%s bot=%s stage=%s",
+            path, session_id, bot_id, lifecycle_stage,
+        )
+        try:
+            async with self._client_for_current_loop() as client:
+                response = await client.get(path, params=params, headers=self._headers())
+            logger.info(
+                "[task][openapi_bot] <<< runtime_status session=%s http_status=%s",
+                session_id, response.status_code,
             )
-        _map_status(response)
-        payload = response.json()
-        if payload.get("code") != 0:
-            raise OpenApiError("Runtime observation query rejected")
-        observation = BotSessionRuntimeStatus.model_validate(payload.get("data"))
-        if observation.session_id != session_id:
-            raise OpenApiError("Runtime observation session mismatch")
+            _map_status(response)
+            payload = response.json()
+            logger.info(
+                "[task][openapi_bot] runtime_status envelope session=%s code=%s",
+                session_id, payload.get("code"),
+            )
+            if payload.get("code") != 0:
+                raise OpenApiError("Runtime observation query rejected")
+            observation = BotSessionRuntimeStatus.model_validate(payload.get("data"))
+            if observation.session_id != session_id:
+                raise OpenApiError("Runtime observation session mismatch")
+        except Exception as exc:  # Log metadata only, never response bodies or credentials.
+            logger.warning(
+                "[task][openapi_bot] runtime_status failed session=%s bot=%s stage=%s error=%s",
+                session_id, bot_id, lifecycle_stage, type(exc).__name__,
+            )
+            raise
+        logger.info(
+            "[task][openapi_bot] runtime_status observed session=%s found=%s reason=%s "
+            "state=%s run=%s last_event_seq=%s",
+            session_id, observation.found, observation.reason, observation.state,
+            observation.run_id, observation.last_event_seq,
+        )
         return observation
 
     async def get_session_messages(
@@ -422,12 +447,39 @@ class OpenApiBotAdapter(
         return data.get("messages") or []
 
     async def cancel_run(self, run_id: str) -> None:
-        """Best-effort stop tracking hook.
+        """Best-effort abort an in-flight BaaS run.
 
-        当前 BaaS Open API 未暴露任务模块可用的 cancel endpoint；Poller 注销 handle 后不再消费晚到结果。
-        当前生产 OpenAPI 未提供任务模块可用的取消端点。
+        与 `/openapi/v1/runs/{run_id}/abort` 对齐；本方法只表达同 session 内的
+        可控终止，不改写任务节点状态、不轮换 relay 身份。中断成功不等于业务
+        完成，也不用于把有意 abort 误判为 terminal_failed。
         """
-        return None
+        path = f"/openapi/v1/runs/{quote(run_id, safe='')}/abort"
+        logger.info(
+            "[task][openapi_bot] >>> cancel_run POST %s base_url=%s",
+            path,
+            self._k.base_url,
+        )
+        async with self._client_for_current_loop() as client:
+            r = await client.post(path, headers=self._headers())
+        logger.info(
+            "[task][openapi_bot] <<< cancel_run status=%s body=%s",
+            r.status_code,
+            _resp_summary(r),
+        )
+        _map_status(r)
+        try:
+            payload = r.json()
+        except ValueError as exc:
+            raise OpenApiError("cancel_run response is not valid JSON") from exc
+        if not isinstance(payload, dict):
+            raise OpenApiError("cancel_run response must be a JSON object")
+        code = payload.get("code")
+        if code is not None and code != 0:
+            raise OpenApiError(f"cancel_run 业务失败 code={code} payload={payload}")
+        data = payload.get("data")
+        data = {} if data is None else data
+        if not isinstance(data, dict) or not data.get("ok"):
+            raise OpenApiError(f"cancel_run 未被引擎接受 payload={payload}")
 
     def send_and_wait(
         self,

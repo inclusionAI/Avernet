@@ -27,6 +27,9 @@ from agentclaw.community.core.services.identity import IdentityService
 BOT = "bot-1"
 OWNER = "u-1"
 ONLINE_BINDING = 41
+TRANSFERRED_ENTITY = "u-original"
+CURRENT_OWNER = "u-current"
+DRAFT_BINDING = 17
 
 
 def _service(*, bot_type="service", read_return=b"hello"):
@@ -58,13 +61,17 @@ def _service(*, bot_type="service", read_return=b"hello"):
             id=7, status="success", ext={"binding": {"online": ONLINE_BINDING}}
         )
     ]
+    binding_repo = MagicMock()
+    binding_repo.get_active_by_bot_and_owner.return_value = SimpleNamespace(
+        id=DRAFT_BINDING
+    )
     svc = IdentityService(
         path_factory=MagicMock(),
         publish_repo=publish_repo,
         bot_repo=bot_repo,
         resolver=resolver,
         device_fs_dispatcher=dispatcher,
-        binding_repo=MagicMock(),
+        binding_repo=binding_repo,
     )
     return svc, resolver, dispatcher, device_fs
 
@@ -77,6 +84,74 @@ async def test_a_read_naming_no_stage_resolves_the_bots_own_binding():
 
     resolver.resolve_for_bot.assert_called_once_with(BOT, OWNER)
     resolver.resolve_for_binding.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_internal_read_without_operator_keeps_owner_scoped_resolution():
+    svc, resolver, _, _ = _service()
+
+    await svc.get_bot_file("staff", OWNER, BOT, "RULES.md", "")
+
+    resolver.resolve_for_bot.assert_called_once_with(BOT, OWNER)
+    resolver.resolve_for_binding.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_transferred_owner_read_locates_by_entity_and_connects_as_operator():
+    svc, resolver, _, _ = _service()
+
+    await svc.get_bot_file(
+        "staff", TRANSFERRED_ENTITY, BOT, "IDENTITY.md", CURRENT_OWNER
+    )
+
+    svc._binding_repo.get_active_by_bot_and_owner.assert_called_once_with(
+        BOT, TRANSFERRED_ENTITY
+    )
+    resolver.resolve_for_binding.assert_called_once_with(
+        DRAFT_BINDING, CURRENT_OWNER, bot_id=BOT
+    )
+    resolver.resolve_for_bot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_transferred_owner_write_uses_the_same_split_identity_resolution():
+    svc, resolver, _, device_fs = _service()
+
+    await svc.update_bot_file(
+        "staff", TRANSFERRED_ENTITY, BOT, "IDENTITY.md", "new", CURRENT_OWNER
+    )
+
+    svc._binding_repo.get_active_by_bot_and_owner.assert_called_once_with(
+        BOT, TRANSFERRED_ENTITY
+    )
+    resolver.resolve_for_binding.assert_called_once_with(
+        DRAFT_BINDING, CURRENT_OWNER, bot_id=BOT
+    )
+    resolver.resolve_for_bot.assert_not_called()
+    device_fs.write_file.assert_awaited_once_with("identity/IDENTITY.md", b"new")
+
+
+@pytest.mark.asyncio
+async def test_transferred_owner_reference_sync_keeps_the_authenticated_operator():
+    svc, resolver, _, device_fs = _service()
+
+    await svc.update_bot_file(
+        "staff", TRANSFERRED_ENTITY, BOT, "RULES.md", "new", CURRENT_OWNER
+    )
+
+    assert svc._binding_repo.get_active_by_bot_and_owner.call_count == 3
+    assert all(
+        call.args == (BOT, TRANSFERRED_ENTITY)
+        for call in svc._binding_repo.get_active_by_bot_and_owner.call_args_list
+    )
+    assert resolver.resolve_for_binding.call_count == 3
+    assert all(
+        call.args == (DRAFT_BINDING, CURRENT_OWNER)
+        and call.kwargs == {"bot_id": BOT}
+        for call in resolver.resolve_for_binding.call_args_list
+    )
+    resolver.resolve_for_bot.assert_not_called()
+    assert device_fs.write_file.await_count == 2
 
 
 @pytest.mark.asyncio

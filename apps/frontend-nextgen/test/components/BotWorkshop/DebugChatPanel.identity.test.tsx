@@ -70,16 +70,22 @@ it.each(['bot_03e6abae', 'tc-bot:888888', 'human_888888'])(
   '协作身份 %s 不影响编辑调试请求的登录用户', async (activeIdentityId) => {
     useWorkspaceStore.setState({ activeIdentityId });
     render(<DetailDebugChat bot={bot} authenticatedUserId="197262" />);
-    await waitFor(() => expect(sessions).toHaveBeenCalledWith(expect.objectContaining({ ownerId: '197262' }), '197262'));
-    expect(models).toHaveBeenCalledWith(expect.any(Object), '197262');
-    expect(chat).toHaveBeenLastCalledWith(expect.any(Object), null, undefined, expect.any(Function), '197262');
+    await waitFor(() => expect(sessions).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerId: '197262' }), '197262', false,
+    ));
+    expect(models).toHaveBeenCalledWith(expect.any(Object), '197262', false);
+    expect(chat).toHaveBeenLastCalledWith(
+      expect.any(Object), null, undefined, expect.any(Function), '197262', { subjectScoped: false },
+    );
     expect(screen.queryByTestId('composer')).not.toBeInTheDocument();
     expect(useBotSessionFileUpload).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '新建会话' }));
-    await waitFor(() => expect(create).toHaveBeenCalledWith(expect.any(Object), '197262', 'Bot 工坊调试'));
+    await waitFor(() => expect(create).toHaveBeenCalledWith(
+      expect.any(Object), '197262', 'Bot 工坊调试', { subjectScoped: false },
+    ));
     expect(await screen.findByTestId('composer')).toHaveAttribute('data-user-id', '197262');
     expect(jest.mocked(useBotCapabilitySets)).toHaveBeenCalledWith(expect.any(Object), '197262');
-    expect(useBotSessionFileUpload).toHaveBeenLastCalledWith('default', 's1', '197262', '197262', undefined, undefined, undefined, undefined);
+    expect(useBotSessionFileUpload).toHaveBeenLastCalledWith('default', 's1', '197262', '197262', undefined, undefined, undefined);
     await act(async () => useWorkspaceStore.setState({ activeIdentityId: 'another-external-bot' }));
     expect(sessions).toHaveBeenCalledTimes(1);
     expect(models).toHaveBeenCalledTimes(1);
@@ -91,16 +97,20 @@ it('登录身份未就绪时不回退到协作 Bot 身份，身份就绪后再�
   const { rerender } = render(<DebugChatPanel bot={bot} authenticatedUserId={null} />);
   expect(sessions).not.toHaveBeenCalled();
   expect(models).not.toHaveBeenCalled();
-  expect(chat).toHaveBeenLastCalledWith(expect.any(Object), null, undefined, expect.any(Function), null);
+  expect(chat).toHaveBeenLastCalledWith(
+    expect.any(Object), null, undefined, expect.any(Function), null, { subjectScoped: false },
+  );
   rerender(<DebugChatPanel bot={bot} authenticatedUserId="197262" />);
-  await waitFor(() => expect(sessions).toHaveBeenCalledWith(expect.any(Object), '197262'));
+  await waitFor(() => expect(sessions).toHaveBeenCalledWith(expect.any(Object), '197262', false));
 });
 
 it('协作者编辑时保留 Bot owner，不用 owner 冒充登录用户', async () => {
   useWorkspaceStore.setState({ activeIdentityId: 'tc-bot:146836' });
   render(<DetailDebugChat bot={{ ...bot, ownerId: '146836' }} authenticatedUserId="197262" />);
-  await waitFor(() => expect(sessions).toHaveBeenCalledWith(expect.objectContaining({ ownerId: '146836' }), '197262'));
-  expect(models).toHaveBeenCalledWith(expect.objectContaining({ ownerId: '146836' }), '197262');
+  await waitFor(() => expect(sessions).toHaveBeenCalledWith(
+    expect.objectContaining({ ownerId: '146836' }), '197262', false,
+  ));
+  expect(models).toHaveBeenCalledWith(expect.objectContaining({ ownerId: '146836' }), '197262', false);
 });
 
 it.each(['bot', 'owner', 'viewer', 'stage', 'session'] as const)('changing %s resets draft and cancels the previous input upload scope', async (change) => {
@@ -137,7 +147,7 @@ it('waits for the initial session before mounting the input and its file feature
   await act(async () => finish({ ok: true, data: [{ sessionId: 'ready', botId: bot.id,
     title: 'Debug', messageCount: 0, gmtCreate: '', gmtModified: '' }] }));
   expect(await screen.findByTestId('composer')).toHaveAttribute('data-user-id', 'viewer');
-  expect(useBotSessionFileUpload).toHaveBeenLastCalledWith(bot.id, 'ready', 'viewer', bot.ownerId, undefined, undefined, undefined, undefined);
+  expect(useBotSessionFileUpload).toHaveBeenLastCalledWith(bot.id, 'ready', 'viewer', bot.ownerId, undefined, undefined, undefined);
 });
 
 it('keeps the mounted input and unsent draft while refreshing an existing session', async () => {

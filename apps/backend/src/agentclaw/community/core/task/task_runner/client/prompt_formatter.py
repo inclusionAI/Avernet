@@ -46,6 +46,7 @@ def format_task_node_business_instruction(
     relay_blackboard: dict[str, Any] | None = None,
     relay_token: str | None = None,
     allowed_run_modes: list[str] | None = None,
+    source_channel: str | None = None,
 ) -> str:
     """Build the single per-node protocol used by runner delivery.
 
@@ -68,6 +69,7 @@ def format_task_node_business_instruction(
             objective=objective,
             instruction=instruction, acceptances=acceptances,
             allowed_run_modes=allowed_run_modes,
+            source_channel=source_channel,
         )
 
 
@@ -184,6 +186,10 @@ class PromptFormatterImpl(PromptFormatter):
             # 措辞不出现 mock/演示等字眼,产出体感为真实接力能力。
             return f"{instr.rstrip()}\n{_static_relay_closure()}\n{OUTPUT_LANGUAGE_CONSTRAINT}"
         goal = node.task_spec.goal.objective
+        execution_config = (
+            node.node_run_graph.extend_props.get("execution_config", {}) or {}
+            if node.node_run_graph else {}
+        )
         siblings = context.get("sibling_outputs") or {}
         acceptances = [
             {"id": acceptance.id, "description": acceptance.description}
@@ -216,6 +222,7 @@ class PromptFormatterImpl(PromptFormatter):
             allowed_run_modes=list(
                 TaskRuntimeProfile.run_modes_from_graph(node.node_run_graph)
             ),
+            source_channel=execution_config.get("source_channel"),
         )
 
     def format_verify(self, context: dict[str, Any], node: TaskNode) -> str:

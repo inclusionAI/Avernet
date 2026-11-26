@@ -15,16 +15,24 @@ from .test_catalog_batch import catalog_for
 @pytest.mark.parametrize(
     "lifecycle",
     [
-        {"status": "active", "delete_at_ms": None, "can_cancel_delete": False},
+        {
+            "status": "active",
+            "delete_at_ms": None,
+            "can_cancel_delete": False,
+            "can_delete": True,
+        },
+        {"can_delete": False},
         {
             "status": "pending_delete",
             "delete_at_ms": 1795000000123,
             "can_cancel_delete": True,
+            "can_delete": False,
         },
         {
             "status": "pending_delete",
             "delete_at_ms": 1795000000123,
             "can_cancel_delete": False,
+            "can_delete": False,
         },
         {},  # Older providers do not supply lifecycle fields.
     ],
@@ -64,6 +72,13 @@ def test_catalog_preserves_optional_lifecycle_without_extra_calls(count, lifecyc
 
 def test_catalog_response_schema_documents_optional_lifecycle_fields():
     schema = CatalogItem.model_json_schema()
-    for field in ("status", "delete_at_ms", "can_cancel_delete"):
+    for field in (
+        "status",
+        "delete_at_ms",
+        "can_cancel_delete",
+        "can_delete",
+        "deletion_grace_period_seconds",
+        "delete_preview_at_ms",
+    ):
         assert field in schema["properties"]
         assert field not in schema["required"]

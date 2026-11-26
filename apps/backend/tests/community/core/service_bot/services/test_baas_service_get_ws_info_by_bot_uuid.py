@@ -24,6 +24,7 @@ from agentclaw.community.core.service_bot.services.baas_service import (
 from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasBotNotFoundError,
     BaasNoActiveDevicesError,
+    BaasNoDevicesFoundError,
 )
 
 
@@ -454,6 +455,15 @@ class TestGetWsInfoByBotUuid:
         service = _make_service_raising(404, body)
 
         with pytest.raises(BaasNoActiveDevicesError):
+            service.get_ws_info_by_bot_uuid(bot_uuid="BOT-xyz")
+
+    @pytest.mark.parametrize("status_code", [404, 503])
+    def test_no_devices_found_preserves_device_error(self, status_code):
+        service = _make_service_raising(
+            status_code, '{"detail":{"error":"NO_DEVICES_FOUND"}}'
+        )
+
+        with pytest.raises(BaasNoDevicesFoundError):
             service.get_ws_info_by_bot_uuid(bot_uuid="BOT-xyz")
 
     def test_503_no_active_devices_logs_info_not_warning_or_error(self):

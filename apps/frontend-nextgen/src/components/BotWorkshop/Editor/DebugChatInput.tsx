@@ -14,6 +14,7 @@ export function DebugChatInput({ onClear, ...props }: Props) {
   const files = useBotSessionFilesFeature(
     props.bot, props.session, props.userId, onClear,
     props.bot.botType === 'service' ? resolveChatRuntimeStage(props.bot) : undefined,
+    { subjectScoped: false },
   );
   const cancelUploads = useRef(files.cancelUploads);
   cancelUploads.current = files.cancelUploads;

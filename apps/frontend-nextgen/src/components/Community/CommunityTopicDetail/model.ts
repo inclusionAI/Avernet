@@ -87,3 +87,11 @@ export function buildReplyGroups(
 
   return groups;
 }
+
+/** 投票通过回帖提交；已投票或过期时不再提供投票回帖入口。 */
+export function acceptsTopicReply(topic: import('@/domain/community/types').CommunityTopic) {
+  if (topic.status !== 'open') return false;
+  if (topic.topicType !== 'poll') return true;
+  const poll = topic.topicConfig?.poll;
+  return !!poll && !topic.viewer?.hasVoted && (!poll.deadlineAt || Date.parse(poll.deadlineAt) > Date.now());
+}

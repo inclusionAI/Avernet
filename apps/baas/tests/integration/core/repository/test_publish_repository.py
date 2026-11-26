@@ -156,9 +156,80 @@ class TestPublishRepositoryProtocol:
         assert updated is not None
         assert updated.status == "ACTIVE"
 
-    # ------------------------------------------------------------------
-    # 4. update_publish (extra_config, name)
-    # ------------------------------------------------------------------
+    def test_update_status_with_matching_expected_status_applies(
+        self,
+        bot_repository: BotRepository,
+        publish_repository: PublishRepository,
+        db_transaction,
+    ):
+        publish_id = self._publish_in_status(
+            bot_repository, publish_repository, status="FAILED"
+        )
+
+        won = publish_repository.update_status(
+            publish_id=publish_id,
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+            status="ACTIVE",
+            expected_status="FAILED",
+        )
+
+        assert won is True
+        updated = publish_repository.get_by_id(publish_id, TEST_TENANT, TEST_ENV)
+        assert updated is not None
+        assert updated.status == "ACTIVE"
+
+    def test_update_status_with_wrong_expected_status_is_rejected(
+        self,
+        bot_repository: BotRepository,
+        publish_repository: PublishRepository,
+        db_transaction,
+    ):
+        """Compare-and-set: a concurrent winner must not be overwritten."""
+        publish_id = self._publish_in_status(
+            bot_repository, publish_repository, status="SUCCESS"
+        )
+
+        won = publish_repository.update_status(
+            publish_id=publish_id,
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+            status="ACTIVE",
+            expected_status="FAILED",
+        )
+
+        assert won is False
+        updated = publish_repository.get_by_id(publish_id, TEST_TENANT, TEST_ENV)
+        assert updated is not None
+        assert updated.status == "SUCCESS"
+
+    def _publish_in_status(
+        self,
+        bot_repository: BotRepository,
+        publish_repository: PublishRepository,
+        *,
+        status: str,
+    ) -> int:
+        bot_id = bot_repository.insert_bot(
+            bot_uuid=_generate_uuid(),
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+            name="CAS Test Bot",
+        )
+        return publish_repository.insert_publish(
+            tenant=TEST_TENANT,
+            env=TEST_ENV,
+            domain="test_domain",
+            bot_id=bot_id,
+            publish_type="UPDATE",
+            status=status,
+            creator="test_user",
+            modifier="test_user",
+            name="CAS Publish",
+        )
 
     def test_update_publish_extra_config(
         self,

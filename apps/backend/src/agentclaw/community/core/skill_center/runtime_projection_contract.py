@@ -87,6 +87,9 @@ class RuntimeProjectionResult:
     delivery_uncertain: bool = False
     # Internal authorization receipt, outside public serialization.
     passport_updated: bool | None = field(default=None, compare=False, repr=False)
+    passport_mcp_codes: frozenset[str] | None = field(default=None, compare=False, repr=False)
+    # Per-invocation confirmed device writes; not a persisted delivery snapshot.
+    delivered_mcp_codes: frozenset[str] = field(default_factory=frozenset, compare=False, repr=False)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "RuntimeProjectionResult":
@@ -146,12 +149,14 @@ class RuntimeProjectionResult:
         issues: list[RuntimeProjectionIssue] = []
         statuses: list[RuntimeProjectionStatus] = []
         passport_updated = None
+        delivered_mcp_codes: set[str] = set()
         for result in results:
             if result.passport_updated is not None:
                 passport_updated = result.passport_updated
             components.update(result.components)
             issues.extend(result.issues)
             statuses.append(result.status)
+            delivered_mcp_codes.update(result.delivered_mcp_codes)
         if RuntimeProjectionStatus.DEGRADED in statuses:
             status = RuntimeProjectionStatus.DEGRADED
         elif RuntimeProjectionStatus.PENDING in statuses:
@@ -166,6 +171,7 @@ class RuntimeProjectionResult:
             issues=tuple(issues),
             delivery_uncertain=any(result.delivery_uncertain for result in results),
             passport_updated=passport_updated,
+            delivered_mcp_codes=frozenset(delivered_mcp_codes),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -453,6 +459,8 @@ class ProjectionScope:
     claim_all_mcp: bool = False
     #: A separate platform authorization update remains due after a device receipt.
     passport: bool = False
+    #: Reconcile against the live authorization scope before writing Passport.
+    passport_if_changed: bool = False
 
     @property
     def requires_device_delivery(self) -> bool:

@@ -18,7 +18,7 @@ async fn writes_notify_once_and_failures_never_notify() {
     let changes = Arc::new(Changes::default());
     let (chain, service, fetcher, _) = fixture_with_catalog(Some(changes.clone())).await;
     chain.db.execute(DbStatement::new("UPDATE bcs_providers SET slug='orders' WHERE provider_id='provider-a'")).await.unwrap();
-    let mut invalid_card = bcs_service_api::application::a2a_bot::RegisterAgentCommand { catalog_labels:Default::default(),
+    let mut invalid_card = bcs_service_api::application::a2a_bot::RegisterAgentCommand { agent_id:Default::default(), catalog_labels:Default::default(),
         provider_bot_ref:"invalid".into(), visibility:Default::default(), provider_admin_token:"test-admin".into(),
         owners:Some(vec!["delegated-owner".into()]), summary:None, source:A2aCardSource::Inline(json!({})), now_ms:1000,
     };
@@ -61,7 +61,7 @@ async fn writes_notify_once_and_failures_never_notify() {
     let cards = Arc::new(DbA2aBotStore::sqlite(chain.db.clone(), bcs_config::resolve_env_str()));
     let core = A2aBotCore::new(cards.clone(), chain.provider_repo.clone()).with_catalog_changes(Some(changes.clone()));
     let old = cards.get(&id).await.unwrap().unwrap();
-    let next = A2aBotRecord { revision:old.revision+1, ..old.clone() };
+    let next = A2aBotRecord { visibility:Default::default(),status:Default::default(),user_visibility:Default::default(),agent_id:None, revision:old.revision+1, ..old.clone() };
     core.commit_card(next.clone(), old.revision).await.unwrap();
     assert_eq!(changes.take(), vec![id.clone()]);
     assert!(core.commit_card(next.clone(), old.revision).await.is_err());
@@ -97,7 +97,7 @@ async fn committed_registration_notifies_even_if_response_readback_fails() {
     let service=A2aBotManagement::new(fetcher.providers.clone(),
         Arc::new(A2aBotCore::new(Arc::new(ReadbackFailure),chain.provider_repo.clone())),fetcher)
         .with_registration(registration,chain.registry_core.clone());
-    let result=service.register_agent(bcs_service_api::application::a2a_bot::RegisterAgentCommand { catalog_labels:Default::default(),
+    let result=service.register_agent(bcs_service_api::application::a2a_bot::RegisterAgentCommand { agent_id:Default::default(), catalog_labels:Default::default(),
         provider_bot_ref:"committed".into(),visibility:Default::default(),provider_admin_token:"test-admin".into(),
         owners:Some(vec!["delegated-owner".into()]),summary:None,source:A2aCardSource::Inline(validated().raw),now_ms:1000,
     }).await;

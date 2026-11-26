@@ -40,6 +40,17 @@ class CatalogItem(BaseModel):
         None,
         description="Provider-owned cancellation capability; never inferred from can_manage",
     )
+    can_delete: bool | None = Field(
+        None,
+        description="Provider-owned deletion capability for the current actor; not can_manage",
+    )
+    deletion_grace_period_seconds: int | None = Field(
+        None, description="Provider-configured deletion grace period; detail only"
+    )
+    delete_preview_at_ms: int | None = Field(
+        None,
+        description="Provider preview deadline in epoch milliseconds; detail only, not a persisted deletion",
+    )
     description: str | None = Field(
         None, description="Stored description, never sample text"
     )
