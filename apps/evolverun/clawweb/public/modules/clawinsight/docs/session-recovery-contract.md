@@ -95,13 +95,14 @@ timing. Once AIS termination is confirmed, the same transaction clears the slot,
 restores the column's business status and increments the state version, fencing
 stale result-delivery snapshots. Disabling resumption still permits slot cleanup.
 
-Before deploying or rolling back this storage change, disable the existing
-per-environment automatic-resume record, wait for every existing resume slot to
-settle, and replace all writers before restoring the previous configuration.
-Existing running rounds must finish or be stopped and confirmed settled; do not
-force-clear permits. This change adds no rollout configuration or automatic
-historical-data migration. Old terminal rows that still own slots must drain on
-the old version before deployment.
+Upgraded workers use the same maintenance path for all tasks, regardless of
+creation time. Existing active tasks remain discoverable. Pre-upgrade terminal
+rows with a resume slot are excluded from the status-only scan; their AIS work
+can finish through the shared execution monitor and callbacks, while historical
+slot markers may remain. These executions can overlap newly scheduled rounds,
+so actual AIS concurrency may exceed the configured resume limit during rollout.
+This transition does not require draining legacy slots and adds no compatibility
+scan, rollout configuration or automatic historical-data migration.
 
 ### Historical effect recheck
 
