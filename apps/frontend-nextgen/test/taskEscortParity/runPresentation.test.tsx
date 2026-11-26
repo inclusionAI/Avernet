@@ -29,7 +29,7 @@ const wire = {
   total_token_usage: 0,
   workflow_version: 3,
   input_json: JSON.stringify({ message: '已记录的用户要求', params: { target: 'later-not-original' } }),
-  params_json: JSON.stringify({ target: 'original', long: '业务参数'.repeat(220), apiKey: 'hidden-launch-value' }),
+  params_json: JSON.stringify({ target: 'original', long: '业务参数'.repeat(220), apiKey: 'xxxxxxxx' }),
   parent_flow_id: 'parent-only',
   root_flow_id: 'root-only',
   device_id: 'server-device',
@@ -136,7 +136,7 @@ it('separates identity/runtime/operations/input/lineage and preserves latest-att
   expect(screen.getByRole('button', { name: '收起原始启动参数' })).toHaveAttribute('aria-expanded', 'true');
   expect(content).toHaveTextContent('original');
   expect(content).not.toHaveTextContent('later-not-original');
-  expect(document.body).not.toHaveTextContent('hidden-launch-value');
+  expect(document.body).not.toHaveTextContent('xxxxxxxx');
   expect(document.body).not.toHaveTextContent('hidden-credential');
   expect(service.runDetail).toHaveBeenCalledTimes(1);
 });

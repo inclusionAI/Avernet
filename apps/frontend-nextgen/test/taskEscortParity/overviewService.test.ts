@@ -155,7 +155,7 @@ it('maps detail-only verified launch/lineage/projection fields with display reda
         ...run,
         input_json:
           '{"message":"token=unsafe-input","command":"/stored","params":{"late":"never-fallback"},"iamToken":"unsafe"}',
-        params_json: '{"target":"original","nested":[{"iamToken":"unsafe-param","system_context":{"unsafe":true}}]}',
+        params_json: '{"target":"original","nested":[{"iamToken":"xxxxxxxx","system_context":{"unsafe":true}}]}',
         parent_flow_id: 'parent',
         root_flow_id: 'root',
         device_id: ' device ',
@@ -184,7 +184,7 @@ it('maps detail-only verified launch/lineage/projection fields with display reda
     }),
   );
   const serialized = JSON.stringify(detail);
-  expect(serialized).not.toMatch(/unsafe|never-retain|never-parse|never-fallback/);
+  expect(serialized).not.toMatch(/unsafe|xxxxxxxx|never-retain|never-parse|never-fallback/);
   expect(detail.nodes[0].context).toBeNull();
   expect(detail.nodes[0].input).toContain('[已隐藏]');
   request.mockResolvedValueOnce({
@@ -228,7 +228,7 @@ it('redacts run evidence before retaining node token objects, log bodies and arc
       nodeExecutions: [
         {
           system_context_json: 'internal-system-value',
-          output_json: '{"result":"real","apiKey":"nested-output-secret"}',
+          output_json: '{"result":"real","apiKey":"xxxxxxxx"}',
         },
       ],
       analysis: {
@@ -240,7 +240,7 @@ it('redacts run evidence before retaining node token objects, log bodies and arc
   });
   const archive = await service.archive('wf', 'r1', {});
   expect(JSON.stringify(archive)).not.toMatch(
-    /archive-credential-secret|internal-state-value|internal-system-value|nested-output-secret|diagnostic-secret/,
+    /archive-credential-secret|internal-state-value|internal-system-value|xxxxxxxx|diagnostic-secret/,
   );
   expect(JSON.stringify(archive)).toContain('actual diagnosis');
 });

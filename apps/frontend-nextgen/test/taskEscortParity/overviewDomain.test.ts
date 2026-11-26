@@ -134,7 +134,7 @@ it('keeps nested business strings/numbers/falsy values intact and masks known cr
       empty: '',
       absent: null,
       nested: [{ accessKey: 'hidden-access', credentials: { nested: 'hidden-executor' }, business: 'null' }],
-      callback: 'https://example.invalid/path?api_key=hidden-query&mode=safe',
+      callback: 'https://example.invalid/path?api_key=xxxxxxxx&mode=safe',
     }),
   });
   const params = JSON.parse(result.launchParams.text);
@@ -142,7 +142,7 @@ it('keeps nested business strings/numbers/falsy values intact and masks known cr
     expect.objectContaining({ count: 0, enabled: false, target: '0', mode: 'false', empty: '', absent: null }),
   );
   expect(params.nested[0].business).toBe('null');
-  expect(JSON.stringify(result)).not.toMatch(/hidden-access|hidden-executor|hidden-query/);
+  expect(JSON.stringify(result)).not.toMatch(/hidden-access|hidden-executor|xxxxxxxx/);
   expect(params.callback).toContain('mode=safe');
 });
 
@@ -150,11 +150,11 @@ it('applies extended known-key URL masking and suppresses escaped state keys ins
   const urls = mapOverviewDetailedRun({
     ...detailWire,
     params_json: JSON.stringify({
-      callback: 'https://example.invalid/path?access_key=url-access-value&mode=safe',
+      callback: 'https://example.invalid/path?access_key=xxxxxxxx&mode=safe',
       nested: { endpoint: 'https://example.invalid/path?system_context=url-system-value' },
     }),
   });
-  expect(urls.launchParams.text).not.toMatch(/url-access-value|url-system-value/);
+  expect(urls.launchParams.text).not.toMatch(/xxxxxxxx|url-system-value/);
   expect(urls.launchParams.text).toContain('mode=safe');
   const encoded = JSON.stringify({
     safe: 'not-launch-evidence',
