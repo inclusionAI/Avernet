@@ -1,0 +1,29 @@
+apps/backend/tests/community/repository/publishing/test_release_audit_production.py
+  s_7c6be7001ef8fd::t_ac12f3ba8a4372 285,309,319,514,520,567,573-614
+  s_7c6be7001ef8fd::t_8cfc524d16c752 615-654
+apps/backend/specs/service-bot-release-audit-single-table/001-spec-output.md
+  s_7c6be7001ef8fd::t_ac12f3ba8a4372 12,41-44
+  s_7c6be7001ef8fd::t_cb22058070b2a3 45-46
+apps/backend/src/agentclaw/community/core/repository/implementations/publishing/bot_publish.py
+  s_7c6be7001ef8fd::t_a29855b588e0c6 107,488-515,536-539,587,607,626-629
+apps/backend/src/agentclaw/community/core/repository/implementations/publishing/release_audit.py
+  s_7c6be7001ef8fd::t_c4d4509ad8b525 60-64,66,72,75,77-78
+apps/backend/src/agentclaw/community/core/service_bot/README.md
+  s_7c6be7001ef8fd::t_8da7e287d0711d 393-395
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "16bf302d510d9bba540813c4c9c421fa130c196d",
+  "prompts": {},
+  "sessions": {
+    "s_7c6be7001ef8fd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d2d4-adef-74d1-8694-5ea4bddc1ac0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
