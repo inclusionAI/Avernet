@@ -342,3 +342,29 @@ async fn after_a_dropped_run_the_engine_is_not_ready_and_a_drain_stops_at_once()
     assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 2 });
     assert!(rig.peers.offers.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn a_cancelled_drain_stops_the_calls_then_retires() {
+    use std::sync::atomic::Ordering;
+    let mut rig = Rig::new().await;
+    let members = members(&mut rig);
+    let _events = rig.agent.start_stream();
+    rig.worker.create().await;
+    rig.worker.notify().await;
+    let running = rig.start();
+    until("accepted", || async { rig.phase().await == "accepted" }).await;
+    let engine = running.engine.clone();
+    // The open stream keeps the call from a safe point: the drain waits.
+    let drain = tokio::spawn(async move { engine.drain(Duration::from_secs(30)).await });
+    settle().await;
+    drain.abort();
+    let _ = drain.await;
+    until("retired after the cancelled drain", || async {
+        members.dead.lock().unwrap().contains(&"conn-03".to_owned())
+    })
+    .await;
+    assert_eq!(running.engine.snapshot().await.unwrap().active_work, 0, "its call stopped first");
+    let after = members.renewals.load(Ordering::SeqCst);
+    settle().await;
+    assert_eq!(members.renewals.load(Ordering::SeqCst), after, "no renewal after the cancelled drain");
+}

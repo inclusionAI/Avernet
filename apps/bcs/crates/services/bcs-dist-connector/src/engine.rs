@@ -37,7 +37,9 @@
 //! Locks: `actors`, `lease`, `orphans` and `ownership` are plain `std`
 //! mutexes held only for a map/vector operation, never across an `.await`.
 
+mod lifecycle;
 mod partitions;
+use lifecycle::{DrainExit, Exit, silence_heartbeat};
 pub use partitions::rank_candidates;
 
 use crate::call::{Call, CallStatus};
@@ -740,35 +742,6 @@ impl ConnectorEngine {
     }
 }
 
-/// Stops the heartbeat for good: no renewal starts after this returns
-/// (`abort` takes effect at the task's next await point, before a renewal).
-fn silence_heartbeat(inner: &Inner) {
-    inner.quiet.store(true, Ordering::SeqCst);
-    if let Some(task) = lock(&inner.heartbeat).take() {
-        task.abort();
-    }
-}
-
-/// The end of `run`, the same on every path (return, error, panic, or the
-/// `run` future dropped): clears `ready` and `looping`, wakes a waiting
-/// drain, and while `armed` silences the heartbeat, unless a drain is
-/// already running (it keeps the registration alive until it retires it).
-struct Exit<'a> {
-    inner: &'a Inner,
-    armed: bool,
-}
-
-impl Drop for Exit<'_> {
-    fn drop(&mut self) {
-        if self.armed && !self.inner.draining.load(Ordering::SeqCst) {
-            silence_heartbeat(self.inner);
-        }
-        self.inner.ready.store(false, Ordering::SeqCst);
-        self.inner.looping.store(false, Ordering::SeqCst);
-        self.inner.wake.notify_waiters();
-    }
-}
-
 /// Locks a `std` mutex, ignoring poisoning. A mutex is poisoned when a thread
 /// panicked while holding it; the data here (maps and vectors changed in one
 /// step) stays usable, so the engine keeps going instead of panicking too.
@@ -837,6 +810,9 @@ impl DistRuntimeControlPort for ConnectorEngine {
     /// loop had not stopped yet, for example while it waits on a claim).
     async fn drain(&self, grace: Duration) -> Result<DrainOutcome, RuntimeError> {
         let inner = &self.inner;
+        // A drain cancelled before it retires must not leave the heartbeat
+        // keeping a process alive that reads nothing (see `DrainExit`).
+        let mut exit = DrainExit { engine: self.clone(), done: false };
         inner.draining.store(true, Ordering::SeqCst);
         inner.stop.notify_one();
         inner.wake.notify_waiters();
@@ -880,20 +856,7 @@ impl DistRuntimeControlPort for ConnectorEngine {
         // and `spawn` starts no actor once it is (it checks under the same
         // lock). So retiring after stopping them is safe even if the main
         // loop is still inside a claim; that claim's call is left held.
-        let leftover: Vec<JoinHandle<()>> = lock(&inner.actors)
-            .drain()
-            .map(|(_, actor)| actor.task)
-            .filter(|task| !task.is_finished())
-            .collect();
-        let stopped = leftover.len();
-        // `abort` only asks; awaiting each task waits until it has stopped
-        // at its next await point.
-        for task in &leftover {
-            task.abort();
-        }
-        for task in leftover {
-            let _ = task.await;
-        }
+        let stopped = self.stop_actors().await;
         // No claim made under the current ownership may still be running
         // when a partition moves: it could take a call back from the new
         // owner. Wait for claims in flight (the main loop may be inside one);
@@ -910,6 +873,7 @@ impl DistRuntimeControlPort for ConnectorEngine {
         };
         let remaining = stopped + lock(&inner.orphans).len() + left;
         self.retire().await;
+        exit.done = true;
         if remaining == 0 && !inner.looping.load(Ordering::SeqCst) {
             return Ok(DrainOutcome::Drained);
         }
