@@ -143,6 +143,13 @@ contract, never a BaaS mount instruction. Changes to the Skills Pool probe,
 mapping contract or historical manifest reader therefore affect publication
 compatibility and must be reviewed together with this module.
 
+A file snapshot records a Center reference only when the artifact carries the
+exact version link. A self-contained Skill directory with a readable root
+`SKILL.md` at the same active name is delivered as local content. A missing
+entry, a dependent directory, or an unexpected Center link blocks the build.
+Legacy manifests include Center delivery only when at least one included Skill
+references it. Pool manifests retain their shared-corpus declarations.
+
 Publish history is associated with its source Bot through immutable
 `ac_bot_publish.source_bot_pk`. Version duplicate checks and stage-record reads
 use this key for transferable, non-`default` service Bots. Personal Bots,

@@ -289,9 +289,6 @@ class ServiceSkillsManifestBuilder:
                 ),
             )
 
-        if center_skills:
-            self._verify_exact_store(center_skills)
-
         return CapturedServiceSkillsLayout(
             engine=engine,
             scope=scope,
@@ -311,6 +308,7 @@ class ServiceSkillsManifestBuilder:
         self,
         *,
         captured: CapturedServiceSkillsLayout,
+        delivered_center_skills: tuple[dict[str, Any], ...],
         bot: dict[str, Any],
     ) -> dict[str, Any]:
         engine = captured.engine
@@ -331,8 +329,8 @@ class ServiceSkillsManifestBuilder:
                 "active Center Skills changed during service build",
                 code=ServiceArtifactBuildErrorCode.CAPABILITY_CHANGED,
             )
-        if captured.center_skills:
-            self._verify_exact_store(captured.center_skills)
+        if delivered_center_skills:
+            self._verify_exact_store(delivered_center_skills)
 
         manifest = {
             "schema_version": 1,
@@ -344,9 +342,11 @@ class ServiceSkillsManifestBuilder:
                 else None
             ),
         }
-        if captured.center_skills:
-            manifest["center_skills"] = [dict(item) for item in captured.center_skills]
-        if captured.shared_corpora:
+        if delivered_center_skills:
+            manifest["center_skills"] = [dict(item) for item in delivered_center_skills]
+        if captured.shared_corpora and (
+            captured.active_layout is SkillLayout.POOL or delivered_center_skills
+        ):
             manifest["shared_corpora"] = [
                 delivery.to_manifest() for delivery in captured.shared_corpora
             ]
