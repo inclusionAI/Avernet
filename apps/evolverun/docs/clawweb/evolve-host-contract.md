@@ -25,6 +25,9 @@ The existing Bot prefill rules apply, including `ownerId` (or `entityId`) for
 `default` Bots and ambiguous ownership. For example,
 `/evolve/skills?register=1&botId=bot-1&botEnv=prod&skillId=skill-1` also preselects
 the optional `skillId` after loading that Bot's available local Skills.
+An optional `spaceId` preselects the registration space through the existing
+space selector. Omitting it defaults to no space. The selection remains editable,
+and registration uses the existing server-side space membership check.
 
 Invalid or inaccessible targets display a message and allow manual selection.
 Opening a link only fills the form; registration requires the user's submit.
