@@ -1,0 +1,28 @@
+apps/frontend-nextgen/assets/task-panel/package.json
+  s_885ffb973587a3::t_bf931545ca7724 3
+apps/frontend-nextgen/assets/task-panel/README.md
+  s_885ffb973587a3::t_8524d26c0cd843 15
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/NodeListViewV2.tsx
+  s_885ffb973587a3::t_8524d26c0cd843 193,196-197
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/NodeListViewV2.coverage.test.tsx
+  s_885ffb973587a3::t_7c607387ebfd07 257
+  s_885ffb973587a3::t_8524d26c0cd843 196-198,204
+apps/frontend-nextgen/assets/task-panel/package-lock.json
+  s_885ffb973587a3::t_c1d2277bfb32a1 3,9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7cab8e564f6975d53ea39add285d966009d88897",
+  "prompts": {},
+  "sessions": {
+    "s_885ffb973587a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17742-1085-7833-94e1-041d70172b63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
