@@ -344,7 +344,7 @@ async fn after_a_dropped_run_the_engine_is_not_ready_and_a_drain_stops_at_once()
 }
 
 #[tokio::test]
-async fn a_cancelled_drain_stops_the_calls_then_retires() {
+async fn a_cancelled_drain_caller_leaves_the_shutdown_running_to_the_end() {
     use std::sync::atomic::Ordering;
     let mut rig = Rig::new().await;
     let members = members(&mut rig);
@@ -355,18 +355,25 @@ async fn a_cancelled_drain_stops_the_calls_then_retires() {
     until("accepted", || async { rig.phase().await == "accepted" }).await;
     let engine = running.engine.clone();
     // The open stream keeps the call from a safe point: the drain waits.
-    let drain = tokio::spawn(async move { engine.drain(Duration::from_secs(30)).await });
-    settle().await;
+    let drain = tokio::spawn(async move { engine.drain(Duration::from_millis(400)).await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
     drain.abort();
     let _ = drain.await;
-    until("retired after the cancelled drain", || async {
+    // The shutdown still runs: the call is stopped at the deadline, then
+    // the registration is retired and the renewals end.
+    until("retired after the cancelled caller", || async {
         members.dead.lock().unwrap().contains(&"conn-03".to_owned())
     })
     .await;
     assert_eq!(running.engine.snapshot().await.unwrap().active_work, 0, "its call stopped first");
     let after = members.renewals.load(Ordering::SeqCst);
     settle().await;
-    assert_eq!(members.renewals.load(Ordering::SeqCst), after, "no renewal after the cancelled drain");
+    assert_eq!(members.renewals.load(Ordering::SeqCst), after, "no renewal after retiring");
+    // A later drain gets the same outcome without running again.
+    assert_eq!(
+        running.engine.drain(Duration::from_millis(10)).await.unwrap(),
+        DrainOutcome::DeadlineReached { remaining: 2 }
+    );
 }
 
 #[tokio::test]
@@ -388,4 +395,28 @@ async fn a_peer_that_never_answers_does_not_hold_the_drain_past_its_deadline() {
     assert!(started.elapsed() < Duration::from_millis(1150), "took {:?}", started.elapsed());
     assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 });
     assert_eq!(rig.peers.offers.lock().unwrap().len(), 1, "the peer was asked");
+}
+
+#[tokio::test]
+async fn a_cancelled_drain_caller_does_not_cut_short_another_drain() {
+    let mut rig = Rig::new().await;
+    let members = members(&mut rig);
+    let events = rig.agent.start_stream();
+    rig.worker.create().await;
+    rig.worker.notify().await;
+    let running = rig.start();
+    until("accepted", || async { rig.phase().await == "accepted" }).await;
+    let (a, b) = (running.engine.clone(), running.engine.clone());
+    let first = tokio::spawn(async move { a.drain(Duration::from_secs(5)).await });
+    let second = tokio::spawn(async move { b.drain(Duration::from_secs(5)).await });
+    settle().await;
+    first.abort();
+    settle().await;
+    // The shutdown goes on unchanged: the call still has its grace.
+    assert_eq!(running.engine.snapshot().await.unwrap().active_work, 1, "the call was not cut short");
+    assert!(!members.dead.lock().unwrap().contains(&"conn-03".to_owned()), "not retired early");
+    drop(events); // the turn ends: the call stops at a safe point
+    let outcome = tokio::time::timeout(Duration::from_secs(3), second).await.unwrap().unwrap().unwrap();
+    assert_eq!(outcome, DrainOutcome::DeadlineReached { remaining: 1 }, "only the partition (no peer)");
+    assert!(members.dead.lock().unwrap().contains(&"conn-03".to_owned()));
 }

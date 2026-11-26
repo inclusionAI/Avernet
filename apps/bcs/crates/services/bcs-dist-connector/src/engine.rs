@@ -39,7 +39,7 @@
 
 mod lifecycle;
 mod partitions;
-use lifecycle::{DrainExit, Exit, silence_heartbeat};
+use lifecycle::{Exit, silence_heartbeat};
 pub use partitions::rank_candidates;
 
 use crate::call::{Call, CallStatus};
@@ -119,11 +119,10 @@ struct Inner {
     /// permit is stored and the next wait (in the main loop or in
     /// `register`'s retry backoff) returns at once.
     stop: Notify,
-    /// Serializes the end of `drain` (stop the leftover actors, hand the
-    /// partitions over, retire). A second, concurrent drain must not retire
-    /// while the first is still waiting for the actors it aborted: those may
-    /// still act until then.
-    stopping: tokio::sync::Mutex<()>,
+    /// The one shutdown of this process, started by the first `drain` on a
+    /// task of its own; every `drain` call waits for it (see
+    /// `lifecycle::drain_once`).
+    shutdown: Mutex<Option<lifecycle::Shutdown>>,
     /// The partitions this process owns (see [`partitions`]).
     ownership: Mutex<partitions::Ownership>,
     /// Set by `drain`: every actor stops at its next safe point. Shared with
@@ -188,7 +187,7 @@ impl ConnectorEngine {
                 claims: AtomicU64::new(0),
                 wake: Notify::new(),
                 stop: Notify::new(),
-                stopping: tokio::sync::Mutex::new(()),
+                shutdown: Mutex::new(None),
                 ownership: Mutex::new(partitions::Ownership::default()),
                 yielding: Arc::new(AtomicBool::new(false)),
                 lost: AtomicBool::new(false),
@@ -808,11 +807,20 @@ impl DistRuntimeControlPort for ConnectorEngine {
     /// `DeadlineReached { remaining }` with the actors aborted, orphans and
     /// partitions not handed over (`remaining` can be 0 when only the main
     /// loop had not stopped yet, for example while it waits on a claim).
+    ///
+    /// The work runs once, on a task of its own, started by the first call
+    /// with that call's `grace`; every call (concurrent or later) waits for
+    /// it and gets its outcome. Cancelling a caller therefore neither cuts
+    /// the shutdown short nor lets it run twice.
     async fn drain(&self, grace: Duration) -> Result<DrainOutcome, RuntimeError> {
+        self.drain_once(grace).await
+    }
+}
+
+impl ConnectorEngine {
+    /// The body of `drain`, run once by `drain_once`.
+    async fn shut_down(&self, grace: Duration) -> Result<DrainOutcome, RuntimeError> {
         let inner = &self.inner;
-        // A drain cancelled before it retires must not leave the heartbeat
-        // keeping a process alive that reads nothing (see `DrainExit`).
-        let mut exit = DrainExit { engine: self.clone(), done: false };
         inner.draining.store(true, Ordering::SeqCst);
         inner.stop.notify_one();
         inner.wake.notify_waiters();
@@ -850,8 +858,6 @@ impl DistRuntimeControlPort for ConnectorEngine {
         // registration is gone, another Connector may take these calls over,
         // and the dispatch fences only this actor's `disp` writes, not its
         // agent calls or inbox writes.
-        // One drain at a time from here (see `stopping`).
-        let _stopping = inner.stopping.lock().await;
         // The set collected below is complete: `draining` is already set,
         // and `spawn` starts no actor once it is (it checks under the same
         // lock). So retiring after stopping them is safe even if the main
@@ -873,7 +879,6 @@ impl DistRuntimeControlPort for ConnectorEngine {
         };
         let remaining = stopped + lock(&inner.orphans).len() + left;
         self.retire().await;
-        exit.done = true;
         if remaining == 0 && !inner.looping.load(Ordering::SeqCst) {
             return Ok(DrainOutcome::Drained);
         }

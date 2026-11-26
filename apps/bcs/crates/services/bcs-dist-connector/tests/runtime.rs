@@ -100,8 +100,8 @@ async fn drain_stops_claiming_and_stops_calls_still_running_at_the_deadline() {
     assert_eq!(rig.phase().await, "accepted");
     assert_eq!(
         running.engine.drain(Duration::from_millis(50)).await.unwrap(),
-        DrainOutcome::DeadlineReached { remaining: 1 },
-        "only the partition is left"
+        DrainOutcome::DeadlineReached { remaining: 2 },
+        "a later drain reports the one shutdown's outcome"
     );
 }
 
@@ -441,7 +441,10 @@ async fn concurrent_drains_both_end_with_every_actor_stopped() {
         running.engine.drain(Duration::from_millis(60)),
     );
     let outcomes = [first.unwrap(), second.unwrap()];
-    assert!(outcomes.contains(&DrainOutcome::DeadlineReached { remaining: 1 }), "{outcomes:?}");
+    // One shutdown, one outcome: the call aborted at the deadline and the
+    // partition nobody took.
+    let expected = DrainOutcome::DeadlineReached { remaining: 2 };
+    assert_eq!(outcomes, [expected.clone(), expected], "{outcomes:?}");
     assert_eq!(running.engine.snapshot().await.unwrap().active_work, 0);
     assert!(leases.calls.lock().unwrap().contains(&"retire conn-03".to_owned()));
 }

@@ -1,9 +1,42 @@
-//! How a Connector process ends: the exit of `run` and of a cancelled
-//! `drain`, the heartbeat stop, and stopping the actors.
+//! How a Connector process ends: the exit of `run`, the one shutdown that
+//! every `drain` waits for, the heartbeat stop, and stopping the actors.
 
-use super::{ConnectorEngine, Inner, lock};
+use super::{ConnectorEngine, Inner, failed, lock};
+use bcs_service_api::types::dist_runtime::{DrainOutcome, RuntimeError};
+use futures::FutureExt;
+use futures::future::{BoxFuture, Shared};
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tokio::task::JoinHandle;
+
+/// The shutdown job: its outcome, shared by every `drain` caller.
+pub(super) type Shutdown = Shared<BoxFuture<'static, Result<DrainOutcome, RuntimeError>>>;
+
+impl ConnectorEngine {
+    /// Starts the shutdown on its own task the first time (with this call's
+    /// `grace`), then waits for it. The task is not tied to any caller: a
+    /// dropped `drain` future leaves it running to the end (actors stopped
+    /// and joined, partitions offered, registration retired), and drains
+    /// never overlap.
+    pub(super) async fn drain_once(&self, grace: Duration) -> Result<DrainOutcome, RuntimeError> {
+        let job = {
+            let mut slot = lock(&self.inner.shutdown);
+            match slot.as_ref() {
+                Some(job) => job.clone(),
+                None => {
+                    let engine = self.clone();
+                    let task = tokio::spawn(async move { engine.shut_down(grace).await });
+                    let job: Shutdown = async move { task.await.unwrap_or_else(|_| Err(failed("drain_failed"))) }
+                        .boxed()
+                        .shared();
+                    *slot = Some(job.clone());
+                    job
+                }
+            }
+        };
+        job.await
+    }
+}
 
 /// Stops the heartbeat for good: no renewal starts after this returns
 /// (`abort` takes effect at the task's next await point, before a renewal).
@@ -52,39 +85,5 @@ impl ConnectorEngine {
             let _ = task.await;
         }
         stopped
-    }
-}
-
-/// Finishes a drain whose future was dropped before it retired: stops the
-/// actors first, then retires (which silences the heartbeat), in that order,
-/// so this instance reads `Dead` only once none of its calls runs. Done on a
-/// spawned task, since `Drop` cannot wait; outside a runtime it only asks the
-/// actors to stop and silences the heartbeat.
-pub(super) struct DrainExit {
-    pub(super) engine: ConnectorEngine,
-    pub(super) done: bool,
-}
-
-impl Drop for DrainExit {
-    fn drop(&mut self) {
-        if self.done {
-            return;
-        }
-        let engine = self.engine.clone();
-        match tokio::runtime::Handle::try_current() {
-            Ok(runtime) => {
-                runtime.spawn(async move {
-                    tracing::warn!("drain cancelled; stopping the calls and retiring");
-                    engine.stop_actors().await;
-                    engine.retire().await;
-                });
-            }
-            Err(_) => {
-                for actor in lock(&engine.inner.actors).values() {
-                    actor.task.abort();
-                }
-                silence_heartbeat(&engine.inner);
-            }
-        }
     }
 }
