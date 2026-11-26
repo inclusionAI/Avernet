@@ -24,6 +24,7 @@
 //!   creates a Human Participant (Consultant role, Present mode). This matches
 //!   the legacy invite-link accept semantics exactly.
 
+mod friend_roster;
 mod invitations;
 
 use std::sync::Arc;
@@ -895,16 +896,10 @@ impl FriendConnectionService for InvitationFriendshipServiceImpl {
         &self,
         command: DeleteFriendConnection,
     ) -> Result<DeleteResult, ApplicationError> {
-        let connect = self.connect_service()?;
-        let caller = Self::caller_default_actor(&command.caller)?;
-        let target = Self::actor_to_internal(&command.target_actor);
-        let revoked = connect
-            .revoke_friend(&caller, &target, command.request_auth.clone())
-            .await
-            .map_err(map_service_error)?;
-        Ok(DeleteResult {
-            deleted: !revoked.is_empty(),
-        })
+        // Inherent method in `friend_roster`: an absent `actor` keeps the
+        // caller-side self-removal byte-identical; a present one selects the
+        // Owner-initiated removal.
+        InvitationFriendshipServiceImpl::delete_friend_connection(self, command).await
     }
 }
 
