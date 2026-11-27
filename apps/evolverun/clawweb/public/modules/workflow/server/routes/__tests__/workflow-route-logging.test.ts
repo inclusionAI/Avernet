@@ -15,15 +15,24 @@ import { createInternalEventsRouter } from "../internal/events.js";
 import { createInternalRunsRouter } from "../internal/runs.js";
 import { registerWorkflowListRoutes, workflowsCache } from "../workflows-list.js";
 import { createWorkflowsRouter } from "../workflows.js";
+import { flushInternalApiLog } from "../internal-logger.js";
 
-const files = vi.hoisted(() => ({ appendFileSync: vi.fn(), mkdirSync: vi.fn() }));
-vi.mock("node:fs", async importOriginal => ({ ...await importOriginal<typeof import("node:fs")>(), ...files }));
+const files = vi.hoisted(() => ({ appendFile: vi.fn(), mkdir: vi.fn() }));
+vi.mock("node:fs/promises", async importOriginal => ({ ...await importOriginal<typeof import("node:fs/promises")>(), ...files }));
 vi.mock("@avernet/workflow/server/routes/internal-logger", async () => import("../internal-logger.js"));
 const servers: Server[] = [];
 const diagnostics: unknown[] = [];
+let summaryWindow = Date.UTC(2026, 10, 27);
 
 beforeEach(() => {
+  // Each independent HTTP case starts in a fresh summary window. Fake only
+  // Date: Express/network and the sink's batching/drain timers remain real.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(summaryWindow);
+  summaryWindow += 1000;
   vi.clearAllMocks();
+  files.mkdir.mockReset().mockResolvedValue(undefined);
+  files.appendFile.mockReset().mockResolvedValue(undefined);
   diagnostics.length = 0;
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -31,8 +40,10 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => server.close(() => resolve()))));
+  await flushInternalApiLog();
   workflowsCache.invalidate();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 async function listen(router: Router) {
@@ -48,11 +59,17 @@ async function listen(router: Router) {
   await once(server, "listening");
   return `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 }
-const post = (url: string, body: object, headers: Record<string, string> = {}) => fetch(url, {
-  method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body),
-});
+const post = async (url: string, body: object, headers: Record<string, string> = {}) => {
+  const response = await fetch(url, {
+    method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body),
+  });
+  await flushInternalApiLog();
+  return response;
+};
 function lastFileLog() {
-  const line = files.appendFileSync.mock.calls.at(-1)![1] as string;
+  // A single append may contain both the request preview and result entry.
+  const batch = String(files.appendFile.mock.calls.at(-1)![1]);
+  const line = batch.trimEnd().split("\n").at(-1)!;
   return { line, entry: JSON.parse(line.slice(line.indexOf("{"))) };
 }
 function persistenceFailureOrigin() {
@@ -177,7 +194,7 @@ describe("workflow route exception logging without response changes", () => {
     expect(lastFileLog().entry).toMatchObject({ path: "/runs", status: 503, stack: error.stack, stackSource: "exception" });
     expect(lastFileLog().entry.stack).toContain("persistenceFailureOrigin");
     const consoleCalls = ["log", "info", "warn", "error", "debug"].flatMap(channel => vi.mocked(console[channel as "error"]).mock.calls);
-    expect(JSON.stringify({ consoleCalls, fileCalls: files.appendFileSync.mock.calls, diagnostics }))
+    expect(JSON.stringify({ consoleCalls, fileCalls: files.appendFile.mock.calls.map(call => [call[0], String(call[1])]), diagnostics }))
       .not.toMatch(/private-|Authorization|cookies|config|token/);
     expect(console.warn).not.toHaveBeenCalled();
   });
