@@ -106,12 +106,18 @@ class Story:
             "webhook_url": "https://provider.example.com/scope", "collaboration_scope": "standard",
         })
         pid, admin = provider["provider_id"], provider["provider_admin_token"]
-        local = self.bot(provider, self.owner, "local-" + uuid.uuid4().hex)
+        local_ref = "local-" + uuid.uuid4().hex
+        local = self.bot(provider, self.owner, local_ref)
         standard = self.request("POST", "/providers", {
             "name": "Cloud scope story", "auth": {"mode": "static_bearer"},
             "webhook_url": "https://provider.example.com/cloud",
         })
         cloud = self.bot(standard, self.owner, "cloud-" + uuid.uuid4().hex)
+        detail = f"/providers/{pid}/bot-detail"
+        for selector in ({"bot_uuid": local}, {"provider_bot_ref": local_ref}):
+            profile = self.request("GET", detail + "?" + urllib.parse.urlencode(selector), token=admin)
+            assert (profile["bot_uuid"], profile["provider_bot_ref"], profile["created_by"]) == (local, local_ref, self.owner)
+        self.request("GET", f"{detail}?bot_uuid={cloud}", token=admin, status=404)
         outsider = self.bot(provider, self.foreign, "foreign-" + uuid.uuid4().hex)
         for bot in (local, cloud, outsider):
             self.request("PUT", f"/bots/{bot}/visibility", {"visibility": "public"},

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{ServiceResult, TaskModeMatch};
+use crate::types::{ProviderBotDetail, ProviderBotLookup};
 
 use super::message_flow::{BotEventOutcome, ChatEventState, ProviderEventIngestCommand};
 use super::v1::UserVisibility;
@@ -188,6 +189,19 @@ pub struct UpdateProviderBotOutcome {
     pub visibility: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderBotListItem {
+    pub binding: ProviderBotBinding,
+    /// The Bot registration's creator, when recorded.
+    pub created_by: Option<String>,
+}
+
+impl From<ProviderBotBinding> for ProviderBotListItem {
+    fn from(binding: ProviderBotBinding) -> Self {
+        Self { binding, created_by: None }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ProviderBotEventCommand {
     pub provider_id: String,
@@ -340,6 +354,22 @@ pub trait ProviderManagementService: Send + Sync {
         provider_id: &str,
         provider_admin_token: &str,
     ) -> ServiceResult<Vec<ProviderBotBinding>>;
+
+    async fn get_provider_bot(
+        &self, _provider_id: &str, _provider_admin_token: &str, _lookup: &ProviderBotLookup,
+    ) -> ServiceResult<Option<ProviderBotDetail>> {
+        Err(crate::ServiceError::InternalError("Provider Bot lookup is not configured".into()))
+    }
+
+    /// Preserve the binding list for implementations without Bot registration metadata.
+    async fn list_provider_bots_with_creators(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+    ) -> ServiceResult<Vec<ProviderBotListItem>> {
+        let bindings = self.list_provider_bots(provider_id, provider_admin_token).await?;
+        Ok(bindings.into_iter().map(ProviderBotListItem::from).collect())
+    }
 
     /// List the current-env bots whose control-plane toggles satisfy `filter`.
     /// Admission (provider admin token + `allowed_switch_provider_ids`) is

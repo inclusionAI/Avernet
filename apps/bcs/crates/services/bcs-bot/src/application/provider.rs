@@ -1,7 +1,9 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
+use bcs_service_api::application::ProviderBotListItem;
 use bcs_service_api::core::provider::BotWebhookChange;
+use bcs_service_api::types::{ProviderBotDetail, ProviderBotLookup};
 use bcs_service_api::{
     ActorKind, BotCatalogCleanupPort, BotControlPlaneCoreService, BotRegistryCoreService,
     BotTaskModesQuery,
@@ -76,9 +78,7 @@ impl ProviderManagement {
         self
     }
 
-    /// Inject the bot control-plane core required by the task-mode roster
-    /// (`list_provider_bots_by_task_modes`). The composition root wires this for
-    /// the production/memory server paths; without it the roster method errors.
+    /// Inject control-plane reads for the task-mode roster and Provider Bot detail.
     pub fn with_control_plane(
         mut self,
         control_plane: Arc<dyn BotControlPlaneCoreService>,
@@ -510,6 +510,38 @@ impl ProviderManagementService for ProviderManagement {
         self.provider_bot_core
             .list_provider_bots(provider_id, provider_admin_token)
             .await
+    }
+
+    async fn list_provider_bots_with_creators(
+        &self,
+        provider_id: &str,
+        provider_admin_token: &str,
+    ) -> ServiceResult<Vec<ProviderBotListItem>> {
+        let bindings = self.list_provider_bots(provider_id, provider_admin_token).await?;
+        let mut items: Vec<_> = bindings.into_iter().map(ProviderBotListItem::from).collect();
+
+        // Bound the number of full registration records held while projecting creators.
+        for batch in items.chunks_mut(100) {
+            let ids: Vec<_> = batch.iter().map(|item| item.binding.bot_uuid.clone()).collect();
+            let mut creators: HashMap<_, _> = self.registry.try_get_many(&ids).await?
+                .into_iter()
+                .filter_map(|bot| bot.created_by.map(|creator| (bot.bot_uuid, creator)))
+                .collect();
+            for item in batch {
+                item.created_by = creators.remove(&item.binding.bot_uuid);
+            }
+        }
+        Ok(items)
+    }
+
+    async fn get_provider_bot(
+        &self, provider_id: &str, provider_admin_token: &str, lookup: &ProviderBotLookup,
+    ) -> ServiceResult<Option<ProviderBotDetail>> {
+        self.get_active_provider(provider_id, provider_admin_token).await?;
+        let control_plane = self.control_plane.as_ref().ok_or_else(|| {
+            ServiceError::InternalError("control-plane core not configured".into())
+        })?;
+        control_plane.find_provider_bot(provider_id, lookup, &bcs_config::resolve_env_str()).await
     }
 
     async fn list_provider_bots_by_task_modes(

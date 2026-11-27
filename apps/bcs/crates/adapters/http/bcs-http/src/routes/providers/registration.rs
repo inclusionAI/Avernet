@@ -1,5 +1,6 @@
 //! Provider and Bot registration HTTP translation.
 use super::*;
+use bcs_service_api::types::{ProviderBotDetail, ProviderBotLookup};
 use crate::mapping::bot_profile::to_core_avatar;
 
 pub async fn register_provider(
@@ -176,14 +177,49 @@ pub async fn list_provider_bots(
     headers: HeaderMap,
 ) -> Result<Json<Value>, ProviderRouteError> {
     let provider_admin_token = bearer_token(&headers)?;
-    let bindings = state
+    let items = state
         .services
         .provider_management
-        .list_provider_bots(&provider_id, &provider_admin_token)
+        .list_provider_bots_with_creators(&provider_id, &provider_admin_token)
         .await
         .map_err(provider_error)?;
-    let items: Vec<Value> = bindings.into_iter().map(binding_to_json).collect();
+    let items: Vec<_> = items
+        .into_iter()
+        .map(|item| {
+            let mut binding = binding_to_json(item.binding);
+            binding["created_by"] = json!(item.created_by);
+            binding
+        })
+        .collect();
     Ok(Json(json!({ "items": items })))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderBotDetailQuery {
+    bot_uuid: Option<String>,
+    provider_bot_ref: Option<String>,
+}
+
+pub async fn get_provider_bot(
+    State(state): State<HttpAppState>,
+    Path(provider_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<ProviderBotDetailQuery>,
+) -> Result<Json<ProviderBotDetail>, ProviderRouteError> {
+    let token = bearer_token(&headers)?;
+    let lookup = match (query.bot_uuid, query.provider_bot_ref) {
+        (Some(id), None) if !id.trim().is_empty() => ProviderBotLookup::BotUuid(id),
+        (None, Some(reference)) if !reference.trim().is_empty() => ProviderBotLookup::ProviderBotRef(reference),
+        _ => return Err(ProviderRouteError::bad_request("supply exactly one non-empty bot_uuid or provider_bot_ref")),
+    };
+    let detail = state.services.provider_management.get_provider_bot(&provider_id, &token, &lookup)
+        .await.map_err(provider_error)?
+        .ok_or_else(|| ProviderRouteError {
+            status: StatusCode::NOT_FOUND,
+            message: "provider bot not found".into(),
+        })?;
+    Ok(Json(detail))
 }
 
 pub async fn get_provider(

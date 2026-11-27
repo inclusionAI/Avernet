@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
+use bcs_service_api::types::{ProviderBotDetail, ProviderBotLookup};
 use bcs_service_api::{
     ActorKind, BotCandidateReadQuery, BotCandidateReadRecord, BotControlPlaneCandidate,
     BotControlPlaneCoreService, BotSearchCandidateQuery,
@@ -144,6 +145,56 @@ impl BotControlPlaneCoreService for BotControlPlaneCore {
         self.control_plane
             .sync_provider_caller_configuration(bot_id, env, provider_id, snapshot)
             .await
+    }
+
+    async fn find_provider_bot(
+        &self, provider_id: &str, lookup: &ProviderBotLookup, env: &str,
+    ) -> ServiceResult<Option<ProviderBotDetail>> {
+        let binding = match lookup {
+            ProviderBotLookup::BotUuid(id) => self.provider_bindings.get_binding_by_bot_uuid(id).await?,
+            ProviderBotLookup::ProviderBotRef(reference) => {
+                self.provider_bindings.get_binding_by_provider_ref(provider_id, reference).await?
+            }
+        };
+        if binding.as_ref().is_some_and(|b| b.disabled || b.provider_id != provider_id) {
+            return Ok(None);
+        }
+
+        // Plugin registrations have no delivery binding. For legacy Gateway bindings,
+        // check any newer Bot metadata by UUID before accepting the binding's identity.
+        let registration = match (&self.bot_providers, &binding, lookup) {
+            (None, _, _) => None,
+            (Some(repo), Some(binding), _) => repo.get_provider_bot(&binding.bot_uuid).await?,
+            (Some(repo), None, ProviderBotLookup::BotUuid(id)) => repo.get_provider_bot(id).await?,
+            (Some(repo), None, ProviderBotLookup::ProviderBotRef(reference)) => {
+                repo.get_provider_bot_by_ref(provider_id, reference).await?
+            }
+        };
+        let (bot_uuid, provider_bot_ref) = if let Some(record) = registration {
+            if record.is_deleted || record.provider_id != provider_id
+                || binding.as_ref().is_some_and(|b| b.provider_bot_ref != record.provider_bot_ref)
+            {
+                return Ok(None);
+            }
+            (record.bot_uuid, record.provider_bot_ref)
+        } else if let Some(binding) = binding {
+            (binding.bot_uuid, binding.provider_bot_ref)
+        } else {
+            return Ok(None);
+        };
+        let record = self.control_plane.get_control_plane(&bot_uuid, env).await?;
+        Ok(record.filter(|bot| bot.kind == ActorKind::Bot).map(|bot| ProviderBotDetail {
+            provider_id: provider_id.to_owned(),
+            bot_uuid,
+            provider_bot_ref,
+            name: bot.name,
+            summary: bot.descriptor.summary,
+            created_by: bot.created_by,
+            visibility: bot.visibility,
+            domains: bot.descriptor.domains,
+            skills: bot.descriptor.skills,
+            scopes: bot.descriptor.scopes,
+        }))
     }
 
     async fn get_record(

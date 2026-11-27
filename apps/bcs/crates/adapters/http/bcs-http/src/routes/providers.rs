@@ -37,7 +37,7 @@ use crate::mapping::capabilities::{to_core_skill, to_wire_skill};
 use crate::state::{HttpAppState, VisibilitySyncRequest};
 
 mod registration;
-pub use registration::{register_provider, get_provider_by_slug, get_provider, patch_provider, register_provider_bot, list_provider_bots};
+pub use registration::{register_provider, get_provider_by_slug, get_provider, patch_provider, register_provider_bot, list_provider_bots, get_provider_bot};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

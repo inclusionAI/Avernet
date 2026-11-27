@@ -150,6 +150,10 @@ fn build_api_routes() -> Router<HttpAppState> {
                 .post(routes::providers::register_provider_bot),
         )
         .route(
+            "/providers/{provider_id}/bot-detail",
+            get(routes::providers::get_provider_bot),
+        )
+        .route(
             "/providers/{provider_id}/bots/by-task-modes",
             get(routes::providers::list_provider_bots_by_task_modes),
         )
