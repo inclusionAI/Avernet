@@ -1,0 +1,26 @@
+apps/backend/specs/2026-11-27-context-collab-relational-product-storage/delivery.md
+  h_059e888e5e4e82 146-164
+apps/backend/specs/2026-11-27-context-collab-relational-product-storage/spec.md
+  h_059e888e5e4e82 52,182,204-205,209,234,239,256-258,274,435,549,557
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/RELATIONAL-STORAGE.md
+  h_059e888e5e4e82 14-16,68-71,102-109
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/product_relational_models.py
+  h_059e888e5e4e82 77-80,105,123,126,129,134,139
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_27_product_relational_storage.sql
+  h_059e888e5e4e82 33,49-50,54,73,79-81
+apps/backend/tests/community/repository/task/context_collab/product_relational/test_business_history.py
+  h_059e888e5e4e82 126-139,244,247
+apps/backend/tests/community/repository/task/context_collab/product_relational/test_evidence_and_schema.py
+  h_059e888e5e4e82 116-117,126,145-166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e2b828d9e57d0d1d218284131b6f28ec7dc93364",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
