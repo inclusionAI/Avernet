@@ -1,0 +1,23 @@
+apps/backend/tests/community/di/test_task_module.py
+  s_03e7ef62150935::t_bd3cce79a0928b 308-317
+apps/backend/tests/community/core/task/task_center/test_task_service_relay.py
+  s_03e7ef62150935::t_da845a40cd176d 136-138,141-163,165-168
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_relay.py
+  s_03e7ef62150935::t_5b4ec57d2d1ade 31-34,67-88,93,225-229,231-236,238-239,243,245
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4a0123719a6c79cdcfba4534b4c94dc4f02f47a4",
+  "prompts": {},
+  "sessions": {
+    "s_03e7ef62150935": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2117d-458d-7882-91e6-559116264dd4",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
