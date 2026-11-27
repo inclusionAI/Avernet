@@ -1,0 +1,156 @@
+{
+  "name": "数据库诊断协作群",
+  "description": "Manager–Worker 群：数据库诊断协作群",
+  "version": "7",
+  "supportedInterfaces": [
+    {
+      "url": "local://groups/group-mw-001",
+      "protocolBinding": "LOCAL",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "capabilities": {
+    "extensions": [
+      {
+        "uri": "https://schemas.example.com/bcn/discovery-card/v1",
+        "description": "BCN discovery composition",
+        "required": true,
+        "params": {
+          "groupKind": "manager_worker",
+          "composition": {
+            "definition": {
+              "managerSlot": "manager",
+              "workerSlots": [
+                "worker:bot-worker-001"
+              ],
+              "instruction": "由 manager 分解任务，分配给 worker 后汇总结果。"
+            },
+            "bindings": {
+              "manager": [
+                {
+                  "uuid": "bot-manager-001"
+                }
+              ],
+              "worker:bot-worker-001": [
+                {
+                  "uuid": "bot-worker-001"
+                }
+              ]
+            },
+            "agents": {
+              "bot-manager-001": {
+                "providerName": "platform_x",
+                "revision": "sha256:216e24e740b1838e68d9720f900b0bc9534b8c742097de110efd8d0b0759b162",
+                "card": {
+                  "name": "数据库诊断经理",
+                  "description": "分解数据库诊断任务并汇总执行结果。",
+                  "version": "1.0.0",
+                  "supportedInterfaces": [
+                    {
+                      "url": "https://agents.example.com/a2a/bot-manager-001",
+                      "protocolBinding": "HTTP+JSON",
+                      "protocolVersion": "1.0"
+                    }
+                  ],
+                  "capabilities": {
+                    "streaming": true,
+                    "extensions": [
+                      {
+                        "uri": "https://example.org/a2a/extensions/source-agent/v1",
+                        "description": "来源平台标识",
+                        "required": false,
+                        "params": {
+                          "agentId": "third-party-agent-manager-001",
+                          "party": "third_party"
+                        }
+                      }
+                    ]
+                  },
+                  "defaultInputModes": [
+                    "text/plain"
+                  ],
+                  "defaultOutputModes": [
+                    "text/plain"
+                  ],
+                  "skills": [
+                    {
+                      "id": "coordinate",
+                      "name": "数据库诊断经理",
+                      "description": "分解数据库诊断任务并汇总执行结果。",
+                      "tags": [
+                        "database"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "bot-worker-001": {
+                "providerName": "platform_y",
+                "revision": "sha256:eed8f5c1e429ecc3e72227600e9726bae0f1ea7bdf540e929f6010b268f57aea",
+                "card": {
+                  "name": "数据库诊断工程师",
+                  "description": "分析数据库指标并提供诊断建议。",
+                  "version": "1.0.0",
+                  "supportedInterfaces": [
+                    {
+                      "url": "https://agents.example.com/a2a/bot-worker-001",
+                      "protocolBinding": "HTTP+JSON",
+                      "protocolVersion": "1.0"
+                    }
+                  ],
+                  "capabilities": {
+                    "streaming": true,
+                    "extensions": [
+                      {
+                        "uri": "https://example.org/a2a/extensions/source-agent/v1",
+                        "description": "来源平台标识",
+                        "required": false,
+                        "params": {
+                          "agentId": "third-party-agent-worker-001",
+                          "party": "third_party"
+                        }
+                      }
+                    ]
+                  },
+                  "defaultInputModes": [
+                    "text/plain"
+                  ],
+                  "defaultOutputModes": [
+                    "text/plain"
+                  ],
+                  "skills": [
+                    {
+                      "id": "diagnose",
+                      "name": "数据库诊断工程师",
+                      "description": "分析数据库指标并提供诊断建议。",
+                      "tags": [
+                        "database"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "revision": "sha256:68a6bff1f9ee092f966514b3cdb034645fac376f75e1152cf30cb17f56f0b47a"
+        }
+      }
+    ]
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "skills": [
+    {
+      "id": "group.execute",
+      "name": "数据库诊断协作群",
+      "description": "Manager–Worker 群：数据库诊断协作群",
+      "tags": [
+        "manager_worker"
+      ]
+    }
+  ]
+}
