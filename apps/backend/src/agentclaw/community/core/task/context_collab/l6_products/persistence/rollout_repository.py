@@ -4,6 +4,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from hashlib import sha256
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func
 from injector import inject
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.core.task.context_collab.errors import (
@@ -53,6 +54,7 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.rollou
     ProductIdentityRow as Identity,
     ProductReceiptRow as Receipt,
     ProductIntentRow as Intent,
+    ProductCandidateSlotRow as Slot,
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.configuration import (
     encode_profile,
@@ -70,7 +72,14 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 )
 
 
-class SqlProductRuntimeRepository:
+from .runtime_outbox import RuntimeOutbox
+from ...l5_methods.multi_rollout_state import initialize, append_candidate, digest
+from ...l5_methods.multi_rollout_policy import ParallelBestOf
+from ..product_profile_service.configuration import multi_policy
+from time import time
+
+
+class SqlProductRuntimeRepository(RuntimeOutbox):
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
         self.db = db
@@ -89,9 +98,10 @@ class SqlProductRuntimeRepository:
 
     @staticmethod
     def _keys(context, payload):
-        return sha256(canonical(context.actor.to_dict()).encode()).hexdigest(), sha256(
-            canonical(payload).encode()
-        ).hexdigest()
+        return (
+            sha256(canonical(context.actor.to_dict()).encode()).hexdigest(),
+            sha256(canonical(payload).encode()).hexdigest(),
+        )
 
     def _replay(self, session, request_id, operation, payload, context):
         text(request_id, maximum=128)
@@ -183,7 +193,7 @@ class SqlProductRuntimeRepository:
             row.collet_id = row.id
         return row.id
 
-    def create_collet(self, profile, content, context, request_id):
+    def create_collet(self, profile, content, context, request_id, *, multi_setup=None):
         payload = {"profile_id": profile.id, "content": content}
         try:
             with self.db.transactional_orm_session() as session:
@@ -222,8 +232,8 @@ class SqlProductRuntimeRepository:
                     MethodCompositionEdge(
                         f"product-v2:{cid}:edge:{i}",
                         f"product-v2:{cid}",
-                        by_kind[r.parent_method],
-                        by_kind[r.child_method],
+                        by_kind[r.source_method],
+                        by_kind[r.target_method],
                         r.relation,
                         CompositionEdgeState.ACTIVE,
                         "",
@@ -252,12 +262,37 @@ class SqlProductRuntimeRepository:
                     policy.acceptance_ref,
                     policy.overall_acceptance,
                 )
-                append_rollout(
-                    snapshot,
-                    lambda kind: self._identity(session, kind, cid),
-                    content,
-                    {s.name for s in snapshot.specs},
-                )
+                selected_multi = multi_policy(profile.composition)
+                if selected_multi:
+                    if multi_setup is None:
+                        raise Invalid(
+                            "MultiRollout requires governed host capability admission"
+                        )
+                    initialize(
+                        snapshot,
+                        selected_multi,
+                        multi_setup,
+                        int(time()),
+                        digest(encode_profile(profile)),
+                    )
+                    count = (
+                        selected_multi.strategy.samples
+                        if isinstance(selected_multi.strategy, ParallelBestOf)
+                        else 1
+                    )
+                    for _ in range(count):
+                        append_candidate(
+                            snapshot,
+                            lambda kind: self._identity(session, kind, cid),
+                            content,
+                        )
+                else:
+                    append_rollout(
+                        snapshot,
+                        lambda kind: self._identity(session, kind, cid),
+                        content,
+                        {s.name for s in snapshot.specs},
+                    )
                 session.add(
                     Runtime(
                         **self._axes(),
@@ -268,21 +303,17 @@ class SqlProductRuntimeRepository:
                     )
                 )
                 session.flush()
-                session.add(
-                    Intent(
-                        **self._axes(),
-                        collet_id=cid,
-                        revision=1,
-                        kind="advance",
-                        payload_json=canonical(
-                            {
-                                "kind": "advance",
-                                "rollout_id": snapshot.current_rollout_id,
-                            }
-                        ),
-                        state="pending",
+                initial = (
+                    tuple(
+                        {"kind": "advance-cand", "rollout_id": c.rollout_id}
+                        for c in snapshot.multi.candidates
+                    )
+                    if snapshot.multi
+                    else (
+                        {"kind": "advance", "rollout_id": snapshot.current_rollout_id},
                     )
                 )
+                self._enqueue(session, snapshot, initial)
                 self._receipt(
                     session,
                     request_id,
@@ -299,11 +330,29 @@ class SqlProductRuntimeRepository:
             return self.get_collet(replay["id"])
 
     def _get(self, session, collet_id):
-        row = (
-            self._query(session, Runtime).filter(Runtime.id == collet_id).one_or_none()
+        # Read the CAS snapshot and its admission facts in ONE SQL statement.
+        # SQLite's legacy SELECT transaction mode (and READ COMMITTED hosts)
+        # does not promise a stable snapshot across two separate SELECTs.
+        # At most eight tenant slots => the numeric aggregate is < 160 bytes,
+        # below both supported databases' GROUP_CONCAT limits.
+        slot_ids = (
+            self._query(session, Slot)
+            .with_entities(func.group_concat(Slot.rollout_id))
+            .filter(Slot.collet_id == Runtime.id)
+            .correlate(Runtime)
+            .scalar_subquery()
         )
-        if row is None:
+        result = (
+            self._query(session, Runtime)
+            .with_entities(Runtime, slot_ids)
+            .filter(Runtime.id == collet_id)
+            .populate_existing()
+            .one_or_none()
+        )
+        if result is None:
             raise Missing("Collet not found in this scope")
+        row, slot_csv = result
+        actual_slots = {int(value) for value in (slot_csv or "").split(",") if value}
         snapshot = decode_snapshot(row.snapshot_json)
         if (
             snapshot.collet.id != row.id
@@ -365,7 +414,7 @@ class SqlProductRuntimeRepository:
             and e.collab_context_id == f"product-v2:{row.id}"
         }
         expected_relations = {
-            (r.parent_method, r.child_method, r.relation)
+            (r.source_method, r.target_method, r.relation)
             for r in profile.composition.relations
         }
         if (
@@ -373,6 +422,24 @@ class SqlProductRuntimeRepository:
             or actual_relations != expected_relations
         ):
             raise Invalid("persisted Method relation prerequisites are incomplete")
+        selected_multi = multi_policy(profile.composition)
+        if bool(selected_multi) != bool(snapshot.multi):
+            raise Invalid("runtime schema does not match the published composition")
+        if snapshot.multi and (
+            snapshot.multi.policy != selected_multi
+            or any(
+                p.profile_digest != digest(encode_profile(profile))
+                for p in snapshot.multi.plans
+            )
+        ):
+            raise Invalid("frozen policy/plan profile digest mismatch")
+        if snapshot.multi:
+            if actual_slots != {
+                c.rollout_id for c in snapshot.multi.candidates if c.slot
+            }:
+                raise Invalid(
+                    "persisted candidate admission facts do not match snapshot"
+                )
         return snapshot
 
     def get_collet(self, collet_id):
@@ -392,7 +459,17 @@ class SqlProductRuntimeRepository:
                 raise Missing("execution identity not found in this scope")
             return self._get(session, row.collet_id)
 
-    def save(self, snapshot, revision, *, receipt=None, intents=(), successor=None):
+    def save(
+        self,
+        snapshot,
+        revision,
+        *,
+        receipt=None,
+        intents=(),
+        successor=None,
+        acquire_slot=None,
+        release_slots=(),
+    ):
         positive_id(revision)
         try:
             with self.db.transactional_orm_session() as session:
@@ -405,12 +482,30 @@ class SqlProductRuntimeRepository:
                         return replay
                 if successor:
                     content, affected = successor
-                    append_rollout(
-                        snapshot,
-                        lambda kind: self._identity(session, kind, snapshot.collet.id),
-                        content,
-                        affected,
-                    )
+                    if snapshot.multi:
+                        append_candidate(
+                            snapshot,
+                            lambda kind: self._identity(
+                                session, kind, snapshot.collet.id
+                            ),
+                            content,
+                        )
+                        intents = (
+                            *intents,
+                            {
+                                "kind": "advance-cand",
+                                "rollout_id": snapshot.current_rollout_id,
+                            },
+                        )
+                    else:
+                        append_rollout(
+                            snapshot,
+                            lambda kind: self._identity(
+                                session, kind, snapshot.collet.id
+                            ),
+                            content,
+                            affected,
+                        )
                 snapshot.revision = revision + 1
                 updated = (
                     self._query(session, Runtime)
@@ -427,6 +522,7 @@ class SqlProductRuntimeRepository:
                 )
                 if updated != 1:
                     raise Conflict("stale product revision")
+                self._slots(session, snapshot, acquire_slot, release_slots)
                 # Older advance intents are superseded atomically. Cancellation
                 # intents are retained until confirmed, even across new iterations.
                 self._query(session, Intent).filter(
@@ -434,17 +530,7 @@ class SqlProductRuntimeRepository:
                     Intent.state == "pending",
                     Intent.kind == "advance",
                 ).update({Intent.state: "superseded"}, synchronize_session=False)
-                for intent in intents:
-                    session.add(
-                        Intent(
-                            **self._axes(),
-                            collet_id=snapshot.collet.id,
-                            revision=snapshot.revision,
-                            kind=intent["kind"],
-                            payload_json=canonical(intent),
-                            state="pending",
-                        )
-                    )
+                self._enqueue(session, snapshot, intents)
                 if receipt:
                     self._receipt(
                         session, request_id, operation, payload, context, result
@@ -483,45 +569,3 @@ class SqlProductRuntimeRepository:
                     state="pending",
                 )
             )
-
-    def pending_intents(self, limit=20):
-        with self.db.orm_session() as session:
-            rows = (
-                self._query(session, Intent)
-                .filter(
-                    Intent.state == "pending", Intent.kind.in_(("advance", "cancel"))
-                )
-                .order_by(Intent.id)
-                .limit(limit)
-                .all()
-            )
-            return [
-                {
-                    "id": r.id,
-                    "collet_id": r.collet_id,
-                    "revision": r.revision,
-                    **load(r.payload_json),
-                }
-                for r in rows
-            ]
-
-    def claim_intent(self, identity):
-        with self.db.transactional_orm_session() as session:
-            return (
-                self._query(session, Intent)
-                .filter(Intent.id == identity, Intent.state == "pending")
-                .update({Intent.state: "claimed"}, synchronize_session=False)
-                == 1
-            )
-
-    def finish_intent(self, identity, state):
-        if state not in {"done", "requested", "confirmed", "unknown", "superseded"}:
-            raise Invalid("unknown intent result")
-        with self.db.transactional_orm_session() as session:
-            count = (
-                self._query(session, Intent)
-                .filter(Intent.id == identity, Intent.state == "claimed")
-                .update({Intent.state: state}, synchronize_session=False)
-            )
-            if count != 1:
-                raise Conflict("intent is no longer claimed")

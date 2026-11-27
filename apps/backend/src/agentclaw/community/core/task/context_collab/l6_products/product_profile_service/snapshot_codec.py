@@ -89,19 +89,51 @@ def encode_snapshot(snapshot: RuntimeSnapshot) -> str:
         }
         for s in snapshot.specs
     ]
-    result = canonical(data)
-    if len(result.encode()) > MAX_SNAPSHOT_BYTES:
-        raise Invalid(
-            "runtime history exceeds snapshot limit; archive before continuing"
-        )
-    return result
+    if snapshot.multi is None:
+        data.pop("multi")  # Explicit legacy branch: old bytes/shape remain readable.
+    else:
+        from .multi_snapshot_codec import encode_control, validate_control
+
+        validate_control(snapshot)
+        from ...l5_methods.multi_rollout_contracts import SCHEMA
+
+        data["schema"] = SCHEMA
+        data["multi"] = encode_control(snapshot.multi)
+    # Stream the bounded wire: a legal 32x100 graph can contain much more
+    # than 12 MiB of repeated context. Do not materialize a giant JSON string
+    # just to discover that it exceeds the limit.
+    chunks, size = [], 0
+    encoder = json.JSONEncoder(
+        sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    )
+    for chunk in encoder.iterencode(data):
+        size += len(chunk.encode())
+        if size > MAX_SNAPSHOT_BYTES:
+            raise Invalid(
+                "runtime history exceeds snapshot limit; archive before continuing"
+            )
+        chunks.append(chunk)
+    return "".join(chunks)
 
 
 def decode_snapshot(value: str) -> RuntimeSnapshot:
     data = load(value)
-    shape(data, {f.name for f in fields(RuntimeSnapshot)})
+    if type(data) is not dict:
+        raise Invalid("stored runtime must be an object")
+    from ...l5_methods.multi_rollout_contracts import SCHEMA
+    from .multi_snapshot_codec import decode_control, validate_control
+
+    names = {f.name for f in fields(RuntimeSnapshot)}
+    if "schema" in data:
+        if data.pop("schema") != SCHEMA:
+            raise Invalid("unknown runtime snapshot schema")
+        shape(data, names)
+        data["multi"] = decode_control(data["multi"])
+    else:
+        shape(data, names - {"multi"})
+        data["multi"] = None
+    shape(data["collet"], {f.name for f in fields(Collet)})
     collet = dict(data["collet"])
-    shape(collet, {f.name for f in fields(Collet)})
     collet["status"] = StatusEnum(collet["status"])
     rollouts = []
     for raw in data["rollouts"]:
@@ -181,4 +213,8 @@ def decode_snapshot(value: str) -> RuntimeSnapshot:
             record = next(v for v in records if v.stage_id == s.stage_rollout_id)
             if (record.route.session_id if record.route else "") != s.session_id:
                 raise Invalid("session route does not match the persisted stage")
+    if snapshot.multi:
+        validate_control(snapshot)
+    elif any(b.method_kind == "MultiRollout" for b in snapshot.bindings):
+        raise Invalid("MultiRollout cannot use a legacy snapshot")
     return snapshot

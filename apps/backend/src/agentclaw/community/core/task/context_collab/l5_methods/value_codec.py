@@ -41,7 +41,16 @@ def encode(value):
                 if type(value).__name__ == "LegacyProductConfiguration"
                 else type(value).__name__
             ),
-            **{f.name: encode(getattr(value, f.name)) for f in fields(value) if f.init},
+            **{
+                f.name: encode(getattr(value, f.name))
+                for f in fields(value)
+                if f.init
+                and not (
+                    type(value).__name__ == "AdaptiveUntilAccepted"
+                    and f.name == "feedback_timeout_seconds"
+                    and value.feedback_mode == "autonomous"
+                )
+            },
         }
     if isinstance(value, Enum):
         return value.value
@@ -115,6 +124,12 @@ def decode(data, expected, registry, method_resolver=None):
         if subtype is not None and issubclass(subtype, expected):
             expected = subtype
     names = {f.name for f in fields(expected) if f.init}
+    if (
+        expected.__name__ == "AdaptiveUntilAccepted"
+        and type(data) is dict
+        and data.get("feedback_mode") == "autonomous"
+    ):
+        names.remove("feedback_timeout_seconds")
     if (
         type(data) is not dict
         or set(data) != names | {"type"}

@@ -15,6 +15,9 @@ from agentclaw.community.core.task.context_collab.l5_methods.publication import 
 )
 
 
+from .multi_rollout_policy import MultiRolloutMethodPolicy
+
+
 @dataclass(frozen=True)
 class OpenMethodPolicy:
     """Publication/admission policy for an Open Method."""
@@ -61,16 +64,28 @@ class SwarmWorkflowPolicy:
 @dataclass(frozen=True)
 class SwarmStagesPolicy:
     """Capabilities for YAML-owned stages, never a second authored stage graph."""
+
     execution_ref: str
     acceptance_ref: str
     overall_acceptance: Literal["stages", "owner"]
     method: Literal["Swarm"] = field(default="Swarm", init=False)
 
     def __post_init__(self) -> None:
-        if any(type(v) is not str or not v.strip() for v in (self.execution_ref, self.acceptance_ref)):
-            raise ContextCollabValidationError("stage execution/acceptance capability refs are required")
+        if any(
+            type(v) is not str or not v.strip()
+            for v in (self.execution_ref, self.acceptance_ref)
+        ):
+            raise ContextCollabValidationError(
+                "stage execution/acceptance capability refs are required"
+            )
         if self.overall_acceptance not in {"stages", "owner"}:
             raise ContextCollabValidationError("overall acceptance must be explicit")
 
 
-MethodPolicy: TypeAlias = SwarmStagesPolicy | OpenMethodPolicy | SwarmMethodPolicy | SwarmWorkflowPolicy
+MethodPolicy: TypeAlias = (
+    MultiRolloutMethodPolicy
+    | SwarmStagesPolicy
+    | OpenMethodPolicy
+    | SwarmMethodPolicy
+    | SwarmWorkflowPolicy
+)

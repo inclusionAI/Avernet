@@ -284,43 +284,39 @@ Delivery 依赖显式 `ProductProfileServiceProtocol`，在 `api/task/` 重导�
 
 ### 5.2 服务签名草图
 
-参数名在本提案中固定如下；网络相关调用采用 async，避免在 async HTTP 中直接运行阻塞编排。`ActorContext` 是可信上下文；request_id/expected_revision 为技术请求参数，不是新增领域对象字段。仓储作用域从可信上下文解析，不能接受正文任意覆盖 tenant/env。
+2026-11-26 按本轮用户要求精简接口：五方法及对应 HTTP 正文不再接收 `context`、`request_id`。原版显式参数及客户端幂等设计被本节修订替代，原实施验证记录保留在交付报告中。网络相关调用仍采用 async；可信身份由入口建立的 G1 `actor_context_scope` 提供，无身份作用域时拒绝，不能默认使用已存 owner。仓储 tenant/env 继续从可信作用域解析，不能接受正文覆盖。后续按用户追加要求，`interactive` 在 `interactive_context` 前新增 `interactive_uuid` 并移除公开 `expected_revision`；仓储 revision/CAS 保留为内部并发围栏，不是领域对象字段。
 
 ```python
 class ProductProfileServiceProtocol(Protocol):
     async def create_product_profile(
-        self, name: str, composition: MethodCompositionTemplate, stages: YAML, *,
-        context: ActorContext, request_id: str,
+        self, name: str, composition: MethodCompositionTemplate, stages: YAML,
     ) -> ProductProfile: ...
 
     async def create_product_collet(
-        self, profile_id: int, content: str, *,
-        context: ActorContext, request_id: str,
+        self, profile_id: int, content: str,
     ) -> Collet: ...
 
     async def query_collet_rollout(
-        self, collet_id: int, all_rollout: bool = True, *,
-        context: ActorContext,
+        self, collet_id: int, all_rollout: bool = True,
     ) -> list[ColletRollout]: ...
 
     async def interactive(
-        self, collet_rollout_id: int, interactive_context: str, *,
-        context: ActorContext, request_id: str, expected_revision: int,
+        self, collet_rollout_id: int, interactive_uuid: str, interactive_context: str,
     ) -> InteractiveResult: ...
 
     async def query_stage_rollout_details(
         self, stage_rollout_id: int, *,
-        context: ActorContext, limit: int = 50,
+        limit: int = 50,
     ) -> StageRolloutDetails: ...
 ```
 
-`ProductProfileService` 实现上述 Protocol。图示方法没有展开鉴权/并发参数；这里显式补充，不改变其业务参数含义。`expected_revision` 从查询响应的技术元数据获得，领域对象本身不添加 version；接口 Envelope/传输元数据在实施切片中同步定义。
+`ProductProfileService` 实现上述 Protocol。HTTP 在共享认证依赖中绑定并清理身份作用域，Core 不解析 HTTP；库调用方也必须建立经过认证的作用域。创建操作的回执标识内部生成，不承诺创建重试去重，也不按内容偷偷去重。干预通过调用者提供的 `interactive_uuid` 重放已提交结果；revision 从服务读取的快照捕获并在仓储执行 CAS，不要求调用者提供。领域对象本身不添加 version；接口 Envelope 的追踪元数据与本次移除的业务请求参数无关。独立 Bot 进度上报的 ReportContext 及其 request_id/重放合同不变。
 
 ### 5.3 create_product_profile
 
-1. 校验配置管理权限、name、request_id 和必填的 composition；验证其 MethodProfile、MethodPolicy、required/optional methods 及 relations，安全解析并验证 stages YAML。
+1. 要求可信身份作用域，校验配置管理权限、name 和必填的 composition；验证其 MethodProfile、MethodPolicy、required/optional methods 及 relations，安全解析并验证 stages YAML。
 2. 联合校验 composition 与 YAML：执行/验收能力须由实际选用的 Method 组合及注入能力承接，图配置冲突显式拒绝；不存在能力时不能创建一个声称可运行的配置。结构校验不访问真实 Bot 或暗中授权。
-3. 创建并原子持久化 `ProductProfile(id, name, composition, stages)`，返回包含完整 composition 及原 YAML 的已落库对象；同主体同请求同内容返回原对象，改内容同键冲突。幂等内容比较同时包含 composition 和 stages，不能仅按名称或 YAML 去重。
+3. 创建并原子持久化 `ProductProfile(id, name, composition, stages)`，返回包含完整 composition 及原 YAML 的已落库对象；每次调用创建独立身份，即使名称/composition/stages 完全相同也不复用旧对象。内部回执与完整配置同事务保存。
 4. 新流程不再“先返回 Definition 再由调用者额外 publish 才能查到”。这是对旧纯 authoring/独立发布合同的明确替换，须同时迁移调用者及发布授权，**不是绕过配置管理权限**。
 5. 返回成功不创建 Collet、不执行阶段、不修改既有配置；不继续提供含不同字段的另一个 Definition 入口。
 
@@ -332,7 +328,7 @@ class ProductProfileServiceProtocol(Protocol):
 4. 同一提交单元保存 Collet、Method 绑定/关系、首轮、阶段、创建回执与待推进意图，然后返回 Collet；外部派发/会话创建在事务后进行，不能在 SQL 长事务里等待 Bot。
 5. 首轮执行推进时固定候选、实际执行者和输入，持久化真实 session_id。没有配置的执行能力明确失败，不用本地生成字符串假装创建真实会话。
 
-图中的 `create_collet_rollout` 作为该方法及 interactive 调用的**内部能力**，不增加第六个公共服务方法。创建请求重放不能再建 Collet/初轮，也不重新派发。
+图中的 `create_collet_rollout` 作为该方法及 interactive 调用的**内部能力**，不增加第六个公共服务方法。每次 create 调用创建独立的 Collet/初轮；内部推进仍使用已存 attempt/回执，不把外部派发重试等同于再次 create。
 
 ### 5.5 query_collet_rollout
 
@@ -344,13 +340,14 @@ class ProductProfileServiceProtocol(Protocol):
 
 ### 5.6 interactive
 
-1. `collet_rollout_id` 精确定位 `ColletRollout.rollout_id`，校验它所属 Collet、操作者权限和 expected_revision；拒绝对被替代轮次的过时控制。
-2. 读取阶段状态、产物、验收失败及需要的授权会话信息；将 interactive_context 交给注入的交互能力，产生经过 schema 校验的调整建议。
+1. 精确签名为 `interactive(collet_rollout_id, interactive_uuid, interactive_context)`。`interactive_uuid` 是调用者生成的干预唯一 ID，非空白字符串且最多 128 UTF-8 字节；HTTP 同步接收该字段，不再接收 `expected_revision`。
+2. `collet_rollout_id` 精确定位 `ColletRollout.rollout_id`，先校验所属 Collet 和当前操作者权限，再按可信 tenant/env/actor 读取 UUID 回执。同 UUID、同 rollout ID 和反馈文本返回原 `InteractiveResult`，即使当前轮次/状态已经改变也不再次提议、生成轮次或取消/推进意图；同 UUID 改内容或改 rollout 显式冲突。无回执的新干预必须指向当前轮次。读取阶段状态、产物、验收失败及需要的授权会话信息，将 interactive_context 交给只产生建议的注入能力，产生经过 schema 校验的调整建议。
 3. 只接纳 DO_NOTHING / OPTIMIZE / RE_DO / SHUTDOWN，返回 `InteractiveResult(type, message)`。自然语言不能成为直接写库的命令；模型不决定授权。
 4. DO_NOTHING 留痕但不新建轮次；OPTIMIZE/RE_DO 固定受影响阶段及其后继，对需要执行的阶段创建新 StageRollout、新会话与新轮次，保留旧事实。图示按 name 表达的 adjusted_stages YAML 只允许引用当前配置中的唯一名称；instruction 不得改变候选/依赖或验收合同。
 5. 已成功且不受影响的阶段可通过内部证据映射复用；不能把旧 session_id 冒充新阶段会话，也不能以复用为理由重写旧产物/结果。旧在途分配撤销，迟到上报被拒绝。
 6. SHUTDOWN 经明确权限停止继续调度，并记录取消意图；远程取消只有实际确认才宣称成功。图中六个状态没有 STOPPED/CANCELLED，首版用内部停止事实阻断调度并保留最后业务状态，不把停止伪装为 RUN_FAILED，也不私自扩充枚举；后续如需公开停止状态，单独演进合同。
 7. 原有 FAILED Plan 不能重规划的限制须改造为“经授权可创建后继轮次、旧失败历史不变”；不能直接声称调用现有 build_revision 已经支持。
+8. UUID 回执、结果、状态/后继身份和 outbox 意图同事务提交；提交失败不消耗 UUID。内部使用本次读取的 revision 做 CAS，和进度上报、其他干预竞争；不自动重算/重试旧建议。重复调用输掉 CAS 时从新事务查询对应回执，存在则返回原结果，否则保留冲突。并发重复可以重复计算无副作用的建议，但只能提交一次干预效果；该能力不得自行持久化或调用派发/取消。服务重建后仍从 SQL 重放，不依赖进程内缓存。
 
 会话摘要可作为 interactive 的内部辅助，不能替代用户要求的消息明细；不新增公开 get_summary 方法。修改 Profile 的 DAG 结构或验收条件应新建 Profile/新协作请求，不用干预参数绕过配置管理。
 
@@ -408,7 +405,7 @@ ProductProfile、Collet、ColletRollout、StageRollout 是新合同中的正式�
 
 最低旅程：创建同时包含 MethodCompositionTemplate 与图示 stages YAML 的 ProductProfile → 创建 Collet/初轮/阶段 → 真实分配并保存 session_id → 按 stage_rollout_id 查询真实消息 → 接纳验收失败 → interactive 创建后继轮次 → 查询全部轮次 → 拒绝旧执行迟到报告 → 新轮通过并按产品合同收敛整体状态。
 
-必须验证领域对象的**精确字段集合**、composition 与 YAML 的完整往返/联合校验、optional methods 不隐式启用、重复 DAG 配置冲突拒绝、YAML 单条件/多条件、三种 ArtifactContent 往返、ProgressEvent 三种类型、五个服务方法、真实消息 provider 调用与越权无调用，以及创建/干预/报告幂等和提交失败。
+必须验证领域对象的**精确字段集合**、composition 与 YAML 的完整往返/联合校验、optional methods 不隐式启用、重复 DAG 配置冲突拒绝、YAML 单条件/多条件、三种 ArtifactContent 往返、ProgressEvent 三种类型、五个服务方法的精简签名、真实消息 provider 调用与越权无调用，以及独立创建、干预 UUID 的顺序/并发/服务重建重放、同 UUID 改内容或 rollout 冲突、内部 CAS、报告幂等和提交失败。身份作用域须覆盖缺失拒绝、异常恢复及并发隔离；HTTP 不要求旧请求字段且拒绝未知字段。
 
 **原方案阶段交付记录（历史）**：当时仅修改 spec/plan/research 和导航，没有实现新对象、模块、方法、DDL 或接口；48 passed 仅为旧实现基线。原文档检查见 [research.md](research.md)。
 

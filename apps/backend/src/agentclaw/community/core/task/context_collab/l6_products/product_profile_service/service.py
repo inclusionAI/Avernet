@@ -3,15 +3,13 @@
 import asyncio
 from dataclasses import asdict
 from copy import deepcopy
+from uuid import uuid4
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError as Invalid,
     ContextCollabVersionConflict as Conflict,
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
-    ActorContext,
-)
-from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
-    ProductProfilePublicationAuthorizer,
+    current_actor_context,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
@@ -41,9 +39,6 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile im
     ProductProfile,
     YAML,
 )
-from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    MethodCompositionTemplate,
-)
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.contracts import (
     ProductProfileServiceProtocol,
     InteractiveResult,
@@ -52,6 +47,8 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.configuration import (
     validate_configuration,
+    default_composition,
+    multi_policy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.ports import (
     ProductProfileRepository,
@@ -61,85 +58,91 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 )
 
 
+from ...l5_methods.multi_rollout_projection import control_metadata
+from ...l5_methods.multi_rollout_controller import MultiRolloutController
+
+
 class ProductProfileService(ProductProfileServiceProtocol):
     def __init__(
         self,
         repository: ProductProfileRepository,
-        publisher: ProductProfilePublicationAuthorizer,
         authorization: ProductRuntimeAuthorization,
         execution: RolloutExecutionPort,
         interaction: RolloutInteractionPort,
         messages: StageSessionMessagesPort,
+        multi_rollout: MultiRolloutController | None = None,
     ) -> None:
         self._repository = repository
-        self._publisher = publisher
         self._authorization = authorization
         self._execution = execution
         self._interaction = interaction
         self._messages = messages
+        self._multi_rollout = multi_rollout
 
     async def create_product_profile(
         self,
         name: str,
-        composition: MethodCompositionTemplate,
         stages: YAML,
-        *,
-        context: ActorContext,
-        request_id: str,
     ) -> ProductProfile:
+        context = current_actor_context()
         text(name, maximum=256)
-        text(request_id, maximum=128)
-        # Keep the existing independently configured management authority.
-        self._publisher.check_publish(name, 1, context)
-        await asyncio.to_thread(
+        composition = default_composition()
+        specs, execution_policy = await asyncio.to_thread(
             validate_configuration, composition, stages, self._execution
         )
+        await self._multi_setup(composition, specs, execution_policy, context)
         return await asyncio.to_thread(
             self._repository.create_profile,
             name,
             composition,
             stages,
             context,
-            request_id,
+            uuid4().hex,
         )
 
-    async def create_product_collet(
-        self, profile_id: int, content: str, *, context: ActorContext, request_id: str
-    ) -> Collet:
+    async def create_product_collet(self, profile_id: int, content: str) -> Collet:
+        context = current_actor_context()
         positive_id(profile_id)
         text(content)
-        text(request_id, maximum=128)
         profile, owner = await asyncio.to_thread(
             self._repository.get_profile, profile_id
         )
         self._authorization.check("create", context, owner)
-        payload = {"profile_id": profile_id, "content": content}
-        replay = await asyncio.to_thread(
-            self._repository.replay, request_id, "create_collet", payload, context
+        specs, execution_policy = await asyncio.to_thread(
+            validate_configuration, profile.composition, profile.stages, self._execution
         )
-        if replay is None:
-            await asyncio.to_thread(
-                validate_configuration,
-                profile.composition,
-                profile.stages,
-                self._execution,
-            )
-            await asyncio.to_thread(
-                self._repository.create_collet, profile, content, context, request_id
-            )
-            replay = await asyncio.to_thread(
-                self._repository.replay, request_id, "create_collet", payload, context
-            )
-        return Collet(
-            replay["id"],
-            replay["profile_id"],
-            replay["content"],
-            StatusEnum(replay["status"]),
+        setup = await self._multi_setup(
+            profile.composition, specs, execution_policy, context
+        )
+        kwargs = {"multi_setup": setup} if setup else {}
+        snapshot = await asyncio.to_thread(
+            self._repository.create_collet,
+            profile,
+            content,
+            context,
+            uuid4().hex,
+            **kwargs
+        )
+        return snapshot.collet
+
+    async def _multi_setup(self, composition, specs, execution_policy, context):
+        policy = multi_policy(composition)
+        if policy is None:
+            return None
+        if self._multi_rollout is None:
+            raise Invalid("MultiRollout host capabilities are not configured")
+        return await asyncio.to_thread(
+            self._multi_rollout.configure,
+            policy,
+            specs,
+            execution_policy.execution_ref,
+            context,
         )
 
     async def query_collet_rollout(
-        self, collet_id: int, all_rollout: bool = True, *, context: ActorContext
+        self, collet_id: int, all_rollout: bool = True
     ) -> list[ColletRollout]:
+        context = current_actor_context()
         positive_id(collet_id)
         if type(all_rollout) is not bool:
             raise Invalid("all_rollout must be a boolean")
@@ -151,22 +154,23 @@ class ProductProfileService(ProductProfileServiceProtocol):
             else [snapshot.current()]
         )
         return RolloutList(
-            values, snapshot.revision, snapshot.current_rollout_id, snapshot.stopped
+            values,
+            snapshot.revision,
+            snapshot.current_rollout_id,
+            snapshot.stopped,
+            multi_rollout_control=control_metadata(snapshot),
         )
 
     async def interactive(
         self,
         collet_rollout_id: int,
+        interactive_uuid: str,
         interactive_context: str,
-        *,
-        context: ActorContext,
-        request_id: str,
-        expected_revision: int,
     ) -> InteractiveResult:
+        context = current_actor_context()
         positive_id(collet_rollout_id)
-        positive_id(expected_revision)
+        text(interactive_uuid, maximum=128)
         text(interactive_context)
-        text(request_id, maximum=128)
         snapshot = await asyncio.to_thread(
             self._repository.locate, collet_rollout_id, "rollout"
         )
@@ -174,18 +178,33 @@ class ProductProfileService(ProductProfileServiceProtocol):
         payload = {
             "rollout_id": collet_rollout_id,
             "content": interactive_context,
-            "revision": expected_revision,
         }
         replay = await asyncio.to_thread(
-            self._repository.replay, request_id, "interactive", payload, context
+            self._repository.replay, interactive_uuid, "interactive", payload, context
         )
         if replay is not None:
             return InteractiveResult(A(replay["type"]), replay["message"])
-        if (
-            snapshot.current_rollout_id != collet_rollout_id
-            or snapshot.revision != expected_revision
-        ):
-            raise Conflict("stale rollout or product revision")
+        if snapshot.current_rollout_id != collet_rollout_id:
+            raise Conflict("stale rollout")
+        if snapshot.multi:
+            if self._multi_rollout is None:
+                raise Invalid("MultiRollout controller is not installed")
+            try:
+                result = await self._multi_rollout.interactive(
+                    snapshot, interactive_uuid, interactive_context, context
+                )
+            except Conflict:
+                result = await asyncio.to_thread(
+                    self._repository.replay,
+                    interactive_uuid,
+                    "interactive",
+                    payload,
+                    context,
+                )
+                if result is None:
+                    raise
+            return InteractiveResult(A(result["type"]), result["message"])
+        revision = snapshot.revision
         adjustment = await self._interaction.propose(
             deepcopy(snapshot), interactive_context, context
         )
@@ -262,19 +281,33 @@ class ProductProfileService(ProductProfileServiceProtocol):
             }
         ):
             intents.append({"kind": "advance"})
-        committed = await asyncio.to_thread(
-            self._repository.save,
-            snapshot,
-            expected_revision,
-            receipt=(request_id, "interactive", payload, context, result),
-            intents=tuple(intents),
-            successor=successor,
-        )
+        try:
+            committed = await asyncio.to_thread(
+                self._repository.save,
+                snapshot,
+                revision,
+                receipt=(interactive_uuid, "interactive", payload, context, result),
+                intents=tuple(intents),
+                successor=successor,
+            )
+        except Conflict:
+            # A duplicate may have committed after save's receipt read but before
+            # its CAS. Re-read in a new transaction; never retry a stale proposal.
+            committed = await asyncio.to_thread(
+                self._repository.replay,
+                interactive_uuid,
+                "interactive",
+                payload,
+                context,
+            )
+            if committed is None:
+                raise
         return InteractiveResult(A(committed["type"]), committed["message"])
 
     async def query_stage_rollout_details(
-        self, stage_rollout_id: int, *, context: ActorContext, limit: int = 50
+        self, stage_rollout_id: int, *, limit: int = 50
     ) -> StageRolloutDetails:
+        context = current_actor_context()
         positive_id(stage_rollout_id)
         if type(limit) is not int or not 1 <= limit <= 200:
             raise Invalid("message limit must be an integer in 1..200")

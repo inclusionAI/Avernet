@@ -1,7 +1,4 @@
--- Product runtime v2: apply before enabling ProductProfileService.
--- Legacy v1 tables are retained read-only during an explicitly drained cutover.
--- Integer identities; exact tenant/env and receipt keys use binary collation.
--- Pin transactional storage and UTF-8 defaults independently of server defaults.
+-- Bootstrap schema (current). Existing installations apply 2026_11_27_multi_rollout.sql instead.
 
 CREATE TABLE ac_product_configuration_v2 (
 	id BIGINT NOT NULL AUTO_INCREMENT,
@@ -53,8 +50,29 @@ CREATE TABLE ac_product_intent_v2 (
 	kind VARCHAR(16) COLLATE utf8mb4_bin NOT NULL,
 	payload_json MEDIUMTEXT NOT NULL,
 	state VARCHAR(16) COLLATE utf8mb4_bin NOT NULL,
+	logical_key VARCHAR(64) COLLATE utf8mb4_bin,
+	claim_owner VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
+	lease_until BIGINT NOT NULL,
 	env VARCHAR(20) COLLATE utf8mb4_bin NOT NULL,
 	avernet_tenant VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
 	PRIMARY KEY (id),
 	FOREIGN KEY(collet_id) REFERENCES ac_product_runtime_v2 (id)
 ) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE INDEX ix_product_intent_v2_ready ON ac_product_intent_v2 (avernet_tenant, env, state, lease_until);
+
+CREATE UNIQUE INDEX uk_product_intent_v2_key ON ac_product_intent_v2 (avernet_tenant, env, logical_key);
+
+CREATE TABLE ac_product_candidate_slot_v1 (
+	id BIGINT NOT NULL AUTO_INCREMENT,
+	ordinal INTEGER NOT NULL,
+	collet_id BIGINT NOT NULL,
+	rollout_id BIGINT NOT NULL,
+	env VARCHAR(20) COLLATE utf8mb4_bin NOT NULL,
+	avernet_tenant VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
+	PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE UNIQUE INDEX uk_product_candidate_run_v1 ON ac_product_candidate_slot_v1 (avernet_tenant, env, rollout_id);
+
+CREATE UNIQUE INDEX uk_product_candidate_slot_v1 ON ac_product_candidate_slot_v1 (avernet_tenant, env, ordinal);

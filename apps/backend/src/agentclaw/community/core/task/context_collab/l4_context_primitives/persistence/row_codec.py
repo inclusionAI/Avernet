@@ -43,6 +43,10 @@ def _collet_from_row(
     row: ContextCollabColletModel,
 ) -> LegacyCollet:
     """Decode L4 identity/scope/audit; composition stays with the injected codec."""
+    if row.product_profile_id is not None:
+        raise ContextCollabValidationError(
+            "product Collet cannot use the legacy L4 reader/writer"
+        )
     if row.actor_ref is None:
         raise ContextCollabValidationError(
             f"collaboration context {row.collab_context_id!r} has a NULL actor_ref column; "

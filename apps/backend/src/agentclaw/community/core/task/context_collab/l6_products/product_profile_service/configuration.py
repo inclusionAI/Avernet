@@ -1,5 +1,7 @@
 """Joint composition/YAML validation and strict immutable configuration codec."""
 
+from ..profile_record import ProductProfileRecord
+
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError as Invalid,
 )
@@ -48,8 +50,19 @@ from agentclaw.community.core.task.context_collab.l5_methods.publication import 
     OpenPublicationProfile,
     DesignatedOpenAdmission,
 )
+from agentclaw.community.core.task.context_collab.l6_products.relation_storage import (
+    from_legacy_relation_fields,
+)
+
+from ...l5_methods.multi_rollout_policy import (
+    MULTI_POLICY_TYPES,
+    MultiRolloutMethodPolicy,
+    MultiRolloutLimits,
+    AdaptiveUntilAccepted,
+)
 
 COMPOSITION_TYPES = (
+    *MULTI_POLICY_TYPES,
     *WORKFLOW_TYPES,
     AgentRef,
     MethodProfile,
@@ -67,6 +80,51 @@ COMPOSITION_TYPES = (
 )
 
 
+def default_composition() -> MethodCompositionTemplate:
+    """Product-owned interactive iteration over the static YAML workflow.
+
+    References identify required host capabilities, not concrete implementations.
+    The host must install them; missing capabilities still fail closed.
+    """
+    return MethodCompositionTemplate(
+        required_methods=(
+            MethodTemplate(
+                get_profile("MultiRollout", "1.0"),
+                MultiRolloutMethodPolicy(
+                    strategy=AdaptiveUntilAccepted(
+                        feedback_mode="interactive",
+                        adaptation_ref="stage-improvement-agent@1",
+                        feedback_timeout_seconds=600,
+                    ),
+                    limits=MultiRolloutLimits(
+                        max_rollouts=4,
+                        max_elapsed_seconds=3600,
+                        max_stage_dispatches=400,
+                        max_strategy_calls=8,
+                        max_no_progress=2,
+                    ),
+                    isolation_ref="per-candidate-workspace@1",
+                ),
+            ),
+            MethodTemplate(
+                get_profile("Swarm", "0.2"),
+                SwarmStagesPolicy(
+                    execution_ref="openapi-bot/v1",
+                    acceptance_ref="trusted-evidence/v1",
+                    overall_acceptance="stages",
+                ),
+            ),
+        ),
+        relations=(
+            MethodRelationTemplate(
+                source_method="MultiRollout",
+                target_method="Swarm",
+                relation=CompositionRelation.NEST,
+            ),
+        ),
+    )
+
+
 def encode_composition(value: MethodCompositionTemplate) -> dict:
     return encode(value)
 
@@ -75,7 +133,7 @@ def decode_composition(data: dict) -> MethodCompositionTemplate:
     return decode(data, MethodCompositionTemplate, COMPOSITION_TYPES, get_profile)
 
 
-def validate_configuration(composition, stages, execution):
+def compile_configuration(composition, stages):
     if type(composition) is not MethodCompositionTemplate:
         raise Invalid("composition is required")
     required, optional = composition.required_methods, composition.optional_methods
@@ -93,6 +151,7 @@ def validate_configuration(composition, stages, execution):
             if policy is not None and (
                 type(policy)
                 not in {
+                    MultiRolloutMethodPolicy,
                     SwarmStagesPolicy,
                     SwarmWorkflowPolicy,
                     OpenMethodPolicy,
@@ -119,16 +178,32 @@ def validate_configuration(composition, stages, execution):
             or type(relation.relation) is not CompositionRelation
         ):
             raise Invalid("invalid Method relation")
-        if relation.parent_method not in kinds or relation.child_method not in kinds:
+        if relation.source_method not in kinds or relation.target_method not in kinds:
             raise Invalid("relation endpoint is not a selected Method")
         validate_composition(
-            relation.parent_method, relation.relation, relation.child_method
+            relation.source_method, relation.relation, relation.target_method
         )
-        pairs.append((relation.parent_method, relation.child_method))
+        pairs.append((relation.source_method, relation.target_method))
     if len(set(pairs)) != len(pairs) or detect_cycle(pairs):
         raise Invalid("duplicate or cyclic Method relations")
     if len(kinds) > 1 and {k for pair in pairs for k in pair} != set(kinds):
         raise Invalid("selected Methods require explicit connected relations")
+    if "MultiRollout" in kinds:
+        roots = [d for d in required if d.profile.method_kind == "MultiRollout"]
+        outgoing = [
+            r for r in composition.relations if r.source_method == "MultiRollout"
+        ]
+        if (
+            type(roots[0].policy) is not MultiRolloutMethodPolicy
+            or len(outgoing) != 1
+            or outgoing[0].relation is not CompositionRelation.NEST
+            or outgoing[0].target_method != "Swarm"
+            or set(kinds) != {"MultiRollout", "Swarm"}
+            or len(composition.relations) != 1
+        ):
+            raise Invalid(
+                "MultiRollout requires exactly one executable NEST Swarm body"
+            )
     specs = compile_stages(stages)
     # Never silently choose YAML over an independently writable legacy DAG.
     if any(isinstance(d.policy, SwarmWorkflowPolicy) for d in (*required, *optional)):
@@ -140,8 +215,13 @@ def validate_configuration(composition, stages, execution):
         raise Invalid("YAML stages require exactly one selected SwarmStagesPolicy")
     # Open admission/Single/Group execution need their own governed adapters.
     # A binding or eligibility declaration alone is never authority to dispatch.
-    execution.require(policies[0].execution_ref, policies[0].acceptance_ref, specs)
     return specs, policies[0]
+
+
+def validate_configuration(composition, stages, execution):
+    specs, policy = compile_configuration(composition, stages)
+    execution.require(policy.execution_ref, policy.acceptance_ref, specs)
+    return specs, policy
 
 
 def encode_profile(profile: ProductProfile) -> dict:
@@ -158,6 +238,28 @@ def decode_profile(data: dict) -> ProductProfile:
     return ProductProfile(
         data["id"],
         data["name"],
-        decode_composition(data["composition"]),
+        decode_composition(from_legacy_relation_fields(data["composition"])),
         data["stages"],
     )
+
+
+def multi_policy(composition):
+    return next(
+        (
+            d.policy
+            for d in composition.required_methods
+            if d.profile.method_kind == "MultiRollout"
+        ),
+        None,
+    )
+
+
+def encode_profile_response(record: "ProductProfileRecord") -> dict:
+    """Metadata is intentionally excluded from the frozen execution encoding."""
+    return {
+        **encode_profile(record.definition),
+        "description": record.description,
+        "status": record.status.value,
+        "creator": record.creator,
+        "modifer": record.modifer,
+    }

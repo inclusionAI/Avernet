@@ -1,5 +1,7 @@
 """Lower-layer durable execution contracts; no dependency on L6 configuration."""
 
+from .multi_rollout_contracts import MultiRolloutRunRecord
+
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
@@ -77,6 +79,8 @@ class RuntimeSnapshot:
     stopped: bool = False
     parents: dict[str, int] = field(default_factory=dict)
 
+    multi: MultiRolloutRunRecord | None = None
+
     def current(self) -> ColletRollout:
         return next(r for r in self.rollouts if r.rollout_id == self.current_rollout_id)
 
@@ -144,7 +148,13 @@ class RolloutExecutionPort(Protocol):
 class RolloutInteractionPort(Protocol):
     async def propose(
         self, snapshot: RuntimeSnapshot, content: str, context: ActorContext
-    ) -> Adjustment: ...
+    ) -> Adjustment:
+        """Return a proposal only; concurrent retries may evaluate it again.
+
+        Do not mutate durable state or dispatch/cancel runs here. The caller
+        atomically commits the accepted proposal and outbox behind receipt/CAS.
+        """
+        ...
 
 
 @runtime_checkable
@@ -167,13 +177,15 @@ class RolloutRepository(Protocol):
         receipt: tuple[str, str, dict, ActorContext, dict] | None = None,
         intents: tuple[dict, ...] = (),
         successor: tuple[str, set[str]] | None = None,
+        acquire_slot: tuple[int, int] | None = None,
+        release_slots: tuple[int, ...] = (),
     ) -> dict | None: ...
     def late_delivery(
         self, collet_id: int, stage_id: int, attempt: str, route: SessionRoute
     ) -> None: ...
     def pending_intents(self, limit: int = 20) -> list[dict]: ...
-    def claim_intent(self, identity: int) -> bool: ...
-    def finish_intent(self, identity: int, state: str) -> None: ...
+    def claim_intent(self, identity: int) -> str: ...
+    def finish_intent(self, identity: int, state: str, fence: str = "") -> None: ...
 
 
 @dataclass(frozen=True)

@@ -29,6 +29,11 @@ from sqlalchemy.sql import func
 from sqlalchemy.sql import text as sql_text
 
 AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
+UnsignedAutoIncrementBigInteger = (
+    BigInteger()
+    .with_variant(mysql.BIGINT(unsigned=True), "mysql")
+    .with_variant(Integer, "sqlite")
+)
 
 
 def _medium_text():
@@ -69,12 +74,22 @@ class ContextCollabColletModel(Base):
     __tablename__ = "ac_context_collab_collet"
 
     id = Column(
-        AutoIncrementBigInteger,
+        UnsignedAutoIncrementBigInteger,
         primary_key=True,
         autoincrement=True,
         nullable=False,
     )
     collab_context_id = Column(String(128), nullable=False)
+    # Product-only facts. NULL preserves independent L4 rows. The owning L6
+    # schema module attaches indexes without introducing an L4 -> L6 import;
+    # product relationships are validated by the business repository, not FKs.
+    content = Column(_medium_text(), nullable=True)
+    status = Column(
+        String(32).with_variant(mysql.VARCHAR(32, collation="utf8mb4_bin"), "mysql"),
+        nullable=True,
+    )
+    product_profile_id = Column(AutoIncrementBigInteger, nullable=True)
+    current_rollout_id = Column(AutoIncrementBigInteger, nullable=True)
     # 创建主体引用(与初始 task.created 事件的 actor_ref 同值);可空:
     # 外部部分行可以没有;P1 创建路径恒写。
     actor_ref = Column(String(2048), nullable=True)
@@ -143,6 +158,8 @@ class ContextCollabEventModel(Base):
     )
     collab_context_id = Column(String(128), nullable=False)
     event_id = Column(String(128), nullable=False)
+    collet_rollout_id = Column(AutoIncrementBigInteger, nullable=True)
+    collet_stage_rollout_id = Column(AutoIncrementBigInteger, nullable=True)
     task_ref = Column(String(128), nullable=True)
     task_version_after = Column(BigInteger, nullable=True)
     parent_event = Column(String(128), nullable=True)

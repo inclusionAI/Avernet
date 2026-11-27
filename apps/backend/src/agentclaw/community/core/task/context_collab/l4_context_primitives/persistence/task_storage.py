@@ -49,6 +49,10 @@ def legacy_task(
 
 
 def load_tasks(db, row) -> tuple[Task | None, tuple[Task, ...]]:
+    if row.product_profile_id is not None:
+        raise ContextCollabValidationError(
+            "product Collet cannot own legacy Task state"
+        )
     if row.root_task_ref is None:
         orphan = (
             db.query(ContextCollabTaskModel.id)

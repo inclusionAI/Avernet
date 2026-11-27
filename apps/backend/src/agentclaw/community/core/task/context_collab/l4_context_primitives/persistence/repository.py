@@ -232,6 +232,8 @@ class ContextCollabRepository(Generic[StateT]):
         由 CAS WHERE 把关。任何写失败原样上抛,异常路径靠事务回滚
         保证不落半态。
         """
+        if request.event_kind.startswith("product_runtime."):
+            raise ContextCollabValidationError("product audit namespace is reserved")
         with self._transaction() as db:
             row = (
                 db.query(ContextCollabColletModel)

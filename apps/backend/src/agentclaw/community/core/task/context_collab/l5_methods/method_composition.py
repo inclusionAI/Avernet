@@ -67,7 +67,9 @@ class CompositionEdgeState(str, Enum):
 
 # 组合边连接基础方法绑定,不连接产品组合名称;四种基础方法都可作为
 # nest/support/delegate_to 的子方法。
-_ALL_METHOD_WIRES = frozenset(kind.value for kind in MethodKind)
+_ALL_METHOD_WIRES = frozenset(
+    kind.value for kind in MethodKind if kind is not MethodKind.MULTI_ROLLOUT
+)
 
 # 矩阵父方法:仅有三个核心方法剧本;Open 依非对称裁决不发起组合。
 _PARENT_METHOD_WIRES = ("Single", "Group", "Swarm")
@@ -78,6 +80,7 @@ _OPEN_RELATIONS = (
 )
 
 COMPOSITION_MATRIX: dict[tuple[str, CompositionRelation], frozenset[str]] = {
+    ("MultiRollout", CompositionRelation.NEST): frozenset({"Single", "Group", "Swarm"}),
     # 任意父方法 × NEST/SUPPORT/DELEGATE_TO → 任意核心方法
     # (ACCS-301 §7:selected Agent 可将子 Task 委托给 Single、Group 或 Swarm)。
     **{
@@ -205,7 +208,9 @@ class MethodCompositionEdge:
             collab_context_id=_required_str(
                 data, "collab_context_id", "MethodCompositionEdge"
             ),
-            parent_binding=_required_str(data, "parent_binding", "MethodCompositionEdge"),
+            parent_binding=_required_str(
+                data, "parent_binding", "MethodCompositionEdge"
+            ),
             child_binding=_required_str(data, "child_binding", "MethodCompositionEdge"),
             relation_kind=CompositionRelation.from_wire(
                 _required_str(data, "relation_kind", "MethodCompositionEdge")
@@ -219,7 +224,9 @@ class MethodCompositionEdge:
             transition_reason=_audit_str(
                 data, "transition_reason", "MethodCompositionEdge"
             ),
-            transitioned_by=_audit_str(data, "transitioned_by", "MethodCompositionEdge"),
+            transitioned_by=_audit_str(
+                data, "transitioned_by", "MethodCompositionEdge"
+            ),
             transitioned_at=_audit_str(
                 data, "transitioned_at", "MethodCompositionEdge"
             ),
