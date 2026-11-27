@@ -65,6 +65,12 @@ jest.mock('@tc-chat/ui/es/Sender', () => {
             >
               submit
             </button>
+            <button
+              type="button"
+              onClick={() => _props.onSubmit?.('@ALL-Bots 你们呢', { mentions: [{ id: 'ALL-Bots', name: 'ALL-Bots' }] })}
+            >
+              submit old ALL
+            </button>
           </div>
         );
       },
@@ -110,9 +116,6 @@ jest.mock('@/pages/Workspace/hooks/useSessionFileUpload', () => ({
 jest.mock('@/pages/Workspace/components/GroupChatPane/UploadFilesModal', () => ({
   UploadFilesModal: ({ open }: { open: boolean }) => open ? <div data-testid="upload-files-modal" /> : null,
 }));
-jest.mock('@/pages/Workspace/components/GroupChatPane/mentionHelpers', () => ({
-  expandMentionIds: () => [],
-}));
 jest.mock('@/components/ui', () => ({
   Badge: () => null,
   IconButton: ({ label, onClick }: { label: string; onClick?: () => void }) => (
@@ -141,6 +144,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     render(
       <GroupChatComposer
         session={session}
+        groupKind="free_chat"
         connectionStatus="connected"
         mentionConfig={undefined}
         onSend={() => {}}
@@ -157,6 +161,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     render(
       <GroupChatComposer
         session={session}
+        groupKind="free_chat"
         connectionStatus="connected"
         mentionConfig={undefined}
         onSend={() => {}}
@@ -171,6 +176,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     render(
       <GroupChatComposer
         session={null}
+        groupKind="free_chat"
         connectionStatus="connected"
         mentionConfig={undefined}
         onSend={() => {}}
@@ -185,6 +191,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     render(
       <GroupChatComposer
         session={session}
+        groupKind="free_chat"
         connectionStatus="connected"
         mentionConfig={undefined}
         onSend={() => {}}
@@ -204,6 +211,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     render(
       <GroupChatComposer
         session={session}
+        groupKind="free_chat"
         connectionStatus="connected"
         mentionConfig={undefined}
         onSend={() => {}}
@@ -225,6 +233,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     render(
       <GroupChatComposer
         session={session}
+        groupKind="free_chat"
         connectionStatus="connected"
         mentionConfig={undefined}
         onSend={onSend}
@@ -237,7 +246,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
 
     fireEvent.click(screen.getByTestId('sender-submit'));
 
-    expect(onSend).toHaveBeenCalledWith('引用 Bot 甲 的消息：\n> 被引用的内容\n\n追问内容', [], undefined);
+    expect(onSend).toHaveBeenCalledWith('引用 Bot 甲 的消息：\n> 被引用的内容\n\n追问内容', undefined, undefined);
     expect(screen.getByText(/引用 Bot 甲/)).toBeInTheDocument();
   });
 
@@ -246,6 +255,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     render(
       <GroupChatComposer
         session={session}
+        groupKind="free_chat"
         connectionStatus="connected"
         mentionConfig={undefined}
         onSend={() => {}}
@@ -263,6 +273,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     const { rerender } = render(
       <GroupChatComposer
         session={session}
+        groupKind="free_chat"
         connectionStatus="error"
         mentionConfig={undefined}
         onSend={() => {}}
@@ -277,6 +288,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     rerender(
       <GroupChatComposer
         session={session}
+        groupKind="free_chat"
         connectionStatus="connected"
         mentionConfig={undefined}
         onSend={() => {}}
@@ -292,6 +304,7 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     render(
       <GroupChatComposer
         session={session}
+        groupKind="free_chat"
         connectionStatus="connected"
         mentionConfig={undefined}
         onSend={() => {}}
@@ -302,4 +315,28 @@ describe('GroupChatComposer — 根因 4 inputRef 经 <Sender ref> 真绑定', (
     // 群聊输入框仅支持 @ 提及成员，占位不得宣传 /file /link /skill 指令（那是单聊 ChatPanel 的能力）。
     expect(screen.getByTestId('sender')).toHaveAttribute('data-placeholder', '输入消息... (将以您的用户身份发送到群内)');
   });
+});
+
+
+it('任务协作会话提交旧草稿的 ALL-Bots 时只点名主节点', () => {
+  const onSend = jest.fn();
+  render(
+    <GroupChatComposer
+      session={{
+        ...session,
+        participants: [
+          { actorId: 'manager', kind: 'bot', name: '主助手', role: 'manager', mode: 'auto' },
+          { actorId: 'worker', kind: 'bot', name: '从助手', role: 'worker', mode: 'auto' },
+        ],
+      }}
+      groupKind="task_master_slave"
+      connectionStatus="connected"
+      mentionConfig={undefined}
+      onSend={onSend}
+      draft=""
+      onDraftChange={() => {}}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'submit old ALL' }));
+  expect(onSend).toHaveBeenCalledWith('@ALL-Bots 你们呢', ['manager'], undefined);
 });
