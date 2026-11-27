@@ -35,6 +35,10 @@ apps/bcs/docs/bot-provider-integration.zh-CN.md
 apps/bcs/crates/adapters/http/bcs-http/src/router.rs
   s_8a428faace6fde::t_b0b29758abf198 153-155
   s_8a428faace6fde::t_83c3c5ddd28ee1 152
+apps/bcs/crates/adapters/http/bcs-http/src/routes/providers.rs
+  s_8a428faace6fde::t_bb1c172725fdf3 40
+apps/bcs/crates/adapters/http/bcs-http/src/routes/providers/registration.rs
+  s_8a428faace6fde::t_bb1c172725fdf3 3,180,183,186-193,197-223
 ---
 {
   "schema_version": "authorship/3.0.0",
