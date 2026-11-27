@@ -114,6 +114,32 @@ Sidebar and route regressions are covered by
 [useWorkspacePage.deepLinkLocation.test.tsx](test/pages/Workspace/hooks/useWorkspacePage.deepLinkLocation.test.tsx)
 and [useGroupSessionLocation.deepLink.test.tsx](test/pages/Workspace/hooks/useGroupSessionLocation.deepLink.test.tsx).
 
+## Collaboration message component resources
+
+[The group Provider](src/services/workspace/groupChatProvider.ts) prepares Bot
+CDN resources only for messages containing AixUI business components that need
+them. Ordinary text, code examples, empty Sessions and participants without
+such messages do not request Bot `render-screens`. Human/system messages, cards
+without business components, explicit CDN URLs and the pinned local task panel
+also do not trigger this request. Inline business components share the same
+CDN resolution path as side panels. Initial history, reload, older pages and
+live updates all prepare resources before delivery to the synchronous SDK
+renderer; live completion cannot overtake a pending update. BCS manifest
+loading remains separate. [The injector](src/services/bcs/libraryCdnInjector.ts)
+reuses completed and in-flight results by Bot ID and owner, including empty
+negative caches on failure. Clear/refresh invalidation prevents an obsolete
+request from replacing the new cache. Tests:
+[Provider delivery](test/services/workspace/groupChatProvider.cdn.test.ts) and
+[cache reuse](test/sidePanel/libraryCdnInjector.registerBotCdnList.test.ts).
+
+## Collaboration session member status
+
+The [session member list](src/pages/Workspace/components/ManagePanel/MemberList.tsx)
+shows Human `present` as 在线 and `absent` as 勿扰 alongside the existing Bot
+mode badges, even in the narrow management panel. This indicates participation
+in the Session, not global presence. The [mention menu](src/pages/Workspace/components/GroupChatPane/mentionHelpers.ts)
+keeps 勿扰 members visible but muted and unavailable for mouse or keyboard selection.
+
 ## Group message sender identity
 
 The [group Provider](src/services/workspace/groupChatProvider.ts) normalizes live

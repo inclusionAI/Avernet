@@ -1,13 +1,13 @@
 import { PillTabs } from '@/components/Common/PillTabs';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Segmented } from '@/components/ui/Segmented';
 import type { CommunityTopicFilter, CommunityTopicOpenTarget } from '@/domain/community/types';
 import { COMMUNITY_REPLY_PAGE_SIZE, useCommunity } from '@/hooks/useCommunity';
 import { history } from '@umijs/max';
 import { ArrowLeft, Plus, Search } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useRef, useState } from 'react';
+import { CommunityFilterBar } from '../CommunityFilterBar';
 import { CommunityPersonalCenter } from '../CommunityPersonalCenter';
 import { CommunityFollowIcon } from '../CommunityFollowIcon';
 import { CommunityTopicDetail } from '../CommunityTopicDetail';
@@ -201,22 +201,19 @@ export function CommunityPage() {
           </section>
 
           {showPersonalCenter ? personalCenter : <>
-          <div className="mt-2 overflow-x-auto">
-            <Segmented<CommunityTopicView>
-              value={topicView}
-              onChange={(value) => {
-                if (value === 'following') {
-                  community.setScope('following');
-                  return;
-                }
-                if (community.scope === 'following') community.setScope('all');
-                community.setTopicType(value);
-              }}
-              aria-label="主题类型"
-              options={topicTypeOptions}
-              className="h-9 w-max"
-            />
-          </div>
+          <CommunityFilterBar<CommunityTopicView>
+            value={topicView}
+            onChange={(value) => {
+              if (value === 'following') {
+                community.setScope('following');
+                return;
+              }
+              if (community.scope === 'following') community.setScope('all');
+              community.setTopicType(value);
+            }}
+            aria-label="主题类型"
+            options={topicTypeOptions}
+          />
 
           <div className="mt-4">
             <CommunityTopicList

@@ -41,6 +41,7 @@ const manifestCdnMap = new Map<string, string>();
 
 /** Bot render screens 来源的 CDN 配置，按 `${botId}:${ownerId}` 复合键分桶（高优先级）。 */
 const botCdnMaps = new Map<string, Map<string, string>>();
+const botCdnRequests = new Map<string, Promise<void>>();
 
 /**
  * 拆复合 bot 标识（形如 `default:146836`）为纯 botId + ownerId。
@@ -135,7 +136,9 @@ export function storeCdnConfigs(screens: BotRenderScreen[]): void {
 
 /** 存储指定 Bot 的 CDN 配置（按 `${botId}:${ownerId}` 复合键分桶），供不同 API 数据源复用运行时注入能力。 */
 export function storeBotCdnConfigs(botId: string, ownerId: string | undefined, configs: LibraryCdnConfig[]): void {
-  botCdnMaps.set(botBucketKey(botId, ownerId), collectLibraryCdnConfigs(configs));
+  const key = botBucketKey(botId, ownerId);
+  botCdnRequests.delete(key);
+  botCdnMaps.set(key, collectLibraryCdnConfigs(configs));
   rebuildLibraryCdnMap();
 }
 
@@ -144,6 +147,7 @@ export function clearCdnConfig(): void {
   libraryCdnMap.clear();
   manifestCdnMap.clear();
   botCdnMaps.clear();
+  botCdnRequests.clear();
   if (typeof window !== 'undefined') {
     const w = window as unknown as AixLibraryCdnGlobal;
     w.aixLibraryCdnMap?.clear?.();
@@ -166,8 +170,11 @@ export function hasBotCdnBucket(botId: string, ownerId?: string): boolean {
 export function clearBotCdnConfig(botId?: string, ownerId?: string): void {
   if (botId) {
     const scoped = ownerId === undefined ? splitScopedBotId(botId) : { botId, ownerId };
-    botCdnMaps.delete(botBucketKey(scoped.botId, scoped.ownerId));
+    const key = botBucketKey(scoped.botId, scoped.ownerId);
+    botCdnRequests.delete(key);
+    botCdnMaps.delete(key);
   } else {
+    botCdnRequests.clear();
     botCdnMaps.clear();
   }
   rebuildLibraryCdnMap();
@@ -213,34 +220,32 @@ export async function queryAndRegisterBotLibraryCdn(botId: string): Promise<numb
  * 批量注册协作群相关 Bot 的 CDN 库映射（迁移老前端 queryAndRegisterMultipleBotCdnPanels 语义）。
  *
  * - 按 `${botId}:${ownerId}` 复合键去重（bot_id 不全局唯一，多 owner 的 default 同名）；
- * - 已有分桶（含请求失败的空桶负缓存）的 Bot 会话内不重拉；
+ * - 已有分桶（含请求失败的空桶负缓存）的 Bot 不重拉，同一复合键共享在途请求；
  * - 并行拉取、单 Bot 失败静默降级为空桶（不阻塞其余 Bot 与调用方）；
  * - 返回合并后的库映射总数（与单 Bot 注册口径一致，供调试/断言）。
  */
 export async function registerBotCdnList(bots: SenderBotRef[]): Promise<number> {
-  const pending = new Map<string, SenderBotRef>();
+  const pending = new Set<Promise<void>>();
   for (const bot of bots) {
     if (!bot?.botId) continue;
     const key = botBucketKey(bot.botId, bot.ownerId);
-    if (botCdnMaps.has(key)) continue; // 会话内缓存（含负缓存）命中
-    pending.set(key, bot);
+    if (botCdnMaps.has(key)) continue;
+    let request = botCdnRequests.get(key);
+    if (!request) {
+      const current = Promise.resolve().then(() => listBotRenderScreens(bot.botId, bot.ownerId))
+        .then((screens) => {
+          if (botCdnRequests.get(key) === current) storeBotCdnConfigs(bot.botId, bot.ownerId, screens);
+        }, (error: unknown) => {
+          if (botCdnRequests.get(key) !== current) return;
+          console.error(`[CollabCdn] Bot 副屏 CDN 配置拉取失败（${key}）:`, error);
+          storeBotCdnConfigs(bot.botId, bot.ownerId, []);
+        });
+      request = current;
+      botCdnRequests.set(key, current);
+    }
+    pending.add(request);
   }
-  if (pending.size === 0) return libraryCdnMap.size;
-  await Promise.allSettled(
-    Array.from(pending.values()).map(async (bot) => {
-      try {
-        const screens = await listBotRenderScreens(bot.botId, bot.ownerId);
-        storeBotCdnConfigs(bot.botId, bot.ownerId, screens);
-      } catch (error: unknown) {
-        // 失败写空桶负缓存：避免 live 消息流每条新消息重拉；报错即该 Bot 库不可解析的真实状态。
-        console.error(
-          `[CollabCdn] Bot 副屏 CDN 配置拉取失败（${bot.botId}${bot.ownerId ? `:${bot.ownerId}` : ''}）:`,
-          error,
-        );
-        storeBotCdnConfigs(bot.botId, bot.ownerId, []);
-      }
-    }),
-  );
+  await Promise.allSettled(pending);
   return libraryCdnMap.size;
 }
 
