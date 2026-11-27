@@ -193,15 +193,15 @@ describe('NodeListViewV2 覆盖补齐', () => {
   });
 
   it.each([
-    ['Bot', { sessionId: 'sess-bot', assignee: 'bot-2', runMode: 'single_bot' }],
-    ['group', { sessionId: 'bcs_grp_2', groupId: 'g-2', drillable: true, runMode: 'coop_group' }],
-  ])('有效 %s 图标只下钻，始终传 null，不选择或联动会话', (_label, fields) => {
+    ['Bot', { sessionId: 'sess-bot', assignee: 'bot-2', runMode: 'single_bot' }, { sessionId: 'sess-bot', kind: 'bot', botId: 'bot-2' }],
+    ['group', { sessionId: 'bcs_grp_2', groupId: 'g-2', drillable: true, runMode: 'coop_group' }, { sessionId: 'bcs_grp_2', kind: 'group', groupId: 'g-2' }],
+  ])('有效 %s 图标下钻节点并联动对应会话', (_label, fields, expectedTarget) => {
     const node = { ...task.nodes[1], ...fields };
     render(<NodeListViewV2 task={{ ...task, nodes: [task.nodes[0], node] }} nav={recorded.nav} />);
     const icon = screen.getByRole('button', { name: `下钻 ${node.name}` });
     expect(icon).toHaveAttribute('aria-disabled', 'false');
     fireEvent.click(icon);
-    expect(recorded.calls.drill).toEqual([[node.id, null]]);
+    expect(recorded.calls.drill).toEqual([[node.id, expect.objectContaining(expectedTarget)]]);
     expect(recorded.calls.root).toEqual([]);
     expect(recorded.calls.select).toEqual([]);
   });
@@ -254,7 +254,7 @@ describe('NodeListViewV2 覆盖补齐', () => {
       fireEvent.keyUp(control, { key });
       fireEvent.click(control, { detail: 0 });
     }
-    expect(recorded.calls.drill).toEqual([[node.id, null]]);
+    expect(recorded.calls.drill).toEqual([[node.id, expect.objectContaining({ sessionId: 'sess-sub', kind: 'bot', botId: 'bot-2' })]]);
     expect(onOpenSubTask).toHaveBeenCalledTimes(1);
     expect(onOpenSubTask).toHaveBeenCalledWith('sub-1');
     expect(recorded.calls.select).toEqual([]);
