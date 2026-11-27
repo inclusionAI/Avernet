@@ -66,12 +66,13 @@ No existing records are migrated and no old wire API is replaced. This initial
 format is not yet frozen for deployment. Subsequent persisted changes require an
 explicit version/reader/migration decision before a provider writes them.
 
-SessionSpec and DispatchSpec use schema version 2. The frozen session contains
+SessionSpec and DispatchSpec use schema version 1. The frozen session contains
 a target, a mode configuration and authorized logical agents and pools. Dispatches
-carry a logical agent and a downstream context. Checkpoint format 2 records the
-shared-context generation and pending cancellation. Deploy the distributed roles
-together on a fresh namespace. Inbox entries, task snapshots and display snapshots
-retain their own format versions.
+carry a logical agent and a downstream context. Checkpoint format 1 records the
+shared-context generation and pending cancellation. These additions complete the
+unreleased v1 format and retain the `bcn:v1` namespace; they do not introduce a
+v2 format or a v1 migration. Inbox entries, task snapshots and display snapshots
+also retain version 1.
 
 `tests/persistence_shape.rs` checks representative persisted identities/tags.
 The `InboxPos` compile-fail example prevents accidental business ordering of

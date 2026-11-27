@@ -217,7 +217,7 @@ async fn inbox_len(store: &Recorder) -> usize {
     store
         .model
         .range(
-            "bcn:v2:c01:main:s0042:inbox:s0042.7f3a9c",
+            "bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
             std::ops::Bound::Unbounded,
             std::ops::Bound::Unbounded,
             std::num::NonZeroU32::new(100).unwrap(),

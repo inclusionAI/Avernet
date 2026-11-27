@@ -15,11 +15,11 @@
 //! Keys touched:
 //!
 //! ```text
-//! disp:       bcn:v2:c01:main:s0042:disp:s0042.7f3a9c.b21e.n2.a1
+//! disp:       bcn:v1:c01:main:s0042:disp:s0042.7f3a9c.b21e.n2.a1
 //!             patch e.g. {"execution": {"phase": "accepted",
 //!             "remote": {"task_id": "t-81", "context_id": null}}}
 //!             written at read version + 1, e.g. 2000000004 -> 2000000005
-//! held index: bcn:v2:held:c01:main:conn-03:1794370950
+//! held index: bcn:v1:held:c01:main:conn-03:1794370950
 //!             member "s0042.7f3a9c.b21e.n2.a1" removed by `finish`
 //! ```
 //!

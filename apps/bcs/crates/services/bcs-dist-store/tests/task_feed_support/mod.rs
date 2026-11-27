@@ -144,7 +144,7 @@ impl Fixture {
         let envelope = CheckpointEnvelope {
             owner,
             checkpoint: Checkpoint {
-                format_version: 2,
+                format_version: 1,
                 commit_seq: CommitSeq(sequence),
                 consumed: None,
                 tasks: VecDeque::new(),

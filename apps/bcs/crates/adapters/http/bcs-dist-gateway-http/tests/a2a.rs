@@ -314,7 +314,7 @@ async fn admission_always_writes_wake_while_the_listener_contract_is_stubbed() {
     json_of(&app, send("msg-2", "next", Some(&sid), None, true)).await;
     json_of(&app, send("msg-3", "more", Some(&sid), None, true)).await;
     let shard = sid.split_once('.').unwrap().0;
-    let prefix = format!("bcn:v2:c01:main:{shard}");
+    let prefix = format!("bcn:v1:c01:main:{shard}");
     assert_eq!(stream_len(&p, &format!("{prefix}:inbox:{sid}")).await, 3);
     // D1: without a listener read, every admitted input also wakes the shard.
     assert_eq!(stream_len(&p, &format!("{prefix}:wake")).await, 3);

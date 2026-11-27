@@ -124,7 +124,7 @@ pub struct Checkpoint {
 }
 
 impl Checkpoint {
-    pub const FORMAT_VERSION: u32 = 2;
+    pub const FORMAT_VERSION: u32 = 1;
 
     pub fn empty() -> Self {
         Self {

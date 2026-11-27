@@ -434,7 +434,7 @@ impl World {
     }
     pub async fn pending(&self, sid: &Sid) {
         let spec = SessionSpec {
-            schema_version: 2,
+            schema_version: 1,
             sid: sid.clone(),
             shard: KeyLayout::shard_of(sid).unwrap(),
             scope: TaskScope {
@@ -497,7 +497,7 @@ pub fn sid() -> Sid {
 }
 pub fn initial() -> Checkpoint {
     Checkpoint {
-        format_version: 2,
+        format_version: 1,
         commit_seq: CommitSeq(0),
         consumed: None,
         tasks: Default::default(),

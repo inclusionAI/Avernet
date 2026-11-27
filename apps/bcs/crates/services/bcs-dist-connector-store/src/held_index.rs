@@ -12,8 +12,8 @@
 //! One sorted set per Connector process run:
 //!
 //! ```text
-//! key:    bcn:v2:held:<cluster>:<ns>:<node>:<incarnation>
-//!         bcn:v2:held:c01:main:conn-03:1794370950
+//! key:    bcn:v1:held:<cluster>:<ns>:<node>:<incarnation>
+//!         bcn:v1:held:c01:main:conn-03:1794370950
 //! member: dispatch id, e.g. s0042.7f3a9c.b21e.n2.a1
 //! score:  claim time in ms (wall clock), e.g. 1794370950456
 //! ```

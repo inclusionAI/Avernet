@@ -28,45 +28,45 @@ fn key_names_match_the_catalogue() {
     let sid = Sid("s0042.7f3a9c".into());
     let shard = KeyLayout::shard_of(&sid).unwrap();
     assert_eq!(shard, ShardId(42));
-    assert_eq!(l.inbox(&sid).unwrap(), "bcn:v2:c01:main:s0042:inbox:s0042.7f3a9c");
-    assert_eq!(l.ckpt(&sid).unwrap(), "bcn:v2:c01:main:s0042:ckpt:s0042.7f3a9c");
-    assert_eq!(l.spec(&sid).unwrap(), "bcn:v2:c01:main:s0042:spec:s0042.7f3a9c");
-    assert_eq!(l.ev(&sid).unwrap(), "bcn:v2:c01:main:s0042:ev:s0042.7f3a9c");
-    assert_eq!(l.session_tasks(&sid).unwrap(), "bcn:v2:c01:main:s0042:tasks:s0042.7f3a9c");
+    assert_eq!(l.inbox(&sid).unwrap(), "bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c");
+    assert_eq!(l.ckpt(&sid).unwrap(), "bcn:v1:c01:main:s0042:ckpt:s0042.7f3a9c");
+    assert_eq!(l.spec(&sid).unwrap(), "bcn:v1:c01:main:s0042:spec:s0042.7f3a9c");
+    assert_eq!(l.ev(&sid).unwrap(), "bcn:v1:c01:main:s0042:ev:s0042.7f3a9c");
+    assert_eq!(l.session_tasks(&sid).unwrap(), "bcn:v1:c01:main:s0042:tasks:s0042.7f3a9c");
     assert_eq!(
         l.task(&Tid("s0042.7f3a9c.b21e".into())).unwrap(),
-        "bcn:v2:c01:main:s0042:task:s0042.7f3a9c.b21e"
+        "bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e"
     );
     assert_eq!(
         l.disp(&Did("s0042.7f3a9c.b21e.n2.a1".into())).unwrap(),
-        "bcn:v2:c01:main:s0042:disp:s0042.7f3a9c.b21e.n2.a1"
+        "bcn:v1:c01:main:s0042:disp:s0042.7f3a9c.b21e.n2.a1"
     );
     assert_eq!(
         l.admit(&sid, &InputId("adm-9c41e7".into())).unwrap(),
-        "bcn:v2:c01:main:s0042:admit:adm-9c41e7"
+        "bcn:v1:c01:main:s0042:admit:adm-9c41e7"
     );
-    assert_eq!(l.owner(shard), "bcn:v2:c01:main:s0042:owner");
-    assert_eq!(l.active(shard), "bcn:v2:c01:main:s0042:active");
-    assert_eq!(l.wake(shard), "bcn:v2:c01:main:s0042:wake");
-    assert_eq!(l.sched(shard), "bcn:v2:c01:main:s0042:sched");
+    assert_eq!(l.owner(shard), "bcn:v1:c01:main:s0042:owner");
+    assert_eq!(l.active(shard), "bcn:v1:c01:main:s0042:active");
+    assert_eq!(l.wake(shard), "bcn:v1:c01:main:s0042:wake");
+    assert_eq!(l.sched(shard), "bcn:v1:c01:main:s0042:sched");
     assert_eq!(
         l.command(&PoolId("a2a".into()), 0).unwrap(),
-        "bcn:v2:cmd:c01:main:a2a:p0"
+        "bcn:v1:cmd:c01:main:a2a:p0"
     );
     let conn = Instance {
         node: "conn-03".into(),
         incarnation: "1794370950".into(),
     };
-    assert_eq!(l.held(&conn).unwrap(), "bcn:v2:held:c01:main:conn-03:1794370950");
+    assert_eq!(l.held(&conn).unwrap(), "bcn:v1:held:c01:main:conn-03:1794370950");
     assert_eq!(
         l.heartbeat(HeartbeatCopy::B, &conn).unwrap(),
-        "bcn:v2:hb:c01:main:b:conn-03:1794370950"
+        "bcn:v1:hb:c01:main:b:conn-03:1794370950"
     );
     assert_eq!(
         l.member("connector", &conn).unwrap(),
-        "bcn:v2:c01:main:member:connector:conn-03:1794370950"
+        "bcn:v1:c01:main:member:connector:conn-03:1794370950"
     );
-    assert_eq!(l.members("connector").unwrap(), "bcn:v2:c01:main:members:connector");
+    assert_eq!(l.members("connector").unwrap(), "bcn:v1:c01:main:members:connector");
     assert_eq!(KeyLayout::shard_text(ShardId(7)), "s0007");
     assert_eq!(KeyLayout::shard_text(ShardId(12345)), "s12345");
 }
@@ -181,10 +181,10 @@ fn unsupported_schema_versions_are_rejected() {
     );
 
     let mut spec = serde_json::to_value(common::spec("grp-1")).unwrap();
-    spec["schema_version"] = json!(3);
+    spec["schema_version"] = json!(2);
     assert_eq!(
         decode_json::<SessionSpec>(spec),
-        Err(StoreError::UnsupportedFormat { format: 3 })
+        Err(StoreError::UnsupportedFormat { format: 2 })
     );
     let current = serde_json::to_value(common::task()).unwrap();
     assert!(decode_json::<TaskSnapshot>(current).is_ok());

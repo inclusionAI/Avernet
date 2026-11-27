@@ -163,7 +163,7 @@ async fn persist_commit(store: &Recorder, consumed: Option<InboxPos>) -> CommitR
     let c = CheckpointEnvelope {
         owner: owner.clone(),
         checkpoint: Checkpoint {
-            format_version: 2,
+            format_version: 1,
             commit_seq: CommitSeq(1),
             consumed: consumed.clone(),
             tasks: Default::default(),

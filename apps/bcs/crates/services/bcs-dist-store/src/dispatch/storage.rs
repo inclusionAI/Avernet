@@ -23,7 +23,7 @@ impl StoreDispatch {
             }
         })?
     }
-    pub(super) async fn read<T: DeserializeOwned + 'static>(
+    pub(super) async fn read<T: DeserializeOwned>(
         &self,
         key: &str,
     ) -> Result<Option<Versioned<T>>, StoreError> {
@@ -47,7 +47,7 @@ impl StoreDispatch {
         )
         .await
     }
-    pub(super) async fn write<T: Serialize + 'static>(
+    pub(super) async fn write<T: Serialize>(
         &self,
         key: &str,
         expected: Option<Version>,

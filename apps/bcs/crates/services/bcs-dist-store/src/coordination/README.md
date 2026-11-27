@@ -67,21 +67,20 @@ The Worker separately validates maximum legal business/finalization candidates;
 missing capacity declarations fail startup. This is an enforced bound, not an
 extra storage read or an assumption about an unnamed backend's native limit.
 
-## Integration and migration
+## Integration
 
 Admission creates spec/task through the same DocumentCas layout that Worker
 reads. Legacy GT helpers remain only for other independently validated paths.
-Do not mix legacy JSON or GT writers with these records. Initial adoption uses
-an isolated namespace with all writers on the new protocol; existing namespaces
-require a separate offline migration/recovery procedure. This change does not
-automatically migrate live data or enable the Worker in existing bootstrap.
+Do not mix legacy JSON or GT writers with these records. All distributed roles
+use the same v1 protocol. This change does not enable the Worker in existing
+bootstrap.
 
-The distributed roles use the `bcn:v2` key prefix and checkpoint format 2.
+The distributed roles retain the `bcn:v1` key prefix and checkpoint format 1.
 The checkpoint records the active task's runner state, downstream conversation
-generation and pending cancellation. Drain v1 work with its original binaries
-before switching traffic. Existing v1 checkpoints and archives remain in their
-original namespace. Reads validate the numeric header before decoding the body.
-Header-only control recovery preserves the raw body.
+generation and pending cancellation. V1 has not been deployed, so these fields
+complete its initial format without a version upgrade or migration. Reads
+validate the numeric header before decoding the body; header-only control
+recovery preserves the raw body.
 
 The provider's lease implementation must pass the retained membership contract before this
 store can start. A document-CAS-only backend is insufficient. The test-only model

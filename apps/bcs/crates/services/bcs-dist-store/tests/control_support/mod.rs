@@ -88,7 +88,7 @@ impl Fixture {
             },
         };
         let checkpoint = Checkpoint {
-            format_version: 2,
+            format_version: 1,
             commit_seq: CommitSeq(0),
             consumed: None,
             tasks: Default::default(),

@@ -202,7 +202,7 @@ async fn list_filters_by_status_and_scope_and_requires_a_session() {
 
 fn spec() -> SessionSpec {
     SessionSpec {
-        schema_version: 2,
+        schema_version: 1,
         sid: Sid(SID.into()),
         shard: ShardId(42),
         scope: scope(),

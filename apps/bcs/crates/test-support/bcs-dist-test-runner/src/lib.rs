@@ -141,7 +141,7 @@ pub fn participant() -> AuthorizedAgent {
 fn dispatch_spec(c: &EvaluationContext<'_>, tid: &Tid) -> DispatchSpec {
     let p = &c.spec.authorized_agents[0];
     DispatchSpec {
-        schema_version: 2,
+        schema_version: 1,
         sid: c.spec.sid.clone(),
         tid: tid.clone(),
         did: dispatch_id(tid),
@@ -165,7 +165,7 @@ fn show(tid: &Tid, delta: Payload) -> ActionIntent {
 }
 pub fn initial() -> Checkpoint {
     Checkpoint {
-        format_version: 2,
+        format_version: 1,
         commit_seq: CommitSeq(0),
         consumed: None,
         tasks: Default::default(),
@@ -188,7 +188,7 @@ pub fn scope() -> TaskScope {
 }
 pub fn specification(sid: Sid) -> SessionSpec {
     SessionSpec {
-        schema_version: 2,
+        schema_version: 1,
         sid,
         shard: ShardId(1),
         scope: scope(),

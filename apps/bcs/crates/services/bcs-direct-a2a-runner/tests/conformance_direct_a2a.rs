@@ -14,7 +14,7 @@ fn spec() -> SessionSpec {
     let agent = AgentId("bot".into());
     let config = json!({"agent": agent});
     SessionSpec {
-        schema_version: 2,
+        schema_version: 1,
         sid: Sid("session".into()),
         shard: ShardId(0),
         scope: TaskScope {

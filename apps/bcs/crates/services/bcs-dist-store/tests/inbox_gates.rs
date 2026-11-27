@@ -53,7 +53,7 @@ async fn owner(store: &Recorder, p: &StoreInboxProducer) -> SessionOwnership {
     let envelope = CheckpointEnvelope {
         owner: owner.owner.clone(),
         checkpoint: Checkpoint {
-            format_version: 2,
+            format_version: 1,
             commit_seq: CommitSeq(0),
             consumed: None,
             tasks: Default::default(),

@@ -35,7 +35,7 @@ impl EffectVerifier {
             .map_err(|error| error::from_read(&error))?
             .ok_or_else(invalid)?;
         let envelope: CheckpointEnvelope = decode_json(document.value)?;
-        if envelope.checkpoint.format_version != 2 {
+        if envelope.checkpoint.format_version != 1 {
             return Err(StoreError::UnsupportedFormat {
                 format: envelope.checkpoint.format_version,
             });

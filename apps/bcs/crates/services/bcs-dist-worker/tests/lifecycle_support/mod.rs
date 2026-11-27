@@ -78,7 +78,7 @@ impl DistRunnerCoreService for Runner {
                 if !matches!(self.mode, Mode::Finish) {
                     let p = &c.spec.authorized_agents[0];
                     actions.push(ActionIntent::StartDispatch(DispatchSpec {
-                        schema_version: 2,
+                        schema_version: 1,
                         sid: c.spec.sid.clone(),
                         tid: tid.clone(),
                         did: dispatch_id(tid),

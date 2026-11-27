@@ -9,8 +9,8 @@
 //! [`connector_write`]).
 //!
 //! ```text
-//! key:   bcn:v2:c01:main:s0042:disp:s0042.7f3a9c.b21e.n2.a1
-//! value: {"spec": {"schema_version": 2, "did": "s0042.7f3a9c.b21e.n2.a1",
+//! key:   bcn:v1:c01:main:s0042:disp:s0042.7f3a9c.b21e.n2.a1
+//! value: {"spec": {"schema_version": 1, "did": "s0042.7f3a9c.b21e.n2.a1",
 //!                  "agent": "agent-analyst", "downstream_context": "s0042.7f3a9c:0", ...},
 //!         "control": {"cancel": null, "pending_input": [{"seq": 1, ...}]},
 //!         "execution": {"holder": {"instance": {"node": "conn-03",

@@ -1,11 +1,11 @@
 //! Key names of the distributed executor plane.
 //!
-//! Shard keys: `bcn:v2:<cluster>:<namespace>:s<shard>:<kind>[:<id>]`, e.g.
-//! `bcn:v2:c01:main:s0042:inbox:s0042.7f3a9c`. Cross-shard keys:
-//! `bcn:v2:cmd:<cluster>:<namespace>:<pool>:p<n>`,
-//! `bcn:v2:held:<cluster>:<namespace>:<node>:<incarnation>`,
-//! `bcn:v2:hb:<cluster>:<namespace>:<a|b>:<node>:<incarnation>`,
-//! `bcn:v2:<cluster>:<namespace>:member(s):…`.
+//! Shard keys: `bcn:v1:<cluster>:<namespace>:s<shard>:<kind>[:<id>]`, e.g.
+//! `bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c`. Cross-shard keys:
+//! `bcn:v1:cmd:<cluster>:<namespace>:<pool>:p<n>`,
+//! `bcn:v1:held:<cluster>:<namespace>:<node>:<incarnation>`,
+//! `bcn:v1:hb:<cluster>:<namespace>:<a|b>:<node>:<incarnation>`,
+//! `bcn:v1:<cluster>:<namespace>:member(s):…`.
 //!
 //! There is no hash tag (`{…}`) anywhere: a brace in a name would create one, so
 //! every segment rejects `{` and `}`.
@@ -13,7 +13,7 @@
 use bcs_dist_model::{Did, InputId, Instance, PoolId, ShardId, Sid, Tid};
 use bcs_service_api::port::repo::distributed::common::StoreError;
 
-const PREFIX: &str = "bcn:v2";
+const PREFIX: &str = "bcn:v1";
 const MAX_SEGMENT_BYTES: usize = 256;
 
 /// Copy of a heartbeat; the two copies are judged together (decision 15).
@@ -147,7 +147,7 @@ impl KeyLayout {
         Ok(format!("{}:admit:{}", self.shard_prefix(shard), input_id.0))
     }
 
-    /// Command-stream partition: `bcn:v2:cmd:c01:main:a2a:p0`.
+    /// Command-stream partition: `bcn:v1:cmd:c01:main:a2a:p0`.
     pub fn command(&self, pool: &PoolId, partition: u32) -> Result<String, StoreError> {
         segment(&pool.0)?;
         Ok(format!(
@@ -155,7 +155,7 @@ impl KeyLayout {
             self.cluster, self.namespace, pool.0
         ))
     }
-    /// A Connector's held index: `bcn:v2:held:c01:main:conn-03:1794370950`.
+    /// A Connector's held index: `bcn:v1:held:c01:main:conn-03:1794370950`.
     pub fn held(&self, instance: &Instance) -> Result<String, StoreError> {
         let (node, inc) = instance_segments(instance)?;
         Ok(format!(
@@ -163,7 +163,7 @@ impl KeyLayout {
             self.cluster, self.namespace
         ))
     }
-    /// `bcn:v2:hb:c01:main:a:worker-07:1794370900`.
+    /// `bcn:v1:hb:c01:main:a:worker-07:1794370900`.
     pub fn heartbeat(
         &self,
         copy: HeartbeatCopy,
@@ -179,7 +179,7 @@ impl KeyLayout {
             self.cluster, self.namespace
         ))
     }
-    /// `bcn:v2:c01:main:member:worker:worker-07:1794370900`.
+    /// `bcn:v1:c01:main:member:worker:worker-07:1794370900`.
     pub fn member(&self, role: &str, instance: &Instance) -> Result<String, StoreError> {
         segment(role)?;
         let (node, inc) = instance_segments(instance)?;
@@ -188,7 +188,7 @@ impl KeyLayout {
             self.cluster, self.namespace
         ))
     }
-    /// `bcn:v2:c01:main:members:worker`.
+    /// `bcn:v1:c01:main:members:worker`.
     pub fn members(&self, role: &str) -> Result<String, StoreError> {
         segment(role)?;
         Ok(format!(

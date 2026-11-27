@@ -206,7 +206,7 @@ pub fn me() -> Instance {
 }
 pub fn spec() -> DispatchSpec {
     DispatchSpec {
-        schema_version: 2,
+        schema_version: 1,
         sid: Sid(crate::common::SID.into()),
         tid: Tid(crate::common::TID.into()),
         did: Did(format!("{}.d1", crate::common::TID)),

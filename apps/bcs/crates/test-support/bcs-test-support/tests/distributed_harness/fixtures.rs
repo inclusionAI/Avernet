@@ -154,7 +154,7 @@ pub fn state() -> RunnerState {
 
 pub fn checkpoint() -> Checkpoint {
     Checkpoint {
-        format_version: 2,
+        format_version: 1,
         commit_seq: CommitSeq(8),
         consumed: Some(position()),
         tasks: vec![TaskProgress {
@@ -202,7 +202,7 @@ pub fn target() -> AgentId {
 
 pub fn spec() -> SessionSpec {
     SessionSpec {
-        schema_version: 2,
+        schema_version: 1,
         sid: owner().sid,
         shard: owner().shard,
         scope: scope(),
@@ -232,7 +232,7 @@ pub fn spec() -> SessionSpec {
 pub fn dispatch_view() -> DispatchView {
     DispatchView {
         spec: DispatchSpec {
-            schema_version: 2,
+            schema_version: 1,
             sid: owner().sid,
             tid: input().tid,
             did: Did("dispatch-a".into()),

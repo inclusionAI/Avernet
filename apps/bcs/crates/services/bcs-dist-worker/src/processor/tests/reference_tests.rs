@@ -122,7 +122,7 @@ fn candidate_with_text(length: usize) -> Checkpoint {
         EffectKind::PublishSnapshot { snapshot },
     ];
     Checkpoint {
-        format_version: 2,
+        format_version: 1,
         commit_seq: CommitSeq(1),
         consumed: None,
         tasks: VecDeque::from([task()]),

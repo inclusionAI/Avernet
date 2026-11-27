@@ -481,7 +481,7 @@ impl Fixture {
 }
 pub fn spec() -> SessionSpec {
     SessionSpec {
-        schema_version: 2,
+        schema_version: 1,
         sid: Sid("s0001.session".into()),
         shard: ShardId(1),
         scope: TaskScope {

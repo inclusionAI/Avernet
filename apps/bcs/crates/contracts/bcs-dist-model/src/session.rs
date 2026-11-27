@@ -59,7 +59,7 @@ pub struct SessionLimits {
     pub max_inline_bytes: u32,
 }
 
-pub const SESSION_SCHEMA_VERSION: u32 = 2;
+pub const SESSION_SCHEMA_VERSION: u32 = 1;
 
 /// Frozen at admission. Identifiers do not confer authority.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

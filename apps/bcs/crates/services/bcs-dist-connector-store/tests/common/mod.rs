@@ -382,7 +382,7 @@ pub fn pool() -> PoolId {
 
 pub fn dispatch_spec(did: &Did) -> DispatchSpec {
     DispatchSpec {
-        schema_version: 2,
+        schema_version: 1,
         sid: Sid("s0042.7f3a9c".into()),
         tid: Tid("s0042.7f3a9c.b21e".into()),
         did: did.clone(),

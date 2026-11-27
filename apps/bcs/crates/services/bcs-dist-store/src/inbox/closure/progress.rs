@@ -36,7 +36,7 @@ impl AdmissionClosurePort for StoreAdmissionControl {
                 .load::<CheckpointEnvelope>(&layout.ckpt(&owner.sid)?)
                 .await?
                 .ok_or_else(|| invalid("closure_checkpoint_missing"))?;
-            if envelope.checkpoint.format_version != 2 || envelope.checkpoint.tasks.len() > 128 {
+            if envelope.checkpoint.format_version != 1 || envelope.checkpoint.tasks.len() > 128 {
                 return Err(invalid("closure_checkpoint_format"));
             }
             let checkpoint_tasks = envelope
@@ -140,7 +140,7 @@ impl AdmissionClosurePort for StoreAdmissionControl {
             .load::<CheckpointEnvelope>(&layout.ckpt(&owner.sid)?)
             .await?
             .ok_or_else(|| invalid("closure_checkpoint_missing"))?;
-        if envelope.checkpoint.format_version != 2 || envelope.checkpoint.tasks.len() > 128 {
+        if envelope.checkpoint.format_version != 1 || envelope.checkpoint.tasks.len() > 128 {
             return Err(invalid("closure_checkpoint_format"));
         }
         let mut added = false;

@@ -1,7 +1,7 @@
 use crate::ids::*;
 use serde::{Deserialize, Serialize};
 
-pub const DISPATCH_SCHEMA_VERSION: u32 = 2;
+pub const DISPATCH_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DispatchSpec {

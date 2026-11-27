@@ -416,7 +416,7 @@ pub fn ports() -> Ports {
 
 pub fn session_spec(sid: &str, scope: TaskScope) -> SessionSpec {
     SessionSpec {
-        schema_version: 2,
+        schema_version: 1,
         sid: Sid(sid.into()),
         shard: KeyLayout::shard_of(&Sid(sid.into())).unwrap(),
         scope,

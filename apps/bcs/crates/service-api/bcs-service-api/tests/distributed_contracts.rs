@@ -6,7 +6,7 @@ use serde_json::json;
 fn awaiting_result_checkpoint_retains_replayable_result_and_input_coverage(
 ) -> Result<(), serde_json::Error> {
     let mut wire = json!({
-        "format_version":2,
+        "format_version":1,
         "downstream_generation":3, "pending_cancel_did":null,
         "commit_seq":8,
         "consumed":{"sid":"s","token":{"backend":"store-a","generation":"v1","value":"opaque-8"}},
@@ -30,6 +30,7 @@ fn awaiting_result_checkpoint_retains_replayable_result_and_input_coverage(
         "terminal_event_id":null, "terminal_published":false
     });
     let checkpoint: Checkpoint = serde_json::from_value(wire.clone())?;
+    assert_eq!(checkpoint.format_version, Checkpoint::FORMAT_VERSION);
     assert!(matches!(
         checkpoint.tasks.front().map(|task| &task.phase),
         Some(TaskPhase::AwaitingResult { .. })

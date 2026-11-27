@@ -24,7 +24,7 @@ pub(super) fn task() -> TaskProgress {
 }
 pub(super) fn spec() -> SessionSpec {
     SessionSpec {
-        schema_version: 2,
+        schema_version: 1,
         sid: Sid("s0001.session".into()),
         shard: ShardId(1),
         scope: TaskScope {
@@ -146,7 +146,7 @@ fn sealed_commit_digest_covers_checkpoint_and_rejects_corrupted_late_effects() {
         },
     };
     let candidate = Checkpoint {
-        format_version: 2,
+        format_version: 1,
         commit_seq: CommitSeq(1),
         consumed: None,
         tasks: VecDeque::from([task()]),
@@ -236,7 +236,7 @@ fn sealed_commit_digest_covers_checkpoint_and_rejects_corrupted_late_effects() {
 
 fn initial() -> Checkpoint {
     Checkpoint {
-        format_version: 2,
+        format_version: 1,
         commit_seq: CommitSeq(0),
         consumed: None,
         tasks: std::collections::VecDeque::from([task()]),

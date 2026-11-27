@@ -78,7 +78,7 @@ impl StoreInboxProducer {
             .map_err(|_| invalid("io_budget_closed"))
     }
 
-    pub(super) async fn load<T: DeserializeOwned + 'static>(
+    pub(super) async fn load<T: DeserializeOwned>(
         &self,
         key: &str,
     ) -> Result<Option<(Version, T)>, StoreError> {
@@ -98,7 +98,7 @@ impl StoreInboxProducer {
         })
         .transpose()
     }
-    pub(super) async fn save<T: Serialize + 'static>(
+    pub(super) async fn save<T: Serialize>(
         &self,
         key: &str,
         version: Option<Version>,
@@ -107,7 +107,7 @@ impl StoreInboxProducer {
     ) -> Result<bool, StoreError> {
         Ok(self.save_version(key, version, value, op).await?.is_some())
     }
-    pub(super) async fn save_version<T: Serialize + 'static>(
+    pub(super) async fn save_version<T: Serialize>(
         &self,
         key: &str,
         version: Option<Version>,

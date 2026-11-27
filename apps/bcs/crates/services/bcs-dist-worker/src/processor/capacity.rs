@@ -38,7 +38,7 @@ pub(super) fn snapshot() -> Result<TaskSnapshot, StoreError> {
     serde_json::from_value(json!({"schema_version":1,"scope":scope(),"sid":identity(1),"tid":identity(2),"content":content(),"output_limits":PHASE_ONE_OUTPUT_LIMITS,"output_usage":{"cumulative_bytes":8_388_608u64},"snapshot_event_id":{"commit":u64::MAX,"index":u32::MAX},"source_commit":u64::MAX,"created_at":i64::MIN,"updated_at":i64::MIN})).map_err(|_| invalid("capacity_shape"))
 }
 fn dispatch(i: usize) -> Result<EffectKind, StoreError> {
-    serde_json::from_value(json!({"kind":"create_dispatch","spec":{"schema_version":2,"sid":identity(1),"tid":identity(2),"did":identity(i+100),"source":identity(5),"attempt":u32::MAX,"agent":identity(6),"pool":identity(9),"downstream_context":identity(8),"request":framed_payload(),"deadline":i64::MIN}})).map_err(|_| invalid("capacity_shape"))
+    serde_json::from_value(json!({"kind":"create_dispatch","spec":{"schema_version":1,"sid":identity(1),"tid":identity(2),"did":identity(i+100),"source":identity(5),"attempt":u32::MAX,"agent":identity(6),"pool":identity(9),"downstream_context":identity(8),"request":framed_payload(),"deadline":i64::MIN}})).map_err(|_| invalid("capacity_shape"))
 }
 pub(super) fn owner() -> SessionOwnership {
     SessionOwnership {
@@ -57,7 +57,7 @@ pub(super) fn candidate() -> Result<Checkpoint, StoreError> {
     let task = |i: usize| json!({"steps":u32::MAX,"tid":identity(i+2),"phase":{"kind":"queued"},"input":framed_payload(),"result_ref":null,"output_limits":PHASE_ONE_OUTPUT_LIMITS,"output_usage":{"cumulative_bytes":0},"publication":{"published_through":{"commit":u64::MAX,"index":u32::MAX},"pending_events":u32::MAX,"pending_bytes":u64::MAX,"flush_deadline":{"id":identity(i+900),"at":i64::MIN,"kind":{"kind":"snapshot","tid":identity(i+2)}}},"finalization":null});
     let deadline = |i: usize| json!({"id":identity(i+600),"at":i64::MIN,"kind":{"kind":"dispatch","tid":identity(2),"did":identity(i%64+100)}});
     let mut result:Checkpoint=serde_json::from_value(json!({
-        "format_version":2,"downstream_generation":u64::MAX,"pending_cancel_did":identity(100),"commit_seq":u64::MAX,"consumed":{"sid":identity(1),"token":{"backend":identity(0),"generation":"1","value":format!("{}-{}",u64::MAX,u64::MAX)}},
+        "format_version":1,"downstream_generation":u64::MAX,"pending_cancel_did":identity(100),"commit_seq":u64::MAX,"consumed":{"sid":identity(1),"token":{"backend":identity(0),"generation":"1","value":format!("{}-{}",u64::MAX,u64::MAX)}},
         "tasks":(0..34).map(task).collect::<Vec<_>>(),
         "runner_state":{"tid":identity(2),"state":{"format_version":1,"value":"r".repeat(65_505)}},
         "dispatch_seq":(0..64).map(|i|(identity(i+100),json!({"tid":identity(2),"holder_epoch":u64::MAX,"sequence":u64::MAX,"terminal_seen":false}))).collect::<BTreeMap<_,_>>(),

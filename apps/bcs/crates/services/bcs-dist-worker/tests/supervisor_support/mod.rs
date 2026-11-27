@@ -224,7 +224,7 @@ impl Harness {
             panic!("acquired")
         };
         let spec = DispatchSpec {
-            schema_version: 2,
+            schema_version: 1,
             sid: processor_support::spec().sid,
             tid: tid.clone(),
             did: did.clone(),

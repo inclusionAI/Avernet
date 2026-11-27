@@ -386,7 +386,7 @@ pub fn scope() -> TaskScope {
 
 pub fn spec(group: &str) -> SessionSpec {
     SessionSpec {
-        schema_version: 2,
+        schema_version: 1,
         sid: Sid(SID.into()),
         shard: ShardId(42),
         scope: scope(),

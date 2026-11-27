@@ -58,7 +58,7 @@ fn new_task_request(input_id: &str, text: &str) -> AdmitRequest {
 async fn inbox_len(store: &Recorder) -> usize {
     StreamStorePlugin::range(
         &store.model,
-        "bcn:v2:c01:main:s0042:inbox:s0042.7f3a9c",
+        "bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
         Bound::Unbounded,
         Bound::Unbounded,
         NonZeroU32::new(100).unwrap(),
@@ -106,14 +106,14 @@ async fn writes_happen_in_the_fixed_order_without_a_journal_root() {
     );
     let created = store
         .model
-        .get_json("bcn:v2:c01:main:s0042:task:s0042.7f3a9c.b21e")
+        .get_json("bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e")
         .await
         .unwrap()
         .unwrap();
     assert_eq!(created.version, Version(1));
     let active = ZSetStorePlugin::range(
         &store.model,
-        "bcn:v2:c01:main:s0042:active",
+        "bcn:v1:c01:main:s0042:active",
         &ZSetRange {
             min: Bound::Unbounded,
             max: Bound::Unbounded,
@@ -176,7 +176,7 @@ async fn same_id_with_other_content_is_a_conflict() {
 #[tokio::test]
 async fn an_existing_task_is_never_replaced() {
     let store = Arc::new(Recorder::default());
-    let key = "bcn:v2:c01:main:s0042:task:s0042.7f3a9c.b21e";
+    let key = "bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e";
     let mut advanced = task();
     advanced.content.status = TaskStatus::Working;
     store
@@ -203,7 +203,7 @@ async fn a_spec_of_another_group_is_a_conflict() {
     let store = Arc::new(Recorder::default());
     let p = producer(&store);
     p.admit(new_task_request("adm-1", "hello")).await.unwrap();
-    let key = "bcn:v2:c01:main:s0042:spec:s0042.7f3a9c";
+    let key = "bcn:v1:c01:main:s0042:spec:s0042.7f3a9c";
     let original = store.model.read_document(key).await.unwrap().unwrap();
     let mut other = new_task_request("adm-2", "again");
     other.create_session = Some(spec("grp-other"));
@@ -220,8 +220,8 @@ async fn repeated_creation_preserves_the_first_spec_and_task() {
     let store = Arc::new(Recorder::default());
     let p = producer(&store);
     p.admit(new_task_request("adm-1", "hello")).await.unwrap();
-    let spec_key = "bcn:v2:c01:main:s0042:spec:s0042.7f3a9c";
-    let task_key = "bcn:v2:c01:main:s0042:task:s0042.7f3a9c.b21e";
+    let spec_key = "bcn:v1:c01:main:s0042:spec:s0042.7f3a9c";
+    let task_key = "bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e";
     let original_spec = store.model.read_document(spec_key).await.unwrap().unwrap();
     let original_task = store.model.read_document(task_key).await.unwrap().unwrap();
     let mut retry = new_task_request("adm-2", "again");
@@ -274,7 +274,7 @@ async fn worker_reads_the_admitted_spec_through_the_same_document_api() {
     assert_eq!(sessions.get_spec(&Sid(SID.into())).await.unwrap(), expected);
     assert_eq!(
         store.calls(),
-        vec!["document.read bcn:v2:c01:main:s0042:spec:s0042.7f3a9c"]
+        vec!["document.read bcn:v1:c01:main:s0042:spec:s0042.7f3a9c"]
     );
 }
 
@@ -390,7 +390,7 @@ async fn an_intermediate_agent_event_is_appended_and_activates_the_session() {
     );
     let page = StreamStorePlugin::range(
         &store.model,
-        "bcn:v2:c01:main:s0042:inbox:s0042.7f3a9c",
+        "bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
         Bound::Unbounded,
         Bound::Unbounded,
         NonZeroU32::new(10).unwrap(),
@@ -404,7 +404,7 @@ async fn an_intermediate_agent_event_is_appended_and_activates_the_session() {
     p.append_stream(request).await.unwrap();
     let page = StreamStorePlugin::range(
         &store.model,
-        "bcn:v2:c01:main:s0042:inbox:s0042.7f3a9c",
+        "bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
         Bound::Unbounded,
         Bound::Unbounded,
         NonZeroU32::new(10).unwrap(),
@@ -496,7 +496,7 @@ async fn an_existing_task_of_another_scope_is_a_conflict() {
     store
         .model
         .mutate_json(
-            "bcn:v2:c01:main:s0042:task:s0042.7f3a9c.b21e",
+            "bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
             WriteCondition::Newer(Version(1)),
             JsonMutation::Replace(serde_json::to_value(&foreign).unwrap()),
             Expiry::Persistent,
@@ -509,7 +509,7 @@ async fn an_existing_task_of_another_scope_is_a_conflict() {
     store
         .model
         .mutate_json(
-            "bcn:v2:c01:main:s0042:spec:s0042.7f3a9c",
+            "bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
             WriteCondition::Newer(Version(1)),
             JsonMutation::Replace(serde_json::to_value(spec("grp-research-01")).unwrap()),
             Expiry::Persistent,
@@ -525,7 +525,7 @@ async fn an_existing_task_of_another_scope_is_a_conflict() {
 
 #[tokio::test]
 async fn documents_of_an_unsupported_version_are_never_written() {
-    for (which, format) in [("spec", 3), ("task", 2)] {
+    for (which, format) in [("spec", 2), ("task", 2)] {
         let store = Arc::new(Recorder::default());
         let mut request = new_task_request("adm-9c41e7", "hello");
         match which {

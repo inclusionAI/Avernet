@@ -143,7 +143,7 @@ impl CoordinationStore {
             timers: Mutex::new(HashMap::new()),
         })
     }
-    async fn read<T: DeserializeOwned + 'static>(
+    async fn read<T: DeserializeOwned>(
         &self,
         key: &str,
     ) -> Result<Option<Versioned<T>>, StoreError> {
@@ -159,7 +159,7 @@ impl CoordinationStore {
             })
             .transpose()
     }
-    async fn write<T: Serialize + 'static>(
+    async fn write<T: Serialize>(
         &self,
         key: &str,
         expected: Option<Version>,

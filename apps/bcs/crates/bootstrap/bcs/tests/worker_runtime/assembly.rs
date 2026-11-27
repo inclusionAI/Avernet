@@ -318,6 +318,7 @@ impl Host {
         use std::sync::atomic::{AtomicBool, Ordering};
         let source_index = self.workers.len() - 1;
         let source = self.workers[source_index].runtime.clone();
+        let source_processor = self.workers[source_index].processor.clone();
         self.add_worker("worker-handoff-target").await;
         let target = self.workers.last().unwrap().runtime.clone();
         let processor = self.workers.last().unwrap().processor.clone();
@@ -348,6 +349,12 @@ impl Host {
             async {
                 let mut errors = vec![];
                 while !finished.load(Ordering::SeqCst) {
+                    // Drain waits for recovery/effects/scheduling to settle.
+                    // Keep driving the source processor until drain finishes,
+                    // just as the host does before signaling its stop channel.
+                    if let Err(error) = source_processor.tick().await {
+                        errors.push(error.code);
+                    }
                     if let Err(error) = target.heartbeat().await {
                         errors.push(error.code);
                     }
