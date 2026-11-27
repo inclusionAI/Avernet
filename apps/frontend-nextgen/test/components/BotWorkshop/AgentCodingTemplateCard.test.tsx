@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import '@testing-library/jest-dom';
 import { AgentCodingTemplateCard } from '@/components/BotWorkshop/CreateBotModal/agentCoding/AgentCodingTemplateCard';
 import { getTemplateReleaseStage, type AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
 import { render, screen } from '@testing-library/react';
@@ -18,7 +19,7 @@ const makeTemplate = (overrides: Partial<AgentCodingTemplate> = {}): AgentCoding
   ...overrides,
 });
 
-test('官方推荐不展示负责人，描述使用较深的正文颜色', () => {
+test('官方推荐直接展示负责人姓名，描述使用较深的正文颜色', () => {
   render(
     <AgentCodingTemplateCard
       template={makeTemplate({ ownerName: '模板负责人' })}
@@ -27,7 +28,8 @@ test('官方推荐不展示负责人，描述使用较深的正文颜色', () =>
     />,
   );
 
-  expect(screen.queryByText('负责人：模板负责人')).toBeNull();
+  expect(screen.getByText('模板负责人')).toBeInTheDocument();
+  expect(screen.queryByText('负责人：模板负责人')).not.toBeInTheDocument();
   expect(screen.getByText('模板描述').className).toContain('text-foreground/70');
 });
 
@@ -44,8 +46,17 @@ test('模板市场展示负责人，白名单状态在卡片右下角展示绶�
     />,
   );
 
-  expect(screen.getByText('负责人：模板负责人')).toBeTruthy();
+  expect(screen.getByText('模板负责人')).toBeInTheDocument();
   expect(screen.getByLabelText('白名单阶段').textContent).toContain('白名单');
+});
+
+test.each(['official', 'market'] as const)('%s 模板没有负责人时不编造负责人', (source) => {
+  render(
+    <AgentCodingTemplateCard template={makeTemplate({ source })} selected={false} onSelect={jest.fn()} />,
+  );
+
+  expect(screen.queryByText('模板负责人')).not.toBeInTheDocument();
+  expect(screen.getByRole('button')).toHaveTextContent('模板 Bot');
 });
 
 test('在线模板不展示白名单绶带', () => {
