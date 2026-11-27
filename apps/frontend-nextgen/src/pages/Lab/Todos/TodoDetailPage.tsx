@@ -10,7 +10,8 @@ import { ArrowLeft } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { TodoAcceptanceActions } from './components/TodoAcceptanceActions';
 import { TodoArtifactList } from './components/TodoArtifactList';
-import { TodoDetailItem, TodoDetailTab } from './components/TodoDetailPrimitives';
+import { TodoDetailTab } from './components/TodoDetailPrimitives';
+import { TodoDetailSidebar } from './components/TodoDetailSidebar';
 import { TodoInteractionPanel } from './components/TodoInteractionPanel';
 import { TodoProductInteractionComposer, TodoProductInteractionPanel } from './components/TodoProductInteractionPanel';
 import { TodoProgressPanel } from './components/TodoProgressPanel';
@@ -21,12 +22,6 @@ function createDecisionId(): string {
   const randomUuid = globalThis.crypto?.randomUUID?.();
   if (randomUuid) return `decision_${randomUuid.replaceAll('-', '')}`;
   return `decision_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
-}
-
-function formatDateTime(value?: string): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
 }
 
 /** 独立待办详情页：围绕阶段进度、互动和产物呈现执行过程。 */
@@ -276,32 +271,7 @@ export default function TodoDetailPage() {
               ) : null}
             </div>
 
-            <aside className="w-full shrink-0 lg:w-64" aria-label="待办详情">
-              <div className="sticky top-6 rounded-xl border border-border bg-card p-4">
-                <h2 className="m-0 mb-3 text-sm font-semibold text-foreground">详情</h2>
-                <div className="space-y-2.5">
-                  <TodoDetailItem
-                    label="状态"
-                    value={
-                      <Badge className={cn('border-0 px-1.5 py-0.5 text-[10px]', TODO_STATUS_CLASS[todo.status])}>
-                        {TODO_STATUS_LABEL[todo.status]}
-                      </Badge>
-                    }
-                  />
-                  <TodoDetailItem
-                    label="执行方"
-                    value={todo.templateId ? todo.templateName || todo.templateId : todo.botName || todo.botId}
-                  />
-                  <TodoDetailItem label="负责人" value={todo.ownerName || todo.ownerId || '—'} />
-                  <TodoDetailItem
-                    label="当前空间"
-                    value={currentSpace?.spaceName || `空间 ${todo.spaceId}`}
-                  />
-                  <TodoDetailItem label="创建时间" value={formatDateTime(todo.createdAt)} />
-                  <TodoDetailItem label="更新时间" value={formatDateTime(todo.updatedAt)} />
-                </div>
-              </div>
-            </aside>
+            <TodoDetailSidebar todo={todo} currentSpaceName={currentSpace?.spaceName} />
           </div>
         </>
       ) : null}

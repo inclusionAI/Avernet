@@ -28,7 +28,6 @@ describe('Lab Todos Bot scope', () => {
   });
 
   it('team space keeps all current-space bots from the inventory', () => {
-    const publicCatalogIds = new Set(['bot-1:u-1']);
     const options = eligibleTodoBots(
       [
         { id: 'bot-1', name: 'One', ownerId: 'u-1' },
@@ -36,26 +35,30 @@ describe('Lab Todos Bot scope', () => {
       ],
       teamSpace,
       'u-1',
-      publicCatalogIds,
     );
-    expect(options).toEqual([{ botId: 'bot-1', botName: 'One' }]);
+    expect(options).toEqual([
+      { botId: 'bot-1', botName: 'One' },
+      { botId: 'bot-2', botName: 'Two' },
+    ]);
   });
 
-  it('personal space requires both current-human ownership and public collaboration visibility', () => {
+  it('personal space keeps all bots owned by the current human', () => {
     const options = eligibleTodoBots(
       [
-        { id: 'bot-1', name: 'Public', ownerId: 'u-1' },
-        { id: 'bot-2', name: 'Private', ownerId: 'u-1' },
+        { id: 'bot-1', name: 'One', ownerId: 'u-1' },
+        { id: 'bot-2', name: 'Two', ownerId: 'u-1' },
         { id: 'bot-3', name: 'Foreign', ownerId: 'u-2' },
       ],
       personalSpace,
       'u-1',
-      new Set(['bot-1:u-1', 'bot-3:u-2']),
     );
-    expect(options).toEqual([{ botId: 'bot-1', botName: 'Public' }]);
+    expect(options).toEqual([
+      { botId: 'bot-1', botName: 'One' },
+      { botId: 'bot-2', botName: 'Two' },
+    ]);
   });
 
   it('unknown spaces fail closed', () => {
-    expect(eligibleTodoBots([{ id: 'bot-1' }], undefined, 'u-1', new Set())).toEqual([]);
+    expect(eligibleTodoBots([{ id: 'bot-1' }], undefined, 'u-1')).toEqual([]);
   });
 });

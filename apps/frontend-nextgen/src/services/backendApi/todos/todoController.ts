@@ -17,8 +17,9 @@ import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '.
 
 const TODO_API_BASE = `${TASK_READ_API_BASE}/todos`;
 const BOT_TEAM_API_BASE = `${TASK_READ_API_BASE}/bot-teams`;
-// Space 列表是 Task Engine 内部契约，不存在对应 OpenAPI；保持同源相对路径，由本地/部署代理转发到 Engine。
-const TODO_SPACES_API_PATH = '/api/v1/collaboration/tasks/spaces';
+// Todo 支撑资源只暴露窄化的 Engine 登录态契约，不复用 Bot/Space OpenAPI。
+const TODO_INTERNAL_API_BASE = '/api/v1/collaboration/tasks';
+const TODO_SPACES_API_PATH = `${TODO_INTERNAL_API_BASE}/spaces`;
 
 
 export interface BotTeamNodeDto extends BackendUnknownRecord {
@@ -224,6 +225,8 @@ export interface TodoAutoImportRuleDto extends BackendUnknownRecord {
 
 export const TODO_ENDPOINTS = {
   spaces: TODO_SPACES_API_PATH,
+  spaceMembers: (spaceId: number | string) => `${TODO_SPACES_API_PATH}/${encodeURIComponent(String(spaceId))}/members`,
+  bots: `${TODO_INTERNAL_API_BASE}/bots`,
   list: TODO_API_BASE,
   detail: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}`,
   progress: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/progress`,
@@ -258,6 +261,25 @@ export function listTodoSpaces() {
     method: 'GET',
     params: { page_no: 1, page_size: 100, scope: 'accessible' },
     operation: 'list-todo-spaces',
+    retryOnTransient: true,
+  });
+}
+
+export function listTodoSpaceMembers(spaceId: number | string, page = 1) {
+  return backendRequest<BackendApiEnvelope<BackendApiPage<BackendUnknownRecord>>>(TODO_ENDPOINTS.spaceMembers(spaceId), {
+    method: 'GET',
+    params: { page_no: page, page_size: 100 },
+    operation: 'list-todo-space-members',
+    retryOnTransient: true,
+  });
+}
+
+export function listTodoBotInventory(spaceId: number | string) {
+  return backendRequest<BackendApiEnvelope<BackendApiPage<BackendUnknownRecord>>>(TODO_ENDPOINTS.bots, {
+    method: 'GET',
+    params: userScopedParams({ page: 1, page_size: 100 }),
+    headers: { 'X-Space-Id': String(spaceId) },
+    operation: 'list-todo-bots',
     retryOnTransient: true,
   });
 }

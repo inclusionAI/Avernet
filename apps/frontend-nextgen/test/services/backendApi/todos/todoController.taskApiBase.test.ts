@@ -14,6 +14,10 @@ describe('todoController task API path', () => {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { TODO_ENDPOINTS } = require('@/services/backendApi/todos/todoController');
       expect(TODO_ENDPOINTS.spaces).toBe('/api/v1/collaboration/tasks/spaces');
+      expect(TODO_ENDPOINTS.spaceMembers('space/1')).toBe(
+        '/api/v1/collaboration/tasks/spaces/space%2F1/members',
+      );
+      expect(TODO_ENDPOINTS.bots).toBe('/api/v1/collaboration/tasks/bots');
       expect(TODO_ENDPOINTS.list).toBe('/api/v1/collaboration/tasks/todos');
       expect(TODO_ENDPOINTS.run('todo/1')).toBe('/api/v1/collaboration/tasks/todos/todo%2F1/run');
       expect(TODO_ENDPOINTS.dimaProjects).toBe('/api/v1/collaboration/tasks/todos/sources/dima/projects');
@@ -23,6 +27,14 @@ describe('todoController task API path', () => {
       expect(TODO_ENDPOINTS.dimaWorkItem('P/1', 'work/1')).toBe(
         '/api/v1/collaboration/tasks/todos/sources/dima/projects/P%2F1/work-items/work%2F1',
       );
+      expect(TODO_ENDPOINTS.dimaAutoImportRules).toBe(
+        '/api/v1/collaboration/tasks/todos/sources/dima/auto-import-rules',
+      );
+      expect(TODO_ENDPOINTS.dimaAutoImportRule('rule/1')).toBe(
+        '/api/v1/collaboration/tasks/todos/sources/dima/auto-import-rules/rule%2F1',
+      );
+      expect(TODO_ENDPOINTS.botTeams).toBe('/api/v1/collaboration/tasks/bot-teams');
+      expect(TODO_ENDPOINTS.botTeam('team/1')).toBe('/api/v1/collaboration/tasks/bot-teams/team%2F1');
     });
   });
 
@@ -36,7 +48,11 @@ describe('todoController task API path', () => {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { TODO_ENDPOINTS } = require('@/services/backendApi/todos/todoController');
       expect(TODO_ENDPOINTS.spaces).toBe('/api/v1/collaboration/tasks/spaces');
+      expect(TODO_ENDPOINTS.spaceMembers('1')).toBe('/api/v1/collaboration/tasks/spaces/1/members');
+      expect(TODO_ENDPOINTS.bots).toBe('/api/v1/collaboration/tasks/bots');
       expect(TODO_ENDPOINTS.spaces).not.toContain('/openapi/');
+      expect(TODO_ENDPOINTS.spaceMembers('1')).not.toContain('/openapi/');
+      expect(TODO_ENDPOINTS.bots).not.toContain('/openapi/');
     });
   });
 });

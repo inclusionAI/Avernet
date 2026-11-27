@@ -3,10 +3,7 @@ import type { BotTeamRecord, TodoBotOption, TodoExecutorOption, TodoOwner } from
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useTodoSpaces } from '@/hooks/useTodoSpaces';
 import { useTodos } from '@/hooks/useTodos';
-import { botManagementService } from '@/services/botWorkshop/botManagementService';
-import { botWorkshopService } from '@/services/botWorkshop';
-import { loadPublicTodoBotCatalogIds } from '@/services/todos/todoBotCatalogService';
-import { loadBotTeams } from '@/services/todos/todoService';
+import { loadBotTeams, loadTodoBots, loadTodoOwners } from '@/services/todos/todoService';
 import { safeReportError } from '@/utils/errorToast';
 import { history } from '@umijs/max';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -51,13 +48,10 @@ export default function LabTodosPage() {
       return;
     }
     let aborted = false;
-    void botWorkshopService
-      .list({ spaceId: String(currentSpaceId), page: 1, pageSize: 100 })
-      .then(async (result) => {
+    void loadTodoBots(currentSpaceId)
+      .then((items) => {
         if (aborted) return;
-        const publicCatalogIds = await loadPublicTodoBotCatalogIds(result.items);
-        if (aborted) return;
-        setBots(eligibleTodoBots(result.items, currentSpace, currentUserId, publicCatalogIds));
+        setBots(eligibleTodoBots(items, currentSpace, currentUserId));
       })
       .catch((cause) => {
         if (aborted) return;
@@ -97,12 +91,10 @@ export default function LabTodosPage() {
       return;
     }
     let aborted = false;
-    void botManagementService
-      .listSpaceMembers(String(currentSpaceId), currentUserId)
+    void loadTodoOwners(currentSpaceId)
       .then((members) => {
         if (aborted) return;
-        const mapped = members.map((member) => ({ userId: member.userId, userName: member.name || member.userId }));
-        setOwners(mapped.length ? mapped : fallbackOwner);
+        setOwners(members.length ? members : fallbackOwner);
       })
       .catch((cause) => {
         if (aborted) return;

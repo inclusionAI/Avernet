@@ -412,7 +412,7 @@ export async function loadTodoSourceDraft(projectId: string, workItemId: string)
   return mapSourceDraft(unwrap(await getTodoSourceDraft(projectId, workItemId), path), path);
 }
 
-const AUTO_IMPORT_RULES_PATH = '/openapi/v1/collaboration/tasks/todos/sources/dima/auto-import-rules';
+const AUTO_IMPORT_RULES_PATH = TODO_ENDPOINTS.dimaAutoImportRules;
 
 export async function createTodoAutoImportRule(input: CreateTodoAutoImportRuleInput): Promise<TodoAutoImportRule> {
   return mapAutoImportRule(unwrap(await createTodoAutoImportRuleRequest(input), AUTO_IMPORT_RULES_PATH), AUTO_IMPORT_RULES_PATH);

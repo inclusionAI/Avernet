@@ -112,7 +112,8 @@ describe('todoController', () => {
       spaceId: 10,
       title: '标题',
       description: '描述',
-      botId: 'bot-1',
+      executor: { type: 'bot', id: 'bot-1' },
+      owner: { userId: 'human-1', userName: '测试用户' },
     });
 
     expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos', {
@@ -122,7 +123,8 @@ describe('todoController', () => {
         space_id: 10,
         title: '标题',
         description: '描述',
-        bot_id: 'bot-1',
+        executor: { type: 'bot', id: 'bot-1' },
+        owner: { user_id: 'human-1', user_name: '测试用户' },
       },
       operation: 'create-todo',
     });
@@ -133,7 +135,8 @@ describe('todoController', () => {
       spaceId: 10,
       title: '标题',
       description: '描述',
-      botId: 'bot-1',
+      executor: { type: 'bot', id: 'bot-1' },
+      owner: { userId: 'human-1', userName: '测试用户' },
       source: {
         type: 'dima',
         containerId: 'P1',
@@ -154,7 +157,8 @@ describe('todoController', () => {
         space_id: 10,
         title: '标题',
         description: '描述',
-        bot_id: 'bot-1',
+        executor: { type: 'bot', id: 'bot-1' },
+        owner: { user_id: 'human-1', user_name: '测试用户' },
         source: {
           type: 'dima',
           container_id: 'P1',
