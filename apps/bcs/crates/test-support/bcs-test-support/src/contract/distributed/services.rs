@@ -160,6 +160,19 @@ pub async fn dist_agent_client_port_contract_tests(
     Ok(())
 }
 
+/// Fixture decisions are supplied by each policy implementation's tests;
+/// the shared contract does not prescribe how identities or grants are evaluated.
+pub async fn dist_session_authorizer_port_contract_tests(
+    authorizer: &dyn DistSessionAuthorizerPort,
+    scope: &TaskScope,
+    cases: &[(SessionTarget, Result<(), DirectoryError>)],
+) -> ContractResult {
+    for (target, expected) in cases {
+        assert_eq!(&authorizer.authorize(scope, target).await, expected);
+    }
+    Ok(())
+}
+
 pub async fn dist_session_directory_port_contract_tests(
     directory: &dyn DistSessionDirectoryPort,
     scope: &TaskScope,

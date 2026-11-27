@@ -126,6 +126,17 @@ pub enum DirectoryError {
 }
 
 #[async_trait]
+pub trait DistSessionAuthorizerPort: Send + Sync {
+    /// Host-supplied authorization. The caller identity and target are passed
+    /// unchanged; this interface defines no Bot, friendship or organization rules.
+    async fn authorize(
+        &self,
+        scope: &TaskScope,
+        target: &SessionTarget,
+    ) -> Result<(), DirectoryError>;
+}
+
+#[async_trait]
 pub trait DistSessionDirectoryPort: Send + Sync {
     /// Gateway checks every external send before durable admission, including replies.
     /// The host supplies the policy; the Gateway passes its existing authenticated

@@ -36,6 +36,17 @@ these strings both as Send sources and bound Inject context. Fully managed
 replays reuse durable deliveries; mixed replays fail as ambiguous because legacy
 recipients have no durable delivery ledger. Runtime retry policy is unchanged.
 
+## Distributed Direct A2A directory
+
+[`DirectSessionDirectory`](src/a2a_chat/directory.rs) checks the configured tenant
+and a nonempty Direct agent target, then builds the immutable mode configuration,
+agent/pool binding and session limits without database access. Its authorization
+method delegates the unchanged caller scope and target to an explicitly injected
+`DistSessionAuthorizerPort`, preserving that port's result. Concrete authorization
+policy is deferred; this directory does not parse principals or call the single-
+process Bot management, friendship or organization services. Configuration
+resolution does not repeat authorization. Existing `A2aChat` checks are unchanged.
+
 ## Direct chat empty-input admission (v1)
 
 A2aChat implements the text-only direct-chat application contract. Both

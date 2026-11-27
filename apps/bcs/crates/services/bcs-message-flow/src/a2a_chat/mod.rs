@@ -1,5 +1,7 @@
 pub mod event_parser;
 pub mod run_store;
+mod directory;
+pub use directory::DirectSessionDirectory;
 mod queued;
 mod queued_runtime;
 mod frame;

@@ -25,11 +25,12 @@ use bcs_dist_worker::{
     ProcessorConfig, ProcessorPorts, RunnerRegistry, WorkerConfig, WorkerOutputReader,
     WorkerProcessor, WorkerRuntime, WorkerTaskAdmission,
 };
+use bcs_message_flow::a2a_chat::DirectSessionDirectory;
 use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::{
     BotRegistryCoreService,
     application::dist_gateway::GatewayError,
-    port::dist_agent::DistSessionDirectoryPort,
+    port::dist_agent::DistSessionAuthorizerPort,
     port::dist_runtime::DistWorkerPeerPort,
     port::repo::distributed::{budget::ScanBudgetPort, session::Checkpoint},
     types::dist_runtime::RuntimeError,
@@ -45,11 +46,14 @@ pub struct DirectA2aStores {
 }
 
 impl DirectA2aStores {
-    /// The host must supply a directory implementing admission and configuration
-    /// resolution. This composition does not install an authorization policy.
+    /// The Direct directory checks targets and builds configuration. The host
+    /// must supply its authorization interface; no policy is installed here.
     pub fn gateway(
         &self,
-        directory: Arc<dyn DistSessionDirectoryPort>,
+        authorizer: Arc<dyn DistSessionAuthorizerPort>,
+        tenant: TenantId,
+        pool: PoolId,
+        limits: SessionLimits,
         config: DistGatewayConfig,
         http: GatewayHttpConfig,
     ) -> Result<axum::Router, GatewayError> {
@@ -67,7 +71,7 @@ impl DirectA2aStores {
         );
         let app = DistGateway::new(
             Arc::new(core),
-            directory,
+            Arc::new(DirectSessionDirectory::new(authorizer, tenant, pool, limits)),
             Arc::new(bcs_app_dist_gateway::SystemClock),
             config,
         )?;

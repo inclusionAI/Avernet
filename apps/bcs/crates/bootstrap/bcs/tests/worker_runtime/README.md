@@ -26,10 +26,11 @@ A2A agent. It sends external JSON-RPC requests through the Direct Gateway,
 checks resolution of the fixture target, streams replacement text and a
 delta, answers a remote question, and starts a new turn after confirmed
 cancellation. The agent records the downstream context and remote task ID.
-This process uses production Gateway, Worker runner, and Connector wiring with
-an explicit test-only directory and authorization stub, test registry, memory
-coordination store, and SQLite archive. It verifies the execution path, not a
-production authorization policy; concrete policy integration is deferred.
+This process uses the production Direct directory, Gateway, Worker runner, and
+Connector with an explicit test-only authorization stub, test registry, memory
+coordination store, and SQLite archive. Target validation and configuration
+resolution run in the real directory. Concrete authorization policy integration
+is deferred and is not verified by the test stub.
 
 The Store mock disappears on process exit. In-process Worker takeover must not
 be reported as persistence across a process or storage-node restart. Actual
@@ -50,7 +51,7 @@ python3 apps/bcs/scripts/e2e-test/worker_runtime_story.py \
 instrumented companion (or accepts `--run-only` after
 `build_e2e_companions.sh worker`), removes only its own profiles, and invalidates
 stale success evidence before starting. BCS runs it in its coverage story phase,
-before profile aggregation. The wrapper requires a report containing all 15
+before profile aggregation. The wrapper requires a report containing all 17
 scenarios and the explicit in-memory Store and SQLite archive declarations.
 The validated report is printed into the existing Singlebox `bcs/e2e.log`; on
 failure the same log records diagnostics, and the BCS story phase fails.

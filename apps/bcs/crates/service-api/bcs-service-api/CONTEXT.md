@@ -4,8 +4,10 @@
 
 Distributed Gateway, Worker, Connector, and their host now consume session
 targets, immutable mode configurations and logical agent IDs. The Gateway
-directory port retains the admission hook, with concrete policy integration
-deferred to the host. The Gateway passes the existing caller scope unchanged;
+directory port retains the admission hook. `DistSessionAuthorizerPort` lets a
+directory delegate authorization independently of target/configuration resolution;
+concrete policy integration is deferred to the host, with no default allow.
+The Gateway passes the existing caller scope unchanged;
 it does not define delegated identities or organization-based task ownership.
 The Worker runner SPI prepares typed effects.
 The Connector agent port resolves transport capabilities at call time. Workspace

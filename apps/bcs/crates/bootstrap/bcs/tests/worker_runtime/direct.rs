@@ -1,4 +1,4 @@
-//! Production role wiring with an explicit test directory and local Agent registry.
+//! Production Direct directory and role wiring with an explicit test authorization stub.
 #[path = "../../../../test-support/message_flow_contract/registry_routing_fakes.rs"]
 mod registry;
 
@@ -16,7 +16,7 @@ use bcs_service_api::{
         principal::{BotActor, CallerContext},
     },
     port::{
-        dist_agent::{DirectoryError, DistSessionDirectoryPort, FrozenSessionProposal},
+        dist_agent::{DirectoryError, DistSessionAuthorizerPort},
         dist_runtime::DistRuntimeControlPort,
     },
     types::a2a_bot::{A2aBinding, A2aInterface, A2aUpdateMode},
@@ -24,40 +24,19 @@ use bcs_service_api::{
 use registry::FakeRegistryService;
 use std::{sync::Arc, time::Duration};
 
-/// Only the loopback companion supplies this policy stub; it is not a host policy.
-struct StoryDirectory {
+/// A fixed fixture decision, not a production authorization policy.
+struct StoryAuthorizer {
     agent: AgentId,
-    pool: PoolId,
 }
 
 #[async_trait::async_trait]
-impl DistSessionDirectoryPort for StoryDirectory {
-    async fn authorize(&self, _: &TaskScope, _: &SessionTarget) -> Result<(), DirectoryError> {
-        Ok(())
-    }
-
-    async fn resolve(&self, _: &TaskScope, target: &SessionTarget) -> Result<FrozenSessionProposal, DirectoryError> {
-        if target != &(SessionTarget::DirectAgent { agent: self.agent.clone() }) {
-            return Err(DirectoryError::NotFound);
+impl DistSessionAuthorizerPort for StoryAuthorizer {
+    async fn authorize(&self, _: &TaskScope, target: &SessionTarget) -> Result<(), DirectoryError> {
+        if target == &(SessionTarget::DirectAgent { agent: self.agent.clone() }) {
+            Ok(())
+        } else {
+            Err(DirectoryError::AccessDenied)
         }
-        let config = serde_json::json!({ "agent": self.agent });
-        Ok(FrozenSessionProposal {
-            target: target.clone(),
-            mode_envelope: ModeConfigEnvelope {
-                mode: CollaborationMode::DirectA2a,
-                mode_version: 1,
-                revision: "1".into(),
-                digest: bcs_dist_encoding::digest_json(&config),
-                payload: Payload::Inline(config),
-            },
-            authorized_agents: vec![AuthorizedAgent { agent: self.agent.clone(), pool: self.pool.clone() }],
-            limits: SessionLimits {
-                max_queued_tasks: 32,
-                max_task_steps: 100,
-                task_timeout_millis: 60_000,
-                max_inline_bytes: 65_536,
-            },
-        })
     }
 }
 
@@ -96,7 +75,14 @@ pub async fn listen(host: &Host, agent_url: &str) -> anyhow::Result<String> {
         caller: CallerContext::Bot(BotActor { bot_uuid: "gateway-story".into() }),
     };
     let router = stores.gateway(
-        Arc::new(StoryDirectory { agent: AgentId(agent.into()), pool: pool.clone() }),
+        Arc::new(StoryAuthorizer { agent: AgentId(agent.into()) }),
+        tenant, pool.clone(),
+        SessionLimits {
+            max_queued_tasks: 32,
+            max_task_steps: 100,
+            task_timeout_millis: 60_000,
+            max_inline_bytes: 65_536,
+        },
         DistGatewayConfig::new(1),
         GatewayHttpConfig::new(&base),
     )?.layer(axum::extract::Extension(caller));
