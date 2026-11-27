@@ -119,10 +119,11 @@ and [useGroupSessionLocation.deepLink.test.tsx](test/pages/Workspace/hooks/useGr
 [The group Provider](src/services/workspace/groupChatProvider.ts) prepares Bot
 CDN resources only for messages containing AixUI business components that need
 them. Ordinary text, code examples, empty Sessions and participants without
-such messages do not request Bot `render-screens`. Human/system messages, cards
-without business components, explicit CDN URLs and the pinned local task panel
-also do not trigger this request. Inline business components share the same
-CDN resolution path as side panels. Initial history, reload, older pages and
+such messages do not request Bot `render-screens`. Human and virtual system
+senders (including `bcs_state_machine`), cards without business components,
+explicit CDN URLs, and the pinned local task panel also do not trigger this
+request. Inline business components share the same CDN resolution path as side
+panels. Initial history, reload, older pages and
 live updates all prepare resources before delivery to the synchronous SDK
 renderer; live completion cannot overtake a pending update. BCS manifest
 loading remains separate. [The injector](src/services/bcs/libraryCdnInjector.ts)

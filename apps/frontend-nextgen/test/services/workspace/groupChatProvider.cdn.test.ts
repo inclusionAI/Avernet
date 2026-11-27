@@ -1,6 +1,6 @@
 import { createSessionToken, listSessionMessages } from '@/services/backendApi/collaboration/sessionController';
-import { listBotRenderScreens, type BotRenderScreen } from '@/services/bcs/bcsManifestController';
-import { clearCdnConfig, getLibraryCdn } from '@/services/bcs/libraryCdnInjector';
+import { getManifest, listBotRenderScreens, type BotRenderScreen } from '@/services/bcs/bcsManifestController';
+import { clearCdnConfig, getLibraryCdn, queryAndRegisterManifestLibraryCdn } from '@/services/bcs/libraryCdnInjector';
 import { createGroupChatProvider } from '@/services/workspace/groupChatProvider';
 import type { ChatMessage } from '@tc-chat/core';
 
@@ -135,4 +135,40 @@ it('历史首屏只查询实际组件发送方，多条消息与失败空结果�
   } finally {
     error.mockRestore();
   }
+});
+
+
+it('BCS 状态机系统发送方不查询 Bot 副屏，仍交付历史及实时消息并保留 manifest 资源', async () => {
+  const { provider, inner } = createProvider();
+  const systemPanel = '<AixUI type="panel" component="bcsPanel.StateMachineRunView" />';
+  const systemId = 'bcs_state_machine';
+  const manifestUrl = '/bcs-panel.js';
+  jest.mocked(getManifest).mockResolvedValue({
+    schema_version: 1, env: 'test', bundles: [{ name: 'bcsPanel', url: manifestUrl }],
+  });
+  jest.mocked(listBotRenderScreens).mockResolvedValue(screens);
+  jest.mocked(listSessionMessages).mockResolvedValue(page([
+    { id: 'system', timestamp: 2000, sender: systemId, content: systemPanel },
+    { id: 'bot', timestamp: 1000, sender: 'bot-a:1', content: panel },
+  ]));
+  await queryAndRegisterManifestLibraryCdn();
+  expect(await provider.loadHistory()).toEqual([
+    expect.objectContaining({ id: 'bot', content: panel }),
+    expect.objectContaining({ id: 'system', content: systemPanel }),
+  ]);
+  expect(listBotRenderScreens).toHaveBeenCalledTimes(1);
+  expect(listBotRenderScreens).toHaveBeenCalledWith('bot-a', '1');
+  expect(getLibraryCdn('bcsPanel')).toBe(manifestUrl);
+
+  const liveMessage = message(systemPanel, `${systemId}:bot_owner`);
+  provider.onMessage = jest.fn();
+  provider.onComplete = jest.fn();
+  await provider.connect();
+  provider.enterLiveMode();
+  inner.onMessage?.(liveMessage);
+  inner.onComplete?.([liveMessage]);
+  expect(provider.onMessage).toHaveBeenCalledWith(liveMessage);
+  expect(provider.onComplete).toHaveBeenCalledWith([liveMessage]);
+  expect(listBotRenderScreens).toHaveBeenCalledTimes(1);
+  provider.disconnect();
 });
