@@ -1,0 +1,21 @@
+devops/hook/check_secrets.py
+  s_c3ece772cfb1b0::t_1d7e692cb01cbd 373-398
+devops/hook/test_check_secrets.py
+  s_c3ece772cfb1b0::t_1d7e692cb01cbd 188-210
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cb16898e71a0127d7f5474c87a8907f50bda9c2d",
+  "prompts": {},
+  "sessions": {
+    "s_c3ece772cfb1b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09ddb-44c3-7291-a427-f725a1955ba0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
