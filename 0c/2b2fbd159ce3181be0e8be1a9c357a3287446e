@@ -1,0 +1,18 @@
+apps/frontend-nextgen/test/taskEscortParity/overviewDomain.test.ts
+  h_bb3ca6fb13c5df 137,145,153,157
+apps/frontend-nextgen/test/taskEscortParity/overviewService.test.ts
+  h_bb3ca6fb13c5df 158,187,231,243
+apps/frontend-nextgen/test/taskEscortParity/runPresentation.test.tsx
+  h_bb3ca6fb13c5df 32,139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0c2b2fbd159ce3181be0e8be1a9c357a3287446e",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
