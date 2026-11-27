@@ -1,8 +1,11 @@
-import * as bottts from '@dicebear/bottts';
-import { createAvatar } from '@dicebear/core';
+import { Avatar, Style } from '@dicebear/core';
+import bottts from '@dicebear/styles/bottts.json';
+
+// Style 实例可跨头像复用(校验与解析只在构造时做一次),提为模块级缓存。
+const botttsStyle = new Style(bottts);
 
 export function generateBotAvatar(seed: string, index = 0): string {
-  return createAvatar(bottts, {
+  return new Avatar(botttsStyle, {
     seed: `${seed || 'bot'}-${index}`,
     size: 80,
     backgroundColor: ['b6e3f4', 'c0aede', 'd1d4f9', 'ffd5dc', 'ffdfbf'],
