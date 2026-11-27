@@ -96,6 +96,50 @@ describe('agentCodingTemplateService', () => {
     );
   });
 
+  it('创建请求把默认模型字段摊平到 template_config 根字段', () => {
+    const template = {
+      key: 'generalCC',
+      versionId: '3000001',
+      name: '通用 Coding Bot',
+      engine: 'claude_code',
+      templateType: 'generalCC',
+      source: 'official' as const,
+      fields: [
+        {
+          field_key: 'default_model',
+          field_name: '默认模型',
+          field_type: 'string',
+          required: true,
+        },
+      ],
+      config: {
+        support_engines: ['claude-code', 'codefuse-codex'],
+        model: 'old-model',
+        runtime: 'claude-code',
+      },
+      raw: {},
+      capabilityTags: [],
+    };
+
+    const result = agentCodingTemplateService.toCreateFields(template, {
+      default_model: { model: 'GLM-5.2', runtime: 'codefuse-codex' },
+    });
+
+    const templateConfig = result.engine_properties.template_config as Record<string, unknown>;
+    const envs = templateConfig.envs as Record<string, string>;
+    expect(templateConfig.model).toBe('GLM-5.2');
+    expect(templateConfig.runtime).toBe('codefuse-codex');
+    expect(templateConfig.default_model).toEqual({
+      model: 'GLM-5.2',
+      runtime: 'codefuse-codex',
+    });
+    expect(JSON.parse(envs.AGENT_CONFIG)).toEqual({
+      default_model: { model: 'GLM-5.2', runtime: 'codefuse-codex' },
+      model: 'GLM-5.2',
+      runtime: 'codefuse-codex',
+    });
+  });
+
   it('兼容模板工厂将服务能力放在 template_config.capabilities 下', () => {
     expect(
       supportsServiceBot({
