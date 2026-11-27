@@ -9,7 +9,7 @@ Scope rules:
 - Decisions here are **BaaS-app-level** and govern the community platform
   (including its side of the two-edition relationship). Hard-to-reverse,
   system-level decisions for the whole Avernet monorepo live in the repo-root
-  [`docs/adr/`](../../../docs/adr/) — see `CONTEXT-MAP.md` and
+  [`docs/adr/`](../../../../docs/adr/) — see `CONTEXT-MAP.md` and
   `docs/agents/domain.md` for that numbering and lifecycle. No repo-root ADR
   concerns BaaS topics today, so the app-level numbering here starts at 0001.
 - The internal OCB monorepo keeps its **own, separate** enterprise-focused ADR
@@ -34,9 +34,17 @@ Scope rules:
 | [0013](0013-async-repository-dal.md) | Async SQLAlchemy repository pattern | accepted | all | repository-per-aggregate quartet; pluggable engines (sqlite/mariadb vs enterprise ZDAS) |
 | [0014](0014-background-job-model.md) | Background job model | accepted | all | `AppScheduler` with scheduled task classes; per-bot concurrency; TTL renewal and sweeper jobs |
 | [0015](0015-one-way-assembly-from-bootstrap.md) | One-way assembly from bootstrap | accepted | all | bootstrap wires all components; reverse `get_container`/service-location outside bootstrap is forbidden (arch-test ratchet) |
+| [0016](0016-chat-transport-state-ownership.md) | Chat transports own connections, not conversation state | accepted | all | WS/A2A transport split; each transport owns its connections and fallback routing, the facade owns conversation state |
 | [0016](0016-wildcard-bot-mapping.md) | Wildcard bot grant in resource-key authorization | superseded by [0017](0017-exact-bot-claim.md) | all | `bot_id = '*'` mapping row authorizes a key for every bot; explicit row only, deny-by-default preserved |
 | [0017](0017-exact-bot-claim.md) | Exact bot claim for service principals | accepted | all | `app.bot_id` claim matches inside the resource-key scope; narrows a token to the one bot it addresses, never a bypass |
 | [0018](0018-session-runtime-observation.md) | Session runtime observation through the Bot boundary | accepted | all | Read-only Engine activity through Bot authorization, lifecycle routing and session affinity; no recovery credentials |
+
+**Number collision:** two ADR files use number 0016 —
+`0016-chat-transport-state-ownership.md` (accepted, dated 2026-11-03) and
+`0016-wildcard-bot-mapping.md` (superseded by 0017, dated 2026-11-04). Neither
+has been renumbered: ADR bodies are not renumbered casually, and 0017 links to
+the wildcard file. Identify these ADRs by file path, not by number alone, until
+a maintainer resolves the numbering.
 
 ## Writing the next ADR
 

@@ -41,8 +41,11 @@ python src/secbaas/community/main.py --config configs/ --mode sofa
 
 ## Architecture
 
+The community package lives under `src/secbaas/community/`; the enterprise
+overlay adds `src/secbaas/enterprise/` in the OCB monorepo.
+
 ```
-src/secbaas/
+src/secbaas/community/
 ├── api/            # HTTP API layer — route definitions & request models
 │   ├── api_gateway/    # API key management & access control
 │   ├── auth/           # Authentication endpoints

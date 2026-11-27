@@ -3,6 +3,7 @@
 Start with [Publish Lifecycle](publish-lifecycle.md). Use these existing contracts and guides to trace the relevant flow. Verify the target version, implementation and tests before applying a document to a running system.
 
 - [Bot run completion and timeout callbacks](bot-run-callback.md)
+- [Caller run binding and instance-status gate](caller-run-binding.md)
 - [Bot, device and publish states](../adr/0004-lifecycle-state-machines.md)
 - [Gated publish pipeline](../adr/0005-gated-publish-pipeline.md)
 - [Sandbox provider selection](../adr/0006-paas-provider-abstraction.md)
