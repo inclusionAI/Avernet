@@ -293,13 +293,21 @@ impl EdgeGrantRepoPort for MemoryEdgeGrantStore {
                     && grant.status == EdgeStatus::Approved
                     // Runtime grants only: owner/manager metadata edges never
                     // surface as runtime authorization (spec §3.2.5 / A16).
-                    && matches!(
-                        grant.grant_kind,
-                        GrantKind::PermissionProfile | GrantKind::Rules
-                    )
+                    && grant.grant_kind.is_runtime_grant()
             })
             .cloned()
             .collect()
+    }
+
+    async fn list_runtime_grants_checked(
+        &self, from: &str, to: &str, env: &str,
+    ) -> ServiceResult<Vec<EdgeGrant>> {
+        let grants = self.list_active_grants(from, to, env).await;
+        for grant in &grants {
+            bcs_domain::agent_invoke::validate_agent_invoke_shape(grant)
+                .map_err(|_| ServiceError::InternalError("Invalid Agent invocation edge shape".into()))?;
+        }
+        Ok(grants)
     }
 
     async fn is_authorized(&self, from: &str, to: &str, env: &str) -> bool {
@@ -379,6 +387,10 @@ impl EdgeGrantRepoPort for MemoryEdgeGrantStore {
     }
 
     async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<u64> {
+        bcs_domain::agent_invoke::validate_agent_invoke_shape(&grant)
+            .map_err(|_| ServiceError::InvalidOperation {
+                message: "Invalid Agent invocation edge shape".into(), request_id: None,
+            })?;
         let mut grants = self.grants.write().await;
         let existing = grants.iter_mut().find(|existing| {
             existing.from_id == grant.from_id

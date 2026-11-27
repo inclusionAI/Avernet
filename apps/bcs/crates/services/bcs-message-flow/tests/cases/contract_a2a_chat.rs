@@ -837,3 +837,6 @@ mod event_parser;
 mod access;
 #[path = "contract_a2a_chat/organization.rs"]
 mod organization;
+
+#[path = "contract_a2a_chat/edge_grant.rs"]
+mod edge_grant;

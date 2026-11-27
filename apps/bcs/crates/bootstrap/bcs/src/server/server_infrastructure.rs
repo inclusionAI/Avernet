@@ -573,6 +573,7 @@ impl BcsServer {
                 a2a_run_port.clone(),
                 a2a_run_port.clone(),
             )
+            .with_edge_grants(edge_grant_store.clone(), bot_authority_env.clone())
             .with_organization(organization_core.clone())
             .with_session_management(session_management.clone())
             .with_interceptors(interceptors.clone())

@@ -1076,3 +1076,13 @@ Memory and SQL implement the contract, and legacy normal-Group creation uses it
 instead of upsert. Custom downstream Core/repo implementations must implement
 or delegate this method before using legacy creation. Trusted internal upserts
 and DM pair reuse retain their separate behavior. See the [label contract](../../../docs/catalog-labels.md).
+
+## AgentInvoke admission compatibility
+
+The existing `AdmissionService` consumes valid directed `agent_invoke` edges
+alongside profile/rules. Admission and `AuthzContext` retain the new kind and
+ref=0, without looking up or creating a target default profile for that kind.
+`EdgeGrantRepoPort::list_runtime_grants_checked` is the fallible exact-pair read;
+unupdated custom implementations return an explicit error until they implement
+it. Memory, SQL and the test Noop implementation implement this contract.
+There are no AgentInvoke-specific application/core APIs, public routes or SDK.

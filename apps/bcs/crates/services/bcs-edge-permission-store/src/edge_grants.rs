@@ -96,7 +96,7 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
                             rules, status, originator_policy_type, originator_policy_data \
                      FROM edge_grants \
                      WHERE from_id = ? AND to_id = ? AND env = ? AND status = 'approved' \
-                       AND grant_kind IN ('permission_profile', 'rules')",
+                       AND grant_kind IN ('permission_profile', 'rules', 'agent_invoke')",
                     vec![
                         DbValue::from(from),
                         DbValue::from(to),
@@ -123,12 +123,17 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
         }
     }
 
+    async fn list_runtime_grants_checked(
+        &self, from: &str, to: &str, env: &str,
+    ) -> ServiceResult<Vec<EdgeGrant>> {
+        self.read_runtime_grants_checked(from, to, env).await
+    }
+
     async fn is_authorized(&self, from: &str, to: &str, env: &str) -> bool {
-        // Any active approved edge from→to admits (friend OR non-friend).
-        // `list_active_grants` already filters `status='approved'`, so a
-        // non-empty result ⇒ authorized. Keep the repo-level call (not a raw
-        // SELECT 1) so this stays a pure projection over the same SoR.
-        !self.list_active_grants(from, to, env).await.is_empty()
+        // Preserve the boolean API while failing closed on query/decoding
+        // errors. Admission consumers use the fallible form to surface errors.
+        self.read_runtime_grants_checked(from, to, env).await
+            .map(|grants| !grants.is_empty()).unwrap_or(false)
     }
 
     async fn has_friend_edge(&self, x: &str, y: &str, env: &str) -> bool {
@@ -315,6 +320,10 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
     }
 
     async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<u64> {
+        bcs_domain::agent_invoke::validate_agent_invoke_shape(&grant)
+            .map_err(|_| ServiceError::InvalidOperation {
+                message: "Invalid Agent invocation edge shape".into(), request_id: None,
+            })?;
         let EdgeGrant {
             edge_id: _,
             env,

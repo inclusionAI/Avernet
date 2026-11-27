@@ -151,7 +151,21 @@ impl AdmissionService for DbAdmissionService {
         // `Specific`/`Owner` policies in a later installment.
         let _ = originator;
 
-        if self.edge_grants.is_authorized(actor, bot, env).await {
+        // Read one directed pair, using the same active-state semantics for all
+        // runtime kinds. AgentInvoke needs no default profile or extra permit.
+        let active = self.edge_grants.list_runtime_grants_checked(actor, bot, env).await?;
+        if active.iter().any(|grant| grant.grant_kind == GrantKind::AgentInvoke) {
+            return Ok(AdmissionResult {
+                allowed: true,
+                grants: vec![AuthzGrantRef {
+                    kind: GrantKind::AgentInvoke, ref_id: 0, revision: None, digest: None,
+                    source: GrantSource::EdgeGrant,
+                }],
+                reason_code: AdmissionReason::Ok,
+                public_default: false,
+            });
+        }
+        if active.iter().any(|grant| grant.grant_kind.is_runtime_grant()) {
             if let Some(grant) = self
                 .ensure_default_profile_ref(bot, env, GrantSource::EdgeGrant)
                 .await
@@ -216,10 +230,10 @@ impl AdmissionService for DbAdmissionService {
         env: &str,
     ) -> ServiceResult<AuthzContext> {
         // §4.3 A2A path: read the same `edge_grants` SoR as admission.
-        let active = self.edge_grants.list_active_grants(from, to, env).await;
+        let active = self.edge_grants.list_runtime_grants_checked(from, to, env).await?;
 
         let mut grants: Vec<AuthzGrantRef> = Vec::with_capacity(active.len());
-        for g in active {
+        for g in active.into_iter().filter(|grant| grant.grant_kind.is_runtime_grant()) {
             // For permission_profile edges we COULD enrich revision/digest by
             // looking up the profile by `grant_ref_id`. `get_active_default`
             // takes `bot_id`, not `profile_id`, and we only need enrichment for

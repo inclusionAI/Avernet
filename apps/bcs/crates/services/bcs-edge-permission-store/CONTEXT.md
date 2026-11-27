@@ -157,3 +157,22 @@ are sufficient; no cutover migration is required. The legacy unpaged list
 reuses the existing fallible, Bot-filtered edge-page query in batches of 100,
 not the older unpaged N+1 profile reader. See [list access cost and semantics](../bcs-friend/CONTEXT.md#edge-owned-compatibility-list-access-cost)
 and [rollout](../../../migrations/README.md#legacy-friend-request-cutover).
+
+## AgentInvoke type compatibility
+
+Memory and SQL edge stores persist `agent_invoke` in the existing edge table
+and unique key. Shape validation is shared with the domain. Checked runtime
+reads return approved profile/rules/AgentInvoke grants for one byte-exact
+from/to/environment tuple, excluding owner/manager; query/decoding errors fail
+the read rather than return partial authorization. The legacy infallible read
+remains for compatibility. `is_authorized` fails closed on read errors.
+Friend list/default-profile predicates and kind-scoped revocation stay separate.
+
+No management, facts, governance, eligibility-generation, audit or invocation
+store is provided. No new tables, columns, indexes or migrations are needed.
+Conformance runs on memory, SQLite and the existing native MySQL authority test fixture;
+no separate empty database or CI selector is needed.
+
+Cost: one indexed pair SELECT for checked edge reads, no external calls, cache,
+transaction or graph traversal. Binary residual comparisons preserve identity
+on older case-insensitive deployments without removing the indexed prefilter.

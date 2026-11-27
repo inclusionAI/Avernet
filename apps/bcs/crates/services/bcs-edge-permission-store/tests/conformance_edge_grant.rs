@@ -78,3 +78,11 @@ async fn sqlite_with_schema() -> Arc<dyn DbPlugin> {
     .expect("create permission_profiles");
     db
 }
+
+#[tokio::test]
+async fn agent_invoke_repo_contract_sqlite() {
+    let store = DbEdgeGrantStore::sqlite(sqlite_with_schema().await);
+    bcs_test_support::contract::repo::edge_grant::run_agent_invoke_repo_contract(
+        &store, "agent-test", "agent-caller", "agent-target",
+    ).await;
+}

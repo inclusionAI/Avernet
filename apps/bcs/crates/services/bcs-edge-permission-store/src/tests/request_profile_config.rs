@@ -600,3 +600,22 @@ async fn request_lists_propagate_sql_and_row_decoding_failures() {
         assert!(store.list_sent("human_a", "dev", status).await.is_err());
     }
 }
+
+#[tokio::test]
+async fn agent_request_kind_roundtrips_through_existing_request_store() {
+    let store = request_store().await;
+    let mut request = sample_request("dev");
+    request.request_kind = RequestKind::AgentInvoke;
+    request.from_id = "agent-a".into();
+    request.to_id = "agent-b".into();
+    request.requested_ref_id = Some(0);
+    request.requested_rules = None;
+    store.insert(request.clone()).await.unwrap();
+    let saved = store.get(&request.request_id, "dev").await.unwrap();
+    assert_eq!(saved.request_kind, RequestKind::AgentInvoke);
+    assert_eq!(saved.requested_ref_id, Some(0));
+    assert!(saved.requested_rules.is_none());
+    assert!(store.find_request("agent-a", "agent-b", "dev", RequestKind::AgentInvoke,
+        request.status, &request.created_by).await.is_some());
+    assert!(store.get(&request.request_id, "other-env").await.is_none());
+}

@@ -344,3 +344,11 @@ creation and daily rotation use the standard rotating writer semantics shared wi
 other BCS log files, without a permission exception. See the request-operation
 logging diagnostic contract for redaction, correlation, limits and runtime
 verification boundaries.
+
+## Existing edge admission assembly
+
+The normal infrastructure constructor supplies the same edge store used by its
+admission service, and the resolved environment, to direct A2A chat. SQL and memory edge stores support
+AgentInvoke without an extra registration, capability or feature flag. The
+public API surface, default test construction and existing security hooks are
+unchanged; no AgentInvoke-specific host extension is exposed.

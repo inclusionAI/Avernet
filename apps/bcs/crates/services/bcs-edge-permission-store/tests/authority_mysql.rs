@@ -543,5 +543,9 @@ async fn authority_mysql_conformance() {
     );
     report_mysql_gate_scenarios("edge-authority", &scenarios);
 
+    bcs_test_support::contract::repo::edge_grant::run_agent_invoke_repo_contract(
+        &bcs_edge_permission_store::DbEdgeGrantStore::mysql(database.plugin.clone()),
+        "agent-kind", "agent-kind-a", "agent-kind-b",
+    ).await;
     database.close().await;
 }

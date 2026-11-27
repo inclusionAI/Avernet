@@ -26,14 +26,23 @@ pub struct FriendIdsPage {
 
 #[async_trait]
 pub trait EdgeGrantRepoPort: Send + Sync {
-    /// Active approved edges `from -> to` in `env` (friend + non-friend).
+    /// Active profile/rules/agent_invoke grants `from -> to` in `env`.
+    /// Legacy best-effort read; security consumers use the checked read below.
     async fn list_active_grants(&self, from: &str, to: &str, env: &str) -> Vec<EdgeGrant>;
 
-    /// Is `from` authorized to reach `to` in `env`? True iff at least one
-    /// active approved edge `from → to` exists (friend OR non-friend: rules,
-    /// non-default profile, etc.). This is the admission-edge superset of
-    /// [`Self::has_friend_edge`] — it admits via ANY active edge, not just the
-    /// default-profile friend edge (D12).
+    /// Checked, byte-exact runtime grants (profile, rules, agent_invoke).
+    /// Query/decoding/shape errors fail the entire read; no partial success.
+    /// The default fails closed so downstream implementations must explicitly
+    /// opt into this contract, never delegate to an infallible read.
+    async fn list_runtime_grants_checked(
+        &self, _from: &str, _to: &str, _env: &str,
+    ) -> ServiceResult<Vec<EdgeGrant>> {
+        Err(ServiceError::InternalError("Checked runtime grant lookup is unavailable".into()))
+    }
+
+    /// True iff an active approved profile/rules/agent_invoke edge exists in
+    /// this direction and environment. Owner/manager do not grant runtime access.
+    /// A new type does not imply friendship or a target default-profile ref.
     async fn is_authorized(&self, from: &str, to: &str, env: &str) -> bool;
 
     /// `are_friends(x, y)` = any approved default-profile edge x→y OR y→x (D12).

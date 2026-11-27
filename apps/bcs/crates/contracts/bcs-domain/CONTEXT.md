@@ -29,3 +29,12 @@ authorized by an HTTP URL. This is an additive admission change for existing
 consumers, requiring no wire, persistence or configuration-schema migration.
 See the [outbound adapter boundary](../../external-clients/bcs-a2a-http/CONTEXT.md)
 and the `a2a_http_address` and `conformance_card_fetch` tests.
+
+## Agent invocation edge type
+
+`GrantKind::AgentInvoke` and `RequestKind::AgentInvoke` serialize as
+`agent_invoke`; unknown/old unpublished spellings are errors, not aliases.
+The canonical directed Bot edge has ref=0, no rules, `same_as_from` and no
+policy data. It is a runtime grant alongside profile/rules, not friendship or
+owner/manager metadata. Shape validation adds no separate eligibility or
+approval system. Existing enum consumers must handle the additive kind.

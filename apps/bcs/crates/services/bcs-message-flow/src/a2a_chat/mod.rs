@@ -1,5 +1,6 @@
 pub mod event_parser;
 pub mod run_store;
+mod edge_admission;
 mod queued;
 mod queued_runtime;
 mod frame;
@@ -44,6 +45,7 @@ pub struct A2aChat {
     bot_delivery: Arc<dyn BotDeliveryPort>,
     registry: Arc<dyn BotRegistryCoreService>,
     friend: Arc<dyn FriendCoreService>,
+    edge_grants: Option<(Arc<dyn bcs_service_api::port::repo::EdgeGrantRepoPort>, String)>,
     run_store: Arc<ChatRunStore>,
     chat_run_events: Arc<dyn ChatRunEventPort>,
     chat_run_cleanup: Arc<dyn ChatRunCleanupPort>,
@@ -99,6 +101,7 @@ impl A2aChat {
             bot_delivery,
             registry,
             friend,
+            edge_grants: None,
             run_store,
             chat_run_events,
             chat_run_cleanup,
@@ -740,12 +743,14 @@ impl A2aChat {
             return Ok(target);
         }
 
+        if target.capabilities.visibility == "public"
+            || self.friend.are_friends(from_bot_id, target_bot_id).await
+            || self.has_directed_edge_access(from_bot_id, target_bot_id).await?
+        {
+            return Ok(target);
+        }
         match target.capabilities.visibility.as_str() {
-            "public" => Ok(target),
-            "protected" if self.friend.are_friends(from_bot_id, target_bot_id).await => Ok(target),
             "protected" => Err(ServiceError::NotFriends(vec![target_bot_id.to_string()])),
-            // "private" or unknown: friends can still reach, strangers get 404
-            _ if self.friend.are_friends(from_bot_id, target_bot_id).await => Ok(target),
             _ => Err(ServiceError::BotNotFound(target_bot_id.to_string())),
         }
     }
@@ -764,7 +769,8 @@ impl A2aChat {
 
         match target.capabilities.visibility.as_str() {
             "public" | "protected" => Ok(target),
-            _ if self.friend.are_friends(from_bot_id, target_bot_id).await => Ok(target),
+            _ if self.friend.are_friends(from_bot_id, target_bot_id).await
+                || self.has_directed_edge_access(from_bot_id, target_bot_id).await? => Ok(target),
             _ => Err(ServiceError::BotNotFound(target_bot_id.to_string())),
         }
     }

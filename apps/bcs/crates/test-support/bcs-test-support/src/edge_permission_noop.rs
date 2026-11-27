@@ -20,6 +20,7 @@ pub struct NoopEdgeGrantRepo;
 #[async_trait]
 impl EdgeGrantRepoPort for NoopEdgeGrantRepo {
     async fn list_active_grants(&self, _: &str, _: &str, _: &str) -> Vec<EdgeGrant> { vec![] }
+    async fn list_runtime_grants_checked(&self, _: &str, _: &str, _: &str) -> ServiceResult<Vec<EdgeGrant>> { Ok(vec![]) }
     async fn is_authorized(&self, _: &str, _: &str, _: &str) -> bool { false }
     async fn has_friend_edge(&self, _: &str, _: &str, _: &str) -> bool { false }
     async fn list_friends(&self, _: &str, _: &str) -> Vec<String> { vec![] }

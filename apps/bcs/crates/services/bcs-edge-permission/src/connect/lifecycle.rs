@@ -271,6 +271,10 @@ impl ConnectService for DbConnectService {
                 ServiceError::FriendRequestNotFound(request_id.to_string())
             })?;
 
+        if req.request_kind != RequestKind::Connect {
+            return Err(ServiceError::FriendRequestNotFound(request_id.to_string()));
+        }
+
         if is_internal_reverse_connect(&req) {
             return Err(ServiceError::Forbidden(format!(
                 "request '{}' is a generated reverse mirror and cannot be decided directly",
@@ -413,6 +417,10 @@ impl ConnectService for DbConnectService {
                 ServiceError::FriendRequestNotFound(request_id.to_string())
             })?;
 
+        if req.request_kind != RequestKind::Connect {
+            return Err(ServiceError::FriendRequestNotFound(request_id.to_string()));
+        }
+
         if is_internal_reverse_connect(&req) {
             return Err(ServiceError::Forbidden(format!(
                 "request '{}' is a generated reverse mirror and cannot be decided directly",
@@ -470,6 +478,10 @@ impl ConnectService for DbConnectService {
                 self.log_request_lookup_miss("cancel", request_id, None);
                 ServiceError::FriendRequestNotFound(request_id.to_string())
             })?;
+
+        if req.request_kind != RequestKind::Connect {
+            return Err(ServiceError::FriendRequestNotFound(request_id.to_string()));
+        }
 
         // Idempotent: an already-cancelled or rejected request is a no-op Ok
         // (spec: "已 rejected/cancelled 幂等"). Only pending requests can be
@@ -529,6 +541,7 @@ impl ConnectService for DbConnectService {
         self.requests
             .get(request_id, &self.env)
             .await
+            .filter(|request| request.request_kind == RequestKind::Connect)
             .ok_or_else(|| {
                 self.log_request_lookup_miss("get_request", request_id, None);
                 ServiceError::FriendRequestNotFound(request_id.to_string())
@@ -877,7 +890,8 @@ impl ConnectService for DbConnectService {
         // second user-facing request from the peer.
         let all: Vec<PermissionRequest> = all
             .into_iter()
-            .filter(|request| !is_internal_reverse_connect(request))
+            .filter(|request| request.request_kind == RequestKind::Connect
+                && !is_internal_reverse_connect(request))
             .collect();
         let total = all.len() as u32;
         let page_size = if page_size == 0 { 20 } else { page_size };

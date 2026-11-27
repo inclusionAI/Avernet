@@ -26,12 +26,22 @@ pub enum GrantKind {
     PermissionProfile,
     /// Edge carries inline `rules`.
     Rules,
+    /// Directed Agent-to-Agent invocation authorization, not friendship or authority.
+    /// Endpoints are concrete Bot identities; ref=0, rules=None, same_as_from.
+    AgentInvoke,
     /// Owner management edge (Human → Bot). Exactly one approved
     /// edge per `(env, to_id)`; unified `grant_ref_id = 0`.
     Owner,
     /// Manager management edge (Human → Bot). Unified
     /// `grant_ref_id = 0`; owner takes precedence over manager.
     Manager,
+}
+
+impl GrantKind {
+    /// Edge kinds that grant runtime access in the existing admission model.
+    pub fn is_runtime_grant(self) -> bool {
+        matches!(self, Self::PermissionProfile | Self::Rules | Self::AgentInvoke)
+    }
 }
 
 /// Lifecycle status of an edge grant.
@@ -75,9 +85,10 @@ pub struct EdgeGrant {
     pub to_id: String,
     pub grant_kind: GrantKind,
     /// `PermissionProfile` -> target's default (or other) profile id;
-    /// `Rules` -> opaque rules ref.
+    /// `Rules` -> opaque rules ref; `AgentInvoke` -> 0.
     pub grant_ref_id: u64,
     /// Inline rules; `None` unless `GrantKind::Rules`.
+    /// AgentInvoke always uses ref=0 and rules=None, without a default profile.
     #[serde(default)]
     pub rules: Option<Value>,
     #[serde(default)]
@@ -193,6 +204,8 @@ pub enum RequestKind {
     Rules,
     /// Revoke an existing edge.
     Revoke,
+    /// Agent invocation request type; not accepted by the Connect lifecycle.
+    AgentInvoke,
 }
 
 /// Status of a permission request.

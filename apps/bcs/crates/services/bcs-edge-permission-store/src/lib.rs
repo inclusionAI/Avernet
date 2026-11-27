@@ -51,6 +51,7 @@ pub type MysqlEdgeGrantRepo = DbEdgeGrantStore;
 pub type SqliteEdgeGrantRepo = DbEdgeGrantStore;
 
 mod edge_grants;
+mod runtime_grants;
 pub use edge_grants::DbEdgeGrantStore;
 mod profiles;
 pub use profiles::DbPermissionProfileStore;
