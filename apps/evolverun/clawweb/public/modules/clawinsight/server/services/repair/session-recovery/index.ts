@@ -23,7 +23,7 @@ import { logRepairEvent, repairLogError } from "../common/logging.js";
 import type { AgentLogTool } from "../common/agent-tools/log-tool.js";
 import type { RecoveryNotificationSender } from "./notification.js";
 
-export const SESSION_RECOVERY_MAINTENANCE_INTERVAL_MS = 60_000;
+export const SESSION_RECOVERY_MAINTENANCE_INTERVAL_MS = 120_000;
 
 export function createSessionRecoveryRuntime(options: {
   db: IDatabase; repo: EvolveRepository; runtime: BotRuntime; targets: BotTargetResolver; ais: AisExecutor;

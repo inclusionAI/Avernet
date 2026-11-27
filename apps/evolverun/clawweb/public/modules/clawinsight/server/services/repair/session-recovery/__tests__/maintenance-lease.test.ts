@@ -84,7 +84,7 @@ it("releases its lock while preserving an original maintenance failure", async (
   expect(vi.getTimerCount()).toBe(0);
 });
 
-it("keeps the global 60-second start cadence after quick release and staggered replica wakeups", async () => {
+it("keeps the global 120-second start cadence after quick release and staggered replica wakeups", async () => {
   const f = await fixture(), other = f.create();
   await Promise.all([f.runtime.maintenance!(), other.maintenance!()]);
   expect(f.maintenance).toHaveBeenCalledOnce();
@@ -94,6 +94,13 @@ it("keeps the global 60-second start cadence after quick release and staggered r
   expect(f.maintenance).toHaveBeenCalledOnce();
   expect(query.mock.calls.some(([sql]) => /\bce_tasks\b/.test(sql))).toBe(false);
   await vi.advanceTimersByTimeAsync(52_000);
+  await other.maintenance!();
+  expect(f.maintenance).toHaveBeenCalledOnce();
+  expect(query.mock.calls.some(([sql]) => /\bce_tasks\b/.test(sql))).toBe(false);
+  await vi.advanceTimersByTimeAsync(59_999);
+  await other.maintenance!();
+  expect(f.maintenance).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(1);
   await other.maintenance!();
   expect(f.maintenance).toHaveBeenCalledTimes(2);
   expect(await f.db.query("SELECT id FROM clawweb_distributed_locks")).toHaveLength(1);
