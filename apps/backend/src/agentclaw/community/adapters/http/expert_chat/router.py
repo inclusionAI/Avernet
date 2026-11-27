@@ -97,7 +97,11 @@ async def add_chat_bot(
             "[expert_chats.add_chat_bot] Online publication unavailable: bot=%s owner=%s",
             request.bot_id, request.owner_id,
         )
-        return ApiResponse(success=False, message="Bot未发布或发布版本不可用", error_code=4001)
+        return ApiResponse(
+            success=False,
+            message="当前bot无法提供服务，请联系Bot Owner进行操作!",
+            error_code=5999,
+        )
 
     except Exception as e:
         logger.error(f"[expert_chats.add_chat_bot] Error: {e}")

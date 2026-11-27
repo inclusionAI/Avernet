@@ -326,25 +326,46 @@ class TestAddChatBot:
         assert data["success"] is False
         assert data["error_code"] == 400
 
-    def test_add_chat_bot_stage_not_live(self, client_with_mock):
-        """A service Bot without a live online runtime is a publication
-        state, not a server error: answer 4001 like get/connect sessions,
-        never the generic retry-later 5999."""
+    def test_add_chat_bot_online_unavailable(self, client_with_mock, caplog):
         client, mock_service = client_with_mock
         mock_service.add_chat_bot.side_effect = EngineStageNotLiveError(
-            "no live online runtime for bot=test_bot env=prod"
+            "SENSITIVE_CREDENTIAL"
         )
+
+        with caplog.at_level(logging.WARNING):
+            response = client.post(
+                "/api/v1/expert-chats",
+                json={"bot_id": "test_bot", "owner_id": "test_owner"},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "success": False,
+            "message": "当前bot无法提供服务，请联系Bot Owner进行操作!",
+            "error_code": 5999,
+            "data": None,
+        }
+        assert "[expert_chats.add_chat_bot] Online publication unavailable" in caplog.text
+        assert "bot=test_bot owner=test_owner" in caplog.text
+        assert "SENSITIVE_CREDENTIAL" not in caplog.text
+        assert "SENSITIVE_CREDENTIAL" not in response.text
+
+    def test_add_chat_bot_unexpected_error(self, client_with_mock):
+        client, mock_service = client_with_mock
+        mock_service.add_chat_bot.side_effect = RuntimeError("unexpected failure")
 
         response = client.post(
             "/api/v1/expert-chats",
-            json={"bot_id": "test_bot", "owner_id": "test_owner"}
+            json={"bot_id": "test_bot", "owner_id": "test_owner"},
         )
 
         assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is False
-        assert data["error_code"] == 4001
-        assert data["message"] == "Bot未发布或发布版本不可用"
+        assert response.json() == {
+            "success": False,
+            "message": "添加专家Bot失败，请稍后重试",
+            "error_code": 5999,
+            "data": None,
+        }
 
 
 class TestListChatBots:
