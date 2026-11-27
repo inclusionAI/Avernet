@@ -1,4 +1,3 @@
-import type { SenderBotRef } from '@/services/bcs/collabSenderBots';
 import type { GroupChatProvider } from '@/services/workspace/groupChatProvider';
 import type { ChatMessage } from '@tc-chat/core';
 import { useState } from 'react';
@@ -14,15 +13,12 @@ export function useGroupChatHistorySync({
   provider,
   sessionId,
   historyRefreshNonce,
-  preRegisterBots,
   setMessages,
   onEnterOutcome,
 }: {
   provider: GroupChatProvider | null;
   sessionId: string | null;
   historyRefreshNonce: number;
-  /** 会话参与者 Bot 副屏 CDN 预注册源（透传 useManifestHistoryLoader）。 */
-  preRegisterBots?: readonly SenderBotRef[];
   setMessages: (messages: ChatMessage[]) => void;
   onEnterOutcome?: (outcome: SessionEnterOutcome, historyEmpty?: boolean) => void;
 }) {
@@ -33,7 +29,6 @@ export function useGroupChatHistorySync({
     provider,
     sessionId,
     historyRefreshNonce,
-    preRegisterBots,
     setHasMoreHistory,
     setIsLoadingMoreHistory,
     setMessages,

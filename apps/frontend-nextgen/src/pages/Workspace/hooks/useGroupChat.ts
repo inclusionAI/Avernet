@@ -1,5 +1,4 @@
 import type { SessionView } from '@/domain/collaboration';
-import { collectParticipantBots } from '@/services/bcs/collabSenderBots';
 import { useTaskPreflightAssistant } from '@/hooks/useTaskPreflightAssistant';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import type { GroupChatState } from '@/services/workspace/groupChatProvider';
@@ -7,7 +6,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useChat, useChatBridge, type ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { BridgeInputRef, ChatMessage, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender/types';
-import { useMemo, useRef, useState, type RefObject } from 'react';
+import { useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 import { prependUniqueMessages } from './groupChatHistoryUtils';
 import { buildActorEcho, buildGroupChatBridgeRequest } from './groupChatRequestBuilder';
@@ -21,7 +20,6 @@ import { useGroupChatRunControl } from './useGroupChatRunControl';
 import { useGroupChatSendActions } from './useGroupChatSendActions';
 import { useCancelledGroupChatMessages } from './useCancelledGroupChatMessages';
 import { useProviderStateSubscriptions } from './useProviderStateSubscriptions';
-import { useSenderBotCdnSync } from './useSenderBotCdnSync';
 import { useViewScopeChangedNotice } from './useViewScopeChangedNotice';
 import { useWsReconnectNonce } from './useWsReconnectNonce';
 
@@ -45,10 +43,6 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
   const historyRefreshNonce = useWorkspaceStore((s) => s.historyRefreshNonce);
   const sessionId = session?.sessionId ?? null;
   const groupId = session?.groupId ?? null;
-  // 副屏 CDN 参与者预注册源：Bot 成员的 live 回复渲染时同步查 CDN map，历史窗口里未发过言的
-  // 成员 Bot 靠此提前入桶（历史批量注册在 useManifestHistoryLoader，增量在 useSenderBotCdnSync）。
-  const participantBots = useMemo(() => collectParticipantBots(session?.participants ?? []), [session]);
-
   const panelRef = useRef<PanelHandle>(null);
   // 主屏输入框 ref（SenderRef）：经 useChatBridge.setInputRef 注册到全局桥,卡片填输入框时
   // bridge.getInputRef().insert(text) 生效。SenderRef ⊇ BridgeInputRef,见下方 useChatBridge 调用 as 转换。
@@ -74,9 +68,6 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
     panelRef,
   });
   const removeCancelledMessages = useCancelledGroupChatMessages(chat.setMessages);
-  // 副屏 CDN 增量补注册：live 新消息发送方 + 会话参与者原始集合（内部自行归并；历史批量注册在
-  // useManifestHistoryLoader，参与者已由 participantBots 并入其临界区注册）。
-  useSenderBotCdnSync(sessionId, chat.messages, session?.participants);
   const runControl = useGroupChatRunControl(provider, sessionId, removeCancelledMessages);
   // 显示状态合成（Spec AC-1/AC-2，就绪绑定消息可见性；进入信号/自动重连由合成 hook 自治管理）。
   const displayStatus = useGroupChatDisplayStatus({
@@ -122,7 +113,6 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
     provider,
     sessionId,
     historyRefreshNonce,
-    preRegisterBots: participantBots,
     setMessages: chat.setMessages,
     onEnterOutcome: displayStatus.onEnterOutcome,
   });
