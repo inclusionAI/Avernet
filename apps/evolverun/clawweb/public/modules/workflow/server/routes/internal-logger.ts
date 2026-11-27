@@ -1,10 +1,12 @@
-import { apiErrorDiagnostic, errorStack, type ApiDiagnosticResponse } from "./error-log-format.js";
+import { apiErrorDiagnostic, type ApiDiagnosticResponse } from "./error-log-format.js";
 import { formatHttpLog, httpLogLevel } from "@avernet/clawweb-shared/server/services/file-log-format";
 /**
  * Internal API Logger — structured logging for all ClawMind↔clawweb API calls.
- * Writes to both console (stdout) and a log file for production debugging.
+ * Rate-limits console summaries; every call is queued best-effort for the fixed log.
  */
-import { appendFileSync, mkdirSync } from "node:fs";
+import { createBoundedFileLogSink } from "@avernet/clawweb-shared/server/logging/bounded-file-log-sink";
+import { boundedLogValue } from "@avernet/clawweb-shared/server/logging/bounded-log-value";
+import { redactLogText } from "@avernet/clawweb-shared/server/logging/redact-log-text";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -13,14 +15,15 @@ import { homedir } from "node:os";
 const LOG_DIR = join(homedir(), "logs", "clawweb");
 const LOG_FILE = join(LOG_DIR, "clawweb-internal-api.log");
 
-let logDirReady = false;
-let writeFailureReported = false;
+const sink = createBoundedFileLogSink({ filePath: LOG_FILE });
+export function flushInternalApiLog(): Promise<void> { return sink.flush(); }
 
-function ensureLogDir(): void {
-  if (logDirReady) return;
-  mkdirSync(LOG_DIR, { recursive: true });
-  logDirReady = true;
-}
+// Fixed severity buckets: no per-path/status map and no per-request stdout I/O.
+const summaries = {
+  INFO: { last: -Infinity, suppressed: 0 },
+  WARN: { last: -Infinity, suppressed: 0 },
+  ERROR: { last: -Infinity, suppressed: 0 },
+};
 
 type ApiLogMethod = "READ" | "WRITE" | "PUT" | "DELETE";
 
@@ -49,13 +52,20 @@ function isTaskGuardPath(path: string): boolean {
 export function apiLog(method: ApiLogMethod, path: string, details: Record<string, unknown>, exception?: unknown, response?: ApiDiagnosticResponse): void {
   try {
     const now = new Date();
-    const status = details.httpStatus ?? details.status;
-    const taskGuard = isTaskGuardPath(path);
+    const safePath = redactLogText(path, 1024);
+    const safeDetails = boundedLogValue(details, { maxChars: 8192 }) as Record<string, unknown>;
+    const status = safeDetails.httpStatus ?? safeDetails.status;
+    const taskGuard = isTaskGuardPath(safePath);
     const level = taskGuard && typeof status === "number" && status >= 400 && status < 500
       ? "WARN" : httpLogLevel(status);
-    const diagnostic = !taskGuard ? undefined : exception !== undefined ? apiErrorDiagnostic(exception)
-      : level === "ERROR" ? apiErrorDiagnostic(typeof details.error === "string" ? details.error : `${method} ${path} ${status}`)
+    const originalDiagnostic = !taskGuard ? undefined : exception !== undefined ? apiErrorDiagnostic(exception)
+      : level === "ERROR" ? apiErrorDiagnostic(typeof safeDetails.error === "string" ? safeDetails.error : `${method} ${safePath} ${typeof status === "number" ? status : "failure"}`)
       : undefined;
+    const diagnostic = originalDiagnostic ? {
+      message: redactLogText(originalDiagnostic.message, 2048),
+      stack: redactLogText(originalDiagnostic.stack, 8192),
+      stackSource: originalDiagnostic.stackSource,
+    } : undefined;
     if (response && level === "ERROR" && diagnostic) {
       response.locals ??= {};
       response.locals.taskGuardApiDiagnostic = diagnostic;
@@ -64,30 +74,32 @@ export function apiLog(method: ApiLogMethod, path: string, details: Record<strin
     const entry = {
       ts: now.toISOString(),
       method,
-      path,
-      ...details,
+      path: safePath,
+      ...safeDetails,
       ...(stack ? { stack, stackSource: diagnostic!.stackSource } : {}),
     };
     const line = formatHttpLog(now, level, "internal-api", entry);
 
-    // Console output (always)
+    // Structured entries are retained best-effort even when stdout is broken or
+    // the summary is suppressed. The sink owns bounded queue/drop accounting.
+    sink.write(line + "\n");
+    const bucket = summaries[level];
+    const timestamp = now.getTime();
+    if (timestamp - bucket.last < 1000) {
+      bucket.suppressed = Math.min(bucket.suppressed + 1, Number.MAX_SAFE_INTEGER);
+      return;
+    }
+    const suppressed = bucket.suppressed;
+    bucket.last = timestamp;
+    bucket.suppressed = 0;
     const consoleMethod = level === "ERROR" ? "error" : level === "WARN" ? "warn" : "log";
-    const summary = `[internal-api] ${method} ${path} ${status ?? "pending"}`;
+    const label = status == null ? "pending" : typeof status === "string" ? redactLogText(status, 256)
+      : typeof status === "number" || typeof status === "boolean" ? String(status) : "[status]";
+    const summary = `[internal-api] ${method} ${safePath} ${label}` + (suppressed ? ` suppressed=${suppressed}` : "");
     if (stack) console[consoleMethod]("%s %s", summary, stack);
     else console[consoleMethod]("%s", summary);
-    ensureLogDir();
-    appendFileSync(LOG_FILE, line + "\n", "utf-8");
-    writeFailureReported = false;
-  } catch (error) {
-    // Keep serving requests, but make an unavailable log destination visible.
-    if (!writeFailureReported) {
-      writeFailureReported = true;
-      try {
-        console.error("[clawweb] Cannot write internal API log to %s %s", LOG_FILE, errorStack(error));
-      } catch {
-        // Both destinations can be unavailable during the same request.
-      }
-    }
+  } catch {
+    // Logging must not break serving requests, including hostile values/stdout.
   }
 }
 
@@ -95,12 +107,7 @@ export function apiLog(method: ApiLogMethod, path: string, details: Record<strin
  * Log a request body (truncated for large payloads).
  */
 export function apiLogBody(method: ApiLogMethod, path: string, body: unknown, extra: Record<string, unknown> = {}): void {
-  let bodyStr: string;
-  try {
-    bodyStr = typeof body === "string" ? body : JSON.stringify(body) ?? "";
-  } catch {
-    bodyStr = "[unserializable body]";
-  }
-  const truncated = bodyStr.length > 2000 ? bodyStr.substring(0, 2000) + "...[truncated]" : bodyStr;
-  apiLog(method, path, { bodyPreview: truncated, ...extra });
+  const preview = boundedLogValue(body, { maxChars: 2000 });
+  const safeExtra = boundedLogValue(extra, { maxChars: 4096 }) as Record<string, unknown>;
+  apiLog(method, path, { bodyPreview: typeof preview === "string" ? preview : JSON.stringify(preview), ...safeExtra });
 }
