@@ -249,7 +249,10 @@ class TodoProductCreationService(TodoProductCreationServiceProtocol):
             actor_id=actor_id,
             env=env,
         )
-        if runtime.status is not TodoProductColletStatus.READY:
+        if runtime.status not in {
+            TodoProductColletStatus.READY,
+            TodoProductColletStatus.NOT_APPLICABLE,
+        }:
             return TodoDimaImportResult(
                 source_work_item_id=item.source.item_id,
                 status=TodoDimaImportStatus.FAILED,

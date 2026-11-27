@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from typing import Any
+
 from fastapi import FastAPI
 from fastapi.routing import APIRoute, _IncludedRouter
 from fastapi.testclient import TestClient
@@ -30,6 +33,20 @@ from agentclaw.community.adapters.http.task.todos.internal_router import router
 from agentclaw.community.api.task.todo_template_capability_service import (
     TodoTemplateCapabilityServiceProtocol,
 )
+from agentclaw.community.api.task.todo_product_creation_service import (
+    TodoProductCreationServiceProtocol,
+)
+from agentclaw.community.api.task.todo_service import TodoServiceProtocol
+from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
+from agentclaw.community.core.task.todos.product_creation_models import (
+    EnsureProductColletResult,
+    TodoDimaImportResult,
+    TodoDimaImportStatus,
+    TodoExecutorKind,
+    TodoExecutorSelection,
+    TodoOwnerInput,
+    TodoProductColletStatus,
+)
 from agentclaw.community.core.task.todos.services.todo_template_capability_service import (
     TodoTemplateCapabilityService,
 )
@@ -43,6 +60,61 @@ _PUBLIC_ROUTERS = (
     public_auto_import_agent_router,
     public_todo_router,
 )
+_NOW = datetime(2026, 11, 27, 8, 0, tzinfo=timezone.utc)
+
+
+def _todo() -> TodoRecord:
+    return TodoRecord(
+        todo_id="todo_1",
+        space_id=107,
+        title="测试",
+        description="111111",
+        bot_id="20261103_wcapfdkz",
+        bot_name="Coding Bot",
+        status=TodoStatus.PENDING,
+        collab_context_id=None,
+        created_by="149844",
+        created_at=_NOW,
+        updated_at=_NOW,
+        owner_id="149844",
+        owner_name="持续",
+    )
+
+
+class _LegacyTodoServiceMustNotCreate:
+    def create_todo(self, **_kwargs: Any) -> TodoRecord:
+        raise AssertionError("product payload must not use legacy Todo creation")
+
+
+class _RecordingProductCreationService:
+    def __init__(self) -> None:
+        self.create_calls: list[dict[str, Any]] = []
+        self.import_calls: list[dict[str, Any]] = []
+
+    def create_todo(self, **kwargs: Any) -> TodoRecord:
+        self.create_calls.append(kwargs)
+        return _todo()
+
+    async def ensure_product_collet(
+        self, **_kwargs: Any
+    ) -> EnsureProductColletResult:
+        return EnsureProductColletResult(
+            status=TodoProductColletStatus.NOT_APPLICABLE,
+            todo=_todo(),
+        )
+
+    async def import_dima_todos(
+        self, **kwargs: Any
+    ) -> tuple[TodoDimaImportResult, ...]:
+        self.import_calls.append(kwargs)
+        return (
+            TodoDimaImportResult(
+                source_work_item_id="2026112400120935582",
+                status=TodoDimaImportStatus.IMPORTED,
+                todo_id="todo_1",
+                product_runtime_status=TodoProductColletStatus.NOT_APPLICABLE,
+            ),
+        )
 
 
 def _routes(source) -> list[APIRoute]:
@@ -141,3 +213,93 @@ def test_internal_capability_route_uses_login_identity_without_public_header():
 
     assert response.status_code == 200
     assert response.json()["data"]["supported_schema_versions"] == ["1.0"]
+
+
+def _product_app(
+    product_service: _RecordingProductCreationService,
+) -> FastAPI:
+    app = FastAPI()
+    app.include_router(router, prefix=_INTERNAL_PREFIX)
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        id="provider-id",
+        staffId="149844",
+        operatorName="持续",
+    )
+    injector = Injector()
+    injector.binder.bind(
+        TodoServiceProtocol,
+        to=_LegacyTodoServiceMustNotCreate(),
+    )
+    injector.binder.bind(
+        TodoProductCreationServiceProtocol,
+        to=product_service,
+    )
+    attach_injector(app, injector)
+    return app
+
+
+def test_internal_create_todo_preserves_product_executor_payload():
+    product_service = _RecordingProductCreationService()
+    app = _product_app(product_service)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/collaboration/tasks/todos",
+            params={"user_id": "149844"},
+            json={
+                "space_id": 107,
+                "title": "测试",
+                "description": "111111",
+                "executor": {"type": "bot", "id": "20261103_wcapfdkz"},
+                "owner": {"user_id": "149844", "user_name": "持续"},
+            },
+        )
+
+    assert response.status_code == 201, response.text
+    assert product_service.create_calls == [
+        {
+            "space_id": 107,
+            "actor_id": "149844",
+            "title": "测试",
+            "description": "111111",
+            "executor": TodoExecutorSelection(
+                type=TodoExecutorKind.BOT,
+                id="20261103_wcapfdkz",
+            ),
+            "owner": TodoOwnerInput(user_id="149844", user_name="持续"),
+        }
+    ]
+
+
+def test_internal_dima_import_preserves_product_executor_payload():
+    product_service = _RecordingProductCreationService()
+    app = _product_app(product_service)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/collaboration/tasks/todos/products/dima-imports",
+            params={"user_id": "149844"},
+            json={
+                "space_id": 107,
+                "executor": {"type": "bot", "id": "20261103_wcapfdkz"},
+                "owner": {"user_id": "149844", "user_name": "持续"},
+                "items": [
+                    {
+                        "title": "测试",
+                        "description": "111111",
+                        "source": {
+                            "type": "dima",
+                            "container_id": "P1",
+                            "item_id": "2026112400120935582",
+                        },
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 201, response.text
+    assert len(product_service.import_calls) == 1
+    assert product_service.import_calls[0]["executor"] == TodoExecutorSelection(
+        type=TodoExecutorKind.BOT,
+        id="20261103_wcapfdkz",
+    )
