@@ -39,8 +39,6 @@ from agentclaw.community.adapters.http.boot import (
     install_openclaw_config_path,
     install_worker_runtime_guard,
     require_worker_injector,
-)
-from agentclaw.community.adapters.http.boot import (
     finalize_worker_runtime as _finalize_worker_runtime,
 )
 from agentclaw.community.di import DeployProfile, validate_deploy_environment
