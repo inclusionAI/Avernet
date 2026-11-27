@@ -190,6 +190,89 @@ impl DbConnectService {
             ),
         }
     }
+
+    /// Batch-enrich `FriendListEntry` items with human-readable metadata.
+    ///
+    /// Bot actors: `name` / `summary` from the collaboration registry
+    /// capabilities; `is_online` from registry runtime-activity observation.
+    /// Human actors: `name` from the user directory `nick_name` lookup.
+    ///
+    /// All enrichment is best-effort — when the registry or directory is
+    /// unavailable, entries keep their `None`/`false` defaults.
+    pub(super) async fn enrich_friend_entries(
+        &self,
+        mut entries: Vec<FriendListEntry>,
+    ) -> Vec<FriendListEntry> {
+        // ── Bot enrichment: capabilities + online status ──
+        let bot_ids: Vec<String> = entries
+            .iter()
+            .filter(|e| e.kind == ActorKind::Bot)
+            .map(|e| e.actor_id.clone())
+            .collect();
+        if !bot_ids.is_empty() {
+            if let Some(ref registry) = self.collaboration_registry {
+                if let Ok(bots) = registry.try_get_many(&bot_ids).await {
+                    // Build bot_uuid → (name, summary) lookup.
+                    let bot_map: std::collections::HashMap<String, (String, String)> = bots
+                        .iter()
+                        .filter_map(|b| {
+                            let name = b.capabilities.name.as_deref()?;
+                            let summary = b.capabilities.summary.as_deref()?;
+                            Some((b.bot_uuid.clone(), (name.to_string(), summary.to_string())))
+                        })
+                        .collect();
+
+                    // Online status: observe the subset that is Online
+                    // in the registry and whose transport is routable.
+                    let online_candidates: Vec<String> = bots
+                        .iter()
+                        .filter(|b| b.status == bcs_domain::actor::ActorStatus::Online)
+                        .map(|b| b.bot_uuid.clone())
+                        .collect();
+                    let active = if online_candidates.is_empty() {
+                        HashSet::new()
+                    } else if let Ok(snapshot) =
+                        registry.try_runtime_activity_for(&online_candidates).await
+                    {
+                        snapshot.active_bot_ids
+                    } else {
+                        HashSet::new()
+                    };
+
+                    for entry in &mut entries {
+                        if entry.kind != ActorKind::Bot {
+                            continue;
+                        }
+                        if let Some((name, summary)) = bot_map.get(&entry.actor_id) {
+                            entry.name = Some(name.clone());
+                            entry.summary = Some(summary.clone());
+                        }
+                        entry.is_online = active.contains(&entry.actor_id);
+                    }
+                }
+            }
+        }
+
+        // ── Human enrichment: nick_name from user directory ──
+        if let Some(ref directory) = self.user_directory {
+            for entry in &mut entries {
+                if entry.kind != ActorKind::Human {
+                    continue;
+                }
+                let staff_no = entry
+                    .actor_id
+                    .strip_prefix("human_")
+                    .unwrap_or(&entry.actor_id);
+                if let Ok(Some(profile)) = directory.lookup_by_staff_no(staff_no).await {
+                    if let Some(nick_name) = &profile.nick_name {
+                        entry.name = Some(nick_name.clone());
+                    }
+                }
+            }
+        }
+
+        entries
+    }
 }
 
 /// Id-by-prefix actor-kind discriminator (D11).
