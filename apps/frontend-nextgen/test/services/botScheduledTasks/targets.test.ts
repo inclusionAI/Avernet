@@ -171,10 +171,7 @@ test.each([
   );
   expect((await client().run(context, mapManagedRoutine(dto, scope))).level).toBe(level);
 });
-test('history validates target without fallback and preserves duplicate run IDs', async () => {
-  const task = mapManagedRoutine({ ...dto, runtime_stage: 'draft', operator_id: undefined }, scope);
-  await expect(client().runs(context, task)).rejects.toThrow('不支持草稿态');
-  expect(request).not.toHaveBeenCalled();
+test('history preserves duplicate run IDs', async () => {
   request.mockResolvedValue(
     ok({
       total: 2,
@@ -455,3 +452,26 @@ test.each([
   expect(addressFromKey(row.key, addressScope)?.id).toBe(dto.routine_id);
   expect(addressFromKey(row.key, { ...addressScope, entityId: 'another-bot-entity' })).toBeUndefined();
 });
+
+// 列表回包没有 operator_id 时，仍按原草稿实例查询，不填充 Owner/执行者。
+test.each([undefined, 'current-owner'])(
+  'draft history queries the listed instance with operator %s',
+  async (operator) => {
+    const task = mapManagedRoutine({ ...dto, runtime_stage: 'draft', operator_id: operator }, scope);
+    request.mockResolvedValue(
+      ok({ total: 1, items: [{ run_id: 'manual:job:1', routine_id: 'job', status: 'ok' }], failed_targets: [] }),
+    );
+    const result = await client().runs(context, task);
+    expect(result.items).toHaveLength(1);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith(
+      expect.stringMatching(/\/runs$/),
+      expect.objectContaining({
+        method: 'GET',
+        params: expect.objectContaining({ runtime_stage: 'draft', device_uuid: 'uuid', page: 1, page_size: 20 }),
+      }),
+    );
+    const params = request.mock.calls[0][1].params;
+    expect(params.operator_id).toBe(operator);
+  },
+);

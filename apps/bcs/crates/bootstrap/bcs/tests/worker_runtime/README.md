@@ -11,7 +11,11 @@ drives JSON-lines commands over stdin/stdout and checks document CAS/projection,
 normal and large-AppendText archive/restore, duplicate admission, late Cancel,
 independent cancellation, Quarantined/Blocked handling, authorization/recovery,
 takeover by a second Worker incarnation sharing the same memory Store, and
-graceful handoff with a pending task. The companion Dispatch story exercises
+graceful handoff with a pending task.
+The handoff driver keeps the source processor running during drain so recovery
+and committed effects can reach a quiescent transfer point; new source rounds
+remain fenced by the runtime. Stopping that processor can leave drain unfinished
+even after the target becomes shard owner. The companion Dispatch story exercises
 HumanReply through a real held dispatch, ambiguous Sending/Cancel supervision,
 late definitive evidence, live follow, snapshot coverage, retention and cursor Gap.
 The retained-obligation probe crosses a durable scan boundary before concluding

@@ -219,8 +219,6 @@ export function createRoutineClient(
       pageSize = 20,
     ): Promise<RuntimePage<RoutineRun>> {
       const target = completeTarget(task);
-      if (target.runtime_stage === 'draft' && target.device_uuid && !target.operator_id)
-        throw new Error('当前接口不支持草稿态仅指定实例的历史查询；目标已保留，请联系后端补齐查询能力');
       const result = await request<RuntimePage<RoutineRunDto>>(`${path(task.id)}/runs`, 'GET', {
         ...target,
         page,

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
@@ -81,6 +81,9 @@ async def list_containers(
     facade: ServicePublicationFacadeProtocol = Injected(
         ServicePublicationFacadeProtocol
     ),
+    allow_unpublished: Annotated[
+        bool, Query(description="Return an empty snapshot when no online publication exists. Authorization and provider errors remain unchanged.")
+    ] = False,
 ) -> Envelope[ContainerList]:
     """Return the current online instance snapshot for a service Bot."""
     # The synchronous facade includes database reads and provider health checks.
@@ -89,6 +92,7 @@ async def list_containers(
         bot_id,
         actor_id=actor_id,
         owner_id=owner_id,
+        **({"allow_unpublished": True} if allow_unpublished else {}),
     )
     return envelope(_project_list(result), request)
 

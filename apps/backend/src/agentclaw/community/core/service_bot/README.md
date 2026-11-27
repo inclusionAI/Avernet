@@ -20,6 +20,13 @@ Slow health checks no longer block the event loop, but provider latency and
 worker-pool saturation can still delay this request. No retry, cache, timeout
 change or fire-and-forget task is introduced; container restart is unchanged.
 
+An explicit `allow_unpublished=true` list query returns an empty snapshot when
+there is no successful online publication. The scheduled-task page uses this
+option so draft-only Bots do not produce an expected-state error. Authorization
+runs first; malformed publications, missing/invalid bindings and provider errors
+retain their error responses. Omitted/false preserves the original 409 behavior.
+No extra publication query or provider call is added.
+
 ## Online retry and restart recovery
 
 Online publication retry and restart share the same candidate decision and

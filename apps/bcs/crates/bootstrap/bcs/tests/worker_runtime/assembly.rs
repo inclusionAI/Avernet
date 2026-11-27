@@ -311,7 +311,7 @@ impl Host {
 }
 
 impl Host {
-    /// Drive real graceful handoff while the destination keeps serving ticks.
+    /// Drive real graceful handoff while both processors keep serving ticks.
     /// Both Workers share this process's mock; no Store restart is involved.
     pub async fn handoff_cycle(&mut self) -> anyhow::Result<serde_json::Value> {
         use bcs_service_api::application::dist_runtime::DistWorkerRuntimeService;
@@ -349,11 +349,13 @@ impl Host {
             async {
                 let mut errors = vec![];
                 while !finished.load(Ordering::SeqCst) {
-                    // Drain waits for recovery/effects/scheduling to settle.
-                    // Keep driving the source processor until drain finishes,
-                    // just as the host does before signaling its stop channel.
-                    if let Err(error) = source_processor.tick().await {
-                        errors.push(error.code);
+                    // Drain fences new rounds, but the embedding processor must
+                    // keep completing recovery and committed effects on source.
+                    // Its attempts to read/start new work are expected to fail.
+                    if let Err(error) = source_processor.tick().await
+                        && error.code != "worker_not_ready"
+                    {
+                        errors.push(format!("source: {}", error.code));
                     }
                     if let Err(error) = target.heartbeat().await {
                         errors.push(error.code);
@@ -370,7 +372,7 @@ impl Host {
             },
         );
         self.workers[source_index].stopped = true;
-        anyhow::ensure!(driven.is_empty(), "handoff destination failed: {driven:?}");
+        anyhow::ensure!(driven.is_empty(), "handoff processors failed: {driven:?}");
         let after = self.coordination.current(ShardId(1)).await?.unwrap();
         Ok(
             serde_json::json!({"outcome":format!("{:?}",drained?),"previous_owner":before.claim.owner.instance,"owner":after.claim.owner.instance,"target":target.instance(),"handoff_recorded":after.handoff.is_some()}),
