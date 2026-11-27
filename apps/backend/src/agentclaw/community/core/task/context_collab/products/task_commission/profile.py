@@ -23,7 +23,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     GovernanceRequirements,
     MethodCompositionTemplate,
     MethodRelationTemplate,
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     ScenarioRole,
     VersionedProfileRef,
     WorkflowProfile,
@@ -109,7 +109,7 @@ TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
 SELF_SERVICE_COMMISSION_PROFILE_REF = VersionedProfileRef("task_commission", 1)
 
 
-def init_product_profile() -> ProductProfileDefinition:
+def init_product_profile() -> LegacyProductConfiguration:
     """Create the authored task-commission definition through the L6 operation.
 
     Keep its exact version and publication policy; DI explicitly installs the

@@ -51,7 +51,11 @@ from agentclaw.community.core.task.todos.models import (
     TodoRecord,
     TodoStatus,
 )
-from agentclaw.community.core.task.todos.stage_models import TodoStageRecord
+from agentclaw.community.core.task.todos.product_creation_models import TodoOwnerInput
+from agentclaw.community.core.task.todos.stage_models import (
+    TodoParticipantBinding,
+    TodoStageRecord,
+)
 from agentclaw.community.core.task.todos.service_protocol import TodoServiceProtocol
 from agentclaw.community.core.task.todos.source_models import (
     MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
@@ -151,6 +155,7 @@ class TodoService(TodoServiceProtocol):
         title: str,
         description: str,
         bot_id: str,
+        owner: TodoOwnerInput | None = None,
         source: TodoSourceInput | None = None,
         env: str | None = None,
     ) -> TodoRecord:
@@ -163,6 +168,7 @@ class TodoService(TodoServiceProtocol):
             description, "description", MAX_DESCRIPTION_LENGTH
         )
         normalized_bot_id = self._required_text(bot_id, "bot_id", MAX_BOT_ID_LENGTH)
+        normalized_owner = self._owner(owner)
         normalized_source = self._source(source)
         space, _member = self._space_access.require_space_member(
             space_id=normalized_space_id,
@@ -184,6 +190,16 @@ class TodoService(TodoServiceProtocol):
             "bot_name": todo_bot_name(bot, normalized_bot_id),
             "created_by": normalized_actor_id,
         }
+        if normalized_owner is not None:
+            create_args["participant_bindings"] = (
+                TodoParticipantBinding(
+                    key="todo_owner",
+                    label="待办负责人",
+                    subject_type="human",
+                    subject_id=normalized_owner.user_id,
+                    subject_name=normalized_owner.user_name,
+                ),
+            )
         if normalized_source is not None:
             create_args["source"] = normalized_source
         return self._repository.create_todo(**create_args)
@@ -765,6 +781,25 @@ class TodoService(TodoServiceProtocol):
         if len(normalized) > max_length:
             raise ValidationError(f"{field} exceeds the maximum length")
         return normalized
+
+    @classmethod
+    def _owner(cls, value: TodoOwnerInput | None) -> TodoOwnerInput | None:
+        if value is None:
+            return None
+        if not isinstance(value, TodoOwnerInput):
+            raise ValidationError("owner must be a TodoOwnerInput")
+        return TodoOwnerInput(
+            user_id=cls._required_text(
+                value.user_id,
+                "owner user_id",
+                MAX_ACTOR_ID_LENGTH,
+            ),
+            user_name=cls._required_text(
+                value.user_name,
+                "owner user_name",
+                MAX_ACTOR_NAME_LENGTH,
+            ),
+        )
 
     @staticmethod
     def _search_text(value: str | None) -> str | None:

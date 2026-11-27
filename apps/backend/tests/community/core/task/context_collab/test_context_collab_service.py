@@ -26,8 +26,8 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
     ColletState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
@@ -140,7 +140,7 @@ class _FakeContextCollabRepository:
             created_event_ref=event_id,
             last_event_ref=event_id,
         )
-        collet = Collet(
+        collet = LegacyCollet(
             collet_id=collab_context_id,
             initiator_ref=request.initial_event.actor_ref,
             state=ColletState.ACTIVE,
@@ -197,7 +197,7 @@ class TestCreateContext:
 
         result = service.create_collaboration(make_create_command(), actor)
 
-        assert isinstance(result, Collet)
+        assert isinstance(result, LegacyCollet)
         record = repo.created_records[0]
         assert result is record.collet
         assert result.collet_id.startswith("collet_")
@@ -207,8 +207,8 @@ class TestCreateContext:
         assert result.state is ColletState.ACTIVE
         assert not hasattr(result, "current_event_id")
         assert record.initial_event.event_id.startswith("evt_")
-        assert Collet.from_dict(result.to_dict()) == result
-        # Work and creation facts remain separate from the returned Collet.
+        assert LegacyCollet.from_dict(result.to_dict()) == result
+        # Work and creation facts remain separate from the returned LegacyCollet.
         assert record.task.objective == OBJECTIVE
         assert record.task.status == "created"
         assert record.task.principal_ref == PRINCIPAL
@@ -463,7 +463,7 @@ class _FixedIdContextCollabRepository(_FakeContextCollabRepository):
             created_event_ref=event_id,
             last_event_ref=event_id,
         )
-        collet = Collet(
+        collet = LegacyCollet(
             collet_id=collab_context_id,
             initiator_ref=request.initial_event.actor_ref,
             state=ColletState.ACTIVE,
@@ -583,8 +583,8 @@ class TestAuthorizerSeam:
         assert checked_actor is actor
 
 
-def _fake_collet() -> Collet:
-    return Collet(
+def _fake_collet() -> LegacyCollet:
+    return LegacyCollet(
         collet_id="collet_todo_001",
         initiator_ref=PRINCIPAL,
         state=ColletState.ACTIVE,

@@ -29,8 +29,8 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
@@ -486,7 +486,7 @@ def _snapshot_to_dto(snapshot: dict) -> CurrentSnapshotDto:
 
 
 def created_collet_to_dto(
-    collet: Collet, command: CollaborationCreateCommand, events: list[EventRecord]
+    collet: LegacyCollet, command: CollaborationCreateCommand, events: list[EventRecord]
 ) -> ContextCollabCreatedResultDto:
     """Preserve the creation wire receipt without adding read views to Collet.
 

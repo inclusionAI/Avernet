@@ -34,6 +34,7 @@ class TodoRepositoryProtocol(Protocol):
         bot_name: str | None,
         created_by: str,
         source: TodoSourceInput | None = None,
+        participant_bindings: tuple[TodoParticipantBinding, ...] = (),
     ) -> TodoRecord: ...
 
     @abstractmethod
@@ -43,8 +44,9 @@ class TodoRepositoryProtocol(Protocol):
         record: TodoRecord,
         participant_bindings: tuple[TodoParticipantBinding, ...],
         stages: tuple[TodoStageRecord, ...],
+        source: TodoSourceInput | None = None,
     ) -> TodoRecord:
-        """Atomically persist a templated Todo and its full stage graph."""
+        """Atomically persist a Todo, source binding, participants, and stages."""
         ...
 
     @abstractmethod
@@ -86,6 +88,18 @@ class TodoRepositoryProtocol(Protocol):
         self, *, todo_id: str, collab_context_id: str
     ) -> TodoRecord:
         """Attach a B Context only while the Todo remains pending."""
+        ...
+
+    @abstractmethod
+    def get_source_binding(self, *, todo_id: str) -> TodoSourceInput | None:
+        """Return one imported Todo's source snapshot."""
+        ...
+
+    @abstractmethod
+    def bind_product_collet(
+        self, *, todo_id: str, product_collet_id: int
+    ) -> TodoRecord:
+        """Bind the Product runtime Collet id with compare-and-set semantics."""
         ...
 
     @abstractmethod

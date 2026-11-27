@@ -1,0 +1,819 @@
+{
+  "module": "todo",
+  "change_name": "2026-11-26-lab-todo-prototype-alignment",
+  "description": "Deliver Dima batch import, BotTeam product facade over existing Template storage, frontend six-state alignment, and prototype-facing Todo surfaces.",
+  "bootstrap": {
+    "status": "ready",
+    "module": "todo",
+    "state_path": "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/pipeline/state.json",
+    "dima_status": "aligned",
+    "ledger_seeded": true,
+    "created_at": "2026-11-26T10:00:14.670629Z"
+  },
+  "dima_context": {
+    "binding_status": "aligned",
+    "alignment_status": "aligned",
+    "writeback_status": "not_required_for_local_bootstrap",
+    "related_work_items": [
+      {
+        "work_item_id": "2026111900120790386",
+        "title": "【BBS-待办】手动选择dima",
+        "binding_status": "aligned"
+      },
+      {
+        "work_item_id": "2026111900120789898",
+        "title": "【BBS-待办】AIcoding场景产品profile定义",
+        "binding_status": "aligned"
+      },
+      {
+        "work_item_id": "2026112400120935398",
+        "title": "【BBS-待办-切流前置验证】20个真实dima自动化导入待办+基于预发bot待办模版完成配置",
+        "binding_status": "aligned"
+      }
+    ],
+    "artifact_alignment_status": "aligned",
+    "artifacts": [
+      "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/proposal.md",
+      "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/research.md",
+      "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/spec.md",
+      "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/design.md",
+      "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/tasks.md"
+    ]
+  },
+  "preflight": {
+    "status": "ready",
+    "missing_tools": [],
+    "notes": [
+      "Repository rules and affected backend/frontend context were loaded before design.",
+      "Existing Template/Version/Stage and Dima source implementations were inspected.",
+      "No schema migration is planned for this delivery."
+    ]
+  },
+  "delivery_audit_report": null,
+  "current_phase": "implement",
+  "current_round": 0,
+  "current_tier": 0,
+  "difficulty": "medium",
+  "threadId": null,
+  "status": "in_progress",
+  "stuck_count": 0,
+  "retry_count": 0,
+  "started_at": "2026-11-26T10:00:14.670369Z",
+  "updated_at": "2026-11-26T11:33:20.817636+00:00",
+  "last_score": null,
+  "last_verdict": "pending",
+  "has_critical": false,
+  "config": {
+    "tier1": {
+      "max_rounds": 4,
+      "max_fix_attempts": 3,
+      "difficulty": "medium",
+      "checkpoint": false,
+      "allow_degraded_review_continuation": false,
+      "reviewer": {
+        "backend": "codex-cli",
+        "model": "gpt-5.5",
+        "reasoning_effort": "high"
+      }
+    },
+    "tier2": {
+      "coverage_threshold": 80,
+      "max_rounds": 2,
+      "checkpoint": false,
+      "test_command": "",
+      "lint_command": "",
+      "format_command": "",
+      "typecheck_command": ""
+    },
+    "acceptance_rework": {
+      "max_total_attempts": 6,
+      "max_attempts_per_ac": 3,
+      "max_same_failure_repeats": 2,
+      "max_no_progress_rounds": 2
+    }
+  },
+  "acceptance_ledger": {
+    "version": 1,
+    "items": [
+      {
+        "id": "AC-001",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/spec.md#ac-001botteam-facade-复用现有物理结构",
+        "title": "BotTeam facade复用现有物理结构",
+        "statement": "Backend 对外提供 BotTeam 产品模型和 API，但持久化继续映射到现有 Template/Version/Stage 表及 Todo template 字段。",
+        "category": "architecture",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/design.md#3-botteam-映射"
+        ],
+        "implementation_refs": [
+          "apps/backend/src/agentclaw/community/core/task/todos/bot_team_models.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_bot_team_service.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/bot_team_router.py"
+        ],
+        "verification": {
+          "method": "unit + service + HTTP contract",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "Confirmed in the 2026-11-26 prototype-alignment discussion. Slice 2 implemented with focused BotTeam tests plus OpenAPI and architecture guards; final AC verification remains pending Tier 2/AC Acceptance."
+      },
+      {
+        "id": "AC-002",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/spec.md#ac-002无命名驱动的-ddl-或历史回填",
+        "title": "无命名驱动DDL或历史回填",
+        "statement": "本批不新增 BotTeam/Node/owner 同义表列，不重命名或删除 Template/Stage 表列，不回填历史 Todo，旧 Template API 保持兼容。",
+        "category": "data",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/design.md#8-兼容与数据库策略"
+        ],
+        "implementation_refs": [
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_bot_team_service.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/README.md"
+        ],
+        "verification": {
+          "method": "schema diff + compatibility tests",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "Confirmed in the 2026-11-26 prototype-alignment discussion. Slice 2 implemented with focused BotTeam tests plus OpenAPI and architecture guards; final AC verification remains pending Tier 2/AC Acceptance."
+      },
+      {
+        "id": "AC-003",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/spec.md#ac-003bot-小队生命周期和线性节点",
+        "title": "Bot小队生命周期和线性节点",
+        "statement": "Bot 小队支持列表、创建、查看、编辑新 revision 和归档；revision 不可变，节点线性且 code 唯一，approval 复用 Bot stage + todo_owner Human stage。",
+        "category": "behavior",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/design.md#3-botteam-映射"
+        ],
+        "implementation_refs": [
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_bot_team_service.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/bot_team_router.py",
+          "apps/backend/tests/community/core/task/todos/test_todo_bot_team_service.py",
+          "apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_bot_teams.py"
+        ],
+        "verification": {
+          "method": "domain + service + HTTP tests",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "Confirmed in the 2026-11-26 prototype-alignment discussion. Slice 2 implemented with focused BotTeam tests plus OpenAPI and architecture guards; final AC verification remains pending Tier 2/AC Acceptance."
+      },
+      {
+        "id": "AC-004",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/spec.md#ac-004botbotteam-创建-todo-并固定快照",
+        "title": "Bot或BotTeam创建Todo并固定快照",
+        "statement": "创建 Todo 可选单 Bot 或 BotTeam 并指定负责人；BotTeam 固定 revision/name/stages，负责人保存为 todo_owner binding，后续小队编辑不影响 Todo。",
+        "category": "behavior",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/design.md#4-todo-创建"
+        ],
+        "implementation_refs": [
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_product_creation_service.py#TodoProductCreationService",
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_service.py#TodoService.create_todo",
+          "apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_repository.py#TodoRepository.create_todo",
+          "apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/models.py#TodoModel._owner_projection",
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_product_creation_service.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/schemas.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/router.py",
+          "apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_repository.py"
+        ],
+        "verification": {
+          "method": "service + repository + HTTP integration + Service API conformance",
+          "evidence": [
+            "Focused core/service/repository tests: 77 passed",
+            "Focused HTTP tests: 24 passed",
+            "Combined Slice 3 regression and conformance: 337 passed"
+          ],
+          "result": "implementation_evidence_collected"
+        },
+        "owner_decision": "confirmed",
+        "notes": "Core creation and owner persistence/projection are implemented over existing Template storage. HTTP integration and final AC Acceptance remain pending."
+      },
+      {
+        "id": "AC-005",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/spec.md#ac-005dima-最多-20-条单向批量导入",
+        "title": "Dima最多20条单向批量导入",
+        "statement": "当前登录用户可一次导入不超过20条Dima工作项，每条独立返回 imported|duplicate|failed，duplicate 返回已有Todo ID，失败不回滚成功项且不回写Dima。",
+        "category": "behavior",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/design.md#5-dima-批量导入"
+        ],
+        "implementation_refs": [],
+        "verification": {
+          "method": "service + HTTP integration",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "Confirmed in the 2026-11-26 prototype-alignment discussion."
+      },
+      {
+        "id": "AC-006",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/spec.md#ac-006frontend-精确支持六状态",
+        "title": "Frontend精确支持六状态",
+        "statement": "Frontend 精确支持 Backend 六状态，未知状态显式报协议错误，不回退为 pending。",
+        "category": "contract",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/design.md#71-六状态"
+        ],
+        "implementation_refs": [],
+        "verification": {
+          "method": "focused frontend tests + typecheck",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "Confirmed in the 2026-11-26 prototype-alignment discussion."
+      },
+      {
+        "id": "AC-007",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/spec.md#ac-007原型页面和统一执行方选择器",
+        "title": "原型页面和统一执行方选择器",
+        "statement": "Todo、Dima、BotTeam 页面按原型信息架构实现，执行方选择器分组展示空间Bot和Bot小队并复用统一协议。",
+        "category": "ui",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/design.md#72-页面"
+        ],
+        "implementation_refs": [],
+        "verification": {
+          "method": "component + service tests",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "Confirmed in the 2026-11-26 prototype-alignment discussion."
+      },
+      {
+        "id": "AC-008",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/spec.md#ac-008progressinteraction-不接假协议",
+        "title": "Progress和Interaction不接假协议",
+        "statement": "本批只使用已有真实数据或明确空态，不发明Node Attempt Step或Dialog Turn接口，不用前端假数据固化未来协议。",
+        "category": "architecture",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/design.md#72-页面"
+        ],
+        "implementation_refs": [],
+        "verification": {
+          "method": "contract review + frontend tests",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "Confirmed in the 2026-11-26 prototype-alignment discussion."
+      }
+    ],
+    "decisions": [
+      {
+        "date": "2026-11-26",
+        "decision": "BotTeam is a product facade over existing Template/Version/Stage persistence; no naming-driven DDL, backfill, physical rename, or legacy API removal in this delivery.",
+        "source": "user_explicit"
+      }
+    ],
+    "blockers": [
+      "AC-001",
+      "AC-002",
+      "AC-003",
+      "AC-004",
+      "AC-005",
+      "AC-006",
+      "AC-007",
+      "AC-008"
+    ],
+    "gate_results": [
+      {
+        "allowed": true,
+        "stage": "implement",
+        "requested_stage": "implement",
+        "gate": "implementation_entry",
+        "blockers": [],
+        "checked_at": "2026-11-26T00:00:00Z"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "gate": "focused_test",
+        "check": "apps/backend/tests/community/core/task/todos/test_todo_bot_team_service.py",
+        "result": "failed",
+        "related_acceptance": [
+          "AC-001",
+          "AC-003"
+        ],
+        "failure": "ModuleNotFoundError: agentclaw.community.core.task.todos.bot_team_models",
+        "checked_at": "2026-11-26T11:00:00Z"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "gate": "focused_test",
+        "check": "apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_bot_teams.py",
+        "result": "failed",
+        "related_acceptance": [
+          "AC-001",
+          "AC-003"
+        ],
+        "failure": "ModuleNotFoundError: agentclaw.community.adapters.http.openapi_v1.task.todos.bot_team_router",
+        "checked_at": "2026-11-26T12:00:00Z"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "gate": "architecture_and_openapi_contracts",
+        "check": "pytest -q tests/community/adapters/http/openapi_v1/test_authorization_inventory.py tests/community/adapters/http/openapi_v1/test_admission_inventory.py tests/community/adapters/http/openapi_v1/test_explicit_user_id.py tests/community/adapters/http/openapi_v1/test_schema_docs.py tests/community/architecture/test_service_api_conformance.py",
+        "result": "failed",
+        "related_acceptance": [
+          "AC-001",
+          "AC-003"
+        ],
+        "failure": "320 passed, 3 failed: explicit-user-id operation pin expected 343 but found 348; bot-id placement none pin expected 185 but found 190; BotTeamStatus lacks x-enum-descriptions.",
+        "checked_at": "2026-11-26T10:33:54Z"
+      },
+      {
+        "allowed": true,
+        "stage": "implement",
+        "gate": "architecture_and_openapi_contracts",
+        "check": "pytest -q tests/community/adapters/http/openapi_v1/test_authorization_inventory.py tests/community/adapters/http/openapi_v1/test_admission_inventory.py tests/community/adapters/http/openapi_v1/test_explicit_user_id.py tests/community/adapters/http/openapi_v1/test_schema_docs.py tests/community/architecture/test_service_api_conformance.py",
+        "result": "passed",
+        "related_acceptance": [
+          "AC-001",
+          "AC-003"
+        ],
+        "evidence": "323 passed, 18 warnings in 24.18s",
+        "checked_at": "2026-11-26T10:35:37Z"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "gate": "backend_architecture_suite",
+        "check": "pytest tests/community/architecture -q",
+        "result": "failed",
+        "related_acceptance": [],
+        "failure": "1 failed, 439 passed: agentclaw.community.api imports TodoBotTeamServiceProtocol without declaring agentclaw.community.core.task.todos.bot_team_service_protocol in its Context Boundary internal_dependencies.",
+        "checked_at": "2026-11-26T10:41:08Z"
+      },
+      {
+        "allowed": true,
+        "stage": "implement",
+        "gate": "backend_architecture_suite",
+        "check": "pytest tests/community/architecture -q",
+        "result": "passed",
+        "related_acceptance": [],
+        "evidence": "440 passed, 43 warnings in 66.68s",
+        "checked_at": "2026-11-26T10:43:37Z"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "gate": "focused_test",
+        "check": "pytest -q tests/community/core/task/todos/test_todo_product_creation_service.py tests/community/core/task/todos/test_todo_service.py tests/community/repository/task/todos/test_todo_repository.py",
+        "result": "failed",
+        "related_acceptance": [
+          "AC-004"
+        ],
+        "failure": "Test collection failed: ModuleNotFoundError: agentclaw.community.core.task.todos.product_creation_models",
+        "checked_at": "2026-11-26T18:54:39+08:00"
+      },
+      {
+        "allowed": true,
+        "stage": "implement",
+        "gate": "focused_test",
+        "check": "pytest -q tests/community/core/task/todos/test_todo_product_creation_service.py tests/community/core/task/todos/test_todo_service.py tests/community/repository/task/todos/test_todo_repository.py",
+        "result": "passed",
+        "related_acceptance": [
+          "AC-004"
+        ],
+        "evidence": "77 passed, 17 warnings in 1.27s",
+        "checked_at": "2026-11-26T11:22:57.927825Z"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "gate": "http_tdd_red_setup",
+        "check": "HTTP red-test setup for tests/community/adapters/http/openapi_v1/task/todos/test_todo_endpoints.py",
+        "result": "failed",
+        "related_acceptance": [
+          "AC-004"
+        ],
+        "failure": "Red-test edit used an apps/backend-prefixed path while already running from apps/backend, so no test was written; the same compound command then hit PermissionError writing /Users/guoke.gk/logs/sofa-rpc-python.log. This is test setup/environment failure, not product behavior evidence.",
+        "checked_at": "2026-11-26T11:26:57.187015+00:00",
+        "audit_recovery": "incomplete_audit_recovery"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "gate": "focused_test",
+        "check": "pytest -q tests/community/adapters/http/openapi_v1/task/todos/test_todo_endpoints.py (AC-004 HTTP red)",
+        "result": "failed",
+        "related_acceptance": [
+          "AC-004"
+        ],
+        "failure": "6 failed, 18 passed: CreateTodoRequest lacks executor/owner compatibility validation; create_todo does not inject/route to TodoProductCreationServiceProtocol; TodoResponse lacks owner projection.",
+        "checked_at": "2026-11-26T11:29:11.489439+00:00"
+      },
+      {
+        "allowed": true,
+        "stage": "implement",
+        "gate": "focused_test",
+        "check": "pytest -q tests/community/adapters/http/openapi_v1/task/todos/test_todo_endpoints.py",
+        "result": "passed",
+        "related_acceptance": [
+          "AC-004"
+        ],
+        "evidence": "24 passed, 18 warnings in 0.06s",
+        "checked_at": "2026-11-26T11:30:50.697011+00:00"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "gate": "pipeline_state_writeback",
+        "check": "pipeline state Slice 3 evidence writeback",
+        "result": "failed",
+        "related_acceptance": [],
+        "failure": "Evidence writeback addressed acceptance_ledger.acceptance_criteria, but the ledger stores ACs under acceptance_ledger.items; no state was written.",
+        "checked_at": "2026-11-26T11:33:20.817636+00:00"
+      },
+      {
+        "allowed": true,
+        "stage": "implement",
+        "gate": "slice_3_regression",
+        "check": "pytest -q tests/community/core/task/todos/test_todo_product_creation_service.py tests/community/core/task/todos/test_todo_service.py tests/community/repository/task/todos/test_todo_repository.py tests/community/adapters/http/openapi_v1/task/todos/test_todo_endpoints.py tests/community/architecture/test_service_api_conformance.py",
+        "result": "passed",
+        "related_acceptance": [
+          "AC-004"
+        ],
+        "evidence": "337 passed, 18 warnings in 1.88s",
+        "checked_at": "2026-11-26T11:33:20.817636+00:00"
+      }
+    ],
+    "rework_attempts": [
+      {
+        "attempt": 1,
+        "kind": "acceptance_fulfillment",
+        "failed_ac_ids": [
+          "AC-001",
+          "AC-003"
+        ],
+        "failure": "BotTeam facade implementation is missing",
+        "planned_action": "Implement transport-neutral BotTeam models, Service API protocol, and core service over existing Template services without schema changes",
+        "status": "completed",
+        "started_at": "2026-11-26T11:00:00Z",
+        "result": "fixed",
+        "actions_taken": [
+          "Implemented BotTeam domain, service, Service API facade, HTTP routes, DI binding, and contract tests over existing Template persistence."
+        ],
+        "changed_files": [
+          "apps/backend/src/agentclaw/community/core/task/todos/bot_team_models.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_bot_team_service.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/bot_team_router.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_bot_team_service.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/bot_team_router.py",
+          "apps/backend/tests/community/core/task/todos/test_todo_bot_team_service.py",
+          "apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_bot_teams.py"
+        ],
+        "verification_evidence": [
+          "focused BotTeam core/HTTP tests: 9 passed",
+          "OpenAPI/architecture focused gate: 323 passed",
+          "backend architecture suite: 440 passed"
+        ],
+        "completed_at": "2026-11-26T10:43:37Z"
+      },
+      {
+        "attempt": 2,
+        "trigger": "verification_failed",
+        "kind": "acceptance_fulfillment",
+        "stage": "implement",
+        "gate": "architecture_and_openapi_contracts",
+        "failed_ac_ids": [
+          "AC-001",
+          "AC-003"
+        ],
+        "failure_type": "verification_failed",
+        "failure": "New BotTeam HTTP operations are not reflected in pinned API inventory counts and BotTeamStatus lacks per-member OpenAPI documentation.",
+        "allowed_scope": "Update only the explicit-user-id/bot-id-placement inventory pins and comments, add BotTeamStatus enum member descriptions, then rerun the same focused contract gate.",
+        "planned_action": "Repair the BotTeam API contract evidence without changing behavior, persistence, schema, or acceptance scope.",
+        "actions_taken": [
+          "Updated explicit user_id and bot_id placement inventory pins for five Human/Space-scoped BotTeam operations.",
+          "Added per-member OpenAPI enum documentation for BotTeamStatus."
+        ],
+        "changed_files": [
+          "apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/bot_team_models.py"
+        ],
+        "verification_evidence": [
+          "pytest -q tests/community/adapters/http/openapi_v1/test_authorization_inventory.py tests/community/adapters/http/openapi_v1/test_admission_inventory.py tests/community/adapters/http/openapi_v1/test_explicit_user_id.py tests/community/adapters/http/openapi_v1/test_schema_docs.py tests/community/architecture/test_service_api_conformance.py: 323 passed, 18 warnings in 24.18s"
+        ],
+        "status": "completed",
+        "result": "fixed",
+        "started_at": "2026-11-26T10:33:54Z",
+        "completed_at": "2026-11-26T10:35:37Z"
+      },
+      {
+        "attempt": 3,
+        "trigger": "verification_failed",
+        "kind": "system_quality",
+        "stage": "implement",
+        "gate": "backend_architecture_suite",
+        "failed_ac_ids": [],
+        "related_acceptance": [],
+        "failure_type": "quality_gate_failed",
+        "failure": "Context Boundary dependency declaration is missing for the new BotTeam Service API re-export.",
+        "allowed_scope": "Update only apps/backend/src/agentclaw/community/api/README.md internal_dependencies for the existing BotTeam protocol re-export, then rerun the backend architecture suite.",
+        "planned_action": "Declare the already-used core BotTeam protocol dependency; do not change runtime behavior, API shape, persistence, schema, or acceptance scope.",
+        "actions_taken": [
+          "Declared agentclaw.community.core.task.todos.bot_team_service_protocol in agentclaw.community.api Context Boundary internal_dependencies."
+        ],
+        "changed_files": [
+          "apps/backend/src/agentclaw/community/api/README.md"
+        ],
+        "verification_evidence": [
+          "pytest tests/community/architecture -q: 440 passed, 43 warnings in 66.68s"
+        ],
+        "status": "completed",
+        "result": "fixed",
+        "started_at": "2026-11-26T10:41:08Z",
+        "completed_at": "2026-11-26T10:43:37Z"
+      },
+      {
+        "attempt": 4,
+        "trigger": "verification_failed",
+        "kind": "acceptance_fulfillment",
+        "stage": "implement",
+        "gate": "focused_test",
+        "failed_ac_ids": [
+          "AC-004"
+        ],
+        "failure_type": "verification_failed",
+        "failure": "Todo product creation facade and owner projection/persistence are not implemented, so the AC-004 focused tests cannot collect.",
+        "allowed_scope": "Implement only AC-004 product creation models/protocol/service, owner binding persistence/projection, legacy create compatibility, and the pre-existing invalid catalog_metadata argument cleanup required by template creation; no DDL, backfill, physical field rename, or Template API removal.",
+        "planned_action": "Add the transport-neutral Bot/BotTeam creation facade over existing template_id/template_version_id storage, persist todo_owner in participant_bindings_json, project legacy owner from created_by without writes, then rerun the same focused tests.",
+        "actions_taken": [
+          "Added transport-neutral Bot/BotTeam Todo product creation models, protocol, and service facade.",
+          "Mapped BotTeam product IDs to existing template_id/template_version_id storage without DDL or backfill.",
+          "Persisted todo_owner in existing participant_bindings_json and projected owner_id/owner_name with created_by fallback for legacy rows.",
+          "Registered the product creation service in DI and structural Service API conformance.",
+          "Removed the stale catalog_metadata argument from template creation resolve_todo_bot calls."
+        ],
+        "changed_files": [
+          "apps/backend/src/agentclaw/community/core/task/todos/product_creation_models.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/product_creation_protocol.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_product_creation_service.py",
+          "apps/backend/src/agentclaw/community/api/task/todo_product_creation_service.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_service.py",
+          "apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/models.py",
+          "apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_repository.py",
+          "apps/backend/src/agentclaw/community/di/modules/task/todo_bindings.py",
+          "apps/backend/tests/community/core/task/todos/test_todo_product_creation_service.py",
+          "apps/backend/tests/community/core/task/todos/test_todo_service.py",
+          "apps/backend/tests/community/repository/task/todos/test_todo_repository.py"
+        ],
+        "verification_evidence": [
+          "pytest -q tests/community/core/task/todos/test_todo_product_creation_service.py tests/community/core/task/todos/test_todo_service.py tests/community/repository/task/todos/test_todo_repository.py: 77 passed, 17 warnings in 1.27s"
+        ],
+        "status": "completed",
+        "result": "fixed",
+        "started_at": "2026-11-26T18:54:39+08:00",
+        "completed_at": "2026-11-26T11:22:57.927825Z"
+      },
+      {
+        "attempt": 5,
+        "trigger": "evidence_invalid",
+        "kind": "system_quality",
+        "stage": "implement",
+        "gate": "http_tdd_red_setup",
+        "failed_ac_ids": [],
+        "related_acceptance": [
+          "AC-004"
+        ],
+        "failure_type": "evidence_invalid",
+        "failure": "The intended AC-004 HTTP red test was not created because the edit path was wrong, and the compound pytest invocation could not initialize its external log file.",
+        "allowed_scope": "Create only the AC-004 Todo creation HTTP compatibility tests at the correct repository path, then run pytest as a standalone command in apps/backend; do not change product scope, database schema, Template compatibility, or unrelated runtime behavior.",
+        "planned_action": "Add the missing HTTP red tests with the correct path and rerun the focused test independently before implementing the bounded schema/router response changes.",
+        "actions_taken": [
+          "Retroactively recorded the missed setup failure before any HTTP repair was applied.",
+          "Created the AC-004 HTTP red tests at the correct repository path.",
+          "Ran focused pytest as a standalone command without the previous external-log permission failure."
+        ],
+        "changed_files": [
+          "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/pipeline/state.json",
+          "apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_todo_endpoints.py"
+        ],
+        "verification_evidence": [
+          "Focused HTTP test executed normally and produced the intended product-contract red result: 6 failed, 18 passed."
+        ],
+        "status": "completed",
+        "result": "fixed",
+        "started_at": "2026-11-26T11:26:57.187146+00:00",
+        "audit_recovery": "incomplete_audit_recovery",
+        "completed_at": "2026-11-26T11:29:11.489439+00:00"
+      },
+      {
+        "attempt": 6,
+        "trigger": "verification_failed",
+        "kind": "acceptance_fulfillment",
+        "stage": "implement",
+        "gate": "focused_test",
+        "failed_ac_ids": [
+          "AC-004"
+        ],
+        "failure_type": "verification_failed",
+        "failure": "The product-level executor/owner creation contract is implemented in core but not exposed through the existing Todo HTTP create endpoint or response.",
+        "allowed_scope": "Extend only CreateTodoRequest/TodoResponse and the existing create_todo route to support executor + owner while preserving legacy bot_id calls; map to TodoProductCreationServiceProtocol without DDL, backfill, Template API removal, or unrelated route changes.",
+        "planned_action": "Add strict compatible request schemas, route new executor/owner requests through the product service, keep legacy bot_id-only routing unchanged, project owner_id/owner_name in TodoResponse, then rerun the same focused HTTP test.",
+        "actions_taken": [
+          "Added strict executor and owner request schemas while preserving the legacy bot_id request shape.",
+          "Routed executor requests and legacy bot_id + owner requests through TodoProductCreationServiceProtocol.",
+          "Kept legacy bot_id-only requests on TodoServiceProtocol.",
+          "Projected owner_id and owner_name in TodoResponse without adding database fields."
+        ],
+        "changed_files": [
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/schemas.py",
+          "apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/router.py",
+          "apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_todo_endpoints.py"
+        ],
+        "verification_evidence": [
+          "pytest -q tests/community/adapters/http/openapi_v1/task/todos/test_todo_endpoints.py: 24 passed, 18 warnings in 0.06s"
+        ],
+        "status": "completed",
+        "result": "fixed",
+        "started_at": "2026-11-26T11:29:11.489439+00:00",
+        "completed_at": "2026-11-26T11:30:50.697011+00:00"
+      },
+      {
+        "attempt": 7,
+        "trigger": "evidence_invalid",
+        "kind": "system_quality",
+        "stage": "implement",
+        "gate": "pipeline_state_writeback",
+        "failed_ac_ids": [],
+        "related_acceptance": [],
+        "failure_type": "evidence_invalid",
+        "failure": "The state update script used the wrong Acceptance Ledger collection key and exited before writing.",
+        "allowed_scope": "Correct only the state writeback path from acceptance_criteria to items and persist already-collected Slice 3 evidence; do not change product code or AC scope.",
+        "planned_action": "Write the same evidence through acceptance_ledger.items and verify the JSON remains parseable.",
+        "actions_taken": [
+          "Corrected the state update to use acceptance_ledger.items."
+        ],
+        "changed_files": [
+          "docs/specs/todo/2026-11-26-lab-todo-prototype-alignment/pipeline/state.json"
+        ],
+        "verification_evidence": [
+          "pipeline/state.json parsed successfully after writeback"
+        ],
+        "status": "completed",
+        "result": "fixed",
+        "started_at": "2026-11-26T11:33:20.817636+00:00",
+        "completed_at": "2026-11-26T11:33:20.817636+00:00"
+      }
+    ],
+    "escalations": []
+  },
+  "tier1": {
+    "rounds": 0,
+    "result": "pending",
+    "verdict": "pending",
+    "blocking_findings": 0,
+    "findings": [],
+    "has_critical": false,
+    "latest_verdict": null,
+    "latest_summary": null,
+    "final_score": null,
+    "dimensions_final": null,
+    "review_evidence": null,
+    "history": []
+  },
+  "tier2": {
+    "rounds": 0,
+    "tests_passed": false,
+    "coverage": 0,
+    "lint_passed": false,
+    "result": "pending",
+    "verdict": "pending",
+    "history": []
+  },
+  "heal_loop": {
+    "active": false,
+    "tier1": {
+      "invocations": 0,
+      "total_issues_fixed": 0,
+      "total_iterations": 0,
+      "history": []
+    },
+    "tier2": {
+      "invocations": 0,
+      "total_issues_fixed": 0,
+      "total_iterations": 0,
+      "history": []
+    },
+    "config": {
+      "tier1_max_iterations": 4,
+      "tier2_max_iterations": 5,
+      "stuck_threshold_iterations": 2,
+      "sources": {
+        "cargo_test": {
+          "enabled": true
+        },
+        "cargo_clippy": {
+          "enabled": true
+        },
+        "cargo_fmt": {
+          "enabled": true
+        },
+        "arch_guard": {
+          "enabled": true
+        },
+        "pytest": {
+          "enabled": true
+        },
+        "ruff_check": {
+          "enabled": true
+        },
+        "ruff_format": {
+          "enabled": true
+        },
+        "mypy": {
+          "enabled": false
+        },
+        "app_logs": {
+          "enabled": false,
+          "mode": "local",
+          "start_command": "",
+          "smoke_test_command": "",
+          "stop_command": "",
+          "log_path": null,
+          "app_name": "",
+          "env": "",
+          "region_id": "",
+          "query": "ERROR",
+          "since": "1h",
+          "severity_gate": "MAJOR",
+          "ignore_patterns": []
+        }
+      }
+    }
+  },
+  "implementation_entry_gate": "passed",
+  "implement": {
+    "slices_total": 5,
+    "slices_completed": 2,
+    "current_slice": "slice-3-bot-team-todo-creation",
+    "tdd_cycles": [
+      {
+        "slice": "slice-1-frontend-six-statuses",
+        "red": true,
+        "green": true,
+        "refactor": true
+      },
+      {
+        "slice": "slice-2-bot-team-facade-core",
+        "red": true,
+        "green": true,
+        "refactor": true
+      },
+      {
+        "slice": "slice-2-bot-team-facade-http",
+        "red": true,
+        "green": true,
+        "refactor": true
+      },
+      {
+        "slice": "slice-3-bot-team-todo-creation-core",
+        "red": true,
+        "green": true,
+        "refactor": true
+      },
+      {
+        "slice": "slice-3-bot-team-todo-creation-http",
+        "red": true,
+        "green": true,
+        "refactor": true
+      }
+    ],
+    "implementation_exit_gate": "pending"
+  }
+}

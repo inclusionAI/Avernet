@@ -14,8 +14,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
     ColletState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet_metadata import (
@@ -41,7 +41,7 @@ def _dump_json(data: dict) -> str:
 
 def _collet_from_row(
     row: ContextCollabColletModel,
-) -> Collet:
+) -> LegacyCollet:
     """Decode L4 identity/scope/audit; composition stays with the injected codec."""
     if row.actor_ref is None:
         raise ContextCollabValidationError(
@@ -79,7 +79,7 @@ def _collet_from_row(
                 f"resources: {error}"
             ) from error
     scope = json.loads(row.scope)
-    collet = Collet(
+    collet = LegacyCollet(
         collet_id=row.collab_context_id,
         initiator_ref=PrincipalRef.from_dict(json.loads(row.actor_ref)),
         state=ColletState.ACTIVE,

@@ -9,7 +9,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.particip
     ROLE_SELECTED_AGENT,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     TaskAction,
     TaskLifecycleContract,
     VersionedProfileRef,
@@ -73,7 +73,7 @@ TASK_CONTRACTS = MappingProxyType({STANDARD_TASK_CONTRACT.ref: STANDARD_TASK_CON
 
 
 def resolve_event_contract(
-    profile: ProductProfileDefinition,
+    profile: LegacyProductConfiguration,
 ) -> TaskLifecycleContract | WorkflowProfile:
     """One authority: legacy workflow OR exact Task contract; never merge them.
 

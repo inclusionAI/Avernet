@@ -9,12 +9,12 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_binding impo
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     MethodRelationTemplate,
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
 )
 
 
 def product_binding_refs(
-    collet_id: str, profile: ProductProfileDefinition
+    collet_id: str, profile: LegacyProductConfiguration
 ) -> tuple[str, ...]:
     if profile.composition.relations:
         return tuple(
@@ -25,7 +25,7 @@ def product_binding_refs(
 
 
 def product_method_binding_ref(
-    collet_id: str, profile: ProductProfileDefinition, method: str
+    collet_id: str, profile: LegacyProductConfiguration, method: str
 ) -> str:
     if method not in {
         item.profile.method_kind for item in profile.composition.required_methods
@@ -39,7 +39,7 @@ def product_method_binding_ref(
 
 
 def product_execution_binding_ref(
-    collet_id: str, profile: ProductProfileDefinition
+    collet_id: str, profile: LegacyProductConfiguration
 ) -> str:
     methods = {
         item.profile.method_kind for item in profile.composition.required_methods

@@ -21,7 +21,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.initiali
     build_profile_binding,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
 )
 from agentclaw.community.core.task.context_collab.l6_products.topology import (
     product_method_binding_ref,
@@ -37,7 +37,7 @@ def project_method_topology(
     store: MethodStoreProtocol,
     axes: StoreAxes,
     collet_id: str,
-    profile: ProductProfileDefinition,
+    profile: LegacyProductConfiguration,
     spec: ResolvedMethodSpec,
     actor: ActorContext,
     *,

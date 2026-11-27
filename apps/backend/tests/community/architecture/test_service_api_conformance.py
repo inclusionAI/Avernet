@@ -420,6 +420,18 @@ from agentclaw.community.core.bot_overview.service import BotOverviewService
 from agentclaw.community.api.task.todo_template_service import (
     TodoTemplateManagementServiceProtocol,
 )
+from agentclaw.community.api.task.todo_bot_team_service import (
+    TodoBotTeamServiceProtocol,
+)
+from agentclaw.community.api.task.todo_product_creation_service import (
+    TodoProductCreationServiceProtocol,
+)
+from agentclaw.community.core.task.todos.services.todo_bot_team_service import (
+    TodoBotTeamService,
+)
+from agentclaw.community.core.task.todos.services.todo_product_creation_service import (
+    TodoProductCreationService,
+)
 from agentclaw.community.core.task.todos.services.todo_template_service import (
     TodoTemplateService,
 )
@@ -427,7 +439,17 @@ from agentclaw.community.core.task.todos.services.todo_template_service import (
 from agentclaw.community.api.task.task_commission_service import TaskCommissionServiceProtocol
 from agentclaw.community.core.task.context_collab.products.task_commission.service import TaskCommissionService
 
+from agentclaw.community.api.task.product_profile_service import ProductProfileServiceProtocol
+from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.service import ProductProfileService
+
+from agentclaw.community.api.task.rollout_progress_service import RolloutProgressServiceProtocol
+from agentclaw.community.core.task.context_collab.l5_methods.rollout_engine import RolloutEngine
+
 _PAIRS = [
+    (RolloutProgressServiceProtocol, RolloutEngine),
+    (ProductProfileServiceProtocol, ProductProfileService),
+    (TodoProductCreationServiceProtocol, TodoProductCreationService),
+    (TodoBotTeamServiceProtocol, TodoBotTeamService),
     (TodoTemplateManagementServiceProtocol, TodoTemplateService),
     (TaskCommissionServiceProtocol, TaskCommissionService),
     (EngineSessionFilesProtocol, EngineSessionFilesService),

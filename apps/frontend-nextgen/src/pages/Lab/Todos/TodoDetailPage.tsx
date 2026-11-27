@@ -13,8 +13,9 @@ import { TodoArtifactList } from './components/TodoArtifactList';
 import { TodoDetailItem, TodoDetailTab } from './components/TodoDetailPrimitives';
 import { TodoEventTimeline } from './components/TodoEventTimeline';
 import { TodoInteractionPanel } from './components/TodoInteractionPanel';
+import { TodoProgressPanel } from './components/TodoProgressPanel';
 
-type DetailView = 'events' | 'interactions' | 'artifacts';
+type DetailView = 'progress' | 'events' | 'interactions' | 'artifacts';
 
 function createDecisionId(): string {
   const randomUuid = globalThis.crypto?.randomUUID?.();
@@ -69,6 +70,28 @@ export default function TodoDetailPage() {
       return [...current, target];
     });
   };
+  const readProgressArtifact = async (
+    artifactId: string,
+    disposition: 'inline' | 'attachment'
+  ): Promise<Blob> => {
+    const blob = await detail.readArtifactContent(artifactId, disposition);
+    if (disposition === 'attachment') {
+      const artifact = detail.artifacts.find((item) => item.artifactId === artifactId);
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download =
+        artifact?.kind === 'file'
+          ? artifact.content.fileName || artifact.artifactName
+          : artifact?.artifactName || artifactId;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    }
+    return blob;
+  };
+
   const submitRejection = async () => {
     const decisionId = rejectionDecisionId || createDecisionId();
     if (!rejectionDecisionId) setRejectionDecisionId(decisionId);
@@ -176,6 +199,9 @@ export default function TodoDetailPage() {
                 aria-label="待办详情视图"
                 className="flex items-center gap-12 border-b border-divider px-8 pt-6"
               >
+                <TodoDetailTab active={view === 'progress'} onClick={() => setView('progress')}>
+                  进度
+                </TodoDetailTab>
                 <TodoDetailTab active={view === 'events'} onClick={() => setView('events')}>
                   事件
                 </TodoDetailTab>
@@ -188,6 +214,18 @@ export default function TodoDetailPage() {
               </div>
 
               <div className="px-5 py-7 sm:px-8 sm:py-8">
+                {view === 'progress' ? (
+                  <TodoProgressPanel
+                    progress={detail.progress}
+                    artifacts={detail.artifacts}
+                    loading={detail.progressLoading}
+                    error={detail.progressError}
+                    onRetry={() => void detail.refreshProgress()}
+                    onExpandStage={(stageCode) => void detail.refreshProgress(stageCode)}
+                    onReadArtifact={readProgressArtifact}
+                  />
+                ) : null}
+
                 {view === 'events' ? (
                   <div className="space-y-1">
                     <TodoEventTimeline
@@ -198,7 +236,7 @@ export default function TodoDetailPage() {
                       error={detail.eventsError}
                       onRetry={detail.refreshEvents}
                     />
-                    {todo.status === 'pending_acceptance' ? (
+                    {todo.status === 'pending_action' ? (
                       <div className="relative pl-[37px] sm:pl-[156px]">
                         <span
                           aria-hidden

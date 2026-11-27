@@ -1,5 +1,13 @@
-import type { TodoArtifact, TodoEvent, TodoRecord, TodoStatus } from '@/domain/todos/models';
-import type { TodoArtifactDto, TodoDto, TodoEventDto } from './todoController';
+import type {
+  TodoArtifact,
+  TodoEvent,
+  TodoProgress,
+  TodoProgressStageStatus,
+  TodoRecord,
+  TodoStageProgress,
+  TodoStatus,
+} from '@/domain/todos/models';
+import type { TodoArtifactDto, TodoDto, TodoEventDto, TodoProgressDto } from './todoController';
 
 function stringValue(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : value === undefined || value === null ? fallback : String(value);
@@ -14,12 +22,20 @@ function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 }
 
+const TODO_STATUSES = new Set<TodoStatus>([
+  'not_started',
+  'in_progress',
+  'interrupted',
+  'pending_action',
+  'completed',
+  'cancelled',
+]);
+
 function statusValue(value: unknown): TodoStatus {
-  const status = stringValue(value).toLowerCase();
-  if (status === 'pending' || status === 'in_progress' || status === 'pending_acceptance' || status === 'completed') {
-    return status;
+  if (typeof value === 'string' && TODO_STATUSES.has(value as TodoStatus)) {
+    return value as TodoStatus;
   }
-  return 'pending';
+  throw new Error(`Unsupported Todo status: ${JSON.stringify(value)}`);
 }
 
 export function mapTodoDto(dto: TodoDto): TodoRecord {
@@ -133,4 +149,104 @@ export function mapTodoArtifactDto(dto: TodoArtifactDto): TodoArtifact | null {
     };
   }
   return null;
+}
+
+const TODO_PROGRESS_STAGE_STATUSES = new Set<TodoProgressStageStatus>([
+  'not_started',
+  'in_progress',
+  'pending_action',
+  'interrupted',
+  'completed',
+  'cancelled',
+  'unknown',
+]);
+
+const TODO_PROGRESS_RUNTIME_KINDS = new Set<TodoProgress['runtimeKind']>([
+  'product_collet',
+  'product_runtime_pending',
+  'legacy_context',
+  'invalid_binding',
+]);
+
+function optionalString(value: unknown): string | undefined {
+  const result = stringValue(value);
+  return result || undefined;
+}
+
+function optionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function progressStatus(value: unknown): TodoProgressStageStatus {
+  if (typeof value === 'string' && TODO_PROGRESS_STAGE_STATUSES.has(value as TodoProgressStageStatus)) {
+    return value as TodoProgressStageStatus;
+  }
+  throw new Error(`Unsupported Todo progress stage status: ${JSON.stringify(value)}`);
+}
+
+function mapTodoProgressStageDto(dto: Record<string, unknown>): TodoStageProgress {
+  if (!stringValue(dto.stage_instance_id) || !stringValue(dto.code) || !stringValue(dto.name)) {
+    throw new Error('Todo progress stage identity fields are missing');
+  }
+  const blockerValue = recordValue(dto.blocker ?? {});
+  const blocker: TodoStageProgress['blocker'] = Object.keys(blockerValue).length
+    ? {
+        reason: optionalString(blockerValue.reason),
+        requestedAction: optionalString(blockerValue.requested_action),
+        errorCode: optionalString(blockerValue.error_code),
+      }
+    : undefined;
+  return {
+    stageInstanceId: stringValue(dto.stage_instance_id),
+    code: stringValue(dto.code),
+    name: stringValue(dto.name),
+    order: numberValue(dto.order),
+    kind: stringValue(dto.kind),
+    status: progressStatus(dto.status),
+    ownerUserId: stringValue(dto.owner_user_id),
+    ownerUserName: stringValue(dto.owner_user_name),
+    executorSubjectId: stringValue(dto.executor_subject_id),
+    executorSubjectName: stringValue(dto.executor_subject_name),
+    summary: stringValue(dto.summary),
+    currentStep: optionalString(dto.current_step),
+    steps: (Array.isArray(dto.steps) ? dto.steps : []).map(recordValue).map((step) => ({
+      stepId: stringValue(step.step_id),
+      name: stringValue(step.name),
+      status: progressStatus(step.status),
+      detail: stringValue(step.detail),
+      occurredAt: optionalString(step.occurred_at),
+    })),
+    outputs: (Array.isArray(dto.outputs) ? dto.outputs : []).map(recordValue).map((output) => ({
+      artifactId: optionalString(output.artifact_id),
+      kind: stringValue(output.kind, 'artifact'),
+      name: stringValue(output.name),
+      summary: stringValue(output.summary),
+    })),
+    blocker,
+    attemptCount: numberValue(dto.attempt_count),
+    detailsLoaded: Boolean(dto.details_loaded),
+    messagesComplete: optionalBoolean(dto.messages_complete),
+    ignoredMessageCount: numberValue(dto.ignored_message_count),
+    updatedAt: optionalString(dto.updated_at),
+  };
+}
+
+export function mapTodoProgressDto(dto: TodoProgressDto): TodoProgress {
+  const runtimeKind = stringValue(dto.runtime_kind);
+  if (!TODO_PROGRESS_RUNTIME_KINDS.has(runtimeKind as TodoProgress['runtimeKind'])) {
+    throw new Error(`Unsupported Todo runtime kind: ${JSON.stringify(dto.runtime_kind)}`);
+  }
+  const status = statusValue(dto.status);
+  if (!stringValue(dto.todo_id)) throw new Error('Todo progress identity is missing');
+  return {
+    todoId: stringValue(dto.todo_id),
+    status,
+    runtimeKind: runtimeKind as TodoProgress['runtimeKind'],
+    runtimeUnavailable: Boolean(dto.runtime_unavailable),
+    runtimeErrorCode: optionalString(dto.runtime_error_code),
+    currentStageCode: optionalString(dto.current_stage_code),
+    rolloutRevision: dto.rollout_revision === null || dto.rollout_revision === undefined ? undefined : numberValue(dto.rollout_revision),
+    stopped: optionalBoolean(dto.stopped),
+    stages: (Array.isArray(dto.stages) ? dto.stages : []).map(recordValue).map(mapTodoProgressStageDto),
+  };
 }

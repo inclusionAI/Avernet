@@ -16,6 +16,28 @@ is oldest-first within that state. `TodoScheduler` scans `not_started` and
 projection. Template Todos with `pending_action` are never sent through the
 legacy acceptance-reconciliation path.
 
+The Bot team product surface is a compatibility facade over the existing Todo
+template model. `TodoBotTeamServiceProtocol` and `TodoBotTeamService` expose
+Bot-team names, linear Bot nodes, immutable published revisions, and archive
+lifecycle while mapping them to the existing Template/Version/Stage services and
+storage. A node that requires approval expands to an adjacent Human stage bound
+to the `todo_owner` participant. The public BotTeam facade does not rename or
+remove the legacy Template API, add BotTeam-specific tables or columns, or
+backfill historical rows. Product-facing `bot_team_id` and `revision_id` map to
+the existing `template_id` and `template_version_id` fields; those physical names
+are intentionally retained and are not exposed by the BotTeam facade.
+
+`TodoProductCreationServiceProtocol` and `TodoProductCreationService` provide the
+shared Bot/BotTeam creation seam. A single-Bot Todo delegates to the legacy
+creation service. A BotTeam Todo pins the selected published revision, expands its
+stages, and stores the responsible Human as the `todo_owner` participant in the
+existing `participant_bindings_json`. Reads project that binding as
+`owner_id/owner_name`; historical rows without it fall back to `created_by` in
+memory only. There is no owner backfill, naming-driven DDL, or duplicate BotTeam
+storage.
+
+`TodoProductProgressServiceProtocol` and `TodoProductProgressService` project the user-facing progress view. The persisted Todo stage snapshot is the product skeleton: it owns stage identity, order, Bot, and acceptance criteria. The Product runtime rollout and its session messages only add runtime facts such as status, retry, blocker, current step, or sub-steps; they do not rename, reorder, or introduce user-visible stages. A runtime stage that cannot be matched to the Todo snapshot or read through the protocol remains explicitly unavailable/unknown rather than being guessed from source text.
+
 A template Todo is pinned to an immutable published template version. Its
 ordered stage instances are the product workflow:
 
@@ -234,6 +256,16 @@ provides:
   - TodoSourceInput
   - TodoAutoImportServiceProtocol
   - TodoAutoImportService
+  - TodoBotTeamServiceProtocol
+  - TodoBotTeamService
+  - TodoProductCreationServiceProtocol
+  - TodoProductCreationService
+  - TodoProductProgressServiceProtocol
+  - TodoProductProgressService
+  - TodoExecutorSelection
+  - TodoOwnerInput
+  - BotTeamRecord
+  - BotTeamRevisionRecord
   - TodoAutoImportRuleRecord
   - TodoAutoImportProgressRecord
   - InProcessTodoCollaborationAdapter

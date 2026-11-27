@@ -200,6 +200,30 @@ TASK_TODO_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "GET",
         "/openapi/v1/collaboration/tasks/todo-template-capabilities",
     ): NoCheck("read-only platform Todo template capabilities; no addressed bot"),
+    ("POST", "/openapi/v1/collaboration/tasks/bot-teams"): NoCheck(
+        "Bot team creation is Space Admin-enforced in the service; no addressed bot"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/bot-teams"): NoCheck(
+        "Bot team listing is Space Member-enforced in the service; no addressed bot"
+    ),
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bot-teams/{bot_team_id}",
+    ): NoCheck(
+        "Bot team reads are Space Member-enforced in the service; no addressed bot"
+    ),
+    (
+        "PUT",
+        "/openapi/v1/collaboration/tasks/bot-teams/{bot_team_id}",
+    ): NoCheck(
+        "Bot team revision publication is Space Admin-enforced in the service; no addressed bot"
+    ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bot-teams/{bot_team_id}/archive",
+    ): NoCheck(
+        "Bot team archival is Space Admin-enforced in the service; no addressed bot"
+    ),
     ("POST", "/openapi/v1/collaboration/tasks/todo-templates"): NoCheck(
         "Todo template creation is Space Admin-enforced in the service; no addressed bot"
     ),
@@ -260,6 +284,12 @@ TASK_TODO_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/collaboration/tasks/todos"): NoCheck(
         "Todo creation validates Space membership and Bot eligibility in the service"
     ),
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/products/dima-imports",
+    ): NoCheck(
+        "Human Dima batch import validates Space and executor ownership in the service"
+    ),
     ("GET", "/openapi/v1/collaboration/tasks/todos/sources/dima/projects"): NoCheck(
         "Human self-service source read is bound to the verified principal"
     ),
@@ -317,6 +347,9 @@ TASK_TODO_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ),
     ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/stages"): NoCheck(
         "stage timeline inherits the Todo Space membership check"
+    ),
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/progress"): NoCheck(
+        "Product Progress inherits Todo Space membership and Product runtime authorization"
     ),
     ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/run"): NoCheck(
         "Todo start inherits Todo Space membership; B collaboration state is service-enforced"

@@ -58,7 +58,7 @@ from agentclaw.community.core.task.context_collab.l6_products.profile_reader imp
     ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     VersionedProfileRef,
     composition_method_kind,
 )
@@ -119,7 +119,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
 
     def _self_service_profile(
         self, ref: VersionedProfileRef
-    ) -> ProductProfileDefinition:
+    ) -> LegacyProductConfiguration:
         profile = self._product_catalog.get(ref.profile_id, ref.version)
         if (
             profile.ref.profile_id != "task_commission"
@@ -137,7 +137,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
 
     @staticmethod
     def _selected_agent_role_refs(
-        collab_context_id: str, profile: ProductProfileDefinition
+        collab_context_id: str, profile: LegacyProductConfiguration
     ) -> tuple[str, ...]:
         return tuple(
             role_binding_ref(
@@ -422,7 +422,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         )
 
     def _require_active_methods(
-        self, collet_id: str, profile: ProductProfileDefinition
+        self, collet_id: str, profile: LegacyProductConfiguration
     ) -> dict[str, str]:
         axes, refs = current_axes(), {}
         for method in profile.composition.required_methods:

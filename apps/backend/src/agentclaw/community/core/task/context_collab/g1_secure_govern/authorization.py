@@ -17,8 +17,8 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.collet_creati
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
@@ -58,7 +58,7 @@ class ContextCollabAuthorizerProtocol(ColletCreationAuthorizer, Protocol):
 
     def check_append(
         self,
-        collet: Collet,
+        collet: LegacyCollet,
         task: Task | None,
         creation_facts: dict,
         product_instance: ProductInstance | None,
@@ -68,7 +68,7 @@ class ContextCollabAuthorizerProtocol(ColletCreationAuthorizer, Protocol):
 
     def filter_visible_events(
         self,
-        collet: Collet,
+        collet: LegacyCollet,
         task: Task | None,
         creation_facts: dict,
         product_instance: ProductInstance | None,
@@ -119,7 +119,7 @@ class StructuralContextCollabAuthorizer(
 
     def check_append(
         self,
-        collet: Collet,
+        collet: LegacyCollet,
         task: Task | None,
         creation_facts: dict,
         product_instance: ProductInstance | None,
@@ -146,7 +146,7 @@ class StructuralContextCollabAuthorizer(
 
     def filter_visible_events(
         self,
-        collet: Collet,
+        collet: LegacyCollet,
         task: Task | None,
         creation_facts: dict,
         product_instance: ProductInstance | None,

@@ -50,13 +50,13 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state
     StateMachineDefinition,
     TransitionRule,
     # 三个与状态词汇无关的 G4 校验原语(字段/头/可达性)直接 import 复用,
-    # 不做本地拷贝——拷贝是 G4 conformance 纪律与 Collet 机器间的唯一
+    # 不做本地拷贝——拷贝是 G4 conformance 纪律与 LegacyCollet 机器间的唯一
     # 漂移通道(同 fix round 1 裁决,见 method_state_machines)。
     _check_str,
     _validate_header,
     _validate_reachability,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
     ColletState,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
@@ -64,7 +64,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_binding impo
     MethodKind,
 )
 
-# Collet 机器的事件注册表(spec §11.4 词汇闭合原则的 Collet 对应面):
+# LegacyCollet 机器的事件注册表(spec §11.4 词汇闭合原则的 LegacyCollet 对应面):
 # collet.* 小写 token,与 schema.REGISTERED_EVENT_KINDS 的 task.* /
 # user_interaction.* 词汇互不相交。``collet.created`` 仅注册不配规则
 # (创建即入口);同事件多 from_state 用多条规则(r1/r2 后缀)。
@@ -81,7 +81,7 @@ COLLET_EVENT_KINDS: frozenset[str] = frozenset(
     }
 )
 
-# Collet 状态→治理类别映射(逐字,防漂移唯一来源;机器定义从这里取 kind)。
+# LegacyCollet 状态→治理类别映射(逐字,防漂移唯一来源;机器定义从这里取 kind)。
 COLLET_STATE_GOVERNANCE: dict[str, str] = {
     "CREATED": "waiting",
     "ACTIVE": "active",
@@ -117,7 +117,7 @@ def _validate_states(d: StateMachineDefinition) -> dict[str, StateDefinition]:
         if state.governance_kind != COLLET_STATE_GOVERNANCE[state.name]:
             raise ContextCollabValidationError(
                 f"governance drift on state {state.name!r}: machine declares "
-                f"{state.governance_kind!r}, Collet vocabulary "
+                f"{state.governance_kind!r}, LegacyCollet vocabulary "
                 f"{COLLET_STATE_GOVERNANCE[state.name]!r}"
             )
         if not isinstance(state.allowed_methods, tuple) or not state.allowed_methods:
@@ -167,12 +167,12 @@ def _validate_transitions(
                 f"rule {rule.rule_id!r} references undefined to_state: "
                 f"{rule.to_state!r}"
             )
-        # Collet 特化之三(之二为事件词汇、之一为状态词汇):守卫一律空
+        # LegacyCollet 特化之三(之二为事件词汇、之一为状态词汇):守卫一律空
         # ——授权断言在 G1 服务层(spec §8.1),机器守卫非空即词汇漂移。
         if rule.guard_refs != ():
             raise ContextCollabValidationError(
                 f"rule {rule.rule_id!r} must declare empty guard_refs; "
-                f"Collet machines keep guards in the G1 service layer"
+                f"LegacyCollet machines keep guards in the G1 service layer"
             )
 
         # 终态无出边(与 G4 同条款)。
@@ -233,13 +233,13 @@ def _transition(rule_id: str, from_state: str,
     )
 
 
-# Collet 是聚合根,任何方法 kind 的 Collet 都走同一生命周期(顶层投影
+# LegacyCollet 是聚合根,任何方法 kind 的 LegacyCollet 都走同一生命周期(顶层投影
 # Single/Open + Group/Open + Single,嵌套绑定 Group/Open/Swarm),机器共享该状态列。
 _ALL_KINDS: tuple[str, ...] = (
     "Single", "Open + Group", "Open + Single", "Group", "Open", "Swarm",
 )
 
-# --------------------------------------------------- Collet 生命周期(spec §4)
+# --------------------------------------------------- LegacyCollet 生命周期(spec §4)
 
 COLLET_LIFECYCLE_MACHINE = StateMachineDefinition(
     schema_version=SCHEMA_VERSION,
@@ -264,7 +264,7 @@ COLLET_LIFECYCLE_MACHINE = StateMachineDefinition(
     ),
 )
 
-# Collet 机器注册表:单键逐字。
+# LegacyCollet 机器注册表:单键逐字。
 COLLET_MACHINE_REGISTRY: dict[str, StateMachineDefinition] = {
     "collet_lifecycle": COLLET_LIFECYCLE_MACHINE,
 }

@@ -30,8 +30,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     ResourceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     AppendEventRecordRequest as AppendEventRecordRequest,
@@ -159,14 +159,14 @@ class ContextCollabRepositoryProtocol(Protocol):
 
     def list_collets_by_product(
         self, product_kind: str
-    ) -> "list[tuple[Collet, dict, datetime]]": ...
+    ) -> "list[tuple[LegacyCollet, dict, datetime]]": ...
 
     def count_message_events(
         self, collab_context_ids: "Sequence[str]"
     ) -> "dict[str, int]": ...
 
 
-def _collet_from_row(row: ContextCollabColletModel) -> tuple[Collet, dict]:
+def _collet_from_row(row: ContextCollabColletModel) -> tuple[LegacyCollet, dict]:
     return _primitive_collet_from_row(row), decode_creation_facts(
         json.loads(row.creation_facts)
     )
@@ -454,7 +454,7 @@ class ContextCollabRepository:
 
     def list_collets_by_product(
         self, product_kind: str
-    ) -> list[tuple[Collet, dict, datetime]]:
+    ) -> list[tuple[LegacyCollet, dict, datetime]]:
         """按 product profile 列 Collet(产品列表读,spec bbs-public-discussion §4)。
 
         域类型直出,零发明 record:元组三元素 = 聚合根、创建参数
@@ -471,7 +471,7 @@ class ContextCollabRepository:
                 .order_by(ContextCollabColletModel.gmt_create.desc())
                 .all()
             )
-            listed: list[tuple[Collet, dict, datetime]] = []
+            listed: list[tuple[LegacyCollet, dict, datetime]] = []
             for row in rows:
                 try:
                     collet, facts = _collet_from_row(row)

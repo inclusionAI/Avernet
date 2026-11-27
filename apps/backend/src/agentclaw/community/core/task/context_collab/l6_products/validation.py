@@ -28,7 +28,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     GovernanceRequirements,
     MethodRelationTemplate,
     MethodTemplate,
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     TaskLifecycleContract,
     composition_method_kind,
 )
@@ -45,7 +45,7 @@ from agentclaw.community.core.task.context_collab.l6_products.task_contracts imp
 )
 
 
-def validate_product_profile(definition: ProductProfileDefinition) -> None:
+def validate_product_profile(definition: LegacyProductConfiguration) -> None:
     """Reject unsupported composition/role/method-policy contracts without installing."""
     if not isinstance(definition.governance, GovernanceRequirements) or not isinstance(
         definition.compatibility, CompatibilityRequirements
@@ -154,7 +154,7 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
                 )
 
 
-def _validate_relations(definition: ProductProfileDefinition) -> None:
+def _validate_relations(definition: LegacyProductConfiguration) -> None:
     composition = definition.composition
     relations = composition.relations
     if not isinstance(relations, tuple) or any(

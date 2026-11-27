@@ -93,6 +93,7 @@ def test_create_template_and_first_draft_are_atomic_and_hash_is_persisted(db) ->
     assert draft.template_version_id.startswith("todo_tplv_")
     assert draft.version_no == 1
     assert draft.status is TodoTemplateVersionStatus.DRAFT
+    assert draft.product_profile_id is None
     assert draft.definition == _definition()
     assert len(draft.definition_hash) == 64
     assert repo.get_template(template_id=detail.template.template_id) == detail.template
@@ -139,6 +140,7 @@ def test_publish_is_immutable_updates_pointer_and_next_draft_copies_definition(
     )
     assert next_draft.version_no == 2
     assert next_draft.status is TodoTemplateVersionStatus.DRAFT
+    assert next_draft.product_profile_id is None
     assert next_draft.definition == published.definition
     assert next_draft.definition_hash == published.definition_hash
 
@@ -180,6 +182,79 @@ def test_only_one_draft_exists_and_republishing_current_version_is_idempotent(
         published_by="admin_1",
     )
     assert replay == first
+
+
+def test_publish_product_version_binds_profile_and_replay_is_idempotent(db) -> None:
+    repo = TodoTemplateRepository(db)
+    detail = _create(repo)
+    draft = detail.versions[0]
+
+    published = repo.publish_product_version(
+        template_id=detail.template.template_id,
+        template_version_id=draft.template_version_id,
+        product_profile_id=101,
+        published_by="admin_1",
+    )
+    replay = repo.publish_product_version(
+        template_id=detail.template.template_id,
+        template_version_id=draft.template_version_id,
+        product_profile_id=101,
+        published_by="admin_1",
+    )
+
+    assert published.status is TodoTemplateVersionStatus.PUBLISHED
+    assert published.product_profile_id == 101
+    assert replay == published
+    assert (
+        repo.get_template(template_id=detail.template.template_id).published_version_id
+        == published.template_version_id
+    )
+
+
+def test_publish_product_version_does_not_overwrite_conflicting_binding(db) -> None:
+    repo = TodoTemplateRepository(db)
+    detail = _create(repo)
+    draft = detail.versions[0]
+    repo.publish_product_version(
+        template_id=detail.template.template_id,
+        template_version_id=draft.template_version_id,
+        product_profile_id=101,
+        published_by="admin_1",
+    )
+
+    with pytest.raises(TodoTemplateStateConflictError, match="another ProductProfile"):
+        repo.publish_product_version(
+            template_id=detail.template.template_id,
+            template_version_id=draft.template_version_id,
+            product_profile_id=202,
+            published_by="admin_2",
+        )
+
+    persisted = repo.get_version(
+        template_id=detail.template.template_id,
+        template_version_id=draft.template_version_id,
+    )
+    assert persisted.product_profile_id == 101
+    assert persisted.published_by == "admin_1"
+
+
+def test_new_draft_does_not_inherit_published_product_profile(db) -> None:
+    repo = TodoTemplateRepository(db)
+    detail = _create(repo)
+    published = repo.publish_product_version(
+        template_id=detail.template.template_id,
+        template_version_id=detail.versions[0].template_version_id,
+        product_profile_id=101,
+        published_by="admin_1",
+    )
+
+    next_draft = repo.create_draft(
+        template_id=detail.template.template_id,
+        created_by="admin_1",
+    )
+
+    assert published.product_profile_id == 101
+    assert next_draft.product_profile_id is None
 
 
 def test_list_is_space_scoped_and_archive_activate_preserve_versions(db) -> None:

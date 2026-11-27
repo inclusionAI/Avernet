@@ -2,7 +2,7 @@
 
 覆盖 ``MethodKind`` wire 值接受/拒绝、``PrincipalRef`` / ``AgentRef`` /
 ``SpaceRef`` / ``ResourceRef`` 的 ``from_dict`` round-trip 与缺字段拒绝、
-``ProductProfile`` / ``WorkflowKind`` 全部合法值,以及错误类继承关系。
+``LegacyProductProfileKey`` / ``WorkflowKind`` 全部合法值,以及错误类继承关系。
 """
 import pytest
 
@@ -29,7 +29,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_binding impo
     MethodKind,
 )
 from agentclaw.community.core.task.context_collab.l6_products.profiles import (
-    ProductProfile,
+    LegacyProductProfileKey,
     WorkflowKind,
 )
 
@@ -173,10 +173,10 @@ def test_resource_ref_rejects_missing_or_empty_fields(data):
 
 
 def test_product_profile_covers_spec_values():
-    assert ProductProfile.TEAM_TODO.value == "team_todo"
-    assert ProductProfile.PUBLIC_DISCUSSION.value == "public_discussion"
-    assert ProductProfile.BBS_PUBLIC_DISCUSSION.value == "bbs_public_discussion"
-    assert ProductProfile.BBS_HELP_REQUEST.value == "bbs_help_request"
+    assert LegacyProductProfileKey.TEAM_TODO.value == "team_todo"
+    assert LegacyProductProfileKey.PUBLIC_DISCUSSION.value == "public_discussion"
+    assert LegacyProductProfileKey.BBS_PUBLIC_DISCUSSION.value == "bbs_public_discussion"
+    assert LegacyProductProfileKey.BBS_HELP_REQUEST.value == "bbs_help_request"
 
 
 def test_workflow_kind_covers_spec_values():

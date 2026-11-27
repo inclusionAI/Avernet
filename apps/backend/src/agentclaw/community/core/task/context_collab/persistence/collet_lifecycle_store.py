@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import threading
 
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
     ColletState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (

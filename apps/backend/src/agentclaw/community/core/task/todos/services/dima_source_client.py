@@ -26,7 +26,7 @@ _ALLOWED_NETWORK_TYPES = frozenset({"INTERNET", "OFFICE"})
 _STREAMABLE_HTTP = "STREAMABLE_HTTP"
 
 
-def _gateway_headers(token: str) -> dict[str, str]:
+def _gateway_headers(token: str, referer: str | None = None) -> dict[str, str]:
     return {
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
@@ -34,7 +34,7 @@ def _gateway_headers(token: str) -> dict[str, str]:
         "Cookie": f"IAM_TOKEN={token}",
         "x-buc-token": token,
         "Authorization": token,
-        "Referer": "https://yuyan.antfin-inc.com/console",
+        "Referer": referer or "",
         "sofa-ai-mcp": "sofa-ai-mcp:1.0",
     }
 
@@ -69,7 +69,7 @@ class DimaSourceClient(TodoSourceClientProtocol):
     ) -> object:
         token = self._iam_token(actor_id, auth_request)
         endpoint = self._endpoint()
-        headers = _gateway_headers(token)
+        headers = _gateway_headers(token, auth_request.base_url)
 
         initialize = self._post(
             endpoint,

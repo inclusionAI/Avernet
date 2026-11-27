@@ -26,10 +26,18 @@ from agentclaw.community.adapters.http.task.todos.template_capability_routes imp
 from agentclaw.community.adapters.http.task.todos.template_routes import (
     router as todo_template_router,
 )
+from agentclaw.community.adapters.http.task.product_profiles import (
+    router as product_profiles_router,
+)
+from agentclaw.community.adapters.http.task.product_progress import (
+    router as product_progress_router,
+)
 
 
 def mount_collaboration_routers(app: FastAPI) -> None:
     """Preserve the existing registration order and router contracts."""
+    app.include_router(product_profiles_router)
+    app.include_router(product_progress_router)
     app.include_router(commission_a2a_router)
     app.include_router(context_collab_router)
     app.include_router(todo_artifact_router)

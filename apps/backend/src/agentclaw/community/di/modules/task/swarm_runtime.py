@@ -66,7 +66,7 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
     actor_has_role,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
 )
 from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
     resolve_event_contract,
@@ -162,7 +162,7 @@ class ProductSwarmRuntimeResolver:
 
     @staticmethod
     def _start_actor(
-        record: ContextStatusRecord, definition: ProductProfileDefinition
+        record: ContextStatusRecord, definition: LegacyProductConfiguration
     ) -> ActorContext:
         """Resolve trusted startup provenance; L4 still adjudicates G1/G4/CAS.
 

@@ -99,7 +99,7 @@ const awaitingAcceptanceTodo: TodoRecord = {
   description: '整理需求并输出实施方案',
   botId: 'bot-owned:u-1',
   botName: '写作助手',
-  status: 'pending_acceptance',
+  status: 'pending_action',
   collabContextId: 'ctx-1',
   createdAt: '2026-11-10T01:00:00Z',
   updatedAt: '2026-11-10T02:00:00Z',
@@ -117,7 +117,7 @@ const createdTodo: TodoRecord = {
   todoId: 'todo-new',
   title: '分析本周用户反馈',
   description: '输出问题分类和改进建议',
-  status: 'pending',
+  status: 'not_started',
   collabContextId: undefined,
 };
 
@@ -125,7 +125,7 @@ const pendingTodo: TodoRecord = {
   ...awaitingAcceptanceTodo,
   todoId: 'todo-pending',
   title: '准备发布说明',
-  status: 'pending',
+  status: 'not_started',
   collabContextId: undefined,
 };
 
@@ -134,6 +134,20 @@ const completedTodo: TodoRecord = {
   todoId: 'todo-completed',
   title: '复盘上线结果',
   status: 'completed',
+};
+
+const interruptedTodo: TodoRecord = {
+  ...awaitingAcceptanceTodo,
+  todoId: 'todo-interrupted',
+  title: '修复构建阻塞',
+  status: 'interrupted',
+};
+
+const cancelledTodo: TodoRecord = {
+  ...awaitingAcceptanceTodo,
+  todoId: 'todo-cancelled',
+  title: '停止旧版迁移',
+  status: 'cancelled',
 };
 
 function resetTodoStore() {
@@ -222,7 +236,7 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     const toolbar = screen.getByRole('region', { name: '待办筛选' });
     const statusGroup = within(toolbar).getByRole('group', { name: '待办状态' });
     const tabs = within(statusGroup).getAllByRole('button');
-    expect(tabs.map((tab) => tab.textContent)).toEqual(['全部', '待处理', '进行中', '待验收', '已完成']);
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['全部', '未开始', '进行中', '已中断', '待处理', '已完成', '已取消']);
 
     const owner = within(toolbar).getByRole('combobox', { name: '负责人' });
     const search = within(toolbar).getByRole('textbox', { name: '搜索待办' });
@@ -241,7 +255,7 @@ describe('LabTodosPage（待办卡片工作台）', () => {
 
     fireEvent.click(tabs[1]);
     await waitFor(() =>
-      expect(mockedService.loadTodos).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'pending' })),
+      expect(mockedService.loadTodos).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'not_started' })),
     );
 
     fireEvent.click(owner);
@@ -253,8 +267,8 @@ describe('LabTodosPage（待办卡片工作台）', () => {
 
   it('状态筛选只展示对应状态的待办和分组', async () => {
     mockedService.loadTodos.mockResolvedValue({
-      items: [pendingTodo, runningTodo, awaitingAcceptanceTodo, completedTodo],
-      total: 4,
+      items: [pendingTodo, runningTodo, interruptedTodo, awaitingAcceptanceTodo, completedTodo, cancelledTodo],
+      total: 6,
       page: 1,
       pageSize: 10,
     });
@@ -270,11 +284,21 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     expect(document.querySelector('#todo-group-in_progress')).toHaveTextContent('进行中');
     expect(within(screen.getByRole('region', { name: '待办分组' })).queryByText('待处理')).not.toBeInTheDocument();
 
-    fireEvent.click(within(statusGroup).getByRole('button', { name: '待验收' }));
+    fireEvent.click(within(statusGroup).getByRole('button', { name: '待处理' }));
     expect(await screen.findByRole('article', { name: '编写实施方案' })).toBeInTheDocument();
     expect(screen.queryByRole('article', { name: '整理会议纪要' })).not.toBeInTheDocument();
     expect(screen.queryByRole('article', { name: '复盘上线结果' })).not.toBeInTheDocument();
-    expect(document.querySelector('#todo-group-pending_acceptance')).toHaveTextContent('待验收');
+    expect(document.querySelector('#todo-group-pending_action')).toHaveTextContent('待处理');
+
+    fireEvent.click(within(statusGroup).getByRole('button', { name: '已中断' }));
+    expect(await screen.findByRole('article', { name: '修复构建阻塞' })).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '编写实施方案' })).not.toBeInTheDocument();
+    expect(document.querySelector('#todo-group-interrupted')).toHaveTextContent('已中断');
+
+    fireEvent.click(within(statusGroup).getByRole('button', { name: '已取消' }));
+    expect(await screen.findByRole('article', { name: '停止旧版迁移' })).toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: '修复构建阻塞' })).not.toBeInTheDocument();
+    expect(document.querySelector('#todo-group-cancelled')).toHaveTextContent('已取消');
 
     fireEvent.click(within(statusGroup).getByRole('button', { name: '已完成' }));
     expect(await screen.findByRole('article', { name: '复盘上线结果' })).toBeInTheDocument();
@@ -283,7 +307,7 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     expect(document.querySelector('#todo-group-completed')).toHaveTextContent('已完成');
   });
 
-  it('待处理切换回全部时保留条件且不携带状态键', async () => {
+  it('未开始切换回全部时保留条件且不携带状态键', async () => {
     render(<LabTodosPage />);
     const toolbar = await screen.findByRole('region', { name: '待办筛选' });
     const tabs = within(within(toolbar).getByRole('group', { name: '待办状态' })).getAllByRole('button');
@@ -308,7 +332,7 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     fireEvent.click(tabs[1]);
     await waitFor(() =>
       expect(mockedService.loadTodos).toHaveBeenLastCalledWith(
-        expect.objectContaining({ status: 'pending', keyword: '编写', botId: 'bot-owned:u-1' }),
+        expect.objectContaining({ status: 'not_started', keyword: '编写', botId: 'bot-owned:u-1' }),
       ),
     );
 
@@ -328,7 +352,7 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     expect(await screen.findByText('编写实施方案')).toBeInTheDocument();
   });
 
-  it('创建待办进入待处理，不在前端自动 Run', async () => {
+  it('创建待办进入未开始，不在前端自动 Run', async () => {
     render(<LabTodosPage />);
     await screen.findByText('编写实施方案');
 
@@ -505,7 +529,7 @@ describe('LabTodosPage（待办卡片工作台）', () => {
 
     const acceptanceCard = await screen.findByRole('article', { name: '编写实施方案' });
     expect(within(acceptanceCard).getByText('写作助手')).toBeInTheDocument();
-    expect(within(acceptanceCard).getByText('待验收')).toBeInTheDocument();
+    expect(within(acceptanceCard).getByText('待处理')).toBeInTheDocument();
     const board = screen.getByRole('region', { name: '待办分组' });
     const cardButton = within(acceptanceCard).getByRole('button', { name: /编写实施方案/ });
     const cardGrid = acceptanceCard.parentElement as HTMLElement;
@@ -523,20 +547,20 @@ describe('LabTodosPage（待办卡片工作台）', () => {
       'text-xs',
       'leading-[18px]',
     );
-    expect(within(board).getByRole('button', { name: /^待处理 \(0\)$/ })).toHaveTextContent('0');
+    expect(within(board).getByRole('button', { name: /^未开始 \(0\)$/ })).toHaveTextContent('0');
     expect(within(board).getByRole('button', { name: /^进行中 \(1\)$/ })).toHaveTextContent('1');
-    expect(within(board).getByRole('button', { name: /^待验收 \(1\)$/ })).toHaveTextContent('1');
+    expect(within(board).getByRole('button', { name: /^待处理 \(1\)$/ })).toHaveTextContent('1');
     expect(
       within(
         within(board)
-          .getByRole('button', { name: /^待处理 \(0\)$/ })
+          .getByRole('button', { name: /^未开始 \(0\)$/ })
           .closest('section') as HTMLElement,
       ).queryByRole('article', { name: '编写实施方案' }),
     ).not.toBeInTheDocument();
     expect(
       within(
         within(board)
-          .getByRole('button', { name: /^待验收 \(1\)$/ })
+          .getByRole('button', { name: /^待处理 \(1\)$/ })
           .closest('section') as HTMLElement,
       ).getByRole('article', { name: '编写实施方案' }),
     ).toBeInTheDocument();

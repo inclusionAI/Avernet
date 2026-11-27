@@ -61,6 +61,9 @@ from agentclaw.community.core.task.todos.artifact_service_protocol import (
 from agentclaw.community.core.task.todos.auto_import_service_protocol import (
     TodoAutoImportServiceProtocol,
 )
+from agentclaw.community.core.task.todos.bot_team_service_protocol import (
+    TodoBotTeamServiceProtocol,
+)
 from agentclaw.community.core.task.todos.collaboration.in_process import (
     InProcessTodoCollaborationAdapter,
 )
@@ -69,6 +72,12 @@ from agentclaw.community.core.task.todos.collaboration.protocol import (
 )
 from agentclaw.community.core.task.todos.execution_protocol import (
     TodoExecutionServiceProtocol,
+)
+from agentclaw.community.core.task.todos.product_creation_protocol import (
+    TodoProductCreationServiceProtocol,
+)
+from agentclaw.community.core.task.todos.product_progress_protocol import (
+    TodoProductProgressServiceProtocol,
 )
 from agentclaw.community.core.task.todos.scheduler import TodoScheduler
 from agentclaw.community.core.task.todos.stage_outcome_protocol import (
@@ -99,8 +108,18 @@ from agentclaw.community.core.task.todos.services.todo_artifact_service import (
 from agentclaw.community.core.task.todos.services.todo_auto_import_service import (
     TodoAutoImportService,
 )
+from agentclaw.community.core.task.todos.services.todo_bot_team_service import (
+    TodoBotTeamProductCompositionFactory,
+    TodoBotTeamService,
+)
 from agentclaw.community.core.task.todos.services.todo_execution_service import (
     TodoExecutionService,
+)
+from agentclaw.community.core.task.todos.services.todo_product_creation_service import (
+    TodoProductCreationService,
+)
+from agentclaw.community.core.task.todos.services.todo_product_progress_service import (
+    TodoProductProgressService,
 )
 from agentclaw.community.core.task.todos.services.todo_service import TodoService
 from agentclaw.community.core.task.todos.services.todo_source_service import (
@@ -150,8 +169,18 @@ class TaskTodoBindings(Module):
         )
         binder.bind(TodoServiceProtocol, to=TodoService, scope=singleton)
         binder.bind(
+            TodoProductCreationServiceProtocol,
+            to=TodoProductCreationService,
+            scope=singleton,
+        )
+        binder.bind(
             TodoAutoImportServiceProtocol,
             to=TodoAutoImportService,
+            scope=singleton,
+        )
+        binder.bind(
+            TodoProductProgressServiceProtocol,
+            to=TodoProductProgressService,
             scope=singleton,
         )
         binder.bind(TodoStageServiceProtocol, to=TodoStageService, scope=singleton)
@@ -163,6 +192,16 @@ class TaskTodoBindings(Module):
         binder.bind(
             TodoTemplateManagementServiceProtocol,
             to=TodoTemplateService,
+            scope=singleton,
+        )
+        binder.bind(
+            TodoBotTeamProductCompositionFactory,
+            to=TodoBotTeamProductCompositionFactory,
+            scope=singleton,
+        )
+        binder.bind(
+            TodoBotTeamServiceProtocol,
+            to=TodoBotTeamService,
             scope=singleton,
         )
         binder.bind(
@@ -339,11 +378,12 @@ class TaskTodoBindings(Module):
     def todo_scheduler(
         self,
         repository: TodoRepositoryProtocol,
+        templates: TodoTemplateRepositoryProtocol,
         execution: TodoExecutionServiceProtocol,
         cache: CachePlugin,
         config: TodoSchedulerConfig,
     ) -> TodoScheduler:
-        return TodoScheduler(repository, execution, cache, config)
+        return TodoScheduler(repository, templates, execution, cache, config)
 
 
 def _mapping(value: Any, *, where: str) -> dict[str, Any]:

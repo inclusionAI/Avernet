@@ -183,6 +183,17 @@ class _Repository:
         )
         return self.version
 
+    def publish_product_version(self, **kwargs):
+        self._call("publish_product_version", **kwargs)
+        self.version = replace(
+            self.version,
+            status=TodoTemplateVersionStatus.PUBLISHED,
+            product_profile_id=kwargs["product_profile_id"],
+            published_by=kwargs["published_by"],
+            published_at=NOW,
+        )
+        return self.version
+
     def set_template_status(self, **kwargs):
         self._call("set_template_status", **kwargs)
         self.template = replace(self.template, status=kwargs["status"])
@@ -290,6 +301,53 @@ def test_mutations_require_admin_of_the_addressed_template_space() -> None:
         "get_template",
         "set_template_status",
     ]
+
+
+def test_publish_product_version_requires_admin_and_forwards_binding() -> None:
+    service, repository, access = _service()
+
+    published = service.publish_product_version(
+        template_id="todo_tpl_1",
+        template_version_id="todo_tplv_1",
+        product_profile_id=101,
+        actor_id="admin_1",
+        env="pre",
+    )
+
+    assert published.product_profile_id == 101
+    assert access.member_calls == [
+        {"space_id": 7, "user_id": "admin_1", "env": "pre"}
+    ]
+    assert repository.calls == [
+        {"operation": "get_template", "template_id": "todo_tpl_1"},
+        {
+            "operation": "publish_product_version",
+            "template_id": "todo_tpl_1",
+            "template_version_id": "todo_tplv_1",
+            "product_profile_id": 101,
+            "published_by": "admin_1",
+        },
+    ]
+
+
+@pytest.mark.parametrize("product_profile_id", [0, -1, True, "101", None])
+def test_publish_product_version_rejects_invalid_profile_id(
+    product_profile_id,
+) -> None:
+    service, repository, _access = _service()
+
+    with pytest.raises(
+        TodoTemplateStateConflictError,
+        match="product_profile_id must be a positive integer",
+    ):
+        service.publish_product_version(
+            template_id="todo_tpl_1",
+            template_version_id="todo_tplv_1",
+            product_profile_id=product_profile_id,
+            actor_id="admin_1",
+        )
+
+    assert [call["operation"] for call in repository.calls] == ["get_template"]
 
 
 def test_template_mutations_reject_non_admin_space_members() -> None:

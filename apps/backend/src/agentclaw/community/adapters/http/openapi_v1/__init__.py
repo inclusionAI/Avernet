@@ -246,6 +246,7 @@ from .task.todos import router as todo_router
 from .task.todos.auto_import_agent_router import (
     router as todo_auto_import_agent_router,
 )
+from .task.todos.bot_team_router import router as todo_bot_team_router
 from .task.todos.template_capability_router import (
     router as todo_template_capability_router,
 )
@@ -764,6 +765,11 @@ def build_public_router() -> APIRouter:
     )
     public.include_router(
         todo_template_router,
+        responses=SPACE_SCOPED_ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    public.include_router(
+        todo_bot_team_router,
         responses=SPACE_SCOPED_ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )

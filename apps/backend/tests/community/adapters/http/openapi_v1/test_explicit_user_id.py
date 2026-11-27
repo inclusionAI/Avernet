@@ -279,7 +279,15 @@ def _without_request_id(response) -> dict:
 #: between "this operation has no user dimension" and "somebody found the
 #: parameter inconvenient".
 _NO_USER_DIMENSION = {
-    *(('post', f'{PUBLIC_API_PREFIX}/bots/{operation}') for operation in ('template-queries', 'template-config-for-others', 'restart-for-others', 'status-for-others')),
+    *(
+        ("post", f"{PUBLIC_API_PREFIX}/bots/{operation}")
+        for operation in (
+            "template-queries",
+            "template-config-for-others",
+            "restart-for-others",
+            "status-for-others",
+        )
+    ),
     # Environment operations declare business operator/owner, not an acting user.
     ("post", "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish"),
     ("get", "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress"),
@@ -448,6 +456,29 @@ _NO_USER_DIMENSION = {
     (
         "get",
         f"{PUBLIC_API_PREFIX}/collaboration/task/context_collab/{{collab_context_id}}",
+    ),
+    # Automatic Dima import execution is tenant-scoped. Any authenticated
+    # caller that can read a rule may inspect progress, create rule-bound Todos,
+    # and persist checkpoints; no Human actor is selected on these operations.
+    (
+        "get",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/todos/sources/dima/auto-import-rules/active",
+    ),
+    (
+        "get",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/todos/sources/dima/auto-import-rules/{{rule_id}}",
+    ),
+    (
+        "get",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/todos/sources/dima/auto-import-rules/{{rule_id}}/progress",
+    ),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/todos/sources/dima/auto-import-rules/{{rule_id}}/checkpoints",
+    ),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/tasks/todos/sources/dima/auto-import-rules/{{rule_id}}/todos",
     ),
 }
 # Read-only operations that accept a user_id as a caller-selected filter rather
@@ -677,10 +708,13 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # Bot-addressed operation: path 233 -> 234. Read-only Caller status adds one
 # Bot-path operation: path 234 -> 235. Bot MCP config read and update add two
 # Bot-path operations: path 235 -> 237. Dedicated recycle operation query
-# adds one OWNER-only Bot-path read: path 237 -> 238. The four template
-# self-service operations have no Bot dimension: none 177 -> 181. The Agent
-# Coding work-items snapshot adds one more no-Bot aggregate: none 181 -> 182.
-_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 182}
+# adds one OWNER-only Bot-path read: path 237 -> 238. The seven Dima
+# auto-import rule/progress operations plus rule-bound Todo creation are
+# Space-scoped rather than Bot-addressed, even though create and update accept
+# a Bot in the body. Product profile/progress operations are also not
+# Bot-addressed, and the five BotTeam management operations are Space-scoped:
+# none 177 -> 194 across the merged protocol and product surfaces, plus release-only account surfaces: 194 -> 197.
+_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 197}
 
 
 def _schema() -> dict:
@@ -911,8 +945,13 @@ def test_the_pinned_number_of_operations_take_it():
     # user-scoped: 329 -> 334. The three Dima Todo source reads are Human-scoped
     # and explicitly user-scoped: 334 -> 337. Bot MCP config read and update
     # both name the acting user: 337 -> 339. Dedicated recycle operation query
-    # adds one OWNER-only read: 339 -> 340.
-    assert len(taking) == 340
+    # adds one OWNER-only read: 339 -> 340. Dima auto-import rule management
+    # adds three Human-scoped operations; its five execution operations are
+    # tenant-scoped and live in _NO_USER_DIMENSION: 340 -> 343. BotTeam list,
+    # create, detail, update, and archive are Human/Space-scoped: 343 -> 348.
+    # Product Dima batch import is also Human/Space-scoped: 348 -> 349, and the release
+    # branch adds one more user-scoped account surface: 349 -> 350.
+    assert len(taking) == 350
 
 
 def test_the_exempt_operations_take_none():
@@ -921,7 +960,15 @@ def test_the_exempt_operations_take_none():
     for method, path in _NO_USER_DIMENSION:
         operation = schema["paths"][path][method]
         assert _param(operation, USER_ID_QUERY) is None, f"{method.upper()} {path}"
-        assert ('403' in operation['responses']) is (path.rsplit('/', 1)[-1] in {'template-queries', 'template-config-for-others', 'restart-for-others', 'status-for-others'}), f'{method.upper()} {path}'
+        assert ("403" in operation["responses"]) is (
+            path.rsplit("/", 1)[-1]
+            in {
+                "template-queries",
+                "template-config-for-others",
+                "restart-for-others",
+                "status-for-others",
+            }
+        ), f"{method.upper()} {path}"
 
 
 def test_authenticated_self_operations_derive_the_user_from_the_principal():
@@ -1009,7 +1056,17 @@ def test_bot_id_is_in_the_path_wherever_it_addresses_a_bot():
 def test_the_403_is_documented_on_exactly_the_user_scoped_operations():
     for path, method, operation in _operations(_schema()):
         documented = "403" in operation["responses"]
-        expected = _user_scoped(path, method) or (method, path) in _AUTHENTICATED_SELF or path.rsplit('/', 1)[-1] in {'template-queries', 'template-config-for-others', 'restart-for-others', 'status-for-others'}
+        expected = (
+            _user_scoped(path, method)
+            or (method, path) in _AUTHENTICATED_SELF
+            or path.rsplit("/", 1)[-1]
+            in {
+                "template-queries",
+                "template-config-for-others",
+                "restart-for-others",
+                "status-for-others",
+            }
+        )
         assert documented is expected, f"{method.upper()} {path}"
 
 

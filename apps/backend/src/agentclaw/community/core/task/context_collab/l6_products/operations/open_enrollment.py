@@ -49,7 +49,7 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
     agent_participant_id,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
 )
 from agentclaw.community.core.task.context_collab.l6_products.profile_reader import (
     ProductProfileReader,
@@ -75,7 +75,7 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 def enrollment_payload(
     command: OpenEnrollmentCommand,
     record: ContextStatusRecord,
-    profile: ProductProfileDefinition,
+    profile: LegacyProductConfiguration,
     store: MethodStoreProtocol,
 ) -> tuple[MethodBinding, dict]:
     """Validate current, correlated admission; return exact materialization evidence."""

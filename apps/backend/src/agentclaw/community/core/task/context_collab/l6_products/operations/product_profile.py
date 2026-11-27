@@ -10,7 +10,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.publication import 
     BotSelfApplicationAdmission,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     ScenarioRole,
     MethodCompositionTemplate,
 )
@@ -24,7 +24,7 @@ from agentclaw.community.core.task.context_collab.l6_products.validation import 
 
 def create_product_profile(
     command: ProductProfileCreateCommand,
-) -> ProductProfileDefinition:
+) -> LegacyProductConfiguration:
     """Return a validated immutable definition, or raise ContextCollabValidationError.
 
     This is a pure authoring operation, not an authenticated runtime write API.
@@ -39,7 +39,7 @@ def create_product_profile(
         raise ContextCollabValidationError(
             "scenario_roles must be a tuple of ScenarioRole"
         )
-    definition = ProductProfileDefinition(
+    definition = LegacyProductConfiguration(
         ref=command.ref,
         participant_scope=command.participant_scope,
         composition=command.composition,

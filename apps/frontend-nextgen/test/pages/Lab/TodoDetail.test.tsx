@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import type { TodoArtifact, TodoEvent, TodoRecord } from '@/domain/todos/models';
+import type { TodoArtifact, TodoEvent, TodoProgress, TodoRecord } from '@/domain/todos/models';
 import TodoDetailPage from '@/pages/Lab/Todos/TodoDetailPage';
 import * as todoService from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
@@ -39,6 +39,7 @@ jest.mock('@/services/todos/todoService', () => ({
   loadTodoMentionBots: jest.fn(),
   downloadTodoArtifactContent: jest.fn(),
   startTodoRun: jest.fn(),
+  loadTodoProgress: jest.fn(),
 }));
 
 jest.mock('@/components/ui/notify', () => ({ notifySuccess: jest.fn() }));
@@ -54,10 +55,38 @@ const todo: TodoRecord = {
   description: '整理三款产品的定价与功能矩阵',
   botId: 'bot-1',
   botName: '数据分析助手',
-  status: 'pending_acceptance',
+  status: 'pending_action',
   collabContextId: 'ctx-1',
   createdAt: '2026-11-08T01:12:00Z',
   updatedAt: '2026-11-08T06:48:00Z',
+};
+
+const todoProgress: TodoProgress = {
+  todoId: 'todo-1',
+  status: 'pending_action',
+  runtimeKind: 'product_collet',
+  runtimeUnavailable: false,
+  currentStageCode: 'analyze',
+  stages: [
+    {
+      stageInstanceId: 'stage-1',
+      code: 'analyze',
+      name: '需求分析',
+      order: 1,
+      kind: 'bot',
+      status: 'pending_action',
+      ownerUserId: '',
+      ownerUserName: '',
+      executorSubjectId: 'bot-1',
+      executorSubjectName: '数据分析助手',
+      summary: '等待处理',
+      steps: [],
+      outputs: [],
+      attemptCount: 1,
+      detailsLoaded: true,
+      ignoredMessageCount: 0,
+    },
+  ],
 };
 
 const artifacts: TodoArtifact[] = [
@@ -151,15 +180,18 @@ function resetStore() {
     interactions: [],
     events: [],
     artifacts: [],
+    progress: null,
     listLoading: false,
     detailLoading: false,
     eventsLoading: false,
     artifactsLoading: false,
+    progressLoading: false,
     mutationLoading: false,
     listError: null,
     detailError: null,
     eventsError: null,
     artifactsError: null,
+    progressError: null,
   });
 }
 
@@ -187,10 +219,11 @@ beforeEach(() => {
     artifactEvent(4, artifacts[1], '产出文件：定价与功能矩阵.xlsx'),
     artifactEvent(5, artifacts[2], '产出链接：产品官网'),
     artifactEvent(6, artifacts[3], '产出代码：pricing-analysis'),
-    event(7, { eventType: 'task.completed', content: '', status: 'pending_acceptance' }),
+    event(7, { eventType: 'task.completed', content: '', status: 'pending_action' }),
     event(8, { eventType: 'user_interaction.posted', actorType: 'human', content: '请补充价格来源' }),
   ]);
   mockedService.loadTodoArtifacts.mockResolvedValue(artifacts);
+  mockedService.loadTodoProgress.mockResolvedValue(todoProgress);
   mockedService.loadTodoMentionBots.mockResolvedValue([
     { botId: 'bot-1', botName: '数据分析助手' },
     { botId: 'bot-review', botName: '复核助手' },
@@ -689,7 +722,7 @@ describe('TodoDetailPage', () => {
     expect(rejectButton).toHaveClass('h-8', 'rounded-lg', 'px-4', 'text-xs');
   });
 
-  it('非待验收待办不显示验收操作', async () => {
+  it('非待处理待办不显示验收操作', async () => {
     mockedService.loadTodo.mockResolvedValue({ ...todo, status: 'completed' });
     render(<TodoDetailPage />);
     await screen.findByText('发起待办：Q3 竞品分析');

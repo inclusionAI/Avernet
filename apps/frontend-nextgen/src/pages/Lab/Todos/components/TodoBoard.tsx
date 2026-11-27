@@ -31,49 +31,56 @@ interface TodoGroup {
 
 const TODO_GROUPS: TodoGroup[] = [
   {
-    key: 'pending',
-    label: '待处理',
-    statuses: ['pending'],
+    key: 'not_started',
+    label: TODO_STATUS_LABEL.not_started,
+    statuses: ['not_started'],
+  },
+  {
+    key: 'in_progress',
+    label: TODO_STATUS_LABEL.in_progress,
+    statuses: ['in_progress'],
+  },
+  {
+    key: 'interrupted',
+    label: TODO_STATUS_LABEL.interrupted,
+    statuses: ['interrupted'],
     labelClassName: 'font-semibold text-destructive',
     attentionDotClassName: 'bg-destructive',
   },
   {
-    key: 'in_progress',
-    label: '进行中',
-    statuses: ['in_progress'],
-  },
-  {
-    key: 'pending_acceptance',
-    label: '待验收',
-    statuses: ['pending_acceptance'],
+    key: 'pending_action',
+    label: TODO_STATUS_LABEL.pending_action,
+    statuses: ['pending_action'],
     labelClassName: 'font-semibold text-warning',
     attentionDotClassName: 'bg-warning',
   },
   {
     key: 'completed',
-    label: '已完成',
+    label: TODO_STATUS_LABEL.completed,
     statuses: ['completed'],
+  },
+  {
+    key: 'cancelled',
+    label: TODO_STATUS_LABEL.cancelled,
+    statuses: ['cancelled'],
   },
 ];
 
 function filteredGroup(status: TodoStatus): TodoGroup {
-  if (status === 'in_progress' || status === 'completed') {
-    return { key: status, label: TODO_STATUS_LABEL[status], statuses: [status] };
+  const configuredGroup = TODO_GROUPS.find((group) => group.key === status);
+  if (!configuredGroup) {
+    throw new Error(`Missing Todo group configuration: ${status}`);
   }
-  return {
-    key: status,
-    label: TODO_STATUS_LABEL[status],
-    statuses: [status],
-    labelClassName: status === 'pending' ? 'font-semibold text-destructive' : 'font-semibold text-warning',
-    attentionDotClassName: status === 'pending' ? 'bg-destructive' : 'bg-warning',
-  };
+  return configuredGroup;
 }
 
 const TODO_DOT_CLASS: Record<TodoStatus, string> = {
-  pending: 'bg-warning',
+  not_started: 'bg-muted-foreground',
   in_progress: 'bg-info',
-  pending_acceptance: 'bg-warning',
+  interrupted: 'bg-destructive',
+  pending_action: 'bg-warning',
   completed: 'bg-success',
+  cancelled: 'bg-muted-foreground',
 };
 
 function formatDate(value: string): string {
@@ -139,10 +146,12 @@ export function TodoBoard({
   onPageSizeChange,
 }: TodoBoardProps) {
   const [expanded, setExpanded] = useState<Record<TodoGroupKey, boolean>>({
-    pending: true,
+    not_started: true,
     in_progress: true,
-    pending_acceptance: true,
+    interrupted: true,
+    pending_action: true,
     completed: false,
+    cancelled: false,
   });
 
   const visibleTodos = status ? todos.filter((todo) => todo.status === status) : todos;

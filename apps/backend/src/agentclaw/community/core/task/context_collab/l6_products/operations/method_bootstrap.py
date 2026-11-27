@@ -43,7 +43,7 @@ from agentclaw.community.core.task.context_collab.l6_products.profile_reader imp
     ProductProfileReader,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
 )
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_method_kind,
@@ -73,7 +73,7 @@ def _resolve_method_spec(
     method_kind: str,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
-    profile: ProductProfileDefinition | None,
+    profile: LegacyProductConfiguration | None,
 ) -> ResolvedMethodSpec:
     versions = (
         {
@@ -107,7 +107,7 @@ def project_created_context(
     method_kind: str,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
-    profile: ProductProfileDefinition | None,
+    profile: LegacyProductConfiguration | None,
     context: ActorContext,
     now: str,
 ) -> MethodBinding:

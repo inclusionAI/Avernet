@@ -26,7 +26,7 @@ from agentclaw.community.core.task.context_collab.l6_products.profile_reader imp
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     GovernanceRequirements,
     NegotiationResult,
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     VersionedProfileRef,
     negotiate,
 )
@@ -138,7 +138,7 @@ def _resolve_profile(
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
     catalog: ProductProfileReader,
-) -> ProductProfileDefinition:
+) -> LegacyProductConfiguration:
     normalized = decode_creation_facts(facts)
     profile = product_definition(
         product_kind=normalized["product_kind"],
@@ -163,7 +163,7 @@ def _instance(
     event_id: str,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
-    profile: ProductProfileDefinition,
+    profile: LegacyProductConfiguration,
     selection: NegotiationResult,
 ) -> ProductInstance:
     if root_task_id is not None and (not root_task_id or root_task_id == collet_id):

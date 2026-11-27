@@ -6,8 +6,8 @@ from uuid import uuid4
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.legacy_collet import (
+    LegacyCollet,
     ColletState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet_metadata import (
@@ -35,7 +35,7 @@ def build_created_collet(
 ) -> CreatedColletRecord:
     now = datetime.now(timezone.utc)
     return CreatedColletRecord(
-        Collet(
+        LegacyCollet(
             collet_id="collet_" + uuid4().hex,
             initiator_ref=actor_ref,
             state=ColletState.ACTIVE,
@@ -57,7 +57,7 @@ def build_created_collet(
 
 
 def build_created_work(
-    collet: Collet,
+    collet: LegacyCollet,
     principal_ref: PrincipalRef,
     objective: str,
     initial_event_draft: InitialEventDraft,

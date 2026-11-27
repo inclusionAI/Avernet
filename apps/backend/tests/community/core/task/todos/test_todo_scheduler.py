@@ -120,6 +120,24 @@ class _Execution:
         return replace(_todo(todo_id, TodoStatus.IN_PROGRESS))
 
 
+class _Revision:
+    product_profile_id: int | None = None
+
+
+class _Templates:
+    def __init__(self, profiles: dict[str, int | None] | None = None) -> None:
+        self.profiles = profiles or {}
+        self.calls: list[tuple[str, str]] = []
+
+    def get_version(self, *, template_id: str, template_version_id: str):
+        self.calls.append((template_id, template_version_id))
+        revision = _Revision()
+        revision.product_profile_id = self.profiles.get(
+            (template_id, template_version_id)
+        )
+        return revision
+
+
 class _Cache:
     def __init__(
         self,
@@ -155,7 +173,7 @@ async def test_lock_held_skips_repository_scan():
     repository = _Repository(pending=(_todo("p1", TodoStatus.PENDING),))
     execution = _Execution()
     cache = _Cache(token=None)
-    scheduler = TodoScheduler(repository, execution, cache, _config())
+    scheduler = TodoScheduler(repository, _Templates(), execution, cache, _config())
 
     result = await scheduler.run_once()
 
@@ -170,8 +188,7 @@ async def test_tick_scans_each_status_with_independent_batch_limit_in_order():
     repository = _Repository(
         pending=tuple(_todo(f"p{index}", TodoStatus.PENDING) for index in range(1, 4)),
         pending_acceptance=tuple(
-            _todo(f"a{index}", TodoStatus.PENDING_ACCEPTANCE)
-            for index in range(1, 4)
+            _todo(f"a{index}", TodoStatus.PENDING_ACCEPTANCE) for index in range(1, 4)
         ),
         in_progress=tuple(
             _todo(f"i{index}", TodoStatus.IN_PROGRESS) for index in range(1, 4)
@@ -179,7 +196,7 @@ async def test_tick_scans_each_status_with_independent_batch_limit_in_order():
     )
     execution = _Execution()
     cache = _Cache()
-    scheduler = TodoScheduler(repository, execution, cache, _config())
+    scheduler = TodoScheduler(repository, _Templates(), execution, cache, _config())
 
     result = await scheduler.run_once()
 
@@ -206,7 +223,7 @@ async def test_scheduler_resumes_claimed_interaction_after_refresh_leaves_it_run
         in_progress=(_todo("i1", TodoStatus.IN_PROGRESS),),
     )
     execution = _Execution(refresh_result=TodoStatus.IN_PROGRESS)
-    scheduler = TodoScheduler(repository, execution, _Cache(), _config())
+    scheduler = TodoScheduler(repository, _Templates(), execution, _Cache(), _config())
 
     result = await scheduler.run_once()
 
@@ -227,7 +244,7 @@ async def test_single_todo_failures_do_not_stop_remaining_work():
         ),
     )
     execution = _Execution(failures={"p1", "i1"})
-    scheduler = TodoScheduler(repository, execution, _Cache(), _config())
+    scheduler = TodoScheduler(repository, _Templates(), execution, _Cache(), _config())
 
     result = await scheduler.run_once()
 
@@ -256,7 +273,7 @@ async def test_todo_vanishing_mid_batch_is_skipped_without_counting_as_error():
         ),
     )
     execution = _Execution(vanished={"p1", "i1"})
-    scheduler = TodoScheduler(repository, execution, _Cache(), _config())
+    scheduler = TodoScheduler(repository, _Templates(), execution, _Cache(), _config())
 
     result = await scheduler.run_once()
 
@@ -289,6 +306,7 @@ async def test_lease_loss_stops_remaining_todos_and_releases_original_token(cach
     execution = _Execution(delay=0.03)
     scheduler = TodoScheduler(
         repository,
+        _Templates(),
         execution,
         cache,
         _config(heartbeat=0.01),
@@ -305,7 +323,9 @@ async def test_lease_loss_stops_remaining_todos_and_releases_original_token(cach
 
 @pytest.mark.asyncio
 async def test_disabled_lifecycle_does_not_start_loop():
-    scheduler = TodoScheduler(_Repository(), _Execution(), _Cache(), _config())
+    scheduler = TodoScheduler(
+        _Repository(), _Templates(), _Execution(), _Cache(), _config()
+    )
 
     await scheduler.startup()
     await scheduler.shutdown()
@@ -317,6 +337,7 @@ async def test_disabled_lifecycle_does_not_start_loop():
 async def test_enabled_lifecycle_starts_and_shutdown_cancels_loop():
     scheduler = TodoScheduler(
         _Repository(),
+        _Templates(),
         _Execution(),
         _Cache(),
         _config(enabled=True),
@@ -331,7 +352,9 @@ async def test_enabled_lifecycle_starts_and_shutdown_cancels_loop():
 
 @pytest.mark.asyncio
 async def test_loop_survives_one_failed_tick(monkeypatch: pytest.MonkeyPatch):
-    scheduler = TodoScheduler(_Repository(), _Execution(), _Cache(), _config())
+    scheduler = TodoScheduler(
+        _Repository(), _Templates(), _Execution(), _Cache(), _config()
+    )
     calls = 0
 
     async def no_sleep(_delay: float) -> None:
@@ -355,3 +378,40 @@ async def test_loop_survives_one_failed_tick(monkeypatch: pytest.MonkeyPatch):
     await scheduler._loop()
 
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_product_runtime_todos_never_enter_legacy_scheduler_paths():
+    product_pending = replace(
+        _todo("product-pending", TodoStatus.PENDING),
+        template_id="todo_tpl_1",
+        template_version_id="todo_tplv_1",
+    )
+    product_running = replace(
+        _todo("product-running", TodoStatus.IN_PROGRESS),
+        template_id="todo_tpl_1",
+        template_version_id="todo_tplv_1",
+        product_collet_id=11,
+    )
+    legacy_pending = _todo("legacy-pending", TodoStatus.PENDING)
+    repository = _Repository(pending=(product_pending, legacy_pending))
+    repository.rows[TodoStatus.IN_PROGRESS] = (product_running,)
+    templates = _Templates({("todo_tpl_1", "todo_tplv_1"): 22})
+    execution = _Execution()
+
+    scheduler = TodoScheduler(
+        repository,
+        templates,
+        execution,
+        _Cache(),
+        _config(),
+    )
+    result = await scheduler.run_once()
+
+    assert result["errors"] == 0
+    assert result["processed"] == 3
+    assert execution.calls == [("dispatch", "legacy-pending")]
+    assert templates.calls == [
+        ("todo_tpl_1", "todo_tplv_1"),
+        ("todo_tpl_1", "todo_tplv_1"),
+    ]

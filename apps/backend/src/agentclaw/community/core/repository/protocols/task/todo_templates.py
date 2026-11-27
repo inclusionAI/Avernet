@@ -79,6 +79,16 @@ class TodoTemplateRepositoryProtocol(Protocol):
     ) -> TodoTemplateVersionRecord: ...
 
     @abstractmethod
+    def publish_product_version(
+        self,
+        *,
+        template_id: str,
+        template_version_id: str,
+        product_profile_id: int,
+        published_by: str,
+    ) -> TodoTemplateVersionRecord: ...
+
+    @abstractmethod
     def set_template_status(
         self,
         *,

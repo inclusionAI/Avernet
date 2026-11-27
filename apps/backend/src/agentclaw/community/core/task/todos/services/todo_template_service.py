@@ -189,6 +189,30 @@ class TodoTemplateService(TodoTemplateManagementServiceProtocol):
             published_by=actor_id,
         )
 
+    def publish_product_version(
+        self,
+        *,
+        template_id: str,
+        template_version_id: str,
+        product_profile_id: int,
+        actor_id: str,
+        env: str | None = None,
+    ) -> TodoTemplateVersionRecord:
+        template = self._require_admin(
+            template_id=template_id, actor_id=actor_id, env=env
+        )
+        self._require_active(template.status)
+        if type(product_profile_id) is not int or product_profile_id < 1:
+            raise TodoTemplateStateConflictError(
+                "product_profile_id must be a positive integer"
+            )
+        return self._repository.publish_product_version(
+            template_id=template_id,
+            template_version_id=template_version_id,
+            product_profile_id=product_profile_id,
+            published_by=actor_id,
+        )
+
     def archive_template(
         self,
         *,

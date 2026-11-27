@@ -19,12 +19,17 @@ from agentclaw.community.adapters.http.openapi_v1.task.todos.auto_import_agent_r
 from agentclaw.community.adapters.http.openapi_v1.task.todos.auto_import_agent_router import (
     router as auto_import_agent_router,
 )
+from agentclaw.community.adapters.http.openapi_v1.task.todos.dima_import_schemas import (
+    ImportDimaTodosRequest,
+)
 from agentclaw.community.adapters.http.openapi_v1.task.todos.router import (
     create_dima_auto_import_rule,
     create_todo,
     create_todo_interaction,
     get_dima_work_item_draft,
     get_todo,
+    get_todo_progress,
+    import_dima_todos,
     list_dima_auto_import_rules,
     list_dima_projects,
     list_dima_work_items,
@@ -72,6 +77,15 @@ from agentclaw.community.core.task.todos.models import (
 from agentclaw.community.core.task.todos.models import (
     TodoArtifactRecord as TodoEventArtifactRecord,
 )
+from agentclaw.community.core.task.todos.product_creation_models import (
+    EnsureProductColletResult,
+    TodoDimaImportResult,
+    TodoDimaImportStatus,
+    TodoExecutorKind,
+    TodoExecutorSelection,
+    TodoOwnerInput,
+    TodoProductColletStatus,
+)
 from agentclaw.community.core.task.todos.source_models import (
     TodoSourceDraft,
     TodoSourceInput,
@@ -118,6 +132,8 @@ def _todo(
     *,
     status: TodoStatus = TodoStatus.IN_PROGRESS,
     collab_context_id: str | None = "context_todo_1",
+    owner_id: str = "human_1",
+    owner_name: str = "Human One",
 ) -> TodoRecord:
     return TodoRecord(
         todo_id="todo_1",
@@ -131,6 +147,8 @@ def _todo(
         created_by="human_1",
         created_at=NOW,
         updated_at=NOW,
+        owner_id=owner_id,
+        owner_name=owner_name,
     )
 
 
@@ -213,6 +231,55 @@ class _RecordedService:
             else TodoStatus.IN_PROGRESS
         )
         return _todo(status=status)
+
+
+class _RecordedProductCreationService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.runtime_calls: list[dict[str, Any]] = []
+        self.last_todo: TodoRecord | None = None
+
+    def create_todo(self, **kwargs: Any) -> TodoRecord:
+        self.calls.append(kwargs)
+        owner = kwargs["owner"]
+        self.last_todo = _todo(
+            status=TodoStatus.PENDING,
+            collab_context_id=None,
+            owner_id=owner.user_id,
+            owner_name=owner.user_name,
+        )
+        assert self.last_todo is not None
+        return self.last_todo
+
+    async def ensure_product_collet(self, **kwargs: Any) -> EnsureProductColletResult:
+        self.runtime_calls.append(kwargs)
+        assert self.last_todo is not None
+        return EnsureProductColletResult(
+            status=TodoProductColletStatus.NOT_APPLICABLE,
+            todo=self.last_todo,
+        )
+
+
+class _RecordedDimaImportService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def import_dima_todos(self, **kwargs: Any):
+        self.calls.append(kwargs)
+        return (
+            TodoDimaImportResult(
+                source_work_item_id="DIM-1",
+                status=TodoDimaImportStatus.IMPORTED,
+                todo_id="todo_1",
+                product_runtime_status=TodoProductColletStatus.READY,
+            ),
+            TodoDimaImportResult(
+                source_work_item_id="DIM-2",
+                status=TodoDimaImportStatus.DUPLICATE,
+                todo_id="todo_existing",
+                product_runtime_status=TodoProductColletStatus.READY,
+            ),
+        )
 
 
 def _auto_import_rule(
@@ -351,6 +418,8 @@ async def test_create_todo_returns_201_and_passes_body_fields():
     assert payload.message == "Created"
     assert payload.data.status == TodoStatus.PENDING
     assert payload.data.collab_context_id is None
+    assert payload.data.owner_id == "human_1"
+    assert payload.data.owner_name == "Human One"
     assert service.calls == [
         {
             "op": "create_todo",
@@ -361,6 +430,193 @@ async def test_create_todo_returns_201_and_passes_body_fields():
             "bot_id": "bot_1",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_create_todo_maps_bot_team_executor_and_owner_to_product_service():
+    legacy_service = _RecordedService()
+    product_service = _RecordedProductCreationService()
+    response = Response()
+
+    payload = await create_todo(
+        body=CreateTodoRequest(
+            space_id=42,
+            title="Prepare release notes",
+            description="Summarize the changes",
+            executor={
+                "type": "bot_team",
+                "id": "todo_tpl_1",
+                "revision_id": "todo_tplv_1",
+            },
+            owner={"user_id": "owner_1", "user_name": "Owner One"},
+        ),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/todos"),
+        response=response,
+        principal={"user_id": "human_1"},
+        user_id="human_1",
+        service=legacy_service,
+        product_service=product_service,
+    )
+
+    assert response.status_code == 201
+    assert payload.data.owner_id == "owner_1"
+    assert payload.data.owner_name == "Owner One"
+    assert payload.data.product_runtime_status == "not_applicable"
+    assert legacy_service.calls == []
+    assert product_service.calls == [
+        {
+            "space_id": 42,
+            "actor_id": "human_1",
+            "title": "Prepare release notes",
+            "description": "Summarize the changes",
+            "executor": TodoExecutorSelection(
+                type=TodoExecutorKind.BOT_TEAM,
+                id="todo_tpl_1",
+                revision_id="todo_tplv_1",
+            ),
+            "owner": TodoOwnerInput(user_id="owner_1", user_name="Owner One"),
+        }
+    ]
+
+
+def _dima_import_item(item_id: str = "DIM-1") -> dict[str, Any]:
+    return {
+        "title": f"Dima {item_id}",
+        "description": "Import independently",
+        "source": {
+            "type": "dima",
+            "container_id": "P1",
+            "item_id": item_id,
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_import_dima_todos_maps_actor_and_per_item_results():
+    service = _RecordedDimaImportService()
+    response = Response()
+
+    payload = await import_dima_todos(
+        body=ImportDimaTodosRequest(
+            space_id=42,
+            executor={
+                "type": "bot_team",
+                "id": "todo_tpl_1",
+                "revision_id": "todo_tplv_1",
+            },
+            owner={"user_id": "owner_1", "user_name": "Owner One"},
+            items=(_dima_import_item("DIM-1"), _dima_import_item("DIM-2")),
+        ),
+        request=_request(
+            "POST", "/openapi/v1/collaboration/tasks/todos/products/dima-imports"
+        ),
+        response=response,
+        principal={"user_id": "human_1"},
+        user_id="human_1",
+        service=service,
+    )
+
+    assert response.status_code == 201
+    assert payload.code == 201000
+    assert payload.message == "Created"
+    assert [
+        (item.status, item.todo_id, item.product_runtime_status)
+        for item in payload.data.items
+    ] == [
+        ("imported", "todo_1", "ready"),
+        ("duplicate", "todo_existing", "ready"),
+    ]
+    assert len(service.calls) == 1
+    call = service.calls[0]
+    assert call["space_id"] == 42
+    assert call["actor_id"] == "human_1"
+    assert call["executor"] == TodoExecutorSelection(
+        type=TodoExecutorKind.BOT_TEAM,
+        id="todo_tpl_1",
+        revision_id="todo_tplv_1",
+    )
+    assert call["owner"] == TodoOwnerInput(
+        user_id="owner_1",
+        user_name="Owner One",
+    )
+    assert tuple(item.source.item_id for item in call["items"]) == ("DIM-1", "DIM-2")
+
+
+def test_import_dima_todos_rejects_batches_over_twenty_at_the_api_boundary():
+    with pytest.raises(PydanticValidationError, match="at most 20 items"):
+        ImportDimaTodosRequest(
+            space_id=42,
+            executor={
+                "type": "bot_team",
+                "id": "todo_tpl_1",
+                "revision_id": "todo_tplv_1",
+            },
+            owner={"user_id": "owner_1", "user_name": "Owner One"},
+            items=tuple(_dima_import_item(f"DIM-{index}") for index in range(21)),
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_todo_maps_legacy_bot_id_with_owner_to_product_service():
+    legacy_service = _RecordedService()
+    product_service = _RecordedProductCreationService()
+
+    await create_todo(
+        body=CreateTodoRequest(
+            space_id=42,
+            title="Prepare release notes",
+            description="Summarize the changes",
+            bot_id="bot_1",
+            owner={"user_id": "owner_1", "user_name": "Owner One"},
+        ),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/todos"),
+        response=Response(),
+        principal={"user_id": "human_1"},
+        user_id="human_1",
+        service=legacy_service,
+        product_service=product_service,
+    )
+
+    assert legacy_service.calls == []
+    assert product_service.calls[0]["executor"] == TodoExecutorSelection(
+        type=TodoExecutorKind.BOT,
+        id="bot_1",
+    )
+    assert product_service.calls[0]["owner"] == TodoOwnerInput(
+        user_id="owner_1",
+        user_name="Owner One",
+    )
+
+
+@pytest.mark.parametrize(
+    ("request_fields", "message"),
+    [
+        ({}, "exactly one"),
+        (
+            {
+                "bot_id": "bot_1",
+                "executor": {"type": "bot", "id": "bot_1"},
+                "owner": {"user_id": "owner_1", "user_name": "Owner One"},
+            },
+            "exactly one",
+        ),
+        (
+            {"executor": {"type": "bot_team", "id": "team_1", "revision_id": "rev_1"}},
+            "owner",
+        ),
+    ],
+)
+def test_create_todo_validates_executor_compatibility(
+    request_fields: dict[str, object],
+    message: str,
+):
+    with pytest.raises(PydanticValidationError, match=message):
+        CreateTodoRequest(
+            space_id=42,
+            title="Prepare release notes",
+            description="Summarize the changes",
+            **request_fields,
+        )
 
 
 @pytest.mark.asyncio
@@ -993,6 +1249,46 @@ def _source_request(path: str) -> Request:
     return request
 
 
+class _RecordedProgressService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def get_progress(self, **kwargs: Any):
+        from agentclaw.community.core.task.todos.progress_models import (
+            TodoProgress,
+            TodoProgressStageStatus,
+            TodoStageProgress,
+        )
+
+        self.calls.append({"op": "get_progress", **kwargs})
+        return TodoProgress(
+            todo_id="todo_1",
+            status=TodoStatus.IN_PROGRESS,
+            runtime_kind="product_collet",
+            runtime_unavailable=False,
+            runtime_error_code=None,
+            current_stage_code="stage_1",
+            rollout_revision=4,
+            stopped=False,
+            stages=(
+                TodoStageProgress(
+                    stage_instance_id="stage_1",
+                    code="stage_1",
+                    name="需求分析",
+                    order=1,
+                    kind="bot",
+                    status=TodoProgressStageStatus.IN_PROGRESS,
+                    owner_user_id="human_1",
+                    owner_user_name="Human One",
+                    executor_subject_id="bot_1",
+                    executor_subject_name="Coding Bot",
+                    summary="正在分析需求",
+                    current_step="需求分析完成",
+                ),
+            ),
+        )
+
+
 class _RecordedSourceService:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -1091,3 +1387,32 @@ async def test_dima_source_routes_forward_verified_human_request_context():
     assert service.calls[1]["project_id"] == "P1"
     assert service.calls[1]["query"] == "requirement"
     assert service.calls[2]["work_item_id"] == "2026112000000000001"
+
+
+@pytest.mark.asyncio
+async def test_todo_progress_route_projects_stable_service_value():
+    service = _RecordedProgressService()
+
+    result = await get_todo_progress(
+        todo_id="todo_1",
+        request=_request("GET", "/openapi/v1/collaboration/tasks/todos/todo_1/progress"),
+        principal={"user_id": "human_1"},
+        user_id="human_1",
+        expanded_stage_code="stage_1",
+        message_limit=25,
+        service=service,
+    )
+
+    assert service.calls == [
+        {
+            "op": "get_progress",
+            "todo_id": "todo_1",
+            "actor_id": "human_1",
+            "expanded_stage_code": "stage_1",
+            "limit": 25,
+        }
+    ]
+    assert result.data.todo_id == "todo_1"
+    assert result.data.runtime_kind == "product_collet"
+    assert result.data.stages[0].status == "in_progress"
+    assert result.data.stages[0].current_step == "需求分析完成"

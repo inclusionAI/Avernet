@@ -20,7 +20,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     DomainProfile,
     GovernanceRequirements,
     MethodCompositionTemplate,
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     ScenarioRole,
     VersionedProfileRef,
     WorkflowProfile,
@@ -35,9 +35,9 @@ def _definition(
     goal: bool,
     executor_required: bool = False,
     message_parent_only: bool = False,
-) -> ProductProfileDefinition:
+) -> LegacyProductConfiguration:
     # Versions are literals, never derived from the installed "latest" Method profile.
-    return ProductProfileDefinition(
+    return LegacyProductConfiguration(
         ref=VersionedProfileRef(product, 1),
         composition=MethodCompositionTemplate(
             required_methods=tuple(

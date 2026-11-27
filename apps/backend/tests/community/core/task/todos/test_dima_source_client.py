@@ -72,6 +72,7 @@ def _request(
     return AuthRequestContext(
         cookies={"IAM_TOKEN": "iam-cookie"} if cookies is None else cookies,
         verified_actor_user_id=actor_id,
+        base_url="https://caller.example.com",
     )
 
 
@@ -134,7 +135,7 @@ def test_calls_dima_tool_over_streamable_http_lifecycle() -> None:
     assert http.calls[0]["headers"]["Cookie"] == "IAM_TOKEN=iam-cookie"
     assert http.calls[0]["headers"]["x-buc-token"] == "iam-cookie"
     assert http.calls[0]["headers"]["x-mcpgw-agentid"] == "agentid"
-    assert http.calls[0]["headers"]["Referer"] == "https://yuyan.antfin-inc.com/console"
+    assert http.calls[0]["headers"]["Referer"] == "https://caller.example.com"
     assert http.calls[0]["headers"]["sofa-ai-mcp"] == "sofa-ai-mcp:1.0"
     assert "Mcp-Session-Id" not in http.calls[0]["headers"]
     assert http.calls[1]["headers"]["Mcp-Session-Id"] == "session-1"

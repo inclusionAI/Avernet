@@ -19,7 +19,7 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductCapabilities,
-    ProductProfileDefinition,
+    LegacyProductConfiguration,
     VersionedProfileRef,
 )
 from agentclaw.community.core.task.context_collab.l6_products.profile_codec import (
@@ -77,7 +77,7 @@ class SqlProductProfileRepository:
             Row.avernet_tenant == axes.avernet_tenant, Row.env == axes.env
         )
 
-    def get(self, product: str, version: int) -> ProductProfileDefinition:
+    def get(self, product: str, version: int) -> LegacyProductConfiguration:
         ref, axes = VersionedProfileRef(product, version), profile_axes()
         with self.db.orm_session() as session:
             row = (
@@ -104,7 +104,7 @@ class SqlProductProfileRepository:
 
     def publish_many(
         self,
-        definitions: tuple[ProductProfileDefinition, ...],
+        definitions: tuple[LegacyProductConfiguration, ...],
         publisher: PrincipalRef,
         *,
         verify_history: bool = False,

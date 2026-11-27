@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import type { TodoArtifact, TodoEvent, TodoRecord } from '@/domain/todos/models';
+import type { TodoArtifact, TodoEvent, TodoProgress, TodoRecord } from '@/domain/todos/models';
 import { useTodoDetail } from '@/hooks/useTodoDetail';
 import * as todoService from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
@@ -24,8 +24,50 @@ const runningTodo: TodoRecord = {
   updatedAt: '2026-11-10T02:00:00Z',
 };
 
-const awaitingAcceptanceTodo: TodoRecord = { ...runningTodo, status: 'pending_acceptance' };
-const pendingDispatchTodo: TodoRecord = { ...runningTodo, status: 'pending', collabContextId: undefined };
+const awaitingAcceptanceTodo: TodoRecord = { ...runningTodo, status: 'pending_action' };
+const pendingDispatchTodo: TodoRecord = { ...runningTodo, status: 'not_started', collabContextId: undefined };
+
+const todoProgress: TodoProgress = {
+  todoId: 'todo-1',
+  status: 'in_progress',
+  runtimeKind: 'product_collet',
+  runtimeUnavailable: false,
+  currentStageCode: 'analyze',
+  rolloutRevision: 3,
+  stopped: false,
+  stages: [
+    {
+      stageInstanceId: 'stage-1',
+      code: 'analyze',
+      name: '需求分析',
+      order: 1,
+      kind: 'bot',
+      status: 'in_progress',
+      ownerUserId: 'human-1',
+      ownerUserName: 'Human One',
+      executorSubjectId: 'bot-1',
+      executorSubjectName: 'Coding Bot',
+      summary: '正在分析需求',
+      currentStep: '形成需求理解',
+      steps: [
+        {
+          stepId: 'message-1',
+          name: '形成需求理解',
+          status: 'in_progress',
+          detail: '形成需求理解',
+        },
+      ],
+      outputs: [
+        { artifactId: 'artifact-1', kind: 'text', name: '需求理解', summary: '已形成需求理解' },
+      ],
+      attemptCount: 2,
+      detailsLoaded: true,
+      messagesComplete: false,
+      ignoredMessageCount: 1,
+      updatedAt: '2026-11-10T02:00:00Z',
+    },
+  ],
+};
 
 function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -62,6 +104,7 @@ beforeEach(() => {
     interactions: [],
     events: [],
     artifacts: [],
+    progress: null,
     listLoading: false,
     detailLoading: false,
     eventsLoading: false,
@@ -74,6 +117,7 @@ beforeEach(() => {
   mockedService.loadTodoInteractions.mockResolvedValue([]);
   mockedService.loadTodoEvents.mockResolvedValue([]);
   mockedService.loadTodoArtifacts.mockResolvedValue([]);
+  mockedService.loadTodoProgress.mockResolvedValue(todoProgress);
   mockedService.loadTodoMentionBots.mockResolvedValue([]);
 });
 
@@ -148,6 +192,20 @@ test('切换待办时立即清理旧详情，避免先渲染上一个待办', as
   expect(mockedService.loadTodo).toHaveBeenLastCalledWith('todo-2');
 });
 
+test('执行进度接口失败不阻断待办详情和事件加载', async () => {
+  mockedService.loadTodoProgress.mockRejectedValueOnce(new Error('进度服务暂不可用'));
+
+  const { result } = renderHook(() => useTodoDetail('todo-1'));
+
+  await waitFor(() => expect(result.current.selectedTodo).toEqual(awaitingAcceptanceTodo));
+  await waitFor(() => expect(result.current.progressLoading).toBe(false));
+
+  expect(result.current.progress).toBeNull();
+  expect(result.current.progressError).toBe('进度服务暂不可用');
+  expect(result.current.error).toBeNull();
+  expect(result.current.events).toEqual([]);
+});
+
 test('B 事件接口失败时不阻断 A 的详情和互动加载', async () => {
   mockedService.loadTodoEvents.mockRejectedValue(new Error('事件服务暂不可用'));
 
@@ -179,7 +237,7 @@ test('事件时序可独立重试且按 eventSeq 排序', async () => {
   expect(result.current.events.map((item) => item.eventSeq)).toEqual([1, 2]);
 });
 
-test('待验收互动保留稳定回复和结构化 mention，只修剪 message', async () => {
+test('待处理互动保留稳定回复和结构化 mention，只修剪 message', async () => {
   mockedService.loadTodo.mockResolvedValue(awaitingAcceptanceTodo);
   mockedService.addTodoInteraction.mockResolvedValue(event(3, { eventType: 'user_interaction.posted' }));
 
