@@ -1,14 +1,13 @@
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Pagination } from '@/components/ui/Pagination';
-import { Segmented } from '@/components/ui/Segmented';
 import type { CommunityAuthor, CommunityTopicOpenTarget, InteractionSummary, PersonalCenterActivityType } from '@/domain/community/types';
 import { usePersonalCenter } from '@/hooks/usePersonalCenter';
 import { ArrowLeft } from 'lucide-react';
+import { CommunityFilterBar } from '../CommunityFilterBar';
 import { ActivityList } from './ActivityList';
 import { FollowList } from './FollowList';
 import { personalCenterActivityOptions } from './model';
-import './PersonalCenter.css';
 
 export function CommunityPersonalCenter({
   onBack,
@@ -44,17 +43,12 @@ export function CommunityPersonalCenter({
 
   const content = (
     <>
-      <div className="overflow-x-auto">
-        <Segmented<PersonalCenterActivityType>
-          value={center.activityType}
-          onChange={center.setActivityType}
-          options={personalCenterActivityOptions}
-          aria-label="我的内容"
-          className="community-personal-tabs mt-4 w-fit"
-          activeOptionClassName="text-foreground"
-          inactiveOptionClassName="font-normal text-muted-foreground"
-        />
-      </div>
+      <CommunityFilterBar<PersonalCenterActivityType>
+        value={center.activityType}
+        onChange={center.setActivityType}
+        options={personalCenterActivityOptions}
+        aria-label="我的内容"
+      />
 
       <div className="mt-4">
         {center.activityType === 'FOLLOWED' ? (
