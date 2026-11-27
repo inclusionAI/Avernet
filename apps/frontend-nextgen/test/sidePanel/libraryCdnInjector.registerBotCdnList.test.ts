@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import { getManifest, listBotRenderScreens, type BotRenderScreen } from '@/services/bcs/bcsManifestController';
 import {
+  clearBotCdnConfig,
   clearCdnConfig,
   getLibraryCdn,
   hasBotCdnBucket,
@@ -98,4 +99,33 @@ test('多 owner 同名 botId 请求互不串桶，后注册不覆盖先注册', 
   expect(getLibraryCdn('libB')).toBe('https://cdn/b.js');
   expect(hasBotCdnBucket('default', '100001')).toBe(true);
   expect(hasBotCdnBucket('default', '100002')).toBe(true);
+});
+
+
+test('并发请求共享在途结果，而不只是已完成缓存', async () => {
+  let resolve!: (screens: BotRenderScreen[]) => void;
+  mockListBotRenderScreens.mockReturnValue(new Promise((done) => { resolve = done; }));
+  const first = registerBotCdnList([{ botId: 'bot-a', ownerId: '1' }]);
+  const second = registerBotCdnList([{ botId: 'bot-a', ownerId: '1' }]);
+  await Promise.resolve();
+  const calls = mockListBotRenderScreens.mock.calls.length;
+  resolve([screen('libA', '/a.js')]);
+  await Promise.all([first, second]);
+  expect(calls).toBe(1);
+  expect(getLibraryCdn('libA')).toBe('/a.js');
+});
+
+
+test('清除或刷新分桶后，过期在途响应不会覆盖新配置', async () => {
+  let resolveOld!: (screens: BotRenderScreen[]) => void;
+  mockListBotRenderScreens.mockReturnValueOnce(new Promise((done) => { resolveOld = done; }));
+  const old = registerBotCdnList([{ botId: 'bot-a', ownerId: '1' }]);
+  await Promise.resolve();
+  clearBotCdnConfig('bot-a', '1');
+  mockListBotRenderScreens.mockResolvedValueOnce([screen('libA', '/new.js')]);
+  await registerBotCdnList([{ botId: 'bot-a', ownerId: '1' }]);
+  resolveOld([screen('libA', '/old.js')]);
+  await old;
+  expect(getLibraryCdn('libA')).toBe('/new.js');
+  expect(mockListBotRenderScreens).toHaveBeenCalledTimes(2);
 });
