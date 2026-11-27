@@ -1,0 +1,66 @@
+apps/frontend-nextgen/src/domain/recovery/originalSession.ts
+  s_a6cf0b4901b3a8::t_5173026de9c5c8 1-27
+apps/frontend-nextgen/test/domain/recovery/originalSession.test.ts
+  s_a6cf0b4901b3a8::t_5173026de9c5c8 1-30
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_a6cf0b4901b3a8::t_e9410b3809beb4 256,265-267
+  s_a6cf0b4901b3a8::t_91fcb389fce236 268
+apps/frontend-nextgen/src/capabilities/types.ts
+  s_a6cf0b4901b3a8::t_ec78a464264d8b 699-700
+apps/frontend-nextgen/src/domain/recovery/journey.ts
+  s_a6cf0b4901b3a8::t_afa20433c22cac 1-238
+apps/frontend-nextgen/src/domain/recovery/presentation.ts
+  s_a6cf0b4901b3a8::t_914c2413d1564d 1-68
+apps/frontend-nextgen/src/domain/recovery/report.ts
+  s_118944da3d52d1::t_aa0f269fb63e49 1-91
+apps/frontend-nextgen/src/domain/recovery/types.ts
+  s_a6cf0b4901b3a8::t_2a6e6dfaecb313 1-126
+apps/frontend-nextgen/src/pages/EvolutionFactory/Recovery/RecoveryBotOptions.tsx
+  s_a6cf0b4901b3a8::t_3f424d43f044b2 1-280
+apps/frontend-nextgen/src/pages/EvolutionFactory/Recovery/RecoveryDetail.tsx
+  s_118944da3d52d1::t_c189be5b9615b7 1-336
+apps/frontend-nextgen/src/pages/EvolutionFactory/Recovery/RecoveryHistory.tsx
+  s_a6cf0b4901b3a8::t_6b9a6078fe09eb 1-268
+apps/frontend-nextgen/src/pages/EvolutionFactory/Recovery/RecoveryList.tsx
+  s_a6cf0b4901b3a8::t_512e2c9932b92b 1-295
+apps/frontend-nextgen/src/pages/EvolutionFactory/Recovery/RecoveryPlan.tsx
+  s_a6cf0b4901b3a8::t_58ee162f794c7a 1-280
+apps/frontend-nextgen/src/pages/EvolutionFactory/Recovery/index.tsx
+  s_a6cf0b4901b3a8::t_a1170025fb5aa7 1-49
+apps/frontend-nextgen/src/pages/EvolutionFactory/Recovery/recovery.css
+  s_a6cf0b4901b3a8::t_543eec6ac29446 1-36
+apps/frontend-nextgen/src/pages/EvolutionFactory/index.tsx
+  s_a6cf0b4901b3a8::t_c2e4004f0286ed 6-7,13,16-20,24-36,46-52,64
+apps/frontend-nextgen/src/pages/EvolutionFactory/shared.tsx
+  s_a6cf0b4901b3a8::t_d216c208302026 1,15-20,24-69,71-72,74-78,87-97,154,164-169
+apps/frontend-nextgen/src/services/backendApi/clawinsight/recoveryController.ts
+  s_a6cf0b4901b3a8::t_ae51d1b3293b97 1-53
+apps/frontend-nextgen/test/domain/recovery/journey.test.ts
+  s_a6cf0b4901b3a8::t_308ba0d1691b24 1-72
+apps/frontend-nextgen/test/evolution/recovery.test.tsx
+  s_a6cf0b4901b3a8::t_b2c91c3ef1582c 1-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2116b15ca5505a5dcc0ec0effc9e33c7ac7966c0",
+  "prompts": {},
+  "sessions": {
+    "s_118944da3d52d1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212f1-f5c7-71d1-9784-e0e8a73b9f55",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    },
+    "s_a6cf0b4901b3a8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a211d3-b312-7363-b8f8-a812788340a7",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
