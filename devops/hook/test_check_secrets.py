@@ -185,3 +185,26 @@ def test_python_call_can_end_in_unchanged_diff_context() -> None:
     assert _findings(diff.replace("connection_type=connection_type", 'connection_type="' + secret + '"'))
     # Context never becomes a new finding by itself.
     assert _findings(_diff('result = runtime_value') + '\n password="' + secret + '"') == []
+
+
+def test_python_continued_signature_and_keyword_reference_are_not_credentials() -> None:
+    for line in [
+        '    SLOT: str | None) -> dict[str, Any] | None:',
+        '    SLOT: str | None = None) -> dict[str, Any]:',
+        '    approval_id=interaction_id, decision=decision, SLOT=record.token)',
+    ]:
+        assert _findings(_diff(line.replace("SLOT", "token"))) == []
+
+
+def test_python_continued_arguments_still_reject_literal_credentials() -> None:
+    secret = "AbCdEf" + "0123456789XYZ-secret-value"
+    for line in [
+        '    SLOT: str = "VALUE") -> dict[str, Any]:',
+        '    SLOT: str = wrap("VALUE")) -> dict[str, Any]:',
+        '    SLOT=record.token, other="VALUE")',
+        '    SLOT=record.token + "VALUE")',
+        '    SLOT="VALUE")',
+    ]:
+        findings = _findings(_diff(line.replace("SLOT", "token").replace("VALUE", secret)))
+        assert findings
+        assert all(secret not in finding.content for finding in findings)

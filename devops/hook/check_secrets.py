@@ -370,6 +370,32 @@ def _python_reference_is_safe(
         return False
 
     if node is None:
+        # A new-side diff may begin at a continued call/signature argument.
+        # Parse the fragment in its syntactic container, never trim away values.
+        for prefix in ("_scan(", "def _scan("):
+            candidate = prefix + stripped
+            if prefix.startswith("def "):
+                candidate += "\n    pass"
+            try:
+                fragment = ast.parse(candidate)
+            except (SyntaxError, ValueError):
+                continue
+            if len(fragment.body) != 1:
+                continue
+            statement = fragment.body[0]
+            if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call):
+                if safe(statement.value):
+                    return True
+            if isinstance(statement, ast.FunctionDef):
+                args = statement.args
+                values = [*args.defaults, *args.kw_defaults, statement.returns]
+                values.extend(arg.annotation for arg in (
+                    *args.posonlyargs, *args.args, *args.kwonlyargs,
+                    *([args.vararg] if args.vararg else []),
+                    *([args.kwarg] if args.kwarg else []),
+                ))
+                if all(value is None or safe(value) for value in values):
+                    return True
         # A credential-named field may be inside a formatted Cookie string.
         # Parse the containing statement and require every string component,
         # including literal prefixes/suffixes, to pass the existing checks.
