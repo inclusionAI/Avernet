@@ -1,4 +1,5 @@
 from dataclasses import replace
+import logging
 import pytest
 from injector import Injector
 from agentclaw.community.core.errors import Forbidden
@@ -142,6 +143,20 @@ async def test_repository_receipts_remain_actor_operation_and_content_scoped(run
         assert session.query(ProductIdentityRow).count() == 4
         assert session.query(ProductReceiptRow).count() == 2
         assert session.query(ProductIntentRow).count() == 1
+
+
+async def test_creation_diagnostics_are_emitted_without_payload(created, caplog):
+    h = created
+    with caplog.at_level(logging.INFO):
+        collet = await h.service.create_product_collet(
+            h.profile.id, "secret-content-for-log-audit"
+        )
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("product_collet.create.start" in m for m in messages)
+    assert any("product_collet.create.step.complete" in m for m in messages)
+    assert any("product_collet.create.complete" in m for m in messages)
+    assert collet.profile_id == h.profile.id
+    assert all("secret-content-for-log-audit" not in m for m in messages)
 
 
 async def test_runtime_authorization_precedes_persistence_and_provider(created):
