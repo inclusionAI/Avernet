@@ -39,8 +39,7 @@ export interface MemberListProps {
   /**
    * 徽标档位（验收微调）：
    * - full：群管理列表默认——类型 + 角色 + 状态 + 视角全量徽标。
-   * - session：会话列表精简档——保留 Bot/用户 类型与 bot 发言状态（自动/禁言），角色仅显示
-   *   管理角色（群主/主节点）；人类参与状态与视角标签不在列表重复展示（会话输入区上方已标识）。
+   * - session：会话列表精简档——保留类型与状态标签，角色仅显示管理角色（群主/主节点），不显示视角标签。
    */
   badgePolicy?: 'full' | 'session';
   onAddMany: (actorIds: string[]) => Promise<number>;
@@ -57,14 +56,14 @@ function getRoleLabel(participant: ParticipantView, groupKind: GroupView['kind']
   return participant.role === 'driver' ? '群主' : '成员';
 }
 
-function getModeLabel(participant: ParticipantView): string | null {
+function getModeLabel(participant: ParticipantView, badgePolicy: MemberListProps['badgePolicy']): string | null {
   if (participant.kind === 'bot') {
     if (participant.mode === 'auto') return '自动';
     if (participant.mode === 'muted') return '禁言';
     return null;
   }
-  if (participant.mode === 'present') return '参与';
-  if (participant.mode === 'absent') return '旁观';
+  if (participant.mode === 'present') return badgePolicy === 'session' ? '在线' : '参与';
+  if (participant.mode === 'absent') return badgePolicy === 'session' ? '勿扰' : '旁观';
   return null;
 }
 
@@ -155,15 +154,14 @@ export function MemberList({
               { id: participant.actorId, kind: participant.kind, name: participant.name },
               authenticatedUserId ? { userId: authenticatedUserId, name: authenticatedUserName } : null,
             );
-            // 标签可见性：会话精简档（badgePolicy=session）仅管理角色显示角色徽标，人类参与状态与视角不重复展示。
             const managementRole = isManagementRole(participant, groupKind);
-            const modeLabel = getModeLabel(participant);
+            const modeLabel = showMode ? getModeLabel(participant, badgePolicy) : null;
             const scope = participant.kind === 'human' ? participant.messageViewScope : undefined;
             const showRoleBadge = badgePolicy === 'full' || managementRole;
-            const showModeBadge = showMode && !!modeLabel && (badgePolicy === 'full' || participant.kind === 'bot');
+            const collapseModeBadge = badgePolicy === 'full';
             const showScopeBadge = badgePolicy === 'full' && !!scope;
             // 存在可收起标签（角色/状态/视角）时渲染「...」展开入口；仅类型标签的行不渲染。
-            const hasCollapsible = showRoleBadge || showModeBadge || showScopeBadge;
+            const hasCollapsible = showRoleBadge || (collapseModeBadge && !!modeLabel) || showScopeBadge;
             return (
               <div
                 key={participant.actorId}
@@ -192,10 +190,7 @@ export function MemberList({
                     <TooltipContent>{displayName}</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
-                {/* 标签分类型着色（走 Badge 组件默认字号）：成员类型默认蓝；群主/主节点紫；自动/参与绿；禁言/旁观灰。
-                    会话精简档（badgePolicy=session）：角色徽标仅管理角色显示；人类参与状态与视角标签不再重复展示。
-                    窄面板折叠（验收微调）：行内容宽 <400px 收起可选标签、<300px 连管理角色也收起（容器查询类），
-                    「...」入口 hover/聚焦展开被收起标签，成员名字不再被挤压。 */}
+                {/* 会话状态与成员类型常驻；窄面板其余标签沿用「...」折叠。 */}
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
                   <Badge tone="primary">{participant.kind === 'bot' ? 'Bot' : '用户'}</Badge>
                   {showRoleBadge ? (
@@ -206,8 +201,8 @@ export function MemberList({
                       {getRoleLabel(participant, groupKind)}
                     </Badge>
                   ) : null}
-                  {showModeBadge && modeLabel ? (
-                    <Badge tone={getModeTone(participant)} className={COLLAPSE_OPTIONAL}>
+                  {modeLabel ? (
+                    <Badge tone={getModeTone(participant)} className={collapseModeBadge ? COLLAPSE_OPTIONAL : undefined}>
                       {modeLabel}
                     </Badge>
                   ) : null}
@@ -233,7 +228,7 @@ export function MemberList({
                               {getRoleLabel(participant, groupKind)}
                             </Badge>
                           ) : null}
-                          {showModeBadge && modeLabel ? (
+                          {collapseModeBadge && modeLabel ? (
                             <Badge tone={getModeTone(participant)}>{modeLabel}</Badge>
                           ) : null}
                           {showScopeBadge && scope ? <MessageViewScopeBadge scope={scope} /> : null}
