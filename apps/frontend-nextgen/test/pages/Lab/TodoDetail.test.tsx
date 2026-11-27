@@ -289,98 +289,32 @@ beforeEach(() => {
 });
 
 describe('TodoDetailPage', () => {
-  it('以独立页面展示事件、互动和产物视图', async () => {
+  it('以独立页面展示进度、互动和产物视图', async () => {
     render(<TodoDetailPage />);
 
     expect(await screen.findByRole('heading', { name: 'Q3 竞品分析' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '返回待办列表' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: '待办详情视图' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: '事件' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '进度' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: '互动' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '产物 4' })).toBeInTheDocument();
-    const eventView = await screen.findByRole('region', { name: '待办事件' });
-    expect(within(eventView).getByText('发起待办：Q3 竞品分析')).toBeInTheDocument();
-    expect(within(eventView).getByText('整理三款产品的定价与功能矩阵')).toBeInTheDocument();
-    expect(within(eventView).getByText('产出文本：已完成三款产品的定价对比。')).toBeInTheDocument();
-    expect(within(eventView).getByText('产出文件：定价与功能矩阵.xlsx')).toBeInTheDocument();
-    expect(within(eventView).getByText('产出链接：产品官网')).toBeInTheDocument();
-    expect(within(eventView).getByText('产出代码：pricing-analysis')).toBeInTheDocument();
-    expect(within(eventView).getByText('本轮执行完成')).toBeInTheDocument();
-    expect(within(eventView).getByText('补充要求：请补充价格来源')).toBeInTheDocument();
-    expect(within(eventView).queryByText('开始采集竞品资料')).not.toBeInTheDocument();
-    expect(within(eventView).queryByText('等待中')).not.toBeInTheDocument();
+
+    const progressView = await screen.findByRole('region', { name: '执行阶段进度' });
+    expect(within(progressView).getByText('需求分析')).toBeInTheDocument();
+    expect(within(progressView).getAllByText('等待处理')).toHaveLength(2);
+    expect(within(progressView).getByText('数据分析助手')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '待办验收' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: '待办详情' })).toBeInTheDocument();
+    expect(mockedService.loadTodoProgress).toHaveBeenCalledWith('todo-1', {
+      expandedStageCode: undefined,
+      messageLimit: 50,
+    });
     expect(mockedService.loadTodoArtifacts).toHaveBeenCalledWith('todo-1');
-  });
-
-  it('事件页仅展示 Human 互动原文预览，互动页保留完整内容', async () => {
-    const longMessage =
-      '请补充三款产品的价格来源、更新时间、企业版与个人版差异，并逐项核对官网、帮助中心、销售页面和公开报价材料，同时标注无法确认的信息、判断依据、风险说明以及后续核验建议。';
-    const preview = `${Array.from(longMessage).slice(0, 20).join('')}…`;
-    mockedService.loadTodoEvents.mockResolvedValue([
-      event(1, {
-        eventType: 'task.created',
-        actorType: 'human',
-        content: '整理三款产品的定价与功能矩阵',
-      }),
-      event(2, { eventType: 'task.started', content: '开始采集竞品资料' }),
-      event(3, { eventType: 'user_interaction.posted', actorType: 'human', content: longMessage }),
-    ]);
-    mockedService.loadTodoInteractions.mockResolvedValue([
-      event(1, {
-        eventType: 'task.created',
-        actorType: 'human',
-        content: '整理三款产品的定价与功能矩阵',
-      }),
-      event(3, { eventType: 'user_interaction.posted', actorType: 'human', content: longMessage }),
-    ]);
-
-    render(<TodoDetailPage />);
-
-    const eventView = await screen.findByRole('region', { name: '待办事件' });
-    expect(within(eventView).getByText(`补充要求：${preview}`)).toBeInTheDocument();
-    expect(within(eventView).queryByText(longMessage)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
-    expect(within(screen.getByRole('region', { name: '待办互动' })).getByText(longMessage)).toBeInTheDocument();
-  });
-
-  it('事件页展示文本产物摘要，互动页展示完整文本产物', async () => {
-    const fullText = '这是一个超过二十个字符的完整竞品分析文本，包含定价、功能矩阵、来源和风险说明。';
-    const summary = `${Array.from(fullText).slice(0, 20).join('')}…`;
-    const textArtifact: TodoArtifact = {
-      artifactId: 'artifact-text',
-      todoId: 'todo-1',
-      executionId: 'execution-1',
-      artifactName: '执行摘要',
-      kind: 'text',
-      content: { text: fullText, isFinalArtifact: true },
-      createdAt: '2026-11-08T06:00:00Z',
-    };
-    mockedService.loadTodoArtifacts.mockResolvedValue([textArtifact]);
-    mockedService.loadTodoEvents.mockResolvedValue([
-      event(1, { eventType: 'task.created', actorType: 'human', content: todo.description }),
-      artifactEvent(2, textArtifact, `产出文本：${summary}`),
-      event(3, { eventType: 'task.completed', content: '' }),
-    ]);
-    mockedService.loadTodoInteractions.mockResolvedValue([
-      event(1, { eventType: 'task.created', actorType: 'human', content: todo.description }),
-      artifactEvent(2, textArtifact, `产出文本：${summary}`),
-      event(3, { eventType: 'task.completed', content: '' }),
-    ]);
-
-    render(<TodoDetailPage />);
-
-    const eventView = await screen.findByRole('region', { name: '待办事件' });
-    expect(within(eventView).getByText(`产出文本：${summary}`)).toBeInTheDocument();
-    expect(within(eventView).queryByText(fullText)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
-    expect(within(screen.getByRole('region', { name: '待办互动' })).getByText(fullText)).toBeInTheDocument();
   });
 
   it('切换互动视图并提交互动', async () => {
     render(<TodoDetailPage />);
-    await screen.findByText('发起待办：Q3 竞品分析');
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
 
     fireEvent.click(screen.getByRole('tab', { name: '互动' }));
     const interactionView = screen.getByRole('region', { name: '待办互动' });
@@ -407,7 +341,7 @@ describe('TodoDetailPage', () => {
 
   it('按楼层回复时提交稳定事件 ID，并可在发送前取消回复', async () => {
     render(<TodoDetailPage />);
-    await screen.findByText('发起待办：Q3 竞品分析');
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
     fireEvent.click(screen.getByRole('tab', { name: '互动' }));
 
     const interactionView = screen.getByRole('region', { name: '待办互动' });
@@ -473,7 +407,7 @@ describe('TodoDetailPage', () => {
 
   it('可从待办所属空间选择 Bot mention，并提交结构化 Bot ID', async () => {
     render(<TodoDetailPage />);
-    await screen.findByText('发起待办：Q3 竞品分析');
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
     fireEvent.click(screen.getByRole('tab', { name: '互动' }));
 
     const interactionView = screen.getByRole('region', { name: '待办互动' });
@@ -509,7 +443,7 @@ describe('TodoDetailPage', () => {
     mockedService.loadTodoArtifacts.mockResolvedValue([...artifacts, orphanArtifact]);
 
     render(<TodoDetailPage />);
-    await screen.findByText('发起待办：Q3 竞品分析');
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
     fireEvent.click(screen.getByRole('tab', { name: '互动' }));
 
     const interactionView = screen.getByRole('region', { name: '待办互动' });
@@ -552,7 +486,7 @@ describe('TodoDetailPage', () => {
   it('拒绝验收切到互动标记楼层，草稿跨页保留并提交完整决策', async () => {
     mockedService.acceptTodo.mockResolvedValue(todo);
     render(<TodoDetailPage />);
-    await screen.findByText('发起待办：Q3 竞品分析');
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
 
     fireEvent.click(
       within(screen.getByRole('region', { name: '待办验收' })).getByRole('button', { name: '验收不通过' }),
@@ -570,7 +504,7 @@ describe('TodoDetailPage', () => {
     fireEvent.change(within(interactionView).getByPlaceholderText('填写完整返工要求'), {
       target: { value: ' 请修正产品 B 的企业版价格 ' },
     });
-    fireEvent.click(screen.getByRole('tab', { name: '事件' }));
+    fireEvent.click(screen.getByRole('tab', { name: '进度' }));
 
     const acceptance = screen.getByRole('region', { name: '待办验收' });
     expect(within(acceptance).getByText('已选中问题楼层：f8')).toBeInTheDocument();
@@ -605,7 +539,7 @@ describe('TodoDetailPage', () => {
   it('拒绝提交失败后保留草稿并复用同一个 decision id，取消时清空', async () => {
     mockedService.acceptTodo.mockRejectedValueOnce(new Error('temporary')).mockResolvedValueOnce(todo);
     render(<TodoDetailPage />);
-    await screen.findByText('发起待办：Q3 竞品分析');
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
 
     fireEvent.click(
       within(screen.getByRole('region', { name: '待办验收' })).getByRole('button', { name: '验收不通过' }),
@@ -630,7 +564,7 @@ describe('TodoDetailPage', () => {
 
   it('取消拒绝清空说明和问题目标', async () => {
     render(<TodoDetailPage />);
-    await screen.findByText('发起待办：Q3 竞品分析');
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
 
     fireEvent.click(
       within(screen.getByRole('region', { name: '待办验收' })).getByRole('button', { name: '验收不通过' }),
@@ -645,7 +579,7 @@ describe('TodoDetailPage', () => {
 
     expect(within(interactionView).queryByPlaceholderText('填写完整返工要求')).not.toBeInTheDocument();
     expect(within(interactionView).getByPlaceholderText('告诉 Bot 需要补充或修改的内容')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: '事件' }));
+    fireEvent.click(screen.getByRole('tab', { name: '进度' }));
     fireEvent.click(
       within(screen.getByRole('region', { name: '待办验收' })).getByRole('button', { name: '验收不通过' }),
     );
@@ -655,7 +589,7 @@ describe('TodoDetailPage', () => {
 
   it('验收通过提交无目标的稳定决策', async () => {
     render(<TodoDetailPage />);
-    await screen.findByText('发起待办：Q3 竞品分析');
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
 
     fireEvent.click(within(screen.getByRole('region', { name: '待办验收' })).getByRole('button', { name: '验收通过' }));
 
@@ -668,9 +602,8 @@ describe('TodoDetailPage', () => {
     });
   });
 
-  it('事件页展示 20 字拒绝摘要，互动页用引用预览展示问题点', async () => {
+  it('互动页用引用预览展示验收问题点', async () => {
     const rejection = '请修正产品 B 的企业版价格，并补充官网来源、更新时间和无法确认项的风险说明。';
-    const preview = `${Array.from(rejection).slice(0, 20).join('')}…`;
     const rejectedEvent = event(5, {
       eventType: 'task.rejected',
       actorType: 'human',
@@ -683,13 +616,6 @@ describe('TodoDetailPage', () => {
         ],
       },
     });
-    mockedService.loadTodoEvents.mockResolvedValue([
-      event(1, { eventType: 'task.created', actorType: 'human', content: todo.description }),
-      artifactEvent(3, artifacts[0], '产出文本：已完成三款产品的定价对比。'),
-      artifactEvent(4, artifacts[1], '产出文件：定价与功能矩阵.xlsx'),
-      rejectedEvent,
-      event(6, { eventType: 'task.accepted', actorType: 'human', content: '' }),
-    ]);
     mockedService.loadTodoInteractions.mockResolvedValue([
       event(1, { eventType: 'task.created', actorType: 'human', content: todo.description }),
       artifactEvent(3, artifacts[0], '产出文本：已完成三款产品的定价对比。'),
@@ -698,13 +624,9 @@ describe('TodoDetailPage', () => {
     ]);
 
     render(<TodoDetailPage />);
-
-    const eventView = await screen.findByRole('region', { name: '待办事件' });
-    expect(within(eventView).getByText(`验收不通过：${preview}`)).toBeInTheDocument();
-    expect(within(eventView).getByText('验收通过')).toBeInTheDocument();
-    expect(within(eventView).queryByText(rejection)).not.toBeInTheDocument();
-
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
     fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+
     const interactionView = screen.getByRole('region', { name: '待办互动' });
     expect(within(interactionView).getByText(rejection)).toBeInTheDocument();
     const quotes = within(interactionView).getByRole('group', { name: '问题引用' });
@@ -714,7 +636,6 @@ describe('TodoDetailPage', () => {
     expect(within(quotes).getByText('f3')).toBeInTheDocument();
     expect(within(quotes).getByText('产物')).toBeInTheDocument();
     expect(within(quotes).getByText('定价与功能矩阵.xlsx · xlsx · 2 KB')).toBeInTheDocument();
-    expect(within(interactionView).queryByText('问题楼层：f2、f3')).not.toBeInTheDocument();
   });
 
   it('产物视图使用独立产物接口展示四类产物，并支持文件下载', async () => {
@@ -725,7 +646,7 @@ describe('TodoDetailPage', () => {
     const clickSpy = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
 
     render(<TodoDetailPage />);
-    await screen.findByText('发起待办：Q3 竞品分析');
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
 
     fireEvent.click(screen.getByRole('tab', { name: '产物 4' }));
     const artifactView = screen.getByRole('region', { name: '待办产物' });
@@ -756,23 +677,17 @@ describe('TodoDetailPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '返回待办列表' }));
     expect(mockedHistory.push).toHaveBeenCalledWith('/lab/todos');
   });
-  it('使用紧凑的业务事件时间线和验收操作', async () => {
+  it('使用紧凑的阶段进度和验收操作', async () => {
     render(<TodoDetailPage />);
-    const eventView = await screen.findByRole('region', { name: '待办事件' });
-
-    const eventName = within(eventView).getByText('发起待办：Q3 竞品分析');
-    const artifactEventName = within(eventView).getByText('产出文件：定价与功能矩阵.xlsx');
-    const firstEvent = eventName.closest('li');
+    const progressView = await screen.findByRole('region', { name: '执行阶段进度' });
+    const stageName = within(progressView).getByText('需求分析');
     const acceptanceHeading = screen.getByRole('heading', { name: '待你验收 · Bot 已完成处理' });
     const acceptance = screen.getByRole('region', { name: '待办验收' });
     const rejectButton = within(acceptance).getByRole('button', { name: '验收不通过' });
 
-    expect(eventName).toHaveClass('text-sm', 'font-medium');
-    expect(firstEvent).toHaveClass('pb-4');
-    expect(within(eventView).queryByText('数据分析助手')).not.toBeInTheDocument();
-    expect(within(eventView).queryByText('开始采集竞品资料')).not.toBeInTheDocument();
-    expect(artifactEventName).toHaveClass('text-sm', 'font-medium');
-    expect(within(eventView).getByText('产出链接：产品官网')).toHaveClass('text-sm', 'font-medium');
+    expect(stageName).toHaveClass('text-sm', 'font-medium');
+    expect(within(progressView).getByText('数据分析助手')).toBeInTheDocument();
+    expect(within(progressView).getAllByText('等待处理')).toHaveLength(2);
     expect(acceptanceHeading).toHaveClass('text-sm', 'font-semibold');
     expect(rejectButton).toHaveClass('h-8', 'rounded-lg', 'px-4', 'text-xs');
   });
@@ -780,13 +695,13 @@ describe('TodoDetailPage', () => {
   it('非待处理待办不显示验收操作', async () => {
     mockedService.loadTodo.mockResolvedValue({ ...todo, status: 'completed' });
     render(<TodoDetailPage />);
-    await screen.findByText('发起待办：Q3 竞品分析');
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
     expect(screen.queryByRole('region', { name: '待办验收' })).not.toBeInTheDocument();
   });
 
   it('使用紧凑产物与互动层级', async () => {
     render(<TodoDetailPage />);
-    await screen.findByText('发起待办：Q3 竞品分析');
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
 
     fireEvent.click(screen.getByRole('tab', { name: '产物 4' }));
     const artifactView = screen.getByRole('region', { name: '待办产物' });
@@ -799,7 +714,7 @@ describe('TodoDetailPage', () => {
     expect(artifactCard).toHaveClass('rounded-xl', 'border', 'border-border', 'bg-card');
     expect(within(artifactView).getByText('已完成三款产品的定价对比。')).toHaveClass('text-xs', 'leading-5');
 
-    fireEvent.click(screen.getByRole('tab', { name: '事件' }));
+    fireEvent.click(screen.getByRole('tab', { name: '进度' }));
     fireEvent.click(
       within(screen.getByRole('region', { name: '待办验收' })).getByRole('button', { name: '验收不通过' }),
     );
@@ -825,19 +740,18 @@ describe('TodoDetailPage', () => {
     render(<TodoDetailPage />);
     const heading = await screen.findByRole('heading', { name: 'Q3 竞品分析' });
     const backButton = screen.getByRole('button', { name: '返回待办列表' });
-    const contentColumn = document.querySelector("div[class*='max-w-[820px]']");
+    const contentColumn = document.querySelector("div[class*='max-w-[1200px]'][class*='lg:flex-row']");
     const summary = screen.getByLabelText('待办概要');
     const card = screen.getByRole('group', { name: '待办详情视图' }).closest('.rounded-xl');
+    const detailSidebar = screen.getByRole('complementary', { name: '待办详情' });
 
     expect(backButton).toHaveClass('size-8', 'rounded-lg');
     expect(backButton.querySelector('svg')).toHaveClass('size-4');
     expect(heading).toHaveClass('text-[18px]', 'font-semibold');
     expect(document.querySelector('header[class*="px-4 pt-6 pb-4"]')).toBeInTheDocument();
-    expect(contentColumn).toHaveClass('max-w-[820px]', 'gap-5');
-
-    expect(summary.querySelector('p')).toHaveClass('text-sm', 'leading-[22px]');
-    fireEvent.click(screen.getByRole('button', { name: '详情' }));
-    expect(screen.getByRole('button', { name: '详情' })).toHaveClass('text-xs', 'font-medium');
+    expect(contentColumn).toHaveClass('max-w-[1200px]', 'gap-6', 'lg:flex-row');
+    expect(summary.querySelector('p')).toHaveClass('text-sm', 'leading-relaxed');
+    expect(within(detailSidebar).getByRole('heading', { name: '详情' })).toHaveClass('text-sm', 'font-semibold');
     expect(card).toHaveClass('rounded-xl');
   });
 });
@@ -856,7 +770,7 @@ describe('Todo Product interaction', () => {
 
   it('Product 待办展示平台互动并提交到 Product 互动接口', async () => {
     render(<TodoDetailPage />);
-    await screen.findByText('发起待办：Q3 竞品分析');
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
     fireEvent.click(screen.getByRole('tab', { name: '互动' }));
 
     const interactionView = await screen.findByRole('region', { name: 'Product 待办互动' });
@@ -864,10 +778,10 @@ describe('Todo Product interaction', () => {
     expect(within(interactionView).getByText('已接受补充要求，正在重做。')).toBeInTheDocument();
     expect(within(interactionView).getByText('RE_DO')).toBeInTheDocument();
 
-    fireEvent.change(within(interactionView).getByLabelText('Product 待办互动内容'), {
+    fireEvent.change(within(interactionView).getByLabelText('继续当前互动'), {
       target: { value: ' 补充价格来源 ' },
     });
-    fireEvent.click(within(interactionView).getByRole('button', { name: '发送互动' }));
+    fireEvent.click(within(interactionView).getByRole('button', { name: '发送回复' }));
 
     await waitFor(() =>
       expect(mockedService.addTodoProductInteraction).toHaveBeenCalledWith('todo-1', {
@@ -876,6 +790,24 @@ describe('Todo Product interaction', () => {
       }),
     );
     expect(mockedService.addTodoInteraction).not.toHaveBeenCalled();
+  });
+
+  it('最外层评论会发起新的 Product 互动会话', async () => {
+    render(<TodoDetailPage />);
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+
+    const composer = screen.getByRole('region', { name: '发起 Product 待办互动' });
+    fireEvent.change(within(composer).getByLabelText('评论，与待办助手对话'), {
+      target: { value: ' 新开一个验收问题 ' },
+    });
+    fireEvent.click(within(composer).getByRole('button', { name: '发送评论' }));
+
+    await waitFor(() =>
+      expect(mockedService.addTodoProductInteraction).toHaveBeenCalledWith('todo-1', {
+        message: '新开一个验收问题',
+      }),
+    );
   });
 
   it('平台未返回前显示停止入口并禁止继续发送', async () => {
@@ -893,15 +825,18 @@ describe('Todo Product interaction', () => {
     );
 
     render(<TodoDetailPage />);
-    await screen.findByText('发起待办：Q3 竞品分析');
+    await screen.findByRole('heading', { name: 'Q3 竞品分析' });
     fireEvent.click(screen.getByRole('tab', { name: '互动' }));
 
     const interactionView = await screen.findByRole('region', { name: 'Product 待办互动' });
     expect(within(interactionView).getByText('结果确认中')).toBeInTheDocument();
-    expect(within(interactionView).getByText('当前互动尚未返回，暂停发送。')).toBeInTheDocument();
-    expect(within(interactionView).queryByLabelText('Product 待办互动内容')).not.toBeInTheDocument();
+    expect(
+      within(interactionView).getByText('待办助手正在处理，返回前暂不能继续发送。'),
+    ).toBeInTheDocument();
+    expect(within(interactionView).getByLabelText('继续当前互动')).toBeDisabled();
+    expect(screen.getByLabelText('评论，与待办助手对话')).toBeDisabled();
 
-    fireEvent.click(within(interactionView).getByRole('button', { name: '停止处理' }));
+    fireEvent.click(within(interactionView).getByRole('button', { name: '终止' }));
     await waitFor(() =>
       expect(mockedService.stopTodoProductInteraction).toHaveBeenCalledWith('todo-1', 'pi-blocking'),
     );
