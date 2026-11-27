@@ -132,6 +132,14 @@ request from replacing the new cache. Tests:
 [Provider delivery](test/services/workspace/groupChatProvider.cdn.test.ts) and
 [cache reuse](test/sidePanel/libraryCdnInjector.registerBotCdnList.test.ts).
 
+## Collaboration session member status
+
+The [session member list](src/pages/Workspace/components/ManagePanel/MemberList.tsx)
+shows Human `present` as 在线 and `absent` as 勿扰 alongside the existing Bot
+mode badges, even in the narrow management panel. This indicates participation
+in the Session, not global presence. The [mention menu](src/pages/Workspace/components/GroupChatPane/mentionHelpers.ts)
+keeps 勿扰 members visible but muted and unavailable for mouse or keyboard selection.
+
 ## Group message sender identity
 
 The [group Provider](src/services/workspace/groupChatProvider.ts) normalizes live
