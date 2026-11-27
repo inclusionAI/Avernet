@@ -1,0 +1,21 @@
+apps/frontend-nextgen/src/domain/recovery/presentation.ts
+  s_a6cf0b4901b3a8::t_d50e8cdfbdeff9 65
+apps/frontend-nextgen/src/pages/EvolutionFactory/Recovery/RecoveryHistory.tsx
+  s_a6cf0b4901b3a8::t_12cddb5acfaf1e 32-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "20d6dc551763e653534ef7004af3ad46af2c2351",
+  "prompts": {},
+  "sessions": {
+    "s_a6cf0b4901b3a8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a211d3-b312-7363-b8f8-a812788340a7",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
