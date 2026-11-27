@@ -4,6 +4,8 @@ This catalog routes existing repository knowledge into the app framework without
 
 ## Existing app documentation and contracts
 
+- [docs/async-chat-transports.md](../async-chat-transports.md): current WS/A2A chat transport isolation contract (transport ownership, callbacks, lifecycle); read with [ADR-0016](../adr/0016-chat-transport-state-ownership.md).
+- [docs/contracts/arca-storage-tenant.md](../contracts/arca-storage-tenant.md): ARCA platform routing tenant (`arca_tenant_id`) propagation, its independence from the BaaS tenant, and experiment-B limits.
 - [docs/deployment-image-overrides.md](../deployment-image-overrides.md)
 - [docs/e2e/README.md](../e2e/README.md)
 - [docs/e2e/architecture.md](../e2e/architecture.md)
