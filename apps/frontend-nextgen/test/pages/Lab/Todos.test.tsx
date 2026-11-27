@@ -26,40 +26,10 @@ jest.mock('@/hooks/useHumanIdentity', () => ({
   })),
 }));
 
-jest.mock('@/services/backendApi/collaboration/collaborationBotController', () => ({
-  queryCollaborationBots: jest.fn(async () => ({
-    code: 200000,
-    message: 'success',
-    data: {
-      total: 1,
-      items: [{ kind: 'bot', bot_id: 'bot-owned', created_by: 'u-1', visibility: 'public' }],
-    },
-  })),
-}));
-
-jest.mock('@/services/botWorkshop', () => ({
-  botWorkshopService: {
-    list: jest.fn(async () => ({
-      items: [
-        { id: 'bot-foreign:u-2', name: '他人助手', ownerId: 'u-2' },
-        { id: 'bot-owned:u-1', name: '写作助手', ownerId: 'u-1' },
-      ],
-      total: 2,
-      page: 1,
-      pageSize: 100,
-      hasMore: false,
-    })),
-  },
-}));
-
-jest.mock('@/services/botWorkshop/botManagementService', () => ({
-  botManagementService: {
-    listSpaceMembers: jest.fn(async () => [{ userId: 'u-1', name: '测试用户' }]),
-  },
-}));
-
 jest.mock('@/services/todos/todoService', () => ({
   loadTodoSpaces: jest.fn(),
+  loadTodoBots: jest.fn(),
+  loadTodoOwners: jest.fn(),
   loadTodos: jest.fn(),
   loadTodo: jest.fn(),
   addTodo: jest.fn(),
@@ -160,6 +130,13 @@ beforeEach(() => {
   localStorage.clear();
   resetTodoStore();
   mockedService.loadTodoSpaces.mockResolvedValue([mockPersonalSpace]);
+  mockedService.loadTodoBots.mockResolvedValue([
+    { id: 'bot-foreign:u-2', name: '他人助手', ownerId: 'u-2' },
+    { id: 'bot-owned:u-1', name: '写作助手', ownerId: 'u-1' },
+  ] as never);
+  mockedService.loadTodoOwners.mockResolvedValue([
+    { userId: 'u-1', userName: '测试用户' },
+  ]);
   mockedService.loadTodos.mockResolvedValue({
     items: [awaitingAcceptanceTodo, runningTodo],
     total: 2,

@@ -1,6 +1,5 @@
 import type { BotDomain } from '@/domain/botWorkshop';
 import type { TodoBotOption, TodoSpace } from '@/domain/todos/models';
-import { todoBotCatalogId } from '@/services/todos/todoBotCatalogService';
 
 export function botBelongsToCurrentSpace(
   bot: Pick<BotDomain, 'id' | 'ownerId'>,
@@ -19,13 +18,8 @@ export function eligibleTodoBots(
   bots: Array<Pick<BotDomain, 'id' | 'ownerId'> & { name?: string }>,
   space: TodoSpace | undefined,
   currentUserId: string | undefined,
-  publicCatalogIds: ReadonlySet<string>,
 ): TodoBotOption[] {
   return bots
     .filter((bot) => botBelongsToCurrentSpace(bot, space, currentUserId))
-    .filter((bot) => {
-      const catalogId = todoBotCatalogId(bot);
-      return Boolean(catalogId && publicCatalogIds.has(catalogId));
-    })
     .map((bot) => ({ botId: bot.id, botName: bot.name || bot.id }));
 }
