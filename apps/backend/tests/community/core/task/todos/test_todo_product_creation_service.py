@@ -20,6 +20,7 @@ from agentclaw.community.core.task.todos.errors import (
 from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
 from agentclaw.community.core.task.todos.product_creation_models import (
     TodoDimaImportItem,
+    TodoDimaImportStatus,
     TodoExecutorKind,
     TodoExecutorSelection,
     TodoOwnerInput,
@@ -186,6 +187,12 @@ class _Repository:
     def bind_product_collet(self, **kwargs: Any) -> TodoRecord:
         self.calls.append({"operation": "bind_product_collet", **kwargs})
         return _todo(product_collet_id=kwargs["product_collet_id"])
+
+
+class _SingleBotRepository(_Repository):
+    def get_todo(self, **kwargs: Any) -> TodoRecord:
+        self.calls.append({"operation": "get_todo", **kwargs})
+        return _todo()
 
 
 def _service(
@@ -491,3 +498,34 @@ async def test_product_collet_failure_preserves_imported_todo_as_retryable_failu
     assert results[0].error_code == "product_runtime_unavailable"
     assert results[0].retryable is True
     assert len(templates.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_single_bot_dima_import_succeeds_without_product_collet() -> None:
+    todos = _Todos()
+    service = TodoProductCreationService(
+        todos=todos,
+        bot_teams=_BotTeams(),
+        template_creation=_TemplateCreation(),
+        product_profiles=_ProductProfiles(),
+        repository=_SingleBotRepository(),
+    )
+
+    results = await service.import_dima_todos(
+        space_id=7,
+        actor_id="creator_1",
+        executor=TodoExecutorSelection(
+            type=TodoExecutorKind.BOT,
+            id="bot_1",
+        ),
+        owner=TodoOwnerInput(user_id="owner_1", user_name="Owner One"),
+        items=(_import_item("DIM-SINGLE-BOT"),),
+    )
+
+    assert len(results) == 1
+    assert results[0].status is TodoDimaImportStatus.IMPORTED
+    assert results[0].todo_id == "todo_1"
+    assert results[0].product_runtime_status is TodoProductColletStatus.NOT_APPLICABLE
+    assert results[0].error_code is None
+    assert results[0].retryable is False
+    assert todos.calls[0]["bot_id"] == "bot_1"
