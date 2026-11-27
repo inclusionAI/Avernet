@@ -4,7 +4,10 @@
 
 Distributed Gateway, Worker, Connector, and their host now consume session
 targets, immutable mode configurations and logical agent IDs. The Gateway
-directory owns admission policy. The Worker runner SPI prepares typed effects.
+directory port retains the admission hook, with concrete policy integration
+deferred to the host. The Gateway passes the existing caller scope unchanged;
+it does not define delegated identities or organization-based task ownership.
+The Worker runner SPI prepares typed effects.
 The Connector agent port resolves transport capabilities at call time. Workspace
 consumers rebuild together. External implementations of the distributed ports
 must update their signatures.

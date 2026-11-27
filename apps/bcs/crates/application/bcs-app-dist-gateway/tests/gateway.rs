@@ -18,7 +18,7 @@ use bcs_test_support::contract::distributed::services::dist_gateway_service_cont
 use common::{FakeWorker, Ports, eid, ports, question, snapshot, status_event, text_event};
 use futures::StreamExt;
 use std::num::NonZeroU32;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -27,10 +27,14 @@ struct Groups {
     /// The directory cannot answer: every resolve fails as unavailable.
     down: AtomicBool,
     revoked: AtomicBool,
+    authorization_unavailable: AtomicBool,
+    authorized_scopes: Mutex<Vec<TaskScope>>,
 }
 #[async_trait]
 impl DistSessionDirectoryPort for Groups {
-    async fn authorize(&self, _: &TaskScope, _: &SessionTarget, _: &SessionAccessContext) -> Result<(), DirectoryError> {
+    async fn authorize(&self, scope: &TaskScope, _: &SessionTarget) -> Result<(), DirectoryError> {
+        self.authorized_scopes.lock().unwrap().push(scope.clone());
+        if self.authorization_unavailable.load(Ordering::SeqCst) { return Err(DirectoryError::Unavailable); }
         if self.revoked.load(Ordering::SeqCst) { Err(DirectoryError::AccessDenied) } else { Ok(()) }
     }
 
@@ -75,7 +79,6 @@ impl Clock for TestClock {
 
 fn caller(bot: &str) -> GatewayCaller {
     GatewayCaller {
-        access: Default::default(),
         tenant: TenantId("t-ant".into()),
         caller: CallerContext::Bot(BotActor {
             bot_uuid: bot.into(),
@@ -238,7 +241,6 @@ async fn callers_only_reach_their_own_sessions_and_tasks() {
     // Another caller's session is reported as absent, not as forbidden.
     assert_eq!(g.submit(&other, intrude).await, Err(GatewayError::NotFound));
     let public = GatewayCaller {
-        access: Default::default(),
         tenant: TenantId("t-ant".into()),
         caller: CallerContext::Public,
     };
@@ -757,28 +759,44 @@ async fn revocation_rejects_new_sends_and_replies_but_leaves_accepted_tasks_inta
 }
 
 #[tokio::test]
-async fn sessions_are_bound_to_the_delegated_source_and_organization() {
+async fn gateway_preserves_authenticated_identity_for_policy_and_task_ownership() {
     let p = ports();
-    let g = gateway(&p);
+    let directory = Arc::new(Groups::default());
+    let g = gateway_with(&p, p.inbox.clone(), directory.clone());
     let target = SessionTarget::DirectAgent { agent: AgentId("target".into()) };
     let request = SubmitInput { target: target.clone(), ..message("first", "hello") };
     let mut actor = me();
     actor.caller = CallerContext::Human(bcs_service_api::application::principal::HumanActor {
         actor_id: "human_owner".into(), staff_no: "owner".into(),
     });
-    actor.access.acting_agent = Some(AgentId("s".repeat(180)));
-    actor.access.organization = Some("o".repeat(180));
     let accepted = g.submit(&actor, request.clone()).await.unwrap();
+    let expected = TaskScope { tenant: actor.tenant.clone(), principal: PrincipalId("human:human_owner".into()) };
+    assert_eq!(*directory.authorized_scopes.lock().unwrap(), vec![expected.clone()]);
     let stored = g.get_task(&actor, &target, &accepted.tid).await.unwrap();
-    assert!(stored.scope.principal.0.len() < 256);
+    assert_eq!(stored.scope, expected);
     assert_eq!(g.submit(&actor, request.clone()).await.unwrap().tid, accepted.tid);
-    let mut other_org = actor.clone();
-    other_org.access.organization = Some("org-b".into());
-    assert_eq!(g.get_task(&other_org, &target, &accepted.tid).await, Err(GatewayError::NotFound));
-    actor.access.acting_agent = Some(AgentId("source-b".into()));
-    assert_eq!(g.get_task(&actor, &target, &accepted.tid).await, Err(GatewayError::NotFound));
     actor.caller = CallerContext::Human(bcs_service_api::application::principal::HumanActor {
-        actor_id: String::new(), staff_no: "owner".into(),
+        actor_id: "human_owner".into(), staff_no: String::new(),
     });
-    assert_eq!(g.submit(&actor, request).await, Err(GatewayError::AccessDenied));
+    assert_eq!(g.submit(&actor, request.clone()).await.unwrap(), accepted);
+    actor.caller = CallerContext::Human(bcs_service_api::application::principal::HumanActor {
+        actor_id: "another_human".into(), staff_no: "owner".into(),
+    });
+    assert_eq!(g.get_task(&actor, &target, &accepted.tid).await, Err(GatewayError::NotFound));
+}
+
+#[tokio::test]
+async fn unavailable_authorization_does_not_fall_back_to_frozen_configuration() {
+    let p = ports();
+    let directory = Arc::new(Groups::default());
+    let g = gateway_with(&p, p.inbox.clone(), directory.clone());
+    let request = message("first", "hello");
+    let accepted = g.submit(&me(), request.clone()).await.unwrap();
+    directory.authorization_unavailable.store(true, Ordering::SeqCst);
+    assert_eq!(g.submit(&me(), request.clone()).await, Err(GatewayError::Unavailable {
+        code: "session_directory_unavailable".into(),
+    }));
+    assert_eq!(g.get_task(&me(), &grp(), &accepted.tid).await.unwrap().content.status, TaskStatus::Submitted);
+    directory.authorization_unavailable.store(false, Ordering::SeqCst);
+    assert_eq!(g.submit(&me(), request).await.unwrap(), accepted);
 }

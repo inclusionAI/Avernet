@@ -13,7 +13,7 @@ use std::sync::Arc;
 struct Groups;
 #[async_trait]
 impl DistSessionDirectoryPort for Groups {
-    async fn authorize(&self, _: &TaskScope, _: &SessionTarget, _: &SessionAccessContext) -> Result<(), DirectoryError> {
+    async fn authorize(&self, _: &TaskScope, _: &SessionTarget) -> Result<(), DirectoryError> {
         Ok(())
     }
     async fn resolve(
@@ -55,7 +55,6 @@ impl Host {
             bcs_app_dist_gateway::DistGatewayConfig::new(2),
         )?;
         let caller = GatewayCaller {
-        access: Default::default(),
             tenant: workload::scope().tenant,
             caller: CallerContext::Bot(BotActor {
                 bot_uuid: "gateway-story".into(),

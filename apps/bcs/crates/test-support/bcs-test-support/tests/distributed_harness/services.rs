@@ -153,7 +153,6 @@ async fn gateway_core_harness_checks_duplicate_receipt() -> ContractResult {
 async fn gateway_harness_checks_idempotency_task_identity_and_access_denial() -> ContractResult {
     use bcs_service_api::application::principal::{CallerContext, IntegrationClient};
     let caller = GatewayCaller {
-        access: Default::default(),
         tenant: scope().tenant,
         caller: CallerContext::Integration(IntegrationClient {
             client_id: "caller-a".into(),
@@ -161,7 +160,6 @@ async fn gateway_harness_checks_idempotency_task_identity_and_access_denial() ->
         }),
     };
     let unauthorized = GatewayCaller {
-        access: Default::default(),
         tenant: TenantId("another-tenant".into()),
         caller: CallerContext::Public,
     };

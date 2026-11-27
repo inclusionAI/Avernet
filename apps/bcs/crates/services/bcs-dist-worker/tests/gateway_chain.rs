@@ -34,7 +34,7 @@ struct Groups {
 }
 #[async_trait::async_trait]
 impl DistSessionDirectoryPort for Groups {
-    async fn authorize(&self, _: &TaskScope, _: &SessionTarget, _: &SessionAccessContext) -> Result<(), DirectoryError> {
+    async fn authorize(&self, _: &TaskScope, _: &SessionTarget) -> Result<(), DirectoryError> {
         Ok(())
     }
     async fn resolve(
@@ -89,7 +89,6 @@ fn app(f: &Fixture, groups: Arc<Groups>) -> Router {
         bcs_dist_gateway_http::GatewayHttpConfig::new("http://localhost"),
     )
     .layer(Extension(GatewayCaller {
-        access: Default::default(),
         tenant: TenantId("t".into()),
         caller: CallerContext::Bot(BotActor {
             bot_uuid: "caller".into(),

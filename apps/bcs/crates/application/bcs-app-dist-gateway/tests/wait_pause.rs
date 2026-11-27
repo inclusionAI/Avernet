@@ -86,7 +86,7 @@ impl DistGatewayCoreService for AlwaysGap {
 struct NoGroups;
 #[async_trait]
 impl DistSessionDirectoryPort for NoGroups {
-    async fn authorize(&self, _: &TaskScope, _: &SessionTarget, _: &SessionAccessContext) -> Result<(), DirectoryError> {
+    async fn authorize(&self, _: &TaskScope, _: &SessionTarget) -> Result<(), DirectoryError> {
         Ok(())
     }
 
@@ -110,7 +110,6 @@ async fn a_wait_that_keeps_hitting_gaps_pauses_between_attempts() {
     config.snapshot_cover_retry = Duration::from_millis(50);
     let gateway = DistGateway::new(core.clone(), Arc::new(NoGroups), Arc::new(TestClock), config).unwrap();
     let caller = GatewayCaller {
-        access: Default::default(),
         tenant: TenantId("t-ant".into()),
         caller: CallerContext::Bot(BotActor {
             bot_uuid: "pa-001".into(),

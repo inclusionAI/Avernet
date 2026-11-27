@@ -351,8 +351,12 @@ With the `dist-direct-a2a` feature, [DirectA2aStores](src/dist_direct_a2a.rs)
 assembles the Gateway router, Worker runtime, processor and dispatch supervisor,
 and Connector engine for an embedding host. Mount the router behind a layer
 that supplies the authenticated GatewayCaller. Direct targets use
-`/a2a/agents/{target}`. Gateway invokes the shared DB-backed Direct access policy
-before admitting each send or reply. Worker executes the persisted input.
+`/a2a/agents/{target}`. The host must inject `DistSessionDirectoryPort`; Gateway
+invokes its authorization method before admitting each send or reply and
+propagates denials and failures. Concrete authorization and directory integration
+are deferred; this composition supplies no default policy. Caller principals
+and task ownership retain their existing meaning. Worker executes the persisted
+input without repeating Gateway authorization.
 
 All three roles use the same cluster, namespace and SQL Result/Blob archive.
 The Worker and its durable scan providers share one scan budget. The host drives

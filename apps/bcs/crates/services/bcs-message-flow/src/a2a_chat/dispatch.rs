@@ -7,9 +7,28 @@ impl A2aChat {
         validate_message(&cmd.message)?;
         let client_kind = direct_chat_client_kind(cmd.client.as_deref());
         let from_bot_id = bot_caller_id(&cmd.caller)?;
-        self.access.authorize(
-            &from_bot_id, &cmd.target_bot_id, cmd.authenticated_staff_id.as_deref(), cmd.organization_code.as_deref(),
-        ).await?;
+        bcs_observability::observe_result("chat.authorize.owner", self.ensure_source_owner(&from_bot_id, cmd.authenticated_staff_id.as_deref())).await?;
+        let target_bot = if let Some(code) = cmd.organization_code.as_deref() {
+            let organization = self.organization.as_ref().ok_or_else(|| {
+                ServiceError::InvalidOperation {
+                    message: "organization service is not configured".to_string(),
+                    request_id: None,
+                }
+            })?;
+            bcs_observability::observe_result("chat.authorize.organization", organization
+                .authorize_pair(code, &from_bot_id, &cmd.target_bot_id)).await?;
+            bcs_observability::observe_result("chat.authorize.organization_target", self.ensure_organization_target_reachable(&from_bot_id, &cmd.target_bot_id)).await?
+        } else {
+            bcs_observability::observe_result("chat.authorize.target", self.ensure_target_reachable(&from_bot_id, &cmd.target_bot_id)).await?
+        };
+        if target_bot.status == ActorStatus::Hidden {
+            let name = target_bot
+                .capabilities
+                .name
+                .as_deref()
+                .unwrap_or(&cmd.target_bot_id);
+            return Err(ServiceError::BotHidden(name.to_string()));
+        }
         let run_id = cmd
             .run_id
             .clone()
@@ -49,7 +68,7 @@ impl A2aChat {
             return self.admit_direct(&cmd, &from_bot_id, &run_id, &session_key, expires_at_ms).await;
         }
         self.guard_legacy(&cmd.target_bot_id, &session_key).await?;
-        let delivery_target = bcs_observability::observe_result("chat.delivery.resolve", self.access
+        let delivery_target = bcs_observability::observe_result("chat.delivery.resolve", self
             .registry
             .resolve_delivery_target(&cmd.target_bot_id)).await?;
         if cmd.a2a_test_user.is_some() && !matches!(delivery_target, BotDeliveryTarget::A2a { .. }) {
@@ -145,8 +164,8 @@ impl A2aChat {
             use bcs_domain::{GroupMessage, GroupMessageType, MessageRole};
 
             let credentials_pair = match (
-                bcs_observability::observe_value("chat.credentials.sender", self.access.registry.get_agent_credentials(&from_bot_id)).await,
-                bcs_observability::observe_value("chat.credentials.target", self.access.registry.get_agent_credentials(&cmd.target_bot_id)).await,
+                bcs_observability::observe_value("chat.credentials.sender", self.registry.get_agent_credentials(&from_bot_id)).await,
+                bcs_observability::observe_value("chat.credentials.target", self.registry.get_agent_credentials(&cmd.target_bot_id)).await,
             ) {
                 (Some(c), Some(r))
                     if c.agent_code.as_deref().is_some_and(|s| !s.is_empty())

@@ -23,11 +23,13 @@ archival, isolation and ownership behavior comes from production services.
 
 The same story starts a second companion with `--direct` and a loopback HTTP
 A2A agent. It sends external JSON-RPC requests through the Direct Gateway,
-checks admission of the registered target, streams replacement text and a
+checks resolution of the fixture target, streams replacement text and a
 delta, answers a remote question, and starts a new turn after confirmed
 cancellation. The agent records the downstream context and remote task ID.
-This process uses the production Direct directory, Worker runner, and Connector
-with the test registry, memory coordination store, and SQLite archive.
+This process uses production Gateway, Worker runner, and Connector wiring with
+an explicit test-only directory and authorization stub, test registry, memory
+coordination store, and SQLite archive. It verifies the execution path, not a
+production authorization policy; concrete policy integration is deferred.
 
 The Store mock disappears on process exit. In-process Worker takeover must not
 be reported as persistence across a process or storage-node restart. Actual

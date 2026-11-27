@@ -36,10 +36,6 @@ these strings both as Send sources and bound Inject context. Fully managed
 replays reuse durable deliveries; mixed replays fail as ambiguous because legacy
 recipients have no durable delivery ledger. Runtime retry policy is unchanged.
 
-## Distributed Direct A2A admission
-
-The distributed Gateway calls `DistSessionDirectoryPort::authorize` on each external send, including new turns and replies. `DirectSessionDirectory` is bound to one tenant and reuses `DirectChatAccess` with the same bot registry, friendship, organization and management services as local chat. A delegated sender is bound to its authenticated human for authorization. An authorized session freezes a logical agent and pool, while its Worker and Connector execute each accepted message under the completed admission decision. Session creation freezes the inline Direct mode configuration without further DB reads.
-
 ## Direct chat empty-input admission (v1)
 
 A2aChat implements the text-only direct-chat application contract. Both

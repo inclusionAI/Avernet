@@ -63,7 +63,7 @@ impl A2aChat {
         }
         let message_id = uuid::Uuid::new_v4().to_string();
         let now = now_ms();
-        let target = self.access.registry.resolve_delivery_target(&cmd.target_bot_id).await?;
+        let target = self.registry.resolve_delivery_target(&cmd.target_bot_id).await?;
         let headers: Vec<_> = cmd.provider_bypass_headers.iter().filter(|(name, _)| target.is_http_provider()
             || flow.queue_persistable_headers.iter().any(|allowed| allowed.eq_ignore_ascii_case(name))).cloned().collect();
         let snapshot = bcs_config_api::queued_provider_headers::snapshot(&headers, &flow.queue_persistable_headers);

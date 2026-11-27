@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub struct Directory;
 #[async_trait]
 impl DistSessionDirectoryPort for Directory {
-    async fn authorize(&self, _: &TaskScope, _: &SessionTarget, _: &SessionAccessContext) -> Result<(), DirectoryError> {
+    async fn authorize(&self, _: &TaskScope, _: &SessionTarget) -> Result<(), DirectoryError> {
         Ok(())
     }
     async fn resolve(

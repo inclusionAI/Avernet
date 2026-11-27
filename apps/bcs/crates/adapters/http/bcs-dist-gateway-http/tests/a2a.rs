@@ -31,7 +31,7 @@ use tower::ServiceExt;
 struct Groups;
 #[async_trait]
 impl DistSessionDirectoryPort for Groups {
-    async fn authorize(&self, _: &TaskScope, _: &SessionTarget, _: &SessionAccessContext) -> Result<(), DirectoryError> {
+    async fn authorize(&self, _: &TaskScope, _: &SessionTarget) -> Result<(), DirectoryError> {
         Ok(())
     }
 
@@ -66,7 +66,6 @@ impl Clock for TestClock {
 
 fn caller() -> GatewayCaller {
     GatewayCaller {
-        access: Default::default(),
         tenant: TenantId("t-ant".into()),
         caller: CallerContext::Bot(BotActor {
             bot_uuid: "pa-001".into(),

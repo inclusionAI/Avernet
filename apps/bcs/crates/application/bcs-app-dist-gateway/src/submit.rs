@@ -2,7 +2,7 @@
 
 use crate::error::{admit_error, core_error};
 use crate::identity::*;
-use crate::{DistGateway, authenticated_scope, invalid, scope_of};
+use crate::{DistGateway, invalid, scope_of};
 use bcs_dist_model::*;
 use bcs_service_api::application::dist_gateway::*;
 use bcs_service_api::core::dist_gateway::{AdmitTaskCommand, CoreAdmission, DistGatewayCoreError};
@@ -21,19 +21,9 @@ pub(crate) async fn submit(
     if request.target.id().is_empty() {
         return Err(invalid("target_missing"));
     }
-    let actor = authenticated_scope(caller)?;
-    // Delegated Direct chat authority uses the verified staff number, while
-    // task ownership and interaction replies use the stable actor ID.
-    let mut access_scope = actor.clone();
-    if caller.access.acting_agent.is_some()
-        && let bcs_service_api::application::principal::CallerContext::Human(human) = &caller.caller
-    {
-        if human.staff_no.is_empty() { return Err(GatewayError::AccessDenied); }
-        access_scope.principal = PrincipalId(format!("human:{}", human.staff_no));
-    }
-    gateway.directory.authorize(&access_scope, &request.target, &caller.access).await.map_err(directory_error)?;
+    gateway.directory.authorize(&scope, &request.target).await.map_err(directory_error)?;
     let command = match (&request.session, &request.task) {
-        (_, Some(tid)) => reply(gateway, &scope, &request, tid, actor.principal).await?,
+        (_, Some(tid)) => reply(gateway, &scope, &request, tid, scope.principal.clone()).await?,
         (Some(sid), None) => {
             parse_session(sid)?;
             gateway.check_target(&scope, sid, &request.target).await?;

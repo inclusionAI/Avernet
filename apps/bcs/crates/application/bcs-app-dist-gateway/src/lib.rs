@@ -123,35 +123,21 @@ pub(crate) fn invalid(code: &str) -> GatewayError {
 
 /// The authorization scope of a caller: its tenant and a principal that names
 /// the kind of identity, so a bot and a human with the same id never collide.
-fn authenticated_scope(caller: &GatewayCaller) -> Result<TaskScope, GatewayError> {
-    let (kind, id) = match &caller.caller {
+pub(crate) fn scope_of(caller: &GatewayCaller) -> Result<TaskScope, GatewayError> {
+    let principal = match &caller.caller {
         CallerContext::Public => return Err(GatewayError::AccessDenied),
-        CallerContext::Human(actor) => ("human", &actor.actor_id),
-        CallerContext::Bot(actor) => ("bot", &actor.bot_uuid),
-        CallerContext::Integration(client) => ("integration", &client.client_id),
-        CallerContext::Admin(actor) => ("admin", &actor.actor_id),
+        CallerContext::Human(actor) => format!("human:{}", actor.actor_id),
+        CallerContext::Bot(actor) => format!("bot:{}", actor.bot_uuid),
+        CallerContext::Integration(client) => format!("integration:{}", client.client_id),
+        CallerContext::Admin(actor) => format!("admin:{}", actor.actor_id),
     };
-    if caller.tenant.0.is_empty() || id.is_empty() {
+    if caller.tenant.0.is_empty() {
         return Err(GatewayError::AccessDenied);
     }
     Ok(TaskScope {
         tenant: caller.tenant.clone(),
-        principal: PrincipalId(format!("{kind}:{id}")),
+        principal: PrincipalId(principal),
     })
-}
-
-/// Keep delegated bot and organization sessions isolated across reads and writes.
-/// Simple callers retain their original stored scope and request identities.
-pub(crate) fn scope_of(caller: &GatewayCaller) -> Result<TaskScope, GatewayError> {
-    let mut scope = authenticated_scope(caller)?;
-    if caller.access.acting_agent.is_some() || caller.access.organization.is_some() {
-        let identity = serde_json::json!([scope.principal.0, caller.access.acting_agent, caller.access.organization]);
-        // A delegated tuple can exceed the store's key-segment limit even if
-        // every component alone is valid. Hash its framed, canonical contents.
-        let digest = identity::content_digest(&identity);
-        scope.principal = PrincipalId(format!("delegated:{}", digest.0));
-    }
-    Ok(scope)
 }
 
 #[async_trait]

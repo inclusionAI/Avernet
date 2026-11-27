@@ -10,7 +10,6 @@ pub use crate::port::dist_output::{FormattedOutputBody, FormattedOutputEvent};
 pub struct GatewayCaller {
     pub tenant: TenantId,
     pub caller: CallerContext,
-    pub access: crate::port::dist_agent::SessionAccessContext,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -105,14 +105,6 @@ pub trait DistAgentClientPort: Send + Sync {
     ) -> CancelOutcome;
 }
 
-/// Trusted caller-side selection for a send. Acting as a bot still requires
-/// a live management grant for the authenticated human.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct SessionAccessContext {
-    pub acting_agent: Option<AgentId>,
-    pub organization: Option<String>,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrozenSessionProposal {
     pub target: SessionTarget,
@@ -136,11 +128,12 @@ pub enum DirectoryError {
 #[async_trait]
 pub trait DistSessionDirectoryPort: Send + Sync {
     /// Gateway checks every external send before durable admission, including replies.
+    /// The host supplies the policy; the Gateway passes its existing authenticated
+    /// scope unchanged. No authorization policy or default allow is provided here.
     async fn authorize(
         &self,
         scope: &TaskScope,
         target: &SessionTarget,
-        access: &SessionAccessContext,
     ) -> Result<(), DirectoryError>;
 
     /// Freeze target configuration once, after caller authorization.

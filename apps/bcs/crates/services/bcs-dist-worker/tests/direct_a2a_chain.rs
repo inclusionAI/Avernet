@@ -51,7 +51,6 @@ impl DistSessionDirectoryPort for Directory {
         &self,
         scope: &TaskScope,
         target: &SessionTarget,
-        _: &SessionAccessContext,
     ) -> Result<(), DirectoryError> {
         assert_eq!(scope.principal.0, "bot:caller");
         assert_eq!(target, &SessionTarget::DirectAgent { agent: AgentId("analyst".into()) });
@@ -115,7 +114,6 @@ fn gateway(f: &Fixture, directory: Arc<Directory>) -> Router {
     .layer(Extension(GatewayCaller {
         tenant: TenantId("t".into()),
         caller: CallerContext::Bot(BotActor { bot_uuid: "caller".into() }),
-        access: Default::default(),
     }))
 }
 
