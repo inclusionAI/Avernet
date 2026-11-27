@@ -18,7 +18,7 @@ const makeTemplate = (overrides: Partial<AgentCodingTemplate> = {}): AgentCoding
   ...overrides,
 });
 
-test('官方推荐不展示负责人，描述使用较深的正文颜色', () => {
+test('官方推荐展示负责人姓名，描述使用较深的正文颜色', () => {
   render(
     <AgentCodingTemplateCard
       template={makeTemplate({ ownerName: '模板负责人' })}
@@ -27,7 +27,7 @@ test('官方推荐不展示负责人，描述使用较深的正文颜色', () =>
     />,
   );
 
-  expect(screen.queryByText('负责人：模板负责人')).toBeNull();
+  expect(screen.getByText('模板负责人')).toBeTruthy();
   expect(screen.getByText('模板描述').className).toContain('text-foreground/70');
 });
 
@@ -44,7 +44,7 @@ test('模板市场展示负责人，白名单状态在卡片右下角展示绶�
     />,
   );
 
-  expect(screen.getByText('负责人：模板负责人')).toBeTruthy();
+  expect(screen.getByText('模板负责人')).toBeTruthy();
   expect(screen.getByLabelText('白名单阶段').textContent).toContain('白名单');
 });
 
