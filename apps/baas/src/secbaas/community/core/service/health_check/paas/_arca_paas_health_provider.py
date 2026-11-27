@@ -1,6 +1,8 @@
 """Arca 平台健康检查实现。"""
 
 import asyncio
+import base64
+import inspect
 import json
 import time
 
@@ -11,6 +13,7 @@ from secbaas.community.api.health_check.paas import (
 from secbaas.community.core.service.paas import PaasServiceFacade
 from secbaas.community.logger import get_logger
 
+from . import _claude_code_alive_probe
 from ._paas_health_provider import PaaSHealthProvider
 
 logger = get_logger("core-service")
@@ -371,14 +374,38 @@ class HermesActiveHealthChecker:
 
 
 class ClaudeCodeActiveHealthChecker:
-    """Claude Code / AICoding 引擎活跃状态检查器
+    """Claude Code / AICoding 引擎活跃状态检查器。
 
-    检查 /home/admin/.claude/projects/ 下 .jsonl 文件的修改时间，
-    判断 Claude Code / AICoding Bot 是否处于活跃使用状态。
+    三源探测：claude jsonl 转录 mtime + sessions.sqlite3 会话表
+    max(updated_at) + cron-tasks.json 内置任务名单。探测逻辑集中在
+    _claude_code_alive_probe 模块（其源码 base64 后在沙箱内以裸
+    python3 执行），内置任务排除语义与实测结论见该模块 docstring。
+
+    minutes 仅保留构造签名兼容；窗口判断由 BaaS 侧
+    _determine_alive_status 基于 lastSessionTime 完成。
     """
+
+    _probe_cmd_cache: "str | None" = None
 
     def __init__(self, minutes: int = 1440):
         self._minutes = minutes
+
+    @classmethod
+    def _build_cmd(cls) -> str:
+        """生成沙箱执行命令：探测模块源码 base64 后用裸 python3 执行。
+
+        base64 下发避免探测脚本与多层 shell 的引号转义冲突。
+        探测模块按架构规则不携带 ``__main__`` 入口（私有模块不可执行），
+        入口调用在此拼接：``python3 -`` 顺序执行模块定义后运行 ``probe()``。
+        """
+        if cls._probe_cmd_cache is None:
+            source = inspect.getsource(_claude_code_alive_probe)
+            entrypoint = "\nprint(json.dumps(probe()))\n"
+            encoded = base64.b64encode((source + entrypoint).encode("utf-8")).decode(
+                "ascii"
+            )
+            cls._probe_cmd_cache = f"echo {encoded} | base64 -d | python3 -"
+        return cls._probe_cmd_cache
 
     @property
     def name(self) -> str:
@@ -390,13 +417,7 @@ class ClaudeCodeActiveHealthChecker:
         paas_facade: "PaasServiceFacade",
     ) -> HealthCheckerStrategyResult:
         start_time = time.time()
-        cmd = (
-            'DIR="/home/admin/.claude/projects"; '
-            f"MIN={self._minutes}; "
-            'LATEST=$(find "$DIR" -type f -name "*.jsonl" -printf "%T@\\n" 2>/dev/null | sort -rn | head -1); '
-            'if [ -n "$LATEST" ]; then LAST_TIME=$(date -d "@${LATEST%.*}" +"%Y-%m-%d %H:%M:%S" 2>/dev/null); else LAST_TIME=""; fi; '
-            'printf "{\\"ok\\": true, \\"lastSessionTime\\": \\"%s\\", \\"hasEnabledCron\\": false}\\n" "$LAST_TIME"'
-        )
+        cmd = self._build_cmd()
         try:
             result = await paas_facade.execute_command(
                 paas_device_id=paas_device_id,
