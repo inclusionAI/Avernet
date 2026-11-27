@@ -208,6 +208,9 @@ class TestHarnessOnlyPollsExecutionLeaves:
         h.register("t1")
         h._poll_once()
         clock.advance(10.0)
+        assert h._poll_once() == []
+        assert not recovery.nodes
+        clock.advance(5.0)
         resets = h._poll_once()
 
         assert resets == []
@@ -237,6 +240,9 @@ class TestHarnessOnlyPollsExecutionLeaves:
         )
         h.register("t1")
         h._poll_once()
+        clock.advance(1.0)
+        assert h._poll_once() == []
+        assert not recovery.nodes
 
         for i in range(1, 5):
             clock.advance(10.0)
@@ -273,6 +279,9 @@ class TestHarnessOnlyPollsExecutionLeaves:
         )
         h.register("t1")
         h._poll_once()
+        clock.advance(1.0)
+        assert h._poll_once() == []
+        assert not recovery.nodes
 
         clock.advance(10.0)
         assert h._poll_once() == []
@@ -309,13 +318,19 @@ class TestHarnessOnlyPollsExecutionLeaves:
         )
         h.register("t1")
         h._poll_once()
+        clock.advance(1.0)
+        assert h._poll_once() == []
 
         clock.advance(10.0)
         assert h._poll_once() == []
         assert node.run_info.extend_props["relay_harness_resume_attempts"] == 1
+        clock.advance(1.0)
+        assert h._poll_once() == []
         clock.advance(10.0)
         assert h._poll_once() == []
         assert node.run_info.extend_props["relay_harness_resume_attempts"] == 2
+        clock.advance(1.0)
+        assert h._poll_once() == []
 
         clock.advance(10.0)
         patches = h._poll_once()
@@ -880,10 +895,92 @@ def test_delivered_resume_has_observation_window_before_second_recovery(svc, gra
     h = TaskHarness(svc, Recorder(), clock=clock,
                     runtime_probe=_ScriptedProbe(_runtime_result("terminal_failed")),
                     runtime_probe_threshold=120, relay_recovery=recovery)
-    asyncio.run(h._relay_runtime_harness("t1", node, elapsed=100, sla=900))
+
+    def poll():
+        return asyncio.run(h._relay_runtime_harness("t1", node, elapsed=3600, sla=900))
+
+    poll()
+    clock.advance(599)
+    poll()
+    assert not recovery.nodes
+    assert "relay_harness_resume_attempts" not in node.run_info.extend_props
     clock.advance(1)
-    asyncio.run(h._relay_runtime_harness("t1", node, elapsed=101, sla=900))
+    poll()
     assert len(recovery.nodes) == 1
+    clock.advance(1)
+    poll()
+    clock.advance(599)
+    poll()
+    assert len(recovery.nodes) == 1
+    clock.advance(1)
+    poll()
+    assert len(recovery.nodes) == 2
+    clock.advance(1)
+    poll()
+    clock.advance(599)
+    assert poll() is None
+    clock.advance(1)
+    assert poll().status == Status.HUNG
+
+
+@pytest.mark.parametrize("reset_state", ["active", "terminal_success", "unknown", "probe_unavailable"])
+def test_engine_failure_wait_restarts_after_state_changes(svc, graph, reset_state):
+    import asyncio
+    graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+    _dispatch_running(svc, graph, "c1")
+    node = svc._get_node(graph, "c1")
+    clock = _Clock(100)
+    recovery = _FakeRelayRecovery()
+    probe = _ScriptedProbe(_runtime_result("terminal_failed"))
+    h = TaskHarness(svc, Recorder(), clock=clock, runtime_probe=probe,
+                    runtime_probe_threshold=120, active_no_progress_max_cycles=3,
+                    relay_recovery=recovery)
+
+    def poll():
+        return asyncio.run(h._relay_runtime_harness("t1", node, elapsed=3600, sla=900))
+
+    poll()
+    clock.advance(359)
+    probe.observations = [_runtime_result(reset_state)]
+    poll()
+    probe.observations = [_runtime_result("terminal_failed")]
+    poll()
+    clock.advance(359)
+    poll()
+    assert not recovery.nodes
+    clock.advance(1)
+    poll()
+    assert len(recovery.nodes) == 1
+
+
+def test_engine_failure_wait_restarts_for_resume_from_another_worker(svc, graph):
+    import asyncio
+    graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
+    _dispatch_running(svc, graph, "c1")
+    node = svc._get_node(graph, "c1")
+    clock = _Clock(100)
+    recovery = _FakeRelayRecovery()
+    h = TaskHarness(svc, Recorder(), clock=clock,
+                    runtime_probe=_ScriptedProbe(_runtime_result("terminal_failed")),
+                    runtime_probe_threshold=120, relay_recovery=recovery)
+
+    def poll():
+        return asyncio.run(h._relay_runtime_harness("t1", node, elapsed=3600, sla=900))
+
+    poll()
+    clock.advance(600)
+    node.run_info.extend_props.update({
+        "relay_harness_resume_run_id": "resume-from-another-worker",
+        "relay_harness_resume_attempts": 1,
+    })
+    poll()
+    clock.advance(599)
+    poll()
+    assert not recovery.nodes
+    clock.advance(1)
+    poll()
+    assert len(recovery.nodes) == 1
+    assert node.run_info.extend_props["relay_harness_resume_attempts"] == 2
 
 
 def test_active_silence_exhaustion_does_not_fail_long_running_call(svc, graph):
