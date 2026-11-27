@@ -1,0 +1,23 @@
+docs/specs/2026-11-26-kb-space-auto-authorization/spec.md
+  s_dddd0d1da584ee::t_254ea372cb1e2a 1,4,7,10-11,14-21,24-26,29-32,35
+docs/specs/2026-11-26-kb-space-auto-authorization/plan.md
+  s_dddd0d1da584ee::t_83e2eefbd92605 1,4,6,9,11,13-20,22,25,27-35,38-40,43-51,54,56-57,60-65,68,70,72-75,77-109,112,114,116-121,124-129,132,134,137,140-148,151-160,162
+docs/specs/2026-11-26-kb-space-auto-authorization/tasks.md
+  s_dddd0d1da584ee::t_50907dbece3c47 1,5,7-9,11-14,17-19,21-24,27-29,31-35,37-39,41-46,48-50,52-55,57-59,61-65,69-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3fc488a7ec79d8d2c95aefcca188568a2bdba12a",
+  "prompts": {},
+  "sessions": {
+    "s_dddd0d1da584ee": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a217be-1ab9-7a02-a7ff-c3c90307ce48",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xingchi.wxc <xingchi.wxc@alipay.com>"
+    }
+  }
+}
