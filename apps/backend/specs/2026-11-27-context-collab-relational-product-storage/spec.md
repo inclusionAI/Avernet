@@ -129,23 +129,23 @@ RENAME TABLE ac_context_collab_product_profile
 
 ```sql
 CREATE TABLE ac_context_collab_product_profile (
-    id BIGINT NOT NULL AUTO_INCREMENT,
-    avernet_tenant VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
-    env VARCHAR(20) COLLATE utf8mb4_bin NOT NULL,
-    name VARCHAR(256) NOT NULL,
-    description VARCHAR(2048) NOT NULL DEFAULT '',
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT 'Profile 主键，自增',
+    avernet_tenant VARCHAR(64) COLLATE utf8mb4_bin NOT NULL COMMENT '租户标识',
+    env VARCHAR(20) COLLATE utf8mb4_bin NOT NULL COMMENT '环境标识',
+    name VARCHAR(256) NOT NULL COMMENT 'Profile 名称',
+    description VARCHAR(2048) NOT NULL DEFAULT '' COMMENT 'Profile 描述',
     config TEXT NOT NULL COMMENT '版本化完整 YAML，唯一执行配置来源',
     status VARCHAR(32) COLLATE utf8mb4_bin NOT NULL DEFAULT 'DRAFT' COMMENT 'Profile 状态：DRAFT/ONLINE/OFFLINE',
     creator VARCHAR(1024) COLLATE utf8mb4_bin NULL COMMENT '创建人稳定标识；历史来源未知可空',
     modifer VARCHAR(1024) COLLATE utf8mb4_bin NULL COMMENT '最后修改人稳定标识；按约定拼写，历史未知可空',
-    gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (id),
     KEY idx_cc_profile_scope_name (avernet_tenant, env, name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 ```
 
-`config` 使用 `TEXT`（不是 MEDIUMTEXT），非唯一索引名为 `idx_cc_profile_scope_name`，索引列与顺序仍为 `(avernet_tenant, env, name)`。已有上一版五表结构不能靠更新建表 SQL 自动升级：停写并核验所有 `OCTET_LENGTH(config) <= 65535` 后，再将列改为 TEXT 并重命名旧索引；超限记录停止升级并人工评审，不截断配置。
+`config` 使用 `TEXT`（不是 MEDIUMTEXT），非唯一索引名为 `idx_cc_profile_scope_name`，索引列与顺序仍为 `(avernet_tenant, env, name)`。迁移 SQL 中所有新增及建表字段均携带明确的 MySQL `COMMENT`，不把字段含义只写在文档里。已有上一版五表结构不能靠更新建表 SQL 自动升级：停写并核验所有 `OCTET_LENGTH(config) <= 65535` 后，再将列改为 TEXT 并重命名旧索引；超限记录停止升级并人工评审，不截断配置。
 
 name 不唯一；同名 create 仍是独立调用。name/description/执行 config 及创建归属不可原地修改，定义变更新建 ID；status 是独立生命周期元数据，不受执行配置不可变限制。本版不新增 Profile 更新接口，仍保留现有五个服务方法，状态管理入口另行评审。
 
@@ -175,10 +175,10 @@ Profile 状态约定：
 
 ```sql
 ALTER TABLE ac_context_collab_collet
-    ADD COLUMN content MEDIUMTEXT NULL,
-    ADD COLUMN status VARCHAR(32) COLLATE utf8mb4_bin NULL,
-    ADD COLUMN product_profile_id BIGINT NULL,
-    ADD COLUMN current_rollout_id BIGINT NULL,
+    ADD COLUMN content MEDIUMTEXT NULL COMMENT 'Collet 业务内容',
+    ADD COLUMN status VARCHAR(32) COLLATE utf8mb4_bin NULL COMMENT 'Collet 业务状态',
+    ADD COLUMN product_profile_id BIGINT NULL COMMENT '关联的 ProductProfile 主键',
+    ADD COLUMN current_rollout_id BIGINT NULL COMMENT '当前 ColletRollout 主键，可为空',
     ADD KEY idx_cc_collet_profile_status (avernet_tenant, env, product_profile_id, status, id);
 ```
 
@@ -188,16 +188,16 @@ Collet 本版共新增四列：content、status、product_profile_id、current_r
 
 ```sql
 CREATE TABLE ac_context_collab_collet_rollout (
-    id BIGINT NOT NULL AUTO_INCREMENT,
-    avernet_tenant VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
-    env VARCHAR(20) COLLATE utf8mb4_bin NOT NULL,
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT 'ColletRollout 主键，自增',
+    avernet_tenant VARCHAR(64) COLLATE utf8mb4_bin NOT NULL COMMENT '租户标识',
+    env VARCHAR(20) COLLATE utf8mb4_bin NOT NULL COMMENT '环境标识',
     collet_id BIGINT UNSIGNED NOT NULL COMMENT '物理 Collet 主键',
     ordinal INT NOT NULL COMMENT '本 Collet 内稳定顺序，从 1 开始',
-    predecessor_id BIGINT NULL,
-    content MEDIUMTEXT NOT NULL,
-    status VARCHAR(32) COLLATE utf8mb4_bin NOT NULL,
-    gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    predecessor_id BIGINT NULL COMMENT '前驱 ColletRollout ID，首轮为 NULL',
+    content MEDIUMTEXT NOT NULL COMMENT '本 Rollout 的业务输入内容',
+    status VARCHAR(32) COLLATE utf8mb4_bin NOT NULL COMMENT 'ColletRollout 执行状态',
+    gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_cc_rollout_order (collet_id, ordinal),
     UNIQUE KEY uk_cc_rollout_collet_id (collet_id, id),
@@ -215,21 +215,21 @@ current/前驱属于同一 Collet 的约束改由应用维护：新建在单事�
 
 ```sql
 CREATE TABLE ac_context_collab_stage_rollout (
-    id BIGINT NOT NULL AUTO_INCREMENT,
-    avernet_tenant VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
-    env VARCHAR(20) COLLATE utf8mb4_bin NOT NULL,
-    collet_rollout_id BIGINT NOT NULL,
-    name VARCHAR(256) NOT NULL,
-    status VARCHAR(32) COLLATE utf8mb4_bin NOT NULL,
-    assignee_type VARCHAR(64) COLLATE utf8mb4_bin NOT NULL DEFAULT '',
-    assignee_uuid VARCHAR(256) COLLATE utf8mb4_bin NOT NULL DEFAULT '',
-    `input` MEDIUMTEXT NOT NULL,
-    session_id VARCHAR(512) COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT 'StageRollout 主键，自增',
+    avernet_tenant VARCHAR(64) COLLATE utf8mb4_bin NOT NULL COMMENT '租户标识',
+    env VARCHAR(20) COLLATE utf8mb4_bin NOT NULL COMMENT '环境标识',
+    collet_rollout_id BIGINT NOT NULL COMMENT '所属 ColletRollout 主键',
+    name VARCHAR(256) NOT NULL COMMENT 'Stage 名称，必须来自 Profile YAML',
+    status VARCHAR(32) COLLATE utf8mb4_bin NOT NULL COMMENT 'Stage 执行状态',
+    assignee_type VARCHAR(64) COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '执行者类型，未分配为空字符串',
+    assignee_uuid VARCHAR(256) COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '执行者 UUID，未分配为空字符串',
+    `input` MEDIUMTEXT NOT NULL COMMENT 'Stage 输入内容',
+    session_id VARCHAR(512) COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '真实会话 ID，未绑定为空字符串',
     acceptances VARCHAR(8192) NOT NULL COMMENT '严格 JSON 数组字符串，序列化后最多 8192 字符，空集合写 []',
-    error_msg TEXT NOT NULL,
+    error_msg TEXT NOT NULL COMMENT '错误消息，UTF-8 字节最多 65535，空值为空字符串',
     artifacts MEDIUMTEXT NOT NULL COMMENT '严格 JSON 数组，空集合写 []',
-    gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (id),
     KEY idx_cc_stage_scope_rollout (avernet_tenant, env, collet_rollout_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
@@ -251,8 +251,8 @@ CREATE TABLE ac_context_collab_stage_rollout (
 
 ```sql
 ALTER TABLE ac_context_collab_event
-    ADD COLUMN collet_rollout_id BIGINT NULL,
-    ADD COLUMN collet_stage_rollout_id BIGINT NULL,
+    ADD COLUMN collet_rollout_id BIGINT NULL COMMENT '关联的 ColletRollout 主键，可为空',
+    ADD COLUMN collet_stage_rollout_id BIGINT NULL COMMENT '关联的 StageRollout 主键，可为空',
     ADD KEY idx_cc_event_rollout (avernet_tenant, env, collet_rollout_id, id),
     ADD KEY idx_cc_event_stage (avernet_tenant, env, collet_stage_rollout_id, id),
     ADD KEY idx_cc_event_stage_parent (collet_rollout_id, collet_stage_rollout_id);
@@ -546,7 +546,7 @@ human 反馈 → adaptation Agent 提议 → 重新核验 → 同一仓储事务
 ### 9.2 必须补充的测试
 
 - 正式安装只涉及五表，不出现五张排除表或旧运行表依赖；普通启动/metadata/create_all 不建回旧表。
-- ORM/DDL 的字段、nullable、signed/unsigned、索引一致；五表 metadata、MySQL 方言编译、实际 SQLite 反射及迁移 SQL 均无物理外键，新增普通索引名均以 `idx_` 开头；Stage 只保留普通关联索引，不定义两个业务唯一键。SQLite 保持 PRAGMA foreign_keys=ON，不靠关闭检查通过；原子创建/审计校验、坏 current/前驱/缺父记录/孤立 stage 拒绝及唯一键竞争有真实数据库测试；目标库另验 DDL/隔离/锁行为。
+- ORM/DDL 的字段、nullable、signed/unsigned、索引一致；五表 metadata、MySQL 方言编译、实际 SQLite 反射及迁移 SQL 均无物理外键，新增普通索引名均以 `idx_` 开头；Stage 只保留普通关联索引，不定义两个业务唯一键。迁移 SQL 中 Profile/rollout/stage 的全部 CREATE 字段和 Collet/Event 的 ADD COLUMN 字段均有明确 COMMENT。SQLite 保持 PRAGMA foreign_keys=ON，不靠关闭检查通过；原子创建/审计校验、坏 current/前驱/缺父记录/孤立 stage 拒绝及唯一键竞争有真实数据库测试；目标库另验 DDL/隔离/锁行为。
 - 全部原始需求字段、status 枚举、闭合 JSON/YAML、description、旧四字段执行摘要/plan digest 正确；独立 config_digest/owner_json 不在目标 Profile ORM/DDL/读写中，审计元数据不影响执行摘要；未知 schema/缺状态 fail closed。
 - Profile.config 的 DDL/ORM 均为 TEXT；非唯一索引为 idx_cc_profile_scope_name，列顺序保持 avernet_tenant/env/name；完整 YAML 序列化后 UTF-8 65535 字节可往返，65536 字节创建/读取拒绝且不截断，失败创建不遗留记录；ASCII 与中文均覆盖。
 - Profile.status 的 DDL/ORM/领域默认均为 DRAFT，新建服务显式写入 DRAFT、响应为草稿且不自动上线，三个枚举值与响应往返正确；未知/空/null/错误大小写拒绝，旧 v2 无状态按显式兼容规则迁为 DRAFT，可信已有生命周期状态保留，不虚构上线事件。status 不进入 config/执行摘要，状态变化不改变原四字段 plan.profile_digest。

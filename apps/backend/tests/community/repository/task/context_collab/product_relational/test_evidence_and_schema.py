@@ -105,6 +105,21 @@ def test_additive_migration_has_no_foreign_key_clauses():
     assert not re.search(r"\b(?:FOREIGN\s+KEY|REFERENCES)\b", migration, re.I)
 
 
+def test_migration_columns_have_database_comments():
+    migration = (
+        Path(product_relational_models.__file__).parents[2]
+        / "sql"
+        / "2026_11_27_product_relational_storage.sql"
+    ).read_text()
+
+    for line in migration.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("ADD COLUMN"):
+            assert " COMMENT " in f" {stripped} ", stripped
+        elif " NULL" in stripped and stripped != ") ENGINE":
+            assert " COMMENT " in f" {stripped} ", stripped
+
+
 @pytest.mark.parametrize(
     "model,expected",
     [

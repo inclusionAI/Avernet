@@ -18,7 +18,8 @@ snapshot v2; do not bind its `RolloutRepository` to the business repository.
   installer must load this L6 module before creating the business table group.
 - [SQL](../../sql/2026_11_27_product_relational_storage.sql) materializes the
   MySQL/InnoDB additive migration. It requires the existing L4 migrations;
-  it is not run automatically. SQLite tests explicitly create `BUSINESS_TABLES`
+  it is not run automatically. Every column introduced or created by that DDL has
+  a meaningful MySQL `COMMENT`. SQLite tests explicitly create `BUSINESS_TABLES`
   only, with SQLite foreign-key checking enabled and no declared foreign keys.
   This is not evidence that global app
   `Base.metadata.create_all` or DI has retired the old runtime tables.

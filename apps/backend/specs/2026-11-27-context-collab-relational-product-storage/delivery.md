@@ -162,3 +162,17 @@ DEPLOY_PROFILE=test .venv/bin/python -m pytest \
 ```
 
 结果：存储专项 **62 passed，18 warnings**；相关仓储和 ProductProfileService 回归 **523 passed，19 warnings**。Ruff format/check、DDL 与方案逐条一致性、Stage 唯一键不存在、新普通索引 `idx_` 前缀、Markdown 链接/格式和 `git diff --check` 均通过。未执行目标数据库 ALTER/迁移，未运行完整 Backend CI，本节变更尚未 commit/push。
+
+## 后续调整：迁移 SQL 字段 COMMENT（2026-11-27）
+
+- 按用户要求，`2026_11_27_product_relational_storage.sql` 中 Profile/ColletRollout/StageRollout 的全部 CREATE 字段，以及 Collet/Event 的所有 ADD COLUMN 字段都补充明确 MySQL `COMMENT`。方案中的 6 条 DDL 与 SQL 文件逐字保持一致，字段含义不再只依赖外部文档。
+- 新增静态测试确保迁移 SQL 的 ADD COLUMN 和建表列都有 `COMMENT`，并保留无外键、`idx_` 索引前缀和 Stage 无唯一键的检查。SQLite 不反映 MySQL COMMENT，本项只验证 SQL 文本和方案一致性。
+
+实际验证（`apps/backend/`）：
+
+```bash
+DEPLOY_PROFILE=test .venv/bin/python -m pytest \
+  tests/community/repository/task/context_collab/product_relational -q --tb=short
+```
+
+结果：**63 passed，18 warnings**。DDL 与方案逐条一致、SQL 中无 `ix_cc_` 新索引名、Stage 无两个业务唯一键、Markdown 链接/格式和 `git diff --check` 通过。未执行目标数据库 DDL/迁移，未 commit/push。
