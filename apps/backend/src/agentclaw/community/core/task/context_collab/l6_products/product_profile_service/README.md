@@ -89,14 +89,16 @@ unchanged.
 ## Creation, queries and revision metadata
 
 - `create_product_profile(name, stages)` creates the [default
-  composition](configuration.py) internally,
-  validates it with the static YAML workflow, and requires installed execution,
-  evidence, adaptation Agent, isolation and notification capabilities before
-  committing the complete immutable configuration. Callers cannot supply or
-  override a composition; the stored/returned ProductProfile still includes it.
-- `create_product_collet` commits the Collet, independent first rollout/stage IDs,
-  actual MethodBinding/relations, owner, frozen policy/graph, receipt and initial
-  advance intent together. Network IO is never inside that transaction.
+  composition](configuration.py) internally and validates only the structural
+  Method/YAML configuration. Runtime execution, evidence, adaptation, isolation
+  and notification capabilities are not required until a Collet is created.
+  Callers cannot supply or override a composition; the stored/returned
+  ProductProfile still includes it.
+- `create_product_collet` validates that the persisted Profile can be executed
+  with the installed runtime and evidence capabilities, then commits the Collet,
+  independent first rollout/stage IDs, actual MethodBinding/relations, owner,
+  frozen policy/graph, receipt and initial advance intent together. Network IO is
+  never inside that transaction.
 - `query_collet_rollout` is read-only. Its list result carries technical `revision`,
   `current_rollout_id` and `stopped` attributes; these are not domain fields.
   HTTP returns those alongside `rollouts` in its Envelope data. `all_rollout=false`
@@ -265,7 +267,8 @@ unchanged; existing persisted serial, parallel or autonomous Profiles are not
 rewritten or silently reconfigured.
 
 ```python
-# In an authenticated actor scope with governed host capabilities installed:
+# Profile creation only needs an authenticated actor; governed host capabilities
+# are required when a Collet is created:
 profile = await service.create_product_profile("coding", stages_yaml)
 collet = await service.create_product_collet(profile.id, "Implement the feature")
 ```
