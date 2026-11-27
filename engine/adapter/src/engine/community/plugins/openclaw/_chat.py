@@ -90,6 +90,17 @@ def _derive_event_name(event_data: dict[str, Any]) -> str:
 class _ChatPortMixin:
     """Domain mixin: chat_stream and chat_abort (pooled, per-token)."""
 
+    async def exec_approval_resolve(self, approval_id: str, decision: str,
+                                    token: str | None = None) -> dict[str, Any]:
+        if not approval_id or decision not in ("allow-once", "deny"):
+            return {"success": False, "error": {"code": "INVALID_REQUEST",
+                    "message": "Invalid exec approval resolution"}}
+        client = await self._pooled_client(token)
+        response = await client.send_request(
+            "exec.approval.resolve", {"id": approval_id, "decision": decision}, timeout=30.0)
+        return {"success": response.ok, "payload": response.payload,
+                "error": response.error.to_dict() if response.error else None}
+
     async def chat_stream(
         self,
         session_key: str,
@@ -99,6 +110,7 @@ class _ChatPortMixin:
         attachments: list[Any] | None = None,
         token: str | None = None,
         on_ack: ChatAckCallback | None = None,
+        wait_for_exec_approval: bool = False,
     ) -> AsyncGenerator[EventFrame, None]:
         """Stream chat events from the OpenClaw gateway as EventFrames.
 
@@ -127,6 +139,8 @@ class _ChatPortMixin:
             await on_ack(ack)
 
         ack_options = {"on_ack": forward_ack} if on_ack is not None else {}
+        if wait_for_exec_approval:
+            ack_options["wait_for_exec_approval"] = True
         upstream = client.chat_stream(
             session_key=session_key,
             message=message,

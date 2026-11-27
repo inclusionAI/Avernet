@@ -22,6 +22,12 @@ OAuth uses the BCS `/auth/*` routes during the compatibility phase. See [deploym
 
 ## Verification
 
+Signed A2A proxy fetches omit browser cookies by default. Deployments may supply
+`AppCapabilities.getA2aProxyCredentials` for proxies requiring browser login;
+the callback must restrict credentialed origins. It is evaluated only after
+the server-issued card/RPC endpoint has been validated. Redirects and automatic
+POST retries remain disabled; non-proxy A2A and WS are unchanged.
+
 ```bash
 npm run check:open-core
 npm run ci

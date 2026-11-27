@@ -1,3 +1,5 @@
+import { getCapabilities } from '@/capabilities';
+
 /** Browser-direct A2A proxy credentials. IAM and the RPC body stay SDK-owned. */
 export interface A2aProxyConnection {
   a2aBaseUrl: string | null;
@@ -71,8 +73,10 @@ export function createBotA2aFetch(
     const headers = new Headers(request?.headers);
     new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
     headers.set(TOKEN_HEADER, tokenOf(current));
-    // No redirects, cookies, buffering or automatic POST retries. SSE and
+    // Cookie policy is deployment-owned and evaluated only after endpoint validation.
+    const credentials = getCapabilities().getA2aProxyCredentials?.(rawUrl) ?? 'omit';
+    // No redirects, buffering or automatic POST retries. SSE and
     // AbortSignal remain fetch-native; uncertain sends must never be replayed.
-    return fetchImpl(input, { ...init, headers, credentials: 'omit', redirect: 'error' });
+    return fetchImpl(input, { ...init, headers, credentials, redirect: 'error' });
   };
 }

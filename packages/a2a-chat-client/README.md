@@ -30,6 +30,8 @@ devDep @tc-chat 2.1.0 + test/helpers/oracleLoader，宿主零依赖——这就�
 
 ## 已知坑（消费端接入时）
 
+- **审批按钮**：A2AProvider 仅为当前 pending 审批消息块绑定 `onApprove` / `onReject`，经 `ResolveInteraction` 提交一次允许或拒绝；失败保留 pending，不伪造成功。回调仅用于当前会话展示，不写入 parser 或持久化历史，不修改 WS provider。
+
 - **老构建管线转译范围**：umi/webpack 老版本（<4.7）对 app 目录外 `.ts` 的转译规则可能比 nextgen 窄——若以 alias 指源消费，产线构建前先烟囱。
 - **jest**：`@tc-chat/*` 族 ESM-only；对经 node_modules 解析的包需 `transformIgnorePatterns` 例外（或 moduleNameMapper 直接指源文件，nextgen 用的后者）。
 - **无 define 环境**：公共核心不含构建期常量引用（hostIsolation 钉死）；若复制宿主三件（switch 等）需自带同义 define 或改判定源。

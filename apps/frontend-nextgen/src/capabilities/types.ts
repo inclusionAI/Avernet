@@ -662,6 +662,10 @@ export interface BotModelBadgeContext {
 }
 
 export interface AppCapabilities {
+  /** Browser login policy for a validated, server-issued A2A proxy endpoint.
+   * Absent means omit cookies. Implementations must restrict credentialed origins.
+   */
+  getA2aProxyCredentials?: (url: string) => RequestCredentials;
   /** Optional deployment preparation for a cloud Coding Bot's draft/default restart.
    * Returns extra_configs additions; rejection aborts restart. Never called for
    * local bots, engine-only actions, or published-service lifecycle restarts.

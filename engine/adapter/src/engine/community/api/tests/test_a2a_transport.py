@@ -765,11 +765,9 @@ async def test_resolve_on_engine_without_resolve_contract_is_structured_unsuppor
 
     from engine.community.core.adapters.openclaw.chat import OpenClawChatAdapter
 
-    # 契约钉：真实 adapter（Protocol 面之上）确实没有 Claude Code 专用
-    # 的三个 resolve 方法——门控依赖的事实本身被测试钉住。
+    # OpenClaw now implements exec only; Claude's other two methods remain absent.
     real_chat = OpenClawChatAdapter(port=MagicMock())
-    for method in ("resolve_exec_approval", "resolve_interaction",
-                   "resolve_mode_transition"):
+    for method in ("resolve_interaction", "resolve_mode_transition"):
         assert not hasattr(real_chat, method), (
             f"OpenClawChatAdapter 长出了 {method}？契约门控依据已过期，需复查"
         )
@@ -780,18 +778,18 @@ async def test_resolve_on_engine_without_resolve_contract_is_structured_unsuppor
 
     rid, _ = await k.open_run("openclaw-ctx", "k3", "first", "d")
     await k.publish_interaction_requested(
-        rid, "i-oc", {"kind": "exec", "prompt": "rm test?"})
+        rid, "i-oc", {"kind": "ask_user", "prompt": "continue?"})
 
     out = await R._resolve_interaction(
         {"interactionId": "i-oc",
-         "resolution": {"decision": "approve", "kind": "exec"}}, 1, None)
+         "resolution": {"decision": "approve", "kind": "ask_user"}}, 1, None)
 
     # 结构化拒绝（非 500/AttributeError 泄漏）——调用方可按 reason 分诊
     assert "error" in out, out
     assert out["error"]["code"] == -32000
     assert out["error"]["data"]["reason"] == "resolve_unsupported", out
     assert "AttributeError" not in out["error"]["message"]
-    assert "resolve_exec_approval" in out["error"]["message"], (
+    assert "resolve_interaction" in out["error"]["message"], (
         "错误必须点名缺失的契约方法，便于分诊"
     )
     # 决策未确认：pending 不得被洗掉，run 不得回 WORKING

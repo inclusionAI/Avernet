@@ -77,6 +77,7 @@ async def chat_stream_events(
     *,
     completion: ChatDispatch | None = None,
     max_pre_ack_bytes: int = 1_572_864,
+    reject_exec_approval: bool = False,
 ) -> AsyncIterator[Dict[str, Any]]:
     """
     发送聊天消息并流式返回事件
@@ -304,6 +305,12 @@ async def chat_stream_events(
         if buffer_before_ack(on_chat_event, event):
             return
         payload = event.payload or {}
+        correlate = getattr(completion, "correlate", None)
+        if correlate is not None:
+            if correlate(event):
+                allowed_run_ids.add(payload["runId"])
+            elif str(payload.get("runId", "")).startswith("exec-approval-followup:"):
+                return
         if completion is not None and (not isinstance(payload.get("runId"), str) or not payload["runId"]):
             # Strict completion requires a correlated identity, not session-only
             # or anonymous terminal broadcasts.
@@ -536,11 +543,28 @@ async def chat_stream_events(
     def forward_approval(
         event: EventFrame, state: str, handler: Callable[[EventFrame], None]
     ) -> None:
+        nonlocal done
         if buffer_before_ack(handler, event):
             return
         if done:
             return
         payload = dict(event.payload or {})
+        if reject_exec_approval:
+            request = payload.get("request")
+            if (state == "approval_requested" and isinstance(request, dict)
+                    and str(request.get("sessionKey", "")).strip().lower().removeprefix("agent:main:")
+                    == session_key.strip().lower().removeprefix("agent:main:")):
+                event_queue.put_nowait(EventFrame(event="chat", payload={
+                    "state": "error", "_source_event": "chat",
+                    "errorCode": "EXEC_APPROVAL_UNSUPPORTED",
+                    "errorMessage": "This Gateway cannot confirm exec approval continuations",
+                }))
+                done = True
+                event_queue.put_nowait(None)
+            return
+        approval = getattr(completion, "approval", None)
+        if approval is not None and not approval(event, state):
+            return
         payload.setdefault("approvalId", payload.get("requestId") or payload.get("id"))
         payload.setdefault("runId", run_id)
         payload.setdefault("sessionKey", session_key)

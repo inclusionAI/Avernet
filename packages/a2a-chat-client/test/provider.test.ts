@@ -718,7 +718,12 @@ describe('request() — A2A wire → 真 parser 的主回路', () => {
       // 终帧被审批阻塞拦下（shouldBlockMessage 语义）：释放前无 onComplete
       expect(spies.onComplete).not.toHaveBeenCalled();
 
-      await provider.resolveApproval('apr-1', 'allow-once');
+      const approval = spies.onMessage.mock.calls.at(-1)![0].blocks
+        .find((block: any) => block.type === 'approval');
+      expect(approval.onApprove).toEqual(expect.any(Function));
+      expect(approval.onReject).toEqual(expect.any(Function));
+      expect(pending?.approvalBlock.onApprove).toBeUndefined();
+      await approval.onApprove();
 
       // wire 请求体钉精确（engine E4 契约：interactionId 优先 + exec 直传决策）
       const resolveCall = fetchImpl.calls
@@ -739,7 +744,38 @@ describe('request() — A2A wire → 真 parser 的主回路', () => {
       expect(spies.onComplete).toHaveBeenCalledTimes(1);
       expect((spies.onComplete.mock.calls[0][0] as any[])[0])
         .toMatchObject({ content: '你好吗', status: 'done' });
+      const completedApproval = spies.onComplete.mock.calls[0][0][0].blocks
+        .find((block: any) => block.type === 'approval');
+      expect(completedApproval.status).toBe('approved');
+      expect(completedApproval.onApprove).toBeUndefined();
+      const sentBeforeStaleClick = fetchImpl.calls.length;
+      await expect(approval.onApprove()).rejects.toThrow('a2a approval not pending');
+      expect(fetchImpl.calls).toHaveLength(sentBeforeStaleClick);
     });
+
+  it('approval reject action submits deny and removes actions after acceptance', async () => {
+    const fetchImpl = routingFetch((req) => req.method === 'ResolveInteraction'
+      ? jsonResponse(jrpcOk(req.id, { interaction: { resolved: true } }))
+      : sseResponse([toSse(reId([
+        ...snapshotEnvelopes.slice(0, 4), approvalEnvelope(req.id, 5),
+        terminalEnvelope(req.id, 6, 'TASK_STATE_COMPLETED'),
+      ], req.id))]));
+    const { provider, spies } = newProvider({ fetchImpl });
+    await provider.connect();
+    await provider.request({ query: 'q', sessionKey: SESSION });
+    const approval = spies.onMessage.mock.calls.at(-1)![0].blocks
+      .find((block: any) => block.type === 'approval');
+    await approval.onReject();
+    const body = JSON.parse(String(fetchImpl.calls.at(-1)!.init.body));
+    expect(body).toMatchObject({ method: 'ResolveInteraction', params: {
+      interactionId: 'apr-1', resolution: { kind: 'exec', decision: 'deny' },
+    } });
+    const rejected = spies.onMessage.mock.calls.at(-1)![0].blocks
+      .find((block: any) => block.type === 'approval');
+    expect(rejected.status).toBe('rejected');
+    expect(rejected.onReject).toBeUndefined();
+    expect(provider.getPendingApproval()).toBeNull();
+  });
 
   it('审批映射表 pin：v3 decision × engine kind → resolution（engine gateway 合法词汇表）', async () => {
     // 每轮：全文流（段→审批→被阻塞终态）→ pending 建立 → resolveApproval
@@ -813,7 +849,9 @@ describe('request() — A2A wire → 真 parser 的主回路', () => {
     await provider.connect();
     await provider.request({ query: 'q', sessionKey: SESSION });
 
-    await expect(provider.resolveApproval('apr-1', 'allow-once'))
+    const approval = spies.onMessage.mock.calls.at(-1)![0].blocks
+      .find((block: any) => block.type === 'approval');
+    await expect(approval.onApprove())
       .rejects.toMatchObject({
         message: A2A_APPROVAL_UNSUPPORTED_MESSAGE,
         failure: { kind: 'protocol', reason: 'approval_unsupported' },

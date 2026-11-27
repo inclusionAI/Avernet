@@ -55,6 +55,31 @@ Observation remains process-local: `NO_ACTIVE_RUN` is not proof that a session
 has finished, and callers must retain their existing fallback for unavailable,
 missing or ambiguous observations. Callers do not select a transport.
 
+### OpenClaw A2A execution approvals
+
+`openclaw-exec-resolve/v1` is a scoped extension below
+`https://avernet.local/a2a/ext/`. It guarantees exec approval handling through
+`ResolveInteraction` with `kind=exec`, an exact native `interactionId`, and
+`decision=allow-once|deny`. It does not claim Claude Code's `ask_user` or
+`mode_switch`, nor change the existing full `resolve/v1` contract.
+The A2A client accepts either the full or scoped contract before selecting A2A;
+older clients keep using WS when only the scoped extension is present.
+
+The optional `ExecApprovalChatService` normalizes native approval events using
+`request.sessionKey` and `expiresAtMs`. Only pending IDs owned by the run's
+session can be forwarded, using the original upstream identity. Expired,
+cross-session, duplicate, and outcome-unknown submissions never trigger a new
+chat or an automatic second approval. Native WS forwarding remains unchanged.
+
+For OpenClaw 2026.5.12, A2A holds the serialized session slot after an exec
+approval request: the original chat's end and the resolution ACK are not the
+approval continuation's final. Only same-session native runs named
+`exec-approval-followup:<approvalId>[:nonce:<nonce>]`, tied to an observed pending
+approval, can extend it. Completion requires the original and all such runs to
+finish; missing confirmation fails within the request's timeout without resending
+the command. Older Gateways retain ordinary chat but fail closed if an exec
+approval cannot be tracked. This behavior is opt-in through `stream_for_a2a`.
+
 ### Local Skill package publication
 
 An Engine advertising `skills.local_package.parallel_targets.v1` allows

@@ -5,6 +5,7 @@
 export const EXT_BASE = 'https://avernet.local/a2a/ext';
 const REPLAY_URI = `${EXT_BASE}/replay/v1`;
 const RESOLVE_URI = `${EXT_BASE}/resolve/v1`;
+const OPENCLAW_EXEC_RESOLVE_URI = `${EXT_BASE}/openclaw-exec-resolve/v1`;
 const DEFAULT_CARD_TIMEOUT_MS = 5000;
 
 export enum Scenario { STREAM = 'stream', RECOVERY = 'recovery', HITL = 'hitl' }
@@ -72,6 +73,9 @@ export function validateScenarios(
     if (s === Scenario.RECOVERY) {
       return urls.has(REPLAY_URI) ? ok() : fail('missing_replay_extension');
     }
-    return urls.has(RESOLVE_URI) ? ok() : fail('missing_resolve_extension');
+    // The scoped contract covers OpenClaw's exec interactions, not Claude's
+    // ask_user/mode_switch. A merely partial legacy implementation still fails.
+    return urls.has(RESOLVE_URI) || urls.has(OPENCLAW_EXEC_RESOLVE_URI)
+      ? ok() : fail('missing_resolve_extension');
   });
 }

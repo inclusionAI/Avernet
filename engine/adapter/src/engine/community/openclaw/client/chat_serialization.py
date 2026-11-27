@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncIterator, Awaitable, Callable
 
 from engine.community.openclaw.client.chat_dispatch import ChatDispatch, supports_dispatch_wait
+from engine.community.openclaw.client.exec_approval_dispatch import ExecApprovalDispatch
 from engine.community.openclaw.client.chat_stream import chat_stream_events
 from engine.community.openclaw.protocol import ResponseFrame
 
@@ -88,12 +89,14 @@ async def serialized_chat(
     on_ack: Callable[[ResponseFrame], Awaitable[None]] | None = None,
     *,
     max_pre_ack_bytes: int,
+    wait_for_exec_approval: bool = False,
 ) -> AsyncIterator[dict[str, Any]]:
     # Keep stop commands usable while a foreground turn owns the session.
     if not supports_dispatch_wait(client) or message.strip().lower() in {"/stop", "/abort"}:
         async with aclosing(chat_stream_events(
             client, session_key, message, timeout_ms, idempotency_key, attachments,
             on_ack, max_pre_ack_bytes=max_pre_ack_bytes,
+            reject_exec_approval=wait_for_exec_approval,
         )) as stream:
             async for event in stream:
                 yield event
@@ -113,7 +116,8 @@ async def serialized_chat(
         return
     queued = slot.users > 0
     slot.users += 1
-    completion = ChatDispatch(client, session_key, idempotency_key or uuid.uuid4().hex, message)
+    dispatch_type = ExecApprovalDispatch if wait_for_exec_approval else ChatDispatch
+    completion = dispatch_type(client, session_key, idempotency_key or uuid.uuid4().hex, message)
     output: asyncio.Queue = asyncio.Queue()
     attached = True
     entered = False

@@ -174,7 +174,10 @@ async def _dispatch_to_engine(kernel: A2aKernel, rid: str, context_id: str,
     )
 
     accumulated: list[str] = []
-    stream = chat.stream(request, auth=auth)
+    stream_method = (chat.stream_for_a2a
+                     if getattr(chat, "a2a_exec_approvals", False) is True
+                     else chat.stream)
+    stream = stream_method(request, auth=auth)
     # ChatService Protocol allows both shapes: async-generator functions
     # (calling yields an async iterator directly — the bundled engines) and
     # coroutines returning an AsyncIterator. Normalize before iterating.

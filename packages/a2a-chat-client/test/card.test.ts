@@ -2,6 +2,16 @@ import { fetchCard, validateScenarios, Scenario } from '../src/index';
 import { makeEngineCard } from './helpers';
 
 describe('card 探测（spec §2/§5：card 通过=基础面；场景缺项→该场景 v3）', () => {
+  it('explicit OpenClaw exec contract permits HITL without claiming full resolve', () => {
+    const card = makeEngineCard({ resolve: false });
+    card.capabilities.extensions.push({
+      url: 'https://avernet.local/a2a/ext/openclaw-exec-resolve/v1', required: false,
+    });
+    expect(validateScenarios(card, [Scenario.STREAM, Scenario.RECOVERY, Scenario.HITL])
+      .every((result) => result.ok)).toBe(true);
+    card.capabilities.streaming = false;
+    expect(validateScenarios(card, [Scenario.STREAM])[0].ok).toBe(false);
+  });
   it('HTTP 非 2xx → card null + reason（probe-v3 不锁定）', async () => {
     const fetchImpl = async () => new Response(null, { status: 404 });
     const r = await fetchCard('http://x/.well-known/agent-card.json', fetchImpl as any);

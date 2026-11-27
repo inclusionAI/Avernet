@@ -160,12 +160,15 @@ class OpenClawGatewayClient(GatewayConnection):
         idempotency_key: Optional[str] = None,
         attachments: Optional[list[dict[str, Any]]] = None,
         on_ack: Callable[[ResponseFrame], Awaitable[None]] | None = None,
+        *,
+        wait_for_exec_approval: bool = False,
     ) -> AsyncIterator[Dict[str, Any]]:
         from engine.community.openclaw.client.chat_serialization import serialized_chat
 
         async with aclosing(serialized_chat(
             self, session_key, message, timeout_ms, idempotency_key,
             attachments, on_ack, max_pre_ack_bytes=_MAX_PRE_ACK_BYTES,
+            wait_for_exec_approval=wait_for_exec_approval,
         )) as stream:
             async for event in stream:
                 yield event

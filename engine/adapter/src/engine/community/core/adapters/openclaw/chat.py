@@ -20,8 +20,10 @@ from contextlib import aclosing
 from typing import Any
 
 from engine.community.core.adapters.openclaw.intent_eval_observer import IntentEvalObserver
+from engine.community.core.adapters.openclaw.exec_resolve import ExecApprovalLedger
 from engine.community.core.chat.models import ChatAbortRequest, ChatAbortResult, ChatRequest
 from engine.community.core.chat.protocol import ChatService
+from engine.community.core.chat.exec_approval import ExecApprovalChatService
 from engine.community.core.engine.context import AuthContext
 from engine.community.kernel.frames import ErrorShape, EventFrame
 from engine.community.plugin_api.openclaw.chat import ChatAckCallback, OpenClawChatPort
@@ -29,11 +31,42 @@ from engine.community.plugin_api.openclaw.chat import ChatAckCallback, OpenClawC
 log = logging.getLogger("openclaw-chat-adapter")
 
 
-class OpenClawChatAdapter(ChatService):
+class OpenClawChatAdapter(ChatService, ExecApprovalChatService):
     """`ChatService` over the OpenClaw native port."""
 
     def __init__(self, port: OpenClawChatPort) -> None:
         self._port = port
+        self._a2a_approvals = ExecApprovalLedger()
+
+    @property
+    def a2a_exec_approvals(self) -> bool:
+        return callable(getattr(self._port, "exec_approval_resolve", None))
+
+    async def stream_for_a2a(self, request: ChatRequest,
+                            auth: AuthContext | None = None) -> AsyncIterator[EventFrame]:
+        """A2A-only approval correlation; the native WS stream is untouched."""
+        owned_ids: set[str] = set()
+        try:
+            async with aclosing(self.stream(request, auth, wait_for_exec_approval=True)) as stream:
+                async for frame in stream:
+                    payload = frame.payload or {}
+                    if payload.get("state") in ("approval_requested", "approval_resolved"):
+                        payload = self._a2a_approvals.normalize(
+                            request.sessionId, payload, auth.token if auth else None)
+                        if payload is None:
+                            continue
+                        if payload.get("state") == "approval_requested":
+                            owned_ids.add(payload["approvalId"])
+                        frame = EventFrame(event=frame.event, payload=payload)
+                    yield frame
+        finally:
+            self._a2a_approvals.clear_session(request.sessionId, owned_ids)
+
+    async def resolve_exec_approval(self, *, session_key: str, interaction_id: str,
+                                    decision: str, message: str | None = None) -> dict[str, Any]:
+        return await self._a2a_approvals.resolve(
+            self._port, session_key=session_key, interaction_id=interaction_id,
+            decision=decision, message=message)
 
     async def inject(
         self,
@@ -67,6 +100,7 @@ class OpenClawChatAdapter(ChatService):
         auth: AuthContext | None = None,
         *,
         on_ack: ChatAckCallback | None = None,
+        wait_for_exec_approval: bool = False,
     ) -> AsyncIterator[EventFrame]:
         """Stream chat events as EventFrames.
 
@@ -123,6 +157,8 @@ class OpenClawChatAdapter(ChatService):
 
         try:
             ack_options = {"on_ack": on_ack} if on_ack is not None else {}
+            if wait_for_exec_approval:
+                ack_options["wait_for_exec_approval"] = True
             upstream = self._port.chat_stream(
                 session_key=session_key,
                 message=request.query,

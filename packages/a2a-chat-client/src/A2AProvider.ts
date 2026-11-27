@@ -902,11 +902,21 @@ export class A2AProvider {
   /** ParseResult → ChatMessage（镜像 OpenClawProvider.js:459-479） */
   private resultToMessage(result: SdkParseResult): A2aChatMessage {
     const isInject = result.runId?.startsWith('inject-') ?? false;
+    const pendingId = this.parser?.getPendingApproval()?.approvalId;
     const message: A2aChatMessage = {
       id: isInject ? (result.runId as string) : this.currentMessageId,
       role: 'assistant',
       content: result.content,
-      blocks: result.blocks,
+      // Bind only the live approval, without mutating parser/history blocks.
+      blocks: result.blocks.map((block) => {
+        if (block.type !== 'approval' || block.status !== 'pending'
+          || !pendingId || block.approvalId !== pendingId) return block;
+        return {
+          ...block,
+          onApprove: () => this.resolveApproval(pendingId, 'allow-once'),
+          onReject: () => this.resolveApproval(pendingId, 'deny'),
+        };
+      }),
       status: result.done ? 'done' : 'streaming',
       sessionKey: result.sessionKey,
     };

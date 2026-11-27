@@ -12,6 +12,7 @@ from typing import Any
 # 侧取消能力以 extension URI 锁定声明——BaaS 端读卡判读（灰度期老引擎
 # 无此声明 → abort 诚实不回退假 ok）。
 EXT_BASE = "https://avernet.local/a2a/ext"
+OPENCLAW_EXEC_RESOLVE_URI = f"{EXT_BASE}/openclaw-exec-resolve/v1"
 # resolve = 词汇表条目 + 条件声明（P0/stage2 §5）：单一 URI 代表完整
 # resolve 能力集，仅在活动引擎 ChatService 三方法全实现时才入卡
 # （router._engine_resolve_supported 计算真值）；其余五项无条件声明。
@@ -29,12 +30,15 @@ def make_agent_card(base_url: str, *,
                     agent_name: str = "OpenClaw Engine",
                     description: str = "Engine adapter with A2A v1.0 JSON-RPC binding",
                     version: str = "0.1.0",
-                    resolve_supported: bool = False) -> dict[str, Any]:
+                    resolve_supported: bool = False,
+                    exec_resolve_supported: bool = False) -> dict[str, Any]:
     # 条件声明：非 resolve 五项恒出；resolve 仅在 resolve_supported=True
     # 时入卡（真值由调用方按活动引擎能力计算，请求时取、不缓存）。
     declared_uris = [u for k, u in EXTENSION_URIS.items()
                      if k != "resolve"] + (
         [EXTENSION_URIS["resolve"]] if resolve_supported else [])
+    if exec_resolve_supported:
+        declared_uris.append(OPENCLAW_EXEC_RESOLVE_URI)
     out: dict[str, Any] = {
         "name": agent_name,
         "description": description,

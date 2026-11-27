@@ -1,6 +1,7 @@
 import { createBotA2aFetch, type A2aProxyConnection } from '@/services/workspace/botA2aFetch';
 import { buildRpcRequest, fetchCard, resolveA2aUrls, streamRpc } from '@avernet/a2a-chat-client';
 import { makeEngineCard } from '../../adapters/a2a/helpers';
+import * as capabilities from '@/capabilities';
 
 const BASE = 'https://proxy.example/proxypass/ARCA_test@0:20003';
 const CARD = `${BASE}/.well-known/agent-card.json`;
@@ -21,6 +22,22 @@ function harness(initial = connection()) {
 }
 
 describe('browser-direct A2A proxy transport', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('uses deployment login policy for validated card and RPC URLs only', async () => {
+    const policy = jest.fn().mockReturnValue('include');
+    jest.spyOn(capabilities, 'getCapabilities').mockReturnValue({
+      ...capabilities.getCapabilities(), getA2aProxyCredentials: policy,
+    });
+    const h = harness();
+    for (const url of [CARD, RPC]) await h.run(url, { credentials: 'omit' });
+    expect(policy.mock.calls).toEqual([[CARD], [RPC]]);
+    for (const [, opts] of h.network.mock.calls) {
+      expect(opts).toMatchObject({ credentials: 'include', redirect: 'error' });
+    }
+    await expect(h.run('https://other.example/rpc')).rejects.toThrow('outside');
+    expect(policy).toHaveBeenCalledTimes(2);
+  });
   it('leaves existing direct A2A and WS credentials alone', () => {
     expect(createBotA2aFetch(connection({ a2aHeaders: undefined }), jest.fn())).toBeUndefined();
     expect(createBotA2aFetch(connection({ a2aHeaders: {} }), jest.fn())).toBeUndefined();

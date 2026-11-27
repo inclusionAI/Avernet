@@ -61,6 +61,15 @@ ChatAckCallback = Callable[[OpenClawChatAck], Awaitable[None]]
 class OpenClawChatPort(Protocol):
     """Native chat operations over the OpenClaw gateway."""
 
+    async def exec_approval_resolve(self, approval_id: str, decision: str,
+                                    token: str | None = None) -> dict[str, Any]:
+        """Resolve an exact native exec ID with allow-once/deny; return success/error.
+
+        The caller must establish pending ownership and expiry before dispatch.
+        Never retry an outcome-unknown submission or translate it into a new turn.
+        """
+        ...
+
     async def chat_stream(
         self,
         session_key: str,
@@ -70,6 +79,7 @@ class OpenClawChatPort(Protocol):
         attachments: list[Any] | None = None,
         token: str | None = None,
         on_ack: ChatAckCallback | None = None,
+        wait_for_exec_approval: bool = False,
     ) -> AsyncGenerator[EventFrame, None]:
         """Stream chat events from the OpenClaw gateway as EventFrames.
 
