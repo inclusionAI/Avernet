@@ -1,0 +1,21 @@
+apps/bcs/crates/services/bcs-direct-a2a-runner/tests/conformance_direct_a2a.rs
+  s_76b15ecd7ad8b7::t_ce5d4dabce9756 327-361
+apps/bcs/crates/services/bcs-dist-worker/tests/direct_a2a_chain/output.rs
+  s_76b15ecd7ad8b7::t_ce5d4dabce9756 135-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "073db0fbee7eaa5a77174c846be770cbc69e9808",
+  "prompts": {},
+  "sessions": {
+    "s_76b15ecd7ad8b7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21c5e-cab2-7ef0-afb6-2c534ee4185f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
