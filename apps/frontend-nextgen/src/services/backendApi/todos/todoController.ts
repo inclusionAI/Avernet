@@ -10,15 +10,14 @@ import type {
   TodoAutoImportRuleStatus,
   UpdateTodoAutoImportRuleInput,
 } from '@/domain/todos/models';
-import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import { userScopedParams } from '../bots/botController';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '../types';
 
-const TODO_API_BASE = `${TASK_READ_API_BASE}/todos`;
-const BOT_TEAM_API_BASE = `${TASK_READ_API_BASE}/bot-teams`;
-// Todo 支撑资源只暴露窄化的 Engine 登录态契约，不复用 Bot/Space OpenAPI。
+// Todo 工作台统一使用 Engine 登录态契约，不复用 OpenAPI。
 const TODO_INTERNAL_API_BASE = '/api/v1/collaboration/tasks';
+const TODO_API_BASE = `${TODO_INTERNAL_API_BASE}/todos`;
+const BOT_TEAM_API_BASE = `${TODO_INTERNAL_API_BASE}/bot-teams`;
 const TODO_SPACES_API_PATH = `${TODO_INTERNAL_API_BASE}/spaces`;
 
 
