@@ -295,6 +295,7 @@ class DefaultBotManagementService(BotManageService):
             ),
             auto_approve=bot_config.auto_approve_publish,
             publish_max_retry_times=bot_config.publish_max_retry_times or 0,
+            publish_stage=bot_config.publish_stage,
         )
         publish = await self._publish_service.create_publish(
             tenant=tenant,
@@ -899,6 +900,7 @@ class DefaultBotManagementService(BotManageService):
             or DEFAULT_CALLBACK_TIMEOUT_SECONDS,
             publish_max_retry_times=existing_config.publish_max_retry_times or 0,
             target_device_uuids=unique_device_uuids,
+            publish_stage=existing_config.publish_stage,
         )
         publish = await self._publish_service.create_publish(
             tenant=tenant,
@@ -1079,6 +1081,7 @@ class DefaultBotManagementService(BotManageService):
                 auto_approve=stored_config.auto_approve_publish,
                 publish_max_retry_times=stored_config.publish_max_retry_times or 0,
                 template_uuid=template_uuid,
+                publish_stage=stored_config.publish_stage,
             )
 
             publish = await self._publish_service.create_publish(
@@ -1333,6 +1336,7 @@ class DefaultBotManagementService(BotManageService):
                 callback_timeout_seconds=config.callback_timeout_seconds
                 or DEFAULT_CALLBACK_TIMEOUT_SECONDS,
                 publish_max_retry_times=stored_config.publish_max_retry_times or 0,
+                publish_stage=stored_config.publish_stage,
             )
         else:
             # No config change — use existing bot config for device records
@@ -1354,6 +1358,7 @@ class DefaultBotManagementService(BotManageService):
                     existing_config.callback_timeout_seconds, self._system_config_repo
                 ),
                 publish_max_retry_times=existing_config.publish_max_retry_times or 0,
+                publish_stage=existing_config.publish_stage,
             )
 
         # Create publish via PublishService

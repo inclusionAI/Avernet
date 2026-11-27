@@ -54,6 +54,14 @@ class BotConfig(BaseModel):
         default=False,
         description="When True, auto-approve all publish stage gates after bot creation",
     )
+    publish_stage: str | None = Field(
+        default=None,
+        description=(
+            "Publish stage semantic forwarded by the backend (e.g. 'online'). "
+            "BaaS reads this to decide ChangeFlow registration; absent for "
+            "verify/draft publishes"
+        ),
+    )
 
 
 class BotClusterCreate(BaseModel):

@@ -22,6 +22,7 @@ from dependency_injector import containers, providers
 from secbaas.community.api.device_manage import K8sCredentials
 from secbaas.community.plugins.auth.oauth import OAuthPlugin
 from secbaas.community.plugins.auth.stub import StubAuthPlugin
+from secbaas.community.plugins.changeflow.noop import NoopChangeFlowObserver
 from secbaas.community.plugins.bot.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.bot_service import (
     AiohttpBotServicePlugin,
@@ -30,6 +31,7 @@ from secbaas.community.plugins.bot_service import (
 )
 from secbaas.community.plugins.cache.redis import RedisCachePlugin
 from secbaas.community.plugins.cache.stub import StubCachePlugin
+from secbaas.community.plugins.changeflow.noop import NoopChangeFlowObserver
 from secbaas.community.plugins.database.mariadb.mariadb_orm import MariaDbOrmPlugin
 from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 from secbaas.community.plugins.eval_env import (
@@ -302,6 +304,11 @@ class PluginContainer(containers.DeclarativeContainer):
     eval_session_log = providers.Selector(
         config.plugins.eval_env,
         stub=providers.Singleton(NoopEvalSessionLog),
+    )
+
+    changeflow_plugin = providers.Selector(
+        config.plugins.changeflow,
+        stub=providers.Singleton(NoopChangeFlowObserver),
     )
 
 

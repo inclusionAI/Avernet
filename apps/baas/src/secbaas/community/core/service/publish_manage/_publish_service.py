@@ -86,6 +86,24 @@ logger = get_logger("core-service")
 
 _BOT_PUBLISH_LOCK_EXPIRE_SECONDS = 300
 
+# Detached ChangeFlow pre-check tasks: kept alive until completion so the
+# event loop does not garbage-collect them mid-flight. The set is best-effort
+# and not awaited at shutdown — on_pre_check is advisory and observe-only.
+_CF_PRE_CHECK_TASKS: set[Any] = set()
+
+
+def stage_display_name(batch: Any) -> str:
+    """Simplified ChangeFlow stage name for a batch (第N批, N=batch_index).
+
+    ChangeFlow observes batches by index; the internal stage key (PREPUB,
+    GRAY, PROD_FIRST_BATCH, …) is irrelevant to the change review.
+    """
+    try:
+        idx = int(getattr(batch, "batch_index", 0)) or 0
+    except Exception:
+        idx = 0
+    return f"第{idx}批"
+
 
 @runtime_checkable
 class PublishLockService(Protocol):
@@ -119,6 +137,29 @@ class _NoOpLockService:
     @contextmanager
     def try_lock(self, *_args: Any, **_kwargs: Any) -> Any:
         yield _NoOpLock()
+
+
+class _NoopChangeFlowObserver:
+    """ChangeFlow observer stand-in used when no observer is wired.
+
+    Mirrors ``_NoOpLockService``: core must not import plugins, so a local
+    no-op keeps DefaultPublishService constructible without a DI-provided
+    observer. The DI container always injects the configured Selector impl
+    (community NoopChangeFlowObserver / enterprise ProdChangeFlowObserver),
+    so this default only guards direct test construction.
+    """
+
+    async def on_register(self, ctx: Any) -> str | None:  # noqa: ARG002
+        return None
+
+    async def on_pre_check(self, ctx: Any) -> None:  # noqa: ARG002
+        return None
+
+    async def on_batch_result(self, ctx: Any) -> None:  # noqa: ARG002
+        return None
+
+    async def on_publish_terminal(self, ctx: Any) -> None:  # noqa: ARG002
+        return None
 
 
 def _extra_config_to_publish_config(
@@ -200,9 +241,11 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         bot_service: BotManageService,
         device_service: DeviceService,
         lock_service: PublishLockService | None = None,
+        cf_observer: Any | None = None,
     ) -> None:
         """Initialize with injected dependencies."""
         self._lock_service: PublishLockService = lock_service or _NoOpLockService()
+        self._cf_observer: Any = cf_observer or _NoopChangeFlowObserver()
         self._bot_repo = bot_repo
         self._device_repo = device_repo
         self._rel_repo = rel_repo
@@ -295,6 +338,370 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             f"[cleanup_pending] Soft-deleted still-PENDING clone bot {target_bot_id} "
             f"abandoned by UPDATE publish {publish_id} terminal resolution"
         )
+
+    # ====================================================================
+    # ChangeFlow observe-only hooks (P1)
+    #
+    # ChangeFlow records publish facts and returns risk judgements; it never
+    # drives the publish. Every call is wrapped so any failure (observer raise,
+    # 4xx/5xx, risk verdict) is logged and swallowed — the publish state
+    # machine is never altered or blocked. ``register`` persists the returned
+    # change_id into ``extra_config["cf"]``; the later batch/terminal hooks
+    # read it back and skip themselves when registration did not happen.
+    # ====================================================================
+
+    def _cf_read_change_id(self, extra_config: dict[str, Any] | None) -> str | None:
+        """Return the ChangeFlow change_id persisted for this publish, or None."""
+        if not extra_config:
+            return None
+        cf = extra_config.get("cf")
+        if not isinstance(cf, dict):
+            return None
+        change_id = cf.get("change_id")
+        return str(change_id) if change_id else None
+
+    def _cf_persist(
+        self,
+        *,
+        tenant: str,
+        env: str,
+        publish_id: int,
+        extra_config: dict[str, Any],
+        modifier: str,
+    ) -> None:
+        """Persist ``extra_config`` (with cf sub-dict) back to the publish row."""
+        try:
+            self._publish_repo.update_publish(
+                publish_id=publish_id,
+                tenant=tenant,
+                env=env,
+                extra_config=extra_config,
+                modifier=modifier,
+            )
+        except Exception:
+            logger.warning(
+                f"[cf] Failed to persist extra_config for publish {publish_id}",
+                exc_info=True,
+            )
+
+    async def _cf_report_terminal(
+        self,
+        *,
+        tenant: str,
+        env: str,
+        publish_id: int,
+        status: str,
+        reason: str | None = None,
+        operator: str | None = None,
+        publish_record: Any | None = None,
+    ) -> None:
+        """Fire the ChangeFlow terminal hook for a publish, non-blocking.
+
+        Called after every terminal status write (SUCCESS / FAILED / REJECTED /
+        REVOKED). Reads the persisted ``cf.change_id``; if absent (register did
+        not happen or failed) the hook is skipped — CF would have no change to
+        close. Marks ``cf.terminal_reported=True`` on success.
+
+        ``publish_record`` lets the caller pass the record it already has so no
+        extra ``get_by_id`` round-trip is made (which would disturb mock
+        ``side_effect`` sequences in tests); when None the record is fetched.
+        """
+        try:
+            if publish_record is None:
+                publish_record = self._publish_repo.get_by_id(publish_id, tenant, env)
+            if publish_record is None:
+                return
+            change_id = self._cf_read_change_id(publish_record.extra_config)
+            if not change_id:
+                return
+            outcome_map = {
+                PublishStatus.SUCCESS.value: "success",
+                PublishStatus.FAILED.value: "failed",
+                PublishStatus.REJECTED.value: "cancelled",
+                PublishStatus.REVOKED.value: "cancelled",
+            }
+            outcome = outcome_map.get(status, "failed")
+            occurred_at = datetime.now()
+            from secbaas.community.spi.changeflow import TerminalCtx
+
+            ctx = TerminalCtx(
+                publish_id=publish_id,
+                change_id=change_id,
+                outcome=outcome,
+                reason=reason,
+                occurred_at=occurred_at,
+            )
+            await self._cf_observer.on_publish_terminal(ctx)
+            # Mark reported so a later duplicate transition does not double-report.
+            extra_config = dict(publish_record.extra_config or {})
+            cf = extra_config.setdefault("cf", {})
+            if not isinstance(cf, dict):
+                cf = {}
+                extra_config["cf"] = cf
+            cf["terminal_reported"] = True
+            self._cf_persist(
+                tenant=tenant,
+                env=env,
+                publish_id=publish_id,
+                extra_config=extra_config,
+                modifier=operator or "cf-callback",
+            )
+        except Exception:
+            logger.warning(
+                f"[cf] on_publish_terminal failed for publish {publish_id}",
+                exc_info=True,
+            )
+
+    def _cf_build_stages(
+        self,
+        *,
+        tenant: str,
+        env: str,
+        publish_id: int,
+    ) -> list[dict[str, Any]]:
+        """Build the ChangeFlow release plan from persisted batch + record rows.
+
+        Returns a list of ``{"name": "第N批", "batches": [{"index": N,
+        "targets": [device_uuid, ...]}]}`` entries, one per batch, ordered by
+        ``batch_index``. Best-effort: any read failure yields an empty list so
+        register never blocks the publish.
+        """
+        stages: list[dict[str, Any]] = []
+        try:
+            batch_rows = self._publish_batch_repo.list_by_publish_id(
+                publish_id, tenant, env
+            )
+            batch_rows.sort(key=lambda b: b.batch_index)
+            record_repo = self._publish_record_repo
+            for b in batch_rows:
+                records = record_repo.list_by_publish_id_and_batch_id(
+                    publish_id, b.id, tenant, env
+                )
+                targets = [
+                    (r.extra_config or {}).get("device_uuid")
+                    for r in records
+                    if (r.extra_config or {}).get("device_uuid")
+                ]
+                stages.append(
+                    {
+                        "name": f"第{b.batch_index}批",
+                        "batches": [
+                            {
+                                "index": b.batch_index,
+                                "targets": targets,
+                            }
+                        ],
+                    }
+                )
+        except Exception:
+            logger.warning(
+                f"[cf] Failed to build ChangeFlow stages for publish {publish_id}",
+                exc_info=True,
+            )
+            return []
+        return stages
+
+    async def _cf_on_register(
+        self,
+        *,
+        tenant: str,
+        env: str,
+        publish_record: Any,
+        publish_type_str: str,
+        stages: list[dict[str, Any]],
+        operator: str,
+    ) -> None:
+        """Call ``on_register`` and persist the returned change_id (non-blocking).
+
+        On success writes ``extra_config["cf"]["change_id"]`` /
+        ``registered_at`` / ``terminal_reported=False`` / ``batches={}``.
+        On failure (observer returns None or raises) the publish proceeds; no
+        cf.change_id is persisted, so batch/terminal hooks skip themselves.
+        """
+        from secbaas.community.spi.changeflow import PublishCtx
+
+        last_pub_id = publish_record.last_publish_id
+        previous_version = f"v{last_pub_id}" if last_pub_id else ""
+        ctx = PublishCtx(
+            publish_id=publish_record.id,
+            tenant="alipay",
+            env=publish_record.env,
+            publish_type=publish_type_str,
+            bot_id=publish_record.bot_id,
+            bot_name=publish_record.name,
+            instance_count=publish_record.replica_desired or 0,
+            operator=publish_record.creator,
+            candidate_version=f"v{publish_record.id}",
+            previous_version=previous_version,
+            revision=f"pub-{publish_record.id}",
+            stages=stages,
+        )
+        change_id: str | None
+        try:
+            change_id = await self._cf_observer.on_register(ctx)
+        except Exception:
+            logger.warning(
+                f"[cf] on_register raised for publish {publish_record.id}",
+                exc_info=True,
+            )
+            return
+        if not change_id:
+            logger.warning(
+                f"[cf] on_register returned no change_id for publish "
+                f"{publish_record.id}; subsequent hooks will be skipped"
+            )
+            return
+        # Persist cf sub-dict into extra_config (nested, not flattened).
+        extra_config = dict(publish_record.extra_config or {})
+        cf = extra_config.setdefault("cf", {})
+        if not isinstance(cf, dict):
+            cf = {}
+            extra_config["cf"] = cf
+        cf["change_id"] = change_id
+        cf["registered_at"] = datetime.now().isoformat()
+        cf["terminal_reported"] = False
+        cf["batches"] = {}
+        self._cf_persist(
+            tenant=tenant,
+            env=env,
+            publish_id=publish_record.id,
+            extra_config=extra_config,
+            modifier=operator,
+        )
+
+    def _cf_fire_pre_check(
+        self,
+        *,
+        tenant: str,
+        env: str,
+        publish_id: int,
+        publish_record: Any,
+        batch: Any,
+    ) -> None:
+        """Fire the ChangeFlow pre-check hook as a detached task (non-blocking).
+
+        Reads ``cf.change_id``; if absent the call is skipped (register never
+        happened). The task is created with ``asyncio.create_task`` so its
+        outcome never blocks the batch. Construction errors are logged.
+        """
+        change_id = self._cf_read_change_id(publish_record.extra_config)
+        if not change_id:
+            return
+        try:
+            record_repo = self._publish_record_repo
+            records = record_repo.list_by_publish_id_and_batch_id(
+                publish_id, batch.id, tenant, env
+            )
+            targets = [
+                (r.extra_config or {}).get("device_uuid")
+                for r in records
+                if (r.extra_config or {}).get("device_uuid")
+            ]
+            from secbaas.community.spi.changeflow import BatchCtx
+
+            ctx = BatchCtx(
+                publish_id=publish_id,
+                change_id=change_id,
+                stage=stage_display_name(batch),
+                batch_index=batch.batch_index,
+                targets=targets,
+                candidate_version=f"v{publish_id}",
+                bot_name=publish_record.name,
+            )
+            task = asyncio.create_task(self._cf_pre_check_safe(ctx))
+            _CF_PRE_CHECK_TASKS.add(task)
+            task.add_done_callback(_CF_PRE_CHECK_TASKS.discard)
+        except Exception:
+            logger.warning(
+                f"[cf] on_pre_check dispatch failed for publish {publish_id} "
+                f"batch {batch.id}",
+                exc_info=True,
+            )
+
+    async def _cf_pre_check_safe(self, ctx: Any) -> None:
+        """Run on_pre_check and swallow any observer failure."""
+        try:
+            await self._cf_observer.on_pre_check(ctx)
+        except Exception:
+            logger.warning(
+                f"[cf] on_pre_check raised for publish {ctx.publish_id} "
+                f"batch {ctx.batch_index}",
+                exc_info=True,
+            )
+
+    async def _cf_report_batch_result(
+        self,
+        *,
+        tenant: str,
+        env: str,
+        publish_id: int,
+        batch: Any,
+        batch_status: str,
+        counts: dict[str, int],
+    ) -> None:
+        """Fire the ChangeFlow batch-result hook (observe-only, non-blocking).
+
+        Reads ``cf.change_id``; if absent the call is skipped. Constructs
+        BatchCtx with the per-device result states and the batch outcome, then
+        awaits the observer inside a try/except so a failure never reaches the
+        publish state machine.
+        """
+        try:
+            publish_record = self._publish_repo.get_by_id(publish_id, tenant, env)
+            if publish_record is None:
+                return
+            change_id = self._cf_read_change_id(publish_record.extra_config)
+            if not change_id:
+                return
+            record_repo = self._publish_record_repo
+            records = record_repo.list_by_publish_id_and_batch_id(
+                publish_id, batch.id, tenant, env
+            )
+            device_states: list[dict[str, Any]] = []
+            error_text: str | None = None
+            for r in records:
+                rs = r.result_status
+                if rs == PublishRecordResult.SUCCESS.value:
+                    state = "succeeded"
+                elif rs == PublishRecordResult.FAILED.value:
+                    state = "failed"
+                    if error_text is None and r.result_message:
+                        error_text = r.result_message
+                else:
+                    state = "unknown"
+                device_states.append(
+                    {
+                        "device_uuid": (r.extra_config or {}).get("device_uuid"),
+                        "state": state,
+                    }
+                )
+            outcome = (
+                "succeeded" if batch_status == BatchStatus.COMPLETED.value else "failed"
+            )
+            if error_text:
+                error_text = error_text[:500]
+            from secbaas.community.spi.changeflow import BatchCtx
+
+            ctx = BatchCtx(
+                publish_id=publish_id,
+                change_id=change_id,
+                stage=stage_display_name(batch),
+                batch_index=batch.batch_index,
+                targets=[d["device_uuid"] for d in device_states if d["device_uuid"]],
+                candidate_version=f"v{publish_id}",
+                bot_name=publish_record.name,
+                outcome=outcome,
+                device_states=device_states,
+                error=error_text,
+                occurred_at=batch.gmt_complete,
+            )
+            await self._cf_observer.on_batch_result(ctx)
+        except Exception:
+            logger.warning(
+                f"[cf] on_batch_result failed for publish {publish_id} "
+                f"batch {batch.id}",
+                exc_info=True,
+            )
 
     def _owns_live_device_binding(self, bot_id: int, tenant: str, env: str) -> bool:
         """True when the generation still holds device ownership nothing else does.
@@ -517,6 +924,15 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                         f"Orphan publish {active_publish.id} cleaned up — "
                         f"marked as FAILED"
                     )
+                    await self._cf_report_terminal(
+                        tenant=tenant,
+                        env=env,
+                        publish_id=active_publish.id,
+                        status=PublishStatus.FAILED.value,
+                        reason="orphan publish auto-cleaned",
+                        operator=operator,
+                        publish_record=active_publish,
+                    )
                 except Exception as cleanup_error:
                     logger.error(
                         f"Failed to auto-clean orphan publish {active_publish.id}: "
@@ -571,6 +987,15 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                         f"Stale publish {active_publish.id} auto-resolved to "
                         f"FAILED — timed-out records processed and publish marked "
                         f"as FAILED"
+                    )
+                    await self._cf_report_terminal(
+                        tenant=tenant,
+                        env=env,
+                        publish_id=active_publish.id,
+                        status=PublishStatus.FAILED.value,
+                        reason="stale publish auto-resolved",
+                        operator=operator,
+                        publish_record=active_publish,
                     )
                 elif active_publish.publish_type != publish_type.value:
                     # Case A: Different publish type, not stale — conflict
@@ -937,6 +1362,39 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         publish_record = publish_repo.get_by_id(publish_id, tenant=tenant, env=env)
         if publish_record is None:
             raise PublishNotFoundError(publish_id)
+
+        # ChangeFlow observe-only register hook (P1 W2).
+        # Register an online Create/Update publish so ChangeFlow opens a change
+        # to observe it. Fire-and-await (change_id is needed by later batch/
+        # terminal hooks), but never block the publish on a failure: an observer
+        # error leaves extra_config without a cf.change_id and the later hooks
+        # skip themselves.
+        try:
+            publish_stage = (publish_record.extra_config or {}).get("publish_stage")
+            if publish_stage == "online" and publish_type.value in (
+                "CREATE",
+                "UPDATE",
+            ):
+                # Build the frozen release plan (stages/batches/targets) from
+                # the just-persisted batch + record rows so ChangeFlow sees the
+                # real device mapping, not an empty placeholder.
+                cf_stages = self._cf_build_stages(
+                    tenant=tenant, env=env, publish_id=publish_id
+                )
+                await self._cf_on_register(
+                    tenant=tenant,
+                    env=env,
+                    publish_record=publish_record,
+                    publish_type_str=publish_type.value,
+                    stages=cf_stages,
+                    operator=operator,
+                )
+        except Exception:
+            logger.warning(
+                f"[cf] on_register failed for publish {publish_id}",
+                exc_info=True,
+            )
+
         current_stage = self._get_current_stage(tenant, publish_id)
         return PublishResponse(
             id=publish_record.id,
@@ -2017,6 +2475,16 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
 
         logger.info(f"Publish {publish_id} rejected by {operator}: {reason}")
 
+        await self._cf_report_terminal(
+            tenant=tenant,
+            env=env,
+            publish_id=publish_id,
+            status=PublishStatus.REJECTED.value,
+            reason=reason,
+            operator=operator,
+            publish_record=publish_record,
+        )
+
         return await self._refresh_publish_response(tenant, publish_id)
 
     async def revoke_publish(
@@ -2074,6 +2542,16 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         )
 
         logger.info(f"Publish {publish_id} revoked by {operator}: {reason}")
+
+        await self._cf_report_terminal(
+            tenant=tenant,
+            env=env,
+            publish_id=publish_id,
+            status=PublishStatus.REVOKED.value,
+            reason=reason,
+            operator=operator,
+            publish_record=publish_record,
+        )
 
         return await self._refresh_publish_response(tenant, publish_id)
 
@@ -2559,6 +3037,17 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 modifier=operator,
             )
 
+            # ChangeFlow pre-check hook (observe-only, fire-and-forget).
+            # Advisory only — must never gate the batch. Skips itself when no
+            # cf.change_id was persisted by register.
+            self._cf_fire_pre_check(
+                tenant=tenant,
+                env=env,
+                publish_id=publish_id,
+                publish_record=publish_record,
+                batch=batch,
+            )
+
             batch_result = await self._execute_batch(
                 tenant=tenant,
                 publish_id=publish_id,
@@ -2779,6 +3268,16 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     f"[execute_stage] Failed to cleanup PENDING records "
                     f"for publish_id={publish_id}: {cleanup_err}"
                 )
+
+            await self._cf_report_terminal(
+                tenant=tenant,
+                env=env,
+                publish_id=publish_id,
+                status=PublishStatus.FAILED.value,
+                reason="stage execution failed",
+                operator=operator,
+                publish_record=publish_record,
+            )
 
             return DrainResult(
                 success=False,
@@ -4521,6 +5020,19 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             )
             logger.info(f"Batch {batch_id} → {batch_status}")
 
+        # ChangeFlow batch-result hook (observe-only, non-blocking).
+        # Reports the per-batch outcome + per-device states once the batch
+        # reaches a terminal status. Skips itself when no cf.change_id exists.
+        if batch:
+            await self._cf_report_batch_result(
+                tenant=tenant,
+                env=env,
+                publish_id=publish_id,
+                batch=batch,
+                batch_status=batch_status,
+                counts=counts,
+            )
+
         # Check stage advancement
         if batch:
             await self._check_stage_advancement(
@@ -4675,6 +5187,15 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     operator="callback",
                 )
             logger.info(f"Publish {publish_id} → FAILED")
+            await self._cf_report_terminal(
+                tenant=tenant,
+                env=env,
+                publish_id=publish_id,
+                status=PublishStatus.FAILED.value,
+                reason="stage callback reported failure",
+                operator="callback",
+                publish_record=publish_record,
+            )
             return
 
         # Check if all batches in the current stage are complete
@@ -5172,6 +5693,15 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                                 f"Failed to update replica_desired "
                                 f"for bot {publish_record.bot_id}"
                             )
+
+        await self._cf_report_terminal(
+            tenant=tenant,
+            env=env,
+            publish_id=publish_id,
+            status=PublishStatus.SUCCESS.value,
+            operator=operator,
+            publish_record=publish_record,
+        )
 
         return PublishResponse(
             id=publish_record.id,

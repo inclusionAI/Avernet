@@ -241,6 +241,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
 
     # Provided by ApplicationContainer (cross-container wiring)
     secret_plugin = providers.Dependency()
+    changeflow_plugin = providers.Dependency()
     bot_repo = providers.Dependency()
     device_repo = providers.Dependency()
     auth_plugin = providers.Dependency()
@@ -606,6 +607,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         bot_service=bot_crud_service,
         device_service=device_service,
         lock_service=distributed_lock_service,
+        cf_observer=changeflow_plugin,
     )
 
     bot_management_service = providers.Singleton(
