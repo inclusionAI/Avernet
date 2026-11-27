@@ -52,7 +52,7 @@ class ProductRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 
 def _payload_size(value: str) -> int:
