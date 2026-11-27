@@ -63,6 +63,16 @@ def _progress(self, *, baas_publish_id, include_devices):
     return {"publish_id": 42, "status": "SUCCESS"}
 
 
+def _progress_not_found(self, *, baas_publish_id, include_devices):
+    from agentclaw.community.core.service_bot.errors import ServicePublishWorkflowNotFoundError
+    raise ServicePublishWorkflowNotFoundError("publish workflow not found")
+
+
+def _progress_upstream_failure(self, *, baas_publish_id, include_devices):
+    from agentclaw.community.core.service_bot.errors import ServicePublishUpstreamError
+    raise ServicePublishUpstreamError("publish provider failed")
+
+
 def _teardown(self, bot_uuid, *, operator, publish_id):
     assert (bot_uuid, operator, publish_id) == ("eval-1", "operator-1", 1)
     return {"success": True, "bot_uuid": bot_uuid, "default_tag": "eval", "message": "enqueued"}
@@ -136,6 +146,35 @@ def progress_ok():
 @endpoint_test(method="GET", path=_PROGRESS, scenario="env_invalid_workflow", seed=_auth,
     input=CaseInput(path_params={"baas_publish_id": 0}, headers=_headers()), expect=ExpectError(status=422))
 def progress_invalid():
+    pass
+
+
+def _seed_progress_not_found(world):
+    _seed(world)
+    bind_overrides(world, PublishFlowServiceProtocol, {
+        "get_baas_publish_progress": _progress_not_found,
+    })
+
+
+def _seed_progress_upstream_failure(world):
+    _seed(world)
+    bind_overrides(world, PublishFlowServiceProtocol, {
+        "get_baas_publish_progress": _progress_upstream_failure,
+    })
+
+
+@endpoint_test(method="GET", path=_PROGRESS, scenario="env_progress_not_found", seed=_seed_progress_not_found,
+    input=CaseInput(path_params={"baas_publish_id": 42}, headers=_headers()),
+    expect=ExpectError(status=404))
+def progress_not_found():
+    pass
+
+
+@endpoint_test(method="GET", path=_PROGRESS, scenario="env_progress_upstream_failure",
+    seed=_seed_progress_upstream_failure,
+    input=CaseInput(path_params={"baas_publish_id": 42}, headers=_headers()),
+    expect=ExpectError(status=502))
+def progress_upstream_failure():
     pass
 
 

@@ -113,6 +113,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors_managed_bots import MAN
 from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials import (
     SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors_service_publish import SERVICE_PUBLISH_ENVELOPE_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
 from agentclaw.community.adapters.http.openapi_v1.errors_space_skill import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.task.errors_todo import (
@@ -673,6 +674,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
+    **SERVICE_PUBLISH_ENVELOPE_ERRORS,
     **SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
     **GENOME_ENVELOPE_ERRORS,
     **TODO_HTTP_ERRORS,
