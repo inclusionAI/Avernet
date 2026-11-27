@@ -349,7 +349,7 @@ describe('TaskOverviewV2 real controller navigation', () => {
     ['group', 'mouse'],
     ['group', 'Enter'],
     ['group', ' '],
-  ])('%s icon via %s drills locally; body navigates; back/switch/close isolate state', async (kind, activation) => {
+  ])('%s icon via %s drills and opens node conversation; body navigates; back/switch/close isolate state', async (kind, activation) => {
     const user = userEvent.setup();
     const host: TaskPanelHost = {
       ...taskPanelTestHost,
@@ -428,6 +428,11 @@ describe('TaskOverviewV2 real controller navigation', () => {
     const view = render(<Panel />);
     try {
       const node = kind === 'Bot' ? bot : task.nodes[1];
+      const expectedTarget = {
+        sessionId: node.sessionId,
+        kind: kind === 'Bot' ? 'bot' : 'group',
+        ...(kind === 'Bot' ? { botId: 'bot-2' } : { groupId: node.groupId }),
+      };
       const icon = screen.getByRole('button', { name: `下钻 ${node.name}` });
       if (activation === 'mouse') await user.click(icon);
       else {
@@ -439,14 +444,19 @@ describe('TaskOverviewV2 real controller navigation', () => {
       const detail = screen.getByTestId('task-node-panel-v2');
       expect(within(detail).getAllByText(node.name).length).toBeGreaterThan(0);
       expect(within(detail).getByText(kind === 'Bot' ? 'Bot 节点产物' : '需求说明书')).toBeTruthy();
-      expect(host.navigate).not.toHaveBeenCalled();
+      expect(host.navigate).toHaveBeenCalledTimes(1);
+      expect(host.navigate).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining(expectedTarget),
+        expect.any(AbortSignal),
+      );
       expect(host.restoreOrigin).not.toHaveBeenCalled();
       expect(host.recordInteraction).not.toHaveBeenCalled();
 
       await user.click(screen.getByRole('button', { name: '任务总览' }));
       expect(controller.getSnapshot().navByTask[first.id].drillStack).toEqual([]);
       expect(screen.getByTestId('task-overview-v2')).toBeTruthy();
-      expect(host.navigate).not.toHaveBeenCalled();
+      expect(host.navigate).toHaveBeenCalledTimes(1);
       expect(host.restoreOrigin).not.toHaveBeenCalled();
       // 子任务按钮的原生 Enter/Space 不得激活父卡片。
       for (const key of ['{Enter}', ' ']) {
@@ -461,14 +471,14 @@ describe('TaskOverviewV2 real controller navigation', () => {
       await user.keyboard('{Enter} ');
       expect(document.activeElement).toBe(unavailable);
       expect(controller.getSnapshot().navByTask[first.id].drillStack).toEqual([]);
-      expect(host.navigate).not.toHaveBeenCalled();
+      expect(host.navigate).toHaveBeenCalledTimes(1);
       expect(host.restoreOrigin).not.toHaveBeenCalled();
 
       const row = screen.getByRole('button', { name: `选中节点 第${kind === 'Bot' ? 3 : 2}棒 ${node.name}` });
       await user.click(row);
       row.focus();
       await user.keyboard('{Enter} ');
-      expect(host.navigate).toHaveBeenCalledTimes(3);
+      expect(host.navigate).toHaveBeenCalledTimes(4);
       expect(host.navigate).toHaveBeenLastCalledWith(
         expect.objectContaining({
           sessionId: node.sessionId,
@@ -484,6 +494,7 @@ describe('TaskOverviewV2 real controller navigation', () => {
       expect(host.restoreOrigin).toHaveBeenCalledWith('origin-handle', expect.any(AbortSignal));
 
       await user.click(screen.getByRole('button', { name: `下钻 ${node.name}` }));
+      expect(host.navigate).toHaveBeenCalledTimes(5);
       act(() => controller.openTask(tab(second.id), 'explicit'));
       expect(controller.getSnapshot().navByTask[second.id].drillStack).toEqual([]);
       expect(screen.getByTestId('task-overview-v2')).toBeTruthy();
@@ -499,7 +510,15 @@ describe('TaskOverviewV2 real controller navigation', () => {
       act(() => controller.openTask(tab(second.id), 'explicit'));
       expect(controller.getSnapshot().navByTask[second.id].drillStack).toEqual([]);
       expect(screen.getByTestId('task-overview-v2')).toBeTruthy();
-      expect(host.navigate).toHaveBeenCalledTimes(3);
+      expect(host.navigate).toHaveBeenCalledTimes(6);
+      expect(host.navigate).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          sessionId: 'other-session',
+          kind: 'bot',
+          botId: 'other-bot',
+        }),
+        expect.any(AbortSignal),
+      );
       expect(host.restoreOrigin).toHaveBeenCalledTimes(1);
       expect(host.recordInteraction).not.toHaveBeenCalled();
       expect(host.transport.requestJson).not.toHaveBeenCalled();

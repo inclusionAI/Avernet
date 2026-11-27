@@ -190,11 +190,11 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                 type="button"
                 aria-label={`下钻 ${node.name}${canDrill ? '' : `：${drillReason}`}`}
                 aria-disabled={!canDrill}
-                title={canDrill ? '下钻节点副屏' : drillReason}
+                title={canDrill ? '下钻节点副屏并进入对应会话' : drillReason}
                 onClick={(e) => {
                   e.stopPropagation();
-                  // null 只更新下钻栈；传入会话目标会同时触发宿主导航。
-                  if (canDrill) nav.drillInto(node.id, null);
+                  // 下钻节点副屏，同时定位到节点对应的原生会话。
+                  if (canDrill) nav.drillInto(node.id, target);
                 }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceAlt)}
                 onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
