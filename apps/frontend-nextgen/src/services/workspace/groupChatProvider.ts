@@ -14,6 +14,8 @@ import {
 } from '@tc-chat/adapters';
 import type { AixContext, ChatMessage, ChatProvider } from '@tc-chat/core';
 import { normalizeHumanUserId } from '@/domain/userIdentity';
+import { collectSenderBots } from '@/services/bcs/collabSenderBots';
+import { hasBotCdnBucket, registerBotCdnList } from '@/services/bcs/libraryCdnInjector';
 import { GroupChatHistoryPaginator } from './groupChatHistoryPaginator';
 import { normalizeGroupLiveMessage } from './groupLiveMessageMapper';
 import {
@@ -60,6 +62,14 @@ type HydrationCapableGroupChatProvider = SdkGroupChatProvider & {
   enterLiveMode?: () => void;
   hydrateRun?: (message: ChatMessage) => ChatMessage;
 };
+
+type GroupLiveEvent = { kind: 'message'; message: ChatMessage } | { kind: 'complete'; messages: ChatMessage[] };
+
+/** 普通消息或已有 CDN 缓存的消息不引入异步等待。 */
+function prepareMessageCdn(messages: ChatMessage[]): Promise<number> | undefined {
+  const bots = collectSenderBots(messages).filter((bot) => !hasBotCdnBucket(bot.botId, bot.ownerId));
+  if (bots.length) return registerBotCdnList(bots);
+}
 
 type SessionFrame = {
   id?: string;
@@ -157,9 +167,9 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   private state: GroupChatState = { phase: 'idle', error: null };
   private bufferLiveEvents = true;
   private historyHydrationActive = true;
-  private bufferedEvents: Array<
-    { kind: 'message'; message: ChatMessage } | { kind: 'complete'; messages: ChatMessage[] }
-  > = [];
+  private bufferedEvents: GroupLiveEvent[] = [];
+  private liveDeliveryEpoch = 0;
+  private pendingLiveDelivery: Promise<void> | null = null;
 
   /** 协作群历史消息向上翻页分页器（游标 / hasMore / 加载态由其内部管理）。 */
   private readonly historyPaginator: GroupChatHistoryPaginator;
@@ -561,6 +571,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     this.unsubscribeInnerConnection?.();
     this.unsubscribeInnerConnection = undefined;
     this.bufferedEvents = [];
+    this.resetLiveDelivery();
     inner?.disconnect();
     this.emitConnection({ status: 'disconnected', retryCount: 0 });
   }
@@ -663,8 +674,10 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     this.setState({ phase: 'loading-history', error: null });
     try {
       const messages = await this.historyPaginator.loadLatest();
+      const hydrated = messages.map((message) => this.hydrateMessage(this.inner, message));
+      await prepareMessageCdn(hydrated);
       this.setState({ phase: 'ready', error: null });
-      return messages.map((message) => this.hydrateMessage(this.inner, message));
+      return hydrated;
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error));
       this.setState({ phase: 'error', error: normalized.message });
@@ -680,7 +693,9 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   async loadMoreHistory(): Promise<ChatMessage[]> {
     try {
       const messages = await this.historyPaginator.loadOlder();
-      return messages.map((message) => this.hydrateMessage(this.inner, message));
+      const hydrated = messages.map((message) => this.hydrateMessage(this.inner, message));
+      await prepareMessageCdn(hydrated);
+      return hydrated;
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error));
       throw normalized;
@@ -718,6 +733,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     this.historyHydrationActive = true;
     this.bufferLiveEvents = true;
     this.bufferedEvents = [];
+    this.resetLiveDelivery();
     (this.inner as HydrationCapableGroupChatProvider | null)?.beginHistoryHydration?.();
   }
 
@@ -728,21 +744,40 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     (this.inner as HydrationCapableGroupChatProvider | null)?.enterLiveMode?.();
     const events = this.bufferedEvents;
     this.bufferedEvents = [];
-    for (const event of events) {
-      if (event.kind === 'message') this.onMessage?.(event.message);
-      else this.onComplete?.(event.messages);
-    }
+    for (const event of events) this.deliverAfterCdn(event);
   }
 
-  private dispatchOrBuffer(
-    event: { kind: 'message'; message: ChatMessage } | { kind: 'complete'; messages: ChatMessage[] },
-  ): void {
+  private dispatchOrBuffer(event: GroupLiveEvent): void {
     if (this.bufferLiveEvents) {
       this.bufferedEvents.push(event);
       return;
     }
-    if (event.kind === 'message') this.onMessage?.(event.message);
-    else this.onComplete?.(event.messages);
+    this.deliverAfterCdn(event);
+  }
+
+  private resetLiveDelivery(): void {
+    this.liveDeliveryEpoch += 1;
+    this.pendingLiveDelivery = null;
+  }
+
+  /** 首次副屏配置到齐前暂存交付，避免同步解析失败及 complete 抢在 update 前。 */
+  private deliverAfterCdn(event: GroupLiveEvent): void {
+    const resources = prepareMessageCdn(event.kind === 'message' ? [event.message] : event.messages);
+    const deliver = () => {
+      if (event.kind === 'message') this.onMessage?.(event.message);
+      else this.onComplete?.(event.messages);
+    };
+    if (!resources && !this.pendingLiveDelivery) {
+      deliver();
+      return;
+    }
+    const epoch = this.liveDeliveryEpoch;
+    const pending = Promise.allSettled([this.pendingLiveDelivery, resources]).then(() => {
+      if (epoch === this.liveDeliveryEpoch && this.liveAllowed) deliver();
+    }).finally(() => {
+      if (this.pendingLiveDelivery === pending) this.pendingLiveDelivery = null;
+    });
+    this.pendingLiveDelivery = pending;
   }
 
   private setState(patch: Partial<GroupChatState>): void {
