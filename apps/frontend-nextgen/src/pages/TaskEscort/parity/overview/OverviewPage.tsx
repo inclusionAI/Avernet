@@ -3,6 +3,7 @@ import { overviewListQuery, readOverviewFilters } from '@/domain/taskEscortParit
 import type { OverviewDays } from '@/domain/taskEscortParity/overviewTypes';
 import type { TaskEscortParityContext } from '@/domain/taskEscortParity/types';
 import { useTaskEscortOverview } from '@/hooks/taskEscortParity/useTaskEscortOverview';
+import { RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { NodeAnalysisPanel } from './NodeAnalysisPanel';
 import { OverviewMetrics, OverviewRisk } from './OverviewMetrics';
@@ -11,6 +12,11 @@ import { Button, Empty, OverviewTabs } from './OverviewShared';
 import { OverviewTrends } from './OverviewTrends';
 import { RunDetail } from './RunDetail';
 import './overview.css';
+
+const daysFromPeriod = (period: string | undefined): OverviewDays =>
+  period === 'today' ? 'today' : period === 'yesterday' ? 'yesterday' : period === '30d' ? '30' : '7';
+const periodFromDays = (days: OverviewDays): string =>
+  days === 'today' ? 'today' : days === 'yesterday' ? 'yesterday' : days === '30' ? '30d' : '7d';
 
 function OverviewContent({ context }: { context: TaskEscortParityContext }) {
   const storageKey = `task-escort:overview:${context.scopeKey}:${context.userId ?? ''}:${context.workflowId}`;
@@ -40,10 +46,38 @@ function OverviewContent({ context }: { context: TaskEscortParityContext }) {
     setFilters(restored.filters);
     setSearch(restored.search);
   }
-  const [days, setDays] = useState<OverviewDays>('7'),
+  const [days, setDays] = useState<OverviewDays>(() => daysFromPeriod(context.query.period)),
     [tab, setTab] = useState<'runs' | 'nodes'>('runs'),
     [nodeFilter, setNodeFilter] = useState('');
   const state = useTaskEscortOverview(context, days, filters);
+  const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
+  const refreshBaseline = useRef<number | null>(null);
+  const refreshPending = useRef(false);
+  useEffect(() => {
+    const fromQuery = daysFromPeriod(context.query.period);
+    setDays((current) => (current === fromQuery ? current : fromQuery));
+  }, [context.query.period]);
+  useEffect(() => {
+    if (!refreshPending.current || state.runs.loading || state.metrics.loading) return;
+    refreshPending.current = false;
+    if (state.runs.error) {
+      setRefreshNotice('刷新失败：请稍后重试');
+      return;
+    }
+    const nextTotal = state.runs.data?.total ?? 0;
+    const before = refreshBaseline.current;
+    setRefreshNotice(
+      before !== null && nextTotal > before
+        ? `有新数据：共 ${nextTotal} 条运行记录`
+        : `已刷新 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`,
+    );
+  }, [state.runs.loading, state.runs.error, state.runs.data, state.metrics.loading]);
+  const handleRefresh = () => {
+    refreshBaseline.current = state.runs.data?.total ?? null;
+    refreshPending.current = true;
+    setRefreshNotice(null);
+    state.refresh();
+  };
   const runRefs = useRef(new Map<string, HTMLButtonElement>()),
     lastRun = useRef<string | null>(null);
   const runId = context.query.runId;
@@ -96,7 +130,12 @@ function OverviewContent({ context }: { context: TaskEscortParityContext }) {
                 size="sm"
                 variant={days === value ? 'default' : 'outline'}
                 aria-pressed={days === value}
-                onClick={() => setDays(value)}
+                onClick={() => {
+                  setDays(value);
+                  if (periodFromDays(value) !== context.query.period) {
+                    context.navigate('runs', { ...context.query, period: periodFromDays(value) });
+                  }
+                }}
               >
                 {label}
               </Button>
@@ -124,14 +163,23 @@ function OverviewContent({ context }: { context: TaskEscortParityContext }) {
                 ]}
                 onChange={setTab}
               />
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={state.runs.loading || state.metrics.loading}
-                onClick={state.refresh}
-              >
-                刷新
-              </Button>
+              <div className="flex flex-wrap items-center gap-2 pr-3">
+                {refreshNotice && (
+                  <span role="status" aria-live="polite" className="text-[11px] text-muted-foreground">
+                    {refreshNotice}
+                  </span>
+                )}
+                <Button
+                  variant="default"
+                  size="sm"
+                  disabled={state.runs.loading || state.metrics.loading}
+                  aria-label="刷新运行概览"
+                  onClick={handleRefresh}
+                >
+                  <RefreshCw className={`size-3.5 ${state.runs.loading || state.metrics.loading ? 'animate-spin' : ''}`} aria-hidden />
+                  刷新
+                </Button>
+              </div>
             </div>
             {tab === 'runs' ? (
               <OverviewRuns

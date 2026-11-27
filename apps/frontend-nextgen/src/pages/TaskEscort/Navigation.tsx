@@ -11,14 +11,17 @@ export const pages: {
   description: string;
   icon: typeof Activity;
   group: string;
+  /** 管理员专属视图，普通身份不在导航中曝光。 */
+  adminOnly?: boolean;
 }[] = [
   {
     id: 'dashboard',
     label: '数据大盘',
     title: '数据大盘',
-    description: '查看工作流运行指标、趋势与记录。',
+    description: '仅管理员可见的全局运行指标与风险趋势；单个工作流请查看「运行概览」。',
     icon: LayoutDashboard,
     group: '全局',
+    adminOnly: true,
   },
   {
     id: 'runs',
@@ -66,13 +69,17 @@ export function GuardSidebar({
   page,
   navigate,
   showIntroduction = false,
+  showDashboard = false,
 }: {
   page: PageId;
   navigate: (page: PageId) => void;
   showIntroduction?: boolean;
+  /** 仅当已确认管理员权限时才展示「数据大盘」，避免普通身份撞无权提示。 */
+  showDashboard?: boolean;
 }) {
   const compact = page === 'editor' && !showIntroduction;
   const resize = useSidebarResize(compact);
+  const visiblePages = pages.filter((item) => !item.adminOnly || showDashboard);
   return (
     <aside
       className={`guard-sidebar${compact ? ' guard-sidebar-compact' : ''}`}
@@ -84,16 +91,17 @@ export function GuardSidebar({
         </div>
         <div className={compact ? 'guard-nav-label' : undefined}>
           <div className="text-sm font-semibold">任务护航</div>
-          <div className="mt-1 font-mono text-[9px] tracking-[.15em] text-muted-foreground">TASK GUARD</div>
+          <div className="mt-1 text-[10px] tracking-[.12em] text-muted-foreground">只读运行观察</div>
         </div>
       </div>
       <nav className="guard-nav" aria-label="任务护航导航">
-        {['全局', '分析与改进', '工作流配置'].map((group) => (
-          <div className="guard-nav-group" key={group}>
-            <p className="nav-group">{group}</p>
-            {pages
-              .filter((item) => item.group === group)
-              .map((item) => (
+        {['全局', '分析与改进', '工作流配置'].map((group) => {
+          const items = visiblePages.filter((item) => item.group === group);
+          if (!items.length) return null;
+          return (
+            <div className="guard-nav-group" key={group}>
+              <p className="nav-group">{group}</p>
+              {items.map((item) => (
                 <Button
                   aria-label={item.label}
                   aria-current={(page === 'workbench' ? 'issues' : page) === item.id ? 'page' : undefined}
@@ -106,8 +114,9 @@ export function GuardSidebar({
                   <span className="guard-nav-label">{item.label}</span>
                 </Button>
               ))}
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </nav>
       {!compact && <div className="guard-sidebar-resize" {...resize.handleProps} />}
     </aside>

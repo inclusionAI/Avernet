@@ -228,7 +228,7 @@ it('真实读取为空时拒绝不存在的选择，不伪造问题、运行或�
     result.current.setSelectedRun(null);
     result.current.setSelectedIssue(null);
     result.current.setWorkflowId('all');
-    result.current.navigate('dashboard');
+    result.current.navigate('runs');
     result.current.setPeriod('7d');
   });
   expect(api.listWorkflows).toHaveBeenCalledTimes(1);

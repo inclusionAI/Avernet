@@ -83,7 +83,7 @@ export const navigationItems: NavigationItem[] = [
     path: '/evolution-factory/task-escort',
     icon: ShieldCheck,
     section: 'bot',
-    description: '观察任务运行并处置护航问题',
+    description: '只读观察任务运行记录与护航问题',
   },
   {
     id: 'evolution-factory',
@@ -91,7 +91,7 @@ export const navigationItems: NavigationItem[] = [
     path: '/evolution-factory',
     icon: Zap,
     section: 'bot',
-    description: '诊断、评估和优化 Bot',
+    description: '诊断 Bot 能力并生成优化建议',
   },
 ];
 

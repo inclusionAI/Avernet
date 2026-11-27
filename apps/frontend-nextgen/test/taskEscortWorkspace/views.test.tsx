@@ -183,7 +183,11 @@ function Harness({
   const View = views[view];
   return (
     <>
-      <GuardSidebar page={view === 'workbench' ? 'issues' : view} navigate={onNavigate} />
+      <GuardSidebar
+        page={view === 'workbench' ? 'issues' : view}
+        navigate={onNavigate}
+        showDashboard
+      />
       <View demo={demo} />
     </>
   );
@@ -199,6 +203,13 @@ test('exports exactly six reference navigation entries without changing the glob
   expect(screen.queryByText('研发效能')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '数据大盘' }));
   expect(onNavigate).toHaveBeenCalledWith('dashboard');
+});
+
+test('普通身份默认不展示管理员专属的数据大盘入口', () => {
+  render(<GuardSidebar page="issues" navigate={onNavigate} />);
+  const nav = screen.getByRole('navigation', { name: '任务护航导航' });
+  expect(within(nav).getAllByRole('button')).toHaveLength(5);
+  expect(within(nav).queryByRole('button', { name: '数据大盘' })).not.toBeInTheDocument();
 });
 
 test('issues search combines with state filters and clearing recovers empty results', async () => {

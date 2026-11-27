@@ -91,11 +91,11 @@ export function Dashboard({
       ) : dashboard.forbidden ? (
         <div role="alert">
           <Empty
-            title="只有管理员可以查看全局数据大盘"
-            description="当前身份无全局大盘权限；请联系管理员或使用有权限的身份"
+            title="数据大盘仅管理员可见"
+            description="当前身份没有全局大盘权限；已为你保留「运行概览」，可继续查看单个工作流的运行记录。如需全局统计，请联系管理员申请权限。"
             action={
-              <Button variant="outline" onClick={dashboard.refresh}>
-                重试大盘权限
+              <Button variant="outline" onClick={() => demo.navigate('runs')}>
+                返回运行概览
               </Button>
             }
           />

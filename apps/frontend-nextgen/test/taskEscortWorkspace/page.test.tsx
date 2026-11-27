@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import type { TaskEscortParityContext } from '@/domain/taskEscortParity/types';
 import { useEditorAuthoringNavigation } from '@/hooks/taskEscortParity/useEditorAuthoringNavigation';
+import { useTaskEscortDashboardAccess } from '@/hooks/taskEscortWorkspace/useTaskEscortDashboardAccess';
 import TaskEscortPage from '@/pages/TaskEscort';
 import { Dashboard } from '@/pages/TaskEscort/Dashboard';
 import { taskEscortService } from '@/services/taskEscort/taskEscortService';
@@ -80,6 +81,9 @@ jest.mock('@umijs/max', () => {
 jest.mock('@/hooks/taskEscortWorkspace/useTaskEscortWorkspaceScope', () => ({
   useTaskEscortWorkspaceScope: () => mockScope,
 }));
+jest.mock('@/hooks/taskEscortWorkspace/useTaskEscortDashboardAccess', () => ({
+  useTaskEscortDashboardAccess: jest.fn(() => 'allowed'),
+}));
 jest.mock('sonner', () => ({ toast: Object.assign(jest.fn(), { success: jest.fn(), error: jest.fn() }) }));
 jest.mock('@/services/taskEscort/taskEscortService', () => ({
   taskEscortService: {
@@ -93,6 +97,7 @@ jest.mock('@/services/taskEscortParity/workflowAuthoringService', () => ({
   workflowAuthoringService: { createBlank: jest.fn() },
 }));
 const read = jest.mocked(readTaskEscortWorkflows);
+const dashboardAccess = jest.mocked(useTaskEscortDashboardAccess);
 const rows = [{ id: 'real-a', title: '真实工作流 A', runCount: 0, lastStatus: 'succeeded', ownerId: 'owner-a' }];
 const items = [
   ['dashboard', '数据大盘'],
@@ -107,6 +112,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockEditorDirty = false;
   Object.assign(mockScope, { key: 'user-a:space-a', userId: 'user-a', ready: true, loading: false, error: undefined });
+  dashboardAccess.mockReturnValue('allowed');
   read.mockResolvedValue(rows);
   history.replace('/evolution-factory/task-escort');
 });
@@ -186,6 +192,7 @@ it('navigation removes old demo but preserves host query/hash, and does not refe
 });
 
 it('dashboard keeps the actual legacy controller/scope, with sequential context navigation + workflow selection', async () => {
+  history.replace('/evolution-factory/task-escort?view=dashboard');
   let resolveWorkflows!: (workflows: typeof rows) => void;
   const workflows = new Promise<typeof rows>((resolve) => {
     resolveWorkflows = resolve;
@@ -390,17 +397,27 @@ it.each(items)(
   },
 );
 
-it('product navigation preserves the implicit default Dashboard without adding a view or workflow selection', async () => {
+it('product navigation preserves the implicit default 运行概览 without adding a view or workflow selection', async () => {
   history.replace('/evolution-factory/task-escort?host=yes#detail');
   render(<TaskEscortPage />);
-  await screen.findByRole('heading', { name: '数据大盘' });
+  await screen.findByTestId('parity-leaf');
   fireEvent.click(screen.getByRole('button', { name: '产品导航' }));
   expect(new URLSearchParams(history.location.search).has('view')).toBe(false);
   expect(new URLSearchParams(history.location.search).has('workflowId')).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: '工作区' }));
   expect(history.location.search).toBe('?host=yes');
   expect(history.location.hash).toBe('#detail');
-  expect(screen.getByRole('heading', { name: '数据大盘' })).toBeInTheDocument();
+  expect(screen.getByTestId('parity-leaf')).toBeInTheDocument();
+});
+
+it('hides the admin-only 数据大盘 and redirects a non-admin deep link to 运行概览', async () => {
+  dashboardAccess.mockReturnValue('denied');
+  history.replace('/evolution-factory/task-escort?view=dashboard');
+  render(<TaskEscortPage />);
+  await waitFor(() => expect(new URLSearchParams(history.location.search).get('view')).toBe('runs'));
+  const nav = screen.getByRole('navigation', { name: '任务护航导航' });
+  expect(within(nav).queryByRole('button', { name: '数据大盘' })).not.toBeInTheDocument();
+  expect(within(nav).getAllByRole('button')).toHaveLength(5);
 });
 
 it.each(items)('%s sidebar destination leaves product navigation and mounts the actual page', async (id, label) => {

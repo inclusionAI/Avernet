@@ -21,10 +21,13 @@ export function RunSummaryHeader({
   run,
   nodes,
   onRefresh,
+  onRelatedIssues,
 }: {
   run: OverviewDetailedRun;
   nodes: OverviewNodeExecution[];
   onRefresh: () => void;
+  /** 单向入口：按当前运行 ID 跳到「问题与优化」，便于从运行证据继续排查。 */
+  onRelatedIssues?: () => void;
 }) {
   const latest = useMemo(() => {
     const byId = new Map<string, OverviewNodeExecution>();
@@ -40,7 +43,7 @@ export function RunSummaryHeader({
     <section aria-label="运行摘要" className="tcov-card p-4 sm:p-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="mb-1 text-[10px] font-medium tracking-widest text-muted-foreground">WORKFLOW RUN</p>
+          <p className="mb-1 text-[10px] font-medium tracking-widest text-muted-foreground">运行详情</p>
           <h2 className="break-all text-lg font-semibold">{run.workflowTitle || run.workflowId}</h2>
           <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{run.id}</p>
         </div>
@@ -48,6 +51,11 @@ export function RunSummaryHeader({
       </header>
       <section aria-label="运行操作" className="mt-4 space-y-2 border-b border-border pb-4">
         <div className="flex flex-wrap justify-end gap-2">
+          {onRelatedIssues && (
+            <Button variant="outline" size="sm" onClick={onRelatedIssues}>
+              查看相关问题
+            </Button>
+          )}
           <UnavailableActions runId={run.id} />
           <Button variant="outline" size="sm" onClick={onRefresh}>
             刷新详情
@@ -57,7 +65,7 @@ export function RunSummaryHeader({
       </section>
       <section aria-label="运行身份" className="py-4">
         <h3 className="run-group-heading">
-          运行身份 <small>IDENTITY</small>
+          运行身份
         </h3>
         <Facts
           values={[
@@ -71,7 +79,7 @@ export function RunSummaryHeader({
       </section>
       <section aria-label="运行上下文" className="border-t border-border py-4">
         <h3 className="run-group-heading">
-          运行上下文 <small>RUNTIME</small>
+          运行上下文
         </h3>
         <Facts
           values={[

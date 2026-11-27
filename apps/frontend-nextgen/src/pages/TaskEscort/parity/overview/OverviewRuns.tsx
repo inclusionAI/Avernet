@@ -163,7 +163,11 @@ export function OverviewRuns({
           <Empty
             compact
             title={filters.query || filters.status ? '没有匹配的运行' : '暂无运行'}
-            description="仅展示真实接口结果；可调整时间、状态或搜索条件。"
+            description={
+              filters.query || filters.status
+                ? '仅展示真实接口结果；可调整时间、状态或搜索条件。'
+                : '运行记录由执行引擎执行工作流后产生；执行一次工作流后即可在此查看。'
+            }
           />
         ))}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3">

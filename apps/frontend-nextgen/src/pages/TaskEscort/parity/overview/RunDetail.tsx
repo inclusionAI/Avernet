@@ -36,7 +36,15 @@ export function RunDetail({
       {!detail.loading && !detail.error && !run && <Empty title="接口未提供运行详情" />}
       {run && (
         <>
-          <RunSummaryHeader key={run.id} run={run} nodes={nodes} onRefresh={detail.refresh} />
+          <RunSummaryHeader
+            key={run.id}
+            run={run}
+            nodes={nodes}
+            onRefresh={detail.refresh}
+            onRelatedIssues={() =>
+              context.navigate('issues', { runId: run.id, workflowId: context.workflowId })
+            }
+          />
           <section aria-label="运行 DAG" className="tcov-card">
             <header className="border-b border-border px-4 py-3">
               <h3 className="text-sm font-semibold">运行 DAG</h3>

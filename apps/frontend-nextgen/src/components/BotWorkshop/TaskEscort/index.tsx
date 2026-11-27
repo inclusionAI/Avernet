@@ -23,6 +23,7 @@ const TAB_OPTIONS: Array<{ value: EscortTab; label: string; icon: React.ReactNod
 
 const TaskEscort: React.FC<TaskEscortProps> = ({ bot }) => {
   const [tab, setTab] = useState<EscortTab>('config');
+  const [configDirty, setConfigDirty] = useState(false);
 
   const botOwnerId = bot?.spaceId;
   const botId = bot?.id;
@@ -88,14 +89,27 @@ const TaskEscort: React.FC<TaskEscortProps> = ({ bot }) => {
               variant={tab === option.value ? 'secondary' : 'ghost'}
               size="sm"
               leftIcon={option.icon}
-              onClick={() => setTab(option.value)}
+              onClick={() => {
+                if (tab === 'config' && option.value !== 'config' && configDirty) {
+                  if (!window.confirm('当前工作流有未保存的修改，离开页签将丢失。是否继续？')) return;
+                  setConfigDirty(false);
+                }
+                setTab(option.value);
+              }}
             >
               {option.label}
             </Button>
           ))}
         </div>
 
-        {tab === 'config' && <TaskEscortFlowConfig botOwnerId={botOwnerId} botId={botId} enabled={flowConfigEnabled} />}
+        {tab === 'config' && (
+          <TaskEscortFlowConfig
+            botOwnerId={botOwnerId}
+            botId={botId}
+            enabled={flowConfigEnabled}
+            onDirtyChange={setConfigDirty}
+          />
+        )}
 
         {tab === 'logs' && (
           <div className="overflow-hidden rounded-lg border border-[var(--color-border)]">

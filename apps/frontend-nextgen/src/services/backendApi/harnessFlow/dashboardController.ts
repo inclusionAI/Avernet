@@ -102,7 +102,8 @@ export interface DashboardControllerApi {
   workflowReleaseStats: (range: DashboardRangeParams, signal?: AbortSignal) => Promise<DashboardWorkflowReleasesDto>;
 }
 
-const BASE = '/openapi/v1/harnessflow/api/dashboard';
+export const DASHBOARD_BASE = '/openapi/v1/harnessflow/api/dashboard';
+const BASE = DASHBOARD_BASE;
 /** Global admin aggregates. Never add a workspace workflowId filter or a response mapper here. */
 export const dashboardController: DashboardControllerApi = {
   overview: (range, signal) => backendRequest(`${BASE}/overview`, { method: 'GET', params: { ...range }, signal }),

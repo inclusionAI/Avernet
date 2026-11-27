@@ -18,10 +18,40 @@ const aliases: Record<string, FormalPage> = {
 export function readWorkspacePage(search: string): FormalPage {
   const query = new URLSearchParams(search);
   const view = query.get('view');
-  if (view) return Object.prototype.hasOwnProperty.call(aliases, view) ? aliases[view] : 'dashboard';
+  // 无参数或非法深链统一落「运行概览」：数据大盘仅管理员可见，不能成为普通用户首屏。
+  if (view) return Object.prototype.hasOwnProperty.call(aliases, view) ? aliases[view] : 'runs';
   const tab = query.get('tab');
   if (tab === 'evolution') return query.get('evoTab') === 'remedies' ? 'experiences' : 'issues';
-  return tab && Object.prototype.hasOwnProperty.call(aliases, tab) ? aliases[tab] : 'dashboard';
+  return tab && Object.prototype.hasOwnProperty.call(aliases, tab) ? aliases[tab] : 'runs';
+}
+
+/** 深链键（工作流/运行/问题/节点等）在切换空间后必须全部失效，避免串用上一个空间的数据。 */
+export const workspaceDeepLinkKeys = [
+  'workflowId',
+  'runId',
+  'analysisId',
+  'issueSignature',
+  'issueId',
+  'nodeId',
+  'stepId',
+  'experienceId',
+  'suggestionId',
+  'repairTaskId',
+  'baseline',
+  'current',
+] as const;
+
+/** 清除跨空间的残留深链，并保留当前视图/周期/host 等非数据选择参数。 */
+export function clearWorkspaceDeepLinks(search: string): string {
+  const query = new URLSearchParams(search);
+  let changed = false;
+  for (const key of workspaceDeepLinkKeys) {
+    if (query.has(key)) {
+      query.delete(key);
+      changed = true;
+    }
+  }
+  return changed ? `?${query.toString()}` : search;
 }
 
 /** Product guidance is an overlay on the current real selection, not another workspace page. */
@@ -68,20 +98,8 @@ export function workspaceSelectionSearch(search: string, id: string, currentId: 
   query.delete('productNavigation');
   query.set('workflowId', id);
   if (id !== currentId) {
-    for (const key of [
-      'baseline',
-      'current',
-      'repairTaskId',
-      'runId',
-      'analysisId',
-      'issueSignature',
-      'issueId',
-      'nodeId',
-      'stepId',
-      'experienceId',
-      'suggestionId',
-    ])
-      query.delete(key);
+    // workflowId 是本次选择的目标，必须保留；其余旧工作流深链全部失效。
+    for (const key of workspaceDeepLinkKeys) if (key !== 'workflowId') query.delete(key);
   }
   return `?${query.toString()}`;
 }

@@ -18,6 +18,8 @@ export interface UseTaskEscortFlowConfigReturn {
   isCreatingWorkflow: boolean;
   isSaving: boolean;
   error: string | null;
+  /** 当前 spec 与最近一次保存/加载基线不一致。 */
+  dirty: boolean;
   selectWorkflow: (workflowId: string) => void;
   refreshList: () => Promise<void>;
   createWorkflowFromYaml: (
@@ -40,6 +42,7 @@ export function useTaskEscortFlowConfig({
   const [isCreatingWorkflow, setIsCreatingWorkflow] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedSpec, setSavedSpec] = useState<TaskEscortWorkflowSpec | null>(null);
 
   const loadList = useCallback(async () => {
     if (!botOwnerId && !botId) return;
@@ -61,6 +64,7 @@ export function useTaskEscortFlowConfig({
     try {
       const data = await taskEscortService.getWorkflow(workflowId);
       setSpec(data as TaskEscortWorkflowSpec);
+      setSavedSpec(data as TaskEscortWorkflowSpec);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '加载工作流定义失败');
     } finally {
@@ -88,6 +92,7 @@ export function useTaskEscortFlowConfig({
         const created = await taskEscortService.createWorkflowFromYaml({ ...input, botOwnerId, botId }, workflows);
         setSelectedWorkflowId(created.id);
         setSpec(created as TaskEscortWorkflowSpec);
+        setSavedSpec(created as TaskEscortWorkflowSpec);
         await loadList();
         return { ok: true } as const;
       } catch (cause: unknown) {
@@ -124,6 +129,7 @@ export function useTaskEscortFlowConfig({
         botOwnerId,
         botId,
       );
+      setSavedSpec(spec);
       return { ok: true } as const;
     } catch (cause: unknown) {
       const message = cause instanceof Error ? cause.message : '保存工作流失败';
@@ -140,6 +146,8 @@ export function useTaskEscortFlowConfig({
     }
   }, [enabled, loadList]);
 
+  const dirty = !!spec && !!savedSpec && JSON.stringify(spec) !== JSON.stringify(savedSpec);
+
   return {
     workflows,
     selectedWorkflowId,
@@ -149,6 +157,7 @@ export function useTaskEscortFlowConfig({
     isCreatingWorkflow,
     isSaving,
     error,
+    dirty,
     selectWorkflow,
     refreshList,
     createWorkflowFromYaml,

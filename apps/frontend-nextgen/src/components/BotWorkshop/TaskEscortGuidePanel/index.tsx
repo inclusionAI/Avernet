@@ -9,8 +9,9 @@ const TaskEscortGuidePanel: React.FC = () => (
       </CardHeader>
       <CardContent className="p-4 pt-2">
         <p className="text-[var(--color-muted)]">
-          任务护航（HarnessFlow）为 Bot 提供可视化的工作流编排与执行监控能力。
-          您可以配置多步骤的任务流程，实时查看每一步的执行状态、耗时和输出， 快速定位失败原因。
+          任务护航把 Bot 的工作流运行记录集中呈现在一个工作台里：按工作流查看每次运行的节点状态、耗时与输出，
+          定位失败原因，并从运行详情跳转到相关问题继续排查。本期以「只读观察」口径透出；未接通的自动修复、
+          重跑、审批等能力会标注「能力建设中」，不会给出可点击但无响应的入口。
         </p>
       </CardContent>
     </Card>
@@ -21,16 +22,16 @@ const TaskEscortGuidePanel: React.FC = () => (
       <CardContent className="p-4 pt-2">
         <ol className="list-decimal space-y-2 pl-5 text-[var(--color-muted)]">
           <li>
-            <span className="font-medium text-[var(--color-fg)]">配置工作流</span>
-            ：在「流程配置」面板中定义工作流节点和执行逻辑。
+            <span className="font-medium text-[var(--color-fg)]">选择工作流</span>
+            ：在「日志分析」页签选择要观察的工作流。
           </li>
           <li>
-            <span className="font-medium text-[var(--color-fg)]">触发执行</span>
-            ：通过手动触发、定时任务或事件回调启动工作流。
+            <span className="font-medium text-[var(--color-fg)]">查看运行概览</span>
+            ：查看该工作流的运行状态、近期表现与运行列表。
           </li>
           <li>
-            <span className="font-medium text-[var(--color-fg)]">监控分析</span>
-            ：在「日志分析」面板中查看运行记录、节点状态和详细日志。
+            <span className="font-medium text-[var(--color-fg)]">深入单次运行</span>
+            ：打开运行详情查看节点、日志与档案，并从「查看相关问题」进入问题与优化页。
           </li>
         </ol>
       </CardContent>
@@ -43,7 +44,7 @@ const TaskEscortGuidePanel: React.FC = () => (
         <div className="space-y-3 text-[var(--color-muted)]">
           <div>
             <p className="font-medium text-[var(--color-fg)]">工作流执行失败怎么办？</p>
-            <p className="mt-0.5">点击失败记录查看具体节点错误信息，根据错误提示调整节点配置后重试。</p>
+            <p className="mt-0.5">点击失败记录查看具体节点错误信息；自动重试能力建设中，当前仅做只读观察。</p>
           </div>
           <div>
             <p className="font-medium text-[var(--color-fg)]">如何查看节点详细日志？</p>

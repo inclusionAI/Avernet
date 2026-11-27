@@ -194,7 +194,7 @@ export function WriteUnavailable({
       <p>
         {!canEdit ? '当前账号为只读权限。 ' : ''}
         {reason ? `服务端：${reason}。 ` : ''}
-        前端尚未集成经确认的写操作；仅展示真实读取，不会生成、应用、发布或启动试运行。
+        能力建设中：前端尚未集成经确认的写操作；仅展示真实读取，不会生成、应用、发布或启动试运行。
       </p>
       <div className="flex flex-wrap gap-2">
         {actions.map((a) => (
