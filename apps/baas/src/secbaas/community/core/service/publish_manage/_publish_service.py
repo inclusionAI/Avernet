@@ -74,7 +74,16 @@ from secbaas.community.core.repository.publish_record import (
 from secbaas.community.core.service.paas import is_paas_mock_mode
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
+from secbaas.community.spi.changeflow import ChangeFlowObserver
 
+from ._changeflow_mapping import (
+    build_batch_context,
+    build_register_context,
+    build_terminal_context,
+    is_online_publish,
+    map_batch_outcome,
+    map_environment,
+)
 from ._publish_retry_orchestrator import (
     DEFAULT_MAX_MANUAL_RETRIES,
     PublishAttemptOrchestrator,
@@ -128,6 +137,22 @@ def _extra_config_to_publish_config(
     if extra_config:
         return PublishConfig.model_validate(extra_config)
     return None
+
+
+def _public_publish_config(
+    extra_config: dict[str, Any] | None,
+) -> PublishConfig | None:
+    """Drop internal audit keys (``cf_*``) from caller-visible publish config.
+
+    P1 is a pure backend audit: ChangeFlow concepts must never surface in the
+    API response consumed by the frontend.
+    """
+    clean = {
+        key: value
+        for key, value in (extra_config or {}).items()
+        if not str(key).startswith("cf_")
+    }
+    return _extra_config_to_publish_config(clean)
 
 
 def terminal_eligible_devices(devices: list[Any]) -> list[Any]:
@@ -200,6 +225,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         bot_service: BotManageService,
         device_service: DeviceService,
         lock_service: PublishLockService | None = None,
+        cf_observer: ChangeFlowObserver | None = None,
     ) -> None:
         """Initialize with injected dependencies."""
         self._lock_service: PublishLockService = lock_service or _NoOpLockService()
@@ -213,6 +239,180 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         self._template_service = template_service
         self._bot_service = bot_service
         self._device_service = device_service
+        self._cf_observer = cf_observer
+        # Strong refs keep fire-and-forget audit tasks alive until completion.
+        self._cf_tasks: set[asyncio.Task[Any]] = set()
+        self._cf_register_timeout_seconds = 5.0
+
+    # ====================================================================
+    # CHANGEFLOW OBSERVER (observe-only side channel)
+    # ====================================================================
+    _CF_PROD_STAGES = frozenset(
+        {PublishStage.PROD_FIRST_BATCH.value, PublishStage.PROD_OTHER_BATCH.value}
+    )
+
+    @staticmethod
+    def _cf_change_id(publish_record: PublishRecord | Any) -> str | None:
+        extra = getattr(publish_record, "extra_config", None) or {}
+        change_id = extra.get("cf_change_id")
+        return str(change_id) if change_id else None
+
+    def _cf_spawn(self, coro: Any) -> None:
+        """Run a best-effort audit coroutine without blocking publish logic."""
+        if self._cf_observer is None:
+            return
+        task = asyncio.create_task(coro)
+        self._cf_tasks.add(task)
+
+        def _done(completed: asyncio.Task[Any]) -> None:
+            self._cf_tasks.discard(completed)
+            try:
+                completed.exception()
+            except Exception:  # pragma: no cover - defensive
+                logger.warning("[changeflow] observer task failed", exc_info=True)
+
+        task.add_done_callback(_done)
+
+    def _cf_records_for_batch(self, batch: Any, tenant: str) -> list[Any]:
+        env = get_current_env()
+        try:
+            return self._publish_record_repo.list_by_publish_id_and_batch_id(
+                batch.publish_id, batch.id, tenant, env
+            )
+        except Exception:
+            logger.warning(
+                "[changeflow] failed to load records for batch %s",
+                getattr(batch, "id", "?"),
+                exc_info=True,
+            )
+            return []
+
+    def _cf_batch_context(
+        self,
+        publish_record: Any,
+        batch: Any,
+        *,
+        outcome: str | None = None,
+        error: str | None = None,
+    ) -> Any:
+        return build_batch_context(
+            publish_record=publish_record,
+            batch=batch,
+            records=self._cf_records_for_batch(batch, publish_record.tenant),
+            change_id=self._cf_change_id(publish_record),
+            outcome=outcome,
+            error=error,
+        )
+
+    async def _cf_register(
+        self,
+        publish_record: Any,
+        bot_record: Any,
+        batches: list[Any],
+    ) -> None:
+        """Register the online publish plan and persist the returned change_id."""
+        if self._cf_observer is None or not is_online_publish(publish_record):
+            return
+        if self._cf_change_id(publish_record):
+            return
+
+        prod_batches = [
+            batch
+            for batch in batches
+            if getattr(batch, "stage", None) in self._CF_PROD_STAGES
+        ]
+        if not prod_batches:
+            return
+
+        try:
+            from secbaas.community.api.bot_manage import BotConfig as BotConfigModel
+
+            bot_config = BotConfigModel.model_validate(
+                getattr(bot_record, "extra_config", None) or {}
+            )
+            batches_by_stage: dict[str, list[Any]] = {}
+            for batch in prod_batches:
+                batches_by_stage.setdefault(batch.stage, []).append(
+                    self._cf_batch_context(publish_record, batch)
+                )
+            ctx = build_register_context(
+                publish_record=publish_record,
+                bot_record=bot_record,
+                bot_config=bot_config,
+                environment=map_environment(get_current_env()),
+                batches_by_stage=batches_by_stage,
+            )
+            change_id = await asyncio.wait_for(
+                self._cf_observer.on_register(ctx),
+                timeout=self._cf_register_timeout_seconds,
+            )
+            if not change_id:
+                logger.warning(
+                    "[changeflow] register returned no change_id for publish=%s",
+                    publish_record.id,
+                )
+                return
+            updated = dict(getattr(publish_record, "extra_config", None) or {})
+            updated["cf_change_id"] = str(change_id)
+            self._publish_repo.update_publish(
+                publish_id=publish_record.id,
+                tenant=publish_record.tenant,
+                env=get_current_env(),
+                extra_config=updated,
+                modifier="changeflow",
+            )
+            logger.info(
+                "[changeflow] registered publish=%s change_id=%s",
+                publish_record.id,
+                change_id,
+            )
+        except Exception:
+            logger.warning(
+                "[changeflow] register failed for publish=%s; proceeding without audit",
+                publish_record.id,
+                exc_info=True,
+            )
+
+    def _cf_pre_check(self, publish_record: Any, batch: Any) -> None:
+        if self._cf_observer is None or not is_online_publish(publish_record):
+            return
+        if getattr(batch, "stage", None) not in self._CF_PROD_STAGES:
+            return
+        if not self._cf_change_id(publish_record):
+            return
+        ctx = self._cf_batch_context(publish_record, batch)
+        self._cf_spawn(self._cf_observer.on_pre_check(ctx))
+
+    def _cf_batch_result(self, publish_record: Any, batch: Any) -> None:
+        if self._cf_observer is None or not is_online_publish(publish_record):
+            return
+        if getattr(batch, "stage", None) not in self._CF_PROD_STAGES:
+            return
+        if not self._cf_change_id(publish_record):
+            return
+        outcome = map_batch_outcome(getattr(batch, "status", ""))
+        ctx = self._cf_batch_context(
+            publish_record,
+            batch,
+            outcome=outcome,
+            error=getattr(batch, "error_message", None),
+        )
+        self._cf_spawn(self._cf_observer.on_batch_result(ctx))
+
+    def _cf_terminal(
+        self, publish_record: Any, status: str, reason: str | None = None
+    ) -> None:
+        if self._cf_observer is None or not is_online_publish(publish_record):
+            return
+        if not self._cf_change_id(publish_record):
+            return
+        ctx = build_terminal_context(
+            publish_record=publish_record,
+            change_id=self._cf_change_id(publish_record),
+            publish_status=status,
+            reason=reason,
+        )
+        self._cf_spawn(self._cf_observer.on_publish_terminal(ctx))
 
     # ====================================================================
     # UTILITY METHODS
@@ -513,6 +713,11 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                         status=PublishStatus.FAILED.value,
                         modifier=operator,
                     )
+                    self._cf_terminal(
+                        active_publish,
+                        PublishStatus.FAILED.value,
+                        "orphan_publish_cleanup",
+                    )
                     logger.info(
                         f"Orphan publish {active_publish.id} cleaned up — "
                         f"marked as FAILED"
@@ -566,6 +771,11 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                         env=env,
                         status=PublishStatus.FAILED.value,
                         modifier=operator,
+                    )
+                    self._cf_terminal(
+                        active_publish,
+                        PublishStatus.FAILED.value,
+                        "stale_publish",
                     )
                     logger.info(
                         f"Stale publish {active_publish.id} auto-resolved to "
@@ -937,6 +1147,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
         publish_record = publish_repo.get_by_id(publish_id, tenant=tenant, env=env)
         if publish_record is None:
             raise PublishNotFoundError(publish_id)
+        await self._cf_register(publish_record, bot, batch_records)
         current_stage = self._get_current_stage(tenant, publish_id)
         return PublishResponse(
             id=publish_record.id,
@@ -944,7 +1155,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             publish_type=publish_record.publish_type,
             status=publish_record.status,
             stage=current_stage,
-            extra_config=_extra_config_to_publish_config(publish_record.extra_config),
+            extra_config=_public_publish_config(publish_record.extra_config),
             creator=publish_record.creator,
             modifier=publish_record.modifier,
             gmt_create=publish_record.gmt_create,
@@ -1744,7 +1955,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             publish_type=publish_record.publish_type,
             status=publish_record.status,
             stage=current_stage,
-            extra_config=_extra_config_to_publish_config(publish_record.extra_config),
+            extra_config=_public_publish_config(publish_record.extra_config),
             creator=publish_record.creator,
             modifier=publish_record.modifier,
             gmt_create=publish_record.gmt_create,
@@ -1787,7 +1998,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             publish_type=publish_record.publish_type,
             status=publish_record.status,
             stage=current_stage,
-            extra_config=_extra_config_to_publish_config(publish_record.extra_config),
+            extra_config=_public_publish_config(publish_record.extra_config),
             creator=publish_record.creator,
             modifier=publish_record.modifier,
             gmt_create=publish_record.gmt_create,
@@ -2014,6 +2225,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             status="REJECTED",
             modifier=operator,
         )
+        self._cf_terminal(publish_record, "REJECTED", reason)
 
         logger.info(f"Publish {publish_id} rejected by {operator}: {reason}")
 
@@ -2072,6 +2284,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             status="REVOKED",
             modifier=operator,
         )
+        self._cf_terminal(publish_record, "REVOKED", reason)
 
         logger.info(f"Publish {publish_id} revoked by {operator}: {reason}")
 
@@ -2395,9 +2608,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                     publish_type=publish_record.publish_type,
                     status=publish_record.status,
                     stage=current_stage,
-                    extra_config=_extra_config_to_publish_config(
-                        publish_record.extra_config
-                    ),
+                    extra_config=_public_publish_config(publish_record.extra_config),
                     creator=publish_record.creator,
                     modifier=publish_record.modifier,
                     gmt_create=publish_record.gmt_create,
@@ -2550,6 +2761,9 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 f"stage={batch.stage}"
             )
 
+            # Observe-only: best-effort pre-check before the batch is dispatched.
+            self._cf_pre_check(publish_record, batch)
+
             # Mark batch as RUNNING when starting
             batch_repo.update_status(
                 batch_id=batch.id,
@@ -2595,6 +2809,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                         f"Batch {batch.id} already FAILED via callback "
                         f"({failed_in_batch} failed records), preserving callback result"
                     )
+                    self._cf_batch_result(publish_record, current_batch)
                 elif (
                     current_batch
                     and current_batch.status == BatchStatus.COMPLETED.value
@@ -2604,6 +2819,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                         f"Batch {batch.id} already COMPLETED via callback, "
                         f"preserving callback result"
                     )
+                    self._cf_batch_result(publish_record, current_batch)
                 else:
                     batch_status = (
                         BatchStatus.COMPLETED.value
@@ -2617,6 +2833,10 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                         status=batch_status,
                         modifier=operator,
                     )
+                    terminal_batch = (
+                        batch_repo.get_by_id(batch.id, tenant, env) or current_batch
+                    )
+                    self._cf_batch_result(publish_record, terminal_batch)
             else:
                 # Async hooks dispatched — batch stays RUNNING until callbacks complete
                 logger.info(
@@ -2675,6 +2895,11 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 env=env,
                 status=PublishStatus.FAILED.value,
                 modifier=operator,
+            )
+            self._cf_terminal(
+                publish_record,
+                PublishStatus.FAILED.value,
+                "stage_execution_failed",
             )
 
             # D-01: Transition bot to FAILED status for CREATE publish failures
@@ -4520,6 +4745,10 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 modifier="callback",
             )
             logger.info(f"Batch {batch_id} → {batch_status}")
+        publish_record = self._publish_repo.get_by_id(publish_id, tenant, env)
+        if batch is not None and publish_record is not None:
+            batch = batch_repo.get_by_id(batch_id, tenant, env) or batch
+            self._cf_batch_result(publish_record, batch)
 
         # Check stage advancement
         if batch:
@@ -4570,6 +4799,11 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 env=env,
                 status=PublishStatus.FAILED.value,
                 modifier="callback",
+            )
+            self._cf_terminal(
+                publish_record,
+                PublishStatus.FAILED.value,
+                "stage_callback_failed",
             )
 
             # Clean up pre-created PENDING publish records that were never
@@ -4768,6 +5002,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                 # execute_stage from callback threads (DB pooling issues).
                 all_empty = all(b.batch_capacity == 0 for b in next_pending_batches)
                 if all_empty:
+                    publish_record = publish_repo.get_by_id(publish_id, tenant, env)
                     for b in next_pending_batches:
                         batch_repo.update_status(
                             batch_id=b.id,
@@ -4776,6 +5011,11 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
                             status=BatchStatus.COMPLETED.value,
                             modifier="callback",
                         )
+                        if publish_record is not None:
+                            completed_batch = (
+                                batch_repo.get_by_id(b.id, tenant, env) or b
+                            )
+                            self._cf_batch_result(publish_record, completed_batch)
                     # Recursively advance to check for more stages
                     await self._check_stage_advancement(
                         tenant=tenant,
@@ -4996,6 +5236,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             status=PublishStatus.SUCCESS.value,
             modifier=operator,
         )
+        self._cf_terminal(publish_record, PublishStatus.SUCCESS.value)
 
         # Get bot_repo once for all branches (only if bot operations needed)
         bot_repo = None
@@ -5179,7 +5420,7 @@ class DefaultPublishService(PublishAttemptOrchestrator, PublishService):
             publish_type=publish_record.publish_type,
             status=PublishStatus.SUCCESS.value,
             stage=PublishStage.SUCCESS.value,
-            extra_config=_extra_config_to_publish_config(publish_record.extra_config),
+            extra_config=_public_publish_config(publish_record.extra_config),
             creator=publish_record.creator,
             modifier=operator,
             gmt_create=publish_record.gmt_create,

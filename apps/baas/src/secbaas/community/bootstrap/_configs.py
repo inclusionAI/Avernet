@@ -205,9 +205,26 @@ class PluginConfig(ConfigSchema):
     session_file_url_projector: str = Field(
         default="stub", pattern=r"^(stub|aliyun_ack)$"
     )
+    changeflow: str = Field(default="stub", pattern=r"^(real|stub)$")
     database: str = Field(default="sqlite", pattern=r"^(sqlite|mariadb)$")
     sandbox: SandboxPluginConfig = Field(default_factory=SandboxPluginConfig)
     bot: BotPluginConfig = Field(default_factory=BotPluginConfig)
+
+
+class ChangeFlowConfig(ConfigSchema):
+    """ChangeFlow external-publish observer configuration.
+
+    Only read when ``plugins.changeflow`` selects ``real``. Credentials are
+    fetched from MIST as a KV secret (AK=secret_user, SK=secret_value); the
+    endpoint is the environment-specific htnn gateway base URL.
+    """
+
+    config_section = "changeflow"
+    base_url: str = ""
+    secret_name: str = "openapi_manual_secbaas_changeflow_ak"
+    timeout_seconds: float = Field(default=5.0, gt=0)
+    max_retries: int = Field(default=3, ge=0, le=10)
+    retry_backoff_seconds: float = Field(default=0.2, ge=0)
 
 
 class DatabaseSectionConfig(ConfigSchema):

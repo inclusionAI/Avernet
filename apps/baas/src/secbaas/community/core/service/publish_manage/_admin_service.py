@@ -6,6 +6,9 @@ bypassing normal state machine transitions.
 
 from __future__ import annotations
 
+import asyncio
+from typing import Any
+
 from secbaas.community.api.bot_manage import BotStatus
 from secbaas.community.api.device_manage import DeviceStatus
 from secbaas.community.api.publish_manage import (
@@ -29,6 +32,10 @@ from secbaas.community.core.repository.publish_batch import PublishBatchReposito
 from secbaas.community.core.repository.publish_record import PublishRecordRepository
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
+from secbaas.community.spi.changeflow import (
+    ChangeFlowObserver,
+    ChangeFlowTerminalContext,
+)
 
 logger = get_logger("core-service")
 
@@ -48,6 +55,7 @@ class DefaultPublishAdminService(PublishAdminService):
         device_repo: DeviceRepository,
         bot_repo: BotRepository,
         rel_repo: BotDeviceRelRepository,
+        cf_observer: ChangeFlowObserver | None = None,
     ) -> None:
         self._publish_repo = publish_repo
         self._batch_repo = batch_repo
@@ -55,6 +63,7 @@ class DefaultPublishAdminService(PublishAdminService):
         self._device_repo = device_repo
         self._bot_repo = bot_repo
         self._rel_repo = rel_repo
+        self._cf_observer = cf_observer
 
     async def force_success(
         self,
@@ -122,6 +131,7 @@ class DefaultPublishAdminService(PublishAdminService):
             status="SUCCESS",
             modifier=modifier,
         )
+        self._notify_cf_terminal(publish)
 
         return ForceSuccessResult(
             publish_id=publish_id,
@@ -131,6 +141,38 @@ class DefaultPublishAdminService(PublishAdminService):
             devices_updated=devices_updated,
             bot_updated=bot_updated,
         )
+
+    def _notify_cf_terminal(self, publish: Any) -> None:
+        if self._cf_observer is None:
+            return
+        extra = publish.extra_config or {}
+        change_id = extra.get("cf_change_id")
+        if (
+            not change_id
+            or extra.get("publish_stage") != "online"
+            or publish.publish_type not in ("CREATE", "UPDATE", "RESTART")
+        ):
+            return
+
+        async def _notify() -> None:
+            try:
+                await self._cf_observer.on_publish_terminal(
+                    ChangeFlowTerminalContext(
+                        tenant=publish.tenant,
+                        publish_id=publish.id,
+                        change_id=str(change_id),
+                        outcome="success",
+                        reason="admin_force_success",
+                    )
+                )
+            except Exception:
+                logger.warning(
+                    "[changeflow] admin terminal notify failed publish=%s",
+                    publish.id,
+                    exc_info=True,
+                )
+
+        asyncio.create_task(_notify())
 
     async def update_device_status(
         self,

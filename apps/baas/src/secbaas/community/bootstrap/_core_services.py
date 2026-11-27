@@ -278,6 +278,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     # 评测环境 Plugin 依赖（由 ApplicationContainer 注入 real/stub 实现）
     eval_consistency_check = providers.Dependency()
     eval_session_log = providers.Dependency()
+    changeflow_observer = providers.Dependency()
 
     # ── Auth service ──────────────────────────────────────────────────────────
 
@@ -606,6 +607,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         bot_service=bot_crud_service,
         device_service=device_service,
         lock_service=distributed_lock_service,
+        cf_observer=changeflow_observer,
     )
 
     bot_management_service = providers.Singleton(
@@ -626,6 +628,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         device_repo=device_repo,
         bot_repo=bot_repo,
         rel_repo=bot_device_rel_repo,
+        cf_observer=changeflow_observer,
     )
 
     bot_service_selector = providers.Singleton(

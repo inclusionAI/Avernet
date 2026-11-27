@@ -405,6 +405,7 @@ class BotConfig:
     entity_type: str = "staff"
     auto_approve_publish: bool = False
     deploy_config: Optional[BotDeployConfig] = None
+    publish_stage: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式。"""
@@ -415,6 +416,8 @@ class BotConfig:
         }
         if self.deploy_config:
             result["deploy_config"] = self.deploy_config.to_dict()
+        if self.publish_stage:
+            result["publish_stage"] = self.publish_stage
         return result
 
 
@@ -900,6 +903,7 @@ class BaasService:  # pragma: no cover
             entity_type=entity_type,
             auto_approve_publish=auto_approve_publish,
             deploy_config=deploy_config,
+            publish_stage=stage,
         )
 
         # 构建请求体
@@ -1100,6 +1104,7 @@ class BaasService:  # pragma: no cover
         template_uuid: str,
         device_count: int = 1,
         ttl_in_minutes: Optional[int] = None,
+        publish_stage: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Provision a **teclaw** (pull-based, non-mount) container via BaaS.
 
@@ -1145,6 +1150,7 @@ class BaasService:  # pragma: no cover
             template_uuid=template_uuid,
             device_count=device_count,
             ttl_in_minutes=ttl_in_minutes,
+            publish_stage=publish_stage,
         )
         return self._post_teclaw(
             path="/api/v1/bots",
@@ -1163,6 +1169,7 @@ class BaasService:  # pragma: no cover
         template_uuid: str,
         device_count: int = 1,
         ttl_in_minutes: Optional[int] = None,
+        publish_stage: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Re-deliver a new frozen artifact to an existing **teclaw** container.
 
@@ -1186,6 +1193,7 @@ class BaasService:  # pragma: no cover
             template_uuid=template_uuid,
             device_count=device_count,
             ttl_in_minutes=ttl_in_minutes,
+            publish_stage=publish_stage,
         )
         return self._post_teclaw(
             path=f"/api/v1/bots/{bot_uuid}/update",
@@ -1203,6 +1211,7 @@ class BaasService:  # pragma: no cover
         template_uuid: str,
         device_count: int,
         ttl_in_minutes: Optional[int],
+        publish_stage: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Shape the create/update body for a teclaw (non-mount) container.
 
@@ -1223,6 +1232,7 @@ class BaasService:  # pragma: no cover
             # teclaw create and update paths (both build through here).
             auto_approve_publish=True,
             deploy_config=deploy_config,
+            publish_stage=publish_stage,
         )
         payload: Dict[str, Any] = {
             "name": bot.get("bot_name", bot.get("bot_id", "")),

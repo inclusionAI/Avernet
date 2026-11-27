@@ -845,6 +845,7 @@ class BotBuildService:
                     config_artifact=delivery.config_artifact,
                     template_uuid=self._teclaw_template_uuid,
                     device_count=1,
+                    publish_stage=publish_stage.value,
                 )
             else:
                 create_kwargs: dict[str, Any] = {
@@ -1814,6 +1815,7 @@ class BotBuildService:
                     config_artifact=delivery.config_artifact,
                     template_uuid=self._teclaw_template_uuid,
                     device_count=1,
+                    publish_stage=publish_stage.value,
                 )
             else:
                 upgrade_kwargs: dict[str, Any] = {
