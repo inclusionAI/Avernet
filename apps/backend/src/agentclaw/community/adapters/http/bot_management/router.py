@@ -1537,6 +1537,14 @@ async def get_auth_status(
             error_code=400,
             data=None,
         )
+    except BotNameExistsError as e:
+        logger.warning(f"[bot_router.get_auth_status] Bot name exists: {e}")
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=409,
+            data=None,
+        )
     except BotLimitExceededError as e:
         logger.warning(f"[bot_router.get_auth_status] Bot limit exceeded: {e}")
         return ApiResponse(

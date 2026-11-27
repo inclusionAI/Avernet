@@ -845,6 +845,34 @@ class TestGetAuthStatus:
         assert data["success"] is False
         assert data["error_code"] == 429
 
+    def test_issued_bot_name_exists_returns_409(self, client, caplog):
+        # 服务层 create_bot 在授权 ISSUED 后才拒绝重名（Race：首次校验通过，
+        # 排程期间他人占用了该 bot_name）→ 必须映射 409 且仅记 WARNING，
+        # 而不是落进通用 500 以 ERROR 级别记日志（CDO 线上噪音来源）。
+        import logging
+
+        tc, svc, passport = client
+        passport.query_auth_status.return_value = {"status": "ISSUED", "token": "tok"}
+        svc.create_bot.side_effect = BotNameExistsError(
+            "Bot name 'NewBot' already exists"
+        )
+        with caplog.at_level(logging.INFO, logger="start"):
+            resp = tc.post(
+                "/api/bots/auth-status",
+                json={"bot_id": "bot1", "bot_name": "NewBot"},
+            )
+        data = resp.json()
+        assert data["success"] is False
+        assert data["error_code"] == 409
+        assert data["message"] == "Bot name 'NewBot' already exists"
+        records = [
+            record
+            for record in caplog.records
+            if "bot_router.get_auth_status" in record.message
+        ]
+        assert records
+        assert all(record.levelno == logging.WARNING for record in records)
+
     def test_issued_retained_creation_returns_retry_handle(self, client):
         tc, svc, passport = client
         passport.query_auth_status.return_value = {
