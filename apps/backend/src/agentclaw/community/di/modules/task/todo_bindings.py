@@ -9,6 +9,7 @@ from typing import Any
 from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.core.repository.implementations.task.todos import (
+    TodoProductInteractionRepository,
     TodoArtifactRepository,
     TodoAutoImportRepository,
     TodoRepository,
@@ -20,11 +21,17 @@ from agentclaw.community.core.repository.protocols.task.todo_artifacts import (
 from agentclaw.community.core.repository.protocols.task.todo_auto_imports import (
     TodoAutoImportRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.task.todo_product_interactions import (
+    TodoProductInteractionRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.task.todo_templates import (
     TodoTemplateRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.work_orders import (
+    WorkOrderRepositoryProtocol,
 )
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.core.task.context_collab.executor import (
@@ -73,8 +80,14 @@ from agentclaw.community.core.task.todos.collaboration.protocol import (
 from agentclaw.community.core.task.todos.execution_protocol import (
     TodoExecutionServiceProtocol,
 )
+from agentclaw.community.core.task.todos.notification_publisher_protocol import (
+    TodoNotificationPublisherProtocol,
+)
 from agentclaw.community.core.task.todos.product_creation_protocol import (
     TodoProductCreationServiceProtocol,
+)
+from agentclaw.community.core.task.todos.product_interaction_protocol import (
+    TodoProductInteractionServiceProtocol,
 )
 from agentclaw.community.core.task.todos.product_progress_protocol import (
     TodoProductProgressServiceProtocol,
@@ -118,6 +131,12 @@ from agentclaw.community.core.task.todos.services.todo_execution_service import 
 from agentclaw.community.core.task.todos.services.todo_product_creation_service import (
     TodoProductCreationService,
 )
+from agentclaw.community.core.task.todos.services.todo_notification_publisher import (
+    TodoNotificationPublisher,
+)
+from agentclaw.community.core.task.todos.services.todo_product_interaction_service import (
+    TodoProductInteractionService,
+)
 from agentclaw.community.core.task.todos.services.todo_product_progress_service import (
     TodoProductProgressService,
 )
@@ -153,6 +172,11 @@ class TaskTodoBindings(Module):
     def configure(self, binder: Binder) -> None:
         binder.bind(TodoRepositoryProtocol, to=TodoRepository, scope=singleton)
         binder.bind(
+            TodoProductInteractionRepositoryProtocol,
+            to=TodoProductInteractionRepository,
+            scope=singleton,
+        )
+        binder.bind(
             TodoAutoImportRepositoryProtocol,
             to=TodoAutoImportRepository,
             scope=singleton,
@@ -179,8 +203,18 @@ class TaskTodoBindings(Module):
             scope=singleton,
         )
         binder.bind(
+            TodoNotificationPublisherProtocol,
+            to=TodoNotificationPublisher,
+            scope=singleton,
+        )
+        binder.bind(
             TodoProductProgressServiceProtocol,
             to=TodoProductProgressService,
+            scope=singleton,
+        )
+        binder.bind(
+            TodoProductInteractionServiceProtocol,
+            to=TodoProductInteractionService,
             scope=singleton,
         )
         binder.bind(TodoStageServiceProtocol, to=TodoStageService, scope=singleton)

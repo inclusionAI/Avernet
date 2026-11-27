@@ -38,6 +38,31 @@ storage.
 
 `TodoProductProgressServiceProtocol` and `TodoProductProgressService` project the user-facing progress view. The persisted Todo stage snapshot is the product skeleton: it owns stage identity, order, Bot, and acceptance criteria. The Product runtime rollout and its session messages only add runtime facts such as status, retry, blocker, current step, or sub-steps; they do not rename, reorder, or introduce user-visible stages. A runtime stage that cannot be matched to the Todo snapshot or read through the protocol remains explicitly unavailable/unknown rather than being guessed from source text.
 
+`ac_todo_product_interaction` is the local authoritative record for Product-Todo
+Human dialogs. Each row is created under the owning Todo row lock and only one
+row in `sending`, `delivery_unknown`, or `cancel_requested` may exist per Todo
+(single-flight). The local interaction ID is also the Product protocol
+`request_id`; it does not use a Context event ID, execution ID, or frontend-supplied
+ID. Before calling `interactive()` the service queries the Collet's runtime
+metadata and persists `collet_rollout_id` plus `expected_revision`. Protocol
+timeouts become `delivery_unknown`, which keeps the send lock; stale revisions
+and explicit runtime failures become `failed`. Only a protocol `SHUTDOWN` result
+projects the stop target and Todo as cancelled. Stop requests use the deterministic
+ID `{interaction_id}:shutdown:v1`, so repeated cancel clicks are idempotent.
+Legacy Context Todos continue to use the original interaction event flow and never
+write the Product interaction table; Product Todos never post
+`user_interaction.posted`.
+
+`TodoNotificationPublisherProtocol` is the Todo-owned notification boundary. Its
+adapter maps bounded Todo events to the existing WorkOrder/Inbox infrastructure
+and uses `delivery_key` (hashed as the inbox group ID) for idempotency. The
+recipient is only the explicit Human recipient or the Todo owner; a missing
+recipient is recorded as skipped. Inbox failures do not roll back a persisted Todo
+fact. The current implementation observes product runtime facts while serving
+Progress, so it relies on the stable delivery key to keep Inbox idempotent. It does
+not yet persist a notification-delivery ledger or run a compensation scheduler;
+failed/delivery-unknown retries remain documented follow-up work.
+
 A template Todo is pinned to an immutable published template version. Its
 ordered stage instances are the product workflow:
 
@@ -240,7 +265,7 @@ event.
 ## Context Boundary
 
 ```yaml
-purpose: Own persisted Todo lifecycle, imported-source identity, automatic Context dispatch, runtime refresh, interactions, and acceptance.
+purpose: Own persisted Todo lifecycle, imported-source identity, automatic Context dispatch, runtime refresh, interactions, Product dialogs, notifications, and acceptance.
 provides:
   - TodoServiceProtocol
   - TodoService
@@ -262,6 +287,10 @@ provides:
   - TodoProductCreationService
   - TodoProductProgressServiceProtocol
   - TodoProductProgressService
+  - TodoProductInteractionServiceProtocol
+  - TodoProductInteractionService
+  - TodoNotificationPublisherProtocol
+  - TodoNotificationPublisher
   - TodoExecutorSelection
   - TodoOwnerInput
   - BotTeamRecord
@@ -272,6 +301,9 @@ provides:
 consumes:
   - TodoRepositoryProtocol
   - TodoAutoImportRepositoryProtocol
+  - TodoProductInteractionRepositoryProtocol
+  - ProductProfileServiceProtocol
+  - WorkOrderRepositoryProtocol
   - SpaceAccessServiceProtocol
   - BotRepository
   - CachePlugin
@@ -297,10 +329,13 @@ internal_dependencies:
 
 Changes affect Todo create/read, imported-source identity and duplicate
 prevention, automatic scheduling, the compensation Run endpoint, event and
-interaction projection, and acceptance. Repository state
+interaction projection, Product Human dialogs, notification delivery, and
+acceptance. Repository state
 transitions are compare-and-set operations so duplicate schedulers or operator
 retries cannot move a Todo backwards. Context creation and Todo persistence are
 not one cross-store transaction; dispatch therefore resumes from an already
-bound Context when retrying. A does not own an interaction table: Human
-interaction events and executor progress remain in B, while Human acceptance
-and the six product states remain in A; runtime attempt states remain in B.
+bound Context when retrying. A does not own the legacy Context interaction table: those Human interaction
+events and executor progress remain in B. Product Collet Todos do own the local
+`ac_todo_product_interaction` dialog facts because they are Product-boundary
+human actions and must remain readable when the external runtime changes; legacy
+product state and generic runtime attempt states remain in B.

@@ -294,6 +294,18 @@ TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "/openapi/v1/collaboration/tasks/todos/{todo_id}/progress",
     ): AdmissionMode.REFUSED,
     (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/product-interactions",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/product-interactions",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/product-interactions/{interaction_id}/cancel",
+    ): AdmissionMode.REFUSED,
+    (
         "POST",
         "/openapi/v1/collaboration/tasks/todos/{todo_id}/run",
     ): AdmissionMode.REFUSED,

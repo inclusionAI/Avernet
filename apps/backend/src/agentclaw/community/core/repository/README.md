@@ -297,6 +297,7 @@ provides:
   - TodoAutoImportRepositoryProtocol
   - TodoTemplateRepositoryProtocol
   - TodoArtifactRepositoryProtocol
+  - TodoProductInteractionRepositoryProtocol
   - TodoArtifactRepository
   # publishing
   - BotPublishRepositoryProtocol
@@ -403,6 +404,7 @@ provides:
   - TodoRepository
   - TodoAutoImportRepository
   - TodoTemplateRepository
+  - TodoProductInteractionRepository
 consumes:
   - DatabasePlugin                # the per-profile session seam, injected into every implementation
   - get_current_env               # environment scoping (utils.env_utils)

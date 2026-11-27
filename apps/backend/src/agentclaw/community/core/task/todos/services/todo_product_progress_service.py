@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from injector import inject
@@ -32,6 +34,14 @@ from agentclaw.community.core.task.todos.bot_team_service_protocol import (
     TodoBotTeamServiceProtocol,
 )
 from agentclaw.community.core.task.todos.errors import TodoNotFoundError
+from agentclaw.community.core.task.todos.notification_models import (
+    TodoNotificationEvent,
+    TodoNotificationType,
+    build_todo_notification_delivery_key,
+)
+from agentclaw.community.core.task.todos.notification_publisher_protocol import (
+    TodoNotificationPublisherProtocol,
+)
 from agentclaw.community.core.task.todos.models import (
     MAX_ACTOR_ID_LENGTH,
     MAX_TODO_ID_LENGTH,
@@ -58,6 +68,7 @@ from agentclaw.community.core.task.todos.stage_models import (
     TodoStageStatus,
 )
 
+_LOG = logging.getLogger(__name__)
 _DEFAULT_MESSAGE_LIMIT = 50
 _MAX_MESSAGE_LIMIT = 200
 _MAX_SAFE_TEXT_LENGTH = 500
@@ -228,10 +239,12 @@ class TodoProductProgressService(TodoProductProgressServiceProtocol):
         todos: TodoServiceProtocol,
         bot_teams: TodoBotTeamServiceProtocol,
         product_profiles: ProductProfileServiceProtocol,
+        notifications: TodoNotificationPublisherProtocol,
     ) -> None:
         self._todos = todos
         self._bot_teams = bot_teams
         self._product_profiles = product_profiles
+        self._notifications = notifications
 
     async def get_progress(
         self,
@@ -365,6 +378,11 @@ class TodoProductProgressService(TodoProductProgressServiceProtocol):
             )
             for stage in projected
         )
+        await self._publish_runtime_notification(
+            todo=todo,
+            runtime=runtime,
+            projected=projected,
+        )
         return TodoProgress(
             todo_id=todo.todo_id,
             status=todo.status,
@@ -375,6 +393,129 @@ class TodoProductProgressService(TodoProductProgressServiceProtocol):
             rollout_revision=runtime.revision,
             stopped=runtime.stopped,
             stages=projected,
+        )
+
+    async def _publish_runtime_notification(
+        self,
+        *,
+        todo: TodoRecord,
+        runtime: ProductRolloutSnapshot,
+        projected: tuple[TodoStageProgress, ...],
+    ) -> None:
+        stage = next(
+            (
+                item
+                for item in projected
+                if item.status
+                in {
+                    TodoProgressStageStatus.PENDING_ACTION,
+                    TodoProgressStageStatus.INTERRUPTED,
+                }
+            ),
+            None,
+        )
+        runtime_stages = runtime.current.stages
+        if stage is None:
+            if not runtime_stages or not all(
+                runtime_stage.status is StatusEnum.ACCEPTANCE_SUCCEED
+                for runtime_stage in runtime_stages
+            ):
+                return
+            stage = next(
+                (
+                    item
+                    for item in projected
+                    if item.code == runtime_stages[0].name
+                    and item.status is TodoProgressStageStatus.COMPLETED
+                ),
+                None,
+            )
+            if stage is None:
+                return
+            await self._publish_notification(
+                todo=todo,
+                runtime=runtime,
+                stage=stage,
+                runtime_stage=runtime_stages[0],
+                notification_type=TodoNotificationType.TODO_COMPLETED,
+            )
+            return
+
+        runtime_stage = next(
+            (
+                item
+                for item in runtime_stages
+                if item.name == stage.code
+            ),
+            None,
+        )
+        if runtime_stage is None:
+            return
+        if runtime_stage.status is StatusEnum.ACCEPTANCE_FAILED:
+            notification_type = TodoNotificationType.VERIFICATION_REQUIRED
+        elif runtime_stage.status is StatusEnum.RUN_FINISHED:
+            notification_type = TodoNotificationType.HUMAN_ACTION_REQUIRED
+        elif runtime_stage.status is StatusEnum.RUN_FAILED:
+            notification_type = TodoNotificationType.EXECUTION_INTERRUPTED
+        else:
+            return
+        await self._publish_notification(
+            todo=todo,
+            runtime=runtime,
+            stage=stage,
+            runtime_stage=runtime_stage,
+            notification_type=notification_type,
+        )
+
+    async def _publish_notification(
+        self,
+        *,
+        todo: TodoRecord,
+        runtime: ProductRolloutSnapshot,
+        stage: TodoStageProgress,
+        runtime_stage: StageRollout,
+        notification_type: TodoNotificationType,
+    ) -> None:
+        action_version = f"{stage.code}:{stage.status.value}:{stage.attempt_count}"
+        event = TodoNotificationEvent(
+            delivery_key=build_todo_notification_delivery_key(
+                todo_id=todo.todo_id,
+                notification_type=notification_type,
+                rollout_revision=runtime.revision,
+                stage_rollout_id=runtime_stage.stage_rollout_id,
+                action_version=action_version,
+            ),
+            notification_type=notification_type,
+            todo_id=todo.todo_id,
+            space_id=str(todo.space_id),
+            recipient_id=todo.owner_id or None,
+            title=todo.title,
+            summary=stage.summary or stage.requested_action or todo.title,
+            stage_code=stage.code,
+            stage_rollout_id=runtime_stage.stage_rollout_id,
+            rollout_revision=runtime.revision,
+            action_version=action_version,
+            occurred_at=datetime.now(timezone.utc),
+        )
+        try:
+            result = await asyncio.to_thread(self._notifications.publish, event)
+        except Exception as error:
+            _LOG.warning(
+                "Todo notification publication raised %s",
+                type(error).__name__,
+                extra={
+                    "todo_id": todo.todo_id,
+                    "notification_delivery_key": event.delivery_key,
+                },
+            )
+            return
+        _LOG.info(
+            "Todo notification publication completed",
+            extra={
+                "todo_id": todo.todo_id,
+                "notification_delivery_key": event.delivery_key,
+                "notification_status": result.status.value,
+            },
         )
 
     def _runtime_kind(

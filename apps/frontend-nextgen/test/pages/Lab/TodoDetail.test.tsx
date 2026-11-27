@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import type { TodoArtifact, TodoEvent, TodoProgress, TodoRecord } from '@/domain/todos/models';
+import type { TodoArtifact, TodoEvent, TodoProgress, TodoProductInteraction, TodoRecord } from '@/domain/todos/models';
 import TodoDetailPage from '@/pages/Lab/Todos/TodoDetailPage';
 import * as todoService from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
@@ -10,6 +10,10 @@ import { history } from '@umijs/max';
 
 jest.mock('@umijs/max', () => ({
   history: { push: jest.fn(), replace: jest.fn() },
+  useLocation: () => ({
+      pathname: '/lab/todos/todo-1',
+      search: (globalThis as { __todoFocusQuery?: string }).__todoFocusQuery ?? '',
+    }),
   useParams: () => ({ todoId: 'todo-1' }),
 }));
 
@@ -34,6 +38,9 @@ jest.mock('@/services/todos/todoService', () => ({
   acceptTodo: jest.fn(),
   loadTodoInteractions: jest.fn(),
   addTodoInteraction: jest.fn(),
+  addTodoProductInteraction: jest.fn(),
+  loadTodoProductInteractionPage: jest.fn(),
+  stopTodoProductInteraction: jest.fn(),
   loadTodoEvents: jest.fn(),
   loadTodoArtifacts: jest.fn(),
   loadTodoMentionBots: jest.fn(),
@@ -64,7 +71,7 @@ const todo: TodoRecord = {
 const todoProgress: TodoProgress = {
   todoId: 'todo-1',
   status: 'pending_action',
-  runtimeKind: 'product_collet',
+  runtimeKind: 'legacy_context',
   runtimeUnavailable: false,
   currentStageCode: 'analyze',
   stages: [
@@ -88,6 +95,50 @@ const todoProgress: TodoProgress = {
     },
   ],
 };
+
+const productProgress: TodoProgress = {
+  ...todoProgress,
+  runtimeKind: 'product_collet',
+  stages: [
+    {
+      stageInstanceId: 'stage-1',
+      code: 'analyze',
+      name: '需求分析',
+      order: 1,
+      kind: 'bot',
+      status: 'pending_action',
+      ownerUserId: 'human-1',
+      ownerUserName: '风太',
+      executorSubjectId: 'bot-1',
+      executorSubjectName: '数据分析助手',
+      summary: '等待补充信息',
+      steps: [],
+      outputs: [],
+      attemptCount: 1,
+      detailsLoaded: true,
+      ignoredMessageCount: 0,
+    },
+  ],
+};
+
+function productInteraction(overrides: Partial<TodoProductInteraction> = {}): TodoProductInteraction {
+  return {
+    interactionId: 'pi-1',
+    todoId: 'todo-1',
+    kind: 'human_message',
+    actorId: '149844',
+    actorName: '风太',
+    requestMessage: '请补充价格来源',
+    deliveryState: 'succeeded',
+    productColletId: 1,
+    colletRolloutId: 10,
+    expectedRevision: 3,
+    response: { type: 'RE_DO', message: '已接受补充要求，正在重做。' },
+    createdAt: '2026-11-27T10:00:00Z',
+    updatedAt: '2026-11-27T10:00:01Z',
+    ...overrides,
+  };
+}
 
 const artifacts: TodoArtifact[] = [
   {
@@ -181,6 +232,9 @@ function resetStore() {
     events: [],
     artifacts: [],
     progress: null,
+    productInteractionPage: null,
+    productInteractionLoading: false,
+    productInteractionError: null,
     listLoading: false,
     detailLoading: false,
     eventsLoading: false,
@@ -224,6 +278,7 @@ beforeEach(() => {
   ]);
   mockedService.loadTodoArtifacts.mockResolvedValue(artifacts);
   mockedService.loadTodoProgress.mockResolvedValue(todoProgress);
+  mockedService.loadTodoProductInteractionPage.mockResolvedValue({ items: [], canSend: true });
   mockedService.loadTodoMentionBots.mockResolvedValue([
     { botId: 'bot-1', botName: '数据分析助手' },
     { botId: 'bot-review', botName: '复核助手' },
@@ -784,5 +839,81 @@ describe('TodoDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '详情' }));
     expect(screen.getByRole('button', { name: '详情' })).toHaveClass('text-xs', 'font-medium');
     expect(card).toHaveClass('rounded-xl');
+  });
+});
+
+describe('Todo Product interaction', () => {
+  beforeEach(() => {
+    mockedService.loadTodoProgress.mockResolvedValue(productProgress);
+    mockedService.loadTodoProductInteractionPage.mockResolvedValue({
+      items: [productInteraction()],
+      canSend: true,
+    });
+    mockedService.addTodoProductInteraction.mockResolvedValue(
+      productInteraction({ interactionId: 'pi-2', requestMessage: '补充价格来源' }),
+    );
+  });
+
+  it('Product 待办展示平台互动并提交到 Product 互动接口', async () => {
+    render(<TodoDetailPage />);
+    await screen.findByText('发起待办：Q3 竞品分析');
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+
+    const interactionView = await screen.findByRole('region', { name: 'Product 待办互动' });
+    expect(within(interactionView).getByText('请补充价格来源')).toBeInTheDocument();
+    expect(within(interactionView).getByText('已接受补充要求，正在重做。')).toBeInTheDocument();
+    expect(within(interactionView).getByText('RE_DO')).toBeInTheDocument();
+
+    fireEvent.change(within(interactionView).getByLabelText('Product 待办互动内容'), {
+      target: { value: ' 补充价格来源 ' },
+    });
+    fireEvent.click(within(interactionView).getByRole('button', { name: '发送互动' }));
+
+    await waitFor(() =>
+      expect(mockedService.addTodoProductInteraction).toHaveBeenCalledWith('todo-1', {
+        message: '补充价格来源',
+        replyToInteractionId: 'pi-1',
+      }),
+    );
+    expect(mockedService.addTodoInteraction).not.toHaveBeenCalled();
+  });
+
+  it('平台未返回前显示停止入口并禁止继续发送', async () => {
+    mockedService.loadTodoProductInteractionPage.mockResolvedValue({
+      items: [productInteraction({
+        interactionId: 'pi-blocking',
+        deliveryState: 'delivery_unknown',
+        response: undefined,
+      })],
+      canSend: false,
+      blockingInteractionId: 'pi-blocking',
+    });
+    mockedService.stopTodoProductInteraction.mockResolvedValue(
+      productInteraction({ interactionId: 'pi-blocking', deliveryState: 'cancel_requested' }),
+    );
+
+    render(<TodoDetailPage />);
+    await screen.findByText('发起待办：Q3 竞品分析');
+    fireEvent.click(screen.getByRole('tab', { name: '互动' }));
+
+    const interactionView = await screen.findByRole('region', { name: 'Product 待办互动' });
+    expect(within(interactionView).getByText('结果确认中')).toBeInTheDocument();
+    expect(within(interactionView).getByText('当前互动尚未返回，暂停发送。')).toBeInTheDocument();
+    expect(within(interactionView).queryByLabelText('Product 待办互动内容')).not.toBeInTheDocument();
+
+    fireEvent.click(within(interactionView).getByRole('button', { name: '停止处理' }));
+    await waitFor(() =>
+      expect(mockedService.stopTodoProductInteraction).toHaveBeenCalledWith('todo-1', 'pi-blocking'),
+    );
+  });
+
+  it('通知深链打开时直接进入互动视图', async () => {
+    (globalThis as { __todoFocusQuery?: string }).__todoFocusQuery = '?focus=interaction';
+    try {
+      render(<TodoDetailPage />);
+      expect(await screen.findByRole('region', { name: 'Product 待办互动' })).toBeInTheDocument();
+    } finally {
+      (globalThis as { __todoFocusQuery?: string }).__todoFocusQuery = undefined;
+    }
   });
 });

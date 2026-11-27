@@ -100,3 +100,44 @@ class TodoTemplateNotFoundError(NotFound):
 
 class TodoTemplateStateConflictError(Conflict):
     """The requested Todo template mutation is illegal in its current state."""
+
+
+class TodoProductInteractionInFlightError(Conflict):
+    """One interaction is already sending or awaiting a delivery decision."""
+
+    def __init__(self, interaction_id: str) -> None:
+        super().__init__("A Product interaction is already in flight")
+        self.interaction_id = interaction_id
+
+
+class TodoProductInteractionNotCancellableError(Conflict):
+    """A completed or cancelled interaction cannot receive a stop request."""
+
+    def __init__(self, state: str) -> None:
+        super().__init__("Product interaction cannot be cancelled")
+        self.state = state
+
+
+class TodoProductInteractionTransitionError(Conflict):
+    """A local Product interaction cannot move to the requested state."""
+
+    def __init__(self, current: str, new: str) -> None:
+        super().__init__("Product interaction state transition is not allowed")
+        self.current = current
+        self.new = new
+
+
+class TodoProductInteractionTerminalTodoError(Conflict):
+    """Terminal Todos cannot open or continue Product interactions."""
+
+    def __init__(self, status: str) -> None:
+        super().__init__("Terminal Todo cannot receive Product interactions")
+        self.status = status
+
+
+class TodoProductRuntimeNotReadyError(Conflict):
+    """A Product Todo has no runtime Collet yet and cannot interact."""
+
+
+class TodoProductInvalidRuntimeBindingError(Conflict):
+    """The Todo's Product and Context runtime bindings conflict."""

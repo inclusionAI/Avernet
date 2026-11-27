@@ -45,6 +45,9 @@ from agentclaw.community.api.task.todo_service import TodoServiceProtocol
 from agentclaw.community.api.task.todo_product_progress_service import (
     TodoProductProgressServiceProtocol,
 )
+from agentclaw.community.api.task.todo_product_interaction_service import (
+    TodoProductInteractionServiceProtocol,
+)
 from agentclaw.community.api.task.todo_source_service import TodoSourceServiceProtocol
 from agentclaw.community.api.task.todo_stage_service import TodoStageServiceProtocol
 from agentclaw.community.api.task.todo_template_creation_service import (
@@ -73,6 +76,11 @@ from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.auth import AuthRequestContext
 
 from .progress_schemas import TodoProgressResponse
+from .product_interaction_schemas import (
+    CreateTodoProductInteractionRequest,
+    TodoProductInteractionPageResponse,
+    TodoProductInteractionResponseSchema,
+)
 from .dima_import_schemas import (
     ImportDimaTodosRequest,
     ImportDimaTodosResponse,
@@ -650,6 +658,88 @@ async def get_todo_progress(
         limit=message_limit,
     )
     return envelope(TodoProgressResponse.from_record(progress), request)
+
+
+@router.get(
+    "/{todo_id}/product-interactions",
+    response_model=Envelope[TodoProductInteractionPageResponse],
+)
+@envelope_errors
+async def list_todo_product_interactions(
+    todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    service: TodoProductInteractionServiceProtocol = Injected(
+        TodoProductInteractionServiceProtocol
+    ),
+) -> Envelope[TodoProductInteractionPageResponse]:
+    """Return local Product interaction dialogs for one Todo."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    result = await service.list_interactions(
+        todo_id=todo_id,
+        actor_id=actor_id,
+        page=page,
+        page_size=page_size,
+    )
+    return envelope(TodoProductInteractionPageResponse.from_record(result), request)
+
+
+@router.post(
+    "/{todo_id}/product-interactions",
+    response_model=Envelope[TodoProductInteractionResponseSchema],
+)
+@envelope_errors
+async def create_todo_product_interaction(
+    todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
+    body: CreateTodoProductInteractionRequest,
+    request: Request,
+    response: Response,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoProductInteractionServiceProtocol = Injected(
+        TodoProductInteractionServiceProtocol
+    ),
+) -> Envelope[TodoProductInteractionResponseSchema]:
+    """Persist and send one Human Product interaction under single-flight."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    result = await service.send_interaction(
+        todo_id=todo_id,
+        actor_id=actor_id,
+        message=body.message,
+        reply_to_interaction_id=body.reply_to_interaction_id,
+    )
+    response.status_code = 201
+    return created(TodoProductInteractionResponseSchema.from_record(result), request)
+
+
+@router.post(
+    "/{todo_id}/product-interactions/{interaction_id}/cancel",
+    response_model=Envelope[TodoProductInteractionResponseSchema],
+)
+@envelope_errors
+async def cancel_todo_product_interaction(
+    todo_id: Annotated[str, Path(description="A-owned Todo identifier.")],
+    interaction_id: Annotated[
+        str, Path(description="In-flight interaction to stop.")
+    ],
+    request: Request,
+    principal: PrincipalDep,
+    user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
+    service: TodoProductInteractionServiceProtocol = Injected(
+        TodoProductInteractionServiceProtocol
+    ),
+) -> Envelope[TodoProductInteractionResponseSchema]:
+    """Send the deterministic stop intent for one in-flight interaction."""
+    actor_id = call_user(user_id=user_id, principal=principal)
+    result = await service.cancel_interaction(
+        todo_id=todo_id,
+        actor_id=actor_id,
+        interaction_id=interaction_id,
+    )
+    return envelope(TodoProductInteractionResponseSchema.from_record(result), request)
 
 
 @router.post(

@@ -52,6 +52,7 @@ class WorkOrderBizType(StrEnum):
     BOT_FRIEND = "BOT_FRIEND"
     GROUP_MENTION = "GROUP_MENTION"
     BBS = "BBS"
+    TODO = "TODO"
 
 
 class NotificationCategory(StrEnum):
@@ -203,6 +204,26 @@ class WorkOrderEventType(StrEnum):
     BBS_HELP_RESPONDED = (
         "BBS_HELP_RESPONDED", NotificationCategory.NOTICE,
         "社区求助响应通知", "有人响应了你的求助帖。",
+    )
+    TODO_HUMAN_ACTION_REQUIRED = (
+        "TODO_HUMAN_ACTION_REQUIRED", NotificationCategory.NOTICE,
+        "待办需要人工处理", "有一个待办需要你介入。",
+    )
+    TODO_BOT_INFORMATION_REQUIRED = (
+        "TODO_BOT_INFORMATION_REQUIRED", NotificationCategory.NOTICE,
+        "待办需要补充信息", "有一个待办正在等待你补充信息。",
+    )
+    TODO_EXECUTION_INTERRUPTED = (
+        "TODO_EXECUTION_INTERRUPTED", NotificationCategory.NOTICE,
+        "待办执行中断", "待办执行失败，需要确认下一步。",
+    )
+    TODO_VERIFICATION_REQUIRED = (
+        "TODO_VERIFICATION_REQUIRED", NotificationCategory.NOTICE,
+        "待办需要验收", "待办已执行完成，等待验收。",
+    )
+    TODO_COMPLETED = (
+        "TODO_COMPLETED", NotificationCategory.NOTICE,
+        "待办已完成", "待办已完成。",
     )
 
 

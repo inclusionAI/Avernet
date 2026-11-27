@@ -31,6 +31,17 @@ const UNKNOWN_SUFFIX = 'UNKNOWN' as const;
  * applicant_name/reason）；列表/通知 content 已是字符串，原样透传不走此处。
  * 提取对象中的展示文案；空间申请对象只给「动作 + 空间」，申请人/理由交给 drawer 的 dl 行，避免重复。
  */
+function todoTargetFrom(contentObj: BackendUnknownRecord | undefined, bizType: string) {
+  if (bizType !== 'TODO' || !contentObj) return undefined;
+  const target = contentObj.target;
+  if (typeof target !== 'object' || target === null || Array.isArray(target)) return undefined;
+  const rawTarget = target as BackendUnknownRecord;
+  const todoId = asString(rawTarget.todoId);
+  const focus = asString(rawTarget.focus);
+  if (!todoId || focus !== 'interaction') return undefined;
+  return { todoId, focus } as const;
+}
+
 function bbsTargetFrom(contentObj: BackendUnknownRecord | undefined, bizType: string) {
   if (bizType !== 'BBS' || !contentObj) return undefined;
   const target = contentObj.target;
@@ -173,6 +184,7 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
       ? (rawContent as BackendUnknownRecord)
       : undefined;
   const bbsTarget = bbsTargetFrom(contentObj, bizType);
+  const todoTarget = todoTargetFrom(contentObj, bizType);
   const contentDisplay =
     typeof rawContent === 'string'
       ? asString(rawContent) ?? ''
@@ -222,6 +234,7 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
     contentRaw,
     sessionUrl,
     bbsTarget,
+    todoTarget,
     detailUrl,
     status,
     statusLabel: WORK_ORDER_STATUS_LABEL[status],

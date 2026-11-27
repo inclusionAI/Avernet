@@ -142,6 +142,7 @@ provides:
   - TodoBotTeamServiceProtocol
   - TodoProductCreationServiceProtocol
   - TodoProductProgressServiceProtocol
+  - TodoProductInteractionServiceProtocol
   - BotGrantReconciliationServiceProtocol
   - TodoTemplateCapabilityServiceProtocol
   - TodoTemplateManagementServiceProtocol
@@ -160,6 +161,7 @@ internal_dependencies:
   - agentclaw.community.core.task.todos.bot_team_service_protocol  # BotTeam product facade Service API contract re-export
   - agentclaw.community.core.task.todos.product_creation_protocol  # Bot/BotTeam Todo creation Service API contract re-export
   - agentclaw.community.core.task.todos.product_progress_protocol  # Todo Product Progress projection Service API contract re-export
+  - agentclaw.community.core.task.todos.product_interaction_protocol  # Todo Product interaction Service API contract re-export
   - agentclaw.community.core.task.todos.template_capability_protocol  # Todo template capability Service API contract re-export
   - agentclaw.community.core.task.todos.template_management_protocol  # Versioned Todo template management Service API contract re-export
   - agentclaw.community.core.task.todos.stage_outcome_protocol  # Todo Human-stage lifecycle Service API contract re-export
