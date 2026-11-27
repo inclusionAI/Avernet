@@ -120,6 +120,13 @@ HTTP base: `/api/v1/collaboration/task/products`. Routes are `POST /profiles`,
 and `GET /stages/{id}/messages`. Auth context and tenant/environment are not body
 fields. Inline configuration and feedback bodies are redacted in error logs.
 
+The [internal context-collab adapter](../../../../../adapters/http/task/context_collab/README.md)
+also exposes `POST /api/v1/collaboration/task/context_collab/product_profiles`
+and `POST /api/v1/collaboration/task/context_collab/collets`. They reuse the same
+creation handlers, `name`/`stages` and `profile_id`/`content` schemas, authenticated
+actor scope and body limits. The original `/products` routes remain supported;
+these aliases do not change service bindings, storage or worker scheduling.
+
 ### Directed Method relation endpoints
 
 `MethodRelationTemplate(source_method, target_method, relation)` describes a
