@@ -42,7 +42,8 @@ beforeEach(() => {
   jest.mocked(createSessionToken).mockResolvedValue({ code: 20000, message: '', request_id: 'r', data: { token: 'test', expires_at: 999 } });
 });
 
-it('空会话和普通历史不查配置；首次向上翻页出现副屏才查，刷新复用结果', async () => {
+it.each([panel, '<AixUI type="panel" component="lib.View" params=\'{\n\n"value": 1\n}\' />'])(
+  '空会话和普通历史不查配置；首次向上翻页出现副屏才查，刷新复用结果：%s', async (content) => {
   const { provider } = createProvider();
   jest.mocked(listSessionMessages).mockResolvedValueOnce(page([]));
   await provider.loadHistory();
@@ -50,7 +51,7 @@ it('空会话和普通历史不查配置；首次向上翻页出现副屏才查�
   jest.mocked(listSessionMessages).mockResolvedValueOnce(page(Array.from({ length: 50 }, (_, i) => ({ id: `m${i}`, timestamp: 2000-i, sender: 'plain:2', content: 'hello' }))));
   await provider.loadHistory();
   expect(listBotRenderScreens).not.toHaveBeenCalled();
-  const older = page([{ id: 'older', timestamp: 1000, sender: 'bot-a:1', content: panel }]);
+  const older = page([{ id: 'older', timestamp: 1000, sender: 'bot-a:1', content }]);
   jest.mocked(listSessionMessages).mockResolvedValue(older);
   const pending = deferred();
   jest.mocked(listBotRenderScreens).mockReturnValue(pending.promise);
@@ -61,7 +62,7 @@ it('空会话和普通历史不查配置；首次向上翻页出现副屏才查�
   expect(loaded).not.toHaveBeenCalled();
   pending.resolve(screens);
   await loading;
-  expect(loaded).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ content: panel })]));
+  expect(loaded).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ content })]));
   expect(getLibraryCdn('lib')).toBe('/lib.js');
   await provider.loadHistory();
   expect(listBotRenderScreens).toHaveBeenCalledTimes(1);

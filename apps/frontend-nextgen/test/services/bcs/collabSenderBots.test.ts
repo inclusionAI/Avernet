@@ -99,3 +99,28 @@ test('检查实际 text block，并利用同批普通消息里的明确 owner �
     msg('bot-b:2', '普通文本'),
   ])).toEqual([{ botId: 'bot-a', ownerId: '1' }]);
 });
+
+const multilinePanel = `<AixUI type="panel" component="lib.View" params='{
+
+  "value": 1
+}' />`;
+
+test.each([
+  multilinePanel,
+  '<AixUI\n\n type="panel" component="lib.View" />',
+  multilinePanel.replace(/\n/g, '\r\n'),
+  multilinePanel.split('\n').map((line) => `    ${line}`).join('\n'),
+  '> <AixUI\n>\n>  type="panel" component="lib.View" />',
+  '- <AixUI\n\n   type="panel" component="lib.View" />',
+  '<AixUI params=\'{\n\n"comparison": "a > b"\n}\' component="lib.View" type="panel" />',
+])('跨空行的 AixUI 开标签仍为发送方准备 CDN：%s', (content) => {
+  expect(collectSenderBots([msg('bot-a:1', content)])).toEqual([{ botId: 'bot-a', ownerId: '1' }]);
+});
+
+test.each([
+  `\`\`\`html\n${multilinePanel}\n\`\`\``,
+  `\`${multilinePanel}\``,
+  `<!--\n${multilinePanel}\n-->`,
+])('跨空行的代码示例和注释不加载 CDN：%s', (content) => {
+  expect(collectSenderBots([msg('bot-a:1', content)])).toEqual([]);
+});

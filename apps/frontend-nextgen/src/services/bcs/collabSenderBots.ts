@@ -31,6 +31,44 @@ function parseBotUuid(botUuid: string): SenderBotRef | null {
 
 const markdown = new MarkdownIt({ html: true });
 
+// SDK 的 AixUI block tokenizer 允许属性跨空行，且先于缩进代码规则执行。
+// MarkdownIt 的普通 HTML/paragraph 规则会在空行截断，须在词法阶段保留完整开标签。
+// 只接管块起始的标签；围栏代码和 HTML 注释仍由各自规则整体消费。
+markdown.block.ruler.before('code', 'aixui_open', (state, startLine, endLine, silent) => {
+  const firstLine = state.getLines(startLine, startLine + 1, state.blkIndent, false);
+  if (!/^ *<aixui\b/i.test(firstLine)) return false;
+  // getLines 按容器偏移去掉引用/列表标记；不能直接跨行切原始 src。
+  let quote: '"' | "'" | undefined;
+  let nextLine = startLine;
+  let closed = false;
+  // 逐行扫描一次，属性引号内的 > 不结束标签；不重扫前缀或复制剩余全文。
+  for (; nextLine < endLine; nextLine += 1) {
+    if (nextLine > startLine && !state.isEmpty(nextLine) && state.sCount[nextLine] < state.blkIndent) return false;
+    const line = nextLine === startLine ? firstLine : state.getLines(nextLine, nextLine + 1, state.blkIndent, false);
+    for (const char of line) {
+      if (quote) {
+        if (char === quote) quote = undefined;
+      } else if (char === '"' || char === "'") {
+        quote = char;
+      } else if (char === '>') {
+        closed = true;
+        break;
+      }
+    }
+    if (closed) {
+      nextLine += 1;
+      break;
+    }
+  }
+  if (!closed) return false;
+  if (silent) return true;
+  const token = state.push('html_block', '', 0);
+  token.map = [startLine, nextLine];
+  token.content = state.getLines(startLine, nextLine, state.blkIndent, true);
+  state.line = nextLine;
+  return true;
+});
+
 /** 复用 Markdown lexer 排除代码块/行内代码，再使用 SDK 的 AixUI 属性语义。 */
 function needsBotCdn(content: string): boolean {
   if (!/<aixui\b/i.test(content)) return false;
