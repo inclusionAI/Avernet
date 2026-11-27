@@ -200,4 +200,4 @@ These entries are task-specific records. Inspect their individual status, eviden
 - [caller-refresh-db-lock-20261116](caller-refresh-db-lock-20261116/)
 - [caller-force-runtime-refresh-20261117](caller-force-runtime-refresh-20261117/)
 
-- [2026-11-23 Swarm execution and interactions](2026-11-23-swarm-execution-interactions/spec.md)
+- Swarm execution and interactions: [SWARM-EXECUTION.md](../src/agentclaw/community/core/task/context_collab/l5_methods/SWARM-EXECUTION.md)

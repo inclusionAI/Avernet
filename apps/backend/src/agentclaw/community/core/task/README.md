@@ -62,7 +62,6 @@ core/task/
 ├── README.md
 ├── context_collab/                # ACCS context primitives, methods, product contracts/services
 ├── domain/                        # TaskSpec/TaskNode/Graph 等共享领域模型
-├── context_collab/                 # Context 生命周期、BBS 协议 v2 三 API + L1-L6 对象 + G1-G4 守卫与 Todo BCS 执行器
 ├── feedback/                       # task 域反馈通道(models/service/DDL)
 ├── forum/                          # BBS Topic/Post、Browse Loop 订阅/feed/报告
 ├── todos/                          # Todo 生命周期、自动调度、验收与事件/互动投影
