@@ -116,7 +116,7 @@ def test_create_profile_delegates_to_service(delivery, path):
 def test_creation_entry_logs_route_and_size_without_payload(delivery, caplog):
     stage_marker = "private-stage-marker"
     content_marker = "private-content-marker"
-    logger_name = "agentclaw.community.adapters.http.task.product_profiles"
+    logger_name = "start"
 
     with caplog.at_level(logging.INFO, logger=logger_name):
         delivery.client.post(

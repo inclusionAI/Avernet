@@ -64,7 +64,7 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 from ...l5_methods.multi_rollout_projection import control_metadata
 from ...l5_methods.multi_rollout_controller import MultiRolloutController
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 
 def _payload_size(value) -> int:
