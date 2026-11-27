@@ -481,7 +481,7 @@ export const botSessionService = {
       };
       const params = subjectScoped
         ? withConversationSubjectParams(bot, userId, baseParams)
-        : baseParams;
+        : withBotSessionScope(bot, userId, baseParams, false);
       const resp = await listBotSessions(bot.realBotId, params);
       const items = (resp.data?.items ?? []).map((s) => toSessionView(s, bot.botId));
       const total = resp.data?.total ?? items.length;
