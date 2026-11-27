@@ -642,3 +642,48 @@ def test_todo_artifact_repository_is_idempotent_and_scopes_artifact_to_todo(db):
     assert artifact_repo.list_artifacts(todo_id=todo.todo_id) == (first,)
     with pytest.raises(TodoArtifactNotFoundError):
         artifact_repo.get_artifact(todo_id=other.todo_id, artifact_id=first.artifact_id)
+
+
+def test_create_todo_persists_owner_binding_and_projects_owner(db):
+    from agentclaw.community.core.task.todos.stage_models import TodoParticipantBinding
+
+    repo = TodoRepository(db)
+    created = _create(
+        repo,
+        participant_bindings=(
+            TodoParticipantBinding(
+                key="todo_owner",
+                label="待办负责人",
+                subject_type="human",
+                subject_id="owner_1",
+                subject_name="Owner One",
+            ),
+        ),
+    )
+
+    assert created.owner_id == "owner_1"
+    assert created.owner_name == "Owner One"
+    with db.orm_session() as session:
+        row = session.query(TodoModel).filter_by(todo_id=created.todo_id).one()
+        assert json.loads(row.participant_bindings_json) == [
+            {
+                "key": "todo_owner",
+                "label": "待办负责人",
+                "subject_type": "human",
+                "subject_id": "owner_1",
+                "subject_name": "Owner One",
+            }
+        ]
+
+
+def test_legacy_todo_without_owner_binding_falls_back_to_creator_without_backfill(db):
+    repo = TodoRepository(db)
+    created = _create(repo, created_by="creator_1")
+
+    loaded = repo.get_todo(todo_id=created.todo_id)
+
+    assert loaded.owner_id == "creator_1"
+    assert loaded.owner_name == "creator_1"
+    with db.orm_session() as session:
+        row = session.query(TodoModel).filter_by(todo_id=created.todo_id).one()
+        assert row.participant_bindings_json == "[]"

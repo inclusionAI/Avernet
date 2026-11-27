@@ -7,6 +7,9 @@ import random
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from agentclaw.community.core.repository.protocols.task.todo_templates import (
+    TodoTemplateRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
 )
@@ -15,6 +18,10 @@ from agentclaw.community.core.task.todos.execution_protocol import (
     TodoExecutionServiceProtocol,
 )
 from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
+from agentclaw.community.core.task.todos.product_creation_models import (
+    resolve_todo_runtime_kind,
+    TodoRuntimeKind,
+)
 from agentclaw.community.di.todo_config import TodoSchedulerConfig
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
@@ -29,11 +36,13 @@ class TodoScheduler(LifecycleBase):
     def __init__(
         self,
         repository: TodoRepositoryProtocol,
+        templates: TodoTemplateRepositoryProtocol,
         execution: TodoExecutionServiceProtocol,
         cache: CachePlugin,
         config: TodoSchedulerConfig,
     ) -> None:
         self._repository = repository
+        self._templates = templates
         self._execution = execution
         self._cache = cache
         self._config = config
@@ -190,6 +199,8 @@ class TodoScheduler(LifecycleBase):
         return errors, processed
 
     async def _dispatch(self, todo: TodoRecord) -> TodoRecord:
+        if await self._uses_product_runtime(todo):
+            return todo
         return await self._execution.dispatch_pending(todo_id=todo.todo_id)
 
     async def _reconcile_acceptance(self, todo: TodoRecord) -> TodoRecord:
@@ -205,11 +216,36 @@ class TodoScheduler(LifecycleBase):
         )
 
     async def _refresh(self, todo: TodoRecord) -> TodoRecord:
+        if await self._uses_product_runtime(todo):
+            return todo
         result = await self._execution.refresh_in_progress(todo_id=todo.todo_id)
         if result.status is not TodoStatus.IN_PROGRESS:
             return result
         return await self._execution.resume_claimed_interaction(
             todo_id=todo.todo_id,
+        )
+
+
+    async def _uses_product_runtime(self, todo: TodoRecord) -> bool:
+        """Skip the legacy executor whenever Product revision facts are bound.
+
+        The scheduler has no authenticated Human principal and therefore must
+        not create/retry a Collet itself. It only fail-closes routing here;
+        explicit authenticated requests own compensation.
+        """
+        if not todo.template_id or not todo.template_version_id:
+            return False
+        revision = await asyncio.to_thread(
+            self._templates.get_version,
+            template_id=todo.template_id,
+            template_version_id=todo.template_version_id,
+        )
+        return (
+            resolve_todo_runtime_kind(
+                todo,
+                product_profile_id=revision.product_profile_id,
+            )
+            is not TodoRuntimeKind.LEGACY_CONTEXT
         )
 
     async def _renew_lease(

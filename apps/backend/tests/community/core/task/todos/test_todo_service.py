@@ -1207,3 +1207,29 @@ async def test_start_todo_rejects_non_pending_before_execution_dispatch():
         await service.start_todo(todo_id="todo_1", actor_id="user_1")
 
     assert service._execution.calls == []
+
+
+def test_create_todo_with_owner_persists_todo_owner_binding():
+    from agentclaw.community.core.task.todos.product_creation_models import TodoOwnerInput
+    from agentclaw.community.core.task.todos.stage_models import TodoParticipantBinding
+
+    service, repository, _, _, _, _ = _service(rows=[_team_bot()])
+
+    service.create_todo(
+        space_id=7,
+        actor_id="user_1",
+        title="title",
+        description="details",
+        bot_id="bot_1",
+        owner=TodoOwnerInput(user_id=" owner_1 ", user_name=" Owner One "),
+    )
+
+    assert repository.calls[-1]["participant_bindings"] == (
+        TodoParticipantBinding(
+            key="todo_owner",
+            label="待办负责人",
+            subject_type="human",
+            subject_id="owner_1",
+            subject_name="Owner One",
+        ),
+    )

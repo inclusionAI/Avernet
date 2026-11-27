@@ -9,6 +9,7 @@ import {
   loadTodoArtifacts,
   loadTodoEvents,
   loadTodoInteractions,
+  loadTodoProgress,
 } from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
 import { safeReportError } from '@/utils/errorToast';
@@ -26,28 +27,35 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
   const storedInteractions = useTodoStore((state) => state.interactions);
   const storedEvents = useTodoStore((state) => state.events);
   const storedArtifacts = useTodoStore((state) => state.artifacts);
+  const storedProgress = useTodoStore((state) => state.progress);
   const detailLoading = useTodoStore((state) => state.detailLoading);
   const eventsLoading = useTodoStore((state) => state.eventsLoading);
   const artifactsLoading = useTodoStore((state) => state.artifactsLoading);
+  const progressLoading = useTodoStore((state) => state.progressLoading);
   const mutationLoading = useTodoStore((state) => state.mutationLoading);
   const storedError = useTodoStore((state) => state.detailError);
   const eventsError = useTodoStore((state) => state.eventsError);
   const artifactsError = useTodoStore((state) => state.artifactsError);
+  const progressError = useTodoStore((state) => state.progressError);
   const setSelectedTodo = useTodoStore((state) => state.setSelectedTodo);
   const setInteractions = useTodoStore((state) => state.setInteractions);
   const setEvents = useTodoStore((state) => state.setEvents);
   const setArtifacts = useTodoStore((state) => state.setArtifacts);
+  const setProgress = useTodoStore((state) => state.setProgress);
   const setLoading = useTodoStore((state) => state.setDetailLoading);
   const setEventsLoading = useTodoStore((state) => state.setEventsLoading);
   const setArtifactsLoading = useTodoStore((state) => state.setArtifactsLoading);
+  const setProgressLoading = useTodoStore((state) => state.setProgressLoading);
   const setMutationLoading = useTodoStore((state) => state.setMutationLoading);
   const setError = useTodoStore((state) => state.setDetailError);
   const setEventsError = useTodoStore((state) => state.setEventsError);
   const setArtifactsError = useTodoStore((state) => state.setArtifactsError);
+  const setProgressError = useTodoStore((state) => state.setProgressError);
   const resetDetail = useTodoStore((state) => state.resetDetail);
   const requestRef = useRef(0);
   const eventRequestRef = useRef(0);
   const artifactRequestRef = useRef(0);
+  const progressRequestRef = useRef(0);
   const loadedTodoIdRef = useRef<string | null>(null);
 
   // Store 是全局详情缓存；换 ID 时先按当前 ID 派生空数据，避免路由先渲染上一个 Todo。
@@ -57,6 +65,7 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
   const interactions = hasCurrentDetail ? storedInteractions : [];
   const events = hasCurrentDetail ? storedEvents : [];
   const artifacts = hasCurrentDetail ? storedArtifacts.filter((item) => item.todoId === todoId) : [];
+  const progress = hasCurrentDetail && storedProgress?.todoId === todoId ? storedProgress : null;
   const error =
     hasCurrentDetail || detailLoading || loadedTodoIdRef.current === todoId ? storedError : null;
   const loading = detailLoading || Boolean(todoId && !hasCurrentDetail && !error);
@@ -95,11 +104,35 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
     }
   }, [setArtifacts, setArtifactsError, setArtifactsLoading, todoId]);
 
+  const refreshProgress = useCallback(
+    async (expandedStageCode?: string) => {
+      if (!todoId) return;
+      const requestId = ++progressRequestRef.current;
+      setProgressLoading(true);
+      setProgressError(null);
+      try {
+        const todoProgress = await loadTodoProgress(todoId, {
+          expandedStageCode,
+          messageLimit: expandedStageCode ? 200 : 50,
+        });
+        if (requestId === progressRequestRef.current) setProgress(todoProgress);
+      } catch (cause) {
+        if (requestId !== progressRequestRef.current) return;
+        setProgress(null);
+        setProgressError(cause instanceof Error ? cause.message : '执行进度加载失败');
+      } finally {
+        if (requestId === progressRequestRef.current) setProgressLoading(false);
+      }
+    },
+    [setProgress, setProgressError, setProgressLoading, todoId],
+  );
+
   const refresh = useCallback(async () => {
     if (!todoId) {
       requestRef.current += 1;
       eventRequestRef.current += 1;
       artifactRequestRef.current += 1;
+      progressRequestRef.current += 1;
       resetDetail();
       return;
     }
@@ -108,6 +141,7 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
     setError(null);
     void refreshEvents();
     void refreshArtifacts();
+    void refreshProgress();
     try {
       const [todo, todoInteractions] = await Promise.all([
         loadTodo(todoId),
@@ -123,7 +157,7 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
     } finally {
       if (requestId === requestRef.current) setLoading(false);
     }
-  }, [refreshArtifacts, refreshEvents, resetDetail, setError, setInteractions, setLoading, setSelectedTodo, todoId]);
+  }, [refreshArtifacts, refreshEvents, refreshProgress, resetDetail, setError, setInteractions, setLoading, setSelectedTodo, todoId]);
 
   useEffect(() => {
     if (loadedTodoIdRef.current !== todoId) {
@@ -135,6 +169,7 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
       requestRef.current += 1;
       eventRequestRef.current += 1;
       artifactRequestRef.current += 1;
+      progressRequestRef.current += 1;
     };
   }, [refresh, resetDetail, todoId]);
 
@@ -176,7 +211,7 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
 
   const accept = useCallback(
     async (input: TodoAcceptanceInput) => {
-      if (!todoId || !selectedTodo || selectedTodo.status !== 'pending_acceptance') {
+      if (!todoId || !selectedTodo || selectedTodo.status !== 'pending_action') {
         safeReportError(new Error('当前状态不允许验收'), { title: '验收失败' });
         return false;
       }
@@ -222,12 +257,16 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
     error,
     eventsError,
     artifactsError,
+    progress,
+    progressLoading,
+    progressError,
     mentionBots: mentionBots.bots,
     mentionBotsLoading: mentionBots.loading,
     mentionBotsError: mentionBots.error,
     refresh,
     refreshEvents,
     refreshArtifacts,
+    refreshProgress,
     readArtifactContent,
     interact,
     accept,

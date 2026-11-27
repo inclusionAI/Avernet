@@ -14,6 +14,7 @@ export {
   createTodoAutoImportRule,
   downloadTodoArtifactContent,
   loadTodo,
+  loadTodoProgress,
   loadTodoArtifacts,
   loadTodoAutoImportRules,
   loadTodoEvents,

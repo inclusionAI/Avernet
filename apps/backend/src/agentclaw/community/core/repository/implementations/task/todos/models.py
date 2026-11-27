@@ -70,6 +70,7 @@ class TodoModel(Base):
     bot_name = Column(String(256), nullable=True)
     status = Column(String(32), nullable=False)
     collab_context_id = Column(String(256), nullable=True)
+    product_collet_id = Column(AutoIncrementBigInteger, nullable=True)
     created_by = Column(String(256), nullable=False)
     env = Column(String(20), nullable=False, default=get_current_env)
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
@@ -113,9 +114,17 @@ class TodoModel(Base):
             "gmt_create",
             "id",
         ),
+        Index(
+            "idx_todo_product_collet",
+            "avernet_tenant",
+            "env",
+            "product_collet_id",
+            "id",
+        ),
     )
 
     def to_record(self) -> TodoRecord:
+        owner_id, owner_name = self._owner_projection()
         return TodoRecord(
             todo_id=self.todo_id,
             space_id=self.space_id,
@@ -132,11 +141,40 @@ class TodoModel(Base):
             bot_name=self.bot_name or "",
             status=TodoStatus(self.status),
             collab_context_id=self.collab_context_id,
+            product_collet_id=self.product_collet_id,
             created_by=self.created_by,
             created_at=self.gmt_create,
             updated_at=self.gmt_modified,
+            owner_id=owner_id,
+            owner_name=owner_name,
         )
 
+    def _owner_projection(self) -> tuple[str, str]:
+        try:
+            bindings = json.loads(self.participant_bindings_json or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            bindings = []
+        if isinstance(bindings, list):
+            for binding in bindings:
+                if not isinstance(binding, dict):
+                    continue
+                if (
+                    binding.get("key") != "todo_owner"
+                    or binding.get("subject_type") != "human"
+                ):
+                    continue
+                raw_id = binding.get("subject_id")
+                if not isinstance(raw_id, str) or not raw_id.strip():
+                    continue
+                owner_id = raw_id.strip()
+                raw_name = binding.get("subject_name")
+                owner_name = (
+                    raw_name.strip()
+                    if isinstance(raw_name, str) and raw_name.strip()
+                    else owner_id
+                )
+                return owner_id, owner_name
+        return self.created_by, self.created_by
 
 
 class TodoStageInstanceModel(Base):

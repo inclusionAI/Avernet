@@ -14,6 +14,7 @@ from agentclaw.community.core.task.todos.models import (
     TodoRecord,
     TodoStatus,
 )
+from agentclaw.community.core.task.todos.product_creation_models import TodoOwnerInput
 from agentclaw.community.core.task.todos.source_models import TodoSourceInput
 from agentclaw.community.core.task.todos.stage_models import TodoStageRecord
 
@@ -48,6 +49,7 @@ class TodoServiceProtocol(Protocol):
         title: str,
         description: str,
         bot_id: str,
+        owner: TodoOwnerInput | None = None,
         source: TodoSourceInput | None = None,
         env: str | None = None,
     ) -> TodoRecord: ...

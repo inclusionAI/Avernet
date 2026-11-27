@@ -138,6 +138,7 @@ class TodoTemplateRepository(TodoTemplateRepositoryProtocol):
                 created_by=created_by,
                 published_by=None,
                 published_at=None,
+                product_profile_id=None,
                 env=get_current_env(),
                 avernet_tenant=get_current_avernet_tenant(),
             )
@@ -256,6 +257,7 @@ class TodoTemplateRepository(TodoTemplateRepositoryProtocol):
                 created_by=created_by,
                 published_by=None,
                 published_at=None,
+                product_profile_id=None,
                 env=get_current_env(),
                 avernet_tenant=get_current_avernet_tenant(),
             )
@@ -324,6 +326,56 @@ class TodoTemplateRepository(TodoTemplateRepositoryProtocol):
                     "only a draft Todo template version can be published"
                 )
             now = datetime.now(timezone.utc)
+            version.status = TodoTemplateVersionStatus.PUBLISHED.value
+            version.draft_template_id = None
+            version.published_by = published_by
+            version.published_at = now
+            template.published_version_id = version.template_version_id
+            template.updated_by = published_by
+            db.flush()
+            db.refresh(version)
+            return version.to_record()
+
+    def publish_product_version(
+        self,
+        *,
+        template_id: str,
+        template_version_id: str,
+        product_profile_id: int,
+        published_by: str,
+    ) -> TodoTemplateVersionRecord:
+        if type(product_profile_id) is not int or product_profile_id < 1:
+            raise TodoTemplateStateConflictError(
+                "product_profile_id must be a positive integer"
+            )
+        with self._transaction() as db:
+            template = self._require_template(db, template_id=template_id, lock=True)
+            version = self._require_version(
+                db,
+                template_id=template_id,
+                template_version_id=template_version_id,
+                lock=True,
+            )
+            if (
+                version.status == TodoTemplateVersionStatus.PUBLISHED.value
+                and template.published_version_id == version.template_version_id
+                and version.product_profile_id == product_profile_id
+            ):
+                return version.to_record()
+            if version.product_profile_id not in (None, product_profile_id):
+                raise TodoTemplateStateConflictError(
+                    "Todo template version is already bound to another ProductProfile"
+                )
+            if template.status == TodoTemplateStatus.ARCHIVED.value:
+                raise TodoTemplateStateConflictError(
+                    "archived Todo template cannot publish a version"
+                )
+            if version.status != TodoTemplateVersionStatus.DRAFT.value:
+                raise TodoTemplateStateConflictError(
+                    "only a draft Todo template version can be published"
+                )
+            now = datetime.now(timezone.utc)
+            version.product_profile_id = product_profile_id
             version.status = TodoTemplateVersionStatus.PUBLISHED.value
             version.draft_template_id = None
             version.published_by = published_by

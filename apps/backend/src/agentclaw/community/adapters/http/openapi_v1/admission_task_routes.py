@@ -182,6 +182,20 @@ TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/collaboration/tasks/todo-template-capabilities",
     ): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/bot-teams"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/bot-teams"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/bot-teams/{bot_team_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "PUT",
+        "/openapi/v1/collaboration/tasks/bot-teams/{bot_team_id}",
+    ): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/bot-teams/{bot_team_id}/archive",
+    ): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/collaboration/tasks/todo-templates"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/collaboration/tasks/todo-templates"): AdmissionMode.REFUSED,
     (
@@ -218,6 +232,10 @@ TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/tasks/todos/products/dima-imports",
+    ): AdmissionMode.REFUSED,
     (
         "GET",
         "/openapi/v1/collaboration/tasks/todos/sources/dima/projects",
@@ -270,6 +288,10 @@ TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "GET",
         "/openapi/v1/collaboration/tasks/todos/{todo_id}/stages",
+    ): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/progress",
     ): AdmissionMode.REFUSED,
     (
         "POST",

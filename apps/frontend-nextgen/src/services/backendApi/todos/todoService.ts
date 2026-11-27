@@ -7,6 +7,7 @@ import type {
   TodoAutoImportRule,
   TodoEvent,
   TodoListQuery,
+  TodoProgress,
   TodoRecord,
   TodoSourceDraft,
   TodoSourceProject,
@@ -23,6 +24,7 @@ import {
   createTodoInteraction,
   downloadTodoArtifactContent as downloadTodoArtifactContentRequest,
   getTodo,
+  getTodoProgress,
   getTodoSourceDraft,
   listTodoArtifacts,
   listTodoEvents,
@@ -46,7 +48,7 @@ import {
   type TodoSpaceDto,
   type TodoSpacePageDto,
 } from './todoController';
-import { mapTodoArtifactDto, mapTodoDto, mapTodoEventDto } from './todoMapper';
+import { mapTodoArtifactDto, mapTodoDto, mapTodoEventDto, mapTodoProgressDto } from './todoMapper';
 
 export interface TodoPage {
   items: TodoRecord[];
@@ -122,6 +124,15 @@ export async function loadTodos(query: TodoListQuery): Promise<TodoPage> {
 export async function loadTodo(todoId: string): Promise<TodoRecord> {
   const response = await getTodo(todoId);
   return mapTodoDto(unwrap(response, TODO_ENDPOINTS.detail(todoId)));
+}
+
+
+export async function loadTodoProgress(
+  todoId: string,
+  options?: { expandedStageCode?: string; messageLimit?: number }
+): Promise<TodoProgress> {
+  const response = await getTodoProgress(todoId, options);
+  return mapTodoProgressDto(unwrap(response, TODO_ENDPOINTS.progress(todoId)));
 }
 
 export async function addTodo(input: CreateTodoInput): Promise<TodoRecord> {

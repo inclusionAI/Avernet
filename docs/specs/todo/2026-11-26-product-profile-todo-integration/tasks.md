@@ -268,3 +268,15 @@ git diff --check --cached
 - [ ] 数据迁移对历史 NULL 数据安全；
 - [ ] focused tests、架构测试和 diff check 有实际结果；
 - [ ] 完整 CI 的执行状态被如实报告。
+
+
+## 7. 验收点实现映射
+
+| Slice | 覆盖 AC | 主要交付 | 快速验证 |
+| --- | --- | --- | --- |
+| Slice 1：Revision → ProductProfile | AC-001、AC-002、AC-013、AC-014 | Revision binding/CAS、稳定YAML、async发布、DI/HTTP | BotTeam service/repository/HTTP/architecture tests |
+| Slice 2：Dima/Todo → Product Collet | AC-003、AC-004、AC-005、AC-013、AC-014 | 原子来源聚合、Todo binding/CAS、runtime resolver、Collet补偿、scheduler分流 | Todo source/product creation/repository/scheduler tests |
+| Slice 3：Product Progress | AC-006、AC-007、AC-008、AC-012、AC-013、AC-014 | Progress VO、Rollout适配、Stage details防御、Frontend投影和降级 | Progress service/HTTP/frontend mapper/detail tests |
+| Slice 4：Notification + Product Interaction | AC-009、AC-010、AC-011、AC-012、AC-013、AC-014 | Inbox adapter、interaction存储/single-flight、interactive/cancel、Frontend输入锁 | interaction/notification repository/service/HTTP/frontend tests |
+
+所有 slice 禁止修改 ProductProfileService/L5 实现。若后台 Scheduler 缺少合法 ActorContext 合同，只记录缺口并跳过后台自动创建，显式 Human 创建和补偿仍需完成。

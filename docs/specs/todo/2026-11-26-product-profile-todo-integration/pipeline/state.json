@@ -1,0 +1,992 @@
+{
+  "module": "todo",
+  "change_name": "2026-11-26-product-profile-todo-integration",
+  "description": "Connect Todo BotTeam, Dima import, progress, notifications and interactions to ProductProfileService without modifying protocol implementation.",
+  "bootstrap": {
+    "status": "ready",
+    "module": "todo",
+    "state_path": "docs/specs/todo/2026-11-26-product-profile-todo-integration/pipeline/state.json",
+    "dima_status": "aligned",
+    "ledger_seeded": true,
+    "created_at": "2026-11-26T14:45:40.271049Z"
+  },
+  "dima_context": {
+    "binding_status": "aligned",
+    "alignment_status": "aligned",
+    "writeback_status": "not_required_for_local_bootstrap",
+    "related_work_items": [
+      {
+        "work_item_id": "2026111900120790386",
+        "title": "【BBS-待办】手动选择dima",
+        "binding_status": "aligned"
+      },
+      {
+        "work_item_id": "2026111900120789898",
+        "title": "【BBS-待办】AIcoding场景产品profile定义",
+        "binding_status": "aligned"
+      },
+      {
+        "work_item_id": "2026112400120935398",
+        "title": "【BBS-待办-切流前置验证】20个真实dima自动化导入待办+基于预发bot待办模版完成配置",
+        "binding_status": "aligned"
+      }
+    ],
+    "artifact_alignment_status": "aligned",
+    "artifacts": [
+      "docs/specs/todo/2026-11-26-product-profile-todo-integration/proposal.md",
+      "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md",
+      "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md",
+      "docs/specs/todo/2026-11-26-product-profile-todo-integration/tasks.md"
+    ]
+  },
+  "preflight": {
+    "status": "ready",
+    "missing_tools": [],
+    "notes": [
+      "uv, backend .venv and pyproject are available.",
+      "npm, frontend node_modules and package.json are available.",
+      "ProductProfileService is an external read-only protocol dependency."
+    ]
+  },
+  "delivery_audit_report": null,
+  "current_phase": "implement",
+  "current_round": 0,
+  "current_tier": 0,
+  "difficulty": "hard",
+  "threadId": null,
+  "status": "in_progress",
+  "stuck_count": 0,
+  "retry_count": 0,
+  "started_at": "2026-11-26T14:45:40.271049Z",
+  "updated_at": "2026-11-27T02:56:27.875765+00:00",
+  "last_score": null,
+  "last_verdict": "pending",
+  "has_critical": false,
+  "config": {
+    "tier1": {
+      "max_rounds": 4,
+      "max_fix_attempts": 3,
+      "difficulty": "hard",
+      "checkpoint": false,
+      "allow_degraded_review_continuation": false,
+      "reviewer": {
+        "backend": "codex-cli",
+        "model": "gpt-5.5",
+        "reasoning_effort": "high"
+      }
+    },
+    "tier2": {
+      "coverage_threshold": 80,
+      "max_rounds": 2,
+      "checkpoint": false,
+      "test_command": "",
+      "lint_command": "",
+      "format_command": "",
+      "typecheck_command": ""
+    },
+    "acceptance_rework": {
+      "max_total_attempts": 10,
+      "max_attempts_per_ac": 3,
+      "max_same_failure_repeats": 2,
+      "max_no_progress_rounds": 2
+    }
+  },
+  "acceptance_ledger": {
+    "version": 1,
+    "items": [
+      {
+        "id": "AC-001",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md#ac-001",
+        "title": "Revision与ProductProfile一一固定绑定",
+        "statement": "每个新发布BotTeam Revision绑定且只绑定一个product_profile_id，重试幂等，冲突不覆盖。",
+        "category": "data",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md#5.1-revision-绑定-productprofile"
+        ],
+        "implementation_refs": [
+          "code:apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_template_repository.py#TodoTemplateRepository.publish_product_version",
+          "code:apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/template_models.py#TodoTemplateVersionModel.product_profile_id",
+          "code:apps/backend/src/agentclaw/community/core/task/todos/services/todo_bot_team_service.py#TodoBotTeamService._publish_product_revision",
+          "test:apps/backend/tests/community/repository/task/todos/test_todo_template_repository.py#test_publish_product_version_binds_profile_and_replay_is_idempotent",
+          "test:apps/backend/tests/community/repository/task/todos/test_todo_template_repository.py#test_publish_product_version_does_not_overwrite_conflicting_binding"
+        ],
+        "verification": {
+          "method": "tests + contract review",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "User directed autonomous execution on 2026-11-26; unresolved code-contract decisions must be recorded and skipped rather than guessed. Slice 1 implemented; focused verification is recorded, final AC acceptance remains pending."
+      },
+      {
+        "id": "AC-002",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md#ac-002",
+        "title": "BotTeam与协议模型解耦",
+        "statement": "BotTeam线性节点稳定转换为协议stages，synthetic approval stage不直接进入ProductProfile。",
+        "category": "architecture",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md#6-task-1-设计revision-发布为-productprofile"
+        ],
+        "implementation_refs": [
+          "code:apps/backend/src/agentclaw/community/core/task/todos/services/todo_bot_team_service.py#build_bot_team_product_profile_spec",
+          "code:apps/backend/src/agentclaw/community/core/task/todos/services/todo_bot_team_service.py#TodoBotTeamProductCompositionFactory",
+          "test:apps/backend/tests/community/core/task/todos/test_todo_bot_team_product_profile.py#test_product_profile_spec_is_deterministic_and_uses_only_original_bot_nodes"
+        ],
+        "verification": {
+          "method": "tests + contract review",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "User directed autonomous execution on 2026-11-26; unresolved code-contract decisions must be recorded and skipped rather than guessed. Slice 1 implemented; focused verification is recorded, final AC acceptance remains pending."
+      },
+      {
+        "id": "AC-003",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md#ac-003",
+        "title": "Todo聚合原子创建",
+        "statement": "Todo、SourceBinding、participant bindings、Stage snapshots在一个本地事务中创建。",
+        "category": "data",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md#7.1-聚合创建边界"
+        ],
+        "implementation_refs": [
+          "code:apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_repository.py#create_todo_with_stages",
+          "code:apps/backend/src/agentclaw/community/core/repository/protocols/task/todos.py#TodoRepositoryProtocol.create_todo_with_stages",
+          "test:apps/backend/tests/community/repository/task/todos/test_todo_product_repository_bindings.py#test_product_todo_aggregate_persists_source_in_the_same_transaction",
+          "test:apps/backend/tests/community/repository/task/todos/test_todo_product_repository_bindings.py#test_product_todo_aggregate_duplicate_source_returns_existing_todo",
+          "test:apps/backend/tests/community/repository/task/todos/test_todo_product_repository_bindings.py#test_product_todo_aggregate_stage_failure_rolls_back_todo_and_source"
+        ],
+        "verification": {
+          "method": "tests + contract review",
+          "evidence": [
+            "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/repository/task/todos/test_todo_product_repository_bindings.py",
+            "pytest: 4 passed (repository aggregate transaction/CAS evidence)",
+            "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos tests/community/repository/task/todos tests/community/adapters/http/openapi_v1/task/todos tests/community/architecture",
+            "pytest: 806 passed"
+          ],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "User directed autonomous execution on 2026-11-26; unresolved code-contract decisions must be recorded and skipped rather than guessed."
+      },
+      {
+        "id": "AC-004",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md#ac-004",
+        "title": "Dima单向导入幂等",
+        "statement": "每批最多20条、逐条独立结果、来源唯一、duplicate返回既有Todo且不回写Dima。",
+        "category": "behavior",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md#7.2-dima-导入"
+        ],
+        "implementation_refs": [
+          "code:apps/backend/src/agentclaw/community/core/task/todos/services/todo_product_creation_service.py#TodoProductCreationService.import_dima_todos",
+          "code:apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/router.py#import_dima_todos",
+          "code:apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/dima_import_schemas.py",
+          "test:apps/backend/tests/community/core/task/todos/test_todo_product_creation_service.py#test_dima_import_returns_independent_results_for_each_item",
+          "test:apps/backend/tests/community/core/task/todos/test_todo_product_creation_service.py#test_product_collet_failure_preserves_imported_todo_as_retryable_failure",
+          "test:apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_todo_endpoints.py#test_import_dima_todos_maps_actor_and_per_item_results",
+          "test:apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_todo_endpoints.py#test_import_dima_todos_rejects_batches_over_twenty_at_the_api_boundary"
+        ],
+        "verification": {
+          "method": "tests + contract review",
+          "evidence": [
+            "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_product_creation_service.py",
+            "pytest: 10 passed; per-item imported/duplicate/failed and retryable Collet failure covered",
+            "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/adapters/http/openapi_v1/task/todos/test_todo_endpoints.py",
+            "pytest: 26 passed; batch mapping and max-20 boundary covered",
+            "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos tests/community/repository/task/todos tests/community/adapters/http/openapi_v1/task/todos tests/community/architecture",
+            "pytest: 806 passed"
+          ],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "User directed autonomous execution on 2026-11-26; unresolved code-contract decisions must be recorded and skipped rather than guessed."
+      },
+      {
+        "id": "AC-005",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md#ac-005",
+        "title": "Collet绑定独立于旧Context",
+        "statement": "Product Todo使用独立product_collet_id并集中判定runtime kind，不复用旧Context/Execution字段。",
+        "category": "architecture",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md#4-产品运行模式"
+        ],
+        "implementation_refs": [
+          "code:apps/backend/src/agentclaw/community/core/task/todos/product_creation_models.py#resolve_todo_runtime_kind",
+          "code:apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/models.py#TodoModel.product_collet_id",
+          "code:apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_repository.py#TodoRepository.bind_product_collet",
+          "code:apps/backend/src/agentclaw/community/core/task/todos/scheduler.py#TodoScheduler.run_once",
+          "test:apps/backend/tests/community/core/task/todos/test_todo_product_collet_runtime.py#test_runtime_kind_resolver_is_the_complete_truth_table",
+          "test:apps/backend/tests/community/repository/task/todos/test_todo_product_repository_bindings.py#test_bind_product_collet_uses_compare_and_set_semantics",
+          "test:apps/backend/tests/community/core/task/todos/test_todo_scheduler.py#test_product_todo_never_enters_legacy_context_dispatch"
+        ],
+        "verification": {
+          "method": "tests + contract review",
+          "evidence": [
+            "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_product_collet_runtime.py",
+            "pytest: 12 passed; truth table, stable request ID, authenticated actor, retry, CAS conflict",
+            "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/repository/task/todos/test_todo_product_repository_bindings.py",
+            "pytest: 4 passed; repository CAS and aggregate atomicity",
+            "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos tests/community/repository/task/todos tests/community/adapters/http/openapi_v1/task/todos tests/community/architecture",
+            "pytest: 806 passed"
+          ],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "User directed autonomous execution on 2026-11-26; unresolved code-contract decisions must be recorded and skipped rather than guessed."
+      },
+      {
+        "id": "AC-006",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md#ac-006",
+        "title": "Progress以Todo Stage为骨架",
+        "statement": "Progress保持Todo Stage快照名称、顺序、Bot和验收条件，Runtime只补充运行事实。",
+        "category": "behavior",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md#8-task-3-设计progress-投影"
+        ],
+        "implementation_refs": [
+          "code:apps/backend/src/agentclaw/community/core/task/todos/progress_models.py#TodoProgress",
+          "code:apps/backend/src/agentclaw/community/core/task/todos/services/todo_product_progress_service.py#TodoProductProgressService._skeleton",
+          "code:apps/backend/src/agentclaw/community/core/task/todos/services/todo_product_progress_service.py#TodoProductProgressService._project_stages",
+          "code:apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoProgressPanel.tsx",
+          "test:apps/backend/tests/community/core/task/todos/test_todo_product_progress.py#test_service_keeps_skeleton_when_runtime_is_unavailable"
+        ],
+        "verification": {
+          "method": "tests + contract review",
+          "evidence": [
+            "command:UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos tests/community/repository/task/todos tests/community/adapters/http/openapi_v1/task/todos tests/community/architecture",
+            "pytest: 814 passed, 44 warnings; Todo stage skeleton retained when product runtime is unavailable",
+            "command:npm test -- --runTestsByPath test/hooks/useTodoDetail.test.tsx test/pages/Lab/TodoDetail.test.tsx test/services/backendApi/todos/todoMapper.test.ts",
+            "jest: 3 suites / 44 tests passed; progress failure does not block Todo details and unknown remains distinct"
+          ],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "User directed autonomous execution on 2026-11-26; unresolved code-contract decisions must be recorded and skipped rather than guessed."
+      },
+      {
+        "id": "AC-007",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md#ac-007",
+        "title": "正确选择当前Rollout",
+        "statement": "使用current_rollout_id、revision和stopped元数据，不依赖列表顺序。",
+        "category": "contract",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md#8.3-查询算法"
+        ],
+        "implementation_refs": [
+          "code:apps/backend/src/agentclaw/community/core/task/todos/services/todo_product_progress_service.py#parse_product_rollouts",
+          "test:apps/backend/tests/community/core/task/todos/test_todo_product_progress.py#test_rollout_parser_uses_metadata_and_current_id_not_order",
+          "test:apps/backend/tests/community/core/task/todos/test_todo_product_progress.py#test_rollout_parser_rejects_missing_metadata",
+          "test:apps/backend/tests/community/core/task/todos/test_todo_product_progress.py#test_service_queries_current_rollout_and_only_the_current_stage_details"
+        ],
+        "verification": {
+          "method": "tests + contract review",
+          "evidence": [
+            "command:UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_product_progress.py",
+            "pytest: 7 passed; current_rollout_id metadata selected, missing metadata rejected, and rollout order never guessed"
+          ],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "User directed autonomous execution on 2026-11-26; unresolved code-contract decisions must be recorded and skipped rather than guessed."
+      },
+      {
+        "id": "AC-008",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md#ac-008",
+        "title": "子步骤由Backend生成",
+        "statement": "Backend防御解析Stage messages并返回稳定VO，Frontend不解释协议DTO或宣称不完整消息完整。",
+        "category": "contract",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md#8.5-session-messages-和子步骤"
+        ],
+        "implementation_refs": [
+          "code:apps/backend/src/agentclaw/community/core/task/todos/progress_models.py#TodoProgressStep",
+          "code:apps/backend/src/agentclaw/community/core/task/todos/services/todo_product_progress_service.py#_messages_steps",
+          "code:apps/backend/src/agentclaw/community/core/task/todos/services/todo_product_progress_service.py#_apply_details",
+          "code:apps/frontend-nextgen/src/services/backendApi/todos/todoMapper.ts",
+          "code:apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoProgressPanel.tsx",
+          "test:apps/backend/tests/community/core/task/todos/test_todo_product_progress.py#test_service_queries_current_rollout_and_only_the_current_stage_details",
+          "test:apps/frontend-nextgen/test/services/backendApi/todos/todoMapper.test.ts"
+        ],
+        "verification": {
+          "method": "tests + contract review",
+          "evidence": [
+            "command:UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_product_progress.py",
+            "pytest: 7 passed; Backend parses only the requested stage messages and preserves explicit completeness/ignored counts",
+            "command:npm test -- --runTestsByPath test/hooks/useTodoDetail.test.tsx test/pages/Lab/TodoDetail.test.tsx test/services/backendApi/todos/todoMapper.test.ts",
+            "jest: 3 suites / 44 tests passed; frontend consumes stable progress models and does not see protocol DTOs"
+          ],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "User directed autonomous execution on 2026-11-26; unresolved code-contract decisions must be recorded and skipped rather than guessed."
+      },
+      {
+        "id": "AC-009",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md#ac-009",
+        "title": "站内通知可达且幂等",
+        "statement": "Human相关事件仅通知明确recipient/owner，delivery key幂等且通知失败不回滚Runtime事实。",
+        "category": "behavior",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md#9-task-4-设计通知"
+        ],
+        "implementation_refs": [],
+        "verification": {
+          "method": "tests + contract review",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "User directed autonomous execution on 2026-11-26; unresolved code-contract decisions must be recorded and skipped rather than guessed."
+      },
+      {
+        "id": "AC-010",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md#ac-010",
+        "title": "产品互动本地可追溯",
+        "statement": "Human请求、发送状态、平台响应、动作、失败和停止请求保存在Todo产品库。",
+        "category": "data",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md#10-task-4-设计product-interaction"
+        ],
+        "implementation_refs": [],
+        "verification": {
+          "method": "tests + contract review",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "User directed autonomous execution on 2026-11-26; unresolved code-contract decisions must be recorded and skipped rather than guessed."
+      },
+      {
+        "id": "AC-011",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md#ac-011",
+        "title": "互动并发受控",
+        "statement": "同一Todo只允许一个sending/delivery_unknown，request ID稳定并携带expected revision。",
+        "category": "behavior",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md#10.3-单飞和并发"
+        ],
+        "implementation_refs": [],
+        "verification": {
+          "method": "tests + contract review",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "User directed autonomous execution on 2026-11-26; unresolved code-contract decisions must be recorded and skipped rather than guessed."
+      },
+      {
+        "id": "AC-012",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md#ac-012",
+        "title": "协议故障不制造产品事实",
+        "statement": "timeout进入delivery_unknown，只有明确SHUTDOWN取消，Progress/通知/Summary按合同降级。",
+        "category": "operation",
+        "blocking": true,
+        "status": "implemented",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md#13-失败与补偿矩阵"
+        ],
+        "implementation_refs": [
+          "code:apps/backend/src/agentclaw/community/core/task/todos/services/todo_product_progress_service.py#map_product_stage_status",
+          "code:apps/backend/src/agentclaw/community/core/task/todos/services/todo_product_progress_service.py#TodoProductProgressService._apply_details",
+          "test:apps/backend/tests/community/core/task/todos/test_todo_product_progress.py#test_product_stage_status_mapping_is_exhaustive_and_fail_closed",
+          "test:apps/backend/tests/community/core/task/todos/test_todo_product_progress.py#test_service_keeps_skeleton_when_runtime_is_unavailable"
+        ],
+        "verification": {
+          "method": "tests + contract review",
+          "evidence": [
+            "command:UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_product_progress.py",
+            "pytest: 7 passed; unknown protocol statuses and runtime read failures fail closed to unknown/unavailable rather than becoming product facts",
+            "command:UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos tests/community/repository/task/todos tests/community/adapters/http/openapi_v1/task/todos tests/community/architecture",
+            "pytest: 814 passed, 44 warnings"
+          ],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "User directed autonomous execution on 2026-11-26; unresolved code-contract decisions must be recorded and skipped rather than guessed."
+      },
+      {
+        "id": "AC-013",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md#ac-013",
+        "title": "Legacy兼容",
+        "statement": "历史Revision、单Bot和已有Context Todo继续Legacy路径，不回填或隐式迁移。",
+        "category": "compatibility",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md#14-迁移和兼容"
+        ],
+        "implementation_refs": [
+          "code:apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_template_repository.py#create_draft",
+          "test:apps/backend/tests/community/repository/task/todos/test_todo_template_repository.py#test_new_draft_does_not_inherit_published_product_profile",
+          "code:apps/backend/src/agentclaw/community/core/task/todos/scheduler.py#TodoScheduler.run_once",
+          "test:apps/backend/tests/community/core/task/todos/test_todo_scheduler.py#test_product_todo_never_enters_legacy_context_dispatch"
+        ],
+        "verification": {
+          "method": "tests + contract review",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "User directed autonomous execution on 2026-11-26; unresolved code-contract decisions must be recorded and skipped rather than guessed. Slice 1 contributes compatibility/authorization evidence; later slices remain required."
+      },
+      {
+        "id": "AC-014",
+        "source": "user_explicit",
+        "requirement_ref": "docs/specs/todo/2026-11-26-product-profile-todo-integration/spec.md#ac-014",
+        "title": "权限和隔离",
+        "statement": "所有读写按tenant/env/space隔离，ActorContext来自认证Human，消息经产品可见性边界。",
+        "category": "permission",
+        "blocking": true,
+        "status": "designed",
+        "design_refs": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/design.md#11-actorcontext-与安全"
+        ],
+        "implementation_refs": [
+          "code:apps/backend/src/agentclaw/community/core/task/todos/services/todo_template_service.py#publish_product_version",
+          "code:apps/backend/src/agentclaw/community/core/task/todos/services/todo_bot_team_service.py#TodoBotTeamService._publish_product_revision",
+          "test:apps/backend/tests/community/core/task/todos/test_todo_template_service.py#test_publish_product_version_requires_admin_and_forwards_binding",
+          "code:apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/router.py#import_dima_todos",
+          "test:apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_todo_endpoints.py#test_import_dima_todos_maps_actor_and_per_item_results"
+        ],
+        "verification": {
+          "method": "tests + contract review",
+          "evidence": [],
+          "result": "pending"
+        },
+        "owner_decision": "confirmed",
+        "notes": "User directed autonomous execution on 2026-11-26; unresolved code-contract decisions must be recorded and skipped rather than guessed. Slice 1 contributes compatibility/authorization evidence; later slices remain required."
+      }
+    ],
+    "decisions": [
+      {
+        "date": "2026-11-26",
+        "decision": "Implement all four tasks together; do not pause for confirmation. Record and skip contracts that cannot be safely inferred.",
+        "source": "user_explicit"
+      },
+      {
+        "date": "2026-11-26",
+        "decision": "Do not implement or modify ProductProfileService/L5 protocol internals.",
+        "source": "user_explicit"
+      }
+    ],
+    "blockers": [
+      "AC-001",
+      "AC-002",
+      "AC-006",
+      "AC-007",
+      "AC-008",
+      "AC-009",
+      "AC-010",
+      "AC-011",
+      "AC-012",
+      "AC-013",
+      "AC-014"
+    ],
+    "gate_results": [
+      {
+        "allowed": true,
+        "stage": "implement",
+        "requested_stage": "implement",
+        "gate": "implementation_entry",
+        "blockers": [],
+        "checked_at": "2026-11-26T14:45:40.271049Z"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "requested_stage": "slice-1-red-test",
+        "gate": "focused_test_environment",
+        "blockers": [
+          "uv_cache_sandbox_permission"
+        ],
+        "checked_at": "2026-11-27T01:38:18.737068Z",
+        "failure_kind": "infrastructure/sandbox",
+        "command": "cd apps/backend && DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_bot_team_product_profile.py",
+        "message": "uv could not initialize /Users/guoke.gk/.cache/uv because the sandbox denied access"
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "requested_stage": "slice-1-red-test",
+        "gate": "slice_1_focused_test",
+        "blockers": [
+          "AC-001",
+          "AC-002"
+        ],
+        "checked_at": "2026-11-27T01:39:04.635536Z",
+        "failure_kind": "expected_tdd_red",
+        "command": "UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_bot_team_product_profile.py",
+        "message": "Test collection failed because build_bot_team_product_profile_spec is not implemented."
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "requested_stage": "slice-1-green-test",
+        "gate": "slice_1_focused_test",
+        "blockers": [
+          "AC-001",
+          "AC-002"
+        ],
+        "checked_at": "2026-11-27T01:47:39.890069Z",
+        "failure_kind": "test_fixture_contract_mismatch",
+        "command": "UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_bot_team_product_profile.py tests/community/core/task/todos/test_todo_bot_team_service.py tests/community/adapters/http/openapi_v1/task/todos/test_bot_teams.py",
+        "message": "2 failed, 11 passed: ProductProfile focused test represented SpaceType as raw text, so the existing Bot scope guard rejected otherwise valid fixtures."
+      },
+      {
+        "allowed": true,
+        "stage": "implement",
+        "requested_stage": "slice-1-green-test",
+        "gate": "slice_1_focused_test",
+        "blockers": [],
+        "checked_at": "2026-11-27T01:51:00.323484Z",
+        "command": "UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_bot_team_product_profile.py tests/community/core/task/todos/test_todo_bot_team_service.py tests/community/adapters/http/openapi_v1/task/todos/test_bot_teams.py",
+        "message": "13 passed, 18 warnings"
+      },
+      {
+        "allowed": true,
+        "stage": "implement",
+        "requested_stage": "slice-1-complete",
+        "gate": "slice_1_verification",
+        "blockers": [],
+        "checked_at": "2026-11-27T01:53:54.094162Z",
+        "command": "UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_bot_team_product_profile.py tests/community/core/task/todos/test_todo_bot_team_service.py tests/community/core/task/todos/test_todo_template_service.py tests/community/repository/task/todos/test_todo_template_repository.py tests/community/adapters/http/openapi_v1/task/todos/test_bot_teams.py",
+        "message": "34 passed, 18 warnings; Slice 1 implementation bindings recorded for AC-001/AC-002 and partial cross-cutting evidence for AC-013/AC-014."
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "requested_stage": "slice-2-red-test",
+        "gate": "slice_2_focused_test",
+        "blockers": [
+          "AC-003",
+          "AC-004",
+          "AC-005"
+        ],
+        "checked_at": "2026-11-27T02:05:36.744627+00:00",
+        "failure_kind": "expected_tdd_red",
+        "command": "UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_product_collet_runtime.py tests/community/repository/task/todos/test_todo_product_repository_bindings.py",
+        "message": "Test collection failed because product-collet runtime models, builder, repository binding methods, and ensure services are not implemented."
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "requested_stage": "slice-2-existing-service-contract",
+        "gate": "slice_2_focused_test",
+        "blockers": [
+          "AC-003",
+          "AC-004",
+          "AC-005"
+        ],
+        "checked_at": "2026-11-27T02:09:33.561668+00:00",
+        "failure_kind": "test_fixture_contract_mismatch",
+        "command": "UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_product_creation_service.py tests/community/core/task/todos/test_todo_template_service.py tests/community/repository/task/todos/test_todo_template_repository.py tests/community/repository/task/todos/test_todo_repository.py tests/community/repository/task/todos/test_todo_stage_lifecycle.py",
+        "message": "7 failed, 56 passed: existing Product creation tests still construct the old three-argument service and do not inject ProductProfileServiceProtocol/TodoRepositoryProtocol."
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "requested_stage": "slice-2-existing-service-contract",
+        "gate": "slice_2_focused_test",
+        "blockers": [
+          "AC-003"
+        ],
+        "checked_at": "2026-11-27T02:10:23.045669+00:00",
+        "failure_kind": "expected_contract_update",
+        "command": "UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_product_collet_runtime.py tests/community/core/task/todos/test_todo_product_creation_service.py tests/community/core/task/todos/test_todo_template_service.py tests/community/repository/task/todos/test_todo_template_repository.py tests/community/repository/task/todos/test_todo_repository.py tests/community/repository/task/todos/test_todo_stage_lifecycle.py",
+        "message": "1 failed, 72 passed: BotTeam template creation now forwards the explicit source parameter, but the existing call-shape assertion omitted source=None."
+      },
+      {
+        "allowed": false,
+        "stage": "implement",
+        "requested_stage": "slice-2-implementation-test",
+        "gate": "slice_2_focused_test",
+        "blockers": [
+          "AC-003",
+          "AC-004",
+          "AC-005"
+        ],
+        "checked_at": "2026-11-27T03:00:00Z",
+        "failure_kind": "test_fixture_contract_mismatch",
+        "command": "UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/repository/task/todos/test_todo_product_repository_bindings.py",
+        "message": "Initial Dima/Collet service and scheduler tests exposed constructor and service-double gaps."
+      },
+      {
+        "allowed": true,
+        "stage": "implement",
+        "requested_stage": "slice-2-green-test",
+        "gate": "slice_2_focused_test",
+        "blockers": [],
+        "checked_at": "2026-11-27T03:00:00Z",
+        "failure_kind": null,
+        "command": "UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos tests/community/repository/task/todos tests/community/adapters/http/openapi_v1/task/todos tests/community/architecture",
+        "message": "806 passed, 44 warnings across Todo core/repository/HTTP and architecture focused suites."
+      }
+    ],
+    "rework_attempts": [
+      {
+        "attempt": 1,
+        "trigger": "verification_failed",
+        "stage": "implement",
+        "gate": "focused_test_environment",
+        "failed_ac_ids": [],
+        "violated_stage": "implementation",
+        "blocker_snapshots": [],
+        "failure_type": "quality_gate_failed",
+        "failure_reason": "Focused Slice 1 red test could not start because uv cache access was denied by the sandbox.",
+        "missing_evidence": [
+          "Slice 1 red-test result"
+        ],
+        "auto_fixable": true,
+        "detected_by": "focused pytest invocation",
+        "ai_claimed_done": false,
+        "actual_problem": "Test infrastructure used an unwritable uv cache path.",
+        "action": "return_to_verification",
+        "allowed_scope": "Rerun the same focused test with UV_CACHE_DIR under /tmp; do not change product code before observing the red result.",
+        "rework_plan": [
+          "Set UV_CACHE_DIR=/tmp/avernet-uv-cache",
+          "Rerun the exact Slice 1 focused test",
+          "Record the resulting red/green evidence before implementation"
+        ],
+        "actions_taken": [
+          "Reran the focused test with UV_CACHE_DIR=/tmp/avernet-uv-cache"
+        ],
+        "changed_files": [
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/pipeline/state.json"
+        ],
+        "verification_evidence": [
+          "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_bot_team_product_profile.py reached pytest collection"
+        ],
+        "before_blockers": [
+          "uv_cache_sandbox_permission"
+        ],
+        "before_acceptance_snapshots": [],
+        "after_blockers": [],
+        "after_acceptance_snapshots": [],
+        "result": "fixed",
+        "next_stage": "implementation"
+      },
+      {
+        "attempt": 2,
+        "trigger": "verification_failed",
+        "stage": "implement",
+        "gate": "slice_1_focused_test",
+        "failed_ac_ids": [
+          "AC-001",
+          "AC-002"
+        ],
+        "violated_stage": "implementation",
+        "blocker_snapshots": [
+          {
+            "ac_id": "AC-001",
+            "acceptance": {
+              "ac_id": "AC-001",
+              "title": "Revision与ProductProfile一一固定绑定",
+              "statement": "每个新发布BotTeam Revision绑定且只绑定一个product_profile_id，重试幂等，冲突不覆盖。",
+              "source": "user_explicit",
+              "category": "data",
+              "blocking": true
+            },
+            "failed_stage": "implement",
+            "violated_stage": "implementation",
+            "status": "designed",
+            "ai_claimed_done": false,
+            "actual_problem": "ProductProfile conversion/publication implementation is absent."
+          },
+          {
+            "ac_id": "AC-002",
+            "acceptance": {
+              "ac_id": "AC-002",
+              "title": "BotTeam与协议模型解耦",
+              "statement": "BotTeam线性节点稳定转换为协议stages，synthetic approval stage不直接进入ProductProfile。",
+              "source": "user_explicit",
+              "category": "architecture",
+              "blocking": true
+            },
+            "failed_stage": "implement",
+            "violated_stage": "implementation",
+            "status": "designed",
+            "ai_claimed_done": false,
+            "actual_problem": "Pure BotTeam-to-ProductProfile spec converter is absent."
+          }
+        ],
+        "failure_type": "verification_failed",
+        "failure_reason": "Expected TDD red: focused test cannot import build_bot_team_product_profile_spec.",
+        "missing_evidence": [
+          "Slice 1 implementation",
+          "Green focused test"
+        ],
+        "auto_fixable": true,
+        "detected_by": "focused pytest invocation",
+        "ai_claimed_done": false,
+        "actual_problem": "Slice 1 production symbols and orchestration have not been implemented.",
+        "action": "return_to_implement_or_verification",
+        "allowed_scope": "Only implement Slice 1 Revision-to-ProductProfile conversion, binding, publication, DI/HTTP async propagation, migration and focused tests.",
+        "rework_plan": [
+          "Implement model/ORM/repository binding",
+          "Implement stable converter and request ID",
+          "Integrate async ProductProfile creation before atomic publish",
+          "Update DI/HTTP/tests",
+          "Rerun Slice 1 focused checks"
+        ],
+        "actions_taken": [
+          "Added nullable ProductProfile binding to revision records and ORM",
+          "Added atomic publish_product_version CAS with idempotent replay and conflict protection",
+          "Added deterministic BotTeam-to-ProductProfile conversion and stable request ID",
+          "Created ProductProfile before publishing the BotTeam revision",
+          "Propagated async create/update through the BotTeam HTTP adapter and DI",
+          "Added repository, service, product conversion, and HTTP coverage"
+        ],
+        "changed_files": [
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_bot_team_service.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/services/todo_template_service.py",
+          "apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_template_repository.py",
+          "apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/template_models.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/template_management_models.py",
+          "apps/backend/src/agentclaw/community/core/task/todos/sql/2026_11_27_todo_product_runtime_bindings.sql",
+          "apps/backend/tests/community/core/task/todos/test_todo_bot_team_product_profile.py",
+          "apps/backend/tests/community/repository/task/todos/test_todo_template_repository.py",
+          "apps/backend/tests/community/core/task/todos/test_todo_template_service.py"
+        ],
+        "verification_evidence": [
+          "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_bot_team_product_profile.py tests/community/core/task/todos/test_todo_bot_team_service.py tests/community/core/task/todos/test_todo_template_service.py tests/community/repository/task/todos/test_todo_template_repository.py tests/community/adapters/http/openapi_v1/task/todos/test_bot_teams.py",
+          "pytest: 34 passed, 18 warnings"
+        ],
+        "before_blockers": [
+          "AC-001",
+          "AC-002"
+        ],
+        "before_acceptance_snapshots": [],
+        "after_blockers": [],
+        "after_acceptance_snapshots": [],
+        "result": "fixed",
+        "next_stage": "implementation"
+      },
+      {
+        "attempt": 3,
+        "trigger": "verification_failed",
+        "stage": "implement",
+        "gate": "slice_1_focused_test",
+        "failed_ac_ids": [
+          "AC-001",
+          "AC-002"
+        ],
+        "violated_stage": "verification",
+        "blocker_snapshots": [],
+        "failure_type": "test_fixture_contract_mismatch",
+        "failure_reason": "Focused tests reached the new implementation but two ProductProfile service tests used space_type=\"team\" instead of SpaceType.TEAM.",
+        "missing_evidence": [
+          "Green Slice 1 focused test"
+        ],
+        "auto_fixable": true,
+        "detected_by": "focused pytest invocation",
+        "ai_claimed_done": false,
+        "actual_problem": "The new test double violated the existing SpaceRecord enum contract; production scope enforcement behaved correctly.",
+        "action": "return_to_implementation",
+        "allowed_scope": "Correct only the ProductProfile focused test Space fixture, then rerun the same focused suite.",
+        "rework_plan": [
+          "Use SpaceType.TEAM in the focused test fixture",
+          "Rerun the exact Slice 1 focused suite",
+          "Record green evidence or the next concrete failure before further changes"
+        ],
+        "actions_taken": [
+          "Used SpaceType.TEAM in the ProductProfile focused test fixture",
+          "Reran the exact Slice 1 focused suite"
+        ],
+        "changed_files": [
+          "apps/backend/tests/community/core/task/todos/test_todo_bot_team_product_profile.py",
+          "docs/specs/todo/2026-11-26-product-profile-todo-integration/pipeline/state.json"
+        ],
+        "verification_evidence": [
+          "command: UV_CACHE_DIR=/tmp/avernet-uv-cache DEPLOY_PROFILE=test uv run --no-sync pytest -q tests/community/core/task/todos/test_todo_bot_team_product_profile.py tests/community/core/task/todos/test_todo_bot_team_service.py tests/community/adapters/http/openapi_v1/task/todos/test_bot_teams.py",
+          "pytest: 13 passed, 18 warnings"
+        ],
+        "before_blockers": [
+          "AC-001",
+          "AC-002"
+        ],
+        "before_acceptance_snapshots": [],
+        "after_blockers": [],
+        "after_acceptance_snapshots": [],
+        "result": "fixed",
+        "next_stage": "implementation"
+      },
+      {
+        "attempt": 4,
+        "trigger": "verification_failed",
+        "stage": "implement",
+        "gate": "slice_2_existing_service_contract",
+        "failed_ac_ids": [
+          "AC-005"
+        ],
+        "violated_stage": "implementation",
+        "blocker_snapshots": [],
+        "failure_type": "test_fixture_contract_mismatch",
+        "failure_reason": "Existing Product creation fixtures do not provide the two newly required runtime collaborators.",
+        "missing_evidence": [
+          "Existing service suite must pass with the expanded constructor."
+        ],
+        "auto_fixable": true,
+        "detected_by": "focused pytest invocation",
+        "ai_claimed_done": false,
+        "actual_problem": "Service constructor injection was expanded, but legacy test scaffolding was not updated to supply test doubles.",
+        "action": "return_to_verification",
+        "allowed_scope": "Update only Product creation test doubles; do not weaken the new runtime collaboration contract.",
+        "rework_plan": [
+          "Add no-op ProductProfileService and TodoRepository test doubles",
+          "Inject them through the existing _service fixture",
+          "Rerun the focused suite"
+        ],
+        "actions_taken": [],
+        "changed_files": [],
+        "verification_evidence": [],
+        "before_blockers": [
+          "AC-005"
+        ],
+        "before_acceptance_snapshots": [],
+        "after_blockers": [],
+        "after_acceptance_snapshots": [],
+        "result": "pending",
+        "next_stage": "implementation"
+      }
+    ],
+    "escalations": [],
+    "tdd_cycles": null
+  },
+  "tier1": {
+    "rounds": 0,
+    "result": "pending",
+    "verdict": "pending",
+    "blocking_findings": 0,
+    "findings": [],
+    "has_critical": false,
+    "latest_verdict": null,
+    "latest_summary": null,
+    "final_score": null,
+    "dimensions_final": null,
+    "review_evidence": null,
+    "history": []
+  },
+  "tier2": {
+    "rounds": 0,
+    "tests_passed": false,
+    "coverage": 0,
+    "lint_passed": false,
+    "result": "pending",
+    "verdict": "pending",
+    "history": []
+  },
+  "heal_loop": {
+    "active": false,
+    "tier1": {
+      "invocations": 0,
+      "total_issues_fixed": 0,
+      "total_iterations": 0,
+      "history": []
+    },
+    "tier2": {
+      "invocations": 0,
+      "total_issues_fixed": 0,
+      "total_iterations": 0,
+      "history": []
+    },
+    "config": {
+      "tier1_max_iterations": 4,
+      "tier2_max_iterations": 5,
+      "stuck_threshold_iterations": 2,
+      "sources": {
+        "pytest": {
+          "enabled": true
+        },
+        "ruff_check": {
+          "enabled": true
+        },
+        "ruff_format": {
+          "enabled": true
+        },
+        "arch_guard": {
+          "enabled": true
+        },
+        "mypy": {
+          "enabled": false
+        }
+      }
+    }
+  },
+  "implementation_entry_gate": "passed",
+  "implement": {
+    "slices_total": 4,
+    "slices_completed": 3,
+    "current_slice": "slice-3-testified",
+    "tdd_cycles": [
+      {
+        "slice": "slice-1-revision-product-profile",
+        "red": true,
+        "green": true,
+        "refactor": true,
+        "red_evidence": "focused test collection ImportError: build_bot_team_product_profile_spec missing",
+        "green_evidence": "34 passed, 18 warnings across BotTeam ProductProfile, template CAS/service, and HTTP focused suites"
+      },
+      {
+        "slice": "slice-2-dima-todo-product-collet",
+        "red": true,
+        "green": true,
+        "refactor": false,
+        "red_evidence": "Focused Dima/Collet tests failed before implementation: missing binding/repository/service and scheduler fixture mismatch; no partial aggregate persisted by design.",
+        "green_evidence": "Focused Todo core/repository/HTTP/architecture suite: 806 passed, 44 warnings."
+      },
+      {
+        "slice": "slice-3-todo-product-progress",
+        "red": true,
+        "green": true,
+        "refactor": true,
+        "red_evidence": "Focused Task 3 tests could not pass before implementation: the Todo Product progress query protocol, service projection, HTTP route, and frontend progress view were absent.",
+        "green_evidence": "Backend focused suite: 814 passed, 44 warnings. Frontend focused suite: 3 passed suites, 44 passed tests. Frontend typecheck now reports only unrelated tiptap errors in Community rich-text files; no Todo progress errors remain."
+      }
+    ],
+    "implementation_exit_gate": "pending"
+  },
+  "contract_gaps": [
+    {
+      "id": "CG-TODO-PRODUCT-001",
+      "title": "Background Product Collet compensation lacks an audited ActorContext contract",
+      "status": "recorded",
+      "notes": "Scheduler now distinguishes Product from Legacy and never sends Product to legacy Context dispatch. It does not fabricate a Human actor for background ensure_product_collet; explicit authenticated Human creation/import can perform safe compensation until an audited service actor contract exists."
+    }
+  ]
+}

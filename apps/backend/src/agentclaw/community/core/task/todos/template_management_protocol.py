@@ -104,6 +104,17 @@ class TodoTemplateManagementServiceProtocol(Protocol):
     ) -> TodoTemplateVersionRecord: ...
 
     @abstractmethod
+    def publish_product_version(
+        self,
+        *,
+        template_id: str,
+        template_version_id: str,
+        product_profile_id: int,
+        actor_id: str,
+        env: str | None = None,
+    ) -> TodoTemplateVersionRecord: ...
+
+    @abstractmethod
     def archive_template(
         self,
         *,

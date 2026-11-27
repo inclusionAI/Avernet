@@ -67,6 +67,18 @@ export interface TodoPageDto {
   pageSize?: number;
 }
 
+export interface TodoProgressDto extends BackendUnknownRecord {
+  todo_id?: string;
+  status?: string;
+  runtime_kind?: string;
+  runtime_unavailable?: boolean;
+  runtime_error_code?: string | null;
+  current_stage_code?: string | null;
+  rollout_revision?: number | null;
+  stopped?: boolean | null;
+  stages?: Array<BackendUnknownRecord>;
+}
+
 export interface TodoSpaceDto extends BackendUnknownRecord {
   space_id?: number | string;
   id?: number | string;
@@ -125,6 +137,7 @@ export const TODO_ENDPOINTS = {
   spaces: TODO_SPACES_API_PATH,
   list: TODO_API_BASE,
   detail: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}`,
+  progress: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/progress`,
   acceptance: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/acceptance`,
   interactions: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/interactions`,
   events: (todoId: string) => `${TODO_API_BASE}/${encodeURIComponent(todoId)}/events`,
@@ -176,6 +189,17 @@ export function getTodo(todoId: string) {
     method: 'GET',
     params: userScopedParams(),
     operation: 'get-todo',
+    retryOnTransient: true,
+  });
+}
+export function getTodoProgress(todoId: string, options?: { expandedStageCode?: string; messageLimit?: number }) {
+  const progressParams: BackendUnknownRecord = {};
+  if (options?.expandedStageCode) progressParams.expanded_stage_code = options.expandedStageCode;
+  if (options?.messageLimit) progressParams.message_limit = options.messageLimit;
+  return backendRequest<BackendApiEnvelope<TodoProgressDto>>(TODO_ENDPOINTS.progress(todoId), {
+    method: 'GET',
+    params: userScopedParams(progressParams),
+    operation: 'get-todo-progress',
     retryOnTransient: true,
   });
 }

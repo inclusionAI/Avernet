@@ -702,8 +702,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # auto-import rule/progress operations plus rule-bound Todo creation are
 # Space-scoped rather than Bot-addressed, even though create and update accept
 # a Bot in the body. Product profile/progress operations are also not
-# Bot-addressed: none 177 -> 189 across both branches.
-_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 189}
+# Bot-addressed, and the five BotTeam management operations are Space-scoped:
+# none 177 -> 194 across the merged protocol and product surfaces.
+_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 195}
 
 
 def _schema() -> dict:
@@ -936,8 +937,10 @@ def test_the_pinned_number_of_operations_take_it():
     # both name the acting user: 337 -> 339. Dedicated recycle operation query
     # adds one OWNER-only read: 339 -> 340. Dima auto-import rule management
     # adds three Human-scoped operations; its five execution operations are
-    # tenant-scoped and live in _NO_USER_DIMENSION: 340 -> 343.
-    assert len(taking) == 343
+    # tenant-scoped and live in _NO_USER_DIMENSION: 340 -> 343. BotTeam list,
+    # create, detail, update, and archive are Human/Space-scoped: 343 -> 348.
+    # Product Dima batch import is also Human/Space-scoped: 348 -> 349.
+    assert len(taking) == 349
 
 
 def test_the_exempt_operations_take_none():

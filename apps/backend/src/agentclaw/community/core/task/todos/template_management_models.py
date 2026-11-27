@@ -67,6 +67,7 @@ class TodoTemplateVersionRecord:
     published_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    product_profile_id: int | None = None
 
 
 @dataclass(frozen=True)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 from agentclaw.community.core.task.todos.artifact_models import (
@@ -22,6 +22,8 @@ from agentclaw.community.core.task.todos.auto_import_models import (
 from agentclaw.community.core.task.todos.models import (
     MAX_ACCEPTANCE_ID_LENGTH,
     MAX_ACCEPTANCE_TARGETS,
+    MAX_ACTOR_ID_LENGTH,
+    MAX_ACTOR_NAME_LENGTH,
     MAX_ARTIFACT_ID_LENGTH,
     MAX_BOT_ID_LENGTH,
     MAX_DESCRIPTION_LENGTH,
@@ -31,6 +33,9 @@ from agentclaw.community.core.task.todos.models import (
     MAX_TITLE_LENGTH,
     TodoEventRecord,
     TodoRecord,
+)
+from agentclaw.community.core.task.todos.product_creation_models import (
+    TodoProductColletStatus,
 )
 from agentclaw.community.core.task.todos.source_models import (
     MAX_TODO_SOURCE_CONTAINER_ID_LENGTH,
@@ -203,8 +208,55 @@ class CreateTodoSourceRequest(BaseModel):
         return normalize_todo_source_metadata(value)
 
 
+class CreateTodoExecutorRequest(BaseModel):
+    """Single Bot or immutable Bot-team revision selected to execute a Todo."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["bot", "bot_team"] = Field(
+        description="Product executor kind selected by the Human."
+    )
+    id: str = Field(
+        min_length=1,
+        max_length=MAX_BOT_ID_LENGTH,
+        description="Bot identity or Bot-team identity in the selected Space.",
+    )
+    revision_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Required immutable revision for a Bot team; omitted for a single Bot.",
+    )
+
+    @model_validator(mode="after")
+    def validate_revision(self) -> "CreateTodoExecutorRequest":
+        if self.type == "bot" and self.revision_id is not None:
+            raise ValueError("revision_id is not allowed for a Bot executor")
+        if self.type == "bot_team" and not self.revision_id:
+            raise ValueError("revision_id is required for a Bot-team executor")
+        return self
+
+
+class CreateTodoOwnerRequest(BaseModel):
+    """Human responsible for the Todo and its explicit approval stages."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str = Field(
+        min_length=1,
+        max_length=MAX_ACTOR_ID_LENGTH,
+        description="Stable Human identity responsible for the Todo.",
+    )
+    user_name: str = Field(
+        min_length=1,
+        max_length=MAX_ACTOR_NAME_LENGTH,
+        description="Human-readable owner name captured for the Todo.",
+    )
+
+
 class CreateTodoRequest(BaseModel):
     """Create one pending Todo in the selected product Space."""
+
+    model_config = ConfigDict(extra="forbid")
 
     space_id: int = Field(
         gt=0,
@@ -219,15 +271,32 @@ class CreateTodoRequest(BaseModel):
         max_length=MAX_DESCRIPTION_LENGTH,
         description="Todo objective persisted by A and passed to B when automatically dispatched.",
     )
-    bot_id: str = Field(
+    bot_id: str | None = Field(
+        default=None,
         min_length=1,
         max_length=MAX_BOT_ID_LENGTH,
-        description="Identifier of the Space-eligible Bot that will execute the Todo.",
+        description="Legacy single-Bot selector retained for compatible callers.",
+    )
+    executor: CreateTodoExecutorRequest | None = Field(
+        default=None,
+        description="Product executor selector for either a Bot or Bot team.",
+    )
+    owner: CreateTodoOwnerRequest | None = Field(
+        default=None,
+        description="Human responsible for the Todo; required with executor.",
     )
     source: CreateTodoSourceRequest | None = Field(
         default=None,
         description="Imported-source identity; omitted for manually created Todos.",
     )
+
+    @model_validator(mode="after")
+    def validate_executor_compatibility(self) -> "CreateTodoRequest":
+        if (self.bot_id is None) == (self.executor is None):
+            raise ValueError("exactly one of bot_id or executor must be provided")
+        if self.executor is not None and self.owner is None:
+            raise ValueError("owner is required when executor is provided")
+        return self
 
 
 class CreateTodoFromAutoImportRuleRequest(BaseModel):
@@ -819,7 +888,7 @@ class TodoInteractionResponse(TodoEventResponse):
 
 
 class TodoResponse(BaseModel):
-    """Public Todo payload without collaboration-owner transport details."""
+    """Public Todo payload including its responsible Human projection."""
 
     todo_id: str = Field(description="A-owned Todo identifier.")
     space_id: int = Field(description="Product Space containing this Todo.")
@@ -858,9 +927,30 @@ class TodoResponse(BaseModel):
     requested_action: str | None = Field(
         description="Action requested from the Human, if any."
     )
+    owner_id: str = Field(
+        description="Responsible Human identity, with legacy rows projected from created_by."
+    )
+    owner_name: str = Field(
+        description="Responsible Human display name when captured by the product flow."
+    )
+    product_runtime_status: Literal[
+        "ready",
+        "retryable_failure",
+        "not_applicable",
+        "binding_conflict",
+        "invalid_binding",
+    ] | None = Field(
+        default=None,
+        description="Dynamic Product runtime binding result when explicitly checked.",
+    )
 
     @classmethod
-    def from_record(cls, record: TodoRecord) -> "TodoResponse":
+    def from_record(
+        cls,
+        record: TodoRecord,
+        *,
+        product_runtime_status: TodoProductColletStatus | None = None,
+    ) -> "TodoResponse":
         return cls(
             todo_id=record.todo_id,
             space_id=record.space_id,
@@ -879,4 +969,11 @@ class TodoResponse(BaseModel):
             pending_action_kind=record.pending_action_kind,
             state_reason=record.state_reason,
             requested_action=record.requested_action,
+            owner_id=record.owner_id,
+            owner_name=record.owner_name,
+            product_runtime_status=(
+                product_runtime_status.value
+                if product_runtime_status is not None
+                else None
+            ),
         )

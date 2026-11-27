@@ -1051,3 +1051,23 @@ notification_delivery_key
 10. 无法区分 Product Todo 与 Legacy Todo。
 
 停止时应提交：发现的代码证据、受影响任务、可选方案和需要 Owner 决策的问题，不得先改协议层。
+
+
+## 18. 验收点设计覆盖矩阵
+
+| AC | 设计覆盖 | 主要章节 |
+| --- | --- | --- |
+| AC-001 | Revision nullable Profile binding、确定 request ID、CAS、绑定后发布 | 5.1、6.1～6.6 |
+| AC-002 | BotTeam 与协议解耦；原始 Bot node 转 stage；过滤 synthetic approval stage | 2、6.3～6.5 |
+| AC-003 | Todo、SourceBinding、participants、stage snapshots 单事务落库 | 7.1 |
+| AC-004 | Dima 最多20条、逐条事务、来源唯一、duplicate复用、失败可补偿 | 7.2、12、13 |
+| AC-005 | 独立 product_collet_id、runtime kind truth table、禁止旧字段承载 | 4、5.2、7.3～7.5 |
+| AC-006 | Todo Stage 固定骨架，Runtime只补充事实 | 8.1～8.4 |
+| AC-007 | 使用 RolloutList.current_rollout_id/revision/stopped | 3、8.3 |
+| AC-008 | Backend规范化消息、完整性/顺序防御、Frontend只消费稳定VO | 8.5～8.7 |
+| AC-009 | Todo独立通知Protocol、recipient、delivery key和Inbox adapter | 9.1～9.5 |
+| AC-010 | Product Interaction本地表、请求/响应/状态/停止审计 | 5.3、10.1～10.8 |
+| AC-011 | Todo级single-flight、interaction ID=request ID、revision fence | 10.3～10.4、12 |
+| AC-012 | timeout/unknown、SHUTDOWN明确性、Progress/通知/Summary降级 | 8、9、10.6～10.7、13 |
+| AC-013 | nullable迁移、Legacy/Product分流、无回填 | 4、7.5、14 |
+| AC-014 | tenant/env/space隔离、认证Human Actor、消息安全边界 | 11、15 |

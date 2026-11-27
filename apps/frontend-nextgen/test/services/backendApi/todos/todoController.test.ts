@@ -73,7 +73,7 @@ describe('todoController', () => {
   it('下发当前用户、空间、状态、负责人和搜索条件', async () => {
     await listTodos({
       spaceId: 10,
-      status: 'pending_acceptance',
+      status: 'pending_action',
       botId: 'bot-1',
       keyword: '方案',
       page: 2,
@@ -85,7 +85,7 @@ describe('todoController', () => {
       params: {
         space_id: 10,
         keyword: '方案',
-        status: 'pending_acceptance',
+        status: 'pending_action',
         bot_id: 'bot-1',
         page: 2,
         page_size: 20,
