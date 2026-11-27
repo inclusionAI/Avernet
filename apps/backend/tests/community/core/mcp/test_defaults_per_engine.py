@@ -584,6 +584,18 @@ def test_teclaw_default_roster_shape():
     assert codes[-1] == "hitl"
 
 
+def test_teclaw_mail_and_meet_defaults_carry_display_names():
+    """These two have no ``ac_skill_set_mcp`` row on Bots created before they
+    joined the roster, so the Bot MCP list synthesises them from this config and
+    falls back to ``server_code.split(".")[-1]`` (``antmailmcp``/``meetmcp``)
+    when ``name`` is missing."""
+    names = {
+        s["server_code"]: s.get("name") for s in get_default_mcp_servers("teclaw")
+    }
+    assert names["mcp.ant.antitmcp.antmailmcp"] == "蚂蚁邮箱 MCP"
+    assert names["mcp.ant.homistudio.meetmcp"] == "会议信息服务"
+
+
 def test_teclaw_roster_is_its_own_bucket():
     """teclaw resolves its own defaults rather than inheriting another engine's.
 
