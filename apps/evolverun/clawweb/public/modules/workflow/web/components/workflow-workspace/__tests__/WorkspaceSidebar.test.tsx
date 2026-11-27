@@ -23,7 +23,7 @@ describe('task escort workspace sidebar', () => {
     const change = vi.fn()
     render(<Sidebar compact activeView="editor" onViewChange={change} isAdmin={false} hasWorkflow />)
     expect(screen.getByLabelText('任务护航导航')).toHaveClass('w-[68px]')
-    expect(screen.getByText('TASK GUARD').parentElement).toHaveClass('sr-only')
+    expect(screen.getByText('运行观察').parentElement).toHaveClass('sr-only')
     const overview = screen.getByRole('button', { name: '运行概览' })
     expect(overview).toHaveAttribute('title', '运行概览')
     fireEvent.click(overview)
@@ -33,7 +33,7 @@ describe('task escort workspace sidebar', () => {
   it('puts the administrator dashboard and workflow views in one navigation', () => {
     renderSidebar(true)
 
-    expect(screen.getByText('TASK GUARD')).toBeInTheDocument()
+    expect(screen.getByText('运行观察')).toBeInTheDocument()
     expect(screen.getByText('分析与改进')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /数据大盘/ })).toBeInTheDocument()
     const activeItem = screen.getByRole('button', { name: /问题与优化.*7/ })
