@@ -1,0 +1,21 @@
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/http_client.rs
+  s_3812c70273d88e::t_0bf11b7eb990ae 151-213
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/mention_notify.rs
+  s_3812c70273d88e::t_ece4f6c112dd21 5-7,44,52-65,72,164,167,173-342,345-354,424-431,444,454,460,473,617-699
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cf474db69a603eadb41f005b3343a95a75e4a2db",
+  "prompts": {},
+  "sessions": {
+    "s_3812c70273d88e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ac71-c383-77c1-a80d-7288193d5ebf",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

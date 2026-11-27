@@ -1,0 +1,39 @@
+apps/bcs-internal/Cargo.lock
+  s_3390a382ab8b6f::t_d7d7c13686b0a6 847,2328,2461-2462
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  s_460ca40e7dae23::t_eb5dadd3b42125 81-85,94,106
+apps/bcs-internal/crates/plugins/bcs-sofa-services/Cargo.toml
+  s_460ca40e7dae23::t_cf41c9df886c60 40-41
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/agent_card_management/assembly.rs
+  s_460ca40e7dae23::t_376a4d7ca2bf2a 37,39,50,134,153,160-161
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a.rs
+  s_460ca40e7dae23::t_653c424b59476c 70-79,143,145,978-980
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a/catalog_sync.rs
+  s_3390a382ab8b6f::t_f025c2a1cf4a66 1-71
+submodules/avernet
+  s_3390a382ab8b6f::t_c027389b956bb9 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a88f82c46f8cafcda69da12530ce9024e42e99a0",
+  "prompts": {},
+  "sessions": {
+    "s_3390a382ab8b6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce64-b71e-7ab0-af3f-e8a007f31b16",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    },
+    "s_460ca40e7dae23": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c086-a457-71b0-8466-0c9920e816e0",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

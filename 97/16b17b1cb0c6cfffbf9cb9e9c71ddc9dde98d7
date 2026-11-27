@@ -1,0 +1,31 @@
+apps/backend/src/agentclaw/community/core/cron/README.md
+  s_c56ff46febc594::t_abd3a3b3b68491 47-49,64-66
+apps/backend/src/agentclaw/community/core/runtime_binding/README.md
+  s_c56ff46febc594::t_abd3a3b3b68491 28-30
+apps/backend/src/agentclaw/community/core/cron/services/cron_targeted_operations.py
+  s_c56ff46febc594::t_83e6a509218ca1 103-107
+apps/backend/src/agentclaw/community/core/cron/services/cron_relay.py
+  s_c56ff46febc594::t_83e6a509218ca1 164,202-207
+apps/backend/tests/community/core/cron/services/test_cron_targeted_operations.py
+  s_c56ff46febc594::t_5335ad3db9ec9e 666-720
+apps/backend/src/agentclaw/community/core/runtime_binding/service.py
+  s_c56ff46febc594::t_83e6a509218ca1 93-97
+apps/backend/tests/community/core/runtime_binding/test_service.py
+  s_c56ff46febc594::t_5335ad3db9ec9e 356-373
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9716b17b1cb0c6cfffbf9cb9e9c71ddc9dde98d7",
+  "prompts": {},
+  "sessions": {
+    "s_c56ff46febc594": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c49f-f1a3-79e2-8560-03ab24f31c27",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,47 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/bot-config-contracts.ts
+  s_c5125da3cacb9c::t_2b6fcfa3deb66e 11
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/legacy-configuration.ts
+  s_c5125da3cacb9c::t_2b6fcfa3deb66e 1-104
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/monitoring-browser-service.ts
+  s_c5125da3cacb9c::t_34d0c88f10006a 7-8,12,81,90
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/notification.test.ts
+  s_c5125da3cacb9c::t_53be1e64377f68 477-481,484-509
+  s_c5125da3cacb9c::t_ba9320f5f6b0de 482-483
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/index.ts
+  s_c5125da3cacb9c::t_2b6fcfa3deb66e 58
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/session-recovery-trigger.ts
+  s_c5125da3cacb9c::t_2b6fcfa3deb66e 2,7,10,13,44-45,90-93
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/notification.ts
+  s_c5125da3cacb9c::t_2b6fcfa3deb66e 10-12,33,65,79,227,242
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/bot-diagnosis-recovery-config-repository.ts
+  s_c5125da3cacb9c::t_2b6fcfa3deb66e 18-21,27
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/bot-config-migration.ts
+  s_c5125da3cacb9c::t_34d0c88f10006a 5,8-9,19,38,44,48
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/monitoring-runtime.ts
+  s_c5125da3cacb9c::t_34d0c88f10006a 55
+  s_c5125da3cacb9c::t_05ff71b4c58aa7 2
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/bot-configuration.ts
+  s_c5125da3cacb9c::t_34d0c88f10006a 3-4,7-11,17-34,36-75
+apps/evolverun/clawweb/public/modules/clawinsight/docs/bot-diagnosis-recovery-config.md
+  s_c5125da3cacb9c::t_f9e3dc0b79aae6 38,51-52,56-71,85-90,114-123,125-154
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/__tests__/bot-config.test.ts
+  s_c5125da3cacb9c::t_769da5b07bbdb0 1,13,95-96,98,107,110-215
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/contracts.ts
+  s_c5125da3cacb9c::t_621f396e0c17e1 31-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "956bcee27f96b6f515b6c7dea64d66249b2e97d8",
+  "prompts": {},
+  "sessions": {
+    "s_c5125da3cacb9c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e2fc-bace-73f3-9dee-91caa19a0ea5",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

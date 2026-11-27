@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/skill_center/test_capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_e6e41a31491d64 486-579
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ff6b9d4cb3711fecf3b69e3badc441adbdc1d63b",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

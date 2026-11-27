@@ -1,0 +1,73 @@
+apps/backend/tests/community/core/devices/services/test_checked_file_reads.py
+  s_415e3c9e89448e::t_6e3f32d06770ed 32-33,48-56
+  s_415e3c9e89448e::t_5c42afdf06509c 14,17,21,24,30,47,65-75
+  s_415e3c9e89448e::t_7678a2a552d89c 34-44
+  s_415e3c9e89448e::t_3c423b95539f5b 20,63-64,76-86
+  s_415e3c9e89448e::t_cd4d1ff35c52d6 1-13,15-16,18-19,22-23,25-29,31,45-46,57-62
+apps/backend/src/agentclaw/community/core/devices/services/teclaw_device_filesystem.py
+  s_415e3c9e89448e::t_8eb66f77dcc2b8 43,137-142
+  s_415e3c9e89448e::t_d88a5c1109b7b3 143
+apps/backend/src/agentclaw/community/core/devices/services/README.md
+  s_415e3c9e89448e::t_ecd69afa52a279 76-78,81-82
+  s_415e3c9e89448e::t_6e3f32d06770ed 79-80
+apps/backend/src/agentclaw/community/core/devices/services/device_read_errors.py
+  s_415e3c9e89448e::t_8eb66f77dcc2b8 1-19
+apps/backend/src/agentclaw/community/core/services/resource_file_service.py
+  s_415e3c9e89448e::t_342be013d07af3 45-46,55,270,293-296,472-473
+  s_415e3c9e89448e::t_22e969b939c6f2 453,466
+apps/backend/src/agentclaw/community/core/channel/json_config_utils.py
+  s_415e3c9e89448e::t_33fb4b652dcb68 99-100,121-125
+apps/backend/src/agentclaw/community/adapters/http/resources/file_router.py
+  s_415e3c9e89448e::t_33fb4b652dcb68 47,336,338-339,396,398-399
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_415e3c9e89448e::t_5a3643de2a326c 2146
+  s_415e3c9e89448e::t_4838ed6f19b490 3943
+  s_415e3c9e89448e::t_6951f016bf1ee0 3929-3933,3941-3942,3944
+  s_415e3c9e89448e::t_6fca05893e1f0a 231-241,3928
+apps/backend/src/agentclaw/community/plugin_api/sandbox_runtime.py
+  s_415e3c9e89448e::t_338b3ea5f7de72 22,48-54
+  s_415e3c9e89448e::t_a51b601c1948d7 55-56
+apps/backend/src/agentclaw/community/core/channel/services/channel_service.py
+  s_415e3c9e89448e::t_d5cc70478e57fd 620
+apps/backend/src/agentclaw/community/core/devices/services/conn_info_builders/teclaw_builder.py
+  s_415e3c9e89448e::t_8eb66f77dcc2b8 12,45
+apps/backend/tests/community/core/service_bot/services/test_baas_service_get_http_info.py
+  s_415e3c9e89448e::t_d9cbadb6ee5118 24-27,153-167
+  s_415e3c9e89448e::t_e89bfdd752845c 150-152
+  s_415e3c9e89448e::t_955aed74aceb54 168-169
+apps/backend/src/agentclaw/community/core/devices/services/local_device_filesystem.py
+  s_415e3c9e89448e::t_8eb66f77dcc2b8 101-110,114-115,117-118
+  s_415e3c9e89448e::t_20ee1aa3629237 116
+  s_415e3c9e89448e::t_850e249fff83e4 111-113
+apps/backend/src/agentclaw/community/core/devices/services/device_filesystem.py
+  s_415e3c9e89448e::t_c1ae8251ddc85e 15,27-36,42,52
+  s_415e3c9e89448e::t_7678a2a552d89c 45-51
+  s_415e3c9e89448e::t_6e3f32d06770ed 43-44
+  s_415e3c9e89448e::t_342be013d07af3 37-41,53-54
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_filesystem.py
+  s_415e3c9e89448e::t_8eb66f77dcc2b8 22,96-101
+  s_415e3c9e89448e::t_bcf39481ee6d1b 102
+apps/backend/src/agentclaw/community/adapters/http/channel/router.py
+  s_415e3c9e89448e::t_d5cc70478e57fd 308-309
+  s_415e3c9e89448e::t_33fb4b652dcb68 27
+apps/backend/tests/community/plugins/local/test_local_device_filesystem_baas.py
+  s_415e3c9e89448e::t_bf44044f600537 61-70
+apps/backend/tests/community/endpoints/test_runtime_unavailability.py
+  s_415e3c9e89448e::t_5ae2942aa55952 1-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bf46d862b09cbe3e1e039b0b9def57b867804e12",
+  "prompts": {},
+  "sessions": {
+    "s_415e3c9e89448e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20cce-7e0f-7113-90e5-442450306709",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

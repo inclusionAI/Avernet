@@ -1,0 +1,98 @@
+apps/bcs-internal/bcn-configs/sofa-rpc-dev.toml
+  h_fa66fe7c023b4b 39,43
+apps/bcs-internal/bcn-configs/sofa-rpc-gray.toml
+  h_fa66fe7c023b4b 48,52
+apps/bcs-internal/bcn-configs/sofa-rpc-pre.toml
+  h_fa66fe7c023b4b 47,51
+apps/bcs-internal/bcn-configs/sofa-rpc-prod.toml
+  h_fa66fe7c023b4b 48,52
+apps/bcs-internal/bcn-configs/sofa-rpc.toml
+  h_fa66fe7c023b4b 86,90
+apps/bcs-internal/configs/sofa-rpc-dev.toml
+  h_fa66fe7c023b4b 39,43
+apps/bcs-internal/configs/sofa-rpc-gray.toml
+  h_fa66fe7c023b4b 40,44
+apps/bcs-internal/configs/sofa-rpc-local.toml
+  h_fa66fe7c023b4b 39,43
+apps/bcs-internal/configs/sofa-rpc-pre.toml
+  h_fa66fe7c023b4b 39,43
+apps/bcs-internal/configs/sofa-rpc-prod.toml
+  h_fa66fe7c023b4b 40,44
+apps/bcs-internal/configs/sofa-rpc.toml
+  h_fa66fe7c023b4b 79,83
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/sofa_rpc.rs
+  h_fa66fe7c023b4b 170,216,225
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/logging.rs
+  h_fa66fe7c023b4b 455,462
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/sofa_rpc_rs_poc.rs
+  h_fa66fe7c023b4b 258
+apps/bcs-internal/crates/plugins/bcs-sofa-services/build.rs
+  h_fa66fe7c023b4b 4-5,9-11,13,15,25-29
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/README.md
+  h_fa66fe7c023b4b 15-16,18-20,27-35,41-47,50,53-56,60-61,63,70-71,77-78,109,126-129,153
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/bcs/rpc/test/v1/agentbase_remote_chat.proto
+  h_fa66fe7c023b4b 3,5
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/bcs/rpc/test/v1/ucs_render.proto
+  h_fa66fe7c023b4b 3,5
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/config.rs
+  h_fa66fe7c023b4b 1,81,92,384
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host.rs
+  h_fa66fe7c023b4b 4-7,11,14,25-26,28,30,32,35-40
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host_sofa.rs
+  h_fa66fe7c023b4b 31-33,40,121-123,259,261-262,267-268,273-274,279-280,285-286,291-292,451,475
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host_tonic.rs
+  h_fa66fe7c023b4b 7-8,38
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/lib.rs
+  h_fa66fe7c023b4b 9,11-12,14-16
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/runtime.rs
+  h_fa66fe7c023b4b 9-10
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/agentbase_remote_chat/mapping.rs
+  h_fa66fe7c023b4b 14,16,52,54,87,98,108,119,132,137,153,159,172-173,184-185,193,200,206,219,236
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/agentbase_remote_chat/mod.rs
+  h_fa66fe7c023b4b 8-9
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/agentbase_remote_chat/provider.rs
+  h_fa66fe7c023b4b 20-21
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/agentbase_remote_chat/validation.rs
+  h_fa66fe7c023b4b 13,21,27,36
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/mod.rs
+  h_fa66fe7c023b4b 1-7
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/ucs_render/mapping.rs
+  h_fa66fe7c023b4b 2,16
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/ucs_render/mod.rs
+  h_fa66fe7c023b4b 8-9
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/ucs_render/provider.rs
+  h_fa66fe7c023b4b 2
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a.rs
+  h_fa66fe7c023b4b 41
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/contracts.rs
+  h_fa66fe7c023b4b 8,15,105-106,110-113,117,146,150,154,226-271
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/provider_host.rs
+  h_fa66fe7c023b4b 11,18,95,126,202,245-247,328-329,379-381
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/roundtrip.rs
+  h_fa66fe7c023b4b 13,16,61,63,67,70,174-175,189,206,238-240,381,412
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/runtime_config.rs
+  h_fa66fe7c023b4b 14-15,20,22,255,264,276,315,405,451
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/sofa_provider_host.rs
+  h_fa66fe7c023b4b 18-19,26-31,99,149,171,521,731
+apps/bcs-internal/docs/sofa-rpc/agent-card-management-service-spec.md
+  h_fa66fe7c023b4b 26,81,101,334-335
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  h_fa66fe7c023b4b 55-56,63
+apps/bcs-internal/tests/fixtures/sofa_rpc_cd_json_baseline.json
+  h_fa66fe7c023b4b 22,25
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  h_fa66fe7c023b4b 355,357
+apps/bcs-internal/tests/test_sofa_rpc_process.py
+  h_fa66fe7c023b4b 27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f472f04066ca433ff11d115496ca6d2acd7dbd6d",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/core/devices/services/local_device_filesystem.py
+  s_415e3c9e89448e::t_c9d7cb1b251a11 26,28,117-128
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "71f1bd0c2ea48a766b6e6116a5fe02cf9487b0e5",
+  "prompts": {},
+  "sessions": {
+    "s_415e3c9e89448e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20cce-7e0f-7113-90e5-442450306709",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

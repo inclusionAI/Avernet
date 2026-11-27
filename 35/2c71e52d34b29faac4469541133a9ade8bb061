@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/core/service_bot/services/deploy/arca_snapshot_producer.py
+  s_7b1b7bb2628d01::t_c8ec83a42cab26 243-244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "352c71e52d34b29faac4469541133a9ade8bb061",
+  "prompts": {},
+  "sessions": {
+    "s_7b1b7bb2628d01": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a212b1-ee57-74e3-bb35-6e7830e4a3d8",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

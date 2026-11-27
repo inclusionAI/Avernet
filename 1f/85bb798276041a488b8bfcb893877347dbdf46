@@ -1,0 +1,24 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/open/__init__.py
+  h_059e888e5e4e82 1
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/open/application.py
+  h_059e888e5e4e82 1-570
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/open/base.py
+  h_059e888e5e4e82 1-304
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/open/opportunity.py
+  h_059e888e5e4e82 1-513
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/open/participation.py
+  h_059e888e5e4e82 1-131
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/open/service.py
+  h_059e888e5e4e82 1-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1f85bb798276041a488b8bfcb893877347dbdf46",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

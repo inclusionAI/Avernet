@@ -1,0 +1,30 @@
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  s_03e7ef62150935::t_542b7a9c326455 150,990-996
+apps/backend/tests/community/core/task/task_runner/integration/test_fixed_candidate_bot_discover.py
+  s_03e7ef62150935::t_542b7a9c326455 2-7,11-48,53-54,60-71
+  s_03e7ef62150935::t_07b6ab389f3720 8-10,50-52,57,59
+  s_03e7ef62150935::t_ae7394c352ab2f 1,49,55-56,58
+apps/backend/src/agentclaw/community/di/task_fixed_search.py
+  s_03e7ef62150935::t_db64301d27a58b 5,13,15-44,48-51
+  s_03e7ef62150935::t_dd0a4cac2e80e7 2-4,6-12,14,47,53-55
+  s_03e7ef62150935::t_d39e984f09f7ec 1,45-46,52
+apps/backend/src/agentclaw/community/core/task/task_runner/client/fixed_candidate_bot_discover.py
+  s_03e7ef62150935::t_dd0a4cac2e80e7 1-42,46-67
+  s_03e7ef62150935::t_07b6ab389f3720 43-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "514696baa4d2a9b348c2f11156a0aa8bc163cd7c",
+  "prompts": {},
+  "sessions": {
+    "s_03e7ef62150935": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a2117d-458d-7882-91e6-559116264dd4",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

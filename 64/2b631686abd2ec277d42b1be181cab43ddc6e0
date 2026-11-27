@@ -1,0 +1,14 @@
+apps/bcs/specs/2026-11-26-distributed-runner-spi/spec.md
+  h_45bbed694cc8b0 39,41,43-44,111-112,161,284,287-288,290-292,299,312,315-319,519-520,522,553-554
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "642b631686abd2ec277d42b1be181cab43ddc6e0",
+  "prompts": {},
+  "humans": {
+    "h_45bbed694cc8b0": {
+      "author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

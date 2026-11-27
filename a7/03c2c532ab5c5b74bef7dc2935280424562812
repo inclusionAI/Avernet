@@ -1,0 +1,25 @@
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/components/SkillRegistrationDialog.tsx
+  s_f9ec5eab8f4aa4::t_75373e55d3b4d7 21,27,37
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/pages/SkillCenter.tsx
+  s_f9ec5eab8f4aa4::t_75373e55d3b4d7 83,118-119
+apps/evolverun/docs/clawweb/evolve-host-contract.md
+  s_f9ec5eab8f4aa4::t_75373e55d3b4d7 28-30
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/pages/__tests__/skill-registration-link.test.tsx
+  s_f9ec5eab8f4aa4::t_75373e55d3b4d7 83-121,173
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a703c2c532ab5c5b74bef7dc2935280424562812",
+  "prompts": {},
+  "sessions": {
+    "s_f9ec5eab8f4aa4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c2d2-ba2d-7031-8b2f-68d24b6afb0c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

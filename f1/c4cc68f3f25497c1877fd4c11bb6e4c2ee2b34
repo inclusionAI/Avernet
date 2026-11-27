@@ -1,0 +1,19 @@
+apps/frontend-nextgen/test/services/workspace/botA2aFetch.test.ts
+  s_c3ece772cfb1b0::t_1f9c97640cb8aa 119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f1c4cc68f3f25497c1877fd4c11bb6e4c2ee2b34",
+  "prompts": {},
+  "sessions": {
+    "s_c3ece772cfb1b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09ddb-44c3-7291-a427-f725a1955ba0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

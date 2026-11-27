@@ -1,0 +1,48 @@
+apps/bcs/Cargo.lock
+  h_10f6235a5d078a 505,511,524
+apps/bcs/configs/bcs-config-example.toml
+  h_10f6235a5d078a 224-234
+apps/bcs/configs/bcs-config-local.toml
+  h_10f6235a5d078a 162-171
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  h_10f6235a5d078a 89-94
+apps/bcs/crates/bootstrap/bcs/src/logging.rs
+  h_10f6235a5d078a 29-30,38-39,42-51,55,58-67,159,172-174,201-203,372-377,535,544,583-589,592-593,595-627
+apps/bcs/crates/external-clients/bcs-a2a-http/CONTEXT.md
+  h_10f6235a5d078a 210-213
+apps/bcs/crates/external-clients/bcs-a2a-http/Cargo.toml
+  h_10f6235a5d078a 15,18,49
+apps/bcs/crates/external-clients/bcs-a2a-http/src/client.rs
+  h_10f6235a5d078a 8-11,17,21-38,44-56,66-75,81-89,93,99-119,128-145,157
+apps/bcs/crates/external-clients/bcs-a2a-http/src/client_json.rs
+  h_10f6235a5d078a 4-7,15-16,19-28,30,32-48,51-54,56-72
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery.rs
+  h_10f6235a5d078a 136-140,142-145,147-150,348-349,357
+apps/bcs/crates/external-clients/bcs-a2a-http/src/digest.rs
+  h_10f6235a5d078a 1-414
+apps/bcs/crates/external-clients/bcs-a2a-http/src/jsonrpc.rs
+  h_10f6235a5d078a 8-12,19,22-27,32,39,41,46,49-52,60-64,66,73-88,92,95-113,115,117-132,135-145,148-186,191,194-203
+apps/bcs/crates/external-clients/bcs-a2a-http/src/lib.rs
+  h_10f6235a5d078a 13
+apps/bcs/crates/external-clients/bcs-a2a-http/src/subscribe.rs
+  h_10f6235a5d078a 5-9,13-18,29,33-37,46-52,54-58,65-93,102-103,105,108-109,111,113-124,126,128,131-146,151-155,158-168,173,175-191,193-219,221,223-227,229-239,241-247,249-259
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/client_digest_log.rs
+  h_10f6235a5d078a 1-293
+apps/bcs/crates/service-api/bcs-config-api/CONTEXT.md
+  h_10f6235a5d078a 42-43
+apps/bcs/crates/service-api/bcs-config-api/src/logging.rs
+  h_10f6235a5d078a 79-88
+apps/bcs/crates/service-api/bcs-config-api/src/tests.rs
+  h_10f6235a5d078a 115-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dc92d1232804a9196c986346c9f883dad89c5233",
+  "prompts": {},
+  "humans": {
+    "h_10f6235a5d078a": {
+      "author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

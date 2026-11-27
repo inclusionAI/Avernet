@@ -1,0 +1,33 @@
+apps/bcs-internal/Cargo.lock
+  s_14578f9514f223::t_f23008661bc96d 895,1910,2578,2593-2594
+apps/bcs-internal/crates/bootstrap/bcs-internal/Cargo.toml
+  s_3390a382ab8b6f::t_7eccb0e54bd48c 40
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  s_3390a382ab8b6f::t_eaed30b3a0bf12 68-74,77,88-92,97-111,118,129-160,237-282
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a/catalog_sync.rs
+  s_3390a382ab8b6f::t_6f948a5d871134 8-9,18-20,24-31,36,75-102
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2004a3f9449652ee2ba6f0fceb0765da4396f769",
+  "prompts": {},
+  "sessions": {
+    "s_14578f9514f223": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e490-9a86-7883-a2dd-b902d9fae6cb",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    },
+    "s_3390a382ab8b6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce64-b71e-7ab0-af3f-e8a007f31b16",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

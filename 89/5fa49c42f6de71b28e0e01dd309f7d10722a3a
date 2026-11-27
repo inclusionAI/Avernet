@@ -1,0 +1,19 @@
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/SKILL.md
+  s_efe96cd8c65cfd::t_429a29de0c0b5a 134-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "895fa49c42f6de71b28e0e01dd309f7d10722a3a",
+  "prompts": {},
+  "sessions": {
+    "s_efe96cd8c65cfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1eca3-90eb-71b3-a533-6f311014afc4",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

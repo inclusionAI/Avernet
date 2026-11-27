@@ -1,0 +1,59 @@
+apps/baas/README.md
+  s_47ed8e91e4b8af::t_77c7f7ef722482 175,177
+CONTEXT-MAP.md
+  s_47ed8e91e4b8af::t_fb9b868bc3a704 34-36,52,54-56,63
+docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_fb9b868bc3a704 5-10,23
+apps/baas/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_6a6ae5421c21d7 3,12-15
+apps/baas/docs/diagnostics/publish-failures.md
+  s_47ed8e91e4b8af::t_b913b52bc3057f 1-13
+apps/baas/docs/flows/README.md
+  s_47ed8e91e4b8af::t_a7a5a821971c7b 3,11-14
+apps/baas/docs/flows/publish-lifecycle.md
+  s_47ed8e91e4b8af::t_ec29e95b5d5341 1-17
+apps/baas/specs/README.md
+  s_47ed8e91e4b8af::t_35d55d83830346 1-7
+apps/bcs/README.md
+  s_47ed8e91e4b8af::t_1e0b458ffbe369 12-13
+apps/bcs/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_ece200bed7f90a 3,12-15
+apps/bcs/docs/diagnostics/session-delete.md
+  s_47ed8e91e4b8af::t_236d7a9eb37bfa 1-12
+apps/bcs/docs/flows/README.md
+  s_47ed8e91e4b8af::t_728fd530271a0b 3,10-13
+apps/bcs/docs/flows/session-deletion.md
+  s_47ed8e91e4b8af::t_931ae97135e06b 1-11
+apps/bcs/specs/README.md
+  s_47ed8e91e4b8af::t_129423ba8fc212 1-7
+apps/bcsfuse/AGENTS.md
+  s_47ed8e91e4b8af::t_3bb147b0a74082 1-3
+apps/bcsfuse/README.md
+  s_47ed8e91e4b8af::t_bc4c992140cf37 12-13
+apps/bcsfuse/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_0ed769b954ab91 3,12-15
+apps/bcsfuse/docs/diagnostics/index-not-current.md
+  s_47ed8e91e4b8af::t_f1772098c177a2 1-12
+apps/bcsfuse/docs/flows/README.md
+  s_47ed8e91e4b8af::t_536c0daca938c9 3,11-14
+apps/bcsfuse/docs/flows/index-rebuild.md
+  s_47ed8e91e4b8af::t_74b7f27be61d0e 1-15
+apps/bcsfuse/specs/README.md
+  s_47ed8e91e4b8af::t_cfb541084371d0 1-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fbcd55a09a2edc0c654a12736abbca5e37b36c46",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

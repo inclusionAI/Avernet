@@ -1,0 +1,47 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_command_registration.py
+  s_cecdc98e721f4b::t_d614298192df0e 14,53,328-337
+apps/bcs/scripts/e2e-runner/bcs_e2e/cli.py
+  s_cecdc98e721f4b::t_e3571585516aea 45,740-750
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_7f7c4f0b67e952 91-92
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_adf8c5184acce7 323,432,566-583,739,746
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy/__init__.py
+  s_cecdc98e721f4b::t_e0f4e8b9f4eaf6 1
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy/checks.py
+  s_cecdc98e721f4b::t_ab3684329d69df 1-238
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy/contract.py
+  s_cecdc98e721f4b::t_cc385d6b876c54 1-235
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy/dual_case_run.py
+  s_cecdc98e721f4b::t_2ee5f95b32e695 1-694
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy/reporting.py
+  s_cecdc98e721f4b::t_8731bef97ebf00 1-186
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy/story.py
+  s_cecdc98e721f4b::t_e1626b7fbf2c41 1-433
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_84940679131bca 359
+apps/bcs/scripts/e2e-runner/service-policy-dual-migration-contract.json
+  s_cecdc98e721f4b::t_463f5458d4696d 1-268
+apps/bcs/scripts/e2e-runner/tests/test_local_backlog_story_commands.py
+  s_cecdc98e721f4b::t_eedf69ef982a9a 262
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_97dc4bdaa8a440 592,595,604,633-634,679-680
+apps/bcs/scripts/e2e-runner/tests/test_service_policy_dual_case_run.py
+  s_cecdc98e721f4b::t_8f555ce6bc93db 1-1122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "81cc98121eb3d29722f2927d1b99de12e93e14ba",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

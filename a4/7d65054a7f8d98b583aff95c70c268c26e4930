@@ -1,0 +1,14 @@
+apps/gateway/tests/unit/core/forwarding/test_commission_a2a_routing.py
+  h_059e888e5e4e82 27-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a47d65054a7f8d98b583aff95c70c268c26e4930",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

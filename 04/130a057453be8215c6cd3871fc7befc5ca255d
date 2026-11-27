@@ -1,0 +1,36 @@
+apps/bcs/crates/external-clients/bcs-dist-worker-client/README.md
+  s_b033c54cc00da7::t_bda80ae037e954 4-6
+apps/bcs/crates/adapters/http/bcs-dist-worker-http/README.md
+  s_b033c54cc00da7::t_bda80ae037e954 5-8,10-14
+apps/bcs/crates/services/bcs-dist-worker/src/runtime.rs
+  s_b033c54cc00da7::t_bda80ae037e954 157-163,165-169,172-175,178-184,186
+  s_b033c54cc00da7::t_6fbb5ce921f6c8 154-156,164,170-171,176-177,185,196
+apps/bcs/crates/adapters/http/bcs-dist-worker-http/src/lib.rs
+  s_b033c54cc00da7::t_bda80ae037e954 1-4
+apps/bcs/crates/service-api/bcs-service-api/src/application/dist_runtime.rs
+  s_b033c54cc00da7::t_bda80ae037e954 10-11
+apps/bcs/crates/external-clients/bcs-dist-worker-client/src/lib.rs
+  s_b033c54cc00da7::t_bda80ae037e954 1-2,37
+apps/bcs/crates/services/bcs-dist-worker/README.md
+  s_b033c54cc00da7::t_bda80ae037e954 101,105-106
+apps/bcs/crates/services/bcs-dist-store/tests/inbox_maintenance.rs
+  s_b033c54cc00da7::t_bda80ae037e954 159,161-164,168-171,174-184,186-187,190-209,211
+apps/bcs/crates/service-api/bcs-service-api/src/port/dist_runtime.rs
+  s_b033c54cc00da7::t_bda80ae037e954 13,44-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "04130a057453be8215c6cd3871fc7befc5ca255d",
+  "prompts": {},
+  "sessions": {
+    "s_b033c54cc00da7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1f49a-9c74-7520-a98f-cccfab724cf5",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

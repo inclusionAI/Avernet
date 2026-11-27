@@ -1,0 +1,19 @@
+apps/backend/docs/bot-config-manifest/user-manual.zh-CN.md
+  s_bcc2d0974a665d::t_3654b4b6194977 264,570-571,573-580,583-586,588-591,593-594,1640-1645
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "52a068daacea090a6a04cd3a7a71b4bdd3b57791",
+  "prompts": {},
+  "sessions": {
+    "s_bcc2d0974a665d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9d9-072f-7481-adc1-c3e3d78b7fd1",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+apps/frontend-nextgen/config/routes.ts
+  h_bb3ca6fb13c5df 1-2,54-56
+apps/frontend-nextgen/src/config/taskEscortVisibility.ts
+  h_bb3ca6fb13c5df 1-2
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/useHostingTabs.ts
+  h_bb3ca6fb13c5df 2,9-10,23,30,42
+apps/frontend-nextgen/src/shell/navigation.tsx
+  h_bb3ca6fb13c5df 2,126-131
+apps/frontend-nextgen/test/capabilities/botEditorPanels.test.tsx
+  h_bb3ca6fb13c5df 36-51
+apps/frontend-nextgen/test/shell/SidebarNavList.test.tsx
+  h_bb3ca6fb13c5df 25,28,31,36,39-40,101,138-139
+apps/frontend-nextgen/test/shell/navigation.test.tsx
+  h_bb3ca6fb13c5df 23,25-26,45,47,70,92-94,147
+apps/frontend-nextgen/test/shell/navigationPlacement.test.ts
+  h_bb3ca6fb13c5df 23,26
+apps/frontend-nextgen/test/shell/routeMeta.test.ts
+  h_bb3ca6fb13c5df 119-121
+apps/frontend-nextgen/test/taskEscortWorkspace/routes.test.ts
+  h_bb3ca6fb13c5df 15,18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "693f24d0ca494e7b840299a53e41f666806612d3",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

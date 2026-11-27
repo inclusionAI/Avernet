@@ -1,0 +1,34 @@
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/skill.py
+  s_3d36bb45bb2a35::t_12da86797840cb 65,677-681,966
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_upload_service.py
+  s_3d36bb45bb2a35::t_12da86797840cb 13,25-29,104,367,399,403-407,421,457-462,478-479,519-520,566-567,661,787-788
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_package_runtime.py
+  s_3d36bb45bb2a35::t_12da86797840cb 54-62,99-106
+  s_3d36bb45bb2a35::t_19feebe13b0a05 107
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_batch.py
+  s_3d36bb45bb2a35::t_12da86797840cb 47-65
+  s_3d36bb45bb2a35::t_b63c86e60b8ab8 17-20
+apps/backend/src/agentclaw/community/core/devices/services/device_context.py
+  s_3d36bb45bb2a35::t_12da86797840cb 103,105,108-116
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/local_skill_package_dispatch.py
+  s_3d36bb45bb2a35::t_12da86797840cb 12-17,25-39
+  s_3d36bb45bb2a35::t_3282877e824c9c 40-41
+apps/backend/tests/community/core/skill_center/test_local_skill_package_batch.py
+  s_3d36bb45bb2a35::t_f522b011d7fa5d 11,45-55,133,140,147,168,175,183,192-193,199,279-311
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d51c7d2fb915927f3b0bbee8d4db919a719f40ef",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

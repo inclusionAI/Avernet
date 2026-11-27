@@ -1,0 +1,48 @@
+apps/bcsfuse/.env.example
+  h_5686002b4ce7b9 17-20
+apps/bcsfuse/configs/application.yaml
+  h_5686002b4ce7b9 149-150,177-181
+apps/bcsfuse/main.py
+  h_5686002b4ce7b9 183
+apps/bcsfuse/src/app/adapters/http/recommend_routes.py
+  h_5686002b4ce7b9 63-65,113,119-141,485-486,491-496
+apps/bcsfuse/src/app/bootstrap/app_factory.py
+  h_5686002b4ce7b9 525-528,667-672
+apps/bcsfuse/src/app/bootstrap/embedding_runtime_provider_composition.py
+  h_5686002b4ce7b9 192
+apps/bcsfuse/src/app/bootstrap/http_admission.py
+  h_5686002b4ce7b9 1-131
+apps/bcsfuse/src/app/infra/public/config/yaml_env_config_provider.py
+  h_5686002b4ce7b9 31-32,35-39,119-127
+apps/bcsfuse/src/app/infra/public/embedding/async_batching_embedding_provider.py
+  h_5686002b4ce7b9 141,162
+apps/bcsfuse/src/app/infra/public/vectorstores/qdrant_mysql_vector_store.py
+  h_5686002b4ce7b9 20,54-59,526-532
+apps/bcsfuse/tests/contract/test_async_embedding_batching_tdd.py
+  h_5686002b4ce7b9 282-284,331-378
+apps/bcsfuse/tests/contract/test_http_admission_tdd.py
+  h_5686002b4ce7b9 1-166
+apps/bcsfuse/tests/contract/test_qdrant_cluster_split_tdd.py
+  h_5686002b4ce7b9 238-241,303-356
+apps/bcsfuse/tests/contract/test_recommendation_projection_threadpool_tdd.py
+  h_5686002b4ce7b9 97-182
+apps/bcsfuse/tests/contract/test_recommendation_stage_profiling_tdd.py
+  h_5686002b4ce7b9 1-101
+apps/bcsfuse/tests/contract/test_server_admission_tdd.py
+  h_5686002b4ce7b9 20,29,33-35,44
+apps/bcsfuse/tests/contract/test_short_index_lease_tdd.py
+  h_5686002b4ce7b9 143-146
+apps/bcsfuse/tests/contract/test_yaml_env_config_provider_tdd.py
+  h_5686002b4ce7b9 1-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fb4f50c638456db2de34ab4acd32b9a771e84939",
+  "prompts": {},
+  "humans": {
+    "h_5686002b4ce7b9": {
+      "author": "文汐 <wenxi.sbw@antfin.com>"
+    }
+  }
+}

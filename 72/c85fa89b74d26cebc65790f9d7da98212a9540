@@ -1,0 +1,57 @@
+apps/bcs-internal/crates/plugins/bcs-tbase-store/README.md
+  s_2a51cb4a02f4d1::t_1a69ca20649358 4-6,25-27,36,159
+  s_2a51cb4a02f4d1::t_9e01aed56081bd 23-24,35,79-101,158
+apps/bcs-internal/specs/2026-11-16-tbase-store/plan.md
+  s_2a51cb4a02f4d1::t_1a69ca20649358 48-52,59
+  s_2a51cb4a02f4d1::t_9e01aed56081bd 53-58,60-72
+apps/bcs-internal/specs/2026-11-16-tbase-store/progress.md
+  s_2a51cb4a02f4d1::t_494bc590c26109 5-13,15,17-20,22-32
+apps/bcs-internal/specs/2026-11-16-tbase-store/verification.md
+  s_2a51cb4a02f4d1::t_66d830839a3de3 87-89
+  s_2a51cb4a02f4d1::t_494bc590c26109 5-9,11,15-18,20-23,25-30,32-38,40,42-44,46-51,53-61,63,65-79,83-86
+apps/bcs-internal/crates/plugins/bcs-tbase-store/src/lib.rs
+  s_2a51cb4a02f4d1::t_ffcf598871414c 113
+apps/bcs-internal/crates/plugins/bcs-tbase-store/tests/dev.rs
+  s_2a51cb4a02f4d1::t_41da15e515c320 85-88,91-94,204-206
+  s_2a51cb4a02f4d1::t_8fb524289e9202 58
+  s_2a51cb4a02f4d1::t_ffcf598871414c 35-38,47-48,55,176-185,264,269,276-281,283,287,292-301
+  s_2a51cb4a02f4d1::t_b875a997273887 60-61
+apps/bcs-internal/crates/plugins/bcs-tbase-store/CONTEXT.md
+  s_2a51cb4a02f4d1::t_9e01aed56081bd 6-12
+apps/bcs-internal/crates/plugins/bcs-tbase-store/src/tests.rs
+  s_2a51cb4a02f4d1::t_41da15e515c320 474,598-608,614-620,627-630,640-644,646-647
+  s_2a51cb4a02f4d1::t_5230c44d2a5742 464,471-473,500
+  s_2a51cb4a02f4d1::t_ffcf598871414c 261,264,592-597,613,621-625,638,645,649-691
+  s_2a51cb4a02f4d1::t_b875a997273887 584-588,590-591,609-612,631,633-637,639,648
+  s_2a51cb4a02f4d1::t_f019f7398b37e4 262-263,265-278,366,434,462,475,589,626,632
+apps/bcs-internal/crates/plugins/bcs-tbase-store/src/kv.rs
+  s_2a51cb4a02f4d1::t_b875a997273887 87,101,104-113
+  s_2a51cb4a02f4d1::t_41da15e515c320 103,124
+  s_2a51cb4a02f4d1::t_ffcf598871414c 102,125-160,187-188,191-194,196,207-208,210-218,220-222,224
+submodules/avernet
+  s_a9c87caa3de52e::t_4ab0d86b58093a 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "72c85fa89b74d26cebc65790f9d7da98212a9540",
+  "prompts": {},
+  "sessions": {
+    "s_2a51cb4a02f4d1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e770-4d8b-74b0-ab62-f3442a6c7bd2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    },
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,34 @@
+apps/backend/tests/community/repository/publishing/test_release_audit_production.py
+  s_7c6be7001ef8fd::t_8d5a316e56cb8b 694-722,724-725
+  s_7c6be7001ef8fd::t_3f03df3934a91c 228,723
+  s_7c6be7001ef8fd::t_5f1c613ce7504b 578-585,588-592,595-677,679,681-687
+  s_7c6be7001ef8fd::t_b6580ac86bc3bc 185-186,206-209,586-587,593-594,678,680,688-693
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/progress_sync_mixin.py
+  s_7c6be7001ef8fd::t_b16cd72e3befb9 798-801
+apps/backend/src/agentclaw/community/core/repository/implementations/publishing/release_audit.py
+  s_7c6be7001ef8fd::t_b484fc8fd25906 25,28,37,42,44-47,53,118-126,129-135,141-146,151,157,163,167,171,179-181
+apps/backend/specs/2026-11-26-release-audit-call-timing/spec.md
+  s_7c6be7001ef8fd::t_87926e86f1ef4e 14-16
+  s_7c6be7001ef8fd::t_2c370cfad17f6d 1-13
+  s_7c6be7001ef8fd::t_3f03df3934a91c 17
+apps/backend/src/agentclaw/community/core/service_bot/README.md
+  s_7c6be7001ef8fd::t_6a10e43cc2d9c2 422-433
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/retry_ops_mixin.py
+  s_7c6be7001ef8fd::t_3f325b11897297 206-209,238-241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6200bcd026e4a3a18685e35f9e005d7b11e2da3f",
+  "prompts": {},
+  "sessions": {
+    "s_7c6be7001ef8fd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d2d4-adef-74d1-8694-5ea4bddc1ac0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": null
+    }
+  }
+}

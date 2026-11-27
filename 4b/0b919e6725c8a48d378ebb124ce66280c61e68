@@ -1,0 +1,36 @@
+apps/frontend-nextgen/src/shell/SidebarNavList.tsx
+  s_f25e37c81adc81::t_31f2242955b71a 49-50,55-72
+  s_f25e37c81adc81::t_5fa3ab5b7b9411 51-54
+  s_f25e37c81adc81::t_cbf2b37f0b2d89 4
+apps/frontend-nextgen/src/shell/AppSidebar.tsx
+  s_f25e37c81adc81::t_1f062d235e8e93 57-59,63
+  s_f25e37c81adc81::t_6cdf80e5c87636 53,61-62,64-74,78-83,85-89
+apps/frontend-nextgen/src/capabilities/types.ts
+  s_f25e37c81adc81::t_662dfeadc4c14c 259-261,263
+apps/frontend-nextgen/test/shell/AppSidebar.test.tsx
+  s_f25e37c81adc81::t_0caa1dcb13700f 177-179
+  s_f25e37c81adc81::t_a367572fa14fb8 209-233
+apps/frontend-nextgen/src/capabilities/brandLogos.tsx
+  s_f25e37c81adc81::t_4fa3dc9fe5030e 13-16
+apps/frontend-nextgen/src/shell/SpaceSwitcher.tsx
+  s_f25e37c81adc81::t_29ee47cc8280aa 2-3,10
+  s_f25e37c81adc81::t_fef5aae75800c1 17
+  s_f25e37c81adc81::t_209f287113e20f 72
+  s_f25e37c81adc81::t_ae2803626bd732 162,168-178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4b0b919e6725c8a48d378ebb124ce66280c61e68",
+  "prompts": {},
+  "sessions": {
+    "s_f25e37c81adc81": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "79f5877d-dc7e-44ad-afcb-ac480847d969",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

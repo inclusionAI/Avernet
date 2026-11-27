@@ -1,0 +1,30 @@
+apps/backend/tests/community/adapters/http/openapi_v1/bot_public/test_bot_public_router.py
+  h_9d7cfd405752f5 30-34,141-148,150-152,160-161,166-168,386,388,400,403,422-423,430-431,441-442,654-655
+apps/backend/tests/community/adapters/http/openapi_v1/test_app_only_refusals.py
+  h_9d7cfd405752f5 96
+apps/backend/tests/community/adapters/http/openapi_v1/test_authorization_inventory.py
+  h_9d7cfd405752f5 29,149,204,238,629
+apps/backend/tests/community/adapters/http/openapi_v1/test_bot_access_check.py
+  h_9d7cfd405752f5 292-295,297,300
+apps/backend/tests/community/adapters/http/openapi_v1/test_digital_employee.py
+  h_9d7cfd405752f5 11,20-29,31,41-42
+apps/backend/tests/community/adapters/http/openapi_v1/test_legacy_parity.py
+  h_9d7cfd405752f5 41-42,47-50,56,105,147
+apps/backend/tests/community/adapters/http/openapi_v1/test_self_checked_routes_refuse.py
+  h_9d7cfd405752f5 229-238,254-255,259-260,264-265,269-270
+apps/backend/tests/community/adapters/http/openapi_v1/test_skills_shared_bot_grant.py
+  h_9d7cfd405752f5 204-215,217,247-248
+apps/backend/tests/community/adapters/http/test_two_phase_boot.py
+  h_9d7cfd405752f5 25,90-97,101,208-210,212-213,215,217-218,222-224,226-227,238-246,250-252,265,268,274,282-284,287,292,294-295,641,643-644,651-655,741,743-744,864,877-878,880-883,887
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9aaefab5ee73d20eb86eb6500e10e53e03a0c3e3",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

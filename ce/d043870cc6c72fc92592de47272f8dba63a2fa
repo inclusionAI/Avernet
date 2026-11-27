@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/skill_center/test_skill_center_reference_processor.py
+  s_763a81eb308339::t_e14c5257bf2fe7 8,66,71-72,76-88,91-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ced043870cc6c72fc92592de47272f8dba63a2fa",
+  "prompts": {},
+  "sessions": {
+    "s_763a81eb308339": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ed82-b79a-76e0-8143-6b80bc462b82",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

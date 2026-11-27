@@ -1,0 +1,44 @@
+apps/backend/tests/community/core/skill_center/test_capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_b404558d99d7e9 8,10-11,22,24,215-265
+  s_3d36bb45bb2a35::t_2a8a7b75cea3bc 15,168-210,213
+  s_3d36bb45bb2a35::t_979b31ed7204de 35,41-44,46-50,211-212,214
+apps/backend/src/agentclaw/community/core/skill_center/services/desktop_skill_recovery.py
+  s_3d36bb45bb2a35::t_43d8c79420924f 9,21-23,207,214,328-329,331-337
+apps/backend/src/agentclaw/community/core/repository/implementations/devices/device.py
+  s_3d36bb45bb2a35::t_5481cdb0f00f1e 501
+apps/backend/src/agentclaw/community/adapters/http/devices/converter.py
+  s_3d36bb45bb2a35::t_5481cdb0f00f1e 22,54
+apps/backend/src/agentclaw/community/di/modules/skill_center_group4_module.py
+  s_3d36bb45bb2a35::t_43d8c79420924f 40-42,255,262
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_3d36bb45bb2a35::t_b404558d99d7e9 435-441
+apps/backend/src/agentclaw/community/core/skill_center/services/capability_projection_reconciler.py
+  s_3d36bb45bb2a35::t_d83478db1346a6 102-103
+  s_3d36bb45bb2a35::t_b404558d99d7e9 260-263
+  s_3d36bb45bb2a35::t_2a8a7b75cea3bc 110-111
+  s_3d36bb45bb2a35::t_43d8c79420924f 45,99-101,116-120,131-133,139,231-232,237-259,264-269
+  s_3d36bb45bb2a35::t_2116fd2b1a2808 121,270
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_retirement.py
+  s_3d36bb45bb2a35::t_b1b8a9b546bdd2 6,63-70
+  s_3d36bb45bb2a35::t_d83478db1346a6 81-84,86
+  s_3d36bb45bb2a35::t_43d8c79420924f 1-5,7-62,71-80,85,87
+apps/backend/src/agentclaw/community/core/devices/repository/record.py
+  s_3d36bb45bb2a35::t_d83478db1346a6 50
+  s_3d36bb45bb2a35::t_5481cdb0f00f1e 12-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "41fb9d99eed42d7c89ff2d2e759a831391fd5abd",
+  "prompts": {},
+  "sessions": {
+    "s_3d36bb45bb2a35": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a203dd-08ef-7063-967d-846800b65a26",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

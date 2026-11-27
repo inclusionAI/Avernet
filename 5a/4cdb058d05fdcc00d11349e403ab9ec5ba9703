@@ -1,0 +1,59 @@
+apps/evolverun/clawweb/public/modules/clawinsight/preview/__tests__/http.test.ts
+  s_c5125da3cacb9c::t_14f5269de733b7 55-65
+apps/evolverun/clawweb/public/modules/clawinsight/docs/bot-diagnosis-recovery-config.md
+  s_c5125da3cacb9c::t_14f5269de733b7 78-80,92-96,107-118
+apps/evolverun/clawweb/public/modules/clawinsight/preview/recovery.ts
+  s_c5125da3cacb9c::t_47b5b6a1611d19 17,19-21,23,26
+apps/evolverun/clawweb/public/modules/clawinsight/preview/server.ts
+  s_c5125da3cacb9c::t_b0b1db7c9aaf9f 20,25-27,48,59
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/monitoring-bot-directory.ts
+  s_c5125da3cacb9c::t_22e7d586f55b4f 8,22-30,39-40
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/__tests__/bot-config.test.ts
+  s_c5125da3cacb9c::t_aebd5f02dd28ae 29,67-71,75,79
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/bot-config-service.ts
+  s_c5125da3cacb9c::t_bc557f8178b445 5-8,37,57
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/directory-contracts.ts
+  s_c5125da3cacb9c::t_711555834987d7 10,40
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/monitoring-browser-service.ts
+  s_c5125da3cacb9c::t_4ed6d4b9e74067 6,40
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/__tests__/InsightCenterTabs.test.tsx
+  s_c5125da3cacb9c::t_0a0685b3db6430 3,32-34,83-92,103,106-110,119,134
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/index.tsx
+  s_c5125da3cacb9c::t_cc7492391245a8 18,56-58,60-68,76-83,87
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/DiagnosisRecord.tsx
+  s_c5125da3cacb9c::t_e2c21f4daad6fa 26-29,51
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/MonitoringBotSelector.tsx
+  s_c5125da3cacb9c::t_d400cc2027a4d1 9,13-14,66-68,70-72,75,80,89-90,99,102,113
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/MonitoringPanel.tsx
+  s_c5125da3cacb9c::t_32100281c61a47 130,132
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/MonitoringSettings.tsx
+  s_c5125da3cacb9c::t_089f7ab9d924bd 3,39-53,55-57,60-64,67-68
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/MonitoringWorkspace.tsx
+  s_c5125da3cacb9c::t_e45b7c3f21543f 7-8,10-16,19,21
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/__tests__/MonitoringSettings.test.tsx
+  s_c5125da3cacb9c::t_9837b6b7b6af08 15-26,29,37,47,50
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/monitoring-settings.css
+  s_c5125da3cacb9c::t_1c432b659c9a8c 1-103
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/SessionRecoveryList.tsx
+  s_c5125da3cacb9c::t_f9074586bef094 9-10,12-26,52-66,68-91,94-95
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/__tests__/SessionRecoveryList.test.tsx
+  s_c5125da3cacb9c::t_9062b55318f695 15-17,19
+apps/evolverun/clawweb/public/modules/clawinsight/web/types/monitoring.ts
+  s_c5125da3cacb9c::t_b233d4f30a9698 31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5a4cdb058d05fdcc00d11349e403ab9ec5ba9703",
+  "prompts": {},
+  "sessions": {
+    "s_c5125da3cacb9c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e2fc-bace-73f3-9dee-91caa19a0ea5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

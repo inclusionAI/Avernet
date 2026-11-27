@@ -1,0 +1,65 @@
+apps/bcsfuse/packages/search-core/tests/test_search_timing.py
+  s_9e428ec8192673::t_fc41ef353a19cc 142
+  s_9e428ec8192673::t_0a318b004cdc44 170,263-280,282,284-293,295-308,310,312-324,327-342
+  s_9e428ec8192673::t_f7587597cf6601 20-21,163-165,167-168,171-176,178-187,189,191-251,253-262
+  s_9e428ec8192673::t_fb0bc440f5a9ac 128
+  s_9e428ec8192673::t_89e7262cbb458a 1-15,17-19,22-28,30-31,33-67,70-116,118-127,129-135,138-141,143-149,151-152,154-162
+  s_9e428ec8192673::t_9daa815e7542da 16
+  s_9e428ec8192673::t_323a894b4d2bc3 29
+  s_9e428ec8192673::t_6af9199a3b8816 32
+  s_9e428ec8192673::t_8a0d38aabe7a75 68-69
+  s_9e428ec8192673::t_2ef609d0ecd469 117
+  s_9e428ec8192673::t_16fa7440e00743 136-137
+  s_9e428ec8192673::t_24e844b019ee39 150
+  s_9e428ec8192673::t_8a3143c60a4d75 153
+  s_9e428ec8192673::t_26382f1eaa22a3 166
+  s_9e428ec8192673::t_f11fddc457f73b 169
+  s_9e428ec8192673::t_dd616e8768f3c7 177
+  s_9e428ec8192673::t_7d06fc7796799a 188
+  s_9e428ec8192673::t_25e997f603c522 190
+  s_9e428ec8192673::t_3dd106606dfe97 252
+  s_9e428ec8192673::t_2e8af038b6b8ea 281
+  s_9e428ec8192673::t_e4a03adc2f13c1 283
+  s_9e428ec8192673::t_2155e3c055c7f5 294
+  s_9e428ec8192673::t_61f702a7effe24 309
+  s_9e428ec8192673::t_397951a898e4cf 311
+  s_9e428ec8192673::t_0526c9ceb41bb8 325-326
+apps/bcsfuse/packages/search-core/src/search_core/core/retrieval.py
+  s_9e428ec8192673::t_fb0bc440f5a9ac 145-156
+apps/bcsfuse/packages/search-core/src/search_core/core/timing.py
+  s_9e428ec8192673::t_adf7b20e53c6fb 1-67
+apps/bcsfuse/packages/search-core/docs/search-api.md
+  s_9e428ec8192673::t_bf9e1e25db7b4c 231-257,259-261
+  s_9e428ec8192673::t_497bb66136133c 258
+apps/bcsfuse/packages/search-core/src/search_core/core/observation.py
+  s_9e428ec8192673::t_fc41ef353a19cc 95-96,99-100
+  s_9e428ec8192673::t_adf7b20e53c6fb 93-94,97-98,113-117,120-123,133
+  s_9e428ec8192673::t_bf9e1e25db7b4c 67-68
+apps/bcsfuse/packages/search-core/src/search_core/application/search.py
+  s_9e428ec8192673::t_bf9e1e25db7b4c 67,69-73
+  s_9e428ec8192673::t_f7924d459284d3 20,47-51,53-60,62-66,68,74-84,86,89-115,117,120-130,144-153
+apps/bcsfuse/packages/search-core/src/search_core/application/cache.py
+  s_9e428ec8192673::t_d486b6870c761b 13,145-164,169-170,183-189,197-198
+apps/bcsfuse/packages/search-core/src/search_core/application/card_metadata.py
+  s_9e428ec8192673::t_6c07f5335a60a0 6,41-51,62,65-68
+apps/bcsfuse/packages/search-core/src/search_core/application/catalog_retrieval.py
+  s_9e428ec8192673::t_090c196172fc3c 8,21-35
+apps/bcsfuse/packages/search-core/src/search_core/application/default_candidates.py
+  s_9e428ec8192673::t_ff5632d58cf10c 8,67,69,73,80,82,89-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e60bee655571fdb4b6158dba7e01c8274a79676b",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

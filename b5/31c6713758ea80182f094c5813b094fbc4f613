@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/task/context_collab/products/swarm_coding_support.py
+  s_69cbf535344cbb::t_a5f3ac92e07682 30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b531c6713758ea80182f094c5813b094fbc4f613",
+  "prompts": {},
+  "sessions": {
+    "s_69cbf535344cbb": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "4addcdee-6837-44bf-9d20-368d973ca014",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,56 @@
+apps/backend/tests/community/core/bot_config_manifest/creation/test_creation_ordering_teclaw.py
+  s_b7f94a3bd241d6::t_bafcb614134cb2 54
+  s_b7f94a3bd241d6::t_9a7d0327eea32b 56,335,343,349-358,372-379,383,386-387,391,394-395
+  s_b7f94a3bd241d6::t_3707f125931553 141,144,247,254
+  s_b7f94a3bd241d6::t_9ac5c498fe54e6 182
+apps/backend/tests/community/di/test_creation_report_recovery_wiring.py
+  s_b7f94a3bd241d6::t_9636ab0ab203c5 1,6
+apps/backend/src/agentclaw/community/di/modules/manifest_apply_module.py
+  s_b7f94a3bd241d6::t_824e395d3d7c3c 5,13,37,61
+apps/backend/src/agentclaw/community/di/modules/bot_management_module.py
+  s_b7f94a3bd241d6::t_b6efaaff37cbb0 93-94,761,763-764
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/creation_recovery_task.py
+  s_b7f94a3bd241d6::t_a9a50ba576d20b 24
+  s_b7f94a3bd241d6::t_7307cd533fc89e 1-23,25-28
+apps/backend/src/agentclaw/community/core/bot_config_manifest/creation_report_recovery.py
+  s_b7f94a3bd241d6::t_6a7d6540bec7bf 1,4,6-7,12-23,28-36
+  s_b7f94a3bd241d6::t_a9a50ba576d20b 8,24,27
+  s_b7f94a3bd241d6::t_a74a72eed28924 25-26
+apps/backend/src/agentclaw/community/core/task_queue/execution_context.py
+  s_b7f94a3bd241d6::t_f2b47433659ff5 13-14
+apps/backend/src/agentclaw/community/core/apply_engine/run/creation_stage.py
+  s_b7f94a3bd241d6::t_f2b47433659ff5 18-19
+  s_b7f94a3bd241d6::t_3ab3b7ad3fa809 9
+apps/backend/src/agentclaw/community/core/bot_config_manifest/create_job.py
+  s_b7f94a3bd241d6::t_bb802d9925bfb6 224,246,269-270,280
+apps/backend/src/agentclaw/community/core/bot_config_manifest/isolated_creation_runtime.py
+  s_b7f94a3bd241d6::t_e54f25ff09b89b 1-49
+apps/backend/src/agentclaw/community/di/modules/creation_report_recovery_module.py
+  s_b7f94a3bd241d6::t_5ed278913c6b6a 1-2,4-6,8,10,17-22
+apps/backend/src/agentclaw/community/core/task_queue/services/worker.py
+  s_b7f94a3bd241d6::t_f2b47433659ff5 327
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/config_manifest_apply.py
+  s_b7f94a3bd241d6::t_7307cd533fc89e 164-167,212,229
+apps/backend/src/agentclaw/community/core/apply_engine/run/service.py
+  s_b7f94a3bd241d6::t_824e395d3d7c3c 91-92,169,185,344-350
+apps/backend/tests/community/core/bot_config_manifest/creation/test_creation_report_recovery.py
+  s_b7f94a3bd241d6::t_c95d40586ab3f6 1-6,8-9,13-26,29-40
+apps/backend/src/agentclaw/community/core/apply_engine/creation_queue.py
+  s_b7f94a3bd241d6::t_218748545caf9b 1-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a4119328771f8067a92086fdee9b9b75ff9a30ee",
+  "prompts": {},
+  "sessions": {
+    "s_b7f94a3bd241d6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a20bc8-03e3-7f13-8458-ae13b209eb0e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

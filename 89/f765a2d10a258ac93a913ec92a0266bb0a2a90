@@ -1,0 +1,22 @@
+apps/frontend-nextgen/src/services/botScheduledTasks/metadata.ts
+  s_7aff7f1d24cd0a::t_92cb8f521b51cb 39-42
+apps/frontend-nextgen/test/services/botScheduledTasks/metadata.test.ts
+  s_7aff7f1d24cd0a::t_96f94a2880e807 7-10
+  s_7aff7f1d24cd0a::t_f9c6dcc8b52f84 41-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "89f765a2d10a258ac93a913ec92a0266bb0a2a90",
+  "prompts": {},
+  "sessions": {
+    "s_7aff7f1d24cd0a": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "f1e7c3d2-ac49-41bb-913b-e6ce18354fea",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

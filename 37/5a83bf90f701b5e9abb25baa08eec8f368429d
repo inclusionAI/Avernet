@@ -1,0 +1,69 @@
+apps/backend/tests/community/core/apply_engine/test_default_historical_members.py
+  s_e059e30c850fff::t_1d0e32e00ca01e 80-87
+  s_e059e30c850fff::t_9a496581372973 6-8,20-27,34-38,40-42,57-59,69-71
+  s_e059e30c850fff::t_74efdc3b31cd09 1-5,9-19,28-33,39,43-50,60-68
+  s_e059e30c850fff::t_92e091778faabb 51-56
+  s_e059e30c850fff::t_a66f4a3fe3e083 72-79,88-96
+apps/backend/tests/community/repository/skill_center/test_default_historical_members.py
+  s_e059e30c850fff::t_9a496581372973 23-33,36-48,53-60
+  s_e059e30c850fff::t_bd4f6781f17d81 85-92,99-100
+  s_e059e30c850fff::t_58e51f8ecb58be 1-2,7,9-12,14-22,34-35,49-52,61-63
+  s_e059e30c850fff::t_92e091778faabb 93-98
+  s_e059e30c850fff::t_cf8dcde0b2062a 3-6,8,13,64-74,81-84
+  s_e059e30c850fff::t_c953b239a0eced 75-80
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities_types.py
+  s_e059e30c850fff::t_e8bb5a2ad59a7f 14,75-81
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_e059e30c850fff::t_a66f4a3fe3e083 19-20
+apps/backend/src/agentclaw/community/core/apply_engine/README.md
+  s_e059e30c850fff::t_a66f4a3fe3e083 71-74
+apps/backend/tests/community/repository/skill_center/test_apply_center_membership_identity.py
+  s_e059e30c850fff::t_3917d6afa7d550 165,167,173
+  s_e059e30c850fff::t_0bbecc20e1a7d7 152
+  s_e059e30c850fff::t_1ad2d188a7c03d 143-147,149,151,156,160,162-163
+  s_e059e30c850fff::t_357d3c7fd0729a 226-230
+  s_e059e30c850fff::t_7919c706465cf8 148,150,153-155,157-159,161
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/apply_skill_set_commands.py
+  s_e059e30c850fff::t_dbecf6e0ca9dd8 316,318-320
+  s_e059e30c850fff::t_ce79e99d7126d9 35-36,50,152-156
+  s_e059e30c850fff::t_c24406f24be1a4 317,512-523
+  s_e059e30c850fff::t_d1097e3bc05fd7 8,122-125,142
+  s_e059e30c850fff::t_e8bb5a2ad59a7f 583
+  s_e059e30c850fff::t_91ddff2d67cf20 263-269
+  s_e059e30c850fff::t_ed5dbc9afec054 524
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/bot_skillset_installations.py
+  s_e059e30c850fff::t_3917d6afa7d550 33,39,81,86-87
+  s_e059e30c850fff::t_c24b9bfd9559ff 84-85
+  s_e059e30c850fff::t_8f0669ed484aaf 436,498-499,569-570
+  s_e059e30c850fff::t_cf7c802bd20463 32,64-74,78-79,82-83,88
+  s_e059e30c850fff::t_d1097e3bc05fd7 17,75-77,80
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/capabilities_resolve.py
+  s_e059e30c850fff::t_e8bb5a2ad59a7f 62,72,80,138,140
+  s_e059e30c850fff::t_c24b9bfd9559ff 8,63-66,69-71
+apps/backend/tests/community/core/skill_center/test_default_members.py
+  s_e059e30c850fff::t_261d171082a299 1-2,6-10,17-26,43-44,48
+  s_e059e30c850fff::t_9a496581372973 3-5,11-16,27-42,45-47,49-54
+apps/backend/tests/community/repository/skill_center/test_apply_skill_set_retired_sources.py
+  s_e059e30c850fff::t_7a9301911a8670 37-52
+apps/backend/src/agentclaw/community/core/skill_center/default_members.py
+  s_e059e30c850fff::t_c24b9bfd9559ff 30
+  s_e059e30c850fff::t_9a496581372973 20-29,31-38,40-42,46-49
+  s_e059e30c850fff::t_91571d8bb16971 1-19,39,50-59
+  s_e059e30c850fff::t_d1097e3bc05fd7 43-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "375a83bf90f701b5e9abb25baa08eec8f368429d",
+  "prompts": {},
+  "sessions": {
+    "s_e059e30c850fff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ed70-3a8f-7e41-9d8f-50f66965b96d",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+apps/agentclawscs/docker/bcn/Dockerfile
+  h_45bbed694cc8b0 32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5bb0f450df1676a02db141757cebe2848d439cd6",
+  "prompts": {},
+  "humans": {
+    "h_45bbed694cc8b0": {
+      "author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

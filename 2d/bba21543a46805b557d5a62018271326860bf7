@@ -1,0 +1,19 @@
+devops/pipeline/PRChecker.aci.yml
+  s_b8318b4c84fe50::t_148ae1c2cc0981 476-482,676-682
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2dbba21543a46805b557d5a62018271326860bf7",
+  "prompts": {},
+  "sessions": {
+    "s_b8318b4c84fe50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e357-98ca-7510-8478-04820a9fb003",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

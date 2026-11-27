@@ -1,0 +1,23 @@
+apps/frontend-nextgen/test/services/workspace/botSessionService.test.ts
+  s_a6cf0b4901b3a8::t_bb45865f674491 522-560
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  s_a6cf0b4901b3a8::t_bb45865f674491 167-168,180-187,192
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_a6cf0b4901b3a8::t_bb45865f674491 236-254
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5617f8cbdfe4418d2a3dffd0a4940e4591e2f700",
+  "prompts": {},
+  "sessions": {
+    "s_a6cf0b4901b3a8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a211d3-b312-7363-b8f8-a812788340a7",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

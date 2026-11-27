@@ -1,0 +1,26 @@
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/lib.rs
+  s_bfac72aaaff711::t_8d99ab8a90f3f9 25,109-110
+  s_bfac72aaaff711::t_c813dfa543a216 111-112
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/identity.rs
+  s_bfac72aaaff711::t_8d99ab8a90f3f9 1-27
+apps/bcs-internal/docs/channels/dingtalk-identity.md
+  s_bfac72aaaff711::t_31979ba7966039 1-25
+apps/bcs-internal/docs/flows/README.md
+  s_bfac72aaaff711::t_69ad4cc96d9134 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1f9c0c1e39d0833abc13066e71a0cee4cb50cfc3",
+  "prompts": {},
+  "sessions": {
+    "s_bfac72aaaff711": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c993-b186-76c1-a52d-d247d8a9eb68",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

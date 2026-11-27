@@ -1,0 +1,31 @@
+apps/bcsfuse/internal/zbcsfuse_internal/providers/bcn_metadata.py
+  s_20c3b110241190::t_c066dd13423cea 26,29-30,35-41,48,66,72,74-76,80-81,83,95,126,133,138-142,157,182,234,259
+  s_20c3b110241190::t_79de4cc93a2446 68-71
+apps/bcsfuse/tests/alipay/test_bcn_metadata.py
+  s_20c3b110241190::t_20f651ddc44269 6,204-206,208-209,221-232,240,262-270,276-285,287-291,293-294
+  s_20c3b110241190::t_79de4cc93a2446 207,210-220,271-275,286,292
+  s_20c3b110241190::t_286f7d018c5a1e 295-296
+apps/bcsfuse/docs/deployment/zbcsfuse-platform-setup.md
+  s_20c3b110241190::t_cb3d61919de633 284,290-316
+apps/bcsfuse/docs/deployment/zbcsfuse-logging-monitoring.md
+  s_20c3b110241190::t_cb3d61919de633 33,39-40
+  s_20c3b110241190::t_04fc3d6d6ebe6d 41
+submodules/avernet
+  s_20c3b110241190::t_045ad253cd9a1b 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8c33ecfc74749ea57180062c3a3192d89eb390f4",
+  "prompts": {},
+  "sessions": {
+    "s_20c3b110241190": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18bb2-2a7d-74a3-9f9b-e05b95d7b339",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

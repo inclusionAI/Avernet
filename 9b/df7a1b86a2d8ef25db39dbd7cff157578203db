@@ -1,0 +1,18 @@
+apps/frontend-nextgen/src/internal/capability-workshop/components/SkillDetailDrawer.tsx
+  h_2f73a63cacab42 3
+apps/frontend-nextgen/src/internal/market/components/McpOverviewTab.tsx
+  h_2f73a63cacab42 7
+apps/frontend-nextgen/src/internal/market/components/RepoSkillDetailView.tsx
+  h_2f73a63cacab42 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9bdf7a1b86a2d8ef25db39dbd7cff157578203db",
+  "prompts": {},
+  "humans": {
+    "h_2f73a63cacab42": {
+      "author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

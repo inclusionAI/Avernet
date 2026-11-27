@@ -1,0 +1,45 @@
+apps/backend/tests/community/core/apply_engine/test_default_mcp_platform_artifact.py
+  s_bcc2d0974a665d::t_224a8ec32acef0 1-48,55-66
+  s_763a81eb308339::t_adc229cad1315b 80,84-85
+  s_763a81eb308339::t_16646e233f68bf 49,53-54,71-72
+  s_763a81eb308339::t_2be5fcf93caa1c 70,74-79
+  s_763a81eb308339::t_c59e059eddac71 73
+  s_763a81eb308339::t_c79d59a2173e5f 50-52,67-69
+  s_763a81eb308339::t_fe69e527d0043b 81-83
+apps/backend/tests/community/core/apply_engine/test_default_mcp_device_delivery.py
+  s_763a81eb308339::t_847209bf365f27 42-46
+  s_763a81eb308339::t_c79d59a2173e5f 108-115,146-148,156
+  s_763a81eb308339::t_132d681aa1e831 157,160-162,164
+  s_763a81eb308339::t_adc229cad1315b 173-176
+  s_763a81eb308339::t_39b0ae4e9bf52c 18-20,158-159,163
+  s_763a81eb308339::t_f522cdac56b3ae 22,104,107,116,149
+  s_763a81eb308339::t_f5a3fc40e74638 39-41
+  s_763a81eb308339::t_8b3b1fcb308aa0 153
+  s_763a81eb308339::t_b27165c66a4f4d 168-172
+  s_763a81eb308339::t_b7a5a4b453501b 126-145,150
+  s_763a81eb308339::t_ec96e407e188be 1-17,21,23-38,47-103,105-106,117-125,151-152,154-155,165-167
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1cb27232b257ff069d68cbc33aff047a5154e72b",
+  "prompts": {},
+  "sessions": {
+    "s_763a81eb308339": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ed82-b79a-76e0-8143-6b80bc462b82",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": null
+    },
+    "s_bcc2d0974a665d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9d9-072f-7481-adc1-c3e3d78b7fd1",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

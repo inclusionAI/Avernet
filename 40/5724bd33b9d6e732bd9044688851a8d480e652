@@ -1,0 +1,19 @@
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_3390a382ab8b6f::t_bfe6a547a1270e 311-321
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "405724bd33b9d6e732bd9044688851a8d480e652",
+  "prompts": {},
+  "sessions": {
+    "s_3390a382ab8b6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce64-b71e-7ab0-af3f-e8a007f31b16",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
