@@ -15,8 +15,6 @@ export interface GroupSidebarSearchRowProps {
   onSearchTextChange: (value: string) => void;
   kindFilter: KindFilter;
   onKindFilterChange: (value: KindFilter) => void;
-  membership: Membership;
-  onMembershipChange: (value: Membership) => void;
   /** 「+」发起协作：打开既有 CreateGroupModal 链路。 */
   onCreateGroup: () => void;
 }
@@ -27,8 +25,6 @@ export function GroupSidebarSearchRow({
   onSearchTextChange,
   kindFilter,
   onKindFilterChange,
-  membership,
-  onMembershipChange,
   onCreateGroup,
 }: GroupSidebarSearchRowProps) {
   return (
@@ -46,8 +42,6 @@ export function GroupSidebarSearchRow({
       <GroupSidebarFilterPopover
         kindFilter={kindFilter}
         onKindFilterChange={onKindFilterChange}
-        membership={membership}
-        onMembershipChange={onMembershipChange}
       />
       <WorkspaceActionButton onCreateGroup={onCreateGroup} />
     </div>

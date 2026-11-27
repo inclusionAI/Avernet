@@ -38,6 +38,14 @@ query result when available and the same ID-seeded fallback as Bot management;
 friend user avatars are unchanged. See the
 [friend roster regression tests](test/components/CollaborationPrivacy/BotFriendRoster.test.tsx).
 
+## Collaboration group list filters
+
+The group sidebar keeps participation as two equal-width tabs below search:
+“固定群成员” (`direct`) and “仅参与临时会话” (`session_only`). The tabs reuse the
+existing membership state and are hidden in restricted single-Group views.
+The filter popover contains only Group kinds; its active indicator reflects
+only the kind filter. See the [sidebar filter tests](test/pages/Workspace/components/GroupSidebar/GroupSidebar.filterPopover.test.tsx).
+
 ## Leaving a collaboration Session
 
 [Session leave](src/services/workspace/sessionService.ts) succeeds when the

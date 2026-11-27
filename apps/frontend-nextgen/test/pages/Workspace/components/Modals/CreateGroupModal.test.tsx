@@ -160,6 +160,24 @@ it('matches configuration panel typography without changing the collaboration fo
   expect(screen.getByTestId('free-chat-settings-grid')).toHaveClass('grid-cols-1', 'sm:grid-cols-3', 'gap-5');
 });
 
+it('keeps collaboration type names beside their icons with descriptions on the next row', async () => {
+  renderModal({ activeIdentity: botIdentity });
+  await screen.findByRole('button', { name: /Alpha/ });
+
+  for (const [name, description] of [
+    ['自由聊天', '开放交流、灵活讨论和日常协作'],
+    ['任务协作', '由主节点统筹，成员分工执行'],
+    ['自定义协作', '通过协同剧本编排执行流程'],
+  ]) {
+    const option = screen.getByRole('radio', { name });
+    const label = within(option).getByText(name);
+    const heading = label.parentElement;
+    expect(heading).toHaveClass('flex', 'items-center', 'gap-2');
+    expect(label.previousElementSibling?.tagName.toLowerCase()).toBe('svg');
+    expect(heading?.nextElementSibling).toBe(within(option).getByText(description));
+  }
+});
+
 it('places free-chat settings in three equal responsive columns with wrapping helper text beside the switch', async () => {
   const longName = '很长的群主 Bot 名称'.repeat(8);
   renderModal({ activeIdentity: { ...botIdentity, displayName: longName } });

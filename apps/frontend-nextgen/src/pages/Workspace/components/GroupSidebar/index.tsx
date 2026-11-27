@@ -1,3 +1,4 @@
+import { PillTabs } from '@/components/Common/PillTabs';
 import { Button, Empty, Input } from '@/components/ui';
 import type {
   GroupContextDelivery,
@@ -141,9 +142,17 @@ export function GroupSidebarList(props: GroupSidebarProps) {
               onSearchTextChange={onSearchTextChange}
               kindFilter={kindFilter}
               onKindFilterChange={onKindFilterChange}
-              membership={membership}
-              onMembershipChange={onMembershipChange}
               onCreateGroup={onCreateGroup}
+            />
+            <PillTabs<Membership>
+              label="参与方式"
+              value={membership}
+              options={[
+                { value: 'direct', label: '固定群成员' },
+                { value: 'session_only', label: '仅参与临时会话' },
+              ]}
+              onChange={onMembershipChange}
+              className="grid grid-cols-2 gap-1 px-4 pb-2 pt-1 [&_[role=tab]]:min-w-0 [&_[role=tab]]:px-1 [&_[role=tab]]:text-xs"
             />
           </div>
         )}
