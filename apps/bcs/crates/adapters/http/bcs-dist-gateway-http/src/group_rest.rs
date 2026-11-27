@@ -142,6 +142,11 @@ fn rest_error(error: &GatewayError) -> Response {
             _ => rest_invalid(StatusCode::BAD_REQUEST, "INVALID_ARGUMENT"),
         },
         GatewayError::Unavailable { code } => match code.as_str() {
+            "group_round_busy" => error_body(
+                StatusCode::CONFLICT,
+                "CONTEXT_BUSY",
+                "another round is active in this context",
+            ),
             "frame_budget" | "projection_frame_budget" => error_body(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 FRAME_BUDGET_EXCEEDED,
@@ -648,6 +653,7 @@ fn stream_error_code(error: &GatewayError) -> &'static str {
             _ => "INVALID_ARGUMENT",
         },
         GatewayError::Unavailable { code } => match code.as_str() {
+            "group_round_busy" => "CONTEXT_BUSY",
             "frame_budget" | "projection_frame_budget" => FRAME_BUDGET_EXCEEDED,
             "cut_released" => "CURSOR_RELEASED",
             _ => "UNAVAILABLE",

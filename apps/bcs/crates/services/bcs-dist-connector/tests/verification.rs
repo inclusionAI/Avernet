@@ -306,12 +306,10 @@ async fn by_request_unsupported_keeps_isolation_and_the_deadline_quarantines() {
     handoff_pacing(&mut rig);
     let isolated = spec_query_by_request(&did());
     rig.worker.create_spec(isolated.clone()).await;
-    // The standard A2A profile: no negotiated request-id index, so the
-    // by-request lookup answers `Unsupported` every time.
+    // The standard A2A profile: no negotiated request-id index, so a
+    // definitive Unsupported answer selects retained verification.
     rig.agent.on_start(Reply::Unknown);
-    for _ in 0..16 {
-        rig.agent.on_request(QueryOutcome::Unsupported);
-    }
+    rig.agent.on_request(QueryOutcome::Unsupported);
     rig.worker.notify().await;
     let live = rig.engine();
     let _loop = run_engine(&live);
@@ -376,19 +374,7 @@ async fn by_request_unsupported_keeps_isolation_and_the_deadline_quarantines() {
     );
     assert_eq!(rig.agent.count("start"), 2, "still no resend after the restart");
 
-    // A late real stop proof completes the closure.
-    rig.agent.on_request(canceled("rt-late-proof"));
-    until("the late stop proof closes the call", || async {
-        doc_of(&rig.store.model, &did()).await["execution"]["phase"] == "ended"
-    })
-    .await;
-    let doc = doc_of(&rig.store.model, &did()).await;
-    assert_eq!(doc["execution"]["outcome"], "canceled");
-    assert!(
-        doc["execution"]["quarantined"].is_object(),
-        "the quarantine history stays durable after the real close"
-    );
-    assert_eq!(rig.agent.count("start"), 2, "closure needed no resend");
+    assert_eq!(rig.agent.count("query_request"), 1, "retained verification never polls the unsupported key");
     // The other context still holds its accepted call, untouched.
     other_events.send(delta("fine")).unwrap();
     assert!(doc_of(&rig.store.model, &other.did).await["execution"]["phase"] != "ended");

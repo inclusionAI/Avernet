@@ -60,6 +60,9 @@ pub enum StrictRoundStage {
     Delivered(AdmitOutcome),
 }
 
+/// The cancel target is no longer the live round at the checkpoint authority.
+pub const STRICT_CANCEL_NOT_ACTIVE: &str = "strict_cancel_not_active";
+
 #[async_trait]
 pub trait InboxProducerPort: Send + Sync {
     /// Read the single scoped admission document. A record is not a success
@@ -93,6 +96,16 @@ pub trait InboxProducerPort: Send + Sync {
     /// Intermediate events only; retry keeps (did, holder epoch, seq) unchanged.
     /// Success also requires activation, even if no notification can be delivered.
     async fn append_stream(&self, request: AppendAgentEvent) -> Result<InboxPos, StoreError>;
+
+    /// Admit a Worker-authorized Cancel for the exact active strict round.
+    /// The provider checks checkpoint ownership of the task, binds the record
+    /// to that license, and never creates a Task or Session. Production of
+    /// new controls on an inactive target returns `STRICT_CANCEL_NOT_ACTIVE`.
+    async fn admit_strict_cancel(&self, _request: AdmitRequest) -> Result<AdmitOutcome, StoreError> {
+        Err(StoreError::NotApplied {
+            code: "strict_cancel_unconfigured".into(),
+        })
+    }
 
     /// Stage (or reconcile) the durable inbox record of one strict-group
     /// round: the record's pre-writes are durable repairs, and its Start

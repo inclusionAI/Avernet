@@ -700,11 +700,17 @@ impl GroupRoundRepo for StoreGroupRoundAdmission {
                     None => return Ok(Admission::Conflict),
                     Some(_) => return Ok(Admission::Conflict),
                 };
+                if original.input.key != license.round_key()
+                    || original.request_id.0 != license.request_id
+                    || original.request_digest.0 != license.request_digest
+                {
+                    return Ok(Admission::Conflict);
+                }
                 let admitted = Self::replay(&original, request);
                 if matches!(admitted, Admission::Replay { .. }) {
-                    // Recovery/aftermath repair for the same accepted round;
-                    // the Start entry stays exactly one durable record.
-                    self.aftermath(request).await?;
+                    // Repair using exactly the request named by the license,
+                    // never another producer's clock-derived candidate.
+                    self.confirm_start(&original).await?;
                 }
                 return Ok(admitted);
             }

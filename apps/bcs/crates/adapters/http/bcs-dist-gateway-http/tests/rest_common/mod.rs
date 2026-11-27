@@ -20,12 +20,13 @@ use bcs_app_dist_gateway::{
     Clock, DistGateway, DistGatewayConfig, GroupDiscovery, GroupDiscoveryConfig,
 };
 use bcs_dist_gateway::DistGatewayCore;
-
-
-
-
+use bcs_dist_store::inbox::StoreInboxProducer;
+use bcs_dist_worker::WorkerTaskAdmission;
+use bcs_service_api::core::dist_admission::{TaskAdmissionCommand, TaskAdmissionCoreService};
+use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_service_api::port::repo::distributed::group_listing::GroupListingPort;
 use bcs_service_api::port::repo::distributed::group_round::GroupRoundGrants;
+use bcs_service_api::port::repo::distributed::inbox::{AdmitOutcome, AdmitRequest, InboxProducerPort};
 use bcs_store_api::stream::StreamStorePlugin;
 
 use futures::StreamExt;
@@ -185,11 +186,53 @@ pub fn test_router_for(stack: &GroupStack, caller: GatewayCaller) -> Router {
     router(stack.gateway.clone(), stack.discovery.clone(), config).layer(Extension(caller))
 }
 
+/// Companion to `FakeWorker`: model an accepted GroupA2a start in the real
+/// Inbox and task index, so HTTP fixtures can independently drive publication
+/// and archive retention. This is not the checkpoint admission test; the
+/// bootstrap REST bridge exercises that with a real licensed Worker.
+struct FixtureAdmission {
+    legacy: WorkerTaskAdmission,
+    inbox: Arc<StoreInboxProducer>,
+}
+
+#[async_trait]
+impl TaskAdmissionCoreService for FixtureAdmission {
+    async fn admit(
+        &self,
+        scope: &TaskScope,
+        command: TaskAdmissionCommand,
+    ) -> Result<AdmitOutcome, StoreError> {
+        if !command.start_task
+            || CreationSource::of_sid(&command.input.sid) != Some(CreationSource::GroupA2a)
+        {
+            return self.legacy.admit(scope, command).await;
+        }
+        let input = command.input;
+        let create_session = command.create_session.map(|definition| {
+            let mut spec = common::session_spec(&input.sid.0, scope.clone());
+            spec.group = definition.group;
+            spec.workflow = definition.workflow;
+            spec.participants = definition.participants;
+            spec.limits = definition.limits;
+            spec
+        });
+        let mut task = snapshot(&input.tid.0, TaskStatus::Submitted, None, NOW);
+        task.scope = scope.clone();
+        task.sid = input.sid.clone();
+        self.inbox.admit(AdmitRequest {
+            scope: scope.clone(),
+            input,
+            create_session,
+            create_task: Some(task),
+        }).await
+    }
+}
+
 pub fn gateway_core(p: &Ports) -> DistGatewayCore {
-    let admission = bcs_dist_worker::WorkerTaskAdmission::new(
-        p.inbox.clone(),
-        Arc::new(|| TimestampMillis(NOW)),
-    );
+    let admission = FixtureAdmission {
+        legacy: WorkerTaskAdmission::new(p.inbox.clone(), Arc::new(|| TimestampMillis(NOW))),
+        inbox: p.inbox.clone(),
+    };
     DistGatewayCore::new(
         Arc::new(admission),
         Arc::new(bcs_dist_worker::WorkerOutputReader::new(

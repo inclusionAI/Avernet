@@ -118,49 +118,30 @@ async fn a_takeover_of_an_accepted_call_reattaches_and_restarts_seq_at_one() {
 #[tokio::test]
 async fn a_possibly_sent_call_is_not_resent_without_a_capability() {
     let mut rig = Rig::new().await;
+    rig.config.max_verifications = 0; // isolate the durable handoff from verifier ticks
     let _old = former_holder(&rig, dispatch_spec(&did()), DispatchPhase::Sending).await;
     dead_holders(&mut rig);
     rig.worker.notify().await;
     let running = rig.start();
-    until("the call is held and unresolved", || async { running.pending_effects().await == 1 }).await;
-    settle().await;
+    until("the call is retained in verification", || async {
+        rig.doc().await["execution"]["verification"]["key"]["kind"] == "retained"
+    }).await;
     assert_eq!(rig.agent.count("start"), 0, "no blind resend");
     assert_eq!(rig.agent.count("query_request"), 0);
     assert_eq!(rig.phase().await, "sending", "it stays in its phase");
-    assert_eq!(running.active().await, 1, "still held and polled");
-    assert_eq!(rig.doc().await["execution"]["holder"]["epoch"], 2);
+    assert_eq!(rig.doc().await["execution"]["holder"]["epoch"], 3, "handoff fenced both normal holders");
+    until("ordinary slot released", || async { running.active().await == 0 }).await;
 
-    // A cancel from the Worker's deadline is seen, but unknown is never
-    // promoted to an end.
+    // A later Worker cancel is retained even without an ordinary actor or
+    // remote task id; it proves neither a stop nor a remote request.
     rig.worker.cancel().await;
-    until("the cancel is observed", || async {
-        rig.doc().await["execution"]["cancellation"]["kind"] == "outcome_unknown"
-    })
-    .await;
-    settle().await;
+    let doc = rig.doc().await;
+    assert!(doc["control"]["cancel"].is_object());
+    assert!(doc["execution"]["verification"].is_object());
+    assert!(doc["execution"]["outcome"].is_null());
     assert_eq!(rig.phase().await, "sending");
     assert_eq!(rig.agent.count("cancel"), 0, "no remote task to cancel");
     assert!(rig.kinds().await.is_empty());
-}
-
-#[tokio::test]
-async fn an_idempotent_start_is_resent_with_the_same_request_id() {
-    let mut rig = Rig::new().await;
-    let _old = former_holder(&rig, spec_with(|c| {
-        c.idempotent_start = true;
-        // Plan T6: a takeover resend relies on the negotiated persistent
-        // dedupe inside the recorded proof window, not on the bare claim.
-        c.persistent_dedupe = true;
-    }), DispatchPhase::Sending).await;
-    dead_holders(&mut rig);
-    let events = rig.agent.start_stream();
-    rig.worker.notify().await;
-    let _running = rig.start();
-    until("accepted", || async { rig.phase().await == "accepted" }).await;
-    assert!(rig.agent.calls()[0].starts_with(&format!("start {DID}:start ")), "{:?}", rig.agent.calls());
-    events.send(final_event()).unwrap();
-    until("the call ends", || async { rig.phase().await == "ended" }).await;
-    assert_eq!(rig.agent.count("start"), 1);
 }
 
 #[tokio::test]
@@ -210,57 +191,22 @@ async fn an_agent_that_does_not_know_the_request_keeps_the_call_as_a_verificatio
 }
 
 #[tokio::test]
-async fn an_unknown_first_send_follows_the_same_policy() {
-    // No capability: unresolved after one attempt.
+async fn an_unknown_first_send_is_found_by_the_original_request_id() {
     let rig = Rig::new().await;
-    rig.worker.create().await;
+    rig.worker.create_spec(spec_with(|c| c.query_by_request = true)).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Unknown);
-    let running = rig.start();
-    until("unresolved", || async { running.pending_effects().await == 1 }).await;
-    settle().await;
-    assert_eq!(rig.agent.count("start"), 1);
-    assert_eq!(rig.phase().await, "sending");
-
-    // Idempotent: sent again, same request id, then accepted.
-    let rig = Rig::new().await;
-    rig.worker.create_spec(spec_with(|c| {
-        c.idempotent_start = true;
-        // Plan T6: a takeover resend relies on the negotiated persistent
-        // dedupe inside the recorded proof window, not on the bare claim.
-        c.persistent_dedupe = true;
-    })).await;
-    rig.worker.notify().await;
-    rig.agent.on_start(Reply::Unknown);
-    let events = rig.agent.start_stream();
+    rig.agent.on_request(found(TaskStatus::Working, json!({"task": {}})));
+    rig.agent.on_task(found(TaskStatus::Working, json!({"task": {"id": "rt-77c2"}})));
+    let events = rig.agent.subscribe_stream();
     let _running = rig.start();
     until("accepted", || async { rig.phase().await == "accepted" }).await;
+    assert_eq!(rig.agent.count("start"), 1);
     let calls = rig.agent.calls();
-    assert_eq!(rig.agent.count("start"), 2);
     assert_eq!(calls[0].split(' ').nth(1), calls[1].split(' ').nth(1), "same request id");
+    assert!(calls[1].starts_with("query_request "));
     events.send(final_event()).unwrap();
     until("the call ends", || async { rig.phase().await == "ended" }).await;
-}
-
-#[tokio::test]
-async fn a_rejected_resend_does_not_fail_a_start_that_may_have_arrived() {
-    let rig = Rig::new().await;
-    rig.worker.create_spec(spec_with(|c| {
-        c.idempotent_start = true;
-        // Plan T6: a takeover resend relies on the negotiated persistent
-        // dedupe inside the recorded proof window, not on the bare claim.
-        c.persistent_dedupe = true;
-    })).await;
-    rig.worker.notify().await;
-    // The first send may have reached the agent; only the resend is refused.
-    rig.agent.on_start(Reply::Unknown);
-    rig.agent.on_start(Reply::Rejected("http_401"));
-    let _running = rig.start();
-    until("the resend was refused", || async { rig.agent.count("start") == 2 }).await;
-    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-    assert_eq!(rig.phase().await, "sending", "unresolved, not failed");
-    assert!(rig.kinds().await.is_empty(), "no error event for a call whose task may be running");
-    assert_eq!(rig.agent.count("start"), 2);
 }
 
 #[tokio::test]
@@ -362,19 +308,16 @@ async fn a_holder_that_lost_the_call_stops_and_writes_nothing() {
 #[tokio::test]
 async fn an_actor_that_dies_is_resumed_under_a_new_generation() {
     let rig = Rig::new().await;
-    rig.worker.create_spec(spec_with(|c| {
-        c.idempotent_start = true;
-        // Plan T6: a takeover resend relies on the negotiated persistent
-        // dedupe inside the recorded proof window, not on the bare claim.
-        c.persistent_dedupe = true;
-    })).await;
+    rig.worker.create_spec(spec_with(|c| c.query_by_request = true)).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Panic);
-    let events = rig.agent.start_stream();
+    rig.agent.on_request(found(TaskStatus::Working, json!({"task": {}})));
+    let events = rig.agent.subscribe_stream();
     let running = rig.start();
     until("accepted by the resumed actor", || async { rig.phase().await == "accepted" }).await;
     assert_eq!(rig.doc().await["execution"]["holder"]["epoch"], 2);
-    assert_eq!(rig.agent.count("start"), 2, "the idempotent start is sent again with the same id");
+    assert_eq!(rig.agent.count("start"), 1, "the resumed actor looks up the original start");
+    assert_eq!(rig.agent.count("query_request"), 1);
     events.send(final_event()).unwrap();
     until("the call ends", || async { rig.phase().await == "ended" }).await;
     until("idle", || async { running.active().await == 0 }).await;
@@ -383,15 +326,11 @@ async fn an_actor_that_dies_is_resumed_under_a_new_generation() {
 #[tokio::test]
 async fn a_failed_resume_is_retried_until_it_succeeds() {
     let rig = Rig::new().await;
-    rig.worker.create_spec(spec_with(|c| {
-        c.idempotent_start = true;
-        // Plan T6: a takeover resend relies on the negotiated persistent
-        // dedupe inside the recorded proof window, not on the bare claim.
-        c.persistent_dedupe = true;
-    })).await;
+    rig.worker.create_spec(spec_with(|c| c.query_by_request = true)).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Panic);
-    let events = rig.agent.start_stream();
+    rig.agent.on_request(found(TaskStatus::Working, json!({"task": {}})));
+    let events = rig.agent.subscribe_stream();
     let running = rig.start();
     until("the first start was attempted", || async { rig.agent.count("start") == 1 }).await;
     // The resume's first write fails; the call must not be forgotten.
@@ -407,15 +346,11 @@ async fn a_resume_owed_from_a_failure_never_replaces_the_actor_that_settled_it()
     let mut rig = Rig::new().await;
     // Long enough for a hint to arrive between two rounds of the main loop.
     rig.config.receive_timeout = std::time::Duration::from_millis(1000);
-    rig.worker.create_spec(spec_with(|c| {
-        c.idempotent_start = true;
-        // Plan T6: a takeover resend relies on the negotiated persistent
-        // dedupe inside the recorded proof window, not on the bare claim.
-        c.persistent_dedupe = true;
-    })).await;
+    rig.worker.create_spec(spec_with(|c| c.query_by_request = true)).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Panic);
-    let events = rig.agent.start_stream();
+    rig.agent.on_request(found(TaskStatus::Working, json!({"task": {}})));
+    let events = rig.agent.subscribe_stream();
     let _running = rig.start();
     until("the first start was attempted", || async { rig.agent.count("start") == 1 }).await;
     // The resume of the dead actor fails once and is owed.
@@ -432,21 +367,18 @@ async fn a_resume_owed_from_a_failure_never_replaces_the_actor_that_settled_it()
     assert_eq!(rig.doc().await["execution"]["holder"]["epoch"], 2, "the running actor was replaced");
     events.send(final_event()).unwrap();
     until("the call ends", || async { rig.phase().await == "ended" }).await;
-    assert_eq!(rig.agent.count("start"), 2);
+    assert_eq!(rig.agent.count("start"), 1);
+    assert_eq!(rig.agent.count("query_request"), 1);
 }
 
 #[tokio::test]
 async fn a_resume_that_landed_without_an_answer_is_resumed_again() {
     let rig = Rig::new().await;
-    rig.worker.create_spec(spec_with(|c| {
-        c.idempotent_start = true;
-        // Plan T6: a takeover resend relies on the negotiated persistent
-        // dedupe inside the recorded proof window, not on the bare claim.
-        c.persistent_dedupe = true;
-    })).await;
+    rig.worker.create_spec(spec_with(|c| c.query_by_request = true)).await;
     rig.worker.notify().await;
     rig.agent.on_start(Reply::Panic);
-    let events = rig.agent.start_stream();
+    rig.agent.on_request(found(TaskStatus::Working, json!({"task": {}})));
+    let events = rig.agent.subscribe_stream();
     let running = rig.start();
     until("the first start was attempted", || async { rig.agent.count("start") == 1 }).await;
     // The resume's claim write lands, but its read-back fails: the engine

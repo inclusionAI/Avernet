@@ -13,6 +13,30 @@ pub struct ArtifactPart {
     pub part: RoundPart,
 }
 
+impl ArtifactPart {
+    /// Expand a final answer's typed parts into the archive's flat, ordered
+    /// rows. The length prefix and index distinguish each part without losing
+    /// the originating artifact's identity.
+    pub fn from_final_answer(
+        artifact: &ArtifactId,
+        content: &serde_json::Value,
+        offset: usize,
+    ) -> Option<Vec<Self>> {
+        let parts: Vec<RoundPart> = serde_json::from_value(content.clone()).ok()?;
+        if parts.is_empty() {
+            return None;
+        }
+        parts.into_iter().enumerate().map(|(index, part)| {
+            let order = offset.checked_add(index)?.checked_add(1)?;
+            Some(Self {
+                artifact_id: ArtifactId(format!("final:{}:{}:{index}", artifact.0.len(), artifact.0)),
+                order: NonZeroU32::new(u32::try_from(order).ok()?)?,
+                part,
+            })
+        }).collect()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
@@ -92,6 +116,8 @@ pub enum OutputClass {
     Output,
     Tool,
     Thinking,
+    /// A strict FSM final artifact: its Upsert contains ordered `RoundPart`s.
+    FinalAnswer,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

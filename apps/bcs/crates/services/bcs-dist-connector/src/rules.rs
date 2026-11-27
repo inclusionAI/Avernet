@@ -64,7 +64,7 @@ fn proof_upholds_dedupe(recheck: &DedupeRecheck<'_>) -> bool {
     let Some(now) = recheck.now else {
         return false;
     };
-    if now >= recorded.guarantee_deadline {
+    if recorded.dedupe_domain.is_empty() || now >= recorded.guarantee_deadline {
         return false;
     }
     let Some(domain) = recheck.resolved_domain else {
@@ -174,7 +174,7 @@ impl DistConnectorCoreService for DistConnectorRules {
 
     fn send_proof(
         &self,
-        spec: &DispatchSpec,
+        _spec: &DispatchSpec,
         operation: ProofOperation,
         canonical_body: &[u8],
         config_digest: Digest,
@@ -185,8 +185,12 @@ impl DistConnectorCoreService for DistConnectorRules {
             }
         };
         SendProof {
-            dedupe_domain: identity::dedupe_domain(&spec.target),
-            guarantee_deadline: spec.deadline,
+            // Retain the durable attempt identity but do not claim a
+            // guarantee. The actual agent resolution exposes neither a
+            // trusted dedupe domain nor a guarantee expiry; a binding name
+            // and the dispatch timeout cannot stand in for either.
+            dedupe_domain: String::new(),
+            guarantee_deadline: TimestampMillis(0),
             operation,
             body_digest: identity::send_body_digest(&request_id, canonical_body),
             config_digest,

@@ -34,7 +34,9 @@ async fn downstream_accept_then_drop_reply() {
     rig.rig.worker.notify_did(&did).await;
     let running = rig.start();
     until("one send attempt", || async { rig.agent.inner.count("start") == 1 }).await;
-    until("the call is unresolved", || async { running.pending_effects().await >= 1 }).await;
+    until("the call hands off and releases the ordinary slot", || async {
+        running.active().await == 0
+    }).await;
     assert_eq!(rig.agent.inner.count("start"), 1, "an odd start outcome is never blind-resent");
     assert_eq!(rig.phase(&did).await, "sending", "the call stays in its sending phase");
     assert!(rig.inbox_of(&did).await.is_empty(), "no stop fact is fabricated for an unknown delivery");

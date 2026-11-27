@@ -11,8 +11,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, reason = "bridge assertions")]
 #[path = "group_a2a_companion_support/mod.rs"]
 mod group_a2a_companion_support;
+#[path = "group_a2a_rest_reuse/mod.rs"]
+mod group_a2a_rest_reuse;
 
 use bcs_dist_model::Admission;
+use bcs_store_api::{WriteOutcome, document::DocumentStorePlugin};
 use group_a2a_companion_support::*;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -156,6 +159,11 @@ async fn rest_message_send_completes_a_strict_round_over_real_joints() {
         until_start(&world).await;
         world.journal.finish(NODE_RESEARCH);
         until_start(&world).await;
+        // Capture a valid in-progress feed snapshot, then finish the real round.
+        // Restoring this lagging projection below simulates a reader that has
+        // not yet observed terminal publication; it does not change authority.
+        let feed_key = world.assembly.roles.layout.task(&tid).unwrap();
+        let working = world.model.read_document(&feed_key).await.unwrap().expect("working feed");
         world.journal.finish(NODE_REVIEW);
 
         // The round reaches its authoritative terminal through the licensed
@@ -184,7 +192,52 @@ async fn rest_message_send_completes_a_strict_round_over_real_joints() {
         };
         let completed =
             until_rest_task_state(&world, &app, &tid, "TASK_STATE_COMPLETED").await;
-        let _ = completed;
+        let parts: Vec<_> = completed["artifacts"]
+            .as_array()
+            .expect("artifact array")
+            .iter()
+            .flat_map(|artifact| artifact["parts"].as_array().expect("part array"))
+            .cloned()
+            .collect();
+        assert_eq!(
+            parts,
+            [json!({"text": "answer-of-review"})],
+            "Completed must disclose the final node's answer, not the research input: {completed}"
+        );
+
+        let published = world.model.read_document(&feed_key).await.unwrap().expect("feed");
+        assert!(matches!(
+            world.model.replace_document(&feed_key, published.version, &working.value).await.unwrap(),
+            WriteOutcome::Applied { .. }
+        ));
+        let (status, lagged) = response_of(
+            &app,
+            Request::get(format!("{GROUPS_PREFIX}/{GROUP}/tasks/{}", tid.0))
+                .body(Body::empty())
+                .unwrap(),
+        ).await;
+        assert_eq!(status, StatusCode::OK);
+        let lagged = lagged.expect("task despite publication lag");
+        assert_eq!(lagged["status"]["state"], "TASK_STATE_COMPLETED", "{lagged}");
+        assert_eq!(lagged["artifacts"], completed["artifacts"], "{lagged}");
+
+        // A same-session snapshot is not enough to make an unaccepted task
+        // public, even while another task has an accepted strict license.
+        let staged_tid = bcs_dist_model::Tid(format!("{}.not-accepted", sid.0));
+        let staged_key = world.assembly.roles.layout.task(&staged_tid).unwrap();
+        let mut staged = working.value.clone();
+        staged["tid"] = json!(staged_tid.0);
+        assert!(matches!(
+            world.model.create_document(&staged_key, &staged).await.unwrap(),
+            WriteOutcome::Applied { .. }
+        ));
+        let (status, body) = response_of(
+            &app,
+            Request::get(format!("{GROUPS_PREFIX}/{GROUP}/tasks/{}", staged_tid.0))
+                .body(Body::empty())
+                .unwrap(),
+        ).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "staged task must stay private: {body:?}");
 
         // The strict license seals the round: the checkpoint's runner state
         // names exactly this round's request (the admission that only the

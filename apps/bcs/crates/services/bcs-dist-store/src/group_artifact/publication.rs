@@ -196,13 +196,18 @@ impl GroupArtifactStore {
                 history.push(event.clone());
                 if let OutputBody::Artifact {
                     artifact_id,
+                    class,
                     update,
                     ..
                 } = &event.body
                 {
-                    match amend_part(&mut artifacts, artifact_id, update) {
-                        Ok(()) => {}
-                        Err(error) => return Err(error),
+                    if *class == OutputClass::FinalAnswer {
+                        if let ArtifactUpdate::Upsert { content: Payload::Inline(content) } = update {
+                            artifacts.extend(ArtifactPart::from_final_answer(artifact_id, content, artifacts.len())
+                                .ok_or_else(|| invalid("archive_final_parts"))?);
+                        }
+                    } else {
+                        amend_part(&mut artifacts, artifact_id, update)?;
                     }
                 }
             }

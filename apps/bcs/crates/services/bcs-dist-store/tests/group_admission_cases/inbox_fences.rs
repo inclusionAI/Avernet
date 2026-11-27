@@ -216,18 +216,24 @@ async fn lost_acceptance_reply_recovers_the_original_round() {
     pause.reached().await;
     crashed.abort();
     drop(pause);
-    assert!(matches!(
-        two.rounds.admit(&winner).await.unwrap(),
-        Admission::Replay { ref accepted } if accepted.input.key.tid == winner.input.key.tid
-    ));
-    assert_eq!(rig.inbox_entries(&one).await, 1);
+    let mut competing_normalization = winner.clone();
+    competing_normalization.input.execution_deadline.0 += 1;
+    assert_eq!(
+        two.rounds.admit(&competing_normalization).await.unwrap(),
+        Admission::Replay { accepted: winner.clone() },
+    );
+    assert_eq!(rig.inbox_entries(&one).await, 1, "replay repairs the original Start");
     let loser = round("msg-b", 1);
     assert_eq!(two.rounds.admit(&loser).await.unwrap(), Admission::Busy);
-    // Duplicate Start delivery (a successor re-issuing the same round's
-    // aftermath) applies once.
-    assert!(matches!(
+
+    // Once a successor takes the active license, the recovered key must
+    // still answer Replay rather than reverting to a prepared record.
+    rig.retire_round(&one).await;
+    let next = round("msg-b", 2);
+    assert!(matches!(two.rounds.admit(&next).await.unwrap(), Admission::New { .. }));
+    assert_eq!(
         two.rounds.admit(&winner).await.unwrap(),
-        Admission::Replay { .. }
-    ));
-    assert_eq!(rig.inbox_entries(&one).await, 1);
+        Admission::Replay { accepted: winner },
+    );
+    assert_eq!(rig.inbox_entries(&one).await, 2);
 }

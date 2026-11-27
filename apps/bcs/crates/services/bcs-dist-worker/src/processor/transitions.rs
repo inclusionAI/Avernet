@@ -187,7 +187,7 @@ pub(super) fn apply_decision(
         if matches!(
             event.body,
             OutputBody::Artifact {
-                class: OutputClass::Output | OutputClass::Tool,
+                class: OutputClass::Output | OutputClass::Tool | OutputClass::FinalAnswer,
                 ..
             }
         ) {
@@ -367,6 +367,7 @@ pub(super) fn archive_confirmed(
     let reference = completed
         .saved
         .get(&task.tid)
+        .or_else(|| task_license(before, &task.tid).and(task.result_ref.as_ref()))
         .ok_or_else(|| invalid("archive_unconfirmed"))?
         .clone();
     let finalization = task

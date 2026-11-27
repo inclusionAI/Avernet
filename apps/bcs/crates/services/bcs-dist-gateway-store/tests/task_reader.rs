@@ -75,6 +75,38 @@ async fn restore_of_a_finished_or_expired_task_is_final() {
 }
 
 #[tokio::test]
+async fn fresh_group_listing_after_expiry_has_a_usable_cursor() {
+    use bcs_service_api::port::repo::distributed::group_listing::{GroupIndexQuery, GroupListingPort};
+    use bcs_store_api::zset::{ZAddMode, ZSetEntry, ZSetStorePlugin};
+    use std::sync::atomic::{AtomicI64, Ordering};
+
+    let clock = Arc::new(AtomicI64::new(NOW));
+    let f = fixture_with(|config| {
+        let clock = clock.clone();
+        config.now = Arc::new(move || TimestampMillis(clock.load(Ordering::SeqCst)));
+    });
+    let sid = Sid("s0042.g1111111111111111".into());
+    let spec = session_spec(&sid.0, scope());
+    f.model.create_document(&layout().spec(&sid).unwrap(), &encode_json(&spec).unwrap()).await.unwrap();
+    for suffix in ["one", "two"] {
+        let mut task = snapshot(&format!("{}.{suffix}", sid.0), TaskStatus::Working, None, NOW);
+        task.sid = sid.clone();
+        f.worker.create(&task).await;
+        f.model.add(&layout().tasks(&scope()).unwrap(), &[ZSetEntry { member: task.tid.0, score: 0.0 }], ZAddMode::InsertOnly).await.unwrap();
+    }
+    let query = GroupIndexQuery { statuses: vec![], limit: NonZeroU32::MIN, load_rows: false };
+    let first = f.reader.first_page(&scope(), &spec.group, &query, TimestampMillis(NOW)).await.unwrap();
+    let old = first.next.unwrap();
+    let later = TimestampMillis(NOW + 86_400_000);
+    clock.store(later.0, Ordering::SeqCst);
+    let fresh = f.reader.first_page(&scope(), &spec.group, &query, later).await.unwrap();
+    let page = f.reader.continue_page(&scope(), &spec.group, &fresh.next.unwrap(), false, later).await.unwrap();
+    assert_eq!(page.rows.len(), 1);
+    assert_ne!(page.rows[0].tid, fresh.rows[0].tid);
+    assert!(f.reader.continue_page(&scope(), &spec.group, &old, false, later).await.is_err());
+}
+
+#[tokio::test]
 async fn another_scope_sees_no_task() {
     let f = fixture();
     f.worker.create(&snapshot(TID, TaskStatus::Working, Some(eid(2, 1)), 1)).await;

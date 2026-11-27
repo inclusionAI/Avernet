@@ -754,6 +754,26 @@ async fn a_session_is_reached_only_through_the_group_it_was_created_for() {
 }
 
 #[tokio::test]
+async fn rpc_list_does_not_expose_a_group_rest_context() {
+    let p = ports();
+    let g = gateway(&p);
+    let sid = Sid("s0042.g1234567890abcdef".into());
+    let mut task = snapshot(&format!("{}.first", sid.0), TaskStatus::Working, None, common::NOW);
+    task.sid = sid.clone();
+    task.scope = TaskScope { tenant: me().tenant, principal: PrincipalId("bot:pa-001".into()) };
+    let spec = common::session_spec(&sid.0, task.scope.clone());
+    use bcs_store_api::document::DocumentStorePlugin;
+    p.model.create_document(&common::layout().spec(&sid).unwrap(), &serde_json::to_value(spec).unwrap())
+        .await.unwrap();
+    p.worker.create(&task).await;
+    let query = ListTasks {
+        group: grp(), session: Some(sid), statuses: vec![], after: None,
+        limit: NonZeroU32::MIN,
+    };
+    assert_eq!(g.list_tasks(&me(), query).await, Err(GatewayError::NotFound));
+}
+
+#[tokio::test]
 async fn a_directory_answer_for_another_group_id_creates_nothing() {
     let p = ports();
     let g = gateway(&p);

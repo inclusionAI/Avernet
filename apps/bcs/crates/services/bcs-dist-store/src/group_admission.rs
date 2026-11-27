@@ -715,10 +715,12 @@ impl StoreGroupRoundAdmission {
                     });
                 };
                 if license.request_id == request.request_id.0 {
-                    if license.request_digest != request.request_digest.0 {
+                    if license.round_key() != request.input.key
+                        || license.request_digest != request.request_digest.0
+                    {
                         return Ok(Admission::Conflict);
                     }
-                    self.aftermath(request).await?;
+                    self.confirm_start(request).await?;
                     return Ok(Admission::Replay {
                         accepted: request.clone(),
                     });
@@ -733,11 +735,16 @@ impl StoreGroupRoundAdmission {
                 return Ok(Admission::Busy);
             }
         }
-        self.mark_accepted(request, &row_key).await?;
+        self.confirm_start(request).await?;
+        Ok(Admission::New { accepted: request.clone() })
+    }
+
+    /// Repair the durable acceptance marker and Inbox aftermath. Return
+    /// success only once recovery can schedule the exact accepted request.
+    pub(crate) async fn confirm_start(&self, request: &AcceptedRound) -> Result<(), StoreError> {
+        self.mark_accepted(request, &self.row_key(request)?).await?;
         match self.aftermath(request).await? {
-            StrictOutcome::Delivered(AdmitOutcome::Accepted(_) | AdmitOutcome::Duplicate(_)) => Ok(Admission::New {
-                accepted: request.clone(),
-            }),
+            StrictOutcome::Delivered(AdmitOutcome::Accepted(_) | AdmitOutcome::Duplicate(_)) => Ok(()),
             StrictOutcome::Delivered(_) => Err(invalid("strict_start_rejected")),
             StrictOutcome::Staged => Err(StoreError::NotApplied {
                 code: "strict_round_superseded".into(),

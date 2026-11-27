@@ -1,13 +1,10 @@
 //! Starting a call, resolving a start whose outcome is unknown, and
 //! (re-)attaching to the remote task.
 //!
-//! SENT policy: a start that may have reached the agent is never repeated
-//! blindly. It is resent only when the target durably dedupes the request
-//! id — a negotiated persistent dedupe — and the proof recorded with the
-//! send intent still upholds that reliance (window, domain, semantics,
-//! configuration, plan T6); asked for by request id when the agent is known
-//! by request id; and otherwise left unresolved. A start that definitely
-//! did not leave the process is retried a bounded number of times.
+//! SENT policy: the current agent port does not provide trusted downstream
+//! dedupe evidence, so a possibly-sent start is never repeated. It can be
+//! looked up by request id, or retained by the verification lane. Only a
+//! definite NotSent is retried in the ordinary lane.
 //!
 //! Glossary:
 //! - **send intent**: `begin_send(Start)` moves the phase `claimed →
@@ -31,7 +28,7 @@ use crate::call::{Call, Flow, held_write};
 use crate::delayed::UnresolvedKind;
 use crate::report::Admitted;
 use bcs_dist_model::*;
-use bcs_service_api::core::dist_connector::{DedupeRecheck, Reattach, UncertainSend};
+use bcs_service_api::core::dist_connector::Reattach;
 use bcs_service_api::port::dist_agent::{CallOperation, StableSendRequest};
 use bcs_service_api::port::dist_agent::{QueryOutcome, RemoteEventStream, RemoteQuery, SendOutcome};
 use bcs_service_api::port::repo::distributed::dispatch::{AcceptanceEvidence, SendOperation};
@@ -50,18 +47,9 @@ impl Call {
     /// Sends the call's request. `possibly_sent` = the dispatch was found in
     /// the sending phase, so an earlier holder may already have sent it.
     ///
-    /// One loop, one attempt per pass:
-    /// - While nothing may have reached the agent (`uncertain == false`), each
-    ///   pass re-reads `disp` (fenced) and ends the call as canceled if a
-    ///   cancel is there.
-    /// - Once the start may have reached the agent (found in `sending`, or an
-    ///   `OutcomeUnknown` answer), each pass first applies the SENT policy:
-    ///   resend (bounded), ask the agent by request id, or unresolved.
-    /// - Definite "not sent" is retried with a sleeping backoff up to
-    ///   `not_sent_retries` times (B16), then unresolved.
-    ///
-    /// Returns `Ok` also when it leaves the call unresolved; `follow` then
-    /// only watches for a cancel.
+    /// A former holder's send intent is possibly sent, even if the old
+    /// record has no proof or the payload cannot be loaded. Recovery uses
+    /// only the original request id and never sends its body again.
     pub async fn start(&mut self, possibly_sent: bool) -> Flow {
         let did = self.did().clone();
         let spec = self.spec().clone();
@@ -70,93 +58,37 @@ impl Call {
         let operation = SendOperation::Start {
             request_id: request_id.clone(),
         };
+        if possibly_sent {
+            return self.resolve_start(operation, request_id, "start_maybe_sent").await;
+        }
         let proof_operation = ProofOperation::Start {
             request_id: request_id.clone(),
         };
-        let config_digest = self.config.send_fingerprint(&capabilities);
-        let retries = self.config.not_sent_retries;
-        let resolved_domain = crate::identity::dedupe_domain(&spec.target);
-        let (mut uncertain, mut not_sent, mut resends) = (possibly_sent, 0u32, 0u32);
+        let mut not_sent = 0;
         let mut backoff = self.backoff();
-        // The request is loaded first: a request that is gone fails the
-        // call cleanly from "claimed", and a later holder that finds the
-        // same call again reports the same error and finishes it.
         let Some(payload) = self.load(&spec.request).await? else {
-            if uncertain {
-                // It may have been sent earlier and cannot be sent again.
-                self.mark_unresolved(UnresolvedKind::Uncertain, "request_unavailable").await;
-                return Ok(());
-            }
             return self
                 .end_with_error("failed", "request_unavailable", FinalDispatchOutcome::Failed, "request_unavailable")
                 .await;
         };
-        // Send intent and its proof are durable before any network call:
-        // the proof is what a later holder re-checks before relying on the
-        // target's dedupe (plan T6).
+        // Send intent and its identity are durable before any network call.
         let proof = self.ports.rules.send_proof(
             &spec,
             proof_operation,
             &canonical_body(&payload),
-            config_digest.clone(),
+            self.config.send_fingerprint(&capabilities),
         );
         loop {
-            if uncertain {
-                let recorded = self.held.view().execution.send_proof.clone();
-                let Some(recorded) = recorded else {
-                    self.mark_unresolved(UnresolvedKind::Uncertain, "send_proof_missing").await;
-                    return Ok(());
-                };
-                let recheck = DedupeRecheck {
-                    recorded: Some(&recorded),
-                    current: &proof,
-                    now: Some(TimestampMillis(self.config.clock.now())),
-                    resolved_domain: Some(&resolved_domain),
-                };
-                match self.ports.rules.uncertain_start(&capabilities, &recheck) {
-                    UncertainSend::Resend if resends < retries => {
-                        resends += 1;
-                    }
-                    UncertainSend::Resend => {
-                        self.mark_unresolved(UnresolvedKind::Uncertain, "resend_exhausted").await;
-                        return Ok(());
-                    }
-                    UncertainSend::AskAgent => {
-                        if !possibly_sent {
-                            // Give the agent a moment to register the request.
-                            backoff.wait().await;
-                        }
-                        return self.ask_agent(operation, request_id).await;
-                    }
-                    UncertainSend::Unresolved => {
-                        self.mark_unresolved(UnresolvedKind::Uncertain, "start_outcome_unknown").await;
-                        return Ok(());
-                    }
-                }
-            } else {
-                // Nothing has left the process yet: a cancel ends the call here.
-                let view = held_write!(self, "dispatch read", self.held.refresh());
-                if view.control.cancel.is_some() {
-                    return self.end_canceled_unsent().await;
-                }
+            let view = held_write!(self, "dispatch read", self.held.refresh());
+            if view.control.cancel.is_some() {
+                return self.end_canceled_unsent().await;
             }
-            // Send intent and its proof are durable before the network call
-            // (B3, plan T6). On a later pass the phase is already
-            // `sending`: the permit comes from a fenced read, with no write
-            // beyond the proof's first durable recording.
             held_write!(
                 self,
                 "send intent",
                 self.held.begin_send(operation.clone(), proof.clone())
             );
-            // Within one loop pass, the resend branch left the fresh
-            // attempts behind: this send is a Resend authority or a Start.
-            let resend = resends > 0;
-            let authority = self.authority_now(
-                if resend { CallOperation::Resend } else { CallOperation::Start },
-                None,
-                &spec,
-            );
+            let authority = self.authority_now(CallOperation::Start, None, &spec);
             let send = StableSendRequest {
                 request_id: request_id.clone(),
                 context_id: None,
@@ -182,13 +114,6 @@ impl Call {
                         }
                     };
                 }
-                // Only the resend was refused (an expired credential, say):
-                // that proves nothing about the earlier send, whose task may
-                // be running.
-                SendOutcome::Rejected { code } if uncertain => {
-                    self.mark_unresolved(UnresolvedKind::Uncertain, &code).await;
-                    return Ok(());
-                }
                 SendOutcome::Rejected { code } => {
                     let evidence = format!("rejected:{code}");
                     return self
@@ -197,26 +122,29 @@ impl Call {
                 }
                 SendOutcome::NotSent { code } => {
                     not_sent += 1;
-                    if not_sent > retries {
-                        let kind = if uncertain {
-                            UnresolvedKind::Uncertain
-                        } else {
-                            UnresolvedKind::NotSent
-                        };
-                        self.mark_unresolved(kind, &code).await;
+                    if not_sent > self.config.not_sent_retries {
+                        self.mark_unresolved(UnresolvedKind::NotSent, &code).await;
                         return Ok(());
                     }
                     backoff.wait().await;
                 }
                 SendOutcome::OutcomeUnknown { code } => {
                     tracing::warn!(did = %did.0, code, "start outcome unknown");
-                    if !uncertain {
-                        uncertain = true;
-                    } else {
+                    if capabilities.query_by_request {
+                        // Give the index time to register the request.
                         backoff.wait().await;
                     }
+                    return self.resolve_start(operation, request_id, &code).await;
                 }
             }
+        }
+    }
+
+    async fn resolve_start(&mut self, operation: SendOperation, request_id: RequestId, code: &str) -> Flow {
+        if self.spec().capabilities.query_by_request {
+            self.ask_agent(operation, request_id).await
+        } else {
+            self.hand_off(code, VerificationKey::Retained).await
         }
     }
 
@@ -267,10 +195,7 @@ impl Call {
                     // The standard profile keeps this unknown a verification
                     // obligation (plan T7): never a resend, never a recovery.
                     return self
-                        .hand_off(
-                            "query_by_request_unsupported",
-                            VerificationKey::ByRequest { request_id },
-                        )
+                        .hand_off("query_by_request_unsupported", VerificationKey::Retained)
                         .await;
                 }
                 // "Not found" may only mean "not registered yet": ask a few

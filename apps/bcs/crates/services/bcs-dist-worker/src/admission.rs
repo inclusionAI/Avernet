@@ -6,11 +6,15 @@ use bcs_service_api::{
     core::dist_admission::*,
     port::repo::distributed::{
         common::StoreError,
-        group_round::{GroupRoundRepo, GroupStartRequest},
+        group_round::{
+            GroupRequestIdentity, GroupRequestRecord, GroupRoundRepo, GroupStartRequest,
+            decode_strict_license,
+        },
         inbox::*,
+        session::SessionStorePort,
     },
 };
-use std::sync::Arc;
+use std::{num::NonZeroU64, sync::Arc};
 
 /// The stable key of a fresh strict round's pinned (empty) history
 /// boundary: a new session's admission is the boundary of no committed
@@ -23,9 +27,15 @@ pub struct WorkerTaskAdmission {
     /// Strict-group rounds admit through the checkpoint-licensed repo; the
     /// generic inbox entry stays the old-RPC-compatible path and never
     /// installs rounds for a strict-claimed Session.
-    rounds: Option<Arc<dyn GroupRoundRepo>>,
+    strict: Option<StrictAdmission>,
     now: Arc<dyn Fn() -> TimestampMillis + Send + Sync>,
 }
+
+struct StrictAdmission {
+    rounds: Arc<dyn GroupRoundRepo>,
+    sessions: Arc<dyn SessionStorePort>,
+}
+
 impl WorkerTaskAdmission {
     pub fn new(
         inbox: Arc<dyn InboxProducerPort>,
@@ -33,7 +43,7 @@ impl WorkerTaskAdmission {
     ) -> Self {
         Self {
             inbox,
-            rounds: None,
+            strict: None,
             now,
         }
     }
@@ -44,11 +54,12 @@ impl WorkerTaskAdmission {
     pub fn with_rounds(
         inbox: Arc<dyn InboxProducerPort>,
         rounds: Arc<dyn GroupRoundRepo>,
+        sessions: Arc<dyn SessionStorePort>,
         now: Arc<dyn Fn() -> TimestampMillis + Send + Sync>,
     ) -> Self {
         Self {
             inbox,
-            rounds: Some(rounds),
+            strict: Some(StrictAdmission { rounds, sessions }),
             now,
         }
     }
@@ -65,67 +76,66 @@ impl WorkerTaskAdmission {
                 code: "group_scope_untrusted".into(),
             });
         }
-        let rounds = self.rounds.as_ref().ok_or_else(|| StoreError::Invalid {
-            code: "strict_rounds_unconfigured".into(),
-        })?;
-        rounds.admit(request).await
+        self.strict_admission()?.rounds.admit(request).await
     }
 
-    /// The strict round a GroupA2a-source start command carries (plan T2
-    /// bridge): the Gateway resolved and froze the published group's
-    /// definition (W resolve) and submitted the trusted scope plus its
-    /// stable intent; this side turns it into the round the licensed
-    /// admission installs. Only the worker builds rounds and licenses —
-    /// the Gateway never touches the store, so no second execution
-    /// authority exists.
+    fn strict_admission(&self) -> Result<&StrictAdmission, StoreError> {
+        self.strict.as_ref().ok_or_else(|| invalid("strict_rounds_unconfigured"))
+    }
+
+    /// Freeze a new strict round from the immutable SessionSpec, not from
+    /// the current directory revision of a reused context.
     fn group_round_of(
         &self,
-        now: TimestampMillis,
         scope: &TaskScope,
         command: &TaskAdmissionCommand,
-    ) -> Result<(GroupStartRequest, InputId), StoreError> {
-        let definition = command
-            .create_session
-            .as_ref()
-            .ok_or_else(|| invalid("group_round_definition_missing"))?;
+        spec: &SessionSpec,
+        generation: NonZeroU64,
+    ) -> Result<GroupStartRequest, StoreError> {
         let InputBody::User { payload } = &command.input.body else {
             return Err(invalid("group_round_body"));
         };
-        // The public surface's wire shape is the frozen plain message
-        // itself: it rides as the round's single ordered part.
-        let data = match payload {
-            Payload::Inline(value) => value.clone(),
-            Payload::Ref(_) => return Err(invalid("group_round_payload_inline")),
+        let Payload::Inline(value) = payload else {
+            return Err(invalid("group_round_payload_inline"));
         };
-        // A fresh session starts at generation one; the store's generation
-        // fencing (`stale_generation`) holds every other claim.
-        let request_id = RequestId(command.input.input_id.0.clone());
-        let request = GroupStartRequest {
+        let parts = value.get("parts").and_then(serde_json::Value::as_array)
+            .filter(|parts| !parts.is_empty()).ok_or_else(|| invalid("group_round_parts"))?;
+        let ordered_parts = parts.iter().map(|part| {
+            let fields = part.as_object().filter(|fields| fields.len() == 1)
+                .ok_or_else(|| invalid("group_round_part_unsupported"))?;
+            if let Some(text) = fields.get("text").and_then(serde_json::Value::as_str) {
+                Ok(RoundPart::Text { text: text.to_owned() })
+            } else if let Some(data) = fields.get("data") {
+                Ok(RoundPart::Data { data: data.clone() })
+            } else {
+                Err(invalid("group_round_part_unsupported"))
+            }
+        }).collect::<Result<Vec<_>, _>>()?;
+        Ok(GroupStartRequest {
             input: RoundInput {
                 schema_version: RoundSchemaVersion::V1,
                 source: GroupRoundSource::GroupA2a,
                 key: RoundKey {
                     scope: scope.clone(),
-                    group: definition.group.clone(),
+                    group: spec.group.clone(),
                     sid: command.input.sid.clone(),
                     tid: command.input.tid.clone(),
-                    generation: std::num::NonZeroU64::new(1)
-                        .ok_or_else(|| invalid("group_round_generation"))?,
+                    generation,
                 },
-                ordered_parts: vec![RoundPart::Data { data }],
-                workflow_ref: definition.workflow.clone(),
+                ordered_parts,
+                workflow_ref: spec.workflow.clone(),
                 history_cut: BlobRef {
                     key: HISTORY_CUT_KEY.into(),
                     digest: bcs_dist_encoding::digest_json(&serde_json::json!({
                         "entries": [],
                     })),
                 },
-                execution_deadline: TimestampMillis((now.0).saturating_add(
-                    i64::try_from(definition.limits.task_timeout_millis)
+                execution_deadline: TimestampMillis((self.now)().0.saturating_add(
+                    i64::try_from(spec.limits.task_timeout_millis)
                         .unwrap_or(i64::MAX / 2),
                 )),
             },
-            request_id: request_id.clone(),
+            request_id: RequestId(command.input.input_id.0.clone()),
             request_digest: command.input.business_digest.clone(),
             normalization_ref: BlobRef {
                 key: format!("group-round-norm:v1:{}", command.input.input_id.0),
@@ -135,122 +145,148 @@ impl WorkerTaskAdmission {
                 })),
             },
             return_configuration: serde_json::json!({"mode": "text"}),
-        };
-        let input_id =
-            bcs_dist_store::group_admission::strict_round_input_id(&request)?;
-        Ok((request, input_id))
+        })
     }
 
-    /// The strict round a message key's first construction froze in its
-    /// durable record. Plan T2: a retry replays the original normalization —
-    /// never a newly generated timestamp — so the drifting fields of a fresh
-    /// construction (the execution window) can never read as changed content.
+    /// First-session recovery before the round registry row exists. Only the
+    /// generation-one bootstrap can have a staged inbox record without a
+    /// registry row; successors reserve through the round repo first.
     async fn original_group_round(
         &self,
         scope: &TaskScope,
-        definition: &bcs_service_api::port::dist_agent::FrozenGroupDefinition,
+        spec: &SessionSpec,
         command: &TaskAdmissionCommand,
-    ) -> Result<Option<(GroupStartRequest, InputId)>, StoreError> {
+    ) -> Result<Option<GroupStartRequest>, StoreError> {
         let input_id = bcs_dist_store::group_admission::strict_round_input_id_parts(
             scope,
-            &definition.group,
+            &spec.group,
             &RequestId(command.input.input_id.0.clone()),
             &command.input.business_digest,
         )?;
         let Some(original) = self.inbox.lookup(scope, &input_id).await? else {
             return Ok(None);
         };
-        let InputBody::User { payload } = &original.input.body else {
-            return Ok(None);
+        let InputBody::User { payload: Payload::Inline(value) } = original.input.body else {
+            return Err(invalid("group_round_encoding"));
         };
-        let Payload::Inline(value) = payload else {
-            return Ok(None);
-        };
-        let request: GroupStartRequest = serde_json::from_value(value.clone())
-            .map_err(|_| invalid("group_round_encoding"))?;
-        if request.input.key.scope != *scope
-            || request.input.key.sid != command.input.sid
-            || request.input.key.tid != command.input.tid
-        {
-            return Err(invalid("group_round_identity"));
-        }
-        Ok(Some((request, input_id)))
+        let request = serde_json::from_value(value).map_err(|_| invalid("group_round_encoding"))?;
+        Ok(Some(request))
     }
 
-    /// Bridge the strict round start of a fresh GroupA2a session: stage the
-    /// round's durable inbox record (its session pre-write included), then
-    /// install the licensed round through the canonical strict seam. The
-    /// staging is a idempotent durable repair — the licensed install drives
-    /// or re-drives the same record.
+    /// First-session bootstrap only. The repo stages successor starts itself,
+    /// after classifying Busy, stale generations and retained request keys.
+    async fn stage_first_round(
+        &self,
+        mut initial: AdmitRequest,
+        request: &GroupStartRequest,
+    ) -> Result<StrictRoundStage, StoreError> {
+        initial.input.input_id = bcs_dist_store::group_admission::strict_round_input_id(request)?;
+        initial.input.body = InputBody::User {
+            payload: Payload::Inline(serde_json::to_value(request)
+                .map_err(|_| invalid("group_round_encoding"))?),
+        };
+        self.inbox.stage_strict_round(
+            initial,
+            StrictRoundIdentity {
+                request_id: request.request_id.0.clone(),
+                generation: request.input.key.generation.get(),
+            },
+        ).await
+    }
+
     async fn admit_strict_start(
         &self,
         scope: &TaskScope,
         command: &TaskAdmissionCommand,
     ) -> Result<AdmitOutcome, StoreError> {
-        let now = (self.now)();
-        let (request, strict_input_id) = match self
-            .original_group_round(scope, command.create_session.as_ref().expect("checked by the caller"), command)
-            .await?
-        {
-            Some(original) => original,
-            None => self.group_round_of(now, scope, command)?,
+        let strict = self.strict_admission()?;
+        let sid = &command.input.sid;
+        let existing = strict.sessions.get_spec(sid).await?;
+        let initial = if existing.is_none() {
+            Some(self.initialize(scope, command)?)
+        } else {
+            None
         };
-        let initial = self.initialize(scope, command)?;
-        let inbox_input = InputEnvelope {
-            schema_version: command.input.schema_version,
-            input_id: strict_input_id.clone(),
-            business_digest: request.request_digest.clone(),
-            sid: command.input.sid.clone(),
-            tid: command.input.tid.clone(),
-            body: InputBody::User {
-                payload: Payload::Inline(
-                    serde_json::to_value(&request)
-                        .map_err(|_| invalid("group_round_encoding"))?,
-                ),
-            },
-        };
-        let staged = self
-            .inbox
-            .stage_strict_round(
-                AdmitRequest {
-                    scope: scope.clone(),
-                    input: inbox_input,
-                    create_session: initial.create_session,
-                    create_task: initial.create_task,
-                },
-                StrictRoundIdentity {
-                    request_id: request.request_id.0.clone(),
-                    generation: request.input.key.generation.get(),
-                },
-            )
-            .await?;
-        if matches!(
-            staged,
-            StrictRoundStage::Delivered(AdmitOutcome::ContentConflict)
-        ) {
-            // The staged record's first identity wins; a changed
-            // normalization never delivers.
+        let spec = existing.as_ref()
+            .or_else(|| initial.as_ref().and_then(|request| request.create_session.as_ref()))
+            .ok_or_else(|| invalid("group_round_definition_missing"))?;
+        if spec.scope != *scope || spec.sid != *sid || spec.kind != SessionKind::FsmGroup {
+            return Err(invalid("group_round_session_binding"));
+        }
+        if command.create_session.as_ref().is_some_and(|proposed| proposed.group != spec.group) {
             return Ok(AdmitOutcome::ContentConflict);
         }
-        match self.admit_group_round(scope, &request).await? {
-            Admission::New { .. } | Admission::Replay { .. } => {
+        let request_id = RequestId(command.input.input_id.0.clone());
+        let identity = GroupRequestIdentity::strict(scope, &spec.group, &request_id);
+        let request = match strict.rounds.lookup(&identity).await? {
+            GroupRequestRecord::Accepted(original) | GroupRequestRecord::Prepared(original) => {
+                if !same_round_intent(&original, spec, command) {
+                    return Ok(AdmitOutcome::ContentConflict);
+                }
+                original
+            }
+            GroupRequestRecord::Expired => return Err(round_expired()),
+            GroupRequestRecord::Absent => {
+                let current = strict.sessions.load(sid).await?;
+                let license = current.as_ref()
+                    .and_then(|state| state.checkpoint.runner_state.as_ref())
+                    .and_then(|state| decode_strict_license(&state.state.value));
+                if license.as_ref().is_some_and(|license| {
+                    license.scope != *scope || license.sid != *sid || license.group != spec.group
+                }) {
+                    return Err(invalid("group_round_session_binding"));
+                }
+                let mut request = if let Some(license) = license {
+                    let generation = license.generation.checked_add(1)
+                        .ok_or_else(|| invalid("group_round_generation"))?;
+                    self.group_round_of(scope, command, spec, generation)?
+                } else {
+                    match self.original_group_round(scope, spec, command).await? {
+                        Some(original) if same_round_intent(&original, spec, command) => original,
+                        Some(_) => return Ok(AdmitOutcome::ContentConflict),
+                        None => self.group_round_of(scope, command, spec, NonZeroU64::MIN)?,
+                    }
+                };
+                if let Some(initial) = &initial
+                    && matches!(self.stage_first_round(initial.clone(), &request).await?,
+                        StrictRoundStage::Delivered(AdmitOutcome::ContentConflict))
+                {
+                    // A concurrent identical bootstrap may have selected
+                    // its own clock-derived fields first.
+                    match self.original_group_round(scope, spec, command).await? {
+                        Some(original) if same_round_intent(&original, spec, command) => request = original,
+                        _ => return Ok(AdmitOutcome::ContentConflict),
+                    }
+                }
+                request
+            }
+        };
+        let mut outcome = self.admit_group_round(scope, &request).await?;
+        if outcome == Admission::Conflict {
+            // Lookup is not a reservation. A concurrent same-key successor
+            // may have frozen a different deadline before our bind CAS.
+            if let GroupRequestRecord::Accepted(original) | GroupRequestRecord::Prepared(original) =
+                strict.rounds.lookup(&identity).await?
+                && original != request
+                && same_round_intent(&original, spec, command)
+            {
+                outcome = self.admit_group_round(scope, &original).await?;
+            }
+        }
+        match outcome {
+            Admission::New { accepted } | Admission::Replay { accepted } => {
                 Ok(AdmitOutcome::Accepted(AdmissionReceipt {
-                    sid: command.input.sid.clone(),
-                    tid: command.input.tid.clone(),
+                    sid: accepted.input.key.sid,
+                    tid: accepted.input.key.tid,
                     input_id: command.input.input_id.clone(),
-                    business_digest: command.input.business_digest.clone(),
+                    business_digest: accepted.request_digest,
                 }))
             }
-            // A competition answered by the durable authority: no accepted
-            // task, no queue entry, no reserved message key — the caller
-            // retries the same message key.
             Admission::Busy => Err(StoreError::NotApplied {
                 code: "group_round_busy".into(),
             }),
             Admission::Conflict => Ok(AdmitOutcome::ContentConflict),
-            Admission::Expired => Err(StoreError::NotApplied {
-                code: "group_round_expired".into(),
-            }),
+            Admission::Expired => Err(round_expired()),
         }
     }
 
@@ -349,6 +385,25 @@ impl WorkerTaskAdmission {
         self.inbox.admit(original).await
     }
 }
+
+fn same_round_intent(
+    original: &GroupStartRequest,
+    spec: &SessionSpec,
+    command: &TaskAdmissionCommand,
+) -> bool {
+    let key = &original.input.key;
+    key.scope == spec.scope
+        && key.group == spec.group
+        && key.sid == command.input.sid
+        && key.tid == command.input.tid
+        && original.request_id.0 == command.input.input_id.0
+        && original.request_digest == command.input.business_digest
+}
+
+fn round_expired() -> StoreError {
+    StoreError::NotApplied { code: "group_round_expired".into() }
+}
+
 fn invalid(code: &str) -> StoreError {
     StoreError::Invalid { code: code.into() }
 }
@@ -364,20 +419,22 @@ impl TaskAdmissionCoreService for WorkerTaskAdmission {
         {
             return Err(invalid("invalid_task_creation"));
         }
-        // The GroupA2a entrance's first message names a fresh strict
-        // session (the `g` namespace marker of the durable session
-        // identity is the routing fact, never caller metadata): its
-        // round start goes through the licensed strict seam, so the
-        // generic inbox entry never installs a task on the session it
-        // would have to later fence anyway. Every other command keeps
-        // the generic path — the old-RPC-compatible contract stays.
-        if self.rounds.is_some()
-            && command.start_task
-            && command.create_session.is_some()
-            && matches!(command.input.body, InputBody::User { .. })
+        // Route by the durable entrance, not by whether this start also
+        // creates a session. Neither initial nor successor Group REST rounds
+        // may use the generic JSON-RPC inbox path.
+        if command.start_task
             && CreationSource::of_sid(&command.input.sid) == Some(CreationSource::GroupA2a)
         {
             return self.admit_strict_start(scope, &command).await;
+        }
+        // The Gateway has checked the request's entrance and grants. Only
+        // a GroupA2a Cancel can use the licensed control entry; legacy and
+        // other controls retain the generic Inbox path and its source fence.
+        if self.strict.is_some()
+            && matches!(command.input.body, InputBody::Cancel { .. })
+            && CreationSource::of_sid(&command.input.sid) == Some(CreationSource::GroupA2a)
+        {
+            return self.inbox.admit_strict_cancel(self.initialize(scope, &command)?).await;
         }
         if let Some(original) = self.inbox.lookup(scope, &command.input.input_id).await? {
             return self.recover(scope, &command, original).await;

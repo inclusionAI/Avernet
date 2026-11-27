@@ -122,8 +122,16 @@ async fn strict_rounds_entry_delegates_to_the_configured_repo() {
         service.admit_group_round(&scope(), &round(&scope())).await,
         Err(StoreError::Invalid { ref code }) if code == "strict_rounds_unconfigured"
     ));
-    let service =
-        WorkerTaskAdmission::with_rounds(inbox(), rounds.clone(), Arc::new(|| TimestampMillis(1)));
+    let model = Arc::new(bcs_test_support::store_model::Model::default());
+    let sessions = bcs_dist_store::coordination::CoordinationStore::new(
+        model.clone(),
+        model.clone(),
+        model,
+        bcs_dist_store::layout::KeyLayout::new("worker", "round-admission").unwrap(),
+    ).unwrap();
+    let service = WorkerTaskAdmission::with_rounds(
+        inbox(), rounds.clone(), Arc::new(sessions), Arc::new(|| TimestampMillis(1)),
+    );
     let admitted = service
         .admit_group_round(&scope(), &round(&scope()))
         .await

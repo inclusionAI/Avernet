@@ -231,6 +231,24 @@ fn name(outcome: &SendOutcome) -> String {
 }
 
 #[tokio::test]
+async fn strict_node_send_preserves_order_and_carries_bound_predecessors() {
+    let (client, agent) = fixture().await;
+    agent.on("SendStreamingMessage", Answer::Sse(vec![json!({"task": task("TASK_STATE_WORKING")})]));
+    let mut req = request("step-two");
+    let upstream = json!({"research": {"state": "completed", "artifacts": [{"parts": [{"text": "research answer"}]}]}});
+    req.payload = Payload::Inline(json!({
+        "schema_version": 1, "generation": 1, "node": "review", "attempt": 1,
+        "parts": [{"kind":"text", "text":"check this"}, {"kind":"data", "data":42}],
+        "upstream": {"research": {"kind":"inline", "value":upstream["research"]}}
+    }));
+    let outcome = client.start(&start_authority(), req).await;
+    assert_eq!(name(&outcome), "accepted");
+    assert_eq!(agent.call(0)["params"]["message"]["parts"], json!([
+        {"text":"check this"}, {"data":42}, {"data":{"upstream": upstream}}
+    ]));
+}
+
+#[tokio::test]
 async fn a_start_is_sent_once_with_a_stable_message_id_and_mapped_to_events() {
     let (client, agent) = fixture().await;
     agent.on(

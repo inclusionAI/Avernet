@@ -30,7 +30,7 @@ use crate::delayed::UnresolvedKind;
 use crate::report::Admitted;
 use crate::send::RemoteRead;
 use bcs_dist_model::*;
-use bcs_service_api::core::dist_connector::{DedupeRecheck, INPUT_MAYBE_SENT, UncertainSend};
+use bcs_service_api::core::dist_connector::INPUT_MAYBE_SENT;
 use bcs_service_api::port::dist_agent::{
     CallOperation, CancelOutcome, SendOutcome, StableSendRequest,
 };
@@ -70,22 +70,13 @@ impl Call {
             &crate::send::canonical_body(&payload),
             self.config.send_fingerprint(&capabilities),
         );
-        // A resend after an unknown outcome waits out its backoff.
-        if self.input_resends > 0 && self.backing_off() {
-            return Ok(());
-        }
-        match self.held.begin_send(operation.clone(), current.clone()).await {
+        match self.held.begin_send(operation.clone(), current).await {
             Ok(_) => {}
             Err(HolderError::Lost) => return Err(Stop::Lost),
-            // A former holder recorded intent for this input and it is not
-            // confirmed: it may already be with the agent. Intent and proof
-            // are durable; only an agent whose recorded proof still upholds
-            // the negotiated dedupe gets it again (then the code falls
-            // through and resends it).
+            // A former holder's input intent may already have reached the
+            // agent. A frozen capability is not a downstream dedupe proof.
             Err(HolderError::InvalidTransition { code }) if code == INPUT_MAYBE_SENT => {
-                if !self.dedupe_recheck(&spec, &current, &capabilities) {
-                    return self.block_input(UnresolvedKind::Uncertain, "input_maybe_sent").await;
-                }
+                return self.uncertain_reply("input_maybe_sent").await;
             }
             // A temporary store error or another refusal: nothing was sent,
             // try again on the next tick.
@@ -94,7 +85,6 @@ impl Call {
                 return Ok(());
             }
         }
-        let resend_allowed = self.dedupe_recheck(&spec, &current, &capabilities);
         let authority = self.authority_now(CallOperation::Continue, Some(remote.clone()), &spec);
         let send = StableSendRequest {
             request_id,
@@ -136,44 +126,22 @@ impl Call {
                 }
                 Ok(()) // retried on the next tick
             }
-            SendOutcome::OutcomeUnknown { code } => {
-                if !resend_allowed {
-                    return self.block_input(UnresolvedKind::Uncertain, &code).await;
-                }
-                // A dedupe-verified idempotent input is sent again, with
-                // backoff and a bound like the start's resend.
-                self.input_resends += 1;
-                if self.input_resends > self.config.not_sent_retries {
-                    return self.block_input(UnresolvedKind::Uncertain, "resend_exhausted").await;
-                }
-                tracing::warn!(did = %did.0, code, "input outcome unknown; resending after a backoff");
-                self.back_off();
-                Ok(())
-            }
+            SendOutcome::OutcomeUnknown { code } => self.uncertain_reply(&code).await,
         }
     }
 
-    /// Whether the input this attempt would send may rely on the target's
-    /// dedupe for a resend (plan T6): the proof recorded with this input's
-    /// send intent — this attempt's own after a fresh write, an earlier
-    /// attempt's after an INPUT_MAYBE_SENT refusal — must still uphold the
-    /// window, domain, semantics and configuration under the current grants.
-    fn dedupe_recheck(
-        &self,
-        spec: &DispatchSpec,
-        current: &SendProof,
-        capabilities: &DownstreamCapabilities,
-    ) -> bool {
-        let resolved_domain = crate::identity::dedupe_domain(&spec.target);
-        let now = TimestampMillis(self.config.clock.now());
-        let recorded = self.held.view().execution.send_proof.clone();
-        let recheck = DedupeRecheck {
-            recorded: recorded.as_ref(),
-            current,
-            now: Some(now),
-            resolved_domain: Some(resolved_domain.as_str()),
-        };
-        self.ports.rules.uncertain_input(capabilities, &recheck) == UncertainSend::Resend
+    /// An ambiguous reply never authorizes another send or skips its
+    /// sequence. Keep following the known remote when possible; otherwise
+    /// pass the stop obligation to verification (including cancel-only).
+    async fn uncertain_reply(&mut self, code: &str) -> Flow {
+        let capabilities = &self.spec().capabilities;
+        if self.events.is_none() && (self.blind || !(capabilities.query_by_task || capabilities.subscribe)) {
+            let key = self.held.view().execution.remote.as_ref()
+                .filter(|_| capabilities.cancel)
+                .map_or(VerificationKey::Retained, |remote| VerificationKey::ByTask { remote: remote.clone() });
+            return self.hand_off(code, key).await;
+        }
+        self.block_input(UnresolvedKind::Uncertain, code).await
     }
 
     /// Records that the agent definitely accepted input `seq`
@@ -185,7 +153,6 @@ impl Call {
         held_write!(self, "input confirmation", self.held.confirm_input(seq, evidence.clone()));
         self.awaiting_input = false;
         self.input_not_sent = 0;
-        self.input_resends = 0;
         self.reset_backoff();
         // The polled state is deliberately kept: until a poll observes
         // something else, an identical read is the question just answered

@@ -17,8 +17,11 @@ use bcs_dist_store::capability;
 use bcs_dist_store::codec::{decode_ev_entry, decode_json, ev_entry_tid, stream_id};
 use bcs_dist_store::error::from_read;
 use bcs_dist_store::layout::KeyLayout;
+use bcs_service_api::application::dist_gateway::CreationSource;
 use bcs_service_api::port::repo::distributed::common::{Page, PageRequest, StoreError};
-use bcs_service_api::port::repo::distributed::result::ResultStorePort;
+use bcs_service_api::port::repo::distributed::group_round::{StrictLicense, decode_strict_license};
+use bcs_service_api::port::repo::distributed::session::{EffectKind, FeedPublication};
+use bcs_service_api::port::repo::distributed::result::{ArchiveGrants, ArchivedTaskView, ResultStorePort, TaskArchiveRepo};
 use bcs_service_api::port::repo::distributed::task_feed::*;
 use bcs_store_api::StoreCapability;
 use bcs_store_api::document::DocumentStorePlugin;
@@ -88,6 +91,7 @@ pub(crate) struct Shared {
     pub(crate) zset: Arc<dyn ZSetStorePlugin>,
     pub(crate) stream: Arc<dyn StreamStorePlugin>,
     pub(crate) results: Arc<dyn ResultStorePort>,
+    pub(crate) group_archives: Option<Arc<dyn TaskArchiveRepo>>,
     pub(crate) layout: KeyLayout,
     pub(crate) config: GatewayStoreConfig,
     pub(crate) readers: SessionReaders,
@@ -107,6 +111,32 @@ impl StoreTaskReader {
         results: Arc<dyn ResultStorePort>,
         layout: KeyLayout,
         config: GatewayStoreConfig,
+    ) -> Result<Self, StoreError> {
+        Self::build(documents, zset, stream, results, layout, config, None)
+    }
+
+    /// The mounted group gateway opts into the strict authority cut. Legacy
+    /// gateway assemblies that have no strict-round repository keep their reader.
+    pub fn with_group_archives(
+        documents: Arc<dyn DocumentStorePlugin>,
+        zset: Arc<dyn ZSetStorePlugin>,
+        stream: Arc<dyn StreamStorePlugin>,
+        results: Arc<dyn ResultStorePort>,
+        layout: KeyLayout,
+        config: GatewayStoreConfig,
+        group_archives: Arc<dyn TaskArchiveRepo>,
+    ) -> Result<Self, StoreError> {
+        Self::build(documents, zset, stream, results, layout, config, Some(group_archives))
+    }
+
+    fn build(
+        documents: Arc<dyn DocumentStorePlugin>,
+        zset: Arc<dyn ZSetStorePlugin>,
+        stream: Arc<dyn StreamStorePlugin>,
+        results: Arc<dyn ResultStorePort>,
+        layout: KeyLayout,
+        config: GatewayStoreConfig,
+        group_archives: Option<Arc<dyn TaskArchiveRepo>>,
     ) -> Result<Self, StoreError> {
         capability::require(&[
             (documents.as_ref(), StoreCapability::DocumentCas),
@@ -131,6 +161,7 @@ impl StoreTaskReader {
                 zset,
                 stream,
                 results,
+                group_archives,
                 layout,
                 config,
                 readers,
@@ -163,6 +194,14 @@ impl Shared {
     /// terminal proof sealed by the authority commit is the one cut that may
     /// disclose the archived terminal here.
     async fn stored(&self, scope: &TaskScope, tid: &Tid) -> Result<Option<Stored>, StoreError> {
+        if let Some(archives) = &self.group_archives
+            && let Some((sid, _)) = tid.0.rsplit_once('.')
+        {
+            let sid = Sid(sid.to_owned());
+            if CreationSource::of_sid(&sid) == Some(CreationSource::GroupA2a) {
+                return self.strict_stored(archives.as_ref(), scope, &sid, tid).await;
+            }
+        }
         match self.snapshot(tid).await? {
             Some(snapshot) if &snapshot.scope == scope => {
                 if is_terminal(snapshot.content.status)
@@ -183,6 +222,97 @@ impl Shared {
                 None => Ok(None),
             },
         }
+    }
+
+    /// Read a strict group's authority from a single checkpoint version.
+    /// A feed pre-write is not an acceptance; a terminal feed snapshot is
+    /// not a confirmed result. Active reads use the exact license; terminal
+    /// reads use the archive even if the feed is lagging or absent.
+    async fn strict_stored(
+        &self,
+        archives: &dyn TaskArchiveRepo,
+        scope: &TaskScope,
+        sid: &Sid,
+        tid: &Tid,
+    ) -> Result<Option<Stored>, StoreError> {
+        let Some(doc) = self.documents.read_document(&self.layout.ckpt(sid)?).await
+            .map_err(|e| from_read(&e))? else {
+            return Ok(None);
+        };
+        let Some(runner) = doc.value.pointer("/checkpoint/runner_state/state/value") else {
+            return Ok(None);
+        };
+        let Some(license) = decode_strict_license(runner).filter(|license| {
+            license.schema_version == 1 && license.sid == *sid && license.scope == *scope
+        }) else {
+            return Ok(None);
+        };
+        let active = license.tid == *tid;
+        let retained = if active {
+            runner.get("group_terminal").cloned().map(decode_json::<TerminalProof>).transpose()?
+        } else {
+            None
+        };
+        let cold = !active && runner.get("group_cold").and_then(serde_json::Value::as_array)
+            .is_some_and(|entries| entries.iter().any(|entry| {
+                entry.get("schema_version").and_then(serde_json::Value::as_u64) == Some(1)
+                    && entry.get("tid").and_then(serde_json::Value::as_str) == Some(tid.0.as_str())
+            }));
+        if retained.is_some() || cold {
+            let grants = ArchiveGrants { read: true };
+            if let Some(proof) = archives.get_terminal_proof(&grants, scope, &license.group, tid).await? {
+                if proof.schema_version != RoundSchemaVersion::V1
+                    || proof.key.scope != *scope || proof.key.sid != *sid
+                    || proof.key.group != license.group || proof.key.tid != *tid
+                    || (active && (proof.key != license.round_key() || retained.as_ref() != Some(&proof)))
+                    || (cold && proof.key.generation >= license.generation)
+                {
+                    return Err(invalid("group_terminal_authority_mismatch"));
+                }
+                let Some(ArchivedTaskView::Committed { archive, check }) =
+                    archives.get_archived(&grants, scope, &license.group, tid).await?
+                else {
+                    return Err(not_applied("group_terminal_archive_missing"));
+                };
+                let record = archive.record;
+                if archive.round != proof.key || record.scope != *scope || record.sid != *sid || record.tid != *tid
+                    || record.status != proof.status || record.source_commit.0 >= proof.commit_seq.0
+                    || archive.result_digest != proof.result_ref.digest
+                    || bcs_dist_store::archive::result_blob_reference(&record)? != proof.result_ref
+                    || (proof.status == TerminalStatus::Completed && !check.fits)
+                {
+                    return Err(invalid("group_terminal_archive_mismatch"));
+                }
+                return Ok(Some(Stored::StrictArchived(record, proof.result_ref)));
+            }
+        }
+        if !active {
+            return Ok(None);
+        }
+        let Some(snapshot) = self.snapshot(tid).await?.filter(|snapshot| {
+            snapshot.scope == *scope && snapshot.sid == *sid && snapshot.tid == *tid
+        }) else {
+            return Err(not_applied("group_accepted_snapshot_missing"));
+        };
+        if !is_terminal(snapshot.content.status) {
+            return Ok(Some(Stored::Live(snapshot)));
+        }
+        // The follower may publish before the strict authority commits its
+        // cold confirmation. Keep the accepted task visible, but do not read
+        // terminal state, artifacts or result from the unconfirmed feed cut.
+        let previous = previous_group_snapshot(&doc.value, &license, &snapshot)?;
+        Ok(Some(Stored::Live(previous.unwrap_or_else(|| {
+            let mut safe = snapshot;
+            safe.content = TaskContent {
+                status: TaskStatus::Working,
+                interactions: Vec::new(),
+                snapshot: Payload::Inline(serde_json::json!({"format_version": DISPLAY_FORMAT_VERSION, "units": []})),
+                result_ref: None,
+            };
+            safe.snapshot_event_id = None;
+            safe.updated_at = safe.created_at;
+            safe
+        }))))
     }
 
     /// May this task's terminal be disclosed on the old read path? For
@@ -274,9 +404,52 @@ impl Shared {
     }
 }
 
+fn previous_group_snapshot(
+    document: &serde_json::Value,
+    license: &StrictLicense,
+    terminal: &TaskSnapshot,
+) -> Result<Option<TaskSnapshot>, StoreError> {
+    let checkpoint = document.get("checkpoint");
+    let finalizing_at = checkpoint
+        .and_then(|value| value.get("tasks"))
+        .and_then(serde_json::Value::as_array)
+        .and_then(|tasks| tasks.iter().find(|task| task.get("tid").and_then(serde_json::Value::as_str) == Some(&license.tid.0)))
+        .and_then(|task| task.pointer("/finalization/record/source_commit"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(terminal.source_commit.0);
+    let Some(entries) = checkpoint
+        .and_then(|value| value.get("feed_publications"))
+        .and_then(serde_json::Value::as_array)
+    else { return Ok(None) };
+    for entry in entries.iter().rev() {
+        if entry.get("tid").and_then(serde_json::Value::as_str) != Some(&license.tid.0)
+            || entry.pointer("/kind/kind").and_then(serde_json::Value::as_str) != Some("publish_snapshot")
+            || entry.pointer("/kind/snapshot/source_commit").and_then(serde_json::Value::as_u64)
+                .is_none_or(|sequence| sequence >= finalizing_at)
+        {
+            continue;
+        }
+        let publication: FeedPublication = decode_json(entry.clone())?;
+        if publication.schema_version != 1 || publication.sid != license.sid
+            || publication.group != license.group || publication.scope != license.scope
+            || publication.generation != license.generation
+        {
+            continue;
+        }
+        if let EffectKind::PublishSnapshot { snapshot } = publication.kind
+            && snapshot.scope == license.scope && snapshot.tid == license.tid
+            && snapshot.sid == license.sid && !is_terminal(snapshot.content.status)
+        {
+            return Ok(Some(snapshot));
+        }
+    }
+    Ok(None)
+}
+
 pub(crate) enum Stored {
     Live(TaskSnapshot),
     Archived(FinalTaskRecord),
+    StrictArchived(FinalTaskRecord, BlobRef),
 }
 
 fn is_terminal(status: TaskStatus) -> bool {
@@ -325,6 +498,11 @@ pub(crate) fn stored_view(stored: Stored) -> TaskView {
     match stored {
         Stored::Live(snapshot) => live_view(snapshot),
         Stored::Archived(record) => archived_view(record),
+        Stored::StrictArchived(record, result_ref) => {
+            let mut view = archived_view(record);
+            view.content.result_ref = Some(result_ref);
+            view
+        }
     }
 }
 
@@ -391,7 +569,9 @@ impl TaskReaderPort for StoreTaskReader {
     ) -> Result<Option<RestoredTask>, StoreError> {
         Ok(match self.shared.stored(scope, tid).await? {
             None => None,
-            Some(Stored::Archived(record)) => Some(RestoredTask::Final(archived_view(record))),
+            Some(stored @ (Stored::Archived(_) | Stored::StrictArchived(_, _))) => {
+                Some(RestoredTask::Final(stored_view(stored)))
+            }
             Some(Stored::Live(snapshot)) if is_terminal(snapshot.content.status) => {
                 Some(RestoredTask::Final(live_view(snapshot)))
             }

@@ -515,12 +515,27 @@ fn build_message(
     let Payload::Inline(payload) = &request.payload else {
         return Err("request_by_reference");
     };
-    let parts = match payload {
-        Value::Object(object) => object.get("parts").filter(|parts| parts.is_array()).cloned(),
-        Value::String(text) => Some(json!([{ "text": text }])),
+    let mut parts = match payload {
+        Value::Object(object) => object.get("parts").and_then(Value::as_array).cloned(),
+        Value::String(text) => Some(vec![json!({ "text": text })]),
         _ => None,
+    }.ok_or("request_invalid")?;
+    if payload.get("schema_version").and_then(Value::as_u64) == Some(1)
+        && payload.get("generation").and_then(Value::as_u64).is_some()
+        && payload.get("node").and_then(Value::as_str).is_some()
+        && let Some(predecessors) = payload.get("upstream")
+    {
+        let mut results = serde_json::Map::new();
+        for (node, encoded) in predecessors.as_object().ok_or("request_invalid")? {
+            match serde_json::from_value(encoded.clone()).map_err(|_| "request_invalid")? {
+                Payload::Inline(content) => { results.insert(node.clone(), content); }
+                Payload::Ref(_) => return Err("request_by_reference"),
+            }
+        }
+        if !results.is_empty() {
+            parts.push(json!({"data": {"upstream": results}}));
+        }
     }
-    .ok_or("request_invalid")?;
     let mut message = json!({ "messageId": request.request_id.0, "role": "ROLE_USER", "parts": parts });
     let context = request
         .context_id

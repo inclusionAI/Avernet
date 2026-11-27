@@ -104,7 +104,7 @@ impl StoreInboxProducer {
                     generation: c.generation,
                     start: c.start(),
                     decision: None,
-                    strict: c.strict.is_some(),
+                    strict: c.start() && c.strict.is_some(),
                 },
             );
             let size = serde_json::to_vec(&s)

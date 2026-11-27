@@ -319,6 +319,17 @@ impl InboxProducerPort for StoreInboxProducer {
         self.append_intermediate(request).await
     }
 
+    async fn admit_strict_cancel(&self, request: AdmitRequest) -> Result<AdmitOutcome, StoreError> {
+        if !matches!(request.input.body, InputBody::Cancel { .. }) {
+            return Err(invalid("strict_cancel_body"));
+        }
+        match self.admit_scoped(request, None, Some(StrictEntry::Cancel)).await? {
+            AdmissionResult::Outcome(AdmitOutcome::Quarantined) => Err(strict_cancel_not_active()),
+            AdmissionResult::Outcome(outcome) => Ok(outcome),
+            AdmissionResult::Staged => Err(invalid("strict_cancel_staged")),
+        }
+    }
+
     async fn stage_strict_round(
         &self,
         request: AdmitRequest,
@@ -349,6 +360,15 @@ pub(super) enum AdmissionResult {
     Staged,
 }
 
+enum StrictEntry {
+    Start(StrictRound),
+    Cancel,
+}
+
+fn strict_cancel_not_active() -> StoreError {
+    StoreError::NotApplied { code: STRICT_CANCEL_NOT_ACTIVE.into() }
+}
+
 impl StoreInboxProducer {
     /// Same-message-key re-admission at a newer generation over a
     /// decided-Rejected strict record (the forfeited claim of a duel
@@ -374,7 +394,7 @@ impl StoreInboxProducer {
             else {
                 return Ok(false);
             };
-            let supersedeable = found.strict.as_ref().is_some_and(|previous| {
+            let supersedeable = found.start() && found.strict.as_ref().is_some_and(|previous| {
                 found.decision.as_ref() == Some(&Decision::Rejected)
                     && previous.request_id == round.request_id
                     && round.generation > previous.generation
@@ -452,7 +472,8 @@ impl StoreInboxProducer {
             // The business digest is deliberately not compared here: `prepare`
             // recomputes it from the stored wire, and the abandonment path
             // passes the caller's digest-bearing request straight through.
-            let same = record.strict.as_ref() == Some(&round)
+            let same = record.start()
+                && record.strict.as_ref() == Some(&round)
                 && record.request.input.sid == request.input.sid
                 && record.request.input.tid == request.input.tid;
             if !same {
@@ -495,7 +516,10 @@ impl StoreInboxProducer {
                 request.create_session = existing.request.create_session.clone();
             }
         }
-        match self.admit_scoped(request, None, Some(round)).await? {
+        if !matches!(request.input.body, InputBody::User { .. }) {
+            return Err(invalid("strict_start_body"));
+        }
+        match self.admit_scoped(request, None, Some(StrictEntry::Start(round))).await? {
             AdmissionResult::Outcome(outcome) => {
                 Ok(crate::group_admission::StrictOutcome::Delivered(outcome))
             }
@@ -507,7 +531,7 @@ impl StoreInboxProducer {
         &self,
         mut request: AdmitRequest,
         connector: Option<ConnectorEventIdentity>,
-        strict: Option<StrictRound>,
+        strict: Option<StrictEntry>,
     ) -> Result<AdmissionResult, StoreError> {
         if let Err(error) = self.prepare(&mut request, connector.as_ref()).await {
             if matches!(&error, StoreError::Invalid { code } if code == "frozen_spec_conflict" || code == "frozen_task_conflict") {
@@ -531,7 +555,7 @@ impl StoreInboxProducer {
         // same message key at a newer generation: the loser's re-admission
         // retargets its own durable record instead of wedging at the entry
         // isolation (same rid, new round generation, old decision = Rejected).
-        if let Some(round) = &strict
+        if let Some(StrictEntry::Start(round)) = &strict
             && self
                 .supersede_rejected_strict(&key, request.clone(), connector.clone(), round)
                 .await?
@@ -554,8 +578,13 @@ impl StoreInboxProducer {
                         code: "strict_claim_source".into(),
                     });
                 }
-                let admission =
-                    self.new_admission(request, schedule.generation, connector.clone(), strict.clone())?;
+                let round = match &strict {
+                    Some(StrictEntry::Start(round)) => Some(round.clone()),
+                    Some(StrictEntry::Cancel) => Some(self.strict_cancel_round(&request).await?
+                        .ok_or_else(strict_cancel_not_active)?),
+                    None => None,
+                };
+                let admission = self.new_admission(request, schedule.generation, connector.clone(), round)?;
                 if self.save(&key, None, &admission, &op).await? {
                     return self.advance(&key, true).await.map_err(|_| unknown(&op));
                 }
@@ -572,11 +601,11 @@ impl StoreInboxProducer {
         if existing.request.input.business_digest != digest {
             return Ok(AdmissionResult::Outcome(AdmitOutcome::ContentConflict));
         }
-        // Entry isolation: a strict record is repaired only by its own entry
-        // (same request id and generation); the generic entry never adopts
-        // one, and a strict entry never takes over a generic record.
+        // Each entry can repair only its own record and the first bound
+        // identity wins. A cancel retry never adopts a new generation.
         match (&existing.strict, &strict) {
-            (Some(a), Some(b)) if a == b => {}
+            (Some(stored), Some(StrictEntry::Start(round))) if stored == round && existing.start() => {}
+            (Some(_), Some(StrictEntry::Cancel)) if !existing.start() => {}
             (Some(_), _) | (_, Some(_)) => {
                 return Err(StoreError::NotApplied {
                     code: "strict_admission_entry".into(),

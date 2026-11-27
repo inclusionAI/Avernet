@@ -64,11 +64,20 @@ pub(super) fn sealed_round_publication(
             history.push(event.clone());
             if let OutputBody::Artifact {
                 artifact_id,
+                class,
                 update,
                 ..
             } = &event.body
             {
-                amend_part(&mut artifacts, artifact_id, update)?;
+                if *class == OutputClass::FinalAnswer {
+                    if let ArtifactUpdate::Upsert { content: Payload::Inline(content) } = update {
+                        artifacts.extend(ArtifactPart::from_final_answer(artifact_id, content, artifacts.len())?);
+                    }
+                    // Referenced values remain available in the history and
+                    // authoritative display snapshot, as with other artifacts.
+                } else {
+                    amend_part(&mut artifacts, artifact_id, update)?;
+                }
             }
         }
     }

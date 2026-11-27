@@ -22,6 +22,7 @@ pub enum JournalPlan {
 
 pub struct DownstreamJournal {
     killed: AtomicBool,
+    confirm_cancel: AtomicBool,
     pub executions: AtomicUsize,
     pub starts_seen: AtomicUsize,
     pub dedupe_hits: AtomicUsize,
@@ -37,6 +38,7 @@ impl DownstreamJournal {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             killed: AtomicBool::new(false),
+            confirm_cancel: AtomicBool::new(false),
             executions: AtomicUsize::new(0),
             starts_seen: AtomicUsize::new(0),
             dedupe_hits: AtomicUsize::new(0),
@@ -86,6 +88,11 @@ impl DownstreamJournal {
             }),
         );
     }
+    /// Subsequent cancel calls for the original remote task confirm it stopped.
+    pub fn confirm_cancel(&self) {
+        self.confirm_cancel.store(true, Ordering::SeqCst);
+    }
+
     fn started_of(&self, request: &RequestId) -> Option<(RemoteTaskRef, String)> {
         self.started.lock().unwrap().get(request).cloned()
     }
@@ -202,12 +209,19 @@ impl DistAgentClientPort for DownstreamJournal {
     }
     async fn cancel(
         &self,
-        _: &CallAuthority,
-        _: &RemoteTaskRef,
+        authority: &CallAuthority,
+        remote: &RemoteTaskRef,
         _: RequestId,
     ) -> CancelOutcome {
         if self.killed.load(Ordering::SeqCst) {
             pending::<CancelOutcome>().await;
+        }
+        if self.confirm_cancel.load(Ordering::SeqCst)
+            && self.started.lock().unwrap().values().any(|(started, node)| {
+                started == remote && node == &authority.node.0
+            })
+        {
+            return CancelOutcome::ConfirmedCanceled;
         }
         CancelOutcome::OutcomeUnknown {
             code: "companion_cancel_unknown".into(),

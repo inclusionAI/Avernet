@@ -89,19 +89,14 @@ async fn an_input_with_an_unknown_outcome_is_not_confirmed_or_resent() {
 }
 
 #[tokio::test]
-async fn an_idempotent_input_is_resent_until_accepted() {
+async fn a_definitely_unsent_input_is_retried_until_accepted() {
     let rig = Rig::new().await;
-    let mut spec = dispatch_spec(&did());
-    // Plan T6: the resend relies on a negotiated persistent dedupe inside
-    // the recorded send-proof window, never on the bare idempotency claim.
-    spec.capabilities.idempotent_input = true;
-    spec.capabilities.persistent_dedupe = true;
     let events = rig.agent.start_stream();
-    rig.worker.create_spec(spec).await;
+    rig.worker.create().await;
     rig.worker.notify().await;
     let _running = rig.start();
     until("accepted", || async { rig.phase().await == "accepted" }).await;
-    rig.agent.on_input(Reply::Unknown);
+    rig.agent.on_input(Reply::NotSent);
     rig.agent.on_input(Reply::NotSent);
     rig.agent.on_input(Reply::Accepted);
     rig.worker.push(pending(1)).await;
@@ -555,24 +550,15 @@ async fn an_unknown_cancel_is_not_resent_on_every_tick() {
 }
 
 #[tokio::test]
-async fn an_idempotent_input_is_resent_a_bounded_number_of_times() {
+async fn a_definitely_unsent_input_has_bounded_retries() {
     let rig = Rig::new().await;
-    let mut spec = dispatch_spec(&did());
-    // Plan T6: the resend relies on a negotiated persistent dedupe inside
-    // the recorded send-proof window, never on the bare idempotency claim.
-    spec.capabilities.idempotent_input = true;
-    spec.capabilities.persistent_dedupe = true;
-    let _events = rig.agent.start_stream();
-    rig.worker.create_spec(spec).await;
-    rig.worker.notify().await;
-    let running = rig.start();
-    until("accepted", || async { rig.phase().await == "accepted" }).await;
+    let (running, _events) = accepted_call(&rig).await;
     for _ in 0..10 {
-        rig.agent.on_input(Reply::Unknown);
+        rig.agent.on_input(Reply::NotSent);
     }
     rig.worker.push(pending(1)).await;
-    until("blocked after the last resend", || async { running.pending_effects().await == 1 }).await;
+    until("blocked after the last retry", || async { running.pending_effects().await == 1 }).await;
     settle().await;
-    assert_eq!(rig.agent.count("input"), 4, "one send and three resends");
+    assert_eq!(rig.agent.count("input"), 4, "one send and three retries");
     assert_eq!(rig.doc().await["execution"]["confirmed_input_through"], serde_json::Value::Null);
 }

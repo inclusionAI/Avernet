@@ -74,7 +74,7 @@ fn status_channel(stored: &Stored) -> (String, i64, Tid, Sid, Option<TaskStatus>
             snapshot.sid.clone(),
             Some(snapshot.content.status),
         ),
-        Stored::Archived(record) => {
+        Stored::Archived(record) | Stored::StrictArchived(record, _) => {
             let status = match record.status {
                 TerminalStatus::Completed => TaskStatus::Completed,
                 TerminalStatus::Failed => TaskStatus::Failed,
@@ -176,7 +176,7 @@ async fn collect_group(
         let (status, updated_at, ..) = status_channel(&stored);
         let sid = match &stored {
             Stored::Live(snapshot) => snapshot.sid.clone(),
-            Stored::Archived(record) => record.sid.clone(),
+            Stored::Archived(record) | Stored::StrictArchived(record, _) => record.sid.clone(),
         };
         if group_of(&sid).as_ref() != Some(group) {
             continue;
@@ -189,7 +189,7 @@ async fn collect_group(
         rows.push(CutRow {
             tid: match &stored {
                 Stored::Live(snapshot) => snapshot.tid.clone(),
-                Stored::Archived(record) => record.tid.clone(),
+                Stored::Archived(record) | Stored::StrictArchived(record, _) => record.tid.clone(),
             },
             sid,
             status,
@@ -230,6 +230,7 @@ async fn materialize(
     group: &GroupId,
     statuses: &[TaskStatus],
     page_size: u32,
+    now: TimestampMillis,
 ) -> Result<(CutSnapshot, String), StoreError> {
     let rows = collect_group(shared, scope, group, statuses).await?;
     if rows.len() > 4096 {
@@ -247,7 +248,7 @@ async fn materialize(
         rows_text.as_bytes(),
     ]);
     let cut = hex_of(&digest).to_owned();
-    let now = (shared.config.now)().0;
+    let now = now.0;
     let snapshot = CutSnapshot {
         schema_version: 1,
         tenant: scope.tenant.0.clone(),
@@ -291,6 +292,16 @@ async fn materialize(
     {
         return Err(not_applied("cut_conflict"));
     }
+    if now >= existing.expires_at_ms {
+        // Only the lease on this immutable row set changes. Old signed cursors
+        // retain their own expiry and cannot regain validity after renewal.
+        let outcome = shared.documents.replace_document(&key, doc.version, &value)
+            .await.map_err(|e| from_read(&e))?;
+        if outcome == WriteOutcome::ConditionNotMet {
+            return Err(not_applied("cut_refresh_contention"));
+        }
+        return Ok((snapshot, cut));
+    }
     Ok((existing, cut))
 }
 
@@ -301,7 +312,7 @@ impl GroupListingPort for StoreTaskReader {
         scope: &TaskScope,
         group: &GroupId,
         query: &GroupIndexQuery,
-        _now: TimestampMillis,
+        now: TimestampMillis,
     ) -> Result<GroupIndexPage, StoreError> {
         let shared = &self.shared;
         let profile = RoundBudgetProfile::v1();
@@ -324,7 +335,7 @@ impl GroupListingPort for StoreTaskReader {
         {
             return Err(not_applied("cursor_secret_unconfigured"));
         }
-        let (snapshot, cut) = materialize(shared, scope, group, &query.statuses, limit).await?;
+        let (snapshot, cut) = materialize(shared, scope, group, &query.statuses, limit, now).await?;
         let total = snapshot.total;
         let rows: Vec<GroupIndexRow> = snapshot.rows[..(limit as usize).min(snapshot.rows.len())]
             .iter()

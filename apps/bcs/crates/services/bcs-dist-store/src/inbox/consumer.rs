@@ -252,11 +252,20 @@ impl StoreInboxProducer {
                         .position
                         .as_ref()
                         .ok_or_else(|| invalid("accepted_without_position"))?;
-                    if self.cursor(sid, pos)? == row.id {
-                        Ok(Some(Some(c.request.input)))
-                    } else {
-                        Ok(Some(None))
+                    if self.cursor(sid, pos)? != row.id {
+                        return Ok(Some(None));
                     }
+                    // Schedule activation and checkpoint succession use
+                    // separate CAS documents. Discard an admitted cancel
+                    // if the round retired before this position was read.
+                    if !c.start() && c.strict.is_some()
+                        && tokio::time::timeout_at(deadline, self.strict_cancel_round(&c.request))
+                            .await
+                            .map_err(|_| unknown("session_read_timeout"))?? != c.strict
+                    {
+                        return Ok(Some(None));
+                    }
+                    Ok(Some(Some(c.request.input)))
                 }
             }
         } else if row.fields.get("intermediate").is_some_and(|v| v == b"1") {

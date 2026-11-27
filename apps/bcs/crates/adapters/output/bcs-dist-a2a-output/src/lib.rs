@@ -15,30 +15,44 @@ fn invalid(code: &'static str) -> OutputAdapterError {
 
 fn class_name(class: OutputClass) -> &'static str {
     match class {
-        OutputClass::Output => "output",
+        OutputClass::Output | OutputClass::FinalAnswer => "output",
         OutputClass::Tool => "tool",
         OutputClass::Thinking => "thinking",
     }
 }
 
-fn artifact(node: &NodeId, id: &ArtifactId, class: OutputClass, value: &Value) -> Artifact {
+fn artifact(node: &NodeId, id: &ArtifactId, class: OutputClass, value: &Value) -> Result<Artifact, OutputAdapterError> {
     // Length framing keeps arbitrary node/artifact names collision free. This
     // uses exactly the identity tuple used by the shared display projection.
-    let artifact_id = format!("dist:{}:{}:{}:{}", class_name(class), node.0.len(), node.0, id.0);
-    Artifact {
+    let id_class = if class == OutputClass::FinalAnswer { "final_answer" } else { class_name(class) };
+    let artifact_id = format!("dist:{}:{}:{}:{}", id_class, node.0.len(), node.0, id.0);
+    let parts = if class == OutputClass::FinalAnswer {
+        let parts: Vec<RoundPart> = serde_json::from_value(value.clone())
+            .map_err(|_| invalid("output_final_parts_invalid"))?;
+        if parts.is_empty() {
+            return Err(invalid("output_final_parts_empty"));
+        }
+        parts.into_iter().map(|part| match part {
+            RoundPart::Text { text } => Part::text(text),
+            RoundPart::Data { data } => Part::data(data),
+        }).collect()
+    } else {
+        vec![match value {
+            Value::String(text) => Part::text(text),
+            value => Part::data(value.clone()),
+        }]
+    };
+    Ok(Artifact {
         artifact_id,
         name: None,
         description: None,
-        parts: vec![match value {
-            Value::String(text) => Part::text(text),
-            value => Part::data(value.clone()),
-        }],
+        parts,
         metadata: Some(HashMap::from([
             ("node".to_owned(), json!(node.0)),
             ("class".to_owned(), json!(class_name(class))),
         ])),
         extensions: None,
-    }
+    })
 }
 
 impl DistOutputAdapterPort for A2aOutputAdapter {
@@ -53,7 +67,7 @@ impl DistOutputAdapterPort for A2aOutputAdapter {
             if unit.class == OutputClass::Thinking {
                 return Err(invalid("output_snapshot_contains_thinking"));
             }
-            artifacts.push(artifact(&unit.node, &unit.artifact_id, unit.class, &unit.content));
+            artifacts.push(artifact(&unit.node, &unit.artifact_id, unit.class, &unit.content)?);
         }
         let mut result = json!({ "artifacts": artifacts });
         // DisplaySnapshot itself has no history or status message. Preserve
@@ -78,7 +92,7 @@ impl DistOutputAdapterPort for A2aOutputAdapter {
             return Err(invalid("output_append_requires_text"));
         }
         Ok(json!({
-            "artifact": artifact(&change.node, &change.artifact_id, change.class, value),
+            "artifact": artifact(&change.node, &change.artifact_id, change.class, value)?,
             "append": append,
             "metadata": { "node": change.node.0, "class": class_name(change.class) },
         }))

@@ -280,7 +280,7 @@ fn fork_workflow() -> StateMachineDefinition {
 /// replied last; the identical input sequence replays byte-identically.
 #[test]
 fn fork_join_uses_designated_final() {
-    let designated = serde_json::json!({"value": "designated"});
+    let designated = serde_json::json!({"state": "completed", "message": {"parts": [{"text": "designated"}]}});
     let branch = |name: &str| serde_json::json!({"value": name});
     let mut orders = Vec::new();
     for first in ["right", "left"] {

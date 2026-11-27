@@ -2,6 +2,20 @@
 
 状态（2026-11-25 范围调整）：**D0 冻结仍待复核；按用户决定拆分 provider 交付，允许继续后续功能实现，不代表 Stage 2 已完成或真实后端验收已通过。** 当前开发授权以 plan 的“交付范围与执行授权”为准；以下原状态裁决是调整前记录，测试结果不变。 当前修复基线为 `564a2b7e30`；下列第一至第五轮为历史记录，不代表当前工作树已通过。最新证据与状态见“第六轮”。未执行合并、部署或 push。
 
+## 2026-11-27：公开路由与停止证明复核
+
+基线 `a19a107251` 的四个反例均使用同进程真实角色装配重现：下游仍在 Sending 就提交终态；在已完成的 context 发第二轮返回 503；运行中取消返回 503；公开 Get 返回 Completed 但没有最终节点的 Artifact。以下测试检查调用方可见的结果，不把仓库直接受理或测试桩的执行次数当作 REST 验收。
+
+- `group_a2a_rest_bridge`：从公开入口连续完成两轮，无须重启 Worker；Busy 不改调度版本，原键重投返回原 Tid。常驻 Worker 只在核对同 owner 的严格许可证、提交回执和 checkpoint 摘要后接收更新；不能丢弃结果不明的本地写。此项取代第七轮的 resident-slot 功能缺口，仍不代表跨进程部署验收。
+- `group_round_recovery` 和 `group_a2a_rest_cancel`：已登记取消但下游未确认停止时，Get 保持非终态、下一轮保持 Busy；收到原尝试的停止证明后才能完成。若需追加取消批次，在替换原 SaveResult outbox 前验证归档并保留结果引用。
+- `group_a2a_rest_bridge` 的最终产物断言核对评审节点的实际文本，同时回写旧 Working 快照模拟 Feed 落后；已确认的终态和产物不随 Feed 回退，未取得许可的任务不可见。
+- `uncertain_send` 使用真实 Connector 和可控下游覆盖新发及接管后的不确定结果。当前解析接口不提供可验证的去重域与保证期限，因此不能用冻结 binding 或调用 deadline 授权重发；无可用查询键的首发由核实通道保留，不伪造停止。
+- `dist_agent`、`gateway`、`task_reader` 另覆盖有序输入与前驱结果的实际 A2A 消息、旧 RPC 列表来源隔离及同一结果集过期后重新分页。`bcs-dist-model` 0.2 增加持久化 `FinalAnswer` 类型，旧 reader 不认识新枚举值；启用写入新格式前须同步升级读取方。`bcs-service-api` 9.1 增加专用取消入口，未实现的 provider 默认拒绝。
+
+本轮最终回归（BCS 工作区，`--locked -j1 -- --test-threads=1`）：12 个受影响 crate 完整测试共 **933 passed / 0 failed / 0 ignored**；另跑 `bcs` 的 `group_a2a_companion`、`group_a2a_rest_bridge`、`group_a2a_rest_cancel` 三个目标，**17 passed / 0 failed**。`cargo check --workspace --all-targets --locked`、端口纯度和存储边界检查、相对 `a19a107251` 的真实 public API 差异和旧格式 wire 检查均通过。不是全 workspace 测试或真实后端验收。
+
+**功能仍缺：跨轮节点历史。** `NodeHistoryRepo` 单独的存储契约可用，但受理尚未固定每个节点的已提交历史边界，派发与接管尚未绑定可重放的输入 pin，实际下游交互和所属轮次结局也没有贯穿运行路径。连续两轮成功、同一节点不泄露其他节点数据，并不能证明“第二轮继承自己的历史”。真实持久 provider、真实 MySQL 和跨进程验收仍独立，不以本记录放行。
+
 ## 第六轮（2026-11-25）：审查修复与状态重新核定
 
 完整修复映射、RED→GREEN、实际命令与限制见 [修复验证记录](review-fixes-2026-11-25.md)。受影响 8 crate 完整套件 **1078 passed / 0 failed / 6 ignored，exit 0**；API 脚本回归 4 passed。真实 MySQL、P、当前完整 API/R25 与全量 workspace 测试不以这些结果替代。**D0 原冻结结论暂停；Stage 2 未完成退出验收，不放行 Stage 3。**

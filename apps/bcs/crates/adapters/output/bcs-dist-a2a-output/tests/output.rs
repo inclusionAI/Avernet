@@ -78,6 +78,29 @@ fn node_and_class_are_part_of_collision_free_artifact_identity() {
 }
 
 #[test]
+fn strict_answer_keeps_one_artifact_with_ordered_typed_parts() {
+    let adapter = A2aOutputAdapter;
+    let content = json!([
+        { "kind": "text", "text": "line 1\n\"quoted\"" },
+        { "kind": "data", "data": "a data string" },
+        { "kind": "data", "data": {"answer": [1, true, null]} },
+    ]);
+    let mut input = snapshot(content.clone());
+    input["units"][0]["class"] = json!("final_answer");
+    let full = adapter.snapshot(&input).unwrap();
+    let upsert = adapter.artifact(&change(OutputClass::FinalAnswer, ArtifactUpdate::Upsert {
+        content: Payload::Inline(content),
+    })).unwrap();
+    assert_eq!(full["artifacts"], json!([upsert["artifact"]]));
+    assert_eq!(upsert["artifact"]["parts"], json!([
+        { "text": "line 1\n\"quoted\"" },
+        { "data": "a data string" },
+        { "data": {"answer": [1, true, null]} },
+    ]));
+    assert_eq!(upsert["append"], false);
+}
+
+#[test]
 fn invalid_neutral_content_is_rejected_instead_of_dropped() {
     let adapter = A2aOutputAdapter;
     let mut unknown = snapshot(json!("x"));

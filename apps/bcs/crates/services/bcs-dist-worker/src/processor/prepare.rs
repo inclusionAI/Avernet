@@ -1,4 +1,4 @@
-use super::{decision::*, engine::*, lifecycle::*, transitions::*};
+use super::{decision::*, engine::*, lifecycle::*, terminal::StopBarrier, transitions::*};
 use crate::runtime::{err, store_error};
 use bcs_dist_model::*;
 use bcs_service_api::{
@@ -95,18 +95,15 @@ impl WorkerProcessor {
             // barrier holds the Done transition until every registered
             // attempt is provably stopped, and the per-task archive is
             // evidence-verified before any authority claim.
-            if let Some(candidate) = self
-                .strict_round_prepares_done(
-                    before,
-                    &task.tid,
-                    now,
-                    completed,
-                    &spec.sid,
-                    slot.acquired.last_commit.clone(),
-                )
-                .await?
-            {
-                return Ok(Some((candidate, false)));
+            match self.strict_round_prepares_done(
+                before, &task.tid, now, completed, &spec.sid, slot.acquired.last_commit.clone(),
+            ).await? {
+                StopBarrier::Register(candidate) => return Ok(Some((candidate, false))),
+                StopBarrier::Waiting => {
+                    slot.retry_at = tokio::time::Instant::now() + self.config.retry_delay;
+                    return Err(err("processor_preparing"));
+                }
+                StopBarrier::Ready => {}
             }
             return archive_confirmed(before, &metadata, now, completed)
                 .map(|c| Some((c, true)))

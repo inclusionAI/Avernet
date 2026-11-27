@@ -292,6 +292,7 @@ impl DistGatewayService for DistGateway {
             return Err(invalid("session_filter_required"));
         };
         parse_session(&sid)?;
+        self.check_source(&sid, CreationSource::Rpc)?;
         self.check_group(&scope, &sid, &request.group).await?;
         let query = CoreTaskQuery {
             sid: Some(sid),

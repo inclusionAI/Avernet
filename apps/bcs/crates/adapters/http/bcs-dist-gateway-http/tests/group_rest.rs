@@ -245,17 +245,20 @@ async fn list_pages_share_cut_across_hot_to_archive() {
     let stack = group_stack(&p);
     let app = test_router(&stack);
 
-    // One REST session with four rounds: the seed stays Submitted, the three
-    // later rounds carry distinct status channels.
-    let (_, body) =
+    // Distinct REST contexts of one group: the seed stays Submitted and the
+    // other accepted tasks carry distinct status channels. The listing cut
+    // is group-scoped; these tasks need not compete for a single context.
+    let (status, body) =
         response_of(&app, rest_send("m-seed", "seed", None, json!({ "blocking": false }))).await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
     let body = body.unwrap();
     let sid = body["contextId"].as_str().unwrap().to_owned();
     let seed = body["id"].as_str().unwrap().to_owned();
     let mut tid_of = vec![(0, seed)];
     for (n, delta) in [("m-l-1", 1_000), ("m-l-2", 3_000), ("m-l-3", 2_000)] {
-        let (_, body) =
-            response_of(&app, rest_send(n, n, Some(&sid), json!({ "blocking": false }))).await;
+        let (status, body) =
+            response_of(&app, rest_send(n, n, None, json!({ "blocking": false }))).await;
+        assert_eq!(status, StatusCode::OK, "{body:?}");
         tid_of.push((delta, body.unwrap()["id"].as_str().unwrap().to_owned()));
     }
     let tid_of: std::collections::HashMap<i64, String> = tid_of.into_iter().collect();
@@ -283,9 +286,10 @@ async fn list_pages_share_cut_across_hot_to_archive() {
     // arrives. The cut of the first query stays consistent.
     p.results.put(final_record_of(&tid_of[&1_000]));
     p.worker.expire(&tid_of[&1_000]).await;
-    let (_, body) =
-        response_of(&app, rest_send("m-l-new", "late", Some(&sid), json!({ "blocking": false }))).await;
-    body.unwrap();
+    let (status, body) =
+        response_of(&app, rest_send("m-l-new", "late", None, json!({ "blocking": false }))).await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let late = body.unwrap()["id"].as_str().unwrap().to_owned();
 
     let (status, body) = response_of(&app, rest_list(&format!("pageSize=2&pageCursor={next}"))).await;
     assert_eq!(status, StatusCode::OK, "{body:?}");
@@ -297,8 +301,7 @@ async fn list_pages_share_cut_across_hot_to_archive() {
         .iter()
         .map(|r| r["id"].as_str().unwrap().to_owned())
         .collect();
-    assert_eq!(rows.len(), 2, "{body:?}");
-    assert!(!rows.contains(&tid_of[&3_000]) && !rows.contains(&tid_of[&2_000]), "no duplicates across pages");
+    assert_eq!(rows, [tid_of[&1_000].clone(), tid_of[&0].clone()], "the original cut retains its order and excludes the new row");
     assert!(body["nextPageCursor"].is_null() || body["nextPageCursor"] == Value::Null, "the cut is exhausted: {body:?}");
 
     // A fresh cut sees the new round, the archived row and no orphan.
@@ -313,6 +316,7 @@ async fn list_pages_share_cut_across_hot_to_archive() {
         .map(|r| r["id"].as_str().unwrap().to_owned())
         .collect();
     assert!(rows.contains(&tid_of[&1_000]), "archived rows stay listed: {rows:?}");
+    assert!(rows.contains(&late), "new tasks appear in a fresh cut: {rows:?}");
     assert!(!rows.iter().any(|tid| tid.ends_with(".orphan")), "unaccepted stays invisible");
 
     // A foreign subject, a tampered cursor, a revoked grant, an expired
@@ -332,15 +336,15 @@ async fn list_pages_share_cut_across_hot_to_archive() {
     // The cut and the cursor expire together with their deadline.
     stack.clock.0.fetch_add(300_001, Ordering::SeqCst);
     let fresh = response_of(&app, rest_list("pageSize=2")).await.1.unwrap();
-    let expiring = fresh["nextPageCursor"].as_str().unwrap().to_owned();
-    let (status, body) = response_of(&app, rest_list(&format!("pageSize=2&pageCursor={expiring}"))).await;
+    let renewed = fresh["nextPageCursor"].as_str().unwrap();
+    let (status, body) = response_of(&app, rest_list(&format!("pageSize=2&pageCursor={renewed}"))).await;
+    assert_eq!(status, StatusCode::OK, "fresh pagination after expiry: {body:?}");
+    let (status, body) = response_of(&app, rest_list(&format!("pageSize=2&pageCursor={next}"))).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body:?}");
     assert_eq!(code_of(&body), "CURSOR_EXPIRED");
-    stack.clock.0.fetch_sub(300_001, Ordering::SeqCst);
-
     // A revoked grant stops the next page even with a still-valid cursor.
     stack.grants.read.store(false, Ordering::SeqCst);
-    let (status, body) = response_of(&app, rest_list("pageSize=2")).await;
+    let (status, body) = response_of(&app, rest_list(&format!("pageSize=2&pageCursor={renewed}"))).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body:?}");
     assert_eq!(code_of(&body), "PERMISSION_DENIED");
     stack.grants.read.store(true, Ordering::SeqCst);

@@ -137,12 +137,9 @@ pub(crate) struct Call {
     /// Consecutive definite "not sent" answers for the current input; above
     /// `not_sent_retries` the input is blocked.
     pub input_not_sent: u32,
-    /// Resends of an idempotent input whose outcome stayed unknown.
-    pub input_resends: u32,
-    /// The tick backoff: a repeated remote action (cancel retry, idempotent
-    /// input resend, read of an already-finished task) is not attempted
-    /// before this time. Unlike [`Backoff`] it never sleeps; a tick that finds
-    /// it in the future simply skips that action. One value serves all three.
+    /// The tick backoff: a repeated remote action (cancel retry, verification
+    /// query, or read of an already-finished task) is not attempted before
+    /// this time. Unlike [`Backoff`] it never sleeps; the tick skips it.
     pub retry_after: Option<Instant>,
     /// The current tick-backoff step: zero, then `backoff_min` doubling up to
     /// `backoff_max`. With ticks of about 1.5 s the first steps have already
@@ -246,7 +243,6 @@ impl Call {
             awaiting_input: false,
             input_blocked: false,
             input_not_sent: 0,
-            input_resends: 0,
             retry_after: None,
             retry_backoff: std::time::Duration::ZERO,
             unresolved: None,
@@ -737,15 +733,15 @@ impl Call {
     /// claim-fenced CAS registers the mode, the attempt, the stable query
     /// key, the approved method, the next due time, the backoff and the
     /// pending scheduling obligation; the read-back confirmed, the actor
-    /// exits and frees its normal slot. Only short-term query exhaustion
-    /// reaches this.
+    /// exits and frees its normal slot. No unsupported lookup is armed as
+    /// a Query, even when a different verification capability was declared.
     pub(crate) async fn hand_off(&mut self, code: &str, key: VerificationKey) -> Flow {
-        let capabilities = self.spec().capabilities.clone();
-        let method = match (&key, capabilities.query_by_request || capabilities.query_by_task) {
-            (VerificationKey::ByRequest { .. }, true) => VerificationMethod::Query,
-            (VerificationKey::ByTask { .. }, true) => VerificationMethod::Query,
-            (_, _) if capabilities.cancel => VerificationMethod::CancelOnly,
-            (_, _) => VerificationMethod::Retain,
+        let capabilities = &self.spec().capabilities;
+        let method = match &key {
+            VerificationKey::ByRequest { .. } if capabilities.query_by_request => VerificationMethod::Query,
+            VerificationKey::ByTask { .. } if !self.blind && capabilities.query_by_task => VerificationMethod::Query,
+            VerificationKey::ByTask { .. } if capabilities.cancel => VerificationMethod::CancelOnly,
+            _ => VerificationMethod::Retain,
         };
         let now = self.config.clock.now();
         let backoff = self.config.verification_backoff_min;
@@ -773,7 +769,7 @@ impl Call {
         }
         tracing::warn!(
             did = %self.did().0, code,
-            "short-term query exhausted; call handed off to the verification lane"
+            "uncertain call handed off to the verification lane"
         );
         // Only after the confirmation/read-back: exit the actor cleanly.
         self.ended = true;

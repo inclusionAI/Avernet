@@ -37,10 +37,14 @@ use bcs_service_api::port::repo::distributed::{
     session::*,
 };
 
+pub(super) enum StopBarrier {
+    Ready,
+    Register(Checkpoint),
+    Waiting,
+}
+
 impl super::WorkerProcessor {
-    /// The AwaitingResult strict gate. Returns a replacement candidate when
-    /// the visit must register barrier cancels instead of archiving, `None`
-    /// when the round may proceed to `archive_confirmed`. Errors propagate.
+    /// A durable cancellation request prevents a duplicate intent, but is not a stop proof.
     #[allow(clippy::too_many_arguments, reason = "sealed head context")]
     pub(super) async fn strict_round_prepares_done(
         &self,
@@ -50,14 +54,15 @@ impl super::WorkerProcessor {
         completed: &CompletedEffects,
         sid: &Sid,
         receipt: Option<CommitReceipt>,
-    ) -> Result<Option<Checkpoint>, RuntimeError> {
+    ) -> Result<StopBarrier, RuntimeError> {
         let Some(license) = task_license(before, tid) else {
-            return Ok(None);
+            return Ok(StopBarrier::Ready);
         };
         // (1) Stop barrier over the sealed attempt set. A missing dispatch
         // record is never read as "no attempts" — the sealed checkpoint
         // registry drove the attempt set, its absence is corruption.
         let mut barrier_cancels = Vec::new();
+        let mut waiting = false;
         for (did, _) in before
             .dispatch_seq
             .iter()
@@ -67,9 +72,14 @@ impl super::WorkerProcessor {
                 return Err(err("barrier_dispatch_missing"));
             };
             let view = record.view;
-            if attempt_stopped(&view.execution) {
+            if attempt_stopped(&view.execution)
+                || (view.execution.phase == DispatchPhase::Created
+                    && view.execution.send_proof.is_none()
+                    && view.control.cancel.is_some())
+            {
                 continue;
             }
+            waiting = true;
             if view.control.cancel.is_none() {
                 let identity = format!("stop-barrier:{}:{}:{}", sid.0, did.0, before.commit_seq.0);
                 barrier_cancels.push(EffectKind::RequestCancel {
@@ -81,10 +91,22 @@ impl super::WorkerProcessor {
                 });
             }
         }
+        if waiting && barrier_cancels.is_empty() {
+            return Ok(StopBarrier::Waiting);
+        }
+        // A cancel-only checkpoint replaces the SaveResult outbox. Verify its archive
+        // while that original commit is still authoritative and retain its result ref.
+        let receipt = receipt.ok_or_else(|| err("checkpoint_proof_missing"))?;
+        self.ensure_round_archive(before, tid, &license, completed, &receipt)
+            .await?;
         if !barrier_cancels.is_empty() {
-            // Intents before effects: the cancel registration commits as its
-            // own sealed candidate; the Done transition stays deferred.
             let mut candidate = next_checkpoint(before, Some(completed)).map_err(store_error)?;
+            let task = candidate.tasks.iter_mut().find(|task| task.tid == *tid)
+                .ok_or_else(|| err("terminal_task_missing"))?;
+            if task.result_ref.is_none() {
+                task.result_ref = Some(completed.saved.get(tid)
+                    .ok_or_else(|| err("round_result_reference_missing"))?.clone());
+            }
             install_effects(&mut candidate, sid, barrier_cancels).map_err(store_error)?;
             let digest = digest_fields(&[
                 b"stop-barrier:v1",
@@ -98,13 +120,9 @@ impl super::WorkerProcessor {
                 ),
                 kind: DeadlineKind::Task { tid: tid.clone() },
             });
-            return Ok(Some(candidate));
+            return Ok(StopBarrier::Register(candidate));
         }
-        // (2) The per-task final archive exists before any authority claim.
-        let receipt = receipt.ok_or_else(|| err("checkpoint_proof_missing"))?;
-        self.ensure_round_archive(before, tid, &license, completed, &receipt)
-            .await?;
-        Ok(None)
+        Ok(StopBarrier::Ready)
     }
 
     /// Write the T4 per-task final archive from the frozen record and the
@@ -363,16 +381,7 @@ fn attempt_stopped(execution: &DispatchExecution) -> bool {
     ) {
         return true;
     }
-    if execution
-        .outcome
-        .is_some_and(|outcome| !matches!(outcome, DispatchOutcome::Unknown))
-    {
-        return true;
-    }
-    // Never begun: no holder claimed a send, no remote task exists. The
-    // attempt cannot be in flight; a registered cancel intent keeps
-    // future claimants out.
-    execution.phase == DispatchPhase::Created && execution.send_proof.is_none()
+    execution.outcome.is_some_and(|outcome| outcome != DispatchOutcome::Unknown)
 }
 
 /// The frozen final record of a terminal task.

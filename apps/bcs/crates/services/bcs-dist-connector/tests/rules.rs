@@ -205,12 +205,18 @@ fn sent_policy_follows_declared_capabilities() {
         Payload::Inline(value) => serde_json::to_vec(value).unwrap(),
         Payload::Ref(reference) => reference.key.as_bytes().to_vec(),
     };
-    let current = rules.send_proof(
+    let mut current = rules.send_proof(
         &view.spec,
         ProofOperation::Start { request_id: request_id.clone() },
         &body,
         Digest("sha256:fixture-config".into()),
     );
+    assert!(current.dedupe_domain.is_empty(), "intent alone is not a dedupe guarantee");
+    assert!(current.guarantee_deadline <= TimestampMillis(NOW));
+    // Inject trusted evidence to exercise the pure predicate; the current
+    // actor has no such evidence source and never uses this resend path.
+    current.dedupe_domain = "verified-test-domain".into();
+    current.guarantee_deadline = TimestampMillis(NOW + 1_000);
     let recorded = current.clone();
     // A recheck that upholds the proof: in window, same domain, same
     // semantics (plan T6).

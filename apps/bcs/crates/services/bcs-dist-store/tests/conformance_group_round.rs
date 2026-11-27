@@ -13,6 +13,8 @@ mod regressions;
 mod public_tasks;
 #[path = "group_admission_cases/inbox_fences.rs"]
 mod inbox_fences;
+#[path = "group_admission_cases/cancel.rs"]
+mod cancel;
 #[path = "group_admission_cases/cold_index.rs"]
 mod cold_index;
 

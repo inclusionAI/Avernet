@@ -15,8 +15,8 @@ pub(super) struct AdmissionRecord {
     pub request: AdmitRequest,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connector: Option<bcs_service_api::port::repo::distributed::inbox::ConnectorEventIdentity>,
-    /// Strict-group rounds stop before the Start feed entry until the
-    /// checkpoint license is granted; generic entries never carry this mark.
+    /// The exact checkpoint license for a strict start or cancel. Only
+    /// starts create a sticky schedule claim; generic entries lack this mark.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub strict: Option<StrictRound>,
     pub created_at: TimestampMillis,
@@ -28,9 +28,8 @@ pub(super) struct AdmissionRecord {
     pub phase: Phase,
 }
 
-/// The strict round identity bound to one admission record. The Start feed
-/// entry and schedule activation are appended only when the checkpoint license
-/// matches this exact request id, round generation and Tid.
+/// The strict round identity bound to one admission record. The feed entry
+/// and schedule activation require the exact request id, generation and Tid.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StrictRound {
     pub request_id: String,

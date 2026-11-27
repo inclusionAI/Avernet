@@ -321,13 +321,14 @@ pub async fn assemble_inprocess(
     reader_config.cursor_secret =
         config.cursor_secret.as_ref().map(|secret| secret.as_bytes().to_vec());
     let reader = Arc::new(
-        bcs_dist_gateway_store::StoreTaskReader::new(
+        bcs_dist_gateway_store::StoreTaskReader::with_group_archives(
             provider.documents.clone(),
             provider.zset.clone(),
             provider.streams.clone(),
             archive.clone(),
             layout.clone(),
             reader_config,
+            artifacts.clone(),
         )
         .map_err(assembly_err)?,
     );
@@ -418,6 +419,7 @@ pub async fn assemble_inprocess(
     let gateway_admission = Arc::new(bcs_dist_worker::WorkerTaskAdmission::with_rounds(
         inbox.clone(),
         rounds.clone(),
+        coordination.clone(),
         Arc::new(now_ms),
     ));
     let processor = Arc::new(

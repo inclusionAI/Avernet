@@ -370,12 +370,56 @@ fn final_node_final_after_timeout_finishes_once() {
     let did = dispatch_of(&opened, "final").1;
     let deadline = dispatch_deadline_of(&opened, &did);
     round.step(&[RunnerInput::Timeout(deadline)]);
-    let report = agent("task-1", &did, 2, AgentEventKind::Final,
-        serde_json::json!({"value": "late final"}));
+    let result = serde_json::json!({
+        "state": "completed",
+        "artifacts": [{"artifactId": "answer", "parts": [
+            {"text": "late final"}, {"data": "distinct from text"}, {"data": {"items": [1, 2]}}
+        ]}],
+    });
+    let report = agent("task-1", &did, 2, AgentEventKind::Final, result.clone());
     let finished = round.step(&[report.clone()]);
-    assert_eq!(Round::finished(&finished).len(), 1);
-    assert_eq!(Round::finished(&finished)[0].0, TerminalStatus::Completed);
-    assert!(Round::finished(&round.step(&[report])).is_empty());
+    assert!(matches!(finished.actions.as_slice(), [ActionIntent::Show { .. }, ActionIntent::FinishTask { .. }]));
+    assert_eq!(Round::finished(&finished), [(TerminalStatus::Completed, Payload::Inline(result))]);
+    assert!(round.step(&[report]).actions.is_empty());
+}
+
+#[test]
+fn final_output_above_archive_part_limit_fails_before_publication() {
+    let mut round = Round::open(workflow_of(vec![("final", &[], true)]), 1);
+    let input = round_for(&round.spec, "task-1", ROUND_DEADLINE_MS);
+    let opened = round.step(&[group_start(input)]);
+    let did = dispatch_of(&opened, "final").1;
+    let report = agent("task-1", &did, 2, AgentEventKind::Final, serde_json::json!({
+        "state": "completed", "artifacts": [
+            {"artifactId":"one", "parts":vec![serde_json::json!({"text":"x"}); 100]},
+            {"artifactId":"two", "parts":[{"text":"y"}]}
+        ]
+    }));
+    let decision = round.step(&[report]);
+    assert!(matches!(decision.actions.as_slice(), [ActionIntent::FinishTask {
+        status: TerminalStatus::Failed, result: Payload::Inline(reason), ..
+    }] if reason["code"] == "PUBLIC_RESULT_TOO_LARGE"));
+}
+
+#[test]
+fn malformed_final_answer_fails_without_a_partial_product() {
+    for parts in [
+        serde_json::json!([]),
+        serde_json::json!([{"text": "good"}, {"text": "ambiguous", "data": 7}]),
+        serde_json::json!([{"text": "good"}, {"url": "https://example.invalid/file"}]),
+    ] {
+        let mut round = Round::open(workflow_of(vec![("final", &[], true)]), 1);
+        let input = round_for(&round.spec, "task-1", ROUND_DEADLINE_MS);
+        let opened = round.step(&[group_start(input)]);
+        let did = dispatch_of(&opened, "final").1;
+        let report = agent("task-1", &did, 2, AgentEventKind::Final, serde_json::json!({
+            "state": "completed", "artifacts": [{"artifactId": "answer", "parts": parts}],
+        }));
+        let decision = round.step(&[report]);
+        assert!(matches!(decision.actions.as_slice(), [ActionIntent::FinishTask {
+            status: TerminalStatus::Failed, ..
+        }]));
+    }
 }
 
 /// Final reports are stop evidence inside the barrier: the terminal commits

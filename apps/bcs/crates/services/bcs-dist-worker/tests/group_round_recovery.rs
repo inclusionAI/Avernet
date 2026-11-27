@@ -31,14 +31,6 @@ fn sibling_did(tid: &Tid) -> Did {
     Did(format!("{}.fsm:1:{NODE}:1", tid.0))
 }
 
-fn phase_of(checkpoint: &Checkpoint, tid: &Tid) -> Option<TaskPhase> {
-    checkpoint
-        .tasks
-        .iter()
-        .find(|task| &task.tid == tid)
-        .map(|task| task.phase.clone())
-}
-
 /// The ConnectorAdmission report of one dispatch terminal: no
 /// `remote_event_id` (a real Connector GetTask result), the stable connector
 /// key identity and the state string bound inside the payload.
@@ -222,26 +214,22 @@ async fn archive_visible_impl() {
         .lock()
         .unwrap()
         .take();
-    drive(&world, &processor, 32).await;
-    let b_view = world
-        .round_view(&round("b", 2).input.key)
-        .await
-        .expect("the licensed round B must be readable");
-    assert!(
-        b_view.terminal.is_none(),
-        "B owns the licensed next round; the restored SSE lane cannot reopen \
-         or re-run it"
-    );
+    let b_key = round("b", 2).input.key;
+    until(&world, &processor, |checkpoint| {
+        checkpoint.runner_state.as_ref().is_some_and(|runner|
+            runner.tid == b_key.tid && runner.state.value.get("group_terminal").is_some())
+    }).await;
+    let b_view = world.round_view(&b_key).await.expect("the successor must remain readable");
+    assert_eq!(b_view.terminal.unwrap().key, b_key);
+    assert_eq!(b_view.result, Some(Payload::Inline(serde_json::json!({"finished": true}))));
     let a_view = world.round_view(&a_key).await.unwrap();
     assert!(a_view.terminal.is_some(), "A's closed authority persists");
     assert_eq!(
         a_view.result,
         Some(Payload::Inline(serde_json::json!({"finished": true})))
     );
-    assert!(
-        calls.load(Ordering::SeqCst) <= after_admit_calls + 1,
-        "killed and rebuilt Workers never re-run the closed round"
-    );
+    assert_eq!(calls.load(Ordering::SeqCst), after_admit_calls + 1,
+        "recovery runs B exactly once without re-running A");
 }
 
 #[tokio::test]
@@ -288,6 +276,12 @@ async fn deadline_leg() {
             .all(|t| t.tid != a_key.tid || !matches!(t.phase, TaskPhase::Done { .. })),
         "a deadline final must not reach a terminal while the sibling is live"
     );
+    drive(&world, &processor, 32).await;
+    let attempt = world.f.dispatch.get(&did).await.unwrap().unwrap().view;
+    assert!(attempt.control.cancel.is_some());
+    assert_eq!(attempt.execution.phase, DispatchPhase::Sending);
+    assert!(attempt.execution.outcome.is_none());
+    assert!(world.round_view(&a_key).await.unwrap().terminal.is_none());
     assert!(
         matches!(world.admission.admit(&round("b", 2)).await, Ok(Admission::Busy)),
         "no release before the stop proof: B stays Busy"
@@ -451,6 +445,10 @@ async fn get_task_final_impl() {
     // The real Connectors confirm their own attempt outcome; the report
     // alone never fabricates one. With the definitive outcome on record the
     // runner's terminal passes the stop barrier.
+    drive(&world, &processor, 32).await;
+    let dispatch = world.f.dispatch.get(&did).await.unwrap().unwrap();
+    assert!(dispatch.view.control.cancel.is_some());
+    assert!(world.round_view(&a_key).await.unwrap().terminal.is_none());
     confirm_attempt_stop(&world, &did).await;
     // The Runner applied the complete terminal exactly once: one new runner
     // reduction and one terminal commit.
@@ -502,10 +500,9 @@ async fn get_task_final_impl() {
         !matches!(dispatch.view.execution.outcome, Some(DispatchOutcome::Unknown)),
         "an unknown outcome never satisfies the stop barrier"
     );
-    assert!(matches!(
-        phase_of(&world.checkpoint().await, &a_key.tid),
-        Some(TaskPhase::Done { .. })
-    ));
+    let view = world.round_view(&a_key).await.unwrap();
+    assert_eq!(view.terminal.unwrap().status, TerminalStatus::Completed);
+    assert_eq!(view.result, Some(Payload::Inline(serde_json::json!({"finished": true}))));
 }
 
 /// A user cancel racing the sibling's confirmed completion resolves to

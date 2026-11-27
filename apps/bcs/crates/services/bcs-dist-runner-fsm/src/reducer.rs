@@ -527,12 +527,7 @@ impl FsmReducerRunner {
                             );
                             return Ok(());
                         }
-                        self.commit(
-                            round,
-                            TerminalStatus::Completed,
-                            event.payload.clone(),
-                            actions,
-                        );
+                        self.complete_final(round, &workflow.final_node, &event.payload, actions);
                     } else if let Some(run) = round.nodes.get_mut(&node_id) {
                         run.artifact = Some(event.payload.clone());
                         run.status = NodeStatus::Succeeded;
@@ -543,7 +538,7 @@ impl FsmReducerRunner {
                     // A timed-out attempt raced to verified success: its
                     // own stop fact is the Final report.
                     if workflow.final_node.0 == node_id {
-                        self.commit(round, TerminalStatus::Completed, event.payload.clone(), actions);
+                        self.complete_final(round, &workflow.final_node, &event.payload, actions);
                     } else if let Some(run) = round.nodes.get_mut(&node_id) {
                         run.artifact = Some(event.payload.clone());
                         run.status = NodeStatus::Succeeded;
@@ -751,6 +746,46 @@ impl FsmReducerRunner {
         }
     }
 
+    fn complete_final(
+        &self,
+        round: &mut RoundCore,
+        node: &NodeId,
+        result: &Payload,
+        actions: &mut Vec<ActionIntent>,
+    ) {
+        let Some(artifacts) = final_artifacts(result) else {
+            // A definitive Final proves the attempt stopped, but unusable
+            // content is not a successful public product.
+            self.commit(
+                round,
+                TerminalStatus::Failed,
+                Payload::Inline(serde_json::json!({"code": "invalid_final_artifact"})),
+                actions,
+            );
+            return;
+        };
+        let budget = bcs_service_api::port::repo::distributed::group_round::RoundBudgetProfile::v1();
+        let parts = artifacts.iter().filter_map(serde_json::Value::as_array).flatten();
+        if parts.clone().count() > budget.max_page_rows as usize
+            || parts.into_iter().any(|part| serde_json::to_vec(part)
+                .map_or(true, |encoded| encoded.len() > budget.feed_event_bytes))
+        {
+            self.commit(round, TerminalStatus::Failed,
+                Payload::Inline(serde_json::json!({"code": "PUBLIC_RESULT_TOO_LARGE"})), actions);
+            return;
+        }
+        for (index, content) in artifacts.into_iter().enumerate() {
+            actions.push(ActionIntent::Show {
+                tid: round.key.tid.clone(),
+                node: node.clone(),
+                artifact_id: ArtifactId(format!("final-answer-{index}")),
+                class: OutputClass::FinalAnswer,
+                update: ArtifactUpdate::Upsert { content: Payload::Inline(content) },
+            });
+        }
+        self.commit(round, TerminalStatus::Completed, result.clone(), actions);
+    }
+
     /// Commit the round terminal exactly once.
     fn commit(
         &self,
@@ -773,6 +808,44 @@ impl FsmReducerRunner {
             status,
             result,
         });
+    }
+}
+
+/// Project the complete A2A answer into the neutral text/data profile.
+/// Validate every part before emitting any action; never drop unsupported
+/// content or let a partial artifact become the round product.
+fn final_artifacts(result: &Payload) -> Option<Vec<serde_json::Value>> {
+    let Payload::Inline(value) = result else { return None };
+    if value.get("state")?.as_str()? != "completed" {
+        return None;
+    }
+    fn parts_of(artifact: &serde_json::Value) -> Option<serde_json::Value> {
+        let parts = artifact.get("parts")?.as_array()?;
+        if parts.is_empty() {
+            return None;
+        }
+        let parts: Vec<RoundPart> = parts.iter().map(|part| {
+            // The neutral profile does not represent file output or part
+            // properties; rejecting them is safer than losing information.
+            let content = part.as_object()?;
+            if content.len() != 1 {
+                return None;
+            }
+            if let Some(text) = content.get("text") {
+                return Some(RoundPart::Text { text: text.as_str()?.to_owned() });
+            }
+            Some(RoundPart::Data { data: content.get("data")?.clone() })
+        }).collect::<Option<_>>()?;
+        serde_json::to_value(parts).ok()
+    }
+    if let Some(artifacts) = value.get("artifacts") {
+        let artifacts = artifacts.as_array()?;
+        if artifacts.is_empty() {
+            return None;
+        }
+        artifacts.iter().map(parts_of).collect()
+    } else {
+        Some(vec![parts_of(value.get("message")?)?])
     }
 }
 
