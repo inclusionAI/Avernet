@@ -11,7 +11,9 @@ snapshot v2; do not bind its `RolloutRepository` to the business repository.
 - [Models](product_relational_models.py) define the integer-ID Profile, rollout
   and stage tables and attach the shared Collet/Event indexes. Relationships
   use ID columns and ordinary/unique indexes, with **no physical foreign keys**
-  anywhere in this five-table schema, including the Collet/Event ALTERs. L4 defines
+  anywhere in this five-table schema, including the Collet/Event ALTERs. Every
+  ordinary index introduced by this schema uses the required `idx_` prefix;
+  `ac_context_collab_stage_rollout` has **no secondary unique key**. L4 defines
   the four Collet/two Event columns but never imports L6 models. A schema
   installer must load this L6 module before creating the business table group.
 - [SQL](../../sql/2026_11_27_product_relational_storage.sql) materializes the
@@ -63,9 +65,10 @@ snapshot v2; do not bind its `RolloutRepository` to the business repository.
 The repository creates Profile/Collet/rollout/stage relationships atomically,
 validating the locked Profile and real inserted IDs before commit. Business
 reads reject missing parents, invalid current-rollout membership, broken
-predecessor chains and incomplete/wrong-scope stages. The creation audit writer
-checks Collet/current/rollout membership before adding an Event. Ordinary/unique
-indexes remain in place, but do not validate parent existence.
+predecessor chains, duplicate stage names and incomplete/wrong-scope stages.
+The creation audit writer checks Collet/current/rollout membership before
+adding an Event. Ordinary/unique indexes remain in place, but do not validate
+parent existence.
 
 There is no database `RESTRICT` or cascading relationship behavior. Direct SQL
 can create orphan records or mismatched Event stage links; it must not bypass
@@ -95,6 +98,14 @@ and have the reviewed upgrade drop only existing constraints listed in the
 [specification](../../../../../../../../specs/2026-11-27-context-collab-relational-product-storage/spec.md#38-已安装旧外键结构的升级边界),
 preserving all relationship columns and indexes. A partially applied migration
 must be inspected before resuming; do not blindly repeat every ADD COLUMN.
+
+The same bootstrap change does not rename or remove existing database indexes.
+An installation with the earlier `ix_cc_*` ordinary indexes or the removed
+`uk_cc_stage_name` / `uk_cc_stage_parent_id` Stage unique keys needs a reviewed
+upgrade: rename/remove those indexes only after inspecting the actual schema,
+and clean or isolate duplicate stage names before dropping the Stage
+constraints. Do not delete relationship columns or the retained `idx_cc_*`
+indexes during that upgrade.
 
 Neither SQL/data migration nor deployment has been executed. Do not enable a
 mixed writer fleet, bulk-import in-flight runtime snapshots, or resume missing

@@ -143,3 +143,22 @@ DEPLOY_PROFILE=test .venv/bin/python -m pytest \
 ```
 
 结果：**1119 passed，45 warnings**，170.44 秒。修改 Python 的 Ruff check/format、source 行数（均不超过 1000 行）、Markdown 相对链接/锚点、六条 DDL 与方案逐条一致性及 `git diff --check` 均通过。本次未重跑完整 Backend CI，也没有目标 MySQL/OceanBase 执行证据；不将 MySQL 方言编译和 SQLite 验证写成目标库部署通过。
+
+## 后续调整：Stage 唯一键与普通索引命名（2026-11-27）
+
+- 按用户要求移除 `ac_context_collab_stage_rollout` 的 `uk_cc_stage_name`、`uk_cc_stage_parent_id` 两个唯一键；SQL/ORM/测试和 owning 文档同步更新。阶段名称重复不再由数据库拒绝，改由仓储按确切 Profile YAML 分组并在读取时 fail closed；新增反向用例证明无数据库约束时重复名称仍被业务读取拒绝。
+- 五表本次新增的普通索引名统一改为 `idx_` 前缀：`idx_cc_collet_profile_status`、`idx_cc_collet_current`、`idx_cc_rollout_predecessor`、`idx_cc_rollout_scope_collet`、`idx_cc_stage_scope_rollout`、`idx_cc_event_rollout`、`idx_cc_event_stage`、`idx_cc_event_stage_parent`。DDL/ORM/实际 SQLite 反射和方案一致，当前迁移 SQL 中不存在 `ix_cc_` 名称。
+- 已安装环境不会被 bootstrap 更新自动改名或删键：需停写、核验实际 schema，再经评审的升级操作把旧 `ix_cc_*` 改为对应 `idx_cc_*`；删除 Stage 两个唯一键前必须先清理或隔离重复阶段名。关联字段和保留索引不得删除。
+- 测试补充 Stage 无二级唯一键、五表普通索引全部使用 `idx_` 且回归配置索引仍为 `idx_cc_profile_scope_name`；把仅依赖 Stage 唯一键的数据库 IntegrityError 测试收敛到 Rollout，Stage 的重复名由应用校验用例覆盖。
+
+实际验证（`apps/backend/`）：
+
+```bash
+DEPLOY_PROFILE=test .venv/bin/python -m pytest \
+  tests/community/repository/task/context_collab/product_relational -q --tb=short
+DEPLOY_PROFILE=test .venv/bin/python -m pytest \
+  tests/community/repository/task/context_collab \
+  tests/community/core/task/context_collab/product_profile_service -q --tb=short
+```
+
+结果：存储专项 **62 passed，18 warnings**；相关仓储和 ProductProfileService 回归 **523 passed，19 warnings**。Ruff format/check、DDL 与方案逐条一致性、Stage 唯一键不存在、新普通索引 `idx_` 前缀、Markdown 链接/格式和 `git diff --check` 均通过。未执行目标数据库 ALTER/迁移，未运行完整 Backend CI，本节变更尚未 commit/push。

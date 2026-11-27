@@ -49,6 +49,7 @@
 - 本轮 Event 修订：不新增 interactive_key 及其专用唯一索引，复用既有 event_id 与 uk_context_collab_event；Event 仅新增两个关联列。既有索引包含 collab_context_id，不将其误写为跨 context 的全租户唯一约束，原反馈 UUID 合同的跨 context 仲裁列为实施前门槛。
 - 本轮执行链路澄清：自动新增/更新五表是接口所触发的完整执行链路的责任，不要求写表逻辑都放进 ProductProfileService 方法体或同一次 HTTP 请求；各生命周期节点的触发方、持久化内容及事务边界见第 6.2 节。
 - 本轮无物理外键修订：遵循“研发规范禁止外键”，移除两张 rollout 新表的三个物理外键，并同步移除 Collet/Event ALTER 的四个物理外键，避免后续升级重复报错。关联 ID 列、普通/唯一索引均保留，由应用事务和完整性校验维护业务关系；数据库不再提供 RESTRICT 保护。
+- 本轮 StageRollout 索引修订：移除 uk_cc_stage_name、uk_cc_stage_parent_id 两个业务唯一键；五表新增普通索引名统一由 `ix_` 改为 `idx_` 前缀，避免不符合命名规范。阶段唯一性与父子归属改由 Profile YAML 校验和仓储读取检查维护，数据库不再提供该去重约束。
 - 本版是“五表 + 业务字段”的方案；并非现在删除实际数据库或已经实现新的运行合同。
 
 实施前，以下文档/源仍描述当前实现。后续采纳时须同步更新合同、消费者、测试及适当的 Backend ADR，不以本文覆盖当前代码事实：
@@ -178,7 +179,7 @@ ALTER TABLE ac_context_collab_collet
     ADD COLUMN status VARCHAR(32) COLLATE utf8mb4_bin NULL,
     ADD COLUMN product_profile_id BIGINT NULL,
     ADD COLUMN current_rollout_id BIGINT NULL,
-    ADD KEY ix_cc_collet_profile_status (avernet_tenant, env, product_profile_id, status, id);
+    ADD KEY idx_cc_collet_profile_status (avernet_tenant, env, product_profile_id, status, id);
 ```
 
 Collet 本版共新增四列：content、status、product_profile_id、current_rollout_id，其中前两列为本次明确的业务字段，后两列保留配置/当前 rollout 关联；不新增 runtime_collet_id、revision、execution_state 及其索引。普通 L4 行新增列保持 NULL，不把未知历史统一填成 CREATE。产品行在提交前要求这四列及 actor_ref 完整；创建中的 current_rollout_id 可临时为 NULL，但提交时必须指向已插入的本 Collet rollout。
@@ -200,12 +201,12 @@ CREATE TABLE ac_context_collab_collet_rollout (
     PRIMARY KEY (id),
     UNIQUE KEY uk_cc_rollout_order (collet_id, ordinal),
     UNIQUE KEY uk_cc_rollout_collet_id (collet_id, id),
-    KEY ix_cc_rollout_predecessor (collet_id, predecessor_id),
-    KEY ix_cc_rollout_scope_collet (avernet_tenant, env, collet_id, id)
+    KEY idx_cc_rollout_predecessor (collet_id, predecessor_id),
+    KEY idx_cc_rollout_scope_collet (avernet_tenant, env, collet_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 ALTER TABLE ac_context_collab_collet
-    ADD KEY ix_cc_collet_current (id, current_rollout_id);
+    ADD KEY idx_cc_collet_current (id, current_rollout_id);
 ```
 
 current/前驱属于同一 Collet 的约束改由应用维护：新建在单事务中插入真实父子记录、再填写 current；读取校验 current 属于当前 Collet、ordinal 连续且前驱恰为本 Collet 的上一条 rollout。前驱无值写 NULL，自环、跨 Collet 或不存在的关联明确拒绝。API rollout.collet_id 直接使用其关联的 Collet.id，不再做公开/物理 ID 转换。普通/唯一索引保留，但不负责验证父记录是否存在。
@@ -230,14 +231,12 @@ CREATE TABLE ac_context_collab_stage_rollout (
     gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_cc_stage_name (collet_rollout_id, name),
-    UNIQUE KEY uk_cc_stage_parent_id (collet_rollout_id, id),
-    KEY ix_cc_stage_scope_rollout (avernet_tenant, env, collet_rollout_id, id)
+    KEY idx_cc_stage_scope_rollout (avernet_tenant, env, collet_rollout_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 ```
 
 - Collet/rollout/stage 的 status 沿用 [StatusEnum](../../src/agentclaw/community/core/task/context_collab/l4_context_primitives/product_status.py)：`CREATE`、`RUNNING`、`RUN_FINISHED`、`RUN_FAILED`、`ACCEPTANCE_SUCCEED`、`ACCEPTANCE_FAILED`。`WAITING_FEEDBACK/SUCCEEDED/FAILED/STOPPED` 不是本版业务 status，不把它们直接混入此枚举以代替已移除的控制存储；相关运行事实的适配缺口见第 4.1 节。
-- 本表不包含 ordinal、lease_until、dispatch_state、reused_from_stage_rollout_id、session_route_json、cancel_state、attempt；移除 uk_cc_stage_order、ix_cc_stage_reused_from、fk_cc_stage_reused_from。不新增 attempt 的同义列或 JSON 落点；保留阶段名称唯一键和 `(collet_rollout_id, id)` 唯一键，后者作为父子关联索引保留，不创建 Event 复合外键。
+- 本表不包含 ordinal、lease_until、dispatch_state、reused_from_stage_rollout_id、session_route_json、cancel_state、attempt；移除 uk_cc_stage_order、idx_cc_stage_reused_from、fk_cc_stage_reused_from，也不保留阶段名称唯一键和 `(collet_rollout_id, id)` 唯一键。阶段名在读取时按确切 Profile YAML 分组并校验重复、缺失或未知，业务创建事务写入唯一配置名；直写 SQL 可产生重复行，须在应用读取时拒绝。本表保留 `idx_cc_stage_scope_rollout` 普通区间关联索引，不创建 Event 复合外键。
 - 未分配的 assignee/session/error_msg 可为空字符串；input、error_msg、acceptances、artifacts 均由应用显式填写。acceptances/artifacts 仍使用闭合 JSON 数组字符串，空集合写 `'[]'`，禁止 Python repr、重复键、非有限数和未知字段，不因 SQL 类型调整改变领域的 `list[AcceptanceResult]`/`list[Artifact]` 语义。
 - acceptances 使用 `VARCHAR(8192)`：以最终规范 JSON 序列化结果计数，包含括号、引号和转义字符，最多 8192 字符；写入及迁移前校验，边界超限明确失败，不截断 JSON、不丢验收项，不默默改回大文本列。
 - error_msg 使用 `TEXT`：按实际 UTF-8 编码字节数校验；MySQL 方言稿按最多 65535 字节设计，目标数据库需验证容量/字符集行为。超限明确失败并回滚，不按 65535 个中文字符判断容量，也不静默截断。artifacts 仍为 MEDIUMTEXT，未在本次调整范围。
@@ -254,9 +253,9 @@ CREATE TABLE ac_context_collab_stage_rollout (
 ALTER TABLE ac_context_collab_event
     ADD COLUMN collet_rollout_id BIGINT NULL,
     ADD COLUMN collet_stage_rollout_id BIGINT NULL,
-    ADD KEY ix_cc_event_rollout (avernet_tenant, env, collet_rollout_id, id),
-    ADD KEY ix_cc_event_stage (avernet_tenant, env, collet_stage_rollout_id, id),
-    ADD KEY ix_cc_event_stage_parent (collet_rollout_id, collet_stage_rollout_id);
+    ADD KEY idx_cc_event_rollout (avernet_tenant, env, collet_rollout_id, id),
+    ADD KEY idx_cc_event_stage (avernet_tenant, env, collet_stage_rollout_id, id),
+    ADD KEY idx_cc_event_stage_parent (collet_rollout_id, collet_stage_rollout_id);
 ```
 
 Event 的两个字段仅为逻辑关联，不定义物理外键。后续 stage/反馈 writer 必须在同一业务事务中验证 rollout 存在、stage 属于指定 rollout，拒绝“stage 非空而 rollout 为空”，并精确校验 context/axes/actor；这些 writer 尚未实现，不声称移除外键后已有等价 Event 阶段保护。当前 creation Event writer 校验 Collet/current/rollout 父子链，stage 关联为 NULL。旧 L4 事件两个新增关联列均为 NULL，原 event_id 保持不变。数据库不再提供 ON DELETE/UPDATE RESTRICT 或级联行为；本版未开放删除 API，离线维护必须自行检查引用并保留审计历史。
@@ -272,7 +271,7 @@ Event 的两个字段仅为逻辑关联，不定义物理外键。后续 stage/�
 - StageRollout：`fk_cc_stage_rollout`。
 - Event：`fk_cc_event_rollout`、`fk_cc_event_stage_parent`。
 
-关联字段及本方案索引不得同时删除；本次不修改既有 L4 或旧 snapshot v2 的历史迁移。直写 SQL/绕过仓储的维护操作不再受数据库引用检查保护，必须校验父子链、scope 和审计保留。尚未开放的后继 rollout、stage Event 或删除操作须先实现对应事务/校验，不把索引视为外键替代品。
+关联字段及本方案索引不得同时删除；若已有前版 Stage 唯一键或 `ix_cc_*` 普通索引，需停写并核验实际 schema 后，经评审的升级操作仅删除存在的 uk_cc_stage_name/uk_cc_stage_parent_id，并把存在的 ix_cc_* 普通索引重命名/替换为对应 idx_cc_*；阶段重复行须先按应用校验清理或隔离。本次不修改既有 L4 或旧 snapshot v2 的历史迁移。直写 SQL/绕过仓储的维护操作不再受数据库引用检查保护，必须校验父子链、scope 和审计保留。尚未开放的后继 rollout、stage Event 或删除操作须先实现对应事务/校验，不把索引视为外键替代品。
 
 ## 4. 去掉五张配套表后的实现方案与能力边界
 
@@ -433,7 +432,7 @@ COMMIT
 | 位置 | 计划修改 |
 | --- | --- |
 | `core/task/context_collab/l6_products/persistence/profile_models.py`、`profile_repository.py` | legacy 模型指向 `_legacy_v1`，保留旧字符串版本、canonical JSON/摘要/权限；与目标 YAML 模型分离。 |
-| 新增 `core/task/context_collab/l6_products/persistence/product_relational_models.py` | 仅定义目标 Profile/rollout/stage；Profile.config 使用 Text，scope/name 索引名为 idx_cc_profile_scope_name；Profile 无 config_digest/owner_json，新增非空 status（默认 DRAFT）及 nullable creator/modifer（新建审计必须非空）；Stage 移除七列（含 attempt）/阶段顺序与复用来源索引/复用 FK，acceptances 用 String(8192)、error_msg 用 Text（MySQL TEXT 而非 MEDIUMTEXT）；各表真实自增、普通/唯一索引/tenant guard，不定义物理外键。**不新增五张技术表模型。** |
+| 新增 `core/task/context_collab/l6_products/persistence/product_relational_models.py` | 仅定义目标 Profile/rollout/stage；Profile.config 使用 Text，scope/name 索引名为 idx_cc_profile_scope_name；Profile 无 config_digest/owner_json，新增非空 status（默认 DRAFT）及 nullable creator/modifer（新建审计必须非空）；Stage 移除七列（含 attempt）/阶段顺序与复用来源索引/复用 FK/两个业务唯一键，acceptances 用 String(8192)、error_msg 用 Text（MySQL TEXT 而非 MEDIUMTEXT）；各表真实自增、普通索引/tenant guard，不定义物理外键，新普通索引统一使用 idx 前缀。**不新增五张技术表模型。** |
 | `core/task/context_collab/l4_context_primitives/persistence/models.py` | Collet 新增四列：content/status/product_profile_id/current_rollout_id；不新增 runtime_collet_id/revision/execution_state 及专属索引。Event 仅新增 collet_rollout_id/collet_stage_rollout_id 两列，复用既有 event_id/唯一索引，不新增反馈专用键；物理 unsigned/SQLite 整数变体正确。共享 metadata，由 L6 注册关联索引而非字符串 FK，不让 L4 导入 L6 实现。 |
 | `core/task/context_collab/l6_products/product_profile.py`、`product_profile_service/contracts.py`、`ports.py`、`service.py` | description/status/creator/modifer 元数据与响应，独立 ProductProfileStatus 校验；create 默认 DRAFT 并从可信 actor 写审计，get_profile 不再返回配置 owner，创建 Collet 调用独立配置使用授权并在事务内检查 ONLINE，状态变更的受控写入同步审计、管理入口另评审；去掉内部 create 的通用回执 UUID/参数；interactive 专用反馈查重/重放，保持默认 human-gated workflow。 |
 | `core/task/context_collab/g1_secure_govern/` 授权合同/实现及配置绑定 | 增加 ProductProfileUseAuthorizer 与 fail-closed 宿主策略，不依赖已移除的配置 owner；保留发布授权和基于 Collet.actor_ref 的运行授权，不以 creator/modifer 自动放权。 |
@@ -547,7 +546,7 @@ human 反馈 → adaptation Agent 提议 → 重新核验 → 同一仓储事务
 ### 9.2 必须补充的测试
 
 - 正式安装只涉及五表，不出现五张排除表或旧运行表依赖；普通启动/metadata/create_all 不建回旧表。
-- ORM/DDL 的字段、nullable、signed/unsigned、普通/唯一索引一致；五表 metadata、MySQL 方言编译、实际 SQLite 反射及迁移 SQL 均无物理外键。SQLite 保持 PRAGMA foreign_keys=ON，不靠关闭检查通过；原子创建/审计校验、坏 current/前驱/缺父记录/孤立 stage 拒绝及唯一键竞争有真实数据库测试；目标库另验 DDL/隔离/锁行为。
+- ORM/DDL 的字段、nullable、signed/unsigned、索引一致；五表 metadata、MySQL 方言编译、实际 SQLite 反射及迁移 SQL 均无物理外键，新增普通索引名均以 `idx_` 开头；Stage 只保留普通关联索引，不定义两个业务唯一键。SQLite 保持 PRAGMA foreign_keys=ON，不靠关闭检查通过；原子创建/审计校验、坏 current/前驱/缺父记录/孤立 stage 拒绝及唯一键竞争有真实数据库测试；目标库另验 DDL/隔离/锁行为。
 - 全部原始需求字段、status 枚举、闭合 JSON/YAML、description、旧四字段执行摘要/plan digest 正确；独立 config_digest/owner_json 不在目标 Profile ORM/DDL/读写中，审计元数据不影响执行摘要；未知 schema/缺状态 fail closed。
 - Profile.config 的 DDL/ORM 均为 TEXT；非唯一索引为 idx_cc_profile_scope_name，列顺序保持 avernet_tenant/env/name；完整 YAML 序列化后 UTF-8 65535 字节可往返，65536 字节创建/读取拒绝且不截断，失败创建不遗留记录；ASCII 与中文均覆盖。
 - Profile.status 的 DDL/ORM/领域默认均为 DRAFT，新建服务显式写入 DRAFT、响应为草稿且不自动上线，三个枚举值与响应往返正确；未知/空/null/错误大小写拒绝，旧 v2 无状态按显式兼容规则迁为 DRAFT，可信已有生命周期状态保留，不虚构上线事件。status 不进入 config/执行摘要，状态变化不改变原四字段 plan.profile_digest。
@@ -555,7 +554,7 @@ human 反馈 → adaptation Agent 提议 → 重新核验 → 同一仓储事务
 - 新建 creator=modifer 且来自可信 actor，伪填审计字段被拒绝，标识长度/类型校验、事务回滚、历史未知 NULL/真实来源转换及响应拼写一致；不存在擅自新增的 Profile 更新接口。
 - 配置发布权/使用权/运行控制权分离：使用授权 hook 确实被调用，拒绝和未配置不落库，不凭同租户/creator/modifer 自动放行，跨 tenant/env 拒绝；Collet owner 始终为本次创建 actor，原运行授权不回退到 Profile 审计字段。
 - Collet 新增列恰为 content/status/product_profile_id/current_rollout_id，目标 DDL/ORM 无 runtime_collet_id/revision/execution_state 或同义控制快照；content/status 读写、普通 L4 行 NULL 兼容正确。
-- Stage DDL/ORM 不含七项排除字段（含 attempt）及阶段顺序/复用来源索引、复用来源 FK；acceptances=VARCHAR(8192)、error_msg=TEXT、artifacts=MEDIUMTEXT；Event 关联阶段不定义复合 FK，阶段父唯一键保留，rollout.ordinal 不被误删。
+- Stage DDL/ORM 不含七项排除字段（含 attempt）、阶段顺序/复用来源索引、复用来源 FK，以及 uk_cc_stage_name/uk_cc_stage_parent_id；acceptances=VARCHAR(8192)、error_msg=TEXT、artifacts=MEDIUMTEXT；Event 关联阶段不定义复合 FK，Stage 只保留 idx 前缀的普通关联索引，rollout.ordinal 不被误删；重复阶段名须由应用读取校验拒绝。
 - attempt 不在目标 DDL/ORM/编码/读写中，也不藏入 JSON/Event 或换名列；执行端口、StageRecord/ReportContext、HTTP 请求与签名调用方同步移除依赖。旧 attempt 不默认为空值、不由 stage.id/session_id 派生；旧请求切换、provider 请求关联、防重复派发/陈旧回调及崩溃恢复有明确合同与消费者测试，未具备依据时拒绝自动处理。
 - acceptances 最终 JSON 的 8192/8193 字符、转义/多字节边界、空数组与非法 JSON；error_msg UTF-8 65535/65536 字节边界和事务回滚。迁移超限不截断、不丢验收项、不偷换回 MEDIUMTEXT；目标库验证实际字符/字节与行容量。
 - 阶段列表依确切 Profile 原 YAML/name 恢复稳定顺序，不依赖插入顺序/ID；未知、重复或缺失阶段有明确错误。session_id/assignee 不能替代完整 SessionRoute，缺路由/权限/有效尝试/取消或复用证据时拒绝受影响操作，不用默认值伪造历史。

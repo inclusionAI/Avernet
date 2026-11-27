@@ -113,8 +113,8 @@ def test_additive_migration_has_no_foreign_key_clauses():
             {
                 "uk_cc_rollout_order": (["collet_id", "ordinal"], True),
                 "uk_cc_rollout_collet_id": (["collet_id", "id"], True),
-                "ix_cc_rollout_predecessor": (["collet_id", "predecessor_id"], False),
-                "ix_cc_rollout_scope_collet": (
+                "idx_cc_rollout_predecessor": (["collet_id", "predecessor_id"], False),
+                "idx_cc_rollout_scope_collet": (
                     ["avernet_tenant", "env", "collet_id", "id"],
                     False,
                 ),
@@ -123,9 +123,7 @@ def test_additive_migration_has_no_foreign_key_clauses():
         (
             StageRolloutRow,
             {
-                "uk_cc_stage_name": (["collet_rollout_id", "name"], True),
-                "uk_cc_stage_parent_id": (["collet_rollout_id", "id"], True),
-                "ix_cc_stage_scope_rollout": (
+                "idx_cc_stage_scope_rollout": (
                     ["avernet_tenant", "env", "collet_rollout_id", "id"],
                     False,
                 ),
@@ -142,6 +140,28 @@ def test_rollout_relationship_indexes_are_preserved(business, model, expected):
         index["name"]: (index["column_names"], bool(index["unique"]))
         for index in inspect(business.engine).get_indexes(model.__tablename__)
     } == expected
+
+
+def test_new_ordinary_indexes_use_idx_prefix_and_stage_has_no_unique_key(business):
+    for table in BUSINESS_TABLES:
+        for index in table.indexes:
+            if not index.unique:
+                assert index.name.startswith("idx_"), (table.name, index.name)
+            assert not index.name.startswith("ix_cc_")
+
+        for index in inspect(business.engine).get_indexes(table.name):
+            if not index["unique"]:
+                assert index["name"].startswith("idx_"), (table.name, index["name"])
+
+    stage = StageRolloutRow.__table__
+    assert stage.indexes and not any(index.unique for index in stage.indexes)
+    migration = (
+        Path(product_relational_models.__file__).parents[2]
+        / "sql"
+        / "2026_11_27_product_relational_storage.sql"
+    ).read_text()
+    assert "ix_cc_" not in migration
+    assert not re.search(r"\bUNIQUE\s+KEY\s+uk_cc_stage_", migration, re.I)
 
 
 @pytest.mark.parametrize("filler", ["x", "字", '"', "\\"])

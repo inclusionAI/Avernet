@@ -30,7 +30,7 @@ ALTER TABLE ac_context_collab_collet
     ADD COLUMN status VARCHAR(32) COLLATE utf8mb4_bin NULL,
     ADD COLUMN product_profile_id BIGINT NULL,
     ADD COLUMN current_rollout_id BIGINT NULL,
-    ADD KEY ix_cc_collet_profile_status (avernet_tenant, env, product_profile_id, status, id);
+    ADD KEY idx_cc_collet_profile_status (avernet_tenant, env, product_profile_id, status, id);
 
 CREATE TABLE ac_context_collab_collet_rollout (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -46,12 +46,12 @@ CREATE TABLE ac_context_collab_collet_rollout (
     PRIMARY KEY (id),
     UNIQUE KEY uk_cc_rollout_order (collet_id, ordinal),
     UNIQUE KEY uk_cc_rollout_collet_id (collet_id, id),
-    KEY ix_cc_rollout_predecessor (collet_id, predecessor_id),
-    KEY ix_cc_rollout_scope_collet (avernet_tenant, env, collet_id, id)
+    KEY idx_cc_rollout_predecessor (collet_id, predecessor_id),
+    KEY idx_cc_rollout_scope_collet (avernet_tenant, env, collet_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 ALTER TABLE ac_context_collab_collet
-    ADD KEY ix_cc_collet_current (id, current_rollout_id);
+    ADD KEY idx_cc_collet_current (id, current_rollout_id);
 
 CREATE TABLE ac_context_collab_stage_rollout (
     id BIGINT NOT NULL AUTO_INCREMENT,
@@ -70,14 +70,12 @@ CREATE TABLE ac_context_collab_stage_rollout (
     gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uk_cc_stage_name (collet_rollout_id, name),
-    UNIQUE KEY uk_cc_stage_parent_id (collet_rollout_id, id),
-    KEY ix_cc_stage_scope_rollout (avernet_tenant, env, collet_rollout_id, id)
+    KEY idx_cc_stage_scope_rollout (avernet_tenant, env, collet_rollout_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 ALTER TABLE ac_context_collab_event
     ADD COLUMN collet_rollout_id BIGINT NULL,
     ADD COLUMN collet_stage_rollout_id BIGINT NULL,
-    ADD KEY ix_cc_event_rollout (avernet_tenant, env, collet_rollout_id, id),
-    ADD KEY ix_cc_event_stage (avernet_tenant, env, collet_stage_rollout_id, id),
-    ADD KEY ix_cc_event_stage_parent (collet_rollout_id, collet_stage_rollout_id);
+    ADD KEY idx_cc_event_rollout (avernet_tenant, env, collet_rollout_id, id),
+    ADD KEY idx_cc_event_stage (avernet_tenant, env, collet_stage_rollout_id, id),
+    ADD KEY idx_cc_event_stage_parent (collet_rollout_id, collet_stage_rollout_id);

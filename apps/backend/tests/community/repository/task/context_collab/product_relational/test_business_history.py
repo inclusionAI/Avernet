@@ -123,6 +123,20 @@ def test_incomplete_or_corrupt_child_fails_closed(online, column, value):
         h.repo.get_collet(history.collet.id, h.owner)
 
 
+def test_duplicate_stage_names_still_fail_closed_without_unique_key(online):
+    h = online
+    history = h.repo.create_collet(h.profile.id, "work", h.owner)
+    stage_id = history.rollouts[0].stages[1].stage_rollout_id
+    with h.db.orm_session() as session:
+        session.query(StageRolloutRow).filter_by(id=stage_id).update(
+            {"name": "z_design"}
+        )
+    with pytest.raises(Invalid, match="duplicate stored stage name"):
+        h.repo.get_collet(history.collet.id, h.owner)
+    with pytest.raises(Invalid, match="duplicate stored stage name"):
+        h.repo.locate(history.rollouts[0].stages[0].stage_rollout_id, "stage", h.owner)
+
+
 def test_event_failure_rolls_back_root_children_current_pointer(online):
     h = online
 
@@ -227,10 +241,10 @@ def test_stage_read_rejects_orphan_parent_without_fk(online):
         h.repo.get_collet(history.collet.id, h.owner)
 
 
-@pytest.mark.parametrize("model", [ColletRolloutRow, StageRolloutRow])
-def test_business_unique_keys_still_reject_duplicate_children(online, model):
+def test_business_unique_keys_still_reject_duplicate_children(online):
     h = online
     history = h.repo.create_collet(h.profile.id, "work", h.owner)
+    model = ColletRolloutRow
     with pytest.raises(IntegrityError):
         with h.db.orm_session() as session:
             original = session.query(model).first()

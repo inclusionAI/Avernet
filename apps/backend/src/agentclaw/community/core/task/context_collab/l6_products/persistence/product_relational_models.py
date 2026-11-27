@@ -74,8 +74,10 @@ class ColletRolloutRow(Base):
     __table_args__ = (
         Index("uk_cc_rollout_order", "collet_id", "ordinal", unique=True),
         Index("uk_cc_rollout_collet_id", "collet_id", "id", unique=True),
-        Index("ix_cc_rollout_predecessor", "collet_id", "predecessor_id"),
-        Index("ix_cc_rollout_scope_collet", "avernet_tenant", "env", "collet_id", "id"),
+        Index("idx_cc_rollout_predecessor", "collet_id", "predecessor_id"),
+        Index(
+            "idx_cc_rollout_scope_collet", "avernet_tenant", "env", "collet_id", "id"
+        ),
         {
             "mysql_engine": "InnoDB",
             "mysql_charset": "utf8mb4",
@@ -99,10 +101,8 @@ class StageRolloutRow(Base):
     artifacts = Column(_medium_text(), nullable=False)
     env, avernet_tenant, gmt_create, gmt_modified = axes()
     __table_args__ = (
-        Index("uk_cc_stage_name", "collet_rollout_id", "name", unique=True),
-        Index("uk_cc_stage_parent_id", "collet_rollout_id", "id", unique=True),
         Index(
-            "ix_cc_stage_scope_rollout",
+            "idx_cc_stage_scope_rollout",
             "avernet_tenant",
             "env",
             "collet_rollout_id",
@@ -120,23 +120,23 @@ class StageRolloutRow(Base):
 for table, name, columns in (
     (
         ColletRow.__table__,
-        "ix_cc_collet_profile_status",
+        "idx_cc_collet_profile_status",
         ["avernet_tenant", "env", "product_profile_id", "status", "id"],
     ),
-    (ColletRow.__table__, "ix_cc_collet_current", ["id", "current_rollout_id"]),
+    (ColletRow.__table__, "idx_cc_collet_current", ["id", "current_rollout_id"]),
     (
         EventRow.__table__,
-        "ix_cc_event_rollout",
+        "idx_cc_event_rollout",
         ["avernet_tenant", "env", "collet_rollout_id", "id"],
     ),
     (
         EventRow.__table__,
-        "ix_cc_event_stage",
+        "idx_cc_event_stage",
         ["avernet_tenant", "env", "collet_stage_rollout_id", "id"],
     ),
     (
         EventRow.__table__,
-        "ix_cc_event_stage_parent",
+        "idx_cc_event_stage_parent",
         ["collet_rollout_id", "collet_stage_rollout_id"],
     ),
 ):
