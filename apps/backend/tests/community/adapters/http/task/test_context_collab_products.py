@@ -1,5 +1,6 @@
 """Creation routes retain DI, authenticated actor scope and HTTP guards."""
 
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -110,6 +111,43 @@ def test_create_profile_delegates_to_service(delivery, path):
     assert delivery.actors == [
         ActorContext(PrincipalRef("human", "authenticated-staff"), "api")
     ]
+
+
+def test_creation_entry_logs_route_and_size_without_payload(delivery, caplog):
+    stage_marker = "private-stage-marker"
+    content_marker = "private-content-marker"
+    logger_name = "agentclaw.community.adapters.http.task.product_profiles"
+
+    with caplog.at_level(logging.INFO, logger=logger_name):
+        delivery.client.post(
+            BASE + "/product_profiles",
+            json={
+                "name": "coding",
+                "stages": STAGES.replace("tests pass", stage_marker),
+            },
+        )
+        profile_entry = next(
+            record.getMessage()
+            for record in caplog.records
+            if "product_profile.http.create.start" in record.getMessage()
+        )
+        assert stage_marker not in caplog.text
+        assert "stage_bytes=" in profile_entry
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger=logger_name):
+        delivery.client.post(
+            BASE + "/collets",
+            json={"profile_id": 7, "content": content_marker},
+        )
+        collet_entry = next(
+            record.getMessage()
+            for record in caplog.records
+            if "product_collet.http.create.start" in record.getMessage()
+        )
+        assert content_marker not in caplog.text
+        assert "profile_id=7" in collet_entry
+        assert "content_bytes=" in collet_entry
 
 
 @pytest.mark.parametrize("path", [BASE + "/collets", LEGACY + "/collets"])

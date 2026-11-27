@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
+from agentclaw.community.adapters.http.openapi_v1.response_envelope import trace_id
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -29,6 +30,7 @@ from agentclaw.community.adapters.http.task.product_body_limits import (
 )
 from .product_rollout_schemas import RolloutQueryResponse
 from agentclaw.community.di import Injected
+from agentclaw.community.log import get_logger
 
 
 async def authenticated_actor(
@@ -48,6 +50,16 @@ router = APIRouter(
 
 class ProductRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+logger = get_logger(__name__)
+
+
+def _payload_size(value: str) -> int:
+    try:
+        return len(value.encode("utf-8"))
+    except Exception:
+        return 0
 
 
 class ProfileCreate(ProductRequest):
@@ -92,6 +104,13 @@ async def create_profile(
     request: Request,
     service: ProductProfileServiceProtocol = Injected(ProductProfileServiceProtocol),
 ) -> Envelope[dict]:
+    logger.info(
+        "product_profile.http.create.start path=%r request_id=%r caller_request_id=%r stage_bytes=%d",
+        request.url.path,
+        trace_id(request),
+        request.headers.get("X-Request-ID", ""),
+        _payload_size(private_body.stages),
+    )
     result = await service.create_product_profile(
         private_body.name,
         private_body.stages,
@@ -106,6 +125,14 @@ async def create_collet(
     request: Request,
     service: ProductProfileServiceProtocol = Injected(ProductProfileServiceProtocol),
 ) -> Envelope[dict]:
+    logger.info(
+        "product_collet.http.create.start path=%r request_id=%r caller_request_id=%r profile_id=%d content_bytes=%d",
+        request.url.path,
+        trace_id(request),
+        request.headers.get("X-Request-ID", ""),
+        private_body.profile_id,
+        _payload_size(private_body.content),
+    )
     result = await service.create_product_collet(
         private_body.profile_id,
         private_body.content,
