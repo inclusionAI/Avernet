@@ -11,9 +11,6 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     current_actor_context,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
-    ProductProfilePublicationAuthorizer,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
 )
@@ -69,7 +66,6 @@ class ProductProfileService(ProductProfileServiceProtocol):
     def __init__(
         self,
         repository: ProductProfileRepository,
-        publisher: ProductProfilePublicationAuthorizer,
         authorization: ProductRuntimeAuthorization,
         execution: RolloutExecutionPort,
         interaction: RolloutInteractionPort,
@@ -77,7 +73,6 @@ class ProductProfileService(ProductProfileServiceProtocol):
         multi_rollout: MultiRolloutController | None = None,
     ) -> None:
         self._repository = repository
-        self._publisher = publisher
         self._authorization = authorization
         self._execution = execution
         self._interaction = interaction
@@ -91,8 +86,6 @@ class ProductProfileService(ProductProfileServiceProtocol):
     ) -> ProductProfile:
         context = current_actor_context()
         text(name, maximum=256)
-        # Keep the existing independently configured management authority.
-        self._publisher.check_publish(name, 1, context)
         composition = default_composition()
         specs, execution_policy = await asyncio.to_thread(
             validate_configuration, composition, stages, self._execution

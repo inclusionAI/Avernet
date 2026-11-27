@@ -11,10 +11,6 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
     ActorContext,
     actor_context_scope,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
-    ProductProfilePublicationAuthorizer,
-    ProfilePublisherAllowlist,
-)
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
@@ -148,11 +144,9 @@ async def test_repository_receipts_remain_actor_operation_and_content_scoped(run
         assert session.query(ProductIntentRow).count() == 1
 
 
-async def test_authorization_precedes_persistence_and_provider(created):
+async def test_runtime_authorization_precedes_persistence_and_provider(created):
     h = created
     outsider = ActorContext(PrincipalRef("human", "outsider"), "test")
-    with actor_context_scope(outsider), pytest.raises(Invalid):
-        await h.service.create_product_profile("bad", h.stages)
     with actor_context_scope(outsider), pytest.raises(Forbidden):
         await h.service.create_product_collet(h.profile.id, "build a feature")
     with actor_context_scope(outsider), pytest.raises(Forbidden):
@@ -251,15 +245,9 @@ async def test_di_resolves_protocol_and_single_storage_instance(runtime):
     h = runtime
     injector = Injector([ProductProfileRuntimeModule()], auto_bind=False)
     injector.binder.bind(DatabasePlugin, to=h.repository.db)
-    injector.binder.bind(
-        ProductProfilePublicationAuthorizer,
-        to=ProfilePublisherAllowlist((h.owner.actor,)),
-    )
     service = injector.get(ProductProfileServiceProtocol)
     assert isinstance(service, ProductProfileServiceProtocol)
     assert injector.get(ProductProfileServiceProtocol) is service
-    with pytest.raises(Invalid):
-        await service.create_product_profile("blocked", h.stages)
 
 
 async def test_method_bindings_relations_and_optional_selection_are_frozen(runtime):

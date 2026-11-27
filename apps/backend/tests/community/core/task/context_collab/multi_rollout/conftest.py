@@ -59,9 +59,6 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.service import (
     ProductProfileService,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
-    ProfilePublisherAllowlist,
-)
 
 STAGE = """stages:
   - name: build
@@ -230,7 +227,6 @@ def multi(runtime, tmp_path):  # noqa: F811
     )
     h.service = ProductProfileService(
         h.repository,
-        ProfilePublisherAllowlist((h.owner.actor,)),
         h.authorization,
         h.execution,
         h.interaction,

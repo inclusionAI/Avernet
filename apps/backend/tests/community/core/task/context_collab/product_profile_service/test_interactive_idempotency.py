@@ -17,9 +17,6 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
     actor_context_scope,
     current_actor_context,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
-    ProfilePublisherAllowlist,
-)
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
@@ -70,7 +67,6 @@ def engine(tmp_path):
 def rebuilt_service(h):
     return ProductProfileService(
         SqlProductRuntimeRepository(h.repository.db),
-        ProfilePublisherAllowlist((h.owner.actor,)),
         h.authorization,
         h.execution,
         h.interaction,

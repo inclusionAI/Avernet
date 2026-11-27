@@ -160,7 +160,6 @@ async def test_explicit_relation_order_capabilities_and_opt_in(multi):
 
         service = ProductProfileService(
             h.repository,
-            h.service._publisher,
             h.authorization,
             h.execution,
             h.interaction,

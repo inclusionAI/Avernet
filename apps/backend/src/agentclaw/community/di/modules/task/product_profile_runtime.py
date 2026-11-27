@@ -2,9 +2,6 @@
 
 from injector import Binder, Module, provider, singleton
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
-    ProductProfilePublicationAuthorizer,
-)
 from agentclaw.community.core.task.context_collab.g1_secure_govern.product_runtime import (
     OwnerProductRuntimeAuthorization,
 )
@@ -129,7 +126,6 @@ class ProductProfileRuntimeModule(Module):
     def service(
         self,
         repository: ProductProfileRepository,
-        publisher: ProductProfilePublicationAuthorizer,
         authorization: ProductRuntimeAuthorization,
         execution: RolloutExecutionPort,
         interaction: RolloutInteractionPort,
@@ -138,7 +134,6 @@ class ProductProfileRuntimeModule(Module):
     ) -> ProductProfileServiceProtocol:
         return ProductProfileService(
             repository,
-            publisher,
             authorization,
             execution,
             interaction,

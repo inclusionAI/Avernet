@@ -9,9 +9,6 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
     ActorContext,
     actor_context_scope,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.profile_publication import (
-    ProfilePublisherAllowlist,
-)
 from agentclaw.community.core.task.context_collab.g1_secure_govern.product_runtime import (
     OwnerProductRuntimeAuthorization,
 )
@@ -129,7 +126,6 @@ def seed_service(world):
     )
     service = ProductProfileService(
         repository,
-        ProfilePublisherAllowlist((OWNER.actor,)),
         authorization,
         IsolatedExecutionBoundary(),
         interaction,
