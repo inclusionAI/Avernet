@@ -11,6 +11,7 @@ apps/evolverun/clawweb/public/modules/clawinsight/server/routes/session-recovery
 apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-list.test.ts
   s_a6cf0b4901b3a8::t_d2c13f81ab2b1e 21-26,40-46
   s_a6cf0b4901b3a8::t_98039f4d2edd6c 47-48
+  s_a6cf0b4901b3a8::t_aab1cff1c9bc0f 27
 apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/session-recovery-task-repository.ts
   s_a6cf0b4901b3a8::t_b7803b2b71c602 15,139-140,142-147,149-150,154,162-182,315-317
 apps/evolverun/clawweb/public/modules/clawevolve/server/services/evolve/teamclaw-scope.ts
