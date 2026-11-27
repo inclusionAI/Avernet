@@ -1,0 +1,35 @@
+engine/adapter/src/engine/community/openclaw/client/chat_stream.py
+  s_3b198be521bb7f::t_47a9a723eea697 787
+engine/adapter/src/engine/community/openclaw/client/chat_dispatch.py
+  s_3b198be521bb7f::t_47a9a723eea697 27-42,54,117-118
+engine/adapter/src/engine/community/openclaw/client/chat_serialization.py
+  s_3b198be521bb7f::t_47a9a723eea697 14-16,30,34-39,47-48,66-88,282-291
+  s_3b198be521bb7f::t_7c421067f3cc7f 176-179
+  s_3b198be521bb7f::t_3eb974b508c45f 31,169-175,180-191,299-304
+  s_3b198be521bb7f::t_3aff5386dd8026 163-168,254-259,293
+  s_3b198be521bb7f::t_61022d54e28aaf 32-33,89-90
+engine/adapter/src/engine/community/openclaw/client/README.md
+  s_3b198be521bb7f::t_47a9a723eea697 60-68
+  s_3b198be521bb7f::t_3eb974b508c45f 69-73
+engine/adapter/src/engine/community/openclaw/client/tests/test_dispatch_recovery.py
+  s_3b198be521bb7f::t_3eb974b508c45f 222-266,268-271
+  s_3b198be521bb7f::t_4ea93bb286b1a9 1-202
+  s_3b198be521bb7f::t_7c421067f3cc7f 267
+  s_3b198be521bb7f::t_3aff5386dd8026 203-221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8c7b8c5c22f428cfc791124685764306811b05a8",
+  "prompts": {},
+  "sessions": {
+    "s_3b198be521bb7f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a166c7-61d8-7221-aa2e-e6efde122735",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
