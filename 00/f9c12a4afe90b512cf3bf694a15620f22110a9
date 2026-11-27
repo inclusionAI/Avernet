@@ -1,0 +1,33 @@
+apps/frontend-nextgen/src/pages/EvolutionFactory/Recovery/RecoveryDetail.tsx
+  s_a6cf0b4901b3a8::t_f7061795cdd57d 4,6,8,10,36,131,170,175,189,200
+apps/frontend-nextgen/src/services/recovery/recoveryService.ts
+  s_a6cf0b4901b3a8::t_1994b873cb48c7 8
+  s_a6cf0b4901b3a8::t_2a79b591a6d23f 1-7,9-13
+apps/frontend-nextgen/src/pages/EvolutionFactory/Recovery/RecoveryBotOptions.tsx
+  s_a6cf0b4901b3a8::t_2a79b591a6d23f 7,26,131,133-134,142,165,171
+apps/frontend-nextgen/src/pages/EvolutionFactory/Recovery/RecoveryHistory.tsx
+  s_a6cf0b4901b3a8::t_2a79b591a6d23f 2,128,130-131,145
+apps/frontend-nextgen/src/pages/EvolutionFactory/Recovery/RecoveryList.tsx
+  s_a6cf0b4901b3a8::t_2a79b591a6d23f 15,197
+apps/frontend-nextgen/src/services/backendApi/clawinsight/recoveryController.ts
+  s_a6cf0b4901b3a8::t_1994b873cb48c7 18-25,31
+  s_a6cf0b4901b3a8::t_2a79b591a6d23f 27-30,32-33
+apps/frontend-nextgen/src/pages/EvolutionFactory/Recovery/RecoveryDetailSections.tsx
+  s_a6cf0b4901b3a8::t_f7061795cdd57d 1-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "00f9c12a4afe90b512cf3bf694a15620f22110a9",
+  "prompts": {},
+  "sessions": {
+    "s_a6cf0b4901b3a8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a211d3-b312-7363-b8f8-a812788340a7",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

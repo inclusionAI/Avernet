@@ -1,0 +1,47 @@
+apps/bcs/crates/bootstrap/bcs/src/dist_direct_a2a.rs
+  s_07828166bbe91d::t_30b498918c7299 28,33,49-50,53-56,74
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/README.md
+  s_07828166bbe91d::t_c6499057d0b374 29-33
+  s_07828166bbe91d::t_498454368ed095 54
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_07828166bbe91d::t_c6499057d0b374 7-10
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/mod.rs
+  s_07828166bbe91d::t_30b498918c7299 3-4
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/services.rs
+  s_07828166bbe91d::t_c6fba66151ad3c 163-175
+apps/bcs/crates/bootstrap/bcs/Cargo.toml
+  s_07828166bbe91d::t_2918a40b31a993 44
+apps/bcs/crates/services/bcs-message-flow/Cargo.toml
+  s_07828166bbe91d::t_30b498918c7299 30-31
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_07828166bbe91d::t_c6499057d0b374 354-361
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/directory.rs
+  s_07828166bbe91d::t_30b498918c7299 1-58
+apps/bcs/crates/services/bcs-message-flow/CONTEXT.md
+  s_07828166bbe91d::t_c6499057d0b374 39-49
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/direct.rs
+  s_07828166bbe91d::t_2918a40b31a993 1,19,27-28,33-38,78-85
+apps/bcs/crates/services/bcs-message-flow/tests/conformance_direct_session_directory.rs
+  s_07828166bbe91d::t_c6fba66151ad3c 1-93
+apps/bcs/crates/service-api/bcs-service-api/src/port/dist_agent.rs
+  s_07828166bbe91d::t_30b498918c7299 129-138
+  s_07828166bbe91d::t_79d656af548b3c 128
+apps/bcs/Cargo.lock
+  s_07828166bbe91d::t_db09f17ddefc81 2295-2296
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0824c3bba7d359a3ecdb3becaeec9de97ad2e0fc",
+  "prompts": {},
+  "sessions": {
+    "s_07828166bbe91d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21896-cfa8-7e12-b50b-b3dfac264e6f",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
