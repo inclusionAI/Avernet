@@ -6,6 +6,7 @@ import { batchOutcome, isBatch, runOutcome } from './results';
 import {
   createRequestTargets,
   routineKey,
+  routineIdentityParams,
   targetParams,
   type RoutineAddress,
   type RoutineStage,
@@ -35,7 +36,7 @@ export function mapManagedRoutine(row: RoutineDto, scope: RoutineScope): Managed
     ...targetParams(row),
     id: row.routine_id,
     bot_id: row.bot_id || scope.botId,
-    owner_id: row.owner_id ?? scope.entityId ?? scope.userId,
+    owner_id: row.owner_id ?? scope.ownerId ?? scope.entityId ?? scope.userId,
   };
   return {
     ...address,
@@ -70,13 +71,14 @@ function mapRun(row: RoutineRunDto): RoutineRun {
 }
 export function createRoutineClient(
   botId: string,
-  ownerId: string | undefined,
+  entityId: string | undefined,
   actorId: string,
   stage?: RoutineStage,
+  legacyOwnerId?: string,
 ) {
-  const scope: RoutineScope = { botId, userId: actorId, entityId: ownerId, stage };
+  const scope: RoutineScope = { botId, userId: actorId, entityId, ownerId: legacyOwnerId, stage };
   const base = `/openapi/v1/bots/${encodeURIComponent(botId)}`;
-  const params = { user_id: actorId, entity_id: ownerId };
+  const params = routineIdentityParams(scope);
   const path = (id: string) => `/${encodeURIComponent(id)}`;
   function request<T>(suffix: string, method = 'GET', query: object = {}, data?: unknown) {
     if (!actorId) throw new Error('当前登录身份尚未就绪');

@@ -11,8 +11,20 @@ export interface RoutineScope {
   botId: string;
   userId: string;
   entityId?: string;
+  /** Legacy links address a Bot by owner; never relabel this as an entity. */
+  ownerId?: string;
   /** 链接查询参数指定的生效环境；线上容器清单等判定依赖它（详情记录不含发布状态）。 */
   stage?: RoutineStage;
+}
+export function routineIdentityParams(scope: RoutineScope) {
+  return {
+    user_id: scope.userId,
+    ...(scope.entityId
+      ? { entity_id: scope.entityId }
+      : scope.ownerId
+      ? { owner_id: scope.ownerId }
+      : {}),
+  };
 }
 export interface RoutineEnvironment {
   runtime_stage: RoutineStage;
@@ -149,7 +161,7 @@ export const routineKey = (
   scope: RoutineScope,
 ) =>
   JSON.stringify([
-    row.owner_id ?? scope.entityId ?? scope.userId,
+    scope.entityId ?? scope.ownerId ?? row.owner_id ?? scope.userId,
     row.bot_id || scope.botId,
     row.runtime_stage ?? null,
     row.device_uuid ?? null,
@@ -160,7 +172,7 @@ export function addressFromKey(key: string | null, scope: RoutineScope): Routine
   if (!key) return undefined;
   try {
     const [owner, bot, stage, device, operator, id] = JSON.parse(key);
-    if (bot !== scope.botId || owner !== (scope.entityId ?? scope.userId) || typeof id !== 'string' || !id)
+    if (bot !== scope.botId || owner !== (scope.entityId ?? scope.ownerId ?? scope.userId) || typeof id !== 'string' || !id)
       return undefined;
     if (stage !== null && stage !== undefined && !isStage(stage)) return undefined;
     if ((device !== null && device !== undefined && typeof device !== 'string') || (operator !== null && operator !== undefined && typeof operator !== 'string'))

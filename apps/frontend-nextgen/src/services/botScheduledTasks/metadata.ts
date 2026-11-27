@@ -1,11 +1,11 @@
 import type { BackendUnknownRecord } from '@/services/backendApi/types';
 import { sendRoutineRequest } from './http';
-import { isStage, type ManagedRoutine, type RoutineContext, type RoutineEnvironment, type RoutineScope } from './types';
+import { routineIdentityParams, isStage, type ManagedRoutine, type RoutineContext, type RoutineEnvironment, type RoutineScope } from './types';
 const string = (value: unknown) => (typeof value === 'string' ? value : '');
 /** Reuse published Bot/editor/Caller APIs; the previous local /api/cron/targets is not a contract. */
 export async function loadRoutineContext(scope: RoutineScope): Promise<RoutineContext> {
   const path = `/openapi/v1/bots/${encodeURIComponent(scope.botId)}`;
-  const params = { user_id: scope.userId, entity_id: scope.entityId };
+  const params = routineIdentityParams(scope);
   const bot = await sendRoutineRequest<BackendUnknownRecord>(path, { params });
   const owner = string(bot.owner_id) || string(bot.owner_entity_id) || scope.entityId || '';
   const service = String(bot.bot_type).toLowerCase() === 'service';

@@ -1,8 +1,9 @@
 """Preserve upstream admission and batch-transaction regression coverage."""
 
-from threading import Event, Thread
+from threading import Event, Thread, current_thread
 
 import pytest
+from sqlalchemy import event
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.plugin_api.models import BotModel
@@ -115,31 +116,51 @@ def test_real_sqlite_plugin_serializes_competing_skill_writes(tmp_path):
         session.flush()
         set_id, first_id, second_id = active.id, first.id, second.id
     repository = CapabilityDesiredStateRepository(db)
-    started, finished = Event(), Event()
+    attempted, acquired = Event(), Event()
     results = []
 
     def install():
-        started.set()
         try:
             repository.install_skill(
                 bot_id="bot", owner_id="owner", skill_id=str(second_id)
             )
         except Exception as exc:
             results.append(exc)
-        finally:
-            finished.set()
 
-    with repository.skill_batch(bot_id="bot", owner_id="owner"):
-        repository.add_skill(
-            bot_id="bot", owner_id="owner", set_id=str(set_id), skill_id=str(first_id)
-        )
-        worker = Thread(target=install)
-        worker.start()
-        assert started.wait(5)
-        assert not finished.wait(0.2)
-    worker.join(5)
-    assert not worker.is_alive()
+    worker = Thread(target=install)
+
+    def before_execute(connection, cursor, statement, parameters, context, many):
+        if current_thread() is worker and statement == "BEGIN IMMEDIATE":
+            attempted.set()
+
+    def after_execute(connection, cursor, statement, parameters, context, many):
+        if current_thread() is worker and statement == "BEGIN IMMEDIATE":
+            acquired.set()
+
+    event.listen(db._engine, "before_cursor_execute", before_execute)
+    event.listen(db._engine, "after_cursor_execute", after_execute)
+    try:
+        with repository.skill_batch(bot_id="bot", owner_id="owner"):
+            repository.add_skill(
+                bot_id="bot", owner_id="owner", set_id=str(set_id), skill_id=str(first_id)
+            )
+            worker.start()
+            # Observe the real competing SQL, not merely Thread.start or a sleep.
+            assert attempted.wait(30), "Competing writer never attempted its transaction"
+            assert not acquired.is_set(), "Competing writer entered an uncommitted batch"
+    finally:
+        # Release the batch before joining, including on assertion failure. The
+        # watchdog allows CI scheduling/coverage overhead, not a performance SLA.
+        if worker.ident is not None:
+            worker.join(30)
+        event.remove(db._engine, "before_cursor_execute", before_execute)
+        event.remove(db._engine, "after_cursor_execute", after_execute)
+    assert not worker.is_alive(), "Competing writer did not finish after batch commit"
+    assert acquired.is_set()
     assert len(results) == 1 and isinstance(results[0], SkillRuntimeNameConflictError)
+    with db.orm_session() as session:
+        installed = {row.skill_id for row in session.query(BotSkillInstallation).all()}
+        assert installed == {first_id}
 
 
 def test_inactive_set_add_rejects_conflict_with_an_installed_skill():
