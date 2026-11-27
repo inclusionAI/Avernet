@@ -44,15 +44,16 @@ export const CodeRepoListField: React.FC<CodeRepoListFieldProps> = ({
   const items = normalizeCodeRepoItems(value);
   const displayItems = items.length ? items : [{ repo_url: '' }];
   const normalizedTenant: CodeRepositoryTenant = tenant === 'xiaojin' ? 'xiaojin' : 'ant';
+  /* figma 稿 node 2027:25877:代码库标签口径「…（可选）（可添加多个）」+ 右侧搜索租户切换(96×24)。 */
   const labelNode = label ? (
-    <label className="block text-xs font-semibold text-slate-600">
+    <label className="block text-xs font-semibold text-foreground">
       {label}
       {required ? (
-        <span className="ml-0.5 text-red-500">*</span>
+        <span className="ml-0.5 text-destructive">*</span>
       ) : (
-        <span className="ml-1 font-normal text-slate-400">（可选）</span>
+        <span className="ml-1 font-normal text-muted-foreground">（可选）</span>
       )}
-      {allowMultiple && <span className="ml-1 font-normal text-slate-400">（可添加多个）</span>}
+      {allowMultiple && <span className="ml-1 font-normal text-muted-foreground">（可添加多个）</span>}
     </label>
   ) : null;
 
@@ -107,7 +108,7 @@ export const CodeRepoListField: React.FC<CodeRepoListFieldProps> = ({
           </div>
         );
       })}
-      {description && <p className="text-[11px] leading-relaxed text-slate-400">{description}</p>}
+      {description && <p className="text-[11px] leading-relaxed text-muted-foreground">{description}</p>}
       {allowMultiple && !removeDisabled && (
         <Button
           type="button"

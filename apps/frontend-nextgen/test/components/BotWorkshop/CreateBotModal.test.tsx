@@ -89,8 +89,10 @@ test('创建云端 Bot（Open Core 形态）卡片化展示 OpenClaw + Claude Co
   expect(screen.queryByRole('button', { name: 'TEClaw' })).not.toBeInTheDocument();
   expect(screen.queryByRole('combobox', { name: '引擎类型' })).not.toBeInTheDocument();
   expect(screen.getByText('Bot 头像')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '上传图片' })).toBeInTheDocument();
-  expect(screen.getAllByRole('button', { name: /选择头像/ })).toHaveLength(8);
+  // figma 稿 node 2074:9156:候选行单行 10 候选 + 行尾换一批槽;上传改为「自定义」Tab 内槽位。
+  expect(screen.queryByRole('button', { name: '上传图片' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /换一批/ })).toBeInTheDocument();
+  expect(screen.getAllByRole('button', { name: /选择头像/ })).toHaveLength(10);
 });
 
 test('创建 Bot 时上传图片会写入提交参数中的 avatarUrl', async () => {
@@ -118,8 +120,10 @@ test('创建 Bot 时上传图片会写入提交参数中的 avatarUrl', async ()
   const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aWQAAAAASUVORK5CYII='), (char) => char.charCodeAt(0));
   const file = new File([png], 'avatar.png', { type: 'image/png' });
   fireEvent.change(input, { target: { files: [file] } });
+  // 单图语义:上传后切到「自定义」Tab 可见已上传图(新交互无「当前头像」大缩略图)。
+  fireEvent.click(screen.getByRole('tab', { name: '自定义' }));
   await waitFor(() =>
-    expect(screen.getByAltText('当前 Bot 头像')).toHaveAttribute(
+    expect(screen.getByAltText('已上传头像')).toHaveAttribute(
       'src',
       expect.stringMatching(/^data:image\/png;base64,/),
     ),
