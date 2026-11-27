@@ -2,7 +2,7 @@ import { FileIcon } from 'lucide-react';
 
 import { MessageEditBar, MessageQuoteBar } from '@/components/Workspace/MessageInteractionToolbar';
 import { ComposerCapabilitiesMenu } from '@/components/Workspace/TaskComposerMenu';
-import type { SessionView } from '@/domain/collaboration';
+import type { GroupKind, SessionView } from '@/domain/collaboration';
 import type { UseTaskExecutionResult } from '@/hooks/useTaskExecution';
 import { useGroupChatImageUpload } from '@/pages/Workspace/hooks/useGroupChatImageUpload';
 import { buildQuotePrompt, type MessageQuote } from '@/pages/Workspace/hooks/useMessageInteractions';
@@ -20,6 +20,7 @@ import { UploadFilesModal } from './UploadFilesModal';
 
 interface GroupChatComposerProps {
   session: SessionView | null;
+  groupKind: GroupKind;
   /** 连接状态：断连四态输入卡灰底不可输入（附录 B；视觉依赖 Sender disabled 形态=灰底）。 */
   connectionStatus: ProviderConnectionStatus;
   mentionConfig: MentionConfig | undefined;
@@ -70,6 +71,7 @@ function ChatFileUploadModal({
 
 export function GroupChatComposer({
   session,
+  groupKind,
   connectionStatus,
   mentionConfig,
   onSend,
@@ -138,7 +140,7 @@ export function GroupChatComposer({
         onDraftChange('');
         return;
       }
-      const mentions = expandMentionIds(context?.mentions ?? [], session?.participants ?? []);
+      const mentions = expandMentionIds(context?.mentions ?? [], session?.participants ?? [], groupKind);
       let attachments: SessionMessageAttachment[] | undefined;
       if (images.images.length > 0 && session?.sessionId) {
         attachments = await images.uploadAll();
@@ -146,7 +148,7 @@ export function GroupChatComposer({
       }
       onSend(quotedContent, mentions, attachments && attachments.length > 0 ? attachments : undefined);
     },
-    [images, onSend, session?.participants, session?.sessionId, execution, onDraftChange, quote],
+    [images, onSend, groupKind, session?.participants, session?.sessionId, execution, onDraftChange, quote],
   );
 
   const submitImageOnlyOnEnter = useCallback(

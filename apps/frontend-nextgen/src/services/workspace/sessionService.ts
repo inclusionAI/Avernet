@@ -269,9 +269,21 @@ export const sessionService = {
     }
   },
 
-  /** 退出会话：从当前身份视角移除自己。 */
-  async leaveSession(sessionId: string, actorId: string): Promise<DomainResult<SessionView>> {
-    return this.removeMember(sessionId, actorId);
+  /** 退出后当前身份已无详情读取权限，只以 DELETE 结果为准，不再回查会话。 */
+  async leaveSession(sessionId: string, actorId: string): Promise<DomainResult<null>> {
+    try {
+      await deleteSessionParticipant(sessionId, actorId);
+      return { ok: true, data: null };
+    } catch (err) {
+      const status = (err as { status?: number })?.status;
+      if (status === 409) {
+        return { ok: false, error: toDomainError('SESSION_CONFLICT', '会话状态已变更，请刷新后重试。') };
+      }
+      return {
+        ok: false,
+        error: toDomainError('SESSION_LEAVE_FAILED', friendlyStatusFallback(status, '退出会话失败，请稍后重试。')),
+      };
+    }
   },
 
   /** 收藏/取消收藏会话：调用后端接口，返回最终收藏状态（collected 字段）。 */

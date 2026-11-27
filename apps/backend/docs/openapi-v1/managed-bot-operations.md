@@ -97,9 +97,14 @@ Each status batch uses one exact-address, tenant, environment and template-scope
 query. It projects readiness and public restart fields without loading complete
 template snapshots, raw Bot configuration or device properties.
 
-Discovery filters before count/pagination in the database and projects only
-display fields. It does not load whole snapshots or probe containers. Platform
-environment differs from service stage: verification is `prestable`, production
-publication is `online`, and the editable source is `draft`. A publication's
-version is unknown unless that publication recorded its own snapshot version;
-it never inherits the draft version. No schema migration or cache is required.
+Discovery lists non-deleted source Bots in `ACTIVE` or `FAILED` state, scoped to the
+requested template and deployment. This visibility rule does not apply to snapshot
+reads or restart status polling. For service Bots, `draft`, `prestable` and `online`
+are distinct rows; only the draft can be restarted through these operations.
+
+All stages of a Bot display the same saved template version ID, label and optional
+`template_status` (`bot_template_config.status`) from the source Bot's template record.
+This is not the running container version or the service publication's own version.
+Legacy metadata can be null. Search, stage and outdated filters apply before total
+and pagination; an out-of-range page still returns the filtered total. Discovery
+returns display fields only, without per-Bot reads or container probes.

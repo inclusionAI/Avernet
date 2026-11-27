@@ -64,19 +64,20 @@ export const YuqueKbReposField: React.FC<YuqueKbReposFieldProps> = ({
 
   return (
     <div className={cn('space-y-1.5', className)}>
-      <label className="flex items-center gap-1 text-xs font-semibold text-slate-600">
+      {/* figma 稿 node 2041:48753:语雀知识库(URL+空间 Token 必填)标签与提示口径。 */}
+      <label className="flex items-center gap-1 text-xs font-semibold text-foreground">
         {label}
         {required ? (
-          <span className="ml-0.5 text-red-500">*</span>
+          <span className="ml-0.5 text-destructive">*</span>
         ) : (
-          <span className="font-normal text-slate-400">（可选）</span>
+          <span className="font-normal text-muted-foreground">（可选）</span>
         )}
-        <span className="font-normal text-slate-400">（可添加多个）</span>
+        <span className="font-normal text-muted-foreground">（可添加多个）</span>
         {tooltipContent && (
           <CreateBotTooltipProvider delayDuration={200}>
             <CreateBotTooltip open={tooltipOpen} onOpenChange={onTooltipOpenChange}>
               <CreateBotTooltipTrigger asChild>
-                <HelpCircle className="h-3.5 w-3.5 cursor-help text-slate-400" />
+                <HelpCircle className="h-3.5 w-3.5 cursor-help text-muted-foreground" />
               </CreateBotTooltipTrigger>
               <CreateBotTooltipContent
                 side="top"
@@ -98,7 +99,7 @@ export const YuqueKbReposField: React.FC<YuqueKbReposFieldProps> = ({
           key={index}
           className={cn(
             'space-y-1.5 rounded-lg border p-2.5 transition-colors',
-            errors[index] ? 'border-red-300 bg-red-50/30' : 'border-slate-100 bg-white',
+            errors[index] ? 'border-destructive/40 bg-destructive/5' : 'border-border/70 bg-card',
           )}
         >
           <div className="flex items-center gap-1.5">
@@ -109,8 +110,10 @@ export const YuqueKbReposField: React.FC<YuqueKbReposFieldProps> = ({
               placeholder={placeholder}
               disabled={disabled}
               className={cn(
-                'flex-1 rounded-lg border px-3 py-1.5 text-sm focus:border-transparent focus:outline-none focus:ring-1 placeholder:text-slate-300 disabled:bg-slate-50 disabled:text-slate-400',
-                errors[index] ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-slate-300',
+                'flex-1 rounded-lg border px-3 py-1.5 text-sm text-foreground focus:border-transparent focus:outline-none focus:ring-1 focus-visible:border-muted-foreground/40 placeholder:text-muted-foreground/50 disabled:bg-muted/60 disabled:text-muted-foreground',
+                errors[index]
+                  ? 'border-destructive/40 focus:ring-destructive/30'
+                  : 'border-input focus:ring-muted-foreground/15',
               )}
             />
             {!disabled && displayItems.length > 1 && (
@@ -128,7 +131,7 @@ export const YuqueKbReposField: React.FC<YuqueKbReposFieldProps> = ({
           </div>
           <div className="flex items-center gap-1.5">
             <div className="relative flex-1">
-              <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-400" />
+              <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="text"
                 value={repo.token || ''}
@@ -136,25 +139,27 @@ export const YuqueKbReposField: React.FC<YuqueKbReposFieldProps> = ({
                 placeholder="空间 Token（必填）"
                 disabled={disabled}
                 className={cn(
-                  'w-full rounded-lg border py-1.5 pl-8 pr-3 text-sm focus:border-transparent focus:outline-none focus:ring-1 placeholder:text-slate-300 disabled:bg-slate-50 disabled:text-slate-400',
-                  errors[index] ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-slate-300',
+                  'w-full rounded-lg border py-1.5 pl-8 pr-3 text-sm text-foreground focus:border-transparent focus:outline-none focus:ring-1 focus-visible:border-muted-foreground/40 placeholder:text-muted-foreground/50 disabled:bg-muted/60 disabled:text-muted-foreground',
+                  errors[index]
+                    ? 'border-destructive/40 focus:ring-destructive/30'
+                    : 'border-input focus:ring-muted-foreground/15',
                 )}
               />
             </div>
             {!disabled && displayItems.length > 1 && <div className="h-9 w-9 flex-shrink-0" aria-hidden />}
           </div>
-          {errors[index] && <p className="pl-1 text-[11px] text-red-500">{errorRenderer(errors[index])}</p>}
+          {errors[index] && <p className="pl-1 text-[11px] text-destructive">{errorRenderer(errors[index])}</p>}
         </div>
       ))}
-      {description && <p className="text-[11px] leading-relaxed text-slate-400">{description}</p>}
+      {description && <p className="text-[11px] leading-relaxed text-muted-foreground">{description}</p>}
       {validating && (
-        <div className="flex items-center gap-2 py-1 text-xs text-slate-400">
+        <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
           <span className="i-lucide-loader-2 h-3 w-3 animate-spin" />
           正在校验语雀知识库...
         </div>
       )}
       {warning && !validating && (
-        <div className="flex items-center gap-1.5 py-1 text-xs text-amber-600">
+        <div className="flex items-center gap-1.5 py-1 text-xs text-warning">
           <AlertTriangle className="h-3 w-3 flex-shrink-0" />
           {warning}
         </div>

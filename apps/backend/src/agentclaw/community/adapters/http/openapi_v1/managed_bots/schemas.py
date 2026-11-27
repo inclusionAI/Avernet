@@ -103,9 +103,13 @@ class TemplateBotRow(BaseModel):
     )
     template_version_id: int | None = Field(
         default=None,
-        description='This stage snapshot version ID, or unknown; never borrowed from draft.',
+        description='Source Bot saved template version ID, shared by all stages; null if unknown.',
     )
-    template_version: str | None = Field(default=None, description='This stage snapshot version label, when recorded.')
+    template_version: str | None = Field(default=None, description='Source Bot saved template version label, when recorded.')
+    template_status: str | None = Field(
+        default=None,
+        description='Source Bot saved template publication status, shared by all stages; null if unknown.',
+    )
 
 
 class ManagedBotSnapshot(BaseModel):

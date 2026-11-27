@@ -1,10 +1,7 @@
-// 协作群消息发送方/参与者 Bot 集合归并（Spec: openspec/changes/collab-bot-cdn-preregister）。
-//
-// 副屏 <AixUI component="lib.Comp"> 的 CDN URL 来自「发送该消息的 Bot」的 render screens
-// 配置（libraryCdnInjector Bot 级来源）。本文件从消息集合归并出发送方 Bot 去重集合，
-// 供历史挂载前批量注册与 live 消息增量补注册消费；另从会话/群参与者归并 Bot 集合
-// （collectParticipantBots），供 live 首条回复前预注册（回复渲染时同步查 map，晚注册不回填）。
-import type { ChatMessage } from '@tc-chat/core';
+// BCS 消息中首次出现需要 CDN 的 AixUI 组件时，才查询实际发送方 Bot 的资源。
+import type { ChatMessage, TextBlock } from '@tc-chat/core';
+import { extractTagAttr, resolveAixUi } from '@tc-chat/ui/es/utils/aixTags';
+import MarkdownIt from 'markdown-it';
 
 /** 协作群发送方 Bot 引用（owner 缺失时仍可发起无 owner 请求，按鉴权语义查到空）。 */
 export interface SenderBotRef {
@@ -17,6 +14,9 @@ export interface SenderBotRef {
 /** BCS 系统消息的发送方 uuid（非真实 Bot，无副屏配置）。 */
 export const BCS_SYSTEM_MESSAGE_BOT_UUID = 'bcs-system-message';
 
+/** BCS 状态机的虚拟事件发送方，其副屏使用 BCS manifest，而非 Bot 配置。 */
+const BCS_STATE_MACHINE_BOT_UUID = 'bcs_state_machine';
+
 /** 发送方复合键（与 libraryCdnInjector 的 botCdnMaps 分桶键同构）。 */
 export function senderBotKey(bot: SenderBotRef): string {
   return `${bot.botId}:${bot.ownerId ?? ''}`;
@@ -27,48 +27,97 @@ function parseBotUuid(botUuid: string): SenderBotRef | null {
   const sepIndex = botUuid.indexOf(':');
   const botId = sepIndex >= 0 ? botUuid.slice(0, sepIndex) : botUuid;
   const ownerId = sepIndex >= 0 ? botUuid.slice(sepIndex + 1) : undefined;
-  if (!botId || botId === BCS_SYSTEM_MESSAGE_BOT_UUID) return null;
+  if (!botId || botId === BCS_SYSTEM_MESSAGE_BOT_UUID || botId === BCS_STATE_MACHINE_BOT_UUID) return null;
   if (botId.startsWith('human_')) return null; // 人类 actor，非真实 Bot
   return { botId, ...(ownerId ? { ownerId } : {}) };
 }
 
-/**
- * 会话/群参与者 Bot 集合（结构子集，SessionView.participants / GroupView.participants 同构）。
- * Bot 成员的 actorId 与消息发送方 botUuid 同构（形如 `botId:entityId`，见 groupChatAbortHelpers
- * 的互比），人类成员为 `human_<userId>`。
- */
-export interface ParticipantBotSource {
-  actorId: string;
-  kind?: 'human' | 'bot';
-}
+const markdown = new MarkdownIt({ html: true });
 
-/**
- * 归并参与者中的 Bot 集合，供 live 首条回复前预注册副屏 CDN。
- *
- * 用户发消息后 Bot 的实时回复渲染时同步查 CDN map，晚注册不回填——尚未在历史中
- * 发过言的会话成员 Bot（新会话/新成员/历史截断）MUST 靠参与者预注册补洞，
- * 否则其首条 live 回复的副屏报「缺少 CDN 地址」（老前端双源并集的动机）。
- * uuid 直接拆段，不做 owner 回退（参与者 uuid 权威；复合键去重交给 registerBotCdnList）。
- */
-export function collectParticipantBots(participants: readonly ParticipantBotSource[]): SenderBotRef[] {
-  const byKey = new Map<string, SenderBotRef>();
-  for (const participant of participants) {
-    if (participant.kind === 'human') continue;
-    const ref = parseBotUuid(participant.actorId);
-    if (!ref) continue;
-    const key = senderBotKey(ref);
-    if (!byKey.has(key)) byKey.set(key, ref);
+// SDK 的 AixUI block tokenizer 允许属性跨空行，且先于缩进代码规则执行。
+// MarkdownIt 的普通 HTML/paragraph 规则会在空行截断，须在词法阶段保留完整开标签。
+// 只接管块起始的标签；围栏代码和 HTML 注释仍由各自规则整体消费。
+markdown.block.ruler.before('code', 'aixui_open', (state, startLine, endLine, silent) => {
+  const firstLine = state.getLines(startLine, startLine + 1, state.blkIndent, false);
+  if (!/^ *<aixui\b/i.test(firstLine)) return false;
+  // getLines 按容器偏移去掉引用/列表标记；不能直接跨行切原始 src。
+  let quote: '"' | "'" | undefined;
+  let nextLine = startLine;
+  let closed = false;
+  // 逐行扫描一次，属性引号内的 > 不结束标签；不重扫前缀或复制剩余全文。
+  for (; nextLine < endLine; nextLine += 1) {
+    if (nextLine > startLine && !state.isEmpty(nextLine) && state.sCount[nextLine] < state.blkIndent) return false;
+    const line = nextLine === startLine ? firstLine : state.getLines(nextLine, nextLine + 1, state.blkIndent, false);
+    for (const char of line) {
+      if (quote) {
+        if (char === quote) quote = undefined;
+      } else if (char === '"' || char === "'") {
+        quote = char;
+      } else if (char === '>') {
+        closed = true;
+        break;
+      }
+    }
+    if (closed) {
+      nextLine += 1;
+      break;
+    }
   }
-  return Array.from(byKey.values()).sort((a, b) => {
-    const botCompare = a.botId.localeCompare(b.botId);
-    return botCompare !== 0 ? botCompare : (a.ownerId ?? '').localeCompare(b.ownerId ?? '');
+  if (!closed) return false;
+  if (silent) return true;
+  const token = state.push('html_block', '', 0);
+  token.map = [startLine, nextLine];
+  token.content = state.getLines(startLine, nextLine, state.blkIndent, true);
+  state.line = nextLine;
+  return true;
+});
+
+/** 复用 Markdown lexer 排除代码块/行内代码，再使用 SDK 的 AixUI 属性语义。 */
+function needsBotCdn(content: string): boolean {
+  if (!/<aixui\b/i.test(content)) return false;
+  const lines = content.split(/\r?\n/);
+  const tokens = markdown.parse(content, {});
+  const fragments = tokens.flatMap((token) => {
+    // SDK 的 AixUI block tokenizer 优先于缩进代码规则，允许开标签前存在任意空格。
+    if (token.type === 'html_block') return [token.content];
+    if (token.type === 'code_block' && /^ *<aixui\b/i.test(token.content)) {
+      // MarkdownIt 已剥掉缩进，包括 SDK 不接受的 tab；回看原始行。
+      const line = token.map ? lines[token.map[0]] ?? '' : '';
+      const tagStart = line.search(/<aixui\b/i);
+      if (tagStart >= 0 && !line.slice(0, tagStart).includes('\t')) return [token.content];
+    }
+    return (token.children ?? []).filter((child) => child.type === 'html_inline').map((child) => child.content);
   });
+  for (const fragment of fragments) {
+    const visible = fragment.replace(/<!--[\s\S]*?(?:-->|$)/g, '');
+    for (const [, attrs] of visible.matchAll(/<AixUI\b((?:"[^"]*"|'[^']*'|[^'">])*)>/gi)) {
+      // DOM 也接受无引号属性；兼容 SDK 的 data-* 镜像属性。
+      const attr = (name: string) => extractTagAttr(attrs, name) ??
+        attrs.match(new RegExp(`(?:^|\\s)(?:data-)?${name}\\s*=\\s*([^\\s'"=<>]+)`, 'i'))?.[1];
+      const resolved = resolveAixUi({
+        type: attr('type'), component: attr('component'), cardId: attr('cardId'),
+        panel: attr('panel'), cdn: attr('cdn'),
+      });
+      // 内联业务组件也使用同一个 SDK CDN 查找入口，保留它的既有显示能力。
+      if (resolved.source === 'component' && resolved.component && !resolved.cdn &&
+          resolved.component.split('.')[0] !== 'taskPanel') return true;
+    }
+  }
+  return false;
+}
+
+function messageNeedsBotCdn(message: ChatMessage): boolean {
+  // 与 buildMessageBlocks 一致：已有渲染块优先，聚合 content 可能包含不会渲染的工具输出。
+  if (message.blocks?.length) {
+    return message.blocks.some((block) => block.type === 'text' && needsBotCdn((block as TextBlock).content));
+  }
+  return typeof message.content === 'string' && needsBotCdn(message.content);
 }
 
 /**
- * 归并消息集合中的发送方 Bot 集合。
+ * 归并需要 Bot CDN 的消息发送方，其他消息只提供归属回退的证据。
  *
- * - 发送方取 `extra.botUuid`（groupMessageMapper 由 BCS DTO `sender` 平铺，形如 `botId:entityId`
+ * - 优先明确发送方 `extra.senderId`，assistant 缺失时回退 SDK `extra.botUuid`（形如 `botId:entityId`
  *   或人类 actor `human_<userId>`）；
  * - uuid 自带 `:ownerId` 时 owner MUST 取 uuid 段——bot_id 不全局唯一（多 owner 的 default 同名），
  *   回退解析会命中别人的 default；
@@ -79,13 +128,16 @@ export function collectParticipantBots(participants: readonly ParticipantBotSour
  */
 export function collectSenderBots(messages: ChatMessage[]): SenderBotRef[] {
   const byKey = new Map<string, SenderBotRef>();
+  const needed = new Set<string>();
   for (const message of messages) {
-    const botUuid = message.extra?.botUuid;
+    if (message.role !== 'assistant') continue;
+    const botUuid = message.extra?.senderId ?? message.extra?.botUuid;
     if (typeof botUuid !== 'string' || !botUuid) continue;
     const ref = parseBotUuid(botUuid);
     if (!ref) continue;
     const key = senderBotKey(ref);
     if (!byKey.has(key)) byKey.set(key, ref);
+    if (messageNeedsBotCdn(message)) needed.add(key);
   }
   // owner 回退：uuid 缺 owner 时，若同 botId 已知 owner 唯一则采纳，避免把候选 Bot 拆成两桶。
   const knownOwnersByBot = new Map<string, Set<string>>();
@@ -97,6 +149,7 @@ export function collectSenderBots(messages: ChatMessage[]): SenderBotRef[] {
   }
   const fallbacked = new Map<string, SenderBotRef>();
   for (const [key, bot] of byKey) {
+    if (!needed.has(key)) continue;
     if (bot.ownerId) {
       fallbacked.set(key, bot);
       continue;

@@ -422,6 +422,41 @@ describe('botSessionService', () => {
     expect(res.ok).toBe(true);
   });
 
+  it.each(['openclaw', 'teclaw'])('%s 工坊历史首次加载、刷新和翻页保留服务 Bot 阶段', async (engine) => {
+    mocked.listBotSessionMessages.mockResolvedValue({ data: { items: [], total: 0 } });
+    for (const stage of ['draft', 'verify', 'online'] as const) {
+      const target = { ...bot, engine, botType: 'service', runtimeStage: stage };
+      for (const page of [1, 1, 2]) {
+        await botSessionService.listMessagesPage(target, 'human_900003', 'debug', page, 50, undefined, false);
+        expect(mocked.listBotSessionMessages).toHaveBeenLastCalledWith('20260402_ab', 'debug', {
+          user_id: '900003', owner_id: '2088', page, page_size: 50, stage,
+        });
+      }
+    }
+  });
+
+  it('工坊历史保留显式实例和阶段，不附加本人会话主体', async () => {
+    mocked.listBotSessionMessages.mockResolvedValue({ data: { items: [], total: 0 } });
+    await botSessionService.listMessagesPage(
+      { ...bot, botType: 'service', runtimeStage: 'online' }, '900003', 'debug', 2, 50,
+      { deviceUuid: 'verify-instance', stage: 'verify' }, false,
+    );
+    expect(mocked.listBotSessionMessages).toHaveBeenLastCalledWith('20260402_ab', 'debug', {
+      user_id: '900003', owner_id: '2088', page: 2, page_size: 50,
+      stage: 'verify', device_uuid: 'verify-instance',
+    });
+  });
+
+  it('个人 Bot 工坊历史保持默认阶段和原有身份参数', async () => {
+    mocked.listBotSessionMessages.mockResolvedValue({ data: { items: [], total: 0 } });
+    await botSessionService.listMessagesPage(
+      { ...bot, botType: 'personal', runtimeStage: 'draft' }, '900003', 'debug', 1, 50, undefined, false,
+    );
+    expect(mocked.listBotSessionMessages).toHaveBeenLastCalledWith('20260402_ab', 'debug', {
+      user_id: '900003', owner_id: '2088', page: 1, page_size: 50,
+    });
+  });
+
   it('listMessages 拉取并映射为 ChatMessage[](旧→新升序,user_id 含冒号取尾段)', async () => {
     mocked.listBotSessionMessages.mockResolvedValue({
       code: 200000,

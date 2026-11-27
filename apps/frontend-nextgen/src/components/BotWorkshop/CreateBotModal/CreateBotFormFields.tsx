@@ -231,6 +231,7 @@ export function CreateBotFormFields({
         </div>
       </div>
 
+      {/* figma 稿 node 2041:48753 footer:左侧 71px 槽位(此处承载校验/提交错误文案)+ 右侧「取消/创建」组。 */}
       <div className="flex items-center justify-between gap-3">
         {error ? (
           <p role="alert" className="m-0 min-w-0 flex-1 text-xs leading-5 text-destructive">

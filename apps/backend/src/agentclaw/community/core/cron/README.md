@@ -79,3 +79,15 @@ the existing targeted-list contract requiring a specific Bot and runtime_stage.
 Auto-selected Caller reads reuse its transport and request/response/failure
 diagnostics after binding resolution and instance enumeration establish
 authorization and device membership.
+
+### Owner handoff and resource addressing
+
+Resolve the Bot before selecting a runtime. Published verify/online bindings
+(including a retained verify instance from a successful publication) are looked
+up by `source_bot_pk = bot.id`, status and environment. Publication `owner_id`
+is a historical resource locator and must not be compared with the current
+Owner. Targets and response ownership still carry the resolved Bot's current
+Owner; authorization and authenticated Caller identity remain unchanged.
+Both legacy `/api/cron` and OpenAPI `routines` consume this same resolver.
+The existing indexed source-Bot repository query is reused, without adding
+per-task queries or provisioning runtime instances.

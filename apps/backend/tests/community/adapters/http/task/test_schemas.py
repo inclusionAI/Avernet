@@ -170,6 +170,31 @@ def test_node_context_dto_projects_used_executor_ids() -> None:
     assert dto.used_executor_ids == ["bot-1", "bot-2"]
 
 
+def test_node_context_dto_projects_reusable_facts() -> None:
+    spec = TaskSpec(
+        context=Context(title="目标"), goal=Goal(objective="完成", acceptances=[])
+    )
+    fact = {
+        "subject": "uctcore:risk_profile_s6",
+        "claim_type": "query_result",
+        "value": {"status": "healthy"},
+        "source_node_id": "n-previous",
+    }
+    dto = node_context_to_dto(
+        TaskContext(
+            spec=spec,
+            all_done_output=[],
+            gaps=[],
+            task_id="t1",
+            node_id="n1",
+            root_task_spec=spec,
+            current_task_spec=spec,
+            reusable_facts=[fact],
+        )
+    )
+    assert dto.reusable_facts == [fact]
+
+
 
 _TRACE_ACTION_TYPES = {
     "EXECUTION_RESULT": [

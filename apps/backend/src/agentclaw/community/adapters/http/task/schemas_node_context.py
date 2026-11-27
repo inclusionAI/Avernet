@@ -45,6 +45,7 @@ class NodeTaskContextDTO(BaseModel):
     actual_goal: GoalDTO | None = None
     capability_failure_reason: str | None = None
     all_done_output: list[DoneOutputDTO] = Field(default_factory=list)
+    reusable_facts: list[dict[str, Any]] = Field(default_factory=list)
     accepted_execution_patch: AcceptedExecutionPatchDTO | None = None
     accepted_plan_report: AcceptedPlanReportDTO | None = None
     used_executor_ids: list[str] = Field(default_factory=list)
@@ -111,6 +112,7 @@ def node_context_to_dto(context: TaskContext) -> NodeTaskContextDTO:
         actual_goal=_goal_to_dto(context.actual_goal) if context.actual_goal else None,
         capability_failure_reason=context.capability_failure_reason,
         all_done_output=task_context_to_dto(context).all_done_output,
+        reusable_facts=list(context.reusable_facts),
         accepted_execution_patch=patch_dto,
         used_executor_ids=list(context.used_executor_ids),
         accepted_plan_report=(

@@ -145,6 +145,30 @@ describe('CommunityPage 滚动容器结构', () => {
     expect(all).not.toHaveClass('bg-primary/10');
   });
 
+  test('全部帖子和我的共用第二排筛选栏样式，保留各自的筛选项', () => {
+    render(<CommunityPage />);
+    const topics = screen.getByRole('group', { name: '主题类型' });
+    const all = within(topics).getByRole('button', { name: '全部', pressed: true });
+    const following = within(topics).getByRole('button', { name: '关注', pressed: false });
+    expect(screen.getByRole('tab', { name: '全部帖子', selected: true })).toHaveClass(
+      'text-[13px]', 'font-medium',
+    );
+    for (const button of within(topics).getAllByRole('button')) {
+      expect(button).toHaveClass('text-[13px]');
+      expect(button).toHaveClass(button === all ? 'font-medium' : 'font-normal');
+    }
+
+    fireEvent.click(screen.getByRole('tab', { name: '我的' }));
+
+    const mine = screen.getByRole('group', { name: '我的内容' });
+    const authored = within(mine).getByRole('button', { name: '我的帖子', pressed: true });
+    const replied = within(mine).getByRole('button', { name: '我的回帖', pressed: false });
+    expect(mine.parentElement?.className).toBe(topics.parentElement?.className);
+    expect(mine.className).toBe(topics.className);
+    expect(authored.className).toBe(all.className);
+    expect(replied.className).toBe(following.className);
+  });
+
   test('我的视图保留搜索和发帖，确认搜索返回帖子列表', () => {
     render(<CommunityPage />);
     fireEvent.click(screen.getByRole('tab', { name: '我的' }));

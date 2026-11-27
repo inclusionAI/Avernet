@@ -38,6 +38,25 @@ query result when available and the same ID-seeded fallback as Bot management;
 friend user avatars are unchanged. See the
 [friend roster regression tests](test/components/CollaborationPrivacy/BotFriendRoster.test.tsx).
 
+## Collaboration group list filters
+
+The group sidebar keeps participation as two equal-width tabs below search:
+“固定群成员” (`direct`) and “仅参与临时会话” (`session_only`). The tabs reuse the
+existing membership state and are hidden in restricted single-Group views.
+The filter popover contains only Group kinds; its active indicator reflects
+only the kind filter. See the [sidebar filter tests](test/pages/Workspace/components/GroupSidebar/GroupSidebar.filterPopover.test.tsx).
+
+## Leaving a collaboration Session
+
+[Session leave](src/services/workspace/sessionService.ts) succeeds when the
+participant DELETE succeeds. It does not reload Session detail: the selected Bot
+may no longer have participant access. Removing another member still refreshes
+the detail. The workspace removes a successfully departed Session from its list
+and rotates or clears selection; the existing route projection updates the URL
+so refresh does not restore the departed target. Failed DELETEs preserve selection.
+Regression coverage: [leave and refresh](test/pages/Workspace/hooks/useGroupSessions.leaveRefresh.test.tsx)
+and [Session service](test/services/workspace/sessionService.test.ts).
+
 ## Group and Session invitation links
 
 The [invitation landing hook](src/pages/Workspace/hooks/useInviteAccept.ts) first
@@ -113,6 +132,36 @@ Sidebar and route regressions are covered by
 [invitationSidebarNavigation.test.tsx](test/pages/Workspace/invitationSidebarNavigation.test.tsx),
 [useWorkspacePage.deepLinkLocation.test.tsx](test/pages/Workspace/hooks/useWorkspacePage.deepLinkLocation.test.tsx)
 and [useGroupSessionLocation.deepLink.test.tsx](test/pages/Workspace/hooks/useGroupSessionLocation.deepLink.test.tsx).
+
+## Collaboration message component resources
+
+[The group Provider](src/services/workspace/groupChatProvider.ts) prepares Bot
+CDN resources only for messages containing AixUI business components that need
+them. Ordinary text, code examples, empty Sessions and participants without
+such messages do not request Bot `render-screens`. Human and virtual system
+senders (including `bcs_state_machine`), cards without business components,
+explicit CDN URLs, and the pinned local task panel also do not trigger this
+request. Inline business components share the same CDN resolution path as side
+panels. Initial history, reload, older pages and
+live updates all prepare resources before delivery to the synchronous SDK
+renderer; live completion cannot overtake a pending update. BCS manifest
+loading remains separate. [The injector](src/services/bcs/libraryCdnInjector.ts)
+reuses completed and in-flight results by Bot ID and owner, including empty
+negative caches on failure. Clear/refresh invalidation prevents an obsolete
+request from replacing the new cache. Tests:
+[Provider delivery](test/services/workspace/groupChatProvider.cdn.test.ts) and
+[cache reuse](test/sidePanel/libraryCdnInjector.registerBotCdnList.test.ts).
+
+## Collaboration session member status
+
+The [session member list](src/pages/Workspace/components/ManagePanel/MemberList.tsx)
+shows Human `present` as 在线 and `absent` as 勿扰 alongside the existing Bot
+mode badges, even in the narrow management panel. This indicates participation
+in the Session, not global presence. The [mention menu](src/pages/Workspace/components/GroupChatPane/mentionHelpers.ts)
+keeps 勿扰 members visible but muted and unavailable for mouse or keyboard selection. In
+ManagerWorker groups, only the manager Bot can be selected; worker Bots remain
+listed with their role badges and `ALL-Bots` is not offered. Bot avatars reuse the
+same configured image and ID-based fallback as the member list.
 
 ## Group message sender identity
 
@@ -511,3 +560,12 @@ engine-only refresh and restart-publication are excluded. Without an extension,
 confirmation-only restart behavior is unchanged. See
 [capability types](src/capabilities/types.ts) and
 [workshop service](src/services/botWorkshop/botWorkshopService.ts).
+
+## Scheduled tasks after Owner handoff
+
+Bot-management task links use the Bot's stable `entity_id` when available.
+Existing links containing `owner_id` keep that legacy query name; they are
+never relabeled as `entity_id`. Lists, Caller metadata and task operations use
+one address scope. Edit-lock reads use the current Owner returned by Bot detail
+as `owner_id`, independently of the stable resource address. The acting user's
+identity and existing management/lock requirements are unchanged.

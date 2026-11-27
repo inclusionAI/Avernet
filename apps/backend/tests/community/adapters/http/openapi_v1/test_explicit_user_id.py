@@ -521,6 +521,12 @@ _AUTHENTICATED_SELF = {
         f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/personal-center/activities",
     ),
 }
+#: Authenticated-self routes that cannot return the standard owner-mismatch
+#: 403. They take no caller-selectable ``user_id`` and are mounted with the
+#: base response table instead of ``USER_SCOPED_ERROR_RESPONSES``.
+_AUTHENTICATED_SELF_WITHOUT_403 = {
+    ("get", f"{PUBLIC_API_PREFIX}/bots/aicoding/work-items"),
+}
 #: Bot Logs is excluded for a different reason and must stay that way — see the
 #: "Naming the end user" note in ``openapi_v1/__init__.py``. Its own ``user_id``
 #: is a filter over other people's traces, not the caller's scope.
@@ -714,7 +720,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # a Bot in the body. Product profile/progress operations are also not
 # Bot-addressed, and the five BotTeam management operations are Space-scoped:
 # none 177 -> 194 across the merged protocol and product surfaces, plus release-only account surfaces: 194 -> 197.
-_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 197}
+# Todo Product interaction list/create/cancel add three non-Bot operations.
+_BOT_ID_PLACEMENT = {"path": 238, "query": 2, "none": 200}
 
 
 def _schema() -> dict:
@@ -951,7 +958,8 @@ def test_the_pinned_number_of_operations_take_it():
     # create, detail, update, and archive are Human/Space-scoped: 343 -> 348.
     # Product Dima batch import is also Human/Space-scoped: 348 -> 349, and the release
     # branch adds one more user-scoped account surface: 349 -> 350.
-    assert len(taking) == 350
+    # Todo Product interaction list/create/cancel each require explicit user_id.
+    assert len(taking) == 353
 
 
 def test_the_exempt_operations_take_none():
@@ -1067,7 +1075,16 @@ def test_the_403_is_documented_on_exactly_the_user_scoped_operations():
                 "status-for-others",
             }
         )
+        expected = expected and (method, path) not in _AUTHENTICATED_SELF_WITHOUT_403
         assert documented is expected, f"{method.upper()} {path}"
+
+
+def test_aicoding_work_items_is_self_service_without_owner_mismatch_403():
+    """The route is user-scoped, but the user cannot be named on the wire."""
+    schema = _schema()
+    operation = schema["paths"][f"{PUBLIC_API_PREFIX}/bots/aicoding/work-items"]["get"]
+    assert _param(operation, USER_ID_QUERY) is None
+    assert "403" not in operation["responses"]
 
 
 def _request_body_models(schema: dict) -> set[str]:

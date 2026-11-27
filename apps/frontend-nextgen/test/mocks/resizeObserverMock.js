@@ -11,3 +11,18 @@ if (typeof window !== 'undefined' && typeof window.ResizeObserver === 'undefined
   window.ResizeObserver = ResizeObserverMock;
   globalThis.ResizeObserver = ResizeObserverMock;
 }
+
+// jsdom 未实现 structuredClone（@dicebear/core v11 内部使用）；真实 Node/浏览器环境均有，仅测试补桩。
+if (typeof globalThis.structuredClone !== 'function') {
+  const utilClone = (() => {
+    try {
+      return require('util').structuredClone;
+    } catch {
+      return undefined;
+    }
+  })();
+  // jsdom 沙箱里 require('util') 可能拿不到完整 builtin，退化为 JSON 克隆
+  // （dicebear 克隆的是纯 JSON 风格/选项数据，语义等价）。
+  globalThis.structuredClone =
+    typeof utilClone === 'function' ? utilClone : (value) => JSON.parse(JSON.stringify(value));
+}

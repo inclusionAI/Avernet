@@ -40,6 +40,23 @@ describe('CreateGroupSessionModal（对齐「创建云端 Bot」表单样式）'
     expect(screen.getAllByText('*').length).toBeGreaterThanOrEqual(2);
   });
 
+  it.each(['请输入会话名称', '请描述本会话希望达成的协作目标'])(
+    '%s 使用与协作群配置面板一致的蓝色 focus 边框和光圈',
+    (placeholder) => {
+      renderModal();
+      const field = screen.getByPlaceholderText(placeholder);
+      expect(field).toHaveClass(
+        'focus-visible:border-brand',
+        'focus-visible:ring-1',
+        'focus-visible:ring-brand/20',
+        'focus-visible:ring-offset-0',
+      );
+      expect(field).not.toHaveClass('focus-visible:border-ring');
+      expect(field).not.toHaveClass('focus-visible:ring-ring/30');
+      expect(field).not.toHaveClass('focus-visible:ring-ring/40');
+    },
+  );
+
   it('底部按钮：取消为 secondary 线框，提交为「创建会话」且空表单禁用', () => {
     renderModal();
     expect(screen.getByRole('button', { name: '取消' })).toHaveClass('border-input');

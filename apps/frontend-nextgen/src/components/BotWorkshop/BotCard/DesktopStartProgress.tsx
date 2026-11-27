@@ -76,14 +76,10 @@ export function DesktopOfflineNotice({ botId }: { botId: string }) {
         <p className="m-0 text-sm font-medium">设备离线</p>
         <p className="m-0 mt-1 text-muted-foreground">打开桌面客户端并保持在线后，即可继续使用此 Bot。</p>
       </div>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => {
-          window.location.href = 'teamclaw://open';
-        }}
-      >
-        打开客户端
+      {/* 协议唤起用原生锚点:JS 导航(window.location.href)到自定义 scheme 在浮层/表格
+          上下文会被部分浏览器策略静默拦截(与 DesktopDeviceFields 同款病灶),交给浏览器协议层更可靠。 */}
+      <Button variant="outline" size="sm" asChild>
+        <a href="teamclaw://open">打开客户端</a>
       </Button>
     </div>
   );

@@ -52,6 +52,8 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
         {"server_code": "mcp.ant.arkai.dimamcpserver"},
         {"server_code": "mcp.ant.homistudio.recordmcp"},
         {"server_code": "mcp.ant.rpc.dcanttouch.adminservice"},
+        {"server_code": "mcp.ant.antitmcp.antmailmcp", "name": "蚂蚁邮箱 MCP", "description": "蚂蚁邮箱 MCP"},
+        {"server_code": "mcp.ant.homistudio.meetmcp", "name": "会议信息服务", "description": "会议信息相关mcp，提供查询分享给我的会议列表、我创建的会议列表、单个会议的纪要、会议发言信息以及待办查询等功能"},
         {"server_code": _ECB_KNOWLEDGE_MCP_SERVER_CODE, "name": "TeamClaw知识库MCP", "description": "TeamClaw知识库MCP，覆盖知识库的查询等服务"},
         # Local/stdio; resolved through LocalMCPRegistry, not MCP Center. Kept
         # last to match the other engines' lists, and the only entry here that

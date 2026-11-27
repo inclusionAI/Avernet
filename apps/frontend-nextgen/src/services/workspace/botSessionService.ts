@@ -473,7 +473,7 @@ export const botSessionService = {
       };
       const params = subjectScoped
         ? withConversationSubjectParams(bot, userId, baseParams)
-        : baseParams;
+        : withBotSessionScope(bot, userId, baseParams, false);
       const resp = await listBotSessions(bot.realBotId, params);
       const items = (resp.data?.items ?? []).map((s) => toSessionView(s, bot.botId));
       const total = resp.data?.total ?? items.length;
@@ -688,6 +688,8 @@ export const botSessionService = {
       owner_id: bot.ownerId,
       page,
       page_size: pageSize,
+      // 工坊关闭 subject scope 时也必须保留运行阶段，不能落回后端默认的 draft。
+      ...(bot.botType === 'service' ? { stage: range?.stage ?? resolveChatRuntimeStage(bot) } : {}),
       ...(range ? {
         device_uuid: range.deviceUuid,
         ...(range.stage ? { stage: range.stage } : {}),

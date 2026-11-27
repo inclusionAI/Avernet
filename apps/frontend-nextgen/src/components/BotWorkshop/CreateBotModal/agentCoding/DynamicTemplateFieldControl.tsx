@@ -28,8 +28,9 @@ export function DynamicTemplateFieldControl({
   onChange,
 }: DynamicTemplateFieldControlProps) {
   const type = fieldTypeOf(field);
+  /* figma 稿 node 2041:48753:输入口径 32 高、描边/聚焦按语义 token(方案 A 映射见 change references)。 */
   const commonClass =
-    'w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 outline-none transition-shadow placeholder:text-slate-300 focus:border-transparent focus:ring-2 focus:ring-slate-300 disabled:bg-slate-50 disabled:text-slate-400';
+    'w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground outline-none transition-shadow placeholder:text-muted-foreground/50 focus-visible:border-muted-foreground/40 focus-visible:ring-1 focus-visible:ring-muted-foreground/15 focus-visible:ring-offset-0 disabled:bg-muted/60 disabled:text-muted-foreground';
   const update = (next: any) => onChange(next);
 
   let control: React.ReactNode;
@@ -38,13 +39,13 @@ export function DynamicTemplateFieldControl({
     case 'checkbox':
     case 'switch':
       control = (
-        <label className="inline-flex items-center gap-2 text-xs text-slate-600">
+        <label className="inline-flex items-center gap-2 text-xs text-foreground">
           <input
             type="checkbox"
             checked={!!value}
             disabled={disabled}
             onChange={(event) => update(event.target.checked)}
-            className="h-3.5 w-3.5 rounded border-slate-300 text-lavender-600"
+            className="h-3.5 w-3.5 rounded border-input text-primary"
           />
           启用
         </label>
@@ -192,12 +193,12 @@ export function DynamicTemplateFieldControl({
 
   return (
     <div className="space-y-1">
-      <label className="text-xs font-semibold text-slate-600">
+      <label className="text-xs font-semibold text-foreground">
         {field.field_name || field.field_key}
-        {required ? <span className="ml-0.5 text-red-500">*</span> : null}
+        {required ? <span className="ml-0.5 text-destructive">*</span> : null}
       </label>
       {control}
-      {field.description ? <p className="text-[11px] leading-relaxed text-slate-400">{field.description}</p> : null}
+      {field.description ? <p className="text-[11px] leading-relaxed text-muted-foreground">{field.description}</p> : null}
     </div>
   );
 }
