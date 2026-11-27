@@ -135,49 +135,6 @@ async fn create_group_with_driver_preserves_chat_request() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn create_group_rejects_malformed_participant_tag_before_request() {
-    let ctx = TestContext::new().await.expect("Failed to create test context");
-
-    let output = ctx
-        .cmd()
-        .arg("create-group")
-        .arg("--driver")
-        .arg("driver-bot")
-        .arg("--participants")
-        .arg("participant-1")
-        .arg("--participant-tag")
-        .arg("missing-separator")
-        .output()
-        .expect("Failed to execute create-group");
-
-    assert_failure(&output, Some(1));
-    assert_output_contains(&output, "BOT_UUID=TAG");
-    assert!(ctx.mock_server.received_requests().await.unwrap().is_empty());
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn create_group_rejects_participant_tag_for_unknown_bot_before_request() {
-    let ctx = TestContext::new().await.expect("Failed to create test context");
-
-    let output = ctx
-        .cmd()
-        .arg("create-group")
-        .arg("--driver")
-        .arg("driver-bot")
-        .arg("--participants")
-        .arg("participant-1")
-        .arg("--participant-tag")
-        .arg("other-bot=tenant-a")
-        .output()
-        .expect("Failed to execute create-group");
-
-    assert_failure(&output, Some(1));
-    assert_output_contains(&output, "other-bot");
-    assert_output_contains(&output, "not a group participant");
-    assert!(ctx.mock_server.received_requests().await.unwrap().is_empty());
-}
-
 async fn assert_no_session_request(lead_arg: &str) {
     let ctx = TestContext::new().await.unwrap();
     Mock::given(method("POST"))

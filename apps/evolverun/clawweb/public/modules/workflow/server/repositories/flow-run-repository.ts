@@ -1,3 +1,6 @@
+import { completeFlowRun } from './flow-run-completion.js';
+import { writeTimeoutFailure, type CompletionOutcome } from './flow-run-timeout-write.js';
+import { normalizeFlowRunLineage } from '../services/flow-run-lineage.js';
 import { normalizeFlowRunMarkers } from '../services/flow-run-markers.js';
 import { OrdinaryRunRequestService } from '../services/ordinary-run-request.js';
 import { WorkflowSnapshotRepository } from '@avernet/clawweb-shared/server/services/workflow-snapshot';
@@ -8,6 +11,8 @@ import { productionRunSql, trialRunSql, productionRunsSql, isTrialRun, type RunP
  * No dependency on ClawFlow; shares the same database schema.
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import type { ExecutionRecordFlowRun, ExecutionRecordWorkflow } from "../../shared/execution-record.js";
+import { ExecutionRecordWorkflowRepository, isMissingExecutionRecordWorkflowAssociation } from "./execution-record-workflow-repository.js";
 import { FanoutStateRepository } from "./fanout-state-repository.js";
 import { RunLogRepository } from "./run-log-repository.js";
 import { registerParentRelatedRun, type ParentRelation } from '../services/parent-related-run-registration.js';
@@ -18,11 +23,21 @@ function isMissingEvolutionAnalysisStatusColumn(message: string): boolean {
     || normalized.includes("no such column: evolution_analysis_status");
 }
 
+/** Internal selection for execution-record guards; state is never part of the callback DTO. */
+export type ExecutionRecordSnapshot = ExecutionRecordFlowRun & {
+  state_json: string | null;
+  workflow_version: number | null;
+  workflow_deploy_number: number | null;
+  workflow_snapshot_json: string | null;
+};
+
 export type FlowRunRow = {
   id: number;
   flow_id: string;
   workflow_id: string;
   workflow_title: string | null;
+  parent_flow_id: string | null;
+  root_flow_id: string | null;
   env: string | null;
   tag: string | null;
   status: string;
@@ -63,6 +78,8 @@ export type FlowRunInsert = {
   flowId: string;
   workflowId: string;
   workflowTitle?: string | null;
+  parentFlowId?: string | null;
+  rootFlowId?: string | null;
   env?: string | null;
   tag?: string | null;
   status: string;
@@ -253,6 +270,30 @@ export class FlowRunRepository {
     }
   }
 
+  /** Callback fields plus same-snapshot internal state. Never reads credentials; failures propagate. */
+  async findExecutionRecordByFlowIdStrict(flowId: string): Promise<ExecutionRecordSnapshot | null> {
+    const select = (association: string) => this.db.query<ExecutionRecordSnapshot>(
+      `SELECT id, flow_id, workflow_id, workflow_title, status, params_json, input_json,
+              result_json, node_count, succeeded_count, failed_count, total_duration_ms,
+              total_token_usage, triggered_by, identity_key, current_phase, started_at,
+              completed_at, NULL AS credentials_json, origin_session_key, origin_session_id,
+              origin_bot_id, user_id, plugin_version, gmt_create, gmt_modified, state_json,
+              workflow_version, workflow_deploy_number, ${association}
+       FROM flow_runs WHERE flow_id = ?`,
+      [flowId],
+    );
+    try { return (await select("workflow_snapshot_json"))[0] ?? null; }
+    catch (error) {
+      if (!isMissingExecutionRecordWorkflowAssociation(error)) throw error;
+      return (await select("NULL AS workflow_snapshot_json"))[0] ?? null;
+    }
+  }
+
+  /** Call only after token, identity and same-snapshot structural guards. */
+  readExecutionRecordWorkflow(run: ExecutionRecordSnapshot): Promise<ExecutionRecordWorkflow> {
+    return new ExecutionRecordWorkflowRepository(this.db).read(run);
+  }
+
   isTrialRun(flowId: string): Promise<boolean> { return isTrialRun(this.db, flowId); }
 
   private _buildWhere(
@@ -303,6 +344,7 @@ export class FlowRunRepository {
   /** Columns returned by list queries (excludes large TEXT columns not needed in list views). */
   private static readonly LIST_COLUMNS = [
     "id", "flow_id", "workflow_id", "workflow_title", "status",
+    "parent_flow_id", "root_flow_id",
     "node_count", "succeeded_count", "failed_count",
     "total_duration_ms", "total_token_usage",
     "started_at", "completed_at",
@@ -377,13 +419,14 @@ export class FlowRunRepository {
   async insert(run: FlowRunInsert): Promise<boolean> {
     try {
       const markers = normalizeFlowRunMarkers(run);
+      const lineage = normalizeFlowRunLineage(run);
       // The run must not survive a failed snapshot read/write. Transaction-bound
       // repositories reuse their caller's transaction for purpose registration.
       return await this.db.transaction(async tx => {
         const now = tx.dialect.now();
         await tx.exec(
-          `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, env, tag, gmt_create, gmt_modified)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO flow_runs (flow_id, workflow_id, workflow_title, status, state_json, params_json, input_json, node_count, triggered_by, identity_key, current_phase, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number, env, tag, parent_flow_id, root_flow_id, gmt_create, gmt_modified)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             run.flowId,
             run.workflowId,
@@ -408,6 +451,8 @@ export class FlowRunRepository {
             run.workflowDeployNumber ?? null,
             markers.env,
             markers.tag,
+            lineage.parent_flow_id,
+            lineage.root_flow_id,
             now,
             now,
           ],
@@ -425,8 +470,9 @@ export class FlowRunRepository {
   async incrementNodeCount(flowId: string, field: "succeeded_count" | "failed_count"): Promise<boolean> {
     try {
       const now = this.db.dialect.now();
+      // Completion owns the final counts; late node events must not change them.
       const result = await this.db.exec(
-        `UPDATE flow_runs SET ${field} = ${field} + 1, gmt_modified = ? WHERE flow_id = ?`,
+        `UPDATE flow_runs SET ${field} = ${field} + 1, gmt_modified = ? WHERE flow_id = ? AND completed_at IS NULL AND LOWER(TRIM(status)) NOT IN ('succeeded', 'failed', 'cancelled', 'canceled')`,
         [now, flowId],
       );
       return result.affectedRows > 0;
@@ -437,68 +483,17 @@ export class FlowRunRepository {
     }
   }
 
+  /** Compatibility API: accepted duplicate timeouts remain successful boolean writes. */
   async updateCompletion(flowId: string, completion: FlowRunCompletion): Promise<boolean> {
-    const now = this.db.dialect.now();
-    // Build SET clause dynamically: only include fields when explicitly provided.
-    // result_json: undefined = preserve existing (e.g. on success, keep last node result);
-    //              null/string = overwrite (e.g. on failure, write structured error info).
-    const sets: string[] = [
-      "status = ?", "total_duration_ms = ?",
-      "total_token_usage = ?", "current_phase = ?", "completed_at = ?", "gmt_modified = ?",
-    ];
-    const values: unknown[] = [
-      completion.status,
-      completion.totalDurationMs ?? null,
-      completion.totalTokenUsage ?? null,
-      completion.currentPhase ?? null,
-      completion.completedAt,
-      now,
-    ];
-    if (completion.resultJson !== undefined) {
-      sets.push("result_json = ?");
-      values.push(completion.resultJson);
-    }
-    if (completion.inputJson !== undefined) {
-      sets.push("input_json = ?");
-      values.push(completion.inputJson);
-    }
-    // Reconcile succeeded/failed counts from caller-provided values (final truth)
-    // or fall back to node_executions sub-query for accurate reconciliation.
-    if (completion.succeededCount !== undefined) {
-      sets.push("succeeded_count = ?");
-      values.push(completion.succeededCount);
-    } else {
-      sets.push("succeeded_count = (SELECT COUNT(*) FROM node_executions WHERE flow_id = ? AND status IN ('succeeded', 'skipped'))");
-      values.push(flowId);
-    }
-    if (completion.failedCount !== undefined) {
-      sets.push("failed_count = ?");
-      values.push(completion.failedCount);
-    } else {
-      sets.push("failed_count = (SELECT COUNT(*) FROM node_executions WHERE flow_id = ? AND status = 'failed')");
-      values.push(flowId);
-    }
-    values.push(flowId);
-    // New and legacy clients use the original completion contract. Explicit
-    // epochs remain supported for already deployed clients during upgrade.
-    const epochGuard = completion.retryEpoch === undefined ? '' : ` AND COALESCE(retry_epoch, 0) = ?
-       AND status <> 'succeeded'
-       AND (COALESCE(retry_epoch, 0) = 0 OR status <> 'failed' OR completed_at IS NULL)`;
-    if (completion.retryEpoch !== undefined) values.push(completion.retryEpoch);
-    const result = await this.db.exec(
-      `UPDATE flow_runs SET ${sets.join(", ")} WHERE flow_id = ? AND status NOT IN ('cancelled', 'canceled')${epochGuard}`,
-      values,
-    );
-    return result.affectedRows > 0;
+    return await this.updateCompletionOutcome(flowId, completion) !== 'rejected';
   }
 
-  /**
-   * Atomically mark a flow failed only when it is not already terminal.
-   * Backs PUT /runs/:flowId/fail-if-running — the engine's timeout watchdog
-   * calls this before reaping so that exactly one engine process sharing
-   * this DB wins the transition (affectedRows > 0). gmt_modified is left to
-   * the DB (ON UPDATE CURRENT_TIMESTAMP / trg_flow_runs_update).
-   */
+  /** Routes distinguish an actual transition from an idempotent timeout acknowledgement. */
+  updateCompletionOutcome(flowId: string, completion: FlowRunCompletion): Promise<CompletionOutcome> {
+    return completeFlowRun(this.db, flowId, completion);
+  }
+
+  /** The dedicated watchdog path always requires saved policy and elapsed evidence. */
   async markFailedIfRunning(flowId: string, fields: {
     reason: string;
     currentPhase: string;
@@ -506,16 +501,16 @@ export class FlowRunRepository {
     completedAt: number;
     retryEpoch?: number;
   }): Promise<boolean> {
-    const result = await this.db.exec(
-      `UPDATE flow_runs SET status = 'failed', result_json = ?, current_phase = ?, total_duration_ms = ?, completed_at = ?
-       WHERE flow_id = ? AND status NOT IN ('succeeded', 'failed', 'cancelled', 'canceled')${fields.retryEpoch === undefined ? '' : ' AND COALESCE(retry_epoch, 0) = ?'}`,
-      [fields.reason, fields.currentPhase, fields.totalDurationMs ?? null, fields.completedAt, flowId,
-        ...(fields.retryEpoch === undefined ? [] : [fields.retryEpoch])],
-    );
-    return result.affectedRows > 0;
+    return await writeTimeoutFailure(this.db, flowId, { ...fields, resultJson: fields.reason }, completedAt => ({
+      sets: ["status = 'failed'", 'result_json = ?', 'current_phase = ?', 'total_duration_ms = ?', 'completed_at = ?'],
+      values: [fields.reason, fields.currentPhase, fields.totalDurationMs ?? null, completedAt],
+    })) === 'updated';
   }
 
   async updateStatus(flowId: string, status: string, retryEpoch?: number): Promise<boolean> {
+    // Old watchdogs call TaskFlow.fail -> adapter.updateStatus before completion.
+    // With no failure evidence this path cannot safely distinguish that write.
+    if (typeof status !== 'string' || !status || status !== status.trim().toLowerCase() || status === 'failed') return false;
     const now = this.db.dialect.now();
     if (retryEpoch === undefined) {
       if (status === 'running') {

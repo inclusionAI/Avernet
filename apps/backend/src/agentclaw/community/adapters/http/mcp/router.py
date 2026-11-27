@@ -43,6 +43,11 @@ from agentclaw.community.core.mcp.errors import (
     McpSyncFailedError,
     McpMarketUnavailableError,
 )
+from agentclaw.community.core.skill_center.errors import (
+    SkillRuntimeNameConflictError,
+    SkillSetControlPlaneConflictError,
+    SkillSetControlPlaneLockUnavailableError,
+)
 from agentclaw.community.core.mcp.presentation import (
     ALLOWED_NETWORK_TYPES,
     is_network_type_visible,
@@ -356,6 +361,17 @@ async def update_mcp_unified_config(
             ),
         )
     except HTTPException:
+        raise
+    except (
+        SkillSetControlPlaneConflictError,
+        SkillSetControlPlaneLockUnavailableError,
+        SkillRuntimeNameConflictError,
+    ):
+        # SkillSet control-plane conflicts already have their wire decided by
+        # _DOMAIN_ERROR_STATUS_MAP in adapters.http.app — 400 echoing the
+        # reason code clients parse, 409 for the fence / runtime-name race.
+        # Letting them through keeps that one-layer decision instead of the
+        # catch-all below masking the reason as an opaque 500.
         raise
     except (McpConfigValueError, McpHeadersInvalidError) as e:
         # Both were 400s with the flow's own message before extraction.

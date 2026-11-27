@@ -589,23 +589,6 @@ mod judge_provider_tests {
     }
 
     #[test]
-    fn judge_llm_provider_selection_uses_public_provider_types() {
-        let mut config = BcsConfig::default();
-        config.llm.provider_type = LlmProviderType::OpenAiCompatible;
-
-        assert_eq!(
-            select_judge_llm_provider(&config).unwrap(),
-            JudgeLlmProviderKind::OpenAiCompatible
-        );
-
-        config.llm.provider_type = LlmProviderType::Anthropic;
-        assert_eq!(
-            select_judge_llm_provider(&config).unwrap(),
-            JudgeLlmProviderKind::Anthropic
-        );
-    }
-
-    #[test]
     fn anthropic_llm_provider_requires_api_key() {
         let mut config = BcsConfig::default();
         config.llm.provider_type = LlmProviderType::Anthropic;

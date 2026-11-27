@@ -169,6 +169,7 @@ class RemoteKnowledgeCatalog:
             "status",
             "delete_at_ms",
             "can_cancel_delete",
+            "can_delete",
             "description",
             "document_count",
             "authorized_bot_count",

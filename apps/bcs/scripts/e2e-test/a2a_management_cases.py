@@ -45,6 +45,48 @@ def exercise(story, provider, original):
     story.request("PUT", control, {"agent_name": changed["name"], "agent_card": changed}, token=admin, status=400)
     story.request("GET", control + "?bot_name=legacy", token=admin, status=400)
 
+    # Exercise the dedicated AgentId field: fill it on registration, keep it on
+    # a Card update, then prove a different value is rejected.
+    identity_value = "trusted-agent-" + uuid.uuid4().hex[:8]
+    identity_ref = reference + "-identity"
+    identity_payload = {
+        "provider_bot_ref": identity_ref,
+        "owners": [story.owner],
+        "agent_card": card,
+        "agent_id": identity_value,
+    }
+    identity = story.request("POST", story.a2a_prefix + "/agents", identity_payload, token=admin, status=201)
+    assert identity["agent_id"] == identity_value
+    bindings = story.request("GET", "/providers/" + provider["provider_id"] + "/bots", token=admin)
+    story.bots.append((provider, next(item for item in bindings["items"] if item["bot_uuid"] == identity["bot_id"])))
+    identity_control = story.a2a_prefix + "/agents/" + identity["bot_id"] + "/agent-card"
+    updated_identity = story.request("PUT", identity_control, {"agent_card": changed, "agent_id": identity_value}, token=admin)
+    assert updated_identity["agent_id"] == identity_value
+    story.request("PUT", identity_control, {"agent_card": changed, "agent_id": identity_value + "-other"}, token=admin, status=409)
+
+    # The metadata endpoint is v1-only; the legacy transport intentionally does
+    # not expose this new control-plane operation.
+    if story.a2a_prefix == "/api/v1/collaboration/a2a":
+        metadata_path = identity_control + "/metadata"
+        story.request("PATCH", metadata_path, {}, token=admin, status=400)
+        metadata = story.request("PATCH", metadata_path, {
+            "catalog_labels": {"lifecycle": ["trial"]},
+            "status": "hidden",
+            "visibility": "private",
+            "user_visibility": "private",
+        }, token=admin)
+        assert metadata["agent_id"] == identity_value
+        assert metadata["catalog_labels"] == {"lifecycle": ["trial"]}
+        assert metadata["status"] == "hidden"
+        assert metadata["visibility"] == "private"
+        assert metadata["user_visibility"] == "private"
+        restored = story.request("PATCH", metadata_path, {"status": "online"}, token=admin)
+        assert restored["status"] == "online"
+        assert restored["visibility"] == "private"
+        assert restored["user_visibility"] == "private"
+        assert restored["catalog_labels"] == {"lifecycle": ["trial"]}
+        story.request("PATCH", metadata_path, {"status": "not-a-status"}, token=admin, status=400)
+
     # Each case isolates one invalid declaration; none may create a Bot.
     for key, value, code in [
         ("name", " ", "INVALID_CARD"), ("description", 42, "INVALID_CARD"),

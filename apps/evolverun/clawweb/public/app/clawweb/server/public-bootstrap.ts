@@ -379,6 +379,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         execStepLogRepo,
         facadeRepo,
         new RunSubworkflowsService(new RunSubworkflowsRepository(db), botPermRepo),
+        { executionRecordConfigRepo: new AppConfigRepository(db) },
       ));
       app.use(["/api/auto-heal/save", "/api/auto-heal/unified-save", "/api/auto-heal/editor-save-first-draft", "/api/auto-heal/deploy", "/api/auto-heal/editor-deploy"], packWriteGuard);
       app.use("/api/auto-heal", createAutoHealRouter({

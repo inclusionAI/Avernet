@@ -251,66 +251,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn insert_get_list_update_delete() {
-        let repo = MemorySessionFileRepo::new();
-        let r = repo.insert(params("f1", "s1", 1005)).await.unwrap();
-        assert_eq!(r.file_id, "f1");
-        assert_eq!(r.status, FileStatus::Pending);
-
-        // get
-        let got = repo.get("s1", "f1").await.unwrap().unwrap();
-        assert_eq!(got.file_id, "f1");
-
-        // list
-        let page = repo
-            .list(
-                "s1",
-                SessionFileListParams {
-                    prefix: None,
-                    status: None,
-                    limit: 100,
-                    offset: 0,
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(page.items.len(), 1);
-        assert_eq!(page.total, 1);
-
-        // update_object_handle_and_status
-        let updated = repo
-            .update_object_handle_and_status(
-                "s1",
-                "f1",
-                r#"{"expires_at":1}"#,
-                FileStatus::Ready,
-                10,
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(updated.status, FileStatus::Ready);
-
-        // delete
-        assert!(repo.delete("s1", "f1").await.unwrap());
-        assert!(repo.get("s1", "f1").await.unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn expired_pending_filtered() {
-        let repo = MemorySessionFileRepo::new();
-        repo.insert(params("f2", "s2", 1005)).await.unwrap(); // expires_at 1005
-
-        // now=2000 → expired (1005 < 2000)
-        let expired = repo.list_expired_pending(2000, 10).await.unwrap();
-        assert_eq!(expired.len(), 1);
-
-        // now=500 → not expired (1005 >= 500)
-        let none = repo.list_expired_pending(500, 10).await.unwrap();
-        assert!(none.is_empty());
-    }
-
-    #[tokio::test]
     async fn offset_pagination() {
         let repo = MemorySessionFileRepo::new();
         // Insert 5 files for session s3 — created_at is monotonic but

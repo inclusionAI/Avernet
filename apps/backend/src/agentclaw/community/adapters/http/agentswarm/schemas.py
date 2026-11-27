@@ -104,12 +104,40 @@ class RunOptionsDTO(BaseModel):
         "(e.g. a space quota ceiling) stop at the first attempt regardless.")
 
 
+class AgentDefinitionRefDTO(BaseModel):
+    """A reference to a stored agent definition."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    definition_id: str = Field(
+        max_length=128,
+        description="The definition to provision this agent from.",
+    )
+    alias: str | None = Field(
+        default=None,
+        max_length=128,
+        description=(
+            "Optional catalog name to spawn this agent under. Defaults to the "
+            "definition's own name; a run may reference the same definition "
+            "twice with distinct aliases."
+        ),
+    )
+
+
 class SubmitRunDTO(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tenant: str = Field(min_length=1, max_length=64)
     goal: str = Field(max_length=8000)
-    agents: list[AgentSpecDTO] = Field(min_length=1, max_length=64)
+    agents: list[AgentSpecDTO] = Field(default_factory=list, max_length=64)
+    agent_refs: list[AgentDefinitionRefDTO] = Field(
+        default_factory=list,
+        max_length=64,
+        description=(
+            "The roster as references to stored agent definitions. Supply "
+            "either this or `agents`, never both: mixing them is refused."
+        ),
+    )
     provider: ProviderKind | None = None
     model: str | None = None
     idempotency_key: str | None = Field(default=None, max_length=190)
@@ -125,6 +153,18 @@ class SubmitRunDTO(BaseModel):
         ),
     )
     options: RunOptionsDTO | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_roster_form(self) -> "SubmitRunDTO":
+        # Neither form is a malformed request; both is ambiguous rather than a
+        # merge, so it is refused instead of guessing which one wins.
+        if self.agents and self.agent_refs:
+            raise ValueError(
+                "supply either 'agents' or 'agent_refs', not both"
+            )
+        if not self.agents and not self.agent_refs:
+            raise ValueError("a submit needs 'agents' or 'agent_refs'")
+        return self
 
 
 class SubmitRunResponseDTO(BaseModel):
@@ -213,11 +253,31 @@ class AgentCatalogSpecDTO(BaseModel):
     kind: str
     model: str | None = None
     engine: str | None = None
+    definition_id: str | None = Field(
+        default=None,
+        description=(
+            "The stored definition this entry came from; null for an inline "
+            "roster. Reported per catalog entry, not per spawned agent: every "
+            "spawn of one entry shares the same definition version."
+        ),
+    )
+    definition_row_id: int | None = Field(
+        default=None,
+        description="The exact definition version (row id) captured at submit.",
+    )
 
 
 class AgentDetailDTO(BaseModel):
     agent_id: str
     name: str
+    catalog_name: str | None = Field(
+        default=None,
+        description=(
+            "The catalog entry this spawned agent came from. A spawned agent is "
+            "named `{catalog_name}_{agent_id[:12]}`, so several agents can share "
+            "one catalog entry — and therefore one definition version."
+        ),
+    )
     role: str | None = None
     kind: str
     status: str
@@ -281,3 +341,111 @@ class PageDTO(BaseModel):
     page: int = 1
     page_size: int = 20
     status: str | None = None
+
+class CreateDefinitionDTO(BaseModel):
+    """Create an agent definition for the authenticated caller."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=128)
+    role: str = Field(default="", max_length=20000)
+    instructions: str = Field(default="", max_length=20000)
+    kind: AgentKind = AgentKind.LLM
+    model: str | None = Field(default=None, max_length=128)
+    engine: str | None = Field(default=None, max_length=64)
+    bot_type: str | None = Field(default=None, max_length=32)
+    manifest_document: str = Field(
+        default="", max_length=200_000,
+        description=(
+            "Full five-category bot_config_manifest YAML, validated once here "
+            "and stored verbatim. Blank means \"no manifest\"."
+        ),
+    )
+
+
+class UpdateDefinitionDTO(CreateDefinitionDTO):
+    """Revise a definition: writes a new version under the same id."""
+
+    definition_id: str = Field(min_length=1, max_length=128)
+    model_config = ConfigDict(extra="forbid",)
+
+    definition_row_id: int = Field(
+        gt=0,
+        description=(
+            "The version you read (every read returns it). A stale value is "
+            "refused with 409 and no version is created; the field exists so "
+            "that refusal can name the version that moved on, not to detect the "
+            "conflict itself. There is no revision counter — a version is a "
+            "row, so this is its id."
+        ),
+    )
+
+
+class DefinitionDTO(BaseModel):
+    definition_id: str
+    name: str
+    role: str
+    instructions: str
+    kind: str
+    model: str | None = None
+    engine: str | None = None
+    bot_type: str
+    manifest_document: str
+    manifest_digest: str
+    owner_id: str
+    creator_id: str
+    modifier_id: str
+    definition_row_id: int
+    created_at: int
+
+
+class DefinitionVersionDTO(BaseModel):
+    """One version in a definition's history. Never carries a retired body."""
+
+    definition_row_id: int
+    is_live: bool
+    manifest_digest: str
+    creator_id: str
+    modifier_id: str
+    created_at: int
+
+
+class DefinitionVersionsDTO(BaseModel):
+    """A definition's whole history, plus whether the definition is deleted.
+
+    ``deleted`` is stated rather than inferred. A deleted definition and a
+    superseded version both retire a row the same way, so without this a caller
+    would have to deduce "deleted" from every entry reporting ``is_live=false``
+    — which is also what a definition whose only version was never edited looks
+    like. The history itself is still returned either way: retired versions stay
+    readable as history.
+    """
+
+    definition_id: str
+    deleted: bool
+    versions: list[DefinitionVersionDTO]
+
+
+class DefinitionListDTO(BaseModel):
+    items: list[DefinitionDTO]
+    total: int
+    page: int
+    page_size: int
+
+
+class DefinitionIdDTO(BaseModel):
+    """The target of a POST-only definition read, version list, or delete."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    definition_id: str = Field(min_length=1, max_length=128)
+
+
+class QueryDefinitionsDTO(BaseModel):
+    """Filter/paging for the definition listing (POST, so no query string)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, description="narrow by name")
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)

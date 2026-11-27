@@ -28,6 +28,7 @@ from engine.community.openclaw.client.gateway_client import (
     get_client,
 )
 from engine.community.shared.mcp_token import build_upstream_headers
+from engine.community.openclaw.client.chat_serialization import retire_client
 
 log = logging.getLogger("openclaw-pool")
 
@@ -99,7 +100,7 @@ class TokenClientPool:
         if client is None:
             return
         try:
-            await client.disconnect()
+            await retire_client(client)
         except Exception as e:
             log.warning(f"Disconnect token client failed (token={token!r}): {e}")
 

@@ -61,10 +61,21 @@ export interface ListFriendConnectionsParams {
   page_size?: number;
 }
 
-/** 移除好友连接的 query 参数（契约 friendships.yaml delete_friend_connection：主体为登录用户，目标由 query 指定）。 */
+/**
+ * 移除好友连接的 query 参数（契约 friendships.yaml delete_friend_connection：主体为登录用户，目标由 query 指定）。
+ * 省略 actor_type/actor_id 为调用方自删；带上 actor_type=bot + actor_id 则为该 Bot Owner 发起的移除。
+ * 两者必须同时提供（both-or-none 由服务端强制 400)。
+ */
 export interface DeleteFriendConnectionParams {
+  actor_type?: FriendConnectionActorType;
+  actor_id?: string;
   target_actor_type: FriendConnectionActorType;
   target_actor_id: string;
+}
+
+/** 移除是幂等的：deleted:false 表示好友关系此前已不存在。 */
+export interface DeleteFriendConnectionResult {
+  deleted: boolean;
 }
 
 export const COLLABORATION_FRIEND_CONNECTION_ENDPOINTS = {
@@ -124,10 +135,13 @@ export function listFriendConnections<T = FriendConnectionDto>(
 }
 
 export function deleteFriendConnection(params: DeleteFriendConnectionParams, signal?: AbortSignal) {
-  return backendRequest<BackendApiEnvelope<void>>(COLLABORATION_FRIEND_CONNECTION_ENDPOINTS.connections, {
-    method: 'DELETE',
-    params: { ...params },
-    injectUserId: false,
-    signal,
-  });
+  return backendRequest<BackendApiEnvelope<DeleteFriendConnectionResult>>(
+    COLLABORATION_FRIEND_CONNECTION_ENDPOINTS.connections,
+    {
+      method: 'DELETE',
+      params: { ...params },
+      injectUserId: false,
+      signal,
+    },
+  );
 }

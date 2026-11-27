@@ -156,6 +156,19 @@ describe("EvolveRepository collaborative Bot access", () => {
 
 
 describe("task list target filter SQL", () => {
+  it("keeps a direct status index predicate and limits recovery JSON compatibility to terminal filters", async () => {
+    const db = new RecordingDb(sql => sql.includes("COUNT(*)") ? [{ total: 0 }] : []);
+    const repo = new EvolveRepository(db);
+    await repo.listTasksPage({ page: 1, pageSize: 20, statuses: ["completed", "succeeded"] });
+    expect(db.calls[0].sql).toContain("status IN (?,?,?)");
+    expect(db.calls[0].sql).toContain("status <> 'settling' OR (task_type = 'session_recovery'");
+    expect(db.calls[0].params).toEqual(["completed", "succeeded", "settling", "completed"]);
+    db.calls.length = 0;
+    await repo.listTasksPage({ page: 1, pageSize: 20, statuses: ["running"] });
+    expect(db.calls[0].sql).toContain("status IN (?)");
+    expect(db.calls[0].sql).not.toContain("JSON_EXTRACT");
+  });
+
   it("uses guarded MySQL JSON extraction in the shared COUNT and SELECT predicate", async () => {
     const db = new RecordingDb((sql) => sql.includes("COUNT(*)") ? [{ total: 0 }] : []);
     await new EvolveRepository(db).listTasksPage({ createdBy: "creator", ownerUserId: "owner",

@@ -16,6 +16,7 @@ baas_session_id 通过 binding_info.baas_session_id 传递。
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
@@ -58,6 +59,7 @@ from ._bot_run_utils import (
     safe_client_msg,
     strip_agent_main_prefix,
 )
+from ._chat_errors import RequestNotSentError
 from ._internal_protocols import BotService
 
 if TYPE_CHECKING:
@@ -415,16 +417,46 @@ class BaasBotService(BotService):
         try:
             auth_token = context.build_auth_token() if context else None
             app_id = context.app_id if context else None
-            content, agent_events = await client.send_message(
-                message=message,
-                session_key=session_id,
-                wait_result=wait_result,
-                timeout=timeout,
-                auth_token=auth_token,
-                app_id=app_id,
-                chat_metadata=chat_metadata,
-                attachments=attachments,
-            )
+            # 复用的池化连接可能在写帧前已关闭（半开连接）。此时帧未写出，
+            # 丢弃死连接并经连接池重发一次是安全的；结果未知的断链不重试。
+            deadline = asyncio.get_running_loop().time() + timeout
+            attempts = 0
+            while True:
+                attempt_timeout = (
+                    timeout
+                    if attempts == 0
+                    else max(deadline - asyncio.get_running_loop().time(), 0.1)
+                )
+                try:
+                    content, agent_events = await client.send_message(
+                        message=message,
+                        session_key=session_id,
+                        wait_result=wait_result,
+                        timeout=attempt_timeout,
+                        auth_token=auth_token,
+                        app_id=app_id,
+                        chat_metadata=chat_metadata,
+                        attachments=attachments,
+                    )
+                    break
+                except RequestNotSentError:
+                    if attempts >= 1:
+                        raise
+                    attempts += 1
+                    logger.warning(
+                        "Request not sent on pooled connection, retrying once: "
+                        "session_id=%s",
+                        session_id,
+                    )
+                    self._client_pool.discard(client)
+                    client = await self._client_pool.get(
+                        pool_key,
+                        conn_info.ws_url,
+                        headers,
+                        token_minter=self._token_minter_for(
+                            binding_info, session_id, context
+                        ),
+                    )
             self._mark_session_completed(baas_session_id, result={"content": content})
             return BotResponse(content=content)
         except TimeoutError:

@@ -54,7 +54,7 @@ const node = {
   output: 'real output',
   error: 'real error',
   tokens: '{"totalTokens":15}',
-  context: '{"realContext":true}',
+  context: null,
   startedAt: 1794902400000,
 };
 beforeEach(() => {
@@ -156,16 +156,16 @@ it('tertiary detail opens with preserved filters, real evidence tabs and restore
   );
   view.rerender(<OverviewPage context={{ ...context, query: { runId: 'real-run' } }} />);
   await screen.findByRole('button', { name: 'Real node' });
-  for (const name of ['节点', '日志', 'DAG', '运行档案']) expect(screen.getByRole('tab', { name })).toBeInTheDocument();
+  for (const name of ['节点', '日志', '运行档案']) expect(screen.getByRole('tab', { name })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Real node' }));
   const dialog = await screen.findByRole('dialog');
   expect(within(dialog).getByText('real error')).toBeInTheDocument();
   expect(within(dialog).getByText(/actualInput/)).toBeInTheDocument();
-  expect(within(dialog).getByText(/realContext/)).toBeInTheDocument();
+  expect(within(dialog).getByText('接口未提供系统上下文')).toBeInTheDocument();
   fireEvent.click(within(dialog).getByRole('button', { name: '关闭节点详情' }));
   fireEvent.click(screen.getByRole('tab', { name: '日志' }));
   await screen.findByText('暂无实际运行日志');
-  fireEvent.click(screen.getByRole('tab', { name: 'DAG' }));
+  expect(screen.getByRole('region', { name: '运行 DAG' })).toBeInTheDocument();
   await screen.findByRole('button', { name: /DAG 节点 Real node/ });
   fireEvent.click(screen.getByRole('tab', { name: '运行档案' }));
   await screen.findByText('档案未提供');

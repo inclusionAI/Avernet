@@ -29,6 +29,7 @@ import { migrationsV109To143 } from './schema-v109-143.js';
 import { repairDeployTagMigrations } from './schema-repair-deploy-tag.js';
 import { workflowAiDraftMigrations } from './schema-workflow-ai-draft.js';
 import { flowRunMarkersMigrations } from './schema-flow-run-markers.js';
+import { flowRunLineageMigrations } from './schema-flow-run-lineage.js';
 import { botDiagnosisRecoveryMigrations } from './schema-bot-diagnosis-recovery.js';
 
 /**
@@ -113,4 +114,5 @@ export const migrations: readonly Migration[] = [
   ...flowRunMarkersMigrations,
   ...workflowAiDraftMigrations,
   ...botDiagnosisRecoveryMigrations,
+  ...flowRunLineageMigrations,
 ];

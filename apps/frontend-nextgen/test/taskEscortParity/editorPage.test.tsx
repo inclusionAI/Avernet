@@ -99,6 +99,57 @@ beforeEach(() => {
   jest.mocked(context.navigate).mockClear();
 });
 
+it('keeps workflow identity, version and live dirty state together beside separate authoring controls', async () => {
+  render(<WorkflowEditorPage context={context} />);
+  await screen.findByRole('button', { name: /准备数据.*cli-script/ });
+  const toolbar = screen.getByLabelText('编辑器工具栏');
+  const title = within(toolbar).getByRole('heading', { level: 2, name: spec.title });
+  const metadata = within(toolbar).getByLabelText('工作流标识与版本');
+  expect(metadata).toHaveTextContent('wf');
+  expect(metadata).toHaveTextContent('v6');
+  expect(title.compareDocumentPosition(metadata) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const status = within(toolbar).getByRole('status', { name: '草稿状态' });
+  expect(status).toHaveTextContent('已读取保存态');
+  for (const name of ['流程设置', '刷新规格', 'AI 生成', 'AI 修改', '发布历史', '导出工作流 YAML 备份', '保存工作流', '发布工作流'])
+    expect(within(toolbar).getByRole('button', { name })).toBeVisible();
+  expect(screen.getByRole('button', { name: '总览' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '添加AI 处理' }));
+  expect(status).toHaveTextContent('未保存');
+  fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+  expect(status).toHaveTextContent('已读取保存态');
+  fireEvent.click(screen.getByRole('button', { name: '重做' }));
+  expect(status).toHaveTextContent('未保存');
+  expect(request.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+});
+
+it('exposes truncated workflow identity through keyboard tooltips rather than native title attributes', async () => {
+  render(<WorkflowEditorPage context={context} />);
+  await screen.findByRole('button', { name: /准备数据.*cli-script/ });
+  const toolbar = screen.getByLabelText('编辑器工具栏');
+  expect(toolbar.querySelector('[title]')).toBeNull();
+  const title = within(toolbar).getByRole('heading', { level: 2, name: spec.title });
+  const id = within(toolbar).getByText(spec.id, { exact: true });
+  for (const [trigger, text] of [[title, spec.title], [id, spec.id]] as const) {
+    expect(trigger).toHaveClass('truncate');
+    expect(trigger).toHaveAttribute('tabindex', '0');
+    fireEvent.focus(trigger);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(text);
+    fireEvent.blur(trigger);
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+  }
+});
+
+it('keeps authoring guidance left-aligned above the actual canvas, without adopting offline demo promises', async () => {
+  render(<WorkflowEditorPage context={context} />);
+  const canvas = await screen.findByRole('region', { name: '工作流画布' });
+  const guide = screen.getByText(/从左侧添加节点，连接输出与输入/);
+  expect(guide).toHaveClass('text-left');
+  expect(guide.compareDocumentPosition(canvas) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(guide).toHaveTextContent('保存与发布需分别确认');
+  expect(guide).toHaveTextContent('脚本文件使用独立的 Pack 快照');
+  expect(guide).not.toHaveTextContent(/离线 DEMO|刷新后丢失/);
+});
+
 it('renders real graph, node selections and preserved advanced/raw fields with permission-gated authoring', async () => {
   render(<WorkflowEditorPage context={context} />);
   fireEvent.click(await screen.findByRole('button', { name: /准备数据.*cli-script/ }));

@@ -18,6 +18,7 @@ from typing import Any, List, Literal, Optional
 from fastapi import APIRouter, Query, Request, Response, Depends, Path
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from starlette.requests import ClientDisconnect
 
 from agentclaw.community.adapters.http.auth.dependencies import require_operator, get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
@@ -102,7 +103,11 @@ from agentclaw.community.api.engine_config_service import EngineConfigServicePro
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, _get_engine_types
-from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceConnectionUnavailableError,
+    DeviceNotBoundError,
+    DeviceOfflineError,
+)
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth import AuthPlugin
@@ -1676,6 +1681,18 @@ async def refresh_bot_passport_token(
             data=result,
         )
 
+    except ClientDisconnect:
+        # 调用方在请求体读完前断开（上游/客户端超时放弃）。str() 为空，
+        # 曾落入通用 except 造成空消息 ERROR 噪音，这里按"调用方放弃"分类记录。
+        logger.warning(
+            "[bot_router.refresh_bot_passport_token] Caller disconnected before body was read"
+        )
+        return ApiResponse(
+            success=False,
+            message="调用方在请求体读取完成前断开连接，本次刷新未执行",
+            error_code=400,
+            data=None,
+        )
     except BotNotFoundError:
         return ApiResponse(
             success=False,
@@ -1700,10 +1717,14 @@ async def refresh_bot_passport_token(
             data=None,
         )
     except Exception as e:
-        logger.error(f"[bot_router.refresh_bot_passport_token] Unexpected error: {e}")
+        logger.error(
+            f"[bot_router.refresh_bot_passport_token] Unexpected error: "
+            f"{type(e).__name__}: {e!r}",
+            exc_info=True,
+        )
         return ApiResponse(
             success=False,
-            message=f"刷新 Passport Token 失败: {str(e)}",
+            message=f"刷新 Passport Token 失败: {type(e).__name__}: {e}",
             error_code=500,
             data=None,
         )
@@ -3448,6 +3469,34 @@ async def get_engine_config(
             error_code=409,
             data=None,
         )
+    except DeviceOfflineError as e:
+        # Provider-confirmed structured offline contract (BaaS NO_ACTIVE_DEVICES,
+        # an ARCA sandbox being replaced, …). Expected, self-healing state —
+        # logging it as ERROR only floods the alarm/ticket pipeline. Keep the
+        # stable 503 contract used by the channel and file routers.
+        logger.info(
+            f"[bot_router.get_engine_config] device offline (provider-confirmed), expected self-healing state: bot_id={bot_id}, error={e}"
+        )
+        return ApiResponse(
+            success=False,
+            message="Bot 设备暂时不可用，请稍后重试",
+            error_code=503,
+            data=None,
+        )
+    except DeviceConnectionUnavailableError as e:
+        # Transient request failure: an upstream connection failure (BaaS 5xx /
+        # timeout) or a runtime-binding race (the subclass). The device is not
+        # known to be offline. Keep the same 503 user contract, but do not
+        # collapse this into the provider-confirmed offline ticket cluster.
+        logger.warning(
+            f"[bot_router.get_engine_config] device request unavailable (transient provider connection failure or runtime binding change, state unknown): bot_id={bot_id}, error={e}"
+        )
+        return ApiResponse(
+            success=False,
+            message="Bot 设备暂时不可用，请稍后重试",
+            error_code=503,
+            data=None,
+        )
     except json.JSONDecodeError as e:
         logger.error(f"[bot_router.get_engine_config] Invalid JSON in config file: {e}")
         return ApiResponse(
@@ -3575,6 +3624,32 @@ async def update_engine_config(
             success=False,
             message=f"Bot不存在: {bot_id}",
             error_code=404,
+            data=None,
+        )
+    except DeviceOfflineError as e:
+        # Same provider-confirmed offline state as the read side: the write
+        # resolves the device the same way. Keep the stable 503 contract.
+        logger.info(
+            f"[bot_router.update_engine_config] device offline (provider-confirmed), expected self-healing state: bot_id={bot_id}, error={e}"
+        )
+        return ApiResponse(
+            success=False,
+            message="Bot 设备暂时不可用，请稍后重试",
+            error_code=503,
+            data=None,
+        )
+    except DeviceConnectionUnavailableError as e:
+        # Transient request failure: an upstream connection failure (BaaS 5xx /
+        # timeout) or a runtime-binding race (the subclass). The device is not
+        # known to be offline. Keep the 503 user contract, but do not collapse
+        # this into the provider-confirmed offline cluster.
+        logger.warning(
+            f"[bot_router.update_engine_config] device request unavailable (transient provider connection failure or runtime binding change, state unknown): bot_id={bot_id}, error={e}"
+        )
+        return ApiResponse(
+            success=False,
+            message="Bot 设备暂时不可用，请稍后重试",
+            error_code=503,
             data=None,
         )
     except Exception as e:

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use a2a::A2AError;
 use bcs_app_identity_api::{CredentialError, OutboundAppIdentity, OutboundTarget, SensitiveHeader};
-use bcs_network_tracing::{ClientExt, ClientWithDefaults, RequestWithDefaults};
+use bcs_network_tracing::{ClientWithDefaults, RequestWithDefaults};
 use reqwest::header::{HeaderName, HeaderValue};
 
 const DESTINATION_REJECTED: &str = "A2A application identity destination rejected";
@@ -47,12 +47,24 @@ impl HttpClient {
         self
     }
 
-    pub(super) async fn send(
+    pub(super) async fn send_observed(
         &self,
         request: RequestWithDefaults<reqwest::RequestBuilder>,
         connection_error: &'static str,
+        guard: &mut crate::digest::DigestGuard,
+    ) -> Result<reqwest::Response, A2AError> {
+        let result = self.send_inner(request, connection_error, guard).await;
+        guard.observe_err(result)
+    }
+
+    async fn send_inner(
+        &self,
+        request: RequestWithDefaults<reqwest::RequestBuilder>,
+        connection_error: &'static str,
+        guard: &mut crate::digest::DigestGuard,
     ) -> Result<reqwest::Response, A2AError> {
         let mut request = request.build().map_err(|_| A2AError::internal(connection_error))?;
+        guard.set_req_bytes(request.body().and_then(|body| body.as_bytes()).map_or(0, |b| b.len()));
         if let Some((identity, provider_id)) = &self.identity {
             let origin = request.url().origin().ascii_serialization();
             let target = OutboundTarget { provider_id, origin: &origin };
@@ -70,13 +82,23 @@ impl HttpClient {
         } else if self.require_identity {
             return Err(A2AError::internal(CREDENTIAL_UNAVAILABLE));
         }
+        // A required identity is scoped to the pre-release test submission.
+        let diagnostic = self.require_identity
+            .then(|| crate::test_response::SensitiveRequestValues::from_headers(request.headers()));
         // Keeps whether a connection was established at all (see `transport_error`):
         // a connect failure becomes `NOT_CONNECTED` (certainly not sent), any
         // other failure the generic `connection_error` (outcome unknown).
-        self.transport
-            .execute_traced(request)
-            .await
-            .map_err(|error| crate::transport_error::send_failure(&error, connection_error))
+        let (result, correlation) = self.transport.execute_traced_with_correlation(request).await;
+        if let Some(correlation) = correlation { guard.set_log_correlation(&correlation); }
+        let mut response = result.map_err(|error| {
+            let (rc, ec) = crate::digest::classify_reqwest_error(&error);
+            guard.finish_err(rc, ec);
+            crate::transport_error::send_failure(&error, connection_error)
+        })?;
+        if let Some(diagnostic) = diagnostic {
+            response.extensions_mut().insert(diagnostic);
+        }
+        Ok(response)
     }
 }
 

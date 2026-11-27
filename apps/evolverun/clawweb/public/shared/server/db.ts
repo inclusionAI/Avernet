@@ -14,6 +14,7 @@ import { getCurrentEnv } from "./env.js";
 import type { DbType } from "./schema.js";
 import { ensureSqliteTriggers } from "./db/sqlite-triggers.js";
 import { collectMigrations } from "./db/migrations-registry.js";
+import { assertFlowRunLineageSchema } from "./schema-flow-run-lineage.js";
 export { allMigrations } from "./db/migrations-registry.js";
 import { OrdinaryMarkerSchemaIncompatible, OrdinaryRequestSchemaIncompatible, OrdinarySchemaDdlDenied, confirmConcurrentOrdinarySqlite } from "./schema-ordinary-run-request.js";
 import { dialectFor, sqliteDialect, type Dialect } from "./db/dialect.js";
@@ -228,6 +229,7 @@ async function runMigrations(db: IDatabase, dbType: DbType, onSqliteDeferred?: (
 
   const current = canDdl ? await getSchemaVersion(db) : 0;
   let sqliteDdlDeferred = false;
+  let schemaDeferred = false;
 
   // v146 and v149 are retired; reserve these versions and leave existing tables untouched.
   for (const migration of collectMigrations()) {
@@ -249,6 +251,7 @@ async function runMigrations(db: IDatabase, dbType: DbType, onSqliteDeferred?: (
         if (db.dbType === "sqlite" && !(error instanceof OrdinarySchemaDdlDenied)) onSqliteDeferred?.();
         const reason = error instanceof OrdinarySchemaDdlDenied ? `${error.operation} denied` : error.message;
         console.warn(`[clawweb] Migration v${error.version} deferred: ordinary schema ${reason}; later migrations stopped`);
+        schemaDeferred = true;
         break;
       }
     }
@@ -295,6 +298,7 @@ async function runMigrations(db: IDatabase, dbType: DbType, onSqliteDeferred?: (
 
   // Trigger failures are fatal: a missing update trigger must not look ready.
   if (dbType === "sqlite") await ensureSqliteTriggers(db, !sqliteDdlDeferred);
+  if (!canDdl || schemaDeferred || sqliteDdlDeferred) await assertFlowRunLineageSchema(db);
 }
 
 // ── Public API ──
@@ -343,6 +347,7 @@ export async function initDatabase(
 
     if (schema === "migrate") await runMigrations(db, db.dbType as DbType, () => { sqliteDeferred = true; });
     if (sqliteDeferred) throw new Error("SQLite migrations deferred; initialization incomplete");
+    if (schema === "external") await assertFlowRunLineageSchema(db);
   } catch (err) {
     if (db) {
       try { await db.close(); } catch (closeError) { console.warn("[clawweb] Failed to close database after init failure:", closeError); }

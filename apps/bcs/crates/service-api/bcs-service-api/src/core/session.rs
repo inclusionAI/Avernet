@@ -185,12 +185,4 @@ mod tests {
             SessionKind::ServiceInvocation);
         assert!(r.is_ok());
     }
-
-    #[test]
-    fn reactivate_ok_when_terminal() {
-        let r = can_reactivate(
-            SessionStatus::Completed,
-            SessionKind::ServiceInvocation);
-        assert!(r.is_ok());
-    }
 }

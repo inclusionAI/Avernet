@@ -284,6 +284,10 @@ async def list_tasks(
         str | None,
         Query(description="可选 status 过滤:运行时态枚举,逗号分隔多值(如 PLANNING,RUNNING);非法值 → 400"),
     ] = None,
+    keyword: Annotated[
+        str | None,
+        Query(description="可选关键字过滤:task_id/owner_bot_id/task_spec.context.title/task_spec.goal.objective"),
+    ] = None,
     page: Annotated[
         int | None,
         Query(ge=1, description="分页页码(1-based);不传则不分页,返回全量(列表契约不变)。"),
@@ -302,6 +306,8 @@ async def list_tasks(
 
     user_id 是直接的筛选条件,不要求与认证主体一致,也不执行 owner 作用域校验。
     返回完整任务记录字段。非法 status 返回 400,而不是服务器内部错误。
+    keyword 空白时不过滤;非空时服务端按大小写不敏感 substring 匹配
+    task_id/owner_bot_id/task_spec.context.title/task_spec.goal.objective,分页前完成过滤。
 
     分页为可选入参(向后兼容):page/page_size 均不传时 data 为列表,
     等同历史契约(供接力 skill 全量枚举等场景);两者同时传入时 data 为
@@ -315,12 +321,19 @@ async def list_tasks(
         )
     if page_size is None:
         items = await run_in_threadpool(  # allow-run-in-threadpool: TaskServiceProtocol method is synchronous.
-            service.list_tasks, status, owner_user_id=user_id
+            service.list_tasks,
+            status,
+            owner_user_id=user_id,
+            keyword=keyword,
         )
         return envelope([task_info_record_to_dto(item) for item in items], request)
     items, total = await run_in_threadpool(
         service.list_tasks_page,
-        status, owner_user_id=user_id, page=page or 1, page_size=page_size
+        status,
+        owner_user_id=user_id,
+        page=page or 1,
+        page_size=page_size,
+        keyword=keyword,
     )
     return page_envelope(
         total,

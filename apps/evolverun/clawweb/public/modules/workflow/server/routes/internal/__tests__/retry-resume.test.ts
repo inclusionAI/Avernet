@@ -7,13 +7,14 @@ import { SqliteDatabase } from '@avernet/clawweb-shared/server/db';
 import { FlowRunRepository } from '../../../repositories/flow-run-repository.js';
 import { createInternalRunsRouter } from '../runs.js';
 
+const timeoutReason = JSON.stringify({ reason: 'flow_timeout', timeoutSecs: 60, ranForSecs: 61 });
 const raw = new Database(':memory:');
 const db = new SqliteDatabase(raw);
 let server: Server;
 let base: string;
 beforeAll(async () => {
   raw.exec(`CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY, status TEXT, started_at INTEGER,
-    retry_epoch INTEGER DEFAULT NULL,
+    retry_epoch INTEGER DEFAULT NULL, state_json TEXT DEFAULT '{"effectiveFlowTimeoutMinutes":1}',
     completed_at INTEGER, result_json TEXT, current_phase TEXT, total_duration_ms INTEGER, gmt_modified INTEGER,
     total_token_usage INTEGER, succeeded_count INTEGER, failed_count INTEGER, input_json TEXT);
     INSERT INTO flow_runs (flow_id,status,started_at,completed_at,result_json,gmt_modified)
@@ -43,15 +44,15 @@ it('resumes a retry idempotently, preserving original start and node history', a
 });
 
 it('the timeout claim still wins only once', async () => {
-  const stale = await (await put('flow/fail-if-running', { reason: 'old timeout', retry_epoch: 0 })).json();
-  const first = await (await put('flow/fail-if-running', { reason: 'timeout', retry_epoch: 1 })).json();
-  const second = await (await put('flow/fail-if-running', { reason: 'timeout', retry_epoch: 1 })).json();
+  const stale = await (await put('flow/fail-if-running', { reason: timeoutReason, retry_epoch: 0 })).json();
+  const first = await (await put('flow/fail-if-running', { reason: timeoutReason, retry_epoch: 1 })).json();
+  const second = await (await put('flow/fail-if-running', { reason: timeoutReason, retry_epoch: 1 })).json();
   expect(stale).toEqual({ success: true, data: { claimed: false } });
   expect(first).toEqual({ success: true, data: { claimed: true } });
   expect(second).toEqual({ success: true, data: { claimed: false } });
   expect((await put('flow/completion', { status: 'succeeded', retry_epoch: 1 })).status).toBe(409);
   expect(raw.prepare('SELECT status, result_json FROM flow_runs WHERE flow_id = ?').get('flow'))
-    .toEqual({ status: 'failed', result_json: 'timeout' });
+    .toEqual({ status: 'failed', result_json: timeoutReason });
 });
 
 it('keeps the legacy status endpoint able to resume a failed TaskGuard run', async () => {
@@ -109,7 +110,7 @@ it('supports legacy status writes while retaining explicit epoch compatibility',
 it('accepts original completion and watchdog requests for previously epoch-enabled records', async () => {
   raw.prepare('INSERT INTO flow_runs (flow_id, status, retry_epoch) VALUES (?, ?, ?)').run('compatible-completion', 'running', 2);
   expect((await put('compatible-completion/completion', { status: 'succeeded' })).status).toBe(200);
-  raw.prepare('INSERT INTO flow_runs (flow_id, status, retry_epoch) VALUES (?, ?, ?)').run('compatible-timeout', 'running', 2);
-  expect(await (await put('compatible-timeout/fail-if-running', { reason: 'timeout' })).json())
+  raw.prepare('INSERT INTO flow_runs (flow_id, status, retry_epoch, started_at) VALUES (?, ?, ?, 1)').run('compatible-timeout', 'running', 2);
+  expect(await (await put('compatible-timeout/fail-if-running', { reason: timeoutReason })).json())
     .toEqual({ success: true, data: { claimed: true } });
 });

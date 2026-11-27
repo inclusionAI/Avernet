@@ -82,9 +82,7 @@ function buildParams(
   ownerId?: string,
   stage?: BotRuntimeStage,
   deviceUuid?: string,
-  /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
-  callerRuntimeTarget?: 'service' | 'caller_instance',
-  /** 好友会话身份(2026-11-19 需求追加:好友 Bot 文件全链携带 f_user_id),缺省不携带 */
+  /** 对话会话主体；本人发起的 owner/协作/好友 Bot 文件链均携带，运维调试缺省不携带。 */
   friendUserId?: string,
 ): BotRequestParams {
   return {
@@ -93,7 +91,6 @@ function buildParams(
     ...(stage ? { stage } : {}),
     // 多实例选中实例定位(openspec add-session-files-device-uuid),缺省不携带
     ...(deviceUuid ? { device_uuid: deviceUuid } : {}),
-    ...(callerRuntimeTarget ? { caller_runtime_target: callerRuntimeTarget } : {}),
     ...(friendUserId ? { f_user_id: resolveUserId(friendUserId) } : {}),
   };
 }
@@ -143,13 +140,7 @@ export const botSessionFileService = {
        */
       deviceUuid?: string;
       /**
-       * Caller 模式 Bot 的运行时目标(openspec add-session-files-caller-runtime-target)。
-       * 服务 Bot 会话语境 `service` / 好友会话语境 `caller_instance`;上传链三接口
-       * 携带为 query `caller_runtime_target`;非 Caller Bot 缺省完全不携带。
-       */
-      callerRuntimeTarget?: 'service' | 'caller_instance';
-      /**
-       * 好友会话身份(2026-11-19 需求追加):好友 Bot 上传链三接口携带为 query `f_user_id`;
+       * 对话会话主体：上传链三接口携带 query `f_user_id`；
        * 非好友会话缺省完全不携带。
        */
       friendUserId?: string;
@@ -158,14 +149,11 @@ export const botSessionFileService = {
       onPhase?: (phase: 'completing' | 'materializing') => void;
     },
   ): Promise<DomainResult<BotSessionFileView>> {
-    // 契约(R20261119 session-file-frontend-params §2):仅 upload-intents 带 caller_runtime_target;
-    // upload-complete / materialize-status 不带(定位沿用资源记录的 binding)。两份 params 分开拼。
-    // f_user_id 不受该契约分面约束:好友全链(2026-11-19 需求追加)三类请求均携带。
-    const intentsParams = buildParams(userId, opts.ownerId, opts.stage, opts.deviceUuid, opts.callerRuntimeTarget, opts.friendUserId);
-    const runtimeParams = buildParams(userId, opts.ownerId, opts.stage, opts.deviceUuid, undefined, opts.friendUserId);
+    // f_user_id 对话主体全链：intents/complete/materialize 三类请求均携带。
+    const params = buildParams(userId, opts.ownerId, opts.stage, opts.deviceUuid, opts.friendUserId);
     try {
       const hash = await sha256Hex(file);
-      const intents = await createUploadIntents(botId, sessionId, intentsParams, {
+      const intents = await createUploadIntents(botId, sessionId, params, {
         files: [{ filename: file.name, size_bytes: file.size, ...(hash ? { content_hash: hash } : {}) }],
       });
       const intent = mapIntent(intents.files[0]);
@@ -173,7 +161,7 @@ export const botSessionFileService = {
       await directUpload(intent, file, opts.signal ?? new AbortController().signal, opts.onProgress);
 
       opts.onPhase?.('completing');
-      const completed = await completeUpload(botId, sessionId, runtimeParams, {
+      const completed = await completeUpload(botId, sessionId, params, {
         resource_id: intent.resourceId,
         transfer_id: intent.transferId,
       });
@@ -190,7 +178,7 @@ export const botSessionFileService = {
         await sleep(POLL_INTERVAL);
         let status;
         try {
-          status = await getMaterializeStatus(botId, sessionId, intent.resourceId, runtimeParams);
+          status = await getMaterializeStatus(botId, sessionId, intent.resourceId, params);
         } catch (err) {
           const httpStatus = (err as { status?: number } | null)?.status;
           if (typeof httpStatus === 'number' && httpStatus >= 400 && httpStatus < 500) {
@@ -227,14 +215,12 @@ export const botSessionFileService = {
     stage?: BotRuntimeStage,
     /** 多实例选中实例(openspec add-session-files-device-uuid),缺省不携带 */
     deviceUuid?: string,
-    /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
-    callerRuntimeTarget?: 'service' | 'caller_instance',
   ): Promise<DomainResult<BotSessionFileListResult>> {
     try {
       const data = await listReadyApi(
         botId,
         sessionId,
-        buildParams(userId, ownerId, stage, deviceUuid, callerRuntimeTarget, friendUserId),
+        buildParams(userId, ownerId, stage, deviceUuid, friendUserId),
       );
       const items = (data.files ?? []).map(mapView);
       return { ok: true, data: { items, total: items.length } };
@@ -253,16 +239,14 @@ export const botSessionFileService = {
     disposition?: 'inline' | 'attachment',
     stage?: BotRuntimeStage,
     deviceUuid?: string,
-    /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
-    callerRuntimeTarget?: 'service' | 'caller_instance',
-    /** 好友会话身份(2026-11-19 需求追加:全链携带 f_user_id),缺省不携带 */
+    /** 对话会话主体；对话链携带 f_user_id，运维链缺省不携带。 */
     friendUserId?: string,
   ): string {
     const path = buildBotSessionFileContentUrl(
       botId,
       sessionId,
       resourceId,
-      buildParams(userId, ownerId, stage, deviceUuid, callerRuntimeTarget, friendUserId),
+      buildParams(userId, ownerId, stage, deviceUuid, friendUserId),
       disposition,
     );
     const origin = resolveGroupGatewayOrigin();
@@ -278,16 +262,14 @@ export const botSessionFileService = {
     ownerId?: string,
     stage?: BotRuntimeStage,
     deviceUuid?: string,
-    /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
-    callerRuntimeTarget?: 'service' | 'caller_instance',
-    /** 好友会话身份(2026-11-19 需求追加:全链携带 f_user_id),缺省不携带 */
+    /** 对话会话主体；对话链携带 f_user_id，运维链缺省不携带。 */
     friendUserId?: string,
   ): Promise<string> {
     const contentUrl = buildBotSessionFileContentUrl(
       botId,
       sessionId,
       resourceId,
-      buildParams(userId, ownerId, stage, deviceUuid, callerRuntimeTarget, friendUserId),
+      buildParams(userId, ownerId, stage, deviceUuid, friendUserId),
       'attachment',
     );
     return fetchExternalDownloadUrl(contentUrl);
@@ -302,9 +284,7 @@ export const botSessionFileService = {
     stage?: BotRuntimeStage,
     /** 多实例选中实例(openspec add-session-files-device-uuid 扩展段),缺省不携带 */
     deviceUuid?: string,
-    /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
-    callerRuntimeTarget?: 'service' | 'caller_instance',
-    /** 好友会话身份(2026-11-19 需求追加:全链携带 f_user_id),缺省不携带 */
+    /** 对话会话主体；对话链携带 f_user_id，运维链缺省不携带。 */
     friendUserId?: string,
   ): Promise<DomainResult<boolean>> {
     try {
@@ -312,7 +292,7 @@ export const botSessionFileService = {
         botId,
         sessionId,
         resourceId,
-        buildParams(userId, ownerId, stage, deviceUuid, callerRuntimeTarget, friendUserId),
+        buildParams(userId, ownerId, stage, deviceUuid, friendUserId),
       );
       return { ok: true, data: true };
     } catch (err) {
@@ -329,9 +309,7 @@ export const botSessionFileService = {
     disposition?: 'inline' | 'attachment',
     stage?: BotRuntimeStage,
     deviceUuid?: string,
-    /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
-    callerRuntimeTarget?: 'service' | 'caller_instance',
-    /** 好友会话身份(2026-11-19 需求追加:全链携带 f_user_id),缺省不携带 */
+    /** 对话会话主体；对话链携带 f_user_id，运维链缺省不携带。 */
     friendUserId?: string,
   ): Promise<DomainResult<Blob>> {
     try {
@@ -339,7 +317,7 @@ export const botSessionFileService = {
         botId,
         sessionId,
         resourceId,
-        buildParams(userId, ownerId, stage, deviceUuid, callerRuntimeTarget, friendUserId),
+        buildParams(userId, ownerId, stage, deviceUuid, friendUserId),
         disposition,
       );
       return { ok: true, data: blob };

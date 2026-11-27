@@ -34,22 +34,23 @@ class TestStageConfig:
 
     def test_defaults(self):
         cfg = StageConfig()
-        assert cfg.device_count == 0
-        assert cfg.batch_capacity == 5
+        assert cfg.batch_capacity == 100
         assert cfg.cooldown_seconds == 0
         assert cfg.pause_for_approval is False
 
     def test_custom_values(self):
         cfg = StageConfig(
-            device_count=10,
             batch_capacity=3,
             cooldown_seconds=30,
             pause_for_approval=True,
         )
-        assert cfg.device_count == 10
         assert cfg.batch_capacity == 3
         assert cfg.cooldown_seconds == 30
         assert cfg.pause_for_approval is True
+
+    def test_device_count_is_not_a_field(self):
+        """Stage device_count was removed: it never affected the pipeline."""
+        assert "device_count" not in StageConfig.model_fields
 
 
 class TestPublishConfig:
@@ -59,7 +60,7 @@ class TestPublishConfig:
         cfg = PublishConfig()
         assert cfg.stages == {}
         assert cfg.drain_timeout_seconds == 0
-        assert cfg.batch_capacity_default == 5
+        assert cfg.batch_capacity_default == 100
         assert cfg.auto_complete is True
         assert cfg.auto_execute_max_iterations == 20
         assert cfg.callback_timeout_seconds == 1800
@@ -67,13 +68,13 @@ class TestPublishConfig:
     def test_custom_values(self):
         cfg = PublishConfig(
             stages={
-                "PREPUB": StageConfig(device_count=2, pause_for_approval=True),
+                "PREPUB": StageConfig(pause_for_approval=True),
             },
             drain_timeout_seconds=30,
             batch_capacity_default=10,
         )
         assert "PREPUB" in cfg.stages
-        assert cfg.stages["PREPUB"].device_count == 2
+        assert cfg.stages["PREPUB"].pause_for_approval is True
         assert cfg.drain_timeout_seconds == 30
 
     def test_extra_fields_allowed(self):
@@ -87,13 +88,13 @@ class TestPublishConfig:
         assert "GRAY" in defaults["stages"]
         assert "PROD_FIRST_BATCH" in defaults["stages"]
         assert "PROD_OTHER_BATCH" in defaults["stages"]
-        assert defaults["stages"]["PREPUB"]["device_count"] == 2
+        assert defaults["stages"]["PREPUB"]["batch_capacity"] == 100
         assert defaults["stages"]["PREPUB"]["pause_for_approval"] is True
 
     def test_get_defaults_for_type_update(self):
         defaults = PublishConfig.get_defaults_for_type(PublishType.UPDATE)
         assert "PREPUB" in defaults["stages"]
-        assert defaults["stages"]["PREPUB"]["device_count"] == 2
+        assert defaults["stages"]["PREPUB"]["batch_capacity"] == 100
 
     def test_get_defaults_for_type_restart(self):
         defaults = PublishConfig.get_defaults_for_type(PublishType.RESTART)

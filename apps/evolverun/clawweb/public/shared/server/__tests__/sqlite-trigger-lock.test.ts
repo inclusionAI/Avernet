@@ -18,8 +18,8 @@ it.each([false, true])('handles a real writer lock with trigger already installe
   peer.pragma('journal_mode = WAL');
   peer.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version, description) VALUES (149, 'old');
-    CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, flow_id TEXT, gmt_modified INTEGER);
-    INSERT INTO flow_runs VALUES (1, 'existing', 0);`);
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, flow_id TEXT, gmt_modified INTEGER);
+    INSERT INTO flow_runs (id, flow_id, gmt_modified) VALUES (1, 'existing', 0);`);
   if (installed) peer.exec(flowTrigger);
   peer.exec(sqliteTriggers.find(sql => sql.includes('trg_schema_version_update'))!);
   const raw = new Database(path);
@@ -181,8 +181,8 @@ it('does not cache a ready SQLite connection after a real deferred migration and
   const peer = new Database(path); peer.pragma('journal_mode = WAL');
   peer.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version, description) VALUES (149, 'old');
-    CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, flow_id TEXT, gmt_modified INTEGER);
-    INSERT INTO flow_runs VALUES (1, 'existing', 0);`);
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, flow_id TEXT, gmt_modified INTEGER);
+    INSERT INTO flow_runs (id, flow_id, gmt_modified) VALUES (1, 'existing', 0);`);
   for (const sql of sqliteTriggers.filter(ddl => /trg_(flow_runs|schema_version)_update\b/.test(ddl))) peer.exec(sql);
   vi.stubEnv('DATABASE_MODE', 'sqlite'); vi.stubEnv('SQLITE_PATH', path);
   const original = SqliteDatabase.prototype.exec; let first = true; const failedConnections: Database.Database[] = [];

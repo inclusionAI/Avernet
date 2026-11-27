@@ -1,8 +1,8 @@
 import { Avatar } from '@/components/ui';
 import { BotDisplayAvatar } from '@/components/Workspace/BotDisplayAvatar';
-import { normalizeMessageHumanId } from '@/components/Workspace/messagePresentation';
 import type { GroupView, ParticipantSummaryView } from '@/domain/collaboration';
 import { getDisplayParticipants } from '@/domain/collaboration/participantPresentation';
+import { isSameHumanIdentity } from '@/domain/userIdentity';
 import { buildMessageBlocks } from '@/services/workspace/messageBlockBuilder';
 import { sessionFileService } from '@/services/workspace/sessionFileService';
 import { formatChatTime } from '@/utils/format';
@@ -134,14 +134,11 @@ export function resolveSender(
           .flatMap((pool) => pool)
           .find(
             (item) =>
-              item.kind === 'human' && normalizeMessageHumanId(item.actorId) === normalizeMessageHumanId(senderId),
+              item.kind === 'human' && isSameHumanIdentity(item.actorId, senderId, 'human'),
           )
       : undefined;
-    const normalizedSenderId = normalizeMessageHumanId(senderId);
-    const normalizedUserIdentityId = normalizeMessageHumanId(userIdentityId);
-    const isCurrentUserMessage =
-      !senderId ||
-      (Boolean(normalizedSenderId && normalizedUserIdentityId) && normalizedSenderId === normalizedUserIdentityId);
+    // 与气泡对齐使用同一判定；未知作者不能借用当前登录用户的名字或头像。
+    const isCurrentUserMessage = isSameHumanIdentity(senderId, userIdentityId, 'human');
     if (isCurrentUserMessage) {
       const name = userIdentityName?.trim() || senderName || humanParticipant?.name || '未命名成员';
       return { name, avatar: renderCurrentUserAvatar(name, userAvatarUrl ?? senderAvatarUrl) };

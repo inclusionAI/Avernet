@@ -112,7 +112,7 @@ it("Agent-first MCP sends one targeted message without an environment approval a
   await agent.report(await current(task.taskId), { kind: "observation", phase: "observe", judgment: { delivery: "confirmed", response: "acted", effect: "recovered", summary: "原失败步骤已成功", evidence_ids: [observed.evidenceId] } });
   expect((await current(task.taskId)).status).toBe("completed"); expect(notifier.notify).not.toHaveBeenCalled();
   expect(actionNotifier.after).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.taskId, kind: "result" }));
-  await service.reportResults(); expect(callbacks.at(-1)).toMatchObject({ effect: "recovered", delivery: { delivery_key: request.delivery_key } });
+  await flush(); expect(callbacks.at(-1)).toMatchObject({ effect: "recovered", delivery: { delivery_key: request.delivery_key } });
 });
 it("authorizes a terminal stop, invalidates tools, retries only the remote stop and reports cancellation once", async () => {
   const task = await create();
@@ -139,7 +139,7 @@ it("authorizes a terminal stop, invalidates tools, retries only the remote stop 
   await agent.handleAisStatus({ task: (await repo.findTask(task.taskId))!, step: (await repo.findStep(task.aisExecution!.stepId))!, report: { status: "failed", retryable: true } });
   await expect(service.resume(task.taskId)).rejects.toMatchObject({ status: 409 });
   expect((await current(task.taskId)).status).toBe("canceled");
-  await service.reportResults(); await service.reportResults();
+  await flush(); await flush();
   expect(callbacks).toHaveLength(1); expect(callbacks[0]).toMatchObject({ status: "canceled", effect: "unknown", result_text: expect.stringContaining("暂停观察") });
 });
 it("stops a late AIS dispatch receipt instead of leaving a new Agent running", async () => {
@@ -168,7 +168,7 @@ it("retains an in-flight write as unknown after stopping without replay or task 
   expect(await pending).toMatchObject({ status: "unknown" });
   expect((await current(task.taskId)).status).toBe("canceled");
   expect((await current(task.taskId)).timeline.some(event => event.kind === "operation" && event.payload.status === "unknown")).toBe(true);
-  await service.reportResults(); expect(callbacks.at(-1)).toMatchObject({ status: "canceled", intervention_status: "unknown" });
+  await flush(); expect(callbacks.at(-1)).toMatchObject({ status: "canceled", intervention_status: "unknown" });
   await service.maintenance(); expect(runtime.sendMessage).toHaveBeenCalledOnce();
 });
 it("non-MCP goes to one environment plan without any initial retry message", async () => {
@@ -208,7 +208,7 @@ it("an oversized trajectory page is recorded as a readable failure instead of br
   const retried = await agent.trajectoryRead(await current(task.taskId), { clientRequestId: "smaller-trace", purpose: "缩小范围读取轨迹", limit: 1 });
   expect(retried.status).toBe("succeeded");
 });
-afterEach(async () => { await db.close(); await rm(directory, { recursive: true, force: true }); });
+afterEach(async () => { await service?.dispose(); await db.close(); await rm(directory, { recursive: true, force: true }); });
 it("approves one plan in the same execution, retries the original session, recovers with durable evidence", async () => {
   let task = await toPlan(await create()); expect(submissions).toHaveLength(1); expect(submissions[0].input.credentials.executionTicket).toBeTruthy();
   await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId); expect(task.status).toBe("waiting_owner"); expect(notifier.notify).not.toHaveBeenCalled();
@@ -222,7 +222,7 @@ it("approves one plan in the same execution, retries the original session, recov
   await appendFile(sessionFile, JSON.stringify({ type: "message", id: "recovered-operation", message: { role: "assistant", content: "原MCP操作成功，继续原任务" } }) + "\n");
   const evidence = await inspect(await current(task.taskId), "read-verify"); expect((evidence.result as any).delivery.text).toContain("配置已核验");
   await agent.report(await current(task.taskId), { phase: "verify", kind: "observation", judgment: { delivery: "confirmed", response: "acted", effect: "recovered", summary: "原失败操作已成功", evidence_ids: [evidence.evidenceId] } });
-  await service.reportResults(); const view = await service.detail(task.taskId, actor); expect(view.status).toBe("completed"); expect(view.evidence).toHaveLength(5); expect(view.timeline.some(event => event.kind === "result")).toBe(true); expect(view.execution).toBeUndefined(); await service.reportResults(); expect(callbacks.at(-1)).toMatchObject({ status: "completed", effect: "recovered" }); expect(runtime.sendMessage).toHaveBeenCalledTimes(2);
+  await flush(); const view = await service.detail(task.taskId, actor); expect(view.status).toBe("completed"); expect(view.evidence).toHaveLength(5); expect(view.timeline.some(event => event.kind === "result")).toBe(true); expect(view.execution).toBeUndefined(); await flush(); expect(callbacks.at(-1)).toMatchObject({ status: "completed", effect: "recovered" }); expect(runtime.sendMessage).toHaveBeenCalledTimes(2);
   await service.annotate(task.taskId, actor, { layer: "effect", correct: true, reason: "原操作前后已核验", evidence_ids: [evidence.evidenceId] }); expect((await current(task.taskId)).timeline.some(event => event.kind === "annotation")).toBe(true);
 });
 it("Debug logs proposed actions without messages, writes or Owner notification", async () => {
@@ -244,7 +244,7 @@ it.each(["succeeded", "failed"] as const)("Base release preserves Owner wait and
   expect((await current(task.taskId)).status).toBe("running");
   expect((await repo.findTask(task.taskId))!.status).toBe("running");
   expect((await current(task.taskId)).execution!.executionId).toBe(task.execution!.executionId);
-  await service.reportResults(); expect(callbacks).toEqual([]);
+  await flush(); expect(callbacks).toEqual([]);
 });
 it("Owner approval before Base release continues the live execution instead of ending it", async () => {
   let task = await toPlan(await create()); await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId);
@@ -260,7 +260,7 @@ it("maintenance ignores the obsolete Owner deadline while the execution heartbea
   await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1, ownerDeadlineAt: now - 1 }));
   await service.maintenance(); task = await current(task.taskId);
   expect(task.status).toBe("waiting_owner"); expect(task.execution!.executionId).toBe(oldId); expect(task.execution!.state).not.toBe("ended");
-  await service.reportResults(); expect(callbacks).toEqual([]);
+  await flush(); expect(callbacks).toEqual([]);
 });
 it("NAS reads bind delivery to the current retry's actual user record, never an old marker or an assistant quote", async () => {
   let task = await toPlan(await create("automatic")); await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId);
@@ -313,7 +313,7 @@ it.each(["apply", "blocked"])("%s failure callbacks retain saved evidence withou
   task = await current(task.taskId); await agent.report(task, { kind: "plan", phase: "plan", plan }); task = await current(task.taskId);
   const operation = await agent.apply(task, { clientRequestId: "apply-for-failure", purpose: "执行原方案", actionId: "fix" }); task = await current(task.taskId);
   await agent.report(task, kind === "apply" ? { kind, phase: "apply", applicable: false, success: false, summary: "方案不再适用" } : { kind, phase: "apply", summary: "执行受阻" });
-  await service.reportResults(); const callback = callbacks.at(-1)!;
+  await flush(); const callback = callbacks.at(-1)!;
   expect(callback.status).toBe("failed"); expect(callback.effect).toBe("unknown");
   expect(callback.evidence_ids).toEqual(expect.arrayContaining([read.evidenceId, operation.evidenceId]));
   expect(callback.evidence?.some(item => item.tool_call_id === operation.toolCallId)).toBe(true);
@@ -333,7 +333,7 @@ it("retries confirmed AIS startup failures in the same task, survives restart an
   expect(task.status).toBe("running"); expect(task.execution!.state).toBe("ended");
   expect(task.timeline.some(event => event.summary.includes("context canceled"))).toBe(true);
   await expect(agent.verify(taskId, firstExecution, firstTicket)).rejects.toMatchObject({ status: 401 });
-  await service.reportResults(); expect(callbacks).toEqual([]);
+  await flush(); expect(callbacks).toEqual([]);
   await service.maintenance(); expect(submissions).toHaveLength(1);
   // Reconstruct the existing services over the same persistent task and ledger.
   tasks = new SessionRecoveryTaskRepository(db, repo, artifactStore);
@@ -350,7 +350,7 @@ it("retries confirmed AIS startup failures in the same task, survives restart an
   now += 1; await service.maintenance(); expect(submissions).toHaveLength(3);
   await reconcile(); task = await current(taskId);
   expect(task.status).toBe("failed"); expect(task.judgment!.effect).toBe("unknown");
-  await service.reportResults(); await service.maintenance(); await service.reportResults();
+  await flush(); await service.maintenance(); await flush();
   expect(submissions).toHaveLength(3); expect(callbacks).toHaveLength(1);
   expect(callbacks[0]).toMatchObject({ task_id: taskId, status: "failed", effect: "unknown" });
   expect(callbacks[0].result_text).toContain("context canceled");
@@ -361,7 +361,7 @@ it("retries dispatch failures with revoked tickets instead of failing the accept
   const ack = await service.create(request, actor); await flush();
   let task = await current(ack.task_id);
   expect(task.status).toBe("running"); expect(task.execution!.state).toBe("ended");
-  await service.reportResults(); expect(callbacks).toEqual([]);
+  await flush(); expect(callbacks).toEqual([]);
   now += 20000; await service.maintenance(); task = await current(ack.task_id);
   expect(task.execution!.jobId).toBeTruthy(); expect(ais.execute).toHaveBeenCalledTimes(2);
 });
@@ -419,14 +419,14 @@ it("preserves an approved plan and unknown write evidence across an AIS retry", 
   expect(submissions).toHaveLength(2); expect(task).toMatchObject({ status: "running", phase: "apply", plan: approved, evidence });
   await expect(agent.apply(task, { actionId: "fix", clientRequestId: "blind-replay", purpose: "不能盲目重复写入" })).rejects.toMatchObject({ status: 409 });
   expect(runtime.executeShell).toHaveBeenCalledTimes(operationCount);
-  await service.reportResults(); expect(callbacks).toEqual([]);
-  await service.executionFailure(task.taskId, "后续执行结束"); await service.reportResults();
+  await flush(); expect(callbacks).toEqual([]);
+  await service.executionFailure(task.taskId, "后续执行结束"); await flush();
   expect(callbacks.at(-1)).toMatchObject({ status: "failed", intervention_status: "performed" });
 });
 it("does not retry a non-retryable Base failure or notify Owner about infrastructure failure", async () => {
   const task = await create(), step = (await repo.findStep(task.aisExecution!.stepId))!;
   await agent.handleAisStatus({ task: (await repo.findTask(task.taskId))!, step, report: { status: "failed", errorCode: "INVALID_INPUT", errorMessage: "invalid runtime input", retryable: false } });
-  now += 120000; await service.maintenance(); await service.reportResults();
+  now += 120000; await service.maintenance(); await flush();
   expect(submissions).toHaveLength(1); expect(callbacks).toHaveLength(1);
   expect(callbacks[0]).toMatchObject({ status: "failed", effect: "unknown" });
   expect(callbacks[0].result_text).toContain("invalid runtime input"); expect(notifier.notify).not.toHaveBeenCalled();
@@ -440,7 +440,7 @@ it("a successful AIS retry continues the original workflow and sends only its fi
   const read = await inspect(task, "read-after-retry");
   await agent.report(await current(task.taskId), { kind: "observation", phase: "observe", judgment: {
     delivery: "confirmed", response: "acted", effect: "recovered", summary: "已核实原阻塞解除并继续推进", evidence_ids: [read.evidenceId] } });
-  await service.reportResults();
+  await flush();
   expect(submissions).toHaveLength(2); expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
   expect(callbacks).toHaveLength(1); expect(callbacks[0]).toMatchObject({ task_id: task.taskId, status: "completed", effect: "recovered" });
 });
@@ -487,7 +487,7 @@ it("waits for an in-flight write lease and retains an abandoned write as unknown
   await expect(agent.apply(task, { actionId: "fix", clientRequestId: "new-write", purpose: "不能跳过未知写入" })).rejects.toMatchObject({ status: 409 });
 });
 it("a failed plan cannot submit a second automatic plan", async () => {
-  let task = await toPlan(await create("automatic")); await agent.report(task, { kind: "plan", phase: "plan", plan }); await agent.report(await current(task.taskId), { kind: "apply", phase: "apply", applicable: false, success: false, summary: "最新现场已变化，原方案不适用" }); task = await current(task.taskId); expect(task.status).toBe("failed"); await service.reportResults(); expect(callbacks.at(-1)!.effect).toBe("unknown"); await expect(service.plan(task.taskId, task.version, plan)).rejects.toMatchObject({ status: 409 });
+  let task = await toPlan(await create("automatic")); await agent.report(task, { kind: "plan", phase: "plan", plan }); await agent.report(await current(task.taskId), { kind: "apply", phase: "apply", applicable: false, success: false, summary: "最新现场已变化，原方案不适用" }); task = await current(task.taskId); expect(task.status).toBe("failed"); await flush(); expect(callbacks.at(-1)!.effect).toBe("unknown"); await expect(service.plan(task.taskId, task.version, plan)).rejects.toMatchObject({ status: 409 });
 });
 it("uses the Engine reference when no actual request is supplied, only after approval", async () => {
   let task = await toPlan(await create());
@@ -786,94 +786,66 @@ it("tool history stays in the audit ledger while Task config stays bounded", asy
   expect(await db.query("SELECT name FROM sqlite_master WHERE name IN ('ce_session_recovery_records', 'ce_session_recovery_results')")).toEqual([]);
 });
 
-it("migrates legacy pending results before reporting and preserves their original version", async () => {
+it("archives legacy inline results on a normal update without replaying them", async () => {
   const task = await create();
-  const result = { event_id: task.request.event_id, task_id: task.taskId, result_version: task.version, status: "failed" as const, phase: task.phase, waiting_reason: null, effect: "unknown" as const, result_text: "历史结果", evidence_ids: [] };
+  const result = { event_id: task.request.event_id, task_id: task.taskId, result_version: task.version,
+    status: "failed" as const, phase: task.phase, waiting_reason: null, effect: "unknown" as const, result_text: "历史结果", evidence_ids: [] };
   const evidence = { evidence_id: "legacy-evidence", tool_call_id: "legacy-call", source: "session", location: "original:1", excerpt: "历史现场" };
-  await db.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify({ ...task, status: "failed", evidence: [evidence], pending_results: [{ ...result, status: "waiting_owner", result_version: 0 }, result] }), task.taskId]);
-  const legacyRow = (await repo.findTask(task.taskId))!;
-  expect((await tasks.listForReporting(20, "", "prod")).tasks).toEqual([]);
-  expect(await repo.findTask(task.taskId)).toEqual(legacyRow);
-  // Old tasks had no phase artifact; preserve the original Step identity.
+  await db.exec("UPDATE ce_tasks SET config_json = ? WHERE task_id = ?", [JSON.stringify({ ...task, status: "failed", evidence: [evidence], pending_results: [result] }), task.taskId]);
   await db.exec("UPDATE ce_steps SET output_json = NULL WHERE task_id = ? AND step_no > 0", [task.taskId]);
-  await service.reportResults();
-  expect(callbacks).toEqual([result]); expect((await current(task.taskId)).pending_results).toEqual([]);
+  await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1 }));
+  await flush();
+  expect(callbacks).toEqual([]);
   expect((await current(task.taskId)).evidence).toEqual([evidence]);
-  expect(JSON.parse((await repo.findTask(task.taskId))!.config_json).artifactStorage).toBe(2);
+  const stored = JSON.parse((await repo.findTask(task.taskId))!.config_json);
+  expect(stored.artifactStorage).toBe(2); expect(stored.pending_results).toBeUndefined();
+  const step = (await repo.listSteps(task.taskId)).find(item => item.step_no === 1)!;
+  const report = JSON.parse((await artifactStore.getObject(JSON.parse(step.output_json!).objectKey)).content.toString());
+  expect(report.results).toHaveLength(1);
+  expect(JSON.parse((await artifactStore.getObject(report.results[0].objectKey)).content.toString())).toEqual(result);
 });
-it("waiting snapshots survive same-task resumes and restart before the final result is delivered", async () => {
+it("immediately sends every immutable waiting and final snapshot across same-task resumes", async () => {
   let task = await toObserve(await create());
   const firstExecution = task.execution!.executionId;
   now = task.observationDeadlineAt! + 1;
   await service.maintenance(); task = await current(task.taskId);
   expect(task.status).toBe("waiting_effect");
-  const firstResult = structuredClone(task.pending_results[0]);
-  vi.spyOn(reporter, "report").mockRejectedValueOnce(new Error("receiver unavailable"));
-  await service.reportResults();
-  const failed = JSON.parse((await repo.findTask(task.taskId))!.config_json).resultDelivery[0];
-  expect(failed).toMatchObject({ resultVersion: firstResult.result_version, attempts: 1 });
-  expect(failed.retryAfterMs).toBeGreaterThan(Date.now());
+  const firstResult = structuredClone(callbacks[0]);
   await service.resume(task.taskId); task = await current(task.taskId);
   expect(task.execution!.executionId).not.toBe(firstExecution);
-  expect(task.phase).toBe("observe"); expect(task.requiresFreshObservation).toBe(true);
   await inspect(task, "resume-read-1"); task = await current(task.taskId);
-  expect(task.requiresFreshObservation).toBe(false);
   now = task.observationDeadlineAt! + 1;
   await service.maintenance(); task = await current(task.taskId);
-  expect(task.pending_results).toHaveLength(2);
   await service.resume(task.taskId); task = await current(task.taskId);
   const read = await inspect(task, "resume-read-2");
   await agent.report(await current(task.taskId), { phase: "observe", kind: "observation", judgment: {
     delivery: "confirmed", response: "acted", effect: "recovered", summary: "原操作成功", evidence_ids: [read.evidenceId] } });
-  task = await current(task.taskId);
-  expect(task.pending_results.map(result => result.status)).toEqual(["waiting_effect", "waiting_effect", "completed"]);
-  expect(task.pending_results[0]).toEqual(firstResult);
+  await flush();
+  expect(callbacks.map(result => result.status)).toEqual(["waiting_effect", "waiting_effect", "completed"]);
+  expect(callbacks[0]).toEqual(firstResult);
   expect(runtime.sendMessage).toHaveBeenCalledOnce();
-  expect((await tasks.listForReporting(20, "", "pre")).tasks).toEqual([]);
+  expect((await current(task.taskId)).timeline.filter(event => event.kind === "result")).toHaveLength(3);
   const stored = JSON.parse((await repo.findTask(task.taskId))!.config_json);
-  expect(stored.pending_results).toBeUndefined(); expect(stored.timeline).toBeUndefined();
-  expect(stored.resultDelivery).toHaveLength(3);
-  expect(stored.resultDelivery[0]).not.toHaveProperty("result_text");
-  const clock = vi.spyOn(Date, "now").mockImplementation(() => failed.retryAfterMs + 1);
-  try {
-    const restoredTasks = new SessionRecoveryTaskRepository(db, new EvolveRepository(db), artifactStore);
-    const restarted = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks: restoredTasks, agent, notifier, reporter, observationMs: 3600000 });
-    const versions = task.pending_results.map(result => result.result_version);
-    await restarted.reportResults();
-    expect(callbacks.map(result => result.result_version)).toEqual(versions);
-    expect((await current(task.taskId)).pending_results).toEqual([]);
-    await restarted.reportResults(); expect(callbacks).toHaveLength(3);
-    await tasks.acknowledgeResult(task.taskId, versions[0], 1);
-    const acknowledgments = (await current(task.taskId)).timeline.filter(event => event.kind === "result");
-    expect(acknowledgments).toHaveLength(3);
-    expect(acknowledgments.map(event => event.payload.attempts)).toEqual([2, 1, 1]);
-    expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(1);
-  } finally { clock.mockRestore(); }
+  expect(stored.resultDelivery).toBeUndefined(); expect(stored.pending_results).toBeUndefined();
 });
-
-it("a late callback acknowledgment preserves a resumed execution and a newer final result", async () => {
+it("a slow callback does not block a resumed execution or a newer final result", async () => {
   let task = await toObserve(await create());
-  now = task.observationDeadlineAt! + 1;
-  await service.maintenance(); task = await current(task.taskId);
-  const waitingVersion = task.pending_results[0].result_version;
   let accepted!: () => void;
   const receiver = new Promise<void>(resolve => { accepted = resolve; });
   vi.spyOn(reporter, "report").mockImplementationOnce(async result => { callbacks.push(result); await receiver; });
-  const reporting = service.reportResults();
-  await vi.waitFor(() => expect(callbacks).toHaveLength(1));
+  now = task.observationDeadlineAt! + 1;
+  await service.maintenance(); task = await current(task.taskId);
   try {
     await service.resume(task.taskId); task = await current(task.taskId);
     const execution = task.execution!.executionId;
     const read = await inspect(task, "read-during-callback");
     await agent.report(await current(task.taskId), { phase: "observe", kind: "observation", judgment: {
       delivery: "confirmed", response: "acted", effect: "recovered", summary: "已恢复", evidence_ids: [read.evidenceId] } });
-    accepted(); await reporting;
-    task = await current(task.taskId);
-    expect(task.status).toBe("completed"); expect(task.execution!.executionId).toBe(execution);
-    expect(task.pending_results).toHaveLength(1); expect(task.pending_results[0].status).toBe("completed");
-    expect(task.timeline.filter(event => event.kind === "result").map(event => event.payload.result_version)).toEqual([waitingVersion]);
-    await service.reportResults(); expect(callbacks.map(result => result.status)).toEqual(["waiting_effect", "completed"]);
-  } finally { accepted(); await reporting; }
+    await flush();
+    expect(callbacks.map(result => result.status)).toEqual(["waiting_effect", "completed"]);
+    expect((await current(task.taskId)).execution!.executionId).toBe(execution);
+  } finally { accepted(); await service.dispose(); }
+  expect((await current(task.taskId)).timeline.filter(event => event.kind === "result")).toHaveLength(2);
 });
 
 it("a failed Step write cannot commit terminal state or its pending callback", async () => {
@@ -883,10 +855,10 @@ it("a failed Step write cannot commit terminal state or its pending callback", a
   await expect(service.executionFailure(task.taskId, "执行异常")).rejects.toThrow("report unavailable");
   const unchanged = (await repo.findTask(task.taskId))!;
   expect(unchanged.config_json).toBe(before.config_json); expect(unchanged.status).toBe(before.status);
-  await service.reportResults(); expect(callbacks).toEqual([]);
+  await flush(); expect(callbacks).toEqual([]);
   await db.exec("DROP TRIGGER fail_recovery_report");
   await service.executionFailure(task.taskId, "执行异常");
-  await service.reportResults(); expect(callbacks).toHaveLength(1); expect(callbacks[0].status).toBe("failed");
+  await flush(); expect(callbacks).toHaveLength(1); expect(callbacks[0].status).toBe("failed");
 });
 
 it("isolates background recovery maintenance by control plane without hiding shared tasks", async () => {
@@ -906,9 +878,9 @@ it("isolates background recovery maintenance by control plane without hiding sha
   await prod.executionFailure(task.taskId, "foreign worker", task.execution!.executionId, true);
   expect(ais.getJobStatusDetail).not.toHaveBeenCalled(); expect(ais.stopExecution).not.toHaveBeenCalled();
   expect(submissions).toHaveLength(1); expect((await current(task.taskId)).execution).toEqual(task.execution);
+  expect(callbacks).toEqual([]);
   await service.executionFailure(task.taskId, "finished", task.execution!.executionId);
-  await prod.reportResults(); expect(callbacks).toEqual([]);
-  await service.reportResults(); expect(callbacks).toHaveLength(1);
+  await flush(); expect(callbacks).toHaveLength(1);
 });
 
 it("does not release a replacement execution carrying an older retry marker", async () => {

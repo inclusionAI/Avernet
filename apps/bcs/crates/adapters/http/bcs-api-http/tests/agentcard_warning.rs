@@ -24,7 +24,10 @@ impl A2aBotManagementService for Management {
         let A2aCardSource::Inline(card) = command.source else { unreachable!() };
         bcs_service_api::types::a2a_bot::a2a_management::validate_management_card(&card)?;
         Ok(ManagedA2aCard { catalog_labels:Default::default(), provider_bot_ref:command.provider_bot_ref,
-            provider_name:"demo".into(), agent_name:"Agent".into(), bot_id:"bot".into(), agent_card_url:None, agent_card:card })
+            provider_name:"demo".into(), agent_name:"Agent".into(), bot_id:"bot".into(), agent_id:None,
+            visibility:bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Protected,
+            status:bcs_service_api::ActorStatus::Online, user_visibility:UserVisibility::Protected,
+            agent_card_url:None, agent_card:card })
     }
     async fn get(&self, _: &str, _: &str, _: &str) -> ServiceResult<Option<A2aBotRecord>> { unreachable!() }
     async fn configure(&self, _: ConfigureA2aBotCommand) -> ServiceResult<A2aBotRecord> { unreachable!() }

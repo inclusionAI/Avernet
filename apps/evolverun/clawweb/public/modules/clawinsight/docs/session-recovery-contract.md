@@ -37,6 +37,35 @@ Bootstrap publishes `planProtocol.allowedOperations` from the same definition us
 
 Owner waiting and effect waiting have separate deadlines. Owner expiry releases the execution while preserving the business task. A later decision creates a new execution for that task; an in-window decision continues the current execution. Effect waiting resumes the paused phase after reading new records, without resending initial advice. Old execution reports cannot overwrite new execution state.
 
+### Maintenance coordination
+
+The host schedules recovery maintenance every 120 seconds. The public assembly
+uses the [Shared database lease service](../../../shared/README.md) and independent
+`clawweb_distributed_locks` table. Only the holder for the control-plane environment,
+scene `session_recovery_maintenance`, tenant `__global__`, resource `scan`, enters
+the original scan. Unclaimed contenders never query `ce_tasks`. The lease lasts
+120 seconds and renews every 20 seconds. Database time governs ownership and the
+minimum 120-second acquisition interval measured from the scan start; quick release
+does not let a staggered replica immediately repeat the scan.
+
+A lost lease stops subsequent pages and maintenance actions. Renewal and release
+both check the acquisition token and current version in SQL. The lease wraps
+the status-based candidate scan and maintenance actions described below. No
+Workflow repository, journal, new index on task tables, or separate maintenance
+queue is used. Provision schema v158 before rollout; absent or incompatible lock schema
+fails closed without request-path DDL or unlocked fallback.
+
+Repair's existing fixed logger, field whitelist and output paths are unchanged.
+Each acquired scan emits `scan_started` / `scan_completed` using `stateVersion`
+for its acquisition revision, `environment`, and `elapsedMs` on completion.
+Instance/PID/timestamp remain supplied by the existing logger. Completion is
+recorded before lease release; skipped contenders remain silent. Failures retain
+the existing bounded redaction and error fields.
+Task-level row locks, versions and execution leases remain necessary for callbacks,
+user operations and takeover overlap. Result delivery starts immediately after commit; execution monitoring keeps
+its existing schedule. Newly created tasks and Owner confirmations still dispatch
+directly; persisted retry deadlines and other maintenance work wait for a later scan.
+
 ### Automatic effect resumption
 
 The existing recovery maintenance scan resumes the same task and observation phase.
@@ -53,6 +82,27 @@ or `session_recovery_effect_resume_prod`. The enabled record holds integer
 An absent or disabled record leaves automatic resumption off. A busy environment
 or an interval that has not elapsed does not make a task eligible for offline
 recheck. A reserved or active round occupies its slot until its AIS steps settle.
+
+Maintenance selects active task statuses plus `settling`, with no card-sync or
+resume-slot JSON search. A short page is processed completely and then ends the
+scan. Owner cards are sent/updated by normal state changes and callbacks; periodic
+maintenance does not compensate failed or interrupted card synchronization.
+
+`settling` is only the `ce_tasks.status` scheduler value for a terminal business
+task that still owns an automatic-resume slot. Its JSON/API status remains
+`completed`, `failed` or `canceled`, and result publication keeps its original
+timing. Once AIS termination is confirmed, the same transaction clears the slot,
+restores the column's business status and increments the state version, fencing
+stale result-delivery snapshots. Disabling resumption still permits slot cleanup.
+
+Upgraded workers use the same maintenance path for all tasks, regardless of
+creation time. Existing active tasks remain discoverable. Pre-upgrade terminal
+rows with a resume slot are excluded from the status-only scan; their AIS work
+can finish through the shared execution monitor and callbacks, while historical
+slot markers may remain. These executions can overlap newly scheduled rounds,
+so actual AIS concurrency may exceed the configured resume limit during rollout.
+This transition does not require draining legacy slots and adds no compatibility
+scan, rollout configuration or automatic historical-data migration.
 
 ### Historical effect recheck
 
@@ -103,7 +153,7 @@ Before deploying this ClawWeb caller, update the AIS Base snapshot to support `r
 
 Observation `response` describes the Bot's response to this recovery message, not independent work or a reply to the user. `acted` and `replied` require `delivery=confirmed`, backed by the existing controlled read for the current delivery key; contradictory reports return 422 without changing task state. No message means `response=none`; insufficient attribution evidence means `unknown`. Recovery effect remains independent: an undelivered intervention does not prevent evidence-backed `effect=recovered`. A real user confirmation after the original fault follows the existing `user_continued` handoff even when it is part of the expected business workflow. Merely waiting for that input remains subject to the ordinary fault-recovery criteria.
 
-Creation stores the exact event/delivery identity and request fingerprint in the existing task. Same-key changed requests return 409. Initial and subsequent sends use the existing tool audit claims; an unknown outcome cannot authorize blind replay. Bot message idempotency remains in the tool ledger. Task result delivery uses compact pending references in the existing Task configuration.
+Creation stores the exact event/delivery identity and request fingerprint in the existing task. Same-key changed requests return 409. Initial and subsequent sends use the existing tool audit claims; an unknown outcome cannot authorize blind replay. Bot message idempotency remains in the tool ledger. Task result snapshots are archived with existing Step reports before immediate asynchronous delivery.
 
 During assessment, the initial recovery message can proceed after a release version change if the diagnosis did not pin a version and the resolved runtime matches the frozen target in every other fingerprint field.
 
@@ -111,17 +161,15 @@ Only transitions into `waiting_effect`, `completed`, `failed` or `canceled` crea
 
 New result snapshots include `intervention_status: none | performed | unknown`, independently of task status and recovery effect. The control plane derives it from the complete task-wide tool ledger, including previous executions and active calls. Controlled session/trajectory receipts must confirm the exact sent message; channel acceptance alone remains unknown. Successful environment execution receipts or existing validated environment-write reconciliation can confirm an intervention. Generic message reconciliation does not replace exact message-presence proof. Uncertain or partially failed writes remain unknown; verified non-execution and investigation alone do not count. Any confirmed intervention survives later failures. The computed projection is transient. Only newly created tasks record complete audit coverage in the existing context artifact; historical artifacts without this marker stay unknown when no intervention is confirmed, including tasks converted before this upgrade. The internal coverage marker is excluded from task configuration, Agent context and task detail. No Agent output, model call or table is introduced; Debug is none. The monitoring receiver accepts this field optionally and retains it in the existing result-history JSON, preserving old payloads and immutable snapshots without changing diagnosis decisions.
 
-`ce_tasks.config_json.resultDelivery` stores each pending snapshot's result version, object key, digest, attempt count and retry time, without its full payload. These references are saved in the same database transaction as the business state and Step report references. Phase reports retain snapshot references and successful delivery events. No record or result-delivery table is added.
+Each immutable result snapshot is stored in the existing object store and referenced from the phase Step report in the same transaction as the business state. The service starts asynchronous HTTP delivery immediately after that transaction commits, including completed read-only effect rechecks and explicit republication of an existing conclusion. A failed commit sends nothing. Task configuration contains no result-delivery queue, attempt counters or retry timestamps. There is no reporting scan, cursor, periodic reporting job or reporting lock.
 
-A separate 20-second reporting loop processes one compact candidate page of at most five tasks and sends at most five requests serially per tick. A per-instance cursor advances past delayed or foreign-environment candidates, wrapping at the end; an unfinished tick is not overlapped by the bootstrap timer. This bounds application-side work, not the database's physical rows examined by the existing JSON filter.
+Each result gets one initial attempt and at most three process-local retries, waiting 1, 5 and 15 minutes after failures. Retries use the same frozen snapshot. Independent newer results can be delivered while an older callback is slow or backing off. Monitoring retains its existing task-ID/result-version idempotence and selects the greatest result version; late delivery cannot replace a newer conclusion. Callback failure never repeats a Bot message or plan action.
 
-Each saved result gets one initial attempt and at most three retries, backing off 1, 5 and 15 minutes after failures. Before HTTP, the sender conditionally updates the existing task version to reserve a due head result and increment its persisted attempt count. Only the winning sender may send; the reservation performs no object I/O or remote call. Its retry timestamp also fences an interrupted sender beyond the HTTP timeout. Acknowledgments and failures are fenced by the reserved attempt number. A failed head result delays only that task's later results. Success removes its pending reference and appends the existing acknowledgment atomically.
+HTTP acceptance requires a matching monitoring acknowledgment (`accepted: true`, event ID, task ID and result version). Duplicate acknowledgments are successful. Logs in the existing recovery log identify the event, task, result version, attempt, elapsed time and next retry time. Fixed diagnostics distinguish HTTP rejection (status and safe monitoring error code), timeout, network failure (safe transport code) and invalid acknowledgment. Raw response bodies, headers, URLs and exception internals are excluded. Accepted callbacks and failed audit writes are logged separately; an audit failure does not resend an already accepted callback.
 
-At exhaustion, including historical counters already at or above four, the result reference moves from `resultDelivery` to compact `stoppedResultDelivery` metadata in the same Task configuration. The original immutable result and phase references remain intact; the stopped metadata projects a `result` timeline event with `delivery_status=exhausted`, the attempt count and the result reference. Stopped results are excluded from automatic delivery, do not reset on restart and are not recreated by later business saves. Stopping delivery does not change task status, effect or intervention status, and does not block newer snapshots. No delivery table, database column, Agent report field or public callback field is added. Deploy all reporting instances in both environments: an old binary can still send from its pre-deployment snapshot.
+Success appends `result-{version}` to the existing Step timeline. Exhaustion appends `result-stopped-{version}` with attempts and `delivery_status=exhausted`; business state and immutable artifacts remain intact. Shutdown cancels delayed retries and drains in-flight HTTP and outcome writes before closing the database. Retries are intentionally process-local: restart does not scan or replay historical results. Old pending references are ignored for sending; existing result artifacts and failure audit remain readable. A normal update archives legacy inline result snapshots and materializes historical failure events before removing old delivery metadata, without a migration scan or new callback.
 
-Resuming a task and generating later results cannot replace unacknowledged snapshots; restarting the service uses the same persisted references. Monitoring deduplicates by task ID and result version. Callbacks never repeat the initial message or plan actions.
-
-Database definitions use the existing shared migration registry. Version 141 is reserved without altering shared columns; the unshipped v142 result-table migration is removed. This change requires no new table or column expansion. Existing widened columns are not shrunk. Legacy task JSON is converted on subsequent updates, including pending result delivery; legacy progress-only snapshots are excluded from callbacks. SQLite runs canonical migrations; MySQL/ZDAS provisioning follows the existing external migration process. Requests perform no DDL. The API contract is `session-recovery-api.md` in this directory.
+Database definitions use the existing shared migration registry. Version 141 remains reserved; no new table, column, configuration or DDL is added for result delivery. The API contract is `session-recovery-api.md` in this directory.
 
 ## Manual termination
 
@@ -202,8 +250,14 @@ require a template and callback route; ordinary handoff cards require a template
 and Markdown plan notices require neither. All legacy reads/format adaptation
 stay in the read-only adapter behind `bot-configuration.ts`. Each attempt reads current policy;
 missing/invalid settings and read failures skip sending. No skipped notice is
-replayed when enabled later. Existing paused ordinary Owner messages remain
-paused. See [configuration and migration](bot-diagnosis-recovery-config.md).
+replayed when enabled later. Ordinary Owner handoff messages are enabled only for an explicit
+`handoff.reason=owner_material_needed`, advertised in `ownerHandoffReasons`.
+Other and legacy handoffs remain silent. This business reason does not add a
+state or a feedback wait; the terminal transition is saved before notification
+and execution fencing rejects duplicate reports. The host may inject an
+original-session URL resolver; the notifier appends that link to existing
+instructions without changing template parameters. Oversized combined text
+points to the full checklist rather than truncating an action or URL. See [configuration and migration](bot-diagnosis-recovery-config.md).
 
 Administrators can list all tasks linked to a diagnosis event, including private
 tasks. Other users still see only their own tasks or tasks explicitly shared by

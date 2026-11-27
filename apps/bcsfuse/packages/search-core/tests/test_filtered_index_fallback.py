@@ -36,7 +36,8 @@ async def test_empty_after_final_eligibility_and_missing_card(limit, expected):
             return reader()
 
     class Metadata:
-        async def enrich(self, result, *, allow_timeout_projection):
+        async def enrich(self, result, *, request, allow_timeout_projection):
+            assert request.filters == filters
             assert not allow_timeout_projection
             assert [i.item_id for i in result.items] == [
                 "missing",

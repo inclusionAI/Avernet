@@ -68,6 +68,14 @@ def _combined_outcome(*outcomes):
 async def write_capabilities(owner, ctx, plan):
     resolved = plan.resolved
     snapshot = resolved.snapshot
+    candidates = ctx.capability_state.manifest_mcp_candidates
+    candidates.update({"mcp/" + code: frozenset({code}) for code, _ in resolved.mcp})
+    candidates.update({
+        "skill_sets/" + group.name: frozenset(group.mcp)
+        for group in resolved.sets if group.is_active
+    })
+    if resolved.default_enabled:
+        candidates["skill_sets/default"] = resolved.default_mcp_codes
     who = dict(bot_id=ctx.bot_id, owner_id=ctx.entity_id, actor_id=ctx.actor_id)
     confirmed = False
     results = {
@@ -187,8 +195,13 @@ async def write_capabilities(owner, ctx, plan):
                 remove_names=plan.remove_sets,
                 default_change=resolved.default_change,
                 platform_default_codes=snapshot.platform_default_codes,
+                retry_mcp_codes=frozenset().union(*(
+                    codes for identity, codes in candidates.items()
+                    if identity.startswith("skill_sets/")
+                )),
             )
             confirmed = confirmed or result.changed
+            ctx.capability_state.delivered_mcp_codes.update(result.delivered_mcp_codes)
             removals.update("skill_sets/" + n for n in result.removed)
             member_uploads = {
                 group.name: tuple(uploaded[s.key] for s in group.skills if s.key in uploaded)
@@ -280,6 +293,10 @@ async def write_capabilities(owner, ctx, plan):
                 result = await owner._activation.claim_apply_mcp(
                     **who, server_code=code, config=config, apply_id=ctx.apply_id
                 )
+                if isinstance(result, dict):
+                    ctx.capability_state.delivered_mcp_codes.update(
+                        result.get("_manifest_delivered_mcp_codes", ())
+                    )
                 confirmed = confirmed or _confirmed_mutation(result)
                 results["mcp/" + code] = EntryResult(
                     Category.CAPABILITIES,

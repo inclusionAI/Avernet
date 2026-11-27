@@ -33,7 +33,7 @@ import { recoveryTaskResult, validateRecoveryEvidenceReferences } from "./task-s
 import { recoveryResult } from "./result.js";
 import type { RecoveryAgentExecutor } from "./task-service.js";
 import type { RecoveryActionNotifier, RecoveryExecutionView, RecoveryTermination, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "./contracts.js";
-import type { RecoveryAssessment, RecoveryEffectConfigCheck, RecoveryEffectRecheckAck, RecoveryStoredTask, RecoveryTaskStore, RecoveryJudgment, RecoveryPlan } from "./task-contracts.js";
+import type { RecoveryAssessment, RecoveryEffectConfigCheck, RecoveryEffectRecheckAck, RecoveryStoredTask, RecoveryTaskResult, RecoveryTaskStore, RecoveryJudgment, RecoveryPlan } from "./task-contracts.js";
 
 function fail(status: number, message: string): never { throw new SessionRecoveryError(status, "recovery_execution_conflict", message); }
 function recoveryToolRequest(body: Record<string, unknown>): Record<string, unknown> {
@@ -126,17 +126,19 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     const reported = await this.deps.tasks.latestDiagnosisEffect!(task);
     if (!reported) recheckError("diagnosis_missing");
     if (definitiveEffect(reported.effect)) recheckError("effect_already_known");
-    if (task.pending_results.some(result => definitiveEffect(result.effect))) recheckError("result_delivery_pending");
     const check = { environment, config: policy, recheck: { register: true, diagnosisVersion: reported.version } };
     if (definitiveEffect(task.judgment?.effect)) {
       let resultVersion = 0;
+      let result: RecoveryTaskResult | undefined;
       const saved = await this.deps.tasks.update(task.taskId, task.version, value => {
         resultVersion = value.version + 1;
         const next = { ...value, version: resultVersion, timeline: [...value.timeline, this.event("execution", "补传已确认的效果结果", {
           effect_recheck_request_id: requestId, result_version: resultVersion })] };
-        return { ...next, pending_results: [...next.pending_results, { ...recoveryTaskResult(next), result_text: next.judgment!.summary }] };
+        result = { ...recoveryTaskResult(next), result_text: next.judgment!.summary };
+        return { ...next, resultToReport: result };
       }, { ...check, recheck: { ...check.recheck, register: false } });
       if (!saved) recheckError("recheck_conflict");
+      this.deps.business().reportResult(saved, result!);
       return { task_id: task.taskId, status: "result_queued", result_version: resultVersion };
     }
     if (task.interventionStatus === "none" || !task.runtimeTarget || !task.current || !task.authorizationScopeDigest) recheckError("intervention_or_target_unverified");
@@ -398,7 +400,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     return task;
   }
   async bootstrap(task: RecoveryStoredTask) {
-    const { pending_results: _pending, execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, ownerCardSyncPending: _cardSync, effectWait: _effectWait, effectResumeSlot: _effectSlot, sessionReadCoverage, trajectoryIndexReads, ...business } = task;
+    const { execution: rawExecution, aisExecution: _ais, interventionStatus: _intervention, interventionAuditComplete: _auditCoverage, effectWait: _effectWait, effectResumeSlot: _effectSlot, sessionReadCoverage, trajectoryIndexReads, ...business } = task;
     const recheck = rawExecution?.effectRecheck;
     const { ticketDigest: _digest, effectRecheck: _recheck, ...execution } = task.status === "canceled" && !recheck ? this.executions.end(rawExecution!) : rawExecution!;
     const latestMessage = [...business.timeline].reverse().find(event => event.kind === "operation"
@@ -415,7 +417,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
           ...(event === latestMessage ? { result: Object.fromEntries(["status", "delivery_key", "initial_message", "dry_run", "dispatched"].map(key => [key, (event.payload.result as Record<string, unknown>)[key]])) } : {}) } : event.payload })),
         evidence: bootstrapEvidence(business.evidence, trajectoryIndexReads),
       }, handbook: savedRecoveryHandbook(task),
-      timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, blockedReasons: ["insufficient_evidence"], ownerCooperationProtocol: "session-recovery-owner/v1", ownerHandoffProtocol: "session-recovery-handoff/v1", planProtocol: {
+      timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, blockedReasons: ["insufficient_evidence"], ownerCooperationProtocol: "session-recovery-owner/v1", ownerHandoffProtocol: "session-recovery-handoff/v1", ownerHandoffReasons: ["owner_material_needed"], planProtocol: {
         allowedOperations: recoveryActionOperations,
         operationScope: "所有 Agent 执行动作需在方案内提供参考 Engine 请求或结构化 operationScope: { operation, target? }。operation 必须取自 allowedOperations，不自行构造动作名；定时任务启用和禁用使用 cron.update，target 填定时任务ID，文件操作的 target 填绝对路径。合法动作名不代表目标支持该操作，实际接口与工具以 tools.engine 和 supportedActionTypes 为准。参数内容可调整，主要动作和对象不可更换。MCP 和用户 Skill 的全部变更交给 Owner，写入 owner_cooperation；无需 Agent 操作时 actions 用空数组。Owner 完成配合后再继续验证和重试。Cron 必须使用声明的接口工具。Shell 仅承载其余获批环境动作，不得绕过接口或变更 MCP／Skill；服务不解析完整 Shell 业务语义。",
         unknownWrite: "未知写入先读取现场，用 reconcile_write 提交 applied / not_applied 和后续读取证据。原调用记录保持不可变；核实后可继续方案，不会自动重放。",
@@ -745,6 +747,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
       if (typeof body.summary !== "string" || !body.summary.trim()) fail(422, "Owner 转交需要保留完整调查说明");
       const handoff = body.handoff === undefined ? undefined : parseOwnerHandoffContent(body.handoff);
       if (body.owner_request !== undefined) {
+        if (handoff?.reason === "owner_material_needed") fail(422, "补材料属于普通转交，不能同时请求权限反馈");
         if (body.effect === "recovered") fail(422, "原任务已恢复，请按正常效果流程回报；优化建议不属于 Owner 转交");
         const request = body.owner_request as { reason?: unknown; instructions?: unknown };
         if (!request || typeof request !== "object" || Array.isArray(request) || Object.keys(request).some(key => !["reason", "instructions"].includes(key))) fail(422, "Owner 续接事项格式无效");

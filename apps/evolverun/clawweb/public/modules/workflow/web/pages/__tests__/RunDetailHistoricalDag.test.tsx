@@ -29,7 +29,6 @@ async function openDrawer() {
   render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/runs/parent']}><Routes><Route path="/runs/:flowId" element={<RunDetail />} /></Routes></MemoryRouter></QueryClientProvider>)
   fireEvent.click(await screen.findByRole('link', { name: mocks.childId }))
   const drawer = screen.getByRole('dialog', { name: '子运行详情' })
-  fireEvent.click(within(drawer).getByRole('button', { name: 'DAG' }))
   return { drawer, client }
 }
 beforeEach(() => {
@@ -51,7 +50,6 @@ describe('child historical DAG', () => {
     expect(mocks.workflow).toHaveBeenCalledWith('')
     fireEvent.click(within(drawer).getByRole('button', { name: '节点' }))
     expect(within(drawer).getByText('规格 无')).toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole('button', { name: 'DAG' })[0])
     expect(screen.getByText('DAG: latest')).toBeInTheDocument()
   })
   it('shows loading instead of the latest graph until the snapshot resolves', async () => {

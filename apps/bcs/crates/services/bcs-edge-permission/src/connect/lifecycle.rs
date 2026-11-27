@@ -628,6 +628,162 @@ impl ConnectService for DbConnectService {
         Ok(revoked)
     }
 
+    /// Owner-initiated removal (bot friend roster): the same friend-edge
+    /// selection as `revoke_friend`, but every candidate transitions through
+    /// the atomic conditional revoke — only edges THIS call transitioned
+    /// count, so concurrent removals transition exactly once. A non-empty
+    /// transition set then emits one `RemovedByOwner` notice (best-effort).
+    /// The auth-sync teardown and legacy mirror cleanup run exactly like
+    /// `revoke_friend`: the owner-removal orientation keeps the human first
+    /// so the human→bot trigger still fires.
+    async fn revoke_friend_as_owner(
+        &self,
+        first: &str,
+        second: &str,
+        request_auth: Option<RequestAuthHeaders>,
+    ) -> ServiceResult<Vec<u64>> {
+        // Collect both directions first, then let the storage layer pick the
+        // relation-level winner: the forward edge (first -> second) is the
+        // token when present, otherwise the reverse edge. A caller that loses
+        // the token transitions nothing and returns an empty set, so two
+        // interleaved removals cannot each revoke one direction and both
+        // notify (review 4693070938).
+        let mut candidates: Vec<u64> = Vec::new();
+        if let Some(second_default) = self
+            .edge_grants
+            .get_default_profile_id(second, &self.env)
+            .await
+        {
+            for g in self
+                .edge_grants
+                .list_active_grants(first, second, &self.env)
+                .await
+            {
+                if g.grant_ref_id == second_default && g.grant_kind == GrantKind::PermissionProfile
+                {
+                    candidates.push(g.edge_id);
+                }
+            }
+        }
+        if let Some(first_default) = self
+            .edge_grants
+            .get_default_profile_id(first, &self.env)
+            .await
+        {
+            for g in self
+                .edge_grants
+                .list_active_grants(second, first, &self.env)
+                .await
+            {
+                if g.grant_ref_id == first_default && g.grant_kind == GrantKind::PermissionProfile
+                {
+                    candidates.push(g.edge_id);
+                }
+            }
+        }
+        let mut revoked: Vec<u64> = Vec::new();
+        if let Some((primary, others)) = candidates.split_first() {
+            revoked = self
+                .edge_grants
+                .revoke_relation_if_active(*primary, others, &self.env)
+                .await?;
+        }
+
+        // 11d: best-effort friend-auth-sync revoke trigger (human→bot), same
+        // as `revoke_friend`.
+        if actor_kind_of(first) == ActorKind::Human && actor_kind_of(second) == ActorKind::Bot {
+            let owner_work_no = self
+                .owner_work_no_from_bot_config(second, &self.env)
+                .await
+                .unwrap_or_default();
+            let command = FriendAuthSyncCommand {
+                env: self.env.clone(),
+                bot_id: second.to_string(),
+                owner_work_no,
+                human_work_no: first
+                    .strip_prefix("human_")
+                    .unwrap_or(first)
+                    .to_string(),
+                action: FriendAuthSyncAction::Revoke,
+                request_id: None,
+                request_auth: request_auth.clone(),
+            };
+            if let Err(err) = self.friend_auth_sync.sync(command).await {
+                warn!(
+                    error = %err,
+                    bot_id = %second,
+                    "friend-auth-sync revoke failed (best-effort)"
+                );
+            }
+        }
+
+        // Reverse-sync (coexistence): drop the legacy friendship mirror.
+        self.writeback_remove_friendship(first, second).await?;
+
+        // No real transition → silent no-op (idempotent re-remove / lost
+        // race): a notice would lie about a removal that did not happen.
+        if revoked.is_empty() {
+            return Ok(revoked);
+        }
+
+        // One `RemovedByOwner` notice for the transitioned set, addressed to
+        // the removed party (or the removed Bot's CURRENT owner). The
+        // applicant actor drives the adapter's HUMAN2BOT/BOT2BOT event-type
+        // split (pinned by the bcs crate's payload tests).
+        let request_ids: Vec<String> = revoked.iter().map(u64::to_string).collect();
+        let notified = match actor_kind_of(first) {
+            ActorKind::Human => {
+                let staff_no = first.strip_prefix("human_").unwrap_or(first).to_string();
+                self.emit_friend_connect_notification(
+                    FriendConnectNotificationKind::RemovedByOwner,
+                    request_ids.clone(),
+                    first,
+                    second,
+                    vec![staff_no],
+                    None,
+                    request_auth,
+                )
+                .await
+            }
+            ActorKind::Bot => match self.bot_config.get(second, &self.env).await {
+                Some(cfg) => {
+                    let recipients = self.target_notification_recipients(second, &cfg).await;
+                    self.emit_friend_connect_notification(
+                        FriendConnectNotificationKind::RemovedByOwner,
+                        request_ids.clone(),
+                        second,
+                        first,
+                        recipients,
+                        None,
+                        request_auth,
+                    )
+                    .await
+                }
+                None => {
+                    warn!(
+                        bot_id = %second,
+                        env = %self.env,
+                        "RemovedByOwner notice skipped: the removed Bot's config \
+                         is unavailable; recipients are unresolvable"
+                    );
+                    Ok(())
+                }
+            },
+        };
+        // Best-effort (Review Focus #4): a notification failure must not roll
+        // back the removal — the edges already transitioned.
+        if let Err(error) = notified {
+            warn!(
+                error = %error,
+                request_ids = ?request_ids,
+                first = %first,
+                second = %second,
+                "RemovedByOwner notification failed; continuing without it"
+            );
+        }
+        Ok(revoked)
+    }
+
     async fn list_friends(&self, actor: &str) -> ServiceResult<Vec<FriendListEntry>> {
         let ids = self.edge_grants.list_friends(actor, &self.env).await;
         let entries = ids

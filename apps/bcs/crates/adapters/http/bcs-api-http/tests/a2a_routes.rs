@@ -38,6 +38,10 @@ fn card() -> ManagedA2aCard {
         bot_id: "bot/opaque".into(),
         agent_card_url: None,
         agent_card: json!({"name":"Agent","unknown":{"keep":true}}),
+        agent_id: None,
+        visibility: A2aRegistrationVisibility::Protected,
+        status: bcs_service_api::ActorStatus::Online,
+        user_visibility: UserVisibility::Protected,
     }
 }
 impl Service {
@@ -59,6 +63,10 @@ impl A2aService for Service {
         assert_eq!(command.provider_bot_ref, "remote");
         assert!(command.owners.is_none());
         assert_eq!(command.visibility, A2aRegistrationVisibility::Private);
+        assert!(matches!(
+            command.agent_id,
+            bcs_service_api::types::a2a_bot::A2aAgentIdentity::Text(ref value) if value == "agent-id"
+        ));
         assert_eq!(
             command.source.agent_card,
             Some(json!({"name":"Agent","unknown":{"keep":true}}))
@@ -79,10 +87,22 @@ impl A2aService for Service {
         assert_eq!(bot, "bot/opaque");
         Ok(card())
     }
+    async fn update_metadata(&self, command: UpdateA2aAgentMetadata) -> Result<ManagedA2aCard, ApplicationError> {
+        self.authenticate(&command.token)?;
+        assert_eq!(command.bot_id, "bot/opaque");
+        assert_eq!(command.status, Some(bcs_service_api::ActorStatus::Hidden));
+        assert_eq!(command.visibility, Some(A2aRegistrationVisibility::Public));
+        assert_eq!(command.user_visibility, Some(UserVisibility::Private));
+        Ok(card())
+    }
     async fn update(&self, command: UpdateA2aAgent) -> Result<ManagedA2aCard, ApplicationError> {
         self.authenticate(&command.token)?;
         assert_eq!(command.bot_id, "bot/opaque");
         assert_eq!(command.visibility, Some(A2aRegistrationVisibility::Public));
+        assert!(matches!(
+            command.agent_id,
+            bcs_service_api::types::a2a_bot::A2aAgentIdentity::Null
+        ));
         assert!(command.source.agent_card.is_none());
         Ok(card())
     }
@@ -162,7 +182,7 @@ async fn management_uses_v1_envelopes_without_gateway_or_invite_principals() {
             "/agents",
             Some("admin"),
             json!({
-        "provider_bot_ref":"remote","visibility":"private","agent_card":card().agent_card}),
+        "provider_bot_ref":"remote","visibility":"private","agent_id":"agent-id","agent_card":card().agent_card}),
         ))
         .await
         .unwrap();
@@ -180,7 +200,12 @@ async fn management_uses_v1_envelopes_without_gateway_or_invite_principals() {
         (
             "PUT",
             "/agents/bot%2Fopaque/agent-card",
-            json!({"visibility":"public"}),
+            json!({"visibility":"public","agent_id":null}),
+        ),
+        (
+            "PATCH",
+            "/agents/bot%2Fopaque/agent-card/metadata",
+            json!({"status":"hidden","visibility":"public","user_visibility":"private"}),
         ),
         (
             "POST",
@@ -274,6 +299,27 @@ async fn errors_use_v1_request_ids_and_fail_before_service_dispatch() {
             Value::Null,
             StatusCode::METHOD_NOT_ALLOWED,
             "method_not_allowed",
+        ),
+        (
+            "PATCH",
+            "/agents/bot/agent-card/metadata",
+            json!({}),
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+        ),
+        (
+            "PATCH",
+            "/agents/bot/agent-card/metadata",
+            json!({"agent_id":"agent-id"}),
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+        ),
+        (
+            "PATCH",
+            "/agents/bot/agent-card/metadata",
+            json!({"status":"OFFLINE"}),
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
         ),
     ] {
         let response = app

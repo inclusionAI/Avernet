@@ -275,6 +275,50 @@ def test_successor_assignee_scope_must_match_searched_candidate() -> None:
         )
 
 
+def test_successor_snapshot_preserves_searched_assignee_name() -> None:
+    service = _graph_service()
+    service.apply_relay_report(_execution())
+
+    result = service.apply_relay_report(
+        _planned_single_bot_command(event_id="plan-named-bot", assignee="bot-2")
+    )
+
+    successor = next(
+        node
+        for node in service.query_task_dashboard("task-1").tasks
+        if node.node_id == result.target_node_id
+    )
+    assert successor.run_info.extend_props["assignee_name"] == "bot-2"
+
+
+def test_successor_assignee_name_falls_back_to_searched_bot_id() -> None:
+    service = _graph_service()
+    service.apply_relay_report(_execution())
+    service.query_task_dashboard("task-1").tasks[0].run_info.action_log.clear()
+    service.append_action_event(
+        "task-1",
+        "task-1",
+        NodeAction.DISPATCH,
+        {
+            "phase": "search",
+            "action_result": "search",
+            "relay_token_fingerprint": hashlib.sha256(b"attempt-1").hexdigest(),
+            "candidates": [{"bot_id": "bot-2", "name": " "}],
+        },
+    )
+
+    result = service.apply_relay_report(
+        _planned_single_bot_command(event_id="plan-unnamed-bot", assignee="bot-2")
+    )
+
+    successor = next(
+        node
+        for node in service.query_task_dashboard("task-1").tasks
+        if node.node_id == result.target_node_id
+    )
+    assert successor.run_info.extend_props["assignee_name"] == "bot-2"
+
+
 def _planned_single_bot_command(
     *, event_id: str, assignee: str | None
 ) -> TaskReportCommand:

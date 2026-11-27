@@ -5388,6 +5388,21 @@ it('uses the registered environment before dispatch and rejects an explicitly di
 
 
 describe("optional task list filters", () => {
+  it.each(["completed", "failed", "canceled"])("shows the %s recovery result while its scheduler permit is settling", async status => {
+    await repo.createTask({ taskId: "settling-recovery", taskType: "session_recovery", userId: "owner-1", botId: "bot-1",
+      taskName: "recovery", configJson: JSON.stringify({ status }), createdBy: "owner-1" });
+    await db.exec("UPDATE ce_tasks SET status = 'settling' WHERE task_id = ?", ["settling-recovery"]);
+    const detail = await fetch(`${baseUrl}/api/evolve/tasks/settling-recovery`, { headers: { "X-User-Id": "owner-1" } });
+    expect(detail.status).toBe(200);
+    expect(await detail.json()).toMatchObject({ status, config: { status } });
+    const filter = status === "completed" ? "success" : "failed";
+    const response = await fetch(`${baseUrl}/api/evolve/tasks?status=${filter}`, { headers: { "X-User-Id": "owner-1" } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ total: 1, tasks: [{ status, config: { status } }] });
+    expect((await list("status=running")).body.total).toBe(0);
+    expect((await repo.findTask("settling-recovery"))!.status).toBe("settling");
+  });
+
   const filters = "taskTypes=diagnose,bench,bench_optimize,optimize,full&targetType=bot";
   async function seed(id: string, type = "diagnose", config = "{}", creator = "owner-1") {
     await repo.createTask({ taskId: id, taskType: type, userId: "bot-owner", botId: "bot-1",

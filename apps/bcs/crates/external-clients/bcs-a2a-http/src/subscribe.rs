@@ -1,7 +1,9 @@
 //! Canonical POST subscription for A2A 1.0.1, without legacy URL/method fallback.
+use crate::digest::DigestGuard;
 use crate::http_client::HttpClient;
 use a2a::{A2AError, StreamResponse};
 use futures::{stream::{self, BoxStream}, StreamExt};
+use std::sync::atomic::Ordering;
 
 const MAX_EVENT_BYTES: usize = 1_048_576;
 
@@ -50,27 +52,59 @@ impl Decoder {
 }
 
 pub(super) async fn post_stream<T: serde::Serialize + ?Sized>(
-    http: &HttpClient, url: &str, request: &T,
+    http: &HttpClient, url: &str, request: &T, guard: DigestGuard,
 ) -> Result<BoxStream<'static, Result<StreamResponse, A2AError>>, A2AError> {
-    post_stream_with_rpc(http, url, request, None).await
+    post_stream_with_rpc(http, url, request, None, guard).await
 }
 
 pub(super) async fn post_stream_with_rpc<T: serde::Serialize + ?Sized>(
-    http: &HttpClient, url: &str, request: &T, rpc_id: Option<String>,
+    http: &HttpClient, url: &str, request: &T, rpc_id: Option<String>, mut guard: DigestGuard,
 ) -> Result<BoxStream<'static, Result<StreamResponse, A2AError>>, A2AError> {
     let request = http.transport.request(|http| {
         http.post(url).header("A2A-Version", "1.0").header("Accept", "text/event-stream").json(request)
     });
     let response = tokio::time::timeout(
         std::time::Duration::from_secs(15),
-        http.send(request, "A2A subscription connection failed"),
-    ).await.map_err(|_| A2AError::internal("A2A subscription header timeout"))??;
+        http.send_observed(request, "A2A subscription connection failed", &mut guard),
+    ).await.map_err(|_| A2AError::internal("A2A subscription header timeout")).and_then(|r| r);
+    let mut response = guard.observe_err(response)?;
     let status = response.status();
+    guard.record_headers(status.as_u16());
+    let mime = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v|v.to_str().ok())
+        .and_then(|v|v.split(';').next()).map(str::trim);
+    let is_json = mime.is_some_and(|value| value.eq_ignore_ascii_case("application/json"));
+    let is_sse = mime.is_some_and(|value| value.eq_ignore_ascii_case("text/event-stream"));
+    let content_type = match mime {
+        _ if is_json => "application/json",
+        _ if is_sse => "text/event-stream",
+        Some(value) if value.eq_ignore_ascii_case("text/plain") => "text/plain",
+        Some(value) if value.eq_ignore_ascii_case("text/html") => "text/html",
+        Some(value) if value.eq_ignore_ascii_case("application/problem+json") => "application/problem+json",
+        Some(_) => "other",
+        None => "missing",
+    };
+    let mut diagnostic = crate::test_response::Diagnostic::from_response(&mut response, content_type);
+    let preview_size = diagnostic.as_ref().map(|entry| entry.preview_budget());
+    let resp_bytes = guard.resp_bytes_counter();
+    // The end marker lets the diagnostic handle chunked bodies with no Content-Length.
+    let mut chunks = response.bytes_stream()
+        .map(Some)
+        .chain(stream::iter([None]))
+        .inspect(move |item| {
+            if let Some(Ok(chunk)) = item { resp_bytes.fetch_add(chunk.len(), Ordering::Relaxed); }
+            if let Some(entry) = &mut diagnostic {
+                match item {
+                    Some(Ok(chunk)) => entry.observe(chunk),
+                    Some(Err(_)) => entry.finish("body_read_error"),
+                    None => entry.finish("complete"),
+                }
+            }
+        })
+        .filter_map(futures::future::ready);
     if !status.is_success() {
-        return Err(tokio::time::timeout(std::time::Duration::from_secs(15), async {
-            let mut response = response;
+        return guard.observe_err(Err(tokio::time::timeout(std::time::Duration::from_secs(15), async {
             let mut body = Vec::new();
-            while let Some(chunk) = response.chunk().await
+            while let Some(chunk) = chunks.next().await.transpose()
                 .map_err(|_|A2AError::internal("A2A error response incomplete"))? {
                 if body.len().saturating_add(chunk.len()) > MAX_EVENT_BYTES {
                     return Err(A2AError::invalid_request("A2A error response exceeds size limit"));
@@ -83,14 +117,12 @@ pub(super) async fn post_stream_with_rpc<T: serde::Serialize + ?Sized>(
                 }
             }
             Ok(crate::client_json::http_error(status.as_u16(), &body))
-        }).await.map_err(|_|A2AError::internal("A2A error response timed out"))??);
+        }).await.map_err(|_|A2AError::internal("A2A error response timed out")).and_then(|r| r).unwrap_or_else(|e| e)));
     }
-    let mime = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v|v.to_str().ok())
-        .and_then(|v|v.split(';').next()).map(str::trim);
-    if rpc_id.is_some() && mime.is_some_and(|v|v.eq_ignore_ascii_case("application/json")) {
-        return Err(tokio::time::timeout(std::time::Duration::from_secs(15), async {
-            let mut response=response;let mut body=Vec::new();
-            while let Some(chunk)=response.chunk().await.map_err(|_|A2AError::internal("RPC error response incomplete"))? {
+    if rpc_id.is_some() && is_json {
+        return guard.observe_err(Err(tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            let mut body=Vec::new();
+            while let Some(chunk)=chunks.next().await.transpose().map_err(|_|A2AError::internal("RPC error response incomplete"))? {
                 if body.len().saturating_add(chunk.len())>MAX_EVENT_BYTES {return Err(A2AError::invalid_agent_response());}
                 body.extend_from_slice(&chunk);
             }
@@ -98,20 +130,38 @@ pub(super) async fn post_stream_with_rpc<T: serde::Serialize + ?Sized>(
             match crate::jsonrpc::decode(value,rpc_id.as_deref().unwrap_or("")) {
                 Err(error)=>Ok(error),Ok(_)=>Err(A2AError::invalid_agent_response()),
             }
-        }).await.map_err(|_|A2AError::internal("RPC error response timed out"))??);
+        }).await.map_err(|_|A2AError::internal("RPC error response timed out")).and_then(|r| r).unwrap_or_else(|e| e)));
     }
-    if !mime.is_some_and(|value| value.eq_ignore_ascii_case("text/event-stream")) { return Err(A2AError::invalid_agent_response()); }
-    Ok(stream::try_unfold((response, Decoder { rpc_id, ..Default::default() }, false), |(mut response, mut decoder, mut eof)| async move {
-        loop {
-            if let Some(event) = decoder.next(eof)? { return Ok(Some((event, (response, decoder, eof)))); }
-            if eof {
-                return if decoder.buffer.is_empty() && decoder.data.is_empty() { Ok(None) }
-                    else { Err(A2AError::parse_error("A2A subscription ended mid-event")) };
+    if !is_sse {
+        if let Some(size) = preview_size {
+            // This failure normally skips the body. Give the finite preview a short read budget.
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(250), async {
+                let mut received = 0;
+                while received < size {
+                    let Some(Ok(chunk)) = chunks.next().await else { break };
+                    received += chunk.len();
+                }
+            }).await;
+        }
+        return guard.observe_err(Err(A2AError::invalid_agent_response()));
+    }
+    Ok(stream::try_unfold((chunks, Decoder { rpc_id, ..Default::default() }, false, guard), |(mut chunks, mut decoder, mut eof, mut guard)| async move {
+        let step: Result<Option<StreamResponse>, A2AError> = async {
+            loop {
+                if let Some(event) = decoder.next(eof)? { guard.inc_stream_events(); return Ok(Some(event)); }
+                if eof {
+                    return if decoder.buffer.is_empty() && decoder.data.is_empty() { guard.finish_ok(); Ok(None) }
+                        else { Err(A2AError::parse_error("A2A subscription ended mid-event")) };
+                }
+                match chunks.next().await.transpose().map_err(|_|A2AError::internal("A2A subscription interrupted"))? {
+                    Some(chunk) => decoder.buffer.extend_from_slice(&chunk),
+                    None => eof = true,
+                }
             }
-            match response.chunk().await.map_err(|_|A2AError::internal("A2A subscription interrupted"))? {
-                Some(chunk) => decoder.buffer.extend_from_slice(&chunk),
-                None => eof = true,
-            }
+        }.await;
+        match guard.observe_err(step)? {
+            Some(event) => Ok(Some((event, (chunks, decoder, eof, guard)))),
+            None => Ok(None),
         }
     }).boxed())
 }

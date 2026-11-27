@@ -18,9 +18,10 @@
 //! score:  claim time in ms (wall clock), e.g. 1794370950456
 //! ```
 //!
-//! Who reads it: the intended reader is the recovery of a dead Connector's
-//! calls (delayed contract D3, `delayed::repost_held`, still a stub). Today
-//! only `StoreDispatchQueue::held_by` pages it.
+//! Who reads it: nothing in production today; `StoreDispatchQueue::held_by`
+//! pages it. A dead Connector's calls are recovered without it: the Worker's
+//! supervisor re-posts their hints and a takeover follows once membership
+//! answers `Dead`.
 
 use crate::shared::Shared;
 use bcs_dist_model::{Did, Instance};

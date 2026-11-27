@@ -205,7 +205,8 @@ class Story:
                 self.request("POST", f"/admin/bots/{target}/ensure", {
                     "name": "Card target", "user_visibility": user_visibility})
                 self.wait_card(target, lambda c: c["labels"] == {
-                    "visibility": [visibility], "user_visibility": [user_visibility]})
+                    "visibility": [visibility], "user_visibility": [user_visibility],
+                    "status": ["online"]})
         self.profile(target, name="Card target", summary="Updated invoices", domains=["finance"],
                      skills=[{"name": "payment"}])
         self.wait_card(target, lambda c: c["card"]["description"] == "Updated invoices" and

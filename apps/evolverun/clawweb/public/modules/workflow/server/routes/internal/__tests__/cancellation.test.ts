@@ -21,6 +21,7 @@ beforeAll(async () => {
   raw.function('GREATEST', (a: number, b: number) => Math.max(a, b));
   raw.exec(`CREATE TABLE flow_runs (
     flow_id TEXT PRIMARY KEY, status TEXT NOT NULL, retry_epoch INTEGER, started_at INTEGER, completed_at INTEGER,
+    state_json TEXT DEFAULT '{"effectiveFlowTimeoutMinutes":1}',
     result_json TEXT, current_phase TEXT, total_duration_ms INTEGER, total_token_usage INTEGER, gmt_modified INTEGER,
     succeeded_count INTEGER, failed_count INTEGER, input_json TEXT
   );
@@ -64,7 +65,7 @@ for (const status of ['cancelled', 'canceled']) {
       }
       expect((await request('/runs/flow/retry-failed', {})).status).toBe(409);
       expect((await request('/runs/flow/retry-resume', { retry_epoch: 1 })).status).toBe(409);
-      const timeout = await request('/runs/flow/fail-if-running', { reason: 'late timeout' });
+      const timeout = await request('/runs/flow/fail-if-running', { reason: JSON.stringify({ reason: 'flow_timeout', timeoutSecs: 60, ranForSecs: 61 }) });
       expect(timeout.status).toBe(200);
       expect(await timeout.json()).toEqual({ success: true, data: { claimed: false } });
       expect(runRow()).toEqual(before);

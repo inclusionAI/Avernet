@@ -1,6 +1,7 @@
 // 公开风险动线提示条（bot-public-risk-check）——从 PublicationEditor 拆出的纯展示片段：
 // 检测/审批在途卡、失败告警条与流程预告条；派生规则留在编辑器，此处只按传入态渲染。
 import { Button } from '@/components/ui/Button';
+import { getRiskFailurePresentation } from '@/domain/collaborationPrivacy/botPublicRisk';
 import type { BotPublicRiskCheckRecord } from '@/services/collaborationPrivacy/botPublicRiskService';
 import { Check, Lock, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 
@@ -86,63 +87,62 @@ export function RiskInFlightBanner({
   );
 }
 
-/**
- * 终局失败/需关注告警条:提示未提交并引导去检测工单看明细。
- * 失败记录仍 current 且轮询已停,提供「刷新状态」入口（§2.2 手动刷新）:
- * 立即查询原安全单同步最新结论（外部改判/申诉结果），不重新建单。
- */
+/** 失败或阻断后的操作取决于风险记录中的原因。 */
 export function RiskFailureBanner({
   kind,
   record,
   onRefreshState,
   refreshing = false,
+  onRetry,
+  retrying = false,
 }: {
   kind: 'failed' | 'attention';
   record: BotPublicRiskCheckRecord | null;
   onRefreshState?: () => void;
   refreshing?: boolean;
+  onRetry?: () => void;
+  retrying?: boolean;
 }) {
+  const { title, description, canRefresh } = getRiskFailurePresentation(kind, record);
+  const showRefresh = canRefresh && onRefreshState;
   return (
     <div className="flex gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
       <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />
       <div className="min-w-0 flex-1">
-        <p className="m-0 text-sm font-medium text-foreground">
-          Bot公开风险前置检测失败{kind === 'attention' ? '（检测服务异常）' : ''}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          本次公开变更未提交。
-          {record?.detail_url ? (
-            <>
-              请前往
-              <a
-                href={record.detail_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium text-primary hover:opacity-80"
+        <p className="m-0 text-sm font-medium text-foreground">{title}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        {canRefresh && record?.detail_url && (
+          <a
+            href={record.detail_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-1 inline-block text-xs font-medium text-primary hover:opacity-80"
+          >
+            查看检测工单
+          </a>
+        )}
+        {(showRefresh || onRetry) && (
+          <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-destructive/15 pt-2.5">
+            {showRefresh && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-primary"
+                loading={refreshing}
+                disabled={retrying}
+                leftIcon={<RefreshCw className="size-3.5" aria-hidden />}
+                onClick={onRefreshState}
               >
-                检测工单
-              </a>
-              查看风险明细与处理建议，处理后重新发起公开。
-            </>
-          ) : (
-            '请前往检测工单查看风险明细与处理建议，处理后重新发起公开。'
-          )}
-        </p>
-        {onRefreshState ? (
-          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-destructive/15 pt-2.5">
-            <span className="text-xs text-muted-foreground">工单结论如有更新，可刷新状态同步，无需重新发起。</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="shrink-0 text-primary"
-              loading={refreshing}
-              leftIcon={<RefreshCw className="size-3.5" aria-hidden />}
-              onClick={onRefreshState}
-            >
-              刷新状态
-            </Button>
+                刷新状态
+              </Button>
+            )}
+            {onRetry && (
+              <Button size="sm" loading={retrying} disabled={refreshing} onClick={onRetry}>
+                重新申请
+              </Button>
+            )}
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   );

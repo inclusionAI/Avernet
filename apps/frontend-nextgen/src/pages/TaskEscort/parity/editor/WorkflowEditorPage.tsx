@@ -91,7 +91,7 @@ function EditorAuthoringSession({
         onModify={() => setAiOpen((open) => !open)} onPublish={() => setPublishOpen(true)} />
       <p
         id="editor-authoring-help"
-        className="m-0 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground"
+        className="m-0 rounded-lg border border-border bg-muted/30 p-3 text-left text-xs text-muted-foreground"
       >
         {canEdit
           ? '从左侧添加节点，连接输出与输入，再选择节点填写当前任务。修改仅保留在当前会话，保存与发布需分别确认。'

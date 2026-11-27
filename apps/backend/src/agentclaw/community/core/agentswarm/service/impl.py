@@ -5,6 +5,8 @@ import asyncio
 import json
 from agentclaw.community.log import get_logger
 import time
+import dataclasses
+import hashlib
 import uuid
 
 from agentclaw.community.core.agentswarm.config.settings import AgentSwarmConfig
@@ -22,12 +24,19 @@ from agentclaw.community.core.agentswarm.repository.message import MessageReposi
 from agentclaw.community.core.agentswarm.repository.round import RoundRepository
 from agentclaw.community.core.agentswarm.repository.run import RunRepository
 from agentclaw.community.core.agentswarm.repository.agent_result import AgentResultRepository
+from agentclaw.community.core.agentswarm.domain.models import (
+    AgentDefinition, AgentDefinitionId, AgentDefinitionPage, AgentSpec,
+    RunAgentRef, TenantId,
+)
 from agentclaw.community.core.agentswarm.service.protocols import (
-    AgentSwarmConfigError, AgentSwarmRunNotFoundError,
+    AgentReferenceUnresolved, AgentSwarmConfigError, AgentSwarmRunNotFoundError,
+    ResolvedRoster,
     AgentSwarmRunNotPurgeableError, AgentSwarmServiceProtocol,
     AgentSwarmSyncTimeoutError, AgentAuthorizationState, AgentDetailItem,
     AgentEvent, AgentMessageDetail, AgentResultDetail, AgentAttemptDetail,
     BotAuthorizationDescriptor, BotAuthorizationSource,
+    DefinitionManifestInvalid, DefinitionNameConflict, DefinitionRowConflict,
+    ManifestDocumentValidator,
     GlobalRunLimitExceeded, GuardEventDetailItem, GuardEventSummary,
     AgentKind,
     IdentitySourceInvalid, IdentitySourceRefusal, IdentitySourceRequired,
@@ -57,6 +66,14 @@ def _unresolvable_authorization(agent: Agent) -> BotAuthorizationDescriptor:
         iframe_url="", redirect_url="", deadline="", application_id="",
     )
 
+from agentclaw.community.core.agentswarm.repository.agent_definition.impl import (
+    AgentDefinitionRepository, DefinitionConflictError,
+)
+from agentclaw.community.core.agentswarm.repository.run_agent_ref import (
+    RunAgentRefRepository,
+)
+
+
 class AgentSwarmService(AgentSwarmServiceProtocol):
 
     def __init__(self, run_repo: RunRepository, dispatch_repo: RunDispatchRepository,
@@ -66,6 +83,11 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
                  config: AgentSwarmConfig,
                  attempt_repo: AgentAttemptRepository | None = None,
                  authorization_source: BotAuthorizationSource | None = None,
+                 definition_manifest_validator: (
+                     ManifestDocumentValidator | None
+                 ) = None,
+                 definition_repo: AgentDefinitionRepository | None = None,
+                 run_agent_ref_repo: RunAgentRefRepository | None = None,
     ) -> None:
         self._run_repo = run_repo
         self._dispatch_repo = dispatch_repo
@@ -76,6 +98,12 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
         self._result_repo = result_repo
         self._attempt_repo = attempt_repo
         self._authorization_source = authorization_source
+        # Required for definition writes; ``None`` means this profile
+        # cannot validate manifests, so writes are refused rather than
+        # storing an unvalidated document.
+        self._definition_manifest_validator = definition_manifest_validator
+        self._definition_repo = definition_repo
+        self._ref_repo = run_agent_ref_repo
         self._config = config
         slice_max = config.orchestration.slice_max_seconds
         # Float deadline with a one-poll-cycle floor: int() truncated a
@@ -124,6 +152,94 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
                 ),
             )
 
+    def _write_provenance(self, run_id: str, roster: ResolvedRoster) -> None:
+        """Record which definition version each catalog entry came from.
+
+        Written after the run row commits and before dispatch is enqueued, so a
+        run that reaches a worker always carries its provenance. It lives in its
+        own table rather than on the catalog entries, which is what keeps run
+        snapshots readable by releases that predate definitions.
+
+        An inline roster has no refs and writes nothing. A failure here is
+        compensated by the caller's enqueue-failure path: without a dispatch row
+        no worker ever owns this run, so the run is failed rather than left
+        RUNNING with silent provenance loss.
+        """
+        if not roster.refs:
+            return
+        rows = [
+            RunAgentRef(
+                run_id=RunId(run_id),
+                tenant=ref.tenant,
+                catalog_name=ref.catalog_name,
+                definition_id=ref.definition_id,
+                definition_row_id=ref.definition_row_id,
+            )
+            for ref in roster.refs
+        ]
+        self._ref_repo.replace_for_run(RunId(run_id), rows[0].tenant, rows)
+
+    def _resolve_roster(self, req: SubmitRunRequest) -> ResolvedRoster:
+        """Resolve a submit's roster to specs plus provenance.
+
+        Inline rosters pass through untouched. A reference roster is resolved in
+        **one batch read scoped to the caller**, so a definition owned by someone
+        else is never even loaded; an unknown, deleted or foreign reference
+        refuses the whole submit before any run or dispatch row exists.
+        """
+        if not req.agent_refs:
+            return ResolvedRoster(specs=tuple(req.agents), refs=())
+
+        if req.agents:
+            raise ValueError("supply either agents or agent_refs, not both")
+
+        wanted = [r.definition_id for r in req.agent_refs]
+        found = {
+            d.definition_id: d
+            for d in self._definition_repo.get_many_live(
+                wanted, TenantId(req.tenant), req.owner_id,
+            )
+        }
+
+        specs: list[AgentSpec] = []
+        refs: list[RunAgentRef] = []
+        seen: set[str] = set()
+        for ref in req.agent_refs:
+            definition = found.get(ref.definition_id)
+            if definition is None:
+                raise AgentReferenceUnresolved(str(ref.definition_id))
+
+            name = ref.alias or definition.name
+            if name in seen:
+                # The orchestrator resolves spawns to catalog entries by name,
+                # so a duplicate name would be ambiguous at spawn time.
+                raise ValueError(f"duplicate agent name in roster: {name!r}")
+            seen.add(name)
+
+            spec = definition.to_spec()
+            # Mirror the inline path: only a bot-kind agent provisions a Bot, so
+            # only it carries the run's identity source. A definition cannot
+            # store one (the field is not on the table), so without this the
+            # resolved Bot agent would hold no source and apply for its own
+            # passport instead of inheriting the run's — parking at the human
+            # authorization gate the inline form skips.
+            if spec.kind is AgentKind.BOT and (req.identity_bot_id or "").strip():
+                spec = dataclasses.replace(
+                    spec, identity_bot_id=(req.identity_bot_id or "").strip(),
+                )
+            specs.append(
+                spec if name == definition.name
+                else dataclasses.replace(spec, name=name)
+            )
+            refs.append(RunAgentRef(
+                run_id=RunId(""),  # stamped with the run id below
+                tenant=TenantId(req.tenant),
+                catalog_name=name,
+                definition_id=definition.definition_id,
+                definition_row_id=definition.row_id,
+            ))
+        return ResolvedRoster(specs=tuple(specs), refs=tuple(refs))
+
     async def submit_async(self, req: SubmitRunRequest) -> str:
         self._require_identity_source(req)
         self._require_llm_config()
@@ -136,6 +252,10 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
                 # a duplicate submit joins an existing run and consumes no
                 # new capacity, so saturation must never refuse it.
                 return existing.run_id
+        # Resolution sits after the idempotency join (a duplicate submit must
+        # never re-read definitions) and before admission (a refused roster
+        # must never consume tenant capacity).
+        roster = self._resolve_roster(req)
         limit = self._config.tenant_limits.max_concurrent_runs
         # Known bounded race: count-then-create is not atomic, so
         # concurrent submits can both pass this check and briefly
@@ -156,7 +276,7 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             run_id=RunId(run_id),
             tenant=TenantId(req.tenant),
             goal=req.goal,
-            agent_catalog=req.agents,
+            agent_catalog=roster.specs,
             provider=req.provider,
             request_metadata=req.request_metadata,
             status=RunStatus.RUNNING,
@@ -174,6 +294,7 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             # run, exactly like the early get_by_idempotency join above.
             return created.run_id
         try:
+            self._write_provenance(run_id, roster)
             self._dispatch_repo.enqueue(
                 run_id=RunId(run_id),
                 tenant=TenantId(req.tenant),
@@ -444,6 +565,12 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             ),
             ended_at=int(run.ended_at) if run.ended_at is not None else None,
             agent_catalog=tuple(run.agent_catalog),
+            # Editorial join, read-side only: the snapshot stays untouched and
+            # an inline run (or a run predating definitions) has no rows here.
+            agent_refs=(
+                self._ref_repo.get_for_run(rid, tid)
+                if self._ref_repo is not None else {}
+            ),
             agents=tuple(agent_items),
             rounds=rounds,
             guards=guards,
@@ -557,3 +684,146 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             for kind in classify_pii(chunk):
                 totals[kind.value] = totals.get(kind.value, 0) + 1
         return totals
+
+    # ── agent definitions ────────────────────────────────────────────────────
+    #
+    # Every method carries the caller's ``owner_id`` and threads it into the
+    # repository predicate. A definition owned by someone else is reported as
+    # absent rather than forbidden: a 403 would confirm the id exists and turn
+    # the id space into an enumeration oracle.
+
+    #: The stored role width (design D1d). The API cap is larger; a definition
+    #: refuses an over-long role rather than truncating it.
+    DEFINITION_ROLE_MAX = 512
+
+    def _require_definition_validator(self) -> ManifestDocumentValidator:
+        validator = self._definition_manifest_validator
+        if validator is None:
+            # A definition write is a promise its manifest was accepted. A
+            # profile that cannot validate must refuse the write rather than
+            # store an unvalidated document.
+            raise AgentSwarmConfigError(
+                "definition writes are unavailable: this profile cannot "
+                "resolve the manifest validator"
+            )
+        return validator
+
+    @classmethod
+    def _check_definition_role(cls, role: str) -> str:
+        if len(role) > cls.DEFINITION_ROLE_MAX:
+            raise ValueError(
+                f"role is {len(role)} characters, over the "
+                f"{cls.DEFINITION_ROLE_MAX}-character limit"
+            )
+        return role
+
+    @staticmethod
+    def _manifest_digest(document: str) -> str:
+        """``sha256:<hex64>`` of the document, or empty for "no manifest".
+
+        The ``sha256:`` prefix is the codebase's fixed digest vocabulary; a bare
+        hex string would be unusable by any consumer that expects it.
+        """
+        if not document.strip():
+            return ""
+        return "sha256:" + hashlib.sha256(document.encode("utf-8")).hexdigest()
+
+    def create_definition(
+        self, *, tenant: str, owner_id: str, name: str, role: str = "",
+        instructions: str = "", kind: AgentKind = AgentKind.LLM,
+        model: str | None = None, engine: str = "",
+        bot_type: str = "personal", manifest_document: str = "",
+    ) -> AgentDefinition:
+        validator = self._require_definition_validator()
+        self._check_definition_role(role)
+        validator.validate_document(manifest_document)
+        definition = AgentDefinition(
+            definition_id=AgentDefinitionId(uuid.uuid4().hex),
+            tenant=TenantId(tenant),
+            owner_id=owner_id,
+            creator_id=owner_id,
+            modifier_id=owner_id,
+            name=name,
+            role=role,
+            instructions=instructions,
+            kind=kind,
+            model=model,
+            engine=engine,
+            bot_type=bot_type,
+            manifest_document=manifest_document,
+            manifest_digest=self._manifest_digest(manifest_document),
+        )
+        try:
+            return self._definition_repo.create(definition)
+        except DefinitionConflictError as exc:
+            raise DefinitionNameConflict(name) from exc
+
+    def get_definition(self, definition_id: AgentDefinitionId, tenant: str,
+                       owner_id: str) -> AgentDefinition | None:
+        return self._definition_repo.get_live(definition_id, TenantId(tenant), owner_id)
+
+    def list_definitions(self, tenant: str, owner_id: str,
+                         name_filter: str | None = None,
+                         page: int = 1, page_size: int = 20
+                         ) -> AgentDefinitionPage:
+        return self._definition_repo.list_live_page(
+            TenantId(tenant), owner_id, name_filter, page, page_size,
+        )
+
+    def list_definition_versions(self, definition_id: AgentDefinitionId,
+                                 tenant: str,
+                                 owner_id: str) -> list[AgentDefinition]:
+        return self._definition_repo.list_versions(
+            definition_id, TenantId(tenant), owner_id,
+        )
+
+    def update_definition(
+        self, *, definition_id: AgentDefinitionId, tenant: str, owner_id: str,
+        expected_row_id: int, name: str, role: str = "",
+        instructions: str = "", kind: AgentKind = AgentKind.LLM,
+        model: str | None = None, engine: str = "",
+        bot_type: str = "personal", manifest_document: str = "",
+    ) -> AgentDefinition:
+        validator = self._require_definition_validator()
+        self._check_definition_role(role)
+        validator.validate_document(manifest_document)
+
+        current = self._definition_repo.get_live(
+            definition_id, TenantId(tenant), owner_id,
+        )
+        if current is None:
+            raise AgentSwarmRunNotFoundError(str(definition_id))
+        if current.row_id != expected_row_id:
+            # Diagnostics, not control: the repository's "AND is_deleted = 0"
+            # predicate already makes a stale write match zero rows. This
+            # comparison exists so the 409 can name the version that moved on
+            # instead of returning a bare conflict.
+            raise DefinitionRowConflict(expected_row_id)
+
+        successor = AgentDefinition(
+            definition_id=current.definition_id,
+            tenant=current.tenant,
+            owner_id=current.owner_id,
+            # The author does not change on a later edit; the modifier does.
+            creator_id=current.creator_id,
+            modifier_id=owner_id,
+            name=name,
+            role=role,
+            instructions=instructions,
+            kind=kind,
+            model=model,
+            engine=engine,
+            bot_type=bot_type,
+            manifest_document=manifest_document,
+            manifest_digest=self._manifest_digest(manifest_document),
+        )
+        try:
+            return self._definition_repo.replace_live(successor, expected_row_id)
+        except DefinitionConflictError as exc:
+            raise DefinitionRowConflict(expected_row_id) from exc
+
+    def delete_definition(self, definition_id: AgentDefinitionId, tenant: str,
+                          owner_id: str) -> int:
+        return self._definition_repo.retire_live(
+            definition_id, TenantId(tenant), owner_id,
+        )

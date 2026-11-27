@@ -264,7 +264,9 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         if todo.status is not TodoStatus.IN_PROGRESS:
             return todo
         if not todo.collab_context_id:
-            raise TodoNotFoundError("Interacting Todo collaboration Context is missing")
+            raise TodoStateConflictError(
+                "Interacting Todo collaboration Context is missing"
+            )
         context = self._collaboration.get_context(
             collab_context_id=todo.collab_context_id,
             actor_id=todo.created_by,
@@ -324,7 +326,7 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         if todo.status is not TodoStatus.PENDING_ACCEPTANCE:
             return todo
         if not todo.collab_context_id:
-            raise TodoNotFoundError(
+            raise TodoStateConflictError(
                 "Pending-acceptance Todo collaboration Context is missing"
             )
         context = self._collaboration.get_context(
@@ -365,7 +367,9 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         if todo.status is not TodoStatus.IN_PROGRESS:
             return todo
         if not todo.collab_context_id:
-            raise TodoNotFoundError("In-progress Todo collaboration Context is missing")
+            raise TodoStateConflictError(
+                "In-progress Todo collaboration Context is missing"
+            )
 
         context = self._collaboration.get_context(
             collab_context_id=todo.collab_context_id,
@@ -578,7 +582,9 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
 
     def _mark_pending_acceptance(self, todo: TodoRecord) -> TodoRecord:
         if not todo.collab_context_id:
-            raise TodoNotFoundError("Completed Todo collaboration Context is missing")
+            raise TodoStateConflictError(
+                "Completed Todo collaboration Context is missing"
+            )
         self._artifacts.complete_execution(
             todo_id=todo.todo_id,
             collab_context_id=todo.collab_context_id,

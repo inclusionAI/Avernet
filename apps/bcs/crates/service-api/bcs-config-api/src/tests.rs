@@ -112,6 +112,11 @@ fn delivery_monitor_defaults_to_raw_and_existing_formats_remain_compatible() {
     let output = logging.outputs.iter().find(|o| o.name == "message-delivery").unwrap();
     assert_eq!(output.file, "message-delivery.log"); assert_eq!(output.format, LogOutputFormat::Raw);
     assert_eq!(output.targets, vec!["bcs_message_delivery_monitor"]);
+    let a2a_digest = logging.outputs.iter().find(|o| o.name == "a2a-http-client-digest").unwrap();
+    assert_eq!(a2a_digest.file, "a2a-http-client-digest.log");
+    assert_eq!(a2a_digest.format, LogOutputFormat::Raw);
+    assert_eq!(a2a_digest.targets, vec!["bcs_a2a_http_client_digest"]);
+    assert_eq!(a2a_digest.max_keep_days, 7);
     for (value, format) in [("raw", LogOutputFormat::Raw), ("text", LogOutputFormat::Text), ("json", LogOutputFormat::Json)] {
         assert_eq!(serde_json::from_value::<LogOutputFormat>(serde_json::json!(value)).unwrap(), format);
     }

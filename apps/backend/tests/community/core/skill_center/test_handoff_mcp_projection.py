@@ -77,6 +77,8 @@ async def test_real_installations_and_collector_reach_device_after_handoff(tmp_p
         scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.weather"})),
     )
     assert result.status is RuntimeProjectionStatus.CONVERGED
+    assert result.delivered_mcp_codes == frozenset({"mcp.weather"})
+    assert result.passport_mcp_codes == frozenset({"mcp.weather"})
     service._resolver.resolve_for_bot.assert_called_once_with("bot", "successor")
     delivered = service._mcp_sync_service.sync_mcp_details_for_bot.await_args.kwargs
     assert delivered["entity_id"] == "owner"

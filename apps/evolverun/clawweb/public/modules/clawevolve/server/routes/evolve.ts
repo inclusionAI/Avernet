@@ -870,6 +870,9 @@ function publicTask(task: Record<string, unknown>, steps?: EvolveStepRow[], incl
   const config = parseJson(String(task.config_json ?? "{}"));
   const rest = { ...task };
   delete rest.config_json;
+  const status = config && typeof config === "object" && "status" in config ? config.status : undefined;
+  if (task.task_type === "session_recovery" && task.status === "settling"
+    && ["completed", "failed", "canceled"].includes(String(status))) rest.status = status;
   return { ...rest, config, steps: steps?.map((item) => stepView(item, includeStepOutput)) };
 }
 function taskLogArchiveView(row: import("../repositories/evolve-repository.js").EvolveTaskLogArchiveRow) {

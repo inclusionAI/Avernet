@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.dialects import registry
+from sqlalchemy.dialects.sqlite.pysqlite import SQLiteDialect_pysqlite
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -197,6 +199,49 @@ class InMemoryDB:
                 return False
 
         return SessionContext(self._session_factory)
+
+
+class _ZeroChangedRowsSQLiteDialect(SQLiteDialect_pysqlite):
+    """SQLite dialect reproducing the production DB proxy's rowcount."""
+
+    def do_execute(self, cursor, statement, parameters, context=None):
+        cursor.execute(statement, parameters)
+        if (
+            isinstance(statement, str)
+            and statement.upper().lstrip().startswith("UPDATE")
+            and "ac_bot_quality_task" in statement
+        ):
+            # The production DB proxy reports changed rows, not matched
+            # rows: a racing identical write makes the UPDATE a no-op and
+            # the driver sees rowcount == 0 even though the row matched.
+            context._rowcount = 0
+
+
+class ZeroChangedRowsDB(InMemoryDB):
+    """In-memory SQLite whose quality-task UPDATEs report 0 changed rows.
+
+    SQLite itself counts matched rows for no-op updates, which is why the
+    production failure never reproduced locally; the dialect hook above
+    pins the production semantics at the layer SQLAlchemy reads rowcount
+    from, so an identity-checked ORM flush raises StaleDataError while the
+    Core UPDATE path stays idempotent.
+    """
+
+    def __init__(self):
+        self.engine = create_engine(
+            "sqlite+zerocount:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        from agentclaw.community.core.base import Base
+
+        Base.metadata.create_all(self.engine)
+        self._session_factory = sessionmaker(bind=self.engine, autoflush=False)
+
+
+registry.register(
+    "sqlite.zerocount", __name__, "_ZeroChangedRowsSQLiteDialect"
+)
 
 
 class TestQualityTaskRepository:
@@ -707,3 +752,167 @@ class TestQualityTaskRepository:
 
         assert result is not None
         assert result.gmt_modified is not None
+
+    # ── concurrent-driver regression tests ─────────────────────────────────────
+    #
+    # The standard-eval driver is spawned per pod, so several drivers can
+    # persist the same quality-task state within the same second. Behind
+    # the production rowcount-based DB proxy the resulting
+    # no-op UPDATE reports 0 changed rows and an identity-checked ORM flush
+    # turns that into StaleDataError, killing the driver (CDO:
+    # "UPDATE statement on table 'ac_bot_quality_task' expected to update
+    # 1 row(s); 0 were matched."). These tests pin the Core-UPDATE behavior:
+    # identical or racing writes stay idempotent and never raise.
+
+    def test_update_status_identical_write_is_idempotent(self, repo):
+        """Re-writing the same status/ext like a twin driver must not raise."""
+        created = repo.create(
+            uuid="test-uuid-idem",
+            task_type="eval",
+            biz_type="service_bot_single",
+            ext={"eval_progress": {"status": "running"}},
+        )
+
+        first = repo.update_status(created.id, "task_created", {"c": 1})
+        second = repo.update_status(created.id, "task_created", {"c": 1})
+
+        assert first is not None and second is not None
+        assert second.status == "task_created"
+        assert second.ext == {"eval_progress": {"status": "running"}, "c": 1}
+
+    def test_update_ext_identical_write_is_idempotent(self, repo):
+        """Re-writing the same ext like a twin driver must not raise."""
+        created = repo.create(
+            uuid="test-uuid-ext-idem",
+            task_type="eval",
+            biz_type="service_bot_single",
+        )
+
+        payload = {"eval_progress": {"status": "judging"}}
+        first = repo.update_ext(created.id, dict(payload))
+        second = repo.update_ext(created.id, dict(payload))
+
+        assert first is not None and second is not None
+        assert second.ext == payload
+
+    def test_update_status_matched_update_reporting_zero_rows_does_not_raise(self):
+        """A matched UPDATE the proxy reports as 0 rows must return the row.
+
+        Production DB proxies report changed rows, so an UPDATE racing a
+        twin driver that already persisted the same values gets
+        ``rowcount == 0`` even though the row exists and matched. The old
+        identity-checked ORM flush turned exactly this into
+        ``StaleDataError``; the Core UPDATE path must return the persisted
+        record instead of raising.
+        """
+        db = ZeroChangedRowsDB()
+        repo = QualityTaskRepository(db)
+        created = repo.create(
+            uuid="test-uuid-zero-rowcount",
+            task_type="eval",
+            biz_type="service_bot_single",
+        )
+
+        update = repo.update_status(created.id, "task_created", {"eval_progress": {"status": "running"}})
+
+        assert update is not None
+        assert update.status == "task_created"
+        assert update.ext == {"eval_progress": {"status": "running"}}
+
+    def test_update_ext_matched_update_reporting_zero_rows_does_not_raise(self):
+        """update_ext mirrors update_status under the proxy's 0-row rowcount."""
+        db = ZeroChangedRowsDB()
+        repo = QualityTaskRepository(db)
+        created = repo.create(
+            uuid="test-uuid-ext-zero-rowcount",
+            task_type="eval",
+            biz_type="service_bot_single",
+        )
+
+        update = repo.update_ext(created.id, {"eval_progress": {"status": "judging"}})
+
+        assert update is not None
+        assert update.status == "init"
+        assert update.ext == {"eval_progress": {"status": "judging"}}
+
+    def test_update_status_row_unreachable_mid_update_does_not_raise(self, db):
+        """A row unreachable between guard SELECT and UPDATE must not raise.
+
+        Behind the production rowcount-based DB proxy a twin
+        driver making the guarded row unreachable at write time yields a
+        0-matched UPDATE; the identity-checked ORM flush turned that into
+        ``StaleDataError`` and killed the driver. The Core UPDATE path must
+        return what the database holds — ``None`` when the row vanished —
+        without an exception.
+        """
+        repo = QualityTaskRepository(db)
+        created = repo.create(
+            uuid="test-uuid-race",
+            task_type="eval",
+            biz_type="service_bot_single",
+        )
+
+        update = self._racing_update(
+            db, repo, lambda r: r.update_status(created.id, "task_created")
+        )
+
+        with db.orm_session() as session:
+            raw = (
+                session.query(repo._Model)
+                .filter(repo._Model.id == created.id)
+                .first()
+            )
+        assert raw is None  # removed by the racing writer
+        assert update is None  # guard saw it, write matched nothing, no raise
+
+    def test_update_ext_row_unreachable_mid_update_does_not_raise(self, db):
+        """update_ext mirrors update_status when the row is unreachable."""
+        repo = QualityTaskRepository(db)
+        created = repo.create(
+            uuid="test-uuid-ext-race",
+            task_type="eval",
+            biz_type="service_bot_single",
+        )
+
+        update = self._racing_update(
+            db, repo, lambda r: r.update_ext(created.id, {"error_msg": "twin"})
+        )
+
+        with db.orm_session() as session:
+            raw = (
+                session.query(repo._Model)
+                .filter(repo._Model.id == created.id)
+                .first()
+            )
+        assert raw is None
+        assert update is None
+
+    @staticmethod
+    def _racing_update(db, repo, call):
+        """Run ``call(repo)`` while a twin writer removes the row mid-update.
+
+        The Session.execute hook deletes the guarded quality-task row just
+        before the repository's Core UPDATE executes — the deterministic
+        equivalent of the production race where a concurrent write makes
+        the row unreachable between the guard SELECT and the write.
+        """
+        from sqlalchemy import delete as sa_delete
+        from sqlalchemy.orm import Session
+        from sqlalchemy.sql.dml import Update as DMLUpdate
+
+        orig_execute = Session.execute
+
+        def racing_execute(self_session, statement, *args, **kwargs):
+            if (
+                isinstance(statement, DMLUpdate)
+                and statement.table.name == "ac_bot_quality_task"
+            ):
+                row = self_session.query(repo._Model).first()
+                if row is not None:
+                    self_session.execute(
+                        sa_delete(repo._Model).where(repo._Model.id == row.id)
+                    )
+            return orig_execute(self_session, statement, *args, **kwargs)
+
+        with patch.object(Session, "execute", racing_execute):
+            return call(repo)

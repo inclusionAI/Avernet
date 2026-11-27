@@ -1,0 +1,68 @@
+/* Run detail only. Hierarchy follows the approved reference, colors follow host tokens. */
+.run-presentation {
+  min-width: 0;
+}
+.run-group-heading {
+  font-size: 12px;
+  font-weight: 600;
+}
+.run-group-heading small {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: hsl(var(--muted-foreground));
+}
+.run-facts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+  flex: 1;
+}
+.run-launch-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(185px, 0.3fr);
+  gap: 12px;
+}
+.run-launch-value {
+  max-width: 100%;
+  max-height: 112px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--card));
+  font-size: 11px;
+  line-height: 1.75;
+}
+.run-launch-expanded {
+  max-height: 420px;
+}
+.run-dag-viewport {
+  height: 330px;
+  max-width: 100%;
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background-color: hsl(var(--muted) / 0.2);
+  background-image: radial-gradient(hsl(var(--muted-foreground) / 0.15) 0.7px, transparent 0.7px);
+  background-size: 16px 16px;
+}
+.run-dag-expanded {
+  height: 560px;
+}
+@media (max-width: 700px) {
+  .run-launch-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .run-facts-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .run-dag-expanded {
+    height: 460px;
+  }
+}

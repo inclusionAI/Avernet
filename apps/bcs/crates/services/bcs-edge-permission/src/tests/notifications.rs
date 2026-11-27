@@ -256,6 +256,148 @@ use super::*;
         );
     }
 
+    // ── RemovedByOwner (owner-initiated friend removal) ────────────────────
+    //
+    // `ConnectService::revoke_friend_as_owner` transitions every friend edge
+    // through the atomic conditional revoke and emits exactly one
+    // `RemovedByOwner` notice for a non-empty transition set. The notice's
+    // `applicant_actor_id` is the REMOVED party (human → the bootstrap
+    // adapter emits HUMAN2BOT_FRIEND_REMOVED, bot → BOT2BOT_FRIEND_REMOVED;
+    // that adapter mapping is pinned by the bcs crate's payload tests, so
+    // these tests assert the port command that drives it end to end).
+
+    #[tokio::test]
+    async fn removed_by_owner_human_friend_notifies_the_removed_human() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:managed", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        let created = svc
+            .create_connect("human_1001", "x:managed", None, None)
+            .await
+            .expect("auto-approved friendship");
+        assert_eq!(created.edge_ids.len(), 1);
+
+        let revoked = svc
+            .revoke_friend_as_owner("human_1001", "x:managed", None)
+            .await
+            .expect("owner removal succeeds");
+        assert_eq!(revoked, created.edge_ids, "the friend edge transitioned");
+        assert!(!eg.has_friend_edge("human_1001", "x:managed", "dev").await);
+
+        let events = events.lock().await;
+        assert_eq!(events.len(), 1, "exactly one RemovedByOwner notice");
+        let event = &events[0];
+        assert_eq!(event.kind, FriendConnectNotificationKind::RemovedByOwner);
+        assert_eq!(event.env, "dev");
+        assert_eq!(event.applicant_actor_id, "human_1001");
+        assert_eq!(event.target_bot_id, "x:managed");
+        assert_eq!(
+            event.recipient_user_ids,
+            vec!["1001".to_string()],
+            "a removed human is notified at their staff_no"
+        );
+        assert_eq!(
+            event.request_ids,
+            created.edge_ids.iter().map(u64::to_string).collect::<Vec<_>>(),
+            "request_ids carry the transitioned edge ids"
+        );
+    }
+
+    #[tokio::test]
+    async fn removed_by_owner_bot_friend_notifies_the_friend_bot_owner() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:managed", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        seed_bot(&db, "x:friend", "protected", "protected", "OPEN", "online", Some("86300")).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        let created = svc
+            .create_connect("x:managed", "x:friend", None, None)
+            .await
+            .expect("bot↔bot friendship");
+        assert_eq!(created.edge_ids.len(), 2);
+
+        let revoked = svc
+            .revoke_friend_as_owner("x:managed", "x:friend", None)
+            .await
+            .expect("owner removal succeeds");
+        assert_eq!(revoked.len(), 2, "both friend edges transitioned");
+        assert!(!eg.has_friend_edge("x:managed", "x:friend", "dev").await);
+
+        let events = events.lock().await;
+        assert_eq!(events.len(), 1, "exactly one RemovedByOwner notice");
+        let event = &events[0];
+        assert_eq!(event.kind, FriendConnectNotificationKind::RemovedByOwner);
+        assert_eq!(event.applicant_actor_id, "x:friend");
+        assert_eq!(event.target_bot_id, "x:managed");
+        assert_eq!(
+            event.recipient_user_ids,
+            vec!["86300".to_string()],
+            "a removed Bot's notice goes to that Bot's owner, not the remover"
+        );
+    }
+
+    #[tokio::test]
+    async fn removed_by_owner_without_friend_bot_config_skips_the_notice() {
+        // Review Focus #6: the friend Bot's config cannot be loaded (bot
+        // deleted/unregistered) → WARN and skip the notice; the removal
+        // itself still succeeds.
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:managed", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        seed_bot(&db, "x:ghost", "protected", "protected", "OPEN", "online", Some("86300")).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        svc.create_connect("x:managed", "x:ghost", None, None)
+            .await
+            .expect("bot↔bot friendship");
+        db.execute(DbStatement::with_params(
+            "DELETE FROM bcs_bots WHERE bot_uuid = ?",
+            vec![DbValue::from("x:ghost")],
+        ))
+        .await
+        .expect("drop the friend Bot config row");
+
+        let revoked = svc
+            .revoke_friend_as_owner("x:managed", "x:ghost", None)
+            .await
+            .expect("removal succeeds even when the notice cannot be addressed");
+        assert_eq!(revoked.len(), 2, "both friend edges still transition");
+        assert!(!eg.has_friend_edge("x:managed", "x:ghost", "dev").await);
+        assert!(
+            events.lock().await.is_empty(),
+            "no resolvable friend-Bot config → the notice is skipped (WARN)"
+        );
+    }
+
+    #[tokio::test]
+    async fn removed_by_owner_notification_failure_keeps_the_removal() {
+        // Review Focus #4: the work-order intake down → WARN + the removal
+        // still returns the transitioned edges.
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:managed", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        let svc = service_with_notification(
+            &eg,
+            &pp,
+            &rq,
+            &bc,
+            Arc::new(FailingFriendConnectNotificationPort),
+        );
+        let created = svc
+            .create_connect("human_1001", "x:managed", None, None)
+            .await
+            .expect("auto-approved friendship");
+
+        let revoked = svc
+            .revoke_friend_as_owner("human_1001", "x:managed", None)
+            .await
+            .expect("a notification failure must not fail the removal");
+        assert_eq!(revoked, created.edge_ids);
+        assert!(!eg.has_friend_edge("human_1001", "x:managed", "dev").await);
+    }
+
     #[tokio::test]
     async fn pending_friend_request_falls_back_to_created_by_when_ownership_uninitialized() {
         // Legacy bots (ownership_version = 0) have no authority owner edge:

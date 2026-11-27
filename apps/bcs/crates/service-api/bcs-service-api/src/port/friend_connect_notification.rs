@@ -12,6 +12,10 @@ pub enum FriendConnectNotificationKind {
     AutoApproved,
     /// A request was reviewed manually.
     Reviewed,
+    /// The managed Bot's Owner removed a friend; emitted only from
+    /// `ConnectService::revoke_friend_as_owner` after a non-empty revoke
+    /// and best-effort (failure never rolls back the removal).
+    RemovedByOwner,
 }
 
 /// Outbound command for friend-connect notifications.

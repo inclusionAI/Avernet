@@ -50,6 +50,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/collaboration/repair"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local/start-progress"): OWNER_SCOPED,
     **METADATA_AUTHORIZATION,
+    **{
+        ('POST', '/openapi/v1/bots/' + operation): NoCheck(
+            'configured environment/tenant/application trust gate; template scope is checked by ManagedBotService'
+        )
+        for operation in ('template-queries', 'template-config-for-others', 'restart-for-others', 'status-for-others')
+    },
     ("GET", "/openapi/v1/bots/{bot_id}/access"): NoCheck(
         "transitional; the handler checks the configured app_name allowlist"
     ),

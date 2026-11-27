@@ -832,6 +832,18 @@ FriendConnectionsPath:
     operationId: delete_friend_connection
     tags: ["Collaboration / Friendships"]
     summary: Remove a friend connection from the caller to a target actor.
+    description: >-
+      Without `actor_type`/`actor_id` the caller removes their own side of the
+      friendship (self-removal, silent). With the optional `actor_type=bot` +
+      `actor_id` pair the caller removes the named Bot's friendship with the
+      target actor (Owner-initiated removal): the caller must be the Bot's
+      CURRENT owner, both sides of the friendship are dissolved, and the
+      removed party (or the removed Bot's owner) is notified in the
+      notification center. Providing exactly one of `actor_type`/`actor_id`
+      is a 400 `invalid_request`; with the pair, a non-owner caller is a 403
+      `forbidden` while the same caller may still list the Bot's friends.
+      The result is idempotent: `deleted:false` when the friendship was
+      already gone, in which case no notification is emitted.
     x-avernet-security:
       user: required
       app: required
@@ -847,6 +859,23 @@ FriendConnectionsPath:
         schema:
           type: string
           minLength: 1
+      - name: actor_type
+        in: query
+        required: false
+        description: >-
+          Optional Owner-removal acting actor. Must be `bot` and must be
+          provided together with `actor_id`.
+        schema:
+          $ref: ../domain-models.yaml#/FriendConnectionActorType
+      - name: actor_id
+        in: query
+        required: false
+        description: >-
+          Optional Owner-removal acting Bot id. Must be provided together
+          with `actor_type`.
+        schema:
+          type: string
+          minLength: 1
     responses:
       "200":
         description: Idempotent remove result.
@@ -855,7 +884,7 @@ FriendConnectionsPath:
             schema:
               $ref: ../domain-models.yaml#/DeleteResultEnvelope
       "400":
-        description: Invalid target actor.
+        description: Invalid target actor, or exactly one of `actor_type`/`actor_id` provided.
         x-error-codes:
           - invalid_request
         content:
@@ -871,7 +900,7 @@ FriendConnectionsPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot remove the friend connection.
+        description: Principal cannot remove the friend connection (including a non-Owner caller passing an `actor` pair).
         x-error-codes:
           - forbidden
         content:

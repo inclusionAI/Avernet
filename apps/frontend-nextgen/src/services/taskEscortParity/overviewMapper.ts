@@ -1,11 +1,13 @@
 import { parseOverviewTimestamp } from '@/domain/taskEscortParity/overview';
 import type {
+  OverviewDetailedRun,
   OverviewNodeExecution,
   OverviewRun,
   OverviewRuns,
   OverviewWorkflow,
 } from '@/domain/taskEscortParity/overviewTypes';
 import { count, list, metric, record, requiredText, strings, text } from './overviewValidation';
+import { displayRunText, nonblank, runLaunchField } from './runLaunchDetails';
 
 export function mapOverviewRun(value: unknown): OverviewRun {
   const row = record(value);
@@ -27,6 +29,20 @@ export function mapOverviewRun(value: unknown): OverviewRun {
     version: row.workflow_version === -1 ? -1 : count(row.workflow_version),
     engine: text(row.engine),
     analysisStatus: text(row.evolution_analysis_status),
+  };
+}
+export function mapOverviewDetailedRun(value: unknown): OverviewDetailedRun {
+  const row = record(value);
+  return {
+    ...mapOverviewRun(row),
+    launchInput: runLaunchField(row.input_json, false),
+    launchParams: runLaunchField(row.params_json, true),
+    parentRunId: nonblank(row.parent_flow_id),
+    rootRunId: nonblank(row.root_flow_id),
+    // Never parse credentials, derive from node context, or request client-side opt-in.
+    deviceId: nonblank(row.device_id),
+    botType: nonblank(row.bot_type),
+    stage: nonblank(row.stage),
   };
 }
 export function mapOverviewRuns(value: unknown, workflowId: string): OverviewRuns {
@@ -60,13 +76,14 @@ export function mapOverviewNode(value: unknown): OverviewNodeExecution {
     durationMs: metric(row.duration_ms),
     startedAt: parseOverviewTimestamp(row.started_at),
     completedAt: parseOverviewTimestamp(row.completed_at),
-    input: text(row.input_json),
-    output: text(row.output_json),
-    error: text(row.error_text),
-    tokens: text(row.token_usage_json),
-    context: text(row.system_context_json),
-    prompt: text(row.resolved_prompt),
-    progress: text(row.progress_message),
+    input: displayRunText(row.input_json),
+    output: displayRunText(row.output_json),
+    error: displayRunText(row.error_text),
+    tokens: displayRunText(row.token_usage_json),
+    // No verified public system-context projection is available.
+    context: null,
+    prompt: displayRunText(row.resolved_prompt),
+    progress: displayRunText(row.progress_message),
     sessionKey: text(row.embedded_session_key) ?? text(row.session_key),
     sessionId: text(row.session_id),
   };

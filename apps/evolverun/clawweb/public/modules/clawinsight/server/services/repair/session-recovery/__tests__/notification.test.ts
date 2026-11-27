@@ -60,7 +60,7 @@ it("sends a single permission notice to the configured Bot group from a confirme
   expect(delivery.text).toContain("Bot 无法读取评审文档。");
   expect(delivery.text).toContain("请申请评审文档的阅读权限。");
   expect(delivery.text).toContain("等待 Owner 处理");
-  expect(delivery.text).toContain("已获取权限，继续任务");
+  expect(delivery.text).toContain("已处理，继续任务");
   expect(delivery.text).toContain("recoveryTaskId=SR-notification");
 });
 
@@ -442,7 +442,7 @@ it("notifies the Owner of nonblocking suggestions after recovery without request
   await notifier.notify({ ownerId: "owner", botId: "bot", targetEnvironment: "prod", taskId: "SR-suggestion", sessionKey: "original", kind: "result", effect: "recovered", summary: "原任务已完成；建议在 Skill 中补充参数示例。" });
   expect(sender.sendCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ cardParamMap: expect.objectContaining({
     title: "会话自愈已恢复，有后续建议", summary: expect.stringContaining("原任务已完成"), instructions: "请查看下方任务详情，按完整处理事项继续。",
-    confirm_visible: "false", status: "本次自愈已结束，后续建议可按需处理",
+    confirm_visible: "false", status: "",
   }) }));
   expect(sender.sendNotification).not.toHaveBeenCalled();
 });

@@ -1,3 +1,4 @@
+import { FlowRunLineageError, normalizeFlowRunLineage } from '../../services/flow-run-lineage.js';
 import { captureApiError, errorStack } from "../error-log-format.js";
 import { FlowRunMarkerError, normalizeFlowRunMarkers } from '../../services/flow-run-markers.js';
 import { hasTrialFields, OrdinaryRequestError, type OrdinaryRequestAuth, type OrdinaryPrincipal } from '../../services/ordinary-run-request.js';
@@ -202,8 +203,11 @@ export function createInternalRunsRouter(
       }
 
       const markers = normalizeFlowRunMarkers({ env, tag });
+      const lineage = normalizeFlowRunLineage({ parentFlowId: requestBody.parent_flow_id, rootFlowId: requestBody.root_flow_id });
       const run = {
         ...markers,
+        parentFlowId: lineage.parent_flow_id,
+        rootFlowId: lineage.root_flow_id,
         flowId: flow_id,
         workflowId: workflow_id,
         workflowTitle: workflow_title ?? null,
@@ -273,7 +277,7 @@ export function createInternalRunsRouter(
       apiLog("WRITE", "/runs", { status: 201, flow_id, workflow_id, status_field: status });
       res.status(registered === 'existing' ? 200 : 201).json({ success: true, data: row });
     } catch (error) {
-      if (error instanceof FlowRunMarkerError) {
+      if (error instanceof FlowRunMarkerError || error instanceof FlowRunLineageError) {
         res.status(400).json({ success: false, error: 'Bad Request', message: error.message }); return;
       }
       if (ordinary) { respondError(res, error); return; }
@@ -318,6 +322,11 @@ export function createInternalRunsRouter(
         return;
       }
 
+      if (typeof status !== 'string' || !status || status !== status.trim().toLowerCase()) {
+        res.status(400).json({ success: false, error: "Bad Request", message: "status must be a nonempty lowercase string without surrounding whitespace" });
+        return;
+      }
+
       const completion: import("../../repositories/flow-run-repository.js").FlowRunCompletion = {
         status: status!,
         totalDurationMs: total_duration_ms ?? null,
@@ -338,16 +347,16 @@ export function createInternalRunsRouter(
       if (failed_count !== undefined) {
         completion.failedCount = failed_count;
       }
-      const row = await flowRunRepo.updateCompletion(flowId, completion);
-      if (!row) {
-        const exists = await flowRunRepo.findFullByFlowId(flowId);
+      const outcome = await flowRunRepo.updateCompletionOutcome(flowId, completion);
+      if (outcome === 'rejected') {
+        const exists = await flowRunRepo.findStatusByFlowId(flowId);
         apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: exists ? 409 : 404 });
-        res.status(exists ? 409 : 404).json({ success: false, error: exists ? "Conflict" : "Not Found", message: exists ? `Flow run "${flowId}" has a different retry epoch or is terminal` : `Flow run "${flowId}" not found` });
+        res.status(exists ? 409 : 404).json({ success: false, error: exists ? "Conflict" : "Not Found", message: exists ? `Flow run "${flowId}" has a conflicting policy, snapshot, retry epoch or terminal status` : `Flow run "${flowId}" not found` });
         return;
       }
       apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: 200, newStatus: status });
-      res.json({ success: true, data: row });
-      if (status === "failed") scheduleTerminalObserver(observers.onTerminal, { flowId, status });
+      res.json({ success: true, data: true });
+      if (outcome === "updated" && status === "failed") scheduleTerminalObserver(observers.onTerminal, { flowId, status });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       apiLog("PUT", `/runs/${flowId}/completion`, { flowId, status: 500, error: msg }, error, res);
@@ -443,9 +452,9 @@ export function createInternalRunsRouter(
       return;
     }
     try {
-      if (!status) {
-        apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: 400, error: "Missing status" });
-        res.status(400).json({ success: false, error: "Bad Request", message: "Missing required field: status" });
+      if (typeof status !== 'string' || !status || status !== status.trim().toLowerCase()) {
+        apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: 400, error: "Invalid status" });
+        res.status(400).json({ success: false, error: "Bad Request", message: "status must be a nonempty lowercase string without surrounding whitespace" });
         return;
       }
 
@@ -458,8 +467,9 @@ export function createInternalRunsRouter(
       if (!row) {
         const existing = await flowRunRepo.findStatusByFlowId(flowId);
         const cancelled = existing && ['cancelled', 'canceled'].includes(existing.status);
-        apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: cancelled ? 409 : 404 });
-        res.status(cancelled ? 409 : 404).json({ success: false, error: cancelled ? "Conflict" : "Not Found", message: cancelled ? `Flow run "${flowId}" is cancelled` : `Flow run "${flowId}" not found` });
+        const conflict = cancelled || (existing && status === 'failed');
+        apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: conflict ? 409 : 404 });
+        res.status(conflict ? 409 : 404).json({ success: false, error: conflict ? "Conflict" : "Not Found", message: conflict ? `Flow run "${flowId}" ${cancelled ? 'is cancelled' : 'cannot accept this status write'}` : `Flow run "${flowId}" not found` });
         return;
       }
       apiLog("PUT", `/runs/${flowId}/status`, { flowId, status: 200, newStatus: status });

@@ -44,7 +44,7 @@ async def test_publish_eval_env_handler(resource_services):
     assert result.data.quality_task_id == 1
     service.eval_publish.assert_awaited_once_with(
         publish_id=7, operator="actor", biz_id=result.data.quality_task_uuid,
-        default_tag="eval", device_count=1, resource_spec=None,
+        default_tag="eval", ttl_seconds=None, device_count=1, resource_spec=None,
     )
     task = quality_tasks.get_task_by_uuid(result.data.quality_task_uuid)
     assert task is not None
@@ -75,6 +75,13 @@ def test_openapi_contract():
     assert params["device_count"]["required"] is False
     assert params["device_count"]["schema"]["default"] == 1
     assert params["device_count"]["schema"]["minimum"] == 1
+    assert params["ttl_seconds"]["in"] == "query"
+    assert params["ttl_seconds"]["required"] is False
+    ttl_schema = params["ttl_seconds"]["schema"]
+    integer_schema = next(item for item in ttl_schema["anyOf"] if item["type"] == "integer")
+    assert integer_schema["exclusiveMinimum"] == 0
+    assert "86400" in params["ttl_seconds"]["description"]
+    assert "ttl_seconds=172800" in operation["description"]
     publication = next(p for p in operation["parameters"] if p["name"] == "publication_id")
     assert publication["schema"]["minimum"] == 1
 
@@ -96,7 +103,7 @@ async def test_publish_eval_env_device_count_forwarded(resource_services):
     assert result.code == 202000
     service.eval_publish.assert_awaited_once_with(
         publish_id=7, operator="actor", biz_id=result.data.quality_task_uuid,
-        default_tag="eval", device_count=3, resource_spec=None,
+        default_tag="eval", ttl_seconds=None, device_count=3, resource_spec=None,
     )
     assert result.data.quality_task_id == 1
 
@@ -298,9 +305,30 @@ async def test_publish_resource_spec_forwarded(resource_services, disk):
     assert result.code == 202000
     service.eval_publish.assert_awaited_once_with(
         publish_id=7, operator="actor", biz_id=result.data.quality_task_uuid,
-        default_tag="eval", device_count=1,
+        default_tag="eval", ttl_seconds=None, device_count=1,
         resource_spec=ResourceSpecification(cpu=4, memory=8, disk=disk),
     )
     task = quality_tasks.get_task_by_uuid(result.data.quality_task_uuid)
     assert task is not None
     assert task.id == result.data.quality_task_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ttl_seconds", [1, 7200, 86400, 172800])
+async def test_publish_eval_env_ttl_forwarded(resource_services, ttl_seconds):
+    service = Mock(eval_publish=AsyncMock(return_value={
+        "success": True, "publish_id": 7, "stage": "eval", "bot_uuid": "eval-bot",
+        "baas_publish_id": 42,
+    }))
+    request = Request({"type": "http", "method": "POST", "path": "/"})
+    quality_tasks = FakeQualityTaskService()
+    result = await publish_eval_env(
+        "bot-1", 7, request, "actor", "owner", service, *resource_services,
+        quality_tasks, ttl_seconds=ttl_seconds,
+    )
+    assert result.code == 202000
+    service.eval_publish.assert_awaited_once_with(
+        publish_id=7, operator="actor", biz_id=result.data.quality_task_uuid,
+        default_tag="eval", ttl_seconds=ttl_seconds, device_count=1, resource_spec=None,
+    )
+    assert result.data.quality_task_id == 1

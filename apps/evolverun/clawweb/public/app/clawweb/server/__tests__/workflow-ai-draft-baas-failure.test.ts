@@ -74,7 +74,10 @@ describe('BaaS terminal failure public classification', () => {
           result: { content: fencedYaml }, content: fencedYaml,
           messages: [{ role: 'assistant', content: fencedYaml }],
         }));
-        expect(result).toEqual({ status: 'failed', error: error === privateError ? 'AUTO_HEAL_BOT_UNAVAILABLE' : 'BAAS_GENERATION_FAILED' });
+        const expected = status === 'TIME_OUT' ? 'BAAS_GENERATION_TIMEOUT'
+          : ['CANCELLED', 'CANCELED', 'STOPPED', 'ABORTED'].includes(status) ? 'BAAS_GENERATION_CANCELLED'
+          : error === privateError ? 'AUTO_HEAL_BOT_UNAVAILABLE' : 'BAAS_GENERATION_FAILED';
+        expect(result).toEqual({ status: 'failed', error: expected });
         expect(result).not.toHaveProperty('result');
       }
     },

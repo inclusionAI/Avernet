@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useId, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type { NodeExecution, NodeStatus, WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 import { api } from '@avernet/clawweb-shared/web/api/client'
@@ -10,6 +10,7 @@ import NodeInputPanel from './NodeInputPanel'
 import RenderedNodeHero from './RenderedNodeHero'
 import NodeStepTracePanel from './NodeStepTracePanel'
 import AnalysisModal from './AnalysisModal'
+import ApprovalNodeDetails from './ApprovalNodeDetails'
 import AIStudioTrainWatchCard from './AIStudioTrainWatchCard'
 import type { SubworkflowGroupRef } from '../api/run-subworkflows'
 import SubworkflowPanel from './subworkflows/SubworkflowPanel'
@@ -70,12 +71,19 @@ interface BaasPollResult {
   error?: string
 }
 
+interface NodeLocateRequest {
+  nodeId: string
+  requestId: number
+}
+
 interface NodeExecutionListProps {
   flowId?: string
   subworkflowGroups?: SubworkflowGroupRef[]
   nodes: NodeExecution[]
   onSelectNode: (nodeId: string) => void
   selectedNodeId?: string
+  /** The parent selects this node directly; increment requestId for each DAG activation. */
+  locateRequest?: NodeLocateRequest
   workflowSpec?: WorkflowSpec
   onAnalyze?: (node: NodeExecution) => void
   onApproval?: (node: NodeExecution) => void
@@ -84,7 +92,7 @@ interface NodeExecutionListProps {
   readOnly?: boolean
 }
 
-export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId, workflowSpec, onAnalyze, onApproval, approvalNodeIds, flowId, subworkflowGroups, renderSubworkflowLinks, readOnly = false }: NodeExecutionListProps) {
+export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId, workflowSpec, onAnalyze, onApproval, approvalNodeIds, flowId, subworkflowGroups, renderSubworkflowLinks, readOnly = false, locateRequest }: NodeExecutionListProps) {
   if (nodes.length === 0) {
     return <p className="py-8 text-center text-gray-400 text-sm">暂无节点执行记录</p>
   }
@@ -130,6 +138,7 @@ export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId,
               node={node}
               isSelected={node.node_id === selectedNodeId}
               onSelect={() => onSelectNode(node.node_id)}
+              locateRequest={locateRequest?.nodeId === node.node_id ? locateRequest : undefined}
               workflowSpec={workflowSpec}
               onAnalyze={onAnalyze}
               onApproval={onApproval}
@@ -151,6 +160,7 @@ function NodeRow({
   node,
   isSelected,
   onSelect,
+  locateRequest,
   workflowSpec,
   onAnalyze,
   onApproval,
@@ -164,6 +174,7 @@ function NodeRow({
   node: NodeExecution
   isSelected: boolean
   onSelect: () => void
+  locateRequest?: NodeLocateRequest
   workflowSpec?: WorkflowSpec
   onAnalyze?: (node: NodeExecution) => void
   onApproval?: (node: NodeExecution) => void
@@ -174,6 +185,20 @@ function NodeRow({
   subworkflowLinks?: ReactNode
   readOnly: boolean
 }) {
+  const rowRef = useRef<HTMLTableRowElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const detailId = useId()
+  const handledRequest = useRef<number | undefined>(undefined)
+  const requestId = locateRequest?.requestId
+  useEffect(() => {
+    if (requestId === undefined || !isSelected || handledRequest.current === requestId) return
+    if (!rowRef.current || !buttonRef.current) return
+    handledRequest.current = requestId
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+    rowRef.current.scrollIntoView({ block: 'center', behavior: reducedMotion ? 'instant' : 'smooth' })
+    buttonRef.current.focus({ preventScroll: true })
+  }, [requestId, isSelected])
+
   const tokenUsage = parseTokenUsage(node.token_usage_json)
   const hasError = node.status === 'failed' && node.error_text
   const hasWarnings = node.status === 'succeeded' && isWarningsErrorText(node.error_text)
@@ -208,14 +233,26 @@ function NodeRow({
   return (
     <>
       <tr
+        ref={rowRef}
         onClick={onSelect}
-        className={`cursor-pointer transition-colors hover:bg-blue-50 ${
-          isSelected ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : ''
-        } ${hasError ? 'bg-red-50/50' : hasWarnings ? 'bg-amber-50/50' : ''}`}
+        className={`cursor-pointer transition-colors motion-reduce:transition-none hover:bg-primary/5 ${
+          isSelected ? 'bg-primary/10 ring-1 ring-inset ring-primary/40'
+            : hasError ? 'bg-red-50/50' : hasWarnings ? 'bg-amber-50/50' : ''
+        }`}
       >
         <td className="px-4 py-3">
-          <div className="font-medium text-gray-900 text-sm">{node.node_title || node.node_id}</div>
-          <div className="font-mono text-gray-400 text-xs">{node.node_id}</div>
+          <button
+            ref={buttonRef}
+            type="button"
+            aria-label={node.node_title ? `${node.node_title} ${node.node_id}` : node.node_id}
+            aria-expanded={isSelected}
+            aria-controls={isSelected ? detailId : undefined}
+            onClick={(event) => { event.stopPropagation(); onSelect() }}
+            className="block w-full rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            <span className="block font-medium text-foreground text-sm">{node.node_title || node.node_id}</span>
+            <span className="block font-mono text-muted-foreground text-xs">{node.node_id}</span>
+          </button>
           {subworkflowLinks}
           {node.progress_message && (
             <div className="mt-0.5 text-gray-400 text-xs">{node.progress_message}</div>
@@ -308,7 +345,7 @@ function NodeRow({
         </tr>
       )}
       {isSelected && (
-        <tr className="bg-gray-50/80">
+        <tr id={detailId} className="bg-gray-50/80">
           <td colSpan={9} className="px-4 py-3">
             <NodeDetailPanel
               node={node}
@@ -481,6 +518,9 @@ function NodeDetailPanel({
         <h3 className="font-semibold text-foreground">子工作流组</h3>
         <p>暂无持久化数据，等待父运行快照；此入口不会启动子运行。</p>
       </section>}
+      {(node.executor_type === 'approval' || workflowSpec?.nodes.some((specNode) => specNode.id === node.node_id && specNode.executor.type === 'approval')) && (
+        <ApprovalNodeDetails flowId={flowId} nodeId={node.node_id} readOnly={readOnly} />
+      )}
       {node.executor_type === 'aistudio-train' ? (
         <AIStudioTrainWatchCard
           key={`${flowId}-${node.node_id}-${node.attempt}`}

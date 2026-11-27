@@ -51,6 +51,7 @@ mod store_lists;
 #[cfg(test)]
 mod store_tests;
 mod store_mapping;
+mod store_projection;
 mod store_reads;
 mod store_repo;
 mod store_writes;

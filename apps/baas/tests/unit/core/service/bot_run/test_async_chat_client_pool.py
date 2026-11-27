@@ -1,7 +1,7 @@
 """test async chat client pool; focused regression tests and fixtures."""
 
 import asyncio
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -330,6 +330,76 @@ class TestSessionRoutedGet:
         result = await pool.get("sbx-4", "ws://host/ws", None, session_key="sk-run")
         assert result is owner
         await pool.close_all()
+
+
+class TestDiscard:
+    def _pool(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        return AsyncChatClientPool(transport_factory=build_chat_transport)
+
+    @pytest.mark.asyncio
+    async def test_discard_removes_entry_and_closes(self):
+        """discard 移出指定连接并异步关闭。"""
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            _ConnEntry,
+        )
+
+        pool = self._pool()
+        client = MagicMock()
+        client.close = AsyncMock()
+        pool._clients["sbx-1"] = [_ConnEntry(client=client)]
+
+        pool.discard(client)
+
+        assert "sbx-1" not in pool._clients
+        await asyncio.sleep(0)
+        client.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_discard_keeps_other_entries(self):
+        """同一 sandbox 下其它连接保留，只移除命中的一条。"""
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            _ConnEntry,
+        )
+
+        pool = self._pool()
+        dead = MagicMock()
+        dead.close = AsyncMock()
+        alive = MagicMock()
+        alive.close = AsyncMock()
+        pool._clients["sbx-2"] = [
+            _ConnEntry(client=alive),
+            _ConnEntry(client=dead),
+        ]
+
+        pool.discard(dead)
+
+        assert [entry.client for entry in pool._clients["sbx-2"]] == [alive]
+        await asyncio.sleep(0)
+        dead.close.assert_awaited_once()
+        alive.close.assert_not_awaited()
+        await pool.close_all()
+
+    @pytest.mark.asyncio
+    async def test_discard_is_idempotent(self):
+        """重复 discard 不抛错，也不重复关闭。"""
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            _ConnEntry,
+        )
+
+        pool = self._pool()
+        client = MagicMock()
+        client.close = AsyncMock()
+        pool._clients["sbx-3"] = [_ConnEntry(client=client)]
+
+        pool.discard(client)
+        pool.discard(client)
+
+        await asyncio.sleep(0)
+        client.close.assert_awaited_once()
 
 
 class TestTotalConnections:

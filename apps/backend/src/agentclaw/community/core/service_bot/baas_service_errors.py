@@ -11,6 +11,14 @@ class BaasBotNotFoundError(BaasServiceError):
     """BaaS confirms that the target Bot no longer exists."""
 
 
+class BaasPublishNotFoundError(BaasServiceError):
+    """BaaS confirms that the publish workflow does not exist (or is hidden)."""
+
+
+class BaasNoDevicesFoundError(BaasServiceError):
+    """BaaS confirms that the Bot has no device records."""
+
+
 class BaasNoActiveDevicesError(BaasServiceError):
     """BaaS confirms that the Bot currently has no active device."""
 
@@ -30,7 +38,9 @@ class BaasTransientServiceError(BaasServiceError):
 
 __all__ = [
     "BaasBotNotFoundError",
+    "BaasNoDevicesFoundError",
     "BaasNoActiveDevicesError",
+    "BaasPublishNotFoundError",
     "BaasServiceError",
     "BaasTransientServiceError",
 ]

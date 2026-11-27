@@ -147,7 +147,7 @@ async fn failed_card_or_profile_write_rolls_back_entire_registration() {
 #[tokio::test]
 async fn provider_a2a_registration_core_conformance() {
     let (chain,_,_,core)=fixture().await;let c=command();let fetched=validated();
-    let card=A2aRegistrationCard { catalog_labels:Default::default(),
+    let card=A2aRegistrationCard { agent_id:Default::default(), catalog_labels:Default::default(),
                 visibility: Default::default(),agent_card_url:Some("https://example.org/card.json".into()),agent_card:fetched.raw,interface:fetched.interface,
         registered_at_ms:1000,};
     let params=RegisterProviderBotParams {webhook_url:None,bot_name:card.agent_card["name"].as_str().unwrap().into(),summary:c.summary,owners:c.owners,
@@ -191,7 +191,7 @@ async fn human_and_provider_atomic_entrypoints_reject_the_wrong_principal() {
     let bot=BotProviderRecord {bot_uuid:"test-bot".into(),provider_id:"provider-a".into(),provider_bot_ref:"remote".into(),
         connection_mode:ProviderBotConnectionMode::Gateway,webhook_url:None,is_deleted:false};
     let v=validated();
-    let card=A2aBotRecord { catalog_labels:Default::default(),bot_uuid:bot.bot_uuid.clone(),provider_id:bot.provider_id.clone(),provider_bot_ref:bot.provider_bot_ref.clone(),
+    let card=A2aBotRecord { visibility:Default::default(),status:Default::default(),user_visibility:Default::default(),agent_id:None, catalog_labels:Default::default(),bot_uuid:bot.bot_uuid.clone(),provider_id:bot.provider_id.clone(),provider_bot_ref:bot.provider_bot_ref.clone(),
         agent_card_url:Some("https://example.org/card.json".into()),agent_card:v.raw,revision:1,};
     let initialization=|actor| OwnershipInitialization {initial_manager_user_ids: Vec::new(),
                 owner_user_id:"delegated-owner".into(),

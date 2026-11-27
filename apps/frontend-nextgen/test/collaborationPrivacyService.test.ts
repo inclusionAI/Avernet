@@ -272,6 +272,34 @@ describe('CollaborationPrivacyService', () => {
     expect(gateway.publicationCommands).toHaveLength(1);
   });
 
+  test('只允许撤回与拦截记录匹配的旧审批投影', async () => {
+    const gateway = new FakeGateway();
+    const bot = gateway.overview.bots[0];
+    bot.pendingPublications.user = {
+      id: 'blocked-puid',
+      audience: 'user',
+      target: { scope: 'all', organizationPaths: [] },
+      submittedAt: '',
+    };
+    const privateConfig = { scope: 'none' as const, organizationPaths: [] };
+    const submit = jest.spyOn(gateway, 'submitPublication').mockResolvedValue({
+      status: 'completed',
+      config: privateConfig,
+    });
+    const service = new CollaborationPrivacyService(gateway);
+    await service.loadOverview('900004');
+    const command = { botId: 'joined', audience: 'user' as const, config: privateConfig };
+
+    await expect(service.submitPublication({ ...command, blockedRiskApprovalPuid: 'other-puid' })).rejects.toThrow(
+      '该可见性已有待审批变更',
+    );
+
+    const updated = await service.submitPublication({ ...command, blockedRiskApprovalPuid: 'blocked-puid' });
+    expect(submit).toHaveBeenCalledWith({ ...command, deptEntries: undefined }, undefined);
+    expect(updated.publication.user).toEqual(privateConfig);
+    expect(updated.pendingPublications.user).toBeUndefined();
+  });
+
   test('归一化后配置无变化时不创建工单', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);

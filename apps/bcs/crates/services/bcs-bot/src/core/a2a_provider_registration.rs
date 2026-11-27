@@ -42,6 +42,33 @@ fn invalid(message: &str) -> ServiceError {
     ServiceError::InvalidOperation { message: message.into(), request_id: None }
 }
 
+fn identity_conflict() -> ServiceError {
+    ServiceError::A2aManagement(
+        bcs_service_api::types::a2a_bot::a2a_management::ManagementError::new(
+            bcs_service_api::types::a2a_bot::a2a_management::ManagementCode::AgentIdentityConflict,
+            "agent_id", "IDENTITY_CONFLICT"),)
+}
+
+/// Resolve the persisted dedicated `bcs_bots.agent_code` without degrading a
+/// trusted Authenticate-as-Agent/subbot derivation. A declared string wins only
+/// when it exactly matches the trusted value or when no independent value exists.
+fn resolve_agent_code(
+    trusted: &bcs_service_api::types::provider_identity::ProviderBotIdentity,
+    declaration: &bcs_service_api::types::a2a_bot::A2aAgentIdentity,
+) -> ServiceResult<Option<String>> {
+    match declaration {
+        bcs_service_api::types::a2a_bot::A2aAgentIdentity::Omitted
+        | bcs_service_api::types::a2a_bot::A2aAgentIdentity::Null => Ok(trusted.agent_code.clone()),
+        bcs_service_api::types::a2a_bot::A2aAgentIdentity::Text(value) => {
+            if trusted.agent_code.as_deref().is_none_or(|current| current == value.as_str()) {
+                Ok(Some(value.clone()))
+            } else {
+                Err(identity_conflict())
+            }
+        }
+    }
+}
+
 #[async_trait]
 impl A2aProviderRegistrationCoreService for A2aProviderRegistrationCore {
     async fn register(&self, provider_id: &str, admin_token: &str, params: RegisterProviderBotParams,
@@ -74,9 +101,10 @@ impl A2aProviderRegistrationCoreService for A2aProviderRegistrationCore {
             new_bot_uuid()
         } else { params.bot_uuid.unwrap_or_else(new_bot_uuid) };
         let owner = owner.as_str();
+        let agent_code = resolve_agent_code(&identity, &card.agent_id)?;
         let capabilities = BotCapabilities { name: Some(params.bot_name), summary: params.summary,
             domains: params.domains, skills: params.skills, scopes: params.scopes,
-            visibility: card.visibility.as_str().into(), agent_code: identity.agent_code.clone(), ..Default::default() };
+            visibility: card.visibility.as_str().into(), agent_code: agent_code.clone(), ..Default::default() };
         let bot = BotProviderRecord { bot_uuid: bot_uuid.clone(), provider_id: provider_id.into(),
             provider_bot_ref: reference.clone(), connection_mode: ProviderBotConnectionMode::Gateway,
             webhook_url: None, is_deleted: false };
@@ -87,7 +115,8 @@ impl A2aProviderRegistrationCoreService for A2aProviderRegistrationCore {
         }};
         let snapshot = A2aBotRecord { catalog_labels: card.catalog_labels, bot_uuid: bot_uuid.clone(), provider_id: provider_id.into(),
             provider_bot_ref: reference.clone(), agent_card_url: card.agent_card_url, agent_card: card.agent_card,
-            revision:1 };
+            visibility: card.visibility, status: bcs_service_api::ActorStatus::Online,
+            user_visibility: Default::default(), agent_id: agent_code, revision:1 };
         // No network calls or locks span this transaction. The existing composite
         // fences concurrent duplicates and includes the real Provider audit actor.
         self.bots.create_provider_admin_a2a_bot_with_ownership(bot, capabilities.clone(), owner, &token, initialization, snapshot).await?;

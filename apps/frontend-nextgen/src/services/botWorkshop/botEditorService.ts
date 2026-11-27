@@ -10,7 +10,7 @@ import type {
 } from '@/domain/botEditor';
 import { botEditorController, type SkillDto, type SpaceSkillDto } from '@/services/backendApi/bots/botEditorController';
 import { isEnvelopeFailure } from '@/services/backendApi/types';
-import { clearBotCdnConfig, storeBotCdnConfigs } from '@/services/bcs/libraryCdnInjector';
+import { clearBotCdnConfig, splitScopedBotId, storeBotCdnConfigs } from '@/services/bcs/libraryCdnInjector';
 import { dataOr, mapPublication, mapResource, mapScreen, mapSkill, toRoutineWrite } from './botEditorMappers';
 import { desktopCapabilityPolicy } from './desktopCapabilityPolicy';
 import { isImageResourcePath } from './resourcePreview';
@@ -70,13 +70,16 @@ export const botEditorService = {
   },
   async registerRenderScreenLibraries(botId: string, ownerId?: string) {
     if (!botId) return 0;
+    // botId 可能是复合 `botId:ownerId` 形态；ownerId 显式入参优先，复合后缀兜底。
+    const scoped = splitScopedBotId(botId);
+    const resolvedOwnerId = ownerId ?? scoped.ownerId;
     try {
-      const response = await botEditorController.listRenderScreens(botId, ownerId);
+      const response = await botEditorController.listRenderScreens(scoped.botId, resolvedOwnerId);
       const screens = response.data?.items ?? [];
-      storeBotCdnConfigs(botId, screens);
+      storeBotCdnConfigs(scoped.botId, resolvedOwnerId, screens);
       return screens.length;
     } catch {
-      clearBotCdnConfig(botId);
+      clearBotCdnConfig(scoped.botId, resolvedOwnerId);
       return 0;
     }
   },

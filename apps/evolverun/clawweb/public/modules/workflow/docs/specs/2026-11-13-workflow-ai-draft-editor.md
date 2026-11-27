@@ -160,3 +160,67 @@ POST；取消仅停止本地接收，不承诺跨实例持久化撤销或远端�
 不得自动转成新任务。当前契约和验证边界见
 [工作流 AI 草稿](../workflow-ai-drafts.md)。此前测试数字只描述各自版本，不能
 代替本次无表版本的回归、宿主集成或部署验收。
+
+
+### 2026-11-26：在最新无表/签名凭据基线上保留 BaaS 失败分类
+
+本地可确认的缺陷是消息结果解析丢失诊断分类：BaaS 的
+`MessageResultResponseData` 返回 `status` 与 `error`，原任务版本把执行失败、超时、
+中止等统一成 `BAAS_GENERATION_FAILED`。最新 dev 已对原生 `data.error` 中的
+`BotBindingNotFoundError` / `Bot binding not found:` 做安全分类，本次在此基础上
+扩充已知认证、会话初始化、结果持久化、上游超时和中止码，不替换现有保护。
+未知诊断仍为固定通用码；字符串原始长度必须不超过 4,096，且只有 adapter 验证
+原消息及冻结 Bot 身份后的原生 envelope `data.error` 可以选择诊断分类。
+外层 API 错误仍是可恢复查询失败，不冒充原任务终态；completed 回复不因包含诊断
+文字被重新推断为终态失败。失败消息中即使夹带合法 YAML 也不可应用。
+
+本次移植仅重放原任务提交 `7fee912df17ce2cc25d3bbe5e65460f9833748d8`，基于
+权威 `origin/dev` 的 `735e609253dbe03da0d908d78461c73fc29e80e5`，不带入旧发布历史。
+前端诊断关联原 `draftId`，它就是已准备的 BaaS `message_id`，不通过持久化
+`job_id` 查任务表；操作性恢复保留同一 signed receipt，只查询原消息。
+七个真实 core + 合成 BaaS 集成用例使用 prepare → 一次 create → 携带原 receipt
+查询/跨 runtime 恢复；验证无任务表、无额外派发、无工作流/部署写入及无秘密日志。
+
+BaaS 支持新会话请求省略 `session_id`，租户及应用身份来自认证上下文；继续由
+配置的 Bot runtime environment 选择配套 endpoint/key，不推断默认 online，不改变
+Bot owner、lifecycle stage、路由、传输、重试、ACL、期限、receipt、响应结构、schema、
+保存或部署。当前契约见[工作流 AI 草稿](../workflow-ai-drafts.md#diagnosing-provider-failure-without-disclosing-diagnostics)。
+
+原事件在先前调查时要求内部登录，未取得原失败消息的 `data.status` / `data.error`，
+未复现真实模型生成、未修改预发配置、未部署。本地分类回归不能证明截图中的上游
+故障已解决；仍需按原消息读取脱敏证据，不能另发一次生成代替原故障证据。
+本记录不声称合并、宿主接入、部署或线上恢复。
+
+#### 原任务版本的历史本地验证（不是本次 dev 基线证据）
+
+原任务记录实际使用 Node `v24.13.0`，并在当时重编译该工作区 SQLite 原生依赖；
+名为 `node@22`、实际返回 v23 的路径不是 Node 22 验证。以下结果仅属于原任务版本：
+
+- workspace `npm run build` / `npm run check` 通过，含凭证边界检查；保留既有大 chunk
+  及 `use client` 构建警告。
+- ClawWeb 聚焦配置：4 文件 / 92 测试通过（BaaS adapter/decoder 87 测试）。
+- Workflow AI 聚焦：16 文件 / 283 测试通过。
+- 当时记录两项独立审查无阻断问题，以及 diff、链接、1,000 行上限和占位扫描通过；
+  这些历史审查不构成本次移植的审批。
+- 未运行整个 monorepo、远端 CI、真实预发模型或端到端验证，不能据此断言原任务恢复。
+
+
+#### 本次移植的当前基线验证（2026-11-26）
+
+本地运行时为 Node `v24.13.0`，没有为此修改 CI 的 Node 版本、依赖、manifest 或
+lockfile，也没有重新安装依赖。保留既有 Git hooks。
+
+- `public/app/clawweb`：`../../../node_modules/.bin/vitest run --config vitest.workflow-ai-draft.config.ts --maxWorkers=2`：
+  **6 文件 / 292 测试通过**；含 7 个 prepare/receipt 真实 core 集成用例、现有 binding
+  安全回归、新增分类的 4,096 字符边界、native-only 与身份校验前置回归。
+- `public/modules/workflow`：聚焦 AI API、services、hooks、drawer、Editor、server
+  routes/services/receipts/storage/concurrency：**17 文件 / 363 测试通过**。已知失败
+  关联原消息 ID；操作性恢复保留原 receipt；未重新准备或派发消息。
+- workspace `npm run build` / `npm run check` 均通过，含公开凭证边界检查。构建仍有
+  非致命 chunk 大小 / `use client` 警告；测试保留现有诊断输出，没有为此改无关代码。
+- core 现有 allowlist 仅追加四个安全错误码，以免在真实 receipt 查询中再次折叠分类；
+  dev 新增 failure 测试只更新取消/超时的过时预期，保留所有安全断言。
+- 原任务中把 completed 的诊断文字视为终态错误、或从外层业务错误推断原任务绑定
+  失败的断言未移植；保留最新 dev 的 completed 解码与外层查询恢复语义。
+- 未运行整个 monorepo、远端 CI、真实 BaaS/预发模型或端到端验证。独立移植审查由
+  主任务另行组织；本记录不是批准、合并、发布或原事件恢复的证明。

@@ -522,11 +522,13 @@ dependencies = [
  "bcs-message-flow",
  "bcs-message-store",
  "bcs-network-tracing",
+ "bcs-observability",
  "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",
  "bcs-test-support",
  "bcs-tracing-api",
+ "chrono",
  "futures",
  "hex",
  "percent-encoding",
@@ -535,10 +537,12 @@ dependencies = [
  "reqwest 0.13.5",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2",
  "tokio",
  "tonic",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -792,6 +796,8 @@ dependencies = [
  "bcs-bot",
  "bcs-bot-store",
  "bcs-domain",
+ "bcs-edge-permission",
+ "bcs-edge-permission-store",
  "bcs-friend",
  "bcs-group",
  "bcs-relation",
@@ -2551,7 +2557,7 @@ dependencies = [
 
 [[package]]
 name = "bcs-service-api"
-version = "7.1.0"
+version = "8.0.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",

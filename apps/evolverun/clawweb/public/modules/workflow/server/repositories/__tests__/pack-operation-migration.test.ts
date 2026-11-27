@@ -10,6 +10,7 @@ vi.mock('@avernet/clawweb-shared/server/schema', async original => ({
 }));
 vi.mock('@avernet/clawweb-shared/server/schema-workflow-snapshot', () => ({ workflowSnapshotMigrations: [] }));
 vi.mock('@avernet/clawweb-shared/server/schema-aistudio-train', () => ({ aistudioTrainMigrations: [] }));
+vi.mock('@avernet/clawweb-shared/server/schema-distributed-lock', () => ({ distributedLockMigrations: [] }));
 
 describe('retired ClawWeb operation migration 149', () => {
   it('reserves 149 without reusing it in active migration lists', async () => {
@@ -54,11 +55,15 @@ describe('retired ClawWeb operation migration 149', () => {
               ...['parent_run_marker', 'child_run_marker'].map(name => ({ name, type: 'TEXT', notnull: 0, pk: 0, dflt_value: null, hidden: 0 })),
             ];
             if (sql === 'PRAGMA table_xinfo(flow_runs)') return [
+              ...['parent_flow_id', 'root_flow_id'].map(name => ({ name, type: 'VARCHAR(255)', notnull: 0, pk: 0, dflt_value: null, hidden: 0 })),
               { name: 'ordinary_run_marker', type: 'TEXT', notnull: 0, pk: 0, dflt_value: null, hidden: 0 },
             ];
             if (sql === 'PRAGMA index_list(ordinary_run_requests)') return [{ name: 'child_unique', unique: 1, partial: 0 }];
             if (sql === 'SELECT name FROM pragma_index_info(?)') return [{ name: 'child_flow_id' }];
             if (sql.includes('information_schema.TABLES') && sql.includes("'ordinary_run_requests'")) return [{ engine: 'InnoDB' }];
+            if (sql.includes('information_schema.COLUMNS') && sql.includes("COLUMN_NAME IN ('parent_flow_id', 'root_flow_id')")) return ['parent_flow_id', 'root_flow_id'].map(column_name => ({
+              column_name, max_length: 255, data_type: 'varchar', is_nullable: 'YES', column_default: null, extra: '', generation_expression: null,
+            }));
             if (sql.includes('information_schema.COLUMNS') && sql.includes("'ordinary_run_requests'")) return required.map(([column_name, max_length]) => ({
               column_name, max_length, data_type: 'varchar', is_nullable: 'NO', column_default: null, extra: '', generation_expression: null,
             }));

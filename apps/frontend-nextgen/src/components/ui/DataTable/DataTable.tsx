@@ -102,7 +102,16 @@ export function DataTable<Row>({
                   rowIndex={rowIndex}
                   columns={columns}
                   rowHeight={rowHeight}
-                  onClick={onRowClick && clickable ? () => onRowClick(row) : undefined}
+                  onClick={
+                    onRowClick && clickable
+                      ? () => {
+                          // 行内拖选文字（如复制 BotId）松开时也会派发 click，此时不应触发行跳转。
+                          const selection = window.getSelection();
+                          if (selection && !selection.isCollapsed) return;
+                          onRowClick(row);
+                        }
+                      : undefined
+                  }
                 />
                 {expanded ? (
                   <tr className="border-b border-divider bg-muted/20">

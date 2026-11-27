@@ -77,6 +77,16 @@ fn default_log_outputs() -> Vec<LogOutputConfig> {
             max_keep_days: 7,
         },
         LogOutputConfig {
+            name: "a2a-http-client-digest".to_string(),
+            path: "./logs".to_string(),
+            file: "a2a-http-client-digest.log".to_string(),
+            level: "info".to_string(),
+            rotation: "daily".to_string(),
+            format: LogOutputFormat::Raw,
+            targets: vec!["bcs_a2a_http_client_digest".to_string()],
+            max_keep_days: 7,
+        },
+        LogOutputConfig {
             name: "common-error".to_string(),
             path: "./logs".to_string(),
             file: "common-error.log".to_string(),

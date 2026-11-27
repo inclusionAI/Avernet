@@ -171,6 +171,26 @@ class RetryRequest(BaseRequest):
     )
 
 
+class RetryDeviceRequest(BaseRequest):
+    """Request model for retrying one failed device inside a publish."""
+
+    operator: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="User performing the device retry",
+    )
+    max_manual_retries: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description=(
+            "Cap on operator-authorized retries for this record, independent of "
+            "the publish's automatic publish_max_retry_times budget"
+        ),
+    )
+
+
 class DrainResultResponse(BaseModel):
     """Response model for drain/execute result."""
 
@@ -517,6 +537,99 @@ async def retry_publish(
         config=request.config,
     )
     return ApiResponse(data=publish)
+
+
+# Error-code prefixes raised by PublishService.retry_device, mapped to HTTP codes.
+_RETRY_DEVICE_ERROR_STATUS = {
+    "PUBLISH_NOT_FOUND": 404,
+    "DEVICE_NOT_IN_PUBLISH": 404,
+    "PUBLISH_TERMINAL": 409,
+    "RECORD_NOT_FAILED": 409,
+    "PROVIDER_RETRY_UNSUPPORTED": 409,
+    "MANUAL_RETRY_EXHAUSTED": 409,
+}
+
+
+@router.post(
+    "/{publish_id}/devices/retry-failed",
+    response_model=ApiResponse[dict[str, Any]],
+)
+@inject
+async def retry_failed_publish_devices(
+    publish_id: Annotated[int, Path(description="Publish ID whose devices to retry")],
+    tenant: Annotated[str, Query(description="Tenant name")] = ...,  # type: ignore[assignment]
+    request: RetryDeviceRequest = ...,  # type: ignore[assignment]
+    service: PublishService = Depends(
+        Provide[ApplicationContainer.services.publish_service]
+    ),
+) -> ApiResponse[dict[str, Any]]:
+    """Retry every failed device of a publish.
+
+    Bulk counterpart of ``POST /{publish_id}/devices/{device_uuid}/retry``: it
+    applies the same operator-authorized retry to each failed device and reports
+    a per-device outcome. One device being refused never aborts the others, so
+    the response distinguishes what was accepted from what was skipped and why.
+    """
+    try:
+        result = await service.retry_failed_devices(
+            tenant=tenant,
+            publish_id=publish_id,
+            operator=request.operator,
+            max_manual_retries=request.max_manual_retries,
+        )
+        return ApiResponse(data=result)
+    except ValueError as exc:
+        code, _, detail = str(exc).partition(": ")
+        if code not in _RETRY_DEVICE_ERROR_STATUS:
+            raise
+        raise HTTPException(
+            status_code=_RETRY_DEVICE_ERROR_STATUS[code],
+            detail={"error_code": code, "message": detail or code},
+        )
+
+
+@router.post(
+    "/{publish_id}/devices/{device_uuid}/retry",
+    response_model=ApiResponse[dict[str, Any]],
+)
+@inject
+async def retry_publish_device(
+    publish_id: Annotated[int, Path(description="Publish ID containing the device")],
+    device_uuid: Annotated[str, Path(description="Device UUID to retry")],
+    tenant: Annotated[str, Query(description="Tenant name")] = ...,  # type: ignore[assignment]
+    request: RetryDeviceRequest = ...,  # type: ignore[assignment]
+    service: PublishService = Depends(
+        Provide[ApplicationContainer.services.publish_service]
+    ),
+) -> ApiResponse[dict[str, Any]]:
+    """Retry one failed device inside an existing publish.
+
+    Re-provisions only the named device through the same per-device
+    orchestrator the automatic retry path uses, instead of rebuilding the whole
+    publish. The retry budget is operator-authorized and independent of
+    ``publish_max_retry_times``, so a publish with automatic retry disabled
+    (the default) can still be recovered.
+
+    Once the device reports success and no real failure remains in the stage,
+    the publish is reconciled back from ``FAILED`` and continues advancing.
+    """
+    try:
+        result = await service.retry_device(
+            tenant=tenant,
+            publish_id=publish_id,
+            device_uuid=device_uuid,
+            operator=request.operator,
+            max_manual_retries=request.max_manual_retries,
+        )
+        return ApiResponse(data=result)
+    except ValueError as exc:
+        code, _, detail = str(exc).partition(": ")
+        if code not in _RETRY_DEVICE_ERROR_STATUS:
+            raise
+        raise HTTPException(
+            status_code=_RETRY_DEVICE_ERROR_STATUS[code],
+            detail={"error_code": code, "message": detail or code},
+        )
 
 
 # Separate router for device callback (different prefix, no publish_id in path)

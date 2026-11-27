@@ -7,16 +7,16 @@
 //! - D2 [`report_unresolved`]: the Worker is not told that a call is stuck.
 //!   The `disp` document keeps the truth (the call stays in its phase and
 //!   held) and the Worker's own deadline later becomes a cancel.
-//! - D3 [`HeldCallRecovery::repost_held`]: nobody re-posts the calls of a
-//!   dead Connector. Their dispatches stay held by it; another Connector
-//!   takes one over only when a hint for it arrives and the membership proves
-//!   the holder dead, which the stub membership never does.
-//! - D8 [`HeldCallRecovery::release`]: drain does not hand calls back; calls
-//!   still running when the grace period ends are reported as remaining.
+//!
+//! Two former stubs are gone. D3 (re-post a dead Connector's calls) is done
+//! by the Worker's supervisor, which re-posts a hint for every open dispatch
+//! about every second; a Connector receiving it takes the call over once
+//! membership answers `Dead`. D8 (hand calls over on drain) is replaced by
+//! `drain` itself: it stops the actors still running at the end of the grace
+//! period and retires the registration, so the same takeover applies.
 
-use async_trait::async_trait;
-use bcs_dist_model::{Did, Holder, Instance};
-use bcs_service_api::port::repo::distributed::common::{Page, PageRequest, StoreError};
+use bcs_dist_model::Did;
+use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_service_api::port::repo::distributed::inbox::AdmitOutcome;
 
 /// Code of a method that waits for a contract.
@@ -43,17 +43,4 @@ pub async fn report_unresolved(_call: &Did, _kind: UnresolvedKind) -> Result<Adm
     Err(StoreError::NotApplied {
         code: NEED_CONTRACT.to_owned(),
     })
-}
-
-/// Recovery steps of held calls, local to the Connector until their contracts
-/// (D3, D8) are final. The storage stubs live in the Connector's store crate;
-/// a thin wrapper joins them at composition.
-#[async_trait]
-pub trait HeldCallRecovery: Send + Sync {
-    /// Delayed contract D3 (walkthrough §16, Gap 5): re-post the held
-    /// dispatches of a dead Connector. Not called by any loop in the MVP.
-    async fn repost_held(&self, dead: &Instance, page: PageRequest) -> Result<Page<Did>, StoreError>;
-    /// Delayed contract D8 (walkthrough §16): hand a call over on drain by
-    /// writing it back to unclaimed and re-notifying.
-    async fn release(&self, did: &Did, holder: &Holder) -> Result<(), StoreError>;
 }

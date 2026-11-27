@@ -25,19 +25,21 @@ No request body is required. URL query parameters:
   This locator is for resource lookup, not proof of caller authorization.
 - `operator`: required non-empty string supplied by the caller as a business operator.
   It is not derived from or proof of the authenticated identity.
-- `biz_id`: optional string, default `""`, for business correlation (not a new
-  HTTP idempotency guarantee).
+- `ttl_seconds`: optional positive integer safety-net teardown delay in seconds.
+  Omission preserves the service default of 86400 seconds (24 hours).
 
-Example: `?owner_id=owner-1&operator=user-1&biz_id=task-1`.
+`biz_id` is generated internally rather than accepted from the caller.
+
+Example: `?owner_id=owner-1&operator=user-1&ttl_seconds=172800` (48 hours).
 Existing public identity handling remains independent of the operator field.
-Template, artifact, image, tag and TTL overrides are not exposed.
+Template, artifact, image and tag overrides are not exposed.
 
 Returns HTTP 202 with the existing Envelope and data fields `success`,
 `publish_id`, `stage` (always `eval`), `bot_uuid`, `baas_publish_id`, and nullable
 `baas_bot_status`. This acknowledges submission, NOT environment readiness.
-The existing service auto-approves the workflow and schedules default TTL teardown
-(currently 24 hours). It does not advance the main publication lifecycle or write
-its binding. The public input contract does not expose `biz_id`. After the publish call
+The existing service auto-approves the workflow and schedules TTL teardown
+(default 24 hours, overridable with `ttl_seconds`). It does not advance the main
+publication lifecycle or write its binding. The public input contract does not expose `biz_id`. After the publish call
 succeeds, the endpoint creates one linked Quality task
 (`task_type="eval"`, `biz_type="service_bot_single"`) through the existing
 QualityTaskService service API. The task UUID uses an internally generated
@@ -60,7 +62,8 @@ or DI binding is introduced. The existing protocol declares eval_publish.
 
 The HTTP route reuses BotServiceProtocol.get_bot_by_address and
 BotPublishServiceProtocol.get_publish_by_id to validate resource addressing before
-calling eval_publish with publish_id/operator/biz_id and an optional resource_spec.
+calling eval_publish with publish_id/operator/biz_id, the existing eval tag,
+optional ttl_seconds, device_count and optional resource_spec.
 Existing identity handling remains; PublicAPIRoute explicitly uses NoCheck.
 EvalPublishMixin merges an optional resource_spec into a copied template_config;
 no bot_address parameter is introduced.
@@ -70,9 +73,10 @@ admission/authorization registrations; no data migration is needed.
 
 ## Validation
 
-Dedicated adapter tests cover accepted payload, required operator and optional biz_id query parameters, OpenAPI
-path constraints and sanitized not-found mapping. Adapter tests also cover cross-Bot/environment rejection before submission. Run existing lifecycle,
-eval-publish, admission/authorization inventory and architecture suites as regression
+Dedicated adapter tests cover accepted payload, required operator, internally
+generated biz_id, optional ttl_seconds, OpenAPI path constraints and sanitized
+not-found mapping. Adapter tests also cover cross-Bot/environment rejection before
+submission. Run existing lifecycle, eval-publish, admission/authorization inventory and architecture suites as regression
 checks. Live BaaS provisioning requires an integration environment.
 
 ### Local validation evidence
@@ -199,3 +203,50 @@ persisted. With all three absent, existing configuration behavior is unchanged.
 Existing Quality callers need no changes. No Plugin API or database change.
 Tests cover real HTTP validation/forwarding and execution of the release callback,
 including no template, existing template, no override, and source immutability.
+
+
+## Per-deployment teardown TTL override
+
+`ttl_seconds` changes only the Backend safety-net teardown task for this new eval
+environment. It is an optional Query parameter with no request body; provided
+values must be positive integers. Zero (including as a purported disable flag),
+negative, fractional, empty and non-numeric values return 422 before provisioning.
+Omission forwards `None` to the existing Service API, preserving its 86400-second
+default. Examples: `&ttl_seconds=7200` for two hours or `&ttl_seconds=172800` for
+48 hours. Existing callers and response fields are unchanged.
+
+The delay starts when the cleanup task is enqueued after obtaining the BaaS Bot
+and publish-workflow IDs, not when the environment becomes ready. The worker
+submits destruction when the task becomes due; successful completion still
+depends on worker availability and the BaaS destroy workflow. This parameter is
+not a provider-side lease renewal or a guarantee of minimum container lifetime;
+other cleanup paths can still release the environment earlier.
+
+The queue deadline retains the existing 90000-second (25-hour) floor and extends
+to `ttl_seconds + 3600` when larger, so long overrides leave at least one hour
+for the cleanup task to execute after its scheduled delay. This also preserves
+the existing deadlines for short TTLs and explicit teardown. No Plugin API,
+database schema, configuration or authorization change is required.
+
+Regression coverage includes omitted and explicit TTL forwarding, generated
+OpenAPI constraints, real HTTP 422 responses, and the actual eval-publish enqueue
+path for short, default and longer-than-24-hour delays. Live timed destruction
+requires a running Backend worker and BaaS environment.
+
+
+### TTL override validation (2026-11-25)
+
+- Focused service-env adapter, eval-publish and publish-task tests: 105 passed.
+- Production-app HTTP cases selected with
+  `tests/community/endpoints/test_endpoint_runner.py -k service-envs`: 26 passed,
+  including the 48-hour override and invalid TTL rejection.
+- Service-bot service and task-queue suites plus selected Service API, module
+  boundary, plugin-contract mapping, admission/authorization inventory, endpoint
+  no-mock and gateway namespace gates: 1995 passed. Existing warnings remain.
+- Focused Ruff, AST parsing, changed Python file line counts and
+  `git diff --check` passed; all changed Python files are below 1000 lines.
+- Tests used the Backend Python 3.12 environment with `readline` import disabled
+  in the test launcher to avoid a local interpreter crash; production code and
+  test assertions were not bypassed.
+- Full Backend CI, Singlebox E2E and live timed container destruction were not
+  run; validation is limited to the focused local suites, without a live stack.

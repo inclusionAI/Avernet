@@ -4,19 +4,24 @@ import { SessionRecoveryNotifier } from "../notification.js";
 import type { RecoveryStoredTask } from "../task-contracts.js";
 const task: RecoveryStoredTask = { schemaVersion: "session-recovery-task/v1", taskId: "SR-one", request: { event_id: "e", delivery_key: "d", session_key: "original", diagnosis: "缺正文", tc_fault_label: null,
   target: { bot_id: "bot", entity_id: "123", env: "prod", engine: "OC" } }, level: "approval", status: "waiting_owner", phase: "assess", version: 2,
-  controlPlaneEnvironment: "pre", observationDeadlineAt: null, ownerDeadlineAt: null, plan: null, judgment: null, evidence: [], timeline: [], pending_results: [],
+  controlPlaneEnvironment: "pre", observationDeadlineAt: null, ownerDeadlineAt: null, plan: null, judgment: null, evidence: [], timeline: [],
   ownerRequest: { requestId: "r1", revision: 1, status: "pending", reason: "permission", summary: "原文档读取权限不足", instructions: "请申请原文档读取权限", evidence_ids: [], resumePhase: "assess", createdAtMs: 1 } };
 it("selects the card route by CW environment even when the Bot is production, and updates one card", async () => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template-pre", callback_route_key: "route-pre" }, prod: { template_id: "template-prod", callback_route_key: "route-prod" } }) }) };
-  const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", config, "pre", notificationBotConfig());
+  const resolveSessionUrl = vi.fn(() => "https://host.example.test/chat?bot=bot&session=original");
+  const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", config, "pre", notificationBotConfig(), resolveSessionUrl);
   expect(await notifier.notifyOwnerRequest({ task, updateOnly: false })).toBe(true);
-  expect(sender.sendCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ outTrackId: "sr-owner:pre:SR-one", templateId: "template-pre", callbackRouteKey: "route-pre", recipientUserId: "123", cardParamMap: expect.objectContaining({ request_id: "r1", task_id: "SR-one", session_key: "original", confirm_label: "已获取权限，继续任务", confirm_status: "normal", confirm_enabled: "true", instructions: "请申请原文档读取权限", control_plane: "pre" }) }));
+  expect(sender.sendCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ outTrackId: "sr-owner:pre:SR-one", templateId: "template-pre", callbackRouteKey: "route-pre", recipientUserId: "123", cardParamMap: expect.objectContaining({ request_id: "r1", task_id: "SR-one", session_key: "original", confirm_label: "已处理，继续任务", confirm_status: "normal", confirm_enabled: "true", instructions: "请申请原文档读取权限", control_plane: "pre" }) }));
   await notifier.notifyOwnerRequest({ task: { ...task, ownerRequest: { ...task.ownerRequest!, requestId: "r2", revision: 2, instructions: "仍缺文档写权限" } }, updateOnly: true });
+  expect(resolveSessionUrl).toHaveBeenNthCalledWith(1, { botId: "bot", ownerId: "123", sessionKey: "original" });
+  expect(resolveSessionUrl).toHaveBeenNthCalledWith(2, { botId: "bot", ownerId: "123", sessionKey: "original" });
+  expect(sender.sendCard.mock.calls[0][0].cardParamMap.session_url).toBe(resolveSessionUrl());
+  expect(sender.updateCard.mock.calls[0][0].cardParamMap.session_url).toBe(resolveSessionUrl());
   expect(sender.sendCard).toHaveBeenCalledOnce();
   expect(sender.sendCard.mock.calls[0][0].cardParamMap).not.toHaveProperty("config");
   expect(sender.updateCard.mock.calls[0][0].cardParamMap).not.toHaveProperty("config");
-  expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ outTrackId: "sr-owner:pre:SR-one", cardParamMap: expect.objectContaining({ request_id: "r2", instructions: "仍缺文档写权限" }) }));
+  expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ outTrackId: "sr-owner:pre:SR-one", cardParamMap: expect.objectContaining({ request_id: "r2", instructions: "仍缺文档写权限", status: "" }) }));
 });
 it("does not claim card delivery when disabled, not configured for the control plane, or rejected by the sender", async () => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn().mockRejectedValue(new Error("unknown")), updateCard: vi.fn() };
@@ -29,22 +34,24 @@ it("does not claim card delivery when disabled, not configured for the control p
   await expect(notifier.notifyOwnerRequest({ task, updateOnly: false })).rejects.toThrow("unknown");
 });
 
-it("updates the single permission button after Owner feedback", async () => {
+it.each(["running", "waiting_owner", "waiting_effect"] as const)("updates feedback controls without displaying task status while %s", async status => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const config = { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template", callback_route_key: "route" } }) }) };
-  const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", config, "pre", notificationBotConfig());
+  const resolveSessionUrl = vi.fn(() => "https://host.example.test/chat?bot=bot&session=original");
+  const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", config, "pre", notificationBotConfig(), resolveSessionUrl);
   const pending: RecoveryStoredTask = { ...task, ownerRequest: { ...task.ownerRequest!, reason: "permission" } };
   await notifier.notifyOwnerRequest({ task: pending, updateOnly: false });
   const initial = sender.sendCard.mock.calls[0][0];
-  expect(initial.cardParamMap).toMatchObject({ confirm_label: "已获取权限，继续任务", confirm_visible: "true", confirm_status: "normal", confirm_enabled: "true", session_key: "original" });
-  expect(Object.keys(initial.cardParamMap)).toHaveLength(14);
+  expect(initial.cardParamMap).toMatchObject({ confirm_label: "已处理，继续任务", confirm_visible: "true", confirm_status: "normal", confirm_enabled: "true", session_key: "original", status: "" });
+  expect(initial.cardParamMap.session_url).toBe(resolveSessionUrl());
+  expect(Object.keys(initial.cardParamMap)).toHaveLength(15);
   expect(Object.values(initial.cardParamMap).every(value => typeof value === "string")).toBe(true);
   expect(initial.cardParamMap).not.toHaveProperty("config");
 
-  await notifier.notifyOwnerRequest({ task: { ...pending, status: "running", ownerRequest: { ...pending.ownerRequest!, status: "confirmed" } }, updateOnly: true });
+  await notifier.notifyOwnerRequest({ task: { ...pending, status, ownerRequest: { ...pending.ownerRequest!, status: "confirmed" } }, updateOnly: true });
   expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith({
     outTrackId: initial.outTrackId,
-    cardParamMap: { ...initial.cardParamMap, confirm_label: "已处理", confirm_enabled: "false", confirm_status: "disabled", status: "已收到处理反馈，正在核验" },
+    cardParamMap: { ...initial.cardParamMap, confirm_label: "已处理", confirm_enabled: "false", confirm_status: "disabled", status: "" },
   });
   expect(sender.sendCard).toHaveBeenCalledOnce();
 });
@@ -54,7 +61,7 @@ it.each(["completed", "failed", "canceled"] as const)("disables an outstanding b
     findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template", callback_route_key: "route" } }) }),
   }, "pre", notificationBotConfig());
   await notifier.notifyOwnerRequest({ task: { ...task, status }, updateOnly: true });
-  expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ cardParamMap: expect.objectContaining({ confirm_status: "disabled", confirm_enabled: "false" }) }));
+  expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ cardParamMap: expect.objectContaining({ confirm_status: "disabled", confirm_enabled: "false", status: "", session_url: "" }) }));
   expect(sender.sendCard).not.toHaveBeenCalled();
 });
 it("clips the original logical session key by UTF-8 bytes without changing the stored request", async () => {
@@ -77,7 +84,8 @@ it("clips the original logical session key by UTF-8 bytes without changing the s
 it.each(["recovered", "not_recovered", "unknown"] as const)("sends an ordinary handoff as a noninteractive card while preserving its %s outcome", async effect => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const config = { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "shared-template" } }) }) };
-  const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", config, "pre", notificationBotConfig());
+  const resolveSessionUrl = vi.fn(() => "https://host.example.test/chat?bot=bot&session=original");
+  const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", config, "pre", notificationBotConfig(), resolveSessionUrl);
   const summary = "完整调查报告：" + "原任务、现场证据、已做核查及未知项。".repeat(90);
   const handoff = effect === "recovered"
     ? { summary: "评审已完成，仍有可选的规则说明建议。", instructions: "可按需补充规则说明示例，无需重跑本次评审。" }
@@ -87,9 +95,11 @@ it.each(["recovered", "not_recovered", "unknown"] as const)("sends an ordinary h
   const sent = sender.sendCard.mock.calls[0][0];
   expect(sent).toMatchObject({ recipientUserId: "123", templateId: "shared-template", outTrackId: "sr-owner-handoff:pre:SR-one",
     cardParamMap: { task_id: "SR-one", request_id: "", control_plane: "pre", bot_id: "bot", session_key: "original",
-      summary: handoff.summary, instructions: handoff.instructions, confirm_visible: "false", confirm_enabled: "false", confirm_status: "disabled", confirm_label: "" } });
+      summary: handoff.summary, instructions: handoff.instructions, status: "", confirm_visible: "false", confirm_enabled: "false", confirm_status: "disabled", confirm_label: "" } });
   expect(sent).not.toHaveProperty("callbackRouteKey");
   expect(sent.cardParamMap).not.toHaveProperty("config");
+  expect(sent.cardParamMap.session_url).toBe(resolveSessionUrl());
+  expect(resolveSessionUrl).toHaveBeenCalledWith(expect.objectContaining({ botId: "bot", ownerId: "123", sessionKey: "original" }));
   expect(sent.cardParamMap.task_url).toContain("recoveryTaskId=SR-one");
   expect(sent.cardParamMap.summary).toBe(handoff.summary);
   expect(sent.cardParamMap.instructions).toBe(handoff.instructions);
@@ -130,4 +140,55 @@ it("preserves complete legacy instructions or points to the complete Task instea
   expect(card.instructions).toBe("请打开任务详情，查看完整的权限对象、处理事项和入口。");
   expect(card.instructions).not.toContain("完整事项见任务页");
   expect(card.task_url).toContain("recoveryTaskId=SR-one");
+});
+
+it("links material instructions to the original conversation through the host without adding callback controls", async () => {
+  const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
+  const row = { enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template" } }) };
+  const resolveSessionUrl = vi.fn(() => "https://host.example.test/chat?bot=bot&session=logical");
+  const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", { findByKey: async () => row }, "pre", notificationBotConfig(), resolveSessionUrl);
+  const input = { ownerId: "123", botId: "bot", targetEnvironment: "prod" as const, taskId: "SR-one", sessionKey: "logical", kind: "result" as const, summary: "完整调查",
+    handoff: { reason: "owner_material_needed" as const, summary: "评审缺少正文", instructions: "请补充活动规则正文。" } };
+  await notifier.notify(input);
+  expect(resolveSessionUrl).toHaveBeenCalledWith(expect.objectContaining({ ownerId: "123", botId: "bot", sessionKey: "logical" }));
+  const card = sender.sendCard.mock.calls[0][0];
+  expect(card.cardParamMap).toMatchObject({ instructions: `${input.handoff.instructions}\n\n[去原会话补材料](${resolveSessionUrl()})`, confirm_visible: "false", status: "" });
+  expect(card.cardParamMap.session_url).toBe(resolveSessionUrl());
+  expect(card).not.toHaveProperty("callbackRouteKey");
+  expect(Object.keys(card.cardParamMap)).toHaveLength(15);
+  row.enabled = 0;
+  expect(await notifier.notify(input)).toBe(false);
+  expect(sender.sendCard).toHaveBeenCalledOnce();
+});
+
+it("keeps the original-conversation link and the full stored checklist when combined text exceeds the card limit", async () => {
+  const sender = { sendNotification: vi.fn(), sendCard: vi.fn() };
+  const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", {
+    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template" } }) }),
+  }, "pre", notificationBotConfig(), () => "https://host.example.test/chat?session=logical");
+  const instructions = "材料".repeat(170);
+  const handoff = { reason: "owner_material_needed" as const, summary: "缺少材料", instructions };
+  await notifier.notify({ ownerId: "123", botId: "bot", targetEnvironment: "prod", taskId: "SR-one", sessionKey: "logical", kind: "result", summary: "完整调查", handoff });
+  const text = sender.sendCard.mock.calls[0][0].cardParamMap.instructions;
+  expect(Buffer.byteLength(text)).toBeLessThanOrEqual(1024);
+  expect(text).toContain("完整补料清单");
+  expect(text).toContain("[去原会话补材料](https://host.example.test/chat?session=logical)");
+  expect(handoff.instructions).toBe(instructions);
+});
+
+// The card transport caps each string parameter at 1KB.
+it.each([1024, 1025])("keeps a %s-byte session URL intact or hides the entry", async length => {
+  const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
+  const prefix = "https://host.example.test/chat?session=";
+  const url = prefix + "a".repeat(length - prefix.length);
+  const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", {
+    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template", callback_route_key: "route" } }) }),
+  }, "pre", notificationBotConfig(), () => url);
+  await notifier.notifyOwnerRequest({ task, updateOnly: false });
+  await notifier.notifyOwnerRequest({ task: { ...task, status: "canceled" }, updateOnly: true });
+  await notifier.notify({ ownerId: "123", botId: "bot", targetEnvironment: "prod", taskId: "SR-one", sessionKey: "original", kind: "result", summary: "需要处理" });
+  const expected = length <= 1024 ? url : "";
+  for (const [card] of [...sender.sendCard.mock.calls, ...sender.updateCard.mock.calls]) {
+    expect(card.cardParamMap.session_url).toBe(expected);
+  }
 });

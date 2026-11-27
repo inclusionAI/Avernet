@@ -1,68 +1,23 @@
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { TopicFirstFloor } from './TopicFirstFloor';
-import type {
-  CommunityAuthor,
-  CommunityPostLocation,
-  CommunityReply,
-  CommunityTopic,
-  ForumTargetRef,
-  InteractionSummary,
-} from '@/domain/community/types';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CommunityAuthor } from '@/domain/community/types';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Floor } from './Floor';
-import { ReplyComposer, type ReplyComposerPayload } from './ReplyComposer';
+import type { ReplyComposerPayload, ReplyComposerTarget } from './ReplyComposer';
+import { TopicDetailFooter } from './TopicDetailFooter';
 import { TopicDetailHeader } from './TopicDetailHeader';
-import { buildReplyGroups } from './model';
+import { TopicFirstFloor } from './TopicFirstFloor';
+import { acceptsTopicReply, buildReplyGroups } from './model';
+import type { CommunityTopicDetailProps } from './types';
+import { useReplyScroll } from './useReplyScroll';
 
-export interface CommunityTopicDetailProps {
-  topic: CommunityTopic | null;
-  replies: CommunityReply[];
-  loading: boolean;
-  error: string | null;
-  closing: boolean;
-  deleting: boolean;
-  helpfulPostId: string | null;
-  onBack: () => void;
-  currentUserId?: string;
-  targetSummary?: InteractionSummary;
-  /** Actor-target summary used only to render the current viewer's liked/favorited state. */
-  viewerTopicSummary?: InteractionSummary;
-  getAuthorSummary?: (author: CommunityAuthor) => InteractionSummary | undefined;
-  loadAuthorSummary?: (author: CommunityAuthor) => void;
-  followAuthor?: (author: CommunityAuthor) => Promise<boolean>;
-  authorFollowLoading?: (author: CommunityAuthor) => boolean;
-  authorFollowed?: (author: CommunityAuthor) => boolean;
-  likePending?: boolean;
-  favoritePending?: boolean;
-  onLike?: (target: ForumTargetRef) => void;
-  onFavorite?: (target: ForumTargetRef) => void;
-  getReplySummary?: (postId: string) => InteractionSummary | undefined;
-  getReplyViewerSummary?: (postId: string) => InteractionSummary | undefined;
-  replyLikePending?: (postId: string) => boolean;
-  onLikeReply?: (postId: string) => void;
-  onCloseTopic: () => Promise<boolean>;
-  onEditTopic: () => void;
-  onDeleteTopic: () => Promise<boolean>;
-  onSetPostHelpful: (postId: string, helpful: boolean) => Promise<boolean>;
-  // 回帖分页
-  replyLoading: boolean;
-  replyError: string | null;
-  replySaving?: boolean;
-  onSubmitReply?: (payload: ReplyComposerPayload) => Promise<boolean>;
-  replyPage: number;
-  replyPageCount: number;
-  replyPageSize: number;
-  onGoToReplyPage: (page: number) => void;
-  /** Initial navigation target resolved by the backend for personal-center links. */
-  pendingPostLocation?: CommunityPostLocation | null;
-  onClearPendingPostLocation?: () => void;
-}
+export type { CommunityTopicDetailProps } from './types';
 
 export function CommunityTopicDetail({
   topic,
   replies,
+  replyTotal,
   loading,
   error,
   closing,
@@ -70,6 +25,7 @@ export function CommunityTopicDetail({
   helpfulPostId,
   onBack,
   currentUserId,
+  viewer,
   targetSummary,
   viewerTopicSummary,
   getAuthorSummary,
@@ -86,14 +42,15 @@ export function CommunityTopicDetail({
   replyLikePending,
   onLikeReply,
   onCloseTopic,
-  onEditTopic,
   onDeleteTopic,
   onSetPostHelpful,
   replyLoading,
   replyError,
   replySaving = false,
   onSubmitReply,
-  replyPage,
+  firstReplyPage,
+  lastReplyPage,
+  failedReplyPage,
   replyPageCount,
   replyPageSize,
   onGoToReplyPage,
@@ -101,32 +58,19 @@ export function CommunityTopicDetail({
   onClearPendingPostLocation,
 }: CommunityTopicDetailProps) {
   const [expandedReplyIds, setExpandedReplyIds] = useState<Record<string, boolean>>({});
-  const replyElementsRef = useRef(new Map<string, HTMLElement | null>());
-  const replyComposerRef = useRef<HTMLDivElement | null>(null);
+  const [composer, setComposer] = useState<'topic' | ReplyComposerTarget | null>(null);
+  const [picks, setPicks] = useState<number[]>([]);
+  useEffect(() => {
+    setComposer(null);
+    setPicks([]);
+    setExpandedReplyIds({});
+  }, [topic?.id]);
 
-  const replyOffset = (replyPage - 1) * replyPageSize;
+  const replyOffset = (firstReplyPage - 1) * replyPageSize;
   const floorGroups = useMemo(() => buildReplyGroups(replies, replyOffset + 1), [replies, replyOffset]);
-  const registerReplyElement = useCallback(
-    (postId?: string) => (element: HTMLElement | null) => {
-      if (postId) replyElementsRef.current.set(postId, element);
-    },
-    [],
-  );
-
   const goToReplyComposer = useCallback(() => {
-    const composer = replyComposerRef.current?.querySelector('textarea');
-    if (!composer) return;
-    composer.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    composer.focus();
-  }, []);
-
-  const locateTargetReply = useCallback((postId: string) => {
-    const element = replyElementsRef.current.get(postId);
-    if (!element) return;
-    element.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    element.classList.add('bg-primary/10');
-    const clearOnNextClick = () => element.classList.remove('bg-primary/10');
-    window.setTimeout(() => window.addEventListener('click', clearOnNextClick, { once: true }), 0);
+    setPicks([]);
+    setComposer('topic');
   }, []);
 
   const toggleThreadReplies = useCallback((postId: string) => {
@@ -144,10 +88,6 @@ export function CommunityTopicDetail({
     [replyLikePending],
   );
 
-  // 楼中楼是楼层页面内的局部展开状态；翻页后必须回到默认展示前 2 条。
-  useEffect(() => {
-    setExpandedReplyIds({});
-  }, [replyPage]);
   useEffect(() => {
     if (!pendingPostLocation) return;
     if (pendingPostLocation.postId === pendingPostLocation.rootPostId) return;
@@ -157,20 +97,39 @@ export function CommunityTopicDetail({
     }));
   }, [pendingPostLocation]);
 
-  useEffect(() => {
-    if (!pendingPostLocation || loading) return;
-    const element = replyElementsRef.current.get(pendingPostLocation.postId);
-    if (!element) return;
-    locateTargetReply(pendingPostLocation.postId);
-    onClearPendingPostLocation?.();
-  }, [
-    expandedReplyIds,
-    loading,
-    locateTargetReply,
-    onClearPendingPostLocation,
-    pendingPostLocation,
-    replies,
-  ]);
+  const { scrollRoot, registerReplyElement, locateTargetReply, loadReplyPage, onScroll, onWheel } = useReplyScroll({
+    firstPostId: floorGroups[0]?.reply.id,
+    firstReplyPage, lastReplyPage, replyPageCount, onGoToReplyPage,
+    replies, expandedReplyIds, loading, pendingPostLocation, onClearPendingPostLocation,
+    edgeLoadingBlocked: !topic || loading || !!error || replyLoading || replySaving ||
+      !!helpfulPostId || !!replyError || !!pendingPostLocation,
+  });
+  const replyLoadError = replyError && (
+    <div className="flex items-center justify-center gap-3 py-2">
+      <p className="m-0 text-sm text-muted-foreground">{replyError}</p>
+      <Button variant="secondary" size="sm" onClick={() => loadReplyPage(failedReplyPage ?? firstReplyPage)}>
+        重试
+      </Button>
+    </div>
+  );
+  const earlierReplyError = failedReplyPage !== null && failedReplyPage !== undefined && failedReplyPage < firstReplyPage;
+  const observedReplyCount = (replyTotal ?? replies.length) + replies.reduce(
+    (count, reply) => count + (reply.childReplies?.length ?? 0), 0,
+  );
+  const replyCount = replyTotal === undefined
+    ? topic?.replyCount ?? observedReplyCount
+    : Math.max(topic?.replyCount ?? 0, observedReplyCount);
+
+  const resetComposer = () => {
+    setComposer(null);
+    setPicks([]);
+  };
+  const submitReply = async (payload: ReplyComposerPayload) => {
+    if (!topic || !acceptsTopicReply(topic)) return false;
+    const ok = await onSubmitReply?.(payload);
+    if (ok) setComposer(null);
+    return ok === true;
+  };
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -178,19 +137,17 @@ export function CommunityTopicDetail({
         topic={topic}
         closing={closing}
         deleting={deleting}
-        replyPage={replyPage}
-        replyPageCount={replyPageCount}
-        replyLoading={replyLoading}
-        currentUserId={currentUserId}
         onBack={onBack}
         onCloseTopic={onCloseTopic}
-        onEditTopic={onEditTopic}
         onDeleteTopic={onDeleteTopic}
-        onGoToReplyPage={onGoToReplyPage}
-        onGoToReplyComposer={goToReplyComposer}
       />
-      <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
-        <div className="flex w-full flex-col px-4 pb-6 sm:px-6 lg:px-10">
+      <main
+        ref={scrollRoot}
+        className="app-scrollbar min-h-0 flex-1 overflow-y-auto"
+        onScroll={onScroll}
+        onWheel={onWheel}
+      >
+        <div className="flex w-full flex-col px-5 pb-6">
           {loading ? (
             <div className="space-y-3 py-4">
               <Skeleton.ListItem />
@@ -209,16 +166,30 @@ export function CommunityTopicDetail({
             />
           ) : topic ? (
             <>
-              {/* 楼主楼层仅在第 1 页显示：分页语义本身一直以一级楼层为单位。 */}
-              {replyPage === 1 ? (
+              {earlierReplyError && replyLoadError}
+              {firstReplyPage === 1 ? (
                 <TopicFirstFloor
+                  onPick={
+                    currentUserId && onSubmitReply
+                      ? (index) => {
+                          setPicks((prev) =>
+                            topic.topicConfig?.poll?.selection === 'multi'
+                              ? prev.includes(index)
+                                ? prev.filter((i) => i !== index)
+                                : [...prev, index]
+                              : [index],
+                          );
+                          setComposer('topic');
+                        }
+                      : undefined
+                  }
                   topic={topic}
                   currentUserId={currentUserId}
                   targetSummary={targetSummary}
                   viewerTopicSummary={viewerTopicSummary}
                   getAuthorSummary={getSummaryFor}
                   loadAuthorSummary={loadSummaryFor}
-                  followAuthor={followFor}
+                  followAuthor={followAuthor ? followFor : undefined}
                   authorFollowLoading={authorFollowLoading}
                   authorFollowed={authorFollowed}
                   likePending={likePending}
@@ -255,17 +226,21 @@ export function CommunityTopicDetail({
                   onLocateTarget={locateTargetReply}
                   registerElement={registerReplyElement}
                   currentUserId={currentUserId}
-                  canReply={topic.topicType === 'discussion' || topic.topicType === 'share'}
-                  replySaving={replySaving}
+                  canReply={
+                    !!currentUserId &&
+                    topic.status === 'open' &&
+                    (topic.topicType === 'discussion' || topic.topicType === 'share')
+                  }
+                  onReplyTarget={setComposer}
                   onSubmitReply={onSubmitReply}
                   getAuthorSummary={getSummaryFor}
                   loadAuthorSummary={loadSummaryFor}
-                  followAuthor={followFor}
+                  followAuthor={followAuthor ? followFor : undefined}
                   authorFollowLoading={authorFollowLoading}
                   authorFollowed={authorFollowed}
                 />
               ))}
-              {!replies.length && !replyLoading && (
+              {!replies.length && !replyLoading && !replyError && (
                 <p className="py-6 text-center text-sm text-muted-foreground">暂时还没有回复</p>
               )}
               {replyLoading && (
@@ -273,28 +248,32 @@ export function CommunityTopicDetail({
                   回复加载中...
                 </p>
               )}
-              {replyError && (
-                <div className="mt-4 flex items-center justify-center gap-3 py-2">
-                  <p className="m-0 text-sm text-muted-foreground">{replyError}</p>
-                  <Button variant="secondary" size="sm" onClick={() => onGoToReplyPage(replyPage)}>
-                    重试
-                  </Button>
-                </div>
-              )}
-              {topic.status === 'open' && currentUserId && topic.topicType !== 'notice' ? (
-                <div ref={replyComposerRef}>
-                  <ReplyComposer
-                    topic={topic}
-                    submitLabel="回复主题"
-                    saving={replySaving}
-                    onSubmit={(payload) => onSubmitReply?.(payload) ?? Promise.resolve(false)}
-                  />
-                </div>
-              ) : null}
+              {!earlierReplyError && replyLoadError}
             </>
           ) : null}
         </div>
       </main>
+      {topic && !loading && !error && (
+        <TopicDetailFooter
+          topic={topic}
+          currentUserId={currentUserId}
+          viewer={viewer}
+          targetSummary={targetSummary}
+          viewerTopicSummary={viewerTopicSummary}
+          likePending={likePending}
+          favoritePending={favoritePending}
+          onLike={onLike}
+          onFavorite={onFavorite}
+          composer={composer}
+          picks={picks}
+          setPicks={setPicks}
+          replySaving={replySaving}
+          replyCount={replyCount}
+          onOpenComposer={goToReplyComposer}
+          onCancel={resetComposer}
+          onSubmit={submitReply}
+        />
+      )}
     </div>
   );
 }

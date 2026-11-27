@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+from contextvars import ContextVar
+from threading import Event, get_ident
 from unittest.mock import Mock
 
 import pytest
@@ -10,6 +14,11 @@ from starlette.requests import Request
 from agentclaw.community.adapters.http.openapi_v1.containers.router import (
     list_containers,
     restart_container,
+)
+from agentclaw.community.core.service_bot.errors import (
+    ServiceContainerConflictError,
+    ServiceContainerUpstreamError,
+    ServicePublicationNotFoundError,
 )
 
 
@@ -78,6 +87,90 @@ async def test_list_containers_projects_summary_and_nullable_metrics():
     facade.list_containers.assert_called_once_with(
         "bot-1", actor_id="member", owner_id="owner"
     )
+
+
+@pytest.mark.asyncio
+async def test_list_containers_leaves_event_loop_available_and_copies_context():
+    loop = asyncio.get_running_loop()
+    loop_thread = get_ident()
+    started = asyncio.Event()
+    release = Event()
+    caller_context = ContextVar("container_test_caller", default="")
+    token = caller_context.set("member")
+
+    def slow_list(bot_id: str, *, actor_id: str, owner_id: str) -> dict:
+        assert get_ident() != loop_thread
+        assert caller_context.get() == actor_id == "member"
+        assert owner_id == "owner"
+        loop.call_soon_threadsafe(started.set)
+        assert release.wait(timeout=5), "event loop did not release the query"
+        return {"bot_id": bot_id, "instances": instances()}
+
+    facade = Mock()
+    facade.list_containers.side_effect = slow_list
+    pending = asyncio.create_task(
+        list_containers("bot-1", request(), "member", "owner", facade)
+    )
+    try:
+        await asyncio.wait_for(started.wait(), timeout=2)
+        # This task can run before the synchronous provider query completes.
+        await asyncio.sleep(0)
+        assert not pending.done()
+    finally:
+        release.set()
+        caller_context.reset(token)
+        response = await asyncio.wait_for(pending, timeout=5)
+
+    assert response.request_id == "trace-1"
+    assert response.data.summary.total == 4
+    facade.list_containers.assert_called_once_with(
+        "bot-1", actor_id="member", owner_id="owner"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "status", "message"),
+    [
+        (ServicePublicationNotFoundError, 404, "Not found"),
+        (
+            ServiceContainerConflictError,
+            409,
+            "Container is not in a valid state for this operation",
+        ),
+        (ServiceContainerUpstreamError, 502, "Container service error"),
+    ],
+)
+async def test_list_containers_preserves_error_envelopes(error, status, message):
+    facade = Mock()
+    facade.list_containers.side_effect = error("private provider details")
+
+    response = await list_containers(
+        "bot-1", request(), "member", "owner", facade
+    )
+
+    assert response.status_code == status
+    assert json.loads(response.body) == {
+        "code": status * 1000,
+        "message": message,
+        "data": None,
+        "request_id": "trace-1",
+    }
+    facade.list_containers.assert_called_once_with(
+        "bot-1", actor_id="member", owner_id="owner"
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_containers_does_not_swallow_unmapped_errors():
+    facade = Mock()
+    failure = RuntimeError("unexpected provider failure")
+    facade.list_containers.side_effect = failure
+
+    with pytest.raises(RuntimeError) as caught:
+        await list_containers("bot-1", request(), "member", "owner", facade)
+
+    assert caught.value is failure
 
 
 @pytest.mark.asyncio

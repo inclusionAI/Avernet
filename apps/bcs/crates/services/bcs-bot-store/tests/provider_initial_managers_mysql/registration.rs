@@ -13,8 +13,19 @@ fn capabilities(id: &str) -> BotCapabilities {
     BotCapabilities {name: Some(id.into()), ..Default::default()}
 }
 fn card(id: &str) -> A2aBotRecord {
-    A2aBotRecord { catalog_labels:Default::default(), bot_uuid: id.into(), provider_id: "provider-a".into(), provider_bot_ref: id.into(),
-        agent_card: serde_json::json!({"name":id}), agent_card_url: None, revision: 1 }
+    A2aBotRecord {
+        catalog_labels: Default::default(),
+        bot_uuid: id.into(),
+        provider_id: "provider-a".into(),
+        provider_bot_ref: id.into(),
+        visibility: bcs_service_api::types::a2a_bot::A2aRegistrationVisibility::Protected,
+        status: bcs_service_api::ActorStatus::Online,
+        user_visibility: bcs_service_api::application::v1::UserVisibility::Protected,
+        agent_id: None,
+        agent_card: serde_json::json!({"name": id}),
+        agent_card_url: None,
+        revision: 1,
+    }
 }
 async fn scalar(db: &dyn DbPlugin, sql: &str) -> i64 {
     db.query(DbStatement::new(sql)).await.unwrap()[0].get_i64("n").unwrap().unwrap()

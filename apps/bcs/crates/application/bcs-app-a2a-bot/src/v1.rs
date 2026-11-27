@@ -72,6 +72,7 @@ pub(crate) fn failure(error: ServiceError) -> ApplicationError {
                 Code::InvalidRequest => ApplicationError::invalid(code, message),
                 Code::ProviderBotRefConflict
                 | Code::BotNameConflict
+                | Code::AgentIdentityConflict
                 | Code::SourceAgentConflict
                 | Code::SourceAgentChangeNotAllowed
                 | Code::TargetChanged
@@ -130,6 +131,7 @@ impl A2aService for A2aApiService {
                 owners: command.owners,
                 summary: command.summary,
                 visibility: command.visibility,
+                agent_id: command.agent_id,
                 source: required_source(command.source)?,
                 now_ms: now_ms(),
             })
@@ -157,6 +159,20 @@ impl A2aService for A2aApiService {
             .update_agent(bcs_service_api::application::a2a_bot::UpdateAgentCommand {
                 provider_admin_token:command.token,bot_id:command.bot_id,
                 source:source(command.source)?,visibility:command.visibility,catalog_labels:command.catalog_labels,
+                agent_id:command.agent_id,
+            })
+            .await
+            .map_err(failure)
+    }
+    async fn update_metadata(&self, command: UpdateA2aAgentMetadata) -> Result<ManagedA2aCard, ApplicationError> {
+        self.management
+            .update_agent_metadata(bcs_service_api::application::a2a_bot::UpdateAgentCardMetadataCommand {
+                provider_admin_token: command.token,
+                bot_id: command.bot_id,
+                catalog_labels: command.catalog_labels,
+                status: command.status,
+                visibility: command.visibility,
+                user_visibility: command.user_visibility,
             })
             .await
             .map_err(failure)
@@ -201,6 +217,7 @@ mod tests {
             Code::BotNotFound,
             Code::InvalidRequest,
             Code::ProviderBotRefConflict,
+            Code::AgentIdentityConflict,
             Code::BotNameConflict,
             Code::SourceAgentConflict,
             Code::SourceAgentChangeNotAllowed,

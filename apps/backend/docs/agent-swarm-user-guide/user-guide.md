@@ -121,6 +121,12 @@ run's bot agents inherit it, so none of them waits for approval.
 | 7 | GET | `/runs/{run_id}/report` | HTML report page |
 | 8 | GET | `/health` | Liveness probe (auth-free) |
 | 9 | GET | `/ready` | Readiness probe (auth-free) |
+| 10 | POST | `/agent/definitions/add` | Create an agent definition |
+| 11 | POST | `/agent/definitions/list` | List *your* definitions (paged, filterable) |
+| 12 | POST | `/agent/definitions/get` | Read your live definition |
+| 13 | POST | `/agent/definitions/versions` | Your definition's version history |
+| 14 | POST | `/agent/definitions/update` | Revise it (new version, same id) |
+| 15 | POST | `/agent/definitions/delete` | Retire it |
 
 ## 5. Endpoint reference
 
@@ -285,6 +291,63 @@ row cursors) — a fresh connection replays the whole run to date, then tails.
 - `GET /health` — auth-free `{"status":"ok","version":"v1"}`; `version` is
   the machine-read keyword for fleet pinning.
 - `GET /ready` — auth-free `{"ready":true}`.
+
+### 5.8 Agent definitions — `/agent/definitions`
+
+A definition is a **named, user-owned agent** you write once and reference by id
+instead of re-sending its whole manifest on every submit.
+
+**Every route is POST.** The action is named in the path rather than carried by
+the HTTP verb, so the target id travels in the request body:
+
+| Path | Body | Behaviour |
+| --- | --- | --- |
+| `POST /agent/definitions/add` | `{name, role?, instructions?, kind?, model?, engine?, bot_type?, manifest_document?}` | Create. `409` when you already own a live definition with that name |
+| `POST /agent/definitions/list` | `{name?, page?, page_size?}` | Your own live definitions, paged |
+| `POST /agent/definitions/get` | `{definition_id}` | Your live version. `404` when absent, deleted, or someone else's |
+| `POST /agent/definitions/versions` | `{definition_id}` | Every version, newest first, including retired ones, plus `deleted` |
+| `POST /agent/definitions/update` | `{definition_id, definition_row_id, ...}` | Revise: writes a **new version** under the same `definition_id` |
+| `POST /agent/definitions/delete` | `{definition_id}` | Retire the live version; idempotent |
+
+**They are private.** Every definition belongs to exactly one user. Another
+user — even in the same tenant — cannot read, revise, delete, or reference it,
+and every such call answers `404` (never `403`, which would confirm the id
+exists).
+
+**A revision is a new row, not an edit.** `update` takes the version you read
+(`definition_row_id`) and writes a successor under the same `definition_id`
+while retiring the predecessor. Revisions are therefore all retrievable, and a
+run keeps the version it actually used.
+
+- Send a `definition_row_id` that is no longer live and you get `409`: someone
+  revised it first. Nothing is written and no version is created.
+- `creator_id` (who authored the definition) is copied forward; `modifier_id`
+  (who produced this version) is the caller. Both, and `owner_id`, come from
+  your session — never from the request body.
+- A manifest is **validated when you write it**, not on every run, and stored
+  byte for byte. A rejected document answers `422` with the platform's own
+  diagnostic and nothing is persisted.
+- `versions` returns retired versions too, because that history is the point.
+  It also states `deleted` explicitly: a deleted definition and a superseded
+  version retire a row identically, so "no live version" is otherwise the only
+  signal. A definition id with no row at all answers `404`.
+
+Submit a run by reference with `agent_refs`, or inline with `agents` — never
+both in one request:
+
+```json
+{
+  "tenant": "teamclaw",
+  "goal": "write a greeting",
+  "agent_refs": [{"definition_id": "7c1e4b9a…", "alias": "greeter"}]
+}
+```
+
+`alias` is optional and becomes the catalog name the orchestrator spawns under.
+A reference to a definition that is missing, deleted, or owned by someone else
+refuses the **whole** submission before any run is created.
+
+The inline `agents` form is unchanged, field for field.
 
 ## 6. Vocabulary
 

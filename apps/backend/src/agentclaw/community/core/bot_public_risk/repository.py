@@ -27,8 +27,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.core.bot_public_risk.legacy_approval import archive_legacy_approval
 from agentclaw.community.core.bot_public_risk.repository_protocol import RiskCheck, RequestConflict
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
 
@@ -179,6 +181,14 @@ class BotPublicRiskRepository:
                 previous.next_action_at = None
                 if previous.phase != "PUBLISHED":
                     previous.phase = "CLOSED"
+                if previous.public_scope == "legacy" and previous.approval_puid:
+                    bot = session.query(BotModel).filter_by(
+                        id=previous.bot_pk, env=previous.env, avernet_tenant=tenant, is_delete=0,
+                    ).with_for_update().one_or_none()
+                    if bot and bot.ext:
+                        ext = json.loads(bot.ext)
+                        if archive_legacy_approval(ext, expected_puid=previous.approval_puid):
+                            bot.ext = json.dumps(ext, ensure_ascii=False)
                 session.flush()
             values = {
                 f.name: getattr(record, f.name)

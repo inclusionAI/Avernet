@@ -191,3 +191,68 @@ it('defers post-create refresh until editor navigation is committed, preserving 
   await waitFor(() => expect(result.current.context.workflowId).toBe('new-flow'));
   expect(result.current.context.ready).toBe(true);
 });
+
+it('exposes introduction only after an identity-ready list resolves empty, not during refresh', async () => {
+  let resolve!: (value: typeof rows) => void;
+  read.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const { result } = renderHook(() => useTaskEscortWorkspaceContext(scope));
+  expect(result.current.showIntroduction).toBe(false);
+  expect(result.current.context.loading).toBe(true);
+  await act(async () => resolve([]));
+  expect(result.current.showIntroduction).toBe(true);
+  expect(result.current.context.ready).toBe(false);
+  read.mockResolvedValue(rows);
+  act(() => result.current.context.refreshWorkflows());
+  expect(result.current.showIntroduction).toBe(false);
+  await waitFor(() => expect(result.current.context.ready).toBe(true));
+  expect(result.current.showIntroduction).toBe(false);
+});
+
+it.each(['missing', ''])('does not introduce an empty list for invalid explicit workflowId=%j', async (id) => {
+  history.replace(`/evolution-factory/task-escort?view=dashboard&workflowId=${id}`);
+  read.mockResolvedValue([]);
+  const { result } = renderHook(() => useTaskEscortWorkspaceContext(scope));
+  await waitFor(() => expect(result.current.context.error).toMatch(/所选工作流/));
+  expect(result.current.showIntroduction).toBe(false);
+});
+
+it('withdraws empty introduction synchronously on scope changes and rejects late empty responses', async () => {
+  read.mockResolvedValueOnce([]);
+  const { result, rerender } = renderHook(({ current }) => useTaskEscortWorkspaceContext(current), {
+    initialProps: { current: scope },
+  });
+  await waitFor(() => expect(result.current.showIntroduction).toBe(true));
+  let resolveOld!: (value: typeof rows) => void;
+  read.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolveOld = done;
+      }),
+  );
+  rerender({ current: { ...scope, key: 'other:space', userId: 'other' } });
+  expect(result.current.showIntroduction).toBe(false);
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+  const signal = read.mock.calls[1][1]!;
+  rerender({ current: { ...scope, ready: false } });
+  expect(result.current.showIntroduction).toBe(false);
+  expect(signal.aborted).toBe(true);
+  await act(async () => resolveOld([]));
+  expect(result.current.showIntroduction).toBe(false);
+});
+
+it('never introduces a failed list or an unready identity', async () => {
+  read.mockRejectedValue(new Error('403 forbidden'));
+  const { result, rerender } = renderHook(({ current }) => useTaskEscortWorkspaceContext(current), {
+    initialProps: { current: { ...scope, ready: false } },
+  });
+  expect(result.current.showIntroduction).toBe(false);
+  expect(read).not.toHaveBeenCalled();
+  rerender({ current: scope });
+  await waitFor(() => expect(result.current.context.error).toBe('403 forbidden'));
+  expect(result.current.showIntroduction).toBe(false);
+});

@@ -24,7 +24,16 @@ fn a2a_test_user_fixture_requires_pre_release_and_a_scoped_header() {
     assert!(validate_loaded_config_for_environment(&config, Environment::Pre).is_err());
     config.provider_http.bypass_headers.clear();
     config.a2a_test_user.as_mut().unwrap().interface_url = "http://agent.example.test/weather".into();
-    assert!(validate_loaded_config_for_environment(&config, Environment::Pre).is_err());
+    assert!(validate_loaded_config_for_environment(&config, Environment::Pre).is_ok());
+    assert!(validate_loaded_config_for_environment(&config, Environment::Prod).is_err());
+    for url in [
+        "ftp://agent.example.test/weather",
+        "http://user@agent.example.test/weather",
+        "http://agent.example.test/weather#fragment",
+    ] {
+        config.a2a_test_user.as_mut().unwrap().interface_url = url.into();
+        assert!(validate_loaded_config_for_environment(&config, Environment::Pre).is_err(), "{url}");
+    }
 }
 
 #[test]

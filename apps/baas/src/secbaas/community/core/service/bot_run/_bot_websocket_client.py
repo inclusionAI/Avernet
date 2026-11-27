@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 import websockets
 from websockets.asyncio.client import ClientConnection
+from websockets.protocol import State
 
 from secbaas.community.api.bot_interaction import InteractionResolution
 from secbaas.community.http_header import get_http_header_plugin
@@ -28,6 +29,7 @@ from secbaas.community.logger import get_logger
 from secbaas.community.tracer import get_tracer_plugin
 
 from ._chat_errors import ChatRequestError as ChatRequestError
+from ._chat_errors import RequestNotSentError
 from ._interaction_protocol import (
     EngineInteractionResolveExchange,
     build_interaction_resolve_request,
@@ -493,7 +495,23 @@ class BotWebSocketClient:
         loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
         self._pending_requests[request_id] = future
-        await self._ws.send(json.dumps(request_frame))
+        # 写出前快照连接状态：websockets 在非 OPEN 状态不写出任何数据，
+        # 用于区分"帧未发出（可安全重放一次）"与"可能已写出（结果未知）"。
+        state_before_send = self._ws.state
+        try:
+            await self._ws.send(json.dumps(request_frame))
+        except websockets.ConnectionClosed as exc:
+            self._discard_pending_request(request_id)
+            if state_before_send is not State.OPEN:
+                raise RequestNotSentError(
+                    f"{method} request not sent: connection already "
+                    f"{state_before_send.name.lower()} ({exc})"
+                ) from exc
+            # 写出过程中连接关闭，帧可能已到达对端：保持结果未知，不重放。
+            raise
+        except BaseException:
+            self._discard_pending_request(request_id)
+            raise
 
         try:
             return await asyncio.wait_for(future, timeout=timeout)
@@ -501,3 +519,9 @@ class BotWebSocketClient:
             raise TimeoutError(f"Request {method} timed out")
         finally:
             self._pending_requests.pop(request_id, None)
+
+    def _discard_pending_request(self, request_id: str) -> None:
+        """移除无人等待的 pending future，避免其异常无人消费。"""
+        future = self._pending_requests.pop(request_id, None)
+        if future is not None and not future.done():
+            future.cancel()

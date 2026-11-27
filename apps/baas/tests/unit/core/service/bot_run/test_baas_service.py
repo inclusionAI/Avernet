@@ -37,6 +37,7 @@ from secbaas.community.core.service.bot_run._async_chat_client_pool import (
     AsyncChatClientPool,
 )
 from secbaas.community.core.service.bot_run._bot_run_utils import plan_session_id
+from secbaas.community.core.service.bot_run._chat_errors import RequestNotSentError
 from secbaas.community.plugins.bot.engine_adapter.aicoding.real import (
     AICodingAdapter,
 )
@@ -1747,6 +1748,107 @@ class TestCreateSessionAdapterErrors:
 
 
 # ==================== TestSendMessageExtended ====================
+
+
+class TestSendMessageNotSentRetry:
+    """池化连接在写帧前已关闭：丢弃死连接并有界重试一次。"""
+
+    @pytest.mark.asyncio
+    async def test_retries_once_on_request_not_sent(
+        self, service, wss_resolver, mock_pool
+    ):
+        """首次 RequestNotSentError → discard 旧连接、重新取连接并成功。"""
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+        stale = AsyncMock()
+        stale.send_message = AsyncMock(side_effect=RequestNotSentError("not sent"))
+        fresh = AsyncMock()
+        fresh.send_message = AsyncMock(return_value=("ok", "done"))
+        mock_pool.get = AsyncMock(side_effect=[stale, fresh])
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed") as mock_completed,
+            patch.object(service, "_mark_session_failed") as mock_failed,
+        ):
+            response = await service.send_message(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+            )
+
+        assert response.content == "ok"
+        mock_pool.discard.assert_called_once_with(stale)
+        assert mock_pool.get.await_count == 2
+        mock_completed.assert_called_once_with("SESSION-xyz", result={"content": "ok"})
+        mock_failed.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_second_not_sent_still_marks_failed(
+        self, service, wss_resolver, mock_pool
+    ):
+        """重试仍 RequestNotSentError → 仍按既有失败分支处理，不逃逸裸异常。"""
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+        stale = AsyncMock()
+        stale.send_message = AsyncMock(side_effect=RequestNotSentError("first"))
+        fresh = AsyncMock()
+        fresh.send_message = AsyncMock(side_effect=RequestNotSentError("second"))
+        mock_pool.get = AsyncMock(side_effect=[stale, fresh])
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_failed") as mock_failed,
+        ):
+            with pytest.raises(BotServiceError, match="Failed to send message"):
+                await service.send_message(
+                    session_id=SESSION_ID,
+                    message="hello",
+                    binding_info=binding,
+                    timeout=30.0,
+                )
+
+        mock_pool.discard.assert_called_once_with(stale)
+        assert mock_pool.get.await_count == 2
+        mock_failed.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_other_errors_are_not_retried(
+        self, service, wss_resolver, mock_pool
+    ):
+        """非 RequestNotSentError（如等待响应期间断链）不重试、不 discard。"""
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+        mock_client = AsyncMock()
+        mock_client.send_message = AsyncMock(
+            side_effect=RuntimeError("connection lost")
+        )
+        mock_pool.get = AsyncMock(return_value=mock_client)
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_failed"),
+        ):
+            with pytest.raises(BotServiceError, match="Failed to send message"):
+                await service.send_message(
+                    session_id=SESSION_ID,
+                    message="hello",
+                    binding_info=binding,
+                    timeout=30.0,
+                )
+
+        mock_pool.discard.assert_not_called()
+        assert mock_pool.get.await_count == 1
 
 
 class TestSendMessageExtended:

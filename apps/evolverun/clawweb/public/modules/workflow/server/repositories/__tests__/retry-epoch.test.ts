@@ -3,12 +3,15 @@ import Database from 'better-sqlite3';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db';
 import { FlowRunRepository } from '../flow-run-repository.js';
 
+const timeoutReason = JSON.stringify({ reason: 'flow_timeout', timeoutSecs: 60, ranForSecs: 61 });
+
 it('rejects delayed completion and watchdog writes from the previous retry attempt', async () => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE flow_runs (
     flow_id TEXT PRIMARY KEY, status TEXT NOT NULL, retry_epoch INTEGER NOT NULL DEFAULT 0,
-    completed_at INTEGER, gmt_modified INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER,
-    current_phase TEXT, result_json TEXT, input_json TEXT, succeeded_count INTEGER, failed_count INTEGER
+    started_at INTEGER DEFAULT 1, completed_at INTEGER, gmt_modified INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER,
+    current_phase TEXT, result_json TEXT, input_json TEXT, succeeded_count INTEGER, failed_count INTEGER,
+    state_json TEXT DEFAULT '{"effectiveFlowTimeoutMinutes":1}'
   );
   INSERT INTO flow_runs (flow_id, status, retry_epoch) VALUES ('flow', 'failed', 0);`);
   const db = new SqliteDatabase(raw);
@@ -20,7 +23,7 @@ it('rejects delayed completion and watchdog writes from the previous retry attem
       status: 'succeeded', completedAt: 10, succeededCount: 0, failedCount: 0, retryEpoch: 0,
     })).toBe(false);
     expect(await runs.markFailedIfRunning('flow', {
-      reason: 'old timeout', currentPhase: 'timeout', completedAt: 11, retryEpoch: 0,
+      reason: timeoutReason, currentPhase: 'timeout', completedAt: 11, retryEpoch: 0,
     })).toBe(false);
     expect(raw.prepare('SELECT status, retry_epoch FROM flow_runs').get()).toEqual({ status: 'running', retry_epoch: 1 });
     expect(await runs.updateCompletion('flow', {
@@ -34,8 +37,9 @@ it('accepts nullable legacy epochs and never repeats an older retry', async () =
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE flow_runs (
     flow_id TEXT PRIMARY KEY, status TEXT NOT NULL, retry_epoch INTEGER DEFAULT NULL,
-    completed_at INTEGER, gmt_modified INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER,
-    current_phase TEXT, result_json TEXT, input_json TEXT, succeeded_count INTEGER, failed_count INTEGER
+    started_at INTEGER DEFAULT 1, completed_at INTEGER, gmt_modified INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER,
+    current_phase TEXT, result_json TEXT, input_json TEXT, succeeded_count INTEGER, failed_count INTEGER,
+    state_json TEXT DEFAULT '{"effectiveFlowTimeoutMinutes":1}'
   );
   INSERT INTO flow_runs (flow_id, status) VALUES ('legacy', 'running');
   INSERT INTO flow_runs (flow_id, status) VALUES ('legacy-watchdog', 'running');
@@ -47,7 +51,7 @@ it('accepts nullable legacy epochs and never repeats an older retry', async () =
       status: 'succeeded', completedAt: 10, succeededCount: 0, failedCount: 0,
     })).toBe(true);
     expect(await runs.markFailedIfRunning('legacy-watchdog', {
-      reason: 'timeout', currentPhase: 'timeout', completedAt: 10,
+      reason: timeoutReason, currentPhase: 'timeout', completedAt: 10,
     })).toBe(true);
     expect(await runs.resumeForRetry('retry', 2)).toBe('conflict');
     expect(await runs.resumeForRetry('retry', 1)).toBe('resumed');
@@ -92,8 +96,9 @@ it('keeps a positive-epoch watchdog claim final without blocking normal failure 
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE flow_runs (
     flow_id TEXT PRIMARY KEY, status TEXT NOT NULL, retry_epoch INTEGER DEFAULT 0,
-    completed_at INTEGER, gmt_modified INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER,
-    current_phase TEXT, result_json TEXT, input_json TEXT, succeeded_count INTEGER, failed_count INTEGER
+    started_at INTEGER DEFAULT 1, completed_at INTEGER, gmt_modified INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER,
+    current_phase TEXT, result_json TEXT, input_json TEXT, succeeded_count INTEGER, failed_count INTEGER,
+    state_json TEXT DEFAULT '{"effectiveFlowTimeoutMinutes":1}'
   );
   INSERT INTO flow_runs (flow_id, status, retry_epoch) VALUES ('timed-out', 'running', 1);
   INSERT INTO flow_runs (flow_id, status, retry_epoch) VALUES ('normal-failure', 'failed', 1);`);
@@ -101,7 +106,7 @@ it('keeps a positive-epoch watchdog claim final without blocking normal failure 
   try {
     const runs = new FlowRunRepository(db);
     expect(await runs.markFailedIfRunning('timed-out', {
-      reason: 'timeout', currentPhase: 'timeout', completedAt: 10, retryEpoch: 1,
+      reason: timeoutReason, currentPhase: 'timeout', completedAt: 10, retryEpoch: 1,
     })).toBe(true);
     expect(await runs.updateCompletion('timed-out', {
       status: 'succeeded', completedAt: 11, succeededCount: 0, failedCount: 0, retryEpoch: 1,
@@ -112,7 +117,7 @@ it('keeps a positive-epoch watchdog claim final without blocking normal failure 
     expect(await runs.updateStatus('timed-out', 'running', 1)).toBe(false);
     expect(await runs.updateStatus('timed-out', 'waiting', 1)).toBe(false);
     expect(raw.prepare('SELECT status, result_json FROM flow_runs WHERE flow_id = ?').get('timed-out'))
-      .toEqual({ status: 'failed', result_json: 'timeout' });
+      .toEqual({ status: 'failed', result_json: timeoutReason });
     expect(await runs.updateCompletion('normal-failure', {
       status: 'failed', completedAt: 12, succeededCount: 0, failedCount: 0, retryEpoch: 1,
     })).toBe(true);
@@ -144,7 +149,8 @@ it('keeps the original status and completion contract usable with null, zero, an
   raw.exec(`CREATE TABLE flow_runs (
     flow_id TEXT PRIMARY KEY, status TEXT NOT NULL, retry_epoch INTEGER DEFAULT NULL,
     started_at INTEGER, completed_at INTEGER, gmt_modified INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER,
-    current_phase TEXT, result_json TEXT, input_json TEXT, succeeded_count INTEGER, failed_count INTEGER
+    current_phase TEXT, result_json TEXT, input_json TEXT, succeeded_count INTEGER, failed_count INTEGER,
+    state_json TEXT DEFAULT '{"effectiveFlowTimeoutMinutes":1}'
   );`);
   const db = new SqliteDatabase(raw);
   try {
@@ -166,9 +172,9 @@ it('keeps the original status and completion contract usable with null, zero, an
         expect(await runs.updateCompletion(id, { status: 'succeeded', completedAt: 200, succeededCount: 1, failedCount: 0 })).toBe(true);
       }
     }
-    raw.prepare('INSERT INTO flow_runs (flow_id, status, retry_epoch) VALUES (?, ?, ?)').run('watchdog', 'running', 2);
-    expect(await runs.markFailedIfRunning('watchdog', { reason: 'timeout', currentPhase: 'P1', completedAt: 200 })).toBe(true);
-    expect(await runs.markFailedIfRunning('watchdog', { reason: 'timeout', currentPhase: 'P1', completedAt: 200 })).toBe(false);
+    raw.prepare('INSERT INTO flow_runs (flow_id, status, retry_epoch, started_at) VALUES (?, ?, ?, 1)').run('watchdog', 'running', 2);
+    expect(await runs.markFailedIfRunning('watchdog', { reason: timeoutReason, currentPhase: 'P1', completedAt: 200 })).toBe(true);
+    expect(await runs.markFailedIfRunning('watchdog', { reason: timeoutReason, currentPhase: 'P1', completedAt: 200 })).toBe(false);
   } finally { await db.close(); }
 });
 
@@ -194,14 +200,14 @@ it('keeps ordinary retry, completion, and timeout usable on a schema without ret
   raw.exec(`CREATE TABLE flow_runs (
     flow_id TEXT PRIMARY KEY, status TEXT, started_at INTEGER, completed_at INTEGER, gmt_modified INTEGER,
     total_duration_ms INTEGER, total_token_usage INTEGER, current_phase TEXT, result_json TEXT, input_json TEXT,
-    succeeded_count INTEGER, failed_count INTEGER
+    succeeded_count INTEGER, failed_count INTEGER, state_json TEXT DEFAULT '{"effectiveFlowTimeoutMinutes":1}'
   ); INSERT INTO flow_runs (flow_id, status, started_at, failed_count) VALUES ('flow', 'failed', 1, 1);`);
   const db = new SqliteDatabase(raw);
   try {
     const runs = new FlowRunRepository(db);
     expect((await runs.resetFailedForRetry('flow', async () => 1)).status).toBe('updated');
     expect(await runs.updateStatus('flow', 'running')).toBe(true);
-    expect(await runs.markFailedIfRunning('flow', { reason: 'timeout', currentPhase: 'P1', completedAt: 10 })).toBe(true);
+    expect(await runs.markFailedIfRunning('flow', { reason: timeoutReason, currentPhase: 'P1', completedAt: 10 })).toBe(true);
     expect(await runs.updateStatus('flow', 'running')).toBe(true);
     expect(await runs.updateCompletion('flow', { status: 'succeeded', completedAt: 20, succeededCount: 1, failedCount: 0 })).toBe(true);
     expect(raw.prepare('SELECT started_at, status FROM flow_runs').get()).toEqual({ started_at: 1, status: 'succeeded' });
@@ -213,7 +219,8 @@ it('invalidates the preceding explicit epoch when the original status API reopen
   raw.exec(`CREATE TABLE flow_runs (
     flow_id TEXT PRIMARY KEY, status TEXT, retry_epoch INTEGER, started_at INTEGER, completed_at INTEGER,
     gmt_modified INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER, current_phase TEXT,
-    result_json TEXT, input_json TEXT, succeeded_count INTEGER, failed_count INTEGER
+    result_json TEXT, input_json TEXT, succeeded_count INTEGER, failed_count INTEGER,
+    state_json TEXT DEFAULT '{"effectiveFlowTimeoutMinutes":1}'
   );`);
   const db = new SqliteDatabase(raw);
   try {
@@ -229,7 +236,7 @@ it('invalidates the preceding explicit epoch when the original status API reopen
       }
       expect(await runs.updateStatus(status, 'running')).toBe(true);
       expect(await runs.updateCompletion(status, { status: 'failed', completedAt: 200, resultJson: 'late old result', succeededCount: 0, failedCount: 1, retryEpoch: 2 })).toBe(false);
-      expect(await runs.markFailedIfRunning(status, { reason: 'old timeout', currentPhase: 'P1', completedAt: 200, retryEpoch: 2 })).toBe(false);
+      expect(await runs.markFailedIfRunning(status, { reason: timeoutReason, currentPhase: 'P1', completedAt: 200, retryEpoch: 2 })).toBe(false);
       expect(await runs.updateStatus(status, 'failed', 2)).toBe(false);
       expect(await runs.resumeForRetry(status, 3)).toBe('conflict');
       expect(raw.prepare('SELECT status, retry_epoch, started_at, completed_at, result_json FROM flow_runs WHERE flow_id = ?').get(status))

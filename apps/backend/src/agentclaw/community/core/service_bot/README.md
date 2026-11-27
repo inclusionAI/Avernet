@@ -10,6 +10,16 @@ legacy owner/entity lookup; service-source mismatches fail closed.
 
 Service-bot domain — bot publication facade, BAAS service binding, sub-resource management.
 
+## Container-list request scheduling
+
+`GET /openapi/v1/bots/{bot_id}/containers` awaits the synchronous publication
+facade in Starlette's bounded worker pool. Authorization, database reads and
+provider health checks run together off the event loop; the response still waits
+for the completed snapshot and retains its existing schema and error mapping.
+Slow health checks no longer block the event loop, but provider latency and
+worker-pool saturation can still delay this request. No retry, cache, timeout
+change or fire-and-forget task is introduced; container restart is unchanged.
+
 ## Online retry and restart recovery
 
 Online publication retry and restart share the same candidate decision and
@@ -132,6 +142,15 @@ of Repo/Center mounts; ``shared_corpora`` is an artifact exclusion and audit
 contract, never a BaaS mount instruction. Changes to the Skills Pool probe,
 mapping contract or historical manifest reader therefore affect publication
 compatibility and must be reviewed together with this module.
+
+A file snapshot records a Center reference only when the artifact carries the
+exact version link. A self-contained Skill directory with a readable root
+`SKILL.md` at the same active name is delivered as local content. A missing
+entry, a dependent directory, or an unexpected Center link blocks the build.
+Legacy manifests include Center delivery only when at least one included Skill
+references it. Only delivered Center references require the V3 mapping capability
+and exact Store Version verification. Pool manifests retain their shared-corpus
+declarations.
 
 Publish history is associated with its source Bot through immutable
 `ac_bot_publish.source_bot_pk`. Version duplicate checks and stage-record reads

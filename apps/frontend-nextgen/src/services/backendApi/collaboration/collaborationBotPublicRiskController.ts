@@ -48,6 +48,8 @@ export interface BotPublicRiskCheckRecord {
   invalidation_reason: string | null;
   /** 已关联审批实例 ID；非审批结果 */
   approval_puid: string | null;
+  /** 审批平台的决定，公开是否生效由 phase 决定。 */
+  approval_decision?: string | null;
 }
 
 /** 创建请求体。client_request_id：同一用户操作（含网络重试）保持相同，新意图新 ID。 */

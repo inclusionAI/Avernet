@@ -1,0 +1,304 @@
+"""L5 Open 方法服务共享骨架(spec §4.4 / §8):构造注入与治理面前置。
+
+``OpenMethodService`` 与 Swarm 服务同款按 1000 行 CI 边界拆片
+(spec §5):机会面操作在 ``opportunity.py``,申请与录取面
+操作在 ``application.py``,本模块持有共用的构造注入
+(``@inject``)、Collet 身份解析、Swift 前置断面(结构 Open binding
+守卫 + RF#2 + G1 授权)与机会/申请加载助手;切片不互相 import。
+
+RF#2 与结构守卫在 ``_gate`` 落地:``"Open"`` 必须在 ``method_names``
+中(顶层 "Open + Group" 或嵌套 "Open" 均满足)——Group/Swarm binding
+上的 Open 剖面操作是结构漂移,直接拒绝;binding 非 ACTIVE 时副作用
+操作一律拒绝(spec §4 通用规则);可申请机会查询也要求 ACTIVE。授权经 G1
+``MethodOpsAuthorizerProtocol.check_open_op``:八个治理面操作 owner
+面;``query_opportunities`` 是公开只读面、``submit_application`` 是公开提交面
+(均要求已认证 actor,不要求已参与);发现查询先经无绑定的
+``check_open_discovery`` 授权,再筛选并授权各 ACTIVE Open binding;``withdraw``
+是 self-help(与目标行 ``accountable_principal_ref`` 字符串相等才
+放行,调用方先定位目标行再授权,沿 group leave 先例)。P1 无身份
+注册表,字符串相等只保证"声明一致"(G1 §8.1)。
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from injector import inject
+
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError,
+    ContextCollabValidationError,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
+    MethodOpsAuthorizerProtocol,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    CollaborationReader,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    BindingState,
+    MethodBinding,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+    OpenOpportunity,
+    ParticipationApplication,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
+    OpenApplicationCommand,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
+    current_axes,
+)
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    MethodStoreProtocol,
+    StoreAxes,
+)
+
+
+def _now() -> str:
+    """UTC ISO 时间戳;与 lifecycle 服务同款,不注入时钟。"""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_timestamp(value: str, owner: str, field: str) -> datetime:
+    """ISO 时间串解析;坏格式抛校验错误;naive 串按 UTC 对待。"""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise ContextCollabValidationError(
+            f"{owner}.{field} must be an ISO timestamp string, got: {value!r}"
+        ) from None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+class OpenMethodServiceBase:
+    """Open 服务共用骨架:store / 授权器 / Collet 仓储注入 + 机会/申请
+    加载与治理面前置(``_gate``);切片 mixin 经 ``self._*`` 共享访问。"""
+
+    @inject
+    def __init__(
+        self,
+        store: MethodStoreProtocol,
+        authorizer: MethodOpsAuthorizerProtocol,
+        collab_repo: CollaborationReader,
+    ) -> None:
+        self._store = store
+        self._authorizer = authorizer
+        self._collab_repo = collab_repo
+
+    def _load_binding(
+        self, axes: StoreAxes, collab_context_id: str, method_binding_id: str
+    ) -> MethodBinding:
+        binding = self._store.get_binding(axes, method_binding_id, collab_context_id)
+        if binding is None:
+            raise ContextCollabNotFoundError(
+                f"method binding {method_binding_id!r} not found in "
+                f"collaboration context {collab_context_id!r}"
+            )
+        return binding
+
+    def _resolve_application_opportunity(
+        self, opportunity_ref: str
+    ) -> tuple[MethodBinding, OpenOpportunity]:
+        """Resolve an exact ref in current axes; scoped duplicate IDs fail closed."""
+        if not isinstance(opportunity_ref, str) or not opportunity_ref.strip():
+            raise ContextCollabValidationError("opportunity_ref must not be empty")
+        axes = current_axes()
+        candidates = []
+        for binding in self._store.list_bindings_in_axes(axes):
+            opportunity = self._store.get_opportunity(
+                axes, opportunity_ref, binding.method_binding_id, binding.collab_context_id
+            )
+            if opportunity is not None:
+                candidates.append((binding, opportunity))
+        if not candidates:
+            raise ContextCollabNotFoundError(
+                f"open opportunity {opportunity_ref!r} not found in current axes"
+            )
+        if len(candidates) != 1:
+            raise ContextCollabValidationError(
+                f"ambiguous opportunity_ref {opportunity_ref!r} in current axes"
+            )
+        return candidates[0]
+
+    def _resolve_application_binding(
+        self, collect_id: str, application_ref: str
+    ) -> tuple[MethodBinding, ParticipationApplication]:
+        """Resolve exactly one application in this Collet and current axes.
+
+        Include inactive/non-Open bindings in ambiguity detection; _gate then
+        checks the resolved binding's structure, state and G1 authorization.
+        """
+        for name, value in (("collect_id", collect_id), ("application_ref", application_ref)):
+            if not isinstance(value, str) or not value.strip():
+                raise ContextCollabValidationError(f"{name} must not be empty")
+        axes = current_axes()
+        candidates = []
+        for binding in self._store.list_bindings(axes, collect_id):
+            application = self._store.get_application(
+                axes, application_ref, binding.method_binding_id, collect_id
+            )
+            if application is not None:
+                candidates.append((binding, application))
+        if not candidates:
+            raise ContextCollabNotFoundError(
+                f"open application {application_ref!r} not found in Collet {collect_id!r}"
+            )
+        if len(candidates) != 1:
+            raise ContextCollabValidationError(
+                f"ambiguous application_ref {application_ref!r} in Collet {collect_id!r}"
+            )
+        return candidates[0]
+
+    @staticmethod
+    def _application_accountability(command: OpenApplicationCommand) -> str:
+        context = command.actor_context
+        if context.actor.principal_type == "bot":
+            if command.applicant_agent_ref != context.actor.principal_id:
+                raise ContextCollabValidationError(
+                    "Bot applicant must match authenticated actor"
+                )
+            principal = context.accountable_principal_ref
+            if principal is None or not principal.principal_id.strip():
+                raise ContextCollabValidationError(
+                    "Bot application requires authenticated owner"
+                )
+            return principal.principal_id
+        principal = context.accountable_principal_ref
+        if principal is not None and principal != context.actor:
+            raise ContextCollabValidationError(
+                "accountability must match authenticated actor"
+            )
+        return context.actor.principal_id
+
+    def _resolve_publish_binding(self, collab_context_id: str) -> str:
+        """Resolve one ACTIVE Open binding; never prefer top-level or first."""
+        if not isinstance(collab_context_id, str) or not collab_context_id.strip():
+            raise ContextCollabValidationError("collab_context_id must not be empty")
+        bindings = [
+            binding
+            for binding in self._store.list_bindings(current_axes(), collab_context_id)
+            if "Open" in binding.method_names
+        ]
+        if not bindings:
+            raise ContextCollabNotFoundError(
+                f"no Open method binding in collaboration context {collab_context_id!r}"
+            )
+        active = [binding for binding in bindings if binding.state is BindingState.ACTIVE]
+        if len(active) != 1:
+            raise ContextCollabValidationError(
+                "publish_opportunity requires exactly one ACTIVE Open method binding "
+                f"in collaboration context {collab_context_id!r}, found {len(active)}"
+            )
+        return active[0].method_binding_id
+
+    def _authorize(
+        self,
+        op: str,
+        binding: MethodBinding,
+        context: ActorContext,
+        collab_context_id: str,
+        application: ParticipationApplication | None = None,
+    ) -> None:
+        """G1 身份解析 + 授权(spec §8.1):身份取所属 Collet 的
+        CollaborationReader 提供的创建身份事实,
+        与 Single/Group/Swarm 服务同款;self-help 操作(withdraw)由
+        授权器比对 ``application.accountable_principal_ref``,调用方
+        先定位目标行再授权。"""
+        principal_id, executor_id = self._authorization_identities(
+            binding, collab_context_id
+        )
+        self._authorizer.check_open_op(
+            op,
+            binding,
+            context,
+            application=application,
+            principal_id=principal_id,
+            executor_id=executor_id,
+        )
+
+    def _authorization_identities(
+        self, binding: MethodBinding, collab_context_id: str
+    ) -> tuple[str | None, str | None]:
+        record = self._collab_repo.get_current_status(collab_context_id)
+        if record is None:
+            return None, binding.participant_ref
+        return record.owner_principal_id, record.designated_executor_id
+
+    def _gate_preface(
+        self,
+        op: str,
+        collab_context_id: str,
+        method_binding_id: str,
+    ) -> tuple[StoreAxes, MethodBinding]:
+        """Open 治理面前置前段:加载 → 结构 Open binding 守卫 → RF#2
+        (不含授权——self-help 面先定位目标行再授权)。"""
+        axes = current_axes()
+        binding = self._load_binding(axes, collab_context_id, method_binding_id)
+        if "Open" not in binding.method_names:
+            raise ContextCollabValidationError(
+                f"method op {op!r} targets method binding "
+                f"{method_binding_id!r} which does not declare Open in "
+                f"method_names {list(binding.method_names)!r}"
+            )
+        if binding.state is not BindingState.ACTIVE:
+            raise ContextCollabValidationError(
+                f"method op {op!r} requires the method binding "
+                f"{binding.method_binding_id!r} to be ACTIVE, got "
+                f"{binding.state.value!r}"
+            )
+        return axes, binding
+
+    def _gate(
+        self,
+        op: str,
+        collab_context_id: str,
+        method_binding_id: str,
+        context: ActorContext,
+    ) -> StoreAxes:
+        """owner/公开面操作共用前置:preface → G1 授权;用例各自
+        收尾机器裁决与写。"""
+        axes, binding = self._gate_preface(op, collab_context_id, method_binding_id)
+        self._authorize(op, binding, context, collab_context_id)
+        return axes
+
+    def _require_opportunity(
+        self,
+        axes: StoreAxes,
+        collab_context_id: str,
+        method_binding_id: str,
+        opportunity_ref: str,
+    ) -> OpenOpportunity:
+        opportunity = self._store.get_opportunity(
+            axes, opportunity_ref, method_binding_id, collab_context_id
+        )
+        if opportunity is None:
+            raise ContextCollabNotFoundError(
+                f"open opportunity {opportunity_ref!r} not found on "
+                f"method binding {method_binding_id!r} in collaboration "
+                f"context {collab_context_id!r}"
+            )
+        return opportunity
+
+    def _require_application(
+        self,
+        axes: StoreAxes,
+        collab_context_id: str,
+        method_binding_id: str,
+        application_ref: str,
+    ) -> ParticipationApplication:
+        application = self._store.get_application(
+            axes, application_ref, method_binding_id, collab_context_id
+        )
+        if application is None:
+            raise ContextCollabNotFoundError(
+                f"open application {application_ref!r} not found on "
+                f"method binding {method_binding_id!r} in collaboration "
+                f"context {collab_context_id!r}"
+            )
+        return application
