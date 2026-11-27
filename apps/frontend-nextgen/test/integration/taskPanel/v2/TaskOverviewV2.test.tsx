@@ -205,19 +205,24 @@ describe('TaskOverviewV2(L1)', () => {
     expect((doneTitle as HTMLElement).style.textDecoration).toContain('line-through');
   });
 
-  it('根节点恢复宿主会话；其他节点保持会话联动', () => {
+  it('根节点按自身实际会话定位；其他节点保持会话联动', () => {
     const nav = makeNav();
     render(<TaskOverviewV2 {...props({ nav })} />);
 
     fireEvent.click(screen.getByRole('button', { name: '选中节点 第1棒 需求澄清与规划' }));
-    expect(nav.calls.root).toEqual(['n-solo']);
-    expect(nav.calls.select).toHaveLength(0);
+    expect(nav.calls.root).toEqual([]);
+    expect(nav.calls.select).toHaveLength(1);
+    expect(nav.calls.select[0][0]).toBe('n-solo');
+    expect(nav.calls.select[0][1]).toMatchObject({
+      sessionId: 'agent:main:session:s-main',
+      kind: 'bot',
+    });
     expect(nav.calls.drill).toHaveLength(0);
 
     fireEvent.click(screen.getByRole('button', { name: '选中节点 第2棒 并行调研执行' }));
-    expect(nav.calls.select).toHaveLength(1);
-    expect(nav.calls.select[0][0]).toBe('n-group');
-    expect(nav.calls.select[0][1]).toMatchObject({ sessionId: 'bcs_grp_902:round:2', kind: 'group' });
+    expect(nav.calls.select).toHaveLength(2);
+    expect(nav.calls.select[1][0]).toBe('n-group');
+    expect(nav.calls.select[1][1]).toMatchObject({ sessionId: 'bcs_grp_902:round:2', kind: 'group' });
     expect(nav.calls.drill).toHaveLength(0);
   });
 
@@ -490,11 +495,18 @@ describe('TaskOverviewV2 real controller navigation', () => {
       expect(controller.getSnapshot().navByTask[first.id].selectedNodeId).toBe(node.id);
       expect(controller.getSnapshot().navByTask[first.id].drillStack).toEqual([]);
       await user.click(screen.getByRole('button', { name: '选中节点 第1棒 需求澄清与规划' }));
-      expect(host.restoreOrigin).toHaveBeenCalledTimes(1);
-      expect(host.restoreOrigin).toHaveBeenCalledWith('origin-handle', expect.any(AbortSignal));
+      expect(host.navigate).toHaveBeenCalledTimes(5);
+      expect(host.navigate).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          sessionId: 'agent:main:session:s-main',
+          kind: 'bot',
+        }),
+        expect.any(AbortSignal),
+      );
+      expect(host.restoreOrigin).not.toHaveBeenCalled();
 
       await user.click(screen.getByRole('button', { name: `下钻 ${node.name}` }));
-      expect(host.navigate).toHaveBeenCalledTimes(5);
+      expect(host.navigate).toHaveBeenCalledTimes(6);
       act(() => controller.openTask(tab(second.id), 'explicit'));
       expect(controller.getSnapshot().navByTask[second.id].drillStack).toEqual([]);
       expect(screen.getByTestId('task-overview-v2')).toBeTruthy();
@@ -510,7 +522,7 @@ describe('TaskOverviewV2 real controller navigation', () => {
       act(() => controller.openTask(tab(second.id), 'explicit'));
       expect(controller.getSnapshot().navByTask[second.id].drillStack).toEqual([]);
       expect(screen.getByTestId('task-overview-v2')).toBeTruthy();
-      expect(host.navigate).toHaveBeenCalledTimes(6);
+      expect(host.navigate).toHaveBeenCalledTimes(7);
       expect(host.navigate).toHaveBeenLastCalledWith(
         expect.objectContaining({
           sessionId: 'other-session',
@@ -519,7 +531,7 @@ describe('TaskOverviewV2 real controller navigation', () => {
         }),
         expect.any(AbortSignal),
       );
-      expect(host.restoreOrigin).toHaveBeenCalledTimes(1);
+      expect(host.restoreOrigin).not.toHaveBeenCalled();
       expect(host.recordInteraction).not.toHaveBeenCalled();
       expect(host.transport.requestJson).not.toHaveBeenCalled();
       expect(host.history.readPage).not.toHaveBeenCalled();
