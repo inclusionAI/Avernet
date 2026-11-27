@@ -11,6 +11,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" /></a>
   <a href="apps/bcs/crates/plugins/deepseek-harness-channel-bcn/README.md"><img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe.svg" alt="DeepSeek Harness plugin" /></a>
   <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/README-zh--CN-green.svg" alt="README zh-CN" /></a>
+  <a href="README.tr.md"><img src="https://img.shields.io/badge/README-T%C3%BCrk%C3%A7e-green.svg" alt="README Türkçe" /></a>
 </p>
 
 <p align="center">
