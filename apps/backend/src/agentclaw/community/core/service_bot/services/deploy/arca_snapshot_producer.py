@@ -27,6 +27,7 @@ from agentclaw.community.core.service_bot.services.deploy.producer import (
 )
 from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
     CapturedServiceSkillsLayout,
+    CenterLinksMismatchError,
     ServiceSkillsManifestBuilder,
     ServiceSkillsManifestError,
 )
@@ -93,12 +94,27 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
                 raise ValueError(
                     "successful service build is missing build_target_path"
                 )
-            delivered_center_skills = self._validate_shared_corpus_snapshot(
-                captured=captured_layout,
-                build_target_path=str(build_target_path),
-                snapshot_paths=result.get("shared_corpus_snapshot_paths"),
-                active_snapshot_path=result.get("active_skill_snapshot_path"),
-            )
+            try:
+                delivered_center_skills = self._validate_shared_corpus_snapshot(
+                    captured=captured_layout,
+                    build_target_path=str(build_target_path),
+                    snapshot_paths=result.get("shared_corpus_snapshot_paths"),
+                    active_snapshot_path=result.get("active_skill_snapshot_path"),
+                )
+            except CenterLinksMismatchError as mismatch_error:
+                # A draft that moved while the physical snapshot ran (skill
+                # activated or layout migrated) is the actionable cause of a
+                # link mismatch; surface its precise error instead of the
+                # generic physical one when the draft visibly moved.
+                concurrent_change = (
+                    self._skills_manifest_builder.concurrent_draft_change_error(
+                        captured=captured_layout,
+                        bot=bot,
+                    )
+                )
+                if concurrent_change is not None:
+                    raise concurrent_change from mismatch_error
+                raise
             # This manifest only describes the Skills slice frozen inside the
             # service version. It augments — never replaces — build_target_path.
             ext["skills_manifest"] = self._skills_manifest_builder.finalize(
@@ -216,7 +232,7 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         actual_links = set(actual)
         if len(actual) != len(actual_links) or actual_links != expected:
             paths = ", ".join(sorted({path for path, _ in actual_links ^ expected}))
-            raise ServiceSkillsManifestError(
+            raise CenterLinksMismatchError(
                 f"Center links do not match the frozen exact manifest: {paths}"
             )
         return tuple(delivered)

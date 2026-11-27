@@ -504,6 +504,255 @@ def test_center_link_outside_active_root_cannot_satisfy_manifest(tmp_path) -> No
         )
 
 
+def _mismatching_pool_fixtures(tmp_path, repository, capability_reader, build=None):
+    """Shared fixtures for Center-link mismatch tests (an undeclared link)."""
+
+    target = tmp_path / "openclaw"
+    active = target / "workspace" / "skills"
+    active.mkdir(parents=True)
+    (active / "undeclared").symlink_to(
+        "/home/admin/.openclaw/workspace/skills-pool/skill-center/"
+        "00000000-0000-4000-8000-000000000001/1.0.0"
+    )
+    state = BotSkillLayoutState(
+        scope=BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+        last_probe_result="READY",
+        last_probe_evidence={
+            "resolved_layout": _resolved_layout(
+                "openclaw",
+                "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+            )
+        },
+    )
+    repository.state = state
+    producer = ArcaSnapshotProducer(
+        build
+        if build is not None
+        else _RecordingBuild(
+            {
+                "success": True,
+                "build_target_path": str(target),
+                "shared_corpus_snapshot_paths": [
+                    "workspace/skills-pool/skills-repo",
+                    "workspace/skills-pool/skill-center",
+                ],
+                "active_skill_snapshot_path": "workspace/skills",
+            }
+        ),
+        ServiceSkillsManifestBuilder(
+            repository,
+            capability_reader,
+            _CENTER_STORE_PREFIX,
+            _CenterStore(),
+            _REPO_STORE_PREFIX,
+        ),
+    )
+    return state, producer
+
+
+class _ChangingCapabilityReader:
+    """Stub reader whose assets move between reads (mid-build draft change)."""
+
+    def __init__(self, first, second) -> None:
+        self._reads = [tuple(first), tuple(second)]
+        self.calls = 0
+
+    def active_skill_assets(self, **kwargs):
+        index = min(self.calls, len(self._reads) - 1)
+        self.calls += 1
+        return self._reads[index]
+
+
+class _FailingDiagnosisReader:
+    """Stub reader that fails only on the post-mismatch diagnosis re-read."""
+
+    def __init__(self, assets) -> None:
+        self._assets = tuple(assets)
+        self.calls = 0
+
+    def active_skill_assets(self, **kwargs):
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("capability store unavailable")
+        return self._assets
+
+
+class _FailingDiagnosisLayoutRepository(_LayoutRepository):
+    """Stub repository that fails only on the diagnosis re-read."""
+
+    def __init__(self, state) -> None:
+        super().__init__(state)
+        self.calls = 0
+
+    def get(self, scope):
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("layout store unavailable")
+        return super().get(scope)
+
+
+@pytest.mark.unit
+def test_center_link_mismatch_reports_concurrent_skill_change(tmp_path) -> None:
+    repository = _LayoutRepository(None)
+    _, producer = _mismatching_pool_fixtures(
+        tmp_path,
+        repository,
+        _ChangingCapabilityReader((), (RegisteredSkillAsset(
+            skill_id=1,
+            name="pdf",
+            git_path="center://pdf",
+            skill_uuid="00000000-0000-4000-8000-000000000001",
+            sc_version_number="1.0.0",
+        ),)),
+    )
+
+    with pytest.raises(
+        ServiceSkillsManifestError,
+        match="active Center Skills changed during service build",
+    ):
+        producer.produce_artifact(
+            _request({
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            }, 7),
+        )
+
+
+class _LayoutDriftDuringSnapshotBuild(_RecordingBuild):
+    """Build stub that drifts the layout state while the snapshot runs."""
+
+    def __init__(self, result, repository) -> None:
+        super().__init__(result)
+        self._repository = repository
+
+    def build(
+        self,
+        bot,
+        version=1,
+        *,
+        shared_corpora=(),
+        active_runtime_path=None,
+    ):
+        self._repository.state = replace(
+            self._repository.state,
+            phase=SkillLayoutPhase.NEEDS_MANUAL_REPAIR,
+            migration_generation="generation-2",
+        )
+        return super().build(
+            bot,
+            version,
+            shared_corpora=shared_corpora,
+            active_runtime_path=active_runtime_path,
+        )
+
+
+@pytest.mark.unit
+def test_center_link_mismatch_reports_concurrent_layout_change(tmp_path) -> None:
+    repository = _LayoutRepository(None)
+    _, producer = _mismatching_pool_fixtures(
+        tmp_path,
+        repository,
+        _CapabilityReader(()),
+        build=_LayoutDriftDuringSnapshotBuild(
+            {
+                "success": True,
+                "build_target_path": str(tmp_path / "openclaw"),
+                "shared_corpus_snapshot_paths": [
+                    "workspace/skills-pool/skills-repo",
+                    "workspace/skills-pool/skill-center",
+                ],
+                "active_skill_snapshot_path": "workspace/skills",
+            },
+            repository,
+        ),
+    )
+
+    with pytest.raises(
+        ServiceSkillsManifestError,
+        match="draft Skills layout changed during service build",
+    ):
+        producer.produce_artifact(
+            _request({
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            }, 7),
+        )
+
+
+@pytest.mark.unit
+def test_center_link_mismatch_keeps_mismatch_when_draft_unchanged(tmp_path) -> None:
+    repository = _LayoutRepository(None)
+    _, producer = _mismatching_pool_fixtures(
+        tmp_path, repository, _CapabilityReader(())
+    )
+
+    with pytest.raises(
+        ServiceSkillsManifestError,
+        match="Center links do not match the frozen exact manifest",
+    ) as excinfo:
+        producer.produce_artifact(
+            _request({
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            }, 7),
+        )
+    assert "workspace/skills/undeclared" in str(excinfo.value)
+
+
+@pytest.mark.unit
+def test_center_link_mismatch_keeps_mismatch_when_diagnosis_fails(tmp_path) -> None:
+    repository = _LayoutRepository(None)
+    _, producer = _mismatching_pool_fixtures(
+        tmp_path, repository, _FailingDiagnosisReader(())
+    )
+
+    with pytest.raises(
+        ServiceSkillsManifestError,
+        match="Center links do not match the frozen exact manifest",
+    ):
+        producer.produce_artifact(
+            _request({
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            }, 7),
+        )
+
+
+@pytest.mark.unit
+def test_center_link_mismatch_keeps_mismatch_when_layout_read_fails(tmp_path) -> None:
+    repository = _FailingDiagnosisLayoutRepository(None)
+    _, producer = _mismatching_pool_fixtures(
+        tmp_path, repository, _CapabilityReader(())
+    )
+
+    with pytest.raises(
+        ServiceSkillsManifestError,
+        match="Center links do not match the frozen exact manifest",
+    ):
+        producer.produce_artifact(
+            _request({
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            }, 7),
+        )
+
+
 @pytest.mark.unit
 def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
     scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")

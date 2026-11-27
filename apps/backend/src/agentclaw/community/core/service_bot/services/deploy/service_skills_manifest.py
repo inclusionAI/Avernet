@@ -41,6 +41,7 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
 )
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
+    BotSkillLayoutState,
     SkillLayout,
     SkillLayoutPhase,
 )
@@ -79,6 +80,17 @@ class ServiceSkillsManifestError(ServiceArtifactBuildError):
         ),
     ) -> None:
         super().__init__(code, message)
+
+
+class CenterLinksMismatchError(ServiceSkillsManifestError):
+    """The snapshot's Center links disagree with the frozen exact manifest.
+
+    Raised when the physical symlink set inside the built artifact is not
+    exactly the set frozen from the draft.  The producer consults
+    :meth:`ServiceSkillsManifestBuilder.concurrent_draft_change_error` for
+    this error only, so a draft that moved mid-build can surface its precise
+    cause instead of this generic physical mismatch.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,12 +323,7 @@ class ServiceSkillsManifestBuilder:
     ) -> dict[str, Any]:
         engine = captured.engine
         current = self._layout_repository.get(captured.scope)
-        if (
-            current.active_layout is not captured.active_layout
-            or current.phase is not captured.phase
-            or current.migration_generation != captured.migration_generation
-            or current.layout_contract_version != captured.layout_contract_version
-        ):
+        if self._layout_state_changed(current, captured):
             raise ServiceSkillsManifestError(
                 "draft Skills layout changed during service build"
             )
@@ -354,6 +361,50 @@ class ServiceSkillsManifestBuilder:
                 delivery.to_manifest() for delivery in captured.shared_corpora
             ]
         return manifest
+
+    def concurrent_draft_change_error(
+        self,
+        *,
+        captured: CapturedServiceSkillsLayout,
+        bot: dict[str, Any],
+    ) -> ServiceSkillsManifestError | None:
+        """Explain a failed snapshot when the draft moved mid-build.
+
+        Re-reads exactly the draft state ``finalize`` compares against the
+        frozen capture.  Returns the precise build-race error when that state
+        moved, or ``None`` when the draft still matches the freeze — the
+        physical snapshot itself is what mismatched.  The caller keeps its
+        original snapshot error when this diagnosis itself is unavailable.
+        """
+        try:
+            current = self._layout_repository.get(captured.scope)
+            if self._layout_state_changed(current, captured):
+                return ServiceSkillsManifestError(
+                    "draft Skills layout changed during service build"
+                )
+            current_center_skills = self._active_center_skills(bot)
+        except Exception:
+            # The diagnosis is auxiliary: failing to re-read the live draft
+            # keeps the caller's original snapshot error in charge.
+            return None
+        if current_center_skills != captured.center_skills:
+            return ServiceSkillsManifestError(
+                "active Center Skills changed during service build",
+                code=ServiceArtifactBuildErrorCode.CAPABILITY_CHANGED,
+            )
+        return None
+
+    @staticmethod
+    def _layout_state_changed(
+        current: BotSkillLayoutState,
+        captured: CapturedServiceSkillsLayout,
+    ) -> bool:
+        return (
+            current.active_layout is not captured.active_layout
+            or current.phase is not captured.phase
+            or current.migration_generation != captured.migration_generation
+            or current.layout_contract_version != captured.layout_contract_version
+        )
 
     @staticmethod
     def _require_layout_observation(
@@ -670,6 +721,7 @@ def service_skills_env_from_ext(
 
 __all__ = [
     "CapturedServiceSkillsLayout",
+    "CenterLinksMismatchError",
     "SERVICE_SKILLS_POOL_CONTRACT_VERSION",
     "ServiceSkillsManifestBuilder",
     "ServiceSkillsManifestError",
