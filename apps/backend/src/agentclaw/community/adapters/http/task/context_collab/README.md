@@ -49,7 +49,10 @@ Creation is an independent invocation, not an idempotent retry API. Publication,
 Profile use and execution capability checks remain service responsibilities.
 Authentication failure prevents service invocation; domain authorization,
 not-found, conflict and validation failures retain the shared error mapping.
-Inline configuration and content remain redacted in error logs.
+Inline configuration and content remain redacted in error logs. Both creation
+handlers also emit an INFO entry diagnostic (`product_profile.http.create.start`
+or `product_collet.http.create.start`) containing only the actual route, the
+response `request_id`, the caller `X-Request-ID` and bounded metadata/byte sizes.
 
 ## Compatibility and runtime boundary
 
