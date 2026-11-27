@@ -1,0 +1,22 @@
+{
+  "scope": "Real BCS V3 with synthetic player-visible inputs on the updated Python player",
+  "reference_commit": "86252c1e98d812f18166f930d9f7c2ceafd06f46",
+  "model": "gpt-6-luna",
+  "status": "completed",
+  "nodes": [
+    {
+      "node_id": "speak_4",
+      "status": "completed",
+      "text": "停电时摸黑找东西，会立刻想起它。",
+      "characters": 16,
+      "referee_violation": null
+    },
+    {
+      "node_id": "vote_4",
+      "status": "completed",
+      "text": "我投1号",
+      "referee_target_seat": 1,
+      "referee_note": null
+    }
+  ]
+}

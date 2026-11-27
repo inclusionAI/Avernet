@@ -1,0 +1,600 @@
+{
+  "reference_commit": "86252c1e98d812f18166f930d9f7c2ceafd06f46",
+  "engine": "OpenAI Agents SDK (Python)",
+  "model": "gpt-6-luna",
+  "openclaw_referees": 1,
+  "openclaw_players": 4,
+  "python_players": 1,
+  "human_input_seats": 1,
+  "totals": {
+    "speeches": 5,
+    "speech_violations": 0,
+    "valid_votes": 6,
+    "abstentions": 0,
+    "invalid_votes": 0
+  },
+  "games": [
+    {
+      "session_suffix": "971afe47",
+      "session_status": "completed",
+      "rules": {
+        "players": 6,
+        "undercover": 1,
+        "difficulty": "medium",
+        "max_rounds": 6,
+        "reveal_role": false
+      },
+      "replacement_seat": 3,
+      "result": {
+        "winner": "civilian",
+        "reason": "卧底已经全部出局",
+        "round": 2
+      },
+      "start_messages": 1,
+      "recovery_messages": 0,
+      "totals": {
+        "speeches": 2,
+        "speech_violations": 0,
+        "valid_votes": 3,
+        "abstentions": 0,
+        "invalid_votes": 0
+      },
+      "rounds": [
+        {
+          "round": 1,
+          "stage": "regular",
+          "tallied": true,
+          "tied": true,
+          "eliminated_seat": null,
+          "public_speeches": [
+            {
+              "seat": 1,
+              "text": "天气热时，人们更容易想到它",
+              "violation": null
+            },
+            {
+              "seat": 2,
+              "text": "通常在饭后或休息时会碰到，颜色也不一定一样。",
+              "violation": null
+            },
+            {
+              "seat": 3,
+              "text": "常见的是装在透明容器里，摆放时高低不一",
+              "violation": null
+            },
+            {
+              "seat": 4,
+              "text": "喝完嘴里常会留下一点甜味",
+              "violation": null
+            },
+            {
+              "seat": 5,
+              "text": "分量通常有大有小",
+              "violation": null
+            },
+            {
+              "seat": 6,
+              "text": "早餐常倒一小杯，配着刚烤好的面包。",
+              "violation": null
+            }
+          ],
+          "public_ballots": [
+            {
+              "seat": 1,
+              "text": "我投3号",
+              "target": 3,
+              "note": null
+            },
+            {
+              "seat": 2,
+              "text": "我投1号",
+              "target": 1,
+              "note": null
+            },
+            {
+              "seat": 3,
+              "text": "我投1号",
+              "target": 1,
+              "note": null
+            },
+            {
+              "seat": 4,
+              "text": "我投5号",
+              "target": 5,
+              "note": null
+            },
+            {
+              "seat": 5,
+              "text": "我投6号",
+              "target": 6,
+              "note": null
+            },
+            {
+              "seat": 6,
+              "text": "我投5号",
+              "target": 5,
+              "note": null
+            }
+          ],
+          "worker_speech": {
+            "display": "常见的是装在透明容器里，摆放时高低不一",
+            "violation": null,
+            "chars": 19
+          },
+          "worker_vote": {
+            "display": "我投1号",
+            "target": 1,
+            "violation": null,
+            "note": null,
+            "classification": "valid_votes"
+          }
+        },
+        {
+          "round": 1,
+          "stage": "pk",
+          "tallied": true,
+          "tied": true,
+          "eliminated_seat": null,
+          "public_speeches": [
+            {
+              "seat": 1,
+              "text": "放置一段时间后，状态可能会发生变化",
+              "violation": null
+            },
+            {
+              "seat": 5,
+              "text": "有时表面会留下一层细小泡沫",
+              "violation": null
+            }
+          ],
+          "public_ballots": [
+            {
+              "seat": 1,
+              "text": "我投5号",
+              "target": 5,
+              "note": null
+            },
+            {
+              "seat": 2,
+              "text": "我投5号",
+              "target": 5,
+              "note": null
+            },
+            {
+              "seat": 3,
+              "text": "我投1号",
+              "target": 1,
+              "note": null
+            },
+            {
+              "seat": 4,
+              "text": "我投1号",
+              "target": 1,
+              "note": null
+            },
+            {
+              "seat": 5,
+              "text": "我投1号",
+              "target": 1,
+              "note": null
+            },
+            {
+              "seat": 6,
+              "text": "我投5号",
+              "target": 5,
+              "note": null
+            }
+          ],
+          "worker_vote": {
+            "display": "我投1号",
+            "target": 1,
+            "violation": null,
+            "note": null,
+            "classification": "valid_votes"
+          }
+        },
+        {
+          "round": 2,
+          "stage": "regular",
+          "tallied": true,
+          "tied": false,
+          "eliminated_seat": 5,
+          "public_speeches": [
+            {
+              "seat": 1,
+              "text": "开封后放在冰箱里，过些天味道会变淡",
+              "violation": null
+            },
+            {
+              "seat": 2,
+              "text": "颜色通常比较鲜亮，入口后会觉得清爽",
+              "violation": null
+            },
+            {
+              "seat": 3,
+              "text": "运动后或天气闷热时，喝几口会觉得舒服些",
+              "violation": null
+            },
+            {
+              "seat": 4,
+              "text": "有时看着清透，有时显得比较浓",
+              "violation": null
+            },
+            {
+              "seat": 5,
+              "text": "点单时常能按口味调整甜度和配料",
+              "violation": null
+            },
+            {
+              "seat": 6,
+              "text": "倒进杯里时，有时能看见细小纤维。",
+              "violation": null
+            }
+          ],
+          "public_ballots": [
+            {
+              "seat": 1,
+              "text": "我投5号",
+              "target": 5,
+              "note": null
+            },
+            {
+              "seat": 2,
+              "text": "我投5号",
+              "target": 5,
+              "note": null
+            },
+            {
+              "seat": 3,
+              "text": "我投5号",
+              "target": 5,
+              "note": null
+            },
+            {
+              "seat": 4,
+              "text": "我投5号",
+              "target": 5,
+              "note": null
+            },
+            {
+              "seat": 5,
+              "text": "我投6号",
+              "target": 6,
+              "note": null
+            },
+            {
+              "seat": 6,
+              "text": "我投5号",
+              "target": 5,
+              "note": null
+            }
+          ],
+          "worker_speech": {
+            "display": "运动后或天气闷热时，喝几口会觉得舒服些",
+            "violation": null,
+            "chars": 19
+          },
+          "worker_vote": {
+            "display": "我投5号",
+            "target": 5,
+            "violation": null,
+            "note": null,
+            "classification": "valid_votes"
+          }
+        }
+      ]
+    },
+    {
+      "session_suffix": "4b50a59a",
+      "session_status": "completed",
+      "rules": {
+        "players": 6,
+        "undercover": 1,
+        "difficulty": "medium",
+        "max_rounds": 6,
+        "reveal_role": false
+      },
+      "replacement_seat": 2,
+      "result": {
+        "winner": "civilian",
+        "reason": "卧底已经全部出局",
+        "round": 2
+      },
+      "start_messages": 1,
+      "recovery_messages": 3,
+      "totals": {
+        "speeches": 2,
+        "speech_violations": 0,
+        "valid_votes": 2,
+        "abstentions": 0,
+        "invalid_votes": 0
+      },
+      "rounds": [
+        {
+          "round": 1,
+          "stage": "regular",
+          "tallied": true,
+          "tied": false,
+          "eliminated_seat": 3,
+          "public_speeches": [
+            {
+              "seat": 1,
+              "text": "一天结束后，常会在安静的时候想起它",
+              "violation": null
+            },
+            {
+              "seat": 2,
+              "text": "它常安静地待在手机里，偶尔也躺在抽屉中",
+              "violation": null
+            },
+            {
+              "seat": 3,
+              "text": "通常不大，拿在手里不会太费力",
+              "violation": null
+            },
+            {
+              "seat": 4,
+              "text": "闲下来翻几页，常会想起那一天的细节。",
+              "violation": null
+            },
+            {
+              "seat": 5,
+              "text": "平时不显眼，打开后容易让人停留很久",
+              "violation": null
+            },
+            {
+              "seat": 6,
+              "text": "有些内容隔了很久再看，感觉也会不一样",
+              "violation": null
+            }
+          ],
+          "public_ballots": [
+            {
+              "seat": 1,
+              "text": "我投3号",
+              "target": 3,
+              "note": null
+            },
+            {
+              "seat": 2,
+              "text": "我投3号",
+              "target": 3,
+              "note": null
+            },
+            {
+              "seat": 3,
+              "text": "我投4号",
+              "target": 4,
+              "note": null
+            },
+            {
+              "seat": 4,
+              "text": "我投1号",
+              "target": 1,
+              "note": null
+            },
+            {
+              "seat": 5,
+              "text": "我投4号",
+              "target": 4,
+              "note": null
+            },
+            {
+              "seat": 6,
+              "text": "我投3号",
+              "target": 3,
+              "note": null
+            }
+          ],
+          "worker_speech": {
+            "display": "它常安静地待在手机里，偶尔也躺在抽屉中",
+            "violation": null,
+            "chars": 19
+          },
+          "worker_vote": {
+            "display": "我投3号",
+            "target": 3,
+            "violation": null,
+            "note": null,
+            "classification": "valid_votes"
+          }
+        },
+        {
+          "round": 2,
+          "stage": "regular",
+          "tallied": true,
+          "tied": false,
+          "eliminated_seat": 1,
+          "public_speeches": [
+            {
+              "seat": 1,
+              "text": "常被放在书架、床头或随身的包里",
+              "violation": null
+            },
+            {
+              "seat": 2,
+              "text": "逢年过节整理旧物时，常会翻到它",
+              "violation": null
+            },
+            {
+              "seat": 4,
+              "text": "翻到旧页，会看到熟悉的面孔和发黄的边角。",
+              "violation": null
+            },
+            {
+              "seat": 5,
+              "text": "看见熟悉的笑脸，心里总会软一下",
+              "violation": null
+            },
+            {
+              "seat": 6,
+              "text": "不同时间留下的片段，常会被放在一起",
+              "violation": null
+            }
+          ],
+          "public_ballots": [
+            {
+              "seat": 1,
+              "text": "我投2号",
+              "target": 2,
+              "note": null
+            },
+            {
+              "seat": 2,
+              "text": "我投4号",
+              "target": 4,
+              "note": null
+            },
+            {
+              "seat": 4,
+              "text": "我投1号",
+              "target": 1,
+              "note": null
+            },
+            {
+              "seat": 5,
+              "text": "我投6号",
+              "target": 6,
+              "note": null
+            },
+            {
+              "seat": 6,
+              "text": "我投1号",
+              "target": 1,
+              "note": null
+            }
+          ],
+          "worker_speech": {
+            "display": "逢年过节整理旧物时，常会翻到它",
+            "violation": null,
+            "chars": 15
+          },
+          "worker_vote": {
+            "display": "我投4号",
+            "target": 4,
+            "violation": null,
+            "note": null,
+            "classification": "valid_votes"
+          }
+        }
+      ]
+    },
+    {
+      "session_suffix": "9eb4af54",
+      "session_status": "completed",
+      "rules": {
+        "players": 6,
+        "undercover": 1,
+        "difficulty": "medium",
+        "max_rounds": 6,
+        "reveal_role": false
+      },
+      "replacement_seat": 6,
+      "result": {
+        "winner": "civilian",
+        "reason": "卧底已经全部出局",
+        "round": 1
+      },
+      "start_messages": 1,
+      "recovery_messages": 0,
+      "totals": {
+        "speeches": 1,
+        "speech_violations": 0,
+        "valid_votes": 1,
+        "abstentions": 0,
+        "invalid_votes": 0
+      },
+      "rounds": [
+        {
+          "round": 1,
+          "stage": "regular",
+          "tallied": true,
+          "tied": false,
+          "eliminated_seat": 3,
+          "public_speeches": [
+            {
+              "seat": 1,
+              "text": "通常会在家里某个角落安静待着",
+              "violation": null
+            },
+            {
+              "seat": 2,
+              "text": "大多是细长的样子",
+              "violation": null
+            },
+            {
+              "seat": 3,
+              "text": "用过之后，手里常带点粗糙感",
+              "violation": null
+            },
+            {
+              "seat": 4,
+              "text": "地上有人留下脚印时，我会顺手拿来处理。",
+              "violation": null
+            },
+            {
+              "seat": 5,
+              "text": "用完后常需要立着放一会儿",
+              "violation": null
+            },
+            {
+              "seat": 6,
+              "text": "天气闷热时，放久了容易有股潮味",
+              "violation": null
+            }
+          ],
+          "public_ballots": [
+            {
+              "seat": 1,
+              "text": "我投3号",
+              "target": 3,
+              "note": null
+            },
+            {
+              "seat": 2,
+              "text": "我投1号",
+              "target": 1,
+              "note": null
+            },
+            {
+              "seat": 3,
+              "text": "我投4号",
+              "target": 4,
+              "note": null
+            },
+            {
+              "seat": 4,
+              "text": "我投3号",
+              "target": 3,
+              "note": null
+            },
+            {
+              "seat": 5,
+              "text": "我投3号",
+              "target": 3,
+              "note": null
+            },
+            {
+              "seat": 6,
+              "text": "我投3号",
+              "target": 3,
+              "note": null
+            }
+          ],
+          "worker_speech": {
+            "display": "天气闷热时，放久了容易有股潮味",
+            "violation": null,
+            "chars": 15
+          },
+          "worker_vote": {
+            "display": "我投3号",
+            "target": 3,
+            "violation": null,
+            "note": null,
+            "classification": "valid_votes"
+          }
+        }
+      ]
+    }
+  ]
+}
