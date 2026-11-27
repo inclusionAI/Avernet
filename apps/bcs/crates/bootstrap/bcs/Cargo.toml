@@ -255,6 +255,7 @@ clap = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
+bcs-a2a-http = { workspace = true, features = ["dist-agent"] }
 log = "0.4"
 dirs = "5.0"
 futures-util = "0.3"

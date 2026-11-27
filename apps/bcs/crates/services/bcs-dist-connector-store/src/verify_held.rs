@@ -174,6 +174,17 @@ impl HeldDispatchPort for StoreVerificationDispatch {
         })
     }
 
+    async fn record_node_response(&mut self, response: NodeResponseEvidence) -> Result<(), HolderError> {
+        self.transition(None, |doc| {
+            match crate::node_history::record_response(&doc.view, &response)? {
+                Some(next) => Ok(Step::Write {
+                    execution: Box::new(next), connector: doc.connector.clone(), due: None, answer: (),
+                }),
+                None => Ok(Step::Keep(())),
+            }
+        }).await
+    }
+
     /// A query by the stable key found the original task: bind it, exactly
     /// like a start acceptance, but through the verification claim fence.
     async fn record_acceptance(
@@ -198,6 +209,9 @@ impl HeldDispatchPort for StoreVerificationDispatch {
                     let mut next = execution.clone();
                     next.phase = DispatchPhase::Accepted;
                     next.remote = Some(evidence.remote.clone());
+                    if doc.view.spec.node_history.is_some() {
+                        next.node_input_delivery = Some(DeliveryState::Delivered);
+                    }
                     Ok(Step::Write {
                         execution: Box::new(next),
                         connector: doc.connector.clone(),

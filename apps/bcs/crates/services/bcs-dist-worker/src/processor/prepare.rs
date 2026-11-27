@@ -599,7 +599,21 @@ impl WorkerProcessor {
                 }
             }
         }
-        let decision = frozen.decision.clone();
+        // The sealed license, not the Runner/body, supplies the history binding.
+        let spec = slot.spec.as_ref().ok_or_else(|| err("session_spec_missing"))?;
+        let mut decision = frozen.decision.clone();
+        let history = task_license(&frozen.base, &frozen.metadata.tid).and_then(|license| {
+            Some(DispatchHistory {
+                round: license.round_key(),
+                workflow: spec.workflow.clone(),
+                cut_manifest: license.history_cut?,
+            })
+        });
+        for action in &mut decision.actions {
+            if let ActionIntent::StartDispatch(dispatch) = action {
+                dispatch.node_history = history.clone();
+            }
+        }
         let task = frozen
             .base
             .tasks

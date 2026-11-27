@@ -403,6 +403,7 @@ impl FsmReducerRunner {
             let target = participant_of(context, &id)?;
             actions.push(ActionIntent::StartDispatch(DispatchSpec {
                 schema_version: 1,
+                node_history: None,
                 sid: context.spec.sid.clone(),
                 tid: round.key.tid.clone(),
                 did: did.clone(),
@@ -591,6 +592,7 @@ impl FsmReducerRunner {
                         .unwrap_or(context.spec.limits.task_timeout_millis);
                     actions.push(ActionIntent::StartDispatch(DispatchSpec {
                         schema_version: 1,
+                        node_history: None,
                         sid: context.spec.sid.clone(),
                         tid: round.key.tid.clone(),
                         did: Did(new_did.0.clone()),

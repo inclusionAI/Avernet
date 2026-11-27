@@ -239,6 +239,7 @@ impl Harness {
         };
         let spec = DispatchSpec {
             schema_version: 1,
+            node_history: None,
             sid: processor_support::spec().sid,
             tid: tid.clone(),
             did: did.clone(),

@@ -182,6 +182,10 @@ pub struct StoreGroupRoundAdmission {
     /// against; the default constructor leaves the spine unconfigured and
     /// `commit_terminal` refuses rather than faking authority.
     pub(crate) artifacts: Option<Arc<dyn TaskArchiveRepo>>,
+    pub(crate) node_history: Option<(
+        Arc<dyn bcs_service_api::port::repo::distributed::node_history::NodeHistoryRepo>,
+        Arc<dyn bcs_service_api::port::repo::distributed::result::BlobStorePort>,
+    )>,
 }
 
 impl StoreGroupRoundAdmission {
@@ -251,7 +255,17 @@ impl StoreGroupRoundAdmission {
             config,
             clock,
             artifacts,
+            node_history: None,
         })
+    }
+
+    pub fn with_node_history(
+        mut self,
+        history: Arc<dyn bcs_service_api::port::repo::distributed::node_history::NodeHistoryRepo>,
+        blobs: Arc<dyn bcs_service_api::port::repo::distributed::result::BlobStorePort>,
+    ) -> Self {
+        self.node_history = Some((history, blobs));
+        self
     }
 
     /// The configured archive repository, when the terminal spine is armed.
@@ -526,6 +540,9 @@ impl StoreGroupRoundAdmission {
             generation: key.generation,
             request_id: request.request_id.0.clone(),
             request_digest: request.request_digest.0.clone(),
+            history_cut: request.input.history_cut.key.starts_with(
+                bcs_service_api::port::repo::distributed::node_history::HistoryManifest::KEY_PREFIX,
+            ).then(|| request.input.history_cut.clone()),
         };
         let mut value = serde_json::json!({ "group_admission": license });
         // Installing the next round condenses the predecessor's closed hot

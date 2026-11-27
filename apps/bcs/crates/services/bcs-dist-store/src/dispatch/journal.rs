@@ -183,6 +183,8 @@ impl StoreDispatch {
                                     cancellation: CancelObservation::NotSent,
                                     outcome: None,
                                     send_proof: None,
+                                    node_input_delivery: None,
+                                    node_responses: Vec::new(),
                                     verification: None,
                                     quarantined: None,
                                 },

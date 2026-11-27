@@ -255,6 +255,7 @@ pub fn dispatch_view() -> DispatchView {
     DispatchView {
         spec: DispatchSpec {
             schema_version: 1,
+            node_history: None,
             sid: owner().sid,
             tid: input().tid,
             did: Did("dispatch-a".into()),
@@ -278,6 +279,8 @@ pub fn dispatch_view() -> DispatchView {
             cancellation: CancelObservation::NotSent,
             outcome: None,
             send_proof: None,
+            node_input_delivery: None,
+            node_responses: Vec::new(),
             verification: None,
             quarantined: None,
         },

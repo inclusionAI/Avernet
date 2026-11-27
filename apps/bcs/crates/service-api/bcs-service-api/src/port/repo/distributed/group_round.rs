@@ -23,6 +23,9 @@ pub struct StrictLicense {
     pub generation: NonZeroU64,
     pub request_id: String,
     pub request_digest: String,
+    /// Frozen input provenance carried through Worker takeover and finalization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_cut: Option<bcs_dist_model::BlobRef>,
 }
 
 impl StrictLicense {

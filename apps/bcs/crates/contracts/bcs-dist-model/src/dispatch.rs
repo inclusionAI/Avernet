@@ -17,6 +17,16 @@ pub struct DispatchSpec {
     pub capabilities: DownstreamCapabilities,
     pub request: Payload,
     pub deadline: TimestampMillis,
+    /// Worker-owned input provenance; neither the reducer nor the user can set it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_history: Option<DispatchHistory>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DispatchHistory {
+    pub round: crate::RoundKey,
+    pub workflow: crate::WorkflowRef,
+    pub cut_manifest: BlobRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,6 +101,25 @@ pub struct DispatchControlState {
     pub pending_input: Vec<PendingInput>,
 }
 
+/// Whether a dispatch reached its bound node. Never infer acceptance from a
+/// possible-send intent, or disprove it from a timeout or an index miss.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveryState {
+    Delivered,
+    Undelivered,
+    Unknown,
+}
+
+/// One actual remote report, persisted under the dispatch holder fence before
+/// handing its event to the Worker. Large payloads carry an immutable BlobRef.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NodeResponseEvidence {
+    pub id: InteractionId,
+    pub kind: crate::AgentEventKind,
+    pub content: BlobRef,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DispatchExecution {
     pub holder: Option<Holder>,
@@ -105,6 +134,11 @@ pub struct DispatchExecution {
     /// proof before it may rely on the target's dedupe for a resend.
     #[serde(default)]
     pub send_proof: Option<SendProof>,
+    /// `None` means no send intent exists for a history-enabled dispatch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_input_delivery: Option<DeliveryState>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub node_responses: Vec<NodeResponseEvidence>,
     /// The fenced verification handoff (plan T7): one claim-fenced CAS
     /// registered the verification mode, the attempt identity, the stable
     /// query key, the approved method, the next due time and backoff — and

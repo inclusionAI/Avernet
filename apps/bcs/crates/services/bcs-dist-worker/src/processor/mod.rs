@@ -5,6 +5,7 @@ mod decision;
 mod effects;
 mod encoding;
 mod lifecycle;
+mod node_history;
 mod references;
 mod terminal;
 mod transitions;

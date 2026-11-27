@@ -94,6 +94,7 @@ impl DistRunnerCoreService for Runner {
                     let p = &c.spec.participants[0];
                     actions.push(ActionIntent::StartDispatch(DispatchSpec {
                         schema_version: 1,
+                        node_history: None,
                         sid: c.spec.sid.clone(),
                         tid: tid.clone(),
                         did: dispatch_id(tid),

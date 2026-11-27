@@ -124,6 +124,7 @@ impl Call {
             kind,
             AgentEventKind::InputRequired { .. } | AgentEventKind::AuthRequired { .. }
         );
+        let payload = self.remember_node_response(&kind, payload).await?;
         let admitted = self.report(kind, remote_event_id, payload).await?;
         if question {
             self.awaiting_input = true;

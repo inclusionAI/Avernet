@@ -131,6 +131,34 @@ impl StoreGroupRoundAdmission {
             .await
     }
 
+    async fn release_history_pins(&self, license: &StrictLicense) -> Result<(), StoreError> {
+        use bcs_service_api::port::repo::distributed::node_history::{
+            HistoryManifest, CODE_NODE_INPUT_PIN_ABSENT,
+        };
+        let Some(reference) = &license.history_cut else { return Ok(()) };
+        let (history, blobs) = self.node_history.as_ref().ok_or_else(|| invalid("node_history_unconfigured"))?;
+        let bytes = blobs.get(reference).await?.ok_or_else(|| invalid("node_history_manifest_missing"))?;
+        if bcs_dist_encoding::blob_reference(&reference.key, &bytes) != *reference {
+            return Err(invalid("node_history_manifest_digest"));
+        }
+        let manifest: HistoryManifest = serde_json::from_slice(&bytes)
+            .map_err(|_| invalid("node_history_manifest_encoding"))?;
+        let round = license.round_key();
+        if manifest.round != round {
+            return Err(invalid("node_history_round_binding"));
+        }
+        for cut in manifest.cuts {
+            match history.release_node_input(&round, &cut.history.node_id).await {
+                Ok(IdempotentWrite::Applied | IdempotentWrite::AlreadyApplied) => {}
+                Ok(IdempotentWrite::ContentConflict) => return Err(invalid("node_history_pin_conflict")),
+                // Nodes not reached before cancellation may never have frozen.
+                Err(StoreError::NotApplied { code }) if code == CODE_NODE_INPUT_PIN_ABSENT => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
     /// Complete the spine window for a still-open licensed round: confirm
     /// the retained proof against the cold archive and read it back. Two
     /// bounded archive calls; idempotent — an already confirmed proof
@@ -146,6 +174,10 @@ impl StoreGroupRoundAdmission {
         let Some(artifacts) = self.artifacts() else {
             return Ok(false);
         };
+        // The retained terminal CAS proves no dispatch can replay. Release
+        // pins before cold confirmation so an admission repairing this same
+        // window cannot overtake cleanup or lose its durable authority.
+        self.release_history_pins(license).await?;
         match artifacts
             .confirm_terminal_proof(&license.scope, &license.group, &license.tid, &proof)
             .await?
@@ -349,6 +381,7 @@ impl StoreGroupRoundAdmission {
             }
         }
         // Cold confirm inside the same window, then read back.
+        self.release_history_pins(&license).await?;
         match artifacts
             .confirm_terminal_proof(&license.scope, &license.group, &license.tid, proof)
             .await?

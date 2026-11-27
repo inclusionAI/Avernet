@@ -11,16 +11,12 @@ use bcs_service_api::{
             decode_strict_license,
         },
         inbox::*,
+        node_history::NodeHistoryRepo,
+        result::BlobStorePort,
         session::SessionStorePort,
     },
 };
 use std::{num::NonZeroU64, sync::Arc};
-
-/// The stable key of a fresh strict round's pinned (empty) history
-/// boundary: a new session's admission is the boundary of no committed
-/// history yet, digest-pinned so the T3 freeze seam (`freeze_node_input`)
-/// can later attach the real history store behind the same reference.
-const HISTORY_CUT_KEY: &str = "group-round-history:v1";
 
 pub struct WorkerTaskAdmission {
     inbox: Arc<dyn InboxProducerPort>,
@@ -34,6 +30,7 @@ pub struct WorkerTaskAdmission {
 struct StrictAdmission {
     rounds: Arc<dyn GroupRoundRepo>,
     sessions: Arc<dyn SessionStorePort>,
+    history: Option<(Arc<dyn NodeHistoryRepo>, Arc<dyn BlobStorePort>)>,
 }
 
 impl WorkerTaskAdmission {
@@ -59,9 +56,19 @@ impl WorkerTaskAdmission {
     ) -> Self {
         Self {
             inbox,
-            strict: Some(StrictAdmission { rounds, sessions }),
+            strict: Some(StrictAdmission { rounds, sessions, history: None }),
             now,
         }
+    }
+
+    pub fn with_node_history(
+        mut self,
+        history: Arc<dyn NodeHistoryRepo>,
+        blobs: Arc<dyn BlobStorePort>,
+    ) -> Result<Self, StoreError> {
+        self.strict.as_mut().ok_or_else(|| invalid("strict_rounds_unconfigured"))?
+            .history = Some((history, blobs));
+        Ok(self)
     }
 
     /// One recoverable round per context. Authorization belongs to the
@@ -76,7 +83,45 @@ impl WorkerTaskAdmission {
                 code: "group_scope_untrusted".into(),
             });
         }
-        self.strict_admission()?.rounds.admit(request).await
+        let strict = self.strict_admission()?;
+        let Some((history, blobs)) = &strict.history else {
+            return strict.rounds.admit(request).await;
+        };
+        let key = &request.input.key;
+        let identity = GroupRequestIdentity::strict(scope, &key.group, &request.request_id);
+        match strict.rounds.lookup(&identity).await? {
+            GroupRequestRecord::Accepted(original) | GroupRequestRecord::Prepared(original) => {
+                let mut replay = request.clone();
+                replay.input.history_cut = original.input.history_cut;
+                return strict.rounds.admit(&replay).await;
+            }
+            GroupRequestRecord::Expired => return Ok(Admission::Expired),
+            GroupRequestRecord::Absent => {}
+        }
+        let spec = strict.sessions.get_spec(&key.sid).await?
+            .ok_or_else(|| invalid("group_round_definition_missing"))?;
+        if key.generation > NonZeroU64::MIN {
+            let current = strict.sessions.load(&key.sid).await?;
+            let previous = current.as_ref()
+                .and_then(|state| state.checkpoint.runner_state.as_ref())
+                .and_then(|state| decode_strict_license(&state.state.value))
+                .ok_or_else(|| invalid("group_round_generation"))?;
+            if previous.generation.checked_add(1) != Some(key.generation) {
+                return Err(invalid("group_round_generation"));
+            }
+            if !Self::previous_closed(strict, &previous).await? {
+                return Ok(Admission::Busy);
+            }
+        }
+        let mut request = request.clone();
+        request.input.history_cut = crate::node_history::capture(
+            history.as_ref(), blobs.as_ref(), &spec, key,
+        ).await?;
+        strict.rounds.admit(&request).await
+    }
+
+    async fn previous_closed(strict: &StrictAdmission, license: &bcs_service_api::port::repo::distributed::group_round::StrictLicense) -> Result<bool, StoreError> {
+        Ok(strict.rounds.get(&license.round_key()).await?.is_some_and(|view| view.terminal.is_some()))
     }
 
     fn strict_admission(&self) -> Result<&StrictAdmission, StoreError> {
@@ -85,7 +130,7 @@ impl WorkerTaskAdmission {
 
     /// Freeze a new strict round from the immutable SessionSpec, not from
     /// the current directory revision of a reused context.
-    fn group_round_of(
+    async fn group_round_of(
         &self,
         scope: &TaskScope,
         command: &TaskAdmissionCommand,
@@ -111,25 +156,21 @@ impl WorkerTaskAdmission {
                 Err(invalid("group_round_part_unsupported"))
             }
         }).collect::<Result<Vec<_>, _>>()?;
+        let key = RoundKey {
+            scope: scope.clone(), group: spec.group.clone(), sid: spec.sid.clone(),
+            tid: command.input.tid.clone(), generation,
+        };
+        let (history, blobs) = self.strict_admission()?.history.as_ref()
+            .ok_or_else(|| invalid("node_history_unconfigured"))?;
+        let history_cut = crate::node_history::capture(history.as_ref(), blobs.as_ref(), spec, &key).await?;
         Ok(GroupStartRequest {
             input: RoundInput {
                 schema_version: RoundSchemaVersion::V1,
                 source: GroupRoundSource::GroupA2a,
-                key: RoundKey {
-                    scope: scope.clone(),
-                    group: spec.group.clone(),
-                    sid: command.input.sid.clone(),
-                    tid: command.input.tid.clone(),
-                    generation,
-                },
+                key,
                 ordered_parts,
                 workflow_ref: spec.workflow.clone(),
-                history_cut: BlobRef {
-                    key: HISTORY_CUT_KEY.into(),
-                    digest: bcs_dist_encoding::digest_json(&serde_json::json!({
-                        "entries": [],
-                    })),
-                },
+                history_cut,
                 execution_deadline: TimestampMillis((self.now)().0.saturating_add(
                     i64::try_from(spec.limits.task_timeout_millis)
                         .unwrap_or(i64::MAX / 2),
@@ -237,14 +278,20 @@ impl WorkerTaskAdmission {
                     return Err(invalid("group_round_session_binding"));
                 }
                 let mut request = if let Some(license) = license {
+                    if !Self::previous_closed(strict, &license).await? {
+                        if current.as_ref().is_some_and(|state| state.recovery.quarantined) {
+                            return Ok(AdmitOutcome::Quarantined);
+                        }
+                        return Err(StoreError::NotApplied { code: "group_round_busy".into() });
+                    }
                     let generation = license.generation.checked_add(1)
                         .ok_or_else(|| invalid("group_round_generation"))?;
-                    self.group_round_of(scope, command, spec, generation)?
+                    self.group_round_of(scope, command, spec, generation).await?
                 } else {
                     match self.original_group_round(scope, spec, command).await? {
                         Some(original) if same_round_intent(&original, spec, command) => original,
                         Some(_) => return Ok(AdmitOutcome::ContentConflict),
-                        None => self.group_round_of(scope, command, spec, NonZeroU64::MIN)?,
+                        None => self.group_round_of(scope, command, spec, NonZeroU64::MIN).await?,
                     }
                 };
                 if let Some(initial) = &initial
@@ -261,7 +308,7 @@ impl WorkerTaskAdmission {
                 request
             }
         };
-        let mut outcome = self.admit_group_round(scope, &request).await?;
+        let mut outcome = strict.rounds.admit(&request).await?;
         if outcome == Admission::Conflict {
             // Lookup is not a reservation. A concurrent same-key successor
             // may have frozen a different deadline before our bind CAS.
@@ -270,7 +317,7 @@ impl WorkerTaskAdmission {
                 && original != request
                 && same_round_intent(&original, spec, command)
             {
-                outcome = self.admit_group_round(scope, &original).await?;
+                outcome = strict.rounds.admit(&original).await?;
             }
         }
         match outcome {

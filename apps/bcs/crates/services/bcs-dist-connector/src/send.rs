@@ -59,6 +59,17 @@ impl Call {
             request_id: request_id.clone(),
         };
         if possibly_sent {
+            let execution = &self.held.view().execution;
+            // Recover a synchronous reply durably observed before its inbox
+            // report, or a proven rejection whose report was interrupted.
+            if execution.remote.is_none() && spec.node_history.is_some() {
+                if execution.node_responses.iter().any(|response| matches!(response.kind, AgentEventKind::Final)) {
+                    return self.replay_recorded_node_final().await;
+                }
+                if execution.node_input_delivery == Some(DeliveryState::Undelivered) {
+                    return self.end_with_error("rejected", "node_start_rejected", FinalDispatchOutcome::Failed, "node_start_rejected").await;
+                }
+            }
             return self.resolve_start(operation, request_id, "start_maybe_sent").await;
         }
         let proof_operation = ProofOperation::Start {
@@ -71,11 +82,43 @@ impl Call {
                 .end_with_error("failed", "request_unavailable", FinalDispatchOutcome::Failed, "request_unavailable")
                 .await;
         };
+        let frozen_history = if spec.node_history.is_some() {
+            let Some(repo) = self.ports.node_history.clone() else {
+                return self.end_with_error("failed", "node_history_unconfigured", FinalDispatchOutcome::Failed, "node_history_unconfigured").await;
+            };
+            let mut backoff = self.backoff();
+            Some(loop {
+                match crate::node_history::pinned_history(&spec, repo.as_ref(), self.ports.blobs.as_ref()).await {
+                    Ok(history) => break history,
+                    Err(error) if crate::call::permanent(&error) => {
+                        tracing::error!(did=%did.0, ?error, "frozen node history cannot be loaded");
+                        return self.end_with_error(
+                            "failed", "node_history_unavailable", FinalDispatchOutcome::Failed, "node_history_unavailable",
+                        ).await;
+                    }
+                    Err(_) => {
+                        backoff.wait().await;
+                        held_write!(self, "dispatch read", self.held.refresh());
+                    }
+                }
+            })
+        } else { None };
+        // BCS owns the history. Every attempt gets a new remote context so
+        // it never layers this history on top of previous remote turns.
+        let context_id = spec.node_history.as_ref().map(|_| format!("fsm-node:{}", request_id.0));
+        let body = match &frozen_history {
+            Some(history) => serde_json::to_vec(&(&payload, &context_id, history))
+                .map_err(|_| crate::call::Stop::Invalid)?,
+            None => canonical_body(&payload),
+        };
+        if frozen_history.is_some() && body.len() > bcs_service_api::port::repo::distributed::group_round::RoundBudgetProfile::v1().inbound_bytes {
+            return self.end_with_error("failed", "node_history_input_budget", FinalDispatchOutcome::Failed, "node_history_input_budget").await;
+        }
         // Send intent and its identity are durable before any network call.
         let proof = self.ports.rules.send_proof(
             &spec,
             proof_operation,
-            &canonical_body(&payload),
+            &body,
             self.config.send_fingerprint(&capabilities),
         );
         loop {
@@ -91,11 +134,11 @@ impl Call {
             let authority = self.authority_now(CallOperation::Start, None, &spec);
             let send = StableSendRequest {
                 request_id: request_id.clone(),
-                context_id: None,
+                context_id: context_id.clone(),
                 payload: payload.clone(),
                 node: spec.node.clone(),
                 attempt: spec.attempt,
-                frozen_history: None,
+                frozen_history: frozen_history.clone(),
             };
             match self.ports.agent.start(&authority, send).await {
                 SendOutcome::Accepted { remote, events } => {
@@ -104,6 +147,7 @@ impl Call {
                 SendOutcome::Completed { result } => {
                     return match self.ports.rules.completed_result(&result) {
                         Ok(verified) => {
+                            let verified = self.remember_node_response(&AgentEventKind::Final, verified).await?;
                             if self.report(AgentEventKind::Final, None, verified).await? == Admitted::Yes {
                                 self.finish(FinalDispatchOutcome::Completed, "sync_result").await?;
                             }
@@ -115,13 +159,23 @@ impl Call {
                     };
                 }
                 SendOutcome::Rejected { code } => {
-                    let evidence = format!("rejected:{code}");
+                    let (code, evidence) = if spec.node_history.is_some() {
+                        held_write!(self, "node rejection", self.held.record_node_start(DeliveryState::Undelivered, false));
+                        ("node_start_rejected".to_owned(), "node_start_rejected".to_owned())
+                    } else {
+                        let evidence = format!("rejected:{code}");
+                        (code, evidence)
+                    };
                     return self
                         .end_with_error("rejected", &code, FinalDispatchOutcome::Failed, &evidence)
                         .await;
                 }
                 SendOutcome::NotSent { code } => {
                     not_sent += 1;
+                    if spec.node_history.is_some() {
+                        // Only the adapter's definitive no-send opens a retry.
+                        held_write!(self, "node not sent", self.held.record_node_start(DeliveryState::Undelivered, true));
+                    }
                     if not_sent > self.config.not_sent_retries {
                         self.mark_unresolved(UnresolvedKind::NotSent, &code).await;
                         return Ok(());

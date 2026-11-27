@@ -2,6 +2,24 @@
 
 状态（2026-11-25 范围调整）：**D0 冻结仍待复核；按用户决定拆分 provider 交付，允许继续后续功能实现，不代表 Stage 2 已完成或真实后端验收已通过。** 当前开发授权以 plan 的“交付范围与执行授权”为准；以下原状态裁决是调整前记录，测试结果不变。 当前修复基线为 `564a2b7e30`；下列第一至第五轮为历史记录，不代表当前工作树已通过。最新证据与状态见“第六轮”。未执行合并、部署或 push。
 
+## PR #4285 审阅意见复核（2026-11-27，基线 `a19a107251`）
+
+对照 [PR 的八条审阅意见](https://github.com/inclusionAI/Avernet/pull/4285#issuecomment-7211124591)，区分已在本地工作树修复的行为和补充发现：
+
+- **1、4、5（续轮/取消、分页、旧入口）**：已有修复不重复改。通过公开路由完成同 context 两轮；Busy 不占用消息键、取消等真实停止；重新分页拿到可用新游标且旧游标仍过期；撤销 REST 读权后，旧 RPC `ListTasks` 同样不能列出该 context。
+- **2（最终产物）**：在上一轮修复后 parts 已正确，但实测返回 `dist:final_answer:6:review:final-answer-0` 而不是下游的 `review-answer`。固定 FinalAnswer 的原始 artifactId 和有序 parts，公开 Get 与 ArtifactUpdate 复用同一标识；没有下游产物 ID 的直接消息仍使用确定性的展示 ID。
+- **3（HTTP+JSON）**：仓库客户端配合锁定的 SDK 模型复现 `invalid Task snapshot` / `SSE contains invalid StreamResponse`。`message:send` 返回 `SendMessageResponse::Task`，普通流首帧使用 `StreamResponse::Task`，订阅支持 POST；独立 GET / Cancel 响应仍是 Task。修复首帧后再驱动真实 Worker，复现“Get 已完成、订阅没有更新”：旧 reader 只解码历史 `ev` 条目，实际生产者写的是带 effect 的 TaskFeed。挂载入口改用规范 Feed；实测 SDK 依次读到 Working、原 `review-answer` 和 Completed 后 EOF。单独阻断终态证明时，SSE 失败关闭，GET 也不提前披露最终产物。
+- **6（许可前可见性）**：直接执行真实 `stage_strict_round`，确认任务文档及主体索引均已持久化，但尚无 checkpoint 许可。在此位置真实 GET 返回 404，List 的行和 total 都是 0，而不是只用一个无索引的伪造任务测试读取。
+- **7（前驱产物）**：完整产品在真实下游 HTTP 请求中可见。加强反例后发现：同时存在公开 artifacts 和私有 status.message 时，原实现把两者一起交给后继。现在 Runner 持久化的派发内容与 HTTP 客户端均只传产品，私有状态消息不跨节点。
+
+- **8（跨轮节点历史）**：受理时按 scope、group、Sid、冻结工作流和节点读取已提交边界，写入带摘要的 manifest。Worker 在发布派发之前固定节点输入；Connector 仅读取并校验该 pin，在真实 A2A 消息中单独发送 `nodeHistory`。已派发输入和实际关键回复按稳定身份写入，带原轮次结果，不把 Delta、Thinking、Tool、合成错误或旧历史递归当作新对话。记录失败不允许 Done；只有轮次停止并且持久终态提交后才释放 pin。没有历史来源的旧在途轮次不回填。
+
+`group_a2a_node_history` 用同一 Bot 的两个节点和真实 loopback HTTP 检查：第二轮各自收到第一轮自己的私有标记，评审同时收到本轮研究产物；新 Sid 没有旧历史。Worker 更替和下游明确 `NotSent` 后的 Connector 更替都不会改变已固定的请求或重复执行；受理后插入的迟到行不可见。另用真实 SQLite 写失败分别打断 pin 固定和交互记录，证实没有提前派发或终结，解除故障后可恢复。
+
+最终工作树：14 个受影响 crate 完整测试 **1289 passed / 0 failed**，5 个 bootstrap 集成目标另 **23 passed / 0 failed**。全工作区 `cargo check --workspace --all-targets --locked`、port/store 架构检查、相对 `a19a107251` 的 public API 差异及旧 wire 兼容门禁通过。完整 bootstrap crate 的全测试编译触发本机 3 GiB 磁盘保护并停止，没有据此宣称全 workspace 测试通过。
+
+验证边界：该 PR 的公开接口和恢复测试是同进程多角色装配（真实 HTTP、SQLite 和存储端口模型）。没有宣称真实 MySQL、外部 provider 或跨进程故障矩阵已经通过；不验证第三方 Bot 自身的长期记忆隔离，也不引入新保留策略。`bcs-service-api` 升至 10.0.0，更新实现端口和构造严格许可证的消费者；`bcs-dist-model` 的新增持久化字段可解码缺省旧格式。版本切换应协调升级读写方。
+
 ## 2026-11-27：公开路由与停止证明复核
 
 基线 `a19a107251` 的四个反例均使用同进程真实角色装配重现：下游仍在 Sending 就提交终态；在已完成的 context 发第二轮返回 503；运行中取消返回 503；公开 Get 返回 Completed 但没有最终节点的 Artifact。以下测试检查调用方可见的结果，不把仓库直接受理或测试桩的执行次数当作 REST 验收。
@@ -14,7 +32,7 @@
 
 本轮最终回归（BCS 工作区，`--locked -j1 -- --test-threads=1`）：12 个受影响 crate 完整测试共 **933 passed / 0 failed / 0 ignored**；另跑 `bcs` 的 `group_a2a_companion`、`group_a2a_rest_bridge`、`group_a2a_rest_cancel` 三个目标，**17 passed / 0 failed**。`cargo check --workspace --all-targets --locked`、端口纯度和存储边界检查、相对 `a19a107251` 的真实 public API 差异和旧格式 wire 检查均通过。不是全 workspace 测试或真实后端验收。
 
-**功能仍缺：跨轮节点历史。** `NodeHistoryRepo` 单独的存储契约可用，但受理尚未固定每个节点的已提交历史边界，派发与接管尚未绑定可重放的输入 pin，实际下游交互和所属轮次结局也没有贯穿运行路径。连续两轮成功、同一节点不泄露其他节点数据，并不能证明“第二轮继承自己的历史”。真实持久 provider、真实 MySQL 和跨进程验收仍独立，不以本记录放行。
+**上一轮尚未接通：跨轮节点历史。此结论已由本文开头 PR #4285 的第 8 项复核取代。** `NodeHistoryRepo` 单独的存储契约可用，但受理尚未固定每个节点的已提交历史边界，派发与接管尚未绑定可重放的输入 pin，实际下游交互和所属轮次结局也没有贯穿运行路径。连续两轮成功、同一节点不泄露其他节点数据，并不能证明“第二轮继承自己的历史”。真实持久 provider、真实 MySQL 和跨进程验收仍独立，不以本记录放行。
 
 ## 第六轮（2026-11-25）：审查修复与状态重新核定
 

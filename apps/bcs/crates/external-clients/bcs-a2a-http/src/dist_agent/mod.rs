@@ -538,6 +538,14 @@ fn build_message(
             parts.push(json!({"data": {"upstream": results}}));
         }
     }
+    if let Some(history) = &request.frozen_history {
+        // A dedicated part preserves the distinction from workflow-bound
+        // predecessor output and from this round's user parts.
+        if history.entries.iter().any(|record| matches!(record.entry.content, Payload::Ref(_))) {
+            return Err("request_by_reference");
+        }
+        parts.push(json!({"data": {"nodeHistory": history}}));
+    }
     let mut message = json!({ "messageId": request.request_id.0, "role": "ROLE_USER", "parts": parts });
     let context = request
         .context_id

@@ -46,6 +46,7 @@ async fn consecutive_round_closes_compact_the_checkpoint_to_a_bounded_skeleton()
 
     let license = |tid: &str| StrictLicense {
         schema_version: 1,
+        history_cut: None,
         scope: scope(),
         group: group(),
         sid: Sid("s0001.session".into()),

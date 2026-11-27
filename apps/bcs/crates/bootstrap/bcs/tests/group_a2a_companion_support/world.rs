@@ -22,6 +22,8 @@ pub struct CompanionWorld {
     /// The injected host directory: the publication seed resolves the
     /// group through the SAME seam the assembly mounts (different
     /// scenarios may publish a different frozen participant/workflow).
+    /// Retain the SQLite fixture for the lifetime of its running roles.
+    archive_dir: tempfile::TempDir,
     directory: std::sync::Mutex<Arc<dyn DistGroupDirectoryPort>>,
 }
 
@@ -44,10 +46,26 @@ impl CompanionWorld {
         Self::assemble_with_parts(config, DownstreamJournal::new(), Arc::new(Catalog)).await
     }
 
+    pub async fn assemble_with_downstream(
+        directory: Arc<dyn DistGroupDirectoryPort>,
+        downstream: Arc<dyn DistAgentClientPort>,
+    ) -> Arc<Self> {
+        Self::assemble_with_host(enabled_config(), DownstreamJournal::new(), directory, downstream).await
+    }
+
     async fn assemble_with_parts(
         config: GroupA2aConfig,
         journal: Arc<DownstreamJournal>,
         directory: Arc<dyn DistGroupDirectoryPort>,
+    ) -> Arc<Self> {
+        Self::assemble_with_host(config, journal.clone(), directory, journal).await
+    }
+
+    async fn assemble_with_host(
+        config: GroupA2aConfig,
+        journal: Arc<DownstreamJournal>,
+        directory: Arc<dyn DistGroupDirectoryPort>,
+        downstream: Arc<dyn DistAgentClientPort>,
     ) -> Arc<Self> {
         let model = Arc::new(Model::default());
         let peers = Arc::new(Peers::default());
@@ -63,7 +81,7 @@ impl CompanionWorld {
         let host = GroupA2aHost {
             directory: directory.clone(),
             policy: Arc::new(AllowPolicy),
-            downstream: journal.clone(),
+            downstream,
             peers: peers.clone(),
         };
         let archive = tempfile::tempdir().expect("temp archive dir");
@@ -82,6 +100,7 @@ impl CompanionWorld {
             journal,
             peers,
             workers: Mutex::new(vec![]),
+            archive_dir: archive,
             directory: std::sync::Mutex::new(directory.clone()),
         });
         // The wired Worker pair is the first live incarnation of the drive.
@@ -95,6 +114,10 @@ impl CompanionWorld {
         }
         Arc::clone(&world).seed_session().await;
         world
+    }
+
+    pub fn archive_path(&self) -> std::path::PathBuf {
+        self.archive_dir.path().join("archive.sqlite")
     }
 
     /// The durable publication write of the group's strict session: the
@@ -265,6 +288,14 @@ impl CompanionWorld {
         self: &Arc<Self>,
         name: &str,
     ) -> (tokio::task::JoinHandle<()>, bcs_dist_connector::ConnectorEngine) {
+        self.connect_with_config(name, |_| {})
+    }
+
+    pub fn connect_with_config(
+        self: &Arc<Self>,
+        name: &str,
+        configure: impl FnOnce(&mut bcs_dist_connector::config::ConnectorConfig),
+    ) -> (tokio::task::JoinHandle<()>, bcs_dist_connector::ConnectorEngine) {
         let roles = &self.assembly.roles;
         let mut config = bcs_dist_connector::config::ConnectorConfig::new(
             Instance {
@@ -276,6 +307,7 @@ impl CompanionWorld {
         config.pool = PoolId(POOL.into());
         // Membership registrations must be reachable to be accepted.
         config.control_address = format!("http://{name}-connector.example.invalid");
+        configure(&mut config);
         let engine = bcs_dist_connector::ConnectorEngine::new(
             config,
             bcs_dist_connector::config::ConnectorPorts {
@@ -284,6 +316,7 @@ impl CompanionWorld {
                 agent: roles.downstream.clone(),
                 membership: roles.coordination.clone(),
                 blobs: roles.archive.clone(),
+                node_history: Some(roles.node_history.clone()),
                 rules: Arc::new(bcs_dist_connector::rules::DistConnectorRules),
             },
         )
@@ -342,7 +375,8 @@ impl CompanionWorld {
                 },
                 bcs_dist_worker::ProcessorConfig::default(),
             )
-            .expect("foreign processor assembles"),
+            .expect("foreign processor assembles")
+            .with_node_history(roles.node_history.clone()),
         );
         // Deliberately NO register_worker_leaser: this claims the shard
         // as an unregistered holder.
@@ -397,7 +431,8 @@ impl CompanionWorld {
                 },
                 bcs_dist_worker::ProcessorConfig::default(),
             )
-            .expect("second processor assembles"),
+            .expect("second processor assembles")
+            .with_node_history(roles.node_history.clone()),
         );
         // The successor is a legal lessee of this host's shard: the
         // round admission binding follows its claim after the takeover.

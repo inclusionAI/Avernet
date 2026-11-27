@@ -123,6 +123,7 @@ pub struct GroupA2aRoles {
     pub dispatch: Arc<StoreDispatch>,
     pub queue: Arc<bcs_dist_connector_store::StoreDispatchQueue>,
     pub archive: Arc<DbArchiveStore>,
+    pub node_history: Arc<bcs_dist_store::node_history::DbNodeHistoryStore>,
     pub artifacts: Arc<GroupArtifactStore>,
     /// The strict licensed admit/get seam, bound to the shard lease and
     /// rebound on rotation (crash takeovers). All call sites use the
@@ -256,6 +257,8 @@ pub async fn assemble_inprocess(
     // Result/Blob durability: the existing SQLite provider + migration
     // chain, one file per store role.
     let archive_db = sqlite_at(&archive_dir, "archive.sqlite").await?;
+    let node_history = Arc::new(bcs_dist_store::node_history::DbNodeHistoryStore::new(archive_db.clone())
+        .map_err(assembly_err)?);
     let archive = Arc::new(
         DbArchiveStore::new(archive_db, provider.documents.clone(), layout.clone())
             .map_err(assembly_err)?,
@@ -389,6 +392,8 @@ pub async fn assemble_inprocess(
         let layout = layout.clone();
         let inbox_clock = inbox_clock.clone();
         let artifacts = artifacts.clone();
+        let node_history = node_history.clone();
+        let archive = archive.clone();
         move |claim: ShardClaim| {
             StoreGroupRoundAdmission::with_artifacts(
                 coordination.clone(),
@@ -400,6 +405,7 @@ pub async fn assemble_inprocess(
                 inbox_clock.clone(),
                 artifacts.clone(),
             )
+            .map(|rounds| rounds.with_node_history(node_history.clone(), archive.clone()))
             .map_err(|e| GroupA2aWiringError::Assembly { code: e.to_string() })
         }
     };
@@ -421,7 +427,7 @@ pub async fn assemble_inprocess(
         rounds.clone(),
         coordination.clone(),
         Arc::new(now_ms),
-    ));
+    ).with_node_history(node_history.clone(), archive.clone()).map_err(assembly_err)?);
     let processor = Arc::new(
         bcs_dist_worker::WorkerProcessor::new(
             runtime.clone(),
@@ -448,7 +454,8 @@ pub async fn assemble_inprocess(
             },
             bcs_dist_worker::ProcessorConfig::default(),
         )
-        .map_err(assembly_err)?,
+        .map_err(assembly_err)?
+        .with_node_history(node_history.clone()),
     );
     let supervisor = if config.supervisor_enabled {
         Some(Arc::new(tokio::sync::Mutex::new(
@@ -498,6 +505,7 @@ pub async fn assemble_inprocess(
             agent: host.downstream.clone(),
             membership: coordination.clone(),
             blobs: archive.clone(),
+            node_history: Some(node_history.clone()),
             rules: Arc::new(bcs_dist_connector::rules::DistConnectorRules),
         },
     )
@@ -551,6 +559,7 @@ pub async fn assemble_inprocess(
             dispatch,
             queue,
             archive,
+            node_history,
             artifacts,
             rounds,
             rounds_binding,

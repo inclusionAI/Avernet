@@ -62,6 +62,7 @@ impl super::WorkerProcessor {
         // record is never read as "no attempts" — the sealed checkpoint
         // registry drove the attempt set, its absence is corruption.
         let mut barrier_cancels = Vec::new();
+        let mut stopped = Vec::new();
         let mut waiting = false;
         for (did, _) in before
             .dispatch_seq
@@ -77,6 +78,13 @@ impl super::WorkerProcessor {
                     && view.execution.send_proof.is_none()
                     && view.control.cancel.is_some())
             {
+                // For history-enabled calls, even a known remote stop must
+                // let the fenced Connector settle its last response first.
+                if license.history_cut.is_some() && view.execution.phase != DispatchPhase::Ended {
+                    waiting = true;
+                    continue;
+                }
+                stopped.push(view);
                 continue;
             }
             waiting = true;
@@ -121,6 +129,10 @@ impl super::WorkerProcessor {
                 kind: DeadlineKind::Task { tid: tid.clone() },
             });
             return Ok(StopBarrier::Register(candidate));
+        }
+        if license.history_cut.is_some() {
+            let status = frozen_record(before, tid)?.status;
+            self.append_round_history(&license, status, &mut stopped).await?;
         }
         Ok(StopBarrier::Ready)
     }
@@ -374,7 +386,7 @@ impl super::WorkerProcessor {
 }
 
 /// Classify one attempt's durable stop facts. Uncertainty is not evidence.
-fn attempt_stopped(execution: &DispatchExecution) -> bool {
+pub(super) fn attempt_stopped(execution: &DispatchExecution) -> bool {
     if matches!(
         execution.cancellation,
         CancelObservation::ConfirmedCanceled | CancelObservation::AlreadyFinished { .. }

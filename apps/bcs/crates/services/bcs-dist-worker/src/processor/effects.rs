@@ -10,6 +10,8 @@ pub(super) struct EffectPorts {
     pub output: Arc<dyn TaskPublisherPort>,
     pub results: Arc<dyn ResultStorePort>,
     pub dispatch: Arc<dyn DispatchControlPort>,
+    pub blobs: Arc<dyn BlobStorePort>,
+    pub node_history: Option<Arc<dyn bcs_service_api::port::repo::distributed::node_history::NodeHistoryRepo>>,
 }
 #[derive(Clone)]
 pub(super) struct CompletedEffects {
@@ -169,6 +171,10 @@ impl EffectPorts {
                 }
             }
             EffectKind::CreateDispatch { spec } => {
+                if let Some(pin) = &spec.node_history {
+                    let repo = self.node_history.as_ref().ok_or(EffectFailure::Blocked("node_history_unconfigured"))?;
+                    super::node_history::freeze_for_dispatch(spec, pin, repo.as_ref(), self.blobs.as_ref()).await?;
+                }
                 if self
                     .dispatch
                     .create(CreateCommittedDispatch {

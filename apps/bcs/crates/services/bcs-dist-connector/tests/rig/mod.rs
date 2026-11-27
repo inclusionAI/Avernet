@@ -391,6 +391,7 @@ impl Rig {
             agent: self.agent.clone(),
             membership: self.membership.clone(),
             blobs: self.blobs.clone(),
+            node_history: None,
             rules: Arc::new(DistConnectorRules),
         }
     }

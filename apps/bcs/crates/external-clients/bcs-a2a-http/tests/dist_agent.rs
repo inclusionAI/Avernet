@@ -251,6 +251,35 @@ async fn strict_node_send_preserves_order_and_carries_bound_predecessors() {
 }
 
 #[tokio::test]
+async fn frozen_node_history_is_sent_as_a_separate_part() {
+    use bcs_service_api::port::repo::distributed::node_history::*;
+    let (client, agent) = fixture().await;
+    agent.on("SendStreamingMessage", Answer::Sse(vec![json!({"task": task("TASK_STATE_WORKING")})]));
+    let mut req = request("node-round-two");
+    req.frozen_history = Some(PinnedHistory {
+        entries: vec![NodeHistoryRecord {
+            interaction_id: InteractionId("previous-response".into()),
+            entry: NodeHistoryEntry {
+                round_generation: std::num::NonZeroU64::MIN,
+                kind: NodeHistoryKind::NodeResponse,
+                content: Payload::Inline(json!({"text": "own private marker"})),
+                round_outcome: Some(TerminalStatus::Completed),
+            },
+        }],
+        ordered_digest: Digest("fixture-history-digest".into()),
+        truncated: true,
+    });
+    assert_eq!(name(&client.start(&start_authority(), req).await), "accepted");
+    let call = agent.call(0);
+    let parts = call["params"]["message"]["parts"].as_array().unwrap();
+    assert_eq!(parts[0], json!({"text":"compare the quarters"}));
+    assert_eq!(parts.len(), 2);
+    let history = &parts[1]["data"]["nodeHistory"];
+    assert_eq!(history["entries"][0]["entry"]["content"]["value"]["text"], "own private marker");
+    assert_eq!(history["truncated"], true);
+}
+
+#[tokio::test]
 async fn a_start_is_sent_once_with_a_stable_message_id_and_mapped_to_events() {
     let (client, agent) = fixture().await;
     agent.on(

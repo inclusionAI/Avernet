@@ -138,6 +138,7 @@ fn dispatch_spec_for(tid: &Tid, spec: &SessionSpec) -> DispatchSpec {
         .expect("sibling binding seeded");
     DispatchSpec {
         schema_version: 1,
+        node_history: None,
         sid: spec.sid.clone(),
         tid: tid.clone(),
         did: Did(format!("{}.fsm:1:{NODE}:1", tid.0)),

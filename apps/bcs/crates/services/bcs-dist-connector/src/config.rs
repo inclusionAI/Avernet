@@ -190,6 +190,8 @@ pub struct ConnectorPorts {
     /// Immutable blobs: large event payloads, and requests or replies the
     /// Worker stored by reference.
     pub blobs: Arc<dyn BlobStorePort>,
+    /// The durable private history lane; required by history-enabled dispatches.
+    pub node_history: Option<Arc<dyn bcs_service_api::port::repo::distributed::node_history::NodeHistoryRepo>>,
     /// The pure rules; normally [`crate::rules::DistConnectorRules`].
     pub rules: Arc<dyn DistConnectorCoreService>,
 }

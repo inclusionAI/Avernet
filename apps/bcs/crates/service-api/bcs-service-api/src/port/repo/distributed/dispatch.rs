@@ -304,6 +304,23 @@ pub trait HeldDispatchPort: Send {
         operation: SendOperation,
         proof: SendProof,
     ) -> Result<SendPermit, HolderError>;
+    /// Record a definitive start observation. A strictly proven `NotSent`
+    /// can reopen the same immutable attempt; ambiguous outcomes never do.
+    async fn record_node_start(
+        &mut self,
+        _delivery: DeliveryState,
+        _retry_not_sent: bool,
+    ) -> Result<(), HolderError> {
+        Err(HolderError::InvalidTransition { code: "node_start_unsupported".into() })
+    }
+    /// Persist the first real response for a stable interaction before
+    /// admitting its public/reducer-facing event. Synthetic errors do not use this.
+    async fn record_node_response(
+        &mut self,
+        _response: NodeResponseEvidence,
+    ) -> Result<(), HolderError> {
+        Err(HolderError::InvalidTransition { code: "node_response_unsupported".into() })
+    }
     async fn record_acceptance(
         &mut self,
         evidence: AcceptanceEvidence,

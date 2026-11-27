@@ -547,6 +547,25 @@ impl NodeHistoryRepo for DbNodeHistoryStore {
             .await
     }
 
+    async fn load_node_input(
+        &self,
+        round: &RoundKey,
+        node: &NodeId,
+        cut: &HistoryCut,
+        budget: &RoundBudgetProfile,
+    ) -> Result<PinnedHistory, StoreError> {
+        validate_key(&cut.history)?;
+        validate_cut(&cut.history, cut)?;
+        if cut.history.scope != round.scope || cut.history.group != round.group
+            || cut.history.sid != round.sid || cut.history.node_id != *node
+        {
+            return Err(invalid("node_input_binding"));
+        }
+        let existing = self.lookup_pin(round, node).await?
+            .ok_or_else(|| invalid(CODE_NODE_INPUT_PIN_ABSENT))?;
+        Self::compare_pin(&existing, cut, page_rows(budget)?)
+    }
+
     async fn release_node_input(
         &self,
         round: &RoundKey,

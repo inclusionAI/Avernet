@@ -162,6 +162,7 @@ pub(super) struct ProcessorState {
 pub struct WorkerProcessor {
     pub(super) runtime: Arc<WorkerRuntime>,
     pub(super) ports: ProcessorPorts,
+    pub(super) node_history: Option<Arc<dyn bcs_service_api::port::repo::distributed::node_history::NodeHistoryRepo>>,
     pub(super) config: ProcessorConfig,
     pub(super) references: References,
     pub(super) effects: EffectPorts,
@@ -208,6 +209,8 @@ impl WorkerProcessor {
             output: ports.output.clone(),
             results: ports.results.clone(),
             dispatch: ports.dispatch.clone(),
+            blobs: ports.blobs.clone(),
+            node_history: None,
         };
         Ok(Self {
             thinking_budget: std::sync::Mutex::new(super::thinking::ThinkingBudget::new(
@@ -215,12 +218,22 @@ impl WorkerProcessor {
             )),
             runtime,
             ports,
+            node_history: None,
             config,
             references,
             effects,
             state: Mutex::new(ProcessorState::default()),
         })
     }
+    pub fn with_node_history(
+        mut self,
+        repo: Arc<dyn bcs_service_api::port::repo::distributed::node_history::NodeHistoryRepo>,
+    ) -> Self {
+        self.effects.node_history = Some(repo.clone());
+        self.node_history = Some(repo);
+        self
+    }
+
     pub async fn run(&self, stop: tokio::sync::watch::Receiver<bool>) -> Result<(), RuntimeError> {
         let mut processor_stop = stop.clone();
         let processing = async {

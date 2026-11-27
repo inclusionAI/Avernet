@@ -160,6 +160,7 @@ fn dispatch_spec(c: &EvaluationContext<'_>, tid: &Tid) -> DispatchSpec {
     let p = &c.spec.participants[0];
     DispatchSpec {
         schema_version: 1,
+        node_history: None,
         sid: c.spec.sid.clone(),
         tid: tid.clone(),
         did: dispatch_id(tid),

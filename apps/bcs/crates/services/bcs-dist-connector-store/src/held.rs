@@ -284,6 +284,11 @@ impl HeldDispatchPort for StoreHeldDispatch {
                         // The proof of the first attempt is durable with the
                         // intent, before any network call (plan T6).
                         next.send_proof = Some(proof.clone());
+                        if doc.view.spec.node_history.is_some() {
+                            // This fenced intent is the exact point the input
+                            // starts carrying an ambiguous delivery obligation.
+                            next.node_input_delivery = Some(DeliveryState::Unknown);
+                        }
                         Ok(Step::Write(Box::new(next), doc.connector.clone(), permit.clone()))
                     }
                     // Intent is already durable: a fenced read is enough.
@@ -319,6 +324,44 @@ impl HeldDispatchPort for StoreHeldDispatch {
         Ok(permit)
     }
 
+    async fn record_node_start(
+        &mut self,
+        delivery: DeliveryState,
+        retry_not_sent: bool,
+    ) -> Result<(), HolderError> {
+        if delivery == DeliveryState::Unknown || (retry_not_sent && delivery != DeliveryState::Undelivered) {
+            return invalid("node_start_observation");
+        }
+        self.transition(None, |doc| {
+            let execution = &doc.view.execution;
+            let phase = if retry_not_sent { DispatchPhase::Claimed } else { DispatchPhase::Sending };
+            if doc.view.spec.node_history.is_none() {
+                return invalid("node_start_unconfigured");
+            }
+            if execution.node_input_delivery == Some(delivery) && execution.phase == phase {
+                return Ok(Step::Keep(()));
+            }
+            if execution.phase != DispatchPhase::Sending
+                || execution.node_input_delivery != Some(DeliveryState::Unknown)
+            {
+                return invalid("node_start_observation");
+            }
+            let mut next = execution.clone();
+            next.node_input_delivery = Some(delivery);
+            next.phase = phase;
+            Ok(Step::Write(Box::new(next), doc.connector.clone(), ()))
+        }).await
+    }
+
+    async fn record_node_response(&mut self, response: NodeResponseEvidence) -> Result<(), HolderError> {
+        self.transition(None, |doc| {
+            match crate::node_history::record_response(&doc.view, &response)? {
+                Some(next) => Ok(Step::Write(Box::new(next), doc.connector.clone(), ())),
+                None => Ok(Step::Keep(())),
+            }
+        }).await
+    }
+
     /// Records that the agent accepted the first message and stores its task
     /// reference: `sending -> accepted` with `/execution/remote` (B4, before
     /// any event is reported). Repeating it with the same task id is kept;
@@ -345,6 +388,9 @@ impl HeldDispatchPort for StoreHeldDispatch {
                     let mut next = execution.clone();
                     next.phase = DispatchPhase::Accepted;
                     next.remote = Some(evidence.remote.clone());
+                    if doc.view.spec.node_history.is_some() {
+                        next.node_input_delivery = Some(DeliveryState::Delivered);
+                    }
                     Ok(Step::Write(Box::new(next), doc.connector.clone(), cancel))
                 }
                 DispatchPhase::Accepted

@@ -2,9 +2,9 @@
 //! History belongs to one logical node inside an authorized scope, Session and
 //! frozen workflow — never to a Bot: nodes bound to the same Bot keep separate
 //! histories, and there is no cross-node traversal at any address here.
-//! Opt-in: no production runtime wiring is installed by this module (that is
-//! plan T9); the caller is the Worker-side use case (admission, dispatch,
-//! takeover), never an HTTP handler.
+//! The mounted strict group runtime captures cuts at admission, freezes the
+//! selected node history before dispatch publication and replays that pin on
+//! takeover. HTTP handlers never access this repository.
 use super::common::{IdempotentWrite, StoreError};
 use super::group_round::RoundBudgetProfile;
 use async_trait::async_trait;
@@ -55,16 +55,7 @@ impl NodeHistoryKey {
     }
 }
 
-/// Whether an input actually dispatched to the node provably reached it,
-/// provably did not, or the delivery outcome is still unknown. The three
-/// states never collapse into each other.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DeliveryState {
-    Delivered,
-    Undelivered,
-    Unknown,
-}
+pub use bcs_dist_model::DeliveryState;
 
 /// Role of one persisted interaction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,6 +119,33 @@ impl HistoryCut {
             .map(|field| (*field).to_owned())
             .chain([self.boundary.to_string()])
             .collect()
+    }
+}
+
+/// Contents of the strict round's immutable history boundary blob. Its
+/// digest is stored in `RoundInput` before any node can become runnable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryManifest {
+    pub round: RoundKey,
+    pub cuts: Vec<HistoryCut>,
+}
+
+impl HistoryManifest {
+    pub const KEY_PREFIX: &'static str = "fsm-node-cuts:v1:";
+
+    pub fn dispatch_cut(
+        &self,
+        spec: &bcs_dist_model::DispatchSpec,
+        pin: &bcs_dist_model::DispatchHistory,
+    ) -> Result<&HistoryCut, StoreError> {
+        if self.round == pin.round && pin.round.sid == spec.sid && pin.round.tid == spec.tid
+            && spec.capabilities.isolated_memory
+            && let Some(cut) = self.cuts.iter().find(|c| c.history.node_id == spec.node)
+            && cut.history.workflow_ref == pin.workflow
+        {
+            return Ok(cut);
+        }
+        Err(StoreError::Invalid { code: "node_history_dispatch_binding".into() })
     }
 }
 
@@ -195,6 +213,16 @@ pub trait NodeHistoryRepo: Send + Sync {
     /// with an explicit error: a freeze failure never falls back to a bare
     /// query at the same cut.
     async fn freeze_node_input(
+        &self,
+        round: &RoundKey,
+        node: &NodeId,
+        cut: &HistoryCut,
+        budget: &RoundBudgetProfile,
+    ) -> Result<PinnedHistory, StoreError>;
+
+    /// Load a previously frozen input without consulting raw history or
+    /// creating a new pin. Missing and released pins both refuse dispatch.
+    async fn load_node_input(
         &self,
         round: &RoundKey,
         node: &NodeId,
