@@ -38,7 +38,7 @@ describe('todoController task API path', () => {
     });
   });
 
-  test('space listing always uses the Engine internal API instead of OpenAPI', () => {
+  test('all Todo endpoints use the Engine internal API instead of OpenAPI', () => {
     Object.defineProperty(globalThis, 'TEAMCLAW_TASK_API_BASE', {
       configurable: true,
       value: '/openapi/v1/collaboration/tasks',
@@ -50,9 +50,14 @@ describe('todoController task API path', () => {
       expect(TODO_ENDPOINTS.spaces).toBe('/api/v1/collaboration/tasks/spaces');
       expect(TODO_ENDPOINTS.spaceMembers('1')).toBe('/api/v1/collaboration/tasks/spaces/1/members');
       expect(TODO_ENDPOINTS.bots).toBe('/api/v1/collaboration/tasks/bots');
-      expect(TODO_ENDPOINTS.spaces).not.toContain('/openapi/');
-      expect(TODO_ENDPOINTS.spaceMembers('1')).not.toContain('/openapi/');
-      expect(TODO_ENDPOINTS.bots).not.toContain('/openapi/');
+      expect(TODO_ENDPOINTS.list).toBe('/api/v1/collaboration/tasks/todos');
+      expect(TODO_ENDPOINTS.botTeams).toBe('/api/v1/collaboration/tasks/bot-teams');
+      expect(TODO_ENDPOINTS.dimaAutoImportRules).toBe(
+        '/api/v1/collaboration/tasks/todos/sources/dima/auto-import-rules',
+      );
+      expect(Object.values(TODO_ENDPOINTS).filter((endpoint) => typeof endpoint === 'string')).not.toEqual(
+        expect.arrayContaining([expect.stringContaining('/openapi/')]),
+      );
     });
   });
 });
