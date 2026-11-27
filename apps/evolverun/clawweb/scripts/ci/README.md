@@ -6,7 +6,7 @@ From `apps/evolverun/clawweb`, use Node 20.19.0:
 npm ci --no-audit --no-fund
 npm run ci:build
 npm run ci:check
-node --test scripts/ci/run-tests.test.mjs
+node --test scripts/ci/run-tests.test.mjs scripts/ci/detect-changes.test.mjs
 npm run test:ci
 ```
 
@@ -33,6 +33,30 @@ GitHub publishes the summary and uploads reports even after test failure. Only
 the added test step is advisory during observation; install/build/check remain
 required. No coverage threshold is introduced. Existing business test failures
 must be tracked separately; this change does not repair or skip them.
+
+## PR scope detection
+
+`ClawWeb Unit Tests` runs on every `pull_request` without a top-level path
+filter, keeping the `ClawWeb unit tests` check present. Only the heavy steps are
+skipped when neither `apps/evolverun/clawweb/` nor
+`.github/workflows/clawweb-ci.yml` changed. Deletions and renames out of scope
+still count. Manual `workflow_dispatch` runs always execute the full gate,
+including on non-merge commits.
+
+The repository-root Bash detector compares the tested PR merge (`GITHUB_SHA`)
+with that merge's first parent. These endpoints belong to the same merge;
+the event payload's base SHA may be stale after the target branch advances and
+would incorrectly include target-only changes. PR detection requires a two-parent
+merge with both parent commits available. Missing or invalid commits, unexpected
+merge shapes and Git failures fail the check instead of reporting a successful
+skip.
+
+Run the scope regression tests from the repository root with Node's built-in
+test runner and Git; no npm installation is needed:
+
+```sh
+node --test apps/evolverun/clawweb/scripts/ci/detect-changes.test.mjs
+```
 
 ## Local entry
 

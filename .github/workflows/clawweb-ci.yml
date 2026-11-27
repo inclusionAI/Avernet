@@ -31,30 +31,7 @@ jobs:
         id: changes
         working-directory: ${{ github.workspace }}
         shell: bash
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ -z "$BASE_SHA" ]; then
-            echo "Missing PR base SHA" >&2
-            exit 1
-          fi
-          changed_files="$(mktemp)"
-          trap 'rm -f "$changed_files"' EXIT
-          # Compare the PR base with the checked-out merge commit. Diff failures
-          # must fail the check, not be interpreted as an unrelated change.
-          git diff --name-only --no-renames -z "$BASE_SHA" "$GITHUB_SHA" -- \
-            apps/evolverun/clawweb .github/workflows/clawweb-ci.yml > "$changed_files"
-          if [ -s "$changed_files" ]; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "No ClawWeb changes; skipping build and tests."
-          fi
+        run: bash apps/evolverun/clawweb/scripts/ci/detect-changes.sh
 
       - name: Set up Node.js
         if: steps.changes.outputs.skip == 'false'
@@ -78,7 +55,7 @@ jobs:
 
       - name: Verify test runner
         if: steps.changes.outputs.skip == 'false'
-        run: node --test scripts/ci/run-tests.test.mjs
+        run: node --test scripts/ci/run-tests.test.mjs scripts/ci/detect-changes.test.mjs
 
       - name: Test packages with coverage
         if: steps.changes.outputs.skip == 'false'
