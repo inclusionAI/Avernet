@@ -148,6 +148,7 @@ describe('visual canvas', () => {
   it('shows a Chinese name, local icon and short description for every existing palette entry', () => {
     render(<EditorGraph spec={base} selectedId={null} select={jest.fn()} onChange={jest.fn()} />);
     const palette = screen.getByRole('complementary', { name: '节点库' });
+    expect(document.body).not.toHaveTextContent(/\bDEMO\b/i);
     expect(within(palette).getAllByRole('button', { name: /^添加/ })).toHaveLength(6);
     fireEvent.click(within(palette).getByRole('button', { name: '更多节点' }));
     expect(within(palette).getAllByRole('button', { name: /^添加/ })).toHaveLength(13);

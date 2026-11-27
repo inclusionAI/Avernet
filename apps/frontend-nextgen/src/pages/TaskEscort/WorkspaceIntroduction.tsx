@@ -88,7 +88,7 @@ export function WorkspaceIntroduction({ context }: { context: TaskEscortParityCo
               onClick={() => setOpenScope(creationScope)}
             >
               <Plus className="size-4" aria-hidden />
-              创建第一个工作流
+              {context.workflow ? '新建工作流' : '创建第一个工作流'}
             </Button>
           </div>
           {!creationReady && (

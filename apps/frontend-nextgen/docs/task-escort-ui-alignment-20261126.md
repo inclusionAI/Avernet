@@ -35,8 +35,20 @@ in `task-escort-authoring.md`.
   and verification. It has no fabricated metrics, runs, sample-loader actions,
   fixture imports or demo mode. A real create action reuses the existing creation
   dialog and identity readiness; it does not implicitly persist or run anything.
-- A5: With real workflows, existing selection, global Dashboard scope, URL/query
-  preservation, navigation and data readers remain unchanged.
+- A5: The formal page exposes **产品导航 / 工作区** above its content, with no
+  DEMO label or “无工作流” mode name. Product navigation opens the existing
+  introduction even with real workflows; it never loads sample data or changes
+  identity readiness or permissions. `productNavigation=1` marks only this
+  presentation choice, without adding a PageId or replacing the default Dashboard.
+  Returning removes only that marker and retains the original view, workflow/run
+  selection, other query values and hash. Sidebar destinations and confirmed
+  creation clear the marker and enter their actual pages. A successfully empty
+  workspace still introduces the product automatically, with its workspace button
+  disabled until a workflow exists. Loading, errors and invalid explicit targets
+  keep their existing honest states even with the marker. Opening from the editor
+  uses the existing history leave guard; the introduction does not retain editor
+  canvas layout or compact-sidebar styles. Global Dashboard scope and real readers
+  remain unchanged.
 
 ### Management and editor
 
@@ -119,3 +131,23 @@ pair, then the user-specified `pr-internal.sh` for a TeamClaw sync branch/PR.
 That script is the deployment branch generator, not an ordinary local feature
 branch helper. Do not bypass it or run it non-dry-run on unreviewed dirty inputs.
 Report source edits, tests, commits, PR, merge and deployment independently.
+
+## Product-navigation implementation handoff — 2026-11-27
+
+The navigation amendment above is implemented in the formal page, workspace
+context and URL helpers, not in the offline reference. Regression cases are added
+to the existing [workspace page tests](../test/taskEscortWorkspace/page.test.tsx)
+and [navigation tests](../test/taskEscortParity/workspaceNavigation.test.ts).
+These cover real-selection round trips, sidebar and creation exits, automatic
+empty-state and identity/error safety, plus the editor history guard and layout
+class reset.
+
+Host verification used the actual enterprise assembly: both task-escort test
+folders passed (57 suites / 666 tests), and the final navigation/page rerun after
+test-lint corrections passed (2 suites / 83 tests). Typecheck, lint, Open Core
+boundary checks, public-test assembly checks and local development compilation
+passed. Independent read-only code review found no blocking issues. Modified
+source/test files matched the assembled copies. Browser appearance and live data
+were not revalidated because the local HTTPS certificate remained untrusted;
+compilation and unit tests do not prove live API access. These checks do not
+establish a merge or deployment.
