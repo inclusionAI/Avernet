@@ -91,7 +91,6 @@ export function CreateGroupSessionModal({ open, group, loading, onClose, onSubmi
               maxLength={100}
               placeholder="请输入会话名称"
               disabled={loading}
-              className="focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/30 focus-visible:ring-offset-0"
               onChange={(event) => setTitle(event.target.value)}
             />
           </label>
@@ -108,7 +107,7 @@ export function CreateGroupSessionModal({ open, group, loading, onClose, onSubmi
               maxLength={2000}
               placeholder="请描述本会话希望达成的协作目标"
               disabled={loading}
-              className="focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/30 focus-visible:ring-offset-0"
+              className="focus-visible:border-brand focus-visible:ring-1 focus-visible:ring-brand/20 focus-visible:ring-offset-0"
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>

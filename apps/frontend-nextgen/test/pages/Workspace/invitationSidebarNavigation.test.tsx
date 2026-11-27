@@ -9,7 +9,7 @@ import { groupService } from '@/services/workspace/groupService';
 import { sessionService } from '@/services/workspace/sessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history, useSearchParams } from '@umijs/max';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
 import '@testing-library/jest-dom';
 import { baseGroup, makeProps, setupResizeObserverMock } from './components/GroupSidebar/GroupSidebar.testUtils';
@@ -92,10 +92,8 @@ it('opens and scrolls a collapsed sidebar to an off-page session whose parent is
   expect(groupService.resolveGroupMembership).toHaveBeenCalledWith('g1', undefined, expect.any(AbortSignal));
   expect(targetGroup).not.toHaveProperty('membership');
   expect(window.location.search).toContain('membership=session_only');
-  fireEvent.click(screen.getByRole('button', { name: /筛选协作群/ }));
-  expect(screen.getByRole('button', { name: '仅参与临时会话' })).toHaveAttribute('aria-pressed', 'true');
-  expect(screen.getByRole('button', { name: '固定群成员' })).toHaveAttribute('aria-pressed', 'false');
-  fireEvent.click(screen.getByRole('button', { name: /筛选协作群/ }));
+  expect(screen.getByRole('tab', { name: '仅参与临时会话' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByRole('tab', { name: '固定群成员' })).toHaveAttribute('aria-selected', 'false');
   // Canonical query updates must not remount the data/history hooks or replay location.
   view.rerender(<Page />);
   expect(mounted).toHaveBeenCalledTimes(1);
