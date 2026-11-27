@@ -1,0 +1,92 @@
+apps/frontend-nextgen/src/components/BotWorkshop/BotAvatar/AvatarEditor.tsx
+  s_fced0487396964::t_aa34bde948a937 30-33,73-98,102,115,117-118,120-125,133,139-141,146-147,151,153,160-161,164,167-168,174-195,199-202,204-205,208-214,217
+  s_fced0487396964::t_4efc35b9f8d4b8 39
+  s_fced0487396964::t_e342fa4b5856c2 23,25,27,34-37,51,61-63,72,99-100
+  s_fced0487396964::t_5197073962178e 3,7
+  s_fced0487396964::t_2842ce8441f4ea 41
+  s_fced0487396964::t_9f9e8f2562010a 15,17,38,40,64-71,103-114,116,126,166,170-171,218
+  s_fced0487396964::t_5130c0e18886c7 6
+  s_fced0487396964::t_8c9f7ef2e896bb 196-198,203,206-207
+  s_fced0487396964::t_c2d04e750caa90 128-132,134-138,142-144,148-150,152,154-159
+  s_fced0487396964::t_a582a30367163d 145
+apps/frontend-nextgen/test/components/BotWorkshop/CreateBotModal.test.tsx
+  s_fced0487396964::t_964324ad220795 92-95
+  s_fced0487396964::t_dd1da9c4b94293 123-124
+  s_fced0487396964::t_ed56c5a27df6fb 126
+apps/frontend-nextgen/src/domain/botAvatar.ts
+  s_4883ef86346172::t_6a0230838ab7a2 1-5,8
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/agentCoding/legacy/aicoding/configFields/YuqueKbReposField.tsx
+  s_fced0487396964::t_f6d7a218ad9b8b 102,113-116
+  s_fced0487396964::t_502176c349a9d3 67-68,71,73,75
+  s_fced0487396964::t_e92612930aae4e 134,142-145,151,154,156,162
+  s_fced0487396964::t_753cb2b4e0b66e 80
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/agentCoding/AgentCodingSection.tsx
+  s_fced0487396964::t_075f14927c31d3 171-172
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/agentCoding/DynamicTemplateFieldControl.tsx
+  s_fced0487396964::t_99effa11086945 31,33
+  s_fced0487396964::t_4b57fb88a76256 42,48
+  s_fced0487396964::t_204b2b9f434a78 196,198,201
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/CreateBotFormFields.tsx
+  s_fced0487396964::t_1b6d54dc7d8f97 234
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/agentCoding/legacy/aicoding/configFields/CodeRepoListField.tsx
+  s_fced0487396964::t_1e21dcf4bc9026 47,49,52,54,56
+  s_fced0487396964::t_bb19cbba1d02d0 111
+apps/frontend-nextgen/test/components/BotWorkshop/BotTable.test.tsx
+  s_fced0487396964::t_c675d514adef06 190-191,194
+apps/frontend-nextgen/test/mocks/resizeObserverMock.js
+  s_4883ef86346172::t_0f0e848a36da3f 14-15,28
+  s_4883ef86346172::t_2062f1f2521471 16-27
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/agentCoding/AgentCodingTemplateCard.tsx
+  s_fced0487396964::t_59d75592c8a4e1 2
+  s_fced0487396964::t_58deb9ba1eb098 44,48-57,60,69,77,89,96-97,101,106
+  s_fced0487396964::t_2bb6a08a4b40ac 25-26
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/agentCoding/DynamicTemplateFields.tsx
+  s_fced0487396964::t_248782c6a6a95c 86
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/index.tsx
+  s_fced0487396964::t_651e6e16338775 167,170-178
+apps/frontend-nextgen/package.json
+  s_4883ef86346172::t_e7717ce1412b6d 28-29
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/agentCoding/legacy/appcoding/ArchitectNameField.tsx
+  s_fced0487396964::t_6bb50ed08d95ff 135,151,163,169,173
+  s_fced0487396964::t_363df7ed194f50 184,186,189,191,218,222,227,229,235,237,241,246
+apps/frontend-nextgen/src/components/BotWorkshop/BotAvatar/avatarStyles.ts
+  s_fced0487396964::t_123a47feefe2f1 1,4-8,11-21,24-37
+  s_fced0487396964::t_ac4d9514dda2dc 2-3
+  s_fced0487396964::t_7ee730d85fe70b 9-10
+  s_fced0487396964::t_b67386215b5c7e 22-23
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/DesktopStartProgress.tsx
+  s_fced0487396964::t_b8ebae4f03675c 79-82
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/DesktopDeviceFields.tsx
+  s_fced0487396964::t_783113fc62bdb9 5,23-24,26-44,50-51,53-56,66
+  s_fced0487396964::t_8fa5ec937f17de 45-49,52
+  s_fced0487396964::t_a5866746fc7c6d 58-60,70-78,80
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/agentCoding/legacy/appcoding/AntCodeProjectSelect.tsx
+  s_fced0487396964::t_aeb259ecd9249d 235,237-238,240-242,253,258,264-265,272,274,283
+  s_fced0487396964::t_f04b700ec27f88 50,54,64-65
+apps/frontend-nextgen/package-lock.json
+  s_4883ef86346172::t_b9e145d1db4439 15-16,1781-1783,1786-1789,1792-1797,6796,6810
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "82c4c1f5fb764e38951de1b9d54ecbd0517fbf5c",
+  "prompts": {},
+  "sessions": {
+    "s_4883ef86346172": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "8e0a68f1-8885-4081-97b6-da78261412f6",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_fced0487396964": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "cd61fa52-1642-4bc7-aab8-45ad1ffe93d5",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
