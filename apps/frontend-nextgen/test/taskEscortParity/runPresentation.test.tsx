@@ -114,6 +114,7 @@ beforeEach(() => {
 it('separates identity/runtime/operations/input/lineage and preserves latest-attempt terminal progress and zero tokens', async () => {
   render(<RunDetail context={context} runId="run-actual" onBack={jest.fn()} />);
   const identity = await screen.findByRole('region', { name: '运行身份' });
+  expect(document.body).not.toHaveTextContent(/\bDEMO\b/i);
   const runtime = screen.getByRole('region', { name: '运行上下文' });
   expect(within(identity).getByText('wf')).toBeInTheDocument();
   expect(within(runtime).getByText('server-device')).toBeInTheDocument();

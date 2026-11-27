@@ -133,6 +133,7 @@ it('does not infer an active version or a known source and preserves empty histo
 it('shows all configured event-message cards together without a disclosure or event selector', async () => {
   render(<ManagementNotification context={context} />);
   const messages = await screen.findByRole('region', { name: '事件消息配置' });
+  expect(document.body).not.toHaveTextContent(/\bDEMO\b/i);
   for (const label of ['节点失败', '工作流成功', 'provider_event_v2']) {
     const card = within(messages).getByRole('region', { name: `${label}消息配置` });
     expect(card).toBeVisible();

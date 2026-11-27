@@ -24,6 +24,15 @@ export function readWorkspacePage(search: string): FormalPage {
   return tab && Object.prototype.hasOwnProperty.call(aliases, tab) ? aliases[tab] : 'dashboard';
 }
 
+/** Product guidance is an overlay on the current real selection, not another workspace page. */
+export function workspaceProductNavigationSearch(search: string, open: boolean): string {
+  const query = new URLSearchParams(search);
+  if (open) query.set('productNavigation', '1');
+  else query.delete('productNavigation');
+  const next = query.toString();
+  return next ? `?${next}` : '';
+}
+
 export function workspaceNavigationSearch(
   search: string,
   page: PageId,
@@ -36,6 +45,7 @@ export function workspaceNavigationSearch(
   }
   const target = page === 'workbench' ? 'issues' : page;
   query.delete('demo');
+  query.delete('productNavigation');
   query.set('view', target);
   const tab = {
     dashboard: 'dashboard',
@@ -55,6 +65,7 @@ export function workspaceNavigationSearch(
 export function workspaceSelectionSearch(search: string, id: string, currentId: string): string {
   const query = new URLSearchParams(search);
   query.delete('demo');
+  query.delete('productNavigation');
   query.set('workflowId', id);
   if (id !== currentId) {
     for (const key of [

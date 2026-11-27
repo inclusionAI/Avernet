@@ -62,8 +62,16 @@ export const pages: {
   },
 ];
 
-export function GuardSidebar({ page, navigate }: { page: PageId; navigate: (page: PageId) => void }) {
-  const compact = page === 'editor';
+export function GuardSidebar({
+  page,
+  navigate,
+  showIntroduction = false,
+}: {
+  page: PageId;
+  navigate: (page: PageId) => void;
+  showIntroduction?: boolean;
+}) {
+  const compact = page === 'editor' && !showIntroduction;
   const resize = useSidebarResize(compact);
   return (
     <aside

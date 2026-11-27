@@ -3,6 +3,7 @@ import type { PageId } from '@/domain/taskEscortWorkspace/types';
 import {
   readWorkspacePage,
   workspaceNavigationSearch,
+  workspaceProductNavigationSearch,
   workspaceSelectionSearch,
 } from '@/services/taskEscortParity/workspaceNavigation';
 import { readTaskEscortWorkflows } from '@/services/taskEscortParity/workspaceService';
@@ -68,6 +69,11 @@ export function useTaskEscortWorkspaceContext(scope: WorkspaceScope) {
     },
     [workflows, workflow?.id],
   );
+  const setProductNavigation = useCallback((open: boolean) => {
+    const current = history.location;
+    // Use the normal router transition so dirty editors retain their existing leave guard.
+    history.push(`${current.pathname}${workspaceProductNavigationSearch(current.search, open)}${current.hash}`);
+  }, []);
   const pendingCreated = useRef<{ scopeKey: string; userId: string | undefined; id: string } | null>(null);
   const openCreatedWorkflow = useCallback(
     (id: string) => {
@@ -111,9 +117,14 @@ export function useTaskEscortWorkspaceContext(scope: WorkspaceScope) {
     refreshWorkflows,
     openCreatedWorkflow,
   };
-  // Workflow readiness is false for both empty and unavailable collections; only a successful
-  // identity-bound list without an explicit target may enter the product introduction.
+  // Neither an explicit guide marker nor a missing workflow may turn an unavailable collection
+  // into a successful empty state or override an identity/selection failure.
+  const emptyWorkspace = resource.data?.length === 0 && !explicitSelection;
   const showIntroduction =
-    scope.ready && !resource.loading && !resource.error && resource.data?.length === 0 && !explicitSelection;
-  return { context, page, workflows, selectWorkflow, showIntroduction };
+    scope.ready &&
+    !context.loading &&
+    !context.error &&
+    !!resource.data &&
+    (query.productNavigation === '1' || emptyWorkspace);
+  return { context, page, workflows, selectWorkflow, showIntroduction, setProductNavigation };
 }
