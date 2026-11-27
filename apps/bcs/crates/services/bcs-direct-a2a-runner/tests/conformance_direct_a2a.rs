@@ -324,6 +324,41 @@ async fn thinking_is_ephemeral_and_tools_have_their_own_output_class() {
     }] if v == &tool));
 }
 
+#[tokio::test]
+async fn tool_units_share_the_artifact_limit_without_silent_truncation() {
+    use bcs_dist_projection::OutputProjectionService;
+    use bcs_service_api::core::dist_projection::*;
+    let mut task = Task::new().await;
+    task.start().await;
+    let limits = PHASE_ONE_OUTPUT_LIMITS;
+    let mut display = DisplaySnapshot { format_version: DISPLAY_FORMAT_VERSION, units: vec![] };
+    let mut usage = OutputUsage::default();
+    // Exercise the real 128-unit boundary in the pure reducer/projection pair.
+    // Worker persistence and final restore need only one tool in direct_a2a_chain.
+    for index in 0..=limits.max_artifacts {
+        let decision = if index == 0 {
+            task.reduce(chunk("keep", false)).await
+        } else {
+            task.reduce(event(AgentEventKind::Tool,
+                json!({"tool":{"toolCallId":index.to_string(),"phase":"end"}}))).await
+        };
+        let [ActionIntent::Show { source, artifact_id, class, update, .. }] = decision.actions.as_slice() else { panic!() };
+        let change = ArtifactChange { source: source.clone(), artifact_id: artifact_id.clone(), class: *class, update: update.clone() };
+        let result = OutputProjectionService.project_candidate(&display, usage, &[change], &limits);
+        if index == limits.max_artifacts {
+            assert_eq!(result, Err(ProjectionError::OutputQuotaExceeded { budget: OutputBudget::Artifacts }));
+        } else {
+            let projected = result.unwrap();
+            display = projected.snapshot;
+            usage = projected.usage;
+        }
+    }
+    assert_eq!(display.units.len(), limits.max_artifacts as usize);
+    assert_eq!(display.units[0].content, json!("keep"));
+    assert_eq!(display.units[0].class, OutputClass::Output);
+    assert!(display.units[1..].iter().all(|unit| unit.class == OutputClass::Tool));
+}
+
 #[test]
 fn config_requires_the_selected_agent_to_be_authorized() {
     let spec = spec();

@@ -132,18 +132,16 @@ async fn final_artifact_action_limit_counts_the_finish_action() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn tool_units_share_the_artifact_limit_without_silent_truncation() {
-    for (tools, expected) in [(127, "TASK_STATE_COMPLETED"), (128, "TASK_STATE_FAILED")] {
-        let (f, app, tid) = setup().await;
-        report(&f, &tid, 1, AgentEventKind::Delta, json!({"artifact":{"artifactId":"answer","parts":[{"text":"keep"}]},"append":false})).await;
-        for index in 0..tools {
-            report(&f, &tid, index + 2, AgentEventKind::Tool, json!({"tool":{"toolCallId":index.to_string(),"phase":"end"}})).await;
-            for _ in 0..12 { f.step().await.unwrap(); tokio::time::sleep(Duration::from_millis(5)).await; }
-        }
-        report(&f, &tid, tools + 2, AgentEventKind::Final, json!({"state":"completed"})).await;
-        let result = terminal(&f, &app, &tid).await;
-        assert_eq!(result["status"]["state"], expected);
-        assert_eq!(result["artifacts"].as_array().unwrap().len(), 128);
-        assert_eq!(result["artifacts"][0]["parts"][0]["text"], "keep");
-    }
+async fn tool_and_answer_survive_worker_publication_and_final_restore() {
+    let (f, app, tid) = setup().await;
+    let tool = json!({"toolCallId":"search", "phase":"end"});
+    report(&f, &tid, 1, AgentEventKind::Delta, json!({"artifact":{"artifactId":"answer","parts":[{"text":"keep"}]},"append":false})).await;
+    report(&f, &tid, 2, AgentEventKind::Tool, json!({"tool":tool})).await;
+    report(&f, &tid, 3, AgentEventKind::Final, json!({"state":"completed"})).await;
+    let result = terminal(&f, &app, &tid).await;
+    assert_eq!(result["status"]["state"], "TASK_STATE_COMPLETED");
+    assert_eq!(result["artifacts"].as_array().unwrap().len(), 2);
+    assert_eq!(result["artifacts"][0]["parts"][0]["text"], "keep");
+    assert_eq!(result["artifacts"][1]["parts"][0]["data"], tool);
+    assert_eq!(result["artifacts"][1]["metadata"]["class"], "tool");
 }
