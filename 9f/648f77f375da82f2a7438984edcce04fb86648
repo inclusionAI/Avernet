@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/adapters/http/task/context_collab/__init__.py
+  s_b6ac98988b64e0::t_246f20d31dba6d 1-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9f648f77f375da82f2a7438984edcce04fb86648",
+  "prompts": {},
+  "sessions": {
+    "s_b6ac98988b64e0": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "2bc86666-1bd5-4493-b14f-05c5fe92a1b8",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
