@@ -64,6 +64,32 @@ impl GroupAdmissionConfig {
     }
 }
 
+/// Pin the request-key format before the first shard claim. V1 request ids
+/// were opaque hashes containing a Sid; neither an alias nor a tombstone can
+/// be reconstructed for another context. Refuse an already-used, unmarked
+/// shard rather than silently re-executing old requests. Old writers must be
+/// stopped before activation; the host serves exactly one shard per namespace.
+pub async fn open_group_request_namespace(
+    documents: &dyn DocumentStorePlugin, layout: &KeyLayout, shard: ShardId,
+) -> Result<(), StoreError> {
+    let key = format!("{}:group-request-format", layout.namespace_identity());
+    let expected = serde_json::json!({"version": 2, "shard": shard.0});
+    let read = || async { documents.read_document(&key).await.map_err(|e| crate::error::from_read(&e)) };
+    let existing = match read().await? {
+        Some(marker) => Some(marker),
+        None => {
+            if documents.read_document(&layout.owner(shard)).await.map_err(|e| crate::error::from_read(&e))?.is_none() {
+                documents.create_document(&key, &expected).await.map_err(|e| crate::error::from_write(&e, &key))?;
+            }
+            // Also covers a concurrent v2 bootstrap that installed its marker
+            // and claimed the shard between our two reads.
+            read().await?
+        }
+    };
+    if existing.is_some_and(|marker| marker.value == expected) { Ok(()) }
+    else { Err(invalid("group_request_format_migration_required")) }
+}
+
 /// Read the strict license sealed in the session checkpoint document without
 /// going through the checkpoint port: probe callers (inbox producer, task
 /// reader) hold only the document plugin. One bounded document read.

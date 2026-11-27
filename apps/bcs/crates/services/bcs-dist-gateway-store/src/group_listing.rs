@@ -7,7 +7,8 @@
 //! per-session task reader stays untouched by group concerns, and no
 //! protocol shape ever crosses this boundary.
 
-use crate::page;
+use crate::{page, group_projection::{self, PendingBlock, ProjectionRef}};
+use bcs_store_api::kv::KvStorePlugin;
 use crate::task_reader::{
     Shared, StoreTaskReader, not_applied, read_stored, status_key, status_name, status_of_name,
     stored_view, Stored, LIST_READ_CONCURRENCY, invalid,
@@ -22,14 +23,16 @@ use bcs_service_api::port::repo::distributed::group_listing::*;
 use bcs_service_api::port::repo::distributed::group_round::RoundBudgetProfile;
 use bcs_store_api::WriteOutcome;
 use futures::StreamExt;
-use std::ops::Bound;
+use std::{collections::{BTreeMap, BTreeSet}, ops::Bound};
 use std::sync::Arc;
 use bcs_store_api::zset::ZSetRange;
 
 
 /// One collected row of the group cut, before materialization.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-struct CutRow {
+pub(crate) struct CutRow {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) projection: Option<ProjectionRef>,
     tid: Tid,
     sid: Sid,
     status: String,
@@ -63,51 +66,24 @@ fn cut_row(row: &CutRow) -> Result<GroupIndexRow, StoreError> {
     })
 }
 
-/// The status channel of any stored task: the live snapshot's update time or
-/// the archived record's finalization time.
-fn status_channel(stored: &Stored) -> (String, i64, Tid, Sid, Option<TaskStatus>) {
-    match stored {
-        Stored::Live(snapshot) => (
-            status_name(snapshot.content.status).to_owned(),
-            snapshot.updated_at.0,
-            snapshot.tid.clone(),
-            snapshot.sid.clone(),
-            Some(snapshot.content.status),
-        ),
-        Stored::Archived(record) | Stored::StrictArchived(record, _) => {
-            let status = match record.status {
-                TerminalStatus::Completed => TaskStatus::Completed,
-                TerminalStatus::Failed => TaskStatus::Failed,
-                TerminalStatus::Canceled => TaskStatus::Canceled,
-                TerminalStatus::Rejected => TaskStatus::Rejected,
-            };
-            (
-                status_name(status).to_owned(),
-                record.finalized_at.0,
-                record.tid.clone(),
-                record.sid.clone(),
-                Some(status),
-            )
-        }
-    }
-}
+/// Scan at most 4096 subject-index candidates; never publish a partial total.
+/// Resolve each strict session once and consult the authoritative reader only
+/// for this group. Strict reads may also consult checkpoint/archive proofs.
+const MAX_CUT_CANDIDATES: usize = 4096;
 
-/// Bounded collect of one (scope, group) listing over the accepted-task
-/// index. Only index members are candidates, so a task no admission accepted
-/// (a crashed preparation) is invisible by construction. Cost per collect:
-/// one index read per 100 candidates, one spec read per distinct session, one
-/// task read per candidate (all batched), one snapshot read and one snapshot
-/// CAS — never a checkpoint, directory or inbox read.
 async fn collect_group(
     shared: &Arc<Shared>,
     scope: &TaskScope,
     group: &GroupId,
     statuses: &[TaskStatus],
+    projections: Option<&dyn KvStorePlugin>,
 ) -> Result<Vec<CutRow>, StoreError> {
     let key = shared.layout.tasks(scope)?;
     let mut members: Vec<bcs_store_api::zset::ZSetEntry> = Vec::new();
     let mut after: Option<bcs_store_api::zset::ZSetEntry> = None;
     loop {
+        let remaining = MAX_CUT_CANDIDATES - members.len();
+        let batch = shared.config.read_batch.min(std::num::NonZeroU32::new((remaining + 1) as u32).unwrap_or(std::num::NonZeroU32::MIN));
         let page = shared
             .zset
             .range(
@@ -116,13 +92,16 @@ async fn collect_group(
                     min: Bound::Unbounded,
                     max: Bound::Unbounded,
                     after: after.clone(),
-                    limit: shared.config.read_batch,
+                    limit: batch,
                 },
             )
             .await
             .map_err(|e| from_read(&e))?;
-        let done = page.len() < shared.config.read_batch.get() as usize;
+        let done = page.len() < batch.get() as usize;
         after = page.last().cloned();
+        if page.len() > MAX_CUT_CANDIDATES - members.len() {
+            return Err(not_applied("group_cut_scan_budget"));
+        }
         members.extend(page);
         if done {
             break;
@@ -130,72 +109,41 @@ async fn collect_group(
     }
     // The frozen group of each distinct session, batched: one bounded read
     // per session, never per task.
-    let mut sids: Vec<Sid> = Vec::new();
-    for member in &members {
-        let sid = Sid(member.member.rsplit_once('.').map_or_else(String::new, |(s, _)| s.to_owned()));
-        if !sids.contains(&sid) {
-            sids.push(sid);
-        }
-    }
-    let lookups: Vec<_> = sids
-        .iter()
-        .map(|sid| read_session_group(shared.clone(), scope.clone(), sid.clone()))
-        .collect();
-    let resolved: Vec<Option<GroupId>> = futures::stream::iter(lookups)
-        .buffered(LIST_READ_CONCURRENCY)
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
-        .collect::<Result<_, StoreError>>()?;
-    // Source isolation: the group public index only ever carries the group
-    // entrance namespace (plan T8) — a legacy session of the same subject and
-    // group stays out of it.
-    let group_of = |sid: &Sid| {
-        if CreationSource::of_sid(sid) != Some(CreationSource::GroupA2a) {
-            return None;
-        }
-        sids.iter()
-            .position(|candidate| candidate == sid)
-            .and_then(|index| resolved[index].clone())
+    let member_sid = |member: &str| member.rsplit_once('.').map(|(sid, _)| Sid(sid.to_owned()));
+    let sids: BTreeSet<_> = members.iter().filter_map(|member| member_sid(&member.member))
+        .filter(|sid| CreationSource::of_sid(sid) == Some(CreationSource::GroupA2a)).collect();
+    let lookup = |sid: Sid| async move {
+        let group = shared.session_group(scope, &sid).await?;
+        Ok((sid, group))
     };
-    // The authoritative stored view decides disclosure: scope match, the
-    // strict-terminal authority cut and archive fallback all live in
-    // `stored`. Batched reads, at most one page of served rows loaded later.
-    let reads: Vec<_> = members
-        .iter()
-        .map(|member| read_stored(shared.clone(), scope.clone(), Tid(member.member.clone())))
-        .collect();
-    let stored_rows: Vec<Option<Stored>> = futures::stream::iter(reads)
-        .buffered(LIST_READ_CONCURRENCY)
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
+    let groups: BTreeMap<_, _> = futures::stream::iter(sids.into_iter().map(lookup))
+        .buffered(LIST_READ_CONCURRENCY).collect::<Vec<_>>().await.into_iter()
         .collect::<Result<_, StoreError>>()?;
+    let in_group = |sid: &Sid| groups.get(sid).and_then(Option::as_ref) == Some(group);
+    let reads = members.into_iter().filter(|member| member_sid(&member.member).as_ref().is_some_and(&in_group))
+        .map(|member| read_stored(shared.clone(), scope.clone(), Tid(member.member)));
+    let mut stored_rows = futures::stream::iter(reads).buffered(LIST_READ_CONCURRENCY);
     let mut rows = Vec::new();
-    for stored in stored_rows.into_iter().flatten() {
-        let (status, updated_at, ..) = status_channel(&stored);
-        let sid = match &stored {
-            Stored::Live(snapshot) => snapshot.sid.clone(),
-            Stored::Archived(record) | Stored::StrictArchived(record, _) => record.sid.clone(),
+    let mut block = PendingBlock::default();
+    while let Some(stored) = stored_rows.next().await {
+        let Some(stored) = stored? else { continue; };
+        let updated_at = match &stored {
+            Stored::Live(snapshot) => snapshot.updated_at,
+            Stored::Archived(record) | Stored::StrictArchived(record, _) => record.finalized_at,
         };
-        if group_of(&sid).as_ref() != Some(group) {
-            continue;
-        }
-        if !statuses.is_empty()
-            && status_of_name(&status).is_none_or(|status| !statuses.contains(&status))
-        {
-            continue;
-        }
+        let view = stored_view(stored);
+        if view.scope != *scope || !in_group(&view.sid) { continue; }
+        if !statuses.is_empty() && !statuses.contains(&view.content.status) { continue; }
         rows.push(CutRow {
-            tid: match &stored {
-                Stored::Live(snapshot) => snapshot.tid.clone(),
-                Stored::Archived(record) | Stored::StrictArchived(record, _) => record.tid.clone(),
-            },
-            sid,
-            status,
-            status_updated_at: updated_at,
+            tid: view.tid.clone(), sid: view.sid.clone(),
+            status: status_name(view.content.status).to_owned(), status_updated_at: updated_at.0,
+            projection: None,
         });
+        if let Some(store) = projections {
+            block.push(shared, store, &mut rows, view).await?;
+        }
     }
+    if let Some(store) = projections { block.flush(shared, store, &mut rows).await?; }
     // Fixed contract order: status_updated_at DESC, ties broken tid ASC. One
     // Tid appears at most once (index members are unique); a violation of
     // that invariant is an error, never silently deduplicated rows.
@@ -213,14 +161,6 @@ async fn collect_group(
     Ok(rows)
 }
 
-async fn read_session_group(
-    shared: Arc<Shared>,
-    scope: TaskScope,
-    sid: Sid,
-) -> Result<Option<GroupId>, StoreError> {
-    shared.session_group(&scope, &sid).await
-}
-
 /// Read-or-materialize the cut snapshot of one query identity. The digest
 /// binds subject, group, filter, sort, page size and the complete row set;
 /// an existing document under the same digest must match field for field.
@@ -231,14 +171,12 @@ async fn materialize(
     statuses: &[TaskStatus],
     page_size: u32,
     now: TimestampMillis,
+    projections: Option<&dyn KvStorePlugin>,
 ) -> Result<(CutSnapshot, String), StoreError> {
-    let rows = collect_group(shared, scope, group, statuses).await?;
-    if rows.len() > 4096 {
-        return Err(not_applied("group_cut_rows_budget"));
-    }
+    let rows = collect_group(shared, scope, group, statuses, projections).await?;
     let rows_text = serde_json::to_string(&rows).map_err(|_| invalid("cut_encoding"))?;
     let digest = digest_fields(&[
-        b"group_cut:v1",
+        if projections.is_some() { b"group_cut:projected:v2" } else { b"group_cut:v1" },
         scope.tenant.0.as_bytes(),
         scope.principal.0.as_bytes(),
         group.0.as_bytes(),
@@ -335,17 +273,11 @@ impl GroupListingPort for StoreTaskReader {
         {
             return Err(not_applied("cursor_secret_unconfigured"));
         }
-        let (snapshot, cut) = materialize(shared, scope, group, &query.statuses, limit, now).await?;
+        let projections = self.projections(query.load_rows)?;
+        let (snapshot, cut) = materialize(shared, scope, group, &query.statuses, limit, now, projections).await?;
         let total = snapshot.total;
-        let rows: Vec<GroupIndexRow> = snapshot.rows[..(limit as usize).min(snapshot.rows.len())]
-            .iter()
-            .map(cut_row)
-            .collect::<Result<_, _>>()?;
-        let rows = if query.load_rows {
-            load_views(shared, scope, rows).await?
-        } else {
-            rows
-        };
+        let frozen = &snapshot.rows[..(limit as usize).min(snapshot.rows.len())];
+        let rows = self.page_rows(scope, frozen, projections).await?;
         let next = next_cursor(shared, &snapshot, &cut, (limit as usize).min(snapshot.rows.len()))?;
         Ok(GroupIndexPage { rows, total, cut, next })
     }
@@ -402,15 +334,7 @@ impl GroupListingPort for StoreTaskReader {
         };
         let start = offset + 1;
         let end = (start + snapshot.page_size as usize).min(snapshot.rows.len());
-        let rows: Vec<GroupIndexRow> = snapshot.rows[start..end]
-            .iter()
-            .map(cut_row)
-            .collect::<Result<_, _>>()?;
-        let rows = if load_rows {
-            load_views(shared, scope, rows).await?
-        } else {
-            rows
-        };
+        let rows = self.page_rows(scope, &snapshot.rows[start..end], self.projections(load_rows)?).await?;
         let next = next_cursor(shared, &snapshot, &claims.cut, end)?;
         Ok(GroupIndexPage {
             rows,
@@ -421,33 +345,20 @@ impl GroupListingPort for StoreTaskReader {
     }
 }
 
-/// Batched, page-scoped optional projections: one read per served row.
-async fn load_views(
-    shared: &Arc<Shared>,
-    scope: &TaskScope,
-    rows: Vec<GroupIndexRow>,
-) -> Result<Vec<GroupIndexRow>, StoreError> {
-    let reads: Vec<_> = rows
-        .iter()
-        .map(|row| read_stored(shared.clone(), scope.clone(), row.tid.clone()))
-        .collect();
-    let stored_rows: Vec<Option<Stored>> = futures::stream::iter(reads)
-        .buffered(LIST_READ_CONCURRENCY)
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
-        .collect::<Result<_, StoreError>>()?;
-    Ok(rows
-        .into_iter()
-        .zip(stored_rows)
-        .map(|(row, stored)| GroupIndexRow {
-            tid: row.tid,
-            sid: row.sid,
-            status: row.status,
-            status_updated_at: row.status_updated_at,
-            view: stored.map(stored_view),
-        })
-        .collect())
+impl StoreTaskReader {
+    fn projections(&self, requested: bool) -> Result<Option<&dyn KvStorePlugin>, StoreError> {
+        if !requested { return Ok(None); }
+        self.projection_store.as_deref().map(Some).ok_or_else(|| not_applied("group_projections_unconfigured"))
+    }
+
+    async fn page_rows(&self, scope: &TaskScope, frozen: &[CutRow], projections: Option<&dyn KvStorePlugin>)
+        -> Result<Vec<GroupIndexRow>, StoreError> {
+        let mut rows = frozen.iter().map(cut_row).collect::<Result<Vec<_>, _>>()?;
+        if let Some(store) = projections {
+            group_projection::restore(&self.shared, store, scope, frozen, &mut rows).await?;
+        }
+        Ok(rows)
+    }
 }
 
 /// The continuation cursor after `end` served rows; `None` when the cut ends.

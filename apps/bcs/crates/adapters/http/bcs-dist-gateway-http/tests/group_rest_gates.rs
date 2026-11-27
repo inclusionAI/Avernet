@@ -60,6 +60,26 @@ async fn d0_matrix_gates_rest_task_read_and_cancel() {
     assert_eq!(status.as_u16(), 200, "{body:?}");
 }
 
+#[tokio::test]
+async fn original_send_is_readable_after_unpublication_but_a_new_key_is_not_admitted() {
+    let p = ports();
+    let stack = group_stack(&p);
+    let app = test_router(&stack);
+    let send = |id: &str, text: &str| rest_send(id, text, None, json!({"blocking": false}));
+    let (status, first) = response_of(&app, send("lost-ack", "same")).await;
+    assert_eq!(status.as_u16(), 200);
+    let tid = first.unwrap()["task"]["id"].as_str().unwrap().to_owned();
+    stack.grants.published.store(false, Ordering::SeqCst);
+    assert_eq!(response_of(&app, rest_task("GET", &tid)).await.0.as_u16(), 200);
+    let (status, replay) = response_of(&app, send("lost-ack", "same")).await;
+    assert_eq!(status.as_u16(), 200, "{replay:?}");
+    assert_eq!(replay.unwrap()["task"]["id"], tid);
+    assert_eq!(response_of(&app, send("lost-ack", "changed")).await.0.as_u16(), 409);
+    assert_eq!(response_of(&app, send("new-key", "new")).await.0.as_u16(), 403);
+    stack.grants.read.store(false, Ordering::SeqCst);
+    assert_eq!(response_of(&app, send("lost-ack", "same")).await.0.as_u16(), 403);
+}
+
 /// Terminal closure on revocation (review round 1): an open group stream
 /// whose grants get revoked mid-flight emits exactly one terminal error
 /// frame and closes within one recheck interval; the server-side

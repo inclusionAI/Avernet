@@ -91,15 +91,13 @@ pub(crate) fn user_input_id(scope: &TaskScope, group: &GroupId, sid: &Sid, messa
 pub(crate) fn group_user_input_id(
     scope: &TaskScope,
     group: &GroupId,
-    sid: &Sid,
     message: &RequestId,
 ) -> InputId {
     input_id(&[
-        "group_user:v1",
+        "group_user:v2",
         &scope.tenant.0,
         &scope.principal.0,
         &group.0,
-        &sid.0,
         &message.0,
     ])
 }
@@ -250,7 +248,7 @@ impl Derivation {
             CreationSource::GroupA2a => Self {
                 session: group_session_id,
                 task: group_task_id,
-                user_input: group_user_input_id,
+                user_input: |scope, group, _, message| group_user_input_id(scope, group, message),
                 reply_input: group_reply_input_id,
                 cancel_input: group_cancel_input_id,
             },

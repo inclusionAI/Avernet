@@ -69,6 +69,75 @@ pub(crate) async fn submit(
     Ok(receipt)
 }
 
+/// In particular a retry after a lost first response has neither a task nor
+/// a context id. Look up the scoped key before consulting today's directory.
+/// Read-only replay never falls through into a write on a miss or an error.
+pub(crate) async fn group_start(
+    gateway: &DistGateway, caller: &GatewayCaller, request: SubmitInput,
+) -> Result<AdmissionReceipt, GatewayError> {
+    use bcs_service_api::core::dist_gateway::GroupStartLookup;
+    use bcs_service_api::port::repo::distributed::group_round::GroupRoundOperation;
+
+    let scope = scope_of(caller)?;
+    check_request_id(&request.message_id)?;
+    if request.group.0.is_empty() { return Err(invalid("group_missing")); }
+    let grants = gateway.policy().grants(caller, &request.group).await;
+    let can_start = grants.allows(GroupRoundOperation::New);
+    if !can_start && !grants.read {
+        return Err(GatewayError::AccessDenied);
+    }
+    let sid = match &request.session {
+        Some(sid) => {
+            parse_session(sid)?;
+            check_source(sid, CreationSource::GroupA2a)?;
+            gateway.check_group(&scope, sid, &request.group).await?;
+            sid.clone()
+        }
+        None => group_session_id(&scope, &request.group, &request.message_id, gateway.config.shard_count),
+    };
+    let derived = Derivation::of(CreationSource::GroupA2a);
+    let mut command = new_task(&scope, &request, sid.clone(), None, derived);
+    match gateway.core.lookup_group_start(&scope, &request.group, &command.input.input_id)
+        .await.map_err(core_error)? {
+        GroupStartLookup::Accepted(receipt) => {
+            if !grants.read { return Err(GatewayError::AccessDenied); }
+            if receipt.business_digest != command.input.business_digest
+                || receipt.input_id != command.input.input_id || receipt.sid != sid || receipt.tid != command.input.tid {
+                return Err(GatewayError::Conflict);
+            }
+            if !can_start { return Ok(receipt); }
+            // Keep the existing idempotent Worker repair path for an invoker:
+            // the license CAS may have won before the Start/hint was sent.
+            // Never submit a command on the read-only path. An accepted start
+            // already has a frozen session spec; no directory resolve here.
+            let CoreAdmission(repaired) = gateway.core.admit(&scope, command).await
+                .map_err(|error| admit_error(error, &request.message_id))?;
+            return Ok(repaired);
+        }
+        GroupStartLookup::Expired if grants.read => return Err(invalid("group_round_expired")),
+        GroupStartLookup::Expired => return Err(GatewayError::AccessDenied),
+        // A preparation isn't public. With read alone it is indistinguishable
+        // from a miss; in particular it cannot be converted into a new start.
+        GroupStartLookup::Prepared | GroupStartLookup::Absent if !can_start => return Err(GatewayError::AccessDenied),
+        GroupStartLookup::Absent | GroupStartLookup::Prepared => {}
+    }
+    if request.session.is_none() {
+        // A prepared bootstrap may already have a frozen spec. Do not replace
+        // it with the current publication, even if the directory changed.
+        match gateway.core.session_group(&scope, &sid).await {
+            Ok(group) if group == request.group => {}
+            Ok(_) => return Err(GatewayError::NotFound),
+            Err(DistGatewayCoreError::NotFound) => {
+                command.create_session = Some(new_spec(gateway, &scope, &request.group, &sid).await?);
+            }
+            Err(error) => return Err(core_error(error)),
+        }
+    }
+    let CoreAdmission(receipt) = gateway.core.admit(&scope, command).await
+        .map_err(|error| admit_error(error, &request.message_id))?;
+    Ok(receipt)
+}
+
 pub(crate) async fn cancel(
     gateway: &DistGateway,
     caller: &GatewayCaller,
@@ -148,11 +217,11 @@ fn new_task(
         input: InputEnvelope {
             schema_version: SCHEMA_VERSION,
             input_id: (derived.user_input)(scope, &request.group, &sid, &request.message_id),
-            business_digest: content_digest(&json!({
-                "kind": "user",
-                "group": request.group.0,
-                "content": request.content,
-            })),
+            business_digest: if request.source == CreationSource::GroupA2a {
+                content_digest(&json!({"kind": "group_start:v2", "context": request.session, "content": request.content}))
+            } else {
+                content_digest(&json!({"kind": "user", "group": request.group.0, "content": request.content}))
+            },
             sid,
             tid,
             body: InputBody::User {

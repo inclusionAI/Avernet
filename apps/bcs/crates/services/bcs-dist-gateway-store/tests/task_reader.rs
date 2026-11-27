@@ -107,6 +107,28 @@ async fn fresh_group_listing_after_expiry_has_a_usable_cursor() {
 }
 
 #[tokio::test]
+async fn group_cut_scan_budget_rejects_instead_of_publishing_a_partial_total() {
+    use bcs_service_api::port::repo::distributed::group_listing::{GroupIndexQuery, GroupListingPort};
+    use bcs_store_api::zset::{ZAddMode, ZSetEntry, ZSetStorePlugin};
+    let f = fixture();
+    let index = layout().tasks(&scope()).unwrap();
+    // Index candidates from the legacy surface are not group rows, but they
+    // still cost a bounded scan. Exactly the limit is not an overflow.
+    let entries: Vec<_> = (0..4097).map(|i| ZSetEntry {
+        member: format!("{SID}.task-{i}"), score: i as f64,
+    }).collect();
+    for batch in entries[..4096].chunks(100) {
+        f.model.add(&index, batch, ZAddMode::InsertOnly).await.unwrap();
+    }
+    let group = GroupId("grp-research-01".into());
+    let query = GroupIndexQuery { statuses: vec![], limit: NonZeroU32::MIN, load_rows: false };
+    assert_eq!(f.reader.first_page(&scope(), &group, &query, TimestampMillis(NOW)).await.unwrap().total, 0);
+    f.model.add(&index, &entries[4096..], ZAddMode::InsertOnly).await.unwrap();
+    assert!(matches!(f.reader.first_page(&scope(), &group, &query, TimestampMillis(NOW)).await,
+        Err(StoreError::NotApplied { code }) if code == "group_cut_scan_budget"));
+}
+
+#[tokio::test]
 async fn another_scope_sees_no_task() {
     let f = fixture();
     f.worker.create(&snapshot(TID, TaskStatus::Working, Some(eid(2, 1)), 1)).await;

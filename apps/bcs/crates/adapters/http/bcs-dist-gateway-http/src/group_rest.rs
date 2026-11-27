@@ -130,6 +130,7 @@ fn rest_error(error: &GatewayError) -> Response {
             "session unavailable",
         ),
         GatewayError::Invalid { code } => match code.as_str() {
+            "group_round_expired" => error_body(StatusCode::GONE, "TASK_EXPIRED", "original task expired"),
             "cursor_format" => rest_invalid(StatusCode::BAD_REQUEST, "CURSOR_FORMAT_INVALID"),
             "cursor_signature" => rest_invalid(StatusCode::BAD_REQUEST, "CURSOR_SIGNATURE_INVALID"),
             "cursor_subject_mismatch" => rest_invalid(StatusCode::BAD_REQUEST, "CURSOR_SUBJECT_MISMATCH"),
@@ -639,6 +640,7 @@ fn stream_error_code(error: &GatewayError) -> &'static str {
         GatewayError::NotCancelable => "TASK_NOT_CANCELABLE",
         GatewayError::Quarantined => "CONTEXT_UNAVAILABLE",
         GatewayError::Invalid { code } => match code.as_str() {
+            "group_round_expired" => "TASK_EXPIRED",
             "cursor_format" => "CURSOR_FORMAT_INVALID",
             "cursor_signature" => "CURSOR_SIGNATURE_INVALID",
             "cursor_subject_mismatch" => "CURSOR_SUBJECT_MISMATCH",

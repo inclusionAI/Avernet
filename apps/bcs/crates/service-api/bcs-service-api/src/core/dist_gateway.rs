@@ -3,7 +3,7 @@ use bcs_dist_model::*;
 use futures::stream::BoxStream;
 use crate::port::dist_output::FormattedOutputEvent;
 
-pub use super::dist_admission::TaskAdmissionCommand as AdmitTaskCommand;
+pub use super::dist_admission::{GroupStartLookup, TaskAdmissionCommand as AdmitTaskCommand};
 
 /// The input is admitted, whether by this call or an earlier one.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +67,12 @@ pub struct CoreTaskPage {
 /// Application owns caller resolution, transport normalization and waiting.
 #[async_trait]
 pub trait DistGatewayCoreService: Send + Sync {
+    /// Read the original strict receipt without authorizing any new work.
+    async fn lookup_group_start(
+        &self, _scope: &TaskScope, _group: &GroupId, _id: &InputId,
+    ) -> Result<GroupStartLookup, DistGatewayCoreError> {
+        Err(DistGatewayCoreError::Unavailable { code: "group_lookup_unconfigured".into() })
+    }
     async fn admit(
         &self,
         scope: &TaskScope,

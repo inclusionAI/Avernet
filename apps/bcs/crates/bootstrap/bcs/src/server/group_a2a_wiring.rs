@@ -226,6 +226,21 @@ pub async fn assemble_inprocess(
 ) -> Result<GroupA2aAssembly, GroupA2aWiringError> {
     let namespace = config.namespace.as_str();
     let layout = KeyLayout::new("bcs", namespace).map_err(assembly_err)?;
+    let shards = config
+        .shards
+        .iter()
+        .map(|id| ShardId(*id))
+        .collect::<Vec<_>>();
+    // Single-shard scope: the strict round admission binding follows ONE
+    // shard record (config `shards[0]`); a multi-shard `[group_a2a]` needs
+    // one assembly per shard — the host mounts those separately (P-time).
+    if shards.len() != 1 {
+        return Err(GroupA2aWiringError::Startup(
+            "group A2A assembly currently serves exactly one shard: `[group_a2a].shards` must have one id",
+        ));
+    }
+    bcs_dist_store::group_admission::open_group_request_namespace(provider.documents.as_ref(), &layout, shards[0])
+        .await.map_err(assembly_err)?;
     let scan_budget = Arc::new(
         SharedScanBudget::new(ScanBudgetConfig::default()).map_err(assembly_err)?,
     );
@@ -332,24 +347,11 @@ pub async fn assemble_inprocess(
             layout.clone(),
             reader_config,
             (artifacts.clone(), feed.clone()),
-        )
+        ).and_then(|reader| reader.with_group_projections(provider.kv.clone()))
         .map_err(assembly_err)?,
     );
     // The Worker: real runtime (heartbeat, lease, peer handoff) plus the
     // real processor over the strict-round spine.
-    let shards = config
-        .shards
-        .iter()
-        .map(|id| ShardId(*id))
-        .collect::<Vec<_>>();
-    // Single-shard scope: the strict round admission binding follows ONE
-    // shard record (config `shards[0]`); a multi-shard `[group_a2a]` needs
-    // one assembly per shard — the host mounts those separately (P-time).
-    if shards.len() != 1 {
-        return Err(GroupA2aWiringError::Startup(
-            "group A2A assembly currently serves exactly one shard: `[group_a2a].shards` must have one id",
-        ));
-    }
     let runtime = bcs_dist_worker::WorkerRuntime::start(
         format!("{namespace}-worker"),
         format!("http://{namespace}-worker.example.invalid"),

@@ -2,6 +2,15 @@
 
 状态（2026-11-25 范围调整）：**D0 冻结仍待复核；按用户决定拆分 provider 交付，允许继续后续功能实现，不代表 Stage 2 已完成或真实后端验收已通过。** 当前开发授权以 plan 的“交付范围与执行授权”为准；以下原状态裁决是调整前记录，测试结果不变。 当前修复基线为 `564a2b7e30`；下列第一至第五轮为历史记录，不代表当前工作树已通过。最新证据与状态见“第六轮”。未执行合并、部署或 push。
 
+## 2026-11-27：请求重放与完整列表投影修复（基线 `e11c221055`）
+
+- RED：修改实现前运行 `bcs-dist-gateway-http` 的 `group_rest`、`group_rest_gates`。完整投影在同一 cut 上从 Submitted 漂到 Working；撤销发布但保留读权，重复原始 send 得到 403 而不是原 Tid。
+- GREEN：HTTP 回归验证相同请求返回原 Tid、变更内容返回 409、仅有读权不能创建、撤销 read 后拒绝；`includeArtifacts` 续页保留原状态，模拟已签游标的投影块丢失时返回 `CURSOR_RELEASED`。`bcs` 的 `group_a2a_rest_bridge` 使用真实 Worker 和严格请求登记，覆盖续轮重投、同键换 context 的冲突，以及撤销发布后跨代读回原 Tid；`group_a2a_companion` 覆盖旧命名空间拒绝启动。证据为路由/同进程角色装配，不是生产 provider 认证。
+- 受影响回归：在 `apps/bcs` 以 `cargo test --locked -j1 --no-fail-fast` 和 `--test-threads=1` 运行 `bcs-dist-gateway-http`、`bcs-dist-gateway-store`、`bcs-app-dist-gateway`、`bcs-dist-gateway`、`bcs-dist-worker`、`bcs-dist-store`，**626 passed / 0 failed / 0 ignored**。另跑 `bcs` 的 `group_a2a_companion` 和 `group_a2a_rest_bridge`，12 + 5 passed。
+- 最终读写路径单独复跑：`group_a2a_rest_bridge`、`conformance_group_public`、`group_rest`、`group_rest_gates`、`group_rest_sdk_options` 共 **23 passed / 0 failed**。与前述回归有重叠，不累计为新增用例。`cargo check --workspace --all-targets --locked -j1` 通过。仅有 read 的重放从不调用写入；可新建的调用方仍保留原请求的幂等 Start 修复路径。
+- `bcs-dist-gateway-store --test task_reader` 单独重跑 **11 passed**，含 4096/4097 个候选的边界。`BCS_BASE_REF=e11c221055 bash scripts/ci/check-public-api.sh` 对基线与未提交工作树实际取清单比较，**exit 0**；Service API 从 10.0.0 升至 10.1.0，dist-model 未变。`git diff --check` 通过。
+- 新增 `GroupListingPort` / `GroupDiscoveryService` 集中合同和实现入口。R25.1 及 R25.2 入口静态差集与该基线相比只消除了这两项缺失、没有新报错；其余基线红项仍在。未把所选静态腿当作完整 R25.3；未运行全 workspace 测试、真实 MySQL 或跨进程恢复。端口纯度和存储边界检查通过。本次不改变 D0 冻结状态。
+
 ## PR #4285 审阅意见复核（2026-11-27，基线 `a19a107251`）
 
 对照 [PR 的八条审阅意见](https://github.com/inclusionAI/Avernet/pull/4285#issuecomment-7211124591)，区分已在本地工作树修复的行为和补充发现：

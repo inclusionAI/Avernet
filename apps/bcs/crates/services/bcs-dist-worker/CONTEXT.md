@@ -17,3 +17,7 @@
 - Callers: explicit host composition and authenticated runtime application facades.
 - Contract changes require failure-path integration tests and provider acceptance;
   model tests alone do not prove production timing or capacity.
+- Strict REST starts: `lookup_group_start` is a read of the scoped message
+  registry, not a second admission entry. Only an accepted row/license returns
+  a receipt. The Gateway compares the original intent before considering a new
+  start; an unpublished group can still serve a currently authorized replay.

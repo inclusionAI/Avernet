@@ -234,6 +234,39 @@ async fn rpc_cannot_write_rest_context_and_vice_versa() {
     assert_eq!(writes_after, writes_before, "a cross-entry attempt writes nothing");
 }
 
+#[tokio::test]
+async fn full_list_projection_stays_submitted_after_the_live_task_changes() {
+    let p = ports();
+    let app = test_router(&group_stack(&p));
+    let mut ids = Vec::new();
+    for id in ["full-one", "full-two"] {
+        let (status, body) = response_of(&app, rest_send(id, id, None, json!({"blocking": false}))).await;
+        assert_eq!(status, StatusCode::OK);
+        ids.push(body.unwrap()["task"]["id"].as_str().unwrap().to_owned());
+    }
+    ids.sort();
+    let query = "status=submitted&pageSize=1&includeArtifacts=true";
+    let (_, first) = response_of(&app, rest_list(query)).await;
+    let first = first.unwrap();
+    assert_eq!(first["tasks"][0]["id"], ids[0]);
+    let cursor = first["nextPageCursor"].as_str().unwrap();
+    publish_at(&p, &ids[1], TaskStatus::Working, 1000, &[]).await;
+    let (status, second) = response_of(&app, rest_list(&format!("{query}&pageCursor={cursor}"))).await;
+    assert_eq!(status, StatusCode::OK, "{second:?}");
+    let second = second.unwrap();
+    assert_eq!(second["cut"], first["cut"]);
+    assert_eq!(second["totalSize"], 2);
+    assert_eq!(second["tasks"][0]["id"], ids[1]);
+    assert_eq!(second["tasks"][0]["status"]["state"], "TASK_STATE_SUBMITTED");
+
+    // Storage lost the pinned version while the signed cursor is still valid:
+    // fail the whole page, even though the live task is available.
+    p.model.advance(Duration::from_millis(300_001));
+    let (status, body) = response_of(&app, rest_list(&format!("{query}&pageCursor={cursor}"))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body:?}");
+    assert_eq!(code_of(&body), "CURSOR_RELEASED");
+}
+
 /// The public list cuts one consistent version and shares it across pages:
 /// filter, total and rows all read the same materialized cut; concurrent
 /// additions and hot-to-archive transitions between pages never duplicate or

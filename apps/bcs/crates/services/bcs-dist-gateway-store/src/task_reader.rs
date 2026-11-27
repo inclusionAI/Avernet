@@ -103,6 +103,7 @@ pub(crate) struct Shared {
 }
 
 pub struct StoreTaskReader {
+    pub(crate) projection_store: Option<Arc<dyn bcs_store_api::kv::KvStorePlugin>>,
     pub(crate) shared: Arc<Shared>,
 }
 
@@ -135,6 +136,13 @@ impl StoreTaskReader {
         Self::build(documents, zset, stream, results, layout, config, Some(group))
     }
 
+    /// Enables immutable, cursor-lifetime projections for expanded group pages.
+    pub fn with_group_projections(mut self, store: Arc<dyn bcs_store_api::kv::KvStorePlugin>) -> Result<Self, StoreError> {
+        capability::require(&[(store.as_ref(), StoreCapability::Kv)])?;
+        self.projection_store = Some(store);
+        Ok(self)
+    }
+
     fn build(
         documents: Arc<dyn DocumentStorePlugin>,
         zset: Arc<dyn ZSetStorePlugin>,
@@ -163,6 +171,7 @@ impl StoreTaskReader {
         );
         let (group_archives, group_feed) = group.unzip();
         Ok(Self {
+            projection_store: None,
             shared: Arc::new(Shared {
                 documents,
                 zset,

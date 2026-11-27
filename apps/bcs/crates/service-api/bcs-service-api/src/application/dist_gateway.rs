@@ -136,8 +136,7 @@ pub struct GroupTaskList {
     pub limit: std::num::NonZeroU32,
     /// Signed continuation cursor of a previous page.
     pub cursor: Option<PageToken>,
-    /// Batch-load each served row's full projection after the page slice
-    /// (bounded page-scoped IO); off by default.
+    /// Include full projections frozen at the listing cut; off by default.
     pub include_artifacts: bool,
 }
 

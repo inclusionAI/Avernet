@@ -87,6 +87,7 @@ impl DistGroupDirectoryPort for Groups {
 /// The host-registered D0 fixture: published, invocable, readable, cancelable
 /// — with switches the revocation vectors flip.
 pub struct AllowGrants {
+    pub published: AtomicBool,
     pub read: AtomicBool,
     pub cancel: AtomicBool,
 }
@@ -94,6 +95,7 @@ pub struct AllowGrants {
 impl AllowGrants {
     fn allow_all() -> Self {
         Self {
+            published: AtomicBool::new(true),
             read: AtomicBool::new(true),
             cancel: AtomicBool::new(true),
         }
@@ -104,7 +106,7 @@ impl AllowGrants {
 impl GroupGrantPolicy for AllowGrants {
     async fn grants(&self, _: &GatewayCaller, _: &GroupId) -> GroupRoundGrants {
         GroupRoundGrants {
-            published: true,
+            published: self.published.load(Ordering::SeqCst),
             invoke: true,
             read: self.read.load(Ordering::SeqCst),
             cancel: self.cancel.load(Ordering::SeqCst),
@@ -191,12 +193,24 @@ pub fn test_router_for(stack: &GroupStack, caller: GatewayCaller) -> Router {
 /// and archive retention. This is not the checkpoint admission test; the
 /// bootstrap REST bridge exercises that with a real licensed Worker.
 struct FixtureAdmission {
+    // The generic Inbox rehashes the initialized request. Keep the original
+    // Gateway intent, like the production strict registry, only after accept.
+    accepted: std::sync::Mutex<std::collections::HashMap<String, (TaskScope, AdmissionReceipt)>>,
     legacy: WorkerTaskAdmission,
     inbox: Arc<StoreInboxProducer>,
 }
 
 #[async_trait]
 impl TaskAdmissionCoreService for FixtureAdmission {
+    async fn lookup_group_start(
+        &self, scope: &TaskScope, _: &GroupId, id: &InputId,
+    ) -> Result<bcs_service_api::core::dist_admission::GroupStartLookup, StoreError> {
+        use bcs_service_api::core::dist_admission::GroupStartLookup;
+        Ok(self.accepted.lock().unwrap().get(&id.0)
+            .filter(|(owner, _)| owner == scope)
+            .map_or(GroupStartLookup::Absent, |(_, receipt)| GroupStartLookup::Accepted(receipt.clone())))
+    }
+
     async fn admit(
         &self,
         scope: &TaskScope,
@@ -206,6 +220,12 @@ impl TaskAdmissionCoreService for FixtureAdmission {
             || CreationSource::of_sid(&command.input.sid) != Some(CreationSource::GroupA2a)
         {
             return self.legacy.admit(scope, command).await;
+        }
+        if let Some((owner, original)) = self.accepted.lock().unwrap().get(&command.input.input_id.0) {
+            return Ok(if owner == scope && original.sid == command.input.sid
+                && original.tid == command.input.tid && original.business_digest == command.input.business_digest {
+                AdmitOutcome::Duplicate(original.clone())
+            } else { AdmitOutcome::ContentConflict });
         }
         let input = command.input;
         let create_session = command.create_session.map(|definition| {
@@ -219,17 +239,24 @@ impl TaskAdmissionCoreService for FixtureAdmission {
         let mut task = snapshot(&input.tid.0, TaskStatus::Submitted, None, NOW);
         task.scope = scope.clone();
         task.sid = input.sid.clone();
-        self.inbox.admit(AdmitRequest {
+        let receipt = AdmissionReceipt { input_id: input.input_id.clone(), sid: input.sid.clone(),
+            tid: input.tid.clone(), business_digest: input.business_digest.clone() };
+        let outcome = self.inbox.admit(AdmitRequest {
             scope: scope.clone(),
             input,
             create_session,
             create_task: Some(task),
-        }).await
+        }).await?;
+        if matches!(outcome, AdmitOutcome::Accepted(_) | AdmitOutcome::Duplicate(_)) {
+            self.accepted.lock().unwrap().entry(receipt.input_id.0.clone()).or_insert((scope.clone(), receipt));
+        }
+        Ok(outcome)
     }
 }
 
 pub fn gateway_core(p: &Ports) -> DistGatewayCore {
     let admission = FixtureAdmission {
+        accepted: Default::default(),
         legacy: WorkerTaskAdmission::new(p.inbox.clone(), Arc::new(|| TimestampMillis(NOW))),
         inbox: p.inbox.clone(),
     };

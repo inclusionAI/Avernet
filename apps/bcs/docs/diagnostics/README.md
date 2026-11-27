@@ -9,6 +9,7 @@ Start with [Session Delete](session-delete.md) when applicable. Start with the s
 | Authentication or principal mismatch | Determine the authentication path and compare its inputs with the applicable contract; inspect the gateway principal contract for gateway calls. | [Reference](../../api-contracts/v1/authentication/contract.md) |
 | Service or provider selection is unclear | Trace the adapter, service API and selected provider through the documented crate boundaries and tests. | [Reference](../../README.md) |
 | A Provider cannot parse a caller IAM token in preproduction | Inspect the exact outbound value and correlate the run and HTTP message IDs. | [Temporary diagnostic](preproduction-caller-token.md) |
+| Strict group startup refuses an old namespace or a group page loses its version | Distinguish `group_request_format_migration_required` from `CURSOR_RELEASED`; do not erase deduplication evidence or retry a continuation as a live read. | [Group request keys and cut projections](../../specs/2026-11-20-fsm-group-a2a-discussion/contract-decisions.md#严格入口请求键与列表投影修订2026-11-27不改变-d0-冻结状态) |
 
 Keep credentials, private runtime data and raw sessions out of repository knowledge. Add a topic page only when a supported, reusable diagnosis is missing.
 

@@ -41,6 +41,9 @@ async fn rest_successor_uses_the_same_context_and_a_new_licensed_generation() {
         let (status, body) = response_of(&app, rest_send("first", "research", false)).await;
         assert_eq!(status, StatusCode::OK, "{body:?}");
         let (sid, first_tid) = receipt_ids(body.unwrap());
+        // A server-assigned context is not a client-supplied context on retry.
+        let (status, _) = response_of(&app, send_in_context(&sid, "first", "research")).await;
+        assert_eq!(status, StatusCode::CONFLICT);
         complete_round(&world, &app, &first_tid).await;
 
         let (status, body) = response_of(&app, send_in_context(&sid, "second", "follow-up")).await;
@@ -48,6 +51,11 @@ async fn rest_successor_uses_the_same_context_and_a_new_licensed_generation() {
         let (second_sid, second_tid) = receipt_ids(body.unwrap());
         assert_eq!(second_sid, sid);
         assert_ne!(second_tid, first_tid);
+        // The successor's message key is already bound. Omitting its explicit
+        // context addresses a different (derived) session, not a new start.
+        let (status, body) = response_of(&app, rest_send("second", "follow-up", false)).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body:?}");
+        assert_eq!(body.unwrap()["error"]["code"], "CONFLICT");
         let key = RoundKey {
             scope: scope(),
             group: group_id(),
@@ -58,6 +66,7 @@ async fn rest_successor_uses_the_same_context_and_a_new_licensed_generation() {
         let view = world.round_view(&key).await.expect("successor owns generation 2");
         assert_eq!(view.accepted.input.ordered_parts, vec![bcs_dist_model::RoundPart::Text { text: "follow-up".into() }]);
 
+        world.policy.unpublished.store(true, Ordering::SeqCst);
         // A retry uses its original generation even while another round owns
         // the checkpoint. The first key is now resolved through cold proof.
         for (request, expected) in [

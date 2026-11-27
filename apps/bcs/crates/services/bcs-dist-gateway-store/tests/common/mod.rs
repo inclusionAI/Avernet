@@ -357,7 +357,7 @@ pub fn fixture_with(tune: impl FnOnce(&mut GatewayStoreConfig)) -> Fixture {
         layout(),
         config,
     )
-    .unwrap();
+    .unwrap().with_group_projections(model.clone()).unwrap();
     Fixture {
         worker: FakeWorker::new(model.clone()),
         model,

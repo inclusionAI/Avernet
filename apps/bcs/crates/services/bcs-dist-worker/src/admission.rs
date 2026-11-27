@@ -456,6 +456,27 @@ fn invalid(code: &str) -> StoreError {
 }
 #[async_trait]
 impl TaskAdmissionCoreService for WorkerTaskAdmission {
+    async fn lookup_group_start(
+        &self, scope: &TaskScope, group: &GroupId, id: &InputId,
+    ) -> Result<GroupStartLookup, StoreError> {
+        let request = RequestId(id.0.clone());
+        let key = GroupRequestIdentity::strict(scope, group, &request);
+        Ok(match self.strict_admission()?.rounds.lookup(&key).await? {
+            GroupRequestRecord::Absent => GroupStartLookup::Absent,
+            GroupRequestRecord::Prepared(_) => GroupStartLookup::Prepared,
+            GroupRequestRecord::Expired => GroupStartLookup::Expired,
+            GroupRequestRecord::Accepted(round) => {
+                let key = round.input.key;
+                if key.scope != *scope || key.group != *group || round.request_id != request {
+                    return Err(invalid("group_request_binding"));
+                }
+                GroupStartLookup::Accepted(AdmissionReceipt {
+                    sid: key.sid, tid: key.tid, input_id: id.clone(), business_digest: round.request_digest,
+                })
+            }
+        })
+    }
+
     async fn admit(
         &self,
         scope: &TaskScope,

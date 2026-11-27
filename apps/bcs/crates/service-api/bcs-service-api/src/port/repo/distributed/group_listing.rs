@@ -22,8 +22,7 @@ pub struct GroupIndexQuery {
     pub statuses: Vec<TaskStatus>,
     /// Rows per page; the caller caps this at the candidate profile bound.
     pub limit: NonZeroU32,
-    /// Batch-load each served row's full projection after the page slice:
-    /// bounded IO, page-scoped.
+    /// Pin full row projections at the initial cut; restore only the served page.
     pub load_rows: bool,
 }
 
@@ -36,8 +35,8 @@ pub struct GroupIndexRow {
     pub status: TaskStatus,
     pub status_updated_at: TimestampMillis,
     /// Present only when the caller asked for loaded rows: the task's
-    /// authoritative stored view at serve time. Absent when the underlying
-    /// record is gone or another scope's.
+    /// authoritative view at the original cut. An unavailable pinned version
+    /// must fail the page, never fall back to a newer live projection.
     pub view: Option<bcs_dist_model::TaskView>,
 }
 

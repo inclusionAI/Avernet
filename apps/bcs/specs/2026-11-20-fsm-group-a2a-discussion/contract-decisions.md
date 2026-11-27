@@ -176,3 +176,10 @@ List 首页取得按授权群过滤、按 Tid 唯一的版本化快照，行、t
 - 首次证明转存增加 1 次 checkpoint 和 1 次 closure 读取，无历史扫描；重放不增加两次读取。目录回收增加 1 次 checkpoint CAS，预登记增加至多 1 次 checkpoint 读取，不引入跨键事务或网络锁。
 
 **核定：D0 冻结结论暂停，Stage 2 未完成退出验收，不放行 Stage 3。** 原型修复不等于必需门禁已重新通过；当前 API/R25、workspace 与真实 MySQL/provider 证据见 validation.md 第六轮。P 仍缺交付，模型与 SQLite 测试不能替代。
+
+## 严格入口请求键与列表投影修订（2026-11-27；不改变 D0 冻结状态）
+
+- 请求登记键 v2 由 tenant、principal、group、messageId 派生；客户端显式 context（含缺省与显式的区别）参与请求内容摘要，不参与查找键。JSON-RPC 原键不变。已受理请求返回原 Tid，不重查当前工作流。仍可调用时保留 Worker 对原 Start 的幂等补发；仅有 read 时重放是只读操作。仅有 read 不能从未命中或准备中创建 Task。撤销发布与撤销 read 仍是两个不同的操作。
+- 传播：Service API 10.1 新增 Gateway core → Worker admission 只读分类，未实现的提供方返回依赖错误，不把缺能力当作未命中。旧严格入口按 Sid 哈希，不能从摘要反推 messageId 去重墓碑；**禁止混跑 v1/v2 写者，禁止把旧数据直接当成空登记表**。同进程装配在首次认领前固定请求键格式和 shard；原单分片有 owner 而无格式记录时拒绝启动（`group_request_format_migration_required`）。保留的试验环境须先停止旧写者并按原 shard 另行核定迁移，不更换 shard 绕过检测，不删除 owner、墓碑或伪造版本标记。未部署生产迁移。
+- 完整 List 投影与轻量行来自同一次 Task 读取；仅 `includeArtifacts=true` 的首页保存带内容摘要的 TTL 数据块。持久 cut 只保存定位信息（摘要、偏移和长度），不永久复制 Artifact。续页按当前授权读 cut 和相应块，缺版本报 `CURSOR_RELEASED`，不改读实时 Task。轻量游标不能事后升级为完整投影。游标仍为 300 秒；刷新相同内容不延长已发游标的期限。
+- 首页限制：主体索引最多检查 4096 个候选，完整 cut 暂存编码共至多 32 MiB；超过即拒绝，不返回部分 total。每个严格 Sid 仅读一次群归属，对本群候选最多 8 个并发权威读取。完整投影通常按 256 KiB 聚合写入（单个较大 view 独占一块），读页最多 100 行且每个不同块只读一次。失败留下的块随游标窗口过期；轻量页不产生这些 KV 读写。以上是工作量上界，不是实际后端的容量验收。

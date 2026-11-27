@@ -217,6 +217,9 @@ impl DistGatewayService for DistGateway {
         caller: &GatewayCaller,
         request: SubmitInput,
     ) -> Result<AdmissionReceipt, GatewayError> {
+        if request.source == CreationSource::GroupA2a {
+            return self.group_send(caller, request).await;
+        }
         submit::submit(self, caller, request).await
     }
 
@@ -320,14 +323,10 @@ impl DistGatewayService for DistGateway {
         if request.source != CreationSource::GroupA2a {
             return Err(invalid("group_source_required"));
         }
-        // New rounds need the published-invoke pair; a reply to an existing
-        // task is a read-surface replay. The frozen revision is checked in
-        // the shared submit path (directory resolve / session spec).
-        let operation = match request.task {
-            Some(_) => GroupRoundOperation::Replay,
-            None => GroupRoundOperation::New,
-        };
-        self.check_grants(caller, &request.group, operation).await?;
+        if request.task.is_none() {
+            return submit::group_start(self, caller, request).await;
+        }
+        self.check_grants(caller, &request.group, GroupRoundOperation::Replay).await?;
         submit::submit(self, caller, request).await
     }
 
@@ -373,6 +372,7 @@ impl DistGatewayService for DistGateway {
         let sid = session_of_task(&request.tid)?;
         self.check_source(&sid, request.source)?;
         self.check_group(&scope, &sid, &request.group).await?;
+        self.check_grants(caller, &request.group, GroupRoundOperation::Read).await?;
         wait::wait_view(self, &scope, request).await
     }
 }

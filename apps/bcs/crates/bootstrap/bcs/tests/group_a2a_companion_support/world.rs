@@ -14,6 +14,7 @@ pub struct WorkerHandle {
 }
 
 pub struct CompanionWorld {
+    pub policy: Arc<AllowPolicy>,
     pub assembly: GroupA2aAssembly,
     pub model: Arc<Model>,
     pub journal: Arc<DownstreamJournal>,
@@ -78,9 +79,10 @@ impl CompanionWorld {
             streams: model.clone(),
             leases: model.clone(),
         };
+        let policy = Arc::new(AllowPolicy::default());
         let host = GroupA2aHost {
             directory: directory.clone(),
-            policy: Arc::new(AllowPolicy),
+            policy: policy.clone(),
             downstream,
             peers: peers.clone(),
         };
@@ -95,6 +97,7 @@ impl CompanionWorld {
         .expect("same-process joint assembly must mount over the real roles");
         peers.register(&assembly.roles.runtime);
         let world = Arc::new(Self {
+            policy,
             assembly,
             model,
             journal,

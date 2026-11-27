@@ -88,7 +88,7 @@ fn minimal_host(
 ) -> bcs::server::group_a2a_wiring::GroupA2aHost {
     bcs::server::group_a2a_wiring::GroupA2aHost {
         directory: Arc::new(Catalog),
-        policy: Arc::new(AllowPolicy),
+        policy: Arc::new(AllowPolicy::default()),
         downstream: DownstreamJournal::new(),
         peers: Arc::new(Peers::default()),
     }
@@ -406,6 +406,20 @@ async fn multi_shard_config_is_a_startup_failure() {
         message.contains("exactly one shard"),
         "the refusal names the single-shard contract: {message}"
     );
+}
+
+#[tokio::test]
+async fn retained_v1_namespace_is_not_reopened_with_new_request_keys() {
+    use bcs_store_api::document::DocumentStorePlugin;
+    let config = enabled_config();
+    let model = Arc::new(Model::default());
+    let layout = bcs_dist_store::layout::KeyLayout::new("bcs", &config.namespace).unwrap();
+    model.create_document(&layout.owner(bcs_dist_model::ShardId(config.shards[0])), &serde_json::json!({}))
+        .await.unwrap();
+    let archive = tempfile::tempdir().unwrap();
+    let error = group_a2a_wiring::assemble_inprocess(&config, provider_of(model), minimal_host(), archive.path().into())
+        .await.expect_err("a used, unmarked namespace needs an explicit migration");
+    assert!(error.to_string().contains("group_request_format_migration_required"));
 }
 
 /// The rebind hardening, part 2: a lease this host does not own fences

@@ -199,13 +199,14 @@ impl DistGroupDirectoryPort for Catalog {
 
 /// The host-registered D0 driver: this group is published, invocable,
 /// readable and cancelable for the companion's caller.
-pub struct AllowPolicy;
+#[derive(Default)]
+pub struct AllowPolicy { pub unpublished: AtomicBool }
 
 #[async_trait]
 impl GroupGrantPolicy for AllowPolicy {
     async fn grants(&self, _: &GatewayCaller, _: &GroupId) -> GroupRoundGrants {
         GroupRoundGrants {
-            published: true,
+            published: !self.unpublished.load(Ordering::SeqCst),
             invoke: true,
             read: true,
             cancel: true,

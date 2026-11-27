@@ -14,8 +14,24 @@ pub struct TaskAdmissionCommand {
     pub start_task: bool,
 }
 
+/// Observational classification. Prepared is never a receipt or permission to execute.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupStartLookup {
+    Absent,
+    Prepared,
+    Accepted(AdmissionReceipt),
+    Expired,
+}
+
 #[async_trait]
 pub trait TaskAdmissionCoreService: Send + Sync {
+    /// Read the strict registry only; never reserve, repair or enqueue work.
+    async fn lookup_group_start(
+        &self, _scope: &TaskScope, _group: &GroupId, _id: &InputId,
+    ) -> Result<GroupStartLookup, StoreError> {
+        Err(StoreError::NotApplied { code: "group_lookup_unconfigured".into() })
+    }
+
     /// scope comes from authenticated caller context. Same scoped identity and
     /// caller content recovers the original initialization, even across races.
     /// Success confirms recoverable input, initial state and durable activation.

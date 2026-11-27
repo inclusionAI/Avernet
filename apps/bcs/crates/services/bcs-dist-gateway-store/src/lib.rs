@@ -10,6 +10,7 @@
 //! Admission is the shared `bcs_dist_store::inbox::StoreInboxProducer`.
 
 mod group_listing;
+mod group_projection;
 mod page;
 mod position;
 mod readers;
