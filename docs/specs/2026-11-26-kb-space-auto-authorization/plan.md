@@ -1,146 +1,162 @@
-# Plan: 知识库按空间自动授权 Bot
+# Plan: TC 每库开关配置（含前后端，不执行授权）
 
 ## Approach
-TC 感知 Bot 新建、转入、移出、删除和 Owner 转交，可靠调用 ECB 的授权/撤权能力。自动操作写入现有实际 grant；ECB 在现有 KB ext 保存每库开关，继续负责实际授权、鉴权和更新记录。列表、数量、状态、分页和内容访问继续读取现有 grant，不另算继承资格。
+在现有知识管理边界内增加专用 TC 配置服务与 GET/PUT 接口，复用 `ac_common_config` 保存每库开关。工作台“已授权 Bot”页签增加配置开关；ECB 只供既有元数据/权限读取，不改代码、不保存开关、不执行 grant/撤权。
 
-本次按评审意见替换旧方案。删除 Bot 归属投影、入驻历史接收、区间计算、effective v2、独立游标和相关初始化迁移。TC 为可靠执行保留必要的当前操作代次、人工取消标记与待处理意图，这些是执行控制状态，不是第二套访问权限事实；不传给 ECB 建立 Bot 名册。
-
-不预设新增表、认证体系或调度系统。先核对并复用现有 KB ext、Bot 扩展/生命周期记录、任务队列、授权 CAS、服务认证和活动能力；无法表达必要保证时，记录具体缺口并提出最小补充，禁止用“已有队列”冒充可靠捕获已经成立。
+2026-11-27 按已确认的最小需求收敛，沿用开发分支及本目录；此前完整自动授权方案仅保留在 Git 历史，不是本次实施清单。所有代码片段均为待实施草图，功能未实现。本计划不建立任务、监听器或 Bot 名册。
 
 ## Affected Components
-路径相对 Avernet，行号为本分支基线 `e1eebb459d` 的证据，不代表新功能已存在。
+公共路径相对 Avernet；证据基于当前分支代码。工作台位于宿主闭源 `apps/frontend-nextgen/src/internal/knowledge/`，不应把其实现复制到公开仓库。
 
-| Source | Current behavior and change |
+| Source | Evidence / change |
 | --- | --- |
-| `apps/backend/src/agentclaw/community/core/repository/implementations/bot/initial_layout.py:30` | 两个创建入口需要可靠记录授权工作。 |
-| `apps/backend/src/agentclaw/community/core/repository/implementations/bot/mutations.py:82` | 移动入口；同文件 `:199` 为删除入口，需要保留旧授权目标以便撤权。 |
-| `apps/backend/src/agentclaw/community/core/repository/implementations/bot/owner_handoff.py:306` | 转交最终事务变化 Owner 和可能的空间，需要保留原 grant 身份及选择状态。 |
-| `apps/backend/src/agentclaw/community/core/repository/implementations/bot/recycle.py:177` | 回收终结不得丢失未确认撤权工作。 |
-| `apps/backend/src/agentclaw/community/adapters/knowledge_platform/catalog.py:353` | 现有 set_grant 传 actor、Owner 和 expected_revision；优先复用。 |
-| `apps/backend/src/agentclaw/community/core/knowledge_management/services/service.py:158` | 列表展示真实授权行，继续沿用 ID 和 revision。 |
-| `apps/backend/src/agentclaw/community/adapters/knowledge_platform/grant_state_reader.py:10` | 状态批量读取和 CAS 校验保留，无自动虚拟授权例外。 |
-| `apps/backend/src/agentclaw/community/core/task_queue/repository/models.py:129` | active-only 去重只防并发排队，不是永久操作幂等或恢复凭据。 |
+| `apps/backend/src/agentclaw/community/plugin_api/models.py:428` | `CommonConfig` 已有表，business_code/param_code 各 64 字符，唯一键为业务码＋参数码＋env。 |
+| `apps/backend/src/agentclaw/community/core/repository/implementations/config/common_config.py:98` | 按完整业务键读取；现有 upsert 是覆盖写，不等同于乐观锁。 |
+| `apps/backend/src/agentclaw/community/core/common_config/service.py:62` | 已有保留配置写保护，可扩展为本功能整个 business_code 保留空间。 |
+| `apps/backend/src/agentclaw/community/core/knowledge_management/services/service.py:126` | 详情复用 Space 校验及 provider 元数据。新增配置路径不可调用成员同步激活或 grant mutation。 |
+| `apps/backend/src/agentclaw/community/adapters/knowledge_platform/catalog.py:221` | catalog-detail 提供 can_manage/status，但不能假定它提供创建者。 |
+| `apps/backend/src/agentclaw/community/adapters/knowledge_platform/space_knowledge.py:141` | 现有 KB state 解析包含 created_by 与 owner_staff_no；后者不等于创建者。 |
+| `apps/backend/src/agentclaw/community/adapters/http/knowledge_management/router.py:145` | 复用已有认证、路由前缀与错误包装，增加配置子资源。 |
+| `apps/backend/src/agentclaw/community/di/modules/knowledge_management_module.py:1` | 现有公开装配及宿主 identity/config override；在此注入配置服务。 |
 
-边界沿用[知识管理](../../../apps/backend/src/agentclaw/community/core/knowledge_management/README.md)、[Bot 知识选择](../../../apps/backend/src/agentclaw/community/core/bot_knowledge/README.md)及[架构规则](../../arch/arch.rules.md)。现有人员同步维持原职责，不扩展为 Bot 同步通道。
-
-ECB 在宿主 `0731_ecb_dev` 基线上核对 knowledge_tenant 授权 service/store、KB ext 更新、活动及认证入口；工作台/企业装配在宿主 `dev`。实际实现前更新基线并读取当地规则，私有配置和现场资料不进入公共仓库。
+读取边界：[知识管理](../../../apps/backend/src/agentclaw/community/core/knowledge_management/README.md)、[通用配置](../../../apps/backend/src/agentclaw/community/core/common_config/README.md)、[Backend](../../../apps/backend/README.md)、[架构规则](../../arch/arch.rules.md)。现有 common-config 通用读接口、人工授权和 Bot 启用接口语义保持。
 
 ## Data Model Changes
-ECB 开关存放现有 KB ext，缺字段视为 OFF。下面是建议的局部扩展键；实施时沿用实际 ext 更新/CAS 机制，不覆盖其他字段。版本字段只用于开关并发与旧任务校验，不是新授权模型。
-
-```jsonc
-// ECB KnowledgeBaseRegistry.ext — additive key sketch
-{
-  "bot_auto_authorization": {
-    "enabled": false,
-    "revision": 0
-  }
-}
-```
-
-实际授权使用现有 grant 行及其 revision。TC 必须能持久区分当前 Bot 实例、当前连续空间归属、人工取消与生命周期撤权：同空间 Owner 转交保留取消；真实迁出再迁回重置本次取消，但旧任务仍失效。仅有一条 false grant 不足以判断取消原因，不能扫描 false 后全部恢复；需要从已确认操作来源及 TC 控制状态判定，未知来源保守保留并报告。
+无新增表或 DDL。为本功能保留一个 business_code，param_code 为规范序列化的隔离键 SHA-256 完整十六进制值，长度 64。隔离元组含配置的 space_tenant、platform、environment、space_id 和原始 opaque kb_id；不截断 ID，不把浏览器传入的环境或平台作为可信隔离来源。
 
 ```python
-# TC existing lifecycle/task metadata — required semantics, not new table DDL
-# Resolve the actual storage seam in Task 1 before implementation.
-operation_id: str             # stable across retries
-bot_instance: str             # derived from authoritative identity; no name reuse
-control_generation: str       # changes on move/delete; not same-space handoff
-source_and_target: dict       # exact old/new Bot grant identities and KB scope
-expected_grant_revision: int  # captured before dispatch, never blindly refreshed
-policy_revision: int         # only applicable to automatic additions
-origin: str                  # automatic / manual / lifecycle
-progress: dict                # confirmed / pending / failed / outcome_unknown
+# core/knowledge_management/toggle_models.py (new; under community/)
+BUSINESS_CODE = "knowledge_bot_auto_authorization"
+identity = [space_tenant, platform, environment, str(space_id), kb_id]
+param_code = sha256(canonical_json(identity).encode("utf-8")).hexdigest()
+# common-config enable is storage availability, NEVER the business switch.
+record_enable = "1"
+param_value = {"schema_version": 1, "identity": identity,
+               "enabled": False, "revision": 1}
 ```
 
-优先复用现有扩展及任务载荷；待处理撤权不得随 Bot 删除或任务历史清理消失。若现有持久载体不满足保留或原子更新，Task 1 给出具体证据和最小改动，不能先创建另一套事实表。无归属投影回填、区间迁移、全量历史 grant 改写或默认批量开放旧库。
+缺行返回 enabled=false/revision=0，读取不写库、不初始化。已有行必须校验 identity、schema、boolean 与 revision；损坏、身份不匹配、异常 disable 或数据库故障明确报错，不被 only_enabled 过滤成“缺失”。业务 OFF 仍保存记录且 enable=1；不会影响其他 common-config。
 
-## Execution authority
-- 修改开关：仍只有 KB 创建者，ECB 后端用可信身份校验；有人工授权权限不等于有改开关权限。
-- 人工授权/取消：保持现有 actor 的 KB_MEMBER_MANAGE 和 recipient/native READ 规则及 CAS。
-- 自动任务：通过现有 TC→ECB 服务认证和明确的授权执行范围调用。操作发起人、执行主体和 Bot Owner 分开留痕；队列消息、开关 ON、actor_staff_no 字段都不是独立授权凭据，不能把创建者字段填上就视为委托。
-- Task 1 必须验证现有服务主体是否能在限定环境、KB/空间范围内执行自动授权，以及在 Owner 离开/转交/删除后执行旧关系撤权。现有 set_grant 会校验 actor 的 KB_MEMBER_MANAGE，不能假定后台天然有权限。
-- 如果已有委托/服务权限不足，记录最小执行授权缺口，补充现有能力的范围校验；不得切换为无条件管理员、冒充旧 Owner 或新建认证体系。无权时记录阻塞和恢复条件，权限恢复后重新校验再续作；不能以撤权失败冒充权限已收敛。
-- 新授权仍检查接收人及原生 READ，不无条件批量创建 viewer；实际消费继续执行原生鉴权。后台控制调用的权限不转移成人员 READ/WRITE 或管理权限。
+写入采用 expected_revision。复用已有唯一键保障首次创建；同一缺行并发写只有一方成功，唯一键冲突返回 409。已有行以读取的完整 param_value 做条件 UPDATE，新值 revision+1；影响行数为 0 返回 409。不使用无条件 upsert，不用时间戳充当 revision，不持锁等待远端 HTTP。
 
-## Reliable execution and stale-work protection
-1. **可靠捕获。** Bot 权威变更与持久待办/恢复标记必须可靠绑定；优先同一真实事务写入既有载体，队列负责唤醒。企业普通 ORM 的 AUTOCOMMIT 不能提供多语句原子性，复用显式事务能力。写后一次 HTTP/enqueue 不够；只扫最终 Bot 当前态也会漏掉迁出迁回。
-2. **开启。** 开关保存成功与授权执行完成分开。可靠发现开关变化并建立可恢复批次，有界分页枚举当前 Bot，再逐项复核；保存开关后、创建任务前崩溃也必须被补偿发现。新增/转入通过生命周期待办接续，不依赖一次性扫描碰巧看到。
-3. **关闭。** 只停止未完成的新增自动授权，已有 grant 不撤销、人工取消不清除。撤权清理不受开关 OFF 影响；关闭前已发出、结果未知的授权须先回查再收尾，不能将其计入关闭批次新增数量。重新开启是新批次，不能复活旧任务。
-4. **逐次执行。** 发送前校验当前实例、空间、Owner、控制代次、开关版本、取消标记及权限。修改同一 grant 的自动/人工/生命周期操作需要可验证的并发控制；先读后写只解决已知过期，不能挡住读后发生的迁移。
-5. **接收端保护。** 复用 grant CAS 作为最终写入保护。旧请求携带原 expected_revision；迁出、删除、取消等使旧授权失效的操作，必须确认撤权或拒绝状态并推进 revision（必要时是 false→false 的屏障），否则无 grant 的迟到写仍可能获权。同名重建/迁回/Owner 身份切换也要处理旧目标键；未知旧请求未收口前不允许其覆盖新选择。若现有接口的同值写不推进 revision，最小补齐现有 mutation 合同并测试，而非仅加发送前检查。
-6. **冲突与未知。** 409 后重读当前事实重新决策，不能更新 expected_revision 后原样重试。超时先用现有状态/CAS及操作回执判断结果；单看 granted=true 不能认领是本任务成功。无法确认归属的成功不计数，标待核对。需要回执时复用既有操作元数据/活动能力，缺口在原接口最小补充，不新增授权读模型。
-7. **恢复。** 按当前待处理意图补队列；保留撤权目标、执行版本和确认结果直到收敛。重试不重复计数/活动，失败任务可恢复；active-only 队列去重不是持久幂等。跨进程并发、任务过期、旧 worker 延迟返回及任务清理都需故障注入验证。
-8. **Owner 转交。** 同空间承接人工 true/false、自动 true 和 OFF 后保留 true，按现有 owner-keyed grant 做受控迁移并撤销旧键，不靠新 Owner 查不到行就自动授权。迁移保留授权来源/取消语义，新主体仍过原生 READ；跨空间先清旧关系，再按目标库开关处理。部分成功留可恢复进度，不能伪报原子完成。
+```python
+# core/repository/implementations/config/knowledge_toggle.py (new)
+# Same CommonConfig model; dedicated narrow repository, no generic policy bypass.
+read(scope: ToggleScope) -> ToggleState
+compare_and_set(scope: ToggleScope, *, expected_revision: int,
+                enabled: bool) -> ToggleState
+# UPDATE ac_common_config SET param_value=:new_value
+# WHERE business_code=:business AND param_code=:key AND env=:env
+#   AND param_value=:previous_value AND enable='1'
+# INSERT for expected_revision=0; constraint conflict => configuration conflict.
+```
+
+repository 使用项目已有数据库事务/错误处理。只把可识别的目标唯一键冲突转成 409，其他写失败向上抛错；测试真实 SQLite 及企业适配，不假定现有通用 upsert 的非 SQLite 分支适用于所有部署。
+
+## Authorization and metadata
+GET 先验证当前 TC 空间访问和 KB 的既有读取权限，返回 can_update；PUT 每次重新校验以下条件，不能信任 GET 的旧结果或客户端提交的 creator/status：
+
+```python
+# core/knowledge_management/services/toggle.py (new)
+context = catalog.toggle_context(space_id=space_id, kb_id=kb_id, actor_id=actor_id)
+can_update = (context.actor_is_creator and context.can_manage
+              and context.status == "active")
+# PUT: require can_update before any config mutation.
+# GET: readable but non-editable => stored value + can_update=False.
+```
+
+新增的 toggle_context 是 TC outbound port 的元数据组合，不是 ECB 新接口。适配器复用既有 catalog-detail 的 can_manage/status，以及既有 KB get 返回的 created_by；用现有可信身份 resolver 比较 actor 与 created_by。不能以 owner_staff_no、can_delete、空间管理员或“最后修改人”推导创建者。缺字段/身份映射失败/两份元数据空间或 KB 不一致则拒绝写入。两次远程读取不承诺与 ECB 权限变更分布式原子，但每次请求都实时校验，不长期缓存写权限。
+
+实施前用实际部署的既有响应固定合同测试；这是只读适配核验，不授权改 ECB。若部署接口缺少必要信息，明确记录接口证据与无法校验的具体缺口，不能猜创建者放行。
+
+通用配置服务的 create/upsert、按 ID update/delete、按业务键 delete、enable/disable 均拒绝本 business_code；按 ID 路径先读取原记录再检查。新增专用配置服务直接使用窄 repository，不经可任意写的通用服务。检查其他 HTTP/内部通用写入口，避免只保护页面；数据库管理员直接 SQL 不属于产品 API 保护范围。
 
 ## API Changes
-复用实际 grant 的点查、批量状态、列表/数量、整数游标和人工 CAS 写接口。Bot 配置、对话/服务阶段和实际内容读路径保持原有授权查询；用回归测试证明自动写出的 grant 能被它们直接消费。
+新增 TC 配置子资源，沿用现有知识管理认证与返回包装。strict boolean、非负整数 revision、未知请求字段拒绝；space_id 和 kb_id 沿用现有格式校验。
 
-```python
-# apps/backend/src/agentclaw/community/adapters/knowledge_platform/catalog.py:353
-# Existing mutation shape remains the baseline.
-set_grant(kb_id=kb_id, actor_id=authorized_actor, bot_id=bot_id,
-          owner_id=owner_id, granted=desired,
-          expected_revision=observed_revision, bot_name=trusted_display)
-# Add only demonstrated gaps to this existing mutation family:
-# trusted operation origin/id, same-value fencing, verifiable receipt.
+```http
+# adapters/http/knowledge_management/router.py (under community/)
+GET /api/knowledge/spaces/{space_id}/knowledge-bases/{kb_id}/bot-auto-authorization
+PUT /api/knowledge/spaces/{space_id}/knowledge-bases/{kb_id}/bot-auto-authorization
 ```
 
-开关读写优先扩展既有 KB metadata/ext 的受控路径，不把通用 ext 覆盖接口直接交给浏览器。creator 校验、字段级更新/CAS、状态与授权批次进度是新增能力；URL/方法名在查明既有能力后定，不预设 effective API 或新的认证路由。进度明确区分策略已保存、任务待执行、部分完成、失败和已收敛。
+```jsonc
+// adapters/http/knowledge_management/schemas.py — payload sketch
+// GET / successful PUT response data
+{"enabled": false, "revision": 0, "can_update": true}
+// PUT request
+{"enabled": true, "expected_revision": 0}
+// Success means configuration persisted, never permission execution completed.
+```
 
-## Activity and count semantics
-ECB 继续拥有更新记录。一次开关动作只产生一条汇总记录；可更新同一记录的执行进度/最终数量，不能每次重试追加动态。自动单项 mutation 标明真实来源，不能调用默认人工活动路径刷一屏“人工授权”。人工取消/恢复仍逐条记活动。
+沿用现有 400/403/404/依赖错误转换；新增配置冲突 409 与配置损坏/存储不可用错误的可识别 code。读取错误不返回 false；保存超时未知时前端重新读取后显示真实结果，不自动重放。新资源没有 pending、批次、授权数量或后台任务状态。
 
-| Field | Meaning |
-| --- | --- |
-| 自动新增成功数 | 本次开启批次从未授权变为授权、且可归因于该操作并确认成功的去重 Bot 数；同 Bot 重试一次计数。 |
-| 已授权/跳过数 | 原已 true、人工取消、归属改变等分别统计，不并入新增成功数。 |
-| 失败/待确认数 | 单列；部分失败不报全量成功，结果未知不推算为成功。 |
-| 关闭汇总数 | 同一“本次实际新增成功数”口径，正常为 0；关闭不执行撤权。保留授权总数如需展示，另标名称并按实际 grant 查询。 |
-| 后续新建/转入 | 归各自生命周期任务，不回填已经完成的开启批次数量。 |
+## Frontend
+在宿主 AuthorizedBotsPanel 顶部增加独立配置区域，不复用 canManage 作为开关写权限。读取 TC 的 enabled/revision/can_update；无法编辑时只读或禁用，保留原人工授权按钮的既有权限。
 
-开启批次保存分页进度与去重依据，枚举/目标校验完成且所有分项终结才结束；不宣称瞬时全空间一致快照。关闭时未确认的旧开启操作仍归旧批次，不能计入关闭结果。该口径与页面当前授权总数不同，UI 必须明确命名。
+```ts
+// host: apps/frontend-nextgen/src/internal/knowledge/domain.ts
+export interface BotAutoAuthorizationConfig {
+  enabled: boolean;
+  revision: number;
+  can_update: boolean;
+}
+// New component: BotAutoAuthorizationToggle.tsx
+// Label: 自动授权当前空间下所有 Bot
+// Always visible help: 本期仅保存配置，暂不执行自动授权
+```
+
+复用现有 UI 组件及语义 token、useKnowledgeResource/useKnowledgeMutation。加载/读取失败不把开关渲染成可信 OFF；请求中禁止重复提交，成功采用服务端响应，失败保留上次确认值并显示错误。409 刷新配置，请用户重新操作；切换库/空间取消旧请求，旧响应不能覆盖新 scope。配置错误单独展示，不阻断原授权列表/人工操作。不开全量 Bot 查询，不额外刷新授权计数，不产生轮询或后台进度。
 
 ## Key Files
-公共目录缩写相对 `apps/backend/src/agentclaw/community/`，测试相对 `apps/backend/`。新增文件仅为按职责拆分的候选，不新增事实表。
+公共源码缩写均相对 `apps/backend/src/agentclaw/community/`；测试相对 `apps/backend/`。
 
-| Work | Files |
+| Unit | Files |
 | --- | --- |
-| Grant orchestration | `core/knowledge_management/services/auto_authorization.py`（新增）、`ports.py`、`services/service.py` |
-| Durable capture | `core/repository/implementations/bot/{initial_layout.py,mutations.py,owner_handoff.py,recycle.py}`、既有任务 repository/生命周期装配；实际扩展载体在 Task 1 固定 |
-| Policy/mutation adapter | `adapters/knowledge_platform/catalog.py`、`adapters/http/knowledge_management/{router.py,schemas.py,errors.py}`、`api/knowledge_management_service.py` |
-| Consumers (regression first) | `core/bot_knowledge/{service.py,stage_selection.py}`、`core/knowledge_management/services/conversation.py`、`adapters/knowledge_platform/grant_state_reader.py` |
-| Provider/host | ECB KB ext、Bot authorization service/store、活动、既有认证；宿主 DI/database、工作台 `internal/knowledge/` 的 panel/domain/service/controller、Avernet gitlink |
-| Knowledge/tests | 知识管理 README、Backend 导航、相关合同/接口/数据库/消费者/工作台测试；本目录 `verification.md` 在实施时记录证据 |
+| Model/port/service | `core/knowledge_management/toggle_models.py`、`ports.py`、`services/toggle.py`；`api/knowledge_management_service.py`（增加方法或同域专用 Service API 导出） |
+| Persistence | `core/repository/implementations/config/knowledge_toggle.py`、同域 repository Protocol；复用 `plugin_api/models.py` 的模型，不改表 |
+| Generic write protection | `core/common_config/service.py`；保留 business_code 常量放低层纯数据模块，避免 common-config 导入知识管理实现 |
+| Metadata/HTTP/DI | `adapters/knowledge_platform/catalog.py`、`adapters/http/knowledge_management/{router.py,schemas.py,errors.py}`、`di/modules/knowledge_management_module.py` |
+| Frontend | 宿主 `src/internal/knowledge/components/{AuthorizedBotsPanel.tsx,BotAutoAuthorizationToggle.tsx}`、`domain.ts`、`services/knowledgeService.ts`、`api/managementController.ts`；按现有调用链拆分 |
+| Documentation | 现有 knowledge_management README、common_config README、必要 Backend 导航；本目录验证记录 |
 
 ## Alternatives Considered
-- ECB 投影 Bot 归属并计算继承权限：职责扩大且改造读链，按本轮裁决移除。
-- 自动任务调用现有实际 grant：采用；存在写放大，以有界批次、限流、重试和汇总活动控制，不隐瞒逐关系写入成本。
-- 只依靠队列去重或发送前校验：不能覆盖崩溃和在途旧写，不采用；必须结合可靠控制状态与接收端 CAS/屏障。
-- 预设新表或新服务认证：缺少必要性证据，不采用；先验证既有载体和授权能力，最小补齐真实缺口。
+- ECB 保存开关：不符合唯一真源边界，不采用。
+- 增加独立策略表：当前 boolean 配置已有存储可用，无证据需要，采用 common-config。
+- 使用通用 enable 代表开关：会把关闭和记录不可用混淆，不采用；业务值单独保存。
+- 直接复用无条件 upsert：会覆盖并发修改，采用窄 CAS 写操作，不改其他配置业务。
+- 将 can_manage/can_delete 当创建者：权限语义不一致，不采用；核对真实 created_by。
+- 接入授权任务预留未来功能：超出本期，完全不实现。
 
 ## Migration / Rollout
-新旧 KB 缺开关字段均 OFF，保留既有 grant true/false；不上线自动授权旧库。删除旧方案的 Bot 投影初始化与数据迁移任务，开启时按需枚举现有 Bot 并写实际 grant。
+没有开关数据回填或 ECB 部署。先上线 TC 专用接口与通用写保护，再上线宿主 UI；旧库无配置保持 OFF。按实际部署核对 common-config 唯一键已存在，缺失为部署问题，不能自动执行 DDL。
 
-先完成执行权限、可靠捕获、CAS 旧写保护和活动来源，再开放开关；公开环境保持可独立测试。扩展字段局部更新，不覆盖其他 ext。任何新增持久结构需由复用调查证明必要，不能把本方案当 DDL 授权。
-
-回滚时停止新自动增权，保留待处理撤权、未知结果回查和恢复记录；不能清空队列或控制状态后宣称完成。真实 grant 读路径不切换，已经成功授予的访问按既有授权继续保留。发布、生产数据操作和部署另行授权。
+回滚前端可隐藏新区域；保留配置记录及通用写保护，避免后续重新发布丢设置。由于无人消费开关执行授权，回滚不改变 grant/访问状态，也无需撤权任务。宿主集成所需公共 gitlink 在实现后固定，文档阶段不改。
 
 ## Test Strategy
-按 spec AC01–AC12 建立实际 grant、页面与新发起内容访问断言；不以任务入队/HTTP 200 代替收敛。
+覆盖 spec AC01–AC08；重点验证“只保存配置”的正向和零副作用断言。
 
 ```python
-# apps/backend/tests/community/core/knowledge_management/test_auto_authorization.py (new)
-def test_missing_ext_defaults_off_and_creator_only_toggle(): ...
-def test_automatic_execution_requires_existing_scoped_authority(): ...
-def test_manual_revoke_beats_delayed_auto_grant_cas(): ...
-def test_same_value_revoke_fences_late_grant_with_no_prior_row(): ...
-def test_reentry_invalidates_old_revoke_and_resets_current_exception(): ...
-def test_same_space_owner_handoff_preserves_all_four_states(): ...
-def test_unknown_receipt_is_not_counted_as_success(): ...
-def test_toggle_summary_counts_only_confirmed_new_grants_once(): ...
+# apps/backend/tests/community/core/knowledge_management/test_toggle.py (new)
+def test_missing_is_off_but_storage_error_is_not_off(): ...
+def test_creator_without_manage_and_manager_without_creator_denied(): ...
+def test_pending_delete_and_unknown_creator_cannot_write(): ...
+def test_toggle_never_calls_grant_queue_members_or_publication(): ...
+# apps/backend/tests/community/repository/config/test_knowledge_toggle.py (new)
+def test_full_scope_isolation_and_long_opaque_kb_ids(): ...
+def test_concurrent_first_insert_and_update_conflict(): ...
+def test_malformed_record_and_hash_identity_mismatch_fail(): ...
 ```
 
-另测 Bot 写后/入队前退出、开关保存后/排队前退出、grant 已提交但回执丢失、旧 worker 返回、队列清理、企业事务回滚、无权撤旧 Owner 关系和权限恢复。企业 AUTOCOMMIT/真实驱动证据单列；不能只以 SQLite 测试证明可靠性。回归沿用 `tests/community/core/bot_knowledge/`、`tests/community/endpoints/test_knowledge_management.py`、`tests/community/contracts/test_knowledge_catalog.py` 和架构/DI 检查；宿主验证现有列表、计数、整数分页及实际检索无需 effective v2。
+补 common-config 所有写变体保护测试、HTTP 直接越权/严格 schema/错误映射及完整 DI/provider 合同测试。前端在组装树执行组件与类型检查：刷新回显、禁用权限、读取失败不显示 OFF、冲突/超时恢复、切换 scope 丢弃旧响应；人工授权功能仍能操作。
 
-设计文档修改本身只检查一致性、引用和格式；上述功能测试均待实施，不宣称已通过。
+```bash
+# apps/backend/ — focused checks after implementation
+DEPLOY_PROFILE=test uv run --no-sync pytest -q \
+  tests/community/endpoints/test_common_config.py \
+  tests/community/endpoints/test_knowledge_management.py \
+  tests/community/knowledge_management tests/community/core/bot_knowledge \
+  tests/community/architecture
+```
+
+新增测试路径创建后加入上述命令；HTTP 变更再执行 Backend README fast gate。宿主按当地 AGENTS 先 assemble，再在组装树运行，不在不完整闭源 src 直接声称 build 通过。组合验证使用真实 TC 保存/刷新，记录 ECB 仅元数据读取，确认 grant、enabled、人员 ACL、MCP 和发布选择无变更。未执行测试单列，设计文档通过不代表功能验收。
