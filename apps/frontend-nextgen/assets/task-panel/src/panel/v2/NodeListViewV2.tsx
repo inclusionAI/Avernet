@@ -1,7 +1,7 @@
 // @asset-migrated: teamclaw 自研资产
 /**
  * NodeListViewV2 —— L1 节点卡片列表(PRD 方案A):
- * 点根节点 = 选中并恢复宿主会话；点其他节点 = 选中并联动会话；
+ * 根节点有明确执行会话时优先按目标联动；目标缺失时回退宿主原会话；其他节点 = 选中并联动会话；
  * 节点本体仅做会话联动；独立图标下钻到节点副屏，不联动会话。
  * 行布局:present 状态环/任务说明(完成划线)/执行体/独立下钻/返工与 HITL 徽章/子任务入口。
  */
@@ -66,7 +66,7 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
         const drillReason = '节点缺少会话或执行者信息，无法下钻';
         const stageName = `第${stageIndex + 1}棒 ${node.name}`;
         const selectForConversation = () => {
-          if (node.id === rootNodeId) nav.selectRootNode(node.id);
+          if (node.id === rootNodeId && !target) nav.selectRootNode(node.id);
           else nav.selectNode(node.id, target);
         };
         return (
