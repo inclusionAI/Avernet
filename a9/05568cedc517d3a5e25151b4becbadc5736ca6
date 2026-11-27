@@ -1,0 +1,60 @@
+apps/bcs/crates/services/bcs-bot/src/application/provider.rs
+  s_8a428faace6fde::t_f3e957c0058be5 6,416-426
+  s_8a428faace6fde::t_0ae8de279730d9 1,4,396-401,403-407,411-415
+  s_8a428faace6fde::t_e71b7691f3805d 79
+  s_8a428faace6fde::t_e63e8048158e6a 402,408-410
+  s_8a428faace6fde::t_3ca6287cebd431 427
+apps/bcs/crates/adapters/http/bcs-http/src/routes/providers/bot_collection.rs
+  s_8a428faace6fde::t_b0b29758abf198 11,128-155
+  s_8a428faace6fde::t_65678c613a5380 1-10,12-127,156-303
+apps/bcs/crates/adapters/http/bcs-http/tests/provider_webhook_routes_contract.rs
+  s_8a428faace6fde::t_4265b3d51bd9b4 5,7,11,21,29-33,35-36,38,40,45,77-90,92-98,103,106,110,112-114,117-131,133-136
+  s_8a428faace6fde::t_e63e8048158e6a 9-10,12,140,150-161,166-170
+  s_8a428faace6fde::t_1adabd89a584a1 22,137-139,141-149,162-165,171-174
+  s_8a428faace6fde::t_6ad02142ec57a8 72-76,91,99-102,104-105,107-109,111,115-116,132
+  s_8a428faace6fde::t_7c030221ed63a5 175
+apps/bcs/crates/service-api/bcs-service-api/src/types/bot_control_plane.rs
+  s_8a428faace6fde::t_f3e957c0058be5 19-38
+apps/bcs/crates/services/bcs-bot/src/core/bot_control_plane_core.rs
+  s_8a428faace6fde::t_e71b7691f3805d 99-101,111,113-115
+  s_8a428faace6fde::t_b0b29758abf198 6,94-98,102-110,112,116-143
+apps/bcs/crates/adapters/http/bcs-http/src/routes/providers.rs
+  s_8a428faace6fde::t_65678c613a5380 1-2,4-5,8,14-16,23,25-28,36
+  s_8a428faace6fde::t_b0b29758abf198 3
+apps/bcs/crates/service-api/bcs-service-api/src/core/bot_control_plane.rs
+  s_8a428faace6fde::t_f3e957c0058be5 8,31-37
+apps/bcs/docs/bot-provider-integration.md
+  s_8a428faace6fde::t_7f24d0154bf3d3 188
+  s_8a428faace6fde::t_b49c3801d3cb01 170-183
+  s_8a428faace6fde::t_ba16312bf19f3b 163-169,184-187,189
+apps/bcs/scripts/e2e-test/provider_scope_story.py
+  s_8a428faace6fde::t_b49c3801d3cb01 109-110,116-120
+apps/bcs/crates/service-api/bcs-service-api/src/application/provider.rs
+  s_8a428faace6fde::t_f3e957c0058be5 11,311-315
+  s_8a428faace6fde::t_e63e8048158e6a 179-184,324
+  s_8a428faace6fde::t_92302bfc2ea158 172-178,316-323,325
+  s_8a428faace6fde::t_fa622493a9725e 326
+apps/bcs/docs/bot-provider-integration.zh-CN.md
+  s_8a428faace6fde::t_7f24d0154bf3d3 137
+  s_8a428faace6fde::t_ba16312bf19f3b 118-123,134-136,138
+  s_8a428faace6fde::t_b49c3801d3cb01 124-133
+apps/bcs/crates/adapters/http/bcs-http/src/router.rs
+  s_8a428faace6fde::t_b0b29758abf198 141-143
+  s_8a428faace6fde::t_83c3c5ddd28ee1 140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a905568cedc517d3a5e25151b4becbadc5736ca6",
+  "prompts": {},
+  "sessions": {
+    "s_8a428faace6fde": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21b85-54e6-71e1-bf51-8d7909270af1",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

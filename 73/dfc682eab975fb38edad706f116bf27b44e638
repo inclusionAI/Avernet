@@ -1,0 +1,63 @@
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_07828166bbe91d::t_08b28f296e62d1 7-10
+apps/bcs/crates/adapters/http/bcs-dist-gateway-http/tests/a2a.rs
+  s_07828166bbe91d::t_f229d55d3445fe 34
+apps/bcs/crates/services/bcs-dist-worker/tests/gateway_chain.rs
+  s_07828166bbe91d::t_f229d55d3445fe 37
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/dispatch.rs
+  s_07828166bbe91d::t_f229d55d3445fe 10-31,71,167-168
+apps/bcs/crates/test-support/bcs-dist-test-runner/src/lib.rs
+  s_07828166bbe91d::t_f229d55d3445fe 10
+apps/bcs/crates/bootstrap/bcs/Cargo.toml
+  s_07828166bbe91d::t_bf5ee09ebd774c 44,51
+apps/bcs/crates/service-api/bcs-service-api/src/port/dist_agent.rs
+  s_07828166bbe91d::t_3a89e5e0519dcb 131-132
+apps/bcs/crates/application/bcs-app-dist-gateway/src/submit.rs
+  s_07828166bbe91d::t_3a89e5e0519dcb 5,24,26
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/README.md
+  s_07828166bbe91d::t_08b28f296e62d1 26,29-32
+apps/bcs/crates/application/bcs-app-dist-gateway/tests/wait_pause.rs
+  s_07828166bbe91d::t_f229d55d3445fe 89
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/queued_runtime.rs
+  s_07828166bbe91d::t_f229d55d3445fe 30-32,36,61
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/queued.rs
+  s_07828166bbe91d::t_f229d55d3445fe 66
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/direct.rs
+  s_07828166bbe91d::t_08b28f296e62d1 1,9,18-21,27-63,99
+apps/bcs/crates/bootstrap/bcs/tests/worker_runtime/gateway.rs
+  s_07828166bbe91d::t_f229d55d3445fe 16
+apps/bcs/crates/services/bcs-dist-worker/tests/processor_support/mod.rs
+  s_07828166bbe91d::t_f229d55d3445fe 55
+apps/bcs/crates/application/bcs-app-dist-gateway/tests/gateway.rs
+  s_07828166bbe91d::t_6aa78bae1c1ce3 21,30-31,36-37,762,764-765,773-774,776,779,781-801
+  s_07828166bbe91d::t_f229d55d3445fe 35
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/mod.rs
+  s_07828166bbe91d::t_f229d55d3445fe 45-46,63-67,100-101,110-111,120,142,691-771,773
+apps/bcs/crates/application/bcs-app-dist-gateway/src/lib.rs
+  s_07828166bbe91d::t_3a89e5e0519dcb 126-127,129-132,134,139
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_07828166bbe91d::t_08b28f296e62d1 354-359
+apps/bcs/crates/bootstrap/bcs/src/dist_direct_a2a.rs
+  s_07828166bbe91d::t_3a89e5e0519dcb 32,52,70
+  s_07828166bbe91d::t_08b28f296e62d1 48-49
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/ports.rs
+  s_07828166bbe91d::t_f229d55d3445fe 427
+apps/bcs/Cargo.lock
+  s_07828166bbe91d::t_f3cc516d3b3bc8 384
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "73dfc682eab975fb38edad706f116bf27b44e638",
+  "prompts": {},
+  "sessions": {
+    "s_07828166bbe91d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a21896-cfa8-7e12-b50b-b3dfac264e6f",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

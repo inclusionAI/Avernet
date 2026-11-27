@@ -1,0 +1,33 @@
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/NodeListViewV2.tsx
+  s_885ffb973587a3::t_701662a3b93983 4,69
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/rootNodeConversation.test.tsx
+  s_885ffb973587a3::t_ccc61d0b752453 33
+  s_885ffb973587a3::t_1d9952869c402b 46,48-49,56
+  s_885ffb973587a3::t_701662a3b93983 29,34,57
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/NodeListViewV2.coverage.test.tsx
+  s_885ffb973587a3::t_489d0951fc6617 179,183
+  s_885ffb973587a3::t_bc51ceeacf29e1 168-169,174-175
+  s_885ffb973587a3::t_1d9952869c402b 156,159,161-164,172,178,184
+apps/frontend-nextgen/assets/task-panel/package.json
+  s_885ffb973587a3::t_299255937a16fa 3
+apps/frontend-nextgen/assets/task-panel/README.md
+  s_885ffb973587a3::t_ee1efb0a111f54 14
+apps/frontend-nextgen/assets/task-panel/package-lock.json
+  s_885ffb973587a3::t_ff241b026dd43e 3,9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b991d71fa3f7fb5da43988a6c4fec1436d2ee7fe",
+  "prompts": {},
+  "sessions": {
+    "s_885ffb973587a3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17742-1085-7833-94e1-041d70172b63",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

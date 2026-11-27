@@ -1,0 +1,34 @@
+apps/frontend-nextgen/docs/task-escort-ui-alignment-20261126.md
+  h_bb3ca6fb13c5df 38-51,134-153
+apps/frontend-nextgen/src/hooks/taskEscortParity/useTaskEscortWorkspaceContext.ts
+  h_bb3ca6fb13c5df 6,72-76,120-122,124-129
+apps/frontend-nextgen/src/pages/TaskEscort/Navigation.tsx
+  h_bb3ca6fb13c5df 65-74
+apps/frontend-nextgen/src/pages/TaskEscort/WorkspaceIntroduction.tsx
+  h_bb3ca6fb13c5df 91
+apps/frontend-nextgen/src/pages/TaskEscort/index.tsx
+  h_bb3ca6fb13c5df 2,16-18,27,30,38-52
+apps/frontend-nextgen/src/services/taskEscortParity/workspaceNavigation.ts
+  h_bb3ca6fb13c5df 27-35,48,68
+apps/frontend-nextgen/test/taskEscortParity/editorVisualCanvas.test.tsx
+  h_bb3ca6fb13c5df 151
+apps/frontend-nextgen/test/taskEscortParity/managementPresentation.test.tsx
+  h_bb3ca6fb13c5df 136
+apps/frontend-nextgen/test/taskEscortParity/runPresentation.test.tsx
+  h_bb3ca6fb13c5df 117
+apps/frontend-nextgen/test/taskEscortParity/workspaceNavigation.test.ts
+  h_bb3ca6fb13c5df 4,30,54,63-83
+apps/frontend-nextgen/test/taskEscortWorkspace/page.test.tsx
+  h_bb3ca6fb13c5df 3,8,22,24-25,28-42,92-94,108,115,129-131,243-245,350-527
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f91071d651503720c68d3f1b97e5e7db9ead36c1",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

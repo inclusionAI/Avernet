@@ -1,0 +1,22 @@
+.github/workflows/clawweb-ci.yml
+  h_bb3ca6fb13c5df 34,58
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowAiDrawer.test.tsx
+  h_bb3ca6fb13c5df 243-244,246-254,256
+apps/evolverun/clawweb/scripts/ci/README.md
+  h_bb3ca6fb13c5df 9,37-60
+apps/evolverun/clawweb/scripts/ci/detect-changes.sh
+  h_bb3ca6fb13c5df 1-41
+apps/evolverun/clawweb/scripts/ci/detect-changes.test.mjs
+  h_bb3ca6fb13c5df 1-251
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1bf002025f1fb91dc449d5105a26e6cdab47e7e4",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
