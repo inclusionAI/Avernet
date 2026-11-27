@@ -110,13 +110,16 @@ describe("route console format strings treat request-derived values as data", ()
 
   it("preserves an asynchronous terminal observer's original stack and successful completion", async () => {
     const error = originalFailure();
-    const row = { flow_id: id, status: "failed" };
-    const updateCompletion = vi.fn().mockResolvedValue(row);
+    const updateCompletionOutcome = vi.fn().mockResolvedValue("updated");
     const onTerminal = vi.fn().mockRejectedValue(error);
-    const base = await listen(createInternalRunsRouter({ updateCompletion } as never, null, undefined, { onTerminal }));
+    const base = await listen(createInternalRunsRouter({ updateCompletionOutcome } as never, null, undefined, { onTerminal }));
     const response = await send(`${base}/${encodeURIComponent(id)}/completion`, "PUT", { status: "failed" });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ success: true, data: row });
+    expect(await response.json()).toEqual({ success: true, data: true });
+    expect(updateCompletionOutcome).toHaveBeenCalledExactlyOnceWith(id, {
+      status: "failed", totalDurationMs: null, totalTokenUsage: null,
+      completedAt: expect.any(Number), retryEpoch: undefined,
+    });
     await vi.waitFor(() => expect(console.warn).toHaveBeenCalledWith(
       "[internal-runs] terminal observer failed for %s: %s", id, error.message, error.stack));
     expect(onTerminal).toHaveBeenCalledExactlyOnceWith({ flowId: id, status: "failed" });
