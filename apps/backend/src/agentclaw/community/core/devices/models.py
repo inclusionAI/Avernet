@@ -46,12 +46,20 @@ class Env(StrEnum):
 
 
 class DeviceBindingStatus(StrEnum):
-    """Device binding status enumeration."""
+    """Device binding status enumeration.
+
+    OFFLINE and RELEASING are reconciliation statuses written by the desktop
+    bot health-check scan (BaaS ALL_OFFLINE / DESTROYING decisions reach
+    ``_update_local_status``, which writes them to the binding row). They are
+    valid persisted states and read paths must accept them.
+    """
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
     STOPPED = "STOPPED"
     FAILED = "FAILED"
     RELEASED = "RELEASED"
+    OFFLINE = "OFFLINE"
+    RELEASING = "RELEASING"
 
 
 class DeviceAllocationMode(StrEnum):
