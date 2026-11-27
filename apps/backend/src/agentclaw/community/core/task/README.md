@@ -279,6 +279,9 @@ Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.p
   `relay_runtime_monitor.py` 区分 Runtime 失败、终态未上报、active 无可观测活动；
   active 停滞按最后可观测活动的单调时间计算，默认 5×120 秒（10 分钟）后请求同会话恢复，
   不因探针临时不可用而清零；活动只证明 Runtime/消息变化，不证明业务验收进展。
+  Bot Runtime 的 `terminal_failed` 同样等待正常停滞窗口（默认 10 分钟），从首次观测失败开始计时，
+  不因任务此前已执行很久而立即恢复；恢复请求发送后重新观察并等待完整窗口，才再次恢复或判断次数耗尽。
+  观测到非失败状态时取消该失败计时；不新增独立阈值，不改变 BCS delivery 的失败确认策略。
   run/session 的版本与更新时间变化不单独算活动；当前进程同节点恢复互斥，发送后
   留一个探针观察窗口避免重复介入；active 静默即使耗尽续跑次数也不直接判 HUNG。无后端分布式恢复锁，不保证多进程全局去重。
   OpenAPI Bot 会话在 active 静默达到预算后，会先对当前旧 run 做 best-effort abort，再向同一 session 发送 resume；该 abort 只释放旧 run，不改写图谱状态，也不算业务 terminal_failed。
