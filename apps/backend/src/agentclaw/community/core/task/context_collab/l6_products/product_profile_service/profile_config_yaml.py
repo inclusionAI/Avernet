@@ -17,7 +17,7 @@ from .configuration import (
 from .stages_yaml import StrictLoader
 
 SCHEMA = "product-profile/config@1"
-MAX_CONFIG_BYTES = 1024 * 1024
+MAX_CONFIG_BYTES = 65535  # MySQL TEXT capacity, measured after YAML serialization.
 
 
 def encode_config(composition, stages: str) -> str:

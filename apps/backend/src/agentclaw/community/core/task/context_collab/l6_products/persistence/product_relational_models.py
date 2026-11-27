@@ -1,12 +1,12 @@
 """Five-table business schema. No runtime snapshot/receipt/outbox/slot models.
 
-L6 registers cross-layer SQL constraints here; L4 has no dependency on L6.
+Relationships use indexed IDs, not database foreign keys. L6 registers shared
+Collet/Event indexes here; L4 has no dependency on L6.
 Load this module in the installer before creating any of these five tables.
 """
 
 from sqlalchemy import (
     Column,
-    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -47,13 +47,13 @@ class ProductProfileRow(Base):
     id = Column(ID, primary_key=True, autoincrement=True)
     name = Column(String(256), nullable=False)
     description = Column(String(2048), nullable=False, default="", server_default="")
-    config = Column(_medium_text(), nullable=False)
+    config = Column(Text, nullable=False)
     status = Column(exact(32), nullable=False, default="DRAFT", server_default="DRAFT")
     creator = Column(exact(1024), nullable=True)
     modifer = Column(exact(1024), nullable=True)
     env, avernet_tenant, gmt_create, gmt_modified = axes()
     __table_args__ = (
-        Index("ix_cc_profile_scope_name", "avernet_tenant", "env", "name"),
+        Index("idx_cc_profile_scope_name", "avernet_tenant", "env", "name"),
         {
             "mysql_engine": "InnoDB",
             "mysql_charset": "utf8mb4",
@@ -76,23 +76,6 @@ class ColletRolloutRow(Base):
         Index("uk_cc_rollout_collet_id", "collet_id", "id", unique=True),
         Index("ix_cc_rollout_predecessor", "collet_id", "predecessor_id"),
         Index("ix_cc_rollout_scope_collet", "avernet_tenant", "env", "collet_id", "id"),
-        ForeignKeyConstraint(
-            ["collet_id"],
-            ["ac_context_collab_collet.id"],
-            name="fk_cc_rollout_collet",
-            ondelete="RESTRICT",
-            onupdate="RESTRICT",
-        ),
-        ForeignKeyConstraint(
-            ["collet_id", "predecessor_id"],
-            [
-                "ac_context_collab_collet_rollout.collet_id",
-                "ac_context_collab_collet_rollout.id",
-            ],
-            name="fk_cc_rollout_predecessor",
-            ondelete="RESTRICT",
-            onupdate="RESTRICT",
-        ),
         {
             "mysql_engine": "InnoDB",
             "mysql_charset": "utf8mb4",
@@ -125,13 +108,6 @@ class StageRolloutRow(Base):
             "collet_rollout_id",
             "id",
         ),
-        ForeignKeyConstraint(
-            ["collet_rollout_id"],
-            ["ac_context_collab_collet_rollout.id"],
-            name="fk_cc_stage_rollout",
-            ondelete="RESTRICT",
-            onupdate="RESTRICT",
-        ),
         {
             "mysql_engine": "InnoDB",
             "mysql_charset": "utf8mb4",
@@ -141,50 +117,6 @@ class StageRolloutRow(Base):
 
 
 # Cross-layer schema assembly is deliberately one-way (L6 -> L4).
-for table, columns, parent, name in (
-    (
-        ColletRow.__table__,
-        ["product_profile_id"],
-        ["ac_context_collab_product_profile.id"],
-        "fk_cc_collet_profile",
-    ),
-    (
-        ColletRow.__table__,
-        ["id", "current_rollout_id"],
-        [
-            "ac_context_collab_collet_rollout.collet_id",
-            "ac_context_collab_collet_rollout.id",
-        ],
-        "fk_cc_collet_current",
-    ),
-    (
-        EventRow.__table__,
-        ["collet_rollout_id"],
-        ["ac_context_collab_collet_rollout.id"],
-        "fk_cc_event_rollout",
-    ),
-    (
-        EventRow.__table__,
-        ["collet_rollout_id", "collet_stage_rollout_id"],
-        [
-            "ac_context_collab_stage_rollout.collet_rollout_id",
-            "ac_context_collab_stage_rollout.id",
-        ],
-        "fk_cc_event_stage_parent",
-    ),
-):
-    table.append_constraint(
-        ForeignKeyConstraint(
-            columns,
-            parent,
-            name=name,
-            ondelete="RESTRICT",
-            onupdate="RESTRICT",
-            # ALTER resolves the Collet <-> rollout installation cycle on MySQL.
-            use_alter=name == "fk_cc_collet_current",
-        )
-    )
-
 for table, name, columns in (
     (
         ColletRow.__table__,

@@ -1,6 +1,9 @@
 from dataclasses import replace
+from pathlib import Path
+import re
 
 import pytest
+from sqlalchemy import inspect
 from sqlalchemy.dialects import mysql
 from sqlalchemy.schema import CreateTable
 
@@ -13,7 +16,11 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.acceptan
 from agentclaw.community.core.task.context_collab.l6_products.persistence.runtime_relational_codec import (
     encode_evidence,
 )
+from agentclaw.community.core.task.context_collab.l6_products.persistence import (
+    product_relational_models,
+)
 from agentclaw.community.core.task.context_collab.l6_products.persistence.product_relational_models import (
+    BUSINESS_TABLES,
     ProductProfileRow,
     ColletRow,
     ColletRolloutRow,
@@ -48,6 +55,15 @@ def test_exact_schema_types_defaults_keys_and_unsigned_parent():
     assert "UNSIGNED" in str(ColletRow.id.type.compile(dialect=dialect))
     assert "UNSIGNED" in str(ColletRolloutRow.collet_id.type.compile(dialect=dialect))
     profile = ProductProfileRow.__table__
+    assert str(profile.c.config.type.compile(dialect=dialect)) == "TEXT"
+    indexes = {index.name: index for index in profile.indexes}
+    assert set(indexes) == {"idx_cc_profile_scope_name"}
+    assert not indexes["idx_cc_profile_scope_name"].unique
+    assert [c.name for c in indexes["idx_cc_profile_scope_name"].columns] == [
+        "avernet_tenant",
+        "env",
+        "name",
+    ]
     assert (
         profile.c.status.default.arg == profile.c.status.server_default.arg == "DRAFT"
     )
@@ -66,9 +82,66 @@ def test_exact_schema_types_defaults_keys_and_unsigned_parent():
         "collab_context_id",
         "event_id",
     ]
-    assert "fk_cc_rollout_collet" in str(
-        CreateTable(ColletRolloutRow.__table__).compile(dialect=dialect)
-    )
+
+
+def test_business_schema_has_no_foreign_keys_in_metadata_mysql_or_sqlite(business):
+    inspector = inspect(business.engine)
+    with business.engine.connect() as connection:
+        assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+    for table in BUSINESS_TABLES:
+        assert not table.foreign_keys, table.name
+        assert not table.foreign_key_constraints, table.name
+        ddl = str(CreateTable(table).compile(dialect=mysql.dialect()))
+        assert not re.search(r"\b(?:FOREIGN\s+KEY|REFERENCES)\b", ddl, re.I)
+        assert inspector.get_foreign_keys(table.name) == []
+
+
+def test_additive_migration_has_no_foreign_key_clauses():
+    migration = (
+        Path(product_relational_models.__file__).parents[2]
+        / "sql"
+        / "2026_11_27_product_relational_storage.sql"
+    ).read_text()
+    assert not re.search(r"\b(?:FOREIGN\s+KEY|REFERENCES)\b", migration, re.I)
+
+
+@pytest.mark.parametrize(
+    "model,expected",
+    [
+        (
+            ColletRolloutRow,
+            {
+                "uk_cc_rollout_order": (["collet_id", "ordinal"], True),
+                "uk_cc_rollout_collet_id": (["collet_id", "id"], True),
+                "ix_cc_rollout_predecessor": (["collet_id", "predecessor_id"], False),
+                "ix_cc_rollout_scope_collet": (
+                    ["avernet_tenant", "env", "collet_id", "id"],
+                    False,
+                ),
+            },
+        ),
+        (
+            StageRolloutRow,
+            {
+                "uk_cc_stage_name": (["collet_rollout_id", "name"], True),
+                "uk_cc_stage_parent_id": (["collet_rollout_id", "id"], True),
+                "ix_cc_stage_scope_rollout": (
+                    ["avernet_tenant", "env", "collet_rollout_id", "id"],
+                    False,
+                ),
+            },
+        ),
+    ],
+)
+def test_rollout_relationship_indexes_are_preserved(business, model, expected):
+    assert {
+        index.name: ([column.name for column in index.columns], index.unique)
+        for index in model.__table__.indexes
+    } == expected
+    assert {
+        index["name"]: (index["column_names"], bool(index["unique"]))
+        for index in inspect(business.engine).get_indexes(model.__tablename__)
+    } == expected
 
 
 @pytest.mark.parametrize("filler", ["x", "字", '"', "\\"])

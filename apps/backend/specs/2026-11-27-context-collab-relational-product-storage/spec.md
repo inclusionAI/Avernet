@@ -48,6 +48,7 @@
 - 本轮追加移除 StageRollout 的 attempt，累计排除七项阶段辅助字段；现有执行派发、进度上报和 provider 请求关联依赖须配套演进，不增加同义字段或伪造历史 attempt。
 - 本轮 Event 修订：不新增 interactive_key 及其专用唯一索引，复用既有 event_id 与 uk_context_collab_event；Event 仅新增两个关联列。既有索引包含 collab_context_id，不将其误写为跨 context 的全租户唯一约束，原反馈 UUID 合同的跨 context 仲裁列为实施前门槛。
 - 本轮执行链路澄清：自动新增/更新五表是接口所触发的完整执行链路的责任，不要求写表逻辑都放进 ProductProfileService 方法体或同一次 HTTP 请求；各生命周期节点的触发方、持久化内容及事务边界见第 6.2 节。
+- 本轮无物理外键修订：遵循“研发规范禁止外键”，移除两张 rollout 新表的三个物理外键，并同步移除 Collet/Event ALTER 的四个物理外键，避免后续升级重复报错。关联 ID 列、普通/唯一索引均保留，由应用事务和完整性校验维护业务关系；数据库不再提供 RESTRICT 保护。
 - 本版是“五表 + 业务字段”的方案；并非现在删除实际数据库或已经实现新的运行合同。
 
 实施前，以下文档/源仍描述当前实现。后续采纳时须同步更新合同、消费者、测试及适当的 Backend ADR，不以本文覆盖当前代码事实：
@@ -81,7 +82,7 @@ event.collet_rollout_id --------------------> rollout.id
 event.(collet_rollout_id, collet_stage_rollout_id) --> stage.(collet_rollout_id, id)
 ```
 
-省略共同前缀。全部读写验证可信 tenant/env、调用者权限和完整父子链；Profile 使用授权与 Collet 运行 owner 授权分开，见第 5.4 节。外键只约束身份关联，**不等于租户授权**。旧表的大小写不敏感排序规则还要求加载后精确核验 axes。
+省略共同前缀。图中箭头只表示逻辑关联，五表不定义物理外键。全部读写验证可信 tenant/env、调用者权限和完整父子链；Profile 使用授权与 Collet 运行 owner 授权分开，见第 5.4 节。关联 ID 和索引均**不等于租户授权**。旧表的大小写不敏感排序规则还要求加载后精确核验 axes。
 
 ### 2.2 ID 分配：Collet.id 即服务 ID，各业务表自增
 
@@ -108,9 +109,9 @@ event.(collet_rollout_id, collet_stage_rollout_id) --> stage.(collet_rollout_id,
 - 以下为 **MySQL/InnoDB 方言方案稿**，没有在目标 MySQL/OceanBase 执行，不宣称生产兼容性已验证。
 - 假设原 L4 Collet/Event/Task 及所需 metadata/resources 列已安装；对已有表提供 ALTER，不重复复制历史基线结构。
 - 全新安装只加载 L4 基线和本版五表变更，**不创建旧六张运行表，也不创建已排除的五张配套表**。已有环境执行受评审升级脚本，历史 SQL 不倒改。
-- 执行前核验实际 schema、signed/unsigned、字符集/排序规则、索引长度、FK/分区支持、隔离级别和同名结构；停写、备份并记录每步。DDL 不视为可整体事务回滚。
+- 执行前核验实际 schema、signed/unsigned、字符集/排序规则、索引长度、禁用物理外键规范/分区支持、隔离级别和同名结构；停写、备份并记录每步。DDL 不视为可整体事务回滚。
 - 不使用 `CREATE IF NOT EXISTS` 掩盖不兼容结构，不依赖版本敏感的 JSON CHECK/ENUM。闭合类型/状态由受测代码校验。
-- OceanBase GLOBAL 索引/分区变体和目标库锁行为须另行验证；外键错误不能忽略后继续上线。
+- OceanBase GLOBAL 索引/分区变体和目标库锁行为须另行验证；本版 CREATE/ALTER 均不定义物理外键，不通过关闭规范检查或忽略 DDL 错误上线。已有部分执行成功的迁移须先检查实际列/索引再续执行，不能直接重跑全部 ADD COLUMN。
 
 ### 3.2 同名旧 Profile 的避让
 
@@ -132,16 +133,18 @@ CREATE TABLE ac_context_collab_product_profile (
     env VARCHAR(20) COLLATE utf8mb4_bin NOT NULL,
     name VARCHAR(256) NOT NULL,
     description VARCHAR(2048) NOT NULL DEFAULT '',
-    config MEDIUMTEXT NOT NULL COMMENT '版本化完整 YAML，唯一执行配置来源',
+    config TEXT NOT NULL COMMENT '版本化完整 YAML，唯一执行配置来源',
     status VARCHAR(32) COLLATE utf8mb4_bin NOT NULL DEFAULT 'DRAFT' COMMENT 'Profile 状态：DRAFT/ONLINE/OFFLINE',
     creator VARCHAR(1024) COLLATE utf8mb4_bin NULL COMMENT '创建人稳定标识；历史来源未知可空',
     modifer VARCHAR(1024) COLLATE utf8mb4_bin NULL COMMENT '最后修改人稳定标识；按约定拼写，历史未知可空',
     gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    KEY ix_cc_profile_scope_name (avernet_tenant, env, name)
+    KEY idx_cc_profile_scope_name (avernet_tenant, env, name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 ```
+
+`config` 使用 `TEXT`（不是 MEDIUMTEXT），非唯一索引名为 `idx_cc_profile_scope_name`，索引列与顺序仍为 `(avernet_tenant, env, name)`。已有上一版五表结构不能靠更新建表 SQL 自动升级：停写并核验所有 `OCTET_LENGTH(config) <= 65535` 后，再将列改为 TEXT 并重命名旧索引；超限记录停止升级并人工评审，不截断配置。
 
 name 不唯一；同名 create 仍是独立调用。name/description/执行 config 及创建归属不可原地修改，定义变更新建 ID；status 是独立生命周期元数据，不受执行配置不可变限制。本版不新增 Profile 更新接口，仍保留现有五个服务方法，状态管理入口另行评审。
 
@@ -175,10 +178,7 @@ ALTER TABLE ac_context_collab_collet
     ADD COLUMN status VARCHAR(32) COLLATE utf8mb4_bin NULL,
     ADD COLUMN product_profile_id BIGINT NULL,
     ADD COLUMN current_rollout_id BIGINT NULL,
-    ADD KEY ix_cc_collet_profile_status (avernet_tenant, env, product_profile_id, status, id),
-    ADD CONSTRAINT fk_cc_collet_profile
-        FOREIGN KEY (product_profile_id) REFERENCES ac_context_collab_product_profile (id)
-        ON DELETE RESTRICT ON UPDATE RESTRICT;
+    ADD KEY ix_cc_collet_profile_status (avernet_tenant, env, product_profile_id, status, id);
 ```
 
 Collet 本版共新增四列：content、status、product_profile_id、current_rollout_id，其中前两列为本次明确的业务字段，后两列保留配置/当前 rollout 关联；不新增 runtime_collet_id、revision、execution_state 及其索引。普通 L4 行新增列保持 NULL，不把未知历史统一填成 CREATE。产品行在提交前要求这四列及 actor_ref 完整；创建中的 current_rollout_id 可临时为 NULL，但提交时必须指向已插入的本 Collet rollout。
@@ -201,25 +201,14 @@ CREATE TABLE ac_context_collab_collet_rollout (
     UNIQUE KEY uk_cc_rollout_order (collet_id, ordinal),
     UNIQUE KEY uk_cc_rollout_collet_id (collet_id, id),
     KEY ix_cc_rollout_predecessor (collet_id, predecessor_id),
-    KEY ix_cc_rollout_scope_collet (avernet_tenant, env, collet_id, id),
-    CONSTRAINT fk_cc_rollout_collet
-        FOREIGN KEY (collet_id) REFERENCES ac_context_collab_collet (id)
-        ON DELETE RESTRICT ON UPDATE RESTRICT,
-    CONSTRAINT fk_cc_rollout_predecessor
-        FOREIGN KEY (collet_id, predecessor_id)
-        REFERENCES ac_context_collab_collet_rollout (collet_id, id)
-        ON DELETE RESTRICT ON UPDATE RESTRICT
+    KEY ix_cc_rollout_scope_collet (avernet_tenant, env, collet_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 ALTER TABLE ac_context_collab_collet
-    ADD KEY ix_cc_collet_current (id, current_rollout_id),
-    ADD CONSTRAINT fk_cc_collet_current
-        FOREIGN KEY (id, current_rollout_id)
-        REFERENCES ac_context_collab_collet_rollout (collet_id, id)
-        ON DELETE RESTRICT ON UPDATE RESTRICT;
+    ADD KEY ix_cc_collet_current (id, current_rollout_id);
 ```
 
-复合 FK 保证 current/前驱属于同一 Collet。前驱无值写 NULL，应用拒绝自环/循环。API rollout.collet_id 直接使用其关联的 Collet.id，不再做公开/物理 ID 转换。
+current/前驱属于同一 Collet 的约束改由应用维护：新建在单事务中插入真实父子记录、再填写 current；读取校验 current 属于当前 Collet、ordinal 连续且前驱恰为本 Collet 的上一条 rollout。前驱无值写 NULL，自环、跨 Collet 或不存在的关联明确拒绝。API rollout.collet_id 直接使用其关联的 Collet.id，不再做公开/物理 ID 转换。普通/唯一索引保留，但不负责验证父记录是否存在。
 
 ### 3.6 StageRollout
 
@@ -243,15 +232,12 @@ CREATE TABLE ac_context_collab_stage_rollout (
     PRIMARY KEY (id),
     UNIQUE KEY uk_cc_stage_name (collet_rollout_id, name),
     UNIQUE KEY uk_cc_stage_parent_id (collet_rollout_id, id),
-    KEY ix_cc_stage_scope_rollout (avernet_tenant, env, collet_rollout_id, id),
-    CONSTRAINT fk_cc_stage_rollout
-        FOREIGN KEY (collet_rollout_id) REFERENCES ac_context_collab_collet_rollout (id)
-        ON DELETE RESTRICT ON UPDATE RESTRICT
+    KEY ix_cc_stage_scope_rollout (avernet_tenant, env, collet_rollout_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 ```
 
 - Collet/rollout/stage 的 status 沿用 [StatusEnum](../../src/agentclaw/community/core/task/context_collab/l4_context_primitives/product_status.py)：`CREATE`、`RUNNING`、`RUN_FINISHED`、`RUN_FAILED`、`ACCEPTANCE_SUCCEED`、`ACCEPTANCE_FAILED`。`WAITING_FEEDBACK/SUCCEEDED/FAILED/STOPPED` 不是本版业务 status，不把它们直接混入此枚举以代替已移除的控制存储；相关运行事实的适配缺口见第 4.1 节。
-- 本表不包含 ordinal、lease_until、dispatch_state、reused_from_stage_rollout_id、session_route_json、cancel_state、attempt；移除 uk_cc_stage_order、ix_cc_stage_reused_from、fk_cc_stage_reused_from。不新增 attempt 的同义列或 JSON 落点；保留阶段名称唯一键和 `(collet_rollout_id, id)` 唯一键，后者继续支持 Event 的复合外键。
+- 本表不包含 ordinal、lease_until、dispatch_state、reused_from_stage_rollout_id、session_route_json、cancel_state、attempt；移除 uk_cc_stage_order、ix_cc_stage_reused_from、fk_cc_stage_reused_from。不新增 attempt 的同义列或 JSON 落点；保留阶段名称唯一键和 `(collet_rollout_id, id)` 唯一键，后者作为父子关联索引保留，不创建 Event 复合外键。
 - 未分配的 assignee/session/error_msg 可为空字符串；input、error_msg、acceptances、artifacts 均由应用显式填写。acceptances/artifacts 仍使用闭合 JSON 数组字符串，空集合写 `'[]'`，禁止 Python repr、重复键、非有限数和未知字段，不因 SQL 类型调整改变领域的 `list[AcceptanceResult]`/`list[Artifact]` 语义。
 - acceptances 使用 `VARCHAR(8192)`：以最终规范 JSON 序列化结果计数，包含括号、引号和转义字符，最多 8192 字符；写入及迁移前校验，边界超限明确失败，不截断 JSON、不丢验收项，不默默改回大文本列。
 - error_msg 使用 `TEXT`：按实际 UTF-8 编码字节数校验；MySQL 方言稿按最多 65535 字节设计，目标数据库需验证容量/字符集行为。超限明确失败并回滚，不按 65535 个中文字符判断容量，也不静默截断。artifacts 仍为 MEDIUMTEXT，未在本次调整范围。
@@ -270,19 +256,23 @@ ALTER TABLE ac_context_collab_event
     ADD COLUMN collet_stage_rollout_id BIGINT NULL,
     ADD KEY ix_cc_event_rollout (avernet_tenant, env, collet_rollout_id, id),
     ADD KEY ix_cc_event_stage (avernet_tenant, env, collet_stage_rollout_id, id),
-    ADD KEY ix_cc_event_stage_parent (collet_rollout_id, collet_stage_rollout_id),
-    ADD CONSTRAINT fk_cc_event_rollout
-        FOREIGN KEY (collet_rollout_id) REFERENCES ac_context_collab_collet_rollout (id)
-        ON DELETE RESTRICT ON UPDATE RESTRICT,
-    ADD CONSTRAINT fk_cc_event_stage_parent
-        FOREIGN KEY (collet_rollout_id, collet_stage_rollout_id)
-        REFERENCES ac_context_collab_stage_rollout (collet_rollout_id, id)
-        ON DELETE RESTRICT ON UPDATE RESTRICT;
+    ADD KEY ix_cc_event_stage_parent (collet_rollout_id, collet_stage_rollout_id);
 ```
 
-复合 FK 保证 stage 属于指定 rollout；应用另外拒绝“stage 非空而 rollout 为空”，精确校验 Event 的 context/axes/actor。旧 L4 事件两个新增 FK 均为 NULL，原 event_id 保持不变。全部 FK 使用 RESTRICT，不级联删除审计历史。
+Event 的两个字段仅为逻辑关联，不定义物理外键。后续 stage/反馈 writer 必须在同一业务事务中验证 rollout 存在、stage 属于指定 rollout，拒绝“stage 非空而 rollout 为空”，并精确校验 context/axes/actor；这些 writer 尚未实现，不声称移除外键后已有等价 Event 阶段保护。当前 creation Event writer 校验 Collet/current/rollout 父子链，stage 关联为 NULL。旧 L4 事件两个新增关联列均为 NULL，原 event_id 保持不变。数据库不再提供 ON DELETE/UPDATE RESTRICT 或级联行为；本版未开放删除 API，离线维护必须自行检查引用并保留审计历史。
 
 既有 `event_id` 是 VARCHAR(128) NOT NULL，现有唯一索引是 `uk_context_collab_event (avernet_tenant, env, collab_context_id, event_id)`。本版不重复 ADD event_id、不修改该索引，也不增加全表 `(avernet_tenant, env, event_id)` 唯一约束以收紧原 L4 的跨 context 合法重号语义。只有按第 4.3 节确定性赋值时才能用于请求去重，随机事件 ID 本身不能让相同反馈自动重放；唯一范围差异与迁移要求须随消费者一起验收。
+
+### 3.8 已安装旧外键结构的升级边界
+
+本次修改 bootstrap SQL/ORM 不会自动删除实际数据库的旧约束。若已有前版五表结构，需停写、备份并通过实际 schema 确认以下旧外键是否存在，再由评审过的升级操作仅移除已存在约束：
+
+- Collet：`fk_cc_collet_profile`、`fk_cc_collet_current`。
+- ColletRollout：`fk_cc_rollout_collet`、`fk_cc_rollout_predecessor`。
+- StageRollout：`fk_cc_stage_rollout`。
+- Event：`fk_cc_event_rollout`、`fk_cc_event_stage_parent`。
+
+关联字段及本方案索引不得同时删除；本次不修改既有 L4 或旧 snapshot v2 的历史迁移。直写 SQL/绕过仓储的维护操作不再受数据库引用检查保护，必须校验父子链、scope 和审计保留。尚未开放的后继 rollout、stage Event 或删除操作须先实现对应事务/校验，不把索引视为外键替代品。
 
 ## 4. 去掉五张配套表后的实现方案与能力边界
 
@@ -374,7 +364,7 @@ stages: |
 ```
 
 - 禁止重复键、别名/循环、不支持 tag、未知字段和过深/超限配置。stages 保留原 YAML 字符串，外层 dump/load 不改写其字节。
-- 不再生成、持久化或校验独立的 config_digest；仍执行完整的 YAML/schema/精确版本及大小校验。完整 config 建议上限 1 MiB，原 stages 256 KiB；description 最多 2048 字符，显式 null/超限拒绝。
+- 不再生成、持久化或校验独立的 config_digest；仍执行完整的 YAML/schema/精确版本及大小校验。完整 config 序列化后的 UTF-8 编码上限为 65535 字节，与 `TEXT` 容量对齐；原 stages 仍保留 256 KiB 输入上限，但必须同时满足完整 config 的更小容量约束，超限拒绝且不截断；description 最多 2048 字符，显式 null/超限拒绝。
 - 读取确切存储的版本/策略，不调用今天的 default_composition 或 latest 回填。不存在能力/版本时 fail closed。
 - 创建方法可新增 keyword-only `description: str = ""`，仍只要求 name/stages，不恢复 composition 参数。creator/modifer 由可信上下文自动填充，不新增为方法参数或 HTTP 请求字段；HTTP 严格拒绝调用者伪填审计字段。
 - 固定旧 execution encode_profile 的 `id/name/composition/stages` 四字段，新增独立 response encoder 返回 description/status/creator/modifer（审计历史未知为 null），避免改动已有 plan.profile_digest。这四项元数据均不参与执行摘要，status 上下线变化不改变 plan.profile_digest；删除 config_digest 不删除现有 plan.profile_digest、composition_digest 或 evidence_digest，也不放松其校验。
@@ -404,9 +394,9 @@ stages: |
 **Collet 创建的业务写入计划：**
 
 1. 按可信 tenant/env 加载 Profile，完成第 5.4 节的配置使用授权；在本创建事务内锁定并重读 Profile.status，仅 ONLINE 可继续，状态变更与该检查按第 3.3 节协调。运行创建还须先通过第 4.1 节的合同适配门槛。插入物理 Collet，current_rollout_id 暂为 NULL，运行 owner 取本次可信创建 actor。
-2. flush 获取真实 id，API 和 rollout 外键直接使用该 id；填 `collab_context_id=product-v2:{id}`，不写公开别名或版本列，冲突/超限明确失败。
+2. flush 获取真实 id，API 和 rollout 关联列直接使用该 id；填 `collab_context_id=product-v2:{id}`，不写公开别名或版本列，冲突/超限明确失败。
 3. 插入初始 rollout/stage 实际行并取得各自自增 ID；Stage 不写七项排除字段，验收字符串/错误文本先按第 3.6 节校验容量。不能以这些业务行已存在为理由，宣称完整运行 bindings/relations/multi、执行尝试/有效租约/路由/投递/取消事实已持久化。
-4. 填 current_rollout_id，追加真实创建审计，然后统一提交；不先填指向不存在后继的 FK，不写执行状态快照。
+4. 填 current_rollout_id，追加真实创建审计，然后统一提交；不先填指向不存在后继的关联 ID，不写执行状态快照。
 
 原 Collet 必填兼容列诚实填写：scope 为合法 JSON `null`，creation_facts 为合法 `{}`，root_task_ref/current_snapshot 为 NULL，actor_ref 来自真实创建者；不虚构 L3 授权、L4 Task 或历史时间，也不借这些列重新存入被移除的控制态。已有 context 冲突不得认领别人的 L4 行。
 
@@ -443,8 +433,8 @@ COMMIT
 | 位置 | 计划修改 |
 | --- | --- |
 | `core/task/context_collab/l6_products/persistence/profile_models.py`、`profile_repository.py` | legacy 模型指向 `_legacy_v1`，保留旧字符串版本、canonical JSON/摘要/权限；与目标 YAML 模型分离。 |
-| 新增 `core/task/context_collab/l6_products/persistence/product_relational_models.py` | 仅定义目标 Profile/rollout/stage；Profile 无 config_digest/owner_json，新增非空 status（默认 DRAFT）及 nullable creator/modifer（新建审计必须非空）；Stage 移除七列（含 attempt）/阶段顺序与复用来源索引/复用 FK，acceptances 用 String(8192)、error_msg 用 Text（MySQL TEXT 而非 MEDIUMTEXT）；各表真实自增、FK/索引/tenant guard。**不新增五张技术表模型。** |
-| `core/task/context_collab/l4_context_primitives/persistence/models.py` | Collet 新增四列：content/status/product_profile_id/current_rollout_id；不新增 runtime_collet_id/revision/execution_state 及专属索引。Event 仅新增 collet_rollout_id/collet_stage_rollout_id 两列，复用既有 event_id/唯一索引，不新增反馈专用键；物理 unsigned/SQLite 整数变体正确。共享 metadata/字符串 FK，不让 L4 导入 L6 实现。 |
+| 新增 `core/task/context_collab/l6_products/persistence/product_relational_models.py` | 仅定义目标 Profile/rollout/stage；Profile.config 使用 Text，scope/name 索引名为 idx_cc_profile_scope_name；Profile 无 config_digest/owner_json，新增非空 status（默认 DRAFT）及 nullable creator/modifer（新建审计必须非空）；Stage 移除七列（含 attempt）/阶段顺序与复用来源索引/复用 FK，acceptances 用 String(8192)、error_msg 用 Text（MySQL TEXT 而非 MEDIUMTEXT）；各表真实自增、普通/唯一索引/tenant guard，不定义物理外键。**不新增五张技术表模型。** |
+| `core/task/context_collab/l4_context_primitives/persistence/models.py` | Collet 新增四列：content/status/product_profile_id/current_rollout_id；不新增 runtime_collet_id/revision/execution_state 及专属索引。Event 仅新增 collet_rollout_id/collet_stage_rollout_id 两列，复用既有 event_id/唯一索引，不新增反馈专用键；物理 unsigned/SQLite 整数变体正确。共享 metadata，由 L6 注册关联索引而非字符串 FK，不让 L4 导入 L6 实现。 |
 | `core/task/context_collab/l6_products/product_profile.py`、`product_profile_service/contracts.py`、`ports.py`、`service.py` | description/status/creator/modifer 元数据与响应，独立 ProductProfileStatus 校验；create 默认 DRAFT 并从可信 actor 写审计，get_profile 不再返回配置 owner，创建 Collet 调用独立配置使用授权并在事务内检查 ONLINE，状态变更的受控写入同步审计、管理入口另评审；去掉内部 create 的通用回执 UUID/参数；interactive 专用反馈查重/重放，保持默认 human-gated workflow。 |
 | `core/task/context_collab/g1_secure_govern/` 授权合同/实现及配置绑定 | 增加 ProductProfileUseAuthorizer 与 fail-closed 宿主策略，不依赖已移除的配置 owner；保留发布授权和基于 Collet.actor_ref 的运行授权，不以 creator/modifer 自动放权。 |
 | `core/task/context_collab/l6_products/product_profile_service/configuration.py`、新增 `profile_config_yaml.py` | 闭合 YAML、精确版本、四字段执行摘要与独立响应编码；不引入独立 config_digest，status/description/审计元数据均不进入执行编码或执行 YAML。 |
@@ -506,7 +496,7 @@ human 反馈 → adaptation Agent 提议 → 重新核验 → 同一仓储事务
 ## 7. Event 与 L4 边界
 
 - 采用闭合 `product_runtime.*` 类型，记录真实创建、状态、反馈决策、停止、投递/取消观察等；Event 是审计，不是待执行命令或第二套状态机。
-- Collet 级两个 FK 可为 NULL，rollout 级填写 rollout，stage 级两个都填；反馈的确定性 event_id 只用于成功提交的受理事件，与普通审计命名空间分开。
+- Collet 级两个关联列可为 NULL，rollout 级填写 rollout，stage 级两个都填；反馈的确定性 event_id 只用于成功提交的受理事件，与普通审计命名空间分开。
 - 除反馈受理事件外，普通审计 event_id 可按 `product-v2:{Collet.id}:{本次提交UUID}:{稳定ordinal}` 生成，不再依赖提交 revision；UUID 只是本事务审计分组，不建设通用请求回执。事件 ID 须校验不超过既有 128 字符上限；稳定顺序不使用无序遍历，重复接受反馈不再插事件/后继。原 L4 event_id 不改写，产品事件的 collab_context_id 仍填写真实 Collet context，不为去重伪造共享 context。
 - 产品审计 `primitive_type/task_ref/task_version_after/context_version_after` 为 NULL，parent_event 不伪接 L4 Work 主干；visibility 默认 private，actor 来自可信上下文。
 - 明确从 L4 reducer/current-event、context_version 增量、Task/普通消息计数中排除；本地 EventRecord 扩展不是 ACCS Envelope 协议升级。
@@ -557,18 +547,19 @@ human 反馈 → adaptation Agent 提议 → 重新核验 → 同一仓储事务
 ### 9.2 必须补充的测试
 
 - 正式安装只涉及五表，不出现五张排除表或旧运行表依赖；普通启动/metadata/create_all 不建回旧表。
-- ORM/DDL 的字段、nullable、signed/unsigned、索引和真实 FK 一致；SQLite 开 FK，目标库验证约束/隔离/锁行为。
+- ORM/DDL 的字段、nullable、signed/unsigned、普通/唯一索引一致；五表 metadata、MySQL 方言编译、实际 SQLite 反射及迁移 SQL 均无物理外键。SQLite 保持 PRAGMA foreign_keys=ON，不靠关闭检查通过；原子创建/审计校验、坏 current/前驱/缺父记录/孤立 stage 拒绝及唯一键竞争有真实数据库测试；目标库另验 DDL/隔离/锁行为。
 - 全部原始需求字段、status 枚举、闭合 JSON/YAML、description、旧四字段执行摘要/plan digest 正确；独立 config_digest/owner_json 不在目标 Profile ORM/DDL/读写中，审计元数据不影响执行摘要；未知 schema/缺状态 fail closed。
+- Profile.config 的 DDL/ORM 均为 TEXT；非唯一索引为 idx_cc_profile_scope_name，列顺序保持 avernet_tenant/env/name；完整 YAML 序列化后 UTF-8 65535 字节可往返，65536 字节创建/读取拒绝且不截断，失败创建不遗留记录；ASCII 与中文均覆盖。
 - Profile.status 的 DDL/ORM/领域默认均为 DRAFT，新建服务显式写入 DRAFT、响应为草稿且不自动上线，三个枚举值与响应往返正确；未知/空/null/错误大小写拒绝，旧 v2 无状态按显式兼容规则迁为 DRAFT，可信已有生命周期状态保留，不虚构上线事件。status 不进入 config/执行摘要，状态变化不改变原四字段 plan.profile_digest。
 - DRAFT/OFFLINE 不能创建新 Collet，ONLINE 仍须使用授权；Profile 行锁协调并发下线/新建，失败不留下 Collet/子行/审计。后续状态受控写入须授权、更新 modifer/时间且保留 creator，不自动停止既有运行或阻止其原授权操作；不擅自新增上下线 API。
 - 新建 creator=modifer 且来自可信 actor，伪填审计字段被拒绝，标识长度/类型校验、事务回滚、历史未知 NULL/真实来源转换及响应拼写一致；不存在擅自新增的 Profile 更新接口。
 - 配置发布权/使用权/运行控制权分离：使用授权 hook 确实被调用，拒绝和未配置不落库，不凭同租户/creator/modifer 自动放行，跨 tenant/env 拒绝；Collet owner 始终为本次创建 actor，原运行授权不回退到 Profile 审计字段。
 - Collet 新增列恰为 content/status/product_profile_id/current_rollout_id，目标 DDL/ORM 无 runtime_collet_id/revision/execution_state 或同义控制快照；content/status 读写、普通 L4 行 NULL 兼容正确。
-- Stage DDL/ORM 不含七项排除字段（含 attempt）及阶段顺序/复用来源索引、复用来源 FK；acceptances=VARCHAR(8192)、error_msg=TEXT、artifacts=MEDIUMTEXT；Event 关联阶段的复合 FK/父唯一键不受影响，rollout.ordinal 不被误删。
+- Stage DDL/ORM 不含七项排除字段（含 attempt）及阶段顺序/复用来源索引、复用来源 FK；acceptances=VARCHAR(8192)、error_msg=TEXT、artifacts=MEDIUMTEXT；Event 关联阶段不定义复合 FK，阶段父唯一键保留，rollout.ordinal 不被误删。
 - attempt 不在目标 DDL/ORM/编码/读写中，也不藏入 JSON/Event 或换名列；执行端口、StageRecord/ReportContext、HTTP 请求与签名调用方同步移除依赖。旧 attempt 不默认为空值、不由 stage.id/session_id 派生；旧请求切换、provider 请求关联、防重复派发/陈旧回调及崩溃恢复有明确合同与消费者测试，未具备依据时拒绝自动处理。
 - acceptances 最终 JSON 的 8192/8193 字符、转义/多字节边界、空数组与非法 JSON；error_msg UTF-8 65535/65536 字节边界和事务回滚。迁移超限不截断、不丢验收项、不偷换回 MEDIUMTEXT；目标库验证实际字符/字节与行容量。
 - 阶段列表依确切 Profile 原 YAML/name 恢复稳定顺序，不依赖插入顺序/ID；未知、重复或缺失阶段有明确错误。session_id/assignee 不能替代完整 SessionRoute，缺路由/权限/有效尝试/取消或复用证据时拒绝受影响操作，不用默认值伪造历史。
-- 类型范围 ID 可重号，但 Collet.id 即 API/外键身份；历史同号不同对象阻止自动迁移，既有 L4 行不被认领；各表自增高水位正确，不用假记录取号或正式别名映射。
+- 类型范围 ID 可重号，但 Collet.id 即 API/关联身份；历史同号不同对象阻止自动迁移，既有 L4 行不被认领；各表自增高水位正确，不用假记录取号或正式别名映射。
 - 目标库多连接根行锁、固定锁顺序、锁超时/死锁和重试重读；任一子表/Event 失败完全回滚，current 只指向已存在的同 Collet rollout，并发读取不混版；SQLite 写事务检查不能替代目标库行锁证据。
 - Event 新增列恰为 collet_rollout_id/collet_stage_rollout_id，不新增 interactive_key/uk_cc_event_interactive 或同义键；event_id 仍为 VARCHAR(128) NOT NULL，uk_context_collab_event 的四列及原 L4 跨 context 重号语义不变。
 - 同 actor/UUID 生成相同的确定性 event_id；换 actor/tenant/env 隔离，换内容/rollout 不换 ID 而报冲突，大小写不同的 opaque UUID 不被折叠；前缀/84 字符/128 字符上限、版本化 canonical 编码、非法碰撞与权限先于重放均有测试。
@@ -582,6 +573,8 @@ human 反馈 → adaptation Agent 提议 → 重新核验 → 同一仓储事务
 实现完成后覆盖现有 `tests/community/core/task/context_collab/product_profile_service/`、`multi_rollout/`、`tests/community/repository/task/context_collab/`、HTTP/DI/architecture 测试和 Backend full CI，并另行验证真实 host/provider。单测通过不能替代目标库和远端副作用证据。
 
 ### 9.3 前期文档阶段的验证与缺口（保留历史，当前进度见 delivery.md）
+
+以下是前期文档阶段记录，其中“7 个外键”及目标库 FK 能力要求已被本次无物理外键修订替代，不代表当前 schema；最新实际验证见 delivery.md 的“移除物理外键”记录。
 
 - 本轮仅修订本方案，两个既有 Proposed 导航保持不变，保留前两版替代方案理由；未修改生产代码、SQL 文件、数据库或部署。
 - 本版文档级静态检查通过：13 个方案/新增导航相对链接可解析，3 个 Markdown 文件围栏、结尾换行及尾随空白正常；目标 DDL 为五张正式表（3 个 CREATE、3 个 ALTER），Collet 新增四列且不含三项排除字段，Event 仅新增两个关联列且不含 interactive_key/新增反馈唯一索引，7 个外键名唯一（已去掉阶段复用来源 FK），引用列/父唯一键和 ID signed/unsigned 对齐。五张排除表、旧运行表、完整 snapshot_json 和 DROP TABLE 均未出现在目标 DDL 中。

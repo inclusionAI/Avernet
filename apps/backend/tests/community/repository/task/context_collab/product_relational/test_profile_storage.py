@@ -29,6 +29,7 @@ from agentclaw.community.core.task.context_collab.l6_products.product_profile_se
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.profile_config_yaml import (
     decode_config,
     encode_config,
+    MAX_CONFIG_BYTES,
 )
 from agentclaw.community.core.task.context_collab.l6_products.product_profile_service.snapshot_codec import (
     canonical,
@@ -44,6 +45,10 @@ def test_only_five_tables_and_no_snapshot_dependencies(business):
         "ac_context_collab_stage_rollout",
         "ac_context_collab_event",
     }
+    indexes = inspect(business.engine).get_indexes(ProductProfileRow.__tablename__)
+    assert [(i["name"], i["column_names"], bool(i["unique"])) for i in indexes] == [
+        ("idx_cc_profile_scope_name", ["avernet_tenant", "env", "name"], False)
+    ]
 
 
 def test_create_roundtrip_audit_and_independent_same_name_invocations(business):
@@ -187,7 +192,43 @@ def test_yaml_preserves_original_bytes_and_rejects_unsupported_forms(business):
         wire + "schema: duplicate\n",
         "schema: &s product-profile/config@1\ncomposition: *s\nstages: x\n",
         "schema: !!python/object:evil {}",
-        "x" * (1024 * 1024 + 1),
+        "x" * (MAX_CONFIG_BYTES + 1),
     ]:
         with pytest.raises(Invalid):
             decode_config(bad)
+
+
+@pytest.mark.parametrize("filler", ["x", "字"])
+def test_profile_config_text_utf8_byte_boundary_and_rejected_write(business, filler):
+    h = business
+    assert MAX_CONFIG_BYTES == 65535
+    # Start with a long comment so PyYAML uses the same wrapping style for
+    # both the baseline and the final boundary-sized serialized document.
+    prefix = filler * 128
+    base = encode_config(h.composition, "#" + prefix + "\n" + h.stages)
+    room = MAX_CONFIG_BYTES - len(base.encode("utf-8"))
+    width = len(filler.encode("utf-8"))
+    padding = prefix + filler * (room // width) + "x" * (room % width)
+    stages = "#" + padding + "\n" + h.stages
+    wire = encode_config(h.composition, stages)
+    assert len(wire.encode("utf-8")) == 65535
+    assert decode_config(wire) == (h.composition, stages)
+
+    profile = h.repo.create_profile("max-size", h.composition, stages, h.owner)
+    assert h.repo.get_profile(profile.id).definition.stages == stages
+    with h.db.orm_session() as session:
+        assert len(session.get(ProductProfileRow, profile.id).config.encode()) == 65535
+
+    with pytest.raises(Invalid, match="byte limit"):
+        h.repo.create_profile("too-large", h.composition, "#x" + stages[1:], h.owner)
+    with h.db.orm_session() as session:
+        assert session.query(ProductProfileRow).count() == 1
+    with pytest.raises(Invalid, match="byte limit"):
+        decode_config(wire + "#")
+
+    # SQLite itself does not enforce MySQL TEXT capacity. Readers must still
+    # reject oversize data inserted outside the repository instead of hiding it.
+    with h.db.orm_session() as session:
+        session.get(ProductProfileRow, profile.id).config = wire + "#"
+    with pytest.raises(Invalid, match="byte limit"):
+        h.repo.get_profile(profile.id)

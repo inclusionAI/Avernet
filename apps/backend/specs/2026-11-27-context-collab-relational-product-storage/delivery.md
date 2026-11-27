@@ -2,6 +2,8 @@
 
 日期：2026-11-27。状态：**部分实现，完整方案尚未交付**。
 
+以下初始实现与验证为历史记录，其中七个物理外键已被文末“移除物理外键”修订替代；不得将原外键测试结果作为当前数据库引用保护的证据。
+
 ## 已实现范围
 
 1. 增加 [MySQL DDL](../../src/agentclaw/community/core/task/context_collab/sql/2026_11_27_product_relational_storage.sql)、三个新模型和共享 Collet/Event 新列、索引、七个真实外键。Stage 保留约定的 15 列，不含 attempt 等七项排除字段；Collet 只增加约定四列，Event 只增加两个关联列。
@@ -95,3 +97,49 @@ apps/backend/.venv/bin/python singlebox/ci/report_check.py \
 - 新模型的 MySQL 方言编译/类型/默认值和实际 SQLite FK 已验证；不是目标 MySQL/OceanBase 执行证据。
 - 当前机器没有可用的 mysql/docker 命令，未运行目标库、生产迁移/回滚、provider/host 集成。
 - 未进行 commit/push，未执行部署或删除实际表。既有文档改动保留，当前仅在工作区继续开发。
+
+## 后续调整：Profile config TEXT 与索引名（2026-11-27）
+
+- 按用户要求将目标 `ac_context_collab_product_profile.config` 从 MEDIUMTEXT 改为 TEXT，DDL/ORM/方案保持一致；非唯一 scope/name 索引改名为 `idx_cc_profile_scope_name`，列顺序仍为 avernet_tenant/env/name。
+- 完整 YAML 编解码上限同步从 1 MiB 收紧为序列化后 65535 UTF-8 字节；创建和读取均检查，超限不截断。旧字符串 Profile 和 snapshot v2 的 JSON 配置合同不变。
+- 补充 MySQL 方言类型/索引断言、实际 SQLite 索引反射、ASCII/中文 65535/65536 字节边界、失败创建不遗留记录，以及拒绝直接写入 SQLite 的超限存储值。
+- 当前容量约束及已有五表结构升级前的停写/容量检查要求已更新到 owning [RELATIONAL-STORAGE.md](../../src/agentclaw/community/core/task/context_collab/l6_products/persistence/RELATIONAL-STORAGE.md)。本次不改变执行链路/DI 切换的未完成状态。
+
+实际验证（`apps/backend/`）：
+
+```bash
+DEPLOY_PROFILE=test .venv/bin/python -m pytest \
+  tests/community/repository/task/context_collab \
+  tests/community/core/task/context_collab/product_profile_service -q --tb=short
+```
+
+结果：**508 passed，19 warnings**。修改 Python 的 Ruff lint/format、文件行数、Markdown 相对链接和 `git diff --check` 均通过。本次未重跑 Backend 全量 CI，未执行目标 MySQL/OceanBase ALTER、实际迁移或部署，未 commit/push。已有环境不能仅更新 bootstrap SQL；必须先处理超限历史配置，再按实际 schema 评审列类型调整和索引重命名。
+
+## 后续调整：移除物理外键（2026-11-27）
+
+- 按“研发规范禁止外键”的要求，移除 ColletRollout 的 `fk_cc_rollout_collet` / `fk_cc_rollout_predecessor`、StageRollout 的 `fk_cc_stage_rollout`；同份 SQL 中 Collet/Event ALTER 的其余四个外键也一并移除，避免后续步骤同样报错。ORM 不再注册任何上述外键，关联 ID 列、普通/唯一索引全部保留。
+- 当前原子创建、Profile 行锁、current/前驱/阶段父子链和 creation Event writer 校验保持不变。将依赖数据库外键拒绝的测试改为在真实 SQLite 写入坏关联后，验证仓储读取明确拒绝；补充缺父/孤立 stage、审计写入前拒绝和唯一键回滚测试。
+- 验证五表 metadata、MySQL 方言编译和实际 SQLite 反射均无物理外键，迁移 SQL 无外键语句；SQLite 仍保持 `PRAGMA foreign_keys=ON`，没有关闭检查或绕开门禁。两张新表的关联索引在 ORM 和实际 SQLite 中均精确验证。
+- 同步方案全部六条 CREATE/ALTER 和 owning [RELATIONAL-STORAGE.md](../../src/agentclaw/community/core/task/context_collab/l6_products/persistence/RELATIONAL-STORAGE.md)。明确数据库不再提供引用 RESTRICT 保护；尚未开放的 stage/反馈 Event writer、后继运行和删除操作必须配套事务校验，不能宣称本次已补齐这些运行路径。
+- 已存在的外键不会因更新 bootstrap 自动消失，需停写、核验实际 schema 后走评审过的升级操作；关联列/索引不得随之删除。此前部分 DDL 若已成功，续执行前先检查已增加列和索引，不盲目重跑整个脚本。
+
+实际验证（`apps/backend/`）：
+
+```bash
+DEPLOY_PROFILE=test .venv/bin/python -m pytest \
+  tests/community/repository/task/context_collab/product_relational -q --tb=short
+```
+
+结果：**61 passed，18 warnings**。本次未执行目标数据库 DDL/迁移或部署，未 commit/push。
+
+相关仓储、服务、MultiRollout 与架构回归：
+
+```bash
+DEPLOY_PROFILE=test .venv/bin/python -m pytest \
+  tests/community/repository/task/context_collab \
+  tests/community/core/task/context_collab/product_profile_service \
+  tests/community/core/task/context_collab/multi_rollout \
+  tests/community/architecture -q --tb=short
+```
+
+结果：**1119 passed，45 warnings**，170.44 秒。修改 Python 的 Ruff check/format、source 行数（均不超过 1000 行）、Markdown 相对链接/锚点、六条 DDL 与方案逐条一致性及 `git diff --check` 均通过。本次未重跑完整 Backend CI，也没有目标 MySQL/OceanBase 执行证据；不将 MySQL 方言编译和 SQLite 验证写成目标库部署通过。

@@ -81,7 +81,8 @@ class ContextCollabColletModel(Base):
     )
     collab_context_id = Column(String(128), nullable=False)
     # Product-only facts. NULL preserves independent L4 rows. The owning L6
-    # schema module attaches FKs without introducing an L4 -> L6 import.
+    # schema module attaches indexes without introducing an L4 -> L6 import;
+    # product relationships are validated by the business repository, not FKs.
     content = Column(_medium_text(), nullable=True)
     status = Column(
         String(32).with_variant(mysql.VARCHAR(32, collation="utf8mb4_bin"), "mysql"),

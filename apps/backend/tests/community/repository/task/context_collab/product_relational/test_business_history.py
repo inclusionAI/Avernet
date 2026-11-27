@@ -5,6 +5,7 @@ from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError as Missing,
     ContextCollabValidationError as Invalid,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.row_codec import (
@@ -14,12 +15,14 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.persiste
     load_tasks,
 )
 from agentclaw.community.core.task.context_collab.l6_products.persistence.product_relational_models import (
+    ProductProfileRow,
     ColletRow,
     ColletRolloutRow,
     StageRolloutRow,
     EventRow,
 )
 from agentclaw.community.core.task.context_collab.l6_products.persistence.runtime_event_writer import (
+    append_creation_event,
     feedback_event_id,
 )
 from agentclaw.community.utils.avernet_tenant import (
@@ -140,41 +143,107 @@ def test_event_failure_rolls_back_root_children_current_pointer(online):
         )
 
 
-def test_current_pointer_cannot_reference_another_collet_rollout(online):
+@pytest.mark.parametrize("target", ["other_collet", "missing"])
+def test_current_pointer_read_rejects_wrong_or_missing_rollout_without_fk(
+    online, target
+):
     h = online
     first = h.repo.create_collet(h.profile.id, "a", h.owner)
     second = h.repo.create_collet(h.profile.id, "b", h.owner)
-    with pytest.raises(IntegrityError):
-        with h.db.orm_session() as session:
-            session.query(ColletRow).filter_by(id=first.collet.id).update(
-                {"current_rollout_id": second.current_rollout_id}
-            )
-    assert h.repo.get_collet(first.collet.id, h.owner) == first
+    rollout_id = second.current_rollout_id if target == "other_collet" else 999999
+    # Raw SQL can corrupt the association now; the repository must fail closed.
+    with h.db.orm_session() as session:
+        session.query(ColletRow).filter_by(id=first.collet.id).update(
+            {"current_rollout_id": rollout_id}
+        )
+    with pytest.raises(Invalid, match="current rollout does not belong"):
+        h.repo.get_collet(first.collet.id, h.owner)
+    assert h.repo.get_collet(second.collet.id, h.owner) == second
 
 
-def test_predecessor_cannot_reference_another_collet(online):
+@pytest.mark.parametrize("target", ["other_collet", "missing", "self"])
+def test_predecessor_read_rejects_invalid_chain_without_fk(online, target):
     h = online
     first = h.repo.create_collet(h.profile.id, "a", h.owner)
     second = h.repo.create_collet(h.profile.id, "b", h.owner)
-    with pytest.raises(IntegrityError):
-        with h.db.orm_session() as session:
-            session.query(ColletRolloutRow).filter_by(
-                id=first.current_rollout_id
-            ).update({"predecessor_id": second.current_rollout_id})
+    predecessor_id = {
+        "other_collet": second.current_rollout_id,
+        "missing": 999999,
+        "self": first.current_rollout_id,
+    }[target]
+    with h.db.orm_session() as session:
+        session.query(ColletRolloutRow).filter_by(id=first.current_rollout_id).update(
+            {"predecessor_id": predecessor_id}
+        )
+    with pytest.raises(Invalid, match="predecessor chain"):
+        h.repo.get_collet(first.collet.id, h.owner)
 
 
-def test_event_stage_must_belong_to_selected_rollout(online):
+@pytest.mark.parametrize("column", ["current_rollout_id", "collet_id"])
+def test_creation_audit_rejects_inconsistent_parents_before_insert(online, column):
     h = online
     a = h.repo.create_collet(h.profile.id, "a", h.owner)
     b = h.repo.create_collet(h.profile.id, "b", h.owner)
+    with h.db.orm_session() as session:
+        root = session.get(ColletRow, a.collet.id)
+        rollout = session.get(ColletRolloutRow, a.current_rollout_id)
+        if column == "current_rollout_id":
+            root.current_rollout_id = b.current_rollout_id
+        else:
+            rollout.collet_id = b.collet.id
+        with pytest.raises(Invalid, match="inconsistent parent chain"):
+            append_creation_event(session, h.repo._axes(), root, rollout, h.owner)
+        assert session.query(EventRow).count() == 2
+        session.rollback()
+    assert h.repo.get_collet(a.collet.id, h.owner) == a
+
+
+@pytest.mark.parametrize("parent", ["profile", "collet", "rollout"])
+def test_missing_parent_is_rejected_by_repository_without_fk(online, parent):
+    h = online
+    history = h.repo.create_collet(h.profile.id, "work", h.owner)
+    model, identity = {
+        "profile": (ProductProfileRow, h.profile.id),
+        "collet": (ColletRow, history.collet.id),
+        "rollout": (ColletRolloutRow, history.current_rollout_id),
+    }[parent]
+    with h.db.orm_session() as session:
+        session.query(model).filter_by(id=identity).delete()
+    with pytest.raises(Missing):
+        h.repo.locate(history.rollouts[0].stages[0].stage_rollout_id, "stage", h.owner)
+
+
+def test_stage_read_rejects_orphan_parent_without_fk(online):
+    h = online
+    history = h.repo.create_collet(h.profile.id, "work", h.owner)
+    stage_id = history.rollouts[0].stages[0].stage_rollout_id
+    with h.db.orm_session() as session:
+        session.query(StageRolloutRow).filter_by(id=stage_id).update(
+            {"collet_rollout_id": 999999}
+        )
+    with pytest.raises(Missing, match="rollout not found"):
+        h.repo.locate(stage_id, "stage", h.owner)
+    with pytest.raises(Invalid, match="missing or excessive product stages"):
+        h.repo.get_collet(history.collet.id, h.owner)
+
+
+@pytest.mark.parametrize("model", [ColletRolloutRow, StageRolloutRow])
+def test_business_unique_keys_still_reject_duplicate_children(online, model):
+    h = online
+    history = h.repo.create_collet(h.profile.id, "work", h.owner)
     with pytest.raises(IntegrityError):
         with h.db.orm_session() as session:
-            audit = (
-                session.query(EventRow)
-                .filter_by(collet_rollout_id=a.current_rollout_id)
-                .one()
+            original = session.query(model).first()
+            session.add(
+                model(
+                    **{
+                        column.name: getattr(original, column.name)
+                        for column in model.__table__.columns
+                        if not column.primary_key
+                    }
+                )
             )
-            audit.collet_stage_rollout_id = b.rollouts[0].stages[0].stage_rollout_id
+    assert h.repo.get_collet(history.collet.id, h.owner) == history
 
 
 def test_legacy_l4_reader_and_task_paths_reject_product_rows(online):

@@ -9,13 +9,16 @@ snapshot v2; do not bind its `RolloutRepository` to the business repository.
 ## Implemented responsibilities
 
 - [Models](product_relational_models.py) define the integer-ID Profile, rollout
-  and stage tables and attach the shared Collet/Event foreign keys. L4 defines
+  and stage tables and attach the shared Collet/Event indexes. Relationships
+  use ID columns and ordinary/unique indexes, with **no physical foreign keys**
+  anywhere in this five-table schema, including the Collet/Event ALTERs. L4 defines
   the four Collet/two Event columns but never imports L6 models. A schema
   installer must load this L6 module before creating the business table group.
 - [SQL](../../sql/2026_11_27_product_relational_storage.sql) materializes the
   MySQL/InnoDB additive migration. It requires the existing L4 migrations;
   it is not run automatically. SQLite tests explicitly create `BUSINESS_TABLES`
-  only, with foreign keys enabled. This is not evidence that global app
+  only, with SQLite foreign-key checking enabled and no declared foreign keys.
+  This is not evidence that global app
   `Base.metadata.create_all` or DI has retired the old runtime tables.
 - [SqlProductBusinessRepository](product_relational_repository.py) provides
   independent Profile creation/read, atomic Collet + initial rollout + static
@@ -34,7 +37,10 @@ snapshot v2; do not bind its `RolloutRepository` to the business repository.
   under a Profile row lock. There is **no** new publish/update endpoint or
   automatic `DRAFT -> ONLINE` path.
 - Configuration is closed, bounded [YAML](../product_profile_service/profile_config_yaml.py)
-  containing exact composition and the original stages string. Pure structural
+  containing exact composition and the original stages string. Profile `config`
+  uses `TEXT`; its complete serialized YAML is limited to 65535 UTF-8 bytes on
+  writes and reads, with no truncation. The non-unique scope/name index is
+  `idx_cc_profile_scope_name` over `(avernet_tenant, env, name)`. Pure structural
   compilation is separate from external capability validation. Storage creation
   is **not** runtime capability admission; the eventual service must still
   validate installed execution/evidence/strategy/isolation capabilities.
@@ -52,6 +58,22 @@ snapshot v2; do not bind its `RolloutRepository` to the business repository.
   L4 row/Task decoders reject product roots, and L4 append reserves the
   `product_runtime.*` namespace. Independent L4 rows retain NULL product columns.
 
+## Application integrity boundary
+
+The repository creates Profile/Collet/rollout/stage relationships atomically,
+validating the locked Profile and real inserted IDs before commit. Business
+reads reject missing parents, invalid current-rollout membership, broken
+predecessor chains and incomplete/wrong-scope stages. The creation audit writer
+checks Collet/current/rollout membership before adding an Event. Ordinary/unique
+indexes remain in place, but do not validate parent existence.
+
+There is no database `RESTRICT` or cascading relationship behavior. Direct SQL
+can create orphan records or mismatched Event stage links; it must not bypass
+the required application checks. Stage/feedback Event writers and deletion APIs
+are **not implemented** by this foundation. They must validate scope and parent
+membership transactionally before being enabled; removing foreign keys is not
+evidence that those future paths already have equivalent protection.
+
 ## Schema compatibility and deployment warning
 
 The old versioned-string Profile model now points at
@@ -60,6 +82,19 @@ stop writers, inspect both names and perform the SQL file's conditional rename
 before deploying that model change. Fresh installations skip the rename. Never
 use `IF NOT EXISTS` or reader fallback to hide an incompatible same-name table.
 The old published definitions, canonical bytes and digests remain unchanged.
+
+For an installation of the earlier five-table schema, changing the bootstrap
+SQL does not alter an existing table. Stop writers and check that every
+`OCTET_LENGTH(config) <= 65535` before narrowing the column to `TEXT` and renaming
+the old scope/name index to `idx_cc_profile_scope_name`. Oversize configurations
+require manual review; never truncate them to complete the upgrade.
+
+For an installation that already has the earlier seven foreign keys, changing
+the bootstrap SQL does not remove them. Stop writers, inspect the actual schema
+and have the reviewed upgrade drop only existing constraints listed in the
+[specification](../../../../../../../../specs/2026-11-27-context-collab-relational-product-storage/spec.md#38-已安装旧外键结构的升级边界),
+preserving all relationship columns and indexes. A partially applied migration
+must be inspected before resuming; do not blindly repeat every ADD COLUMN.
 
 Neither SQL/data migration nor deployment has been executed. Do not enable a
 mixed writer fleet, bulk-import in-flight runtime snapshots, or resume missing

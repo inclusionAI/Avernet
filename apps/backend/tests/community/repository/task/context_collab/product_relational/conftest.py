@@ -1,4 +1,4 @@
-"""Real multi-connection SQLite with FKs; only the five business tables exist."""
+"""Real SQLite with FK checking enabled; the five business tables define no FKs."""
 
 from contextlib import contextmanager
 from types import SimpleNamespace
