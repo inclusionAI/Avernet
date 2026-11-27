@@ -310,6 +310,28 @@ describe('conversationService.listManagedSessions', () => {
       });
     });
 
+    it('keeps service Coding Bot scans on the online runtime stage', async () => {
+      const serviceCodingBot: ChatBotView = {
+        ...codingBot,
+        botType: 'service',
+        runtimeStage: 'online',
+      };
+      mocked.listBotSessions.mockResolvedValue(rawSessionsEnvelope([sessionDto('user:100:session:mine:agent:bot-a')]));
+
+      const result = await conversationService.listManagedSessions(serviceCodingBot, '100', 'all', 1, 10);
+
+      expect(mocked.listBotSessions).toHaveBeenCalledWith(
+        'bot-a',
+        expect.objectContaining({ user_id: '100', page: 1, page_size: 100, stage: 'online' }),
+      );
+      expect(mocked.listBotSessions.mock.calls[0][1]).not.toHaveProperty('source');
+      expect(mocked.listBotSessions.mock.calls[0][1]).not.toHaveProperty('f_user_id');
+      expect(result).toMatchObject({
+        ok: true,
+        data: { items: [{ sessionId: 'user:100:session:mine:agent:bot-a' }], total: 1 },
+      });
+    });
+
     it('returns only AgentCoding-defined other sessions for origin=others', async () => {
       mocked.listBotSessions.mockResolvedValue(
         rawSessionsEnvelope([
