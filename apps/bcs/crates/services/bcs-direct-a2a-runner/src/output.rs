@@ -1,5 +1,5 @@
 //! Project the AgentEvent payloads produced by the distributed A2A client.
-//! Keep just artifact identities and text eligibility in the checkpoint. The
+//! Keep just artifact identities in the checkpoint. The
 //! Worker owns their accumulated content and applies its existing output quotas.
 use bcs_dist_encoding::digest_fields;
 use bcs_dist_model::*;
@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct Artifacts {
     first: Option<ArtifactId>,
-    text_slots: BTreeSet<ArtifactId>,
+    parts_slots: BTreeSet<ArtifactId>,
 }
 
 pub(super) fn message_text(message: &Value) -> Option<String> {
@@ -30,13 +30,15 @@ fn parts_content(source: &Value) -> Option<Value> {
     if parts.is_empty() {
         return None;
     }
-    if parts.iter().all(|part| part.get("text").is_some_and(Value::is_string)) {
-        return Some(Value::String(
-            parts.iter().filter_map(|part| part["text"].as_str()).collect(),
-        ));
-    }
-    // Keep data, file and mixed parts intact, including their metadata.
+    // Preserve part boundaries and metadata for text as well as data and files.
     Some(Value::Array(parts.clone()))
+}
+
+fn plain_text(parts: &Value) -> Option<String> {
+    let parts = parts.as_array()?;
+    parts.iter().all(|part| part.as_object().is_some_and(|object| object.len() == 1)
+        && part.get("text").is_some_and(Value::is_string))
+        .then(|| parts.iter().filter_map(|part| part["text"].as_str()).collect())
 }
 
 fn show(
@@ -94,12 +96,19 @@ impl Artifacts {
         if self.artifact_list(tid, &value["artifacts"], actions) {
             return;
         }
+        if self.first.is_some() {
+            return;
+        }
         if let Some(content) = parts_content(&value["message"]) {
+            let update = match plain_text(&content) {
+                Some(text) => ArtifactUpdate::Upsert { content: Payload::Inline(Value::String(text)) },
+                None => ArtifactUpdate::UpsertParts { content: Payload::Inline(content) },
+            };
             actions.push(show(
                 tid,
                 ArtifactId("answer".into()),
                 OutputClass::Output,
-                ArtifactUpdate::Upsert { content: Payload::Inline(content) },
+                update,
             ));
         }
     }
@@ -138,16 +147,17 @@ impl Artifacts {
         } else {
             key
         };
-        let was_text = self.text_slots.remove(&slot);
-        let text = content.is_string();
-        if text {
-            self.text_slots.insert(slot.clone());
-        }
-        let payload = Payload::Inline(content);
-        let update = if append && was_text && text {
-            ArtifactUpdate::AppendText { delta: payload }
+        let text = plain_text(&content).filter(|_| !append || !self.parts_slots.contains(&slot));
+        let update = if let Some(text) = text {
+            self.parts_slots.remove(&slot);
+            let payload = Payload::Inline(Value::String(text));
+            if append { ArtifactUpdate::AppendText { delta: payload } }
+            else { ArtifactUpdate::Upsert { content: payload } }
         } else {
-            ArtifactUpdate::Upsert { content: payload }
+            self.parts_slots.insert(slot.clone());
+            let payload = Payload::Inline(content);
+            if append { ArtifactUpdate::AppendParts { delta: payload } }
+            else { ArtifactUpdate::UpsertParts { content: payload } }
         };
         actions.push(show(tid, slot, OutputClass::Output, update));
     }

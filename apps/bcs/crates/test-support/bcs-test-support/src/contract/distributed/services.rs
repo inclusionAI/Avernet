@@ -181,11 +181,6 @@ pub async fn dist_session_directory_port_contract_tests(
     let first = directory.resolve(scope, group).await?;
     assert_eq!(&first.target, group);
     assert_eq!(directory.resolve(scope, group).await?, first);
-    let workflow = directory.load_mode_config(scope, &first.mode_envelope).await?;
-    assert_eq!(
-        serde_json::to_value(workflow)?,
-        serde_json::to_value(directory.load_mode_config(scope, &first.mode_envelope).await?)?
-    );
     Ok(())
 }
 

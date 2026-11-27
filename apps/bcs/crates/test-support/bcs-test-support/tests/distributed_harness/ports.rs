@@ -435,13 +435,6 @@ impl DistSessionDirectoryPort for Script {
         self.call("DistSessionDirectoryPort::resolve", (scope, target))
     }
 
-    async fn load_mode_config(
-        &self,
-        scope: &TaskScope,
-        reference: &ModeConfigEnvelope,
-    ) -> Result<Payload, DirectoryError> {
-        self.call("DistSessionDirectoryPort::load_mode_config", (scope, reference))
-    }
 }
 
 #[async_trait]

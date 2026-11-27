@@ -56,11 +56,25 @@ class Agent(BaseHTTPRequestHandler):
             return
         if text == 'yes':
             task['cancel'].set()
+        if text == 'mixed':
+            for index, part in enumerate(mixed_parts()):
+                event({'artifactUpdate': {'taskId': remote, 'contextId': context, 'append': index != 0,
+                       'artifact': {'artifactId': 'answer', 'parts': [part]}}})
+            event({'statusUpdate': {'taskId': remote, 'contextId': context,
+                   'status': {'state': 'TASK_STATE_COMPLETED', 'message': {
+                       'messageId': 'done', 'role': 'ROLE_AGENT', 'parts': [{'text': 'Done'}]}}}})
+            return
         for fragment, append in [('draft', False), (text, False), ('!', True)]:
             event({'artifactUpdate': {'taskId': remote, 'contextId': context, 'append': append,
                    'artifact': {'artifactId': 'answer', 'parts': [{'text': fragment}]}}})
         event({'statusUpdate': {'taskId': remote, 'contextId': context,
                                 'status': {'state': 'TASK_STATE_COMPLETED'}}})
+
+
+def mixed_parts():
+    return [{'url': 'https://example.com/report.pdf', 'mediaType': 'application/pdf',
+             'metadata': {'label': 'report'}},
+            {'data': {'large': 'x' * 70_000}}, {'text': 'caption', 'metadata': {'language': 'en'}}]
 
 
 def run(host, checks):
@@ -122,6 +136,9 @@ def run(host, checks):
         assert agent.tasks['remote-stop']['cancel'].is_set()
         assert all(context == f'{sid}:0' for _, context, _ in agent.calls), agent.calls
         checks.append('direct_confirmed_cancel_preserves_context')
+        mixed_tid = send('mixed', sid)['result']['task']['id']
+        assert wait(mixed_tid, 'TASK_STATE_COMPLETED')['artifacts'][0]['parts'] == mixed_parts()
+        checks.append('direct_mixed_parts_survive_blob_and_final_status')
     finally:
         for task in list(agent.tasks.values()):
             task['cancel'].set()

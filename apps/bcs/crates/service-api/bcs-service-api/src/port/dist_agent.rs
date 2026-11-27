@@ -147,22 +147,12 @@ pub trait DistSessionDirectoryPort: Send + Sync {
         target: &SessionTarget,
     ) -> Result<(), DirectoryError>;
 
-    /// Freeze target configuration once, after caller authorization.
+    /// Freeze target configuration once, after caller authorization. Worker
+    /// resolves the immutable payload through its existing Blob reference reader.
     async fn resolve(
         &self,
         scope: &TaskScope,
         target: &SessionTarget,
     ) -> Result<FrozenSessionProposal, DirectoryError>;
 
-    /// A referenced configuration needs a directory that can load the exact revision.
-    async fn load_mode_config(
-        &self,
-        _scope: &TaskScope,
-        envelope: &ModeConfigEnvelope,
-    ) -> Result<Payload, DirectoryError> {
-        match &envelope.payload {
-            Payload::Inline(_) => Ok(envelope.payload.clone()),
-            _ => Err(DirectoryError::InvalidRevision),
-        }
-    }
 }

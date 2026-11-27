@@ -179,6 +179,11 @@ struct AppendingRunner {
 }
 #[async_trait::async_trait]
 impl DistRunnerCoreService for AppendingRunner {
+    fn validate_session(
+        &self, _: &SessionSpec, _: &Value,
+    ) -> Result<Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(Arc::new(()))
+    }
     async fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         Ok(RunnerState {
             format_version: 1,

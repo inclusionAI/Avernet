@@ -214,6 +214,7 @@ pub fn hello_snapshot(sequence: u64, covered: EventId) -> TaskSnapshot {
         serde_json::to_value(DisplaySnapshot {
             format_version: 1,
             units: vec![DisplayUnit {
+                content_format: DisplayContentFormat::Json,
                 source: CorrelationKey("source".into()),
                 artifact_id: ArtifactId("answer".into()),
                 class: OutputClass::Output,

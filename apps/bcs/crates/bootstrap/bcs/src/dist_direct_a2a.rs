@@ -1,5 +1,8 @@
 //! Distributed Direct A2A composition for hosts providing the shared stores.
 //! Mount the Gateway router behind the host's authenticated GatewayCaller layer.
+//! Production admission also requires the host's content interception/audit
+//! integration before Inbox admission, for both initial messages and replies.
+//! This assembly does not install that policy. Use a Direct-only namespace.
 use crate::dist_agent_registry::RegisteredAgentResolver;
 use bcs_a2a_http::{dist_agent::A2aDistAgentClient, grpc_mesh::GrpcMeshConfig};
 use bcs_app_dist_gateway::{DistGateway, DistGatewayConfig};

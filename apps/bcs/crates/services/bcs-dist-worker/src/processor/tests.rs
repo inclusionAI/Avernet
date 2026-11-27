@@ -282,6 +282,25 @@ fn completed(checkpoint: &Checkpoint) -> super::effects::CompletedEffects {
 }
 
 #[test]
+fn independent_finalization_only_cancels_unfinished_dispatches() {
+    let mut checkpoint = initial();
+    for (id, terminal_seen) in [("finished", true), ("running", false)] {
+        checkpoint.dispatch_seq.insert(Did(id.into()), DispatchSequence {
+            tid: task().tid, holder_epoch: HolderEpoch(1), sequence: InputSeq(1), terminal_seen,
+        });
+    }
+    let result = super::lifecycle::finalize_independently(
+        &checkpoint, &metadata(TaskStatus::Working), TerminalStatus::Failed,
+        "OutputQuotaExceeded", TimestampMillis(10), None,
+    ).unwrap();
+    let canceled: Vec<_> = result.outbox.unwrap().effects.into_iter().filter_map(|effect| match effect.kind {
+        EffectKind::RequestCancel { did, .. } => Some(did.0),
+        _ => None,
+    }).collect();
+    assert_eq!(canceled, ["running"]);
+}
+
+#[test]
 fn finish_requires_archive_confirmation_and_a_separate_terminal_commit() {
     use super::transitions::*;
     let decision = check(decision(vec![

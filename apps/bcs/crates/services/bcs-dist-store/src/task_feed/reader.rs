@@ -103,6 +103,18 @@ impl StoreTaskFeed {
                                 .await?,
                         ),
                     },
+                    ArtifactUpdate::UpsertParts { content } => ArtifactUpdate::UpsertParts {
+                        content: Payload::Inline(
+                            self.payload(&content)
+                                .await?,
+                        ),
+                    },
+                    ArtifactUpdate::AppendParts { delta } => ArtifactUpdate::AppendParts {
+                        delta: Payload::Inline(
+                            self.payload(&delta)
+                                .await?,
+                        ),
+                    },
                 };
                 *display = self
                     .projection

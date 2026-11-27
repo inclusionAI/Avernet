@@ -17,3 +17,16 @@
 - Callers: explicit host composition and authenticated runtime application facades.
 - Contract changes require failure-path integration tests and provider acceptance;
   model tests alone do not prove production timing or capacity.
+
+The current RunnerRegistry adapts one installed mode/version. Every Worker in
+one shared namespace must install the same supported mode/version; Direct-only
+and other-mode deployments must use separate namespaces. Shard assignment does
+not route by mode. Unsupported configurations are isolated, not silently handed
+to another Worker. Multi-mode routing is deferred to the StateMachine integration.
+
+CancelGrace measures terminal confirmation processed by the Worker. A matching
+terminal event in the currently delivered input wins over a due grace timer.
+An event still queued in Inbox may miss that window during backlog or slow
+archive publication; the Worker then starts a fresh downstream context. This is
+a conservative loss of conversation continuity, not data corruption. No Inbox
+scan or cross-store confirmation check is added at the timer boundary.

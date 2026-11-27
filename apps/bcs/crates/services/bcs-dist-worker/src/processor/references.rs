@@ -135,8 +135,8 @@ impl References {
                         for event in events {
                             if let OutputBody::Artifact { update, .. } = &mut event.body {
                                 let value = match update {
-                                    ArtifactUpdate::Upsert { content } => content,
-                                    ArtifactUpdate::AppendText { delta } => delta,
+                                    ArtifactUpdate::Upsert { content } | ArtifactUpdate::UpsertParts { content } => content,
+                                    ArtifactUpdate::AppendText { delta } | ArtifactUpdate::AppendParts { delta } => delta,
                                 };
                                 one!(value);
                             }

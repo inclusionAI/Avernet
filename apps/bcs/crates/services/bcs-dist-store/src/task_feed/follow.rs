@@ -146,8 +146,8 @@ impl StoreTaskFeed {
         match &mut event.body {
             OutputBody::Artifact { update, .. } => {
                 let payload = match update {
-                    ArtifactUpdate::Upsert { content } => content,
-                    ArtifactUpdate::AppendText { delta } => delta,
+                    ArtifactUpdate::Upsert { content } | ArtifactUpdate::UpsertParts { content } => content,
+                    ArtifactUpdate::AppendText { delta } | ArtifactUpdate::AppendParts { delta } => delta,
                 };
                 let value = self
                     .payload(payload)

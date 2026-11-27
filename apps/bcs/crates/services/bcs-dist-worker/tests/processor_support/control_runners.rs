@@ -7,6 +7,11 @@ pub struct InvalidRunner {
 
 #[async_trait::async_trait]
 impl DistRunnerCoreService for InvalidRunner {
+    fn validate_session(
+        &self, _: &SessionSpec, _: &serde_json::Value,
+    ) -> Result<Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(Arc::new(()))
+    }
     async fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         if self.corrupt {
             self.calls.fetch_add(1, Ordering::SeqCst);
@@ -40,6 +45,11 @@ pub struct DeadlineRunner(pub AtomicUsize);
 
 #[async_trait::async_trait]
 impl DistRunnerCoreService for DeadlineRunner {
+    fn validate_session(
+        &self, _: &SessionSpec, _: &serde_json::Value,
+    ) -> Result<Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(Arc::new(()))
+    }
     async fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         Ok(RunnerState {
             format_version: 1,
@@ -77,6 +87,11 @@ pub struct FutureDeadlineRunner(pub AtomicUsize);
 
 #[async_trait::async_trait]
 impl DistRunnerCoreService for FutureDeadlineRunner {
+    fn validate_session(
+        &self, _: &SessionSpec, _: &serde_json::Value,
+    ) -> Result<Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(Arc::new(()))
+    }
     async fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         Ok(RunnerState {
             format_version: 1,
@@ -129,6 +144,11 @@ pub struct RefRunner {
 
 #[async_trait::async_trait]
 impl DistRunnerCoreService for RefRunner {
+    fn validate_session(
+        &self, _: &SessionSpec, _: &serde_json::Value,
+    ) -> Result<Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(Arc::new(()))
+    }
     async fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         Ok(RunnerState {
             format_version: 1,

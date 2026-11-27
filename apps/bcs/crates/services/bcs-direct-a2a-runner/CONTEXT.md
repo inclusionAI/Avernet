@@ -13,3 +13,17 @@ Its state records artifact identities, the dispatch deadline, the open question
 and the number of accepted replies. The Worker persists display content.
 A status-only completion keeps the existing display. Each matching user reply
 continues the original remote task with the next input sequence number.
+
+Final status messages only supply an answer when no artifact has been produced;
+they never replace an existing streamed answer. Explicit Final artifacts remain
+authoritative replacements. Plain text retains the string/AppendText path;
+file, data and text with metadata use explicit parts operations. The shared
+projection accumulates parts (including promotion of existing plain text), and
+the output adapter preserves their fields. Contents never enter Runner state.
+
+The existing phase-one output profile applies: at most 128 display units,
+including tool-call units, and 32 actions per decision. A Final with artifacts
+uses one additional FinishTask action, so 31 artifacts fit and 32 exceed the
+profile. With one answer unit, 127 distinct tools fit and the 128th exceeds it.
+Exceeding a limit fails the task with OutputQuotaExceeded, preserves previously
+committed output and does not silently truncate or roll over display slots.

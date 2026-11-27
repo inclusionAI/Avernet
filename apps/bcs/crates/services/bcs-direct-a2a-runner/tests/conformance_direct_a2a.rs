@@ -142,7 +142,7 @@ async fn delta_snapshot_and_authoritative_final_share_one_output() {
     let mut task = Task::new().await;
     let deadline = task.start().await;
     let first = task.reduce(chunk("hello", true)).await;
-    assert_show(&first.actions[0], upsert("hello"));
+    assert_show(&first.actions[0], ArtifactUpdate::AppendText { delta: Payload::Inline(json!("hello")) });
     assert_eq!(first.next_deadlines, vec![deadline]);
     let d = task.reduce(chunk("!", true)).await;
     assert_show(&d.actions[0], ArtifactUpdate::AppendText { delta: Payload::Inline(json!("!")) });
@@ -174,11 +174,11 @@ async fn delta_snapshot_and_authoritative_final_share_one_output() {
 }
 
 #[tokio::test]
-async fn status_only_final_preserves_stream_and_message_final_replaces_it() {
+async fn status_only_and_message_final_preserve_stream() {
     for (value, output) in [
         (json!({"state":"completed"}), None),
         (json!({"state":"completed", "artifacts":[]}), None),
-        (json!({"state":"completed", "message":{"parts":[{"text":"answer"}]}}), Some("answer")),
+        (json!({"state":"completed", "message":{"parts":[{"text":"Done"}]}}), None),
     ] {
         let mut task = Task::new().await;
         task.start().await;
@@ -193,6 +193,50 @@ async fn status_only_final_preserves_stream_and_message_final_replaces_it() {
             Some(ActionIntent::FinishTask { status: TerminalStatus::Completed, .. })
         ));
     }
+}
+
+#[tokio::test]
+async fn mixed_parts_survive_stream_projection_and_snapshot() {
+    use bcs_dist_projection::OutputProjectionService;
+    use bcs_service_api::{core::dist_projection::OutputProjectionCoreService, port::dist_output::DistOutputAdapterPort};
+    let file = json!({"url":"https://example.com/report.pdf", "mediaType":"application/pdf", "metadata":{"label":"report"}});
+    let text = json!({"text":"caption", "metadata":{"language":"en"}});
+    let data = json!({"data":{"count":1}});
+    for parts in [vec![file.clone(), text.clone(), data.clone()], vec![text.clone(), file.clone(), data.clone()]] {
+        let mut task = Task::new().await;
+        task.start().await;
+        let mut display = DisplaySnapshot { format_version: 1, units: vec![] };
+        let mut expected = vec![];
+        for part in parts {
+            let decision = task.reduce(event(AgentEventKind::Delta, json!({
+                "artifact":{"artifactId":"a", "parts":[part.clone()]}, "append":true
+            }))).await;
+            for action in decision.actions {
+                let ActionIntent::Show { source, artifact_id, class, update, .. } = action else { panic!() };
+                let change = ArtifactChange { source, artifact_id, class, update };
+                let wire = bcs_dist_a2a_output::A2aOutputAdapter.artifact(&change).unwrap();
+                assert_eq!(wire["artifact"]["parts"], json!([part]));
+                display = OutputProjectionService.fold_committed(&display, &[change], &PHASE_ONE_OUTPUT_LIMITS).unwrap();
+            }
+            expected.push(part);
+            let wire = bcs_dist_a2a_output::A2aOutputAdapter.snapshot(&serde_json::to_value(&display).unwrap()).unwrap();
+            assert_eq!(wire["artifacts"][0]["parts"], json!(expected));
+        }
+        let final_decision = task.reduce(event(AgentEventKind::Final, json!({"state":"completed"}))).await;
+        assert_eq!(final_decision.actions.len(), 1);
+        assert!(serde_json::to_string(&task.state).unwrap().len() < 512);
+    }
+}
+
+#[tokio::test]
+async fn message_only_final_supplies_an_answer() {
+    let mut task = Task::new().await;
+    task.start().await;
+    let decision = task.reduce(event(AgentEventKind::Final, json!({
+        "state":"completed", "message":{"parts":[{"text":"answer"}]}
+    }))).await;
+    assert_show(&decision.actions[0], upsert("answer"));
+    assert_eq!(decision.actions.len(), 2);
 }
 
 #[tokio::test]

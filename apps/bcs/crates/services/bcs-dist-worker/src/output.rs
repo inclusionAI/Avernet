@@ -72,6 +72,8 @@ async fn format_event(
             let update = match update {
                 ArtifactUpdate::Upsert { content } => ArtifactUpdate::Upsert { content: Payload::Inline(inline(blobs, content).await?) },
                 ArtifactUpdate::AppendText { delta } => ArtifactUpdate::AppendText { delta: Payload::Inline(inline(blobs, delta).await?) },
+                ArtifactUpdate::UpsertParts { content } => ArtifactUpdate::UpsertParts { content: Payload::Inline(inline(blobs, content).await?) },
+                ArtifactUpdate::AppendParts { delta } => ArtifactUpdate::AppendParts { delta: Payload::Inline(inline(blobs, delta).await?) },
             };
             let content = output.artifact(&ArtifactChange { source, artifact_id, class, update }).map_err(format_error)?;
             FormattedOutputBody::Artifact { content }

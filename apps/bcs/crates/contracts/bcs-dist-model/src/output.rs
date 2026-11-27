@@ -17,6 +17,23 @@ pub enum ArtifactUpdate {
     AppendText {
         delta: Payload,
     },
+    /// Complete ordered part objects, preserved without interpreting their fields.
+    UpsertParts {
+        content: Payload,
+    },
+    /// Append part objects, creating a unit if absent. Existing plain text is
+    /// promoted to a text part; other ordinary JSON cannot be appended to.
+    AppendParts {
+        delta: Payload,
+    },
+}
+
+/// Distinguishes ordinary application JSON from protocol part objects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DisplayContentFormat {
+    Json,
+    Parts,
 }
 
 /// Stable identity is computed from task/workflow data, never random IDs or
@@ -33,10 +50,10 @@ pub struct ArtifactChange {
 /// through TaskContent.snapshot; references never change this inner encoding.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DisplayUnit {
-    #[serde(alias = "node")]
     pub source: CorrelationKey,
     pub artifact_id: ArtifactId,
     pub class: OutputClass,
+    pub content_format: DisplayContentFormat,
     pub content: Value,
 }
 

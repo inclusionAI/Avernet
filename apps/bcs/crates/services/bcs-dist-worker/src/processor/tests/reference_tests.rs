@@ -73,6 +73,7 @@ fn candidate_with_text(length: usize) -> Checkpoint {
     let display = DisplaySnapshot {
         format_version: 1,
         units: vec![DisplayUnit {
+            content_format: DisplayContentFormat::Json,
             source: CorrelationKey("source".into()),
             artifact_id: ArtifactId("answer".into()),
             class: OutputClass::Output,

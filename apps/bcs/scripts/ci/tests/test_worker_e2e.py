@@ -23,6 +23,7 @@ def valid_report():
         'status': 'passed', 'store': 'memory_mock', 'durable_store': False, 'archive': 'sqlite',
         'checks': [
             'direct_admission_stream_and_reply', 'direct_confirmed_cancel_preserves_context',
+            'direct_mixed_parts_survive_blob_and_final_status',
             'gateway_http_retry_conflict_once', 'gateway_http_concurrent_first_request',
             'gateway_http_sse_get_task_consistency', 'document_projection_atomic_patch_and_unknown',
             'finish_archive_restore_and_late_cancel', 'append_archive_restore_and_late_cancel',

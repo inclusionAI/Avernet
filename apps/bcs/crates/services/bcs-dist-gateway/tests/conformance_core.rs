@@ -210,7 +210,7 @@ async fn restore_inlines_a_referenced_snapshot() {
     let c = core(&p);
     assert_eq!(c.restore_task(&scope(), &Tid(TID.into())).await, Err(DistGatewayCoreError::NotFound));
     let mut task = snapshot(TID, TaskStatus::Working, Some(eid(2, 1)), NOW);
-    task.content.snapshot = Payload::Ref(p.blobs.put("snap/b21e", br#"{"format_version":1,"units":[{"node":"n1","artifact_id":"a-1","class":"output","content":"big"}]}"#));
+    task.content.snapshot = Payload::Ref(p.blobs.put("snap/b21e", br#"{"format_version":1,"units":[{"source":"n1","artifact_id":"a-1","class":"output","content_format":"json","content":"big"}]}"#));
     p.worker.create(&task).await;
     let cut = c.restore_task(&scope(), &Tid(TID.into())).await.unwrap();
     let Payload::Inline(display) = cut.view.content.snapshot else { panic!("expected inline output"); };

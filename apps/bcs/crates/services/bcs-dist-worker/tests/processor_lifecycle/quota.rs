@@ -16,6 +16,11 @@ struct QuotaRunner {
 }
 #[async_trait::async_trait]
 impl DistRunnerCoreService for QuotaRunner {
+    fn validate_session(
+        &self, _: &SessionSpec, _: &serde_json::Value,
+    ) -> Result<Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(Arc::new(()))
+    }
     async fn init(&self, c: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         self.initializations.fetch_add(1, Ordering::SeqCst);
         Runner::new(Mode::Stream).init(c).await

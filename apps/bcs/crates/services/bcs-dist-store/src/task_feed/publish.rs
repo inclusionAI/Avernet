@@ -22,14 +22,19 @@ impl StoreTaskFeed {
                     return Err(invalid("artifact_identity"));
                 }
                 let (payload, text) = match update {
-                    ArtifactUpdate::Upsert { content } => (content, false),
+                    ArtifactUpdate::Upsert { content } | ArtifactUpdate::UpsertParts { content } => (content, false),
                     ArtifactUpdate::AppendText { delta } => (delta, true),
+                    ArtifactUpdate::AppendParts { delta } => (delta, false),
                 };
                 let value = self
                     .payload(payload)
                     .await?;
                 if text && !value.is_string() {
                     return Err(invalid("append_text_type"));
+                }
+                if matches!(update, ArtifactUpdate::UpsertParts { .. } | ArtifactUpdate::AppendParts { .. })
+                    && !value.as_array().is_some_and(|parts| parts.iter().all(serde_json::Value::is_object)) {
+                    return Err(invalid("parts_require_objects"));
                 }
                 if let Payload::Inline(_) = payload {
                     bounded_bytes(&value, task.output_limits.inline_threshold_bytes as usize)?;

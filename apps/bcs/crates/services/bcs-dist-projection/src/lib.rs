@@ -115,6 +115,9 @@ fn validate_snapshot(
         if !identities.insert((&unit.source.0, &unit.artifact_id.0, class)) {
             return Err(invalid_snapshot("duplicate_artifact_identity"));
         }
+        if unit.content_format == DisplayContentFormat::Parts && !is_parts(&unit.content) {
+            return Err(invalid_snapshot("parts_require_objects"));
+        }
     }
     Ok(())
 }
@@ -139,14 +142,17 @@ fn project(
     for change in changes {
         identity(&change.source, &change.artifact_id, limits)?;
         let payload = match &change.update {
-            ArtifactUpdate::Upsert { content } => content,
-            ArtifactUpdate::AppendText { delta } => delta,
+            ArtifactUpdate::Upsert { content } | ArtifactUpdate::UpsertParts { content } => content,
+            ArtifactUpdate::AppendText { delta } | ArtifactUpdate::AppendParts { delta } => delta,
         };
         let Payload::Inline(value) = payload else {
             return Err(ProjectionError::UnresolvedReference);
         };
         if matches!(change.update, ArtifactUpdate::AppendText { .. }) && !value.is_string() {
             return Err(invalid_artifact("append_requires_text"));
+        }
+        if matches!(change.update, ArtifactUpdate::UpsertParts { .. } | ArtifactUpdate::AppendParts { .. }) && !is_parts(value) {
+            return Err(invalid_artifact("parts_require_objects"));
         }
         // Thinking never enters the durable display or output accounting.
         if change.class == OutputClass::Thinking {
@@ -170,6 +176,10 @@ fn apply(
     value: &Value,
     limits: &OutputLimits,
 ) -> Result<(), ProjectionError> {
+    let format = match change.update {
+        ArtifactUpdate::UpsertParts { .. } | ArtifactUpdate::AppendParts { .. } => DisplayContentFormat::Parts,
+        _ => DisplayContentFormat::Json,
+    };
     let index = snapshot.units.iter().position(|unit| {
         unit.source == change.source
             && unit.artifact_id == change.artifact_id
@@ -177,13 +187,28 @@ fn apply(
     });
     if let Some(index) = index {
         let unit = &mut snapshot.units[index];
+        // A file/data append after streamed plain text promotes that text to a
+        // part without dropping it. Arbitrary application JSON is never merged.
+        if matches!(change.update, ArtifactUpdate::AppendParts { .. })
+            && unit.content_format == DisplayContentFormat::Json && unit.content.is_string() {
+            unit.content = serde_json::json!([{ "text": unit.content }]);
+            unit.content_format = DisplayContentFormat::Parts;
+        }
+        if matches!(change.update, ArtifactUpdate::AppendText { .. } | ArtifactUpdate::AppendParts { .. })
+            && unit.content_format != format {
+            return Err(invalid_artifact("append_content_format"));
+        }
         match (&change.update, &mut unit.content, value) {
             (ArtifactUpdate::AppendText { .. }, Value::String(current), Value::String(delta)) => {
                 current.push_str(delta)
             }
-            (ArtifactUpdate::Upsert { .. }, current, next) => *current = next.clone(),
+            (ArtifactUpdate::AppendParts { .. }, Value::Array(current), Value::Array(delta)) => {
+                current.extend(delta.iter().cloned())
+            }
+            (ArtifactUpdate::Upsert { .. } | ArtifactUpdate::UpsertParts { .. }, current, next) => *current = next.clone(),
             _ => return Err(invalid_artifact("append_requires_text")),
         }
+        unit.content_format = format;
     } else {
         if snapshot.units.len() == limits.max_artifacts as usize {
             return Err(quota(OutputBudget::Artifacts));
@@ -192,9 +217,14 @@ fn apply(
             source: change.source.clone(),
             artifact_id: change.artifact_id.clone(),
             class: change.class,
+            content_format: format,
             content: value.clone(),
         };
         snapshot.units.push(unit);
     }
     Ok(())
+}
+
+fn is_parts(value: &Value) -> bool {
+    value.as_array().is_some_and(|parts| parts.iter().all(Value::is_object))
 }

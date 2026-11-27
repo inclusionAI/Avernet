@@ -9,7 +9,11 @@ can implement the same port and be selected by the host composition root.
 ## Encoding
 
 A format-1 `DisplaySnapshot` becomes an ordered A2A artifact list. JSON strings
-become text parts; all other JSON values become data parts without flattening.
+with content_format=json become text parts; all other ordinary JSON values become
+data parts without flattening. content_format=parts is emitted as the original
+ordered part objects, including file and per-part metadata. UpsertParts emits
+append=false; AppendParts emits only the new parts with append=true. Ordinary
+application JSON arrays are never guessed to be protocol parts.
 Artifact identity length-frames the node name and includes the neutral
 `(node, artifact_id, class)` tuple. Full views, Upsert replacements and AppendText
 deltas therefore address the same artifact, including when node names contain

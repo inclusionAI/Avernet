@@ -1517,8 +1517,10 @@ name = "bcs-direct-a2a-runner"
 version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
+ "bcs-dist-a2a-output",
  "bcs-dist-encoding",
  "bcs-dist-model",
+ "bcs-dist-projection",
  "bcs-service-api",
  "bcs-test-support",
  "serde",
@@ -1530,7 +1532,6 @@ dependencies = [
 name = "bcs-dist-a2a-output"
 version = "0.1.4-beta.3"
 dependencies = [
- "a2a-lf",
  "bcs-dist-model",
  "bcs-service-api",
  "bcs-test-support",

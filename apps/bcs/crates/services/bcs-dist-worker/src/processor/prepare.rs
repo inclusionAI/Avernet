@@ -546,8 +546,8 @@ impl WorkerProcessor {
             for action in &mut frozen.decision.actions {
                 let payload = match action {
                     ActionIntent::Show { update, .. } => match update {
-                        ArtifactUpdate::Upsert { content } => Some(content),
-                        ArtifactUpdate::AppendText { delta } => Some(delta),
+                        ArtifactUpdate::Upsert { content } | ArtifactUpdate::UpsertParts { content } => Some(content),
+                        ArtifactUpdate::AppendText { delta } | ArtifactUpdate::AppendParts { delta } => Some(delta),
                     },
                     ActionIntent::StartDispatch(spec) => Some(&mut spec.request),
                     ActionIntent::ContinueDispatch { input, .. } => Some(&mut input.payload),

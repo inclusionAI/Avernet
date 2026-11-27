@@ -145,7 +145,8 @@ def run(h, checks):
         display = restored['view']['content']['snapshot']
         assert display['kind'] == 'inline'
         assert display['value'] == {'format_version': 1, 'units': [
-            {'source': 'answer', 'artifact_id': 'answer', 'class': 'output', 'content': 'x' * size}]}
+            {'source': 'answer', 'artifact_id': 'answer', 'class': 'output',
+             'content_format': 'json', 'content': 'x' * size}]}
         assert saved['result'] == {'kind': 'inline', 'value': {'finished': True}}
         consumed = h.call('checkpoint', sid=sid)['checkpoint']['consumed']
         calls = h.call('tick')['runner_calls']

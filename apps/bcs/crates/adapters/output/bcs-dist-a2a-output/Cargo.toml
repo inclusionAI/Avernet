@@ -8,7 +8,6 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-a2a = { package = "a2a-lf", version = "=0.4.2" }
 bcs-dist-model = { workspace = true }
 bcs-service-api = { workspace = true }
 serde_json = { workspace = true }

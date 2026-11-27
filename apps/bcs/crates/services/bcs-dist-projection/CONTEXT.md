@@ -1,7 +1,7 @@
 # Context boundary
 
 - Role: pure implementation of `OutputProjectionCoreService`.
-- Owns: deterministic Upsert/AppendText projection, ordered display encoding,
+- Owns: deterministic JSON/text/parts projection, ordered display encoding,
   exact logical output byte accounting and frozen profile checks.
 - Consumes: data contracts from `bcs-dist-model` and the public Service API.
 - Does not own: reference IO, event identity deduplication, checkpoint writes,

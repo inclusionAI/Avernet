@@ -89,12 +89,11 @@ pub enum RunnerError {
 pub trait DistRunnerCoreService: Send + Sync {
     fn shares_session_downstream_context(&self, _spec: &SessionSpec) -> bool { false }
 
-    /// Bind the immutable session configuration once for the lifetime of a held slot.
+    /// Bind the immutable session configuration once for the lifetime of a held
+    /// slot. Implementations must explicitly validate their supported mode/config.
     fn validate_session(
         &self, _spec: &SessionSpec, _raw: &serde_json::Value,
-    ) -> Result<Arc<dyn Any + Send + Sync>, RunnerError> {
-        Ok(Arc::new(()))
-    }
+    ) -> Result<Arc<dyn Any + Send + Sync>, RunnerError>;
     async fn init(&self, context: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError>;
     async fn reduce(
         &self,

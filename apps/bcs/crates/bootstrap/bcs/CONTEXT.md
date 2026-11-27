@@ -368,3 +368,31 @@ registered agent endpoint and credentials when it calls the agent. Give each
 independent registry a distinct Connector pool when logical agent IDs overlap. Enable this
 composition in the distributed host. The standalone server keeps its existing
 Direct and group deployments.
+
+This assembly does not install the monolith's outbound content interception or
+audit chain. Before accepting production traffic, the host must integrate those
+policies at Gateway admission, covering both initial inputs and human replies
+before Inbox writes. The authorization port alone cannot inspect message content.
+Policy implementations remain deferred; admitted inputs are executed without a
+Worker-side authorization recheck.
+
+Use a Direct-only namespace with the same Runner mode/version on every Worker;
+shard ownership does not route by mode. In-flight protocol capability changes or
+switches to an unrelated stateful Agent backend are unsupported. Credential and
+endpoint updates must preserve the same logical service/task store. Returned
+context IDs are stored in RemoteTaskRef for the current dispatch; cross-task
+Direct conversation continuity requires the Agent to honor the supplied context.
+
+Registry resolution cost is implementation-dependent. RegisteredAgentResolver
+calls resolve_delivery_target once per network operation, plus lazy capability
+resolution per Connector holder. DbProviderStore caches binding, provider and
+credential reads for 30 seconds with bounded entries and local invalidation;
+PersistentBotRepo may serve Bot metadata from memory. The A2A card read still
+issues one bounded SQL query. With warm caches, each poll therefore costs one
+card query plus any Bot metadata reload; a completely cold successful resolution
+also loads binding, provider and credential. At the default 1.5-second interval,
+N polling dispatches issue about N/1.5 card reads per second before retries,
+reattachment and cache misses. Streaming events do not each resolve the registry.
+These are source-derived costs, not measured production throughput. This change
+adds no second resolver cache; representative query-count/load measurements are
+required before claiming production capacity or selecting another cache policy.

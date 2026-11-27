@@ -310,6 +310,11 @@ struct SelectiveRunner {
 }
 #[async_trait::async_trait]
 impl DistRunnerCoreService for SelectiveRunner {
+    fn validate_session(
+        &self, _: &SessionSpec, _: &serde_json::Value,
+    ) -> Result<Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(Arc::new(()))
+    }
     async fn init(&self, context: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         if context.spec.sid == spec().sid {
             self.bad.init(context).await

@@ -272,8 +272,8 @@ async fn neutral_worker_output_reaches_get_task_and_sse_with_matching_ids() {
     task.sid = Sid(tid.rsplit_once('.').unwrap().0.to_owned());
     task.scope = TaskScope { tenant: TenantId("t-ant".into()), principal: PrincipalId("bot:pa-001".into()) };
     task.content.snapshot = Payload::Inline(json!({ "format_version": 1, "units": [
-        { "node": "n1", "artifact_id": "a-1", "class": "output", "content": "Hello" },
-        { "node": "n2", "artifact_id": "a-1", "class": "tool", "content": { "answer": 42 } }
+        { "source": "n1", "artifact_id": "a-1", "class": "output", "content_format": "json", "content": "Hello" },
+        { "source": "n2", "artifact_id": "a-1", "class": "tool", "content_format": "json", "content": { "answer": 42 } }
     ] }));
     p.worker.publish(&task).await;
     let got = json_of(&app, rpc("GetTask", json!({ "id": tid }))).await;

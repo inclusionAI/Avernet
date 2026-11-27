@@ -3,6 +3,11 @@ use harness::services::*;
 
 #[async_trait::async_trait]
 impl DistRunnerCoreService for Script {
+    fn validate_session(
+        &self, _: &SessionSpec, _: &serde_json::Value,
+    ) -> Result<std::sync::Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(std::sync::Arc::new(()))
+    }
     async fn init(&self, context: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         self.call(
             "init",
@@ -338,7 +343,7 @@ async fn agent_harness_keeps_uncertain_send_and_cancel_distinct_from_failure() -
 }
 
 #[tokio::test]
-async fn directory_harness_checks_frozen_definition_and_workflow_revision() -> ContractResult {
+async fn directory_harness_checks_frozen_configuration() -> ContractResult {
     let spec = spec();
     let frozen = FrozenSessionProposal {
         target: spec.target.clone(),
@@ -347,9 +352,9 @@ async fn directory_harness_checks_frozen_definition_and_workflow_revision() -> C
         limits: spec.limits,
     };
     for stable in [true, false] {
-        let mut repeated = frozen.mode_envelope.payload.clone();
+        let mut repeated = frozen.clone();
         if !stable {
-            repeated = Payload::Inline(serde_json::json!("changed"));
+            repeated.mode_envelope.payload = Payload::Inline(serde_json::json!("changed"));
         }
         let script = Script::default()
             .expect(
@@ -360,16 +365,6 @@ async fn directory_harness_checks_frozen_definition_and_workflow_revision() -> C
             .expect(
                 "DistSessionDirectoryPort::resolve",
                 (scope(), &frozen.target),
-                Ok::<_, DirectoryError>(frozen.clone()),
-            )
-            .expect(
-                "DistSessionDirectoryPort::load_mode_config",
-                (scope(), &frozen.mode_envelope),
-                Ok::<_, DirectoryError>(frozen.mode_envelope.payload.clone()),
-            )
-            .expect(
-                "DistSessionDirectoryPort::load_mode_config",
-                (scope(), &frozen.mode_envelope),
                 Ok::<_, DirectoryError>(repeated),
             );
         let scope = scope();

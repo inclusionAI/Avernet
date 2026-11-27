@@ -37,8 +37,11 @@ at the Service API boundary; this crate stores its immutable reference and diges
 - `TaskSnapshot.snapshot_event_id` is exact persisted coverage;
   `TaskView.covered_through` is the cut after reconstruction. These are distinct
   from the newest event known to exist.
-- Artifact identity is `(NodeId, ArtifactId, OutputClass)`. Show and Artifact
-  events share explicit Upsert/AppendText operations; no implicit merge exists.
+- Artifact identity is `(CorrelationKey, ArtifactId, OutputClass)`. Show and Artifact
+  events share explicit Upsert/AppendText and UpsertParts/AppendParts operations.
+  DisplayUnit.content_format distinguishes ordinary JSON from ordered part
+  objects. AppendParts may promote existing plain text to a text part, but never
+  interprets other application JSON as parts. No implicit JSON merge exists.
   Complete DisplaySnapshot format 1 retains first-appearance order. Thinking
   never enters that persisted snapshot. The pure implementation and accounting
   rules live in [bcs-dist-projection](../../services/bcs-dist-projection/README.md).

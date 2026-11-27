@@ -276,7 +276,7 @@ pub fn final_record(tid: &str) -> FinalTaskRecord {
         tid: Tid(tid.into()),
         status: TerminalStatus::Completed,
         snapshot: Payload::Inline(serde_json::json!({ "format_version": 1, "units": [
-            { "node": "n1", "artifact_id": "a-1", "class": "output", "content": "final" }
+            { "source": "n1", "artifact_id": "a-1", "class": "output", "content_format": "json", "content": "final" }
         ] })),
         result: Payload::Inline(serde_json::json!("done")),
         source_commit: CommitSeq(9),

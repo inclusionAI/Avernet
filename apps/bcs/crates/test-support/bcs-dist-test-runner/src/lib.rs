@@ -25,6 +25,11 @@ pub struct Runner {
 }
 #[async_trait::async_trait]
 impl DistRunnerCoreService for Runner {
+    fn validate_session(
+        &self, _: &SessionSpec, _: &serde_json::Value,
+    ) -> Result<std::sync::Arc<dyn std::any::Any + Send + Sync>, RunnerError> {
+        Ok(std::sync::Arc::new(()))
+    }
     async fn init(&self, _: &EvaluationContext<'_>) -> Result<RunnerState, RunnerError> {
         Ok(RunnerState {
             format_version: 1,

@@ -16,7 +16,7 @@ fn change(class: OutputClass, update: ArtifactUpdate) -> ArtifactChange {
 
 fn snapshot(content: Value) -> Value {
     json!({ "format_version": 1, "units": [
-        { "source": "n1", "artifact_id": "answer", "class": "output", "content": content }
+        { "source": "n1", "artifact_id": "answer", "class": "output", "content_format": "json", "content": content }
     ] })
 }
 
@@ -45,6 +45,30 @@ fn append_text_is_a_delta_for_the_same_artifact() {
     assert_eq!(append["artifact"]["parts"], json!([{ "text": " world" }]));
     assert_eq!(append["append"], true);
     assert!(append.get("last_chunk").is_none());
+}
+
+#[test]
+fn explicit_parts_preserve_fields_without_reinterpreting_plain_json_arrays() {
+    let parts = json!([{"url":"https://example.com/file", "metadata":{"name":"file"}},
+        {"text":"caption", "metadata":{"lang":"en"}}, {"data":{"n":1}}]);
+    let mut raw = snapshot(parts.clone());
+    let ordinary = A2aOutputAdapter.snapshot(&raw).unwrap();
+    assert_eq!(ordinary["artifacts"][0]["parts"], json!([{"data":parts}]));
+    raw["units"][0]["content_format"] = json!("parts");
+    let full = A2aOutputAdapter.snapshot(&raw).unwrap();
+    for (update, append) in [(ArtifactUpdate::UpsertParts { content: Payload::Inline(parts.clone()) }, false),
+        (ArtifactUpdate::AppendParts { delta: Payload::Inline(parts.clone()) }, true)] {
+        let event = A2aOutputAdapter.artifact(&change(OutputClass::Output, update)).unwrap();
+        assert_eq!(event["artifact"], full["artifacts"][0]);
+        assert_eq!(event["artifact"]["parts"], parts);
+        assert_eq!(event["append"], append);
+    }
+    for invalid in [json!("not parts"), json!([null])] {
+        raw["units"][0]["content"] = invalid.clone();
+        assert!(A2aOutputAdapter.snapshot(&raw).is_err());
+        assert!(A2aOutputAdapter.artifact(&change(OutputClass::Output,
+            ArtifactUpdate::AppendParts { delta: Payload::Inline(invalid) })).is_err());
+    }
 }
 
 #[test]

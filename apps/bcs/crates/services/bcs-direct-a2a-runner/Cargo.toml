@@ -19,5 +19,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+bcs-dist-a2a-output.workspace = true
+bcs-dist-projection.workspace = true
 bcs-test-support.workspace = true
 tokio.workspace = true

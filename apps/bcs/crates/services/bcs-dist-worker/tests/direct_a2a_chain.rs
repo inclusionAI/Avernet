@@ -79,7 +79,7 @@ impl DistSessionDirectoryPort for Directory {
                 digest: bcs_dist_encoding::digest_json(&config),
                 payload: Payload::Inline(config),
             },
-            limits: processor_support::spec().limits,
+            limits: SessionLimits { max_task_steps: 10_000, ..processor_support::spec().limits },
         })
     }
 }
@@ -180,6 +180,9 @@ impl DistAgentResolver for AgentRoute {
 }
 
 type Calls = Arc<Mutex<Vec<Value>>>;
+
+#[path = "direct_a2a_chain/output.rs"]
+mod output_cases;
 
 // Scripted A2A wire responses. The asking stream stays live until the reply
 // arrives, just like an agent that waits for a user before sending its result.
