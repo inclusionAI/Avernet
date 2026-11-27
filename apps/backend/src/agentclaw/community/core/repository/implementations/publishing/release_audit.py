@@ -57,25 +57,25 @@ def _start_stage(status: str, source_status: str | None, actor: str | None) -> s
     return None
 
 
-def prepare_transition(row, *, source_status: str | None, actor: str | None) -> str | None:
-    """Fence a new native attempt even when its later audit INSERT fails."""
-    if _start_stage(row.status, source_status, actor) is None:
-        return None
+def prepare_transition(publish_id: int, *, status: str, ext_json: str | None,
+                       source_status: str | None, actor: str | None) -> tuple[str | None, str | None]:
+    """Prepare metadata for the native SQL payload, without dirtying an ORM row."""
+    if _start_stage(status, source_status, actor) is None:
+        return ext_json, None
     try:
-        ext = json.loads(row.ext) if row.ext else {}
+        ext = json.loads(ext_json) if ext_json else {}
         change_id = uuid4().hex
         metadata = {_CHANGE_KEY: change_id, _TENANT_KEY: get_current_avernet_tenant()}
         for key in (*metadata, "_release_audit_submit_failed", "_release_audit_restart_completed",
                     "_release_audit_wait_restart"):
             ext.pop(key, None)
-        if source_status == "failed" and row.status == "success":
+        if source_status == "failed" and status == "success":
             metadata["_release_audit_wait_restart"] = change_id
         # Add only audit metadata; preserve all native values and their ordering.
-        row.ext = json.dumps({**metadata, **ext}, ensure_ascii=False)
-        return change_id
+        return json.dumps({**metadata, **ext}, ensure_ascii=False), change_id
     except Exception as exc:
-        logger.warning("release_audit.prepare_failed publish_id=%s exception_type=%s", row.id, type(exc).__name__)
-        return None
+        logger.warning("release_audit.prepare_failed publish_id=%s exception_type=%s", publish_id, type(exc).__name__)
+        return ext_json, None
 
 
 def _before_stage(status: str | None) -> str | None:

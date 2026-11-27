@@ -282,7 +282,7 @@ def test_external_tenant_submission_finishes_in_default_background_context(repos
     assert terminal.finish_status == "failed"
 
 
-def test_autocommit_database_isolates_audit_failure_inside_explicit_transaction(repository):
+def test_autocommit_native_session_is_preserved_and_audit_failure_is_isolated(repository):
     from sqlalchemy import event
     repo, engine = repository
 
@@ -306,7 +306,7 @@ def test_autocommit_database_isolates_audit_failure_inside_explicit_transaction(
     db = AutocommitDatabase()
     repo._db = db
     record = create(repository)
-    assert db.transactions == 2
+    assert db.transactions == 1
 
     def fail_insert(*args):
         raise RuntimeError("audit unavailable")
@@ -316,7 +316,7 @@ def test_autocommit_database_isolates_audit_failure_inside_explicit_transaction(
         started = repo.update_status(record.id, "building", "draft", audit_operator_id="submitter")
     finally:
         event.remove(ReleaseAuditModel, "before_insert", fail_insert)
-    assert db.transactions == 4
+    assert db.transactions == 2
     assert repo.get_by_id(record.id).status == "building"
     assert started.ext["_release_audit_change_id"] not in {row.change_id for row in audits(repository)}
     assert len(audits(repository)) == 1
@@ -511,13 +511,13 @@ def test_audit_transaction_failure_happens_after_native_commit(repository, caplo
     def fail_audit_transaction():
         nonlocal calls
         calls += 1
-        if calls == 2:
+        if calls == 1:
             raise RuntimeError("audit connection unavailable")
         with original() as session:
             yield session
     repo._db.transactional_orm_session = fail_audit_transaction
     record = create(repository)
-    assert calls == 2 and record.status == "draft"
+    assert calls == 1 and record.status == "draft"
     assert repo.get_by_id(record.id).status == "draft"
     assert audits(repository) == []
     assert "release_audit.skipped" in caplog.text
@@ -564,9 +564,91 @@ def test_audit_commit_failure_keeps_native_publication(repository):
         calls += 1
         with original() as session:
             yield session
-            if calls == 2:
+            if calls == 1:
                 raise RuntimeError("audit commit unavailable")
     repo._db.transactional_orm_session = fail_audit_commit
     record = create(repository)
     assert record.status == "draft"
     assert audits(repository) == []
+
+
+@pytest.mark.parametrize("operation", ["status_ext", "ext_cas", "status_ext_cas"])
+def test_autocommit_native_update_keeps_marker_and_uses_only_one_audit_transaction(repository, operation):
+    repo, engine = repository
+    class AutocommitDatabase(Database):
+        def __init__(self):
+            self.factory = sessionmaker(engine.execution_options(isolation_level="AUTOCOMMIT"), autoflush=False)
+            self.audit_transactions = 0
+        @contextmanager
+        def transactional_orm_session(self):
+            self.audit_transactions += 1
+            factory = sessionmaker(engine.execution_options(isolation_level="SERIALIZABLE"), autoflush=False)
+            with factory.begin() as session:
+                yield session
+    database = AutocommitDatabase()
+    repo._db = database
+    record = create(repository)
+    if operation == "ext_cas":
+        record = repo.update_status(record.id, "building", "draft", audit_operator_id="editor")
+    before = database.audit_transactions
+    replacement = {**(record.ext or {}), "native": "kept"}
+    if operation == "status_ext":
+        result = repo.update_status_with_ext(record.id, "building", replacement, "draft", audit_operator_id="editor")
+    elif operation == "status_ext_cas":
+        result = repo.compare_and_set_status_with_ext(
+            publish_id=record.id, source_status="draft", target_status="building",
+            expected_ext=record.ext, ext=replacement, audit_operator_id="editor")
+    else:
+        result = repo.compare_and_set_ext(publish_id=record.id, expected_ext=record.ext, ext=replacement)
+    assert database.audit_transactions == before + 1
+    persisted = repo.get_by_id(record.id)
+    assert result.status == persisted.status == "building"
+    assert persisted.ext["native"] == "kept"
+    assert persisted.ext["_release_audit_change_id"] == audits(repository)[-1].change_id
+    assert audits(repository)[-1].operator_id == "editor"
+    # The next CAS must match the exact committed marker and native ext.
+    done = repo.compare_and_set_status_with_ext(
+        publish_id=record.id, source_status="building", target_status="failed",
+        expected_ext=persisted.ext, ext=persisted.ext)
+    assert done.status == "failed"
+    assert audits(repository)[-1].finish_status == "failed"
+
+
+@pytest.mark.parametrize("interleaving", ["before_cursor_execute", "after_cursor_execute"])
+def test_autocommit_status_marker_is_atomic_and_keeps_concurrent_ext(repository, interleaving):
+    from sqlalchemy import event
+    repo, engine = repository
+    class AutocommitDatabase(Database):
+        def __init__(self):
+            self.factory = sessionmaker(engine.execution_options(isolation_level="AUTOCOMMIT"), autoflush=False)
+        @contextmanager
+        def transactional_orm_session(self):
+            factory = sessionmaker(engine.execution_options(isolation_level="SERIALIZABLE"), autoflush=False)
+            with factory.begin() as session:
+                yield session
+    repo._db = AutocommitDatabase()
+    record = create(repository)
+    observed = []
+    def concurrent_writer(connection, cursor, statement, parameters, context, executemany):
+        if observed or not statement.startswith("UPDATE ac_bot_publish SET status="):
+            return
+        current = repo.get_by_id(record.id)
+        observed.append(current.status)
+        if interleaving == "after_cursor_execute":
+            # Another connection sees status and change marker in the same write.
+            assert current.status == "building"
+            assert current.ext["_release_audit_change_id"]
+        updated = repo.compare_and_set_ext(
+            publish_id=record.id, expected_ext=current.ext,
+            ext={**(current.ext or {}), "concurrent_native": "must survive"})
+        assert updated is not None
+    event.listen(engine, interleaving, concurrent_writer)
+    try:
+        result = repo.update_status(record.id, "building", "draft", audit_operator_id="editor")
+    finally:
+        event.remove(engine, interleaving, concurrent_writer)
+    assert observed
+    assert result.status == "building"
+    assert result.ext["concurrent_native"] == "must survive"
+    assert result.ext["_release_audit_change_id"] == audits(repository)[-1].change_id
+    assert audits(repository)[-1].operator_id == "editor"
