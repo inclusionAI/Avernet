@@ -8,7 +8,9 @@ import { assertOrdinaryRequestSchema } from '../ordinary-run-request-repository.
 it('leaves old SQLite storage usable but ordinary requests unavailable when ALTER is denied', async () => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (150,'old');
-    CREATE TABLE flow_runs (flow_id TEXT NOT NULL PRIMARY KEY); INSERT INTO flow_runs VALUES ('existing');
+    CREATE TABLE flow_runs (flow_id TEXT NOT NULL PRIMARY KEY,
+      parent_flow_id VARCHAR(255) NULL DEFAULT NULL, root_flow_id VARCHAR(255) NULL DEFAULT NULL);
+    INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
       child_flow_id TEXT NOT NULL UNIQUE, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL);`);
   const real = new SqliteDatabase(raw);
@@ -35,7 +37,9 @@ it('leaves old SQLite storage usable but ordinary requests unavailable when ALTE
 it('defers a SQLite v150 CREATE authorization denial without recording progress and resumes after provisioning', async () => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
-    CREATE TABLE flow_runs (flow_id TEXT NOT NULL PRIMARY KEY); INSERT INTO flow_runs VALUES ('existing');`);
+    CREATE TABLE flow_runs (flow_id TEXT NOT NULL PRIMARY KEY,
+      parent_flow_id VARCHAR(255) NULL DEFAULT NULL, root_flow_id VARCHAR(255) NULL DEFAULT NULL);
+    INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
   const real = new SqliteDatabase(raw);
   const db: IDatabase = { dbType: 'sqlite', dialect: real.dialect, query: real.query.bind(real),
     transaction: real.transaction.bind(real), close: real.close.bind(real),
@@ -62,7 +66,8 @@ it.each([
 ])('defers incompatible existing SQLite marker (%s) without changing old data, and retries after repair', async (definition) => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT); INSERT INTO schema_version (version,description) VALUES (150,'old');
-    CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT NOT NULL UNIQUE, ordinary_run_marker VARCHAR(64) ${definition});
+    CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT NOT NULL UNIQUE, ordinary_run_marker VARCHAR(64) ${definition},
+      parent_flow_id VARCHAR(255) NULL DEFAULT NULL, root_flow_id VARCHAR(255) NULL DEFAULT NULL);
     INSERT INTO flow_runs (flow_id) VALUES ('existing');
     CREATE TABLE ordinary_run_requests (request_key_hash TEXT NOT NULL PRIMARY KEY, parent_flow_id TEXT NOT NULL,
       child_flow_id TEXT NOT NULL UNIQUE, child_workflow_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL,

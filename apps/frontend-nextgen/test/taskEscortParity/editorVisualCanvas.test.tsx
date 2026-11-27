@@ -10,7 +10,7 @@ import {
 } from '@/pages/TaskEscort/parity/editor/canvas/model';
 import { NODE_CATALOG } from '@/pages/TaskEscort/parity/editor/canvas/nodeCatalog';
 import '@testing-library/jest-dom';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 // Only the browser geometry/gesture surface is mocked; cards, palette, contracts
 // and immutable graph mutations are real. React Flow itself is used in production.
@@ -145,6 +145,50 @@ describe('canvas graph contracts', () => {
   });
 });
 describe('visual canvas', () => {
+  it('shows a Chinese name, local icon and short description for every existing palette entry', () => {
+    render(<EditorGraph spec={base} selectedId={null} select={jest.fn()} onChange={jest.fn()} />);
+    const palette = screen.getByRole('complementary', { name: '节点库' });
+    expect(within(palette).getAllByRole('button', { name: /^添加/ })).toHaveLength(6);
+    fireEvent.click(within(palette).getByRole('button', { name: '更多节点' }));
+    expect(within(palette).getAllByRole('button', { name: /^添加/ })).toHaveLength(13);
+    for (const item of NODE_CATALOG) {
+      expect(item.label).toMatch(/[\u4e00-\u9fff]/);
+      expect(item.description).toMatch(/[\u4e00-\u9fff]/);
+      const card = within(palette).getByRole('button', { name: `添加${item.label}` });
+      expect(within(card).getByText(item.label)).toBeVisible();
+      expect(within(card).getByText(item.description)).toBeVisible();
+      expect(card.querySelector('svg[aria-hidden="true"] path')).not.toBeNull();
+    }
+    fireEvent.change(within(palette).getByRole('textbox', { name: '搜索节点类型' }), { target: { value: 'MCP' } });
+    expect(within(palette).getAllByRole('button', { name: /^添加/ })).toHaveLength(1);
+    expect(within(palette).getByRole('button', { name: '添加工具调用' })).toBeVisible();
+  });
+
+  it('shows Chinese types, raw executors, task summaries and ID footers without rewriting imported nodes', () => {
+    const spec: EditorSpec = { ...base, nodes: [...base.nodes, {
+      id: 'extension-node', title: '兼容任务', phase: 'P1',
+      executor: { type: 'vendor.custom-worker', prompt: '保留真实任务说明', extra: { keep: true } },
+    }] };
+    const snapshot = JSON.stringify(spec);
+    const select = jest.fn();
+    const onChange = jest.fn();
+    render(<EditorGraph spec={spec} selectedId="a" select={select} onChange={onChange} />);
+    const known = screen.getByRole('article', { name: '开始 · cli-script' });
+    expect(known).toHaveClass('border-primary', 'ring-2');
+    expect(within(known).getByText('脚本执行 · cli-script')).toBeVisible();
+    expect(within(known).getByText('echo ok')).toBeVisible();
+    expect(within(known).getByText('a')).toHaveClass('font-mono');
+    const imported = screen.getByRole('article', { name: '兼容任务 · vendor.custom-worker' });
+    expect(within(imported).getByText('扩展节点 · vendor.custom-worker')).toBeVisible();
+    expect(within(imported).getByText('保留真实任务说明')).toBeVisible();
+    expect(within(imported).getByText('extension-node')).toHaveClass('font-mono');
+    expect(within(imported).getByText('兼容模式')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '兼容任务 · vendor.custom-worker' }));
+    expect(select).toHaveBeenCalledWith('extension-node');
+    expect(JSON.stringify(spec)).toBe(snapshot);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('delegates bounded history to host callbacks and preserves input-native undo', () => {
     const onUndo = jest.fn(),
       onRedo = jest.fn();

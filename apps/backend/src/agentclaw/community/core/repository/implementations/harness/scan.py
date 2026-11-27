@@ -34,10 +34,13 @@ the reference; the old SQLite twin's divergent behavior is dropped):
   SQLite twin additionally overwrote ``findings``; that behavior is
   dropped (see the in-method TODO).
 - Read methods return the same dict shapes as the twins. Latest-per-
-  dim selection uses an ordered scan + first-seen dedup (portable,
-  identical result to the prod ``ROW_NUMBER()`` window) and the
-  time-window check computes the cutoff in Python (portable,
-  equivalent to prod ``DATE_SUB(NOW(), INTERVAL n MINUTE)``).
+  dim selection runs the prod ``ROW_NUMBER()`` window back in SQL over
+  a narrow ``id`` projection and fetches full rows only for the
+  winning ids, keeping the read bounded by the number of distinct
+  dimensions instead of the whole scan history (which outgrew the prod
+  query-timeout ceiling). The time-window check computes the cutoff in
+  Python (portable, equivalent to prod ``DATE_SUB(NOW(), INTERVAL n
+  MINUTE)``).
 """
 from __future__ import annotations
 
@@ -449,30 +452,66 @@ class HarnessScanRecordRepository(
         - ``match_null_publish=False``: records with any
           ``bot_publish_id`` value are returned.
 
-        Ordered scan + first-seen dedup — portable and identical in
-        result to the prod twin's ``ROW_NUMBER() OVER (PARTITION BY
-        COALESCE(scan_dim,'') ORDER BY gmt_create DESC)``.
+        The latest-per-dim selection runs the prod twin's
+        ``ROW_NUMBER() OVER (PARTITION BY COALESCE(scan_dim,'')
+        ORDER BY gmt_create DESC)`` window back in SQL, over a narrow
+        ``id`` projection; full rows (with the TEXT payloads) are
+        fetched only for the winning ids. Ties stay broken by
+        ``id DESC`` and the full-row fetch stays bounded by the number
+        of distinct dimensions instead of the whole scan history.
         """
         env = get_current_env()
         with self._db.orm_session() as db:
-            query = db.query(self.Model).filter(
+            filters = [
                 self.Model.bot_id == bot_id,
                 self.Model.entity_id == entity_id,
                 self.Model.env == env,
-            )
+            ]
             if bot_publish_id is not None:
-                query = query.filter(
-                    self.Model.bot_publish_id == bot_publish_id
-                )
+                filters.append(self.Model.bot_publish_id == bot_publish_id)
             elif match_null_publish:
-                query = query.filter(self.Model.bot_publish_id.is_(None))
+                filters.append(self.Model.bot_publish_id.is_(None))
 
-            rows = query.order_by(
-                self.Model.gmt_create.desc(), self.Model.id.desc()
-            ).all()
+            latest_per_dim = (
+                db.query(
+                    self.Model.id,
+                    func.row_number()
+                    .over(
+                        partition_by=func.coalesce(self.Model.scan_dim, ""),
+                        order_by=[
+                            self.Model.gmt_create.desc(),
+                            self.Model.id.desc(),
+                        ],
+                    )
+                    .label("rn"),
+                )
+                .filter(*filters)
+                .subquery()
+            )
+            winner_ids = [
+                row.id
+                for row in db.query(latest_per_dim.c.id)
+                .filter(latest_per_dim.c.rn == 1)
+                .all()
+            ]
+            if not winner_ids:
+                return []
+
+            rows = (
+                db.query(self.Model)
+                .filter(self.Model.id.in_(winner_ids))
+                .order_by(
+                    self.Model.gmt_create.desc(), self.Model.id.desc()
+                )
+                .all()
+            )
 
             seen: set[str] = set()
             result: list[dict] = []
+            # Defense in depth: the ID conflict above guarantees one winner
+            # per dim, so this first-seen pass is a no-op safety net — it
+            # stays so the output contract keeps holding even if the window
+            # grouping ever drifts from the Python dedup key ('' vs NULL).
             for row in rows:
                 dim = row.scan_dim
                 dim_key = dim if dim is not None else ""

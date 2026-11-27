@@ -103,8 +103,6 @@ export type RecoveryTaskState = {
   ownerDeadlineAt: number | null;
   /** Absent on legacy tasks and ordinary terminal Owner handoffs. */
   ownerRequest?: RecoveryOwnerRequest;
-  /** Durable notification work marker, including terminal tasks; not a business wait. */
-  ownerCardSyncPending?: boolean;
   plan: (RecoveryPlan & { digest: string; approvedAt: number | null }) | null;
   judgment: RecoveryJudgment | null;
   /** Agent-authored overall closeout summary; absent on legacy tasks or failed generation. */
@@ -151,8 +149,10 @@ export type RecoveryStoredTask = RecoveryTaskState & {
   /** Written only at task creation; absence means historical audit coverage cannot be proven. */
   interventionAuditComplete?: true;
   timeline: RecoveryTimelineEvent[];
-  pending_results: RecoveryTaskResult[];
 };
+/** A result snapshot is archived atomically with this transition; never stored in Task config. */
+export type RecoveryTaskChange = RecoveryStoredTask & { resultToReport?: RecoveryTaskResult };
+
 export type RecoveryEffectConfigCheck =
   | { environment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment; config: RecoveryEffectResumeConfig }
   | { environment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment; config: RecoveryEffectResumeConfig | null;
@@ -163,7 +163,7 @@ export interface RecoveryTaskStore {
   create(value: RecoveryStoredTask, stepId: string): Promise<void>;
   find(taskId: string, options?: { forBootstrap?: boolean }): Promise<RecoveryStoredTask | null>;
   listForEvent(eventId: string, ownerId: string, isAdmin: boolean): Promise<RecoveryStoredTask[]>;
-  update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryStoredTask,
+  update(taskId: string, expectedVersion: number, change: (current: RecoveryStoredTask) => RecoveryTaskChange,
     effectResumeClaim?: RecoveryEffectConfigCheck): Promise<RecoveryStoredTask | null>;
   claimRecheckDispatch?(stepId: string): Promise<boolean>;
   recordRecheckJob?(stepId: string, jobId: string, receipt: Record<string, string>): Promise<void>;
@@ -173,11 +173,7 @@ export interface RecoveryTaskStore {
   settleEffectResumeSlot?(taskId: string, slot: RecoveryEffectResumeSlot, jobEnded: (jobId: string) => Promise<boolean>): Promise<boolean>;
   /** Append a notification fact atomically without changing the Agent's business-state version. */
   appendNotification(taskId: string, event: RecoveryTimelineEvent): Promise<boolean>;
-  /** Atomically reserve a due attempt. A stale worker must not send or settle another attempt. */
-  claimResult(taskId: string, resultVersion: number): Promise<number | null>;
-  failResult(taskId: string, resultVersion: number, attempt: number): Promise<void>;
-  acknowledgeResult(taskId: string, resultVersion: number, attempt: number): Promise<void>;
-  listForReporting?(limit: number, afterTaskId: string, controlPlaneEnvironment: import("../common/task-control-plane.js").AgentControlPlaneEnvironment): Promise<{ tasks: RecoveryStoredTask[]; nextTaskId: string }>;
-  listForMaintenance?(limit: number, afterTaskId?: string, environment?: import("../common/task-control-plane.js").AgentControlPlaneEnvironment,
-    includeEffectResumeSlots?: boolean): Promise<Array<RecoveryStoredTask | RecoveryMaintenanceTask>>;
+  /** Append the callback outcome without changing the Agent's business-state version. */
+  appendResultOutcome(taskId: string, resultVersion: number, attempts: number, accepted: boolean): Promise<void>;
+  listForMaintenance?(limit: number, afterTaskId?: string, environment?: import("../common/task-control-plane.js").AgentControlPlaneEnvironment): Promise<Array<RecoveryStoredTask | RecoveryMaintenanceTask>>;
 }

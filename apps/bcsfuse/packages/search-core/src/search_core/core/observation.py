@@ -62,6 +62,19 @@ def failure_reason(error):
     return "dependency_error"
 
 
+def _detail_line(record):
+    if "request_body" not in record:
+        return json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+    # Legacy monitors extract compact '"field":' delimiters from the entire line.
+    # JSON whitespace inside the business body keeps nested keys out of those matches.
+    envelope = {key: value for key, value in record.items() if key != "request_body"}
+    prefix = json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
+    body = json.dumps(
+        record["request_body"], ensure_ascii=False, separators=(",", " : ")
+    )
+    return prefix[:-1] + ',"request_body":' + body + "}"
+
+
 class EventSummaries:
     """Every event is counted; emit first sample, then periodic count summaries.
 
@@ -204,7 +217,7 @@ class EventSummaries:
                 record = self._steps.get_nowait()
             except Empty:
                 break
-            logger.info(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+            logger.info(_detail_line(record))
 
 
 events = EventSummaries()

@@ -19,11 +19,11 @@ export default function RunMarkers({ run, variant = 'compact' }: RunMarkersProps
       <>
         <div className="min-w-0">
           <dt className="text-xs text-muted-foreground">流量标识</dt>
-          <dd className="mt-0.5 truncate font-mono text-sm font-medium text-foreground" title={env ?? unavailable}>{env ?? unavailable}</dd>
+          <dd className="mt-1 min-w-0 break-words font-mono text-xs font-medium leading-relaxed text-foreground [overflow-wrap:anywhere]" title={env ?? unavailable}>{env ?? unavailable}</dd>
         </div>
         <div className="min-w-0">
           <dt className="text-xs text-muted-foreground">标签</dt>
-          <dd className="mt-0.5 truncate text-sm font-medium text-foreground" title={tag ?? unavailable}>{detailTag}</dd>
+          <dd className="mt-1 min-w-0 break-words text-xs font-medium leading-relaxed text-foreground [overflow-wrap:anywhere]" title={tag ?? unavailable}>{detailTag}</dd>
         </div>
       </>
     )

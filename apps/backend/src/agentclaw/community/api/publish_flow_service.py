@@ -49,6 +49,8 @@ class PublishFlowServiceProtocol(Protocol):
 
         Callers validate resource addressing and authorize the actor separately.
         Submission success is not readiness.
+        ttl_seconds overrides the safety-net teardown delay from task enqueue;
+        None uses 86400 seconds (24 hours). It does not renew provider leases.
         resource_spec replaces template resource settings for this deployment only;
         None preserves existing defaults. Disk units/support are provider-defined.
         device_count is the number of BaaS deployment instances in this eval

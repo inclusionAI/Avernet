@@ -43,6 +43,19 @@ comparable across sources. TC exposes complete Profile keys as IDs and returns
 name source is supplied. A valid empty result is HTTP 200 with an empty list.
 Search failures must not be converted to an empty success by new providers.
 
+A catalog host may enable a bounded empty-search fallback. When a `search`
+completes empty and the result was not already routed to default candidates,
+the service reads one filtered page of at most five points from the active
+keyword collection and returns up to `min(limit, 5)` eligible Cards. The result
+is `degraded` with reason `default_candidates`, and those items carry no
+relevance score. The fallback is not a recall branch, does not fetch another
+page, does not use the timeout projection for Card hydration, and is controlled
+by the host's empty-result fallback setting: a catalog host that opted into
+separate retrieval defaults sets `empty_result_fallback_enabled` through
+`update_retrieval`, while a host on the legacy emergency policy uses
+`retrieval.empty_result_fallback_enabled` in `emergencyConfig`. Recommendation
+and all-off paths retain their existing selection rules.
+
 Items produced by the hybrid retrieval pipeline additionally include optional
 `scoreDetails`. Existing `summary`, numeric `score`, `score_source` and
 `extensions` retain their meanings and types. Each present stage has a finite
@@ -279,6 +292,8 @@ Embedding, keyword/vector recall, recall filtering/deduplication (`recall_merge`
 RRF (`fusion`), reranking, result construction, Card hydration (`card_metadata`,
 including `card_fetch` for database reads), eligibility.
 Default TopK records `default_candidates`, including cache/refresh wait time.
+The bounded empty-search fallback records `filtered_default_candidates`,
+including candidate read, Card hydration and returned count.
 Optional business extensions can use `stage_timing` with fixed stage names.
 
 Times include waiting, not just CPU or upstream service time. `recall` spans the
@@ -314,9 +329,11 @@ that wraps retrieval owns complete cache keys, business-filter separation, data
 revision invalidation, successful-result admission and final eligibility checks.
 Hosts must keep authentication and overload protection outside cache shortcuts.
 
-`EmergencyPolicy.embedding_singleflight_enabled` controls sharing overlapping
-query-embedding calls and defaults to `true`. Hosts using DRM set this top-level
-field in the existing `emergencyConfig` JSON; other required fields remain required.
+`embedding_singleflight_enabled` controls sharing overlapping query-embedding
+calls and defaults to `true`. A catalog host that opted into separate retrieval
+defaults sets it through `update_retrieval`; a host on the legacy emergency policy
+sets the top-level `EmergencyPolicy.embedding_singleflight_enabled` field in
+`emergencyConfig`, where the other legacy fields remain required.
 It is independent of cache TTL: disabling caches does not disable coalescing.
 Set it to `false` to restore separate model calls while retaining any configured
 vector cache. Updates affect new requests; existing requests keep their snapshot.

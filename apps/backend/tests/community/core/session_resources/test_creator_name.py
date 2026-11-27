@@ -84,7 +84,7 @@ def test_openapi_adapter_passes_actual_actor_to_directory_and_preserves_snapshot
     service, repo, _ = _service(staff_dept=staff)
     staff.get_profile_by_work_no.return_value = StaffProfileInfo("actor-2", "上传者")
     bindings = Mock()
-    bindings.resolve.return_value = SimpleNamespace(binding_id=42)
+    bindings.resolve.return_value = SimpleNamespace(binding_id=42, owner_id="owner-1", device_uuid=None)
     adapter = OpenApiSessionFileAdapter(
         session_resources=service, runtime_bindings=bindings, engine_files=Mock(),
     )

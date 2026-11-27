@@ -432,3 +432,43 @@ async def test_eval_publish_without_artifact_ext_falls_back_to_stored_manifest()
         release_async.await_args.kwargs["ext_info"]["skills_manifest"]
         is stored_manifest
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ttl_seconds,expected_delay,expected_deadline", [
+    (None, 86400, 90000),
+    (1, 1, 90000),
+    (7200, 7200, 90000),
+    (86400, 86400, 90000),
+    (172800, 172800, 176400),
+    (604800, 604800, 608400),
+])
+async def test_eval_publish_schedules_teardown_after_effective_ttl(
+    ttl_seconds, expected_delay, expected_deadline,
+):
+    """Exercise real enqueue logic, including TTLs beyond the old queue deadline."""
+    svc = _FakeEvalPublishService()
+    result = await svc.eval_publish(42, "tester", ttl_seconds=ttl_seconds)
+
+    assert result["success"] is True
+    svc._task_queue_service.enqueue.assert_called_once_with(
+        "service_bot.publish.eval_teardown",
+        {"publish_id": 42, "bot_uuid": "eval-uuid", "operator": "tester"},
+        delay_seconds=expected_delay,
+        deadline_seconds=expected_deadline,
+        idempotency_key="eval_teardown:42:eval-uuid",
+    )
+
+
+def test_explicit_eval_teardown_retains_existing_deadline():
+    svc = _FakeEvalPublishService()
+    result = svc.eval_teardown("eval-uuid", publish_id=42, operator="tester")
+
+    assert result["success"] is True
+    svc._task_queue_service.enqueue.assert_called_once_with(
+        "service_bot.publish.eval_teardown",
+        {"publish_id": 42, "bot_uuid": "eval-uuid", "operator": "tester"},
+        delay_seconds=0,
+        deadline_seconds=90000,
+        idempotency_key="eval_teardown:42:eval-uuid",
+    )

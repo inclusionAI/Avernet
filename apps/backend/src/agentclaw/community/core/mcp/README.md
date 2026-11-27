@@ -67,6 +67,7 @@ internal_dependencies:
   - agentclaw.community.core.devices
   - agentclaw.community.core.skill_center.capability_projection_reconcile
   - agentclaw.community.core.skill_center.runtime_projection_contract
+  - agentclaw.community.core.skill_center.errors    # SkillSet control-plane error taxonomy the config flow passes through
   - agentclaw.community.core.workspace
   - agentclaw.community.di.modules
   - agentclaw.community.log

@@ -86,6 +86,10 @@ Run reads and the retry mailbox are owned by `@avernet/workflow`; schema migrati
 
 ## Internal API contract
 
+For creation-only `parent_flow_id` / `root_flow_id`, exact readback, callback
+placement, and schema v157 rollout, see [flow run lineage](flow-run-lineage.md).
+These fields do not change the separate scoped run-read summary contract below.
+
 All paths below are relative to `/api/internal`, behind the host's service signature middleware.
 `POST /runs` accepts optional `state_json` as a serialized JSON object. When present, the run and its initial state are inserted in one SQL statement. Clients that omit the field remain compatible. Deploy this server change before updating ClawMind; existing runs with null state are unchanged.
 Read requests use POST so their scope and filters are covered by the existing body signature.

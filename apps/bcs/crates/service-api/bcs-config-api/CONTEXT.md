@@ -39,7 +39,8 @@ instance exclusivity.
 
 - Typed configuration contract objects for BCS runtime assembly.
 - LogOutputFormat::Raw is a message-only output format; the default
-  message-delivery logging output uses it for fixed-column monitoring records.
+  message-delivery and a2a-http-client-digest logging outputs use it for
+  fixed-column monitoring and digest records.
   Existing Text/Json formats and the default Text deserialization remain unchanged.
 - Config-facing value objects and secrets wrappers shared across bootstrap and services.
 - A stable schema boundary for configuration-related evolution.

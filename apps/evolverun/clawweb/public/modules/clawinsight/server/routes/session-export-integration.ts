@@ -7,16 +7,16 @@ import type {
   EvolveStepRow,
   EvolveTaskRow,
 } from "@avernet/clawevolve/server/repositories/evolve-repository";
-import {
-  AistudioService,
-  SESSION_ANALYSIS_SNAPSHOT_ID,
-} from "../services/aistudio-service.js";
+import type { AisExecutor, SessionAisOptions } from "@avernet/clawevolve/server/contracts/ais-executor";
+import { sessionAisBaseConfig, sessionAisParams, sessionExportAisArtifacts, type SessionAisBaseConfig } from "@avernet/clawevolve/server/services/session-ais-config";
+import type { AisArtifactSpec } from "@avernet/clawevolve/server/services/ais/ais-artifact-contract";
 import type { MistOssObjectStore } from "../services/object-storage/oss-object-store.js";
 
 type ExportScope = "single" | "bot";
 type ExportStage = "all" | "draft" | "service";
 
 type SessionExportConfig = {
+  aisBase?: SessionAisBaseConfig;
   source: "integration_api";
   apiVersion: "session-export/v1";
   mode: "EXPORT_SINGLE" | "EXPORT_ALL";
@@ -34,7 +34,7 @@ type SessionExportConfig = {
   artifactUploadMode: "broker";
   llmAnalysis: false;
   llmUseDefault: true;
-  artifacts: Record<string, { objectKey: string }>;
+  artifacts: Record<string, AisArtifactSpec>;
   integration: {
     requestHash: string;
     idempotencyKeyHash: string;
@@ -45,7 +45,8 @@ type SignedUrlStore = Pick<MistOssObjectStore, "createSignedUrl">;
 
 export type SessionExportIntegrationRouterDeps = {
   repo: EvolveRepository | null;
-  ais: Pick<AistudioService, "execute">;
+  ais: Pick<AisExecutor, "execute">;
+  aisOptions: SessionAisOptions;
   officeDownloadStore: SignedUrlStore;
   productionDownloadStore: SignedUrlStore;
   now?: () => number;
@@ -216,6 +217,8 @@ function buildTaskParams(config: SessionExportConfig): Record<string, string> {
       artifacts: config.artifacts,
     },
   };
+  if (config.aisBase) return sessionAisParams({ ...config, aisBase: config.aisBase },
+    "session_export", { ...envelope.input, llmAnalysis: false, llmUseDefault: true });
   return { "${clawevolve_params}": JSON.stringify(envelope) };
 }
 
@@ -255,6 +258,9 @@ export function createSessionExportIntegrationRouter(
       return error(res, 422, "UNSUPPORTED_ENGINE", "一期只支持 OpenClaw Bot");
     }
 
+    if (deps.aisOptions.configurationError)
+      return error(res, 503, deps.aisOptions.configurationError, "会话 AIS 配置无效，请联系管理员");
+    const aisBase = sessionAisBaseConfig(deps.aisOptions, now());
     const stepId = `${taskId}-AIS`;
     const attempt = 1;
     const prefix = `evolution/${taskId}/session-export/attempt-${attempt}`;
@@ -266,6 +272,7 @@ export function createSessionExportIntegrationRouter(
       result: { objectKey: `${prefix}/result.json` },
     };
     const config: SessionExportConfig = {
+      ...(aisBase ? { aisBase } : {}),
       source: "integration_api",
       apiVersion: API_VERSION,
       mode: request.exportScope === "single" ? "EXPORT_SINGLE" : "EXPORT_ALL",
@@ -283,7 +290,7 @@ export function createSessionExportIntegrationRouter(
       artifactUploadMode: "broker",
       llmAnalysis: false,
       llmUseDefault: true,
-      artifacts,
+      artifacts: aisBase ? sessionExportAisArtifacts(artifacts, request.exportScope === "single") : artifacts,
       integration: {
         requestHash,
         idempotencyKeyHash: sha256(key),
@@ -315,12 +322,12 @@ export function createSessionExportIntegrationRouter(
       const jobId = await deps.ais.execute(
         request.target.userId,
         buildTaskParams(config),
-        SESSION_ANALYSIS_SNAPSHOT_ID,
+        config.aisBase?.snapshotId ?? deps.aisOptions.legacySnapshotId,
       );
       await deps.repo.markExternalDispatched(stepId, jobId, {
         jobId,
         jobUrl: `https://aistudio.alipay.com/project/job/detail/${jobId}`,
-        snapshotId: SESSION_ANALYSIS_SNAPSHOT_ID,
+        snapshotId: config.aisBase?.snapshotId ?? deps.aisOptions.legacySnapshotId,
         submittedBy: request.target.userId,
         taskId,
         stepId,

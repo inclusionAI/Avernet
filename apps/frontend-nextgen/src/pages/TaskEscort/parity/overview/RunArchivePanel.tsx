@@ -1,7 +1,8 @@
 import { overviewTime } from '@/domain/taskEscortParity/overview';
 import type { TaskEscortParityContext } from '@/domain/taskEscortParity/types';
 import { useTaskEscortRunArchive } from '@/hooks/taskEscortParity/useTaskEscortRunDetail';
-import { Empty, EvidenceValue, ReadFeedback } from './OverviewShared';
+import { Empty, ReadFeedback } from './OverviewShared';
+import { RunEvidenceValue } from './RunEvidenceValue';
 
 export function RunArchivePanel({ context, runId }: { context: TaskEscortParityContext; runId: string }) {
   const state = useTaskEscortRunArchive(context, runId),
@@ -18,7 +19,7 @@ export function RunArchivePanel({ context, runId }: { context: TaskEscortParityC
               {archive.status ?? '状态未知'} · {overviewTime(archive.createdAt)}
             </span>
           </div>
-          {archive.errors.length > 0 && <EvidenceValue label="档案收集错误" value={archive.errors} />}
+          {archive.errors.length > 0 && <RunEvidenceValue label="档案收集错误" value={archive.errors} />}
           <section className="tcov-card p-4">
             <h3 className="mb-3 text-sm font-semibold">1. 运行过程数据</h3>
             <div className="space-y-3">
@@ -29,7 +30,7 @@ export function RunArchivePanel({ context, runId }: { context: TaskEscortParityC
                     {Array.isArray(section.value) ? ` (${section.value.length})` : ''}
                   </summary>
                   <div className="mt-3">
-                    <EvidenceValue label={section.label} value={section.value} />
+                    <RunEvidenceValue label={section.label} value={section.value} />
                   </div>
                 </details>
               ))}
@@ -51,22 +52,22 @@ export function RunArchivePanel({ context, runId }: { context: TaskEscortParityC
                 <p className="text-xs font-medium">
                   {node.title || node.nodeId} · 尝试 {node.attempt ?? '未知'}
                 </p>
-                <EvidenceValue label="实际错误" value={node.error} />
+                <RunEvidenceValue label="实际错误" value={node.error} />
               </div>
             ))}
             {!archive.failedNodes.length && <p className="text-xs text-muted-foreground">档案未提供失败节点</p>}
-            <EvidenceValue label="根因线索" value={archive.rootCauseHints.length ? archive.rootCauseHints : null} />
+            <RunEvidenceValue label="根因线索" value={archive.rootCauseHints.length ? archive.rootCauseHints : null} />
           </section>
           <section className="tcov-card space-y-3 p-4">
-            <h3 className="text-sm font-semibold">3. AI 诊断</h3>
+            <h3 className="text-sm font-semibold">3. 单次运行 AI 诊断</h3>
             {archive.analysis ? (
               <>
                 <p className="text-xs text-muted-foreground">
                   来源 {archive.analysis.source ?? '未知'} · 状态 {archive.analysis.status ?? '未知'}
                 </p>
-                <EvidenceValue label="分析摘要" value={archive.analysis.summary} />
-                <EvidenceValue label="分析错误" value={archive.analysis.error} />
-                <EvidenceValue
+                <RunEvidenceValue label="分析摘要" value={archive.analysis.summary} />
+                <RunEvidenceValue label="分析错误" value={archive.analysis.error} />
+                <RunEvidenceValue
                   label="诊断证据"
                   value={archive.analysis.diagnoses.length ? archive.analysis.diagnoses : null}
                 />
@@ -79,9 +80,9 @@ export function RunArchivePanel({ context, runId }: { context: TaskEscortParityC
             <h3 className="text-sm font-semibold">4. 建议的工作流 YAML</h3>
             {archive.suggestedYaml ? (
               <>
-                <EvidenceValue label="建议说明" value={archive.suggestedYaml.summary} />
-                <EvidenceValue label="建议 YAML" value={archive.suggestedYaml.content} />
-                <EvidenceValue label="Patch Proposal" value={archive.suggestedYaml.proposal} />
+                <RunEvidenceValue label="建议说明" value={archive.suggestedYaml.summary} />
+                <RunEvidenceValue label="建议 YAML" value={archive.suggestedYaml.content} />
+                <RunEvidenceValue label="Patch Proposal" value={archive.suggestedYaml.proposal} />
               </>
             ) : (
               <p className="text-xs text-muted-foreground">档案未提供建议 YAML；未生成示例或替代内容。</p>

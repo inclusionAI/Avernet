@@ -87,6 +87,18 @@ def _classify_status(value: Any) -> RuntimeLivenessState | None:
     return None
 
 
+def _is_transport_failure(error: Any) -> bool:
+    """Treat send-transport failure as backend activity, not business failure.
+
+    ``chat.send failed: TRANSPORT_ERROR`` means the runtime may have accepted the
+    request while the response stream broke. Downgrade it to the ordinary active
+    silence path so Harness waits for the configured no-progress interval before
+    resuming, instead of taking the immediate terminal-failure recovery branch.
+    """
+    normalized_error = _normalized_status(error)
+    return "chat.send failed: transport_error" in normalized_error
+
+
 def _digest(value: Any) -> str:
     try:
         text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
@@ -348,15 +360,17 @@ class TaskRuntimeLivenessProbe:
                 session_id, bot_id=bot_id, lifecycle_stage=lifecycle_stage,
             )
         except Exception as exc:  # An unreadable activity path is not a dead Bot.
-            return RuntimeProbeResult(
-                state="activity_unknown", source=source,
-                error=f"{type(exc).__name__}: {exc}"[:500],
-                detail={"reason": "activity_query_failed"},
+            return await self._probe_session_messages(
+                session_id=session_id, previous_cursor=previous_cursor,
+                bot_id=bot_id, lifecycle_stage=lifecycle_stage,
+                fallback_reason="activity_query_failed", status_error=type(exc).__name__,
             )
         if not observation.found:
-            return RuntimeProbeResult(
-                state="activity_unknown", source=source,
-                detail={"reason": observation.reason},
+            assert observation.reason is not None
+            return await self._probe_session_messages(
+                session_id=session_id, previous_cursor=previous_cursor,
+                bot_id=bot_id, lifecycle_stage=lifecycle_stage,
+                fallback_reason=observation.reason,
             )
         assert observation.last_event_seq is not None
         assert observation.state is not None
@@ -386,6 +400,52 @@ class TaskRuntimeLivenessProbe:
             detail={"engine_run_id": observation.run_id,
                     "last_event_seq": observation.last_event_seq,
                     "lifecycle_stage": lifecycle_stage},
+        )
+
+    async def _probe_session_messages(
+        self, *, session_id: str, previous_cursor: str | None,
+        bot_id: str | None, lifecycle_stage: str | None,
+        fallback_reason: str, status_error: str | None = None,
+    ) -> RuntimeProbeResult:
+        """Use existing message observation when runtime status cannot observe the run."""
+        source = "openapi_bot.session_fallback"
+        detail = {
+            "session_id": session_id, "lifecycle_stage": lifecycle_stage,
+            "fallback_reason": fallback_reason, "status_error": status_error,
+        }
+        logger.warning(
+            "[task][harness] runtime status fallback session=%s bot=%s stage=%s "
+            "reason=%s status_error=%s selected_source=%s",
+            session_id, bot_id, lifecycle_stage, fallback_reason, status_error, source,
+        )
+        try:
+            if self._bot is None:
+                raise RuntimeError("Bot port is not configured")
+            messages = await self._bot.get_session_messages(
+                session_id, limit=20, bot_id=bot_id, lifecycle_stage=lifecycle_stage,
+            )
+            if not isinstance(messages, list):
+                raise ValueError("Session messages response is not a list")
+        except Exception as exc:  # noqa: BLE001 - two failed reads are not Bot failure
+            logger.warning(
+                "[task][harness] runtime fallback unavailable session=%s "
+                "reason=%s status_error=%s fallback_error=%s state=probe_unavailable",
+                session_id, fallback_reason, status_error, type(exc).__name__,
+            )
+            return self._unavailable(source=source, error=exc, detail=detail)
+        cursor = "session:" + _digest([
+            {"session_id": session_id}, _last_message_cursor(messages),
+        ])
+        baseline_reset = not (previous_cursor and previous_cursor.startswith("session:"))
+        progressed = not baseline_reset and cursor != previous_cursor
+        logger.info(
+            "[task][harness] runtime fallback observed session=%s selected_source=%s "
+            "progressed=%s baseline_reset=%s",
+            session_id, source, progressed, baseline_reset,
+        )
+        return RuntimeProbeResult(
+            state="active", source=source, status="active", heartbeat_cursor=cursor,
+            progressed=progressed, baseline_reset=baseline_reset, detail=detail,
         )
 
     def _active_result(
@@ -438,6 +498,16 @@ class TaskRuntimeLivenessProbe:
             )
         status = _normalized_status(run.get("status"))
         state = _classify_status(status) or "unknown"
+        if state == "terminal_failed" and _is_transport_failure(run.get("error")):
+            return RuntimeProbeResult(
+                state="active",
+                source="openapi_bot.run",
+                status="transport_error",
+                detail={
+                    "run_id": run_id,
+                    "transport_error": True,
+                },
+            )
         if state in {"terminal_success", "terminal_failed"}:
             return RuntimeProbeResult(
                 state=state,

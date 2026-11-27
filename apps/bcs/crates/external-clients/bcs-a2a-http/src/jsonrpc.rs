@@ -1,6 +1,7 @@
 //! A2A 1.0 JSON-RPC binding. No legacy method aliases or binding retries.
 use a2a::A2AError;
 use bcs_network_tracing::ClientWithDefaults;
+use crate::digest::{A2aCallContext, DigestGuard, DigestStart, InvokeType, Protocol};
 use crate::http_client::HttpClient;
 use futures::stream::BoxStream;
 use serde::{Serialize, de::DeserializeOwned};
@@ -12,6 +13,7 @@ pub struct JsonRpcClient {
     http: HttpClient,
     url: String,
     tenant: Option<String>,
+    context: A2aCallContext,
 }
 
 pub(super) fn decode(value: Value, id: &str) -> Result<Value, A2AError> {
@@ -47,7 +49,14 @@ impl JsonRpcClient {
         Self::with_http(HttpClient::new(http.into()), url, tenant)
     }
     pub(super) fn with_http(http: HttpClient, url: String, tenant: Option<String>) -> Self {
-        Self { http, url, tenant }
+        Self { http, url, tenant, context: A2aCallContext::default() }
+    }
+    pub fn with_call_context(mut self, context: A2aCallContext) -> Self { self.context = context; self }
+    fn start_digest(&self, invoke_type: InvokeType, method: &'static str) -> DigestGuard {
+        DigestGuard::start(DigestStart {
+            protocol: Protocol::JsonRpc, invoke_type, method, url: &self.url,
+            canonical_path: None, tenant: self.tenant.as_deref(), context: &self.context,
+        })
     }
     fn request<T: Serialize>(&self, method: &str, params: &T) -> Result<(String, Value), A2AError> {
         let id = REQUEST_ID.fetch_add(1, Ordering::Relaxed).to_string();
@@ -63,19 +72,22 @@ impl JsonRpcClient {
     }
     async fn call<T: Serialize, R: DeserializeOwned>(
         &self,
-        method: &str,
+        method: &'static str,
         params: &T,
     ) -> Result<R, A2AError> {
-        let (id, request) = self.request(method, params)?;
-        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        let mut guard = self.start_digest(InvokeType::Sync, method);
+        let (id, request) = guard.observe_err(self.request(method, params))?;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(15), async {
             let request = self.http.transport.request(|http| {
                 http.post(&self.url).header("A2A-Version", "1.0").json(&request)
             });
-            let mut response = self.http.send(request, "A2A JSON-RPC request interrupted").await?;
+            let mut response = self.http.send_observed(request, "A2A JSON-RPC request interrupted", &mut guard).await?;
             let status = response.status();
+            guard.record_headers(status.as_u16());
             let mut body = Vec::new();
             while let Some(chunk) = response.chunk().await
                 .map_err(|_| A2AError::internal("A2A JSON-RPC response incomplete"))? {
+                guard.add_resp_bytes(chunk.len());
                 if body.len().saturating_add(chunk.len()) > 8 * 1024 * 1024 {
                     return Err(A2AError::invalid_agent_response());
                 }
@@ -88,16 +100,18 @@ impl JsonRpcClient {
             let result = decode(envelope, &id)?;
             if !status.is_success() { return Err(crate::client_json::http_error(status.as_u16(), &body)); }
             serde_json::from_value(result).map_err(|_| A2AError::invalid_agent_response())
-        }).await.map_err(|_| A2AError::internal("A2A JSON-RPC request timed out"))?
+        }).await.map_err(|_| A2AError::internal("A2A JSON-RPC request timed out")).and_then(|res| res);
+        guard.observe(result)
     }
 
     async fn stream<T: Serialize>(
         &self,
-        method: &str,
+        method: &'static str,
         params: &T,
     ) -> Result<BoxStream<'static, Result<a2a::StreamResponse, A2AError>>, A2AError> {
-        let (id, request) = self.request(method, params)?;
-        crate::subscribe::post_stream_with_rpc(&self.http, &self.url, &request, Some(id)).await
+        let mut guard = self.start_digest(InvokeType::Stream, method);
+        let (id, request) = guard.observe_err(self.request(method, params))?;
+        crate::subscribe::post_stream_with_rpc(&self.http, &self.url, &request, Some(id), guard).await
     }
     pub async fn send_message(
         &self,

@@ -163,7 +163,7 @@ async fn label_only_replacement_fences_manual_and_background_url_refresh() {
             if background {service.refresh_due(300_000).await.map(|_|())} else {service.refresh_agent_by_id("test-admin",&id).await.map(|_|())}
         })};
         fetcher.entered.notified().await;
-        service.update_agent(bcs_service_api::application::a2a_bot::UpdateAgentCommand {
+        service.update_agent(bcs_service_api::application::a2a_bot::UpdateAgentCommand { agent_id:Default::default(),
             provider_admin_token:"test-admin".into(),bot_id:first.bot_id.clone(),source:None,visibility:None,
             catalog_labels:Some(serde_json::from_value(json!({"stage":["running"]})).unwrap()),
         }).await.unwrap();
@@ -190,7 +190,7 @@ async fn omitted_labels_preserve_concurrent_label_write_during_single_url_fetch(
             }else {service.update_agent_by_id("test-admin",&id,source).await.map(|record|record.catalog_labels)}
         })};
         tokio::time::timeout(std::time::Duration::from_secs(3),fetcher.entered.notified()).await.unwrap();
-        service.update_agent(UpdateAgentCommand {provider_admin_token:"test-admin".into(),bot_id:first.bot_id.clone(),source:None,visibility:None,
+        service.update_agent(UpdateAgentCommand { agent_id:Default::default(),provider_admin_token:"test-admin".into(),bot_id:first.bot_id.clone(),source:None,visibility:None,
             catalog_labels:Some(serde_json::from_value(json!({"stage":["running"]})).unwrap())}).await.unwrap();
         fetcher.release.notify_one();let result=updating.await.unwrap();
         if legacy && expected.is_some(){assert!(matches!(result,Err(ServiceError::Conflict(_))));}

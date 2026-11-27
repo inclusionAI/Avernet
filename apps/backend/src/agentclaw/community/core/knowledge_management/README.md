@@ -148,12 +148,14 @@ failures are preserved; accepted deletion is never projected as completed.
 
 `DELETE /api/knowledge/spaces/{space_id}/knowledge-bases/{kb_id}` forwards one
 provider deletion request. The default requests a configurable cancellable grace
-period; `?immediate=true` skips that period. A successful response is durable
+period; `?immediate=true` skips that period on an active KB. A pending KB must
+first cancel deletion before requesting immediate deletion. A successful response is durable
 acceptance, not confirmation that physical resources have been reclaimed.
 `POST .../{kb_id}/cancel-delete` asks the provider to cancel before its deadline.
 Both reuse authentication, local space membership and native provider Owner/KB
 checks. No active catalog/registry read is required before cancellation: pending
-KBs can be hidden from those read surfaces. The adapter preserves native statuses,
+KBs remain readable for human management under their existing native ACL,
+without making them available to Bot or retrieval consumption. The adapter preserves native statuses,
 opaque KB identities, deadline, warnings and cleanup state. It adds no scheduler,
 worker, table, automatic retry, restore policy or frontend UI. Protected default
 KBs and expired/deleted cancellation remain provider-denied; the adapter does not
@@ -170,6 +172,14 @@ the existing space membership and native ACL visibility. Both `items` and
 - `status`: `active` or `pending_delete`, independent of `kgbase_status`.
 - `delete_at_ms`: the persisted epoch-millisecond deadline, or null when active.
 - `can_cancel_delete`: the current actor's provider-owned cancellation capability.
+- `can_delete`: the current actor's provider-owned deletion capability, based on
+  native Owner and lifecycle rules; never inferred from `can_manage`.
+
+`GET .../{kb_id}/catalog-detail` additionally forwards optional
+`deletion_grace_period_seconds` (configured grace interval) and
+`delete_preview_at_ms` (preview epoch-millisecond deadline). The preview is not
+an accepted deletion or a persisted deadline; the DELETE response's
+`delete_at_ms` remains authoritative. The detail's `can_delete` is preserved too.
 
 Explicit false/null values and the cursor are preserved. An older provider that
 omits these fields remains compatible; the adapter does not fabricate defaults,

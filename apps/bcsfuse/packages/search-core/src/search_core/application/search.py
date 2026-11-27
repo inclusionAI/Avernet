@@ -2,7 +2,6 @@
 
 import logging
 import math
-import re
 import time
 from collections.abc import Callable
 from contextlib import nullcontext
@@ -20,6 +19,7 @@ from search_core.api.models import (
 from search_core.api.services import RetrievalService
 from search_core.application.emergency import EmergencyControl
 from search_core.catalog.cards import is_label_filter
+from search_core.core.log_context import log_text, received_body_fields
 from search_core.core.observation import (
     events,
     logger,
@@ -29,15 +29,6 @@ from search_core.core.observation import (
 )
 from search_core.core.timing import request_timing, stage_timing
 
-# Keep request logs readable without copying whole prompts or common identifiers.
-_sensitive_text = re.compile(
-    r"(?i)\bbearer\s+[a-z0-9._~+/=-]+|(?<![\w.+-])[\w.+-]+@[\w.-]+\.[a-z]{2,}|(?<!\d)1[3-9]\d{9}(?!\d)"
-)
-
-
-def _log_text(value):
-    return _sensitive_text.sub("[redacted]", value)[:256]
-
 
 def _log_filters(filters, allowed):
     visible = {}
@@ -46,7 +37,7 @@ def _log_filters(filters, allowed):
         if key not in allowed:
             truncated = True
             continue
-        logged = [_log_text(value) for value in values[:20]]
+        logged = [log_text(value) for value in values[:20]]
         visible[key] = logged
         if tuple(logged) != tuple(values[:20]) or len(values) > 20:
             truncated = True
@@ -107,7 +98,7 @@ class CatalogSearchApplication:
                     trace_id,
                     transport=search_transport.get(),
                     operation=command.operation,
-                    query=_log_text(command.query),
+                    query=log_text(command.query),
                     limit=command.limit,
                     filters=logged_filters[0],
                     **({"is_load_test": load_test} if load_test is not None else {}),
@@ -118,18 +109,17 @@ class CatalogSearchApplication:
                         in {"keyword_enabled", "vector_enabled", "rerank_enabled"}
                         and isinstance(value, bool)
                     },
+                    **received_body_fields(self._filter_fields | {"labels.visibility"}),
                 )
             started = time.monotonic()
             with stage_timing("configuration"):
+                overrides = command.retrieval if isinstance(command, CatalogSearchCommand) else {}
+                if overrides and self._emergency is None:
+                    raise UnsupportedSearchOption("request retrieval switches unavailable")
                 snapshot = (
-                    self._emergency.snapshot() if self._emergency is not None else None
+                    self._emergency.for_request(overrides)
+                    if self._emergency is not None else None
                 )
-                if isinstance(command, CatalogSearchCommand) and command.retrieval:
-                    if self._emergency is None:
-                        raise UnsupportedSearchOption(
-                            "request retrieval switches unavailable"
-                        )
-                    snapshot = self._emergency.for_request(command.retrieval)
                 maximum = snapshot.policy.max_results if snapshot is not None else 20
                 if command.limit > maximum:
                     events.record(

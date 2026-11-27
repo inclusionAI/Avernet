@@ -29,7 +29,7 @@ function errorSummary(value: unknown): FanoutErrorSummary | null {
     ...(row.sourceNodeId === undefined ? {} : { sourceNodeId: text(row.sourceNodeId) }) };
 }
 
-export function readFanoutMap(run: StoredRunSnapshot): RecordValue {
+export function readFanoutMap(run: Pick<StoredRunSnapshot, 'flow_id' | 'state_json'>): RecordValue {
   if (run.state_json === null || run.state_json === '') return {};
   let state: RecordValue;
   try { state = object(JSON.parse(run.state_json)); } catch { return invalid(); }

@@ -2,7 +2,7 @@
 
 覆盖 ``MethodKind`` wire 值接受/拒绝、``PrincipalRef`` / ``AgentRef`` /
 ``SpaceRef`` / ``ResourceRef`` 的 ``from_dict`` round-trip 与缺字段拒绝、
-``ProductProfile`` / ``WorkflowKind`` 四个合法值,以及错误类继承关系。
+``ProductProfile`` / ``WorkflowKind`` 全部合法值,以及错误类继承关系。
 """
 import pytest
 
@@ -34,15 +34,30 @@ from agentclaw.community.core.task.context_collab.l6_products.profiles import (
 )
 
 
-@pytest.mark.parametrize("bad", ["", "Swarm", "open+group", "single"])
+@pytest.mark.parametrize(
+    "bad",
+    ["", "swarm", "open+group", "single", "Open + Group", "Open + Single", "Open + Swarm"],
+)
 def test_method_kind_rejects_unknown_wire_values(bad):
     with pytest.raises(ContextCollabValidationError):
         MethodKind.from_wire(bad)
 
 
+def test_method_kind_has_exactly_four_base_members():
+    assert MethodKind.__members__ == {
+        "SINGLE": MethodKind.SINGLE,
+        "GROUP": MethodKind.GROUP,
+        "SWARM": MethodKind.SWARM,
+        "OPEN": MethodKind.OPEN,
+    }
+    assert {kind.value for kind in MethodKind} == {"Single", "Group", "Swarm", "Open"}
+
+
 def test_method_kind_accepts_spec_values():
     assert MethodKind.from_wire("Single") is MethodKind.SINGLE
-    assert MethodKind.from_wire("Open + Group") is MethodKind.OPEN_GROUP
+    assert MethodKind.from_wire("Group") is MethodKind.GROUP
+    assert MethodKind.from_wire("Open") is MethodKind.OPEN
+    assert MethodKind.from_wire("Swarm") is MethodKind.SWARM
 
 
 def test_principal_ref_round_trip():
@@ -160,6 +175,8 @@ def test_resource_ref_rejects_missing_or_empty_fields(data):
 def test_product_profile_covers_spec_values():
     assert ProductProfile.TEAM_TODO.value == "team_todo"
     assert ProductProfile.PUBLIC_DISCUSSION.value == "public_discussion"
+    assert ProductProfile.BBS_PUBLIC_DISCUSSION.value == "bbs_public_discussion"
+    assert ProductProfile.BBS_HELP_REQUEST.value == "bbs_help_request"
 
 
 def test_workflow_kind_covers_spec_values():
@@ -168,6 +185,8 @@ def test_workflow_kind_covers_spec_values():
         WorkflowKind.FORUM_PUBLIC_DISCUSSION.value
         == "forum_public_discussion"
     )
+    assert WorkflowKind.BBS_PUBLIC_DISCUSSION.value == "bbs_public_discussion"
+    assert WorkflowKind.BBS_HELP_REQUEST_GOAL.value == "bbs_help_request_goal"
 
 
 def test_context_collab_error_hierarchy():

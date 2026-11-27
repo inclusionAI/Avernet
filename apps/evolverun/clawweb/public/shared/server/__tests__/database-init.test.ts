@@ -31,12 +31,17 @@ vi.mock("../schema-ordinary-run-request.js", async original => ({
   ordinaryRunRequestMigrations: [],
 }));
 
+vi.mock("../schema-distributed-lock.js", () => ({ distributedLockMigrations: [] }));
 vi.mock("../schema-aistudio-train.js", () => ({ aistudioTrainMigrations: [] }));
 
 import { closeDatabase, initDatabase } from "../db.js";
 const ledgerInsert = "INSERT INTO schema_version (version, description) VALUES (?, ?)";
 
 function schemaQuery(sql: string): unknown[] {
+  if (sql.includes('information_schema.COLUMNS') && sql.includes("TABLE_NAME = 'flow_runs'")) return [[
+    'parent_flow_id', 'root_flow_id',
+  ].map(column_name => ({ column_name, data_type: 'varchar', max_length: 255,
+    is_nullable: 'YES', column_default: null, extra: '', generation_expression: null })), []];
   if (sql === "SELECT MAX(version) as v FROM schema_version") return [[{ v: 0 }], []];
   if (/^CREATE TABLE IF NOT EXISTS schema_version\b/.test(sql) || sql === "CREATE TABLE ordinary_probe (id INT)"
     || sql === ledgerInsert) return [{ affectedRows: 1 }, []];
@@ -77,12 +82,29 @@ describe("database initialization strategy", () => {
     expect(state.repair).toHaveBeenCalledOnce();
   });
 
-  it("only connects for externally provisioned tables, without any migration SQL or repair", async () => {
+  it("only connects and validates externally provisioned lineage, without any migration SQL or repair", async () => {
     const first = await initDatabase(undefined, { schema: "external" });
     expect(first.db.dbType).toBe("mysql");
     expect(await initDatabase(undefined, { schema: "external" })).toBe(first);
     expect(state.connection).toHaveBeenCalledOnce();
-    expect(state.query).not.toHaveBeenCalled();
+    expect(state.query).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("TABLE_NAME = 'flow_runs'"), undefined);
+    expect(state.repair).not.toHaveBeenCalled();
+  });
+
+  it("closes an incompatible external schema without DDL/ledger writes and permits retry after provisioning", async () => {
+    state.query.mockResolvedValueOnce([[], []]);
+    await expect(initDatabase(undefined, { schema: "external" })).rejects.toThrow("flow_runs.parent_flow_id is not compatibly provisioned");
+    expect(state.close).toHaveBeenCalledOnce();
+    expect(state.query).toHaveBeenCalledOnce();
+    expect(state.repair).not.toHaveBeenCalled();
+    expect((await initDatabase(undefined, { schema: "external" })).db.dbType).toBe("mysql");
+  });
+
+  it("propagates external lineage metadata failures unchanged", async () => {
+    const failure = new Error("metadata storage unavailable");
+    state.query.mockRejectedValueOnce(failure);
+    await expect(initDatabase(undefined, { schema: "external" })).rejects.toBe(failure);
+    expect(state.close).toHaveBeenCalledOnce();
     expect(state.repair).not.toHaveBeenCalled();
   });
 

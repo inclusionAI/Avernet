@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | 0.1 | 2026-11-03 | 初始对接合同：Provider token 定位归属、注册、AgentCard 查询/更新/刷新、统一错误定义 |
 | 0.2 | 本次变更 | 管理路径统一 Bot ID；Location 使用 ID；支持 source_agent_id 找回 ID；无 name 兼容、无版本历史 |
+| 0.3 | 本次变更 | 增加可选 AgentId、完整管理视图字段和管理元数据 PATCH；AgentId 不同步 Fuse |
 
 状态：对接评审稿
 
@@ -49,6 +50,10 @@
 | agent_card | object | 完整 A2A 1.0 系列 AgentCard |
 | owners | string[] 或 null | 省略、null 或 [] 时使用 Provider 配置 `config.a2a.default_owner`；非空时须恰好一个有效负责人 ID，不带 human_ 前缀；默认值缺失或无效时拒绝注册 |
 | summary | string | 注册可选展示摘要，最长 4096 个 Unicode 码点；省略时取 Card.description，空字符串表示空摘要 |
+| agent_id | string 或响应中的 null | 可选平台身份；注册接受省略、null、空字符串或字符串原值；本期不做必填/非空或全局唯一校验，历史数据不自动处理 |
+| catalog_labels | object | 配置约束的管理标签集合；更新时整集合替换，`{}` 表示清空自定义标签 |
+| status | string | 管理状态枚举：`online`、`hidden`；注册默认 `online`，仅投影到 AgentCard Fuse 标签，不改变 Fuse 搜索策略 |
+| user_visibility | string | Human 侧可见性枚举：`public`、`protected`、`private`；与 `visibility` 独立 |
 
 Agent 名称仅用于展示，可在同一 Provider 下重复。稳定身份是 bot_id；平台稳定键是 provider_bot_ref，同一环境和 Provider 下唯一。
 
@@ -59,6 +64,12 @@ agent_card 与 agent_card_url 二选一。URL 方式要求地址在 10 秒内直
 注册和 PUT 更新均接受 `private`、`protected`、`public`。注册省略时默认 `protected`；更新省略时保持原值，刷新不改变可见性。可通过 PUT `/a2a/agents/{bot_id}/agent-card` 提交 `{"visibility":"private"}` 单独修改。
 
 这是 BCN Bot 的协作可见性，沿用既有权限规则；`private` 不等同于“仅 owner 可见/可调用”。Human 侧由独立的 `user_visibility` 等权限控制，本字段不会自动修改它。有权限的 Provider 仍可管理 Card；不新增聊天、发现或连接的权限绕过。
+
+### 2.1.2 AgentId 与状态
+
+`agent_id` 存储复用既有 `bcs_bots.agent_code` 列，不新增数据库列或索引。注册时省略或 `null` 表示 SQL NULL，空字符串和非空字符串按原值保存；SDK 或客户端不得增加“必填/非空”前端校验。Card PUT 中省略 `agent_id` 表示保持当前值；已存储 NULL 或空字符串时可用非空字符串补填，同一非空值重复 PUT 幂等成功；尝试清空或替换为不同值返回 409 / `AGENT_IDENTITY_CONFLICT`。`agent_id` 不按 provider_bot_ref、Card.name 自动推导，不写入 Fuse，也不参与本变更中的任何权限接口。
+
+`status` 是 AgentCard 管理状态，当前只允许 `online`、`hidden`。注册默认 `online`。状态通过 metadata 修改接口提交，提交后与其他 Fuse 标签一起投影为 `status: hidden` 或 `status: online`。本契约只要求状态进入同步模型；已知 Bot ID 直接调用、消息投递、通知及既有 hidden 路径的运行时语义继续沿用现状，不新增状态分支。Fuse 是否启用严格 `online` 过滤由 Fuse 端另行实施，不属于本契约。
 
 ### 2.2 AgentCard 字段要求
 
@@ -186,6 +197,11 @@ party 可选：first_party（自身）、second_party（合作方）、third_par
 | bot_id | BCN Bot 标识；改名后保持不变 |
 | agent_card_url | URL 来源地址；直接提交 Card 时为 null |
 | agent_card | 完整 Card，保留可选字段及扩展 |
+| agent_id | 保存的平台身份；SQL NULL 响应为 null，空字符串和非空字符串原样返回 |
+| catalog_labels | 当前自定义管理标签 |
+| visibility | 当前协作可见性 |
+| status | 当前管理状态；仅 `online` / `hidden` |
+| user_visibility | 当前 Human 侧可见性 |
 
 响应头包含 X-Request-Id（排障标识）和 Cache-Control: no-store。
 
@@ -238,6 +254,7 @@ Content-Type: application/json
 | agent_card_url | 二选一 | 拉取 Card 后校验、注册 |
 | agent_card | 二选一，推荐 | 直接校验并保存完整 Card；字段要求见 2.2 |
 | summary | 否 | 仅设置注册时的展示摘要 |
+| agent_id | 否 | 可选平台身份；省略/null、空字符串和非空字符串均可提交，服务端原值保存，不做非空校验 |
 
 名称从 Card.name 获取，无需另传 agent_name。`owners` 省略、传 `null` 或 `[]` 时，BCN 从当前 Provider 的 `config.a2a.default_owner` 补齐负责人；配置缺失或无效时返回 422 / INVALID_OWNER，且不创建 Bot。成功返回 **201 Created**，响应见 2.3；Location 头为 `/a2a/agents/{bot_id}/agent-card`，需携带管理凭据查询。同一 Provider 下 provider_bot_ref 已存在时返回 409 / PROVIDER_BOT_REF_CONFLICT，不覆盖已有 Card。缺少或非法 ref 返回 400。
 
@@ -296,12 +313,13 @@ Content-Type: application/json
 | bot_id（路径参数） | 是 | 注册返回的稳定 Bot ID；请求体不重复填写 |
 | agent_card_url | 二选一，可选方式 | 更新来源 URL，并立即拉取、校验其 Card |
 | agent_card | 二选一，推荐 | 提交完整 Card 覆盖原内容，切换为内联来源 |
+| agent_id | 否 | 省略保持当前值；空身份可补填；非空同值幂等；不同值/清空返回 `AGENT_IDENTITY_CONFLICT` |
 
 成功返回 **200 OK**，响应格式见 2.3，agent_name 为更新后的名称。
 
 | 更新规则 | 说明 |
 | --- | --- |
-| 提交内容 | 提交完整 agent_card 或 agent_card_url，不能同时传；若只改 visibility 则都不传。不做 Card 部分合并、不提供 PATCH |
+| 提交内容 | Card 本体提交完整 agent_card 或 agent_card_url，不能同时传；若只改管理元数据则都不传。Card 本体不做部分合并，状态等管理元数据使用 metadata PATCH |
 | 更新范围 | 更新 Card 及来源，不修改 owners、summary；可选 visibility 为 private/protected/public，省略保持原值，也可只提交 visibility |
 | 来源切换 | 直接提交 Card 后清除旧 URL、停止自动刷新；提交 URL 后按新地址刷新 |
 | 名称变化 | 同步更新 agent_name，后续仍使用原 bot_id；允许与其他 Bot 重名 |
@@ -310,6 +328,27 @@ Content-Type: application/json
 | 已有任务 | 保持原任务关联，不切换到新接口地址 |
 
 错误码见第 7 节。
+
+## 5.1 修改 AgentCard 管理元数据
+
+```http
+PATCH /api/v1/collaboration/a2a/agents/{bot_id}/agent-card/metadata
+Authorization: Bearer <provider_admin_token>
+Content-Type: application/json
+```
+
+可修改字段为 `catalog_labels`、`status`、`visibility`、`user_visibility`。每个字段省略表示保持当前值，显式传入则覆盖为约定值；未知字段、显式 null 或空 JSON 均拒绝。至少传一个字段。
+
+```json
+{
+  "status": "hidden",
+  "visibility": "private",
+  "user_visibility": "private",
+  "catalog_labels": {"lifecycle": ["ga"]}
+}
+```
+
+`catalog_labels` 是整集合替换，`{}` 合法并清空自定义标签；值仍受平台配置约束。`status` 只允许 `online`、`hidden`；`visibility` 和 `user_visibility` 只允许对应的三态枚举。成功返回 200 和完整管理视图。该接口只改管理元数据，不修改 Card 本体、来源或 AgentId，也不触发新的直接调用、群路由、投递或通知分支；提交成功后按现有异步机制同步 Fuse。
 
 ## 6. 刷新 AgentCard
 
@@ -371,6 +410,7 @@ details.field 指出错误字段，例如 agent_card.name；reason 为原因标�
 | 405 | METHOD_NOT_ALLOWED | 方法不支持；响应含 Allow |
 | 406 | NOT_ACCEPTABLE | Accept 不接受 JSON |
 | 409 | PROVIDER_BOT_REF_CONFLICT | 同 Provider 下平台稳定键已登记，先按 ref 找回 ID 再显式更新 |
+| 409 | AGENT_IDENTITY_CONFLICT | 已保存非空 AgentId 与提交值不同，或尝试清空；按当前值保持不变 |
 | 409 | TARGET_CHANGED | 请求期间目标被移除、绑定变化或持续并发冲突；按原 ID 查询后重试 |
 | 409 | CARD_URL_REQUIRED | 内联 Card 无法通过 URL 刷新 |
 | 409 | REFRESH_SUPERSEDED | 刷新结果已过期，没有应用；先查询最新配置 |

@@ -362,13 +362,13 @@ def test_aicoding_refresh_clears_persisted_marker_after_confirmed_extra_success(
             template_service=template_service,
         ) is True
 
-    template_service.update_template.assert_called_once()
+    template_service.update_template_conditionally.assert_called_once()
     runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-1",
         scope=ProjectionScope(mcp=True),
     )
-    cleared = template_service.update_template.call_args.kwargs["template_config"]
+    cleared = template_service.update_template_conditionally.call_args.kwargs["template_config"]
     assert "_aicoding_restart" not in cleared
     assert cleared["template_version_id"] == 101
 
@@ -405,8 +405,8 @@ def test_aicoding_refresh_uses_persisted_template_marker_and_clears_after_succes
             template_service=template_service,
         ) is True
 
-    template_service.update_template.assert_called_once()
-    cleared = template_service.update_template.call_args.kwargs["template_config"]
+    template_service.update_template_conditionally.assert_called_once()
+    cleared = template_service.update_template_conditionally.call_args.kwargs["template_config"]
     assert "_aicoding_restart" not in cleared
     assert cleared["template_version_id"] == 101
 
@@ -457,7 +457,7 @@ def test_aicoding_refresh_keeps_succeeded_refresh_when_marker_clear_fails() -> N
         scope=ProjectionScope(mcp=True),
     )
     skill_set_service.project_skills.assert_awaited_once_with()
-    template_service.update_template.assert_not_called()
+    template_service.update_template_conditionally.assert_not_called()
 
 
 def test_baas_restart_publish_listener_dispatches_strategy_after_restart_event() -> None:

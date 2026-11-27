@@ -1,3 +1,4 @@
+import { normalizeFlowRunLineage, runLineageMatches } from './flow-run-lineage.js';
 import { normalizeFlowRunMarkers } from './flow-run-markers.js';
 import { createHash, randomBytes } from 'node:crypto';
 import type { Request } from 'express';
@@ -32,12 +33,13 @@ const validId = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0
 const ordinaryFields = new Set(['type', 'ordinary_request_key', 'ordinary_parent_flow_id', 'flow_id', 'workflow_id',
   'workflow_title', 'status', 'state_json', 'triggered_by', 'params_json', 'input_json', 'node_count', 'identity_key', 'current_phase',
   'started_at', 'credentials_json', 'origin_session_key', 'origin_session_id', 'origin_bot_id', 'user_id', 'plugin_version',
-  'engine', 'workflow_version', 'workflow_deploy_number', 'env', 'tag']);
+  'engine', 'workflow_version', 'workflow_deploy_number', 'env', 'tag', 'parent_flow_id', 'root_flow_id']);
 const trialKeys = ['run_request_id', 'run_request_parent_flow_id', 'run_request_bot_id', 'run_request_owner_id',
   'candidate_commit', 'pack_digest', 'input_digest'];
 export const hasTrialFields = (body: Record<string, unknown>) => trialKeys.some(key => Object.hasOwn(body, key));
 
 function fingerprint(run: FlowRunInsert): string {
+  // Lineage is checked separately against the locked winner, preserving old hashes.
   // Flow ID and startedAt intentionally excluded: a delivery may propose a new
   // native ID or occur later. env/tag are descriptive metadata, excluded from identity.
   // The pre-existing fields remain frozen, including
@@ -55,7 +57,7 @@ function fingerprint(run: FlowRunInsert): string {
 function validate(body: Record<string, unknown>, run: FlowRunInsert): { key: string; parent: string } {
   if (hasTrialFields(body)) throw conflict();
   if (Object.keys(body).some(key => !ordinaryFields.has(key))) throw invalid();
-  try { normalizeFlowRunMarkers(run); } catch { throw invalid(); }
+  try { normalizeFlowRunMarkers(run); normalizeFlowRunLineage(run); } catch { throw invalid(); }
   if (!validOrdinaryKey(body.ordinary_request_key) || !validId(body.ordinary_parent_flow_id)
     || !validId(run.flowId) || !validId(run.workflowId) || body.ordinary_parent_flow_id === run.flowId) throw invalid();
   if (run.status !== 'pending'
@@ -183,6 +185,7 @@ export class OrdinaryRunRequestService {
         }
       } catch (error) { if (error instanceof OrdinaryRequestError) throw error; throw invalid(); }
       if (existing) {
+        if (!await runLineageMatches(tx, existing.child_flow_id, body)) throw conflict();
         if (existing.parent_flow_id !== parent || existing.child_workflow_id !== run.workflowId || existing.request_fingerprint !== inputHash) throw conflict();
         return { created: false, parent_flow_id: existing.parent_flow_id, flow_id: existing.child_flow_id, workflow_id: existing.child_workflow_id };
       }

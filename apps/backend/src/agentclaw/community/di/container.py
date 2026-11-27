@@ -45,6 +45,9 @@ from agentclaw.community.di.modules.bot_copy_module import BotCopyModule
 from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModule
 from agentclaw.community.di.modules.bot_knowledge_module import BotKnowledgeModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
+from agentclaw.community.di.modules.manifest_apply_module import ManifestApplyModule
+from agentclaw.community.di.modules.managed_bots_module import ManagedBotsModule
+from agentclaw.community.di.openapi_bot_operations_config import OpenApiBotOperationsConfig
 from agentclaw.community.di.modules.bot_message_feedback_module import (
     BotMessageFeedbackModule,
 )
@@ -222,6 +225,7 @@ def build_injector(
         # Transitional Bot access check allowlist (``openapi.bot_access_check``);
         # resolved eagerly below so a malformed block fails the boot.
         OpenApiBotAccessCheckConfigModule(),
+        ManagedBotsModule(),
         InstallationReadConfigModule(),
         SkillCenterModule(),
         SkillCenterGroup4Module(),
@@ -232,6 +236,7 @@ def build_injector(
         SystemConfigModule(),
         CommonConfigModule(),
         BotManagementModule(),
+        ManifestApplyModule(),
         BotCopyModule(),
         ExecutionIdentityModule(),
         OwnerHandoffModule(),
@@ -354,6 +359,7 @@ def build_injector(
     # refusal a failed boot on every profile, pre/prod included.
     _app_injector.get(OpenApiUserIdBypassConfig)
     _app_injector.get(OpenApiBotAccessCheckConfig)
+    _app_injector.get(OpenApiBotOperationsConfig)
     # Manager-sync config: the strict parser refuses an unknown key, a
     # mistyped value, or an enabled block with missing fields — and that
     # refusal must be a failed boot on every profile (a disabled block is

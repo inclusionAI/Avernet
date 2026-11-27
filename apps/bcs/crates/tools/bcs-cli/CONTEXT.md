@@ -42,9 +42,20 @@
 ## Configuration
 
 - CLI args, optional config files, and tokens are read at tool entrypoints only.
-- BCS API URL precedence is `--url`, `BCS_API_BASE_URL`, `MOLTIS_BCS_URL`,
-  `$BOT_DATA_DIR/.bcs/session.json`, a runtime-selected compiled distribution
-  default, then the local default.
+- BCS API URL selection has two layers. In the `bcs-cli` binary, clap captures
+  `--url` and, when no flag is given, `MOLTIS_BCS_URL` into that same argument;
+  the captured argument is resolved first, then `BCS_API_BASE_URL`,
+  `$BOT_DATA_DIR/.bcs/session.json` (`api_base_url` before `bcs_url`), a
+  runtime-selected compiled distribution default, and finally the local default.
+  So the binary ranks `MOLTIS_BCS_URL` above `BCS_API_BASE_URL`.
+- A resolver call handed a hand-built `url: None` skips the captured layer and
+  therefore ranks `BCS_API_BASE_URL` above `MOLTIS_BCS_URL`; the remaining order
+  is unchanged. An invalid URL from a higher-priority source is an error and
+  never falls back to a lower one.
+- Session and URL resolution for both targets lives in
+  `src/cli/environment/shared.rs`, loaded privately by the `lib.rs` and `main.rs`
+  roots; the binary keeps only `Cli`-typed wrappers, log targets, network
+  probing and authentication flow.
 - Distributions may compile both `BCS_CLI_DEFAULT_PRE_URL` and
   `BCS_CLI_DEFAULT_PROD_URL` into one binary. The CLI selects pre for
   `pre`/`prepub` and production for every other runtime environment. Public
@@ -57,8 +68,8 @@ The crate owns operator workflows and diagnostics. It does not own BCS server ru
 
 ## Tests
 
-- `cargo test --package bcs-cli --manifest-path src/bcs/Cargo.toml`
-- `cargo check --package bcs-cli --all-targets --manifest-path src/bcs/Cargo.toml`
+- `cargo test --package bcs-cli --manifest-path apps/bcs/Cargo.toml` (from the repo root)
+- `cargo check --package bcs-cli --all-targets --manifest-path apps/bcs/Cargo.toml`
 
 ## Per-Bot caller context
 

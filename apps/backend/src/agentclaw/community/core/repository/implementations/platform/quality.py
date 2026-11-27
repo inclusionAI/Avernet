@@ -13,7 +13,7 @@ import json
 from typing import Any
 
 from injector import inject
-from sqlalchemy import func
+from sqlalchemy import func, update
 
 from agentclaw.community.core.quality.models import QualityTaskRecord
 from agentclaw.community.core.repository.implementations.bot.resource_locator import resource_locator, resource_owner_filter
@@ -24,6 +24,13 @@ from agentclaw.community.core.repository.protocols.platform import QualityTaskRe
 
 
 logger = get_logger()
+
+
+def _merged_ext(current_ext: dict[str, Any], overlay: dict[str, Any] | None) -> str:
+    """Merge ``overlay`` into the stored ext dict and serialize it back to JSON."""
+    if overlay:
+        current_ext.update(overlay)
+    return json.dumps(current_ext, ensure_ascii=False)
 
 
 def _row_to_record(row) -> QualityTaskRecord | None:
@@ -166,7 +173,17 @@ class QualityTaskRepository(
     def update_status(
         self, id: int, status: str, ext: dict[str, Any] | None = None
     ) -> QualityTaskRecord | None:
-        """Update the status of a quality task by ID."""
+        """Update the status of a quality task by ID.
+
+        The standard-eval driver is spawned per pod, so several drivers can
+        persist the same task state within the same second. Behind the
+        production DB proxy such a no-op UPDATE reports 0 changed rows and
+        the identity-checked ORM flush turns that into ``StaleDataError`` —
+        killing every racing driver (CDO: ``expected to update 1 row(s); 0
+        were matched`` on ``ac_bot_quality_task``). Issue the write as a
+        Core UPDATE and read the row back instead: the racing write stays
+        idempotent and callers still observe the persisted state.
+        """
         with self._db.orm_session() as session:
             row = (
                 session.query(self._Model)
@@ -178,10 +195,8 @@ class QualityTaskRepository(
             )
             if not row:
                 return None
-            row.status = status
-            row.gmt_modified = func.now()
 
-            # Merge ext if provided
+            values: dict[str, Any] = {"status": status, "gmt_modified": func.now()}
             if ext is not None:
                 try:
                     current_ext = (
@@ -191,16 +206,31 @@ class QualityTaskRepository(
                     )
                 except (json.JSONDecodeError, TypeError):
                     current_ext = {}
-                current_ext.update(ext)
-                row.ext = json.dumps(current_ext, ensure_ascii=False)
+                values["ext"] = _merged_ext(current_ext, ext)
 
-            session.flush()
-            session.refresh(row)
-            logger.info("[update_status] updated quality task id=%s, status=%s", row.id, row.status)
-            return _row_to_record(row)
+            session.execute(
+                update(self._Model).where(self._Model.id == row.id).values(**values)
+            )
+            updated = _row_to_record(self._reselect(session, id))
+            if updated is not None:
+                logger.info(
+                    "[update_status] updated quality task id=%s, status=%s",
+                    updated.id,
+                    updated.status,
+                )
+            else:
+                logger.warning(
+                    "[update_status] quality task id=%s vanished during update", id
+                )
+            return updated
 
     def update_ext(self, id: int, ext: dict[str, Any]) -> QualityTaskRecord | None:
-        """Update only the ext field of a quality task by ID."""
+        """Update only the ext field of a quality task by ID.
+
+        Same Core-UPDATE rationale as :meth:`update_status`: concurrent
+        drivers writing identical progress within one second must not raise
+        ``StaleDataError`` from a 0-changed ORM flush.
+        """
         with self._db.orm_session() as session:
             row = (
                 session.query(self._Model)
@@ -212,9 +242,7 @@ class QualityTaskRepository(
             )
             if not row:
                 return None
-            row.gmt_modified = func.now()
 
-            # Merge ext
             try:
                 current_ext = (
                     json.loads(row.ext)
@@ -223,10 +251,37 @@ class QualityTaskRepository(
                 )
             except (json.JSONDecodeError, TypeError):
                 current_ext = {}
-            current_ext.update(ext)
-            row.ext = json.dumps(current_ext, ensure_ascii=False)
 
-            session.flush()
-            session.refresh(row)
-            logger.info("[update_ext] updated quality task id=%s", row.id)
-            return _row_to_record(row)
+            session.execute(
+                update(self._Model)
+                .where(self._Model.id == row.id)
+                .values(
+                    gmt_modified=func.now(),
+                    ext=_merged_ext(current_ext, ext),
+                )
+            )
+            updated = _row_to_record(self._reselect(session, id))
+            if updated is not None:
+                logger.info("[update_ext] updated quality task id=%s", updated.id)
+            else:
+                logger.warning(
+                    "[update_ext] quality task id=%s vanished during update", id
+                )
+            return updated
+
+    def _reselect(self, session: Any, id: int) -> Any:
+        """Re-read the task row after a Core UPDATE.
+
+        The fresh SELECT synchronizes the identity map with what the racing
+        writer actually persisted (or returns ``None`` if the row vanished),
+        instead of asserting the UPDATE rowcount like an ORM flush does.
+        """
+        return (
+            session.query(self._Model)
+            .filter(
+                self._Model.id == id,
+                self._Model.env == get_current_env(),
+            )
+            .populate_existing()
+            .first()
+        )

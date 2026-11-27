@@ -8,6 +8,7 @@ import {
   type CollaborationBotDto,
 } from '@/services/backendApi/collaboration/collaborationBotController';
 import {
+  deleteFriendConnection,
   listFriendConnections,
   type FriendConnectionActorType,
   type FriendConnectionDto,
@@ -64,6 +65,8 @@ export interface BotFriendDirectoryResult {
 }
 
 export const BOT_FRIEND_PAGE_SIZE = 100;
+/** BCS `/bots/query` 契约的 `bot_ids.maxItems=100`：详情解析必须分批。 */
+export const BOT_FRIEND_DETAIL_BATCH_SIZE = 100;
 export const BOT_FRIEND_SESSION_PAGE_SIZE = 10;
 export const BOT_FRIEND_MESSAGE_PAGE_SIZE = 50;
 export const BOT_FRIEND_DISABLED_REASON = '暂不支持查看 Bot 好友对话';
@@ -125,7 +128,14 @@ async function loadAllRelations(
     const current = response.data?.items ?? [];
     total = response.data?.total ?? current.length;
     items.push(...current);
-    if (current.length === 0) break;
+    if (current.length === 0) {
+      // D2:total 未满时的空页是服务端无进展信号——中止为该类型的错误态
+      // (带重试),绝不把部分名单当全量名单渲染/搜索。
+      if (items.length < total) {
+        throw new Error('friend-connections pagination made no progress');
+      }
+      break;
+    }
     page += 1;
   }
   return { items, total };
@@ -194,9 +204,24 @@ async function resolveDetails(
     ),
   );
   if (queryIds.length === 0) return new Map();
+  // 契约限制 bot_ids 单次 ≤100（maxItems=100）：全量名单可能上千，一次性
+  // 提交会被 BCS 拒绝，catch 后所有好友退化成原始 id，姓名搜索失效。按
+  // 100 分批查询再合并详情。单批失败沿用原有降级语义（详情不可用 → 原始 id）。
+  const batches: string[][] = [];
+  for (let index = 0; index < queryIds.length; index += BOT_FRIEND_DETAIL_BATCH_SIZE) {
+    batches.push(queryIds.slice(index, index + BOT_FRIEND_DETAIL_BATCH_SIZE));
+  }
   try {
-    const response = await queryCollaborationBots({ bot_ids: queryIds }, signal);
-    return new Map((response.data?.items ?? []).map((item) => [item.bot_id, item]));
+    const responses = await Promise.all(
+      batches.map((bot_ids) => queryCollaborationBots({ bot_ids }, signal)),
+    );
+    const details = new Map<string, CollaborationBotDto>();
+    for (const response of responses) {
+      for (const item of response.data?.items ?? []) {
+        details.set(item.bot_id, item);
+      }
+    }
+    return details;
   } catch {
     return new Map();
   }
@@ -241,6 +266,26 @@ export const botFriendConversationService = {
   },
 
   loadSection,
+
+  async removeFriend(
+    botIdentityId: string,
+    friend: { actorType: BotFriendActorType; actorId: string },
+  ): Promise<DomainResult<{ deleted: boolean }>> {
+    try {
+      const response = await deleteFriendConnection({
+        actor_type: 'bot',
+        actor_id: botIdentityId,
+        target_actor_type: friend.actorType,
+        target_actor_id: friend.actorId,
+      });
+      return { ok: true, data: { deleted: response.data?.deleted ?? false } };
+    } catch {
+      return {
+        ok: false,
+        error: toDomainError('BOT_FRIEND_REMOVE_FAILED', '移除好友失败，请稍后重试。'),
+      };
+    }
+  },
 
   async listSessionsPage(
     botIdentityId: string,

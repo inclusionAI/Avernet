@@ -76,9 +76,9 @@ export default function EditorFlowNode({ id, data, selected, isConnectable }: No
           <CanvasHint text={node.title || node.id}>
             <h3 className="truncate text-sm font-semibold">{node.title || node.id}</h3>
           </CanvasHint>
-          <CanvasHint text={type}>
+          <CanvasHint text={`${meta.label} · ${type}`}>
             <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-              {meta?.label ?? '扩展节点'} · {type}
+              {meta.label} · {type}
             </p>
           </CanvasHint>
         </div>

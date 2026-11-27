@@ -20,7 +20,7 @@ it('rejects a v150 ledger BUSY race and retries when a peer has completed v151',
   const peer = new Database(path); peer.pragma('journal_mode = WAL');
   peer.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
     INSERT INTO schema_version (version,description) VALUES (149,'old');
-    CREATE TABLE flow_runs (id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT);
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, id INTEGER PRIMARY KEY, gmt_modified INTEGER, flow_id TEXT);
     INSERT INTO flow_runs (gmt_modified,flow_id) VALUES (0,'existing');
     CREATE TABLE future_probe (value INTEGER);`);
   for (const sql of sqliteTriggers.filter(ddl => /trg_(flow_runs|schema_version)_update\b/.test(ddl))) peer.exec(sql);
@@ -66,7 +66,7 @@ it.each(['missing v150', 'wrong v150', 'wrong v151', 'conflicting v150', 'confli
   ('fails closed for an advanced peer with %s', async scenario => {
     const raw = new Database(':memory:');
     raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
-      CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing');`);
+      CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
     const real = new SqliteDatabase(raw); let raced = false;
     const code = scenario === 'readonly' ? 'SQLITE_READONLY' : scenario === 'busy snapshot' ? 'SQLITE_BUSY_SNAPSHOT'
       : scenario === 'io error' ? 'SQLITE_IOERR' : 'SQLITE_BUSY';
@@ -103,7 +103,7 @@ it.each(['missing v150', 'wrong v150', 'wrong v151', 'conflicting v150', 'confli
 it('accepts v150 CREATE BUSY when the peer has verified and recorded both known versions', async () => {
   const raw = new Database(':memory:');
   raw.exec(`CREATE TABLE schema_version (version INTEGER, description TEXT); INSERT INTO schema_version VALUES (149,'old');
-    CREATE TABLE flow_runs (flow_id TEXT); INSERT INTO flow_runs VALUES ('existing');`);
+    CREATE TABLE flow_runs (parent_flow_id VARCHAR(255) DEFAULT NULL, root_flow_id VARCHAR(255) DEFAULT NULL, flow_id TEXT); INSERT INTO flow_runs (flow_id) VALUES ('existing');`);
   const { sqliteTriggers } = await import('../schema.js');
   for (const ddl of sqliteTriggers.filter(sql => /trg_(flow_runs|schema_version)_update\b/.test(sql))) raw.exec(ddl);
   const real = new SqliteDatabase(raw); let raced = false;

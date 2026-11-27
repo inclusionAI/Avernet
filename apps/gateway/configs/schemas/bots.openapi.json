@@ -11406,6 +11406,90 @@
         "title": "Envelope[LocalOpenFolderResult]",
         "type": "object"
       },
+      "Envelope_ManagedBotSnapshot_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManagedBotSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[ManagedBotSnapshot]",
+        "type": "object"
+      },
+      "Envelope_ManagedBotStatus_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManagedBotStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[ManagedBotStatus]",
+        "type": "object"
+      },
       "Envelope_McpCallTypeResult_": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -12498,6 +12582,48 @@
         "title": "Envelope[Page[LocalDevice]]",
         "type": "object"
       },
+      "Envelope_Page_ManagedBotStatus__": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_ManagedBotStatus_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[ManagedBotStatus]]",
+        "type": "object"
+      },
       "Envelope_Page_MarketFavoriteItem__": {
         "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
         "properties": {
@@ -13294,6 +13420,48 @@
           "request_id"
         ],
         "title": "Envelope[Page[SubscriptionItem]]",
+        "type": "object"
+      },
+      "Envelope_Page_TemplateBotRow__": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Page_TemplateBotRow_"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Page[TemplateBotRow]]",
         "type": "object"
       },
       "Envelope_Page_TopicListItem__": {
@@ -18974,6 +19142,262 @@
         "title": "LocalOpenFolderResult",
         "type": "object"
       },
+      "ManagedBotRestart": {
+        "additionalProperties": false,
+        "description": "Restart one draft Bot; acceptance is not readiness or completion.",
+        "properties": {
+          "bot_id": {
+            "description": "Source Bot identifier.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "extra_configs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RestartExtraConfigs"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omit for a normal restart without updating the snapshot."
+          },
+          "owner_id": {
+            "description": "Current Bot Owner identifier, not the calling operator.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "stage": {
+            "const": "draft",
+            "default": "draft",
+            "description": "Only the editable draft runtime can be restarted.",
+            "title": "Stage",
+            "type": "string"
+          },
+          "template_key": {
+            "description": "Expected creation template key; mismatches are refused.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Template Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "owner_id",
+          "template_key"
+        ],
+        "title": "ManagedBotRestart",
+        "type": "object"
+      },
+      "ManagedBotScope": {
+        "additionalProperties": false,
+        "description": "Template-scoped Bot address checked against its persisted snapshot.",
+        "properties": {
+          "bot_id": {
+            "description": "Source Bot identifier.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Current Bot Owner identifier, not the calling operator.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "template_key": {
+            "description": "Expected creation template key; mismatches are refused.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Template Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "owner_id",
+          "template_key"
+        ],
+        "title": "ManagedBotScope",
+        "type": "object"
+      },
+      "ManagedBotSnapshot": {
+        "description": "Sensitive complete snapshot available only to approved server applications.",
+        "properties": {
+          "active_engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Active engine for existing legacy migration policy.",
+            "title": "Active Engine"
+          },
+          "bot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Saved Bot name for legacy form migration.",
+            "title": "Bot Name"
+          },
+          "bot_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bot lifecycle kind; desktop lifecycle is managed separately.",
+            "title": "Bot Type"
+          },
+          "env": {
+            "description": "Authoritative platform environment serving this snapshot.",
+            "title": "Env",
+            "type": "string"
+          },
+          "template_config": {
+            "additionalProperties": true,
+            "description": "Persisted draft template snapshot, for server-side merging only; do not forward to a browser.",
+            "title": "Template Config",
+            "type": "object"
+          },
+          "template_config_hash": {
+            "description": "Opaque snapshot revision hash used to prevent stale replacement.",
+            "title": "Template Config Hash",
+            "type": "string"
+          },
+          "template_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Creation template type for existing legacy migration policy.",
+            "title": "Template Type"
+          }
+        },
+        "required": [
+          "template_config",
+          "template_config_hash",
+          "env"
+        ],
+        "title": "ManagedBotSnapshot",
+        "type": "object"
+      },
+      "ManagedBotStatus": {
+        "description": "Runtime readiness and optional engine-owned restart operation progress.",
+        "properties": {
+          "bot_id": {
+            "description": "Source Bot identifier.",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "ext": {
+            "additionalProperties": true,
+            "description": "Engine-namespaced extensions.",
+            "title": "Ext",
+            "type": "object"
+          },
+          "is_ready": {
+            "description": "Existing runtime readiness policy; ACTIVE alone is not restart completion.",
+            "title": "Is Ready",
+            "type": "boolean"
+          },
+          "owner_id": {
+            "description": "Current Bot Owner identifier.",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "Runtime lifecycle status, distinct from restart operation status.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "owner_id",
+          "status",
+          "is_ready"
+        ],
+        "title": "ManagedBotStatus",
+        "type": "object"
+      },
+      "ManagedBotStatusQueries": {
+        "additionalProperties": false,
+        "description": "Bounded batch of exact draft addresses under one template.",
+        "properties": {
+          "bots": {
+            "description": "At most 20 targets; duplicate pairs are ignored.",
+            "items": {
+              "$ref": "#/components/schemas/ManagedBotTarget"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Bots",
+            "type": "array"
+          },
+          "template_key": {
+            "description": "Expected template key of every target.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Template Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template_key",
+          "bots"
+        ],
+        "title": "ManagedBotStatusQueries",
+        "type": "object"
+      },
+      "ManagedBotTarget": {
+        "additionalProperties": false,
+        "description": "Exact current Owner and Bot identity of a managed draft runtime.",
+        "properties": {
+          "bot_id": {
+            "description": "Source Bot identifier.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Current Bot Owner identifier, not the calling operator.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Owner Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "owner_id"
+        ],
+        "title": "ManagedBotTarget",
+        "type": "object"
+      },
       "ManifestConstruct": {
         "description": "One thing a manifest can declare, and whether this bot accepts it.",
         "properties": {
@@ -21911,6 +22335,31 @@
         "title": "Page[LocalDevice]",
         "type": "object"
       },
+      "Page_ManagedBotStatus_": {
+        "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/ManagedBotStatus"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "example": 1,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[ManagedBotStatus]",
+        "type": "object"
+      },
       "Page_MarketFavoriteItem_": {
         "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
         "properties": {
@@ -22434,6 +22883,31 @@
           "items"
         ],
         "title": "Page[TaskInfoRecordDTO]",
+        "type": "object"
+      },
+      "Page_TemplateBotRow_": {
+        "description": "One page of a list result: `total` counts every match, `items` holds the current page.",
+        "properties": {
+          "items": {
+            "description": "Items on the current page (present, possibly empty).",
+            "items": {
+              "$ref": "#/components/schemas/TemplateBotRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "description": "Total number of items matching the query.",
+            "example": 1,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "Page[TemplateBotRow]",
         "type": "object"
       },
       "Page_TopicListItem_": {
@@ -23953,6 +24427,37 @@
           "FILE",
           "FOLDER"
         ]
+      },
+      "RestartExtraConfigs": {
+        "additionalProperties": false,
+        "description": "Complete merged template snapshot for the existing restart lifecycle.",
+        "properties": {
+          "confirmed_template_update": {
+            "const": "true",
+            "description": "Explicit string confirmation to apply the snapshot.",
+            "title": "Confirmed Template Update",
+            "type": "string"
+          },
+          "expected_template_config_hash": {
+            "description": "Hash from the snapshot read. A changed snapshot or downgrade is refused with 409 under the persistence lock.",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Template Config Hash",
+            "type": "string"
+          },
+          "template_config": {
+            "additionalProperties": true,
+            "description": "Complete snapshot, merged by the trusted caller; never a partial patch.",
+            "title": "Template Config",
+            "type": "object"
+          }
+        },
+        "required": [
+          "template_config",
+          "confirmed_template_update",
+          "expected_template_config_hash"
+        ],
+        "title": "RestartExtraConfigs",
+        "type": "object"
       },
       "RoundDetailDTO": {
         "properties": {
@@ -30438,6 +30943,189 @@
         "title": "TaskTrajectoryDTO",
         "type": "object"
       },
+      "TemplateBotQueries": {
+        "additionalProperties": false,
+        "description": "Discover Bot identities by creation template without returning credentials.",
+        "properties": {
+          "limit": {
+            "default": 20,
+            "description": "Maximum number of stage rows, at most 100.",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "description": "Zero-based result offset after filtering.",
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "outdated_before": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only known snapshot version IDs below this ID; unknown versions are excluded.",
+            "title": "Outdated Before"
+          },
+          "search": {
+            "default": "",
+            "description": "Literal substring of Bot name, Bot ID or Owner.",
+            "maxLength": 256,
+            "title": "Search",
+            "type": "string"
+          },
+          "stage": {
+            "default": "",
+            "description": "Empty selects all; prestable denotes the verification runtime.",
+            "enum": [
+              "",
+              "draft",
+              "prestable",
+              "online"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "template_key": {
+            "description": "Creation template key, across template versions in the current environment.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Template Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template_key"
+        ],
+        "title": "TemplateBotQueries",
+        "type": "object"
+      },
+      "TemplateBotRow": {
+        "description": "Display-only metadata for one Bot runtime stage.",
+        "properties": {
+          "bot_id": {
+            "description": "Source Bot identifier.",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "bot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Saved Bot name.",
+            "title": "Bot Name"
+          },
+          "bot_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bot kind, such as personal or service.",
+            "title": "Bot Type"
+          },
+          "engine": {
+            "description": "Active engine type.",
+            "title": "Engine",
+            "type": "string"
+          },
+          "env": {
+            "description": "Bot platform environment; independent of publication stage.",
+            "title": "Env",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Current Bot Owner identifier.",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "owner_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Saved Owner display name, when known.",
+            "title": "Owner Name"
+          },
+          "publication_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Publication identity for published rows; absent on draft.",
+            "title": "Publication Id"
+          },
+          "stage": {
+            "description": "draft, prestable or online; published stages are read-only.",
+            "title": "Stage",
+            "type": "string"
+          },
+          "status": {
+            "description": "Source Bot runtime lifecycle status; not a publication health probe.",
+            "title": "Status",
+            "type": "string"
+          },
+          "template_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This stage snapshot version label, when recorded.",
+            "title": "Template Version"
+          },
+          "template_version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This stage snapshot version ID, or unknown; never borrowed from draft.",
+            "title": "Template Version Id"
+          }
+        },
+        "required": [
+          "bot_id",
+          "owner_id",
+          "engine",
+          "env",
+          "status",
+          "stage"
+        ],
+        "title": "TemplateBotRow",
+        "type": "object"
+      },
       "TopicClosed": {
         "description": "Outcome of closing a Topic — idempotent for an already-closed topic.",
         "properties": {
@@ -33369,6 +34057,684 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/openapi/v1/bots/restart-for-others": {
+      "post": {
+        "description": "Approved applications may restart another Owner's draft Bot without a per-Bot grant.\n\nHTTP 200 is acceptance or observation of an active operation, not completion.\nUses the existing restart lock, operation deduplication and backup policy.\nPoll status-for-others for engine-owned operation progress and backup warnings.",
+        "operationId": "restart_for_others_openapi_v1_bots_restart_for_others_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedBotRestart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ManagedBotStatus_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The verified application is not approved for this environment and tenant."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 501000,
+                  "message": "Not supported for this engine",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Supported engines: aicoding, claude_code."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Accept a managed draft Bot restart",
+        "tags": [
+          "Bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/status-for-others": {
+      "post": {
+        "description": "Runtime status is separate from restart completion. Failed operations remain successful query results.",
+        "operationId": "status_for_others_openapi_v1_bots_status_for_others_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedBotStatusQueries"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_ManagedBotStatus__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The verified application is not approved for this environment and tenant."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 501000,
+                  "message": "Not supported for this engine",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Supported engines: aicoding, claude_code."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Read managed draft restart progress in a batch",
+        "tags": [
+          "Bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/template-config-for-others": {
+      "post": {
+        "description": "Approved backend callers only. The sensitive result must remain server-side.",
+        "operationId": "get_template_snapshot_openapi_v1_bots_template_config_for_others_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedBotScope"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ManagedBotSnapshot_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The verified application is not approved for this environment and tenant."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Read a managed draft template snapshot",
+        "tags": [
+          "Bots"
+        ]
+      }
+    },
+    "/openapi/v1/bots/template-queries": {
+      "post": {
+        "description": "Approved server applications only, scoped by tenant and deployment environment.",
+        "operationId": "query_template_bots_openapi_v1_bots_template_queries_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateBotQueries"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_TemplateBotRow__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The verified application is not approved for this environment and tenant."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Discover template-associated Bot runtimes",
+        "tags": [
+          "Bots"
+        ]
+      }
+    },
     "/openapi/v1/bots/{bot_id}/mcps/{server_code}/config": {
       "get": {
         "description": "Read the addressed Bot's explicit, redacted MCP connection overrides.",

@@ -331,3 +331,60 @@ def test_authoritative_approval_association_discards_wrong_early_puid():
     RiskAdvance(repo, lambda _: True, submit, lambda: datetime(2026, 1, 1)).advance('dev', 'a')
     assert repo.row.approval_puid == 'correct'
     assert 'pending_approval' not in json.loads(repo.row.workflow_json)
+
+
+@pytest.mark.parametrize("decision", ["AGREE", "DISAGREE", "CANCEL"])
+def test_recovered_matching_negative_approval_can_associate_despite_drift(decision):
+    repo = MemoryRepository(row())
+    eligibility = MagicMock(side_effect=[True, False])
+
+    def submit(record, on_started):
+        workflow = json.loads(repo.row.workflow_json)
+        workflow["error"] = "APPROVAL_OUTCOME_UNKNOWN"
+        workflow["pending_approval"] = {"puid": "correct", "decision": decision}
+        repo.update_current(env="dev", risk_check_id="a", row_version=repo.row.row_version, changes={
+            "phase": "NEEDS_ATTENTION", "workflow_json": json.dumps(workflow),
+        })
+        on_started({"puid": "correct"})
+        return "approval"
+
+    RiskAdvance(repo, eligibility, submit, lambda: datetime(2026, 1, 1)).advance("dev", "a")
+    if decision == "AGREE":
+        assert repo.row.phase == "NEEDS_ATTENTION"
+        assert repo.row.approval_puid is None
+        assert eligibility.call_count == 2
+    else:
+        assert repo.row.phase == "APPROVING"
+        assert repo.row.approval_puid == "correct"
+        assert eligibility.call_count == 1
+
+
+def test_expired_prewrite_block_projects_blocked_legacy_approval():
+    from agentclaw.community.core.bot_public_risk.advance import RiskPendingHandler
+    from agentclaw.community.core.bot_public_risk.approval_guard import RiskApprovalGuard
+
+    now = datetime(2026, 1, 1)
+    pending = row(phase="APPROVING", public_scope="legacy", approval_puid="puid", next_action_at=now,
+                  workflow_json=json.dumps({
+                      "approval_target_ready": True,
+                      "callback_claim": {
+                          "event": {"puid": "puid", "decision": "AGREE"},
+                          "status": "processing", "block_reason": "CONFIG_CHANGED",
+                      },
+                  }))
+    repo = MemoryRepository(pending)
+    bots, public = MagicMock(), MagicMock()
+    ext = {"public_approval": {"puid": "puid", "status": "PROCESSING"}, "keep": True}
+    bots.get_by_pk.return_value = {"bot_id": "b", "owner_id": "owner", "ext": ext}
+    guard = RiskApprovalGuard(repo, MagicMock(), lambda: now)
+    handler = RiskPendingHandler(repo, bots, public, guard, lambda: "dev", clock=lambda: now)
+    handler.handle({"tenant": "teamclaw", "env": "dev", "risk_check_id": "a"})
+
+    assert repo.row.phase == "NEEDS_ATTENTION"
+    assert json.loads(repo.row.workflow_json)["error"] == "CONFIG_CHANGED"
+    patch = bots.compare_and_set_ext.call_args.kwargs["ext"]
+    assert patch["keep"] is True
+    assert patch["public_approval"]["status"] == "BLOCKED"
+    assert patch["public_approval"]["approval_decision"] == "AGREE"
+    assert patch["public_approval"]["block_reason"] == "CONFIG_CHANGED"
+    public.handle_public_approval_callback.assert_not_called()

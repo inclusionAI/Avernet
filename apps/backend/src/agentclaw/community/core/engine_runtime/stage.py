@@ -321,6 +321,7 @@ def resolve_stage_device_context(
     owner_id: str,
     stage: str,
     device_uuid: str | None = None,
+    operator_id: str | None = None,
 ) -> DeviceContext:
     """The device context of the runtime ``stage`` names.
 
@@ -342,6 +343,12 @@ def resolve_stage_device_context(
     primary key selects publication history, and its current Owner is passed to
     device resolution. A bot-id-only lookup cannot safely identify ``default``.
     Callers must authorize the actor before reaching this resource resolver.
+
+    ``operator_id`` is a compatibility seam for draft resources whose stable
+    entity locator no longer equals the authenticated operator after an Owner
+    handoff. Existing callers omit it and retain the original owner-scoped
+    resolution. When supplied, the locator selects the draft binding first and
+    the operator is used only to build its connection context.
 
     A row that is not there yields empty facts rather than an exception, and
     :func:`require_stage_addressable` then refuses the published stage as having
@@ -386,6 +393,15 @@ def resolve_stage_device_context(
     require_known_stage(stage)
     selection = {"device_uuid": device_uuid} if device_uuid is not None else {}
     if stage == STAGE_DRAFT:
+        if operator_id is not None and operator_id != owner_id:
+            binding = binding_repo.get_active_by_bot_and_owner(bot_id, owner_id)
+            if binding is None:
+                raise DeviceNotBoundError(
+                    f"engine_runtime: no draft binding for bot={bot_id}"
+                )
+            return resolver.resolve_for_binding(
+                binding.id, operator_id, bot_id=bot_id, **selection
+            )
         return resolver.resolve_for_bot(bot_id, owner_id, **selection)
 
     try:

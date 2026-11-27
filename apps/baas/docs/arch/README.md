@@ -4,7 +4,7 @@ Record constraints and ownership specific to this app; keep cross-app rules in t
 
 ## Existing architecture and contracts
 
-The [BaaS ADR index](../adr/README.md) lists all 15 existing BaaS decisions and their individual status and scope.
+The [BaaS ADR index](../adr/README.md) lists the existing BaaS decisions and their individual status and scope.
 
 - [Layered architecture ADR](../adr/0001-layered-architecture.md)
 - [Plugin selection ADR](../adr/0003-spi-plugin-backend-selection.md)

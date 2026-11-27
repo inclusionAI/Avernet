@@ -398,6 +398,41 @@ async fn tool_records_need_the_negotiated_extension() {
 }
 
 #[tokio::test]
+async fn tool_v2_records_need_the_negotiated_extension() {
+    let extension = bcs_a2a_http::tools::EXTENSION_V2;
+    let record = json!({"messageId": "m-v2", "role": "ROLE_AGENT",
+        "extensions": [extension],
+        "parts": [{"data": {"phase": "start", "toolCallId": "call-v2", "name": "search"}}]});
+    let stream = vec![json!({"task": task("TASK_STATE_WORKING")}), status("TASK_STATE_WORKING", Some(record))];
+
+    let (client, agent) = fixture_with(vec![extension.to_owned()]).await;
+    agent.on("SendStreamingMessage", Answer::Sse(stream.clone()));
+    let SendOutcome::Accepted { events, .. } = client.start(&target(), request("r")).await else {
+        panic!("not accepted");
+    };
+    let events = collect(events.unwrap()).await;
+    assert_eq!(kinds(&events), vec!["snapshot", "tool"]);
+    assert_eq!(payload(&events[1])["tool"], json!({"phase": "start", "toolCallId": "call-v2", "name": "search"}));
+    assert_eq!(agent.calls.lock().unwrap()[0].2.as_deref(), Some(extension));
+
+    let (client, agent) = fixture_with(vec![extension.to_owned()]).await;
+    let mut repeated = stream.clone();
+    repeated.push(repeated[1].clone());
+    agent.on("SendStreamingMessage", Answer::Sse(repeated));
+    let SendOutcome::Accepted { events, .. } = client.start(&target(), request("r")).await else {
+        panic!("not accepted");
+    };
+    assert_eq!(kinds(&collect(events.unwrap()).await), vec!["snapshot", "tool"]);
+
+    let (client, agent) = fixture().await;
+    agent.on("SendStreamingMessage", Answer::Sse(stream));
+    let SendOutcome::Accepted { events, .. } = client.start(&target(), request("r")).await else {
+        panic!("not accepted");
+    };
+    assert_eq!(kinds(&collect(events.unwrap()).await), vec!["snapshot"]);
+}
+
+#[tokio::test]
 async fn complete_rejections_are_distinct_from_uncertain_outcomes() {
     let (client, agent) = fixture().await;
     let cases = [

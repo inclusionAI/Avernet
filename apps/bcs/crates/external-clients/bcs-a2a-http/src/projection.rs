@@ -55,6 +55,10 @@ impl Projection {
         self.tools = crate::tools::Tools::new(enabled); self
     }
 
+    pub fn with_tools_versions(mut self, v1_enabled: bool, v2_enabled: bool) -> Self {
+        self.tools = crate::tools::Tools::with_versions(v1_enabled, v2_enabled); self
+    }
+
     fn message(&mut self, message: a2a::Message, out: &mut Vec<Output>) -> Result<(), ProjectionError> {
         for record in self.tools.decode(&message).map_err(ProjectionError::Tool)? { out.push(Output::Tool(record)); }
         out.push(Output::StatusMessage(message));

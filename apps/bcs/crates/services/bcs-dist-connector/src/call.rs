@@ -293,10 +293,10 @@ impl Call {
     /// a pending effect until another holder takes it or it is ended.
     ///
     /// Parking re-reads `disp` every poll interval and returns only on `Lost`
-    /// or phase `ended`. It does not carry out cancels and ignores pokes. With
-    /// today's stub membership no other process can take the call over, so a
-    /// parked call usually stays parked until the process exits. Drain does
-    /// not abort it either.
+    /// or phase `ended`. It does not carry out cancels and ignores pokes.
+    /// Another process can take the call over only once membership proves
+    /// this one dead, so a parked call usually stays parked until `drain`
+    /// stops it (or the process exits).
     async fn park(&mut self) {
         self.events = None;
         self.status.pending_effect.store(true, Ordering::SeqCst);

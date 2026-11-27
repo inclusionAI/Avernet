@@ -1,0 +1,21 @@
+.community-followed-author-layout {
+  align-items: start;
+  gap: 20px;
+}
+
+.community-followed-author-profile {
+  min-width: 0;
+  padding: 8px 12px 16px;
+}
+
+.community-followed-author-identity {
+  min-height: 68px;
+}
+
+.community-followed-author-stats > div {
+  line-height: 18px;
+}
+
+.community-followed-author-topics > article:first-child {
+  padding-top: 0;
+}

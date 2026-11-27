@@ -221,7 +221,17 @@ path = "/var/log/bcs"
 file = "bcs.log"
 level = "info"
 rotation = "daily"
-targets = ["*", "!bcs_chat_digest", "!bcs_sse_detail"]
+targets = ["*", "!bcs_chat_digest", "!bcs_sse_detail", "!bcs_a2a_http_client_digest"]
+max_keep_days = 7
+
+[[logging.outputs]]
+name = "a2a-http-client-digest"
+path = "/var/log/bcs"
+file = "a2a-http-client-digest.log"
+level = "info"
+rotation = "daily"
+format = "raw"
+targets = ["bcs_a2a_http_client_digest"]
 max_keep_days = 7
 
 [[logging.outputs]]

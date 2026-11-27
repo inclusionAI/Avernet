@@ -118,17 +118,17 @@ async fn unavailable_outbox_yields_the_only_slot(unknown: bool) {
     assert_eq!(runner.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn not_applied_outbox_yields_capacity_and_recovers_without_rerunning() {
     unavailable_outbox_yields_the_only_slot(false).await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn unknown_outbox_yields_capacity_and_replays_the_same_effect() {
     unavailable_outbox_yields_the_only_slot(true).await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn canceled_replay_parking_finishes_cleanup_before_retrying_effects() {
     use std::sync::atomic::Ordering;
     use std::time::Duration;
@@ -201,7 +201,7 @@ async fn canceled_replay_parking_finishes_cleanup_before_retrying_effects() {
     assert_eq!(runner.calls.load(Ordering::SeqCst), 2);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn isolation_racing_failed_replay_parking_closes_the_gate_and_yields() {
     use std::sync::atomic::Ordering;
     use std::time::Duration;
@@ -408,16 +408,16 @@ async fn isolated_session_yields_the_only_local_slot(blocked: bool) {
     assert_eq!(after.control.mode, isolated.control.mode);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn blocked_session_releases_capacity_without_discarding_durable_evidence() {
     isolated_session_yields_the_only_local_slot(true).await;
 }
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn completed_quarantine_releases_capacity_without_automatic_resume() {
     isolated_session_yields_the_only_local_slot(false).await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn an_idle_owned_shard_does_not_hold_the_only_reader_forever() {
     let f = Fixture::with_shards(
         Arc::new(FinishingRunner::default()),
@@ -470,7 +470,7 @@ async fn an_idle_owned_shard_does_not_hold_the_only_reader_forever() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_hot_session_yields_before_draining_all_its_inputs() {
     let f = Fixture::with_reader_limits(Arc::new(FinishingRunner::default()), 1, 1, 4).await;
     let mut hot = Vec::new();
@@ -519,33 +519,36 @@ async fn a_hot_session_yields_before_draining_all_its_inputs() {
 }
 
 #[tokio::test]
-async fn inadmissible_physical_profile_or_binding_never_creates_a_task() {
+async fn invalid_session_or_output_limits_never_create_a_task() {
     let f = Fixture::new(Arc::new(FinishingRunner::default())).await;
-    for large_binding in [false, true] {
-        let mut definition = spec();
-        let mut initial = metadata();
-        if large_binding {
-            definition.participants.push(ParticipantBinding {
-                node: NodeId("node".into()),
-                pool: PoolId("pool".into()),
-                target: AgentBinding {
-                    agent: AgentId("a".into()),
-                    binding_version: BindingVersion("1".into()),
-                    credential_ref: CredentialRef("x".repeat(30_000)),
-                },
-                capabilities: DownstreamCapabilities {
-                    idempotent_start: true,
-                    idempotent_input: true,
-                    query_by_request: true,
-                    query_by_task: true,
-                    subscribe: true,
-                    resume_events: true,
-                    cancel: true,
-                },
-            });
-        } else {
-            initial.output_limits.max_outbox_bytes = 65_537;
-        }
+    let mut bad_profile = metadata();
+    bad_profile.output_limits.max_outbox_bytes = 65_537;
+    let mut bad_timeout = spec();
+    bad_timeout.limits.task_timeout_millis = u64::MAX;
+    let mut large_binding = spec();
+    large_binding.participants.push(ParticipantBinding {
+        node: NodeId("node".into()),
+        pool: PoolId("pool".into()),
+        target: AgentBinding {
+            agent: AgentId("a".into()),
+            binding_version: BindingVersion("1".into()),
+            credential_ref: CredentialRef("x".repeat(30_000)),
+        },
+        capabilities: DownstreamCapabilities {
+            idempotent_start: true,
+            idempotent_input: true,
+            query_by_request: true,
+            query_by_task: true,
+            subscribe: true,
+            resume_events: true,
+            cancel: true,
+        },
+    });
+    for (case, definition, initial) in [
+        ("oversized-outbox", spec(), bad_profile),
+        ("oversized-binding", large_binding, metadata()),
+        ("unrepresentable-timeout", bad_timeout, metadata()),
+    ] {
         let result = f
             .inbox
             .admit(AdmitRequest {
@@ -554,7 +557,7 @@ async fn inadmissible_physical_profile_or_binding_never_creates_a_task() {
                     schema_version: 1,
                     sid: definition.sid.clone(),
                     tid: initial.tid.clone(),
-                    input_id: InputId(format!("invalid-{large_binding}")),
+                    input_id: InputId(case.into()),
                     business_digest: Digest(String::new()),
                     body: InputBody::User {
                         payload: Payload::Inline(serde_json::Value::Null),
@@ -566,7 +569,7 @@ async fn inadmissible_physical_profile_or_binding_never_creates_a_task() {
             .await;
         assert!(
             matches!(result, Err(StoreError::Invalid { .. })),
-            "{result:?}"
+            "{case}: {result:?}"
         );
         assert!(
             f.feed
@@ -611,7 +614,7 @@ async fn exhausted_scan_budget_defers_recovery_without_failing_tick() {
     assert!(f.coordination.load(&spec().sid).await.unwrap().is_some());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn output_inline_threshold_does_not_change_the_input_capacity() {
     let f = Fixture::new(Arc::new(FinishingRunner::default())).await;
     let mut initial = metadata();
@@ -643,40 +646,4 @@ async fn output_inline_threshold_does_not_change_the_input_capacity() {
         }
     }
     assert_eq!(f.snapshot(&tid).await.content.status, TaskStatus::Completed);
-}
-#[tokio::test]
-async fn unrepresentable_task_timeout_is_rejected_before_task_creation() {
-    let f = Fixture::new(Arc::new(FinishingRunner::default())).await;
-    let mut definition = spec();
-    definition.limits.task_timeout_millis = u64::MAX;
-    let initial = metadata();
-    let result = f
-        .inbox
-        .admit(AdmitRequest {
-            scope: definition.scope.clone(),
-            input: InputEnvelope {
-                schema_version: 1,
-                sid: definition.sid.clone(),
-                tid: initial.tid.clone(),
-                input_id: InputId("bad-timeout".into()),
-                business_digest: Digest(String::new()),
-                body: InputBody::User {
-                    payload: Payload::Inline(serde_json::Value::Null),
-                },
-            },
-            create_session: Some(definition),
-            create_task: Some(initial.clone()),
-        })
-        .await;
-    assert!(
-        matches!(result, Err(StoreError::Invalid { .. })),
-        "{result:?}"
-    );
-    assert!(
-        f.feed
-            .load_snapshot(&initial.scope, &initial.tid)
-            .await
-            .unwrap()
-            .is_none()
-    );
 }

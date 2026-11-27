@@ -47,8 +47,10 @@ not grant permissions: the server must authorize the bound identity.
   success. A partial save is an error, not success or permission to publish.
   Publication is a separate confirmation; if save succeeds but publication
   fails, report the saved state and publication failure separately.
-- Edit permission gates YAML/AI/save/publish. Node properties and script files
-  remain read-only in this authoring surface. Warn before discarding dirty work.
+- Edit permission gates canvas and node-property editing, YAML/AI/save/publish.
+  Applying node properties updates only the local canvas/YAML draft; saving and
+  publishing remain separate explicit actions. Script files remain read-only
+  Pack snapshots. Warn before discarding dirty work.
 
 ## Isolation and cancellation
 

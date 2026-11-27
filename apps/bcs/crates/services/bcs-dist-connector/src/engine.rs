@@ -109,6 +109,10 @@ struct Inner {
     /// permit is stored and the next wait (in the main loop or in
     /// `register`'s retry backoff) returns at once.
     stop: Notify,
+    /// Serializes the end of `drain` (stop the leftover actors, retire). A
+    /// second, concurrent drain must not retire while the first is still
+    /// waiting for the actors it aborted: those may still act until then.
+    stopping: tokio::sync::Mutex<()>,
 }
 
 /// One Connector process: reads the command feed, claims dispatches and runs
@@ -149,12 +153,14 @@ impl ConnectorEngine {
                 claims: AtomicU64::new(0),
                 wake: Notify::new(),
                 stop: Notify::new(),
+                stopping: tokio::sync::Mutex::new(()),
             }),
         })
     }
 
     /// Runs until `drain` is called or the membership registration is lost.
-    /// Actors of held calls keep running after it returns.
+    /// Actors of held calls keep running after it returns (`drain` stops the
+    /// ones still running at the end of its grace period).
     ///
     /// `Ok` after a drain; `Err` when the start fails (registration refused or
     /// not confirmed in time, command feed unavailable) or the registration is
@@ -407,6 +413,18 @@ impl ConnectorEngine {
             poke.clone(),
         );
         let wake = self.inner.clone();
+        // Checked under the `actors` lock, in the same critical section as
+        // the insert: `drain` sets `draining` before it collects the actors
+        // under this lock, so either it sees this actor and stops it, or
+        // this sees `draining` and starts nothing. A claim or resume that
+        // wins after the drain began therefore never runs here; its call
+        // stays held and is taken over once this instance is `Dead`, like
+        // the actors `drain` stops.
+        let mut actors = lock(&self.inner.actors);
+        if self.inner.draining.load(Ordering::SeqCst) {
+            tracing::info!(did = %did.0, "draining; the call is left held for another Connector");
+            return;
+        }
         // The `wake` is sent inside the task, after `run` returned: it tells a
         // main loop waiting at capacity, or a drain, that an actor ended. A
         // task that is aborted or panics never reaches it; those waiters time
@@ -421,11 +439,12 @@ impl ConnectorEngine {
             poke,
             task,
         };
+        actors.insert(did.clone(), actor);
+        drop(actors);
         // Whatever resume was still owed for this call is settled by this actor.
         // (`retain` keeps the entries for which the test is true, i.e. it
         // drops this call's orphan entries.)
         lock(&self.inner.orphans).retain(|(orphan, _)| orphan != &did);
-        lock(&self.inner.actors).insert(did, actor);
     }
 
     /// Forgets finished actors; one that died without finishing its run is
@@ -587,6 +606,20 @@ impl ConnectorEngine {
             }
         }
     }
+
+    /// Ends this instance's registration for good (drain only). Afterwards
+    /// liveness answers `Dead` for it at once, instead of after the lifetime
+    /// runs out. No registration (stub membership, or a drain before
+    /// registering): nothing to do. A failure is only logged: the
+    /// registration then expires on its own, because nothing renews it.
+    async fn retire(&self) {
+        let Some(lease) = lock(&self.inner.lease).clone() else {
+            return;
+        };
+        if let Err(error) = self.inner.ports.membership.retire(&lease).await {
+            tracing::warn!(?error, "membership retire failed; the registration expires on its own");
+        }
+    }
 }
 
 /// Locks a `std` mutex, ignoring poisoning. A mutex is poisoned when a thread
@@ -624,22 +657,29 @@ impl DistRuntimeControlPort for ConnectorEngine {
         })
     }
 
-    /// Stops claiming and waits up to `grace` for held calls to end. Calls
-    /// still running are left held and recoverable, never aborted (B20).
+    /// Stops claiming, waits up to `grace` for held calls to end, then stops
+    /// what is left and retires the registration (B20).
     ///
     /// Steps: mark draining, interrupt the main loop (`stop`) and wake
     /// waiters, mark the registration as draining if there is one. Then wait
     /// in two stages within the one deadline: first until the main loop has
     /// left (a claim in flight may still start one actor), then until no
-    /// actor is live. It returns as soon as both hold, and renews the
+    /// actor is live. It stops waiting as soon as both hold, and renews the
     /// registration while it waits.
     ///
-    /// Result: `Drained` when nothing is left and the main loop has stopped;
-    /// otherwise `DeadlineReached { remaining }` with the live actors plus
+    /// At the end, every actor still running is aborted and awaited, so no
+    /// call of this process keeps talking to its agent or session after
+    /// this returns. No new actor starts once draining (`spawn` refuses), so
+    /// this also holds for a claim or resume still in flight. Then the
+    /// registration is retired: other processes see this instance `Dead` at
+    /// once, and the Worker's supervisor re-posts the hints of the calls it
+    /// still holds, so another Connector takes them over at the next holder
+    /// epoch. Their dispatches stay held (and in the held index) until then.
+    ///
+    /// Result: `Drained` when nothing was left and the main loop has stopped;
+    /// otherwise `DeadlineReached { remaining }` with the actors stopped plus
     /// orphans (`remaining` can be 0 when only the main loop had not stopped
-    /// yet). Each leftover is offered to `release` (D8, a stub today that
-    /// fails); the result does not depend on it. Leftover actors keep running
-    /// after this returns; nothing aborts them.
+    /// yet, for example while it waits on a claim).
     async fn drain(&self, grace: Duration) -> Result<DrainOutcome, RuntimeError> {
         let inner = &self.inner;
         inner.draining.store(true, Ordering::SeqCst);
@@ -669,27 +709,37 @@ impl DistRuntimeControlPort for ConnectorEngine {
                 self.renew().await;
             }
         }
-        let leftover: Vec<(Did, Holder)> = lock(&inner.actors)
-            .iter()
-            .filter(|(_, actor)| !actor.task.is_finished())
-            .map(|(did, actor)| (did.clone(), actor.holder.clone()))
+        // Whatever still runs is stopped here, not left behind: once the
+        // registration is gone, another Connector may take these calls over,
+        // and the dispatch fences only this actor's `disp` writes, not its
+        // agent calls or inbox writes.
+        // One drain at a time from here (see `stopping`).
+        let _stopping = inner.stopping.lock().await;
+        // The set collected below is complete: `draining` is already set,
+        // and `spawn` starts no actor once it is (it checks under the same
+        // lock). So retiring after stopping them is safe even if the main
+        // loop is still inside a claim; that claim's call is left held.
+        let leftover: Vec<JoinHandle<()>> = lock(&inner.actors)
+            .drain()
+            .map(|(_, actor)| actor.task)
+            .filter(|task| !task.is_finished())
             .collect();
-        let leftover: Vec<(Did, Holder)> = leftover
-            .into_iter()
-            .chain(lock(&inner.orphans).iter().cloned())
-            .collect();
-        if leftover.is_empty() && !inner.looping.load(Ordering::SeqCst) {
+        let stopped = leftover.len();
+        // `abort` only asks; awaiting each task waits until it has stopped
+        // at its next await point.
+        for task in &leftover {
+            task.abort();
+        }
+        for task in leftover {
+            let _ = task.await;
+        }
+        let remaining = stopped + lock(&inner.orphans).len();
+        self.retire().await;
+        if remaining == 0 && !inner.looping.load(Ordering::SeqCst) {
             return Ok(DrainOutcome::Drained);
         }
-        for (did, holder) in &leftover {
-            // D8: handing a call over is not implemented yet; the call stays
-            // held and is recovered by the Worker's deadline re-post.
-            if let Err(error) = inner.ports.recovery.release(did, holder).await {
-                tracing::warn!(did = %did.0, ?error, "call left held after drain");
-            }
-        }
         Ok(DrainOutcome::DeadlineReached {
-            remaining: leftover.len() as u64,
+            remaining: remaining as u64,
         })
     }
 }

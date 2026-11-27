@@ -4257,6 +4257,28 @@ class BotService(BotServiceProtocol):
                             operator=operator,
                         )
                         logger.info(f"[bot_service.delete_bot] Released device for binding {binding_id}")
+                    except InvalidDeviceStatusError as e:
+                        # The pre-check above and release_device's own status
+                        # validation are two separate reads; a concurrent actor
+                        # (stop_bot, admin release, async recycle, duplicate
+                        # delete) can release this binding in between. Re-read:
+                        # gone or RELEASED means the desired end state was
+                        # already reached by someone else, so the deletion
+                        # continues instead of failing on the transient race.
+                        # Any other status keeps the failure fatal.
+                        raced = None
+                        try:
+                            raced = service.get_device(binding_id=binding_id)
+                        except Exception:
+                            raced = None
+                        if raced is None or raced.status == DeviceBindingStatus.RELEASED.value:
+                            logger.info(
+                                f"[bot_service.delete_bot] Binding {binding_id} already released "
+                                f"by a concurrent operation ({e}); continuing with bot deletion"
+                            )
+                        else:
+                            logger.error(f"[bot_service.delete_bot] Failed to release device for binding {binding_id}: {e}")
+                            raise BotServiceError(f"设备释放失败，无法删除 Bot: {e}")
                     except Exception as e:
                         # 释放失败，阻断删除，抛出异常
                         logger.error(f"[bot_service.delete_bot] Failed to release device for binding {binding_id}: {e}")
@@ -4968,7 +4990,6 @@ class BotService(BotServiceProtocol):
         from agentclaw.community.core.bot_management.engines import (
             resolve_provisioning,
         )
-
         ctx, strategy = resolve_provisioning(
             bot_id=bot_id,
             owner_id=str(bot.get("owner_id") or ""),
@@ -4990,6 +5011,8 @@ class BotService(BotServiceProtocol):
             # An intentional write rejection must not become a successful restart.
             raise
         except Exception as exc:
+            if strategy.restart_config_error_is_fatal(exc) is True:
+                raise
             # Optional engine extensions must never block the existing restart path.
             logger.warning(
                 "[bot_service.restart_bot] applying restart extra configs failed; "
@@ -4998,7 +5021,6 @@ class BotService(BotServiceProtocol):
                 exc,
                 exc_info=True,
             )
-
         env = get_current_env()
         entity_id = bot.get("entity_id")
         if not entity_id:
@@ -5974,6 +5996,25 @@ class BotService(BotServiceProtocol):
                         operator=operator,
                     )
                     logger.info(f"[bot_service.release_bot_for_others] Released device for binding {binding_id}")
+                except InvalidDeviceStatusError as e:
+                    # Same transient race as delete_bot: the status pre-check
+                    # above and release_device's own validation are two reads,
+                    # and a concurrent release in between flips the binding to
+                    # RELEASED. Re-read and treat "already released" as the
+                    # desired end state; keep any other status fatal.
+                    raced = None
+                    try:
+                        raced = service.get_device(binding_id=binding_id)
+                    except Exception:
+                        raced = None
+                    if raced is None or raced.status == DeviceBindingStatus.RELEASED.value:
+                        logger.info(
+                            f"[bot_service.release_bot_for_others] Binding {binding_id} already "
+                            f"released by a concurrent operation ({e}); continuing"
+                        )
+                    else:
+                        logger.error(f"[bot_service.release_bot_for_others] Failed to release device for binding {binding_id}: {e}")
+                        raise BotServiceError(f"释放设备失败: {e}")
                 except Exception as e:
                     logger.error(f"[bot_service.release_bot_for_others] Failed to release device for binding {binding_id}: {e}")
                     raise BotServiceError(f"释放设备失败: {e}")

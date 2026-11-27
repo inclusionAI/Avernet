@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from json import JSONDecodeError
 
+import httpx
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
@@ -108,9 +109,11 @@ from agentclaw.community.adapters.http.openapi_v1.errors_genome import (
     GENOME_ENVELOPE_ERROR_CODES,
     GENOME_ENVELOPE_ERRORS,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors_managed_bots import MANAGED_BOT_HTTP_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials import (
     SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors_service_publish import SERVICE_PUBLISH_ENVELOPE_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
 from agentclaw.community.adapters.http.openapi_v1.errors_space_skill import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.task.errors_todo import (
@@ -220,6 +223,7 @@ from agentclaw.community.core.caller_identity.contracts import (
     CallerMcpSyncError,
 )
 from agentclaw.community.core.engine_runtime.errors import (
+    EngineCallerRuntimePreparingError,
     EngineBotTypeNotSupportedError,
     EngineHistoryDepthExceededError,
     EngineSessionCursorError,
@@ -437,6 +441,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # asked for; both ids are on the warning line in ``principal.py``.
     UserIdMismatchError: (403, "Forbidden"),
     BotAccessCheckForbiddenError: (403, "Forbidden"),
+    **MANAGED_BOT_HTTP_ERRORS,
     SpaceAccessDeniedError: (403, "Forbidden"),
     SpaceNotFoundError: (404, "Not found"),
     SpaceMemberInvalidError: (400, "Invalid space member"),
@@ -669,6 +674,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
+    **SERVICE_PUBLISH_ENVELOPE_ERRORS,
     **SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
     **GENOME_ENVELOPE_ERRORS,
     **TODO_HTTP_ERRORS,
@@ -757,6 +763,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ),
     # Retryable: cold, dormant or restarting. Distinct from 404 (the bot IS the
     # caller's) and from 500 (nothing is broken).
+    EngineCallerRuntimePreparingError: (409, "Caller runtime is preparing"),
     EngineDeviceNotReadyError: (409, "Bot device is not ready"),
     # NOT retryable as-is: the named stage has no live runtime (nothing
     # validating for verify, nothing released for online, or a published stage
@@ -883,11 +890,20 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ContextCollabVersionConflict: (409, "Context version conflict"),
     ContextCollabValidationError: (422, "Invalid context collab request"),
     ContextCollabParentEventError: (422, "Parent event not found"),
+    # A raw ``httpx.HTTPStatusError`` is an upstream HTTP call that failed with
+    # a non-2xx status no service translated — the identity/resources routes
+    # leak exactly this, surfacing upstream outages as 500 [Unhandled
+    # exception]. On the read paths this guards the failure is never the
+    # caller's fault, so it joins the fixed-message 502 upstream family;
+    # device-level 404s never arrive (every ``DeviceFileSystem`` provider
+    # returns ``None`` first — absence is empty content, not an error).
+    httpx.HTTPStatusError: (502, "Upstream service error"),
 }
 # Most public categories retain the ordinary ``xxx000`` business code.  A
 # small, explicit override table lets a category expose a stable actionable
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
+    EngineCallerRuntimePreparingError: 409113,
     PersonalSpaceDeletionError: SpaceErrorCode.PERSONAL_SPACE_NOT_DELETABLE,
     SpaceNotEmptyError: SpaceErrorCode.SPACE_NOT_EMPTY,
     SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
@@ -978,5 +994,6 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
                 request,
                 code=ENVELOPE_ERROR_CODES.get(error_type),
                 data=error_data(exc),
+                headers={"Retry-After": "3"} if isinstance(exc, EngineCallerRuntimePreparingError) else None,
             )
     return None

@@ -1614,8 +1614,20 @@ export class EvolveRepository {
       params.push(...input.excludedTaskTypes);
     }
     if (input.statuses?.length) {
-      clauses.push(`status IN (${input.statuses.map(() => "?").join(",")})`);
-      params.push(...input.statuses);
+      const includesRecovery = !input.excludedTaskTypes?.includes("session_recovery")
+        && (!input.taskTypes || input.taskTypes.includes("session_recovery"));
+      const terminal = includesRecovery ? input.statuses.filter(status => ["completed", "failed", "canceled"].includes(status)) : [];
+      const statuses = terminal.length ? [...new Set([...input.statuses, "settling"])] : input.statuses;
+      // Keep the indexed column predicate; inspect JSON only within the settling candidates.
+      clauses.push(`status IN (${statuses.map(() => "?").join(",")})`);
+      params.push(...statuses);
+      if (terminal.length) {
+        const config = "CASE WHEN JSON_VALID(config_json) THEN config_json ELSE '{}' END";
+        const businessStatus = this.db.dbType === "sqlite" ? `JSON_EXTRACT(${config}, '$.status')`
+          : `JSON_UNQUOTE(JSON_EXTRACT(${config}, '$.status'))`;
+        clauses.push(`(status <> 'settling' OR (task_type = 'session_recovery' AND ${businessStatus} IN (${terminal.map(() => "?").join(",")})))`);
+        params.push(...terminal);
+      }
     }
     const keyword = input.query?.trim();
     if (keyword) {

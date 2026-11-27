@@ -91,6 +91,7 @@ CODE_REVIEW.md
 .dev
 .private_docs/
 memory/
+!apps/bcs/crates/services/bcs-event-store/src/memory/
 skills-lock.json
 
 # Private/local API exports and release artifacts

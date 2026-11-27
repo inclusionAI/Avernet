@@ -71,12 +71,14 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     deleted as deleted_envelope,
     envelope,
     envelope_errors,
+    error_response,
     page as page_envelope,
 )
 from agentclaw.community.core.devices.errors import DeviceFileSystemReadOnlyError
 from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError as DeviceFileTooLargeError,
 )
+from agentclaw.community.core.ports.resource_file_port import ListingFailed
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
@@ -196,6 +198,10 @@ def _to_file_entry(entry: dict[str, Any]) -> FileEntry:
     )
 
 
+class _ListPathIsFile(Exception):
+    """A failed directory listing whose parent metadata identifies a file."""
+
+
 async def _list_dir_or_empty(
     file_svc: ResourceFileService,
     *,
@@ -204,33 +210,37 @@ async def _list_dir_or_empty(
     bot_repo: BotRepository,
     path: str,
     target: dict[str, Any] | None = None,
+    reject_file_path: bool = False,
 ) -> list[dict[str, Any]]:
-    """One directory's entries, treating an absent directory as empty.
-
-    The baas providers re-raise an upstream 404 rather than answering "nothing
-    there", and that loudness is load-bearing at the device
-    (``baas_device_filesystem.py:68``). It is only here that a 404 stops being a
-    failure: the providers that return ``None`` already produce an empty listing
-    for an absent directory, so without this the same request is a 500 on baas
-    and an empty page everywhere else. Every other status still propagates.
-    """
+    """List one directory, keeping the existing empty result for absence."""
     coords = _file_coords(bot_id, owner_id, bot_repo)
-    entity_type, entity_id, engine_type = (
-        coords.entity_type, coords.entity_id, coords.engine_type
+    file_args = dict(
+        **(target or {}),
+        entity_type=coords.entity_type,
+        entity_id=coords.entity_id,
+        bot_id=bot_id,
+        engine_type=coords.engine_type,
+        path=path,
     )
     try:
-        listed = await file_svc.list_dir(
-            **(target or {}),
-            entity_type=entity_type,
-            entity_id=entity_id,
-            bot_id=bot_id,
-            engine_type=engine_type,
-            path=path,
-        )
+        listed = await file_svc.list_dir(**file_args)
     except httpx.HTTPStatusError as exc:
-        if exc.response.status_code != 404:
-            raise
-        return []
+        status = exc.response.status_code
+        if status == 404:
+            return []
+        if reject_file_path and path and status == 400:
+            # A generic 400 does not identify the failure. Only a confirmed file
+            # can be reported as an invalid directory path.
+            try:
+                is_directory = await file_svc.lookup_path_is_dir(**file_args)
+            except Exception:
+                # The extra probe is advisory. Preserve the original list
+                # failure even if the device becomes unavailable in between.
+                logger.debug("Resource list path could not be classified", exc_info=True)
+            else:
+                if is_directory is False:
+                    raise _ListPathIsFile from exc
+        raise
     return listed or []
 
 
@@ -261,7 +271,17 @@ DirPathQuery = Annotated[
 ]
 
 
-@router.get("", response_model=Envelope[Page[FileEntry]])
+@router.get(
+    "",
+    response_model=Envelope[Page[FileEntry]],
+    responses={
+        400: {
+            "model": ErrorEnvelope,
+            "description": "Invalid request, including a path that refers to a file.",
+            **error_example(400, "path must refer to a directory"),
+        },
+    },
+)
 @envelope_errors
 async def list_resources(
     page: PageParamsDep,
@@ -291,8 +311,9 @@ async def list_resources(
     removes the divergence the other direction — a record whose bytes are not
     where it claims can no longer be reported as a file that exists.
 
-    The path parameter selects the directory (empty = workspace root). Listing
-    is non-recursive, which bounds the device round trip this endpoint makes.
+    The path parameter selects the directory (empty = workspace root).
+    Listing is non-recursive. A rejected listing returns 400 when the
+    provider's parent metadata identifies the supplied path as a file.
 
     Paging is applied by this server over the whole directory, because the
     engine's listing API takes no page, limit or cursor: `page_size` bounds the
@@ -314,9 +335,18 @@ async def list_resources(
         return JSONResponse(content=preview.model_dump(mode="json"))
 
     safe = _safe_path(path)
-    listed = await _list_dir_or_empty(
-        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=safe, target=target
-    )
+    try:
+        listed = await _list_dir_or_empty(
+            file_svc,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            bot_repo=bot_repo,
+            path=safe,
+            target=target,
+            reject_file_path=True,
+        )
+    except _ListPathIsFile:
+        return error_response(400, "path must refer to a directory", request)
     entries = [_to_file_entry(entry) for entry in listed]
     if type is not None:
         entries = [entry for entry in entries if entry.type == type]
@@ -619,8 +649,8 @@ async def _read_file_or_404(
         # promoted files, so that loudness is load-bearing and must not be
         # changed at the device. It is only *here* that a 404 stops being a
         # failure and becomes an ordinary answer: this route documents 404 for a
-        # path that is not there. Every other status stays unmapped and surfaces
-        # as a 500, which is what an upstream fault is.
+        # path that is not there. Every other status surfaces as the mapped
+        # upstream 502, which is what an upstream fault is.
         if exc.response.status_code != 404:
             raise
         raise HTTPException(status_code=404, detail="Resource not found") from exc
@@ -743,7 +773,7 @@ async def download_directory(
         # rule as there — only *here* does that 404 stop being an upstream fault
         # and become this route's documented "not found"; a missing directory is
         # an ordinary answer, an empty walk is not. Every other status still
-        # surfaces as a 500, which is what an upstream fault is.
+        # surfaces as the mapped upstream 502, which is what an upstream fault is.
         if exc.response.status_code != 404:
             raise
         raise HTTPException(status_code=404, detail="Resource not found") from exc
@@ -845,7 +875,14 @@ async def create_directory(
 @router.delete(
     "",
     response_model=Envelope[Deleted],
-    responses=_READ_ONLY_RESPONSE,
+    responses={
+        **_READ_ONLY_RESPONSE,
+        502: {
+            "model": ErrorEnvelope,
+            "description": "The storage provider could not resolve or delete the target.",
+            **error_example(502, "Delete storage failed"),
+        },
+    },
 )
 @envelope_errors
 async def delete_file(
@@ -877,14 +914,18 @@ async def delete_file(
     entity_type, entity_id, engine_type = (
         coords.entity_type, coords.entity_id, coords.engine_type
     )
-    if not await file_svc.exists(
-        **(target or {}),
-        entity_type=entity_type,
-        entity_id=entity_id,
-        bot_id=bot_id,
-        engine_type=engine_type,
-        path=safe,
-    ):
+    try:
+        is_directory = await file_svc.lookup_path_is_dir(
+            **(target or {}),
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            path=safe,
+        )
+    except ListingFailed as exc:
+        raise HTTPException(status_code=502, detail="Could not resolve resource path") from exc
+    if is_directory is None:
         raise HTTPException(status_code=404, detail="Resource not found")
     # Record first, file second — the reverse order cannot recover. Deleting the
     # file first and then failing to drop the record leaves the manifest pointing
@@ -907,6 +948,7 @@ async def delete_file(
         bot_id=bot_id,
         engine_type=engine_type,
         path=safe,
+        is_directory=is_directory,
     ):
         raise HTTPException(status_code=502, detail="Delete storage failed")
     return deleted_envelope(request)

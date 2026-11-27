@@ -45,7 +45,16 @@ class PublishRepository(Protocol):
         env: str,
         status: str,
         modifier: str | None = None,
-    ) -> None: ...
+        expected_status: str | None = None,
+    ) -> bool:
+        """Set a publish's status.
+
+        ``expected_status`` turns the write into compare-and-set: the update is
+        applied only when the stored status still equals it, and the return value
+        reports whether this caller won. Pass it whenever two concurrent callers
+        could race to the same transition.
+        """
+        ...
 
     def update_publish(
         self,

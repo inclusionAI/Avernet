@@ -1,0 +1,604 @@
+syntax = "proto3";
+
+package bcs.rpc.agent_card_management.v1;
+
+option java_package = "bcs.rpc.agent_card_management.v1";
+option java_multiple_files = true;
+option java_outer_classname = "AgentCardManagementProto";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/wrappers.proto";
+
+// BCN Provider AgentCard management contract (REST model v1).
+//
+// This file is the canonical model source for the management REST face:
+//   POST   /api/v1/collaboration/a2a/agents                                      -> RegisterAgent
+//   GET    /api/v1/collaboration/a2a/agents/{bot_id}/agent-card                 -> GetAgentCard
+//   GET    /api/v1/collaboration/a2a/agents?provider_bot_ref=<ref>               -> FindAgentCards
+//   PUT    /api/v1/collaboration/a2a/agents/{bot_id}/agent-card                 -> UpdateAgentCard
+//   PATCH  /api/v1/collaboration/a2a/agents/{bot_id}/agent-card/metadata        -> UpdateAgentCardMetadata
+//   POST   /api/v1/collaboration/a2a/agents/{bot_id}/agent-card:refresh         -> RefreshAgentCard
+//
+// The service definition and generated models are retained for shared language
+// contracts and descriptor compatibility. AgentCard management Triple is not
+// published in this phase; retaining this service definition does not make it
+// callable. OCB keeps the host-side publication disabled.
+//
+// Inline card sources accept either the legacy raw google.protobuf.Struct
+// passthrough (deprecated) or the typed AgentCard model below; the Provider
+// deterministically rebuilds the REST-face canonical JSON for the typed form
+// and validates both through the same domain path.
+//
+// Error model: over the management REST face, business success uses
+// success + view and business rejection uses ManagementError. The Java models
+// preserve these two alternatives without implying a required Triple transport.
+//
+// Authentication: management requests use the existing Provider admin token.
+// The application-level provider_admin_token therefore rides in every request
+// message. It is never echoed in a response and never logged.
+service AgentCardManagementService {
+  // Creates the agent under the token-bound Provider. Equivalent of REST
+  // 201 Created; there is no "created" wire status, consumers reconcile with
+  // the returned view. Not idempotent: after a timeout, GetAgentCard first,
+  // then decide whether to retry. Only Providers with StaticBearer identity
+  // mode may register (PERMISSION_DENIED / IDENTITY_AWARE_ADMISSION_REQUIRED
+  // otherwise).
+  rpc RegisterAgent(RegisterAgentRequest) returns (RegisterAgentResponse);
+
+  // Returns the saved card for the current stable Bot ID. Never fetches the
+  // remote URL and never triggers a refresh.
+  rpc GetAgentCard(GetAgentCardRequest) returns (GetAgentCardResponse);
+
+  // Recovers zero or one cards in the authenticated Provider scope using the
+  // immutable platform reference supplied at registration. This mirrors the
+  // REST collection query and never scans Card JSON.
+  rpc FindAgentCards(FindAgentCardsRequest) returns (FindAgentCardsResponse);
+
+  // Overwrites card and/or source as a whole (no partial merge). Renaming
+  // happens by submitting a card whose name differs; owners, summary,
+  // bot_id, and provider_bot_ref are never modified by this method. The
+  // registered platform reference is immutable. Conflicts surface as
+  // business errors, not wire failures; server-internal CAS retries are
+  // invisible to the caller.
+  rpc UpdateAgentCard(UpdateAgentCardRequest) returns (UpdateAgentCardResponse);
+
+  // Re-fetches the previously saved source URL (10s budget, no redirect,
+  // <=1 MiB, loopback-external HTTPS only). Requires a saved URL: inline
+  // cards fail with CARD_URL_REQUIRED. A result superseded by a concurrent
+  // update fails with REFRESH_SUPERSEDED without side effects.
+  rpc RefreshAgentCard(RefreshAgentCardRequest) returns (RefreshAgentCardResponse);
+
+  // Replaces only the named management metadata fields. Every field is
+  // presence-aware: an omitted field leaves the stored value unchanged; a
+  // present field replaces it. An empty catalog-label message clears the
+  // custom collection. At least one of the four fields must be present.
+  rpc UpdateAgentCardMetadata(UpdateAgentCardMetadataRequest)
+        returns (UpdateAgentCardMetadataResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Requests
+// ---------------------------------------------------------------------------
+
+// Registration/update visibility (Avernet #3670/#3840; domain type
+// A2aRegistrationVisibility is a three-state protected/public/private enum
+// with a protected default). Wire convergence:
+//   - RegisterAgent: UNSPECIFIED is indistinguishable from "absent" in proto3
+//     and mirrors the REST face's serde default: the server normalizes it to
+//     PROTECTED (legacy registration behavior).
+//   - UpdateAgentCard: UNSPECIFIED means "leave the stored visibility
+//     unchanged"; a visibility-only update is valid. Any other encoded value
+//     is unknown to this contract version and fails closed with
+//     INVALID_REQUEST (field "visibility", reason INVALID_VISIBILITY) before
+//     the domain sees it.
+enum Visibility {
+  UNSPECIFIED = 0;
+  PROTECTED = 1;
+  PUBLIC = 2;
+  PRIVATE = 3;
+}
+
+// AgentCard management status. The server stores this in the existing
+// bcs_bots.status column and projects it into the AgentCard Fuse label model
+// as a single-valued system label. It does not redefine Fuse search policy or
+// direct-call behavior in this contract.
+enum AgentCardStatus {
+  UNSPECIFIED_STATUS = 0;
+  ONLINE = 1;
+  HIDDEN = 2;
+}
+
+// User-facing visibility, stored in bcs_bots.user_visibility and projected into
+// Fuse alongside status.
+enum UserVisibility {
+  UNSPECIFIED_USER_VISIBILITY = 0;
+  PROTECTED_USER_VISIBILITY = 1;
+  PUBLIC_USER_VISIBILITY = 2;
+  PRIVATE_USER_VISIBILITY = 3;
+}
+
+// Presence wrapper for AgentId. A missing outer message means the REST key was
+// omitted. A present `null_value` encodes explicit JSON null; a present `value`
+// encodes the exact string, including the explicitly empty string.
+message AgentIdValue {
+  oneof kind {
+    google.protobuf.NullValue null_value = 1;
+    string value = 2;
+  }
+}
+
+// Presence wrapper for AgentCardStatus in metadata PATCH.
+message AgentCardStatusValue { AgentCardStatus value = 1; }
+
+// Presence wrapper for Visibility in metadata PATCH.
+message VisibilityValue { Visibility value = 1; }
+
+// Presence wrapper for UserVisibility in metadata PATCH.
+message UserVisibilityValue { UserVisibility value = 1; }
+
+// ---------------------------------------------------------------------------
+// Typed AgentCard model
+// ---------------------------------------------------------------------------
+
+// Structured inline AgentCard for the `card` source members. This is a
+// construction and constraint surface, not a second validation authority:
+// the Provider deterministically rebuilds the REST-face canonical JSON
+// (schema keys first, per-level `extensions`/`extra` tails verbatim) and the
+// domain layer re-runs full validation, size budgets and unknown-field
+// preservation on the result. Presence conventions under the proto3
+// no-optional generator chain:
+//   - "" means "not provided" for strings; the server emits the same
+//     INVALID_CARD details as a missing REST key;
+//   - false or an empty list means "not provided" wherever the falsy value is
+//     domain-equivalent, and comments mark the explicit-empty overrides that
+//     are not representable over this typed wire;
+//   - google.protobuf.BoolValue marks the one boolean presence distinction
+//     callers actually need (extension declarations' `required`);
+//   - `additional_properties` Struct tails carry every unknown key verbatim;
+//     reusing a key owned by the typed schema fails closed with INVALID_CARD
+//     and reason EXTENSIONS_FIELD_COLLISION instead of silently winning.
+message AgentCard {
+  // Required display identity: 2..64 unicode code points, no surrounding
+  // whitespace, no control characters; renames ride the same field through
+  // UpdateAgentCard.
+  string name = 1;
+  // Required non-empty capability introduction; display summary fallback
+  // when RegisterAgentRequest.summary is not provided.
+  string description = 2;
+  // Required non-empty agent software version, e.g. "1.0.0".
+  string version = 3;
+  // Required by preference order; the first entry satisfying both protocol
+  // and outbound address policy is selected.
+  repeated AgentInterface supported_interfaces = 4;
+  // Required block: an omitted capabilities message keeps the REST "missing"
+  // branch; {} is valid when no optional declaration is used.
+  AgentCapabilities capabilities = 5;
+  // Required list, must contain "text/plain"; other modes are preserved
+  // without implying runtime support.
+  repeated string default_input_modes = 6;
+  // Required list, must contain "text/plain"; other modes are preserved.
+  repeated string default_output_modes = 7;
+  // Required list; omitted reconstructs to [] (REST accepts [] and rejects a
+  // missing key - known convergence over the typed wire).
+  repeated AgentSkill skills = 8;
+  // Optional publisher block: when the message is present, organization and
+  // an absolute http(s) url become mandatory.
+  AgentProvider provider = 9;
+  // Optional absolute http(s) address, returned verbatim; never fetched by
+  // registration admission.
+  string documentation_url = 10;
+  // Optional absolute http(s) address.
+  string icon_url = 11;
+  // Optional named security scheme objects (open per-scheme bodies).
+  map<string, google.protobuf.Struct> security_schemes = 12;
+  // Optional OR-alternatives for the anonymous admission contract; omitting
+  // the list or an empty requirement is the anonymous path.
+  repeated AgentSecurityRequirement security_requirements = 13;
+  // Optional opaque signature objects, preserved verbatim.
+  repeated google.protobuf.Struct signatures = 14;
+  // Proto-only open tail: each entry is restored as an additional top-level
+  // JSON property. Struct-valued entries (including a real JSON key named
+  // `extensions`) remain nested and are never flattened into their parent.
+  // The tag stays 15 for binary compatibility with the former ambiguously
+  // named `extensions` field.
+  google.protobuf.Struct additional_properties = 15;
+}
+
+// One supportedInterfaces entry.
+message AgentInterface {
+  // Entry point address; required for the standard bindings and always
+  // checked by the outbound admission policy.
+  string url = 1;
+  // Open binding domain (HTTP+JSON, JSONRPC, GRPC or a deployment-defined
+  // binding): string on purpose, so unknown custom bindings still decode and
+  // are judged only by domain policy.
+  string protocol_binding = 2;
+  // Required binding version text; BCN selects protocol version 1.0.
+  string protocol_version = 3;
+  // Optional non-empty tenant routing value, passed through as-is.
+  string tenant = 4;
+  // Proto-only open tail for unknown JSON properties of this interface.
+  // A property named `extensions` is represented as an entry whose value is a
+  // Struct, preserving the nested REST shape. Tag 5 is wire-compatible with
+  // the former open-tail field name.
+  google.protobuf.Struct additional_properties = 5;
+}
+
+// The capabilities block.
+message AgentCapabilities {
+  // true selects streaming delivery; false or omitted selects the polling
+  // delivery (text Q&A, long task query and cancel only).
+  bool streaming = 1;
+  // BCN does not configure callback receivers this release.
+  bool push_notifications = 2;
+  // The registered card must be complete without an authenticated
+  // extended-card fetch.
+  bool extended_agent_card = 3;
+  // Typed extension declarations; URIs must stay unique, `required=true`
+  // declarations unsupported by BCN reject admission, and per-extension
+  // params (for example the source-agent party) stay domain-validated
+  // objects.
+  repeated AgentExtension extensions = 4;
+  // Proto-only open tail for capability-level unknown JSON properties other
+  // than streaming/pushNotifications/extendedAgentCard/extensions. Tag 5 is
+  // wire-compatible with the former `extra` field.
+  google.protobuf.Struct additional_properties = 5;
+}
+
+// One capabilities.extensions declaration.
+message AgentExtension {
+  // Required absolute extension URI; duplicates are rejected by the domain.
+  string uri = 1;
+  // Optional human description, preserved verbatim.
+  string description = 2;
+  // Presence matters: omitted is not false. The source-agent extension, for
+  // example, requires an explicit required=false.
+  google.protobuf.BoolValue required = 3;
+  // Open extension data (e.g. source-agent params {party}); validated by
+  // the owning extension's domain rules.
+  google.protobuf.Struct params = 4;
+  // Proto-only open tail for unknown JSON properties of this extension entry.
+  // Struct-valued properties retain their nesting. Tag 5 is unchanged.
+  google.protobuf.Struct additional_properties = 5;
+}
+
+// One skills entry.
+message AgentSkill {
+  // Required non-empty id, unique inside the card (not a platform agentId).
+  string id = 1;
+  // Required non-empty display name.
+  string name = 2;
+  // Required non-empty description, preserved and returned in full.
+  string description = 3;
+  // Required label list (may be empty); omitted reconstructs to [].
+  repeated string tags = 4;
+  // Optional preserved demonstrations; omitted keeps the REST inherit-from-
+  // defaults semantics. An explicit empty override is not representable here.
+  repeated string examples = 5;
+  // Optional overriding input mode list; omitted inherits
+  // default_input_modes. An explicit empty override is not representable.
+  repeated string input_modes = 6;
+  // Optional overriding output mode list; omitted inherits
+  // default_output_modes.
+  repeated string output_modes = 7;
+  // Optional per-skill anonymous admission requirements.
+  repeated AgentSecurityRequirement security_requirements = 8;
+  // Proto-only open tail for unknown JSON properties of this skill entry.
+  // Struct-valued properties retain their nesting. Tag 9 is unchanged.
+  google.protobuf.Struct additional_properties = 9;
+}
+
+// Optional publisher block.
+message AgentProvider {
+  // Required non-empty organization text once this message is present.
+  string organization = 1;
+  // Required absolute http(s) publisher URL once this message is present.
+  string url = 2;
+  // Proto-only open tail for unknown provider JSON properties. Struct-valued
+  // properties retain their nesting.
+  google.protobuf.Struct additional_properties = 3;
+}
+
+// One OR-alternative of the anonymous admission contract.
+message AgentSecurityRequirement {
+  // Referenced security scheme name to its AND-scopes. Every referenced name
+  // must be declared in AgentCard.security_schemes; an empty map is the
+  // anonymous path.
+  map<string, AgentScopes> schemes = 1;
+  // Proto-only open tail for unknown JSON properties of this requirement.
+  // Struct-valued properties retain their nesting. Tag 2 is unchanged.
+  google.protobuf.Struct additional_properties = 2;
+}
+
+// Scope set bound to one referenced security scheme.
+message AgentScopes {
+  // Optional required scope list.
+  repeated string list = 1;
+  // Proto-only open tail for unknown scope-object JSON properties.
+  google.protobuf.Struct additional_properties = 2;
+}
+
+// Management metadata, independent of raw AgentCard fields and open tails.
+// The deployed public policy defines allowed keys/values and multiplicity;
+// business dictionaries must not become Proto enums.
+message CatalogLabelValues {
+  // Empty lists remove this key from the supplied replacement collection.
+  // JSON per-key null converges to this representation over the typed wire.
+  repeated string values = 1;
+}
+
+message CatalogLabels {
+  map<string, CatalogLabelValues> entries = 1;
+}
+
+message RegisterAgentRequest {
+  // Optional caller correlation id (safe_id charset, <=128 bytes). Effective
+  // request id resolution order on the server: x-request-id metadata >
+  // this field > generated uuid v4. Echoed back in the response.
+  string request_id = 1;
+  // Required. Binds the Provider scope; validated per REST semantics
+  // (missing/invalid/expired -> UNAUTHENTICATED; disabled Provider ->
+  // PERMISSION_DENIED; unconfigured slug -> SERVICE_UNAVAILABLE).
+  string provider_admin_token = 2;
+  // List of caller-supplied owner/manager user IDs. The OCB wire face accepts
+  // the field as a plain repeated list, including the empty representation,
+  // and forwards it without injecting a local default. Default-owner filling,
+  // if introduced later, belongs to a separate branch and must not change this
+  // wire shape.
+  repeated string owners = 3;
+  // Display summary, <=4096 unicode code points. "" means "not provided":
+  // the server normalizes "" to absent and falls back to card.description
+  // (an explicit empty summary is not representable over Triple; see the
+  // spec's known-convergence note).
+  string summary = 4;
+  // Exactly one source must be set (the absent oneof case is invalid and
+  // maps to CARD_SOURCE_INVALID, mirroring REST EXACTLY_ONE_SOURCE_REQUIRED).
+  oneof source {
+    // Inline full AgentCard as the raw REST-face JSON, canonical JSON
+    // <= 1 MiB; unknown fields and extensions are preserved verbatim by
+    // the server (never reconstructed). Deprecated in favor of the typed
+    // `card` field; still accepted verbatim until the next major contract
+    // version reserves tag 5.
+    google.protobuf.Struct agent_card = 5 [deprecated = true];
+    // Absolute http(s) URL, <=2048 characters, no userinfo, no fragment.
+    // Fetched by the server, not the caller.
+    string agent_card_url = 6;
+    // Recommended inline source: the typed AgentCard model above. The
+    // Provider deterministically reconstructs the canonical REST-face JSON
+    // from the typed fields plus per-level open tails (collision fails
+    // closed) and then applies exactly the same domain validation, budgets
+    // and storage rules as the other sources.
+    AgentCard card = 9;
+  }
+  // Registration visibility. UNSPECIFIED (absent) normalizes server-side to
+  // PROTECTED, mirroring the REST face's serde default; legacy registrations
+  // remain protected.
+  Visibility visibility = 7;
+  // Required. Stable Provider-scoped platform identity for recovery and chat
+  // routing. Validated by Avernet #3822: ASCII letters/digits plus `_-.:`,
+  // 1..128 bytes, no case or numeric normalization, immutable after
+  // registration. Names may repeat; this key may not.
+  string provider_bot_ref = 8;
+  // Optional management metadata. Missing or present-empty initializes {}.
+  // REST uses a flat object, e.g. {"lifecycle":["draft"]}; entries/values are
+  // Proto-only wrappers. Top-level JSON null is invalid, not an empty map.
+  CatalogLabels catalog_labels = 10;
+  // Optional stable platform AgentId. A missing outer message means the REST
+  // key was omitted; a present AgentIdValue preserves explicit JSON null, the
+  // empty string, and nonempty strings. No client-side required/nonempty
+  // validation is applied. Current management updates may fill a missing/empty
+  // stored value, but cannot replace a different nonempty value.
+  AgentIdValue agent_id = 11;
+}
+
+message GetAgentCardRequest {
+  string request_id = 1;
+  string provider_admin_token = 2; // required
+  // Required. Stable BCN Bot identity returned by registration and recovery;
+  // never the display name, which may now repeat within a Provider.
+  string bot_id = 3;
+}
+
+message UpdateAgentCardRequest {
+  string request_id = 1;
+  string provider_admin_token = 2; // required
+  // Required stable Bot ID returned by registration; renaming is performed by
+  // submitting a card whose name differs and does not change this identity.
+  string bot_id = 3;
+  // Optional source replacement, as in RegisterAgent. Inline submission
+  // clears any saved URL (auto-refresh stops); URL submission switches the
+  // source and re-fetches immediately. Owners and summary are untouched.
+  oneof source {
+    // Raw REST-face JSON card source; deprecated in favor of `card`, still
+    // accepted verbatim until the next major contract version reserves tag 4.
+    google.protobuf.Struct agent_card = 4 [deprecated = true];
+    // Absolute http(s) URL source, as in RegisterAgent.
+    string agent_card_url = 5;
+    // Typed AgentCard source, as in RegisterAgent.
+    AgentCard card = 7;
+  }
+  // Optional visibility override. UNSPECIFIED (absent) leaves the stored
+  // visibility unchanged. At least one of `source`, `visibility` or the
+  // catalog_labels message must be present; an all-empty update still fails
+  // closed with INVALID_REQUEST / UPDATE_REQUIRED (mirrors REST).
+  Visibility visibility = 6;
+  // Whole-collection replacement, not a merge. A present empty message is a
+  // valid label-only clear. Omission in an otherwise-valid explicit update
+  // CLEARS existing labels (including legacy source/visibility-only writers).
+  // RefreshAgentCardRequest deliberately has no such field and preserves them.
+  CatalogLabels catalog_labels = 8;
+  // Optional AgentId for conditionally filling an empty stored identity.
+  // A missing outer message preserves the stored value; a present AgentIdValue
+  // is subject to the same explicit-null/empty-string/nonempty semantics as
+  // registration and may either fill an empty value, return idempotent success
+  // for the same nonempty value, or yield ManagementError with
+  // AGENT_IDENTITY_CONFLICT.
+  AgentIdValue agent_id = 9;
+}
+
+// Changes management metadata only. Omission preserves the field; each present
+// entry replaces it. CatalogLabels is itself a whole-collection replacement.
+message UpdateAgentCardMetadataRequest {
+  string request_id = 1;
+  string provider_admin_token = 2; // required
+  // Required stable BCN Bot ID.
+  string bot_id = 3;
+  // Optional present-empty custom label replacement.
+  CatalogLabels catalog_labels = 4;
+  // Optional status replacement.
+  AgentCardStatusValue status = 5;
+  // Optional discovery visibility replacement.
+  VisibilityValue visibility = 6;
+  // Reserved for the documented discovery-visibility alias; the canonical
+  // REST field is `visibility`.
+  reserved 7;
+  reserved "discovery_visibility";
+  // Optional user visibility replacement.
+  UserVisibilityValue user_visibility = 8;
+}
+
+message RefreshAgentCardRequest {
+  string request_id = 1;
+  string provider_admin_token = 2; // required
+  string bot_id = 3; // required, as GetAgentCard
+}
+
+message FindAgentCardsRequest {
+  string request_id = 1;
+  string provider_admin_token = 2; // required
+  // Required. Exact Provider-scoped platform reference. Returns zero or one
+  // card; names are not accepted as lookup keys.
+  string provider_bot_ref = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Responses (identical envelope shape for all four methods)
+// ---------------------------------------------------------------------------
+
+message AgentCardView {
+  // Provider slug pinned server-side from the admin token at call time;
+  // never a client input.
+  string provider_name = 1;
+  // BCN stable bot id; survives renames.
+  string bot_id = 2;
+  // Provider-owned stable platform key; not Card.name and not mutable by
+  // UpdateAgentCard.
+  string provider_bot_ref = 6;
+  // Saved card name (card.name); the post-rename name after UpdateAgentCard.
+  string agent_name = 3;
+  // Non-empty iff the card was registered/updated from a URL; "" for
+  // inline cards (REST serializes this as null).
+  string agent_card_url = 4;
+  // Full saved card, unknown fields and extensions preserved.
+  google.protobuf.Struct agent_card = 5;
+  // Current persisted normalized management metadata, including empty {}.
+  // Applies to every management view, including Find items and Refresh.
+  CatalogLabels catalog_labels = 7;
+  // Committed bcs_bots.agent_code value. `null_value` is used for SQL NULL;
+  // `value` preserves the empty string and nonempty strings exactly.
+  AgentIdValue agent_id = 8;
+  // Committed discovery visibility.
+  Visibility visibility = 9;
+  // Committed AgentCard management status.
+  AgentCardStatus status = 10;
+  // Committed user visibility.
+  UserVisibility user_visibility = 11;
+}
+
+// field names the REST contract documents (e.g. "agent_card.name");
+// empty string when the error has no field. reason is a stable identifier.
+message ErrorDetail {
+  string field = 1;
+  string reason = 2;
+}
+
+message ManagementError {
+  ManagementCode code = 1;   // the only stable machine branch key
+  string message = 2;        // human copy, mirrors the REST message() table
+  repeated ErrorDetail details = 3; // wire-absent == empty list (REST: [])
+}
+
+message RegisterAgentResponse {
+  string request_id = 1;    // effective id resolved server-side
+  bool success = 2;
+  AgentCardView view = 3;    // set iff success
+  ManagementError error = 4; // set iff !success
+}
+
+message GetAgentCardResponse {
+  string request_id = 1;
+  bool success = 2;
+  AgentCardView view = 3;
+  ManagementError error = 4;
+}
+
+message UpdateAgentCardResponse {
+  string request_id = 1;
+  bool success = 2;
+  AgentCardView view = 3;
+  ManagementError error = 4;
+}
+
+message RefreshAgentCardResponse {
+  string request_id = 1;
+  bool success = 2;
+  AgentCardView view = 3;
+  ManagementError error = 4;
+}
+
+message UpdateAgentCardMetadataResponse {
+  string request_id = 1;
+  bool success = 2;
+  AgentCardView view = 3;
+  ManagementError error = 4;
+}
+
+message FindAgentCardsResponse {
+  string request_id = 1;
+  bool success = 2;
+  repeated AgentCardView items = 3;
+  ManagementError error = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Error taxonomy
+// ---------------------------------------------------------------------------
+
+// 28 values in the exact declaration order of Avernet bcs-domain
+// ManagementCode (PR #3517 head). Numbers are contract: never renumber;
+// removed values must be reserved per repo governance (proto/README.md).
+// Values 4, 5 and 13 are structurally unreachable over Triple and exist
+// only for enum parity with the REST contract; 12 surfaces transport-side
+// as gRPC ResourceExhausted when the host admission limit is exceeded.
+enum ManagementCode {
+  INVALID_REQUEST = 0;
+  UNAUTHENTICATED = 1;
+  PERMISSION_DENIED = 2;
+  BOT_NOT_FOUND = 3;
+  METHOD_NOT_ALLOWED = 4;      // unreachable over Triple
+  NOT_ACCEPTABLE = 5;          // unreachable over Triple
+  BOT_NAME_CONFLICT = 6;
+  SOURCE_AGENT_CONFLICT = 7;
+  SOURCE_AGENT_CHANGE_NOT_ALLOWED = 8;
+  TARGET_CHANGED = 9;
+  CARD_URL_REQUIRED = 10;
+  REFRESH_SUPERSEDED = 11;
+  REQUEST_TOO_LARGE = 12;      // host-admission oversize surfaces as ResourceExhausted Status instead
+  UNSUPPORTED_MEDIA_TYPE = 13; // unreachable over Triple
+  INVALID_OWNER = 14;
+  INVALID_CARD = 15;
+  CARD_SOURCE_INVALID = 16;
+  CARD_TOO_LARGE = 17;
+  CARD_ADDRESS_REJECTED = 18;
+  CARD_INTERFACE_UNSUPPORTED = 19;
+  CARD_CONTENT_UNSUPPORTED = 20;
+  CARD_AUTH_UNSUPPORTED = 21;
+  CARD_EXTENSION_UNSUPPORTED = 22;
+  RATE_LIMITED = 23;           // reserved placeholder; no producer path in PR head, never emitted
+  CARD_FETCH_FAILED = 24;
+  CARD_FETCH_TIMEOUT = 25;
+  SERVICE_UNAVAILABLE = 26;
+  INTERNAL_ERROR = 27;
+  PROVIDER_BOT_REF_CONFLICT = 28; // Avernet #3822
+  AGENT_IDENTITY_CONFLICT = 29;  // bcs_bots.agent_code conflict
+}

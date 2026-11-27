@@ -34,7 +34,7 @@ export function getNodeMeta(type: string): NodeMeta {
   return (
     NODE_CATALOG.find((item) => item.type === type) ?? {
       type,
-      label: type,
+      label: '扩展节点',
       description: '兼容配置模式：保留真实类型与全部原始字段',
       group: 'advanced',
       icon: '◇',

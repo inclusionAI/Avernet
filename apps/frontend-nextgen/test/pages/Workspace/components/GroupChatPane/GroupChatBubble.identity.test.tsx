@@ -54,6 +54,22 @@ it.each([
 });
 
 it.each([
+  [{}, '未命名成员', undefined],
+  [{ senderName: '消息作者', senderAvatarUrl: '/author.png' }, '消息作者', '/author.png'],
+  [{ senderId: '   ', senderName: '消息作者' }, '消息作者', undefined],
+] as const)('发送者未知时不使用当前登录用户的名字和头像: %j', (extra, name, avatar) => {
+  render(<GroupChatBubble
+    message={{ id: 'unknown', role: 'user', content: 'hello', status: 'done', extra }}
+    group={group} participants={[]} isLastMessage={false} isRequesting={false}
+    userIdentityId="human_B" userIdentityName="用户B" userAvatarUrl="/B.png"
+  />);
+  expect(screen.getByTestId('bubble')).toHaveAttribute('data-align', 'left');
+  expect(screen.getByTestId('message-sender-meta')).toHaveTextContent(name);
+  expect(screen.queryByText('用户B')).not.toBeInTheDocument();
+  expect(screen.queryByRole('img')?.getAttribute('src')).toBe(avatar);
+});
+
+it.each([
   ['user', '456', '测试用户乙', '用户'],
   ['assistant', 'bot-a', '协作助手', 'Bot'],
 ] as const)('%s 名称后显示与会话管理一致的类型标签，时间在标签之后', (role, senderId, senderName, label) => {

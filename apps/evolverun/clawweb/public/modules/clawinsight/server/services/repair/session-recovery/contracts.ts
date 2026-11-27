@@ -60,7 +60,9 @@ export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
   /** Only infrastructure callers supply failureCode; Agent business blocks are not technical alarms. */
   executionFailure(taskId: string, reason: string, executionId?: string, retryable?: boolean, finalSummary?: unknown, failureCode?: string): Promise<void>;
   maintenance(): Promise<void>;
-  reportResults(): Promise<void>;
+  /** Internal post-commit callback; never replays Bot actions. */
+  reportResult(task: RecoveryStoredTask, result: import("./task-contracts.js").RecoveryTaskResult): void;
+  dispose(): Promise<void>;
 }
 /** Worker Service API; the factory supplies the existing Agent service. */
 export interface SessionRecoveryAgentApi {
@@ -103,5 +105,6 @@ export type SessionRecoveryRuntime = {
   tasks?: SessionRecoveryTaskApi;
   agent?: SessionRecoveryAgentApi;
   maintenance?: () => Promise<void>;
-  reportResults?: () => Promise<void>;
+  /** Cancel delayed callback retries and drain in-flight callback/audit writes. */
+  dispose?: () => Promise<void>;
 };

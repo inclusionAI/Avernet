@@ -1,44 +1,42 @@
 import { Button, Empty, Input } from '@/components/ui';
 import { Search } from 'lucide-react';
-import { useState } from 'react';
 import { DemoSelect, StatusBadge } from './DemoPrimitives';
-import { DemoNode, DemoRun, NodeId, RunStatus, STATUS_LABEL } from './model';
-import { RunDetail } from './RunDetail';
+import { DemoNode, DemoRun, RunStatus, STATUS_LABEL } from './model';
 
-type StatusFilter = RunStatus | 'all';
+export type StatusFilter = RunStatus | 'all';
 export function RunList({
   runs,
   nodes,
-  focusRun,
+  status,
+  onStatusChange,
+  keyword,
+  onKeywordChange,
   onFocusRun,
-  onLocate,
 }: {
   runs: DemoRun[];
   nodes: DemoNode[];
-  focusRun: string | null;
-  onFocusRun: (id: string | null) => void;
-  onLocate: (id: NodeId) => void;
+  status: StatusFilter;
+  onStatusChange: (status: StatusFilter) => void;
+  keyword: string;
+  onKeywordChange: (keyword: string) => void;
+  onFocusRun: (id: string) => void;
 }) {
-  const [status, setStatus] = useState<StatusFilter>('all');
-  const [keyword, setKeyword] = useState('');
-  const selected = runs.find((run) => run.id === focusRun);
   const filtered = runs.filter((run) => {
     const node = nodes.find((item) => item.id === run.node);
     const haystack = `${run.id} ${node?.name} ${run.version}`.toLowerCase();
     return (status === 'all' || run.status === status) && haystack.includes(keyword.trim().toLowerCase());
   });
   const clear = () => {
-    setStatus('all');
-    setKeyword('');
+    onStatusChange('all');
+    onKeywordChange('');
   };
-  if (selected) return <RunDetail run={selected} nodes={nodes} onBack={() => onFocusRun(null)} onLocate={onLocate} />;
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2 px-3.5 py-3">
         <DemoSelect<StatusFilter>
           label="运行状态筛选"
           value={status}
-          onChange={setStatus}
+          onChange={onStatusChange}
           options={[
             { value: 'all', label: '全部状态' },
             ...Object.entries(STATUS_LABEL).map(([value, label]) => ({ value: value as RunStatus, label })),
@@ -50,7 +48,7 @@ export function RunList({
             aria-label="运行关键词"
             placeholder="搜索 RUN ID、节点或版本"
             value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
+            onChange={(event) => onKeywordChange(event.target.value)}
             className="pl-8"
           />
         </div>
@@ -96,7 +94,16 @@ export function RunList({
                   key={run.id}
                   className="border-b border-border/50 transition-colors last:border-0 hover:bg-muted/30"
                 >
-                  <td className="px-3.5 py-2.5 font-mono text-primary">{run.id}</td>
+                  <td className="px-3.5 py-2.5">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onFocusRun(run.id)}
+                      className="h-6 px-1.5 font-mono text-[11px] text-primary"
+                    >
+                      {run.id}
+                    </Button>
+                  </td>
                   <td className="px-3">
                     <StatusBadge status={run.status} />
                   </td>

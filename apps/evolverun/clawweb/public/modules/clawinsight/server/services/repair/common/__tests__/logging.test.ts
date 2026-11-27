@@ -113,3 +113,16 @@ it.each([["failed", "ERROR"], ["succeeded", "INFO"]])("labels tool_settled outco
   logRepairEvent("session-recovery", "session_recovery_tool", "tool_settled", { outcome, operation: "trajectory_read" });
   expect(readFileSync(logFile, "utf8")).toContain(` ${level} [session-recovery] {`);
 });
+
+it("retains callback diagnostics while excluding response bodies, headers and raw causes", async () => {
+  const { logRepairEvent } = await import("../logging.js");
+  logRepairEvent("session-recovery", "session_recovery_reporting", "callback_failed", {
+    taskId: "task", eventId: "event", stateVersion: 7, attempt: 2, elapsedMs: 10000, retryAtMs: 123456,
+    failureKind: "http", httpStatus: 404, upstreamCode: "MONITORING_RESULT_TARGET_NOT_FOUND", transportCode: "ECONNRESET",
+    body: "PRIVATE_BODY", headers: "PRIVATE_HEADERS", cause: "PRIVATE_CAUSE", url: "PRIVATE_URL",
+  } as never);
+  expect(events()[0]).toMatchObject({ taskId: "task", eventId: "event", stateVersion: 7, attempt: 2,
+    elapsedMs: 10000, retryAtMs: 123456, httpStatus: 404, failureKind: "http",
+    upstreamCode: "MONITORING_RESULT_TARGET_NOT_FOUND", transportCode: "ECONNRESET" });
+  expect(readFileSync(logFile, "utf-8")).not.toContain("PRIVATE_");
+});

@@ -13,6 +13,7 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
     RuntimeProjectionResult,
+    RuntimeProjectionStatus,
 )
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 from agentclaw.community.core.skill_center.services._mutation_flow import (
@@ -414,3 +415,22 @@ async def test_early_runtime_failure_retains_committed_release_candidates(prefli
         candidates=runtime.before if preflight == "final_snapshot" else (),
         candidate_device_id="device-1" if preflight == "final_snapshot" else None,
     )
+
+
+@pytest.mark.asyncio
+async def test_manifest_caller_can_receive_private_projection_receipt_without_public_payload_change():
+    runtime = _PlanRuntime()
+    runtime.apply_plan = AsyncMock(return_value=RuntimeProjectionResult(
+        status=RuntimeProjectionStatus.CONVERGED, delivered_mcp_codes=frozenset({"weather"}), passport_updated=True,
+    ))
+    flow = MutationProjectionFlow(repository=_Repository(), runtime=runtime, recovery=MagicMock())
+    receipts = []
+    result = await flow.apply(
+        bot={"owner_id": "owner-1", "status": "ACTIVE"}, bot_id="bot-1",
+        engine_type="openclaw", scope=ProjectionScope(mcp=True),
+        mutation=lambda: DesiredStateMutation(item={}, changed=True, previous_state=None),
+        on_projection=receipts.append,
+    )
+    assert receipts[0].delivered_mcp_codes == frozenset({"weather"})
+    assert receipts[0].passport_updated is True
+    assert "delivered_mcp_codes" not in result["runtime_projection"]

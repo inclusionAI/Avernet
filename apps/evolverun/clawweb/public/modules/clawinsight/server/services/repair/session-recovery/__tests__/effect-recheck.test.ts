@@ -14,6 +14,8 @@ import { AgentToolCallRepository } from "../../../../repositories/repair/agent-t
 import { SessionRecoveryTaskService } from "../task-service.js";
 import { SessionRecoveryAgentService, recoveryTargetSnapshot } from "../agent-service.js";
 import type { RecoveryStoredTask } from "../task-contracts.js";
+let reporter: { report: ReturnType<typeof vi.fn> };
+
 const exec = promisify(execFile);
 const actor = { userId: "owner", isAdmin: false };
 const request = { event_id: "event-fixture", tc_fault_label: "TC.MCP.PERMISSION", delivery_key: "initial-1", diagnosis: "原 MCP 操作失败", error_location: "原会话第1行",
@@ -63,7 +65,7 @@ beforeEach(async () => {
   ais = { execute: vi.fn(async (_owner, params) => { submissions.push(JSON.parse(params["${clawevolve_params}"])); return `job-${submissions.length}`; }), getJobStatusDetail: vi.fn(async () => ({ status: "running", rawStatus: "RUNNING", errorMessage: null })), stopExecution: vi.fn(), getJobStatus: vi.fn() }; notifier = { notify: vi.fn() };
   actionNotifier = { after: vi.fn() };
   agent = new SessionRecoveryAgentService({ controlPlaneEnvironment: "pre", tasks, repo, audit: new AgentToolCallRepository(db, "session_recovery"), ais, runtime, targets, business: () => service, publicBaseUrl: "https://service.invalid", snapshotId: 1, nasRoots: [directory], leaseSeconds: 120, launchGraceSeconds: 1800, observationMs: 3600000, now: () => now, actionNotifier });
-  const reporter = { report: vi.fn() };
+  reporter = { report: vi.fn() };
   service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent, notifier, reporter, observationMs: 3600000, now: () => now, resolveTarget: async () => recoveryTargetSnapshot(target), actionNotifier });
 });
 
@@ -99,9 +101,9 @@ it("rechecks a canceled task with original-session evidence and keeps its origin
   await agent.report(await current(task.taskId), { phase: "observe", kind: "observation", effect_recheck: true, judgment });
   const saved = await current(task.taskId);
   expect(saved).toMatchObject({ status: "canceled", phase: task.phase, judgment, execution: { state: "ended" } });
-  expect(saved.pending_results.at(-1)).toMatchObject({ task_id: task.taskId, event_id: request.event_id, status: "canceled",
+  expect(reporter.report.mock.calls.at(-1)![0]).toMatchObject({ task_id: task.taskId, event_id: request.event_id, status: "canceled",
     effect: "recovered", intervention_status: "performed", evidence_ids: [read.evidenceId] });
-  expect(saved.timeline.find(event => event.payload.effect_recheck_outcome === "recovered")?.payload.result_version).toBe(saved.pending_results.at(-1)!.result_version);
+  expect(saved.timeline.find(event => event.payload.effect_recheck_outcome === "recovered")?.payload.result_version).toBe(reporter.report.mock.calls.at(-1)![0]!.result_version);
   expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
   expect(notifier.notify).not.toHaveBeenCalled();
   expect(actionNotifier.after).not.toHaveBeenCalled();
@@ -130,7 +132,7 @@ it("keeps a wait with another online round and discards a late supplement when p
   const saved = await current(task.taskId);
   expect(saved).toMatchObject({ status: "waiting_effect", judgment: { effect: "unknown" } });
   expect(saved.timeline.find(event => event.payload.effect_recheck_outcome === "superseded")?.payload.reason).toBe("online_resume_available");
-  expect(saved.pending_results.every(result => result.effect === "unknown")).toBe(true);
+  expect(reporter.report.mock.calls.every(([result]) => result.effect === "unknown")).toBe(true);
 });
 
 it("queues an existing source conclusion without starting AIS", async () => {
@@ -141,12 +143,11 @@ it("queues an existing source conclusion without starting AIS", async () => {
     { delivery: "confirmed", response: "acted", effect: "recovered", summary: "原故障已解除", evidence_ids: [evidence.evidenceId!] }, []);
   task = await current(task.taskId);
   await finishOnlineAis(task);
-  await service.reportPending(task);
   const result = await service.startEffectRecheck(task.taskId, "republish", actor);
   expect(result).toMatchObject({ status: "result_queued", task_id: task.taskId });
   expect(await service.startEffectRecheck(task.taskId, "republish", actor)).toEqual(result);
   expect(submissions).toHaveLength(1);
-  const latest = (await current(task.taskId)).pending_results.at(-1)!;
+  const latest = reporter.report.mock.calls.at(-1)![0];
   expect(latest).toMatchObject({ status: "completed", effect: "recovered" });
   await db.exec("UPDATE insight_monitoring_diagnose SET self_healing_results=? WHERE event_id=?",
     [JSON.stringify([latest]), request.event_id]);

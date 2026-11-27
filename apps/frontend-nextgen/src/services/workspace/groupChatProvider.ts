@@ -15,6 +15,7 @@ import {
 import type { AixContext, ChatMessage, ChatProvider } from '@tc-chat/core';
 import { normalizeHumanUserId } from '@/domain/userIdentity';
 import { GroupChatHistoryPaginator } from './groupChatHistoryPaginator';
+import { normalizeGroupLiveMessage } from './groupLiveMessageMapper';
 import {
   buildGroupChatPayload,
   buildGroupWsUrl,
@@ -386,8 +387,12 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     }
 
     const isCurrent = () => this.liveAllowed && this.inner === inner;
-    inner.onMessage = (message) => { if (isCurrent()) this.dispatchOrBuffer({ kind: 'message', message }); };
-    inner.onComplete = (messages) => { if (isCurrent()) this.dispatchOrBuffer({ kind: 'complete', messages }); };
+    inner.onMessage = (message) => {
+      if (isCurrent()) this.dispatchOrBuffer({ kind: 'message', message: normalizeGroupLiveMessage(message) });
+    };
+    inner.onComplete = (messages) => {
+      if (isCurrent()) this.dispatchOrBuffer({ kind: 'complete', messages: messages.map(normalizeGroupLiveMessage) });
+    };
     inner.onError = (error) => { if (isCurrent()) this.onError?.(error); };
 
     this.unsubscribeInnerConnection?.();

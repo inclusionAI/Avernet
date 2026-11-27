@@ -4,9 +4,12 @@ import StatusBadge from '@avernet/workflow/web/components/StatusBadge'
 import RunMarkers from './RunMarkers'
 import { useDeleteFlowRun, useRerunFlowRun, useAbortFlowRun } from '@avernet/clawweb-shared/web/api/hooks'
 import type { RunRuntimeMetadata } from '../../shared/run-runtime-metadata'
+import type { RunLaunchMetadata } from '../../shared/run-launch-metadata'
+import RunLaunchDetails from './RunLaunchDetails'
+import { formatTime, formatDuration } from '@avernet/workflow/web/utils/time'
 
 interface RunSummaryHeaderProps {
-  run: FlowRun & Partial<RunRuntimeMetadata>
+  run: FlowRun & Partial<RunRuntimeMetadata> & Partial<RunLaunchMetadata>
   nodeCount: number
   succeededCount?: number
   failedCount?: number
@@ -16,9 +19,17 @@ interface RunSummaryHeaderProps {
   readOnly?: boolean
 }
 
-import { formatTime, formatDuration } from '@avernet/workflow/web/utils/time'
+const actionClass = 'inline-flex min-h-8 items-center justify-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
+const neutralActionClass = `${actionClass} border-input bg-card text-muted-foreground hover:bg-muted hover:text-foreground`
+const dangerActionClass = `${actionClass} border-destructive/25 bg-card text-destructive hover:border-destructive/50 hover:bg-destructive/10`
+const confirmActionClass = `${actionClass} border-destructive bg-destructive text-primary-foreground hover:bg-destructive/90`
 
-export default function RunSummaryHeader({ run, nodeCount, succeededCount, failedCount, onAutoHeal, onApproval, pendingApprovalCount = 0, readOnly = false }: RunSummaryHeaderProps) {
+export default function RunSummaryHeader(props: RunSummaryHeaderProps) {
+  // Destructive confirmations belong to one run, never a cached navigation destination.
+  return <RunScopedSummaryHeader key={props.run.flow_id} {...props} />
+}
+
+function RunScopedSummaryHeader({ run, nodeCount, succeededCount, failedCount, onAutoHeal, onApproval, pendingApprovalCount = 0, readOnly = false }: RunSummaryHeaderProps) {
   const succeeded = succeededCount ?? run.succeeded_count
   const failed = failedCount ?? run.failed_count
   const succeededPct = nodeCount > 0 ? Math.round((succeeded / nodeCount) * 100) : 0
@@ -75,22 +86,35 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
   const canRerun = !!run.origin_bot_id
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4" aria-label="运行摘要">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="truncate text-lg font-semibold text-slate-950">
-            {run.workflow_title || run.workflow_id}
-          </h1>
-          <p className="mt-1 font-mono text-gray-400 text-xs">{run.flow_id}</p>
+    <section className="min-w-0 rounded-xl border border-border bg-card p-4 text-foreground sm:p-5" aria-label="运行摘要">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <div aria-hidden="true" className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="size-5">
+              <rect x="9" y="2" width="6" height="6" rx="1.5" />
+              <rect x="2" y="16" width="6" height="6" rx="1.5" />
+              <rect x="16" y="16" width="6" height="6" rx="1.5" />
+              <path d="M12 8v4M5 16v-4h14v4" />
+            </svg>
+          </div>
+          <div className="min-w-0">
+            <p aria-hidden="true" className="text-[10px] font-medium tracking-widest text-muted-foreground">WORKFLOW RUN</p>
+            <h1 className="mt-0.5 break-words text-lg font-semibold tracking-tight text-foreground [overflow-wrap:anywhere] sm:text-xl">
+              {run.workflow_title || run.workflow_id}
+            </h1>
+            <p className="mt-1 break-words font-mono text-[11px] leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{run.flow_id}</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <StatusBadge status={run.status} className="text-sm" />
+        <StatusBadge status={run.status} className="mt-1 shrink-0 text-xs" />
+      </div>
+      {!readOnly && (
+        <div role="group" aria-label="运行操作" className="mt-3 flex flex-wrap items-center justify-end gap-1.5">
           {!readOnly && canRerun && (
             <button
               type="button"
               onClick={handleRerun}
               disabled={rerunMutation.isPending}
-              className="inline-flex items-center gap-0.5 rounded-md border border-green-200 bg-white px-2 py-1 text-xs text-green-600 transition-colors hover:border-green-400 hover:bg-green-50 hover:text-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className={`${actionClass} border-success/25 bg-card text-success hover:border-success/50 hover:bg-success/10`}
               title="重跑：重新发送原始命令到 Bot"
             >
               {rerunMutation.isPending ? '⏳' : '🔄 重跑'}
@@ -103,14 +127,14 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
                   type="button"
                   onClick={handleAbort}
                   disabled={abortMutation.isPending}
-                  className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+                  className={confirmActionClass}
                 >
                   {abortMutation.isPending ? '中止中…' : '确认中止'}
                 </button>
                 <button
                   type="button"
                   onClick={handleCancelAbort}
-                  className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
+                  className={neutralActionClass}
                 >
                   取消
                 </button>
@@ -120,7 +144,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
                 type="button"
                 onClick={handleAbort}
                 disabled={abortMutation.isPending}
-                className="inline-flex items-center gap-0.5 rounded-md border border-red-200 bg-white px-2 py-1 text-xs text-red-600 transition-colors hover:border-red-400 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className={dangerActionClass}
                 title="中止运行中的工作流"
               >
                 ⛔ 中止
@@ -131,7 +155,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
             <button
               type="button"
               onClick={handleAutoHeal}
-              className="inline-flex items-center gap-0.5 rounded-md border border-blue-200 bg-white px-2 py-1 text-xs text-blue-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700"
+              className={`${actionClass} border-primary/25 bg-card text-primary hover:border-primary/50 hover:bg-primary/5`}
               title="AI 自动诊断与修复"
             >
               🩹 修复
@@ -141,12 +165,12 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
             <button
               type="button"
               onClick={onApproval}
-              className="inline-flex items-center gap-0.5 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 transition-colors hover:border-amber-400 hover:bg-amber-100"
+              className={`${actionClass} border-warning/30 bg-warning/10 text-warning-foreground hover:border-warning/50 hover:bg-warning/20`}
               title="审批"
             >
               📋 审批
               {pendingApprovalCount > 1 && (
-                <span className="ml-0.5 rounded-full bg-amber-200 px-1 text-[10px] leading-none text-amber-800">{pendingApprovalCount}</span>
+                <span className="ml-0.5 rounded border border-warning/40 px-1 text-[10px] leading-4">{pendingApprovalCount}</span>
               )}
             </button>
           )}
@@ -156,14 +180,14 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
                 type="button"
                 onClick={handleDelete}
                 disabled={deleteMutation.isPending}
-                className="rounded-md bg-red-600 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+                className={confirmActionClass}
               >
                 {deleteMutation.isPending ? '删除中…' : '确认删除'}
               </button>
               <button
                 type="button"
                 onClick={handleCancelDelete}
-                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
+                className={neutralActionClass}
               >
                 取消
               </button>
@@ -172,68 +196,94 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
             <button
               type="button"
               onClick={handleDelete}
-              className="inline-flex items-center rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600"
+              className={`${actionClass} border-input bg-card text-muted-foreground hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive`}
               title="删除此运行实例"
             >
               🗑 删除
             </button>
           ))}
         </div>
-      </div>
+      )}
 
-      <dl className="mt-4 grid grid-cols-2 gap-x-5 gap-y-3 border-t border-slate-100 pt-3 sm:grid-cols-3 lg:grid-cols-7">
-        <Stat label="工作流" value={run.workflow_id} mono />
-        <Stat label="版本" value={run.workflow_version != null ? (run.workflow_version === -1 ? '未绑定发布版本' : String(run.workflow_version)) : '—'} mono={run.workflow_version != null && run.workflow_version !== -1} />
-        <Stat label="创建者" value={run.user_id || run.triggered_by || '—'} mono={!!(run.user_id || run.triggered_by)} />
-        <Stat label="发起 Bot" value={(run.origin_bot_id || '—') + (run.plugin_version ? ` / ${run.plugin_version}` : '')} mono={!!(run.origin_bot_id || run.plugin_version)} />
-        <Stat label="运行引擎" value={run.engine || '—'} mono={!!run.engine} />
-        <RunMarkers run={run} variant="details" />
-        <Stat label="耗时" value={formatDuration(run.total_duration_ms)} className="lg:col-start-1" />
-        <Stat label="开始时间" value={formatTime(run.started_at)} />
-        <Stat label="device_id" value={run.device_id ?? ''} mono className="break-all" />
-        <Stat label="BOT_TYPE" value={run.bot_type ?? ''} className="break-all" />
-        <Stat label="STAGE" value={run.stage ?? ''} className="break-all" />
-      </dl>
+      <section aria-label="运行身份" className="mt-4 border-t border-border pt-3">
+        <GroupHeading label="运行身份" caption="IDENTITY" />
+        <dl className="mt-2.5 grid grid-cols-2 gap-x-5 gap-y-3 sm:grid-cols-4">
+          <Stat label="工作流" value={run.workflow_id} mono />
+          <Stat label="版本" value={run.workflow_version != null ? (run.workflow_version === -1 ? '未绑定发布版本' : String(run.workflow_version)) : '—'} mono={run.workflow_version != null && run.workflow_version !== -1} />
+          <Stat label="创建者" value={run.user_id || run.triggered_by || '—'} mono={!!(run.user_id || run.triggered_by)} />
+          <Stat label="发起 Bot" value={run.origin_bot_id || '—'} mono={!!(run.origin_bot_id || run.plugin_version)} note={run.plugin_version ? `plugin_version · ${run.plugin_version}` : undefined} />
+        </dl>
+      </section>
 
-      {/* Node progress bar */}
-      <div className="mt-4">
-        <div className="mb-1 flex items-center justify-between text-xs text-gray-500">
+      <section aria-label="执行上下文" className="mt-4 border-t border-border pt-3">
+        <GroupHeading label="执行上下文" caption="RUNTIME" />
+        <dl className="mt-2.5 grid grid-cols-2 gap-x-5 gap-y-3 md:grid-cols-3 xl:grid-cols-6">
+          <Stat label="运行引擎" value={run.engine || '—'} mono={!!run.engine} />
+          <RunMarkers run={run} variant="details" />
+          <Stat label="device_id" value={run.device_id ?? ''} mono className="break-all" />
+          <Stat label="BOT_TYPE" value={run.bot_type ?? ''} mono className="break-all" />
+          <Stat label="STAGE" value={run.stage ?? ''} mono className="break-all" />
+        </dl>
+      </section>
+
+      <RunLaunchDetails run={run} />
+
+      <section aria-label="运行用量与进度" className="mt-4 border-t border-border pt-3">
+        <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+          <dl className="flex min-w-0 flex-wrap gap-x-7 gap-y-3">
+            <Stat label="耗时" value={formatDuration(run.total_duration_ms)} mono />
+            <Stat label="开始时间" value={formatTime(run.started_at)} />
+          </dl>
+          {run.total_token_usage !== null && run.total_token_usage > 0 && (
+            <dl className="flex min-w-0 items-baseline gap-2">
+              <dt className="text-xs text-muted-foreground">Token 用量</dt>
+              <dd className="font-mono text-base font-medium tabular-nums text-foreground">{run.total_token_usage.toLocaleString()}</dd>
+            </dl>
+          )}
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
           <span>节点进度</span>
-          <span>
+          <div
+            role="progressbar"
+            aria-label="节点进度"
+            aria-valuemin={0}
+            aria-valuemax={nodeCount}
+            aria-valuenow={succeeded + failed}
+            aria-valuetext={`${succeeded} 成功 / ${failed} 失败 / ${nodeCount} 总计`}
+            className="flex h-1.5 min-w-24 flex-1 overflow-hidden rounded-full bg-muted"
+          >
+            {nodeCount > 0 && (
+              <>
+                <div className="shrink-0 bg-success transition-all motion-reduce:transition-none" style={{ width: `${succeededPct}%` }} />
+                <div className="shrink-0 bg-destructive transition-all motion-reduce:transition-none" style={{ width: `${failedPct}%` }} />
+              </>
+            )}
+          </div>
+          <span className="font-mono text-[11px] tabular-nums">
             {succeeded} 成功 / {failed} 失败 / {nodeCount} 总计
           </span>
         </div>
-        <div className="flex h-2 overflow-hidden rounded-full bg-gray-100">
-          {nodeCount > 0 && (
-            <>
-              <div
-                className="bg-status-succeeded transition-all"
-                style={{ width: `${succeededPct}%` }}
-              />
-              <div
-                className="bg-status-failed transition-all"
-                style={{ width: `${failedPct}%` }}
-              />
-            </>
-          )}
-        </div>
-      </div>
-
-      {run.total_token_usage !== null && run.total_token_usage > 0 && (
-        <div className="mt-3 text-xs text-gray-400">
-          Token 用量: {run.total_token_usage.toLocaleString()}
-        </div>
-      )}
+      </section>
     </section>
   )
 }
 
-function Stat({ label, value, mono, className }: { label: string; value: string; mono?: boolean; className?: string }) {
+function GroupHeading({ label, caption }: { label: string; caption: string }) {
   return (
-    <div className={className}>
-      <dt className="text-gray-400 text-xs">{label}</dt>
-      <dd className={`mt-0.5 text-sm font-medium text-gray-900 ${mono ? 'font-mono' : ''}`}>
+    <h2 className="flex items-baseline gap-2 text-xs font-semibold text-muted-foreground">
+      {label}
+      <span aria-hidden="true" className="text-[9px] font-normal tracking-widest">{caption}</span>
+    </h2>
+  )
+}
+
+function Stat({ label, value, mono, className, note }: { label: string; value: string; mono?: boolean; className?: string; note?: string }) {
+  return (
+    <div className={`min-w-0 ${className ?? ''}`}>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className={`mt-1 min-w-0 break-words text-xs font-medium leading-relaxed text-foreground [overflow-wrap:anywhere] ${mono ? 'font-mono' : ''}`}>
         {value}
+        {note && <small className="mt-0.5 block text-[10px] font-normal text-muted-foreground">{note}</small>}
       </dd>
     </div>
   )

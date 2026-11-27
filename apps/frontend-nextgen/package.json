@@ -39,6 +39,10 @@
     "@tc-chat/core": "2.1.0",
     "@tc-chat/ui": "2.1.0",
     "@tc-chat/utils": "2.1.0",
+    "@tiptap/core": "3.34.0",
+    "@tiptap/pm": "3.34.0",
+    "@tiptap/react": "3.34.0",
+    "@tiptap/starter-kit": "3.34.0",
     "@uiw/react-codemirror": "^4.25.11",
     "@umijs/max": "4.7.6",
     "@xyflow/react": "^12.11.3",
@@ -57,6 +61,7 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@babel/plugin-transform-modules-commonjs": "7.29.7",
     "@tailwindcss/postcss": "^4.0.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^7.0.1",
@@ -64,9 +69,12 @@
     "@testing-library/user-event": "^14.6.4",
     "@types/jest": "^30.0.0",
     "@types/js-yaml": "^4.0.9",
+    "@types/markdown-it": "12.2.3",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@types/styled-components": "^5.1.36",
+    "@umijs/babel-preset-umi": "4.7.6",
+    "babel-jest": "29.7.0",
     "cross-env": "^7.0.3",
     "husky": "^8.0.1",
     "jest": "^30.3.0",
@@ -74,11 +82,7 @@
     "lint-staged": "^13.0.3",
     "prettier": "^2.7.1",
     "tailwindcss": "^4.0.0",
-    "typescript": "^5.6.3",
-    "babel-jest": "29.7.0",
-    "@umijs/babel-preset-umi": "4.7.6",
-    "@types/markdown-it": "12.2.3",
-    "@babel/plugin-transform-modules-commonjs": "7.29.7"
+    "typescript": "^5.6.3"
   },
   "engines": {
     "node": ">=22"

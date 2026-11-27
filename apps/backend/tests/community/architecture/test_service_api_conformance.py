@@ -418,8 +418,12 @@ from agentclaw.community.core.task.todos.services.todo_template_service import (
     TodoTemplateService,
 )
 
+from agentclaw.community.api.task.task_commission_service import TaskCommissionServiceProtocol
+from agentclaw.community.core.task.context_collab.products.task_commission.service import TaskCommissionService
+
 _PAIRS = [
     (TodoTemplateManagementServiceProtocol, TodoTemplateService),
+    (TaskCommissionServiceProtocol, TaskCommissionService),
     (EngineSessionFilesProtocol, EngineSessionFilesService),
     (BotOverviewServiceProtocol, BotOverviewService),
     (ConversationKnowledgeServiceProtocol, ConversationKnowledgeService),

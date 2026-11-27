@@ -18,20 +18,23 @@ function registrationError(reason: unknown, fallback: string): string {
   return reason instanceof Error && !/^API \d+:/.test(reason.message) ? reason.message : fallback
 }
 
-export default function SkillRegistrationDialog({ bots, botsLoading = false, botsError = '', onClose, onRegistered }: {
+export default function SkillRegistrationDialog({ bots, botsLoading = false, botsError = '', initialBotKey = '', initialSkillId = '', initialSpaceId = '', onClose, onRegistered }: {
   bots: EvolveBotPickerOption[]
   botsLoading?: boolean
   botsError?: string
+  initialBotKey?: string
+  initialSkillId?: string
+  initialSpaceId?: string
   onClose: () => void
   onRegistered: (asset: EvolveSkillAsset) => void | Promise<void>
 }) {
   const titleId = useId()
   const submitting = useRef(false)
-  const [botKey, setBotKey] = useState('')
+  const [botKey, setBotKey] = useState(initialBotKey)
   const [botQuery, setBotQuery] = useState('')
   const [skills, setSkills] = useState<Array<{ skillId: string; displayName: string }>>([])
   const [skillId, setSkillId] = useState('')
-  const [spaceId, setSpaceId] = useState('')
+  const [spaceId, setSpaceId] = useState(initialSpaceId)
   const [loading, setLoading] = useState(false)
   const [registering, setRegistering] = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -43,16 +46,25 @@ export default function SkillRegistrationDialog({ bots, botsLoading = false, bot
   const visibleBots = bots.filter(item => evolveBotOptionKey(item) === botKey ||
     [item.botName, item.botId, item.ownerId, item.env].some(value => value?.toLowerCase().includes(botQuery.trim().toLowerCase())))
 
+  useEffect(() => { setBotKey(initialBotKey) }, [initialBotKey])
+
   useEffect(() => {
     let active = true
     setSkills([]); setSkillId(''); setLoadError(''); setSubmitError('')
     setLoading(Boolean(botId))
     if (botId) void api.evolve.listAvailableLocalSkills(botId, botEnv)
-      .then(result => { if (active) setSkills(result.items) })
+      .then(result => {
+        if (!active) return
+        setSkills(result.items)
+        if (initialSkillId && botKey === initialBotKey) {
+          if (result.items.some(skill => skill.skillId === initialSkillId)) setSkillId(initialSkillId)
+          else setSubmitError('链接指定的 Skill 不在该 Bot 的可登记列表中，请重新选择。')
+        }
+      })
       .catch(reason => { if (active) setLoadError(registrationError(reason, 'Skill 列表读取失败，请稍后重试。')) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [botId, botEnv, botKey, attempt])
+  }, [botId, botEnv, botKey, attempt, initialBotKey, initialSkillId])
 
   const register = async () => {
     if (submitting.current || !botId || !skillId || loading || loadError) return
@@ -74,7 +86,7 @@ export default function SkillRegistrationDialog({ bots, botsLoading = false, bot
       <div className="mt-5 space-y-4">
         <SpaceSelector value={spaceId} onChange={setSpaceId} disabled={registering} />
         <section aria-label="所属 Bot">
-          {botsError && <p role="alert" className="mb-2 text-sm text-red-600">{botsError}</p>}
+          {botsError && !bot && <p role="alert" className="mb-2 text-sm text-red-600">{botsError}</p>}
           <p className="mb-1.5 text-xs font-medium text-gray-600">所属 Bot</p>
           <input aria-label="搜索 Bot" value={botQuery} disabled={registering} onChange={event => setBotQuery(event.target.value)} placeholder="搜索 Bot 名称、ID、Owner 或环境" className="mb-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-blue-500" />
           <EvolveBotPicker bots={visibleBots} value={botKey} disabled={botsLoading || registering} disableUnsupported={false} inlineOptions

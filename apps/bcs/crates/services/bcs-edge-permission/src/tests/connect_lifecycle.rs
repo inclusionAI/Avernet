@@ -489,6 +489,121 @@ use super::*;
         assert_eq!(svc.list_friends("x:rB").await.expect("friends").len(), 1);
     }
     #[tokio::test]
+    async fn removed_by_owner_second_call_is_a_silent_noop() {
+        // Review Focus #3: removing an already-removed friend reports no
+        // transitioned edges and emits no notice (idempotent re-remove).
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:twice", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        svc.create_connect("human_1", "x:twice", None, None)
+            .await
+            .expect("auto-approved friendship");
+
+        let first = svc
+            .revoke_friend_as_owner("human_1", "x:twice", None)
+            .await
+            .expect("first removal");
+        assert_eq!(first.len(), 1);
+        let second = svc
+            .revoke_friend_as_owner("human_1", "x:twice", None)
+            .await
+            .expect("second removal is an Ok no-op");
+        assert!(
+            second.is_empty(),
+            "nothing left to transition → empty revoke set"
+        );
+        assert_eq!(
+            events.lock().await.len(),
+            1,
+            "a removal without transitions emits no notice"
+        );
+    }
+
+    #[tokio::test]
+    async fn removed_by_owner_concurrent_removals_transition_and_notify_once() {
+        // Review Focus #10: two genuinely concurrent removals of the same
+        // friendship must transition exactly one edge set (the atomic
+        // conditional revoke performs each transition at most once) and
+        // therefore emit exactly one notice.
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:race", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        let recorder = RecordingFriendConnectNotificationPort::default();
+        let events = recorder.events.clone();
+        let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+        let created = svc
+            .create_connect("human_1", "x:race", None, None)
+            .await
+            .expect("auto-approved friendship");
+        assert_eq!(created.edge_ids.len(), 1);
+
+        let (left, right) = tokio::join!(
+            svc.revoke_friend_as_owner("human_1", "x:race", None),
+            svc.revoke_friend_as_owner("human_1", "x:race", None),
+        );
+        let mut transition_counts = [
+            left.expect("first concurrent removal").len(),
+            right.expect("second concurrent removal").len(),
+        ];
+        transition_counts.sort();
+        assert_eq!(
+            transition_counts,
+            [0, 1],
+            "exactly one concurrent call performs the transition {transition_counts:?}"
+        );
+        assert!(!eg.has_friend_edge("human_1", "x:race", "dev").await);
+        assert_eq!(
+            events.lock().await.len(),
+            1,
+            "at most one notice per successful state transition"
+        );
+    }
+
+    #[tokio::test]
+    async fn removed_by_owner_bot_to_bot_concurrent_removals_are_relation_atomic() {
+        // Review 4693070938: bot↔bot has two directed edges. Two interleaved
+        // owner removals must not each revoke one direction and both notify;
+        // the relation-level transaction means exactly one caller transitions
+        // both edges and emits one notice. Repeated rounds make a non-atomic
+        // per-edge implementation fail with high probability.
+        for round in 0..10 {
+            let (eg, pp, rq, bc, db) = assemble().await;
+            seed_bot(&db, "x:managedA", "protected", "protected", "OPEN", "online", Some("85020")).await;
+            seed_bot(&db, "x:friendB", "protected", "protected", "OPEN", "online", Some("85020")).await;
+            let recorder = RecordingFriendConnectNotificationPort::default();
+            let events = recorder.events.clone();
+            let svc = service_with_notification(&eg, &pp, &rq, &bc, Arc::new(recorder));
+            let created = svc
+                .create_connect("x:managedA", "x:friendB", None, None)
+                .await
+                .expect("auto-approved bot friendship");
+            assert_eq!(created.edge_ids.len(), 2, "bot↔bot friendship has two directed edges");
+
+            let (left, right) = tokio::join!(
+                svc.revoke_friend_as_owner("x:managedA", "x:friendB", None),
+                svc.revoke_friend_as_owner("x:managedA", "x:friendB", None),
+            );
+            let mut counts = [left.expect("first removal").len(), right.expect("second removal").len()];
+            counts.sort();
+            assert_eq!(
+                counts,
+                [0, 2],
+                "round {round}: exactly one relation winner transitions both edges {counts:?}"
+            );
+            assert!(
+                !eg.has_friend_edge("x:managedA", "x:friendB", "dev").await,
+                "round {round}: both directions are revoked"
+            );
+            assert_eq!(
+                events.lock().await.len(),
+                1,
+                "round {round}: exactly one notice for the relation"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn list_friends_after_connect() {
         let (eg, pp, rq, bc, db) = assemble().await;
         seed_bot(&db, "x:lf1", "protected", "protected", "OPEN", "online", Some("85020")).await;

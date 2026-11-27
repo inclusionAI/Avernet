@@ -228,7 +228,7 @@ Owner 或管理员在原任务控制面调用，传入 `{ "request_id": "调用�
 `202` 返回 `{ "task_id", "execution_id", "status": "accepted" }`。源任务已有确定结论但诊断未收到，且没有待发送的确定结果时，复用结果队列，返回
 `{ "task_id", "result_version", "status": "result_queued" }`，不启动 AIS。同任务同请求标识返回原回执。
 `409` 的 `error` 区分在线仍可续接（`online_resume_available`）、在途执行或工具（`execution_pending`）、
-已有结论（`effect_already_known`）、已有待发结果（`result_delivery_pending`）和并发冲突（`recheck_conflict`）。
+已有结论（`effect_already_known`）和并发冲突（`recheck_conflict`）。
 
 仅允许读取原会话和证据、提交本次效果判断。新结论需要确证曾经发生干预，并引用本次成功读取的受控证据。
 结果为 `unknown` 时只记录本次补验结果。补验不改变业务状态、阶段、结束原因和创建时间；不发消息、群通知或 Owner 卡片。
@@ -371,7 +371,7 @@ Owner 卡片资源独立保存在既有 `ce_app_config` 表的 `session_recovery
 
 内部DingTalk适配由OCB组合：现有Gateway验证x-one-id并签名User，CW忽略原始userId／IAM正文与未签名身份头；校验Owner、当前requestId、固定card ID及控制面环境后快速确认，AIS续接异步进行。权限申请显示“已获取权限，继续任务”，普通转交不显示确认按钮；平台模板、应用互动卡片写权限和HTTP回调路由需按OCB接入说明准备，代码提交不代表已发布或真实发卡。新后端在bootstrap声明 `ownerCooperationProtocol=session-recovery-owner/v1`。新包仅在收到该声明时产出owner_request；旧服务未声明时仍用纯转交，并在wrapper解析层拒绝新字段，避免旧服务静默忽略。手册与runtime共包，可先提供新增手册资产，再部署引用它的后端候选。
 
-原生卡片的 `cardData.cardParamMap` 同时用于首次发送与后续更新，值均为字符串：`title`、`summary`、`instructions`、`bot_id`、`session_key`、`task_url`、`status`、`confirm_label`、`confirm_visible`、`confirm_enabled`、`confirm_status`、`task_id`、`request_id`、`control_plane`。`summary` 和 `instructions` 分别映射已验证的交接问题说明及 Owner 处理事项，不发送恢复状态兜底句或完整调查报告的片段。`session_key` 是原任务逻辑会话键，不是物理 `session_id`；超长定位字段按 UTF-8 字节截短，完整身份保留在任务中。模板只保留一个确认按钮，其可见性绑定 `confirm_visible`（`"true"`／`"false"`），可点击状态绑定 `confirm_status`（`normal`／`disabled`）。仅权限待办显示确认操作，并在任务未结束且请求为 pending 时启用；普通转交传 `confirm_visible="false"`、`confirm_status="disabled"`，不发送回调参数。`confirm_enabled` 仍作为字符串同步传递，当前设计器导出的按钮实际以 `confirm_status` 控制禁用。卡片使用钉钉平台默认布局和宽度，发送与更新均不传额外的布局 `config`。
+原生卡片的 `cardData.cardParamMap` 同时用于首次发送与后续更新，值均为字符串：`title`、`summary`、`instructions`、`bot_id`、`session_key`、`task_url`、`session_url`、`status`、`confirm_label`、`confirm_visible`、`confirm_enabled`、`confirm_status`、`task_id`、`request_id`、`control_plane`。`summary` 和 `instructions` 分别映射已验证的交接问题说明及 Owner 处理事项，不发送恢复状态兜底句或完整调查报告的片段。`session_key` 是原任务逻辑会话键，不是物理 `session_id`；超长定位字段按 UTF-8 字节截短，完整身份保留在任务中。`task_url` 对应“查看自愈任务”；`session_url` 对应“查看原会话”，由宿主根据任务保存的 Bot、Owner 和原逻辑会话键解析，首次发送和后续更新均提供。宿主未提供入口或完整 URL 超过 1KB 时传空字符串，模板隐藏该入口，不截断 URL。模板只保留一个确认按钮，其可见性绑定 `confirm_visible`（`"true"`／`"false"`），可点击状态绑定 `confirm_status`（`normal`／`disabled`）。仅权限待办显示确认操作，并在任务未结束且请求为 pending 时启用；普通转交传 `confirm_visible="false"`、`confirm_status="disabled"`，不发送回调参数。`confirm_enabled` 仍作为字符串同步传递，当前设计器导出的按钮实际以 `confirm_status` 控制禁用。所有 Owner 卡片均不显示任务状态。`status` 展示参数已停用，创建和更新时始终传空字符串，避免按字段更新旧卡片时保留历史文字；权限待办、反馈、终态和普通转交均遵循此约定。卡片使用钉钉平台默认布局和宽度，发送与更新均不传额外的布局 `config`。
 
 权限待办私聊卡片首次发送成功且回执已写入任务时间线后，沿用现有群通知配置和 Bot 路由发送一条 Markdown 通知。群消息展示受阻原因、Owner 处理事项、发送状态和任务链接。群通知按任务去重，卡片状态更新、失败和未确认回执均不触发。Owner 通过私聊卡片或任务页确认。
 
@@ -400,7 +400,7 @@ Owner 卡片资源独立保存在既有 `ce_app_config` 表的 `session_recovery
 
 排障时按 `taskId` 查询，再用 `executionId` / `stepId` / `jobId` 关联 AIS，或用 `toolCallId` 查询既有工具审计。`eventId` 对应上游诊断；`environment` 是控制面环境，`targetEnvironment` 是目标 Bot 环境，两者可以不同。
 
-有意义的过程事实包括创建确认、AIS 派发开始／回执及耗时、技术故障重试时间、持久化后的阶段／状态变化、写工具终态、读取失败或工具结果未知，以及后台核对／维护／通知失败的有界脱敏原因。正常读取成功、心跳和空轮询不新增日志；不记录诊断正文、用户会话、完整请求／回执、票据或凭据。结果回传失败沿用原排障日志，不新增告警指标；成功和转交等业务比例由数据库统计。
+有意义的过程事实包括创建确认、AIS 派发开始／回执及耗时、技术故障重试时间、持久化后的阶段／状态变化、写工具终态、读取失败或工具结果未知，以及后台核对／维护／通知失败的有界脱敏原因。正常读取成功、心跳和未获锁的维护轮询不新增日志；获锁的维护每轮仅用既有格式输出 `scan_started` / `scan_completed` 摘要，`stateVersion` 为该轮获锁时的租约版本（不是任务版本），结束摘要带 `elapsedMs`，环境、实例、PID 和时间戳由现有日志器统一输出；不记录诊断正文、用户会话、完整请求／回执、票据或凭据。结果落库后立即异步回传，失败按 1、5、15 分钟退避，最多 4 次；不定时扫描，重启不恢复内存重试。回传日志记录任务、诊断事件、结果版本、次数、耗时和下次重试时间，区分 HTTP 拒绝（状态码及安全业务码）、超时、网络错误和无效回执；不输出原始响应、URL、凭据或异常内部信息。失败沿用原排障日志，不新增告警指标；成功和转交等业务比例由数据库统计。
 
 AIS 派发异常可能把完整响应正文放在异常消息中，因此派发日志只保留错误分类、执行关联和耗时；重试及最终技术失败日志不复制原因正文，具体已脱敏执行报告仍从原任务与 Step 查询。
 

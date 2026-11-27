@@ -58,6 +58,16 @@ def fs_baas(mock_baas, binding_ctx) -> LocalDeviceFileSystem:
     )
 
 
+@pytest.mark.asyncio
+async def test_checked_read_maps_baas_unavailability(fs_baas, mock_baas):
+    from agentclaw.community.core.devices.services.device_context import DeviceOfflineError
+    from agentclaw.community.core.service_bot.baas_service_errors import BaasNoActiveDevicesError
+
+    mock_baas.get_http_info.side_effect = BaasNoActiveDevicesError(status_code=404)
+    with pytest.raises(DeviceOfflineError):
+        await fs_baas.read_file_checked("file")
+
+
 def _mock_httpx_response(
     status_code: int = 200,
     content: bytes = b"",

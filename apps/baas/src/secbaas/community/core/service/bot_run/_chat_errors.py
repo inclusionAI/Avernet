@@ -28,3 +28,12 @@ class ChatRequestError(Exception):
 
 class NotConnectedError(Exception):
     """No usable transport connection is available for the operation."""
+
+
+class RequestNotSentError(Exception):
+    """请求帧未写出（连接在 write 前已关闭），可以安全重放一次。
+
+    由 wire client 在 ``send()`` 入口发现连接已非 OPEN 时抛出：websockets
+    在该状态下不会写出任何数据，对端没有收到请求。等待响应期间断链等
+    结果未知的场景不得使用本异常，调用方不得据此透明重放。
+    """

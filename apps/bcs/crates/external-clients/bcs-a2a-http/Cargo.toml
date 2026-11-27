@@ -12,14 +12,16 @@ workspace = true
 
 [features]
 # The distributed Connector's agent client; not part of the `bcs` binary yet.
-dist-agent = ["dep:bcs-dist-model"]
+dist-agent = ["dep:bcs-dist-model", "dep:serde_yaml"]
 
 [dependencies]
 bcs-app-identity-api.workspace = true
 bcs-dist-model = { workspace = true, optional = true }
 bcs-a2a-binding-api.workspace = true
+bcs-observability = { workspace = true }
 bcs-tracing-api.workspace = true
 bcs-network-tracing = { workspace = true, features = ["reqwest13"] }
+chrono = { workspace = true }
 a2a = { package = "a2a-lf", version = "=0.4.2" }
 a2a-pb = "=0.3.2"
 tonic = { version = "0.14", features = ["transport"] }
@@ -29,6 +31,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "j
 percent-encoding = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true, optional = true }
 futures = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
@@ -53,3 +56,4 @@ bcs-chat-run-store = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-message-flow = { workspace = true }
 axum = { workspace = true }
+tracing-subscriber = { workspace = true }

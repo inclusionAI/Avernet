@@ -51,6 +51,46 @@ describe("workflow collaborator permission union", () => {
     expect(await repo.resolveViewScope("shared", "member")).toBe("all");
   });
 
+  it("applies global owner-level execute grants with null, empty, or wildcard Bot IDs", async () => {
+    const { raw, repo } = fixture();
+    await repo.upsert({ workflow_id: "global-null", bot_owner_id: "*", bot_id: null,
+      can_view: 0, can_edit: 0, can_execute: 1 });
+    const { changes } = raw.prepare(
+      "INSERT INTO bot_workflow_permissions (bot_id, bot_owner_id, workflow_id, env, can_view, can_execute, can_edit, gmt_create, gmt_modified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run("", "*", "global-empty", "test", 0, 1, 0, 1, 1);
+    expect(changes).toBe(1);
+    await repo.upsert({ workflow_id: "global-wildcard", bot_owner_id: "*", bot_id: "*",
+      can_view: 0, can_edit: 0, can_execute: 1 });
+
+    const executableIds = (await repo.getExecuteIdsForOwner("stranger")).executableIds;
+    expect([...executableIds].sort()).toEqual([
+      "global-empty",
+      "global-null",
+      "global-wildcard",
+    ]);
+  });
+
+  it("keeps execute visibility deny-by-default when the permission table is empty", async () => {
+    const { repo } = fixture();
+    const result = await repo.getExecuteIdsForOwner("member");
+    expect(result).toEqual({ restrictedIds: new Set(), executableIds: new Set() });
+  });
+
+  it("separates execute visibility from view and edit visibility", async () => {
+    const { repo, grant } = fixture();
+    await grant("view-only", "owner", "shared-bot", 1, 1);
+    await repo.upsert({ workflow_id: "owned-execute", bot_owner_id: "member", bot_id: null,
+      can_view: 0, can_edit: 0, can_execute: 1 });
+    await repo.upsert({ workflow_id: "inherited-execute", bot_owner_id: "owner", bot_id: "shared-bot",
+      can_view: 0, can_edit: 0, can_execute: 1 });
+
+    const member = await repo.getExecuteIdsForOwner("member");
+    expect([...member!.executableIds].sort()).toEqual(["inherited-execute", "owned-execute"]);
+
+    const stranger = await repo.getExecuteIdsForOwner("stranger");
+    expect(stranger!.executableIds.size).toBe(0);
+  });
+
   it("does not inherit an Owner's private, wildcard, other-Bot, or mismatched-Owner grants", async () => {
     const { repo, grant } = fixture();
     await grant("private", "owner", null);

@@ -48,9 +48,10 @@ def _auth(world):
     init_principal_verifier_config(_Resolver(), "gateway_principal_signing_key", strict=False)
 
 
-async def _publish(self, *, publish_id, operator, biz_id, default_tag, device_count, resource_spec=None):
+async def _publish(self, *, publish_id, operator, biz_id, default_tag, device_count, resource_spec=None, ttl_seconds=None):
     global _last_publish_biz_id
     assert default_tag == "eval"
+    assert ttl_seconds is None
     assert resource_spec is None
     assert (publish_id, operator, device_count) == (1, "operator-1", 1)
     _last_publish_biz_id = biz_id
@@ -60,6 +61,16 @@ async def _publish(self, *, publish_id, operator, biz_id, default_tag, device_co
 def _progress(self, *, baas_publish_id, include_devices):
     assert baas_publish_id == 42 and include_devices is True
     return {"publish_id": 42, "status": "SUCCESS"}
+
+
+def _progress_not_found(self, *, baas_publish_id, include_devices):
+    from agentclaw.community.core.service_bot.errors import ServicePublishWorkflowNotFoundError
+    raise ServicePublishWorkflowNotFoundError("publish workflow not found")
+
+
+def _progress_upstream_failure(self, *, baas_publish_id, include_devices):
+    from agentclaw.community.core.service_bot.errors import ServicePublishUpstreamError
+    raise ServicePublishUpstreamError("publish provider failed")
 
 
 def _teardown(self, bot_uuid, *, operator, publish_id):
@@ -138,6 +149,35 @@ def progress_invalid():
     pass
 
 
+def _seed_progress_not_found(world):
+    _seed(world)
+    bind_overrides(world, PublishFlowServiceProtocol, {
+        "get_baas_publish_progress": _progress_not_found,
+    })
+
+
+def _seed_progress_upstream_failure(world):
+    _seed(world)
+    bind_overrides(world, PublishFlowServiceProtocol, {
+        "get_baas_publish_progress": _progress_upstream_failure,
+    })
+
+
+@endpoint_test(method="GET", path=_PROGRESS, scenario="env_progress_not_found", seed=_seed_progress_not_found,
+    input=CaseInput(path_params={"baas_publish_id": 42}, headers=_headers()),
+    expect=ExpectError(status=404))
+def progress_not_found():
+    pass
+
+
+@endpoint_test(method="GET", path=_PROGRESS, scenario="env_progress_upstream_failure",
+    seed=_seed_progress_upstream_failure,
+    input=CaseInput(path_params={"baas_publish_id": 42}, headers=_headers()),
+    expect=ExpectError(status=502))
+def progress_upstream_failure():
+    pass
+
+
 @endpoint_test(method="POST", path=_TEARDOWN, scenario="env_teardown_ok", seed=_seed,
     input=CaseInput(path_params={"bot_uuid": "eval-1"},
         query_params={"operator": "operator-1", "publish_id": 1}, headers=_headers()),
@@ -164,8 +204,9 @@ for _method, _path, _params in (
         expect=ExpectError(status=401))(lambda: None)
 
 
-async def _publish_resources(self, *, publish_id, operator, biz_id, default_tag, device_count, resource_spec):
+async def _publish_resources(self, *, publish_id, operator, biz_id, default_tag, device_count, resource_spec, ttl_seconds=None):
     assert default_tag == "eval"
+    assert ttl_seconds is None
     assert resource_spec.to_dict() == {"cpu": 4, "memory": 8, "disk": 200}
     assert device_count == 1
     return {"success": True, "publish_id": publish_id, "stage": "eval", "bot_uuid": "eval-1", "baas_publish_id": 42}
@@ -184,8 +225,9 @@ def publish_resources():
     pass
 
 
-async def _publish_device_count(self, *, publish_id, operator, biz_id, default_tag, device_count, resource_spec=None):
+async def _publish_device_count(self, *, publish_id, operator, biz_id, default_tag, device_count, resource_spec=None, ttl_seconds=None):
     assert default_tag == "eval"
+    assert ttl_seconds is None
     assert resource_spec is None
     assert (publish_id, operator, device_count) == (1, "operator-1", 3)
     return {"success": True, "publish_id": publish_id, "stage": "eval", "bot_uuid": "eval-1", "baas_publish_id": 42}
@@ -218,4 +260,39 @@ for _case, _resources in [
     endpoint_test(method="POST", path=_PUBLISH, scenario=f"env_publish_resources_{_case}", seed=_auth,
         input=CaseInput(path_params={"bot_id": _BOT, "publication_id": 1},
             query_params={"owner_id": _OWNER, "operator": "operator-1", **_resources}, headers=_headers()),
+        expect=ExpectError(status=422))(lambda: None)
+
+
+async def _publish_ttl(
+    self, *, publish_id, operator, biz_id, default_tag, device_count,
+    resource_spec, ttl_seconds,
+):
+    assert (publish_id, operator, default_tag, device_count) == (1, "operator-1", "eval", 1)
+    assert resource_spec is None
+    assert ttl_seconds == 172800
+    return {"success": True, "publish_id": publish_id, "stage": "eval", "bot_uuid": "eval-1", "baas_publish_id": 42}
+
+
+def _seed_ttl(world):
+    _seed(world)
+    bind_overrides(world, PublishFlowServiceProtocol, {"eval_publish": _publish_ttl})
+
+
+@endpoint_test(method="POST", path=_PUBLISH, scenario="env_publish_ttl_override", seed=_seed_ttl,
+    input=CaseInput(path_params={"bot_id": _BOT, "publication_id": 1},
+        query_params={"owner_id": _OWNER, "operator": "operator-1", "ttl_seconds": 172800},
+        headers=_headers()),
+    expect=ExpectSuccess(status=202, json_contains={"data": {"success": True}}))
+def publish_ttl_override():
+    pass
+
+
+for _case, _ttl in [
+    ("zero", 0), ("negative", -1), ("fractional", "1.5"),
+    ("non_numeric", "forever"), ("empty", ""),
+]:
+    endpoint_test(method="POST", path=_PUBLISH, scenario=f"env_publish_ttl_{_case}", seed=_seed,
+        input=CaseInput(path_params={"bot_id": _BOT, "publication_id": 1},
+            query_params={"owner_id": _OWNER, "operator": "operator-1", "ttl_seconds": _ttl},
+            headers=_headers()),
         expect=ExpectError(status=422))(lambda: None)

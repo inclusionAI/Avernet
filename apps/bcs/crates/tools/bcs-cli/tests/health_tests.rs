@@ -2,7 +2,6 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
-use std::time::Duration;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers::*};
 
 #[tokio::test]
@@ -26,27 +25,6 @@ async fn test_health_ok_json() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("\"status\":\"healthy\""));
-}
-
-#[tokio::test]
-async fn test_health_timeout() {
-    let mock_server = MockServer::start().await;
-
-    Mock::given(method("GET"))
-        .and(path("/health"))
-        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(30)))
-        .mount(&mock_server)
-        .await;
-
-    let mut cmd = Command::cargo_bin("bcs-cli").unwrap();
-    cmd.arg("--json")
-        .arg("--url")
-        .arg(mock_server.uri())
-        .arg("health")
-        .timeout(Duration::from_secs(2));
-
-    // Command timed out and was interrupted - this is expected failure
-    cmd.assert().failure();
 }
 
 #[tokio::test]

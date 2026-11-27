@@ -30,10 +30,10 @@ beforeEach(async () => {
   start = vi.fn(async (_task: RecoveryStoredTask) => {});
   deps = { tasks, controlPlaneEnvironment: "pre", observationMs: hour, now: () => now,
     agent: { start, release: async () => {}, terminate: async () => ({ status: "remote_stopped", aisJobId: null }), listExecutions: async () => [] },
-    notifier: { notify: async () => false }, reporter: { report: async () => {} } };
+    notifier: { notify: async () => false }, reporter: { report: vi.fn(async () => {}) } };
   service = new SessionRecoveryTaskService(deps);
 });
-afterEach(async () => { await db.close(); });
+afterEach(async () => { await service.dispose(); await db.close(); });
 
 async function enable(concurrency = 2) {
   await new AppConfigRepository(db).create({ config_key: "session_recovery_effect_resume_pre", config_json: JSON.stringify({ concurrency }) });
@@ -45,7 +45,7 @@ async function seed(id: string, patch: Partial<RecoveryStoredTask> = {}) {
     request: { event_id: id, delivery_key: id, tc_fault_label: null, diagnosis: "fixture", session_key: "original",
       target: { bot_id: "default", entity_id: "owner", env: "prod", engine: "TE" } },
     observationDeadlineAt: now - hour, ownerDeadlineAt: null, plan: null,
-    judgment: { ...unknown, evidence_ids: [] }, evidence: [], pending_results: [],
+    judgment: { ...unknown, evidence_ids: [] }, evidence: [],
     timeline: [], effectWait: { firstAt: now - hour, sinceAt: now - hour, resumes: 0 }, ...patch,
   };
   await tasks.create(task, `${id}-1`);
@@ -80,8 +80,23 @@ it("keeps new starts on later pages ahead of resumption and avoids hydrating the
   await service.maintenance();
   await vi.waitFor(() => expect(start.mock.calls.map(([task]) => task.taskId)).toEqual(["zzz-new", "000-due"]));
   expect(getObject.mock.calls.length).toBeLessThan(25);
-  expect(query.mock.calls.filter(([sql]) => sql.includes("ORDER BY task_id ASC LIMIT"))).toHaveLength(3);
+  expect(query.mock.calls.filter(([sql]) => sql.includes("ORDER BY task_id ASC LIMIT"))).toHaveLength(2);
 });
+
+it.each([[0, 1], [181, 1], [200, 2], [201, 2], [400, 3]])(
+  "processes all %i maintenance tasks in %i scans without querying past a short page",
+  async (count, scans) => {
+    const ids = Array.from({ length: count }, (_, index) => `task-${String(index).padStart(3, "0")}`);
+    for (const id of ids) await seed(id, { status: "running", phase: "assess", effectWait: undefined });
+    const list = vi.spyOn(tasks, "listForMaintenance");
+    await service.maintenance();
+    expect(start.mock.calls.map(([task]) => task.taskId)).toEqual(ids);
+    expect(list).toHaveBeenCalledTimes(scans);
+    expect(list.mock.calls.map(([, cursor]) => cursor)).toEqual([
+      "", ...ids.filter((_, index) => (index + 1) % 200 === 0),
+    ]);
+  },
+);
 
 it("shares two slots across maintenance workers and holds them until the AIS step is terminal", async () => {
   await enable();
@@ -119,9 +134,9 @@ it("closes aged legacy waits and exhausted rounds with an unknown effect and no 
   await service.maintenance();
   for (const id of ["aged", "exhausted"]) {
     const task = await current(id);
-    expect(task.status).toBe("completed");
+    expect(deps.reporter.report).toHaveBeenCalledWith(expect.objectContaining({ status: "completed", effect: "unknown" }));
     expect(task.judgment).toMatchObject({ effect: "unknown", delivery: "confirmed", response: "acted" });
-    expect(task.pending_results.at(-1)).toMatchObject({ status: "completed", effect: "unknown" });
+    expect(deps.reporter.report).toHaveBeenCalledWith(expect.objectContaining({ status: "completed", effect: "unknown" }));
   }
   expect((await current("prod")).status).toBe("waiting_effect");
   expect(start).not.toHaveBeenCalled();
@@ -209,4 +224,44 @@ it("applies live interval and closes if the next round cannot fit in the configu
   await service.maintenance();
   expect(await current("next-fits")).toMatchObject({ status: "running", effectWait: { resumes: 1 } });
   expect(await current("next-too-late")).toMatchObject({ status: "completed", judgment: { effect: "unknown" } });
+});
+
+it.each(["completed", "failed", "canceled"] as const)("keeps a %s business result indexed until AIS settlement, including with resumption disabled", async status => {
+  const slot = { firstExecutionNo: 1, lastExecutionNo: 1 };
+  await seed("settlement", { status, effectResumeSlot: slot });
+  await repo.createStep({ taskId: "settlement", stepId: "settlement-AIS-1", stepType: "agent_execution", stepNo: -1, command: "session_recovery" });
+  await db.exec("UPDATE ce_steps SET status = 'canceled', bot_run_id = 'job', bot_response_json = ? WHERE step_id = ?",
+    [JSON.stringify({ evolve_cancel: { status: "remote_stop_failed" } }), "settlement-AIS-1"]);
+  const raw = (await repo.findTask("settlement"))!;
+  expect(raw.status).toBe("settling");
+  expect(JSON.parse(raw.config_json!)).toMatchObject({ status, effectResumeSlot: slot });
+  expect((await tasks.listForMaintenance(200, "", "pre")).map(task => task.taskId)).toContain("settlement");
+  const before = await current("settlement");
+  deps.agent.effectResumeJobEnded = vi.fn().mockResolvedValue(false);
+  await service.maintenance();
+  expect(await current("settlement")).toMatchObject({ status, effectResumeSlot: slot, version: before.version });
+  expect(start).not.toHaveBeenCalled();
+  vi.mocked(deps.agent.effectResumeJobEnded).mockResolvedValue(true);
+  await service.maintenance();
+  const after = await current("settlement");
+  expect(after).toMatchObject({ status, version: before.version + 1, timeline: before.timeline });
+  expect(after.effectResumeSlot).toBeUndefined();
+  expect((await repo.findTask("settlement"))!.status).toBe(status);
+  expect(await tasks.settleEffectResumeSlot("settlement", slot, async () => true)).toBe(false);
+  expect(await tasks.update("settlement", before.version, value => ({ ...value, version: value.version + 1 }))).toBeNull();
+  expect((await tasks.listForMaintenance(200)).map(task => task.taskId)).not.toContain("settlement");
+});
+
+it("uses only status predicates for every maintenance candidate page", async () => {
+  await seed("ordinary-terminal", { status: "completed" });
+  const query = vi.spyOn(db, "query");
+  await tasks.listForMaintenance(200);
+  await tasks.listForMaintenance(200);
+  const scans = query.mock.calls.filter(([sql]) => sql.includes("ORDER BY task_id ASC LIMIT"));
+  expect(scans).toHaveLength(2);
+  for (const [sql, params] of scans) {
+    expect(sql).toContain("'settling'");
+    expect(sql).not.toMatch(/LIKE|JSON_EXTRACT|\bOR\b/);
+    expect(params).toEqual(["", 200]);
+  }
 });

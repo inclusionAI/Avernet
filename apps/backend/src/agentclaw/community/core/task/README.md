@@ -5,6 +5,24 @@
 > 权威源(冲突时以此为准):
 > - 设计三件套:`apps/backend/specs/2026-08-09-task-goal-driven-execution-framework/{plan,spec,tasks}.md`
 
+## Context collaboration / L6 product contracts
+
+The ACCS context-collaboration path is separate from the older goal-driven
+framework below. Its [collaboration boundary](context_collab/README.md)
+owns independent L4 Task authority, G3 read projections,
+[generic telemetry acquisition](context_collab/g3_observe_evaluate_evolve/README.md)
+and storage cutover.
+Its [L6 product contract](context_collab/l6_products/README.md)
+owns versioned product composition, ScenarioRole → L4 RoleBinding mappings,
+ProductInstance selection and the shared G4 enforcement/compatibility boundary.
+Concrete product definitions, specialized strategies and services live in
+`context_collab/products/`; DI installs and injects a shared immutable catalog.
+L6 supplies reusable contracts/mechanisms, not concrete business templates, a
+second Task/Method engine or Resource access grants.
+The [task commission product boundary](context_collab/products/task_commission/README.md)
+also documents its generic G3 step/metric/outcome reporting, bounded signed-Bot
+A2A Work ingress and executor-only compatibility progress enforcement.
+
 ## 任务副屏资产
 
 展示、声明恢复与导航编排由独立的 [task-panel 资产](../../../../../../frontend-nextgen/assets/task-panel/README.md) 持有；
@@ -38,6 +56,7 @@ Bot 会话通过 SecBaaS 查询 Engine 的同一 run 事件序号，而非仅以
 ```text
 core/task/
 ├── README.md
+├── context_collab/                # ACCS context primitives, methods, product contracts/services
 ├── domain/                        # TaskSpec/TaskNode/Graph 等共享领域模型
 ├── feedback/                       # task 域反馈通道(models/service/DDL)
 ├── forum/                          # BBS Topic/Post、Browse Loop 订阅/feed/报告
@@ -251,11 +270,18 @@ Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.p
   `relay_ledger_runtime.py` 统一入口真实读取 S1、读取当前节点本地账本并输出精简决策。后端已接纳状态优先；
   本地账本负责方法止损、在途等待/对账及细粒度阶段续跑，不上传完整账本，
   不从节点扩展属性消费第二份恢复投影，不保证跨容器恢复。
-  `relay_runtime_monitor.py` 区分 Runtime 失败、终态未上报、active 无消息活动；
+  `TaskRuntimeLivenessProbe` 优先通过 Bot OpenAPI 的 session runtime status 读取事件序号；
+  同一 `run_id + started_at` 下 `last_event_seq` 增长才算 Runtime 活动，`found=true` 的终态不再回退。
+  status 请求/协议失败或 `found=false` 时，使用原有 session messages 检测，来源标记为
+  `openapi_bot.session_fallback`；两条读取路径均失败才返回 `probe_unavailable`，不将探测失败视为 Bot 无进展。
+  Runtime 与消息检测切换时重建基线，不把 cursor 类型变化算作活动。旧消息接口仍无法观测没有消息变化的工具活动。
+  status 日志记录 HTTP status、业务 code 和 Runtime 摘要；fallback 日志记录原因、异常类型和最终来源，不新增完整报文或凭据日志。
+  `relay_runtime_monitor.py` 区分 Runtime 失败、终态未上报、active 无可观测活动；
   active 停滞按最后可观测活动的单调时间计算，默认 5×120 秒（10 分钟）后请求同会话恢复，
   不因探针临时不可用而清零；活动只证明 Runtime/消息变化，不证明业务验收进展。
   run/session 的版本与更新时间变化不单独算活动；当前进程同节点恢复互斥，发送后
   留一个探针观察窗口避免重复介入；active 静默即使耗尽续跑次数也不直接判 HUNG。无后端分布式恢复锁，不保证多进程全局去重。
+  OpenAPI Bot 会话在 active 静默达到预算后，会先对当前旧 run 做 best-effort abort，再向同一 session 发送 resume；该 abort 只释放旧 run，不改写图谱状态，也不算业务 terminal_failed。
 - `manager_worker` 协作群以当前协调 Bot 的 `send` delivery 为执行状态依据，不以群的
   `active` 生命周期或错误文本代替执行状态。沿用现有参与者 Bearer 查询消息和 delivery；
   同一节点代次、run、delivery 连续两个检测间隔确认失败且无新执行/消息活动，才恢复原会话。

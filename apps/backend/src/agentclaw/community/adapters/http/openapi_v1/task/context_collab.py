@@ -17,11 +17,10 @@ GET  /openapi/v1/collaboration/task/context_collab/{collab_context_id}       —
 ``@envelope_errors`` + ``ENVELOPE_ERRORS`` 的 ContextCollab 行映射
 ErrorEnvelope(422/409/404),router 不手写 ``HTTPException``。
 """
+
 from __future__ import annotations
 
 from typing import Annotated
-
-from fastapi import APIRouter, Depends, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
@@ -42,7 +41,7 @@ from agentclaw.community.adapters.http.task.schemas_context_collab import (
     ContextCollabStatusResponse,
     EventAcceptedResultDto,
     EventCreateRequest,
-    created_result_to_dto,
+    created_collet_to_dto,
     event_accepted_to_dto,
     status_to_dto,
 )
@@ -54,6 +53,7 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 )
 from agentclaw.community.core.task.context_collab.service_api import ActorContext
 from agentclaw.community.di import Injected
+from fastapi import APIRouter, Depends, Path, Query, Request
 
 router = APIRouter(
     prefix="/openapi/v1/collaboration/task/context_collab",
@@ -91,14 +91,17 @@ def _actor_context(principal: Principal) -> ActorContext:
 
 @router.post("", response_model=Envelope[ContextCollabCreatedResultDto])
 @envelope_errors
-async def create_context_collab(
+async def create_collet_collab(
     body: ColletCreateRequest,
     request: Request,
     principal: PrincipalDep,
     service: ContextCollabServiceProtocol = Injected(ContextCollabServiceProtocol),  # noqa: B008
 ) -> Envelope[ContextCollabCreatedResultDto]:
-    result = service.create_context(body.to_domain(), _actor_context(principal))
-    return envelope(created_result_to_dto(result), request)
+    command = body.to_domain()
+    context = _actor_context(principal)
+    collet = service.create_collaboration(command, context)
+    events = service.get_events(collet.collet_id, context=context)
+    return envelope(created_collet_to_dto(collet, command, events), request)
 
 
 @router.post(

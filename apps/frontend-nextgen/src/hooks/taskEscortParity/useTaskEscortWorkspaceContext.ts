@@ -111,5 +111,9 @@ export function useTaskEscortWorkspaceContext(scope: WorkspaceScope) {
     refreshWorkflows,
     openCreatedWorkflow,
   };
-  return { context, page, workflows, selectWorkflow };
+  // Workflow readiness is false for both empty and unavailable collections; only a successful
+  // identity-bound list without an explicit target may enter the product introduction.
+  const showIntroduction =
+    scope.ready && !resource.loading && !resource.error && resource.data?.length === 0 && !explicitSelection;
+  return { context, page, workflows, selectWorkflow, showIntroduction };
 }

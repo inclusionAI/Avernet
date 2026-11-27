@@ -100,7 +100,7 @@ export function ConversationSessionStatus({ botId, sessionId, showReplying = fal
   const visual = SESSION_STATUS_ICON_MAP[normalizedCode];
   if (!visual) return renderReplying();
   const { Icon, colorClass, animationClass } = visual;
-  const accessibleLabel = `DevFlow：${status.label}`;
+  const accessibleLabel = status.label;
   return (
     <TooltipProvider delayDuration={200}>
       <Tooltip>

@@ -10,7 +10,7 @@ function fixture(status: string, epoch: number | null | 'absent') {
   raw.function('GREATEST', (a: number, b: number) => Math.max(a, b));
   raw.exec(`CREATE TABLE flow_runs (
     flow_id TEXT PRIMARY KEY, status TEXT NOT NULL, ${epoch === 'absent' ? '' : 'retry_epoch INTEGER,'}
-    started_at INTEGER, completed_at INTEGER, gmt_modified INTEGER, result_json TEXT, input_json TEXT,
+    state_json TEXT DEFAULT '{"effectiveFlowTimeoutMinutes":1}', started_at INTEGER, completed_at INTEGER, gmt_modified INTEGER, result_json TEXT, input_json TEXT,
     total_duration_ms INTEGER, total_token_usage INTEGER, current_phase TEXT, succeeded_count INTEGER, failed_count INTEGER
   );
   CREATE TABLE node_executions (flow_id TEXT, status TEXT, error_text TEXT, duration_ms INTEGER, completed_at INTEGER, gmt_modified INTEGER);
@@ -39,7 +39,7 @@ for (const cancelled of ['cancelled', 'canceled']) {
               expect(snapshot()).toEqual(before);
             }
             expect(await runs.markFailedIfRunning('flow', {
-              reason: 'late timeout', currentPhase: 'timeout', completedAt: 2000, retryEpoch: supplied,
+              reason: JSON.stringify({ reason: 'flow_timeout', timeoutSecs: 60, ranForSecs: 61 }), currentPhase: 'timeout', completedAt: 2000, retryEpoch: supplied,
             })).toBe(false);
             expect(snapshot()).toEqual(before);
           } finally { await db.close(); }

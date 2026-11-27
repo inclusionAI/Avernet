@@ -66,6 +66,13 @@ A2A. `off` must work without importing either A2A module.
   supplied registered keys. The facade alone changes its unfinished states;
   completed/unknown sessions and unrelated waiters are untouched. A fallback
   failure does not trigger main reconnect.
+- A send snapshots the wire connection state before writing. When the connection
+  is already non-`OPEN`, `RequestNotSentError` means the frame was not written
+  and the caller may replay once; a close during the write remains an unknown
+  outcome and must not be replayed. The client pool also exposes `discard(client)`
+  so a send-side-dead connection is removed before `recv_loop` marks it
+  disconnected. Regressions: `tests/unit/core/service/bot_run/test_bot_websocket_client.py`
+  and `test_async_chat_client_pool.py`.
 
 ## Lifecycle and routing invariants
 

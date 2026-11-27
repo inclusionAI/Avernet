@@ -205,10 +205,20 @@ mode. Anonymous HTTP/gRPC clients do not look up or transmit Provider credential
 Authentication errors never switch a run to anonymous or change its binding.
 
 Pre-release named chat can carry a request-scoped test `user_id`. The adapter
-checks the caller, stable target, full HTTPS endpoint, and JSON-RPC streaming
-binding. The initial Send uses a sensitive user header and requires application
-identity on a Card without a Bearer scheme. The user ID is kept in memory for
-the submission. Follow-up Task operations use the ordinary client.
+checks the caller, stable target, full configured HTTP or HTTPS endpoint, and
+JSON-RPC streaming binding. The outbound URL policy and redirect blocking apply
+to this request. The initial Send uses a sensitive user header and requires
+application identity on a Card without a Bearer scheme. The user ID is kept in
+memory for the submission. Follow-up Task operations use the ordinary client.
+
+For this scoped submission, `a2a.test_response` records HTTP status, media
+type, observed byte count and body state. Complete bodies up to 512 bytes,
+including chunked bodies, can supply allowlisted JSON error fields. The log
+redacts values echoing sensitive request headers and reports only metadata
+for unstructured or incomplete bodies. A response rejected on content type
+has at most 250 ms to supply the preview. The `a2a.test_submission` event
+records the result of waiting for the first A2A event, including failures
+before headers arrive. Both events use the current business log correlation.
 
 ## JSON-RPC 1.0 binding
 
@@ -221,3 +231,7 @@ before the common delivery driver sees it. No 0.3 aliases, endpoint suffixes or
 binding fallback are introduced. Run persistence records json_rpc separately.
 
 Custom bindings normalize responses through bcs-a2a-binding-api::Client and share the existing task driver. Registration keeps raw Cards; selected opaque routes and fingerprints fence recovery/cancellation across configuration changes.
+
+## HTTP+JSON / JSON-RPC client digest log
+
+`digest` emits one 22-column positional CSV record per outbound `HTTP+JSON` or `JSONRPC` call (`SendMessage`, `SendStreamingMessage`, `GetTask`, `CancelTask`, `SubscribeToTask`) to tracing target `bcs_a2a_http_client_digest`, routed to the dedicated raw `a2a-http-client-digest.log` output. Columns 2–3 carry `trace_id` and `span_id` from `bcs-tracing-api` `LogCorrelation` (matching the outbound traced HTTP call when a network tracer is installed, falling back to current log correlation or empty when absent). Streaming calls record one final line upon EOF, error, or drop (including `ttfb_ms`, total `duration_ms`, and `stream_events`); dropping after at least one valid event records success (`00`/`Y`), while dropping before any event records cancellation (`07`/`N`). URL credentials, queries, raw task IDs in REST paths, and untrusted remote diagnostic text are excluded from digest fields.

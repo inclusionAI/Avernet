@@ -33,6 +33,19 @@ class ServiceContainerUpstreamError(ServicePublicationError):
     """The runtime provider failed while serving a container operation."""
 
 
+class ServicePublishWorkflowNotFoundError(ServicePublicationError):
+    """The addressed BaaS publish workflow is absent or hidden from the caller.
+
+    Distinct from :class:`ServicePublicationNotFoundError`: that type reports
+    a local Bot/publication pair that does not exist, while this one relays the
+    upstream BaaS provider's own "publish workflow not found" answer.
+    """
+
+
+class ServicePublishUpstreamError(ServicePublicationError):
+    """The BaaS provider failed while serving a publish-progress query."""
+
+
 class ServicePublicationGateBlockedError(ServicePublicationError):
     """The release is blocked by the unified service-Bot evaluation gate."""
 

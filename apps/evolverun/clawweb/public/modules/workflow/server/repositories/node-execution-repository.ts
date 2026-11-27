@@ -3,6 +3,7 @@
  * No dependency on ClawFlow; shares the same database schema.
  */
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import type { ExecutionRecordNodeExecution } from "../../shared/execution-record.js";
 
 const MAX_ERROR_LENGTH = 4000;
 
@@ -137,6 +138,22 @@ export class NodeExecutionRepository {
       console.warn(`[db] NodeExecutionRepository.findByFlowId failed: ${msg}`);
       return [];
     }
+  }
+
+  /** All persisted attempts in callback order, with stable ties and no limit or fallback. */
+  async findExecutionRecordsByFlowIdStrict(
+    flowId: string,
+    includeNodeOutput = false,
+  ): Promise<ExecutionRecordNodeExecution[]> {
+    return this.db.query<ExecutionRecordNodeExecution>(
+      `SELECT id, flow_id, workflow_id, node_id, executor_type, status, attempt,
+              input_json, error_text, duration_ms, token_usage_json, node_title,
+              triggered_by, branch_id, progress_message, session_key, session_id,
+              system_context_json, embedded_session_key, started_at, completed_at,
+              gmt_create, gmt_modified${includeNodeOutput ? ", output_json" : ""}
+       FROM node_executions WHERE flow_id = ? ORDER BY started_at DESC, id DESC`,
+      [flowId],
+    );
   }
 
   async findLatestByFlowId(flowId: string): Promise<NodeExecutionRow[]> {

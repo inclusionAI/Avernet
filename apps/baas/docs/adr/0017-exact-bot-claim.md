@@ -92,9 +92,11 @@ an additional match **inside** the existing resource-key scope:
 - community: `tests/unit/adapters/web/test_gateway_jwt_dependencies.py` —
   claim surfaced on the auth context, absent claim and absent `app` block both
   reading as `None`.
-- OCB (private): `apps/backend/.../gateway_principal/baas_service_principal.py`
+- Avernet `apps/backend` (public):
+  `apps/backend/src/agentclaw/community/core/gateway_principal/baas_service_principal.py`
   — the mint, including the normalization mirror and the omit-when-absent rule.
-- OCB (private): `apps/backend/.../agentswarm/chat/baas_gateway.py` —
-  `_chat_once` passes the resolved target into the mint.
+- Avernet `apps/backend` (public):
+  `apps/backend/src/agentclaw/community/plugins/community/agentswarm/chat/baas_gateway.py`
+  — `_chat_once` passes the resolved target into the mint.
 - Supersedes: `ADR-0016-wildcard-bot-mapping.md` — the wildcard's blast-radius
   caveat is what this decision addresses; the wildcard itself is retained.

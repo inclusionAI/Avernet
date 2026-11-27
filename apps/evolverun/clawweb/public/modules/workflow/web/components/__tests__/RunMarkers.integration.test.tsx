@@ -185,24 +185,32 @@ describe('RunSummaryHeader env/tag wiring', () => {
     { name: 'mixed null tag', fields: { env: 'test', tag: null }, env: 'test', tag: '未记录' },
     { name: 'raw strings', fields: { env: '', tag: '  raw-tag  ' }, env: '', tag: '  raw-tag  ' },
   ])('shows separate env/tag fields for $name responses', ({ fields, env, tag }) => {
-    render(<RunSummaryHeader run={makeRun('detail-run', fields)} nodeCount={1} />)
+    render(<RunSummaryHeader run={makeRun('detail-run', fields)} nodeCount={1} />, { wrapper: MemoryRouter })
     const summary = screen.getByRole('region', { name: '运行摘要' })
     expect(within(summary).getByText('流量标识', { selector: 'dt' }).nextElementSibling?.textContent).toBe(env)
     expect(within(summary).getByText('标签', { selector: 'dt' }).nextElementSibling?.textContent).toBe(tag)
     expect(within(summary).getByText('运行引擎', { selector: 'dt' }).nextElementSibling).toHaveTextContent('engine-not-an-env')
   })
 
-  it('keeps long tag text inert and bounded in read-only details', () => {
+  it('keeps long tag text inert and bounded in read-only details', async () => {
+    const onApproval = vi.fn()
     const run = makeRun('read-only-run', { env: 'test', tag: longTag, status: 'waiting' })
-    const { container } = render(<RunSummaryHeader run={run} nodeCount={1} readOnly onApproval={vi.fn()} pendingApprovalCount={1} />)
-    const tag = screen.getByTitle(longTag)
+    const { container } = render(<RunSummaryHeader run={run} nodeCount={1} readOnly onApproval={onApproval} pendingApprovalCount={1} />, { wrapper: MemoryRouter })
+    const context = screen.getByRole('region', { name: '执行上下文' })
+    const tag = within(context).getByTitle(longTag)
     expect(tag.textContent).toBe(longTag)
-    expect(tag).toHaveClass('truncate')
+    // Detail markers wrap within shrinkable grid tracks; compact list markers still truncate.
+    expect(tag).toHaveClass('min-w-0', 'break-words', '[overflow-wrap:anywhere]')
+    expect(tag).not.toHaveClass('truncate')
     expect(tag.parentElement).toHaveClass('min-w-0')
-    expect(tag.closest('dl')).toHaveClass('grid', 'grid-cols-2', 'sm:grid-cols-3', 'lg:grid-cols-7')
+    expect(tag.closest('dl')).toHaveClass('grid', 'grid-cols-2', 'md:grid-cols-3', 'xl:grid-cols-6')
+    expect(screen.getByRole('region', { name: '运行摘要' })).toHaveClass('min-w-0')
     expect(container.querySelector('img, script')).toBeNull()
-    expect(screen.getByText('流量标识', { selector: 'dt' }).nextElementSibling).toHaveTextContent('test')
+    expect(tag.closest('a, button')).toBeNull()
+    expect(within(context).getByText('流量标识', { selector: 'dt' }).nextElementSibling).toHaveTextContent('test')
     expect(screen.queryAllByRole('button')).toHaveLength(0)
+    await userEvent.click(tag)
+    expect(onApproval).not.toHaveBeenCalled()
     expect(mocks.mutation.mutate).not.toHaveBeenCalled()
   })
 })

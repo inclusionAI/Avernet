@@ -30,7 +30,7 @@ from .test_apply_service_lifecycle import _ManifestService
 from .test_apply_service_uses_strategy import _InlineQueue
 
 
-def registered_world(document, *, platform=False, resolver=None, world=None):
+def registered_world(document, *, platform=False, resolver=None, world=None, server_permission_check=None):
     world = world or CapabilityWorld()
     if platform:
         world.bots.update_by_owner("bot-1", "owner", {"active_engine": "teclaw"})
@@ -65,6 +65,7 @@ def registered_world(document, *, platform=False, resolver=None, world=None):
     manifests = _ManifestService(document)
     queue = _InlineQueue()
     service = ApplyRunService(
+        server_permission_check=server_permission_check,
         capabilities=manifests,
         apply_repository=BotConfigManifestApplyRepository(world.db),
         lock_repository=BotConfigManifestApplyLockRepository(world.db),

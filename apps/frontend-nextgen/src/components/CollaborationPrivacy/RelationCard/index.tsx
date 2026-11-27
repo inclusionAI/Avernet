@@ -15,22 +15,18 @@ export interface RelationCardProps {
   disabled?: boolean;
   onEdit: () => void;
   onViewScope: () => void;
-  /**
-   * 公开风险前置检测在途态（bot-public-risk-check，仅「对用户」行使用）：
-   * checking/advancing/approving 锁定编辑并展示徽标；approving 附「查看审批进度」，
-   * checking/advancing 附「查看检测工单」（detail_url 缺失时不渲染链接）。
-   * 在途态行级提供「刷新状态」入口：approving 起钩子停自动轮询（审批终态由后端
-   * 工单回调推进），刷新即重读最新记录同步结论。风险动线审批期后端会把同一申请
-   * 投影进 BCS friend_ext（pendingPublications），故刷新入口不因 pending 隐藏。
-   * 既有 pending（审批中）仍优先渲染角标/外链，避免双徽标。
-   */
-  riskStatus?: {
-    kind: 'checking' | 'advancing' | 'approving';
-    detailUrl?: string | null;
-    onViewApprovalProgress: () => void;
-    onRefreshStatus?: () => void;
-    refreshingStatus?: boolean;
-  } | null;
+  /** 风险记录主导对用户公开的进度，审批投影提供同一笔申请的外链。 */
+  riskStatus?:
+    | {
+        kind: 'checking' | 'advancing' | 'approving';
+        approvalPuid?: string | null;
+        detailUrl?: string | null;
+        onViewApprovalProgress: () => void;
+        onRefreshStatus?: () => void;
+        refreshingStatus?: boolean;
+      }
+    | { kind: 'failed' | 'attention'; label: string }
+    | null;
 }
 
 export function RelationCard({
@@ -42,39 +38,42 @@ export function RelationCard({
   onViewScope,
   riskStatus,
 }: RelationCardProps) {
-  const riskBadge =
-    !pending && riskStatus ? (
-      <Badge tone={riskStatus.kind === 'approving' ? 'warning' : 'primary'}>
-        {riskStatus.kind === 'approving' ? '审批中' : '检测中'}
-      </Badge>
-    ) : null;
-  // 状态外链与操作按钮同入右侧动作区：链接用原生 sm 高度（h-8）保证与按钮同一文本盒水平对齐。
-  // 审批态看审批进度（对 Bot 走既有 approvalUrl，对用户风险动线走站内跳转），检测态看检测工单。
-  const stateLink = pending?.approvalUrl ? (
+  const failure = riskStatus && 'label' in riskStatus ? riskStatus : null;
+  const inFlight = riskStatus && 'onViewApprovalProgress' in riskStatus ? riskStatus : null;
+  const approving = inFlight?.kind === 'approving';
+  const pendingApproval =
+    !riskStatus || (approving && (!inFlight.approvalPuid || pending?.id === inFlight.approvalPuid))
+      ? pending
+      : undefined;
+  const riskBadge = failure ? (
+    <Badge tone="error">{failure.label}</Badge>
+  ) : !pendingApproval && inFlight ? (
+    <Badge tone={approving ? 'warning' : 'primary'}>{approving ? '审批中' : '检测中'}</Badge>
+  ) : null;
+  // 链接与按钮共用右侧动作区，审批投影仅在对应当前审批时提供外链。
+  const stateLink = pendingApproval?.approvalUrl ? (
     <Button asChild variant="ghost" size="sm" className="px-2 text-primary">
-      <a href={pending.approvalUrl} target="_blank" rel="noopener noreferrer">
+      <a href={pendingApproval.approvalUrl} target="_blank" rel="noopener noreferrer">
         查看审批进度
       </a>
     </Button>
-  ) : riskStatus && !pending ? (
-    riskStatus.kind === 'approving' ? (
-      <Button variant="ghost" size="sm" className="px-2 text-primary" onClick={riskStatus.onViewApprovalProgress}>
-        查看审批进度
-      </Button>
-    ) : riskStatus.detailUrl ? (
-      <Button asChild variant="ghost" size="sm" className="px-2 text-primary">
-        <a href={riskStatus.detailUrl} target="_blank" rel="noopener noreferrer">
-          查看检测工单
-        </a>
-      </Button>
-    ) : null
+  ) : !pendingApproval && approving ? (
+    <Button variant="ghost" size="sm" className="px-2 text-primary" onClick={inFlight.onViewApprovalProgress}>
+      查看审批进度
+    </Button>
+  ) : inFlight?.detailUrl ? (
+    <Button asChild variant="ghost" size="sm" className="px-2 text-primary">
+      <a href={inFlight.detailUrl} target="_blank" rel="noopener noreferrer">
+        查看检测工单
+      </a>
+    </Button>
   ) : null;
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-4 first:pt-0 last:pb-0">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <p className="m-0 text-sm font-medium text-foreground">{audienceLabels[audience]}</p>
-          {pending && <Badge tone="warning">待审批</Badge>}
+          {pendingApproval && <Badge tone="warning">待审批</Badge>}
           {riskBadge}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -94,14 +93,14 @@ export function RelationCard({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {stateLink}
-        {riskStatus?.onRefreshStatus ? (
+        {inFlight?.onRefreshStatus ? (
           <Button
             variant="ghost"
             size="sm"
             className="px-2 text-primary"
-            loading={riskStatus.refreshingStatus ?? false}
+            loading={inFlight.refreshingStatus ?? false}
             leftIcon={<RefreshCw className="size-3.5" aria-hidden />}
-            onClick={riskStatus.onRefreshStatus}
+            onClick={inFlight.onRefreshStatus}
           >
             刷新状态
           </Button>
@@ -109,10 +108,10 @@ export function RelationCard({
         <Button
           variant="secondary"
           size="sm"
-          disabled={disabled || Boolean(pending) || Boolean(riskStatus)}
+          disabled={disabled || Boolean(pendingApproval || inFlight)}
           onClick={onEdit}
         >
-          {pending || riskStatus?.kind === 'approving' ? '审批中' : riskStatus ? '检测中' : '修改可见性'}
+          {pendingApproval || approving ? '审批中' : inFlight ? '检测中' : failure ? '去处理' : '修改可见性'}
         </Button>
       </div>
     </div>

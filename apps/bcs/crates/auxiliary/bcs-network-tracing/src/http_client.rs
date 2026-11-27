@@ -1,4 +1,4 @@
-use bcs_tracing_api::{Call, Kind, Outcome, RequestInfo, with_context};
+use bcs_tracing_api::{Call, Kind, LogCorrelation, Outcome, RequestInfo, with_context};
 use crate::{ClientWithDefaults, RequestWithDefaults, default_headers::merge_defaults};
 
 /// Traced send. For custom defaults use `ClientWithDefaults`; raw reqwest
@@ -52,6 +52,17 @@ macro_rules! client_adapter {
                 }
             }
 
+            impl ClientWithDefaults<Client> {
+                /// Traced execution that also returns the outbound call's read-only log correlation.
+                pub async fn execute_traced_with_correlation(
+                    &self,
+                    mut request: Request,
+                ) -> ($client::Result<Response>, Option<LogCorrelation>) {
+                    merge_defaults(request.headers_mut(), &self.headers);
+                    execute_with_correlation(&self.client, request).await
+                }
+            }
+
             impl ClientExt for ClientWithDefaults<Client> {
                 type Request = Request;
                 type Response = Response;
@@ -80,8 +91,18 @@ macro_rules! client_adapter {
                 }
             }
 
-            async fn execute(client: &Client, mut request: Request) -> $client::Result<Response> {
-                if !bcs_tracing_api::is_enabled() { return client.execute(request).await; }
+            async fn execute(client: &Client, request: Request) -> $client::Result<Response> {
+                execute_with_correlation(client, request).await.0
+            }
+
+            async fn execute_with_correlation(
+                client: &Client,
+                mut request: Request,
+            ) -> ($client::Result<Response>, Option<LogCorrelation>) {
+                if !bcs_tracing_api::is_enabled() {
+                    let correlation = bcs_tracing_api::current_log_correlation();
+                    return (client.execute(request).await, correlation);
+                }
                 let mut endpoint = request.url().clone();
                 let _ = endpoint.set_username("");
                 let _ = endpoint.set_password(None);
@@ -95,6 +116,7 @@ macro_rules! client_adapter {
                     kind: Kind::HttpClient, method: request.method().as_str(), endpoint: endpoint.as_str(),
                     route: None, target_app: "", request_size: request.body().and_then(|body| body.as_bytes()).map(|bytes| bytes.len() as u64),
                 }, &incoming);
+                let correlation = call.scope().scope_sync(bcs_tracing_api::current_log_correlation);
                 for name in call.remove_headers() {
                     if let Ok(name) = $client::header::HeaderName::from_bytes(name.as_bytes()) {
                         request.headers_mut().remove(name);
@@ -110,7 +132,7 @@ macro_rules! client_adapter {
                     Ok(response) => call.finish(Outcome::Http(response.status().as_u16()), response.content_length()),
                     Err(error) => call.finish(if error.is_timeout() { Outcome::Timeout } else { Outcome::TransportError }, None),
                 }
-                result
+                (result, correlation)
             }
         }
     };

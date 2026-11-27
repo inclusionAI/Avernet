@@ -88,3 +88,40 @@ describe('Drawer bodyClassName', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
+
+describe('Drawer layer', () => {
+  const hasClass = (token: string) =>
+    Array.from(document.querySelectorAll('body *')).some((node) =>
+      node.classList?.contains(token),
+    );
+
+  it('default layer uses the base drawer token', () => {
+    render(
+      <Drawer open>
+        <DrawerContent side="right">
+          <DrawerTitle className="sr-only">标题</DrawerTitle>
+          <span>抽屉正文</span>
+        </DrawerContent>
+      </Drawer>,
+    );
+    expect(hasClass('z-[var(--z-drawer)]')).toBe(true);
+    expect(hasClass('z-[var(--z-nested-drawer)]')).toBe(false);
+  });
+
+  it('layer="nested" raises both overlay and content above a parent dialog', () => {
+    render(
+      <Drawer open>
+        <DrawerContent side="right" layer="nested">
+          <DrawerTitle className="sr-only">标题</DrawerTitle>
+          <span>抽屉正文</span>
+        </DrawerContent>
+      </Drawer>,
+    );
+    // 遮罩 + 内容都取更高级的 Token（Portal 后层级不会被父 Modal 抬升）。
+    const nested = Array.from(document.querySelectorAll('body *')).filter((node) =>
+      node.classList?.contains('z-[var(--z-nested-drawer)]'),
+    );
+    expect(nested).toHaveLength(2);
+    expect(hasClass('z-[var(--z-drawer)]')).toBe(false);
+  });
+});

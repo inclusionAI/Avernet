@@ -482,8 +482,33 @@ class BotSkillSetInstallations:
                  Skill.skill_uuid.in_(center_uuids)).first():
             raise SkillSetControlPlaneConflictError("RESOURCE_DIRECT_ACTIVE")
         ordinary_facts = self._apply_facts(session, [row for row in bot_sets if not row.is_default])
-        if any(self._apply_set_owns_skill(fact, skill, frozenset())
-               for fact in ordinary_facts for skill in skills):
+        # Scan in the same order the old `any(...)` short-circuited, but keep
+        # the first colliding pair so the raise carries an operable identity
+        # (which ordinary Set claims a Default member) instead of a bare
+        # reason code. Extra-detail line only; behaviour is unchanged.
+        conflicting = next(
+            (
+                (fact, skill)
+                for fact in ordinary_facts
+                for skill in skills
+                if self._apply_set_owns_skill(fact, skill, frozenset())
+            ),
+            None,
+        )
+        if conflicting is not None:
+            fact, skill = conflicting
+            logger.warning(
+                "[skill_center] RAISK default membership conflict: bot_id=%s "
+                "owner_id=%s engine_type=%s conflicting_set_id=%s "
+                "conflicting_set_name=%s skill_id=%s skill_uuid=%s",
+                bot_id,
+                owner_id,
+                engine_type,
+                fact.id,
+                fact.name,
+                skill.id,
+                skill.skill_uuid,
+            )
             raise SkillSetControlPlaneConflictError("RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET")
         self._require_unique_runtime_names(
             session, bot_id=bot_id, owner_id=owner_id, candidate_ids=default_ids,

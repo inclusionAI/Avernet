@@ -1,6 +1,7 @@
 from typing import Annotated
 
-from injector import Injector, Module, provider, singleton
+from agentclaw.community.core.task.context_collab.l6_products.profile_reader import ProductProfileReader
+from agentclaw.community.di.modules.task.context_collab_products import build_product_catalog
 
 from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator,
@@ -8,12 +9,79 @@ from agentclaw.community.adapters.http.task.auth import (
 )
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
-from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.task.forum_digest_service import (
     ForumDigestReportServiceProtocol,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
+    ContextCollabAuthorizerProtocol,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
+    MethodOpsAuthorizerProtocol,
+    StructuralMethodOpsAuthorizer,
+)
+from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
+    A2aDeliveryPort,
+    MockA2aDelivery,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (
+    ColletLifecycleService,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    CollaborationReader,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.lifecycle import (
+    MethodLifecycleService,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
+    OpenMethodService,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.single_group import (
+    SingleGroupMethodService,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.service import (
+    SwarmMethodService,
+)
+from agentclaw.community.core.task.context_collab.method_service_api import (
+    GroupMethodOpsServiceProtocol,
+    MethodLifecycleServiceProtocol,
+    OpenMethodOpsServiceProtocol,
+    SwarmMethodOpsServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.persistence.collet_lifecycle_store import (
+    ColletLifecycleStore,
+    InMemoryColletLifecycleStore,
+)
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    MethodStoreProtocol,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
+    ContextCollabRepositoryProtocol as L4ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.l6_products.persistence.records import ContextStatusRecord
+from agentclaw.community.core.task.context_collab.persistence.repository import (
+    ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
+    BbsPublicDiscussionService,
+)
+from agentclaw.community.core.task.context_collab.products.service_api import (
+    BbsPublicDiscussionServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.dispatch import (
+    A2aTaskDispatch,
+    LoggingTaskDispatch,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.service import (
+    TaskCommissionService,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    TaskCommissionServiceProtocol,
+    TaskDispatchPort,
+    TaskMethodOpsPort,
+)
 from agentclaw.community.core.task.forum.browsing import (
     BbsBrowseLoopRunner,
     BbsBrowseLoopScheduler,
@@ -28,21 +96,15 @@ from agentclaw.community.core.task.forum.browsing.subscription_provisioner impor
 from agentclaw.community.core.task.forum.service_protocol import (
     ForumServiceProtocol,
 )
-from agentclaw.community.di.config import TaskDispatchConfig
-from agentclaw.community.plugin_api.notify_sender import (
-    QUALIFIER_BBS_DIGEST,
-    NotifySenderPlugin,
-)
-from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.task.task_runner.callback_correlation import (
-    CallbackCorrelationRegistry,
-    InMemoryCallbackCorrelationRegistry,
+from agentclaw.community.core.task.task_discovery.frontend_url import (
+    ConfigFrontendUrlProvider,
 )
 from agentclaw.community.core.task.task_dispatch.task_settings import (
     TaskSettingsServiceProtocol,
 )
-from agentclaw.community.core.task.task_discovery.frontend_url import (
-    ConfigFrontendUrlProvider,
+from agentclaw.community.core.task.task_runner.callback_correlation import (
+    CallbackCorrelationRegistry,
+    InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.task.context_collab.executor import (
     ContextCollabExecutor,
@@ -54,6 +116,17 @@ from agentclaw.community.di.modules.task_module import _resolve_harness_enabled
 from agentclaw.community.core.task.task_runner.client.semantic_keyword_bot_discover import (
     SemanticKeywordBotDiscover,
 )
+from agentclaw.community.di.modules.task.todo_bindings import TaskTodoBindings
+from agentclaw.community.di.config import TaskDispatchConfig
+from agentclaw.community.di.modules.task.task_commission_method_ops_adapter import (
+    TaskCommissionOpenMethodAdapter,
+)
+from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.notify_sender import (
+    QUALIFIER_BBS_DIGEST,
+    NotifySenderPlugin,
+)
+from injector import Injector, Module, provider, singleton
 
 
 class _StubDiscoverModule(Module):
@@ -166,7 +239,7 @@ class _ContextExecutorInjector:
 
 
 def test_context_collab_executor_requires_openapi_bot_port():
-    executor = TaskModule().context_collab_executor(
+    executor = TaskTodoBindings().context_collab_executor(
         _ContextExecutorInjector(),
         TaskDispatchConfig(backend_url="http://backend.example"),
     )
@@ -176,7 +249,7 @@ def test_context_collab_executor_requires_openapi_bot_port():
 
 def test_context_collab_executor_allows_missing_legacy_bcs_ports():
     openapi_bot = object()
-    executor = TaskModule().context_collab_executor(
+    executor = TaskTodoBindings().context_collab_executor(
         _ContextExecutorInjector(openapi_bot),
         TaskDispatchConfig(backend_url="http://backend.example"),
     )
@@ -342,3 +415,246 @@ def test_task_module_wires_bbs_digest_report_service_singleton():
     )
     service = injector.get(ForumDigestReportServiceProtocol)
     assert service is injector.get(ForumDigestReportServiceProtocol)
+
+
+
+
+class _StubContextCollabRepoModule(Module):
+    """L5 method 服务接线测试用的受控 collet 仓储 stub(免 ORM,可解析性
+    是断言对象,行为不是)。"""
+
+    @singleton
+    @provider
+    def product_catalog(self) -> ProductProfileReader:
+        return build_product_catalog()
+
+    @singleton
+    @provider
+    def l4_collab_repo(self) -> L4ContextCollabRepositoryProtocol[ContextStatusRecord]:
+        return self.collab_repo()
+
+    @singleton
+    @provider
+    def collab_repo(self) -> ContextCollabRepositoryProtocol:
+        class _Repo:
+            def get_current_status(self, collab_context_id: str):
+                return None
+
+            def create_context(self, request):
+                raise NotImplementedError("stub only implements get_current_status")
+
+            def append_event(self, collab_context_id: str, request):
+                raise NotImplementedError("stub only implements get_current_status")
+
+        return _Repo()  # type: ignore[return-value]
+
+
+def test_task_module_binds_l5_method_services_and_authorizer_singletons():
+    """L5 接线(2026-11-12 spec §5/Task 13):授权器 + 生命周期/Group/
+    Swarm/Open 四服务协议均从 injector 解析且 singleton;四服务共享
+    同一 MethodStoreProtocol singleton(authorizer 无 store 依赖,
+    结构断言授权 P1 裁决)。"""
+    inj = Injector(
+        [TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()]
+    )
+    authorizer = inj.get(MethodOpsAuthorizerProtocol)
+    assert isinstance(authorizer, StructuralMethodOpsAuthorizer)
+    lifecycle = inj.get(MethodLifecycleServiceProtocol)
+    assert isinstance(lifecycle, MethodLifecycleService)
+    group = inj.get(GroupMethodOpsServiceProtocol)
+    assert isinstance(group, SingleGroupMethodService)
+    swarm = inj.get(SwarmMethodOpsServiceProtocol)
+    assert isinstance(swarm, SwarmMethodService)
+    open_service = inj.get(OpenMethodOpsServiceProtocol)
+    assert isinstance(open_service, OpenMethodService)
+    # singleton:两次解析取同对象。
+    for binding in (
+        MethodOpsAuthorizerProtocol,
+        MethodLifecycleServiceProtocol,
+        GroupMethodOpsServiceProtocol,
+        SwarmMethodOpsServiceProtocol,
+        OpenMethodOpsServiceProtocol,
+        MethodStoreProtocol,
+    ):
+        assert inj.get(binding) is inj.get(binding)
+    # 四服务共享同一 method store singleton。
+    store = inj.get(MethodStoreProtocol)
+    assert lifecycle._store is store  # noqa: SLF001
+    assert group._store is store  # noqa: SLF001
+    assert swarm._store is store  # noqa: SLF001
+    assert open_service._store is store  # noqa: SLF001
+    reader = inj.get(CollaborationReader)
+    assert reader is inj.get(L4ContextCollabRepositoryProtocol[ContextStatusRecord])
+    assert lifecycle._collab_repo is reader
+    assert group._collab_repo is reader
+    assert swarm._collab_repo is reader
+    assert open_service._collab_repo is reader
+
+
+def test_task_module_binds_collet_lifecycle_store_and_service_singletons():
+    """Collet 生命周期接线(2026-11-12 L4 对齐 spec §5.3):store 协议绑
+    进程内 singleton 实现,服务 singleton 且共享同一 store;collab_repo
+    协议由 TaskPersistenceModule 绑定,此处 stub 仅供可解析。"""
+    inj = Injector(
+        [TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()]
+    )
+    store = inj.get(ColletLifecycleStore)
+    assert isinstance(store, InMemoryColletLifecycleStore)
+    service = inj.get(ColletLifecycleService)
+    assert isinstance(service, ColletLifecycleService)
+    # singleton:两次解析取同对象。
+    for binding in (ColletLifecycleStore, ColletLifecycleService):
+        assert inj.get(binding) is inj.get(binding)
+    # 服务持有同一 store singleton。
+    assert service._store is store  # noqa: SLF001
+
+
+def test_task_module_binds_bbs_public_discussion_service_singleton():
+    """BBS 公开讨论产品层接线(spec §3.4):协议解析为产品服务 singleton,
+    复用既有 ContextCollabAuthorizerProtocol / MethodStoreProtocol /
+    ContextCollabRepositoryProtocol 绑定,collab_repo 由 persistence
+    模块绑(测试经 stub 供可解析)。"""
+    inj = Injector(
+        [TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()]
+    )
+    service = inj.get(BbsPublicDiscussionServiceProtocol)
+    assert isinstance(service, BbsPublicDiscussionService)
+    # singleton:两次解析取同对象。
+    assert inj.get(BbsPublicDiscussionServiceProtocol) is service
+    # 复用既有 singleton 依赖。
+    assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)  # noqa: SLF001
+    assert service._method_store is inj.get(MethodStoreProtocol)  # noqa: SLF001
+
+
+def test_task_module_binds_task_commission_method_ops_adapter():
+    """方法编排缝接线(任务代办 spec §9):TaskMethodOpsPort 解析为
+    真适配器 singleton,与开方法服务同 singleton;产品服务持同端口——
+    发布即驱动真 Open 方法生命周期。"""
+    inj = Injector(
+        [TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()]
+    )
+    port = inj.get(TaskMethodOpsPort)
+    assert isinstance(port, TaskCommissionOpenMethodAdapter)
+    assert inj.get(TaskMethodOpsPort) is port
+    assert port._open_ops is inj.get(OpenMethodOpsServiceProtocol)  # noqa: SLF001
+    service = inj.get(TaskCommissionServiceProtocol)
+    assert isinstance(service, TaskCommissionService)
+    assert service._method_ops_port is port  # noqa: SLF001
+
+
+def test_task_module_bridges_dispatch_to_l1_mock():
+    """L1 桥接(2026-11-13 L1 spec §5):TaskDispatchPort→A2aTaskDispatch,
+    共享 MockA2aDelivery singleton;真实 A2A P2 经同端口整体替换。"""
+    inj = Injector(
+        [TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()]
+    )
+    delivery = inj.get(A2aDeliveryPort)
+    assert isinstance(delivery, MockA2aDelivery)
+    assert inj.get(A2aDeliveryPort) is delivery
+    dispatch = inj.get(TaskDispatchPort)
+    assert isinstance(dispatch, A2aTaskDispatch)
+    assert dispatch is inj.get(TaskDispatchPort)
+    # 退位的日志实现不再被解析(DI 换绑生效,而非恒真否定)。
+    assert not isinstance(dispatch, LoggingTaskDispatch)
+    # 桥实现共享同一个 L1 mock singleton。
+    assert dispatch._delivery is delivery  # noqa: SLF001
+
+
+def test_task_module_binds_task_commission_service_singleton():
+    """任务代办接线(spec §5):协议解析为产品服务 singleton,复用既有
+    ContextCollabAuthorizerProtocol / MethodStoreProtocol 绑定。"""
+    inj = Injector(
+        [TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()]
+    )
+    service = inj.get(TaskCommissionServiceProtocol)
+    assert isinstance(service, TaskCommissionService)
+    assert inj.get(TaskCommissionServiceProtocol) is service
+    assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)  # noqa: SLF001
+    assert service._method_store is inj.get(MethodStoreProtocol)  # noqa: SLF001
+
+
+def test_task_module_shares_swarm_controls_with_commission_service():
+    """Task-scoped composition keeps one runtime behind the commission API."""
+    from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.service import (
+        SwarmExecutionOperations,
+    )
+    from agentclaw.community.core.task.context_collab.l5_methods.swarm_execution_contracts import (
+        SwarmDriverFactory,
+        SwarmExecutionControl,
+        SwarmInteractionPlanner,
+    )
+    from agentclaw.community.core.task.context_collab.l5_methods.swarm_workflow_ports import (
+        SwarmWorkflowPolicyReader,
+    )
+    from agentclaw.community.di.modules.task.swarm_execution import InjectedSwarmDrivers
+
+    inj = Injector([TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()])
+    service = inj.get(TaskCommissionServiceProtocol)
+    controls = inj.get(SwarmExecutionControl)
+
+    assert controls is inj.get(SwarmExecutionControl)
+    assert controls is inj.get(SwarmExecutionOperations)
+    assert service._swarm_execution is controls  # noqa: SLF001
+    assert controls._store is inj.get(MethodStoreProtocol)  # noqa: SLF001
+    assert controls._workflow_policies is inj.get(SwarmWorkflowPolicyReader)  # noqa: SLF001
+    assert controls.drivers is inj.get(SwarmDriverFactory)
+    assert isinstance(controls.drivers, InjectedSwarmDrivers)
+    assert controls.interaction_planner is inj.get(SwarmInteractionPlanner)
+
+
+def test_product_instantiation_protocol_resolves_l6_implementation():
+    from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
+        ProductInstantiationServiceProtocol,
+    )
+    from agentclaw.community.core.task.context_collab.l6_products.operations.product_instantiation import (
+        ProductInstantiationService,
+    )
+
+    inj = Injector([TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()])
+    service = inj.get(ProductInstantiationServiceProtocol)
+    assert isinstance(service, ProductInstantiationService)
+    assert type(service).__module__.endswith("l6_products.operations.product_instantiation")
+    assert service is inj.get(ProductInstantiationServiceProtocol)
+    assert service._repository is inj.get(ContextCollabRepositoryProtocol)
+    assert service._store is inj.get(MethodStoreProtocol)
+    assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)
+
+
+def test_task_module_binds_complete_l4_service_directly():
+    from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service import (
+        ContextService,
+    )
+    from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
+        ContextServiceProtocol,
+    )
+
+    inj = Injector([TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()])
+    service = inj.get(ContextServiceProtocol)
+    assert type(service) is ContextService
+    assert service is inj.get(ContextServiceProtocol)
+    assert service._repository is inj.get(L4ContextCollabRepositoryProtocol[ContextStatusRecord])
+    assert service._repository is not inj.get(ContextCollabRepositoryProtocol)
+    assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)
+
+
+def test_combined_creation_protocol_resolves_l6_implementation():
+    from agentclaw.community.core.task.context_collab import service_api as legacy_api
+    from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_policy import (
+        ProductCollaborationPolicy,
+    )
+    from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
+        ContextCollabService,
+    )
+    from agentclaw.community.core.task.context_collab.l6_products.service_api import (
+        ContextCollabServiceProtocol,
+    )
+
+    inj = Injector([TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()])
+    service = inj.get(ContextCollabServiceProtocol)
+    assert type(service) is ContextCollabService
+    assert service is inj.get(legacy_api.ContextCollabServiceProtocol)
+    assert service is inj.get(ContextCollabServiceProtocol)
+    assert isinstance(service._policy, ProductCollaborationPolicy)
+    assert service._repository is inj.get(ContextCollabRepositoryProtocol)
+    assert service._method_store is inj.get(MethodStoreProtocol)
+    assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)

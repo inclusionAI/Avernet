@@ -17,7 +17,6 @@
 //! control_address    "" (no control endpoint yet)
 //! ```
 
-use crate::delayed::HeldCallRecovery;
 use bcs_dist_model::{Did, Instance, PoolId};
 use bcs_service_api::core::dist_connector::DistConnectorCoreService;
 use bcs_service_api::port::dist_agent::DistAgentClientPort;
@@ -119,14 +118,13 @@ pub struct ConnectorPorts {
     /// The downstream agents (A2A): start, send input, query, subscribe,
     /// cancel.
     pub agent: Arc<dyn DistAgentClientPort>,
-    /// Registration of this process and proof of death of others. Today a
-    /// stub (`PendingMembership`) that answers `need_contract_not_implemented`.
+    /// Registration of this process and proof of death of others: the
+    /// composition injects the real provider (`CoordinationStore`); without
+    /// one, the stub `PendingMembership` answers `need_contract_not_implemented`.
     pub membership: Arc<dyn MembershipPort>,
     /// Immutable blobs: large event payloads, and requests or replies the
     /// Worker stored by reference.
     pub blobs: Arc<dyn BlobStorePort>,
-    /// Held-call recovery steps (D3, D8) that are still stubs.
-    pub recovery: Arc<dyn HeldCallRecovery>,
     /// The pure rules; normally [`crate::rules::DistConnectorRules`].
     pub rules: Arc<dyn DistConnectorCoreService>,
 }

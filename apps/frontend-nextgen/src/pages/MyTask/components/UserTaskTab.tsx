@@ -46,6 +46,8 @@ export interface UserTaskTabProps {
   loading: boolean;
   error: string | null;
   statusFilter: UserTaskStatusFilter;
+  keyword: string;
+  onKeywordChange: (keyword: string) => void;
   onStatusFilterChange: (status: UserTaskStatusFilter) => void;
   onRetry: () => void;
   onSelectTask: (taskId: string) => void;
@@ -68,6 +70,8 @@ export function UserTaskTab({
   loading,
   error,
   statusFilter,
+  keyword,
+  onKeywordChange,
   onStatusFilterChange,
   onRetry,
   onSelectTask,
@@ -80,7 +84,6 @@ export function UserTaskTab({
   ownerBotOptions = [],
   displayVariant = 'default',
 }: UserTaskTabProps) {
-  const [userKeyword, setUserKeyword] = useState('');
   const [ownerBotFilter, setOwnerBotFilter] = useState('all');
   const isLabVariant = displayVariant === 'lab';
   const columnCount = isLabVariant ? 7 : 6;
@@ -89,12 +92,10 @@ export function UserTaskTab({
     () =>
       filterUserTaskRecords({
         taskRecords,
-        keyword: userKeyword,
-        titleOnly: isLabVariant,
         ownerBotFilter,
         ownerBotOptions,
       }),
-    [isLabVariant, ownerBotFilter, ownerBotOptions, taskRecords, userKeyword],
+    [ownerBotFilter, ownerBotOptions, taskRecords],
   );
 
   return (
@@ -103,9 +104,9 @@ export function UserTaskTab({
         <div className="relative min-w-0">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            value={userKeyword}
+            value={keyword}
             onChange={(event) => {
-              setUserKeyword(event.target.value);
+              onKeywordChange(event.target.value);
               onPageChange(1);
             }}
             placeholder={isLabVariant ? '搜索任务标题' : '搜索任务标题 / ID / Bot / 来源'}
@@ -195,7 +196,7 @@ export function UserTaskTab({
                       <Empty
                         title="暂无符合条件的用户任务"
                         description={
-                          userKeyword || statusFilter !== 'all' || (isLabVariant && ownerBotFilter !== 'all')
+                          keyword || statusFilter !== 'all' || (isLabVariant && ownerBotFilter !== 'all')
                             ? '请尝试清除筛选条件或刷新数据。'
                             : '当前账号下还没有任务记录。'
                         }

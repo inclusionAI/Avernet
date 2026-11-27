@@ -235,6 +235,8 @@ class WorkOrderEventType(_DocumentedEnum):
     HUMAN2BOT_FRIEND_REVIEWED = "HUMAN2BOT_FRIEND_REVIEWED"
     BOT2BOT_FRIEND_APPLIED = "BOT2BOT_FRIEND_APPLIED"
     BOT2BOT_FRIEND_REVIEWED = "BOT2BOT_FRIEND_REVIEWED"
+    HUMAN2BOT_FRIEND_REMOVED = "HUMAN2BOT_FRIEND_REMOVED"
+    BOT2BOT_FRIEND_REMOVED = "BOT2BOT_FRIEND_REMOVED"
     HUMAN2BOT_PUBLIC_ORDER_CREATED = "HUMAN2BOT_PUBLIC_ORDER_CREATED"
     HUMAN2BOT_PUBLIC_ORDER_COMPLETED = "HUMAN2BOT_PUBLIC_ORDER_COMPLETED"
     BOT2BOT_PUBLIC_ORDER_CREATED = "BOT2BOT_PUBLIC_ORDER_CREATED"
@@ -255,6 +257,8 @@ class WorkOrderEventType(_DocumentedEnum):
         "HUMAN2BOT_FRIEND_REVIEWED": "A user-to-bot friend request was reviewed.",
         "BOT2BOT_FRIEND_APPLIED": "A bot-to-bot friend request was submitted.",
         "BOT2BOT_FRIEND_REVIEWED": "A bot-to-bot friend request was reviewed.",
+        "HUMAN2BOT_FRIEND_REMOVED": "A bot's owner removed you from the bot's friend list.",
+        "BOT2BOT_FRIEND_REMOVED": "A bot's owner removed your bot from its friend list.",
         "HUMAN2BOT_PUBLIC_ORDER_CREATED": "A user created a public order for a bot.",
         "HUMAN2BOT_PUBLIC_ORDER_COMPLETED": "A user's public bot order completed.",
         "BOT2BOT_PUBLIC_ORDER_CREATED": "A bot created a public order for another bot.",

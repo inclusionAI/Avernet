@@ -1039,6 +1039,93 @@ def test_handle_sync_failure_clears_retry_flag_and_stores_source_status_value():
     assert updated_ext['error_message'] == 'BaaS publish failed: 1 device(s) failed'
 
 
+def test_handle_sync_failure_cas_loses_race_reports_reconciled_record():
+    # Concurrent reconcile of a terminal BaaS FAILED outcome: the loser's
+    # conditional update returns no rows after the winner already marked the
+    # record FAILED; it must report the reconciled record, not raise.
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    reconciled_record = _make_publish_record(
+        id=41,
+        status=PublishStatus.FAILED.value,
+        ext={"restart": {"online": 456}},
+    )
+    publish_service.get_publish_by_id.return_value = reconciled_record
+    publish_service.update_publish_status_with_ext.side_effect = PublishNotFoundError(
+        "Publish record not found or source status mismatch: publish_id=41, "
+        "expected source_status=success"
+    )
+
+    progress = {"status": "FAILED", "failed_devices": [{"id": "d1"}]}
+    result = svc._handle_sync_failure(
+        publish_id=41,
+        current_status=PublishStatus.SUCCESS,
+        ext={"restart": {"online": 456, "restarting": True}},
+        progress=progress,
+        baas_publish_id=456,
+    )
+
+    assert result.status == PublishStatus.FAILED
+    assert "already reconciled by a concurrent writer" in result.message
+    assert result.data == progress
+
+
+def test_handle_sync_failure_cas_loses_ext_only_race_keeps_failure_pending():
+    # Ext-only concurrent write while the record is still at SUCCESS: the FAILED
+    # marking is NOT reconciled, so the result must not carry the terminal
+    # progress payload that would make the restart poll give up.
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    conflicted_record = _make_publish_record(
+        id=43,
+        status=PublishStatus.SUCCESS.value,
+        ext={"restart": {"online": 456, "restarting": True}},
+    )
+    publish_service.get_publish_by_id.return_value = conflicted_record
+    publish_service.update_publish_status_with_ext.side_effect = PublishNotFoundError(
+        "Publish record not found or source status mismatch: publish_id=43, "
+        "expected source_status=success"
+    )
+
+    progress = {"status": "FAILED", "failed_devices": [{"id": "d1"}]}
+    result = svc._handle_sync_failure(
+        publish_id=43,
+        current_status=PublishStatus.SUCCESS,
+        ext={"restart": {"online": 456, "restarting": True}},
+        progress=progress,
+        baas_publish_id=456,
+    )
+
+    assert result.status == PublishStatus.SUCCESS
+    assert "retry pending" in result.message
+    assert result.data is None
+
+
+def test_handle_sync_failure_cas_lose_still_raises_when_record_missing():
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_service.get_publish_by_id.return_value = None
+    publish_service.update_publish_status_with_ext.side_effect = PublishNotFoundError("gone")
+
+    with pytest.raises(PublishNotFoundError):
+        svc._handle_sync_failure(
+            publish_id=42,
+            current_status=PublishStatus.SUCCESS,
+            ext={},
+            progress={"status": "FAILED", "failed_devices": []},
+            baas_publish_id=456,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Task 12: build-phase producer selection + de-hardcoded device_provider
 # ---------------------------------------------------------------------------
@@ -3591,6 +3678,37 @@ def test_get_baas_publish_progress_raises_when_baas_fails_public_name():
     with pytest.raises(RuntimeError, match="boom"):
         svc.get_baas_publish_progress(baas_publish_id="789")
 
+def test_get_baas_publish_progress_404_maps_to_public_not_found_error():
+    """BaaS publish-workflow-not-found surfaces as the public 404 error type (from-chain kept)."""
+    from agentclaw.community.core.service_bot.baas_service_errors import (
+        BaasPublishNotFoundError,
+    )
+    from agentclaw.community.core.service_bot.errors import (
+        ServicePublishWorkflowNotFoundError,
+    )
+
+    svc = _pf(Mock(), Mock(), Mock(), Mock(), Mock())
+    original = BaasPublishNotFoundError("BaaS publish not found: 1")
+    svc._baas_service.get_publish_progress.side_effect = original
+
+    with pytest.raises(ServicePublishWorkflowNotFoundError, match="publish workflow not found") as excinfo:
+        svc.get_baas_publish_progress(baas_publish_id=1)
+    assert excinfo.value.__cause__ is original
+
+
+def test_get_baas_publish_progress_other_baas_failure_maps_to_public_upstream_error():
+    """Non-404 BaaS failures surface as the public 502 upstream error type."""
+    from agentclaw.community.core.service_bot.baas_service_errors import BaasServiceError
+    from agentclaw.community.core.service_bot.errors import ServicePublishUpstreamError
+
+    svc = _pf(Mock(), Mock(), Mock(), Mock(), Mock())
+    original = BaasServiceError("BaaS API error: 500 - upstream exploded")
+    svc._baas_service.get_publish_progress.side_effect = original
+
+    with pytest.raises(ServicePublishUpstreamError, match="publish provider failed") as excinfo:
+        svc.get_baas_publish_progress(baas_publish_id=1)
+    assert excinfo.value.__cause__ is original
+
 
 @pytest.mark.unit
 def test_handle_sync_success_skips_destroy_verify_bot_for_teclaw_online_publish():
@@ -3732,6 +3850,132 @@ def test_handle_sync_success_verify_stage_updates_validating_and_clears_retry():
     )
     bot_service.get_bot_by_address.assert_not_called()
     svc._destroy_bot_by_stage.assert_not_called()
+
+
+@pytest.mark.unit
+def test_handle_sync_success_cas_loses_race_reports_reconciled_record():
+    # Concurrent reconcile (durable poll task vs a /restart_status poll): the
+    # loser's conditional update returns no rows and must report the record the
+    # winner wrote, not raise a noisy "Order not found" 404.
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    bot_service = Mock()
+
+    svc = _pf(publish_service, build_service, baas_service, bot_service, _arca_router(build_service))
+
+    reconciled_record = _make_publish_record(
+        id=31,
+        status=PublishStatus.VALIDATING.value,
+        ext={"restart": {"verify": 456}},
+    )
+    publish_service.get_publish_by_id.return_value = reconciled_record
+    publish_service.update_publish_status_with_ext.side_effect = PublishNotFoundError(
+        "Publish record not found or source status mismatch: publish_id=31, "
+        "expected source_status=validate_pub"
+    )
+
+    publish_record = _make_publish_record(
+        id=31,
+        status=PublishStatus.VALIDATE_PUB.value,
+        ext={"restart": {"verify": 456, "restarting": True}},
+    )
+    svc._mark_previous_publish_superseded = Mock()
+    svc._activate_binding = Mock()
+    svc._destroy_bot_by_stage = Mock()
+    svc._refresh_provider_mcp_after_success = Mock()
+
+    progress = {"status": "SUCCESS", "device_details": []}
+    result = svc._handle_sync_success(
+        publish_id=31,
+        publish_record=publish_record,
+        stage=PublishStage.VERIFY,
+        ext=dict(publish_record.ext),
+        baas_publish_id=456,
+        progress=progress,
+    )
+
+    assert result.status == PublishStatus.VALIDATING
+    assert "already reconciled by a concurrent writer" in result.message
+    assert result.data == progress
+    # The winner ran the post-advance side effects; the loser must not repeat them.
+    svc._mark_previous_publish_superseded.assert_not_called()
+    svc._activate_binding.assert_not_called()
+    svc._destroy_bot_by_stage.assert_not_called()
+    svc._refresh_provider_mcp_after_success.assert_not_called()
+
+
+@pytest.mark.unit
+def test_handle_sync_success_cas_loses_ext_only_race_keeps_transition_pending():
+    # An ext-only concurrent writer fences the whole-ext CAS while the record is
+    # still at the source status: the transition is NOT reconciled, so the
+    # result must not carry the terminal progress payload (pollers key on it
+    # and would complete without reconciling) and side effects must not run.
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    bot_service = Mock()
+
+    svc = _pf(publish_service, build_service, baas_service, bot_service, _arca_router(build_service))
+
+    conflicted_record = _make_publish_record(
+        id=33,
+        status=PublishStatus.VALIDATE_PUB.value,
+        ext={"restart": {"verify": 456, "restarting": True}},
+    )
+    publish_service.get_publish_by_id.return_value = conflicted_record
+    publish_service.update_publish_status_with_ext.side_effect = PublishNotFoundError(
+        "Publish record not found or source status mismatch: publish_id=33, "
+        "expected source_status=validate_pub"
+    )
+
+    publish_record = _make_publish_record(
+        id=33, status=PublishStatus.VALIDATE_PUB.value, ext={"restart": {"verify": 456}}
+    )
+    svc._mark_previous_publish_superseded = Mock()
+    svc._activate_binding = Mock()
+    svc._destroy_bot_by_stage = Mock()
+    svc._refresh_provider_mcp_after_success = Mock()
+
+    progress = {"status": "SUCCESS", "device_details": []}
+    result = svc._handle_sync_success(
+        publish_id=33,
+        publish_record=publish_record,
+        stage=PublishStage.VERIFY,
+        ext=dict(publish_record.ext),
+        baas_publish_id=456,
+        progress=progress,
+    )
+
+    assert result.status == PublishStatus.VALIDATE_PUB
+    assert "retry pending" in result.message
+    assert result.data is None  # no terminal payload: poll handlers reschedule
+    svc._activate_binding.assert_not_called()
+    svc._mark_previous_publish_superseded.assert_not_called()
+
+
+@pytest.mark.unit
+def test_handle_sync_success_cas_lose_still_raises_when_record_missing():
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_service.get_publish_by_id.return_value = None
+    publish_service.update_publish_status_with_ext.side_effect = PublishNotFoundError("gone")
+
+    publish_record = _make_publish_record(
+        id=32, status=PublishStatus.VALIDATE_PUB.value, ext={}
+    )
+    with pytest.raises(PublishNotFoundError):
+        svc._handle_sync_success(
+            publish_id=32,
+            publish_record=publish_record,
+            stage=PublishStage.VERIFY,
+            ext={},
+            baas_publish_id=456,
+            progress={"status": "SUCCESS"},
+        )
 
 
 @pytest.mark.unit

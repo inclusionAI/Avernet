@@ -168,7 +168,7 @@ class TaskRunner:
         """上下文组装(Runner 内聚;内部自动判定,无 NODE/SUBTREE/TASK scope 入参)。
 
         有结构子(``get_child_tasks`` 非空)→**验收模式**:聚合【结构子(子树)DONE 的 run_info.output
-        + 本节点 ``task_spec.goal/acceptances``】→ 组装验证 prompt(经 source_channel 派 owner/master bot)。
+        + 本节点 ``task_spec.goal/acceptances``】→ 组装验证 prompt(经任务执行通道派 owner/master bot)。
         无结构子→**执行模式**:取结构父 ``P = get_parent_task``;聚合【``P.task_spec/goal`` + P 已 DONE 结构子
         (本节点兄弟)``run_info.output`` + 本节点 ``task_spec``】→ 组装执行 prompt 注入执行主体。
         数据流一律经结构父 P 中转,无跨兄弟直接数据边。"""

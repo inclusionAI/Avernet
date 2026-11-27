@@ -9,8 +9,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use bcs_service_api::RequestAuthHeaders;
 use bcs_service_api::application::v1::{
-    FriendConnectionActorType, FriendConnectionCreateResult, FriendConnectionCreateStatus,
-    FriendConnectionRequestDirection, FriendConnectionRequestStatus,
+    ApplicationError, FriendConnectionActorType, FriendConnectionCreateResult,
+    FriendConnectionCreateStatus, FriendConnectionRequestDirection, FriendConnectionRequestStatus,
 };
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -433,6 +433,96 @@ async fn openapi_friend_connection_routes_forward_decisions_and_delete() {
         assert_eq!(deleted.target_actor.actor_type, FriendConnectionActorType::Bot);
         assert_eq!(deleted.target_actor.id, "bot-2");
     }
+}
+
+// ── Owner-initiated friend removal (bot friend roster) ─────────────────
+//
+// `DELETE /friend-connections` gains optional `actor_type`/`actor_id` query
+// params: both present → an Owner removal through that Bot, both absent →
+// today's caller-side self-removal. Exactly one present (or an unknown
+// `actor_type` variant) is a 400 — partial actor identity is never silently
+// downgraded to self-removal.
+
+#[tokio::test]
+async fn openapi_friend_connection_routes_delete_forwards_the_owner_actor() {
+    let service = Arc::new(FakeFriendConnectionService::default());
+    let app = openapi_test_router(service.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "DELETE",
+            "/openapi/v1/collaboration/friend-connections?actor_type=bot&actor_id=bot-b&target_actor_type=human&target_actor_id=1001",
+            Value::Null,
+        ))
+        .await
+        .expect("owner delete response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["deleted"], true);
+    {
+        let deleted = service.deleted_connection.lock().expect("delete lock");
+        let deleted = deleted.as_ref().expect("delete command");
+        let actor = deleted.actor.as_ref().expect("actor forwarded to the service");
+        assert_eq!(actor.actor_type, FriendConnectionActorType::Bot);
+        assert_eq!(actor.id, "bot-b");
+        assert_eq!(deleted.target_actor.actor_type, FriendConnectionActorType::Human);
+        assert_eq!(deleted.target_actor.id, "1001");
+    }
+}
+
+#[tokio::test]
+async fn openapi_friend_connection_routes_delete_rejects_partial_or_unknown_actor_params() {
+    let service = Arc::new(FakeFriendConnectionService::default());
+    let app = openapi_test_router(service.clone());
+
+    for uri in [
+        // exactly one of the pair present → invalid_request
+        "/openapi/v1/collaboration/friend-connections?target_actor_type=bot&target_actor_id=friend-bot&actor_type=bot",
+        "/openapi/v1/collaboration/friend-connections?target_actor_type=bot&target_actor_id=friend-bot&actor_id=bot-b",
+        // unknown actor_type variant → 400 (list-query precedent)
+        "/openapi/v1/collaboration/friend-connections?target_actor_type=bot&target_actor_id=friend-bot&actor_type=alien&actor_id=bot-b",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authenticated_request("DELETE", uri, Value::Null))
+            .await
+            .expect("delete response");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        let body = response_json(response).await;
+        assert_eq!(body["data"]["error_code"], "invalid_request", "{uri}");
+    }
+    assert!(
+        service
+            .deleted_connection
+            .lock()
+            .expect("delete lock")
+            .is_none(),
+        "rejected actor params must never reach the service"
+    );
+}
+
+#[tokio::test]
+async fn openapi_friend_connection_routes_delete_maps_owner_removal_errors() {
+    // A manager (can_manage, not owner) or a stale owner calling with an
+    // actor is denied by the application layer; the route maps the denial.
+    let service = Arc::new(FakeFriendConnectionService::default());
+    *service.delete_error.lock().expect("delete error lock") =
+        Some(ApplicationError::forbidden(
+            "Authenticated User does not own Bot 'bot-b'",
+        ));
+    let app = openapi_test_router(service.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "DELETE",
+            "/openapi/v1/collaboration/friend-connections?actor_type=bot&actor_id=bot-b&target_actor_type=bot&target_actor_id=friend-bot",
+            Value::Null,
+        ))
+        .await
+        .expect("manager delete response");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "forbidden");
 }
 
 #[tokio::test]
