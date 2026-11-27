@@ -187,10 +187,7 @@ it('leaveSession removes session from list and clears selection', async () => {
     ok: true,
     data: [session('s1', 'g1', 'A'), session('s2', 'g1', 'B')],
   });
-  ss.leaveSession.mockResolvedValue({
-    ok: true,
-    data: session('s1', 'g1', 'A'),
-  });
+  ss.leaveSession.mockResolvedValue({ ok: true, data: null });
   useWorkspaceStore.getState().selectGroup('g1');
   useWorkspaceStore.getState().selectSession('s1');
   const { result } = renderHook(() => useGroupSessions('g1'));

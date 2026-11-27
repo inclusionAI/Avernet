@@ -411,6 +411,32 @@ it('removeMember DELETEs participant and returns refreshed session', async () =>
   expect(res.ok).toBe(true);
 });
 
+it('leaveSession succeeds after DELETE without requesting the departed session detail', async () => {
+  sc.deleteSessionParticipant.mockResolvedValue({ code: 20000, data: { deleted: true } });
+  // 当前 Bot 已退出，详情请求必然无权限；退出成功不能依赖详情读取。
+  sc.getSession.mockRejectedValue({ status: 403 });
+
+  const res = await sessionService.leaveSession('s1', 'bot-self');
+
+  expect(sc.deleteSessionParticipant).toHaveBeenCalledWith('s1', 'bot-self');
+  expect(sc.getSession).not.toHaveBeenCalled();
+  expect(res).toEqual({ ok: true, data: null });
+});
+
+it.each([
+  [403, '当前账号暂无权限执行该操作'],
+  [404, '访问的资源不存在或已被移除'],
+  [undefined, '退出会话失败，请稍后重试。'],
+])('leaveSession preserves DELETE failure semantics (status %s)', async (status, message) => {
+  sc.deleteSessionParticipant.mockRejectedValue({ status });
+
+  const res = await sessionService.leaveSession('s1', 'bot-self');
+
+  expect(res.ok).toBe(false);
+  expect(!res.ok && res.error.friendlyMessage).toBe(message);
+  expect(sc.getSession).not.toHaveBeenCalled();
+});
+
 it('leaveSession maps 409 to friendly conflict', async () => {
   sc.deleteSessionParticipant.mockRejectedValue({ status: 409 });
   const res = await sessionService.leaveSession('s1', 'human_1');
