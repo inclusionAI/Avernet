@@ -33,6 +33,7 @@ from .public_support import (
     BotPublicServiceError,
     BotNotFoundError,
 )
+from .friend_callback_recovery import recover_bot_friend_id
 
 class FriendCatalogActions:
     def _resolve_friend_bot(self, bot_id: str, locator: str) -> Dict[str, Any]:
@@ -268,10 +269,30 @@ class FriendCatalogActions:
         """
         logger.info(f"[handle_friend_request_approval_callback] Received: puid={puid}, last_operate={last_operate}, bot_friend_id={bot_friend_id}")
 
+        if not bot_friend_id or bot_friend_id <= 0:
+            # 表单未带有效 bot_friend_id（平台正常会回显审批 context），从 puid 恢复记录 ID
+            recovered_id = recover_bot_friend_id(puid)
+            if not recovered_id:
+                logger.warning(
+                    "[handle_friend_request_approval_callback] bot_friend_id absent in callback "
+                    f"and not recoverable from puid={puid!r}, last_operate={last_operate!r}; "
+                    "callback ignored (received form fields are logged by the route)"
+                )
+                return {
+                    "success": False,
+                    "message": "bot_friend_id absent in callback and not recoverable from puid",
+                }
+            logger.info(
+                "[handle_friend_request_approval_callback] Recovered bot_friend_id="
+                f"{recovered_id} from puid={puid}"
+            )
+            bot_friend_id = recovered_id
+
         # 查询BotFriend记录
         friend_record = self._bot_friend_repo.get_by_id(bot_friend_id)
         if not friend_record:
-            logger.error(f"[handle_friend_request_approval_callback] BotFriend record not found: bot_friend_id={bot_friend_id}")
+            # 记录确实不存在属过期/未知回调的确定性残留，非服务故障；下方真实处理失败仍记 ERROR
+            logger.warning(f"[handle_friend_request_approval_callback] BotFriend record not found: bot_friend_id={bot_friend_id}")
             return {"success": False, "message": f"BotFriend record not found: bot_friend_id={bot_friend_id}"}
 
         last_operate_upper = (last_operate or "").upper()

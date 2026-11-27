@@ -1150,6 +1150,70 @@ class TestHandleFriendRequestApprovalCallback:
         result = svc.handle_friend_request_approval_callback("puid1", "agree", 99)
         assert result["success"] is False
 
+    _RECOVERY_PUID = "antprocess-agentclaw_botpublicfriends_12320261127104210"
+    _UNRECOVERABLE_PUID = "puid1"
+
+    def test_missing_form_id_recovers_from_puid_and_agrees(self):
+        friend_record = {"id": 123, "status": "PENDING"}
+        repo = self._make_repo(record=friend_record)
+        repo.accept.return_value = {"id": 123, "status": "ACCEPTED"}
+        svc = _make_service(bot_friend_repo=repo)
+        with patch.object(svc, "_create_auth_relationship_for_approval") as mock_create_auth:
+            result = svc.handle_friend_request_approval_callback(
+                self._RECOVERY_PUID, "agree", 0,
+            )
+
+        assert result["success"] is True
+        repo.get_by_id.assert_called_once_with(123)
+        repo.accept.assert_called_once_with(
+            123, approval_uuid=self._RECOVERY_PUID,
+        )
+        mock_create_auth.assert_called_once_with(friend_record, 123)
+
+    def test_missing_form_id_unrecoverable_puid_skips_lookup(self):
+        repo = self._make_repo(record=None)
+        svc = _make_service(bot_friend_repo=repo)
+        result = svc.handle_friend_request_approval_callback(
+            self._UNRECOVERABLE_PUID, "agree", 0,
+        )
+
+        assert result["success"] is False
+        repo.get_by_id.assert_not_called()
+        assert "not recoverable" in result["message"]
+
+    def test_recovered_id_record_still_missing_warns_without_error(
+        self, caplog,
+    ):
+        repo = self._make_repo(record=None)
+        svc = _make_service(bot_friend_repo=repo)
+        with caplog.at_level("WARNING"):
+            result = svc.handle_friend_request_approval_callback(
+                self._RECOVERY_PUID, "agree", 0,
+            )
+
+        assert result["success"] is False
+        assert "BotFriend record not found" in result["message"]
+        not_found_logs = [
+            r for r in caplog.records
+            if "BotFriend record not found" in r.getMessage()
+        ]
+        assert not_found_logs, "expected a not-found record"
+        assert all(r.levelname == "WARNING" for r in not_found_logs)
+
+    def test_direct_id_record_not_found_warns_without_error(self, caplog):
+        repo = self._make_repo(record=None)
+        svc = _make_service(bot_friend_repo=repo)
+        with caplog.at_level("WARNING"):
+            result = svc.handle_friend_request_approval_callback("puid1", "agree", 99)
+
+        assert result["success"] is False
+        not_found_logs = [
+            r for r in caplog.records
+            if "BotFriend record not found" in r.getMessage()
+        ]
+        assert not_found_logs
+        assert all(r.levelname == "WARNING" for r in not_found_logs)
+
     def test_agree_calls_accept(self):
         friend_record = {"id": 1, "status": "PENDING"}
         repo = self._make_repo(record=friend_record)
