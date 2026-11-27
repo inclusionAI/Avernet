@@ -1,0 +1,40 @@
+name: "Python 小满 BCN 产物联调"
+participants:
+  xiaoman:
+    display_name: "话痨小满"
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    defaults:
+      node_timeout_ms: 180000
+      max_attempts: 1
+    nodes:
+      speak_4:
+        kind: bot_task
+        display_name: "4号发言"
+        assignee:
+          type: bot_binding
+          binding: xiaoman
+        instruction: |
+          你是 4 号，你的词是【手电筒】。第 1 轮发言。
+          输出一句话，不超过 25 字，描述你的词。不要泄露完整词、连续两字、拆开说全、拼音或谐音。
+          本轮钝度 4。选一个日常角度，用一句宽泛但真实的描述。
+          只输出发言。
+        transitions:
+          complete:
+            targets: [vote_4]
+      vote_4:
+        kind: bot_task
+        display_name: "4号投票"
+        assignee:
+          type: bot_binding
+          binding: xiaoman
+        final_output: true
+        instruction: |
+          第 1 轮投票。只输出「我投N号」（阿拉伯数字）或「我弃权」，没有理由、解释或前缀。
+          你是 4 号，词是【手电筒】。全场：1号、2号、4号。
+          可以投：1号、2号；不能投自己。
+          只根据 [Input] 内的公开发言投给相对最可疑者。

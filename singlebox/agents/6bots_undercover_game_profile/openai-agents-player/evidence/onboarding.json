@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-27",
+  "environment": "WSL 2",
+  "prerequisite": "Working local Singlebox table and already registered BCS identities",
+  "scope": "Fresh Singlebox runtime and Python environment, two real BCN nodes with synthetic game input",
+  "elapsed_seconds": 956.658,
+  "stages_seconds": {
+    "stop_original": 6.691,
+    "prepare_mixed_profiles": 6.713,
+    "start_first_slice": 12.395,
+    "start_second_slice": 20.68,
+    "create_python_venv": 22.455,
+    "install_python_requirements": 809.276,
+    "five_original_gateways_verified": 809.343,
+    "python_bcn_v3_connected": 810.396,
+    "first_fixture_delivery": 819.079,
+    "original_referee_accepted_both": 956.658
+  },
+  "install_retries": [
+    {
+      "reason": "PyPI file download read timeout",
+      "elapsed_before_retry_seconds": 424.323,
+      "policy": "the same requirements and package index, pip timeout increased to 60 seconds"
+    }
+  ],
+  "protocol_version": 3,
+  "result": {
+    "speech_chars": 17,
+    "speech_violations": 0,
+    "vote": "我投2号",
+    "vote_accepted": true
+  }
+}
